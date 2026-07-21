@@ -4,6 +4,8 @@
 
 > 本文档沉淀当前方案讨论结论与待定项，**不是最终实现规格**。实现前需继续对齐下文「待定决策」。
 
+Agent 编排目标架构已开始拆分到 [`docs/architecture/agent-orchestration.md`](docs/architecture/agent-orchestration.md)，文档导航见 [`docs/README.md`](docs/README.md)。
+
 ---
 
 ## 1. 要解决什么问题
