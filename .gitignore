@@ -1,0 +1,7 @@
+# BEGIN HARNESS ENGINEERING: harness-artifacts
+/.arccgz-harness/
+/.claude/
+/.codex/
+/AGENTS.md
+/CLAUDE.md
+# END HARNESS ENGINEERING: harness-artifacts
