@@ -4,4 +4,13 @@
 /.codex/
 /AGENTS.md
 /CLAUDE.md
+/.worktrees/
+/backend/build/bin/
+/backend/frontend/dist/*
+!/backend/frontend/dist/.gitkeep
+/frontend/dist/
+/frontend/node_modules/
+/frontend/wailsjs/
+/frontend/package.json.md5
+/.tmp-init/
 # END HARNESS ENGINEERING: harness-artifacts
