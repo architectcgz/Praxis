@@ -1,0 +1,108 @@
+package agentruntime
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+
+	"praxis/internal/core/domain"
+)
+
+// Snapshot returns a defensive copy of the turn input so provider code cannot mutate runtime state.
+func (s TurnSnapshot) Snapshot() TurnSnapshot {
+	copy := s
+	copy.Messages = cloneMessages(s.Messages)
+	copy.TaskPacket = s.TaskPacket
+	copy.ContextManifest = s.ContextManifest
+	copy.Tools = cloneToolDefinitions(s.Tools)
+	copy.Execution = s.Execution.Snapshot()
+	return copy
+}
+
+// BuildTurnSnapshot reads the safe session projection and constructs the next immutable provider request.
+func BuildTurnSnapshot(ctx context.Context, config RuntimeConfig, run domain.AgentRun, turnNumber int) (TurnSnapshot, error) {
+	normalized, err := normalizeConfig(config)
+	if err != nil {
+		return TurnSnapshot{}, err
+	}
+	if err := ValidateIDs(run, normalized.TaskSessionID, normalized.AgentThreadID); err != nil {
+		return TurnSnapshot{}, err
+	}
+	if run.Execution != normalized.Execution {
+		return TurnSnapshot{}, &RuntimeError{Code: ErrorContract, Message: "run execution snapshot does not match runtime config"}
+	}
+	if turnNumber < 1 {
+		return TurnSnapshot{}, &RuntimeError{Code: ErrorContract, Message: "turn number must be positive"}
+	}
+	contextProjection, err := normalized.SessionStore.ReadContext(ctx, normalized.SessionReference)
+	if err != nil {
+		return TurnSnapshot{}, &RuntimeError{Code: ErrorStorage, Message: "session context could not be read", Cause: err}
+	}
+	return TurnSnapshot{
+		RunID:                run.ID,
+		SessionReference:     normalized.SessionReference,
+		Messages:             cloneMessages(contextProjection.Messages),
+		TaskPacket:           normalized.TaskPacket,
+		ContextManifest:      normalized.ContextManifest,
+		SystemPrompt:         normalized.Prompt.SystemPrompt,
+		SystemPromptHash:     normalized.Prompt.SystemPromptHash,
+		ArtifactTemplateHash: normalized.Prompt.ArtifactTemplateHash,
+		Model:                normalized.Model,
+		Tools:                cloneToolDefinitions(normalized.ToolDefinitions),
+		GrantID:              normalized.Grant.ID,
+		Execution:            normalized.Execution.Snapshot(),
+		TurnNumber:           turnNumber,
+	}, nil
+}
+
+func normalizeConfig(config RuntimeConfig) (RuntimeConfig, error) {
+	if config.TaskSessionID == "" {
+		config.TaskSessionID = config.Thread.TaskSessionID
+	}
+	if config.AgentThreadID == "" {
+		config.AgentThreadID = config.Thread.ID
+	}
+	if err := config.validate(); err != nil {
+		return RuntimeConfig{}, err
+	}
+	definitions, err := filterToolDefinitions(config.ToolDefinitions, config.Grant.AllowedTools)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	config.ToolDefinitions = definitions
+	config.SessionReference = normalizeString(config.SessionReference)
+	config.LeaseReference = normalizeString(config.LeaseReference)
+	config.Grant = config.Grant.Snapshot()
+	config.Execution = config.Execution.Snapshot()
+	return config, nil
+}
+
+func filterToolDefinitions(definitions []ToolDefinition, allowed []domain.ToolName) ([]ToolDefinition, error) {
+	byName := make(map[domain.ToolName]ToolDefinition, len(definitions))
+	for _, definition := range definitions {
+		if !definition.Name.Valid() {
+			return nil, &RuntimeError{Code: ErrorContract, Message: "tool definition has an unknown name"}
+		}
+		if _, exists := byName[definition.Name]; exists {
+			return nil, &RuntimeError{Code: ErrorContract, Message: "duplicate tool definition"}
+		}
+		definition.Description = normalizeString(definition.Description)
+		definition.InputSchema = cloneRaw(definition.InputSchema)
+		byName[definition.Name] = definition
+	}
+	result := make([]ToolDefinition, 0, len(allowed))
+	for _, tool := range allowed {
+		definition, exists := byName[tool]
+		if !exists {
+			return nil, &RuntimeError{Code: ErrorContract, Message: fmt.Sprintf("missing definition for granted tool %q", tool)}
+		}
+		result = append(result, definition)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
+func normalizeString(value string) string {
+	return strings.TrimSpace(value)
+}
