@@ -2,7 +2,7 @@ package agentruntime
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"strings"
 
 	"praxis/internal/core/domain"
@@ -16,12 +16,17 @@ type loopResult struct {
 func (r *Runtime) runLoop(ctx context.Context) loopResult {
 	toolCallsUsed := 0
 	for {
+		// A pause or cancelled parent context wins before another turn starts. Queued
+		// steer/follow-up input must be durably cleared so it cannot leak into a later run.
 		if result, stop := r.abortResult(); stop {
 			if err := r.clearAbortQueues(r.settlementContext()); err != nil {
 				return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}
 			}
 			return result
 		}
+
+		// Reserve a monotonically increasing turn before building provider input; the
+		// resource limit applies to attempted turns, including provider failures.
 		r.mu.Lock()
 		r.turnCount++
 		turnNumber := r.turnCount
@@ -29,6 +34,8 @@ func (r *Runtime) runLoop(ctx context.Context) loopResult {
 		if limit := r.config.Grant.ResourceLimits.MaxTurns; limit > 0 && turnNumber > limit {
 			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorResourceLimit)}
 		}
+		// The snapshot is assembled from the durable session projection, making every
+		// provider request reflect prior assistant messages, tool results, and queue input.
 		run, _, _, err := r.currentSettlement()
 		if err != nil {
 			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorContract)}
@@ -37,6 +44,8 @@ func (r *Runtime) runLoop(ctx context.Context) loopResult {
 		if err != nil {
 			return loopResult{outcome: domain.RunFailed, failureCode: runtimeFailureCode(err, ErrorStorage)}
 		}
+		// Consume the provider stream completely before recording the assistant turn, so
+		// text and requested tools are persisted as one coherent model response.
 		stream, err := r.config.ModelStream.Stream(ctx, ModelRequest{Snapshot: snapshot.Snapshot()})
 		if err != nil {
 			if result, stop := r.abortResult(); stop {
@@ -54,9 +63,14 @@ func (r *Runtime) runLoop(ctx context.Context) loopResult {
 		if result, stop := r.abortResult(); stop && strings.TrimSpace(text) == "" && len(calls) == 0 {
 			return result
 		}
+		// Reject the whole response before persistence when its requested tools exceed the
+		// remaining run budget; this prevents partial side effects beyond the Grant.
 		if limit := r.config.Grant.ResourceLimits.MaxToolCalls; limit > 0 && toolCallsUsed+len(calls) > limit {
 			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorResourceLimit)}
 		}
+
+		// Persist the assistant output before dispatching tools, so each execution has a
+		// durable originating tool call for recovery and audit.
 		if err := r.appendAssistant(ctx, text, calls); err != nil {
 			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}
 		}
@@ -66,10 +80,14 @@ func (r *Runtime) runLoop(ctx context.Context) loopResult {
 
 		if len(calls) > 0 {
 			toolCallsUsed += len(calls)
+			// Tool results are appended as user-visible context and drive the next model turn.
 			if result, stop := r.executeTools(ctx, calls); stop {
 				return result
 			}
 		}
+
+		// A save point first flushes durable state, then incorporates higher-priority steer
+		// or follow-up input. Draining either queue requires another model turn.
 		drained, err := r.savePoint(ctx)
 		if err != nil {
 			return loopResult{outcome: domain.RunFailed, failureCode: runtimeFailureCode(err, ErrorStorage)}
@@ -77,6 +95,7 @@ func (r *Runtime) runLoop(ctx context.Context) loopResult {
 		if result, stop := r.abortResult(); stop {
 			return result
 		}
+		// A text-only response with no newly drained work is the stable completion point.
 		if len(calls) == 0 && !drained {
 			return loopResult{outcome: domain.RunCompleted}
 		}
@@ -107,36 +126,55 @@ func consumeModelStream(ctx context.Context, stream <-chan ModelStreamEvent) (st
 				}
 				return text.String(), calls, event.Err
 			default:
-				return text.String(), calls, &RuntimeError{Code: ErrorProvider, Message: "model stream emitted an unknown event"}
+				return text.String(), calls, &RuntimeError{
+					Code:    ErrorProvider,
+					Message: "model stream emitted an unknown event",
+				}
 			}
 		}
 	}
 }
 
 func (r *Runtime) appendAssistant(ctx context.Context, text string, calls []ToolCall) error {
-	content := make([]ContentBlock, 0, 1+len(calls))
+	content := make([]TurnContentBlock, 0, 1+len(calls))
 	if text != "" {
-		content = append(content, ContentBlock{Kind: ContentText, Text: text})
+		content = append(content, TurnContentBlock{Kind: TurnContentText, Text: text})
 	}
 	for _, call := range calls {
-		content = append(content, ContentBlock{Kind: ContentToolUse, ToolCallID: call.ID, ToolName: string(call.Name), Input: cloneRaw(call.Input)})
+		content = append(
+			content,
+			TurnContentBlock{
+				Kind:       TurnContentToolUse,
+				ToolCallID: call.ID,
+				ToolName:   string(call.Name),
+				Input:      cloneRaw(call.Input),
+			},
+		)
 	}
-	payload, err := json.Marshal(messagePayload{Role: RoleAssistant, Content: content})
-	if err != nil {
-		return err
-	}
-	return r.appendEntry(ctx, EntryMessage, payload, true)
+	_, err := r.appendSessionEvent(
+		ctx,
+		SessionEventMessage,
+		MessageEvent{Message: TurnMessage{Role: TurnRoleAssistant, Content: content}},
+		true,
+	)
+	return err
 }
 
 func (r *Runtime) executeTools(ctx context.Context, calls []ToolCall) (loopResult, bool) {
-	results := make([]ContentBlock, 0, len(calls))
+	results := make([]TurnContentBlock, 0, len(calls))
 	for _, call := range calls {
 		decision, reason := r.preflight(ctx, call)
-		started, err := json.Marshal(toolStartedPayload{ToolCallID: call.ID, Name: string(call.Name), Preflight: decision, BlockReason: reason})
-		if err != nil {
-			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}, true
-		}
-		if err := r.appendEntry(ctx, EntryToolStarted, started, true); err != nil {
+		if _, err := r.appendSessionEvent(
+			ctx,
+			SessionEventToolStarted,
+			ToolStartedEvent{
+				ToolCallID:  call.ID,
+				Name:        string(call.Name),
+				Preflight:   decision,
+				BlockReason: reason,
+			},
+			true,
+		); err != nil {
 			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}, true
 		}
 		result := ToolExecutionResult{}
@@ -147,12 +185,16 @@ func (r *Runtime) executeTools(ctx context.Context, calls []ToolCall) (loopResul
 			errorClass = reason
 			result.Content = "tool call was blocked by runtime policy"
 		} else {
-			execCtx := ToolExecutionContext{Grant: r.config.Grant.Snapshot(), Execution: r.config.Execution.Snapshot(), LeaseReference: r.config.LeaseReference}
-			result, err = r.config.ToolExecutor.Execute(ctx, cloneToolCall(call), execCtx)
+			execCtx := ToolExecutionContext{
+				Grant:          r.config.Grant.Snapshot(),
+				Execution:      r.config.Execution.Snapshot(),
+				LeaseReference: r.config.LeaseReference,
+			}
+			result, executeErr := r.config.ToolExecutor.Execute(ctx, cloneToolCall(call), execCtx)
 			if result.Content == "" {
 				result.Content = result.Output
 			}
-			if err != nil {
+			if executeErr != nil {
 				outcome = "error"
 				errorClass = string(ErrorTool)
 				if result.Content == "" {
@@ -166,20 +208,35 @@ func (r *Runtime) executeTools(ctx context.Context, calls []ToolCall) (loopResul
 				}
 			}
 		}
-		settled, marshalErr := json.Marshal(toolSettledPayload{ToolCallID: call.ID, Outcome: outcome, ErrorClass: errorClass, SideEffect: result.SideEffect})
-		if marshalErr != nil {
+		if _, err := r.appendSessionEvent(
+			r.durableContext(ctx),
+			SessionEventToolSettled,
+			ToolSettledEvent{
+				ToolCallID: call.ID,
+				Outcome:    outcome,
+				ErrorClass: errorClass,
+				SideEffect: result.SideEffect,
+			},
+			true,
+		); err != nil {
 			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}, true
 		}
-		if err := r.appendEntry(r.durableContext(ctx), EntryToolSettled, settled, true); err != nil {
-			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}, true
-		}
-		results = append(results, ContentBlock{Kind: ContentToolResult, ToolCallID: call.ID, Text: result.Content, IsError: outcome != "ok"})
+		results = append(
+			results,
+			TurnContentBlock{
+				Kind:       TurnContentToolResult,
+				ToolCallID: call.ID,
+				Text:       result.Content,
+				IsError:    outcome != "ok",
+			},
+		)
 	}
-	payload, err := json.Marshal(messagePayload{Role: RoleUser, Content: results})
-	if err != nil {
-		return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}, true
-	}
-	if err := r.appendEntry(r.durableContext(ctx), EntryMessage, payload, true); err != nil {
+	if _, err := r.appendSessionEvent(
+		r.durableContext(ctx),
+		SessionEventMessage,
+		MessageEvent{Message: TurnMessage{Role: TurnRoleUser, Content: results}},
+		true,
+	); err != nil {
 		return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorStorage)}, true
 	}
 	if result, stop := r.abortResult(); stop {
@@ -210,7 +267,8 @@ func (r *Runtime) preflight(ctx context.Context, call ToolCall) (PreflightDecisi
 	if call.Name == domain.ToolWriteFile && !r.config.Grant.AllowsWritePath(call.Path) {
 		return PreflightBlocked, string(ErrorPolicyBlocked)
 	}
-	if (call.Name == domain.ToolReadFile || call.Name == domain.ToolListDir || call.Name == domain.ToolSearchText) && !r.config.Grant.AllowsReadPath(call.Path) {
+	if (call.Name == domain.ToolReadFile || call.Name == domain.ToolListDir || call.Name == domain.ToolSearchText) &&
+		!r.config.Grant.AllowsReadPath(call.Path) {
 		return PreflightBlocked, string(ErrorPolicyBlocked)
 	}
 	if call.Name == domain.ToolSubmitResult && !r.config.Grant.AllowsResult(domain.ResultPermissionAgentResult) {
@@ -223,7 +281,15 @@ func (r *Runtime) preflight(ctx context.Context, call ToolCall) (PreflightDecisi
 		if r.config.Approval == nil {
 			return PreflightBlocked, string(ErrorApprovalRequired)
 		}
-		approved, err := r.config.Approval.ApproveCommand(ctx, cloneToolCall(call), ToolExecutionContext{Grant: r.config.Grant.Snapshot(), Execution: r.config.Execution.Snapshot(), LeaseReference: r.config.LeaseReference})
+		approved, err := r.config.Approval.ApproveCommand(
+			ctx,
+			cloneToolCall(call),
+			ToolExecutionContext{
+				Grant:          r.config.Grant.Snapshot(),
+				Execution:      r.config.Execution.Snapshot(),
+				LeaseReference: r.config.LeaseReference,
+			},
+		)
 		if err != nil || !approved {
 			return PreflightBlocked, string(ErrorApprovalRequired)
 		}
@@ -269,28 +335,12 @@ func (r *Runtime) isAbortRequested() bool {
 	return r.abortRequested
 }
 
+// runtimeFailureCode preserves a structured runtime error after wrapping and otherwise
+// applies the caller's fallback.
 func runtimeFailureCode(err error, fallback ErrorCode) string {
 	var runtimeErr *RuntimeError
-	if errorsAsRuntime(err, &runtimeErr) && runtimeErr.Code != "" {
+	if errors.As(err, &runtimeErr) && runtimeErr.Code != "" {
 		return string(runtimeErr.Code)
 	}
 	return string(fallback)
-}
-
-func errorsAsRuntime(err error, target **RuntimeError) bool {
-	for err != nil {
-		if runtimeErr, ok := err.(*RuntimeError); ok {
-			*target = runtimeErr
-			return true
-		}
-		err = unwrapRuntime(err)
-	}
-	return false
-}
-
-func unwrapRuntime(err error) error {
-	if unwrapper, ok := err.(interface{ Unwrap() error }); ok {
-		return unwrapper.Unwrap()
-	}
-	return nil
 }

@@ -2,7 +2,6 @@ package agentruntime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -31,7 +30,6 @@ type Runtime struct {
 	turnCount      int
 
 	queues        runtimeQueues
-	entrySequence uint64
 	eventSequence uint64
 	events        chan RuntimeEvent
 	lifecycleDone chan struct{}
@@ -55,9 +53,6 @@ func New(config RuntimeConfig) (*Runtime, error) {
 	}, nil
 }
 
-// NewRuntime is an explicit constructor alias for callers that prefer the domain name.
-func NewRuntime(config RuntimeConfig) (*Runtime, error) { return New(config) }
-
 // Events returns the ordered runtime event stream.
 func (r *Runtime) Events() <-chan RuntimeEvent { return r.events }
 
@@ -77,7 +72,7 @@ func (r *Runtime) Start(ctx context.Context, run domain.AgentRun, prompt string)
 		r.guard.Release()
 		return &RuntimeError{Code: ErrorContract, Message: "run is invalid", Cause: err}
 	}
-	if err := ValidateIDs(normalizedRun, r.config.TaskSessionID, r.config.AgentThreadID); err != nil {
+	if err := validateRunForRuntime(normalizedRun, r.config.AgentThreadID); err != nil {
 		r.guard.Release()
 		return err
 	}
@@ -119,49 +114,25 @@ func (r *Runtime) initializeSession(ctx context.Context, run domain.AgentRun, pr
 	if err != nil {
 		return &RuntimeError{Code: ErrorStorage, Message: "session context could not be initialized", Cause: err}
 	}
-	r.entryMu.Lock()
-	if projection.LastSequence > r.entrySequence {
-		r.entrySequence = projection.LastSequence
+	if projection.HasManifest && !projection.CanContinue {
+		return &RuntimeError{Code: ErrorContract, Message: "session requires a newer reader version"}
 	}
-	for _, entry := range projection.Entries {
-		if entry.Sequence > r.entrySequence {
-			r.entrySequence = entry.Sequence
+	if !projection.HasManifest {
+		if _, err := r.config.SessionStore.Initialize(ctx, r.sessionManifest(), r.now()); err != nil {
+			return &RuntimeError{Code: ErrorStorage, Message: "session manifest could not be initialized", Cause: err}
 		}
 	}
-	needsHeader := r.entrySequence == 0
-	r.entryMu.Unlock()
-	if needsHeader {
-		payload, marshalErr := json.Marshal(SessionHeaderPayload{
-			TaskSessionID:     r.config.TaskSessionID.String(),
-			AgentThreadID:     r.config.AgentThreadID.String(),
-			WorkspaceKey:      r.config.Grant.WorkspaceKey,
-			GrantID:           r.config.Grant.ID.String(),
-			TaskPacketID:      r.config.TaskPacket.ID.String(),
-			ContextManifestID: r.config.ContextManifest.ID.String(),
-			ModelID:           r.config.Model.ID,
-			SystemPromptHash:  r.config.Prompt.SystemPromptHash,
-			ArtifactTplHash:   r.config.Prompt.ArtifactTemplateHash,
-		})
-		if marshalErr != nil {
-			return marshalErr
-		}
-		if err := r.appendEntry(ctx, EntrySessionHeader, payload, true); err != nil {
-			return err
-		}
-	}
-	runPayload, err := json.Marshal(runStartedPayload{Reason: run.Reason})
-	if err != nil {
-		return err
-	}
-	if err := r.appendEntry(ctx, EntryRunStarted, runPayload, true); err != nil {
+	if _, err := r.appendSessionEvent(ctx, SessionEventRunStarted, RunStartedEvent{
+		Reason: run.Reason,
+		Inputs: r.runInputs(run),
+	}, true); err != nil {
 		return err
 	}
 	if strings.TrimSpace(prompt) != "" {
-		message, marshalErr := json.Marshal(messagePayload{Role: RoleUser, Content: []ContentBlock{{Kind: ContentText, Text: strings.TrimSpace(prompt)}}})
-		if marshalErr != nil {
-			return marshalErr
-		}
-		if err := r.appendEntry(ctx, EntryMessage, message, true); err != nil {
+		if _, err := r.appendSessionEvent(ctx, SessionEventMessage, MessageEvent{Message: TurnMessage{
+			Role:    TurnRoleUser,
+			Content: []TurnContentBlock{{Kind: TurnContentText, Text: strings.TrimSpace(prompt)}},
+		}}, true); err != nil {
 			return err
 		}
 	}

@@ -2,8 +2,7 @@ package agentruntime
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"strconv"
 
 	"praxis/internal/core/domain"
 )
@@ -21,7 +20,13 @@ func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, fa
 	run := r.activeRun.Snapshot()
 	turnCount := r.turnCount
 	r.mu.Unlock()
-	settlement := Settlement{RunID: run.ID, ThreadID: run.AgentThreadID, Outcome: outcome, FailureCode: failureCode, TurnCount: turnCount}
+	settlement := Settlement{
+		RunID:       run.ID,
+		ThreadID:    run.AgentThreadID,
+		Outcome:     outcome,
+		FailureCode: failureCode,
+		TurnCount:   turnCount,
+	}
 
 	if err := r.flush(ctx); err != nil {
 		settlement.Outcome = domain.RunFailed
@@ -29,13 +34,14 @@ func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, fa
 		failureCode = settlement.FailureCode
 	}
 	if outcome == domain.RunInterrupted {
-		payload, marshalErr := json.Marshal(map[string]string{"reason": string(ErrorInterrupted)})
-		if marshalErr == nil {
-			if err := r.appendEntry(ctx, EntryOperationInterrupted, payload, true); err != nil {
-				settlement.Outcome = domain.RunFailed
-				settlement.FailureCode = string(ErrorStorage)
-				failureCode = settlement.FailureCode
-			}
+		if _, err := r.appendSessionEvent(ctx, SessionEventInterrupted, OperationInterruptedEvent{
+			Operation: "run",
+			TargetID:  run.ID.String(),
+			Note:      string(ErrorInterrupted),
+		}, true); err != nil {
+			settlement.Outcome = domain.RunFailed
+			settlement.FailureCode = string(ErrorStorage)
+			failureCode = settlement.FailureCode
 		}
 	}
 	for _, listener := range r.config.Critical {
@@ -56,16 +62,15 @@ func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, fa
 			return &RuntimeError{Code: ErrorStorage, Message: "product settlement failed", Cause: err}
 		}
 	}
-	settledPayload, err := json.Marshal(runSettledPayload{Outcome: string(settlement.Outcome), ErrorClass: failureCode, TurnCount: settlement.TurnCount})
+	entry, err := r.appendSessionEvent(ctx, SessionEventRunSettled, RunSettledEvent{
+		Outcome:    settlement.Outcome,
+		ErrorClass: failureCode,
+		TurnCount:  settlement.TurnCount,
+	}, false)
 	if err != nil {
 		r.finish(err)
 		return err
 	}
-	if err := r.appendEntry(ctx, EntryRunSettled, settledPayload, false); err != nil {
-		r.finish(err)
-		return err
-	}
-	entrySequence := r.currentEntrySequence()
 	r.publish(RuntimeEvent{
 		TaskSessionID: r.config.TaskSessionID,
 		AgentThreadID: r.config.AgentThreadID,
@@ -74,17 +79,11 @@ func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, fa
 		Kind:          RuntimeEventRunSettled,
 		Payload: map[string]string{
 			"outcome":       string(settlement.Outcome),
-			"entrySequence": fmt.Sprintf("%d", entrySequence),
+			"entrySequence": strconv.FormatUint(entry.Sequence, 10),
 		},
 	})
 	r.finish(nil)
 	return nil
-}
-
-func (r *Runtime) currentEntrySequence() uint64 {
-	r.entryMu.Lock()
-	defer r.entryMu.Unlock()
-	return r.entrySequence
 }
 
 func (r *Runtime) finish(err error) {

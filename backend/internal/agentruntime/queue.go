@@ -2,7 +2,6 @@ package agentruntime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -12,13 +11,6 @@ type runtimeQueues struct {
 	followUp []QueueItem
 	nextTurn []QueueItem
 	nextID   uint64
-}
-
-type queueEntryPayload struct {
-	Queue   QueueKind     `json:"queue"`
-	ItemID  string        `json:"itemId"`
-	Content string        `json:"content,omitempty"`
-	Reason  ConsumeReason `json:"reason,omitempty"`
 }
 
 // Enqueue durably adds content to a same-agent queue before reporting success.
@@ -52,11 +44,11 @@ func (r *Runtime) Enqueue(ctx context.Context, queue QueueKind, content string) 
 	item := QueueItem{ID: fmt.Sprintf("queue-%d", r.queues.nextID), Queue: queue, Content: content}
 	r.mu.Unlock()
 
-	payload, err := json.Marshal(queueEntryPayload{Queue: queue, ItemID: item.ID, Content: item.Content})
-	if err != nil {
-		return QueueItem{}, err
-	}
-	if err := r.appendEntry(ctx, EntryQueueEnqueued, payload, true); err != nil {
+	if _, err := r.appendSessionEvent(ctx, SessionEventQueueAdd, QueueEnqueuedEvent{
+		Queue:   queue,
+		ItemID:  item.ID,
+		Content: []TurnContentBlock{{Kind: TurnContentText, Text: item.Content}},
+	}, true); err != nil {
 		return QueueItem{}, err
 	}
 	switch queue {
@@ -89,7 +81,10 @@ func (r *Runtime) NextTurn(ctx context.Context, content string) (QueueItem, erro
 func (r *Runtime) Queued() (steer, followUp, nextTurn []QueueItem) {
 	r.queueMu.Lock()
 	defer r.queueMu.Unlock()
-	return append([]QueueItem(nil), r.queues.steer...), append([]QueueItem(nil), r.queues.followUp...), append([]QueueItem(nil), r.queues.nextTurn...)
+	steer = append([]QueueItem(nil), r.queues.steer...)
+	followUp = append([]QueueItem(nil), r.queues.followUp...)
+	nextTurn = append([]QueueItem(nil), r.queues.nextTurn...)
+	return steer, followUp, nextTurn
 }
 
 func (r *Runtime) drainQueue(ctx context.Context) (bool, error) {
@@ -154,16 +149,17 @@ func (r *Runtime) drainNextTurn(ctx context.Context) error {
 }
 
 func (r *Runtime) consumeQueueItem(ctx context.Context, item QueueItem, queue QueueKind, reason ConsumeReason) error {
-	payload, err := json.Marshal(queueEntryPayload{Queue: queue, ItemID: item.ID, Reason: reason})
-	if err != nil {
+	if _, err := r.appendSessionEvent(
+		ctx,
+		SessionEventQueueTake,
+		QueueConsumedEvent{Queue: queue, ItemID: item.ID, Reason: reason},
+		true,
+	); err != nil {
 		return err
 	}
-	if err := r.appendEntry(ctx, EntryQueueConsumed, payload, true); err != nil {
-		return err
-	}
-	messagePayload, err := json.Marshal(messagePayload{Role: RoleUser, Content: []ContentBlock{{Kind: ContentText, Text: item.Content}}})
-	if err != nil {
-		return err
-	}
-	return r.appendEntry(ctx, EntryMessage, messagePayload, true)
+	_, err := r.appendSessionEvent(ctx, SessionEventMessage, MessageEvent{Message: TurnMessage{
+		Role:    TurnRoleUser,
+		Content: []TurnContentBlock{{Kind: TurnContentText, Text: item.Content}},
+	}}, true)
+	return err
 }

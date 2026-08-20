@@ -10,53 +10,40 @@ import (
 	"praxis/internal/core/domain"
 )
 
-// EntryKind identifies the durable lifecycle and transcript records written by a runtime.
-type EntryKind string
+// TurnMessageRole identifies the participant that produced a turn message.
+type TurnMessageRole string
 
 const (
-	EntrySessionHeader        EntryKind = "session_header"
-	EntryRunStarted           EntryKind = "run_started"
-	EntryMessage              EntryKind = "message"
-	EntryToolStarted          EntryKind = "tool_started"
-	EntryToolSettled          EntryKind = "tool_settled"
-	EntryQueueEnqueued        EntryKind = "queue_enqueued"
-	EntryQueueConsumed        EntryKind = "queue_consumed"
-	EntryContextArtifact      EntryKind = "context_artifact"
-	EntryRunSettled           EntryKind = "run_settled"
-	EntryOperationInterrupted EntryKind = "operation_interrupted"
+	TurnRoleUser      TurnMessageRole = "user"
+	TurnRoleAssistant TurnMessageRole = "assistant"
 )
 
-// MessageRole is the role of a durable agent message.
-type MessageRole string
+// TurnContentBlockKind identifies content returned by or supplied to a model.
+type TurnContentBlockKind string
 
 const (
-	RoleUser      MessageRole = "user"
-	RoleAssistant MessageRole = "assistant"
+	TurnContentText       TurnContentBlockKind = "text"
+	TurnContentThinking   TurnContentBlockKind = "thinking"
+	TurnContentToolUse    TurnContentBlockKind = "tool_use"
+	TurnContentToolResult TurnContentBlockKind = "tool_result"
 )
 
-// ContentBlockKind identifies a block within a message.
-type ContentBlockKind string
-
-const (
-	ContentText       ContentBlockKind = "text"
-	ContentToolUse    ContentBlockKind = "tool_use"
-	ContentToolResult ContentBlockKind = "tool_result"
-)
-
-// ContentBlock is the provider-neutral representation of message content.
-type ContentBlock struct {
-	Kind       ContentBlockKind
+// TurnContentBlock is the provider-neutral content used while constructing a turn.
+// It deliberately has no persistence tags; sessionlog owns its durable wire shape.
+type TurnContentBlock struct {
+	Kind       TurnContentBlockKind
 	Text       string
+	Signature  string
 	ToolCallID string
 	ToolName   string
 	Input      json.RawMessage
 	IsError    bool
 }
 
-// Message is a complete user or assistant message used to build a turn snapshot.
-type Message struct {
-	Role    MessageRole
-	Content []ContentBlock
+// TurnMessage is a complete user or assistant message used to build a turn snapshot.
+type TurnMessage struct {
+	Role    TurnMessageRole
+	Content []TurnContentBlock
 }
 
 // ToolDefinition describes a tool exposed to the model after Grant filtering.
@@ -122,7 +109,7 @@ type ModelRequest struct {
 type TurnSnapshot struct {
 	RunID                domain.AgentRunID
 	SessionReference     string
-	Messages             []Message
+	Messages             []TurnMessage
 	TaskPacket           domain.TaskPacket
 	ContextManifest      domain.ContextManifest
 	SystemPrompt         string
@@ -135,28 +122,12 @@ type TurnSnapshot struct {
 	TurnNumber           int
 }
 
-// AgentSessionEntry is one append-only record in an agent session.
-type AgentSessionEntry struct {
-	ID       string
-	Sequence uint64
-	At       time.Time
-	Kind     EntryKind
-	Version  uint16
-	RunID    domain.AgentRunID
-	Payload  json.RawMessage
-}
-
-// AgentSessionContext is the safe context projection returned by an AgentSessionStore.
-type AgentSessionContext struct {
-	LastSequence uint64
-	Messages     []Message
-	Entries      []AgentSessionEntry
-}
-
-// SessionEntryRef identifies an existing durable artifact for idempotency checks.
-type SessionEntryRef struct {
-	Sequence uint64
-	ID       string
+// SessionContext is the safe provider-facing projection of a session log.
+// Raw records remain inside the sessionlog adapter.
+type SessionContext struct {
+	HasManifest bool
+	CanContinue bool
+	Messages    []TurnMessage
 }
 
 // PromptConfig contains safe prompt metadata and prompt text, but no credentials.
@@ -225,20 +196,18 @@ const (
 type RuntimeEventKind string
 
 const (
-	RuntimeEventSessionHeader   RuntimeEventKind = RuntimeEventKind(EntrySessionHeader)
-	RuntimeEventRunStarted      RuntimeEventKind = RuntimeEventKind(EntryRunStarted)
-	RuntimeEventMessage         RuntimeEventKind = RuntimeEventKind(EntryMessage)
-	RuntimeEventToolStarted     RuntimeEventKind = RuntimeEventKind(EntryToolStarted)
-	RuntimeEventToolSettled     RuntimeEventKind = RuntimeEventKind(EntryToolSettled)
-	RuntimeEventQueueEnqueued   RuntimeEventKind = RuntimeEventKind(EntryQueueEnqueued)
-	RuntimeEventQueueConsumed   RuntimeEventKind = RuntimeEventKind(EntryQueueConsumed)
-	RuntimeEventContextArtifact RuntimeEventKind = RuntimeEventKind(EntryContextArtifact)
-	RuntimeEventRunSettled      RuntimeEventKind = RuntimeEventKind(EntryRunSettled)
-	RuntimeEventInterrupted     RuntimeEventKind = RuntimeEventKind(EntryOperationInterrupted)
+	RuntimeEventRunStarted      RuntimeEventKind = "run_started"
+	RuntimeEventMessage         RuntimeEventKind = "message"
+	RuntimeEventToolStarted     RuntimeEventKind = "tool_started"
+	RuntimeEventToolSettled     RuntimeEventKind = "tool_settled"
+	RuntimeEventQueueEnqueued   RuntimeEventKind = "queue_enqueued"
+	RuntimeEventQueueConsumed   RuntimeEventKind = "queue_consumed"
+	RuntimeEventContextArtifact RuntimeEventKind = "context_artifact"
+	RuntimeEventRunSettled      RuntimeEventKind = "run_settled"
+	RuntimeEventInterrupted     RuntimeEventKind = "operation_interrupted"
 )
 
 const (
-	EventSessionHeader   = RuntimeEventSessionHeader
 	EventRunStarted      = RuntimeEventRunStarted
 	EventMessage         = RuntimeEventMessage
 	EventToolStarted     = RuntimeEventToolStarted
@@ -250,7 +219,7 @@ const (
 	EventInterrupted     = RuntimeEventInterrupted
 )
 
-// RuntimeEvent is the ordered UI/control-plane projection of a durable runtime entry.
+// RuntimeEvent is the ordered UI/control-plane projection of a durable session event.
 type RuntimeEvent struct {
 	TaskSessionID domain.TaskSessionID
 	AgentThreadID domain.AgentThreadID
@@ -279,16 +248,22 @@ type RuntimeConfig struct {
 	Prompt           PromptConfig
 
 	ToolDefinitions []ToolDefinition
-	ModelStream     ModelStreamPort
-	ToolExecutor    ToolExecutor
-	SessionStore    AgentSessionStore
-	Approval        CommandApproval
-	OnSettle        SettlementHandler
-	Critical        []SettlementListener
-	Observers       []RuntimeObserver
-	Clock           Clock
-	EventBuffer     int
-	LeaseReference  string
+	// ToolDefinitionHashes are recorded with each run_started event; reader
+	// compatibility metadata remains in the session manifest.
+	ToolDefinitionHashes map[string]string
+	MinimumReaderVersion uint16
+	WrittenBy            string
+	ModelStream          ModelStreamPort
+	ToolExecutor         ToolExecutor
+	SessionStore         AgentSessionStore
+	Approval             CommandApproval
+	OnSettle             SettlementHandler
+	Critical             []SettlementListener
+	Observers            []RuntimeObserver
+	Clock                Clock
+	EventBuffer          int
+	LeaseReference       string
+	InjectionNonce       string
 }
 
 func (c RuntimeConfig) validate() error {
@@ -341,24 +316,24 @@ func cloneRaw(value json.RawMessage) json.RawMessage {
 	return append(json.RawMessage(nil), value...)
 }
 
-func cloneBlock(block ContentBlock) ContentBlock {
+func cloneTurnContentBlock(block TurnContentBlock) TurnContentBlock {
 	block.Input = cloneRaw(block.Input)
 	return block
 }
 
-func cloneMessage(message Message) Message {
+func cloneTurnMessage(message TurnMessage) TurnMessage {
 	copy := message
-	copy.Content = make([]ContentBlock, len(message.Content))
+	copy.Content = make([]TurnContentBlock, len(message.Content))
 	for i, block := range message.Content {
-		copy.Content[i] = cloneBlock(block)
+		copy.Content[i] = cloneTurnContentBlock(block)
 	}
 	return copy
 }
 
-func cloneMessages(messages []Message) []Message {
-	result := make([]Message, len(messages))
+func cloneTurnMessages(messages []TurnMessage) []TurnMessage {
+	result := make([]TurnMessage, len(messages))
 	for i, message := range messages {
-		result[i] = cloneMessage(message)
+		result[i] = cloneTurnMessage(message)
 	}
 	return result
 }
@@ -380,19 +355,6 @@ func cloneToolDefinitions(definitions []ToolDefinition) []ToolDefinition {
 	for i, definition := range definitions {
 		result[i] = definition
 		result[i].InputSchema = cloneRaw(definition.InputSchema)
-	}
-	return result
-}
-
-func cloneEntry(entry AgentSessionEntry) AgentSessionEntry {
-	entry.Payload = cloneRaw(entry.Payload)
-	return entry
-}
-
-func cloneEntries(entries []AgentSessionEntry) []AgentSessionEntry {
-	result := make([]AgentSessionEntry, len(entries))
-	for i, entry := range entries {
-		result[i] = cloneEntry(entry)
 	}
 	return result
 }

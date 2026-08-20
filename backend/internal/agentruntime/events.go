@@ -2,102 +2,166 @@ package agentruntime
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"time"
 
 	"praxis/internal/core/domain"
 )
 
-const currentEntryVersion uint16 = 1
+// SessionEventKind identifies a runtime timeline fact that must be made durable.
+// It is independent from the JSONL entry kind owned by sessionlog.
+type SessionEventKind string
 
-// SessionHeaderPayload records the approved inputs that establish a session boundary.
-type SessionHeaderPayload struct {
-	TaskSessionID     string `json:"taskSessionId"`
-	AgentThreadID     string `json:"agentThreadId"`
-	WorkspaceKey      string `json:"workspaceKey"`
-	GrantID           string `json:"grantId"`
-	TaskPacketID      string `json:"taskPacketId"`
-	ContextManifestID string `json:"contextManifestId"`
-	ModelID           string `json:"modelId"`
-	SystemPromptHash  string `json:"systemPromptHash,omitempty"`
-	ArtifactTplHash   string `json:"artifactTplHash,omitempty"`
+const (
+	SessionEventRunStarted  SessionEventKind = "run_started"
+	SessionEventMessage     SessionEventKind = "message"
+	SessionEventToolStarted SessionEventKind = "tool_started"
+	SessionEventToolSettled SessionEventKind = "tool_settled"
+	SessionEventQueueAdd    SessionEventKind = "queue_enqueued"
+	SessionEventQueueTake   SessionEventKind = "queue_consumed"
+	SessionEventRunSettled  SessionEventKind = "run_settled"
+	SessionEventInterrupted SessionEventKind = "operation_interrupted"
+)
+
+// SessionEvent is a typed runtime fact. It is neither an append operation nor a
+// physical log record; the session writer owns those concerns.
+type SessionEvent struct {
+	Kind       SessionEventKind
+	RunID      domain.AgentRunID
+	OccurredAt time.Time
+	Payload    SessionEventPayload
 }
 
-type runStartedPayload struct {
-	Reason string `json:"reason"`
+// SessionEventPayload restricts a timeline fact to the supported semantic payloads.
+type SessionEventPayload interface{ sessionEventPayload() }
+
+// SessionAppendResult identifies the durable record created by a session writer.
+type SessionAppendResult struct {
+	EntryID  string
+	Sequence uint64
 }
 
-type messagePayload struct {
-	Role    MessageRole    `json:"role"`
-	Content []ContentBlock `json:"content"`
+// RunStartedEvent records why a durable run began and the immutable inputs it used.
+type RunStartedEvent struct {
+	Reason string
+	Inputs RunInputs
 }
 
-type toolStartedPayload struct {
-	ToolCallID  string            `json:"toolCallId"`
-	Name        string            `json:"name"`
-	Preflight   PreflightDecision `json:"preflight"`
-	BlockReason string            `json:"blockReason,omitempty"`
+// MessageEvent records a provider-neutral message that participates in future context.
+type MessageEvent struct{ Message TurnMessage }
+
+// ToolStartedEvent records an authorization decision after its triggering message is durable.
+type ToolStartedEvent struct {
+	ToolCallID  string
+	Name        string
+	Preflight   PreflightDecision
+	BlockReason string
 }
 
-type toolSettledPayload struct {
-	ToolCallID string `json:"toolCallId"`
-	Outcome    string `json:"outcome"`
-	ErrorClass string `json:"errorClass,omitempty"`
-	SideEffect bool   `json:"sideEffect"`
+// ToolSettledEvent records the audit outcome of one tool invocation.
+type ToolSettledEvent struct {
+	ToolCallID string
+	Outcome    string
+	ErrorClass string
+	Duration   time.Duration
+	SideEffect bool
 }
 
-type runSettledPayload struct {
-	Outcome    string `json:"outcome"`
-	ErrorClass string `json:"errorClass,omitempty"`
-	TurnCount  int    `json:"turnCount"`
+// QueueEnqueuedEvent preserves same-runtime input until the next safe point.
+type QueueEnqueuedEvent struct {
+	Queue   QueueKind
+	ItemID  string
+	Content []TurnContentBlock
 }
 
-func (r *Runtime) appendEntry(ctx context.Context, kind EntryKind, payload json.RawMessage, publish bool) error {
+// QueueConsumedEvent records that a queued item left its queue.
+type QueueConsumedEvent struct {
+	Queue  QueueKind
+	ItemID string
+	Reason ConsumeReason
+}
+
+// RunSettledEvent records the durable run outcome after product settlement succeeds.
+type RunSettledEvent struct {
+	Outcome    domain.AgentRunOutcome
+	ErrorClass string
+	TurnCount  int
+}
+
+// OperationInterruptedEvent records a known incomplete operation without retrying it.
+type OperationInterruptedEvent struct {
+	Operation string
+	TargetID  string
+	Note      string
+}
+
+func (RunStartedEvent) sessionEventPayload()           {}
+func (MessageEvent) sessionEventPayload()              {}
+func (ToolStartedEvent) sessionEventPayload()          {}
+func (ToolSettledEvent) sessionEventPayload()          {}
+func (QueueEnqueuedEvent) sessionEventPayload()        {}
+func (QueueConsumedEvent) sessionEventPayload()        {}
+func (RunSettledEvent) sessionEventPayload()           {}
+func (OperationInterruptedEvent) sessionEventPayload() {}
+
+func (r *Runtime) appendSessionEvent(
+	ctx context.Context,
+	kind SessionEventKind,
+	payload SessionEventPayload,
+	publish bool,
+) (SessionAppendResult, error) {
 	r.entryMu.Lock()
 	defer r.entryMu.Unlock()
-	sequence := r.entrySequence + 1
 	runID := r.currentRunID()
-	if kind == EntrySessionHeader {
-		runID = ""
-	}
-	entry := AgentSessionEntry{
-		ID:       fmt.Sprintf("entry-%d", sequence),
-		Sequence: sequence,
-		At:       r.now(),
-		Kind:     kind,
-		Version:  currentEntryVersion,
-		RunID:    runID,
-		Payload:  cloneRaw(payload),
-	}
-	if err := r.config.SessionStore.Append(ctx, []AgentSessionEntry{entry}); err != nil {
-		return &RuntimeError{Code: ErrorStorage, Message: "session entry could not be appended", Cause: err}
-	}
-	r.entrySequence = sequence
-	if publish {
-		r.publishEntry(entry)
-	}
-	return nil
-}
-
-func (r *Runtime) publishEntry(entry AgentSessionEntry) {
-	kind := RuntimeEventKind(entry.Kind)
-	runID := entry.RunID
-	if runID == "" {
-		runID = r.currentRunID()
-	}
-	payload := map[string]string{"entryId": entry.ID}
-	if entry.Kind == EntryToolStarted || entry.Kind == EntryToolSettled || entry.Kind == EntryQueueEnqueued || entry.Kind == EntryQueueConsumed {
-		var values map[string]any
-		if json.Unmarshal(entry.Payload, &values) == nil {
-			for key, value := range values {
-				if text, ok := value.(string); ok {
-					payload[key] = text
-				}
-			}
+	result, err := r.config.SessionStore.Append(ctx, SessionEvent{
+		Kind:       kind,
+		RunID:      runID,
+		OccurredAt: r.now(),
+		Payload:    payload,
+	})
+	if err != nil {
+		return SessionAppendResult{}, &RuntimeError{
+			Code:    ErrorStorage,
+			Message: "session event could not be appended",
+			Cause:   err,
 		}
 	}
-	r.publish(RuntimeEvent{TaskSessionID: r.config.TaskSessionID, AgentThreadID: r.config.AgentThreadID, AgentRunID: runID, Sequence: r.nextEventSequence(), Kind: kind, Payload: payload})
+	if publish {
+		r.publishSessionEvent(kind, runID, payload, result)
+	}
+	return result, nil
+}
+
+func (r *Runtime) publishSessionEvent(
+	kind SessionEventKind,
+	runID domain.AgentRunID,
+	payload SessionEventPayload,
+	result SessionAppendResult,
+) {
+	values := map[string]string{"entryId": result.EntryID}
+	switch typed := payload.(type) {
+	case ToolStartedEvent:
+		values["toolCallId"] = typed.ToolCallID
+		values["name"] = typed.Name
+		values["preflight"] = string(typed.Preflight)
+	case ToolSettledEvent:
+		values["toolCallId"] = typed.ToolCallID
+		values["outcome"] = typed.Outcome
+	case QueueEnqueuedEvent:
+		values["itemId"] = typed.ItemID
+		values["queue"] = string(typed.Queue)
+	case QueueConsumedEvent:
+		values["itemId"] = typed.ItemID
+		values["queue"] = string(typed.Queue)
+		values["reason"] = string(typed.Reason)
+	}
+	r.publish(RuntimeEvent{
+		TaskSessionID: r.config.TaskSessionID,
+		AgentThreadID: r.config.AgentThreadID,
+		AgentRunID:    runID,
+		Sequence:      r.nextEventSequence(),
+		Kind:          RuntimeEventKind(kind),
+		Payload:       values,
+	})
 }
 
 func (r *Runtime) publish(event RuntimeEvent) {
