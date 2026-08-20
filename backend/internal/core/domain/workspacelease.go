@@ -23,7 +23,13 @@ type WorkspaceWriteLease struct {
 	ReleasedAt    time.Time
 }
 
-func AcquireWorkspaceWriteLease(id WorkspaceLeaseID, workspaceKey string, ownerThreadID AgentThreadID, grant CapabilityGrant, at time.Time) (WorkspaceWriteLease, DomainEvent, error) {
+func AcquireWorkspaceWriteLease(
+	id WorkspaceLeaseID,
+	workspaceKey string,
+	ownerThreadID AgentThreadID,
+	grant CapabilityGrant,
+	at time.Time,
+) (WorkspaceWriteLease, DomainEvent, error) {
 	lease := WorkspaceWriteLease{
 		ID:            id,
 		WorkspaceKey:  filepath.Clean(strings.TrimSpace(workspaceKey)),
@@ -33,10 +39,16 @@ func AcquireWorkspaceWriteLease(id WorkspaceLeaseID, workspaceKey string, ownerT
 		AcquiredAt:    at.UTC(),
 	}
 	if !grant.HasWriteAccess() {
-		return WorkspaceWriteLease{}, DomainEvent{}, invalidValue("workspaceLease", "only a write grant can acquire a lease")
+		return WorkspaceWriteLease{}, DomainEvent{}, invalidValue(
+			"workspaceLease",
+			"only a write grant can acquire a lease",
+		)
 	}
 	if lease.WorkspaceKey != grant.WorkspaceKey {
-		return WorkspaceWriteLease{}, DomainEvent{}, invalidValue("workspaceLease.workspaceKey", "lease workspace must match the grant")
+		return WorkspaceWriteLease{}, DomainEvent{}, invalidValue(
+			"workspaceLease.workspaceKey",
+			"lease workspace must match the grant",
+		)
 	}
 	if err := lease.Validate(); err != nil {
 		return WorkspaceWriteLease{}, DomainEvent{}, err

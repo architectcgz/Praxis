@@ -23,16 +23,36 @@ type AgentRun struct {
 	FailureCode   string
 }
 
-func NewAgentRun(id AgentRunID, threadID AgentThreadID, reason string, execution RuntimeExecutionSnapshot, startedAt time.Time) (AgentRun, error) {
+func NewAgentRun(
+	id AgentRunID,
+	threadID AgentThreadID,
+	reason string,
+	execution RuntimeExecutionSnapshot,
+	startedAt time.Time,
+) (AgentRun, error) {
 	return newAgentRun(id, "", threadID, reason, execution, startedAt)
 }
 
 // NewAgentRunForWorkItem creates a product run bound to one durable work item.
-func NewAgentRunForWorkItem(id AgentRunID, workItemID WorkItemID, threadID AgentThreadID, reason string, execution RuntimeExecutionSnapshot, startedAt time.Time) (AgentRun, error) {
+func NewAgentRunForWorkItem(
+	id AgentRunID,
+	workItemID WorkItemID,
+	threadID AgentThreadID,
+	reason string,
+	execution RuntimeExecutionSnapshot,
+	startedAt time.Time,
+) (AgentRun, error) {
 	return newAgentRun(id, workItemID, threadID, reason, execution, startedAt)
 }
 
-func newAgentRun(id AgentRunID, workItemID WorkItemID, threadID AgentThreadID, reason string, execution RuntimeExecutionSnapshot, startedAt time.Time) (AgentRun, error) {
+func newAgentRun(
+	id AgentRunID,
+	workItemID WorkItemID,
+	threadID AgentThreadID,
+	reason string,
+	execution RuntimeExecutionSnapshot,
+	startedAt time.Time,
+) (AgentRun, error) {
 	run := AgentRun{
 		ID:            id,
 		AgentThreadID: threadID,

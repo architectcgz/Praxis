@@ -47,7 +47,18 @@ type QueuedWorkItem struct {
 }
 
 // NewQueuedWorkItem creates an item in the durable FIFO queue.
-func NewQueuedWorkItem(id WorkItemID, sessionID TaskSessionID, threadID AgentThreadID, sequence uint64, prompt string, packetID TaskPacketID, manifestID ContextManifestID, grantID CapabilityGrantID, execution RuntimeExecutionSnapshot, createdAt time.Time) (QueuedWorkItem, error) {
+func NewQueuedWorkItem(
+	id WorkItemID,
+	sessionID TaskSessionID,
+	threadID AgentThreadID,
+	sequence uint64,
+	prompt string,
+	packetID TaskPacketID,
+	manifestID ContextManifestID,
+	grantID CapabilityGrantID,
+	execution RuntimeExecutionSnapshot,
+	createdAt time.Time,
+) (QueuedWorkItem, error) {
 	item := QueuedWorkItem{
 		ID:                id,
 		TaskSessionID:     sessionID,
@@ -78,7 +89,8 @@ func (w QueuedWorkItem) Validate() error {
 	if w.Prompt == "" || len([]byte(w.Prompt)) > MaxWorkItemPromptBytes || !utf8.ValidString(w.Prompt) {
 		return invalidValue("workItem.prompt", "prompt is empty, invalid UTF-8, or exceeds the bounded limit")
 	}
-	if idIsEmpty(string(w.TaskPacketID)) || idIsEmpty(string(w.ContextManifestID)) || idIsEmpty(string(w.CapabilityGrantID)) {
+	if idIsEmpty(string(w.TaskPacketID)) || idIsEmpty(string(w.ContextManifestID)) ||
+		idIsEmpty(string(w.CapabilityGrantID)) {
 		return invalidValue("workItem", "execution references are required")
 	}
 	if err := w.Execution.Validate(); err != nil {
@@ -99,7 +111,8 @@ func (w QueuedWorkItem) Validate() error {
 	if w.StartedAt.IsZero() && !w.FinishedAt.IsZero() {
 		return invalidValue("workItem.timestamps", "finished item must have a start time")
 	}
-	if w.FailureCode != "" && (len([]byte(w.FailureCode)) > MaxWorkItemFailureCodeBytes || strings.ContainsAny(w.FailureCode, "\x00\r\n")) {
+	if w.FailureCode != "" &&
+		(len([]byte(w.FailureCode)) > MaxWorkItemFailureCodeBytes || strings.ContainsAny(w.FailureCode, "\x00\r\n")) {
 		return invalidValue("workItem.failureCode", "failure code is invalid or exceeds the bounded limit")
 	}
 
@@ -165,7 +178,12 @@ func (w *QueuedWorkItem) Resume(runID AgentRunID, at time.Time) (DomainEvent, er
 }
 
 // Settle records the outcome of the currently bound AgentRun.
-func (w *QueuedWorkItem) Settle(runID AgentRunID, outcome AgentRunOutcome, at time.Time, failureCode string) (DomainEvent, error) {
+func (w *QueuedWorkItem) Settle(
+	runID AgentRunID,
+	outcome AgentRunOutcome,
+	at time.Time,
+	failureCode string,
+) (DomainEvent, error) {
 	if w.Status != WorkItemRunning {
 		return DomainEvent{}, invalidTransition("workItem", string(w.Status), string(statusForOutcome(outcome)))
 	}
@@ -179,8 +197,12 @@ func (w *QueuedWorkItem) Settle(runID AgentRunID, outcome AgentRunOutcome, at ti
 		return DomainEvent{}, invalidValue("workItem.finishedAt", "settlement time cannot precede start")
 	}
 	failureCode = strings.TrimSpace(failureCode)
-	if failureCode != "" && (len([]byte(failureCode)) > MaxWorkItemFailureCodeBytes || strings.ContainsAny(failureCode, "\x00\r\n")) {
-		return DomainEvent{}, invalidValue("workItem.failureCode", "failure code is invalid or exceeds the bounded limit")
+	if failureCode != "" &&
+		(len([]byte(failureCode)) > MaxWorkItemFailureCodeBytes || strings.ContainsAny(failureCode, "\x00\r\n")) {
+		return DomainEvent{}, invalidValue(
+			"workItem.failureCode",
+			"failure code is invalid or exceeds the bounded limit",
+		)
 	}
 	w.Status = statusForOutcome(outcome)
 	w.FinishedAt = at.UTC()
@@ -242,7 +264,13 @@ func statusForOutcome(outcome AgentRunOutcome) WorkItemStatus {
 
 func validWorkItemStatus(status WorkItemStatus) bool {
 	switch status {
-	case WorkItemQueued, WorkItemRunning, WorkItemPaused, WorkItemFailed, WorkItemInterrupted, WorkItemCompleted, WorkItemCancelled:
+	case WorkItemQueued,
+		WorkItemRunning,
+		WorkItemPaused,
+		WorkItemFailed,
+		WorkItemInterrupted,
+		WorkItemCompleted,
+		WorkItemCancelled:
 		return true
 	default:
 		return false

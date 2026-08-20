@@ -8,7 +8,11 @@ type RuntimeExecutionSnapshot struct {
 	Revision     string
 }
 
-func NewRuntimeExecutionSnapshot(sandboxMode SandboxMode, approvalMode ApprovalMode, revision string) (RuntimeExecutionSnapshot, error) {
+func NewRuntimeExecutionSnapshot(
+	sandboxMode SandboxMode,
+	approvalMode ApprovalMode,
+	revision string,
+) (RuntimeExecutionSnapshot, error) {
 	snapshot := RuntimeExecutionSnapshot{
 		SandboxMode:  sandboxMode,
 		ApprovalMode: approvalMode,

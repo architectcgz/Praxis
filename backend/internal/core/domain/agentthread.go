@@ -27,7 +27,15 @@ type AgentThread struct {
 	UpdatedAt         time.Time
 }
 
-func NewAgentThread(id AgentThreadID, sessionID TaskSessionID, profile AgentProfile, packetID TaskPacketID, manifestID ContextManifestID, grantID CapabilityGrantID, at time.Time) (AgentThread, error) {
+func NewAgentThread(
+	id AgentThreadID,
+	sessionID TaskSessionID,
+	profile AgentProfile,
+	packetID TaskPacketID,
+	manifestID ContextManifestID,
+	grantID CapabilityGrantID,
+	at time.Time,
+) (AgentThread, error) {
 	thread := AgentThread{
 		ID:                id,
 		TaskSessionID:     sessionID,
@@ -45,7 +53,9 @@ func NewAgentThread(id AgentThreadID, sessionID TaskSessionID, profile AgentProf
 }
 
 func (t AgentThread) Validate() error {
-	if idIsEmpty(string(t.ID)) || idIsEmpty(string(t.TaskSessionID)) || idIsEmpty(string(t.TaskPacketID)) || idIsEmpty(string(t.ContextManifestID)) || idIsEmpty(string(t.GrantID)) {
+	if idIsEmpty(string(t.ID)) || idIsEmpty(string(t.TaskSessionID)) || idIsEmpty(string(t.TaskPacketID)) ||
+		idIsEmpty(string(t.ContextManifestID)) ||
+		idIsEmpty(string(t.GrantID)) {
 		return invalidValue("agentThread", "required reference is missing")
 	}
 	if !t.Profile.Valid() {
