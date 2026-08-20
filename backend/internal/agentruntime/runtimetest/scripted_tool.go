@@ -20,7 +20,11 @@ type ScriptedTool struct {
 	results  map[domain.ToolName]agentruntime.ToolExecutionResult
 	errors   map[domain.ToolName]error
 	calls    []ScriptedToolCall
-	ExecuteF func(context.Context, agentruntime.ToolCall, agentruntime.ToolExecutionContext) (agentruntime.ToolExecutionResult, error)
+	ExecuteF func(
+		context.Context,
+		agentruntime.ToolCall,
+		agentruntime.ToolExecutionContext,
+	) (agentruntime.ToolExecutionResult, error)
 }
 
 // NewScriptedTool creates an executor with fixed successful results by tool name.
@@ -56,7 +60,11 @@ func (t *ScriptedTool) Calls() []ScriptedToolCall {
 }
 
 // Execute implements agentruntime.ToolExecutor.
-func (t *ScriptedTool) Execute(ctx context.Context, call agentruntime.ToolCall, execCtx agentruntime.ToolExecutionContext) (agentruntime.ToolExecutionResult, error) {
+func (t *ScriptedTool) Execute(
+	ctx context.Context,
+	call agentruntime.ToolCall,
+	execCtx agentruntime.ToolExecutionContext,
+) (agentruntime.ToolExecutionResult, error) {
 	if t.ExecuteF != nil {
 		return t.ExecuteF(ctx, call, execCtx)
 	}

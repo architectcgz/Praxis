@@ -45,7 +45,10 @@ func (m *ScriptedModel) Requests() []agentruntime.ModelRequest {
 }
 
 // Stream implements agentruntime.ModelStreamPort.
-func (m *ScriptedModel) Stream(ctx context.Context, request agentruntime.ModelRequest) (<-chan agentruntime.ModelStreamEvent, error) {
+func (m *ScriptedModel) Stream(
+	ctx context.Context,
+	request agentruntime.ModelRequest,
+) (<-chan agentruntime.ModelStreamEvent, error) {
 	m.mu.Lock()
 	m.requests = append(m.requests, request)
 	var response ScriptedModelResponse
