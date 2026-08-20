@@ -475,7 +475,11 @@ func (s *QueueScheduler) claimNext(ctx context.Context, threadID domain.AgentThr
 	return plan, StartResult{Started: true, WorkItem: plan.item, Run: plan.run, Lease: plan.lease}, nil
 }
 
-func (s *QueueScheduler) claimNextInTx(ctx context.Context, threadID domain.AgentThreadID, at time.Time) (startPlan, bool, error) {
+func (s *QueueScheduler) claimNextInTx(
+	ctx context.Context,
+	threadID domain.AgentThreadID,
+	at time.Time,
+) (startPlan, bool, error) {
 	thread, err := s.threads.Get(ctx, threadID)
 	if err != nil {
 		return startPlan{}, false, err
@@ -509,7 +513,11 @@ func (s *QueueScheduler) claimNextInTx(ctx context.Context, threadID domain.Agen
 	return plan, true, nil
 }
 
-func (s *QueueScheduler) materializeClaim(ctx context.Context, thread domain.AgentThread, at time.Time) (startPlan, error) {
+func (s *QueueScheduler) materializeClaim(
+	ctx context.Context,
+	thread domain.AgentThread,
+	at time.Time,
+) (startPlan, error) {
 	runID := domain.NewAgentRunID()
 	item, err := s.queue.ClaimNext(ctx, thread.ID, runID, at)
 	if err != nil {
@@ -518,7 +526,14 @@ func (s *QueueScheduler) materializeClaim(ctx context.Context, thread domain.Age
 	return s.materializePlan(ctx, thread, item, runID, "queued_work_item", at)
 }
 
-func (s *QueueScheduler) materializePlan(ctx context.Context, thread domain.AgentThread, item domain.QueuedWorkItem, runID domain.AgentRunID, reason string, at time.Time) (startPlan, error) {
+func (s *QueueScheduler) materializePlan(
+	ctx context.Context,
+	thread domain.AgentThread,
+	item domain.QueuedWorkItem,
+	runID domain.AgentRunID,
+	reason string,
+	at time.Time,
+) (startPlan, error) {
 	packet, err := s.packets.Get(ctx, item.TaskPacketID)
 	if err != nil {
 		return startPlan{}, err
@@ -628,7 +643,12 @@ type leaseAcquisition struct {
 	event domain.DomainEvent
 }
 
-func (s *QueueScheduler) acquireLease(ctx context.Context, grant domain.CapabilityGrant, threadID domain.AgentThreadID, at time.Time) (leaseAcquisition, error) {
+func (s *QueueScheduler) acquireLease(
+	ctx context.Context,
+	grant domain.CapabilityGrant,
+	threadID domain.AgentThreadID,
+	at time.Time,
+) (leaseAcquisition, error) {
 	if !grant.HasWriteAccess() {
 		return leaseAcquisition{}, nil
 	}
@@ -642,7 +662,13 @@ func (s *QueueScheduler) acquireLease(ctx context.Context, grant domain.Capabili
 	if !errors.Is(err, domain.ErrNotFound) {
 		return leaseAcquisition{}, err
 	}
-	lease, event, err := domain.AcquireWorkspaceWriteLease(domain.NewWorkspaceLeaseID(), grant.WorkspaceKey, threadID, grant, at)
+	lease, event, err := domain.AcquireWorkspaceWriteLease(
+		domain.NewWorkspaceLeaseID(),
+		grant.WorkspaceKey,
+		threadID,
+		grant,
+		at,
+	)
 	if err != nil {
 		return leaseAcquisition{}, err
 	}
@@ -652,7 +678,12 @@ func (s *QueueScheduler) acquireLease(ctx context.Context, grant domain.Capabili
 	return leaseAcquisition{lease: lease, event: event}, nil
 }
 
-func (s *QueueScheduler) releaseLease(ctx context.Context, grant domain.CapabilityGrant, threadID domain.AgentThreadID, at time.Time) (domain.DomainEvent, error) {
+func (s *QueueScheduler) releaseLease(
+	ctx context.Context,
+	grant domain.CapabilityGrant,
+	threadID domain.AgentThreadID,
+	at time.Time,
+) (domain.DomainEvent, error) {
 	if !grant.HasWriteAccess() {
 		return domain.DomainEvent{}, nil
 	}
@@ -715,7 +746,8 @@ func (s *QueueScheduler) isShuttingDown() bool {
 }
 
 func validateQueueRequest(request QueueTaskRequest, thread domain.AgentThread) error {
-	if request.TaskSessionID == "" || request.AgentThreadID == "" || request.TaskSessionID != thread.TaskSessionID || request.AgentThreadID != thread.ID {
+	if request.TaskSessionID == "" || request.AgentThreadID == "" || request.TaskSessionID != thread.TaskSessionID ||
+		request.AgentThreadID != thread.ID {
 		return invalidSchedulerState("queue task does not belong to the agent thread")
 	}
 	if err := request.TaskPacket.Validate(); err != nil {
@@ -736,7 +768,13 @@ func validateQueueRequest(request QueueTaskRequest, thread domain.AgentThread) e
 	return nil
 }
 
-func validateMaterializedItem(thread domain.AgentThread, item domain.QueuedWorkItem, packet domain.TaskPacket, manifest domain.ContextManifest, grant domain.CapabilityGrant) error {
+func validateMaterializedItem(
+	thread domain.AgentThread,
+	item domain.QueuedWorkItem,
+	packet domain.TaskPacket,
+	manifest domain.ContextManifest,
+	grant domain.CapabilityGrant,
+) error {
 	if item.TaskSessionID != thread.TaskSessionID || item.AgentThreadID != thread.ID {
 		return invalidSchedulerState("queued work item does not belong to the agent thread")
 	}
@@ -784,8 +822,16 @@ func queuedEvent(item domain.QueuedWorkItem, at time.Time) domain.DomainEvent {
 
 func startedEvent(item domain.QueuedWorkItem, at time.Time) domain.DomainEvent {
 	return domain.DomainEvent{
-		ID: domain.NewEventID(), Type: domain.EventWorkItemStarted, OccurredAt: at.UTC(),
-		TaskSession: item.TaskSessionID, AgentThread: item.AgentThreadID, AgentRun: item.AgentRunID, WorkItem: item.ID,
-		Payload: map[string]string{"status": string(domain.WorkItemRunning), "sequence": fmt.Sprintf("%d", item.Sequence)},
+		ID:          domain.NewEventID(),
+		Type:        domain.EventWorkItemStarted,
+		OccurredAt:  at.UTC(),
+		TaskSession: item.TaskSessionID,
+		AgentThread: item.AgentThreadID,
+		AgentRun:    item.AgentRunID,
+		WorkItem:    item.ID,
+		Payload: map[string]string{
+			"status":   string(domain.WorkItemRunning),
+			"sequence": fmt.Sprintf("%d", item.Sequence),
+		},
 	}
 }

@@ -6,19 +6,29 @@ import (
 	"praxis/internal/core/domain"
 )
 
-type SessionEntry struct {
-	Kind          string
-	TaskSessionID domain.TaskSessionID
-	AgentThreadID domain.AgentThreadID
-	AgentRunID    domain.AgentRunID
-	Sequence      uint64
-	Payload       map[string]string
+// ArtifactRef identifies an approved artifact already appended to a target
+// session. It exposes only the idempotency evidence needed by orchestration.
+type ArtifactRef struct {
+	EntryID  string
+	Sequence uint64
 }
 
+// ArtifactLookup lets orchestration reconcile a delivery without reading a
+// transcript or depending on the JSONL storage representation.
+type ArtifactLookup interface {
+	FindArtifact(context.Context, domain.AgentThreadID, string) (*ArtifactRef, error)
+}
+
+// SessionRepairer performs conservative repair before startup recovery changes
+// product state. Physical paths and backup details stay inside storage.
+type SessionRepairer interface {
+	Repair(context.Context, domain.AgentThreadID) error
+}
+
+// SessionStore is the core-facing session maintenance port. Transcript append
+// and provider context projection are runtime concerns, not core API types.
 type SessionStore interface {
-	Append(ctx context.Context, entry SessionEntry) error
-	FindArtifact(ctx context.Context, threadID domain.AgentThreadID, injectionKey string) (SessionEntry, error)
-	ReadContext(ctx context.Context, threadID domain.AgentThreadID, limit int) ([]SessionEntry, error)
-	Repair(ctx context.Context, threadID domain.AgentThreadID) error
-	Close(ctx context.Context) error
+	ArtifactLookup
+	SessionRepairer
+	Close(context.Context) error
 }
