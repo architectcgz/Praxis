@@ -7,7 +7,12 @@ type AgentPolicySnapshot struct {
 	Profiles     map[AgentProfile]DefaultGrantTemplate
 }
 
-func NewAgentPolicySnapshot(revision string, mode ApprovalMode, sandboxMode SandboxMode, profiles map[AgentProfile]DefaultGrantTemplate) (AgentPolicySnapshot, error) {
+func NewAgentPolicySnapshot(
+	revision string,
+	mode ApprovalMode,
+	sandboxMode SandboxMode,
+	profiles map[AgentProfile]DefaultGrantTemplate,
+) (AgentPolicySnapshot, error) {
 	snapshot := AgentPolicySnapshot{
 		Revision:     revision,
 		ApprovalMode: mode,

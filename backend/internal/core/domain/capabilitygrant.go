@@ -125,10 +125,22 @@ func (g CapabilityGrant) Validate() error {
 	if g.CanProposeDelegation != containsTool(g.AllowedTools, ToolProposeDelegate) {
 		return invalidValue("grant.canProposeDelegation", "delegation flag and tool permission must agree")
 	}
-	if containsTool(g.AllowedTools, ToolSubmitResult) != containsResultPermission(g.ResultPermissions, ResultPermissionAgentResult) {
+	if containsTool(
+		g.AllowedTools,
+		ToolSubmitResult,
+	) != containsResultPermission(
+		g.ResultPermissions,
+		ResultPermissionAgentResult,
+	) {
 		return invalidValue("grant", "submit_result and agent_result permission must agree")
 	}
-	if containsTool(g.AllowedTools, ToolSubmitBriefing) != containsResultPermission(g.ResultPermissions, ResultPermissionBriefing) {
+	if containsTool(
+		g.AllowedTools,
+		ToolSubmitBriefing,
+	) != containsResultPermission(
+		g.ResultPermissions,
+		ResultPermissionBriefing,
+	) {
 		return invalidValue("grant", "submit_briefing and briefing permission must agree")
 	}
 	if containsTool(g.AllowedTools, ToolWriteFile) && len(g.WriteScopes) == 0 {
@@ -207,7 +219,10 @@ func canonicalizeGrant(grant *CapabilityGrant) {
 	sort.Slice(grant.AllowedTools, func(i, j int) bool { return grant.AllowedTools[i] < grant.AllowedTools[j] })
 	grant.ReadScopes = canonicalizeScopes(grant.ReadScopes)
 	grant.WriteScopes = canonicalizeScopes(grant.WriteScopes)
-	sort.Slice(grant.ResultPermissions, func(i, j int) bool { return grant.ResultPermissions[i] < grant.ResultPermissions[j] })
+	sort.Slice(
+		grant.ResultPermissions,
+		func(i, j int) bool { return grant.ResultPermissions[i] < grant.ResultPermissions[j] },
+	)
 }
 
 func validateScopes(workspaceKey string, scopes []string, field string) ([]string, error) {

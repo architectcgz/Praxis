@@ -26,7 +26,16 @@ type DelegationRequest struct {
 	UpdatedAt      time.Time
 }
 
-func NewDelegationRequest(id DelegationRequestID, sessionID TaskSessionID, sourceThreadID AgentThreadID, profile AgentProfile, packetID TaskPacketID, manifestID ContextManifestID, grant CapabilityGrant, at time.Time) (DelegationRequest, error) {
+func NewDelegationRequest(
+	id DelegationRequestID,
+	sessionID TaskSessionID,
+	sourceThreadID AgentThreadID,
+	profile AgentProfile,
+	packetID TaskPacketID,
+	manifestID ContextManifestID,
+	grant CapabilityGrant,
+	at time.Time,
+) (DelegationRequest, error) {
 	request := DelegationRequest{
 		ID:             id,
 		TaskSessionID:  sessionID,
@@ -46,7 +55,8 @@ func NewDelegationRequest(id DelegationRequestID, sessionID TaskSessionID, sourc
 }
 
 func (r DelegationRequest) Validate() error {
-	if idIsEmpty(string(r.ID)) || idIsEmpty(string(r.TaskSessionID)) || idIsEmpty(string(r.TaskPacketID)) || idIsEmpty(string(r.ManifestID)) {
+	if idIsEmpty(string(r.ID)) || idIsEmpty(string(r.TaskSessionID)) || idIsEmpty(string(r.TaskPacketID)) ||
+		idIsEmpty(string(r.ManifestID)) {
 		return invalidValue("delegationRequest", "required reference is missing")
 	}
 	if !r.Profile.Valid() {

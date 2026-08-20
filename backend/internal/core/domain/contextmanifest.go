@@ -14,7 +14,12 @@ type ContextManifest struct {
 	CreatedAt time.Time
 }
 
-func NewContextManifest(id ContextManifestID, summary string, sources []ContentRef, createdAt time.Time) (ContextManifest, error) {
+func NewContextManifest(
+	id ContextManifestID,
+	summary string,
+	sources []ContentRef,
+	createdAt time.Time,
+) (ContextManifest, error) {
 	manifest := ContextManifest{
 		ID:        id,
 		Summary:   strings.TrimSpace(summary),

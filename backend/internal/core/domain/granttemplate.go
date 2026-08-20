@@ -20,7 +20,14 @@ const (
 
 func (t ToolName) Valid() bool {
 	switch t {
-	case ToolReadFile, ToolListDir, ToolSearchText, ToolWriteFile, ToolRunCommand, ToolProposeDelegate, ToolSubmitResult, ToolSubmitBriefing:
+	case ToolReadFile,
+		ToolListDir,
+		ToolSearchText,
+		ToolWriteFile,
+		ToolRunCommand,
+		ToolProposeDelegate,
+		ToolSubmitResult,
+		ToolSubmitBriefing:
 		return true
 	default:
 		return false
@@ -67,7 +74,11 @@ type DefaultGrantTemplate struct {
 	ResultPermissions []ResultPermission
 }
 
-func NewDefaultGrantTemplate(tools []ToolName, workspaceAccess WorkspaceAccess, resultPermissions []ResultPermission) (DefaultGrantTemplate, error) {
+func NewDefaultGrantTemplate(
+	tools []ToolName,
+	workspaceAccess WorkspaceAccess,
+	resultPermissions []ResultPermission,
+) (DefaultGrantTemplate, error) {
 	template := DefaultGrantTemplate{
 		AllowedTools:      cloneTools(tools),
 		WorkspaceAccess:   workspaceAccess,
@@ -110,10 +121,22 @@ func (t DefaultGrantTemplate) Validate() error {
 	if t.WorkspaceAccess == WorkspaceAccessRead && containsTool(t.AllowedTools, ToolWriteFile) {
 		return invalidValue("grantTemplate.workspaceAccess", "write_file requires read_write access")
 	}
-	if containsTool(t.AllowedTools, ToolSubmitResult) != containsResultPermission(t.ResultPermissions, ResultPermissionAgentResult) {
+	if containsTool(
+		t.AllowedTools,
+		ToolSubmitResult,
+	) != containsResultPermission(
+		t.ResultPermissions,
+		ResultPermissionAgentResult,
+	) {
 		return invalidValue("grantTemplate", "submit_result and agent_result permission must agree")
 	}
-	if containsTool(t.AllowedTools, ToolSubmitBriefing) != containsResultPermission(t.ResultPermissions, ResultPermissionBriefing) {
+	if containsTool(
+		t.AllowedTools,
+		ToolSubmitBriefing,
+	) != containsResultPermission(
+		t.ResultPermissions,
+		ResultPermissionBriefing,
+	) {
 		return invalidValue("grantTemplate", "submit_briefing and briefing permission must agree")
 	}
 	return nil
@@ -136,8 +159,14 @@ func (t DefaultGrantTemplate) Snapshot() DefaultGrantTemplate {
 }
 
 func canonicalizeTemplate(template *DefaultGrantTemplate) {
-	sort.Slice(template.AllowedTools, func(i, j int) bool { return template.AllowedTools[i] < template.AllowedTools[j] })
-	sort.Slice(template.ResultPermissions, func(i, j int) bool { return template.ResultPermissions[i] < template.ResultPermissions[j] })
+	sort.Slice(
+		template.AllowedTools,
+		func(i, j int) bool { return template.AllowedTools[i] < template.AllowedTools[j] },
+	)
+	sort.Slice(
+		template.ResultPermissions,
+		func(i, j int) bool { return template.ResultPermissions[i] < template.ResultPermissions[j] },
+	)
 }
 
 func containsTool(tools []ToolName, target ToolName) bool {
@@ -150,7 +179,9 @@ func containsTool(tools []ToolName, target ToolName) bool {
 }
 
 func containsFilesystemTool(tools []ToolName) bool {
-	return containsTool(tools, ToolReadFile) || containsTool(tools, ToolListDir) || containsTool(tools, ToolSearchText) || containsTool(tools, ToolWriteFile)
+	return containsTool(tools, ToolReadFile) || containsTool(tools, ToolListDir) ||
+		containsTool(tools, ToolSearchText) ||
+		containsTool(tools, ToolWriteFile)
 }
 
 func containsResultPermission(permissions []ResultPermission, target ResultPermission) bool {

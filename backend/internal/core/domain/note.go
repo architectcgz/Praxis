@@ -15,7 +15,15 @@ type Note struct {
 	CreatedAt      time.Time
 }
 
-func NewNote(id NoteID, sessionID TaskSessionID, sourceThreadID AgentThreadID, title string, bodyRef ContentRef, tags []string, at time.Time) (Note, error) {
+func NewNote(
+	id NoteID,
+	sessionID TaskSessionID,
+	sourceThreadID AgentThreadID,
+	title string,
+	bodyRef ContentRef,
+	tags []string,
+	at time.Time,
+) (Note, error) {
 	note := Note{
 		ID:             id,
 		TaskSessionID:  sessionID,
