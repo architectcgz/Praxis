@@ -18,7 +18,11 @@ const workItemColumns = `id, task_session_id, agent_thread_id, sequence, prompt,
 
 // Get loads one durable work item by ID.
 func (s *Store) Get(ctx context.Context, id domain.WorkItemID) (domain.QueuedWorkItem, error) {
-	row := executorFromContext(ctx, s.db).QueryRowContext(ctx, `SELECT `+workItemColumns+` FROM work_queue_items WHERE id = ?`, id.String())
+	row := executorFromContext(ctx, s.db).QueryRowContext(
+		ctx,
+		`SELECT `+workItemColumns+` FROM work_queue_items WHERE id = ?`,
+		id.String(),
+	)
 	item, err := scanWorkItem(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.QueuedWorkItem{}, domain.ErrNotFound
@@ -30,7 +34,12 @@ func (s *Store) Get(ctx context.Context, id domain.WorkItemID) (domain.QueuedWor
 }
 
 // ListByThread returns work items in FIFO order, optionally filtered by status.
-func (s *Store) ListByThread(ctx context.Context, threadID domain.AgentThreadID, status domain.WorkItemStatus, limit int) ([]domain.QueuedWorkItem, error) {
+func (s *Store) ListByThread(
+	ctx context.Context,
+	threadID domain.AgentThreadID,
+	status domain.WorkItemStatus,
+	limit int,
+) ([]domain.QueuedWorkItem, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -91,9 +100,15 @@ func (s *Store) Enqueue(ctx context.Context, item domain.QueuedWorkItem) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.ID.String(), item.TaskSessionID.String(), item.AgentThreadID.String(), item.Sequence, item.Prompt,
 		item.TaskPacketID.String(), item.ContextManifestID.String(), item.CapabilityGrantID.String(),
-		string(item.Execution.SandboxMode), string(item.Execution.ApprovalMode), item.Execution.Revision,
-		string(item.Status), nullableID(item.AgentRunID), formatTime(item.CreatedAt), formatTime(item.StartedAt),
-		formatTime(item.FinishedAt), item.FailureCode,
+		string(item.Execution.SandboxMode),
+		string(item.Execution.ApprovalMode),
+		item.Execution.Revision,
+		string(item.Status),
+		nullableID(item.AgentRunID),
+		nullableTimeValue(item.CreatedAt),
+		nullableTimeValue(item.StartedAt),
+		nullableTimeValue(item.FinishedAt),
+		item.FailureCode,
 	)
 	if err != nil {
 		return fmt.Errorf("enqueue work item: %w", err)
@@ -106,11 +121,19 @@ func (s *Store) Save(ctx context.Context, item domain.QueuedWorkItem) error {
 	if err := item.Validate(); err != nil {
 		return err
 	}
-	result, err := executorFromContext(ctx, s.db).ExecContext(ctx, `
+	result, err := executorFromContext(ctx, s.db).ExecContext(
+		ctx,
+		`
 		UPDATE work_queue_items
 		SET status = ?, agent_run_id = ?, started_at = ?, finished_at = ?, failure_code = ?
 		WHERE id = ?`,
-		string(item.Status), nullableID(item.AgentRunID), formatTime(item.StartedAt), formatTime(item.FinishedAt), item.FailureCode, item.ID.String())
+		string(item.Status),
+		nullableID(item.AgentRunID),
+		nullableTimeValue(item.StartedAt),
+		nullableTimeValue(item.FinishedAt),
+		item.FailureCode,
+		item.ID.String(),
+	)
 	if err != nil {
 		return fmt.Errorf("save work item: %w", err)
 	}
@@ -123,7 +146,12 @@ func (s *Store) Save(ctx context.Context, item domain.QueuedWorkItem) error {
 }
 
 // ClaimNext atomically claims the earliest queued item for a thread.
-func (s *Store) ClaimNext(ctx context.Context, threadID domain.AgentThreadID, runID domain.AgentRunID, at time.Time) (domain.QueuedWorkItem, error) {
+func (s *Store) ClaimNext(
+	ctx context.Context,
+	threadID domain.AgentThreadID,
+	runID domain.AgentRunID,
+	at time.Time,
+) (domain.QueuedWorkItem, error) {
 	if runID == "" {
 		return domain.QueuedWorkItem{}, errors.New("work item run id is required")
 	}
@@ -133,7 +161,9 @@ func (s *Store) ClaimNext(ctx context.Context, threadID domain.AgentThreadID, ru
 	var item domain.QueuedWorkItem
 	err := s.withValueTx(ctx, func(txCtx context.Context, _ *sql.Tx) error {
 		executor := executorFromContext(txCtx, s.db)
-		row := executor.QueryRowContext(txCtx, `
+		row := executor.QueryRowContext(
+			txCtx,
+			`
 			UPDATE work_queue_items
 			SET status = ?, agent_run_id = ?, started_at = ?, finished_at = NULL, failure_code = ''
 			WHERE id = (
@@ -150,8 +180,15 @@ func (s *Store) ClaimNext(ctx context.Context, threadID domain.AgentThreadID, ru
 			)
 			AND status = ?
 			RETURNING `+workItemColumns,
-			string(domain.WorkItemRunning), runID.String(), formatTime(at),
-			threadID.String(), string(domain.WorkItemQueued), threadID.String(), string(domain.WorkItemRunning), string(domain.WorkItemQueued))
+			string(domain.WorkItemRunning),
+			runID.String(),
+			nullableTimeValue(at),
+			threadID.String(),
+			string(domain.WorkItemQueued),
+			threadID.String(),
+			string(domain.WorkItemRunning),
+			string(domain.WorkItemQueued),
+		)
 		var err error
 		item, err = scanWorkItem(row)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -195,8 +232,14 @@ func (s *Store) CancelQueued(ctx context.Context, id domain.WorkItemID, at time.
 func (s *Store) ReconcileRunning(ctx context.Context, at time.Time) ([]domain.QueuedWorkItem, error) {
 	var reconciled []domain.QueuedWorkItem
 	err := s.withValueTx(ctx, func(txCtx context.Context, _ *sql.Tx) error {
-		rows, err := executorFromContext(txCtx, s.db).QueryContext(txCtx, `
-			SELECT `+workItemColumns+` FROM work_queue_items WHERE status = ? ORDER BY agent_thread_id, sequence`, string(domain.WorkItemRunning))
+		rows, err := executorFromContext(txCtx, s.db).QueryContext(
+			txCtx,
+			`SELECT `+workItemColumns+`
+			FROM work_queue_items
+			WHERE status = ?
+			ORDER BY agent_thread_id, sequence`,
+			string(domain.WorkItemRunning),
+		)
 		if err != nil {
 			return fmt.Errorf("find running work items: %w", err)
 		}
@@ -253,7 +296,25 @@ func scanWorkItem(scanner rowScanner) (domain.QueuedWorkItem, error) {
 		status, createdAt, failureCode      string
 		agentRunID, startedAt, finishedAt   sql.NullString
 	)
-	if err := scanner.Scan(&id, &sessionID, &threadID, &sequence, &prompt, &packetID, &manifestID, &grantID, &sandboxMode, &approvalMode, &revision, &status, &agentRunID, &createdAt, &startedAt, &finishedAt, &failureCode); err != nil {
+	if err := scanner.Scan(
+		&id,
+		&sessionID,
+		&threadID,
+		&sequence,
+		&prompt,
+		&packetID,
+		&manifestID,
+		&grantID,
+		&sandboxMode,
+		&approvalMode,
+		&revision,
+		&status,
+		&agentRunID,
+		&createdAt,
+		&startedAt,
+		&finishedAt,
+		&failureCode,
+	); err != nil {
 		return domain.QueuedWorkItem{}, err
 	}
 	if sequence <= 0 {
@@ -271,7 +332,11 @@ func scanWorkItem(scanner rowScanner) (domain.QueuedWorkItem, error) {
 	if err != nil {
 		return domain.QueuedWorkItem{}, fmt.Errorf("parse work item finishedAt: %w", err)
 	}
-	execution, err := domain.NewRuntimeExecutionSnapshot(domain.SandboxMode(sandboxMode), domain.ApprovalMode(approvalMode), revision)
+	execution, err := domain.NewRuntimeExecutionSnapshot(
+		domain.SandboxMode(sandboxMode),
+		domain.ApprovalMode(approvalMode),
+		revision,
+	)
 	if err != nil {
 		return domain.QueuedWorkItem{}, fmt.Errorf("parse work item execution: %w", err)
 	}

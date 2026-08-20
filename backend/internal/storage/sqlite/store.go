@@ -132,6 +132,7 @@ func executorFromContext(ctx context.Context, db *sql.DB) sqlExecutor {
 	return db
 }
 
+// contextTx returns the active transaction carried by ctx when it is usable.
 func contextTx(ctx context.Context) (*sql.Tx, bool) {
 	tx, ok := ctx.Value(transactionContextKey{}).(*sql.Tx)
 	return tx, ok && tx != nil
@@ -145,6 +146,8 @@ func (s *Store) withValueTx(ctx context.Context, fn func(context.Context, *sql.T
 	if err != nil {
 		return fmt.Errorf("begin sqlite transaction: %w", err)
 	}
+	// Roll back any transaction left unfinished by the callback; after Commit,
+	// Rollback returns sql.ErrTxDone, which is intentionally ignored.
 	defer func() { _ = tx.Rollback() }()
 	txCtx := context.WithValue(ctx, transactionContextKey{}, tx)
 	if err := fn(txCtx, tx); err != nil {
@@ -156,7 +159,9 @@ func (s *Store) withValueTx(ctx context.Context, fn func(context.Context, *sql.T
 	return nil
 }
 
-func formatTime(value time.Time) any {
+// nullableTimeValue preserves an unset timestamp as SQL NULL and stores present
+// timestamps as UTC RFC3339Nano text.
+func nullableTimeValue(value time.Time) any {
 	if value.IsZero() {
 		return nil
 	}
