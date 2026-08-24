@@ -13,8 +13,20 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/0001_initial.sql
+//go:embed migrations/*.sql
 var migrationFiles embed.FS
+
+type migration struct {
+	version int
+	path    string
+}
+
+var migrations = []migration{
+	{version: 1, path: "migrations/0001_initial.sql"},
+	{version: 2, path: "migrations/0002_target_orchestration.sql"},
+	{version: 3, path: "migrations/0003_legacy_conversion_reports.sql"},
+	{version: 4, path: "migrations/0004_target_queued_work.sql"},
+}
 
 type transactionContextKey struct{}
 
@@ -28,6 +40,9 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("sqlite database is required")
 	}
+	// SQLite foreign-key settings are connection-local. One connection keeps
+	// target relation constraints effective for every repository operation.
+	db.SetMaxOpenConns(1)
 	return &Store{db: db}, nil
 }
 
@@ -64,14 +79,45 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("sqlite migration context is required")
 	}
-	schema, err := migrationFiles.ReadFile("migrations/0001_initial.sql")
-	if err != nil {
-		return fmt.Errorf("read sqlite migration: %w", err)
+	if _, err := s.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		return fmt.Errorf("enable sqlite foreign keys: %w", err)
 	}
 	return s.InTx(ctx, func(ctx context.Context) error {
 		executor := executorFromContext(ctx, s.db)
-		if _, err := executor.ExecContext(ctx, string(schema)); err != nil {
-			return fmt.Errorf("apply sqlite migration: %w", err)
+		if _, err := executor.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS schema_migrations (
+				version INTEGER PRIMARY KEY,
+				applied_at TEXT NOT NULL
+			)`); err != nil {
+			return fmt.Errorf("create sqlite migration ledger: %w", err)
+		}
+		for _, migration := range migrations {
+			var applied bool
+			if err := executor.QueryRowContext(
+				ctx,
+				`SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)`,
+				migration.version,
+			).Scan(&applied); err != nil {
+				return fmt.Errorf("inspect sqlite migration %d: %w", migration.version, err)
+			}
+			if applied {
+				continue
+			}
+			schema, err := migrationFiles.ReadFile(migration.path)
+			if err != nil {
+				return fmt.Errorf("read sqlite migration %d: %w", migration.version, err)
+			}
+			if _, err := executor.ExecContext(ctx, string(schema)); err != nil {
+				return fmt.Errorf("apply sqlite migration %d: %w", migration.version, err)
+			}
+			if _, err := executor.ExecContext(
+				ctx,
+				`INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+				migration.version,
+				time.Now().UTC().Format(time.RFC3339Nano),
+			); err != nil {
+				return fmt.Errorf("record sqlite migration %d: %w", migration.version, err)
+			}
 		}
 		return nil
 	})

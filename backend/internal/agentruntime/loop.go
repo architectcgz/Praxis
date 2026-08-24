@@ -36,7 +36,7 @@ func (r *Runtime) runLoop(ctx context.Context) loopResult {
 		}
 		// The snapshot is assembled from the durable session projection, making every
 		// provider request reflect prior assistant messages, tool results, and queue input.
-		run, _, _, err := r.currentSettlement()
+		run, _, _, err := r.currentRunState()
 		if err != nil {
 			return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorContract)}
 		}
@@ -161,6 +161,9 @@ func (r *Runtime) appendAssistant(ctx context.Context, text string, calls []Tool
 }
 
 func (r *Runtime) executeTools(ctx context.Context, calls []ToolCall) (loopResult, bool) {
+	if r.config.ToolExecutor == nil {
+		return loopResult{outcome: domain.RunFailed, failureCode: string(ErrorTool)}, true
+	}
 	results := make([]TurnContentBlock, 0, len(calls))
 	for _, call := range calls {
 		decision, reason := r.preflight(ctx, call)

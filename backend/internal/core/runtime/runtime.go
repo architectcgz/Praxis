@@ -43,7 +43,9 @@ type RuntimeEvent struct {
 }
 
 type Runtime interface {
-	Start(ctx context.Context, run domain.AgentRun, prompt string) error
+	// StartExecution activates one already durable run and returns after the
+	// asynchronous execution loop has been accepted by the runtime.
+	StartExecution(ctx context.Context, run domain.AgentRun, prompt string) error
 	RequestPause(ctx context.Context) error
 	Events() <-chan RuntimeEvent
 	Close(ctx context.Context) error

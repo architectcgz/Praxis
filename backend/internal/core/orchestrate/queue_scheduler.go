@@ -237,7 +237,7 @@ func (s *QueueScheduler) StartNextQueued(ctx context.Context, threadID domain.Ag
 	if err != nil || !result.Started {
 		return result, err
 	}
-	if err := s.startRuntime(ctx, plan); err != nil {
+	if err := s.startExecution(ctx, plan); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -340,7 +340,7 @@ func (s *QueueScheduler) OnSettle(ctx context.Context, settlement runtime.Settle
 	if next == nil {
 		return nil
 	}
-	return s.startRuntime(ctx, *next)
+	return s.startExecution(ctx, *next)
 }
 
 // ResumeAgent explicitly resumes the current paused or interrupted work item
@@ -385,7 +385,7 @@ func (s *QueueScheduler) ResumeAgent(ctx context.Context, threadID domain.AgentT
 		if err != nil {
 			return err
 		}
-		threadEvent, err := thread.Start(plan.run.ID, plan.run.StartedAt)
+		threadEvent, err := thread.StartExecution(plan.run.ID, plan.run.StartedAt)
 		if err != nil {
 			return err
 		}
@@ -415,7 +415,7 @@ func (s *QueueScheduler) ResumeAgent(ctx context.Context, threadID domain.AgentT
 		return StartResult{}, err
 	}
 	result := StartResult{Started: true, WorkItem: plan.item, Run: plan.run, Lease: plan.lease}
-	if err := s.startRuntime(ctx, plan); err != nil {
+	if err := s.startExecution(ctx, plan); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -491,7 +491,7 @@ func (s *QueueScheduler) claimNextInTx(
 	if err != nil {
 		return startPlan{}, false, err
 	}
-	threadEvent, err := thread.Start(plan.run.ID, at)
+	threadEvent, err := thread.StartExecution(plan.run.ID, at)
 	if err != nil {
 		return startPlan{}, false, err
 	}
@@ -556,7 +556,11 @@ func (s *QueueScheduler) materializePlan(
 	return startPlan{thread: thread, item: item, run: run, packet: packet, manifest: manifest, grant: grant}, nil
 }
 
-func (s *QueueScheduler) startRuntime(ctx context.Context, plan startPlan) error {
+// startExecution is the scheduler's single runtime activation seam. The
+// durable run/thread/lease transaction is complete before this method performs
+// runtime I/O, so future AgentExecution activation can replace the legacy run
+// implementation without widening the queue command paths.
+func (s *QueueScheduler) startExecution(ctx context.Context, plan startPlan) error {
 	config := runtime.RuntimeConfig{
 		Thread: plan.thread, TaskPacket: plan.packet, ContextManifest: plan.manifest,
 		Grant: plan.grant, Execution: plan.item.Execution, Model: plan.grant.Model,
@@ -565,21 +569,21 @@ func (s *QueueScheduler) startRuntime(ctx context.Context, plan startPlan) error
 	}
 	runtime, err := s.runtime.New(s.lifecycleContext, config)
 	if err != nil {
-		return s.failRuntimeStart(ctx, plan, err)
+		return s.failExecutionStart(ctx, plan, err)
 	}
 	if runtime == nil {
-		return s.failRuntimeStart(ctx, plan, errors.New("runtime factory returned nil runtime"))
+		return s.failExecutionStart(ctx, plan, errors.New("runtime factory returned nil runtime"))
 	}
 	generation := s.registerRuntime(plan.thread.ID, runtime)
-	if err := runtime.Start(s.lifecycleContext, plan.run, plan.item.Prompt); err != nil {
+	if err := runtime.StartExecution(s.lifecycleContext, plan.run, plan.item.Prompt); err != nil {
 		s.unregisterRuntime(plan.thread.ID, generation)
 		_ = runtime.Close(context.WithoutCancel(s.lifecycleContext))
-		return s.failRuntimeStart(ctx, plan, err)
+		return s.failExecutionStart(ctx, plan, err)
 	}
 	return nil
 }
 
-func (s *QueueScheduler) failRuntimeStart(ctx context.Context, plan startPlan, cause error) error {
+func (s *QueueScheduler) failExecutionStart(ctx context.Context, plan startPlan, cause error) error {
 	compensationErr := s.compensateRuntimeFailure(ctx, plan, "runtime_start_failed")
 	if compensationErr != nil {
 		return fmt.Errorf("runtime start failed: %v; compensation failed: %w", cause, compensationErr)

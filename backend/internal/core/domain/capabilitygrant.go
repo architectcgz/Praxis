@@ -7,7 +7,8 @@ import (
 )
 
 type ModelRef struct {
-	ID string
+	ID        string
+	Reasoning string
 }
 
 type ResourceLimits struct {
@@ -56,14 +57,17 @@ type CapabilityGrant struct {
 
 func NewCapabilityGrant(spec CapabilityGrantSpec) (CapabilityGrant, error) {
 	grant := CapabilityGrant{
-		ID:                        spec.ID,
-		WorkspaceKey:              strings.TrimSpace(spec.WorkspaceKey),
-		AllowedTools:              cloneTools(spec.AllowedTools),
-		ReadScopes:                cloneStrings(spec.ReadScopes),
-		WriteScopes:               cloneStrings(spec.WriteScopes),
-		CanProposeDelegation:      spec.CanProposeDelegation,
-		ResultPermissions:         cloneResultPermissions(spec.ResultPermissions),
-		Model:                     ModelRef{ID: strings.TrimSpace(spec.Model.ID)},
+		ID:                   spec.ID,
+		WorkspaceKey:         strings.TrimSpace(spec.WorkspaceKey),
+		AllowedTools:         cloneTools(spec.AllowedTools),
+		ReadScopes:           cloneStrings(spec.ReadScopes),
+		WriteScopes:          cloneStrings(spec.WriteScopes),
+		CanProposeDelegation: spec.CanProposeDelegation,
+		ResultPermissions:    cloneResultPermissions(spec.ResultPermissions),
+		Model: ModelRef{
+			ID:        strings.TrimSpace(spec.Model.ID),
+			Reasoning: strings.TrimSpace(spec.Model.Reasoning),
+		},
 		ResourceLimits:            spec.ResourceLimits,
 		ContextManifestRef:        spec.ContextManifestRef,
 		ApprovalSource:            spec.ApprovalSource,

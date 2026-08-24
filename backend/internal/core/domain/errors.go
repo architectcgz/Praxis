@@ -13,6 +13,10 @@ var (
 	ErrWorkQueueEmpty    = errors.New("work queue is empty")
 	ErrWorkItemActive    = errors.New("agent thread already has an active work item")
 	ErrAlreadyDelivered  = errors.New("briefing already has a delivery")
+	ErrAgentExecuting    = errors.New("agent is executing")
+	ErrAgentUnavailable  = errors.New("agent cannot accept this command")
+	ErrRequestNotFound   = errors.New("execution request was not found")
+	ErrRequestConflict   = errors.New("execution request conflict")
 	ErrNotFound          = errors.New("domain object not found")
 )
 

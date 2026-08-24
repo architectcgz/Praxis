@@ -49,7 +49,8 @@ type SessionLogHeaderPayload struct {
 
 // SessionLogModelRef is the persisted model identity used for run diagnostics.
 type SessionLogModelRef struct {
-	ID string `json:"id"`
+	ID        string `json:"id"`
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // SessionLogMessagePayload is the only durable owner of normal context messages.

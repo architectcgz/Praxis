@@ -75,7 +75,10 @@ func eventToEntry(event agentruntime.SessionEvent, sequence uint64) (SessionLogE
 				SandboxMode:  string(value.Inputs.Execution.SandboxMode),
 				ApprovalMode: string(value.Inputs.Execution.ApprovalMode),
 			},
-			ModelRef:             SessionLogModelRef{ID: value.Inputs.Model.ID},
+			ModelRef: SessionLogModelRef{
+				ID:        value.Inputs.Model.ID,
+				Reasoning: value.Inputs.Model.Reasoning,
+			},
 			SystemPromptHash:     value.Inputs.SystemPromptHash,
 			ToolDefHashes:        toolDefinitionHashes,
 			ArtifactTemplateHash: value.Inputs.ArtifactTemplateHash,

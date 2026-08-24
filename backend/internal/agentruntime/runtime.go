@@ -59,8 +59,10 @@ func (r *Runtime) Events() <-chan RuntimeEvent { return r.events }
 // Phase returns the current structural operation phase.
 func (r *Runtime) Phase() AgentRuntimePhase { return r.guard.Current() }
 
-// Start durably records a run and starts its asynchronous turn loop.
-func (r *Runtime) Start(ctx context.Context, run domain.AgentRun, prompt string) error {
+// StartExecution activates one validated run and starts its asynchronous turn
+// loop. Product persistence is owned by the caller; the runtime only owns the
+// session receipt and model/tool lifecycle after this boundary accepts the run.
+func (r *Runtime) StartExecution(ctx context.Context, run domain.AgentRun, prompt string) error {
 	if ctx == nil {
 		return &RuntimeError{Code: ErrorContract, Message: "start context is required"}
 	}
@@ -257,7 +259,7 @@ func (r *Runtime) settlementContext() context.Context {
 	return context.Background()
 }
 
-func (r *Runtime) currentSettlement() (domain.AgentRun, int, bool, error) {
+func (r *Runtime) currentRunState() (domain.AgentRun, int, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.activeRun == nil {

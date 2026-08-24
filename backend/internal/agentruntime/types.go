@@ -100,6 +100,30 @@ type ModelStreamEvent struct {
 	Err        error
 }
 
+// AgentOutputEventKind identifies a non-durable provider output notification.
+// These events are for live presentation only; the transcript remains the
+// recovery source for complete messages.
+type AgentOutputEventKind string
+
+const (
+	AgentOutputTextDelta AgentOutputEventKind = "text_delta"
+	AgentOutputSettled   AgentOutputEventKind = "settled"
+)
+
+// AgentOutputEvent is a transient projection of output from one execution.
+// Text is set only for text_delta events; settled tells subscribers to reload
+// the durable transcript and execution state.
+type AgentOutputEvent struct {
+	Kind        AgentOutputEventKind    `json:"kind"`
+	AgentID     domain.AgentID          `json:"agentId"`
+	ExecutionID domain.AgentExecutionID `json:"executionId"`
+	Text        string                  `json:"text"`
+}
+
+// AgentOutputObserver receives non-durable execution output. Implementations
+// must return promptly so provider stream consumption is not delayed.
+type AgentOutputObserver func(AgentOutputEvent)
+
 // ModelRequest is the request sent to a model provider. It contains no credential fields.
 type ModelRequest struct {
 	Snapshot TurnSnapshot
@@ -300,77 +324,14 @@ func (c RuntimeConfig) validate() error {
 	if c.Model.ID == "" {
 		return fmt.Errorf("runtime config: model reference is required")
 	}
-	if c.ModelStream == nil || c.ToolExecutor == nil || c.SessionStore == nil {
-		return fmt.Errorf("runtime config: model, tool and session ports are required")
+	if c.ModelStream == nil || c.SessionStore == nil {
+		return fmt.Errorf("runtime config: model and session ports are required")
+	}
+	if len(c.Grant.AllowedTools) > 0 && c.ToolExecutor == nil {
+		return fmt.Errorf("runtime config: tool executor is required when tools are granted")
 	}
 	if c.EventBuffer < 0 {
 		return fmt.Errorf("runtime config: event buffer cannot be negative")
 	}
 	return nil
-}
-
-func cloneRaw(value json.RawMessage) json.RawMessage {
-	if value == nil {
-		return nil
-	}
-	return append(json.RawMessage(nil), value...)
-}
-
-func cloneTurnContentBlock(block TurnContentBlock) TurnContentBlock {
-	block.Input = cloneRaw(block.Input)
-	return block
-}
-
-func cloneTurnMessage(message TurnMessage) TurnMessage {
-	copy := message
-	copy.Content = make([]TurnContentBlock, len(message.Content))
-	for i, block := range message.Content {
-		copy.Content[i] = cloneTurnContentBlock(block)
-	}
-	return copy
-}
-
-func cloneTurnMessages(messages []TurnMessage) []TurnMessage {
-	result := make([]TurnMessage, len(messages))
-	for i, message := range messages {
-		result[i] = cloneTurnMessage(message)
-	}
-	return result
-}
-
-func cloneToolCall(call ToolCall) ToolCall {
-	if len(call.Input) == 0 && len(call.Arguments) > 0 {
-		call.Input = call.Arguments
-	}
-	if len(call.Arguments) == 0 && len(call.Input) > 0 {
-		call.Arguments = call.Input
-	}
-	call.Input = cloneRaw(call.Input)
-	call.Arguments = cloneRaw(call.Arguments)
-	return call
-}
-
-func cloneToolDefinitions(definitions []ToolDefinition) []ToolDefinition {
-	result := make([]ToolDefinition, len(definitions))
-	for i, definition := range definitions {
-		result[i] = definition
-		result[i].InputSchema = cloneRaw(definition.InputSchema)
-	}
-	return result
-}
-
-func cloneRuntimeEvent(event RuntimeEvent) RuntimeEvent {
-	event.Payload = cloneStringMap(event.Payload)
-	return event
-}
-
-func cloneStringMap(values map[string]string) map[string]string {
-	if values == nil {
-		return nil
-	}
-	copy := make(map[string]string, len(values))
-	for key, value := range values {
-		copy[key] = value
-	}
-	return copy
 }

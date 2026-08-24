@@ -10,20 +10,27 @@ import (
 // IDs are distinct types so a repository cannot accidentally swap identifiers
 // between aggregates while all persistence formats can still use strings.
 type (
-	TaskSessionID       string
-	AgentThreadID       string
-	AgentRunID          string
-	WorkItemID          string
-	CapabilityGrantID   string
-	TaskPacketID        string
-	ContextManifestID   string
-	DelegationRequestID string
-	WorkspaceLeaseID    string
-	AgentResultID       string
-	BriefingID          string
-	DeliveryID          string
-	EventID             string
-	NoteID              string
+	SessionID             string
+	AgentGroupID          string
+	AgentID               string
+	AgentExecutionID      string
+	RequestID             string
+	WaitConditionID       string
+	AgentControlRequestID string
+	TaskSessionID         string
+	AgentThreadID         string
+	AgentRunID            string
+	WorkItemID            string
+	CapabilityGrantID     string
+	TaskPacketID          string
+	ContextManifestID     string
+	DelegationRequestID   string
+	WorkspaceLeaseID      string
+	AgentResultID         string
+	BriefingID            string
+	DeliveryID            string
+	EventID               string
+	NoteID                string
 )
 
 var idSequence uint64
@@ -36,6 +43,19 @@ func newOpaqueID(prefix string) string {
 func idIsEmpty(value string) bool { return strings.TrimSpace(value) == "" }
 
 func NewTaskSessionID() TaskSessionID { return TaskSessionID(newOpaqueID("task")) }
+func NewSessionID() SessionID         { return SessionID(newOpaqueID("session")) }
+func NewAgentGroupID() AgentGroupID   { return AgentGroupID(newOpaqueID("group")) }
+func NewAgentID() AgentID             { return AgentID(newOpaqueID("agent")) }
+func NewAgentExecutionID() AgentExecutionID {
+	return AgentExecutionID(newOpaqueID("execution"))
+}
+func NewRequestID() RequestID { return RequestID(newOpaqueID("request")) }
+func NewWaitConditionID() WaitConditionID {
+	return WaitConditionID(newOpaqueID("wait"))
+}
+func NewAgentControlRequestID() AgentControlRequestID {
+	return AgentControlRequestID(newOpaqueID("control"))
+}
 func NewAgentThreadID() AgentThreadID { return AgentThreadID(newOpaqueID("thread")) }
 func NewAgentRunID() AgentRunID       { return AgentRunID(newOpaqueID("run")) }
 func NewWorkItemID() WorkItemID       { return WorkItemID(newOpaqueID("work")) }
@@ -54,7 +74,16 @@ func NewDeliveryID() DeliveryID             { return DeliveryID(newOpaqueID("del
 func NewEventID() EventID                   { return EventID(newOpaqueID("event")) }
 func NewNoteID() NoteID                     { return NoteID(newOpaqueID("note")) }
 
-func (id TaskSessionID) String() string       { return string(id) }
+func (id TaskSessionID) String() string    { return string(id) }
+func (id SessionID) String() string        { return string(id) }
+func (id AgentGroupID) String() string     { return string(id) }
+func (id AgentID) String() string          { return string(id) }
+func (id AgentExecutionID) String() string { return string(id) }
+func (id RequestID) String() string        { return string(id) }
+func (id WaitConditionID) String() string  { return string(id) }
+func (id AgentControlRequestID) String() string {
+	return string(id)
+}
 func (id AgentThreadID) String() string       { return string(id) }
 func (id AgentRunID) String() string          { return string(id) }
 func (id WorkItemID) String() string          { return string(id) }

@@ -1,0 +1,6 @@
+/* Stable workspace style entrypoint. Keep imports ordered by cascade dependency. */
+@import './workspace/base.css';
+@import './workspace/navigation.css';
+@import './workspace/content.css';
+@import './workspace/dialogs.css';
+@import './workspace/responsive.css';

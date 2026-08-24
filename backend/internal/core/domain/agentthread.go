@@ -70,7 +70,8 @@ func (t AgentThread) Validate() error {
 	return nil
 }
 
-func (t *AgentThread) Start(runID AgentRunID, at time.Time) (DomainEvent, error) {
+// StartExecution moves an eligible thread into its running state for runID.
+func (t *AgentThread) StartExecution(runID AgentRunID, at time.Time) (DomainEvent, error) {
 	if t.State != ThreadIdle && t.State != ThreadPaused && t.State != ThreadInterrupted && t.State != ThreadFailed {
 		return DomainEvent{}, invalidTransition("agentThread", string(t.State), string(ThreadRunning))
 	}
