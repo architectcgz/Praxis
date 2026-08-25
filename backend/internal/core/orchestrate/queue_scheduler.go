@@ -565,7 +565,6 @@ func (s *QueueScheduler) startExecution(ctx context.Context, plan startPlan) err
 		Thread: plan.thread, TaskPacket: plan.packet, ContextManifest: plan.manifest,
 		Grant: plan.grant, Execution: plan.item.Execution, Model: plan.grant.Model,
 		SessionReference: plan.thread.RuntimeSessionRef, LeaseReference: plan.lease.ID.String(),
-		OnSettle: s.OnSettle,
 	}
 	runtime, err := s.runtime.New(s.lifecycleContext, config)
 	if err != nil {
@@ -575,7 +574,7 @@ func (s *QueueScheduler) startExecution(ctx context.Context, plan startPlan) err
 		return s.failExecutionStart(ctx, plan, errors.New("runtime factory returned nil runtime"))
 	}
 	generation := s.registerRuntime(plan.thread.ID, runtime)
-	if err := runtime.StartExecution(s.lifecycleContext, plan.run, plan.item.Prompt); err != nil {
+	if err := runtime.StartExecution(s.lifecycleContext, plan.run, plan.item.Prompt, s.OnSettle); err != nil {
 		s.unregisterRuntime(plan.thread.ID, generation)
 		_ = runtime.Close(context.WithoutCancel(s.lifecycleContext))
 		return s.failExecutionStart(ctx, plan, err)

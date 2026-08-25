@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"praxis/internal/core/domain"
+	coreruntime "praxis/internal/core/runtime"
 	coresession "praxis/internal/core/session"
 )
 
@@ -19,19 +20,6 @@ type TargetSessionHeaderResolver func(
 	context.Context,
 	domain.AgentExecution,
 ) (coresession.AgentSessionHeader, error)
-
-// TargetExecutionLifecycle is implemented by the durable orchestration owner.
-// The runtime can report receipts and final outcomes but cannot create or
-// mutate unrelated product state.
-type TargetExecutionLifecycle interface {
-	ConfirmExecutionStart(context.Context, coresession.ExecutionStartReceipt) error
-	SettleRuntimeExecution(
-		context.Context,
-		domain.AgentExecutionID,
-		domain.ExecutionOutcome,
-		domain.ExecutionFailureCode,
-	) error
-}
 
 // TargetExecutionRunner is the provider/tool boundary. It receives a durable
 // immutable execution snapshot and returns only a stable settlement outcome.
@@ -60,7 +48,6 @@ type TargetRuntimeConfig struct {
 	AgentID           domain.AgentID
 	Sessions          TargetSessionResolver
 	Header            TargetSessionHeaderResolver
-	Lifecycle         TargetExecutionLifecycle
 	Runner            TargetExecutionRunner
 	Logger            TargetExecutionLogger
 	EventLogger       TargetExecutionEventLogger
@@ -73,7 +60,6 @@ type TargetRuntime struct {
 	agentID           domain.AgentID
 	sessions          TargetSessionResolver
 	header            TargetSessionHeaderResolver
-	lifecycle         TargetExecutionLifecycle
 	runner            TargetExecutionRunner
 	logger            TargetExecutionLogger
 	eventLogger       TargetExecutionEventLogger
@@ -89,6 +75,7 @@ type targetRuntimeExecution struct {
 	cancel        context.CancelFunc
 	done          chan struct{}
 	cancelOutcome domain.ExecutionOutcome
+	lifecycle     coreruntime.ExecutionLifecycle
 }
 
 func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
@@ -97,9 +84,6 @@ func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
 	}
 	if config.Sessions == nil {
 		return nil, errors.New("target runtime session resolver is required")
-	}
-	if config.Lifecycle == nil {
-		return nil, errors.New("target runtime lifecycle is required")
 	}
 	if config.Runner == nil {
 		return nil, errors.New("target runtime execution runner is required")
@@ -120,7 +104,6 @@ func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
 		agentID:           config.AgentID,
 		sessions:          config.Sessions,
 		header:            config.Header,
-		lifecycle:         config.Lifecycle,
 		runner:            config.Runner,
 		logger:            logger,
 		eventLogger:       eventLogger,
@@ -128,11 +111,19 @@ func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
 	}, nil
 }
 
-// Activate accepts only a durable execution for this Agent. A duplicate
-// activation of the same execution is harmless; a second execution is not.
-func (r *TargetRuntime) Activate(ctx context.Context, execution domain.AgentExecution) error {
+// Activate accepts only a durable execution for this Agent. lifecycle belongs
+// to that execution's receipt handoff; a duplicate activation is harmless, but
+// a second active execution is not.
+func (r *TargetRuntime) Activate(
+	ctx context.Context,
+	execution domain.AgentExecution,
+	lifecycle coreruntime.ExecutionLifecycle,
+) error {
 	if ctx == nil {
 		return errors.New("target runtime activation context is required")
+	}
+	if lifecycle == nil {
+		return errors.New("target runtime execution lifecycle is required")
 	}
 	if err := execution.Validate(); err != nil {
 		return err
@@ -157,6 +148,7 @@ func (r *TargetRuntime) Activate(ctx context.Context, execution domain.AgentExec
 		cancel:        cancel,
 		done:          make(chan struct{}),
 		cancelOutcome: domain.ExecutionInterrupted,
+		lifecycle:     lifecycle,
 	}
 	r.active = active
 	go r.run(executionCtx, execution, active)
@@ -251,7 +243,7 @@ func (r *TargetRuntime) run(
 		return
 	}
 	startContext, cancelStart := r.settlementContext()
-	err = r.lifecycle.ConfirmExecutionStart(startContext, start)
+	err = active.lifecycle.ConfirmExecutionStart(startContext, start)
 	cancelStart()
 	if err != nil {
 		r.logError(execution, "confirm execution start", err)
@@ -301,7 +293,7 @@ func (r *TargetRuntime) run(
 		r.logError(execution, "append execution settlement", err)
 		return
 	}
-	if err := r.lifecycle.SettleRuntimeExecution(
+	if err := active.lifecycle.SettleRuntimeExecution(
 		settlementContext,
 		settlement.ExecutionID,
 		settlement.Outcome,

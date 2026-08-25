@@ -205,7 +205,7 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 	if err != nil {
 		return report, err
 	}
-	if err := c.scheduler.ActivateStarting(context.WithoutCancel(ctx), len(starting)); err != nil {
+	if err := c.scheduler.ActivateStarting(context.WithoutCancel(ctx), len(starting), c.orchestrator); err != nil {
 		return report, err
 	}
 	report.ActivatedStarting = len(starting)

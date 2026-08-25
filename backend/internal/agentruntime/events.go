@@ -80,7 +80,7 @@ type QueueConsumedEvent struct {
 	Reason ConsumeReason
 }
 
-// RunSettledEvent records the durable run outcome after product settlement succeeds.
+// RunSettledEvent records the durable run outcome before product settlement begins.
 type RunSettledEvent struct {
 	Outcome    domain.AgentRunOutcome
 	ErrorClass string

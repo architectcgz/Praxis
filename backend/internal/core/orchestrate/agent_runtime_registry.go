@@ -7,12 +7,13 @@ import (
 	"sync"
 
 	"praxis/internal/core/domain"
+	coreruntime "praxis/internal/core/runtime"
 )
 
 // ManagedAgentRuntime is intentionally limited to process-local lifecycle
 // signals. It cannot create executions or persist product-owned payloads.
 type ManagedAgentRuntime interface {
-	Activate(context.Context, domain.AgentExecution) error
+	Activate(context.Context, domain.AgentExecution, coreruntime.ExecutionLifecycle) error
 	Cancel(context.Context, domain.AgentExecutionID, domain.ExecutionOutcome) error
 	Close(context.Context) error
 }
@@ -48,9 +49,16 @@ func NewAgentRuntimeRegistry(factory ManagedAgentRuntimeFactory) (*AgentRuntimeR
 	}, nil
 }
 
-func (r *AgentRuntimeRegistry) Activate(ctx context.Context, execution domain.AgentExecution) error {
+func (r *AgentRuntimeRegistry) Activate(
+	ctx context.Context,
+	execution domain.AgentExecution,
+	lifecycle coreruntime.ExecutionLifecycle,
+) error {
 	if ctx == nil {
 		return errors.New("runtime activation context is required")
+	}
+	if lifecycle == nil {
+		return errors.New("runtime execution lifecycle is required")
 	}
 	if err := execution.Validate(); err != nil {
 		return err
@@ -59,7 +67,7 @@ func (r *AgentRuntimeRegistry) Activate(ctx context.Context, execution domain.Ag
 	if err != nil {
 		return err
 	}
-	if err := runtime.Activate(ctx, execution); err != nil {
+	if err := runtime.Activate(ctx, execution, lifecycle); err != nil {
 		return fmt.Errorf("activate agent runtime: %w", err)
 	}
 	return nil

@@ -28,7 +28,6 @@ type RuntimeConfig struct {
 	Model            domain.ModelRef
 	SessionReference string
 	LeaseReference   string
-	OnSettle         SettlementHandler
 }
 
 // RuntimeEvent is the runtime-owned event projection delivered after durable
@@ -44,8 +43,14 @@ type RuntimeEvent struct {
 
 type Runtime interface {
 	// StartExecution activates one already durable run and returns after the
-	// asynchronous execution loop has been accepted by the runtime.
-	StartExecution(ctx context.Context, run domain.AgentRun, prompt string) error
+	// asynchronous execution loop has been accepted by the runtime. onSettle is
+	// scoped to this run rather than the runtime configuration.
+	StartExecution(
+		ctx context.Context,
+		run domain.AgentRun,
+		prompt string,
+		onSettle SettlementHandler,
+	) error
 	RequestPause(ctx context.Context) error
 	Events() <-chan RuntimeEvent
 	Close(ctx context.Context) error

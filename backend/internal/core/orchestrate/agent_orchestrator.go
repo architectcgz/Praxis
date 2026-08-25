@@ -13,6 +13,7 @@ import (
 
 	"praxis/internal/core/domain"
 	"praxis/internal/core/persistence"
+	coreruntime "praxis/internal/core/runtime"
 	coresession "praxis/internal/core/session"
 	"praxis/internal/core/system"
 )
@@ -34,7 +35,7 @@ type CommandError struct {
 func (e *CommandError) Error() string { return e.Code }
 
 type ExecutionActivation interface {
-	TryActivate(ctx context.Context, agentID domain.AgentID) error
+	TryActivate(context.Context, domain.AgentID, coreruntime.ExecutionLifecycle) error
 }
 
 type ExecutionCancellation interface {
@@ -527,7 +528,7 @@ func (o *AgentOrchestrator) SendInput(ctx context.Context, request SendInputRequ
 	if result.ExistingRequest || o.activator == nil {
 		return result, nil
 	}
-	if err := o.activator.TryActivate(context.WithoutCancel(ctx), request.AgentID); err != nil {
+	if err := o.activator.TryActivate(context.WithoutCancel(ctx), request.AgentID, o); err != nil {
 		result.ActivationError = err.Error()
 	}
 	return result, nil
@@ -781,7 +782,7 @@ func (o *AgentOrchestrator) StartNextQueuedWork(
 	if err != nil || !result.Started || o.activator == nil {
 		return result, err
 	}
-	if err := o.activator.TryActivate(context.WithoutCancel(ctx), agentID); err != nil {
+	if err := o.activator.TryActivate(context.WithoutCancel(ctx), agentID, o); err != nil {
 		result.ActivationError = err.Error()
 	}
 	return result, nil
@@ -885,7 +886,7 @@ func (o *AgentOrchestrator) Resume(ctx context.Context, request ResumeRequest) (
 	if result.ExistingRequest || o.activator == nil {
 		return result, nil
 	}
-	if err := o.activator.TryActivate(context.WithoutCancel(ctx), request.AgentID); err != nil {
+	if err := o.activator.TryActivate(context.WithoutCancel(ctx), request.AgentID, o); err != nil {
 		result.ActivationError = err.Error()
 	}
 	return result, nil
@@ -1220,7 +1221,7 @@ func (o *AgentOrchestrator) CompleteContextDelivery(
 	if result.ExistingDelivery || o.activator == nil {
 		return result, nil
 	}
-	if err := o.activator.TryActivate(context.WithoutCancel(ctx), result.Execution.AgentID); err != nil {
+	if err := o.activator.TryActivate(context.WithoutCancel(ctx), result.Execution.AgentID, o); err != nil {
 		result.ActivationError = err.Error()
 	}
 	return result, nil

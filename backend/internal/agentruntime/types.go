@@ -281,7 +281,6 @@ type RuntimeConfig struct {
 	ToolExecutor         ToolExecutor
 	SessionStore         AgentSessionStore
 	Approval             CommandApproval
-	OnSettle             SettlementHandler
 	Critical             []SettlementListener
 	Observers            []RuntimeObserver
 	Clock                Clock

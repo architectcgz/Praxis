@@ -62,7 +62,13 @@ func (r *Runtime) Phase() AgentRuntimePhase { return r.guard.Current() }
 // StartExecution activates one validated run and starts its asynchronous turn
 // loop. Product persistence is owned by the caller; the runtime only owns the
 // session receipt and model/tool lifecycle after this boundary accepts the run.
-func (r *Runtime) StartExecution(ctx context.Context, run domain.AgentRun, prompt string) error {
+// onSettle belongs to this run and is not retained by the reusable runtime.
+func (r *Runtime) StartExecution(
+	ctx context.Context,
+	run domain.AgentRun,
+	prompt string,
+	onSettle SettlementHandler,
+) error {
 	if ctx == nil {
 		return &RuntimeError{Code: ErrorContract, Message: "start context is required"}
 	}
@@ -107,7 +113,7 @@ func (r *Runtime) StartExecution(ctx context.Context, run domain.AgentRun, promp
 		r.abortStart(err)
 		return err
 	}
-	go r.executeRun()
+	go r.executeRun(onSettle)
 	return nil
 }
 
@@ -229,15 +235,20 @@ func errOr(first, fallback error) error {
 	return fallback
 }
 
-func (r *Runtime) executeRun() {
+func (r *Runtime) executeRun(onSettle SettlementHandler) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			_ = r.settle(context.WithoutCancel(r.settlementContext()), domain.RunFailed, "runtime_panic")
+			_ = r.settle(
+				context.WithoutCancel(r.settlementContext()),
+				domain.RunFailed,
+				"runtime_panic",
+				onSettle,
+			)
 		}
 	}()
 	ctx := r.runningContext()
 	result := r.runLoop(ctx)
-	if err := r.settle(ctx, result.outcome, result.failureCode); err != nil {
+	if err := r.settle(ctx, result.outcome, result.failureCode, onSettle); err != nil {
 		r.mu.Lock()
 		r.lastError = err
 		r.mu.Unlock()

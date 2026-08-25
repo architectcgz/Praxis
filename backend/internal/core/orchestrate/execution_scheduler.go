@@ -7,12 +7,13 @@ import (
 
 	"praxis/internal/core/domain"
 	"praxis/internal/core/persistence"
+	coreruntime "praxis/internal/core/runtime"
 )
 
 // RuntimeActivator is a generation-fenced registry boundary. It may lose a
 // notification because starting executions remain discoverable in SQLite.
 type RuntimeActivator interface {
-	Activate(ctx context.Context, execution domain.AgentExecution) error
+	Activate(context.Context, domain.AgentExecution, coreruntime.ExecutionLifecycle) error
 }
 
 type ExecutionSchedulerConfig struct {
@@ -37,9 +38,16 @@ func NewExecutionScheduler(config ExecutionSchedulerConfig) (*ExecutionScheduler
 	return &ExecutionScheduler{executions: config.Executions, runtime: config.Runtime}, nil
 }
 
-func (s *ExecutionScheduler) TryActivate(ctx context.Context, agentID domain.AgentID) error {
+func (s *ExecutionScheduler) TryActivate(
+	ctx context.Context,
+	agentID domain.AgentID,
+	lifecycle coreruntime.ExecutionLifecycle,
+) error {
 	if ctx == nil {
 		return errors.New("execution activation context is required")
+	}
+	if lifecycle == nil {
+		return errors.New("execution lifecycle is required")
 	}
 	execution, err := s.executions.GetActiveByAgent(ctx, agentID)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -51,7 +59,7 @@ func (s *ExecutionScheduler) TryActivate(ctx context.Context, agentID domain.Age
 	if execution.Status != domain.ExecutionStarting {
 		return nil
 	}
-	if err := s.runtime.Activate(ctx, execution); err != nil {
+	if err := s.runtime.Activate(ctx, execution, lifecycle); err != nil {
 		return fmt.Errorf("activate execution %s: %w", execution.ID, err)
 	}
 	return nil
@@ -59,16 +67,23 @@ func (s *ExecutionScheduler) TryActivate(ctx context.Context, agentID domain.Age
 
 // ActivateStarting is used after recovery because runtime notifications are
 // an optimization, not a source of runnable execution state.
-func (s *ExecutionScheduler) ActivateStarting(ctx context.Context, limit int) error {
+func (s *ExecutionScheduler) ActivateStarting(
+	ctx context.Context,
+	limit int,
+	lifecycle coreruntime.ExecutionLifecycle,
+) error {
 	if ctx == nil {
 		return errors.New("starting execution scan context is required")
+	}
+	if lifecycle == nil {
+		return errors.New("execution lifecycle is required")
 	}
 	executions, err := s.executions.ListStarting(ctx, limit)
 	if err != nil {
 		return err
 	}
 	for _, execution := range executions {
-		if err := s.runtime.Activate(ctx, execution); err != nil {
+		if err := s.runtime.Activate(ctx, execution, lifecycle); err != nil {
 			return fmt.Errorf("activate execution %s: %w", execution.ID, err)
 		}
 	}

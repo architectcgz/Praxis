@@ -7,7 +7,12 @@ import (
 	"praxis/internal/core/domain"
 )
 
-func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, failureCode string) error {
+func (r *Runtime) settle(
+	ctx context.Context,
+	outcome domain.AgentRunOutcome,
+	failureCode string,
+	onSettle SettlementHandler,
+) error {
 	base := r.settlementContext()
 	if ctx == nil || ctx.Err() != nil {
 		ctx = base
@@ -20,6 +25,7 @@ func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, fa
 	run := r.activeRun.Snapshot()
 	turnCount := r.turnCount
 	r.mu.Unlock()
+	defer r.guard.Release()
 	settlement := Settlement{
 		RunID:       run.ID,
 		ThreadID:    run.AgentThreadID,
@@ -55,13 +61,8 @@ func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, fa
 			break
 		}
 	}
-	r.guard.Release()
-	if r.config.OnSettle != nil {
-		if err := r.config.OnSettle(ctx, settlement); err != nil {
-			r.finish(err)
-			return &RuntimeError{Code: ErrorStorage, Message: "product settlement failed", Cause: err}
-		}
-	}
+	// The transcript receipt is the recovery source of truth. Product state must
+	// not settle until the terminal outcome is durably visible there.
 	entry, err := r.appendSessionEvent(ctx, SessionEventRunSettled, RunSettledEvent{
 		Outcome:    settlement.Outcome,
 		ErrorClass: failureCode,
@@ -70,6 +71,16 @@ func (r *Runtime) settle(ctx context.Context, outcome domain.AgentRunOutcome, fa
 	if err != nil {
 		r.finish(err)
 		return err
+	}
+	if err := r.flush(ctx); err != nil {
+		r.finish(err)
+		return err
+	}
+	if onSettle != nil {
+		if err := onSettle(ctx, settlement); err != nil {
+			r.finish(err)
+			return &RuntimeError{Code: ErrorStorage, Message: "product settlement failed", Cause: err}
+		}
 	}
 	r.publish(RuntimeEvent{
 		TaskSessionID: r.config.TaskSessionID,

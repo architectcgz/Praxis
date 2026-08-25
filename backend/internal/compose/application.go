@@ -89,10 +89,8 @@ func Open(
 			outputObserver: output.Publish,
 		}
 	}
-	lifecycle := &lifecycleBridge{}
 	factory := targetRuntimeFactory{
 		root:        root,
-		lifecycle:   lifecycle,
 		runner:      runner,
 		header:      newSessionHeaderResolver(store),
 		logger:      diagnostics.Log,
@@ -141,7 +139,6 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	lifecycle.Set(orchestrator)
 	sessions := newAgentSessionResolver(root)
 	delivery, err := orchestrate.NewDeliveryCoordinator(orchestrate.DeliveryCoordinatorConfig{
 		Orchestrator:    orchestrator,
@@ -283,37 +280,8 @@ func (a *Application) ListAgentMessages(
 	return store.ListMessages(ctx, limit)
 }
 
-type lifecycleBridge struct {
-	lifecycle agentruntime.TargetExecutionLifecycle
-}
-
-func (b *lifecycleBridge) Set(value agentruntime.TargetExecutionLifecycle) { b.lifecycle = value }
-
-func (b *lifecycleBridge) ConfirmExecutionStart(
-	ctx context.Context,
-	receipt session.ExecutionStartReceipt,
-) error {
-	if b.lifecycle == nil {
-		return errors.New("target execution lifecycle is not configured")
-	}
-	return b.lifecycle.ConfirmExecutionStart(ctx, receipt)
-}
-
-func (b *lifecycleBridge) SettleRuntimeExecution(
-	ctx context.Context,
-	executionID domain.AgentExecutionID,
-	outcome domain.ExecutionOutcome,
-	failureCode domain.ExecutionFailureCode,
-) error {
-	if b.lifecycle == nil {
-		return errors.New("target execution lifecycle is not configured")
-	}
-	return b.lifecycle.SettleRuntimeExecution(ctx, executionID, outcome, failureCode)
-}
-
 type targetRuntimeFactory struct {
 	root        storage.DataRoot
-	lifecycle   agentruntime.TargetExecutionLifecycle
 	runner      agentruntime.TargetExecutionRunner
 	header      agentruntime.TargetSessionHeaderResolver
 	logger      agentruntime.TargetExecutionLogger
@@ -330,7 +298,6 @@ func (f targetRuntimeFactory) New(
 			return agentlog.Open(f.root, sessionID, targetAgentID)
 		},
 		Header:            f.header,
-		Lifecycle:         f.lifecycle,
 		Runner:            f.runner,
 		Logger:            f.logger,
 		EventLogger:       f.eventLogger,
