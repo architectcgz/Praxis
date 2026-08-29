@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"praxis/internal/agentruntime"
 	"praxis/internal/core/domain"
+	coreruntime "praxis/internal/core/runtime"
 	"praxis/internal/providers"
 )
 
@@ -72,12 +72,12 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
-var _ agentruntime.ModelStreamPort = (*Provider)(nil)
+var _ coreruntime.ModelStreamPort = (*Provider)(nil)
 
 func (p *Provider) Stream(
 	ctx context.Context,
-	request agentruntime.ModelRequest,
-) (<-chan agentruntime.ModelStreamEvent, error) {
+	request coreruntime.ModelRequest,
+) (<-chan coreruntime.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("openai-compatible stream context is required")
 	}
@@ -106,7 +106,7 @@ func (p *Provider) Stream(
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, providers.DecodeErrorResponse(response)
 	}
-	events := make(chan agentruntime.ModelStreamEvent, 16)
+	events := make(chan coreruntime.ModelStreamEvent, 16)
 	go func() {
 		defer close(events)
 		defer response.Body.Close()
@@ -119,7 +119,7 @@ func (p *Provider) Stream(
 	return events, nil
 }
 
-func (p *Provider) requestPayload(snapshot agentruntime.TurnSnapshot) ([]byte, string, error) {
+func (p *Provider) requestPayload(snapshot coreruntime.TurnSnapshot) ([]byte, string, error) {
 	model := p.model
 	if model == "" {
 		model = snapshot.Model.ID
@@ -184,15 +184,15 @@ func (p *Provider) requestPayload(snapshot agentruntime.TurnSnapshot) ([]byte, s
 	return encoded, "/chat/completions", err
 }
 
-func chatMessage(message agentruntime.TurnMessage) map[string]any {
+func chatMessage(message coreruntime.TurnMessage) map[string]any {
 	result := map[string]any{"role": string(message.Role)}
 	var text strings.Builder
 	toolCalls := make([]map[string]any, 0)
 	for _, block := range message.Content {
 		switch block.Kind {
-		case agentruntime.TurnContentText:
+		case coreruntime.TurnContentText:
 			text.WriteString(block.Text)
-		case agentruntime.TurnContentToolUse:
+		case coreruntime.TurnContentToolUse:
 			toolCalls = append(toolCalls, map[string]any{
 				"id":   block.ToolCallID,
 				"type": "function",
@@ -200,7 +200,7 @@ func chatMessage(message agentruntime.TurnMessage) map[string]any {
 					"name": block.ToolName, "arguments": string(block.Input),
 				},
 			})
-		case agentruntime.TurnContentToolResult:
+		case coreruntime.TurnContentToolResult:
 			result["role"] = "tool"
 			result["tool_call_id"] = block.ToolCallID
 			text.WriteString(block.Text)
@@ -213,11 +213,11 @@ func chatMessage(message agentruntime.TurnMessage) map[string]any {
 	return result
 }
 
-func responseMessage(message agentruntime.TurnMessage) map[string]any {
+func responseMessage(message coreruntime.TurnMessage) map[string]any {
 	return chatMessage(message)
 }
 
-func parseChat(reader io.Reader, events chan<- agentruntime.ModelStreamEvent) {
+func parseChat(reader io.Reader, events chan<- coreruntime.ModelStreamEvent) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024), 2*1024*1024)
 	var calls = map[int]*toolAccumulator{}
@@ -260,7 +260,7 @@ func parseChat(reader io.Reader, events chan<- agentruntime.ModelStreamEvent) {
 		}
 		choice := chunk.Choices[0]
 		if choice.Delta.Content != "" {
-			events <- agentruntime.ModelStreamEvent{Kind: agentruntime.StreamTextDelta, Text: choice.Delta.Content}
+			events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamTextDelta, Text: choice.Delta.Content}
 		}
 		for _, delta := range choice.Delta.ToolCalls {
 			call := calls[delta.Index]
@@ -291,7 +291,7 @@ func parseChat(reader io.Reader, events chan<- agentruntime.ModelStreamEvent) {
 
 type toolAccumulator struct{ id, name, arguments string }
 
-func emitTool(events chan<- agentruntime.ModelStreamEvent, call *toolAccumulator) {
+func emitTool(events chan<- coreruntime.ModelStreamEvent, call *toolAccumulator) {
 	if call == nil || call.name == "" {
 		return
 	}
@@ -299,9 +299,9 @@ func emitTool(events chan<- agentruntime.ModelStreamEvent, call *toolAccumulator
 	if len(bytes.TrimSpace(args)) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	events <- agentruntime.ModelStreamEvent{
-		Kind: agentruntime.StreamToolCall,
-		ToolCall: agentruntime.ToolCall{
+	events <- coreruntime.ModelStreamEvent{
+		Kind: coreruntime.StreamToolCall,
+		ToolCall: coreruntime.ToolCall{
 			ID:        call.id,
 			Name:      domain.ToolName(call.name),
 			Input:     append(json.RawMessage(nil), args...),
@@ -310,7 +310,7 @@ func emitTool(events chan<- agentruntime.ModelStreamEvent, call *toolAccumulator
 	}
 }
 
-func emitChatTools(events chan<- agentruntime.ModelStreamEvent, calls map[int]*toolAccumulator) {
+func emitChatTools(events chan<- coreruntime.ModelStreamEvent, calls map[int]*toolAccumulator) {
 	indices := make([]int, 0, len(calls))
 	for index := range calls {
 		indices = append(indices, index)
@@ -321,7 +321,7 @@ func emitChatTools(events chan<- agentruntime.ModelStreamEvent, calls map[int]*t
 	}
 }
 
-func parseResponses(reader io.Reader, events chan<- agentruntime.ModelStreamEvent) {
+func parseResponses(reader io.Reader, events chan<- coreruntime.ModelStreamEvent) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024), 2*1024*1024)
 	calls := map[string]*toolAccumulator{}
@@ -361,7 +361,7 @@ func parseResponses(reader io.Reader, events chan<- agentruntime.ModelStreamEven
 		switch event.Type {
 		case "response.output_text.delta":
 			if event.Delta != "" {
-				events <- agentruntime.ModelStreamEvent{Kind: agentruntime.StreamTextDelta, Text: event.Delta}
+				events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamTextDelta, Text: event.Delta}
 			}
 		case "response.output_item.added":
 			if event.Item.Type == "function_call" {
@@ -414,11 +414,11 @@ func parseResponses(reader io.Reader, events chan<- agentruntime.ModelStreamEven
 	}
 }
 
-func emitComplete(events chan<- agentruntime.ModelStreamEvent, reason string) {
-	events <- agentruntime.ModelStreamEvent{Kind: agentruntime.StreamComplete, StopReason: reason}
+func emitComplete(events chan<- coreruntime.ModelStreamEvent, reason string) {
+	events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamComplete, StopReason: reason}
 }
 
-func emitResponseTools(events chan<- agentruntime.ModelStreamEvent, calls map[string]*toolAccumulator) {
+func emitResponseTools(events chan<- coreruntime.ModelStreamEvent, calls map[string]*toolAccumulator) {
 	keys := make([]string, 0, len(calls))
 	for key := range calls {
 		keys = append(keys, key)
@@ -428,6 +428,6 @@ func emitResponseTools(events chan<- agentruntime.ModelStreamEvent, calls map[st
 		emitTool(events, calls[key])
 	}
 }
-func emitError(events chan<- agentruntime.ModelStreamEvent, err error) {
-	events <- agentruntime.ModelStreamEvent{Kind: agentruntime.StreamError, Err: err}
+func emitError(events chan<- coreruntime.ModelStreamEvent, err error) {
+	events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamError, Err: err}
 }

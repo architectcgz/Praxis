@@ -14,7 +14,7 @@ import (
 
 // TargetSessionResolver returns the only JSONL writer for one Agent. The
 // runtime cannot inspect other Agents' transcripts through this interface.
-type TargetSessionResolver func(domain.SessionID, domain.AgentID) (coresession.AgentSessionStore, error)
+type TargetSessionResolver func(domain.SessionID, domain.AgentID) (coresession.TranscriptReceiptStore, error)
 
 type TargetSessionHeaderResolver func(
 	context.Context,
@@ -33,7 +33,7 @@ type TargetExecutionSessionRunner interface {
 	RunWithSession(
 		context.Context,
 		domain.AgentExecution,
-		coresession.AgentSessionStore,
+		coresession.TranscriptReceiptStore,
 	) (domain.ExecutionOutcome, domain.ExecutionFailureCode, error)
 }
 

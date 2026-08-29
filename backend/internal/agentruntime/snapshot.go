@@ -11,17 +11,6 @@ import (
 	"praxis/internal/core/domain"
 )
 
-// Snapshot returns a defensive copy of the turn input so provider code cannot mutate runtime state.
-func (s TurnSnapshot) Snapshot() TurnSnapshot {
-	copy := s
-	copy.Messages = cloneTurnMessages(s.Messages)
-	copy.TaskPacket = s.TaskPacket
-	copy.ContextManifest = s.ContextManifest
-	copy.Tools = cloneToolDefinitions(s.Tools)
-	copy.Execution = s.Execution.Snapshot()
-	return copy
-}
-
 // BuildTurnSnapshot reads the safe session projection and constructs the next immutable provider request.
 func BuildTurnSnapshot(
 	ctx context.Context,

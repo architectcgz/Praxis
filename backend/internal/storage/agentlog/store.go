@@ -338,7 +338,7 @@ func (s *Store) FindExecutionStart(
 }
 
 // ListMessages returns the latest transcript messages in chronological order.
-// The read is intentionally separate from AgentSessionStore so runtime code
+// The read is intentionally separate from TranscriptReceiptStore so runtime code
 // cannot use the UI projection to influence execution context or state.
 func (s *Store) ListMessages(
 	ctx context.Context,
@@ -896,4 +896,4 @@ func containsSensitiveValue(value any) bool {
 	return false
 }
 
-var _ coresession.AgentSessionStore = (*Store)(nil)
+var _ coresession.TranscriptReceiptStore = (*Store)(nil)

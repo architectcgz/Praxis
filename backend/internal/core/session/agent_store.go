@@ -59,9 +59,9 @@ type ContextArtifactReceipt struct {
 	Sequence   uint64
 }
 
-// AgentSessionStore is the transcript-side port used for cross-store receipt
+// TranscriptReceiptStore is the transcript-side port used for cross-store receipt
 // reconciliation. Product state remains exclusively in AgentOrchestrator.
-type AgentSessionStore interface {
+type TranscriptReceiptStore interface {
 	Initialize(context.Context, AgentSessionHeader) error
 	AppendExecutionStart(context.Context, domain.AgentExecution) (ExecutionStartReceipt, error)
 	AppendExecutionSettlement(context.Context, ExecutionSettlementReceipt) (ExecutionSettlementReceipt, error)

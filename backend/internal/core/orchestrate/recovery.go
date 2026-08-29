@@ -10,7 +10,7 @@ import (
 	coresession "praxis/internal/core/session"
 )
 
-type AgentSessionResolver func(domain.SessionID, domain.AgentID) (coresession.AgentSessionStore, error)
+type AgentSessionResolver func(domain.SessionID, domain.AgentID) (coresession.TranscriptReceiptStore, error)
 
 type RuntimeSnapshotResolver func(context.Context, domain.Agent) (domain.RuntimeExecutionSnapshot, error)
 

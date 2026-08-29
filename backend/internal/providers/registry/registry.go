@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"praxis/internal/agentruntime"
 	"praxis/internal/core/domain"
+	coreruntime "praxis/internal/core/runtime"
 	"praxis/internal/providers"
 	"praxis/internal/providers/anthropic"
 	"praxis/internal/providers/openaicompat"
@@ -224,12 +224,12 @@ func (r *Registry) ResolveModelSelection(modelID, reasoning string) (domain.Mode
 	return r.modelRef(model, reasoning)
 }
 
-func (r *Registry) StreamPort(modelID string) (agentruntime.ModelStreamPort, error) {
+func (r *Registry) StreamPort(modelID string) (coreruntime.ModelStreamPort, error) {
 	return r.StreamPortFor(domain.ModelRef{ID: modelID})
 }
 
 // StreamPortFor builds the port for the already-frozen model selection.
-func (r *Registry) StreamPortFor(ref domain.ModelRef) (agentruntime.ModelStreamPort, error) {
+func (r *Registry) StreamPortFor(ref domain.ModelRef) (coreruntime.ModelStreamPort, error) {
 	if strings.TrimSpace(ref.ID) == "" {
 		return nil, errors.New("model reference is required")
 	}

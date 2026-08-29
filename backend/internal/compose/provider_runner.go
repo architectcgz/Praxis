@@ -44,7 +44,7 @@ func (r *providerRunner) Run(
 func (r *providerRunner) RunWithSession(
 	ctx context.Context,
 	execution domain.AgentExecution,
-	store coresession.AgentSessionStore,
+	store coresession.TranscriptReceiptStore,
 ) (domain.ExecutionOutcome, domain.ExecutionFailureCode, error) {
 	messages, ok := store.(providerMessageStore)
 	if !ok {

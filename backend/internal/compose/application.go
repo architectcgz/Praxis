@@ -292,11 +292,15 @@ func (f targetRuntimeFactory) New(
 	ctx context.Context,
 	agentID domain.AgentID,
 ) (orchestrate.ManagedAgentRuntime, error) {
+	openSessions := func(
+		sessionID domain.SessionID,
+		targetAgentID domain.AgentID,
+	) (session.TranscriptReceiptStore, error) {
+		return agentlog.Open(f.root, sessionID, targetAgentID)
+	}
 	return agentruntime.NewTargetRuntime(agentruntime.TargetRuntimeConfig{
-		AgentID: agentID,
-		Sessions: func(sessionID domain.SessionID, targetAgentID domain.AgentID) (session.AgentSessionStore, error) {
-			return agentlog.Open(f.root, sessionID, targetAgentID)
-		},
+		AgentID:           agentID,
+		Sessions:          openSessions,
 		Header:            f.header,
 		Runner:            f.runner,
 		Logger:            f.logger,
@@ -306,7 +310,7 @@ func (f targetRuntimeFactory) New(
 }
 
 func newAgentSessionResolver(root storage.DataRoot) orchestrate.AgentSessionResolver {
-	return func(sessionID domain.SessionID, agentID domain.AgentID) (session.AgentSessionStore, error) {
+	return func(sessionID domain.SessionID, agentID domain.AgentID) (session.TranscriptReceiptStore, error) {
 		return agentlog.Open(root, sessionID, agentID)
 	}
 }

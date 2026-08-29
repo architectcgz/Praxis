@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"praxis/internal/agentruntime"
 	"praxis/internal/core/domain"
+	coreruntime "praxis/internal/core/runtime"
 	"praxis/internal/providers"
 )
 
@@ -62,12 +62,12 @@ func New(config Config) (*Provider, error) {
 		maxOutputTokens: maxOutputTokens}, nil
 }
 
-var _ agentruntime.ModelStreamPort = (*Provider)(nil)
+var _ coreruntime.ModelStreamPort = (*Provider)(nil)
 
 func (p *Provider) Stream(
 	ctx context.Context,
-	request agentruntime.ModelRequest,
-) (<-chan agentruntime.ModelStreamEvent, error) {
+	request coreruntime.ModelRequest,
+) (<-chan coreruntime.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("anthropic stream context is required")
 	}
@@ -130,24 +130,24 @@ func (p *Provider) Stream(
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, providers.DecodeErrorResponse(response)
 	}
-	events := make(chan agentruntime.ModelStreamEvent, 16)
+	events := make(chan coreruntime.ModelStreamEvent, 16)
 	go func() { defer close(events); defer response.Body.Close(); parse(response.Body, events) }()
 	return events, nil
 }
 
-func anthropicMessage(message agentruntime.TurnMessage) map[string]any {
+func anthropicMessage(message coreruntime.TurnMessage) map[string]any {
 	content := make([]map[string]any, 0, len(message.Content))
 	role := string(message.Role)
 	for _, block := range message.Content {
 		switch block.Kind {
-		case agentruntime.TurnContentText:
+		case coreruntime.TurnContentText:
 			content = append(content, map[string]any{"type": "text", "text": block.Text})
-		case agentruntime.TurnContentToolUse:
+		case coreruntime.TurnContentToolUse:
 			content = append(content, map[string]any{
 				"type": "tool_use", "id": block.ToolCallID, "name": block.ToolName,
 				"input": json.RawMessage(block.Input),
 			})
-		case agentruntime.TurnContentToolResult:
+		case coreruntime.TurnContentToolResult:
 			role = "user"
 			content = append(content, map[string]any{
 				"type": "tool_result", "tool_use_id": block.ToolCallID,
@@ -158,7 +158,7 @@ func anthropicMessage(message agentruntime.TurnMessage) map[string]any {
 	return map[string]any{"role": role, "content": content}
 }
 
-func parse(reader io.Reader, events chan<- agentruntime.ModelStreamEvent) {
+func parse(reader io.Reader, events chan<- coreruntime.ModelStreamEvent) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024), 2*1024*1024)
 	var tools = map[int]*toolAccumulator{}
@@ -202,7 +202,7 @@ func parse(reader io.Reader, events chan<- agentruntime.ModelStreamEvent) {
 			switch event.Delta.Type {
 			case "text_delta":
 				if event.Delta.Text != "" {
-					events <- agentruntime.ModelStreamEvent{Kind: agentruntime.StreamTextDelta, Text: event.Delta.Text}
+					events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamTextDelta, Text: event.Delta.Text}
 				}
 			case "input_json_delta":
 				if tool := tools[event.Index]; tool != nil {
@@ -232,7 +232,7 @@ func parse(reader io.Reader, events chan<- agentruntime.ModelStreamEvent) {
 
 type toolAccumulator struct{ id, name, arguments string }
 
-func emitTool(events chan<- agentruntime.ModelStreamEvent, tool *toolAccumulator) {
+func emitTool(events chan<- coreruntime.ModelStreamEvent, tool *toolAccumulator) {
 	if tool == nil || tool.name == "" {
 		return
 	}
@@ -240,21 +240,21 @@ func emitTool(events chan<- agentruntime.ModelStreamEvent, tool *toolAccumulator
 	if len(bytes.TrimSpace(args)) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	events <- agentruntime.ModelStreamEvent{
-		Kind: agentruntime.StreamToolCall,
-		ToolCall: agentruntime.ToolCall{
+	events <- coreruntime.ModelStreamEvent{
+		Kind: coreruntime.StreamToolCall,
+		ToolCall: coreruntime.ToolCall{
 			ID: tool.id, Name: domain.ToolName(tool.name), Input: args, Arguments: args,
 		},
 	}
 }
-func emitComplete(events chan<- agentruntime.ModelStreamEvent, reason string) {
-	events <- agentruntime.ModelStreamEvent{Kind: agentruntime.StreamComplete, StopReason: reason}
+func emitComplete(events chan<- coreruntime.ModelStreamEvent, reason string) {
+	events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamComplete, StopReason: reason}
 }
-func emitError(events chan<- agentruntime.ModelStreamEvent, err error) {
-	events <- agentruntime.ModelStreamEvent{Kind: agentruntime.StreamError, Err: err}
+func emitError(events chan<- coreruntime.ModelStreamEvent, err error) {
+	events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamError, Err: err}
 }
 
-func emitTools(events chan<- agentruntime.ModelStreamEvent, tools map[int]*toolAccumulator) {
+func emitTools(events chan<- coreruntime.ModelStreamEvent, tools map[int]*toolAccumulator) {
 	indices := make([]int, 0, len(tools))
 	for index := range tools {
 		indices = append(indices, index)
