@@ -11,13 +11,13 @@ import (
 	"strings"
 
 	"praxis/internal/core/domain"
-	"praxis/internal/storage"
+	"praxis/internal/storage/dataroot"
 )
 
 // AttachmentStore owns opaque durable tool-result attachments.
 type AttachmentStore struct{ root, temporary string }
 
-func NewAttachmentStore(root storage.DataRoot) *AttachmentStore {
+func NewAttachmentStore(root dataroot.DataRoot) *AttachmentStore {
 	return &AttachmentStore{root: root.Attachments, temporary: root.Temporary}
 }
 
@@ -63,7 +63,7 @@ func (s *AttachmentStore) Read(ctx context.Context, ref domain.ContentRef) ([]by
 // NoteFileStore owns Markdown bodies while SQLite stores their metadata.
 type NoteFileStore struct{ root, temporary string }
 
-func NewNoteFileStore(root storage.DataRoot) *NoteFileStore {
+func NewNoteFileStore(root dataroot.DataRoot) *NoteFileStore {
 	return &NoteFileStore{root: root.Notes, temporary: root.Temporary}
 }
 

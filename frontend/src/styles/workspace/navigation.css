@@ -2,18 +2,26 @@
 .workspace-grid {
     display: grid;
     grid-template-columns: 272px minmax(0, 1fr) 292px;
-    height: calc(100vh - 64px);
     min-height: 0;
+    overflow: hidden;
 }
 
 .sidebar {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     min-width: 0;
     padding: 26px 18px;
-    overflow: auto;
+    overflow: hidden;
     border-right: 1px solid var(--line);
     background: rgba(250, 250, 252, 0.62);
     -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
+}
+
+/* Keep the reserved gutter inside the sidebar padding so row width stays constant. */
+.sidebar > .scroll-region {
+    margin-right: calc(-1 * var(--scroll-gutter));
 }
 
 .agents-panel {
@@ -60,6 +68,34 @@
     margin-top: 20px;
 }
 
+.sidebar-footer {
+    padding-top: 24px;
+}
+
+.settings-nav {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-align: left;
+    transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease, color var(--motion-duration) ease;
+}
+
+.settings-nav:hover,
+.settings-nav.active {
+    border-color: rgba(0, 122, 255, 0.2);
+    background: var(--blue-soft);
+    color: var(--blue-strong);
+}
+
 .icon-button {
     display: grid;
     width: 32px;
@@ -103,12 +139,29 @@
     transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease;
 }
 
+.project-heading.selected {
+    border-color: rgba(0, 122, 255, 0.2);
+    background: var(--blue-soft);
+}
+
 .project-toggle {
     display: grid;
-    grid-template-columns: 20px minmax(0, 1fr);
-    flex: 1 1 auto;
+    grid-template-columns: 20px;
+    flex: 0 0 28px;
     gap: 8px;
     align-items: center;
+    min-width: 0;
+    min-height: 30px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.project-select {
+    display: block;
+    flex: 1 1 auto;
     min-width: 0;
     min-height: 30px;
     padding: 0;
@@ -125,7 +178,8 @@
 }
 
 .project-heading:hover .project-heading-copy strong,
-.project-heading:focus-within .project-heading-copy strong {
+.project-heading:focus-within .project-heading-copy strong,
+.project-heading.selected .project-heading-copy strong {
     color: var(--blue-strong);
 }
 

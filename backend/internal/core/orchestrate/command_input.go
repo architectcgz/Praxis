@@ -12,9 +12,11 @@ import (
 )
 
 type SendInputRequest struct {
+	SessionID       domain.SessionID
 	AgentID         domain.AgentID
 	RequestID       domain.RequestID
 	Content         string
+	ProviderID      string
 	ModelID         string
 	Reasoning       string
 	RuntimeSnapshot domain.RuntimeExecutionSnapshot
@@ -35,12 +37,19 @@ func (o *AgentOrchestrator) SendInput(ctx context.Context, request SendInputRequ
 	if !o.Ready() {
 		return SendInputResult{}, commandError(CommandErrorNotReady)
 	}
-	if strings.TrimSpace(request.AgentID.String()) == "" ||
+	if strings.TrimSpace(request.SessionID.String()) == "" && strings.TrimSpace(request.AgentID.String()) == "" ||
 		strings.TrimSpace(request.RequestID.String()) == "" || strings.TrimSpace(request.Content) == "" {
 		return SendInputResult{}, commandError(CommandErrorInvalidRequest)
 	}
 	if err := request.RuntimeSnapshot.Validate(); err != nil {
 		return SendInputResult{}, fmt.Errorf("%w: %v", commandError(CommandErrorInvalidRequest), err)
+	}
+	if request.AgentID == "" {
+		created, err := o.EnsurePrimaryAgent(ctx, request.SessionID)
+		if err != nil {
+			return SendInputResult{}, err
+		}
+		request.AgentID = created.Agent.ID
 	}
 
 	var result SendInputResult
@@ -55,7 +64,7 @@ func (o *AgentOrchestrator) SendInput(ctx context.Context, request SendInputRequ
 			) {
 				return domain.ErrRequestConflict
 			}
-			matches, matchErr := o.executionModelMatches(txCtx, existing, request.ModelID, request.Reasoning)
+			matches, matchErr := o.executionModelMatches(txCtx, existing, request.ProviderID, request.ModelID, request.Reasoning)
 			if matchErr != nil {
 				return matchErr
 			}
@@ -86,7 +95,7 @@ func (o *AgentOrchestrator) SendInput(ctx context.Context, request SendInputRequ
 		if err := o.checkGroupCapacity(txCtx, agent.GroupID); err != nil {
 			return err
 		}
-		grantID, err := o.selectedGrant(txCtx, agent, request.ModelID, request.Reasoning)
+		grantID, err := o.selectedGrant(txCtx, agent, request.ProviderID, request.ModelID, request.Reasoning)
 		if err != nil {
 			return err
 		}
@@ -138,6 +147,7 @@ func (o *AgentOrchestrator) SendInput(ctx context.Context, request SendInputRequ
 			matches, matchErr := o.executionModelMatches(
 				ctx,
 				existing,
+				request.ProviderID,
 				request.ModelID,
 				request.Reasoning,
 			)
@@ -163,6 +173,7 @@ func (o *AgentOrchestrator) SendInput(ctx context.Context, request SendInputRequ
 func (o *AgentOrchestrator) selectedGrant(
 	ctx context.Context,
 	agent domain.Agent,
+	providerID string,
 	modelID string,
 	reasoning string,
 ) (domain.CapabilityGrantID, error) {
@@ -170,7 +181,7 @@ func (o *AgentOrchestrator) selectedGrant(
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(modelID) == "" && strings.TrimSpace(reasoning) == "" {
+	if strings.TrimSpace(providerID) == "" && strings.TrimSpace(modelID) == "" && strings.TrimSpace(reasoning) == "" {
 		return base.ID, nil
 	}
 	selector, ok := o.models.(ModelSelectionResolver)
@@ -178,10 +189,13 @@ func (o *AgentOrchestrator) selectedGrant(
 		return "", commandError(CommandErrorInvalidRequest)
 	}
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		modelID = base.Model.ID
+	if providerID == "" {
+		providerID = base.Model.ProviderID
 	}
-	model, err := selector.ResolveModelSelection(modelID, strings.TrimSpace(reasoning))
+	if modelID == "" {
+		modelID = base.Model.ModelID
+	}
+	model, err := selector.ResolveModelSelection(providerID, modelID, strings.TrimSpace(reasoning))
 	if err != nil {
 		return "", commandError(CommandErrorInvalidRequest)
 	}
@@ -203,19 +217,24 @@ func (o *AgentOrchestrator) selectedGrant(
 func (o *AgentOrchestrator) executionModelMatches(
 	ctx context.Context,
 	execution domain.AgentExecution,
+	providerID string,
 	modelID string,
 	reasoning string,
 ) (bool, error) {
+	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
 	reasoning = strings.TrimSpace(reasoning)
-	if modelID == "" && reasoning == "" {
+	if providerID == "" && modelID == "" && reasoning == "" {
 		return true, nil
 	}
 	grant, err := o.grants.Get(ctx, execution.Input.CapabilityGrantID)
 	if err != nil {
 		return false, err
 	}
-	if modelID != "" && grant.Model.ID != modelID {
+	if providerID != "" && grant.Model.ProviderID != providerID {
+		return false, nil
+	}
+	if modelID != "" && grant.Model.ModelID != modelID {
 		return false, nil
 	}
 	if reasoning != "" && grant.Model.Reasoning != reasoning {
@@ -231,8 +250,8 @@ type ResumeRequest struct {
 	RuntimeSnapshot domain.RuntimeExecutionSnapshot
 }
 
-// Resume creates a fresh execution and deliberately does not reuse runtime
-// channels, model streams, tool state, or the previous execution identity.
+// Resume creates a fresh execution with isolated runtime channels, model
+// streams, tool state, and execution identity.
 func (o *AgentOrchestrator) Resume(ctx context.Context, request ResumeRequest) (SendInputResult, error) {
 	if ctx == nil {
 		return SendInputResult{}, errors.New("resume context is required")

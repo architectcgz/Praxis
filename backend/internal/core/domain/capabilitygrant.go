@@ -6,9 +6,10 @@ import (
 	"strings"
 )
 
-type ModelRef struct {
-	ID        string
-	Reasoning string
+type ModelSelection struct {
+	ProviderID string
+	ModelID    string
+	Reasoning  string
 }
 
 type ResourceLimits struct {
@@ -27,13 +28,15 @@ func (r ResourceLimits) Validate() error {
 
 type CapabilityGrantSpec struct {
 	ID                        CapabilityGrantID
-	WorkspaceKey              string
+	WorkspaceID               WorkspaceID
+	WorkspacePathSnapshot     string
+	WorkspaceRevision         uint64
 	AllowedTools              []ToolName
 	ReadScopes                []string
 	WriteScopes               []string
 	CanProposeDelegation      bool
 	ResultPermissions         []ResultPermission
-	Model                     ModelRef
+	Model                     ModelSelection
 	ResourceLimits            ResourceLimits
 	ContextManifestRef        ContextManifestID
 	ApprovalSource            ApprovalSource
@@ -42,13 +45,15 @@ type CapabilityGrantSpec struct {
 
 type CapabilityGrant struct {
 	ID                        CapabilityGrantID
-	WorkspaceKey              string
+	WorkspaceID               WorkspaceID
+	WorkspacePathSnapshot     string
+	WorkspaceRevision         uint64
 	AllowedTools              []ToolName
 	ReadScopes                []string
 	WriteScopes               []string
 	CanProposeDelegation      bool
 	ResultPermissions         []ResultPermission
-	Model                     ModelRef
+	Model                     ModelSelection
 	ResourceLimits            ResourceLimits
 	ContextManifestRef        ContextManifestID
 	ApprovalSource            ApprovalSource
@@ -57,16 +62,19 @@ type CapabilityGrant struct {
 
 func NewCapabilityGrant(spec CapabilityGrantSpec) (CapabilityGrant, error) {
 	grant := CapabilityGrant{
-		ID:                   spec.ID,
-		WorkspaceKey:         strings.TrimSpace(spec.WorkspaceKey),
-		AllowedTools:         cloneTools(spec.AllowedTools),
-		ReadScopes:           cloneStrings(spec.ReadScopes),
-		WriteScopes:          cloneStrings(spec.WriteScopes),
-		CanProposeDelegation: spec.CanProposeDelegation,
-		ResultPermissions:    cloneResultPermissions(spec.ResultPermissions),
-		Model: ModelRef{
-			ID:        strings.TrimSpace(spec.Model.ID),
-			Reasoning: strings.TrimSpace(spec.Model.Reasoning),
+		ID:                    spec.ID,
+		WorkspaceID:           spec.WorkspaceID,
+		WorkspacePathSnapshot: strings.TrimSpace(spec.WorkspacePathSnapshot),
+		WorkspaceRevision:     spec.WorkspaceRevision,
+		AllowedTools:          cloneTools(spec.AllowedTools),
+		ReadScopes:            cloneStrings(spec.ReadScopes),
+		WriteScopes:           cloneStrings(spec.WriteScopes),
+		CanProposeDelegation:  spec.CanProposeDelegation,
+		ResultPermissions:     cloneResultPermissions(spec.ResultPermissions),
+		Model: ModelSelection{
+			ProviderID: strings.TrimSpace(spec.Model.ProviderID),
+			ModelID:    strings.TrimSpace(spec.Model.ModelID),
+			Reasoning:  strings.TrimSpace(spec.Model.Reasoning),
 		},
 		ResourceLimits:            spec.ResourceLimits,
 		ContextManifestRef:        spec.ContextManifestRef,
@@ -84,6 +92,19 @@ func (g CapabilityGrant) Validate() error {
 	if idIsEmpty(string(g.ID)) {
 		return invalidValue("grant.id", "id is required")
 	}
+	if idIsEmpty(string(g.WorkspaceID)) {
+		return invalidValue("grant.workspaceID", "workspace id is required")
+	}
+	if g.WorkspacePathSnapshot == "" {
+		return invalidValue("grant.workspacePathSnapshot", "workspace path snapshot is required")
+	}
+	cleanPath := filepath.Clean(g.WorkspacePathSnapshot)
+	if !filepath.IsAbs(cleanPath) || cleanPath != g.WorkspacePathSnapshot {
+		return invalidValue("grant.workspacePathSnapshot", "workspace path snapshot must be an absolute normalized path")
+	}
+	if g.WorkspaceRevision == 0 {
+		return invalidValue("grant.workspaceRevision", "workspace revision must be positive")
+	}
 	if !g.ApprovalSource.Valid() {
 		return invalidValue("grant.approvalSource", "unknown approval source")
 	}
@@ -93,19 +114,12 @@ func (g CapabilityGrant) Validate() error {
 	if idIsEmpty(string(g.ContextManifestRef)) {
 		return invalidValue("grant.contextManifestRef", "context manifest reference is required")
 	}
-	if g.Model.ID == "" {
-		return invalidValue("grant.model.id", "model reference is required")
+	if g.Model.ProviderID == "" || g.Model.ModelID == "" {
+		return invalidValue("grant.model", "provider and model IDs are required")
 	}
 	if err := g.ResourceLimits.Validate(); err != nil {
 		return err
 	}
-	if g.WorkspaceKey != "" {
-		cleanWorkspace := filepath.Clean(g.WorkspaceKey)
-		if !filepath.IsAbs(cleanWorkspace) || cleanWorkspace != g.WorkspaceKey {
-			return invalidValue("grant.workspaceKey", "workspace key must be an adapter-normalized absolute path")
-		}
-	}
-
 	seenTools := make(map[ToolName]struct{}, len(g.AllowedTools))
 	for _, tool := range g.AllowedTools {
 		if !tool.Valid() {
@@ -153,16 +167,13 @@ func (g CapabilityGrant) Validate() error {
 	if len(g.WriteScopes) > 0 && !containsTool(g.AllowedTools, ToolWriteFile) {
 		return invalidValue("grant.writeScopes", "write scopes require write_file")
 	}
-	if containsTool(g.AllowedTools, ToolRunCommand) && g.WorkspaceKey == "" {
-		return invalidValue("grant.workspaceKey", "run_command requires a workspace key")
-	}
 	if containsFilesystemTool(g.AllowedTools) && len(g.ReadScopes) == 0 {
 		return invalidValue("grant.readScopes", "file tools require at least one read scope")
 	}
-	if _, err := validateScopes(g.WorkspaceKey, g.ReadScopes, "grant.readScopes"); err != nil {
+	if _, err := validateScopes(g.WorkspacePathSnapshot, g.ReadScopes, "grant.readScopes"); err != nil {
 		return err
 	}
-	if _, err := validateScopes(g.WorkspaceKey, g.WriteScopes, "grant.writeScopes"); err != nil {
+	if _, err := validateScopes(g.WorkspacePathSnapshot, g.WriteScopes, "grant.writeScopes"); err != nil {
 		return err
 	}
 	return nil
@@ -171,7 +182,9 @@ func (g CapabilityGrant) Validate() error {
 func (g CapabilityGrant) Snapshot() CapabilityGrant {
 	return CapabilityGrant{
 		ID:                        g.ID,
-		WorkspaceKey:              g.WorkspaceKey,
+		WorkspaceID:               g.WorkspaceID,
+		WorkspacePathSnapshot:     g.WorkspacePathSnapshot,
+		WorkspaceRevision:         g.WorkspaceRevision,
 		AllowedTools:              cloneTools(g.AllowedTools),
 		ReadScopes:                cloneStrings(g.ReadScopes),
 		WriteScopes:               cloneStrings(g.WriteScopes),
@@ -217,8 +230,8 @@ func (g CapabilityGrant) HasWriteAccess() bool {
 }
 
 func canonicalizeGrant(grant *CapabilityGrant) {
-	if grant.WorkspaceKey != "" {
-		grant.WorkspaceKey = filepath.Clean(grant.WorkspaceKey)
+	if grant.WorkspacePathSnapshot != "" {
+		grant.WorkspacePathSnapshot = filepath.Clean(grant.WorkspacePathSnapshot)
 	}
 	sort.Slice(grant.AllowedTools, func(i, j int) bool { return grant.AllowedTools[i] < grant.AllowedTools[j] })
 	grant.ReadScopes = canonicalizeScopes(grant.ReadScopes)
@@ -229,12 +242,12 @@ func canonicalizeGrant(grant *CapabilityGrant) {
 	)
 }
 
-func validateScopes(workspaceKey string, scopes []string, field string) ([]string, error) {
+func validateScopes(workspacePath string, scopes []string, field string) ([]string, error) {
 	if len(scopes) == 0 {
 		return nil, nil
 	}
-	if workspaceKey == "" {
-		return nil, invalidValue(field, "scopes require a workspace key")
+	if workspacePath == "" {
+		return nil, invalidValue(field, "scopes require a workspace path")
 	}
 	seen := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {
@@ -242,7 +255,7 @@ func validateScopes(workspaceKey string, scopes []string, field string) ([]strin
 		if clean == "." || !filepath.IsAbs(clean) {
 			return nil, invalidValue(field, "scope must be an absolute normalized path")
 		}
-		if !pathWithin(workspaceKey, clean) {
+		if !pathWithin(workspacePath, clean) {
 			return nil, invalidValue(field, "scope must remain inside the workspace")
 		}
 		if _, exists := seen[clean]; exists {

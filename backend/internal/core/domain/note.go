@@ -6,32 +6,32 @@ import (
 )
 
 type Note struct {
-	ID             NoteID
-	TaskSessionID  TaskSessionID
-	SourceThreadID AgentThreadID
-	Title          string
-	BodyRef        ContentRef
-	Tags           []string
-	CreatedAt      time.Time
+	ID            NoteID
+	SessionID     SessionID
+	SourceAgentID AgentID
+	Title         string
+	BodyRef       ContentRef
+	Tags          []string
+	CreatedAt     time.Time
 }
 
 func NewNote(
 	id NoteID,
-	sessionID TaskSessionID,
-	sourceThreadID AgentThreadID,
+	sessionID SessionID,
+	sourceAgentID AgentID,
 	title string,
 	bodyRef ContentRef,
 	tags []string,
 	at time.Time,
 ) (Note, error) {
 	note := Note{
-		ID:             id,
-		TaskSessionID:  sessionID,
-		SourceThreadID: sourceThreadID,
-		Title:          strings.TrimSpace(title),
-		BodyRef:        bodyRef,
-		Tags:           cloneStrings(tags),
-		CreatedAt:      at.UTC(),
+		ID:            id,
+		SessionID:     sessionID,
+		SourceAgentID: sourceAgentID,
+		Title:         strings.TrimSpace(title),
+		BodyRef:       bodyRef,
+		Tags:          cloneStrings(tags),
+		CreatedAt:     at.UTC(),
 	}
 	for i := range note.Tags {
 		note.Tags[i] = strings.TrimSpace(note.Tags[i])
@@ -43,7 +43,7 @@ func NewNote(
 }
 
 func (n Note) Validate() error {
-	if idIsEmpty(string(n.ID)) || idIsEmpty(string(n.TaskSessionID)) || idIsEmpty(string(n.SourceThreadID)) {
+	if idIsEmpty(string(n.ID)) || idIsEmpty(string(n.SessionID)) || idIsEmpty(string(n.SourceAgentID)) {
 		return invalidValue("note", "required reference is missing")
 	}
 	if n.Title == "" || len([]byte(n.Title)) > MaxArtifactSummaryBytes {

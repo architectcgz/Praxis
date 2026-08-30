@@ -19,8 +19,7 @@ import (
 
 type Config struct {
 	BaseURL         string
-	APIKeyEnv       string
-	ResolveKey      func(context.Context, string) (string, error)
+	APIKey          string
 	HTTPClient      *http.Client
 	Model           string
 	Version         string
@@ -29,11 +28,10 @@ type Config struct {
 }
 
 type Provider struct {
-	baseURL, apiKeyEnv, model, version string
-	reasoning                          string
-	maxOutputTokens                    int
-	resolveKey                         func(context.Context, string) (string, error)
-	client                             *http.Client
+	baseURL, apiKey, model, version string
+	reasoning                       string
+	maxOutputTokens                 int
+	client                          *http.Client
 }
 
 func New(config Config) (*Provider, error) {
@@ -41,13 +39,11 @@ func New(config Config) (*Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: %w", err)
 	}
-	if strings.TrimSpace(config.APIKeyEnv) == "" {
-		return nil, errors.New("anthropic API key environment name is required")
+	apiKey := strings.TrimSpace(config.APIKey)
+	if apiKey == "" {
+		return nil, errors.New("anthropic API key is required")
 	}
 	reasoning := strings.TrimSpace(config.Reasoning)
-	if config.ResolveKey == nil {
-		return nil, errors.New("anthropic key resolver is required")
-	}
 	version := strings.TrimSpace(config.Version)
 	if version == "" {
 		version = "2023-06-01"
@@ -56,13 +52,13 @@ func New(config Config) (*Provider, error) {
 	if maxOutputTokens <= 0 {
 		maxOutputTokens = 4096
 	}
-	return &Provider{baseURL: baseURL, apiKeyEnv: config.APIKeyEnv,
+	return &Provider{baseURL: baseURL, apiKey: apiKey,
 		model: strings.TrimSpace(config.Model), version: version, reasoning: reasoning,
-		resolveKey: config.ResolveKey, client: config.HTTPClient,
+		client:          config.HTTPClient,
 		maxOutputTokens: maxOutputTokens}, nil
 }
 
-var _ coreruntime.ModelStreamPort = (*Provider)(nil)
+var _ coreruntime.ModelStream = (*Provider)(nil)
 
 func (p *Provider) Stream(
 	ctx context.Context,
@@ -74,13 +70,9 @@ func (p *Provider) Stream(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	key, err := p.resolveKey(ctx, p.apiKeyEnv)
-	if err != nil {
-		return nil, err
-	}
 	model := p.model
 	if model == "" {
-		model = request.Snapshot.Model.ID
+		model = request.Snapshot.Model.ModelID
 	}
 	if model == "" {
 		return nil, errors.New("anthropic model is required")
@@ -119,7 +111,7 @@ func (p *Provider) Stream(
 	if err != nil {
 		return nil, fmt.Errorf("build anthropic request: %w", err)
 	}
-	httpRequest.Header.Set("x-api-key", key)
+	httpRequest.Header.Set("x-api-key", p.apiKey)
 	httpRequest.Header.Set("anthropic-version", p.version)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")

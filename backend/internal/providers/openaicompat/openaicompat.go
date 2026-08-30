@@ -26,8 +26,7 @@ const (
 
 type Config struct {
 	BaseURL         string
-	APIKeyEnv       string
-	ResolveKey      func(context.Context, string) (string, error)
+	APIKey          string
 	HTTPClient      *http.Client
 	Protocol        Protocol
 	Model           string
@@ -37,8 +36,7 @@ type Config struct {
 
 type Provider struct {
 	baseURL         string
-	apiKeyEnv       string
-	resolveKey      func(context.Context, string) (string, error)
+	apiKey          string
 	client          *http.Client
 	protocol        Protocol
 	model           string
@@ -51,11 +49,9 @@ func New(config Config) (*Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openai-compatible: %w", err)
 	}
-	if config.APIKeyEnv == "" {
-		return nil, errors.New("openai-compatible API key environment name is required")
-	}
-	if config.ResolveKey == nil {
-		return nil, errors.New("openai-compatible key resolver is required")
+	apiKey := strings.TrimSpace(config.APIKey)
+	if apiKey == "" {
+		return nil, errors.New("openai-compatible API key is required")
 	}
 	protocol := config.Protocol
 	if protocol == "" {
@@ -66,13 +62,13 @@ func New(config Config) (*Provider, error) {
 	}
 	reasoning := strings.TrimSpace(config.Reasoning)
 	return &Provider{
-		baseURL: baseURL, apiKeyEnv: config.APIKeyEnv, resolveKey: config.ResolveKey,
+		baseURL: baseURL, apiKey: apiKey,
 		client: config.HTTPClient, protocol: protocol, model: strings.TrimSpace(config.Model),
 		maxOutputTokens: config.MaxOutputTokens, reasoning: reasoning,
 	}, nil
 }
 
-var _ coreruntime.ModelStreamPort = (*Provider)(nil)
+var _ coreruntime.ModelStream = (*Provider)(nil)
 
 func (p *Provider) Stream(
 	ctx context.Context,
@@ -84,10 +80,6 @@ func (p *Provider) Stream(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	key, err := p.resolveKey(ctx, p.apiKeyEnv)
-	if err != nil {
-		return nil, err
-	}
 	payload, path, err := p.requestPayload(request.Snapshot)
 	if err != nil {
 		return nil, err
@@ -96,7 +88,7 @@ func (p *Provider) Stream(
 	if err != nil {
 		return nil, fmt.Errorf("build openai-compatible request: %w", err)
 	}
-	httpRequest.Header.Set("Authorization", "Bearer "+key)
+	httpRequest.Header.Set("Authorization", "Bearer "+p.apiKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "text/event-stream")
 	response, err := providers.RequestClient(p.client).Do(httpRequest)
@@ -122,7 +114,7 @@ func (p *Provider) Stream(
 func (p *Provider) requestPayload(snapshot coreruntime.TurnSnapshot) ([]byte, string, error) {
 	model := p.model
 	if model == "" {
-		model = snapshot.Model.ID
+		model = snapshot.Model.ModelID
 	}
 	if strings.TrimSpace(model) == "" {
 		return nil, "", errors.New("openai-compatible model is required")

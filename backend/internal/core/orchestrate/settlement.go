@@ -10,7 +10,7 @@ import (
 )
 
 // MarkExecutionRunning records the product transition after runtime has
-// reconciled its run-start receipt. It is idempotent for repeated activation.
+// reconciled its execution-start receipt. It is idempotent for repeated activation.
 func (o *AgentOrchestrator) MarkExecutionRunning(
 	ctx context.Context,
 	executionID domain.AgentExecutionID,
@@ -37,7 +37,7 @@ func (o *AgentOrchestrator) MarkExecutionRunning(
 }
 
 // ConfirmExecutionStart accepts a JSONL receipt after the runtime has fsynced
-// both run_started and the source-request message. Only then may SQLite drop
+// both execution_started and the source-request message. Only then may SQLite drop
 // its temporary StartContent copy.
 func (o *AgentOrchestrator) ConfirmExecutionStart(
 	ctx context.Context,

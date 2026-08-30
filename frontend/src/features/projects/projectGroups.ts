@@ -1,32 +1,31 @@
-import {SessionSummary} from '../../shared/api'
-import {ProjectGroup} from './types'
+import { ProjectSummary, SessionSummary } from '../../api'
+import { ProjectGroup } from './types'
 
-export function groupSessions(items: SessionSummary[]): ProjectGroup[] {
+export function groupSessions(items: SessionSummary[], projects: ProjectSummary[] = []): ProjectGroup[] {
     const groups = new Map<string, ProjectGroup>()
+    for (const project of projects) {
+        groups.set(project.id, {
+            id: project.id,
+            workspaceID: project.defaultWorkspaceId,
+            name: project.name,
+            path: project.path,
+            sessions: [],
+        })
+    }
     for (const item of items) {
-        const key = item.workspaceKey || 'unknown-workspace'
-        const path = item.workspaceKey || 'Workspace not recorded'
-        const current = groups.get(key)
+        const id = item.projectId
+        const current = groups.get(id)
         if (current) {
             current.sessions.push(item)
             continue
         }
-        groups.set(key, {
-            key,
-            name: projectName(path),
-            path,
+        groups.set(id, {
+            id,
+            workspaceID: item.workspaceId,
+            name: '项目',
+            path: '',
             sessions: [item],
         })
     }
     return Array.from(groups.values())
-}
-
-export function projectNameFromWorkspace(path: string) {
-    return projectName(path || 'Project')
-}
-
-function projectName(path: string) {
-    const normalized = path.replace(/[\\/]+$/, '')
-    const parts = normalized.split(/[\\/]/)
-    return parts[parts.length - 1] || normalized || 'Workspace'
 }

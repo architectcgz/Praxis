@@ -23,8 +23,8 @@ type AgentSessionMessage struct {
 type AgentSessionHeader struct {
 	SessionID        domain.SessionID
 	AgentID          domain.AgentID
+	WorkspaceID      domain.WorkspaceID
 	Profile          domain.AgentProfile
-	WorkspaceKey     string
 	InjectionNonce   string
 	MinReaderVersion uint16
 	WrittenBy        string
@@ -59,7 +59,7 @@ type ContextArtifactReceipt struct {
 	Sequence   uint64
 }
 
-// TranscriptReceiptStore is the transcript-side port used for cross-store receipt
+// TranscriptReceiptStore is the transcript-side interface used for cross-store receipt
 // reconciliation. Product state remains exclusively in AgentOrchestrator.
 type TranscriptReceiptStore interface {
 	Initialize(context.Context, AgentSessionHeader) error

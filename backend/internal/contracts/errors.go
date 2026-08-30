@@ -22,6 +22,7 @@ const (
 	ErrorCodeWorkItemActive          ErrorCode = "work_item_active"
 	ErrorCodeAlreadyDelivered        ErrorCode = "already_delivered"
 	ErrorCodeProjectWorkspaceInvalid ErrorCode = "project_workspace_invalid"
+	ErrorCodeModelNotConfigured      ErrorCode = "model_not_configured"
 	ErrorCodeRequestCanceled         ErrorCode = "request_canceled"
 	ErrorCodeRequestTimeout          ErrorCode = "request_timeout"
 	ErrorCodeExecutionContract       ErrorCode = "execution_contract_error"

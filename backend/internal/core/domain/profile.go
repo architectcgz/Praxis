@@ -5,13 +5,13 @@ type AgentProfile string
 const (
 	ProfilePrimary  AgentProfile = "primary"
 	ProfileDelegate AgentProfile = "delegate"
-	ProfileConsult  AgentProfile = "consult"
-	ProfileNote     AgentProfile = "note"
+	ProfileAdvisor  AgentProfile = "advisor"
+	ProfileCurator  AgentProfile = "curator"
 )
 
 func (p AgentProfile) Valid() bool {
 	switch p {
-	case ProfilePrimary, ProfileDelegate, ProfileConsult, ProfileNote:
+	case ProfilePrimary, ProfileDelegate, ProfileAdvisor, ProfileCurator:
 		return true
 	default:
 		return false

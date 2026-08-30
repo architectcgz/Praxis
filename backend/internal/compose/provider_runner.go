@@ -12,14 +12,14 @@ import (
 	coresession "praxis/internal/core/session"
 	"praxis/internal/logging"
 	"praxis/internal/providers/registry"
-	"praxis/internal/storage"
 	"praxis/internal/storage/agentlog"
+	"praxis/internal/storage/dataroot"
 	"praxis/internal/storage/sqlite"
 )
 
 type providerRunner struct {
 	store          *sqlite.Store
-	root           storage.DataRoot
+	root           dataroot.DataRoot
 	registry       *registry.Registry
 	logger         *logging.Logger
 	outputObserver agentruntime.AgentOutputObserver
@@ -94,11 +94,11 @@ func (r *providerRunner) runWithMessageStore(
 	if err != nil {
 		return failedRunner(err)
 	}
-	model, err := r.registry.Model(grant.Model.ID)
+	model, err := r.registry.Model(grant.Model.ProviderID, grant.Model.ModelID)
 	if err != nil {
 		return domain.ExecutionFailed, domain.ExecutionFailureProvider, err
 	}
-	streamPort, err := r.registry.StreamPortFor(grant.Model)
+	modelStream, err := r.registry.StreamFor(grant.Model)
 	if err != nil {
 		return domain.ExecutionFailed, domain.ExecutionFailureProvider, err
 	}
@@ -130,9 +130,12 @@ func (r *providerRunner) runWithMessageStore(
 		})
 	}
 	messageCount := len(turnMessages)
-	r.logger.Infof("provider request prepared id=%s model=%s messages=%d", execution.ID, grant.Model.ID, messageCount)
+	r.logger.Infof(
+		"provider request prepared id=%s model=%s messages=%d",
+		execution.ID, grant.Model.ModelID, messageCount,
+	)
 	snapshot := agentruntime.TurnSnapshot{
-		RunID: domain.AgentRunID(execution.ID), SessionReference: agent.RuntimeSessionRef, Messages: turnMessages,
+		ExecutionID: execution.ID, SessionReference: agent.RuntimeSessionRef, Messages: turnMessages,
 		TaskPacket: packet, ContextManifest: manifest, SystemPrompt: manifest.Summary,
 		Model:     grant.Model,
 		Execution: execution.Input.Runtime, TurnNumber: 1, GrantID: grant.ID,
@@ -141,11 +144,11 @@ func (r *providerRunner) runWithMessageStore(
 		return domain.ExecutionFailed, domain.ExecutionFailureProvider,
 			errors.New("model context window exceeded")
 	}
-	stream, err := streamPort.Stream(ctx, agentruntime.ModelRequest{Snapshot: snapshot})
+	stream, err := modelStream.Stream(ctx, agentruntime.ModelRequest{Snapshot: snapshot})
 	if err != nil {
 		return domain.ExecutionFailed, domain.ExecutionFailureProvider, err
 	}
-	r.logger.Infof("provider stream connected id=%s model=%s", execution.ID, grant.Model.ID)
+	r.logger.Infof("provider stream connected id=%s model=%s", execution.ID, grant.Model.ModelID)
 	text, calls, err := collectProviderStream(ctx, stream, output.Append)
 	if err != nil {
 		return domain.ExecutionFailed, domain.ExecutionFailureProvider, err

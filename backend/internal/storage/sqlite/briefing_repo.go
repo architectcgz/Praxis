@@ -22,18 +22,18 @@ func (s *Store) SaveBriefing(ctx context.Context, value domain.Briefing) error {
 	return s.savePayload(
 		ctx,
 		`INSERT INTO briefings (
-	        id, task_session_id, source_thread_id, target_thread_id, status, payload
+	        id, session_id, source_agent_id, target_agent_id, status, payload
 	    ) VALUES (?, ?, ?, ?, ?, ?)
 	    ON CONFLICT(id) DO UPDATE SET
-	        task_session_id = excluded.task_session_id,
-	        source_thread_id = excluded.source_thread_id,
-	        target_thread_id = excluded.target_thread_id,
+	        session_id = excluded.session_id,
+	        source_agent_id = excluded.source_agent_id,
+	        target_agent_id = excluded.target_agent_id,
 	        status = excluded.status,
 	        payload = excluded.payload`,
 		value.ID.String(),
-		value.TaskSessionID.String(),
-		value.SourceThreadID.String(),
-		value.TargetThreadID.String(),
+		value.SessionID.String(),
+		value.SourceAgentID.String(),
+		value.TargetAgentID.String(),
 		string(value.Status),
 		payload,
 	)

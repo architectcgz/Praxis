@@ -24,6 +24,14 @@
     --motion-duration-emphasized: 180ms;
     --motion-duration-spinner: 900ms;
     --motion-iteration-count: infinite;
+    /* Width reserved for a scroll gutter; see .scroll-region in workspace/layout.css. */
+    --scroll-gutter: 12px;
+    /* Stacking order. Never write a raw z-index outside this scale. */
+    --z-base: 0;
+    --z-raised: 1;
+    --z-popover: 10;
+    --z-sticky: 100;
+    --z-modal: 1000;
 }
 
 html {

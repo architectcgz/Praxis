@@ -19,6 +19,7 @@ const (
 	CommandErrorInvalidRequest          = "invalid_request"
 	CommandErrorNotReady                = "orchestration_not_ready"
 	CommandErrorProjectWorkspaceInvalid = "project_workspace_invalid"
+	CommandErrorModelNotConfigured      = "model_not_configured"
 )
 
 // CommandError is stable at the app boundary and never exposes persistence or
@@ -43,19 +44,21 @@ type ExecutionCancellation interface {
 }
 
 // ModelResolver maps an agent profile to a configured model snapshot before
-// a Grant is persisted. The model reference becomes immutable execution input.
+// a Grant is persisted. The model selection becomes immutable execution input.
 type ModelResolver interface {
-	ResolveModel(domain.AgentProfile) (domain.ModelRef, error)
+	ResolveModel(domain.AgentProfile) (domain.ModelSelection, error)
 }
 
 // ModelSelectionResolver validates a user-selected model capability before it
 // is frozen into an execution-specific CapabilityGrant.
 type ModelSelectionResolver interface {
-	ResolveModelSelection(string, string) (domain.ModelRef, error)
+	ResolveModelSelection(string, string, string) (domain.ModelSelection, error)
 }
 
 type AgentOrchestratorConfig struct {
 	Transactions   persistence.TxRunner
+	Projects       persistence.ProjectRepository
+	Workspaces     persistence.WorkspaceRepository
 	Sessions       persistence.SessionRepository
 	Groups         persistence.AgentGroupRepository
 	Agents         persistence.AgentRepository
@@ -78,6 +81,8 @@ type AgentOrchestratorConfig struct {
 // mutation. Runtime components only receive already-created executions.
 type AgentOrchestrator struct {
 	tx         persistence.TxRunner
+	projects   persistence.ProjectRepository
+	workspaces persistence.WorkspaceRepository
 	sessions   persistence.SessionRepository
 	groups     persistence.AgentGroupRepository
 	agents     persistence.AgentRepository
@@ -108,6 +113,8 @@ func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, e
 		value any
 	}{
 		{name: "transactions", value: config.Transactions},
+		{name: "projects", value: config.Projects},
+		{name: "workspaces", value: config.Workspaces},
 		{name: "sessions", value: config.Sessions},
 		{name: "groups", value: config.Groups},
 		{name: "agents", value: config.Agents},
@@ -131,6 +138,8 @@ func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, e
 	}
 	return &AgentOrchestrator{
 		tx:         config.Transactions,
+		projects:   config.Projects,
+		workspaces: config.Workspaces,
 		sessions:   config.Sessions,
 		groups:     config.Groups,
 		agents:     config.Agents,

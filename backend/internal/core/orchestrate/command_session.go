@@ -10,12 +10,16 @@ import (
 	"praxis/internal/core/domain"
 )
 
+// CreateSessionRequest identifies the project and workspace explicitly. A
+// caller may provide the immutable input aggregates; when omitted, the
+// orchestrator creates the standard primary-agent inputs.
 type CreateSessionRequest struct {
 	SessionID       domain.SessionID
 	GroupID         domain.AgentGroupID
 	AgentID         domain.AgentID
+	ProjectID       domain.ProjectID
+	WorkspaceID     domain.WorkspaceID
 	Goal            string
-	WorkspaceKey    string
 	MaxConcurrent   int
 	Profile         domain.AgentProfile
 	TaskPacket      domain.TaskPacket
@@ -29,19 +33,76 @@ type CreateSessionResult struct {
 	Agent   domain.Agent
 }
 
+// CreateProjectRequest provisions one Project and its default Workspace.
 type CreateProjectRequest struct {
-	WorkspaceKey string
-	Goal         string
+	ProjectID   domain.ProjectID
+	WorkspaceID domain.WorkspaceID
+	Name        string
+	Path        string
+}
+
+type CreateProjectResult struct {
+	Project   domain.Project
+	Workspace domain.Workspace
 }
 
 type SessionSnapshot struct {
-	ID           domain.SessionID
-	Goal         string
-	WorkspaceKey string
+	ID          domain.SessionID
+	ProjectID   domain.ProjectID
+	WorkspaceID domain.WorkspaceID
+	Goal        string
 }
 
-// CreateSession creates the minimum explicit Session -> AgentGroup -> Agent
-// hierarchy and saves every execution input reference in the same transaction.
+func (o *AgentOrchestrator) CreateProject(
+	ctx context.Context,
+	request CreateProjectRequest,
+) (CreateProjectResult, error) {
+	if ctx == nil {
+		return CreateProjectResult{}, errors.New("create project context is required")
+	}
+	if !o.Ready() {
+		return CreateProjectResult{}, commandError(CommandErrorNotReady)
+	}
+	if request.ProjectID == "" {
+		request.ProjectID = domain.NewProjectID()
+	}
+	if request.WorkspaceID == "" {
+		request.WorkspaceID = domain.NewWorkspaceID()
+	}
+	name := strings.TrimSpace(request.Name)
+	path := filepath.Clean(strings.TrimSpace(request.Path))
+	if name == "" || strings.ContainsAny(name, "\x00\r\n") || !absolutePath(path) {
+		return CreateProjectResult{}, commandError(CommandErrorProjectWorkspaceInvalid)
+	}
+	at := o.clock.Now().UTC()
+	workspace, err := domain.NewWorkspace(
+		request.WorkspaceID,
+		request.ProjectID,
+		domain.WorkspaceProjectRoot,
+		path,
+		at,
+	)
+	if err != nil {
+		return CreateProjectResult{}, fmt.Errorf("create workspace: %w", err)
+	}
+	project, err := domain.NewProject(request.ProjectID, name, workspace.ID, at)
+	if err != nil {
+		return CreateProjectResult{}, fmt.Errorf("create project: %w", err)
+	}
+	if err := o.tx.InTx(ctx, func(txCtx context.Context) error {
+		if err := o.projects.Save(txCtx, project); err != nil {
+			return err
+		}
+		return o.workspaces.Save(txCtx, workspace)
+	}); err != nil {
+		return CreateProjectResult{}, err
+	}
+	return CreateProjectResult{Project: project, Workspace: workspace}, nil
+}
+
+// CreateSession creates one independent Session and its initial AgentGroup and
+// primary Agent. Project and workspace ownership is checked in the same
+// transaction as the new records.
 func (o *AgentOrchestrator) CreateSession(
 	ctx context.Context,
 	request CreateSessionRequest,
@@ -61,27 +122,39 @@ func (o *AgentOrchestrator) CreateSession(
 	if request.AgentID == "" {
 		request.AgentID = domain.NewAgentID()
 	}
-	if request.MaxConcurrent < 1 || !request.Profile.Valid() {
-		return CreateSessionResult{}, commandError(CommandErrorInvalidRequest)
+	if request.MaxConcurrent < 1 {
+		request.MaxConcurrent = 1
 	}
-	if err := request.TaskPacket.Validate(); err != nil {
-		return CreateSessionResult{}, fmt.Errorf("%w: %v", commandError(CommandErrorInvalidRequest), err)
+	if request.Profile == "" {
+		request.Profile = domain.ProfilePrimary
 	}
-	if err := request.ContextManifest.Validate(); err != nil {
-		return CreateSessionResult{}, fmt.Errorf("%w: %v", commandError(CommandErrorInvalidRequest), err)
-	}
-	if err := request.Grant.Validate(); err != nil {
-		return CreateSessionResult{}, fmt.Errorf("%w: %v", commandError(CommandErrorInvalidRequest), err)
-	}
-	if request.Grant.ContextManifestRef != request.ContextManifest.ID {
+	if request.ProjectID == "" || request.WorkspaceID == "" || !request.Profile.Valid() {
 		return CreateSessionResult{}, commandError(CommandErrorInvalidRequest)
 	}
 	result := CreateSessionResult{}
 	err := o.tx.InTx(ctx, func(txCtx context.Context) error {
-		at := o.clock.Now()
-		session, err := domain.NewSession(request.SessionID, request.Goal, request.WorkspaceKey, at)
+		project, err := o.projects.Get(txCtx, request.ProjectID)
 		if err != nil {
 			return err
+		}
+		if project.State != domain.ProjectActive {
+			return commandError(CommandErrorProjectWorkspaceInvalid)
+		}
+		workspace, err := o.workspaces.Get(txCtx, request.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if workspace.ProjectID != project.ID || workspace.State != domain.WorkspaceReady {
+			return commandError(CommandErrorProjectWorkspaceInvalid)
+		}
+		packet, manifest, grant, err := o.sessionInputs(request, workspace)
+		if err != nil {
+			return err
+		}
+		at := o.clock.Now().UTC()
+		session, err := domain.NewSession(request.SessionID, project.ID, workspace.ID, request.Goal, at)
+		if err != nil {
+			return fmt.Errorf("create session: %w", err)
 		}
 		group, err := domain.NewAgentGroup(request.GroupID, session.ID, request.MaxConcurrent, at)
 		if err != nil {
@@ -92,9 +165,9 @@ func (o *AgentOrchestrator) CreateSession(
 			session.ID,
 			group.ID,
 			request.Profile,
-			request.TaskPacket.ID,
-			request.ContextManifest.ID,
-			request.Grant.ID,
+			packet.ID,
+			manifest.ID,
+			grant.ID,
 			at,
 		)
 		if err != nil {
@@ -105,26 +178,20 @@ func (o *AgentOrchestrator) CreateSession(
 				return err
 			}
 		}
-		if err := o.packets.Save(txCtx, request.TaskPacket); err != nil {
-			return err
-		}
-		if err := o.manifests.Save(txCtx, request.ContextManifest); err != nil {
-			return err
-		}
-		if err := o.grants.Save(txCtx, request.Grant.Snapshot()); err != nil {
-			return err
-		}
-		if err := o.sessions.Save(txCtx, session); err != nil {
-			return err
-		}
-		if err := o.groups.Save(txCtx, group); err != nil {
-			return err
-		}
-		if err := o.agents.Save(txCtx, agent); err != nil {
-			return err
+		for _, save := range []func(context.Context) error{
+			func(c context.Context) error { return o.packets.Save(c, packet) },
+			func(c context.Context) error { return o.manifests.Save(c, manifest) },
+			func(c context.Context) error { return o.grants.Save(c, grant) },
+			func(c context.Context) error { return o.sessions.Save(c, session) },
+			func(c context.Context) error { return o.groups.Save(c, group) },
+			func(c context.Context) error { return o.agents.Save(c, agent) },
+		} {
+			if err := save(txCtx); err != nil {
+				return err
+			}
 		}
 		result = CreateSessionResult{
-			Session: SessionSnapshot{ID: session.ID, Goal: session.Goal, WorkspaceKey: session.WorkspaceKey},
+			Session: sessionSnapshot(session),
 			Group:   group,
 			Agent:   agent,
 		}
@@ -136,92 +203,168 @@ func (o *AgentOrchestrator) CreateSession(
 	return result, nil
 }
 
-// CreateProject creates a workspace-backed Session with its first Primary Agent.
-// The initial grant is intentionally read-only until the user approves broader access.
-func (o *AgentOrchestrator) CreateProject(
+// CreateSessionForProject is the compact command used by the desktop binding.
+func (o *AgentOrchestrator) CreateSessionForProject(
 	ctx context.Context,
-	request CreateProjectRequest,
+	projectID domain.ProjectID,
+	workspaceID domain.WorkspaceID,
+	goal string,
+) (CreateSessionResult, error) {
+	return o.CreateSession(ctx, CreateSessionRequest{
+		ProjectID: projectID, WorkspaceID: workspaceID, Goal: goal,
+		Profile: domain.ProfilePrimary, MaxConcurrent: 1,
+	})
+}
+
+// EnsurePrimaryAgent repairs a session created without an agent, while
+// preserving the same project/workspace identity.
+func (o *AgentOrchestrator) EnsurePrimaryAgent(
+	ctx context.Context,
+	sessionID domain.SessionID,
 ) (CreateSessionResult, error) {
 	if ctx == nil {
-		return CreateSessionResult{}, errors.New("create project context is required")
+		return CreateSessionResult{}, errors.New("ensure primary agent context is required")
 	}
 	if !o.Ready() {
 		return CreateSessionResult{}, commandError(CommandErrorNotReady)
 	}
-	workspaceKey := filepath.Clean(strings.TrimSpace(request.WorkspaceKey))
-	if workspaceKey == "." || !filepath.IsAbs(workspaceKey) || strings.ContainsAny(workspaceKey, "\x00\r\n") {
-		return CreateSessionResult{}, commandError(CommandErrorProjectWorkspaceInvalid)
+	session, err := o.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return CreateSessionResult{}, err
 	}
-	return o.createPrimarySession(ctx, workspaceKey, request.Goal)
-}
-
-// CreateSessionForWorkspace creates another Primary Agent session for an
-// existing project workspace selected from the project catalog.
-func (o *AgentOrchestrator) CreateSessionForWorkspace(
-	ctx context.Context,
-	workspaceKey string,
-	goal string,
-) (CreateSessionResult, error) {
-	if ctx == nil {
-		return CreateSessionResult{}, errors.New("create session context is required")
+	groups, err := o.groups.ListBySession(ctx, sessionID, 100)
+	if err != nil {
+		return CreateSessionResult{}, err
 	}
-	if !o.Ready() {
-		return CreateSessionResult{}, commandError(CommandErrorNotReady)
+	for _, group := range groups {
+		agents, listErr := o.agents.ListByGroup(ctx, group.ID, 100)
+		if listErr != nil {
+			return CreateSessionResult{}, listErr
+		}
+		if len(agents) > 0 {
+			return CreateSessionResult{Session: sessionSnapshot(session), Group: group, Agent: agents[0]}, nil
+		}
 	}
-	workspaceKey = filepath.Clean(strings.TrimSpace(workspaceKey))
-	if workspaceKey == "." || !filepath.IsAbs(workspaceKey) || strings.ContainsAny(workspaceKey, "\x00\r\n") {
-		return CreateSessionResult{}, commandError(CommandErrorProjectWorkspaceInvalid)
+	workspace, err := o.workspaces.Get(ctx, session.WorkspaceID)
+	if err != nil {
+		return CreateSessionResult{}, err
 	}
-	return o.createPrimarySession(ctx, workspaceKey, goal)
-}
-
-func (o *AgentOrchestrator) createPrimarySession(
-	ctx context.Context,
-	workspaceKey string,
-	goal string,
-) (CreateSessionResult, error) {
-	goal = strings.TrimSpace(goal)
-	if goal == "" {
-		goal = "Work on " + filepath.Base(workspaceKey)
+	packet, manifest, grant, err := o.sessionInputs(CreateSessionRequest{Goal: session.Goal, Profile: domain.ProfilePrimary}, workspace)
+	if err != nil {
+		return CreateSessionResult{}, err
 	}
 	at := o.clock.Now().UTC()
-	packet, err := domain.NewTaskPacket(domain.NewTaskPacketID(), goal, nil, nil)
+	group, err := domain.NewAgentGroup(domain.NewAgentGroupID(), session.ID, 1, at)
 	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("create project task packet: %w", err)
+		return CreateSessionResult{}, err
 	}
-	manifest, err := domain.NewContextManifest(domain.NewContextManifestID(), goal, nil, at)
+	agent, err := domain.NewAgent(domain.NewAgentID(), session.ID, group.ID, domain.ProfilePrimary, packet.ID, manifest.ID, grant.ID, at)
 	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("create project context manifest: %w", err)
+		return CreateSessionResult{}, err
 	}
-	model, err := o.models.ResolveModel(domain.ProfilePrimary)
-	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("resolve primary model: %w", err)
+	if err := group.SetPrimary(agent.ID, at); err != nil {
+		return CreateSessionResult{}, err
 	}
-	grant, err := domain.NewCapabilityGrant(domain.CapabilityGrantSpec{
-		ID:           domain.NewCapabilityGrantID(),
-		WorkspaceKey: workspaceKey,
-		AllowedTools: []domain.ToolName{domain.ToolReadFile, domain.ToolListDir, domain.ToolSearchText,
-			domain.ToolProposeDelegate, domain.ToolSubmitResult, domain.ToolSubmitBriefing},
-		ReadScopes:           []string{workspaceKey},
-		CanProposeDelegation: true,
-		ResultPermissions: []domain.ResultPermission{
-			domain.ResultPermissionAgentResult,
-			domain.ResultPermissionBriefing,
-		},
-		Model:              model,
-		ContextManifestRef: manifest.ID,
-		ApprovalSource:     domain.ApprovalSourceUser,
-	})
-	if err != nil {
-		return CreateSessionResult{}, fmt.Errorf("create project capability grant: %w", err)
+	if err := o.tx.InTx(ctx, func(txCtx context.Context) error {
+		for _, save := range []func(context.Context) error{
+			func(c context.Context) error { return o.packets.Save(c, packet) },
+			func(c context.Context) error { return o.manifests.Save(c, manifest) },
+			func(c context.Context) error { return o.grants.Save(c, grant) },
+			func(c context.Context) error { return o.groups.Save(c, group) },
+			func(c context.Context) error { return o.agents.Save(c, agent) },
+		} {
+			if err := save(txCtx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return CreateSessionResult{}, err
 	}
-	return o.CreateSession(ctx, CreateSessionRequest{
-		Goal:            goal,
-		WorkspaceKey:    workspaceKey,
-		MaxConcurrent:   1,
-		Profile:         domain.ProfilePrimary,
-		TaskPacket:      packet,
-		ContextManifest: manifest,
-		Grant:           grant,
-	})
+	return CreateSessionResult{Session: sessionSnapshot(session), Group: group, Agent: agent}, nil
+}
+
+func (o *AgentOrchestrator) sessionInputs(
+	request CreateSessionRequest,
+	workspace domain.Workspace,
+) (domain.TaskPacket, domain.ContextManifest, domain.CapabilityGrant, error) {
+	packet := request.TaskPacket
+	manifest := request.ContextManifest
+	grant := request.Grant
+	at := o.clock.Now().UTC()
+	if packet.ID == "" {
+		var err error
+		packet, err = domain.NewTaskPacket(domain.NewTaskPacketID(), strings.TrimSpace(request.Goal), nil, nil)
+		if err != nil {
+			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
+		}
+	}
+	if manifest.ID == "" {
+		var err error
+		manifest, err = domain.NewContextManifest(domain.NewContextManifestID(), packet.Goal, nil, at)
+		if err != nil {
+			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
+		}
+	}
+	if grant.ID == "" {
+		if o.models == nil {
+			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, commandError(CommandErrorModelNotConfigured)
+		}
+		model, err := o.models.ResolveModel(domain.ProfilePrimary)
+		if err != nil {
+			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, fmt.Errorf("%w: %v", commandError(CommandErrorModelNotConfigured), err)
+		}
+		grant, err = domain.NewCapabilityGrant(domain.CapabilityGrantSpec{
+			ID:                    domain.NewCapabilityGrantID(),
+			WorkspaceID:           workspace.ID,
+			WorkspacePathSnapshot: workspace.Path,
+			WorkspaceRevision:     workspace.Revision,
+			AllowedTools:          primaryTools(),
+			ReadScopes:            []string{workspace.Path},
+			CanProposeDelegation:  true,
+			ResultPermissions:     []domain.ResultPermission{domain.ResultPermissionAgentResult, domain.ResultPermissionBriefing},
+			Model:                 model,
+			ContextManifestRef:    manifest.ID,
+			ApprovalSource:        domain.ApprovalSourceUser,
+		})
+		if err != nil {
+			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
+		}
+	}
+	if err := packet.Validate(); err != nil {
+		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
+	}
+	if err := manifest.Validate(); err != nil {
+		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
+	}
+	if err := grant.Validate(); err != nil {
+		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
+	}
+	if grant.ContextManifestRef != manifest.ID || grant.WorkspaceID != workspace.ID ||
+		grant.WorkspacePathSnapshot != workspace.Path || grant.WorkspaceRevision != workspace.Revision {
+		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, commandError(CommandErrorInvalidRequest)
+	}
+	return packet, manifest, grant.Snapshot(), nil
+}
+
+func primaryTools() []domain.ToolName {
+	return []domain.ToolName{
+		domain.ToolReadFile,
+		domain.ToolListDir,
+		domain.ToolSearchText,
+		domain.ToolProposeDelegate,
+		domain.ToolSubmitResult,
+		domain.ToolSubmitBriefing,
+	}
+}
+
+func sessionSnapshot(session domain.Session) SessionSnapshot {
+	return SessionSnapshot{
+		ID: session.ID, ProjectID: session.ProjectID, WorkspaceID: session.WorkspaceID, Goal: session.Goal,
+	}
+}
+
+func absolutePath(path string) bool {
+	return path != "" && path != "." && filepath.IsAbs(path) && filepath.Clean(path) == path &&
+		!strings.ContainsAny(path, "\x00\r\n")
 }

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"time"
 
 	"praxis/internal/core/domain"
 )
@@ -23,16 +24,18 @@ func (s *Store) SaveAgent(ctx context.Context, value domain.Agent) error {
 		ctx,
 		`INSERT INTO agents (
 			id, session_id, group_id, profile, task_packet_id, context_manifest_id,
-			capability_grant_id, state, current_execution_id, payload
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
+			capability_grant_id, state, current_execution_id, created_at, updated_at, payload
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
 			session_id = excluded.session_id, group_id = excluded.group_id, profile = excluded.profile,
 			task_packet_id = excluded.task_packet_id, context_manifest_id = excluded.context_manifest_id,
 			capability_grant_id = excluded.capability_grant_id, state = excluded.state,
-			current_execution_id = excluded.current_execution_id, payload = excluded.payload`,
+			current_execution_id = excluded.current_execution_id, created_at = excluded.created_at,
+			updated_at = excluded.updated_at, payload = excluded.payload`,
 		value.ID.String(), value.SessionID.String(), value.GroupID.String(), string(value.Profile),
 		value.TaskPacketID.String(), value.ContextManifestID.String(), value.GrantID.String(), string(value.State),
-		value.CurrentExecutionID.String(), payload,
+		value.CurrentExecutionID.String(), value.CreatedAt.UTC().Format(time.RFC3339Nano),
+		value.UpdatedAt.UTC().Format(time.RFC3339Nano), payload,
 	)
 }
 

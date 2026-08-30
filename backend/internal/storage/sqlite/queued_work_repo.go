@@ -29,12 +29,15 @@ func (s *Store) SaveQueuedWork(ctx context.Context, value domain.QueuedWork) err
 	err = s.savePayload(
 		ctx,
 		`INSERT INTO queued_work_items (
-			id, session_id, agent_id, sequence, status, execution_id, created_at, payload
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			id, session_id, agent_id, sequence, status, execution_id, created_at,
+			started_at, finished_at, failure_code, payload
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			session_id = excluded.session_id, agent_id = excluded.agent_id, sequence = excluded.sequence,
 			status = excluded.status, execution_id = excluded.execution_id,
-			created_at = excluded.created_at, payload = excluded.payload`,
+			created_at = excluded.created_at, started_at = excluded.started_at,
+			finished_at = excluded.finished_at, failure_code = excluded.failure_code,
+			payload = excluded.payload`,
 		value.ID.String(),
 		value.SessionID.String(),
 		value.AgentID.String(),
@@ -42,6 +45,9 @@ func (s *Store) SaveQueuedWork(ctx context.Context, value domain.QueuedWork) err
 		string(value.Status),
 		nullableID(value.ExecutionID),
 		nullableTimeValue(value.CreatedAt),
+		nullableTimeValue(value.StartedAt),
+		nullableTimeValue(value.FinishedAt),
+		string(value.FailureCode),
 		payload,
 	)
 	if err != nil && isConstraintError(err, "queued_work_items.agent_id, queued_work_items.sequence") {

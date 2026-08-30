@@ -7,70 +7,67 @@ import (
 	"praxis/internal/core/domain"
 )
 
-// RecoveryThreadRef identifies a session file that must be checked before
-// product state is marked interrupted during process-start reconciliation.
-type RecoveryThreadRef struct {
-	TaskSessionID domain.TaskSessionID
-	AgentThreadID domain.AgentThreadID
+// RecoveryAgentRef identifies an Agent transcript that may need reconciliation.
+type RecoveryAgentRef struct {
+	SessionID domain.SessionID
+	AgentID   domain.AgentID
 }
 
-func (s *Store) ListRecoveryThreads(ctx context.Context) ([]RecoveryThreadRef, error) {
-	rows, err := executorFromContext(
+func (s *Store) ListRecoveryAgents(ctx context.Context) ([]RecoveryAgentRef, error) {
+	rows, err := executorFromContext(ctx, s.db).QueryContext(
 		ctx,
-		s.db,
-	).QueryContext(ctx, `SELECT task_session_id, id FROM agent_threads ORDER BY task_session_id, id`)
+		`SELECT session_id, id FROM agents ORDER BY session_id, id`,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("list recovery threads: %w", err)
+		return nil, fmt.Errorf("list recovery agents: %w", err)
 	}
 	defer rows.Close()
-	refs := make([]RecoveryThreadRef, 0)
+	refs := make([]RecoveryAgentRef, 0)
 	for rows.Next() {
-		var sessionID, threadID string
-		if err := rows.Scan(&sessionID, &threadID); err != nil {
-			return nil, fmt.Errorf("scan recovery thread: %w", err)
+		var sessionID, agentID string
+		if err := rows.Scan(&sessionID, &agentID); err != nil {
+			return nil, fmt.Errorf("scan recovery agent: %w", err)
 		}
-		refs = append(
-			refs,
-			RecoveryThreadRef{
-				TaskSessionID: domain.TaskSessionID(sessionID),
-				AgentThreadID: domain.AgentThreadID(threadID),
-			},
-		)
+		refs = append(refs, RecoveryAgentRef{
+			SessionID: domain.SessionID(sessionID),
+			AgentID:   domain.AgentID(agentID),
+		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate recovery threads: %w", err)
+		return nil, fmt.Errorf("iterate recovery agents: %w", err)
 	}
 	return refs, nil
 }
 
-func (s *Store) ListUnsettledRunIDs(ctx context.Context) ([]domain.AgentRunID, error) {
-	rows, err := executorFromContext(
+func (s *Store) ListUnsettledExecutionIDs(ctx context.Context) ([]domain.AgentExecutionID, error) {
+	rows, err := executorFromContext(ctx, s.db).QueryContext(
 		ctx,
-		s.db,
-	).QueryContext(ctx, `SELECT id FROM agent_runs WHERE outcome = '' ORDER BY id`)
+		`SELECT id FROM agent_executions WHERE status <> 'settled' ORDER BY id`,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("list unsettled runs: %w", err)
+		return nil, fmt.Errorf("list unsettled executions: %w", err)
 	}
 	defer rows.Close()
-	ids := make([]domain.AgentRunID, 0)
+	ids := make([]domain.AgentExecutionID, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan unsettled run: %w", err)
+			return nil, fmt.Errorf("scan unsettled execution: %w", err)
 		}
-		ids = append(ids, domain.AgentRunID(id))
+		ids = append(ids, domain.AgentExecutionID(id))
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate unsettled runs: %w", err)
+		return nil, fmt.Errorf("iterate unsettled executions: %w", err)
 	}
 	return ids, nil
 }
 
 func (s *Store) ListActiveLeaseIDs(ctx context.Context) ([]domain.WorkspaceLeaseID, error) {
-	rows, err := executorFromContext(
+	rows, err := executorFromContext(ctx, s.db).QueryContext(
 		ctx,
-		s.db,
-	).QueryContext(ctx, `SELECT id FROM workspace_write_leases WHERE state = ? ORDER BY id`, string(domain.LeaseActive))
+		`SELECT id FROM workspace_write_leases WHERE state = ? ORDER BY id`,
+		string(domain.LeaseActive),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list active workspace leases: %w", err)
 	}
@@ -92,9 +89,8 @@ func (s *Store) ListActiveLeaseIDs(ctx context.Context) ([]domain.WorkspaceLease
 func (s *Store) ListInFlightDeliveryIDs(ctx context.Context) ([]domain.DeliveryID, error) {
 	rows, err := executorFromContext(ctx, s.db).QueryContext(
 		ctx,
-		`SELECT id FROM briefing_deliveries WHERE status IN (?, ?) ORDER BY id`,
-		string(domain.DeliveryPending),
-		string(domain.DeliveryDelivering),
+		`SELECT id FROM context_deliveries WHERE status IN (?, ?) ORDER BY id`,
+		string(domain.ContextDeliveryPending), string(domain.ContextDeliveryDelivering),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list in-flight deliveries: %w", err)

@@ -69,6 +69,8 @@ func publicCommandError(command *orchestrate.CommandError) error {
 		return bindingError(contracts.ErrorCodeNotReady)
 	case orchestrate.CommandErrorProjectWorkspaceInvalid:
 		return bindingError(contracts.ErrorCodeProjectWorkspaceInvalid)
+	case orchestrate.CommandErrorModelNotConfigured:
+		return bindingError(contracts.ErrorCodeModelNotConfigured)
 	default:
 		return bindingError(contracts.ErrorCodeInternal)
 	}

@@ -75,7 +75,7 @@ func encodeAgentResultArtifact(
 	if result.Status != domain.ArtifactApproved {
 		return coresession.ContextArtifact{}, errors.New("agent result is not approved")
 	}
-	if domain.TaskSessionID(delivery.SessionID) != result.TaskSessionID {
+	if delivery.SessionID != result.SessionID {
 		return coresession.ContextArtifact{}, errors.New("agent result session does not match delivery")
 	}
 	body, err := json.Marshal(struct {
@@ -105,7 +105,7 @@ func encodeBriefingArtifact(
 	if briefing.Status != domain.ArtifactApproved {
 		return coresession.ContextArtifact{}, errors.New("briefing is not approved")
 	}
-	if domain.TaskSessionID(delivery.SessionID) != briefing.TaskSessionID {
+	if delivery.SessionID != briefing.SessionID {
 		return coresession.ContextArtifact{}, errors.New("briefing session does not match delivery")
 	}
 	body, err := json.Marshal(struct {

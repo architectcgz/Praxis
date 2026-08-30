@@ -1,3 +1,5 @@
-// Package storage contains persistence adapters for SQLite, JSONL, and blobs.
-// Storage implementations must not be imported by the core or agent runtime.
+// Package storage is the namespace for persistence adapters: dataroot path
+// layout, agent-policy files, SQLite, per-Agent JSONL, and blobs. It holds no
+// code of its own, and its subpackages must not be imported by the core or the
+// agent runtime.
 package storage

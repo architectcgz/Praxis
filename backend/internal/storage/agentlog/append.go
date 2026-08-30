@@ -54,7 +54,7 @@ func (s *Store) AppendExecutionStart(
 			"agent session must be initialized before execution start",
 		)
 	}
-	payload, err := json.Marshal(runStartedPayload{
+	payload, err := json.Marshal(executionStartedPayload{
 		RequestID: execution.RequestID.String(),
 		Reason:    execution.Reason,
 		Input:     execution.Input,
@@ -65,7 +65,7 @@ func (s *Store) AppendExecutionStart(
 	if err := s.appendLocked(entry{
 		ID:          domain.NewEventID().String(),
 		At:          time.Now().UTC(),
-		Kind:        entryRunStarted,
+		Kind:        entryExecutionStarted,
 		Version:     currentEntryVersion,
 		ExecutionID: execution.ID.String(),
 		Payload:     payload,
@@ -115,7 +115,7 @@ func (s *Store) AppendExecutionSettlement(
 	if err := s.appendLocked(entry{
 		ID:          domain.NewEventID().String(),
 		At:          time.Now().UTC(),
-		Kind:        entryRunSettled,
+		Kind:        entryExecutionSettled,
 		Version:     currentEntryVersion,
 		ExecutionID: receipt.ExecutionID.String(),
 		Payload:     payload,

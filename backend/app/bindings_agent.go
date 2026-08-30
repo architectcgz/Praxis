@@ -1,20 +1,26 @@
 package app
 
 import (
+	"context"
 	"sort"
 
 	"praxis/internal/contracts"
 	"praxis/internal/core/domain"
 )
 
-func (a *App) GetAgent(agentID string) (response contracts.AgentSnapshot, err error) {
-	done := a.beginBinding("GetAgent")
+type AgentBindings struct {
+	runtime *bindingRuntime
+	queries serviceRef[AgentQueries]
+}
+
+func (b *AgentBindings) GetAgent(agentID string) (response contracts.AgentSnapshot, err error) {
+	done := b.runtime.begin("GetAgent")
 	defer func() { done(err) }()
-	ctx, service, err := a.bindingContext()
+	ctx, queries, err := b.bindingContext()
 	if err != nil {
 		return contracts.AgentSnapshot{}, err
 	}
-	projection, err := service.ProjectAgent(ctx, domain.AgentID(agentID), 100)
+	projection, err := queries.ProjectAgent(ctx, domain.AgentID(agentID), 100)
 	if err != nil {
 		return contracts.AgentSnapshot{}, publicBindingError(err)
 	}
@@ -56,14 +62,16 @@ func (a *App) GetAgent(agentID string) (response contracts.AgentSnapshot, err er
 	return result, nil
 }
 
-func (a *App) ListAgentMessages(agentID string) (response []contracts.AgentMessage, err error) {
-	done := a.beginBinding("ListAgentMessages")
+func (b *AgentBindings) ListAgentMessages(
+	agentID string,
+) (response []contracts.AgentMessage, err error) {
+	done := b.runtime.begin("ListAgentMessages")
 	defer func() { done(err) }()
-	ctx, service, err := a.bindingContext()
+	ctx, queries, err := b.bindingContext()
 	if err != nil {
 		return nil, err
 	}
-	messages, err := service.ListAgentMessages(ctx, domain.AgentID(agentID), 200)
+	messages, err := queries.ListAgentMessages(ctx, domain.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
@@ -80,18 +88,20 @@ func (a *App) ListAgentMessages(agentID string) (response []contracts.AgentMessa
 	return result, nil
 }
 
-func (a *App) ListAgentHistory(agentID string) (response []contracts.AgentHistoryItem, err error) {
-	done := a.beginBinding("ListAgentHistory")
+func (b *AgentBindings) ListAgentHistory(
+	agentID string,
+) (response []contracts.AgentHistoryItem, err error) {
+	done := b.runtime.begin("ListAgentHistory")
 	defer func() { done(err) }()
-	ctx, service, err := a.bindingContext()
+	ctx, queries, err := b.bindingContext()
 	if err != nil {
 		return nil, err
 	}
-	messages, err := service.ListAgentMessages(ctx, domain.AgentID(agentID), 200)
+	messages, err := queries.ListAgentMessages(ctx, domain.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
-	projection, err := service.ProjectAgent(ctx, domain.AgentID(agentID), 200)
+	projection, err := queries.ProjectAgent(ctx, domain.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
@@ -142,4 +152,16 @@ func (a *App) ListAgentHistory(agentID string) (response []contracts.AgentHistor
 		return result[i].At.Before(result[j].At)
 	})
 	return result, nil
+}
+
+func (b *AgentBindings) bindingContext() (context.Context, AgentQueries, error) {
+	ctx, err := b.runtime.context()
+	if err != nil {
+		return nil, nil, err
+	}
+	queries := b.queries.get()
+	if queries == nil {
+		return nil, nil, bindingError(contracts.ErrorCodeBindingUnavailable)
+	}
+	return ctx, queries, nil
 }

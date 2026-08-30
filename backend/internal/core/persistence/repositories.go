@@ -6,77 +6,74 @@ import (
 	"praxis/internal/core/domain"
 )
 
-type TaskSessionRepository interface {
-	Get(ctx context.Context, id domain.TaskSessionID) (domain.TaskSession, error)
-	Save(ctx context.Context, session domain.TaskSession) error
+// ProjectRepository stores the durable project aggregate.
+type ProjectRepository interface {
+	Get(context.Context, domain.ProjectID) (domain.Project, error)
+	Save(context.Context, domain.Project) error
+}
+
+// ProjectListRepository provides the indexed project catalog used by the UI.
+type ProjectListRepository interface {
+	List(context.Context, int) ([]domain.Project, error)
+}
+
+// WorkspaceRepository stores a project's execution workspace aggregate.
+type WorkspaceRepository interface {
+	Get(context.Context, domain.WorkspaceID) (domain.Workspace, error)
+	Save(context.Context, domain.Workspace) error
+	ListByProject(context.Context, domain.ProjectID, int) ([]domain.Workspace, error)
 }
 
 type TaskPacketRepository interface {
-	Get(ctx context.Context, id domain.TaskPacketID) (domain.TaskPacket, error)
-	Save(ctx context.Context, packet domain.TaskPacket) error
+	Get(context.Context, domain.TaskPacketID) (domain.TaskPacket, error)
+	Save(context.Context, domain.TaskPacket) error
 }
 
 type ContextManifestRepository interface {
-	Get(ctx context.Context, id domain.ContextManifestID) (domain.ContextManifest, error)
-	Save(ctx context.Context, manifest domain.ContextManifest) error
+	Get(context.Context, domain.ContextManifestID) (domain.ContextManifest, error)
+	Save(context.Context, domain.ContextManifest) error
 }
 
 type CapabilityGrantRepository interface {
-	Get(ctx context.Context, id domain.CapabilityGrantID) (domain.CapabilityGrant, error)
-	Save(ctx context.Context, grant domain.CapabilityGrant) error
+	Get(context.Context, domain.CapabilityGrantID) (domain.CapabilityGrant, error)
+	Save(context.Context, domain.CapabilityGrant) error
 }
 
 type DelegationRepository interface {
-	Get(ctx context.Context, id domain.DelegationRequestID) (domain.DelegationRequest, error)
-	Save(ctx context.Context, request domain.DelegationRequest) error
-}
-
-type AgentThreadRepository interface {
-	Get(ctx context.Context, id domain.AgentThreadID) (domain.AgentThread, error)
-	Save(ctx context.Context, thread domain.AgentThread) error
-}
-
-type AgentRunRepository interface {
-	Get(ctx context.Context, id domain.AgentRunID) (domain.AgentRun, error)
-	Save(ctx context.Context, run domain.AgentRun) error
+	Get(context.Context, domain.DelegationRequestID) (domain.DelegationRequest, error)
+	Save(context.Context, domain.DelegationRequest) error
 }
 
 type WorkspaceLeaseRepository interface {
-	GetActiveByWorkspace(ctx context.Context, workspaceKey string) (domain.WorkspaceWriteLease, error)
-	Save(ctx context.Context, lease domain.WorkspaceWriteLease) error
-	Release(ctx context.Context, lease domain.WorkspaceWriteLease) error
+	GetActiveByWorkspace(context.Context, domain.WorkspaceID) (domain.WorkspaceWriteLease, error)
+	Save(context.Context, domain.WorkspaceWriteLease) error
+	Release(context.Context, domain.WorkspaceWriteLease) error
 }
 
 type AgentResultRepository interface {
-	Get(ctx context.Context, id domain.AgentResultID) (domain.AgentResult, error)
-	Save(ctx context.Context, result domain.AgentResult) error
+	Get(context.Context, domain.AgentResultID) (domain.AgentResult, error)
+	Save(context.Context, domain.AgentResult) error
 }
 
 type BriefingRepository interface {
-	Get(ctx context.Context, id domain.BriefingID) (domain.Briefing, error)
-	Save(ctx context.Context, briefing domain.Briefing) error
-}
-
-type DeliveryRepository interface {
-	Get(ctx context.Context, id domain.DeliveryID) (domain.BriefingDelivery, error)
-	GetByInjectionKey(ctx context.Context, injectionKey string) (domain.BriefingDelivery, error)
-	Save(ctx context.Context, delivery domain.BriefingDelivery) error
+	Get(context.Context, domain.BriefingID) (domain.Briefing, error)
+	Save(context.Context, domain.Briefing) error
 }
 
 type NoteRepository interface {
-	Get(ctx context.Context, id domain.NoteID) (domain.Note, error)
-	Save(ctx context.Context, note domain.Note) error
+	Get(context.Context, domain.NoteID) (domain.Note, error)
+	Save(context.Context, domain.Note) error
 }
 
 type EventRepository interface {
-	Append(ctx context.Context, event domain.DomainEvent) error
+	Append(context.Context, domain.DomainEvent) error
 }
 
 type AgentPolicyStore interface {
-	Current(ctx context.Context) (domain.AgentPolicySnapshot, error)
-	Update(ctx context.Context, snapshot domain.AgentPolicySnapshot) error
+	Current(context.Context) (domain.AgentPolicySnapshot, error)
+	Update(context.Context, domain.AgentPolicySnapshot) error
 }
 
 type TxRunner interface {
-	InTx(ctx context.Context, fn func(context.Context) error) error
+	InTx(context.Context, func(context.Context) error) error
 }

@@ -16,11 +16,11 @@ const currentEntryVersion uint16 = 2
 type entryKind string
 
 const (
-	entryHeader     entryKind = "session_header"
-	entryRunStarted entryKind = "run_started"
-	entryMessage    entryKind = "message"
-	entryArtifact   entryKind = "context_artifact"
-	entryRunSettled entryKind = "run_settled"
+	entryHeader           entryKind = "session_header"
+	entryExecutionStarted entryKind = "execution_started"
+	entryMessage          entryKind = "message"
+	entryArtifact         entryKind = "context_artifact"
+	entryExecutionSettled entryKind = "execution_settled"
 )
 
 type entry struct {
@@ -37,13 +37,13 @@ type headerPayload struct {
 	SessionID        string `json:"sessionId"`
 	AgentID          string `json:"agentId"`
 	Profile          string `json:"profile"`
-	WorkspaceKey     string `json:"workspaceKey"`
+	WorkspaceID      string `json:"workspaceId"`
 	InjectionNonce   string `json:"injectionNonce"`
 	MinReaderVersion uint16 `json:"minReaderVer"`
 	WrittenBy        string `json:"writtenBy"`
 }
 
-type runStartedPayload struct {
+type executionStartedPayload struct {
 	RequestID string                        `json:"requestId"`
 	Reason    domain.ExecutionReason        `json:"reason"`
 	Input     domain.ExecutionInputSnapshot `json:"input"`
@@ -105,7 +105,7 @@ func validateEntry(value entry, previous uint64) error {
 		return errors.New("first agent session entry must be session_header")
 	}
 	switch value.Kind {
-	case entryHeader, entryRunStarted, entryMessage, entryArtifact, entryRunSettled:
+	case entryHeader, entryExecutionStarted, entryMessage, entryArtifact, entryExecutionSettled:
 	default:
 		return fmt.Errorf("unknown agent session entry kind %q", value.Kind)
 	}
@@ -121,7 +121,7 @@ func validateEntry(value entry, previous uint64) error {
 
 func validateHeader(header coresession.AgentSessionHeader) error {
 	if header.SessionID == "" || header.AgentID == "" || !header.Profile.Valid() ||
-		strings.TrimSpace(header.WorkspaceKey) == "" || strings.TrimSpace(header.InjectionNonce) == "" ||
+		strings.TrimSpace(header.WorkspaceID.String()) == "" || strings.TrimSpace(header.InjectionNonce) == "" ||
 		header.MinReaderVersion == 0 || strings.TrimSpace(header.WrittenBy) == "" {
 		return errors.New("agent session header is invalid")
 	}

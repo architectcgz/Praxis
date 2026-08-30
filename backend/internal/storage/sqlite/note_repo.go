@@ -21,14 +21,14 @@ func (s *Store) SaveNote(ctx context.Context, value domain.Note) error {
 	}
 	return s.savePayload(
 		ctx,
-		`INSERT INTO notes (id, task_session_id, source_thread_id, payload) VALUES (?, ?, ?, ?)
+		`INSERT INTO notes (id, session_id, source_agent_id, payload) VALUES (?, ?, ?, ?)
 	    ON CONFLICT(id) DO UPDATE SET
-	        task_session_id = excluded.task_session_id,
-	        source_thread_id = excluded.source_thread_id,
+	        session_id = excluded.session_id,
+	        source_agent_id = excluded.source_agent_id,
 	        payload = excluded.payload`,
 		value.ID.String(),
-		value.TaskSessionID.String(),
-		value.SourceThreadID.String(),
+		value.SessionID.String(),
+		value.SourceAgentID.String(),
 		payload,
 	)
 }

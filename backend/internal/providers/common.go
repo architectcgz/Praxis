@@ -1,45 +1,44 @@
 package providers
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"regexp"
+	"net/url"
 	"strings"
 )
-
-// KeyResolver resolves a named secret at request time. Provider adapters never
-// read environment variables or secret files directly.
-type KeyResolver func(context.Context, string) (string, error)
-
-var envNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-
-// EnvironmentKeyResolver is the default resolver for deployments that only
-// provide credentials through the process environment.
-func EnvironmentKeyResolver(ctx context.Context, name string) (string, error) {
-	if ctx == nil {
-		return "", errors.New("key resolver context is required")
-	}
-	if !envNamePattern.MatchString(name) {
-		return "", fmt.Errorf("invalid API key environment name %q", name)
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return "", fmt.Errorf("API key is not configured for %s", name)
-	}
-	return value, nil
-}
 
 func RequestClient(client *http.Client) *http.Client {
 	if client != nil {
 		return client
 	}
 	return http.DefaultClient
+}
+
+// NewProxyClient returns a copy of client that routes requests through raw.
+// An empty proxy URL keeps the caller's existing client behavior.
+func NewProxyClient(client *http.Client, raw string) (*http.Client, error) {
+	_, proxyURL, err := parseProxyURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	base := RequestClient(client)
+	if proxyURL == nil {
+		return base, nil
+	}
+	transport := http.DefaultTransport.(*http.Transport)
+	if base.Transport != nil {
+		configured, ok := base.Transport.(*http.Transport)
+		if !ok {
+			return nil, errors.New("provider proxy requires a standard HTTP transport")
+		}
+		transport = configured
+	}
+	copy := *base
+	proxyTransport := transport.Clone()
+	proxyTransport.Proxy = http.ProxyURL(proxyURL)
+	copy.Transport = proxyTransport
+	return &copy, nil
 }
 
 func ValidateBaseURL(raw string) (string, error) {
@@ -56,6 +55,25 @@ func ValidateBaseURL(raw string) (string, error) {
 		return "", errors.New("provider base URL must use http or https")
 	}
 	return value, nil
+}
+
+func ValidateProxyURL(raw string) (string, error) {
+	value, _, err := parseProxyURL(raw)
+	return value, err
+}
+
+func parseProxyURL(raw string) (string, *url.URL, error) {
+	value := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if value == "" {
+		return "", nil, nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed == nil || parsed.Host == "" || parsed.Path != "" ||
+		parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", nil, errors.New("provider proxy URL must be an absolute HTTP or HTTPS URL without a path, query, or fragment")
+	}
+	return value, parsed, nil
 }
 
 func DecodeErrorResponse(response *http.Response) error {

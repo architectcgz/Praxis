@@ -1,0 +1,49 @@
+/* Container layers: Shell -> Region -> Scroll -> Page. Overlays render in #overlay-root. */
+
+/* L0 Shell owns the viewport and never uses transform, filter, contain, or perspective. */
+.app-shell {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100dvh;
+    overflow: hidden;
+    background: #f5f5f7;
+    color: var(--ink);
+}
+
+/* L2 Scroll is the single scrolling element in its region. */
+.scroll-region {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-color: rgba(60, 60, 67, 0.24) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: auto;
+}
+
+.scroll-region::-webkit-scrollbar {
+    width: var(--scroll-gutter);
+}
+
+.scroll-region::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.scroll-region::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: rgba(60, 60, 67, 0.24);
+    background-clip: padding-box;
+}
+
+/* L3 Page owns width and rhythm without overflow or transform. */
+.page {
+    width: min(100%, var(--page-width, 860px));
+    margin-inline: auto;
+    animation: content-enter var(--motion-duration-emphasized) ease-out both;
+}
+
+/* Non-scrolling page header, paired with a .scroll-region sibling. */
+.page-header {
+    flex: 0 0 auto;
+}

@@ -2,12 +2,6 @@
 @media (max-width: 900px) {
     .workspace-grid {
         grid-template-columns: minmax(0, 1fr);
-        height: calc(100vh - 64px);
-        min-height: 0;
-    }
-
-    .main-panel {
-        height: 100%;
     }
 
     .sidebar,
@@ -23,14 +17,10 @@
 
     .workspace-grid {
         display: block;
-        height: calc(100vh - 64px);
-        min-height: 0;
     }
 
     .main-panel {
         height: 100%;
-        min-height: 0;
-        overflow: hidden;
         --main-panel-inline-padding: 18px;
         padding: 28px 18px 52px;
     }
@@ -38,6 +28,22 @@
     .session-panel {
         width: 100%;
         margin: 0;
+    }
+
+    .project-overview-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .project-overview-action {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .management-title-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 16px;
     }
 
     h1 {
@@ -50,6 +56,85 @@
 }
 
 @media (max-width: 460px) {
+    .management-title-row h1 {
+        font-size: 1.9rem;
+    }
+
+    .management-primary {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .provider-directory-header,
+    .provider-model-item {
+        grid-template-columns: 34px minmax(0, 1fr) 32px;
+        gap: 9px;
+    }
+
+    .provider-model-item {
+        padding: 11px;
+    }
+
+    .provider-directory-icon,
+    .provider-model-icon {
+        width: 34px;
+        height: 34px;
+    }
+
+    .provider-model-directory {
+        margin-left: 43px;
+    }
+
+    .config-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .config-delete-confirm {
+        grid-template-columns: 18px minmax(0, 1fr);
+    }
+
+    .config-delete-confirm button {
+        grid-column: 1 / -1;
+    }
+
+    .config-actions {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .config-action-spacer {
+        display: none;
+    }
+
+    .config-actions .config-delete {
+        grid-column: 1 / -1;
+    }
+
+    .settings-row-title {
+        flex-wrap: wrap;
+    }
+
+    .settings-row-detail {
+        white-space: normal;
+    }
+
+    .error-banner {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .error-banner-action {
+        align-self: flex-start;
+    }
+
+    .dialog-error {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .dialog-error-action {
+        align-self: flex-start;
+    }
+
     .topbar > div:nth-child(2) span,
     .quiet-button {
         display: none;

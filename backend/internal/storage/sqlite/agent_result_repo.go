@@ -21,15 +21,15 @@ func (s *Store) SaveAgentResult(ctx context.Context, value domain.AgentResult) e
 	}
 	return s.savePayload(
 		ctx,
-		`INSERT INTO agent_results (id, task_session_id, source_thread_id, status, payload) VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO agent_results (id, session_id, source_agent_id, status, payload) VALUES (?, ?, ?, ?, ?)
 	    ON CONFLICT(id) DO UPDATE SET
-	        task_session_id = excluded.task_session_id,
-	        source_thread_id = excluded.source_thread_id,
+	        session_id = excluded.session_id,
+	        source_agent_id = excluded.source_agent_id,
 	        status = excluded.status,
 	        payload = excluded.payload`,
 		value.ID.String(),
-		value.TaskSessionID.String(),
-		value.SourceThreadID.String(),
+		value.SessionID.String(),
+		value.SourceAgentID.String(),
 		string(value.Status),
 		payload,
 	)

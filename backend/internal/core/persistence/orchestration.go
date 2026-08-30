@@ -20,6 +20,10 @@ type SessionListRepository interface {
 	List(ctx context.Context, limit int) ([]domain.Session, error)
 }
 
+type ProjectSessionListRepository interface {
+	ListByProject(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.Session, error)
+}
+
 type AgentGroupRepository interface {
 	Get(ctx context.Context, id domain.AgentGroupID) (domain.AgentGroup, error)
 	Save(ctx context.Context, group domain.AgentGroup) error
@@ -50,7 +54,7 @@ type AgentExecutionRepository interface {
 
 // QueuedWorkRepository exposes only durable independent-task records. The
 // AgentOrchestrator composes queue, execution, and Agent state in one
-// transaction; runtime actors never call this port.
+// transaction; runtime actors never call this interface.
 type QueuedWorkRepository interface {
 	Get(ctx context.Context, id domain.WorkItemID) (domain.QueuedWork, error)
 	Save(ctx context.Context, work domain.QueuedWork) error

@@ -1,10 +1,11 @@
-import {ArrowRight, ChevronDown, FolderPlus, MessageSquarePlus, Search} from 'lucide-react'
-import {ProjectGroup, ProjectPanelProps} from './types'
+import { ArrowRight, ChevronDown, FolderPlus, MessageSquarePlus, Search, Settings } from 'lucide-react'
+import { ProjectGroup, ProjectPanelProps } from './types'
 
 export function ProjectsPanel({
     projectGroups,
     sessionsCount,
     selectedSessionID,
+    selectedProjectID,
     lookupID,
     searchOpen,
     collapsedProjects,
@@ -16,20 +17,23 @@ export function ProjectsPanel({
     onToggleSearch,
     onOpenProject,
     onOpenSession,
+    onSelectProject,
     onSelectSession,
     onToggleProject,
+    onOpenSettings,
+    settingsOpen,
 }: ProjectPanelProps) {
     return (
         <aside className="sidebar projects-panel">
             <div className="sidebar-heading">
-                <span className="section-label">Projects</span>
+                <span className="section-label">项目</span>
                 <div className="sidebar-tools">
                     <span className="sidebar-count">{projectGroups.length}</span>
                     <button
                         className="icon-button"
                         type="button"
-                        title="New project"
-                        aria-label="New project"
+                        title="新建项目"
+                        aria-label="新建项目"
                         onClick={onOpenProject}
                         disabled={busy || !bridgeAvailable || !healthReady}
                     >
@@ -38,8 +42,8 @@ export function ProjectsPanel({
                     <button
                         className={`icon-button ${searchOpen ? 'active' : ''}`}
                         type="button"
-                        title="Find session"
-                        aria-label={searchOpen ? 'Close session search' : 'Find session'}
+                        title="查找会话"
+                        aria-label={searchOpen ? '关闭会话搜索' : '查找会话'}
                         aria-expanded={searchOpen}
                         onClick={onToggleSearch}
                     >
@@ -49,7 +53,7 @@ export function ProjectsPanel({
             </div>
             {searchOpen && (
                 <form className="session-lookup" onSubmit={onLoadSession}>
-                    <label htmlFor="session-id">Find by session ID</label>
+                    <label htmlFor="session-id">通过会话 ID 查找</label>
                     <div className="lookup-row">
                         <input
                             id="session-id"
@@ -62,8 +66,8 @@ export function ProjectsPanel({
                         <button
                             className="lookup-button"
                             type="submit"
-                            title="Load session"
-                            aria-label="Load session"
+                            title="加载会话"
+                            aria-label="加载会话"
                             disabled={!lookupID.trim() || busy || !bridgeAvailable}
                         >
                             <ArrowRight size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -71,23 +75,40 @@ export function ProjectsPanel({
                     </div>
                 </form>
             )}
-            <div className="project-list">
-                {projectGroups.map((project) => (
-                    <ProjectSection
-                        key={project.key}
-                        project={project}
-                        collapsed={collapsedProjects[project.key] === true}
-                        selectedSessionID={selectedSessionID}
-                        busy={busy}
-                        bridgeAvailable={bridgeAvailable}
-                        healthReady={healthReady}
-                        onSelectSession={onSelectSession}
-                        onToggleProject={onToggleProject}
-                        onOpenSession={onOpenSession}
-                    />
-                ))}
+            <div className="scroll-region">
+                <div className="project-list">
+                    {projectGroups.map((project) => (
+                        <ProjectSection
+                            key={project.id}
+                            project={project}
+                            collapsed={collapsedProjects[project.id] === true}
+                            selectedSessionID={selectedSessionID}
+                            selectedProjectID={selectedProjectID}
+                            busy={busy}
+                            bridgeAvailable={bridgeAvailable}
+                            healthReady={healthReady}
+                            onSelectSession={onSelectSession}
+                            onSelectProject={onSelectProject}
+                            onToggleProject={onToggleProject}
+                            onOpenSession={onOpenSession}
+                        />
+                    ))}
+                </div>
+                {sessionsCount === 0 && projectGroups.length === 0 && <p className="muted-copy">还没有创建任何项目。</p>}
             </div>
-            {sessionsCount === 0 && <p className="muted-copy">No sessions have been created yet.</p>}
+            <div className="sidebar-footer">
+                <button
+                    className={`settings-nav ${settingsOpen ? 'active' : ''}`}
+                    type="button"
+                    title="打开设置"
+                    aria-label="打开设置"
+                    aria-current={settingsOpen ? 'page' : undefined}
+                    onClick={onOpenSettings}
+                >
+                    <Settings size={16} strokeWidth={1.8} aria-hidden="true" />
+                    <span>设置</span>
+                </button>
+            </div>
         </aside>
     )
 }
@@ -96,41 +117,53 @@ type ProjectSectionProps = {
     project: ProjectGroup
     collapsed: boolean
     selectedSessionID: string
+    selectedProjectID: string
     busy: boolean
     bridgeAvailable: boolean
     healthReady: boolean
     onSelectSession: (id: string) => void
-    onToggleProject: (key: string) => void
-    onOpenSession: (workspaceKey: string) => void
+    onSelectProject: (project: ProjectGroup) => void
+    onToggleProject: (id: string) => void
+    onOpenSession: (project: ProjectGroup) => void
 }
 
 function ProjectSection({
     project,
     collapsed,
     selectedSessionID,
+    selectedProjectID,
     busy,
     bridgeAvailable,
     healthReady,
     onSelectSession,
+    onSelectProject,
     onToggleProject,
     onOpenSession,
 }: ProjectSectionProps) {
-    const sessionListID = projectSessionID(project.key)
+    const sessionListID = projectSessionID(project.id)
     return (
-        <section className="project-section" key={project.key}>
-            <div className="project-heading">
+        <section className="project-section" key={project.id}>
+            <div className={`project-heading ${project.id === selectedProjectID || project.sessions.some((item) => item.id === selectedSessionID) ? 'selected' : ''}`}>
                 <button
                     className="project-toggle"
                     type="button"
-                    title={`${collapsed ? 'Expand' : 'Collapse'} ${project.name} (${project.path})`}
-                    aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${project.name}`}
+                    title={`${collapsed ? '展开' : '折叠'} ${project.name} (${project.path})`}
+                    aria-label={`${collapsed ? '展开' : '折叠'}项目 ${project.name}`}
                     aria-expanded={!collapsed}
                     aria-controls={sessionListID}
-                    onClick={() => onToggleProject(project.key)}
+                    onClick={() => onToggleProject(project.id)}
                 >
                     <span className={`project-chevron ${collapsed ? 'collapsed' : ''}`} aria-hidden="true">
                         <ChevronDown size={14} strokeWidth={2.2} />
                     </span>
+                </button>
+                <button
+                    className="project-select"
+                    type="button"
+                    title={`打开项目 ${project.name}`}
+                    aria-label={`打开项目 ${project.name}`}
+                    onClick={() => onSelectProject(project)}
+                >
                     <span className="project-heading-copy">
                         <strong>{project.name}</strong>
                         <small>{project.path}</small>
@@ -140,9 +173,9 @@ function ProjectSection({
                 <button
                     className="icon-button project-session-button"
                     type="button"
-                    title={`New session in ${project.name}`}
-                    aria-label={`New session in ${project.name}`}
-                    onClick={() => onOpenSession(project.path)}
+                    title={`在 ${project.name} 中新建会话`}
+                    aria-label={`在 ${project.name} 中新建会话`}
+                    onClick={() => onOpenSession(project)}
                     disabled={busy || !bridgeAvailable || !healthReady}
                 >
                     <MessageSquarePlus size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -157,7 +190,7 @@ function ProjectSection({
                         onClick={() => onSelectSession(item.id)}
                     >
                         <span className="session-row-copy">
-                            <strong>{item.goal || 'Untitled session'}</strong>
+                            <strong>{item.goal || '未命名会话'}</strong>
                         </span>
                     </button>
                 ))}

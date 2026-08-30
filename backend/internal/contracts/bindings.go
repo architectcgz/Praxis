@@ -19,45 +19,56 @@ type HealthSnapshot struct {
 }
 
 type SessionSnapshot struct {
-	ID           string          `json:"id"`
-	Goal         string          `json:"goal"`
-	WorkspaceKey string          `json:"workspaceKey"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
-	Groups       []GroupSnapshot `json:"groups"`
-	Agents       []AgentSnapshot `json:"agents"`
+	ID          string          `json:"id"`
+	ProjectID   string          `json:"projectId"`
+	WorkspaceID string          `json:"workspaceId"`
+	Goal        string          `json:"goal"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
+	Groups      []GroupSnapshot `json:"groups"`
+	Agents      []AgentSnapshot `json:"agents"`
 }
 
 type SessionSummary struct {
-	ID           string    `json:"id"`
-	Goal         string    `json:"goal"`
-	WorkspaceKey string    `json:"workspaceKey"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"projectId"`
+	WorkspaceID string    `json:"workspaceId"`
+	Goal        string    `json:"goal"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type CreateProjectRequest struct {
 	ProjectName string `json:"projectName"`
-	Goal        string `json:"goal"`
 }
 
 type CreateProjectResponse struct {
-	SessionID    string `json:"sessionId"`
-	AgentID      string `json:"agentId"`
-	Goal         string `json:"goal"`
-	WorkspaceKey string `json:"workspaceKey"`
+	ProjectID   string `json:"projectId"`
+	Name        string `json:"name"`
+	WorkspaceID string `json:"workspaceId"`
+	Path        string `json:"path"`
+}
+
+type ProjectSummary struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	DefaultWorkspaceID string `json:"defaultWorkspaceId"`
+	Path               string `json:"path"`
+	State              string `json:"state"`
 }
 
 type CreateSessionRequest struct {
-	WorkspaceKey string `json:"workspaceKey"`
-	Goal         string `json:"goal"`
+	ProjectID   string `json:"projectId"`
+	WorkspaceID string `json:"workspaceId"`
+	Goal        string `json:"goal"`
 }
 
 type CreateSessionResponse struct {
-	SessionID    string `json:"sessionId"`
-	AgentID      string `json:"agentId"`
-	Goal         string `json:"goal"`
-	WorkspaceKey string `json:"workspaceKey"`
+	SessionID   string `json:"sessionId"`
+	ProjectID   string `json:"projectId"`
+	WorkspaceID string `json:"workspaceId"`
+	AgentID     string `json:"agentId"`
+	Goal        string `json:"goal"`
 }
 
 type GroupSnapshot struct {
@@ -118,17 +129,72 @@ type ReasoningOption struct {
 }
 
 type ModelOption struct {
-	ID              string          `json:"id"`
+	ProviderID      string          `json:"providerId"`
+	ModelID         string          `json:"modelId"`
 	Label           string          `json:"label"`
-	ProviderLabel   string          `json:"providerLabel"`
+	ProviderName    string          `json:"providerName"`
 	Reasoning       ReasoningOption `json:"reasoning"`
 	DefaultProfiles []string        `json:"defaultProfiles"`
 }
 
+// ProviderConfigOption carries every field the settings UI needs to edit a
+// provider, including the locally configured API key.
+type ProviderConfigOption struct {
+	ID           string `json:"id"`
+	ProviderName string `json:"providerName"`
+	BaseURL      string `json:"baseURL"`
+	ProxyURL     string `json:"proxyURL"`
+	APIKey       string `json:"apiKey"`
+}
+
+// ModelConfigOption carries every field the settings UI needs to edit a model.
+type ModelConfigOption struct {
+	ProviderID      string          `json:"providerId"`
+	ModelID         string          `json:"modelId"`
+	Label           string          `json:"label"`
+	APIFormat       string          `json:"apiFormat"`
+	ContextWindow   int             `json:"contextWindow"`
+	MaxOutputTokens int             `json:"maxOutputTokens"`
+	Reasoning       ReasoningOption `json:"reasoning"`
+}
+
+// ModelConfigDocument is one editable configuration document. The UI submits it
+// whole so per-entry edits cannot leave dangling references, such as deleting a
+// model that a profile still binds.
+type ModelConfigDocument struct {
+	Providers []ProviderConfigOption    `json:"providers"`
+	Models    []ModelConfigOption       `json:"models"`
+	Profiles  map[string]ModelReference `json:"profiles"`
+	// ProfileNames is the profile allowlist the backend accepts, so the UI renders
+	// exactly the bindings that will validate.
+	ProfileNames []string `json:"profileNames"`
+}
+
+type SaveModelConfigRequest struct {
+	Providers []ProviderConfigOption    `json:"providers"`
+	Models    []ModelConfigOption       `json:"models"`
+	Profiles  map[string]ModelReference `json:"profiles"`
+}
+
+// SaveModelConfigResponse reports user-fixable configuration problems through
+// validationError. Those are not call failures, so they bypass the opaque
+// binding error codes and stay actionable in the UI.
+type SaveModelConfigResponse struct {
+	Saved           bool   `json:"saved"`
+	ValidationError string `json:"validationError,omitempty"`
+}
+
+type ModelReference struct {
+	ProviderID string `json:"providerId"`
+	ModelID    string `json:"modelId"`
+}
+
 type SendInputRequest struct {
+	SessionID    string `json:"sessionId"`
 	AgentID      string `json:"agentId"`
 	RequestID    string `json:"requestId"`
 	Content      string `json:"content"`
+	ProviderID   string `json:"providerId"`
 	ModelID      string `json:"modelId"`
 	Reasoning    string `json:"reasoning"`
 	SandboxMode  string `json:"sandboxMode"`

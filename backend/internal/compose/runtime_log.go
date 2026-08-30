@@ -5,14 +5,14 @@ import (
 
 	"praxis/internal/core/domain"
 	"praxis/internal/logging"
-	"praxis/internal/storage"
+	"praxis/internal/storage/dataroot"
 )
 
 type runtimeLog struct {
 	logger *logging.Logger
 }
 
-func openRuntimeLog(root storage.DataRoot) (*runtimeLog, error) {
+func openRuntimeLog(root dataroot.DataRoot) (*runtimeLog, error) {
 	path := filepath.Join(root.Runtime, "praxis.log")
 	logger, err := logging.NewFactory().Runtime(path)
 	if err != nil {

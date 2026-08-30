@@ -1,7 +1,7 @@
-/* Project and Session modal surfaces. */
+/* Modal surfaces. */
 .modal-backdrop {
     position: fixed;
-    z-index: 10;
+    z-index: var(--z-modal);
     inset: 0;
     display: grid;
     place-items: center;
@@ -44,6 +44,10 @@
 }
 
 .dialog-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     margin-top: 16px;
     padding: 10px 12px;
     border: 1px solid rgba(255, 59, 48, 0.18);
@@ -52,6 +56,22 @@
     color: #c9342c;
     font-size: 0.78rem;
     line-height: 1.45;
+}
+
+.dialog-error-action {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 59, 48, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.55);
+    color: #c9342c;
+    font-size: 0.74rem;
+    font-weight: 650;
+}
+
+.dialog-error-action:hover {
+    background: rgba(255, 255, 255, 0.9);
 }
 
 .project-form {
@@ -109,4 +129,316 @@
 
 .modal-primary:hover:not(:disabled) {
     background: var(--blue-strong);
+}
+
+.config-dialog {
+    width: min(100%, 580px);
+    max-height: min(760px, calc(100vh - 48px));
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.config-dialog::-webkit-scrollbar {
+    display: none;
+}
+
+.config-dialog .management-error {
+    margin-top: 14px;
+}
+
+.config-form {
+    display: grid;
+    gap: 13px;
+    padding-top: 18px;
+}
+
+.config-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.config-field {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+}
+
+.config-field > span {
+    color: var(--ink-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.config-field select {
+    box-sizing: border-box;
+    width: 100%;
+    height: 38px;
+    padding: 0 36px 0 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    outline: none;
+    background: rgba(255, 255, 255, 0.84);
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 12px;
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+.config-field select:hover:not(:disabled) {
+    border-color: var(--blue);
+    background-color: rgba(255, 255, 255, 0.95);
+}
+
+.config-field select:focus {
+    border-color: var(--blue);
+    background-color: #fff;
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+}
+
+.config-field select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.config-field select option {
+    padding: 8px 12px;
+    background: #fff;
+    color: var(--ink);
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.config-field input {
+    border-radius: 8px;
+}
+
+.config-field input:invalid:not(:placeholder-shown),
+.config-field select:invalid:not(:placeholder-shown) {
+    border-color: rgba(255, 59, 48, 0.5);
+    background: rgba(255, 59, 48, 0.03);
+}
+
+.config-field input:invalid:focus:not(:placeholder-shown),
+.config-field select:invalid:focus:not(:placeholder-shown) {
+    border-color: rgba(255, 59, 48, 0.7);
+    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.1);
+}
+
+.config-field input:valid:not(:placeholder-shown),
+.config-field select:valid {
+    border-color: var(--line-strong);
+}
+
+.config-field input:required,
+.config-field select:required {
+    background-image: none;
+}
+
+.config-field input:invalid,
+.config-field select:invalid {
+    box-shadow: none;
+}
+
+.config-form input:invalid,
+.config-form select:invalid {
+    box-shadow: none;
+}
+
+.config-dialog input:invalid,
+.config-dialog select:invalid {
+    box-shadow: none;
+}
+
+/* Custom validation message styling */
+.config-field input::placeholder,
+.config-field select::placeholder {
+    color: var(--ink-tertiary);
+    opacity: 0.6;
+}
+
+.config-field > span {
+    color: var(--ink-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.config-field > span::after {
+    content: '';
+}
+
+.config-field:has(input:required) > span::after,
+.config-field:has(select:required) > span::after {
+    content: ' *';
+    color: rgba(255, 59, 48, 0.7);
+    font-weight: 700;
+}
+
+.config-model-picker {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px;
+    gap: 6px;
+    align-items: center;
+}
+
+.config-model-picker input {
+    min-width: 0;
+}
+
+.config-model-refresh {
+    width: 32px;
+    height: 32px;
+}
+
+.config-field > .config-field-status {
+    color: var(--ink-tertiary);
+    font-size: 0.68rem;
+    font-weight: 500;
+}
+
+.config-field-error {
+    display: block;
+    margin-top: 4px;
+    color: #c9342c;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.3;
+}
+
+.config-field input.has-error,
+.config-field select.has-error {
+    border-color: rgba(255, 59, 48, 0.6);
+    background: rgba(255, 59, 48, 0.04);
+}
+
+.config-field input.has-error:focus,
+.config-field select.has-error:focus {
+    border-color: rgba(255, 59, 48, 0.7);
+    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.1);
+}
+
+.config-check {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink-secondary);
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+
+.config-check input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    accent-color: var(--blue);
+}
+
+.config-actions {
+    align-items: center;
+    margin-top: 5px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+
+.config-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.config-action-spacer {
+    flex: 1 1 auto;
+}
+
+.config-delete {
+    border-color: rgba(255, 59, 48, 0.2) !important;
+    background: rgba(255, 59, 48, 0.08);
+    color: #c9342c;
+}
+
+.config-delete:hover:not(:disabled) {
+    background: rgba(255, 59, 48, 0.14);
+}
+
+.config-delete-confirm {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid rgba(255, 59, 48, 0.2);
+    border-radius: 8px;
+    background: rgba(255, 59, 48, 0.07);
+    color: #c9342c;
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.config-delete-confirm button {
+    min-height: 30px;
+    padding: 0 9px;
+    border: 1px solid rgba(255, 59, 48, 0.28);
+    border-radius: 7px;
+    background: #fff;
+    color: #c9342c;
+    font-size: 0.7rem;
+    font-weight: 650;
+}
+
+.config-advanced-section {
+    display: grid;
+    gap: 10px;
+}
+
+.config-advanced-toggle {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: rgba(118, 118, 128, 0.06);
+    color: var(--ink-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+}
+
+.config-advanced-toggle:hover {
+    border-color: var(--blue);
+    background: rgba(0, 122, 255, 0.06);
+    color: var(--blue);
+}
+
+.config-advanced-toggle svg:last-child {
+    transition: transform 0.2s ease;
+}
+
+.config-advanced-toggle svg:last-child.is-expanded {
+    transform: rotate(90deg);
+}
+
+.config-advanced-content {
+    display: grid;
+    gap: 13px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(118, 118, 128, 0.03);
 }

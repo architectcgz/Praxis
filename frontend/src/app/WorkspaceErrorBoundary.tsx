@@ -1,5 +1,5 @@
-import {Component, type ErrorInfo, type ReactNode} from 'react'
-import {RefreshCw, TriangleAlert} from 'lucide-react'
+import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { RefreshCw, TriangleAlert } from 'lucide-react'
 
 type WorkspaceErrorBoundaryProps = {
     children: ReactNode
@@ -11,10 +11,10 @@ type WorkspaceErrorBoundaryState = {
 
 // This is the final UI safety net when a boundary contract regresses.
 export class WorkspaceErrorBoundary extends Component<WorkspaceErrorBoundaryProps, WorkspaceErrorBoundaryState> {
-    state: WorkspaceErrorBoundaryState = {failed: false}
+    state: WorkspaceErrorBoundaryState = { failed: false }
 
     static getDerivedStateFromError(): WorkspaceErrorBoundaryState {
-        return {failed: true}
+        return { failed: true }
     }
 
     componentDidCatch(error: Error, info: ErrorInfo) {

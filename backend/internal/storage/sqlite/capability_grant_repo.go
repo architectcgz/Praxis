@@ -22,16 +22,21 @@ func (s *Store) SaveCapabilityGrant(ctx context.Context, value domain.Capability
 	return s.savePayload(
 		ctx,
 		`INSERT INTO capability_grants (
-	        id, workspace_key, context_manifest_id, approval_source, approval_policy_fingerprint, payload
-	    ) VALUES (?, ?, ?, ?, ?, ?)
+	        id, workspace_id, workspace_path_snapshot, workspace_revision,
+	        context_manifest_id, approval_source, approval_policy_fingerprint, payload
+	    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	    ON CONFLICT(id) DO UPDATE SET
-	        workspace_key = excluded.workspace_key,
+	        workspace_id = excluded.workspace_id,
+	        workspace_path_snapshot = excluded.workspace_path_snapshot,
+	        workspace_revision = excluded.workspace_revision,
 	        context_manifest_id = excluded.context_manifest_id,
 	        approval_source = excluded.approval_source,
 	        approval_policy_fingerprint = excluded.approval_policy_fingerprint,
 	        payload = excluded.payload`,
 		value.ID.String(),
-		value.WorkspaceKey,
+		value.WorkspaceID.String(),
+		value.WorkspacePathSnapshot,
+		value.WorkspaceRevision,
 		value.ContextManifestRef.String(),
 		string(value.ApprovalSource),
 		value.ApprovalPolicyFingerprint,

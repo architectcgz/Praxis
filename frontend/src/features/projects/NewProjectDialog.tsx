@@ -1,11 +1,12 @@
-import {FormEvent, useState} from 'react'
-import {X} from 'lucide-react'
-import {createProject} from '../../shared/api'
-import {readableError} from './errors'
+import { FormEvent, useState } from 'react'
+import { X } from 'lucide-react'
+import { Overlay } from '../../components/ui'
+import { createProject } from '../../api'
+import { readableError } from '../../shared/errors'
 
 type NewProjectDialogProps = {
     bridgeAvailable: boolean
-    onCreated: (sessionID: string) => void
+    onCreated: (projectID: string) => void
     onClose: () => void
 }
 
@@ -15,7 +16,6 @@ export function NewProjectDialog({
     onClose,
 }: NewProjectDialogProps) {
     const [projectName, setProjectName] = useState('')
-    const [projectGoal, setProjectGoal] = useState('')
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState('')
 
@@ -36,9 +36,8 @@ export function NewProjectDialog({
         try {
             const created = await createProject({
                 projectName: name,
-                goal: projectGoal.trim(),
             })
-            onCreated(created.sessionId)
+            onCreated(created.projectId)
             onClose()
         } catch (err) {
             setError(readableError(err))
@@ -48,45 +47,33 @@ export function NewProjectDialog({
     }
 
     return (
-        <div
-            className="modal-backdrop"
-            role="presentation"
-            onMouseDown={(event) => {
-                if (event.target === event.currentTarget) {
-                    close()
-                }
-            }}
-        >
+        <Overlay labelledBy="new-project-title" onClose={close}>
             <section
                 className="project-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="new-project-title"
-                onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                        close()
-                    }
-                }}
             >
                 <div className="dialog-heading">
                     <div>
-                        <span className="section-label">Projects</span>
-                        <h2 id="new-project-title">New project</h2>
+                        <span className="section-label">项目</span>
+                        <h2 id="new-project-title">新建项目</h2>
                     </div>
                     <button
                         className="icon-button dialog-close"
                         type="button"
-                        title="Close"
-                        aria-label="Close new project dialog"
+                        title="关闭"
+                        aria-label="关闭新建项目对话框"
                         onClick={close}
                         disabled={busy}
                     >
                         <X size={16} strokeWidth={1.8} aria-hidden="true" />
                     </button>
                 </div>
-                {error && <div className="dialog-error" role="alert">{error}</div>}
+                {error && (
+                    <div className="dialog-error" role="alert">
+                        <span>{error}</span>
+                    </div>
+                )}
                 <form className="project-form" onSubmit={(event) => void submit(event)}>
-                    <label htmlFor="project-name">Project name</label>
+                    <label htmlFor="project-name">项目名称</label>
                     <input
                         id="project-name"
                         value={projectName}
@@ -97,24 +84,16 @@ export function NewProjectDialog({
                         required
                         disabled={busy}
                     />
-                    <label htmlFor="project-goal">First session goal <span>(optional)</span></label>
-                    <input
-                        id="project-goal"
-                        value={projectGoal}
-                        onChange={(event) => setProjectGoal(event.target.value)}
-                        placeholder="What should the Primary Agent work on?"
-                        disabled={busy}
-                    />
                     <div className="modal-actions">
                         <button className="modal-secondary" type="button" onClick={close} disabled={busy}>
-                            Cancel
+                            取消
                         </button>
                         <button className="modal-primary" type="submit" disabled={busy || !projectName.trim() || !bridgeAvailable}>
-                            {busy ? 'Creating...' : 'Create project'}
+                            {busy ? '创建中...' : '创建项目'}
                         </button>
                     </div>
                 </form>
             </section>
-        </div>
+        </Overlay>
     )
 }

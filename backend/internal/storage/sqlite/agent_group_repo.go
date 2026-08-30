@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"time"
 
 	"praxis/internal/core/domain"
 )
@@ -21,12 +22,15 @@ func (s *Store) SaveAgentGroup(ctx context.Context, value domain.AgentGroup) err
 	}
 	return s.savePayload(
 		ctx,
-		`INSERT INTO agent_groups (id, session_id, primary_agent_id, max_concurrent, payload)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO agent_groups (
+			id, session_id, primary_agent_id, max_concurrent, created_at, updated_at, payload
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET session_id = excluded.session_id,
 		 primary_agent_id = excluded.primary_agent_id, max_concurrent = excluded.max_concurrent,
-		 payload = excluded.payload`,
-		value.ID.String(), value.SessionID.String(), value.PrimaryAgentID.String(), value.MaxConcurrent, payload,
+		 created_at = excluded.created_at,
+		 updated_at = excluded.updated_at, payload = excluded.payload`,
+		value.ID.String(), value.SessionID.String(), value.PrimaryAgentID.String(), value.MaxConcurrent,
+		value.CreatedAt.UTC().Format(time.RFC3339Nano), value.UpdatedAt.UTC().Format(time.RFC3339Nano), payload,
 	)
 }
 

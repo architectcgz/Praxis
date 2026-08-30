@@ -99,7 +99,7 @@ func (a *Agent) Start(executionID AgentExecutionID, at time.Time) error {
 }
 
 // Resume starts a new execution after a prior pause or interruption. It never
-// revives the old runtime context, stream, or tool process.
+// reuses runtime context, model streams, or tool processes from another execution.
 func (a *Agent) Resume(executionID AgentExecutionID, at time.Time) error {
 	if a.State != AgentPaused && a.State != AgentInterrupted {
 		return invalidTransition("agent", string(a.State), string(AgentExecuting))

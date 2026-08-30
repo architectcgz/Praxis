@@ -24,15 +24,17 @@ func (s *Store) SaveWaitCondition(ctx context.Context, value domain.WaitConditio
 	}
 	return s.savePayload(
 		ctx,
-		`INSERT INTO wait_conditions (id, agent_id, execution_id, kind, status, payload)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO wait_conditions (id, agent_id, execution_id, kind, mode, status, payload)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET agent_id = excluded.agent_id,
-		 execution_id = excluded.execution_id, kind = excluded.kind, status = excluded.status,
+		 execution_id = excluded.execution_id, kind = excluded.kind, mode = excluded.mode,
+		 status = excluded.status,
 		 payload = excluded.payload`,
 		value.ID.String(),
 		value.AgentID.String(),
 		value.ExecutionID.String(),
 		string(value.Kind),
+		string(value.Mode),
 		string(value.Status),
 		payload,
 	)

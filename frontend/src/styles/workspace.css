@@ -1,6 +1,14 @@
 /* Stable workspace style entrypoint. Keep imports ordered by cascade dependency. */
 @import './workspace/base.css';
+@import './workspace/layout.css';
 @import './workspace/navigation.css';
-@import './workspace/content.css';
+
+/* Feature-specific styles */
+@import '../features/shared/styles.css';
+@import '../features/projects/styles.css';
+@import '../features/sessions/styles.css';
+@import '../features/settings/styles.css';
+@import '../features/workspace/styles.css';
+
 @import './workspace/dialogs.css';
 @import './workspace/responsive.css';

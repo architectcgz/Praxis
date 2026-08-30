@@ -1,7 +1,7 @@
 package domain
 
 // RuntimeExecutionSnapshot freezes the technical sandbox and approval behavior
-// for one AgentRun so policy changes cannot alter an in-flight side effect.
+// for one AgentExecution so policy changes cannot alter an in-flight side effect.
 type RuntimeExecutionSnapshot struct {
 	SandboxMode  SandboxMode
 	ApprovalMode ApprovalMode

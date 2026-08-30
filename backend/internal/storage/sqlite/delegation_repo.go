@@ -28,12 +28,12 @@ func (s *Store) SaveDelegation(ctx context.Context, value domain.DelegationReque
 	return s.savePayload(
 		ctx,
 		`INSERT INTO delegation_requests (
-	        id, task_session_id, source_thread_id, profile, task_packet_id,
+	        id, session_id, source_agent_id, profile, task_packet_id,
 	        context_manifest_id, capability_grant_id, status, payload
 	    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	    ON CONFLICT(id) DO UPDATE SET
-	        task_session_id = excluded.task_session_id,
-	        source_thread_id = excluded.source_thread_id,
+	        session_id = excluded.session_id,
+	        source_agent_id = excluded.source_agent_id,
 	        profile = excluded.profile,
 	        task_packet_id = excluded.task_packet_id,
 	        context_manifest_id = excluded.context_manifest_id,
@@ -41,8 +41,8 @@ func (s *Store) SaveDelegation(ctx context.Context, value domain.DelegationReque
 	        status = excluded.status,
 	        payload = excluded.payload`,
 		value.ID.String(),
-		value.TaskSessionID.String(),
-		value.SourceThreadID.String(),
+		value.SessionID.String(),
+		value.SourceAgentID.String(),
 		string(value.Profile),
 		value.TaskPacketID.String(),
 		value.ManifestID.String(),

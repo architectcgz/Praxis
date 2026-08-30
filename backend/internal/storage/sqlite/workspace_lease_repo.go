@@ -5,15 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"praxis/internal/core/domain"
 )
 
-func (s *Store) GetActiveByWorkspace(ctx context.Context, workspaceKey string) (domain.WorkspaceWriteLease, error) {
+func (s *Store) GetActiveByWorkspace(ctx context.Context, workspaceID domain.WorkspaceID) (domain.WorkspaceWriteLease, error) {
 	row := executorFromContext(ctx, s.db).QueryRowContext(
 		ctx,
-		`SELECT payload FROM workspace_write_leases WHERE workspace_key = ? AND state = ?`,
-		workspaceKey,
+		`SELECT payload FROM workspace_write_leases WHERE workspace_id = ? AND state = ?`,
+		workspaceID.String(),
 		string(domain.LeaseActive),
 	)
 	value, err := decodePayload[domain.WorkspaceWriteLease](
@@ -40,19 +41,27 @@ func (s *Store) SaveWorkspaceLease(ctx context.Context, value domain.WorkspaceWr
 	err = s.savePayload(
 		ctx,
 		`INSERT INTO workspace_write_leases (
-        id, workspace_key, owner_thread_id, capability_grant_id, state, payload
-    ) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET workspace_key = excluded.workspace_key, owner_thread_id = excluded.owner_thread_id,
-        capability_grant_id = excluded.capability_grant_id, state = excluded.state, payload = excluded.payload`,
+        id, workspace_id, workspace_path_snapshot, workspace_revision, owner_agent_id,
+        capability_grant_id, state, acquired_at, released_at, payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id,
+        workspace_path_snapshot = excluded.workspace_path_snapshot,
+        workspace_revision = excluded.workspace_revision, owner_agent_id = excluded.owner_agent_id,
+        capability_grant_id = excluded.capability_grant_id, state = excluded.state,
+        acquired_at = excluded.acquired_at, released_at = excluded.released_at, payload = excluded.payload`,
 		value.ID.String(),
-		value.WorkspaceKey,
-		value.OwnerThreadID.String(),
+		value.WorkspaceID.String(),
+		value.WorkspacePathSnapshot,
+		value.WorkspaceRevision,
+		value.OwnerAgentID.String(),
 		value.GrantID.String(),
 		string(value.State),
+		value.AcquiredAt.UTC().Format(time.RFC3339Nano),
+		nullableTimeValue(value.ReleasedAt),
 		payload,
 	)
-	if err != nil && isConstraintError(err, "workspace_write_leases.workspace_key") {
-		return fmt.Errorf("%w: %s", domain.ErrLeaseConflict, value.WorkspaceKey)
+	if err != nil && isConstraintError(err, "workspace_write_leases.workspace_id") {
+		return fmt.Errorf("%w: %s", domain.ErrLeaseConflict, value.WorkspaceID)
 	}
 	return err
 }
@@ -70,8 +79,9 @@ func (s *Store) ReleaseWorkspaceLease(ctx context.Context, value domain.Workspac
 	}
 	result, err := executorFromContext(ctx, s.db).ExecContext(
 		ctx,
-		`UPDATE workspace_write_leases SET state = ?, payload = ? WHERE id = ? AND state = ?`,
+		`UPDATE workspace_write_leases SET state = ?, released_at = ?, payload = ? WHERE id = ? AND state = ?`,
 		string(domain.LeaseReleased),
+		nullableTimeValue(value.ReleasedAt),
 		payload,
 		value.ID.String(),
 		string(domain.LeaseActive),
@@ -104,9 +114,9 @@ type WorkspaceLeaseRepository struct{ store *Store }
 
 func (r WorkspaceLeaseRepository) GetActiveByWorkspace(
 	ctx context.Context,
-	key string,
+	workspaceID domain.WorkspaceID,
 ) (domain.WorkspaceWriteLease, error) {
-	return r.store.GetActiveByWorkspace(ctx, key)
+	return r.store.GetActiveByWorkspace(ctx, workspaceID)
 }
 
 func (r WorkspaceLeaseRepository) Save(ctx context.Context, value domain.WorkspaceWriteLease) error {

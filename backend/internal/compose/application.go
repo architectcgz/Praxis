@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"praxis/internal/agentruntime"
@@ -13,8 +15,8 @@ import (
 	"praxis/internal/core/session"
 	"praxis/internal/logging"
 	"praxis/internal/providers/registry"
-	"praxis/internal/storage"
 	"praxis/internal/storage/agentlog"
+	"praxis/internal/storage/dataroot"
 	"praxis/internal/storage/sqlite"
 )
 
@@ -23,7 +25,7 @@ import (
 // command/query surface used by the Wails binding.
 type Application struct {
 	*orchestrate.AgentOrchestrator
-	root       storage.DataRoot
+	root       dataroot.DataRoot
 	store      *sqlite.Store
 	models     *registry.Registry
 	registry   *orchestrate.AgentRuntimeRegistry
@@ -32,11 +34,55 @@ type Application struct {
 	output     *agentOutputPublisher
 }
 
+func (a *Application) ListProjects(ctx context.Context, limit int) ([]domain.Project, error) {
+	return a.store.Repositories().Projects.List(ctx, limit)
+}
+
+func (a *Application) ListWorkspaces(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.Workspace, error) {
+	return a.store.TargetRepositories().Workspaces.ListByProject(ctx, projectID, limit)
+}
+
+func (a *Application) ListSessionsByProject(
+	ctx context.Context,
+	projectID domain.ProjectID,
+	limit int,
+) ([]domain.Session, error) {
+	return a.store.TargetRepositories().Sessions.ListByProject(ctx, projectID, limit)
+}
+
+func (a *Application) CreateProject(ctx context.Context, name string) (result orchestrate.CreateProjectResult, err error) {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || filepath.Base(name) != name {
+		return result, &orchestrate.CommandError{Code: orchestrate.CommandErrorProjectWorkspaceInvalid}
+	}
+	path := filepath.Join(a.root.Projects, name)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		if os.IsExist(err) {
+			return result, &orchestrate.CommandError{Code: orchestrate.CommandErrorProjectWorkspaceInvalid}
+		}
+		return result, err
+	}
+	created := true
+	defer func() {
+		if err != nil && created {
+			_ = os.Remove(path)
+		}
+	}()
+	result, err = a.AgentOrchestrator.CreateProject(ctx, orchestrate.CreateProjectRequest{
+		ProjectID: domain.NewProjectID(), WorkspaceID: domain.NewWorkspaceID(), Name: name, Path: path,
+	})
+	if err != nil {
+		return orchestrate.CreateProjectResult{}, err
+	}
+	created = false
+	return result, nil
+}
+
 // Open builds a target application and completes recovery before returning a
 // ready command owner. The runner is the only provider/tool integration point.
 func Open(
 	ctx context.Context,
-	root storage.DataRoot,
+	root dataroot.DataRoot,
 	runner agentruntime.TargetExecutionRunner,
 ) (*Application, error) {
 	if ctx == nil {
@@ -44,19 +90,6 @@ func Open(
 	}
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
-	}
-	if _, err := os.Stat(root.Database); err == nil {
-		inventory, err := sqlite.InspectExisting(ctx, root.Database)
-		if err != nil {
-			return nil, err
-		}
-		if inventory.HasLegacyData() {
-			return nil, errors.New(
-				"legacy data root requires an explicit stopped backup and conversion",
-			)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect data root database: %w", err)
 	}
 	store, err := sqlite.Open(ctx, root.Database)
 	if err != nil {
@@ -80,7 +113,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	legacy := store.Repositories()
+	supporting := store.Repositories()
 	target := store.TargetRepositories()
 	output := newAgentOutputPublisher()
 	if runner == nil {
@@ -116,14 +149,16 @@ func Open(
 	}
 	orchestrator, err := orchestrate.NewAgentOrchestrator(orchestrate.AgentOrchestratorConfig{
 		Transactions:   store,
+		Projects:       target.Projects,
+		Workspaces:     target.Workspaces,
 		Sessions:       target.Sessions,
 		Groups:         target.Groups,
 		Agents:         target.Agents,
 		Executions:     target.Executions,
 		QueuedWork:     target.QueuedWork,
-		TaskPackets:    legacy.TaskPackets,
-		Manifests:      legacy.ContextManifests,
-		Grants:         legacy.CapabilityGrants,
+		TaskPackets:    supporting.TaskPackets,
+		Manifests:      supporting.ContextManifests,
+		Grants:         supporting.CapabilityGrants,
 		Waits:          target.Waits,
 		Controls:       target.Controls,
 		Deliveries:     target.Deliveries,
@@ -219,6 +254,59 @@ func (a *Application) ListModels() []registry.ModelOption {
 	return a.models.ListModels()
 }
 
+// ModelConfig returns an editable copy of the full model configuration for
+// the settings UI to render.
+func (a *Application) ModelConfig() registry.FileConfig {
+	if a.models == nil {
+		return registry.FileConfig{}
+	}
+	return a.models.Config()
+}
+
+// SaveModelConfig validates and persists a new model configuration. A saved
+// configuration takes effect immediately for the running orchestration layer.
+func (a *Application) SaveModelConfig(config registry.FileConfig) error {
+	if a.models == nil {
+		return errors.New("model registry is not available")
+	}
+	if err := a.models.ApplyConfig(config); err != nil {
+		return err
+	}
+	a.RuntimeLogger().Infof(
+		"model config saved providers=%d models=%d", len(config.Providers), len(config.Models),
+	)
+	return nil
+}
+
+// SetProviderKey stores or clears the API key for one configured provider.
+func (a *Application) SetProviderKey(providerID, value string) error {
+	if a.models == nil {
+		return errors.New("model registry is not available")
+	}
+	if err := a.models.SetProviderKey(providerID, value); err != nil {
+		return err
+	}
+	a.RuntimeLogger().Infof("provider API key updated provider=%s cleared=%t", providerID, value == "")
+	return nil
+}
+
+// ProviderKey returns the locally configured key for a provider.
+func (a *Application) ProviderKey(providerID string) string {
+	if a.models == nil {
+		return ""
+	}
+	return a.models.ProviderKey(providerID)
+}
+
+// DiscoverProviderModels retrieves model IDs from the configured provider
+// endpoint while keeping the resolved API key inside the registry.
+func (a *Application) DiscoverProviderModels(ctx context.Context, providerID string) ([]string, error) {
+	if a.models == nil {
+		return nil, errors.New("model registry is not available")
+	}
+	return a.models.DiscoverProviderModels(ctx, providerID)
+}
+
 // Close prevents new commands before stopping runtime actors and storage.
 func (a *Application) Close(ctx context.Context) error {
 	if ctx == nil {
@@ -281,7 +369,7 @@ func (a *Application) ListAgentMessages(
 }
 
 type targetRuntimeFactory struct {
-	root        storage.DataRoot
+	root        dataroot.DataRoot
 	runner      agentruntime.TargetExecutionRunner
 	header      agentruntime.TargetSessionHeaderResolver
 	logger      agentruntime.TargetExecutionLogger
@@ -309,7 +397,7 @@ func (f targetRuntimeFactory) New(
 	})
 }
 
-func newAgentSessionResolver(root storage.DataRoot) orchestrate.AgentSessionResolver {
+func newAgentSessionResolver(root dataroot.DataRoot) orchestrate.AgentSessionResolver {
 	return func(sessionID domain.SessionID, agentID domain.AgentID) (session.TranscriptReceiptStore, error) {
 		return agentlog.Open(root, sessionID, agentID)
 	}
@@ -337,15 +425,15 @@ func newDeliveryHeaderResolver(store *sqlite.Store) orchestrate.DeliverySessionH
 
 func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domain.Agent) session.AgentSessionHeader {
 	sessionRecord, err := store.GetSession(ctx, agent.SessionID)
-	workspace := ""
+	workspaceID := domain.WorkspaceID("")
 	if err == nil {
-		workspace = sessionRecord.WorkspaceKey
+		workspaceID = sessionRecord.WorkspaceID
 	}
 	return session.AgentSessionHeader{
 		SessionID:        agent.SessionID,
 		AgentID:          agent.ID,
 		Profile:          agent.Profile,
-		WorkspaceKey:     workspace,
+		WorkspaceID:      workspaceID,
 		InjectionNonce:   agent.SessionID.String() + ":" + agent.ID.String(),
 		MinReaderVersion: 2,
 		WrittenBy:        "praxis/target",

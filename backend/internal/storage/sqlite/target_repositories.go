@@ -1,9 +1,9 @@
 package sqlite
 
-// Target orchestration storage deliberately uses distinct tables while the
-// pre-release converter remains to be implemented. Production composition can
-// select these repositories without accidentally reading legacy aggregates.
+// TargetRepositories groups the repositories used by the orchestration model.
 type TargetRepositories struct {
+	Projects   ProjectRepository
+	Workspaces WorkspaceRepository
 	Sessions   SessionRepository
 	Groups     AgentGroupRepository
 	Agents     AgentRepository
@@ -16,6 +16,8 @@ type TargetRepositories struct {
 
 func (s *Store) TargetRepositories() TargetRepositories {
 	return TargetRepositories{
+		Projects:   ProjectRepository{s},
+		Workspaces: WorkspaceRepository{s},
 		Sessions:   SessionRepository{s},
 		Groups:     AgentGroupRepository{s},
 		Agents:     AgentRepository{s},

@@ -10,6 +10,8 @@ import (
 // IDs are distinct types so a repository cannot accidentally swap identifiers
 // between aggregates while all persistence formats can still use strings.
 type (
+	ProjectID             string
+	WorkspaceID           string
 	SessionID             string
 	AgentGroupID          string
 	AgentID               string
@@ -17,9 +19,6 @@ type (
 	RequestID             string
 	WaitConditionID       string
 	AgentControlRequestID string
-	TaskSessionID         string
-	AgentThreadID         string
-	AgentRunID            string
 	WorkItemID            string
 	CapabilityGrantID     string
 	TaskPacketID          string
@@ -42,10 +41,11 @@ func newOpaqueID(prefix string) string {
 
 func idIsEmpty(value string) bool { return strings.TrimSpace(value) == "" }
 
-func NewTaskSessionID() TaskSessionID { return TaskSessionID(newOpaqueID("task")) }
-func NewSessionID() SessionID         { return SessionID(newOpaqueID("session")) }
-func NewAgentGroupID() AgentGroupID   { return AgentGroupID(newOpaqueID("group")) }
-func NewAgentID() AgentID             { return AgentID(newOpaqueID("agent")) }
+func NewProjectID() ProjectID       { return ProjectID(newOpaqueID("project")) }
+func NewWorkspaceID() WorkspaceID   { return WorkspaceID(newOpaqueID("workspace")) }
+func NewSessionID() SessionID       { return SessionID(newOpaqueID("session")) }
+func NewAgentGroupID() AgentGroupID { return AgentGroupID(newOpaqueID("group")) }
+func NewAgentID() AgentID           { return AgentID(newOpaqueID("agent")) }
 func NewAgentExecutionID() AgentExecutionID {
 	return AgentExecutionID(newOpaqueID("execution"))
 }
@@ -56,9 +56,7 @@ func NewWaitConditionID() WaitConditionID {
 func NewAgentControlRequestID() AgentControlRequestID {
 	return AgentControlRequestID(newOpaqueID("control"))
 }
-func NewAgentThreadID() AgentThreadID { return AgentThreadID(newOpaqueID("thread")) }
-func NewAgentRunID() AgentRunID       { return AgentRunID(newOpaqueID("run")) }
-func NewWorkItemID() WorkItemID       { return WorkItemID(newOpaqueID("work")) }
+func NewWorkItemID() WorkItemID { return WorkItemID(newOpaqueID("work")) }
 func NewCapabilityGrantID() CapabilityGrantID {
 	return CapabilityGrantID(newOpaqueID("grant"))
 }
@@ -74,7 +72,8 @@ func NewDeliveryID() DeliveryID             { return DeliveryID(newOpaqueID("del
 func NewEventID() EventID                   { return EventID(newOpaqueID("event")) }
 func NewNoteID() NoteID                     { return NoteID(newOpaqueID("note")) }
 
-func (id TaskSessionID) String() string    { return string(id) }
+func (id ProjectID) String() string        { return string(id) }
+func (id WorkspaceID) String() string      { return string(id) }
 func (id SessionID) String() string        { return string(id) }
 func (id AgentGroupID) String() string     { return string(id) }
 func (id AgentID) String() string          { return string(id) }
@@ -84,8 +83,6 @@ func (id WaitConditionID) String() string  { return string(id) }
 func (id AgentControlRequestID) String() string {
 	return string(id)
 }
-func (id AgentThreadID) String() string       { return string(id) }
-func (id AgentRunID) String() string          { return string(id) }
 func (id WorkItemID) String() string          { return string(id) }
 func (id CapabilityGrantID) String() string   { return string(id) }
 func (id TaskPacketID) String() string        { return string(id) }

@@ -13,23 +13,23 @@ const (
 )
 
 type DelegationRequest struct {
-	ID             DelegationRequestID
-	TaskSessionID  TaskSessionID
-	SourceThreadID AgentThreadID
-	Profile        AgentProfile
-	TaskPacketID   TaskPacketID
-	ManifestID     ContextManifestID
-	Grant          CapabilityGrant
-	Status         DelegationStatus
-	Approval       *ApprovalRecord
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            DelegationRequestID
+	SessionID     SessionID
+	SourceAgentID AgentID
+	Profile       AgentProfile
+	TaskPacketID  TaskPacketID
+	ManifestID    ContextManifestID
+	Grant         CapabilityGrant
+	Status        DelegationStatus
+	Approval      *ApprovalRecord
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func NewDelegationRequest(
 	id DelegationRequestID,
-	sessionID TaskSessionID,
-	sourceThreadID AgentThreadID,
+	sessionID SessionID,
+	sourceAgentID AgentID,
 	profile AgentProfile,
 	packetID TaskPacketID,
 	manifestID ContextManifestID,
@@ -37,16 +37,16 @@ func NewDelegationRequest(
 	at time.Time,
 ) (DelegationRequest, error) {
 	request := DelegationRequest{
-		ID:             id,
-		TaskSessionID:  sessionID,
-		SourceThreadID: sourceThreadID,
-		Profile:        profile,
-		TaskPacketID:   packetID,
-		ManifestID:     manifestID,
-		Grant:          grant.Snapshot(),
-		Status:         DelegationDraft,
-		CreatedAt:      at.UTC(),
-		UpdatedAt:      at.UTC(),
+		ID:            id,
+		SessionID:     sessionID,
+		SourceAgentID: sourceAgentID,
+		Profile:       profile,
+		TaskPacketID:  packetID,
+		ManifestID:    manifestID,
+		Grant:         grant.Snapshot(),
+		Status:        DelegationDraft,
+		CreatedAt:     at.UTC(),
+		UpdatedAt:     at.UTC(),
 	}
 	if err := request.Validate(); err != nil {
 		return DelegationRequest{}, err
@@ -55,7 +55,7 @@ func NewDelegationRequest(
 }
 
 func (r DelegationRequest) Validate() error {
-	if idIsEmpty(string(r.ID)) || idIsEmpty(string(r.TaskSessionID)) || idIsEmpty(string(r.TaskPacketID)) ||
+	if idIsEmpty(string(r.ID)) || idIsEmpty(string(r.SessionID)) || idIsEmpty(string(r.TaskPacketID)) ||
 		idIsEmpty(string(r.ManifestID)) {
 		return invalidValue("delegationRequest", "required reference is missing")
 	}
@@ -84,9 +84,9 @@ func (r *DelegationRequest) Submit(at time.Time) (DomainEvent, error) {
 	r.Status = DelegationPendingApproval
 	r.UpdatedAt = at.UTC()
 	event := newDomainEvent(EventDelegationPending, at)
-	event.TaskSession = r.TaskSessionID
-	event.AgentThread = r.SourceThreadID
-	event.Delegation = r.ID
+	event.SessionID = r.SessionID
+	event.AgentID = r.SourceAgentID
+	event.DelegationID = r.ID
 	return event, nil
 }
 
@@ -102,9 +102,9 @@ func (r *DelegationRequest) Approve(approval ApprovalRecord, at time.Time) (Doma
 	r.Approval = &copy
 	r.UpdatedAt = at.UTC()
 	event := newDomainEvent(EventDelegationApproved, at)
-	event.TaskSession = r.TaskSessionID
-	event.AgentThread = r.SourceThreadID
-	event.Delegation = r.ID
+	event.SessionID = r.SessionID
+	event.AgentID = r.SourceAgentID
+	event.DelegationID = r.ID
 	event.Payload = map[string]string{"approvalSource": string(approval.Source)}
 	return event, nil
 }
@@ -116,7 +116,7 @@ func (r *DelegationRequest) Reject(at time.Time) (DomainEvent, error) {
 	r.Status = DelegationRejected
 	r.UpdatedAt = at.UTC()
 	event := newDomainEvent(EventDelegationRejected, at)
-	event.TaskSession, event.AgentThread, event.Delegation = r.TaskSessionID, r.SourceThreadID, r.ID
+	event.SessionID, event.AgentID, event.DelegationID = r.SessionID, r.SourceAgentID, r.ID
 	return event, nil
 }
 
@@ -127,7 +127,7 @@ func (r *DelegationRequest) Cancel(at time.Time) (DomainEvent, error) {
 	r.Status = DelegationCancelled
 	r.UpdatedAt = at.UTC()
 	event := newDomainEvent(EventDelegationCancelled, at)
-	event.TaskSession, event.AgentThread, event.Delegation = r.TaskSessionID, r.SourceThreadID, r.ID
+	event.SessionID, event.AgentID, event.DelegationID = r.SessionID, r.SourceAgentID, r.ID
 	return event, nil
 }
 

@@ -111,10 +111,10 @@ func (s *Store) artifactReceiptLocked(
 
 func startReceipt(entries []entry, executionID domain.AgentExecutionID) (*coresession.ExecutionStartReceipt, error) {
 	for _, value := range entries {
-		if value.Kind != entryRunStarted || value.ExecutionID != executionID.String() {
+		if value.Kind != entryExecutionStarted || value.ExecutionID != executionID.String() {
 			continue
 		}
-		var payload runStartedPayload
+		var payload executionStartedPayload
 		if err := json.Unmarshal(value.Payload, &payload); err != nil {
 			return nil, fmt.Errorf("decode execution start receipt: %w", err)
 		}
@@ -160,7 +160,7 @@ func settlementReceipt(
 	executionID domain.AgentExecutionID,
 ) (*coresession.ExecutionSettlementReceipt, error) {
 	for _, value := range entries {
-		if value.Kind != entryRunSettled || value.ExecutionID != executionID.String() {
+		if value.Kind != entryExecutionSettled || value.ExecutionID != executionID.String() {
 			continue
 		}
 		var payload settledPayload

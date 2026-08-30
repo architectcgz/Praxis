@@ -1,7 +1,5 @@
 package domain
 
-import "strings"
-
 // ExecutionFailureCode is the stable, UI-safe reason for a failed or
 // interrupted target execution. Its string representation is persisted in
 // SQLite and JSONL, and crosses the Wails binding unchanged.
@@ -23,7 +21,6 @@ const (
 	ExecutionFailureRuntimeFailed       ExecutionFailureCode = "runtime_failed"
 	ExecutionFailureRuntimeInvalid      ExecutionFailureCode = "runtime_invalid_outcome"
 	ExecutionFailureRecoveryInterrupted ExecutionFailureCode = "recovery_interrupted"
-	ExecutionFailureLegacy              ExecutionFailureCode = "legacy_failure"
 )
 
 func (c ExecutionFailureCode) Valid() bool {
@@ -34,23 +31,9 @@ func (c ExecutionFailureCode) Valid() bool {
 		ExecutionFailureStorage, ExecutionFailureContract, ExecutionFailureBusy,
 		ExecutionFailureClosed, ExecutionFailureInterrupted,
 		ExecutionFailureRuntimeCancelled, ExecutionFailureRuntimeFailed,
-		ExecutionFailureRuntimeInvalid, ExecutionFailureRecoveryInterrupted,
-		ExecutionFailureLegacy:
+		ExecutionFailureRuntimeInvalid, ExecutionFailureRecoveryInterrupted:
 		return true
 	default:
 		return false
 	}
-}
-
-// ExecutionFailureFromLegacy preserves known codes during conversion and
-// replaces pre-enum free-form values with one safe, queryable code.
-func ExecutionFailureFromLegacy(value string) ExecutionFailureCode {
-	code := ExecutionFailureCode(strings.TrimSpace(value))
-	if code == "" {
-		return ""
-	}
-	if code != "" && code.Valid() {
-		return code
-	}
-	return ExecutionFailureLegacy
 }

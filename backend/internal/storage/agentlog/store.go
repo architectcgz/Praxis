@@ -13,7 +13,7 @@ import (
 
 	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
-	"praxis/internal/storage"
+	"praxis/internal/storage/dataroot"
 )
 
 // Store owns one Agent transcript writer. It assigns every sequence number
@@ -28,7 +28,7 @@ type Store struct {
 	lastSequence uint64
 }
 
-func Open(root storage.DataRoot, sessionID domain.SessionID, agentID domain.AgentID) (*Store, error) {
+func Open(root dataroot.DataRoot, sessionID domain.SessionID, agentID domain.AgentID) (*Store, error) {
 	if sessionID == "" || agentID == "" {
 		return nil, errors.New("session and agent identifiers are required")
 	}
@@ -67,7 +67,7 @@ func (s *Store) Initialize(ctx context.Context, header coresession.AgentSessionH
 		SessionID:        header.SessionID.String(),
 		AgentID:          header.AgentID.String(),
 		Profile:          string(header.Profile),
-		WorkspaceKey:     header.WorkspaceKey,
+		WorkspaceID:      header.WorkspaceID.String(),
 		InjectionNonce:   header.InjectionNonce,
 		MinReaderVersion: header.MinReaderVersion,
 		WrittenBy:        header.WrittenBy,
@@ -205,6 +205,7 @@ func (s *Store) verifyHeaderLocked(header coresession.AgentSessionHeader) error 
 		return fmt.Errorf("decode agent session header: %w", err)
 	}
 	if existing.SessionID != header.SessionID.String() || existing.AgentID != header.AgentID.String() ||
+		existing.WorkspaceID != header.WorkspaceID.String() ||
 		existing.InjectionNonce != header.InjectionNonce || existing.MinReaderVersion != header.MinReaderVersion {
 		return errors.New("agent session header does not match immutable identity")
 	}

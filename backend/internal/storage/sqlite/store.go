@@ -22,10 +22,7 @@ type migration struct {
 }
 
 var migrations = []migration{
-	{version: 1, path: "migrations/0001_initial.sql"},
-	{version: 2, path: "migrations/0002_target_orchestration.sql"},
-	{version: 3, path: "migrations/0003_legacy_conversion_reports.sql"},
-	{version: 4, path: "migrations/0004_target_queued_work.sql"},
+	{version: 1, path: "migrations/0001_target.sql"},
 }
 
 type transactionContextKey struct{}
@@ -118,6 +115,13 @@ func (s *Store) Migrate(ctx context.Context) error {
 			); err != nil {
 				return fmt.Errorf("record sqlite migration %d: %w", migration.version, err)
 			}
+		}
+		inventory, err := s.inspectSchema(ctx)
+		if err != nil {
+			return err
+		}
+		if !inventory.HasRequiredTables() {
+			return errors.New("sqlite database does not contain the target schema")
 		}
 		return nil
 	})

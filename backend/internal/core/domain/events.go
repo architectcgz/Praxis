@@ -9,19 +9,19 @@ const (
 	EventDelegationApproved  DomainEventType = "delegation_approved"
 	EventDelegationRejected  DomainEventType = "delegation_rejected"
 	EventDelegationCancelled DomainEventType = "delegation_cancelled"
-	EventThreadStarted       DomainEventType = "thread_started"
-	EventThreadPausing       DomainEventType = "thread_pausing"
-	EventThreadPaused        DomainEventType = "thread_paused"
-	EventThreadSettled       DomainEventType = "thread_settled"
-	EventThreadFailed        DomainEventType = "thread_failed"
-	EventThreadInterrupted   DomainEventType = "thread_interrupted"
-	EventThreadClosed        DomainEventType = "thread_closed"
-	EventRunSettled          DomainEventType = "run_settled"
-	EventWorkItemQueued      DomainEventType = "work_item_queued"
-	EventWorkItemStarted     DomainEventType = "work_item_started"
-	EventWorkItemResumed     DomainEventType = "work_item_resumed"
-	EventWorkItemSettled     DomainEventType = "work_item_settled"
-	EventWorkItemCancelled   DomainEventType = "work_item_cancelled"
+	EventAgentStarted        DomainEventType = "agent_started"
+	EventAgentPausing        DomainEventType = "agent_pausing"
+	EventAgentPaused         DomainEventType = "agent_paused"
+	EventAgentSettled        DomainEventType = "agent_settled"
+	EventAgentFailed         DomainEventType = "agent_failed"
+	EventAgentInterrupted    DomainEventType = "agent_interrupted"
+	EventAgentClosed         DomainEventType = "agent_closed"
+	EventExecutionSettled    DomainEventType = "execution_settled"
+	EventQueuedWorkCreated   DomainEventType = "queued_work_created"
+	EventQueuedWorkStarted   DomainEventType = "queued_work_started"
+	EventQueuedWorkResumed   DomainEventType = "queued_work_resumed"
+	EventQueuedWorkSettled   DomainEventType = "queued_work_settled"
+	EventQueuedWorkCancelled DomainEventType = "queued_work_cancelled"
 	EventLeaseAcquired       DomainEventType = "lease_acquired"
 	EventLeaseReleased       DomainEventType = "lease_released"
 	EventArtifactSubmitted   DomainEventType = "artifact_submitted"
@@ -33,16 +33,16 @@ const (
 )
 
 type DomainEvent struct {
-	ID          EventID
-	Type        DomainEventType
-	OccurredAt  time.Time
-	TaskSession TaskSessionID
-	AgentThread AgentThreadID
-	AgentRun    AgentRunID
-	WorkItem    WorkItemID
-	Delegation  DelegationRequestID
-	Delivery    DeliveryID
-	Payload     map[string]string
+	ID               EventID
+	Type             DomainEventType
+	OccurredAt       time.Time
+	SessionID        SessionID
+	AgentID          AgentID
+	AgentExecutionID AgentExecutionID
+	WorkItemID       WorkItemID
+	DelegationID     DelegationRequestID
+	DeliveryID       DeliveryID
+	Payload          map[string]string
 }
 
 func newDomainEvent(eventType DomainEventType, at time.Time) DomainEvent {

@@ -22,36 +22,36 @@ const (
 )
 
 type AgentResult struct {
-	ID             AgentResultID
-	TaskSessionID  TaskSessionID
-	SourceThreadID AgentThreadID
-	Summary        string
-	ChangedPaths   []string
-	EvidenceRefs   []ContentRef
-	Status         ArtifactReviewStatus
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            AgentResultID
+	SessionID     SessionID
+	SourceAgentID AgentID
+	Summary       string
+	ChangedPaths  []string
+	EvidenceRefs  []ContentRef
+	Status        ArtifactReviewStatus
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func NewAgentResult(
 	id AgentResultID,
-	sessionID TaskSessionID,
-	sourceThreadID AgentThreadID,
+	sessionID SessionID,
+	sourceAgentID AgentID,
 	summary string,
 	changedPaths []string,
 	evidenceRefs []ContentRef,
 	at time.Time,
 ) (AgentResult, error) {
 	result := AgentResult{
-		ID:             id,
-		TaskSessionID:  sessionID,
-		SourceThreadID: sourceThreadID,
-		Summary:        strings.TrimSpace(summary),
-		ChangedPaths:   cloneStrings(changedPaths),
-		EvidenceRefs:   cloneContentRefs(evidenceRefs),
-		Status:         ArtifactDraft,
-		CreatedAt:      at.UTC(),
-		UpdatedAt:      at.UTC(),
+		ID:            id,
+		SessionID:     sessionID,
+		SourceAgentID: sourceAgentID,
+		Summary:       strings.TrimSpace(summary),
+		ChangedPaths:  cloneStrings(changedPaths),
+		EvidenceRefs:  cloneContentRefs(evidenceRefs),
+		Status:        ArtifactDraft,
+		CreatedAt:     at.UTC(),
+		UpdatedAt:     at.UTC(),
 	}
 	for i := range result.ChangedPaths {
 		result.ChangedPaths[i] = strings.TrimSpace(result.ChangedPaths[i])
@@ -63,7 +63,7 @@ func NewAgentResult(
 }
 
 func (r AgentResult) Validate() error {
-	if idIsEmpty(string(r.ID)) || idIsEmpty(string(r.TaskSessionID)) || idIsEmpty(string(r.SourceThreadID)) {
+	if idIsEmpty(string(r.ID)) || idIsEmpty(string(r.SessionID)) || idIsEmpty(string(r.SourceAgentID)) {
 		return invalidValue("agentResult", "required reference is missing")
 	}
 	if r.Summary == "" || len([]byte(r.Summary)) > MaxArtifactSummaryBytes {
@@ -94,8 +94,8 @@ func (r *AgentResult) Submit(at time.Time) (DomainEvent, error) {
 		&r.UpdatedAt,
 		ArtifactDraft,
 		at,
-		r.TaskSessionID,
-		r.SourceThreadID,
+		r.SessionID,
+		r.SourceAgentID,
 		"agent_result",
 		r.ID.String(),
 	)
@@ -107,8 +107,8 @@ func (r *AgentResult) Approve(at time.Time) (DomainEvent, error) {
 		&r.UpdatedAt,
 		r.Status,
 		at,
-		r.TaskSessionID,
-		r.SourceThreadID,
+		r.SessionID,
+		r.SourceAgentID,
 		"agent_result",
 		r.ID.String(),
 	)
@@ -120,8 +120,8 @@ func (r *AgentResult) Reject(at time.Time) (DomainEvent, error) {
 		&r.UpdatedAt,
 		r.Status,
 		at,
-		r.TaskSessionID,
-		r.SourceThreadID,
+		r.SessionID,
+		r.SourceAgentID,
 		"agent_result",
 		r.ID.String(),
 	)
@@ -135,32 +135,32 @@ func (r AgentResult) Snapshot() AgentResult {
 }
 
 type Briefing struct {
-	ID             BriefingID
-	TaskSessionID  TaskSessionID
-	SourceThreadID AgentThreadID
-	TargetThreadID AgentThreadID
-	Body           string
-	Status         ArtifactReviewStatus
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            BriefingID
+	SessionID     SessionID
+	SourceAgentID AgentID
+	TargetAgentID AgentID
+	Body          string
+	Status        ArtifactReviewStatus
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func NewBriefing(
 	id BriefingID,
-	sessionID TaskSessionID,
-	sourceThreadID, targetThreadID AgentThreadID,
+	sessionID SessionID,
+	sourceAgentID, targetAgentID AgentID,
 	body string,
 	at time.Time,
 ) (Briefing, error) {
 	briefing := Briefing{
-		ID:             id,
-		TaskSessionID:  sessionID,
-		SourceThreadID: sourceThreadID,
-		TargetThreadID: targetThreadID,
-		Body:           strings.TrimSpace(body),
-		Status:         ArtifactDraft,
-		CreatedAt:      at.UTC(),
-		UpdatedAt:      at.UTC(),
+		ID:            id,
+		SessionID:     sessionID,
+		SourceAgentID: sourceAgentID,
+		TargetAgentID: targetAgentID,
+		Body:          strings.TrimSpace(body),
+		Status:        ArtifactDraft,
+		CreatedAt:     at.UTC(),
+		UpdatedAt:     at.UTC(),
 	}
 	if err := briefing.Validate(); err != nil {
 		return Briefing{}, err
@@ -169,8 +169,8 @@ func NewBriefing(
 }
 
 func (b Briefing) Validate() error {
-	if idIsEmpty(string(b.ID)) || idIsEmpty(string(b.TaskSessionID)) || idIsEmpty(string(b.SourceThreadID)) ||
-		idIsEmpty(string(b.TargetThreadID)) {
+	if idIsEmpty(string(b.ID)) || idIsEmpty(string(b.SessionID)) || idIsEmpty(string(b.SourceAgentID)) ||
+		idIsEmpty(string(b.TargetAgentID)) {
 		return invalidValue("briefing", "required reference is missing")
 	}
 	if b.Body == "" || len([]byte(b.Body)) > MaxBriefingBodyBytes {
@@ -188,8 +188,8 @@ func (b *Briefing) Submit(at time.Time) (DomainEvent, error) {
 		&b.UpdatedAt,
 		ArtifactDraft,
 		at,
-		b.TaskSessionID,
-		b.SourceThreadID,
+		b.SessionID,
+		b.SourceAgentID,
 		"briefing",
 		b.ID.String(),
 	)
@@ -201,13 +201,13 @@ func (b *Briefing) Approve(at time.Time) (DomainEvent, error) {
 		&b.UpdatedAt,
 		b.Status,
 		at,
-		b.TaskSessionID,
-		b.SourceThreadID,
+		b.SessionID,
+		b.SourceAgentID,
 		"briefing",
 		b.ID.String(),
 	)
 	if err == nil {
-		event.Payload["targetThreadId"] = b.TargetThreadID.String()
+		event.Payload["targetAgentId"] = b.TargetAgentID.String()
 	}
 	return event, err
 }
@@ -218,8 +218,8 @@ func (b *Briefing) Reject(at time.Time) (DomainEvent, error) {
 		&b.UpdatedAt,
 		b.Status,
 		at,
-		b.TaskSessionID,
-		b.SourceThreadID,
+		b.SessionID,
+		b.SourceAgentID,
 		"briefing",
 		b.ID.String(),
 	)
@@ -227,103 +227,13 @@ func (b *Briefing) Reject(at time.Time) (DomainEvent, error) {
 
 func (b Briefing) Snapshot() Briefing { return b }
 
-type DeliveryStatus string
-
-const (
-	DeliveryPending    DeliveryStatus = "pending"
-	DeliveryDelivering DeliveryStatus = "delivering"
-	DeliveryDelivered  DeliveryStatus = "delivered"
-	DeliveryFailed     DeliveryStatus = "failed"
-)
-
-type BriefingDelivery struct {
-	ID              DeliveryID
-	BriefingID      BriefingID
-	TargetThreadID  AgentThreadID
-	InjectionKey    string
-	RuntimeEntryRef string
-	Status          DeliveryStatus
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	FailureMessage  string
-}
-
-func NewBriefingDelivery(
-	id DeliveryID,
-	briefing Briefing,
-	injectionKey string,
-	at time.Time,
-) (BriefingDelivery, error) {
-	if briefing.Status != ArtifactApproved {
-		return BriefingDelivery{}, invalidValue("briefingDelivery", "only an approved briefing can be delivered")
-	}
-	delivery := BriefingDelivery{
-		ID:             id,
-		BriefingID:     briefing.ID,
-		TargetThreadID: briefing.TargetThreadID,
-		InjectionKey:   strings.TrimSpace(injectionKey),
-		Status:         DeliveryPending,
-		CreatedAt:      at.UTC(),
-		UpdatedAt:      at.UTC(),
-	}
-	if err := delivery.Validate(); err != nil {
-		return BriefingDelivery{}, err
-	}
-	return delivery, nil
-}
-
-func (d BriefingDelivery) Validate() error {
-	if idIsEmpty(string(d.ID)) || idIsEmpty(string(d.BriefingID)) || idIsEmpty(string(d.TargetThreadID)) ||
-		d.InjectionKey == "" {
-		return invalidValue("briefingDelivery", "required reference is missing")
-	}
-	if strings.ContainsAny(d.InjectionKey, "\x00\r\n") || !validDeliveryStatus(d.Status) || d.CreatedAt.IsZero() ||
-		d.UpdatedAt.IsZero() {
-		return invalidValue("briefingDelivery", "invalid key, status or timestamp")
-	}
-	return nil
-}
-
-func (d *BriefingDelivery) Begin(at time.Time) (DomainEvent, error) {
-	if d.Status != DeliveryPending {
-		return DomainEvent{}, invalidTransition("delivery", string(d.Status), string(DeliveryDelivering))
-	}
-	d.Status, d.UpdatedAt = DeliveryDelivering, at.UTC()
-	event := newDomainEvent(EventDeliveryCreated, at)
-	event.Delivery = d.ID
-	return event, nil
-}
-
-func (d *BriefingDelivery) MarkDelivered(entryRef string, at time.Time) (DomainEvent, error) {
-	if d.Status != DeliveryDelivering {
-		return DomainEvent{}, invalidTransition("delivery", string(d.Status), string(DeliveryDelivered))
-	}
-	if strings.TrimSpace(entryRef) == "" {
-		return DomainEvent{}, invalidValue("briefingDelivery.runtimeEntryRef", "runtime entry reference is required")
-	}
-	d.Status, d.RuntimeEntryRef, d.UpdatedAt = DeliveryDelivered, strings.TrimSpace(entryRef), at.UTC()
-	event := newDomainEvent(EventDeliveryDelivered, at)
-	event.Delivery = d.ID
-	return event, nil
-}
-
-func (d *BriefingDelivery) Fail(message string, at time.Time) (DomainEvent, error) {
-	if d.Status != DeliveryDelivering && d.Status != DeliveryPending {
-		return DomainEvent{}, invalidTransition("delivery", string(d.Status), string(DeliveryFailed))
-	}
-	d.Status, d.FailureMessage, d.UpdatedAt = DeliveryFailed, strings.TrimSpace(message), at.UTC()
-	event := newDomainEvent(EventDeliveryFailed, at)
-	event.Delivery = d.ID
-	return event, nil
-}
-
 func submitArtifact(
 	status *ArtifactReviewStatus,
 	updatedAt *time.Time,
 	expected ArtifactReviewStatus,
 	at time.Time,
-	sessionID TaskSessionID,
-	sourceID AgentThreadID,
+	sessionID SessionID,
+	sourceID AgentID,
 	kind, id string,
 ) (DomainEvent, error) {
 	if *status != expected {
@@ -331,7 +241,7 @@ func submitArtifact(
 	}
 	*status, *updatedAt = ArtifactPendingApproval, at.UTC()
 	event := newDomainEvent(EventArtifactSubmitted, at)
-	event.TaskSession, event.AgentThread = sessionID, sourceID
+	event.SessionID, event.AgentID = sessionID, sourceID
 	event.Payload = map[string]string{"kind": kind, "id": id}
 	return event, nil
 }
@@ -341,8 +251,8 @@ func approveArtifact(
 	updatedAt *time.Time,
 	current ArtifactReviewStatus,
 	at time.Time,
-	sessionID TaskSessionID,
-	sourceID AgentThreadID,
+	sessionID SessionID,
+	sourceID AgentID,
 	kind, id string,
 ) (DomainEvent, error) {
 	if current != ArtifactPendingApproval {
@@ -350,7 +260,7 @@ func approveArtifact(
 	}
 	*status, *updatedAt = ArtifactApproved, at.UTC()
 	event := newDomainEvent(EventArtifactApproved, at)
-	event.TaskSession, event.AgentThread = sessionID, sourceID
+	event.SessionID, event.AgentID = sessionID, sourceID
 	event.Payload = map[string]string{"kind": kind, "id": id}
 	return event, nil
 }
@@ -360,8 +270,8 @@ func rejectArtifact(
 	updatedAt *time.Time,
 	current ArtifactReviewStatus,
 	at time.Time,
-	sessionID TaskSessionID,
-	sourceID AgentThreadID,
+	sessionID SessionID,
+	sourceID AgentID,
 	kind, id string,
 ) (DomainEvent, error) {
 	if current != ArtifactPendingApproval {
@@ -369,7 +279,7 @@ func rejectArtifact(
 	}
 	*status, *updatedAt = ArtifactRejected, at.UTC()
 	event := newDomainEvent(EventArtifactRejected, at)
-	event.TaskSession, event.AgentThread = sessionID, sourceID
+	event.SessionID, event.AgentID = sessionID, sourceID
 	event.Payload = map[string]string{"kind": kind, "id": id}
 	return event, nil
 }
@@ -377,15 +287,6 @@ func rejectArtifact(
 func validArtifactStatus(status ArtifactReviewStatus) bool {
 	switch status {
 	case ArtifactDraft, ArtifactPendingApproval, ArtifactApproved, ArtifactRejected:
-		return true
-	default:
-		return false
-	}
-}
-
-func validDeliveryStatus(status DeliveryStatus) bool {
-	switch status {
-	case DeliveryPending, DeliveryDelivering, DeliveryDelivered, DeliveryFailed:
 		return true
 	default:
 		return false
