@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"praxis/internal/contracts"
+	domainfoundation "praxis/internal/core/domain/foundation"
 )
 
 type ProjectBindings struct {
@@ -24,20 +25,9 @@ func (b *ProjectBindings) ListProjects() (response []contracts.ProjectSummary, e
 	}
 	result := make([]contracts.ProjectSummary, 0, len(projects))
 	for _, project := range projects {
-		workspaces, listErr := service.ListWorkspaces(ctx, project.ID, 100)
-		if listErr != nil {
-			return nil, publicBindingError(listErr)
-		}
-		path := ""
-		for _, workspace := range workspaces {
-			if workspace.ID == project.DefaultWorkspaceID {
-				path = workspace.Path
-				break
-			}
-		}
 		result = append(result, contracts.ProjectSummary{
 			ID: project.ID.String(), Name: project.Name,
-			DefaultWorkspaceID: project.DefaultWorkspaceID.String(), Path: path,
+			DefaultWorkspaceID: project.DefaultWorkspaceID.String(), Path: project.Path,
 			State: string(project.State),
 		})
 	}
@@ -53,7 +43,7 @@ func (b *ProjectBindings) CreateProject(
 	if err != nil {
 		return contracts.CreateProjectResponse{}, err
 	}
-	result, err := service.CreateProject(ctx, request.ProjectName)
+	result, err := service.CreateProject(ctx, request.ProjectName, request.Path, domainfoundation.RequestID(request.RequestID))
 	if err != nil {
 		return contracts.CreateProjectResponse{}, publicBindingError(err)
 	}

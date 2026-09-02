@@ -5,32 +5,32 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkspace "praxis/internal/core/domain/workspace"
 	"time"
-
-	"praxis/internal/core/domain"
 )
 
-func (s *Store) GetActiveByWorkspace(ctx context.Context, workspaceID domain.WorkspaceID) (domain.WorkspaceWriteLease, error) {
+func (s *Store) GetActiveByWorkspace(ctx context.Context, workspaceID domainfoundation.WorkspaceID) (domainworkspace.WorkspaceWriteLease, error) {
 	row := executorFromContext(ctx, s.db).QueryRowContext(
 		ctx,
 		`SELECT payload FROM workspace_write_leases WHERE workspace_id = ? AND state = ?`,
 		workspaceID.String(),
-		string(domain.LeaseActive),
+		string(domainworkspace.LeaseActive),
 	)
-	value, err := decodePayload[domain.WorkspaceWriteLease](
+	value, err := decodePayload[domainworkspace.WorkspaceWriteLease](
 		row,
-		func(value domain.WorkspaceWriteLease) error { return value.Validate() },
+		func(value domainworkspace.WorkspaceWriteLease) error { return value.Validate() },
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.WorkspaceWriteLease{}, domain.ErrNotFound
+		return domainworkspace.WorkspaceWriteLease{}, domainfoundation.ErrNotFound
 	}
 	if err != nil {
-		return domain.WorkspaceWriteLease{}, fmt.Errorf("get active workspace lease: %w", err)
+		return domainworkspace.WorkspaceWriteLease{}, fmt.Errorf("get active workspace lease: %w", err)
 	}
 	return value, nil
 }
 
-func (s *Store) SaveWorkspaceLease(ctx context.Context, value domain.WorkspaceWriteLease) error {
+func (s *Store) SaveWorkspaceLease(ctx context.Context, value domainworkspace.WorkspaceWriteLease) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -61,16 +61,16 @@ func (s *Store) SaveWorkspaceLease(ctx context.Context, value domain.WorkspaceWr
 		payload,
 	)
 	if err != nil && isConstraintError(err, "workspace_write_leases.workspace_id") {
-		return fmt.Errorf("%w: %s", domain.ErrLeaseConflict, value.WorkspaceID)
+		return fmt.Errorf("%w: %s", domainfoundation.ErrLeaseConflict, value.WorkspaceID)
 	}
 	return err
 }
 
-func (s *Store) ReleaseWorkspaceLease(ctx context.Context, value domain.WorkspaceWriteLease) error {
+func (s *Store) ReleaseWorkspaceLease(ctx context.Context, value domainworkspace.WorkspaceWriteLease) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
-	if value.State != domain.LeaseReleased {
+	if value.State != domainworkspace.LeaseReleased {
 		return errors.New("workspace lease release requires a released lease")
 	}
 	payload, err := encodePayload(value)
@@ -80,11 +80,11 @@ func (s *Store) ReleaseWorkspaceLease(ctx context.Context, value domain.Workspac
 	result, err := executorFromContext(ctx, s.db).ExecContext(
 		ctx,
 		`UPDATE workspace_write_leases SET state = ?, released_at = ?, payload = ? WHERE id = ? AND state = ?`,
-		string(domain.LeaseReleased),
+		string(domainworkspace.LeaseReleased),
 		nullableTimeValue(value.ReleasedAt),
 		payload,
 		value.ID.String(),
-		string(domain.LeaseActive),
+		string(domainworkspace.LeaseActive),
 	)
 	if err != nil {
 		return fmt.Errorf("release workspace lease: %w", err)
@@ -92,20 +92,20 @@ func (s *Store) ReleaseWorkspaceLease(ctx context.Context, value domain.Workspac
 	return exactlyOne(result, "release workspace lease")
 }
 
-func (s *Store) GetWorkspaceLease(ctx context.Context, id domain.WorkspaceLeaseID) (domain.WorkspaceWriteLease, error) {
+func (s *Store) GetWorkspaceLease(ctx context.Context, id domainfoundation.WorkspaceLeaseID) (domainworkspace.WorkspaceWriteLease, error) {
 	row := executorFromContext(
 		ctx,
 		s.db,
 	).QueryRowContext(ctx, `SELECT payload FROM workspace_write_leases WHERE id = ?`, id.String())
-	value, err := decodePayload[domain.WorkspaceWriteLease](
+	value, err := decodePayload[domainworkspace.WorkspaceWriteLease](
 		row,
-		func(value domain.WorkspaceWriteLease) error { return value.Validate() },
+		func(value domainworkspace.WorkspaceWriteLease) error { return value.Validate() },
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.WorkspaceWriteLease{}, domain.ErrNotFound
+		return domainworkspace.WorkspaceWriteLease{}, domainfoundation.ErrNotFound
 	}
 	if err != nil {
-		return domain.WorkspaceWriteLease{}, fmt.Errorf("get workspace lease: %w", err)
+		return domainworkspace.WorkspaceWriteLease{}, fmt.Errorf("get workspace lease: %w", err)
 	}
 	return value, nil
 }
@@ -114,15 +114,15 @@ type WorkspaceLeaseRepository struct{ store *Store }
 
 func (r WorkspaceLeaseRepository) GetActiveByWorkspace(
 	ctx context.Context,
-	workspaceID domain.WorkspaceID,
-) (domain.WorkspaceWriteLease, error) {
+	workspaceID domainfoundation.WorkspaceID,
+) (domainworkspace.WorkspaceWriteLease, error) {
 	return r.store.GetActiveByWorkspace(ctx, workspaceID)
 }
 
-func (r WorkspaceLeaseRepository) Save(ctx context.Context, value domain.WorkspaceWriteLease) error {
+func (r WorkspaceLeaseRepository) Save(ctx context.Context, value domainworkspace.WorkspaceWriteLease) error {
 	return r.store.SaveWorkspaceLease(ctx, value)
 }
 
-func (r WorkspaceLeaseRepository) Release(ctx context.Context, value domain.WorkspaceWriteLease) error {
+func (r WorkspaceLeaseRepository) Release(ctx context.Context, value domainworkspace.WorkspaceWriteLease) error {
 	return r.store.ReleaseWorkspaceLease(ctx, value)
 }

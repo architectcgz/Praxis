@@ -4,6 +4,7 @@ import type { ModelConfigDocument, ModelOption, SaveModelConfigResponse } from '
 import type { CreateProjectRequest, CreateProjectResponse, ProjectSummary } from './projects'
 import type { CreateSessionRequest, CreateSessionResponse, SessionSnapshot, SessionSummary } from './sessions'
 import type { HealthSnapshot } from './system'
+import type { EventSnapshot } from './events'
 
 type SystemBinding = {
     Readiness(): Promise<HealthSnapshot>
@@ -26,6 +27,12 @@ type AgentBinding = {
     ListAgentHistory(agentID: string): Promise<AgentHistoryItem[]>
 }
 
+type EventBinding = {
+    ListSessionEvents(sessionID: string, after: string, limit: number): Promise<EventSnapshot[]>
+    ListAgentEvents(agentID: string, after: string, limit: number): Promise<EventSnapshot[]>
+    ListExecutionEvents(executionID: string, after: string, limit: number): Promise<EventSnapshot[]>
+}
+
 type CommandBinding = {
     SendInput(request: SendInputRequest): Promise<SendInputResponse>
     RequestControl(request: ControlRequest): Promise<ControlResponse>
@@ -35,6 +42,8 @@ type ModelBinding = {
     ListModels(): Promise<ModelOption[]>
     GetModelConfig(): Promise<ModelConfigDocument>
     SaveModelConfig(request: Omit<ModelConfigDocument, 'profileNames'>): Promise<SaveModelConfigResponse>
+    SetProviderKey(providerId: string, value: string): Promise<void>
+    ClearProviderKey(providerId: string): Promise<void>
     ListProviderModels(providerID: string): Promise<string[]>
 }
 
@@ -50,6 +59,7 @@ type WailsBindings = {
     ProjectBindings?: ProjectBinding
     SessionBindings?: SessionBinding
     AgentBindings?: AgentBinding
+    EventBindings?: EventBinding
     CommandBindings?: CommandBinding
     ModelBindings?: ModelBinding
 }
@@ -82,6 +92,7 @@ export function isBindingAvailable() {
         bindings.ProjectBindings &&
         bindings.SessionBindings &&
         bindings.AgentBindings &&
+        bindings.EventBindings &&
         bindings.CommandBindings &&
         bindings.ModelBindings,
     )
@@ -109,4 +120,8 @@ export function getCommandBinding() {
 
 export function getModelBinding() {
     return requireBinding(bindingNamespace().ModelBindings)
+}
+
+export function getEventBinding() {
+    return requireBinding(bindingNamespace().EventBindings)
 }

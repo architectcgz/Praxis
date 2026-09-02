@@ -25,7 +25,6 @@ type SessionSnapshot struct {
 	Goal        string          `json:"goal"`
 	CreatedAt   time.Time       `json:"createdAt"`
 	UpdatedAt   time.Time       `json:"updatedAt"`
-	Groups      []GroupSnapshot `json:"groups"`
 	Agents      []AgentSnapshot `json:"agents"`
 }
 
@@ -40,6 +39,8 @@ type SessionSummary struct {
 
 type CreateProjectRequest struct {
 	ProjectName string `json:"projectName"`
+	Path        string `json:"path"`
+	RequestID   string `json:"requestId"`
 }
 
 type CreateProjectResponse struct {
@@ -61,6 +62,7 @@ type CreateSessionRequest struct {
 	ProjectID   string `json:"projectId"`
 	WorkspaceID string `json:"workspaceId"`
 	Goal        string `json:"goal"`
+	RequestID   string `json:"requestId"`
 }
 
 type CreateSessionResponse struct {
@@ -71,24 +73,18 @@ type CreateSessionResponse struct {
 	Goal        string `json:"goal"`
 }
 
-type GroupSnapshot struct {
-	ID             string `json:"id"`
-	PrimaryAgentID string `json:"primaryAgentId"`
-	MaxConcurrent  int    `json:"maxConcurrent"`
-}
-
 type AgentSnapshot struct {
-	ID                string              `json:"id"`
-	SessionID         string              `json:"sessionId"`
-	GroupID           string              `json:"groupId"`
-	Profile           string              `json:"profile"`
-	State             string              `json:"state"`
-	CurrentExecution  string              `json:"currentExecutionId"`
-	ExecutionIDs      []string            `json:"executionIds"`
-	Executions        []ExecutionSnapshot `json:"executions"`
-	WaitConditionIDs  []string            `json:"waitConditionIds"`
-	DeliveryIDs       []string            `json:"deliveryIds"`
-	ControlRequestIDs []string            `json:"controlRequestIds"`
+	ID                     string              `json:"id"`
+	SessionID              string              `json:"sessionId"`
+	SecurityPolicyRevision uint64              `json:"securityPolicyRevision"`
+	Profile                string              `json:"profile"`
+	State                  string              `json:"state"`
+	CurrentExecution       string              `json:"currentExecutionId"`
+	ExecutionIDs           []string            `json:"executionIds"`
+	Executions             []ExecutionSnapshot `json:"executions"`
+	WaitConditionIDs       []string            `json:"waitConditionIds"`
+	DeliveryIDs            []string            `json:"deliveryIds"`
+	ControlRequestIDs      []string            `json:"controlRequestIds"`
 }
 
 // ExecutionSnapshot exposes the durable lifecycle and safe failure code of
@@ -120,6 +116,16 @@ type AgentHistoryItem struct {
 	Execution *ExecutionSnapshot `json:"execution,omitempty"`
 }
 
+type EventSnapshot struct {
+	ID          string            `json:"id"`
+	Type        string            `json:"type"`
+	OccurredAt  time.Time         `json:"occurredAt"`
+	SessionID   string            `json:"sessionId,omitempty"`
+	AgentID     string            `json:"agentId,omitempty"`
+	ExecutionID string            `json:"executionId,omitempty"`
+	Payload     map[string]string `json:"payload,omitempty"`
+}
+
 // ReasoningOption is the model-declared reasoning capability presented by the
 // frontend. It never contains provider credentials or endpoint details.
 type ReasoningOption struct {
@@ -137,14 +143,13 @@ type ModelOption struct {
 	DefaultProfiles []string        `json:"defaultProfiles"`
 }
 
-// ProviderConfigOption carries every field the settings UI needs to edit a
-// provider, including the locally configured API key.
+// ProviderConfigOption carries editable provider metadata and secret status.
 type ProviderConfigOption struct {
 	ID           string `json:"id"`
 	ProviderName string `json:"providerName"`
 	BaseURL      string `json:"baseURL"`
 	ProxyURL     string `json:"proxyURL"`
-	APIKey       string `json:"apiKey"`
+	HasAPIKey    bool   `json:"hasAPIKey"`
 }
 
 // ModelConfigOption carries every field the settings UI needs to edit a model.
@@ -190,16 +195,13 @@ type ModelReference struct {
 }
 
 type SendInputRequest struct {
-	SessionID    string `json:"sessionId"`
-	AgentID      string `json:"agentId"`
-	RequestID    string `json:"requestId"`
-	Content      string `json:"content"`
-	ProviderID   string `json:"providerId"`
-	ModelID      string `json:"modelId"`
-	Reasoning    string `json:"reasoning"`
-	SandboxMode  string `json:"sandboxMode"`
-	ApprovalMode string `json:"approvalMode"`
-	Revision     string `json:"revision"`
+	SessionID  string `json:"sessionId"`
+	AgentID    string `json:"agentId"`
+	RequestID  string `json:"requestId"`
+	Content    string `json:"content"`
+	ProviderID string `json:"providerId"`
+	ModelID    string `json:"modelId"`
+	Reasoning  string `json:"reasoning"`
 }
 
 type SendInputResponse struct {
@@ -209,18 +211,15 @@ type SendInputResponse struct {
 }
 
 type ResumeRequest struct {
-	AgentID      string `json:"agentId"`
-	RequestID    string `json:"requestId"`
-	Content      string `json:"content"`
-	SandboxMode  string `json:"sandboxMode"`
-	ApprovalMode string `json:"approvalMode"`
-	Revision     string `json:"revision"`
+	AgentID   string `json:"agentId"`
+	RequestID string `json:"requestId"`
+	Content   string `json:"content"`
 }
 
 type ControlRequest struct {
-	ID      string `json:"id"`
-	AgentID string `json:"agentId"`
-	Kind    string `json:"kind"`
+	RequestID string `json:"requestId"`
+	AgentID   string `json:"agentId"`
+	Kind      string `json:"kind"`
 }
 
 type ControlResponse struct {
@@ -234,12 +233,10 @@ type ControlResponse struct {
 }
 
 type QueueWorkRequest struct {
-	ID           string `json:"id"`
-	AgentID      string `json:"agentId"`
-	Prompt       string `json:"prompt"`
-	SandboxMode  string `json:"sandboxMode"`
-	ApprovalMode string `json:"approvalMode"`
-	Revision     string `json:"revision"`
+	ID        string `json:"id"`
+	RequestID string `json:"requestId"`
+	AgentID   string `json:"agentId"`
+	Prompt    string `json:"prompt"`
 }
 
 type QueueWorkResponse struct {

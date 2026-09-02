@@ -2,6 +2,7 @@
 
 .session-panel {
     --session-content-width: 920px;
+    --session-content-padding: clamp(16px, 3vw, 40px);
 
     display: flex;
     flex-direction: column;
@@ -29,6 +30,51 @@
     flex: 1 1 auto;
     min-height: 0;
     margin-top: 0;
+    position: relative;
+}
+
+.scroll-to-bottom-button {
+    position: absolute;
+    bottom: 90px;
+    right: max(24px, var(--session-content-padding));
+    z-index: var(--z-raised);
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--ink-secondary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+    transition: all var(--motion-duration) ease;
+    animation: fade-slide-in 0.2s ease-out;
+}
+
+.scroll-to-bottom-button:hover {
+    background: #fff;
+    color: var(--blue-strong);
+    border-color: var(--blue-strong);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
+
+.scroll-to-bottom-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+@keyframes fade-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .message-thread {
@@ -44,7 +90,7 @@
     overflow: auto;
     overflow-anchor: none;
     overflow-x: hidden;
-    padding: 4px 14px 10px 2px;
+    padding: 4px var(--session-content-padding) 10px var(--session-content-padding);
     scrollbar-color: rgba(60, 60, 67, 0.24) transparent;
     scrollbar-gutter: stable;
     scrollbar-width: auto;
@@ -70,8 +116,9 @@
 }
 
 .message {
-    width: min(100%, var(--session-content-width));
-    padding: 15px 2px;
+    width: 100%;
+    max-width: var(--session-content-width);
+    padding: 15px 0;
     border: 0;
     background: transparent;
     justify-self: center;
@@ -82,7 +129,8 @@
 }
 
 .message-empty {
-    width: min(100%, var(--session-content-width));
+    width: 100%;
+    max-width: var(--session-content-width);
     justify-self: center;
 }
 
@@ -410,7 +458,7 @@
     align-items: center;
     justify-content: center;
     margin: 0;
-    padding: 48px 24px;
+    padding: clamp(24px, 5vh, 48px) var(--session-content-padding);
     text-align: center;
 }
 
@@ -457,8 +505,8 @@
     align-items: center;
     justify-content: center;
     min-height: 100%;
-    padding: 64px 32px;
-    gap: 48px;
+    padding: clamp(32px, 8vh, 64px) var(--session-content-padding);
+    gap: clamp(32px, 6vh, 48px);
     animation: session-empty-fade-in 0.4s ease-out;
 }
 
@@ -664,9 +712,8 @@
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
-    .session-empty-container {
-        padding: 48px 24px;
-        gap: 36px;
+    .session-panel {
+        --session-content-padding: 20px;
     }
 
     .session-empty-icon-wrapper {
@@ -706,5 +753,10 @@
         flex-wrap: wrap;
         justify-content: center;
         text-align: center;
+    }
+
+    .scroll-to-bottom-button {
+        right: 16px;
+        bottom: 80px;
     }
 }

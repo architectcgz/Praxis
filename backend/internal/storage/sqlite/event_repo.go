@@ -3,11 +3,14 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"time"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
+	"praxis/internal/core/persistence"
 )
 
-func (s *Store) AppendEvent(ctx context.Context, value domain.DomainEvent) error {
+func (s *Store) AppendEvent(ctx context.Context, value domainfoundation.DomainEvent) error {
 	if value.ID == "" || value.Type == "" || value.OccurredAt.IsZero() {
 		return errors.New("domain event identity, type and occurrence time are required")
 	}
@@ -36,6 +39,35 @@ func (s *Store) AppendEvent(ctx context.Context, value domain.DomainEvent) error
 
 type EventRepository struct{ store *Store }
 
-func (r EventRepository) Append(ctx context.Context, value domain.DomainEvent) error {
+func (r EventRepository) Append(ctx context.Context, value domainfoundation.DomainEvent) error {
 	return r.store.AppendEvent(ctx, value)
 }
+
+func (r EventRepository) ListBySession(ctx context.Context, id domainfoundation.SessionID, after time.Time, limit int) ([]domainfoundation.DomainEvent, error) {
+	return r.list(ctx, "session_id", id.String(), after, limit)
+}
+
+func (r EventRepository) ListByAgent(ctx context.Context, id domainfoundation.AgentID, after time.Time, limit int) ([]domainfoundation.DomainEvent, error) {
+	return r.list(ctx, "agent_id", id.String(), after, limit)
+}
+
+func (r EventRepository) ListByExecution(ctx context.Context, id domainfoundation.AgentExecutionID, after time.Time, limit int) ([]domainfoundation.DomainEvent, error) {
+	return r.list(ctx, "execution_id", id.String(), after, limit)
+}
+
+func (r EventRepository) list(ctx context.Context, column, id string, after time.Time, limit int) ([]domainfoundation.DomainEvent, error) {
+	cutoff := ""
+	if !after.IsZero() {
+		cutoff = after.UTC().Format(time.RFC3339Nano)
+	}
+	return listTargetPayloads[domainfoundation.DomainEvent](ctx, r.store,
+		`SELECT payload FROM orchestration_events WHERE `+column+` = ? AND occurred_at > ? ORDER BY occurred_at, id LIMIT ?`,
+		[]any{id, cutoff, targetLimit(limit)}, "orchestration events", func(value domainfoundation.DomainEvent) error {
+			if value.ID == "" || value.Type == "" || value.OccurredAt.IsZero() {
+				return errors.New("invalid stored orchestration event")
+			}
+			return nil
+		})
+}
+
+var _ persistence.EventQueryRepository = EventRepository{}

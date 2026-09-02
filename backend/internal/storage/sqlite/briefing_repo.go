@@ -3,15 +3,16 @@ package sqlite
 import (
 	"context"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
 )
 
-func (s *Store) GetBriefing(ctx context.Context, id domain.BriefingID) (domain.Briefing, error) {
-	var value domain.Briefing
+func (s *Store) GetBriefing(ctx context.Context, id domainfoundation.BriefingID) (domainworkflow.Briefing, error) {
+	var value domainworkflow.Briefing
 	return value, s.loadPayload(ctx, "briefings", id.String(), &value, func() error { return value.Validate() })
 }
 
-func (s *Store) SaveBriefing(ctx context.Context, value domain.Briefing) error {
+func (s *Store) SaveBriefing(ctx context.Context, value domainworkflow.Briefing) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -41,10 +42,10 @@ func (s *Store) SaveBriefing(ctx context.Context, value domain.Briefing) error {
 
 type BriefingRepository struct{ store *Store }
 
-func (r BriefingRepository) Get(ctx context.Context, id domain.BriefingID) (domain.Briefing, error) {
+func (r BriefingRepository) Get(ctx context.Context, id domainfoundation.BriefingID) (domainworkflow.Briefing, error) {
 	return r.store.GetBriefing(ctx, id)
 }
 
-func (r BriefingRepository) Save(ctx context.Context, value domain.Briefing) error {
+func (r BriefingRepository) Save(ctx context.Context, value domainworkflow.Briefing) error {
 	return r.store.SaveBriefing(ctx, value)
 }

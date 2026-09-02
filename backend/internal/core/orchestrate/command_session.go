@@ -2,369 +2,311 @@ package orchestrate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	domaincontext "praxis/internal/core/domain/context"
 	"strings"
 
-	"praxis/internal/core/domain"
+	domainagent "praxis/internal/core/domain/agent"
+	domaincommand "praxis/internal/core/domain/command"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainproject "praxis/internal/core/domain/project"
+	domainsecurity "praxis/internal/core/domain/security"
+	domainsession "praxis/internal/core/domain/session"
+	domainworkspace "praxis/internal/core/domain/workspace"
 )
 
-// CreateSessionRequest identifies the project and workspace explicitly. A
-// caller may provide the immutable input aggregates; when omitted, the
-// orchestrator creates the standard primary-agent inputs.
 type CreateSessionRequest struct {
-	SessionID       domain.SessionID
-	GroupID         domain.AgentGroupID
-	AgentID         domain.AgentID
-	ProjectID       domain.ProjectID
-	WorkspaceID     domain.WorkspaceID
-	Goal            string
-	MaxConcurrent   int
-	Profile         domain.AgentProfile
-	TaskPacket      domain.TaskPacket
-	ContextManifest domain.ContextManifest
-	Grant           domain.CapabilityGrant
+	RequestID   domainfoundation.RequestID
+	SessionID   domainfoundation.SessionID
+	AgentID     domainfoundation.AgentID
+	ProjectID   domainfoundation.ProjectID
+	WorkspaceID domainfoundation.WorkspaceID
+	Goal        string
+	Profile     domainsecurity.AgentProfile
+	Policy      domainsecurity.AgentSecurityPolicy
 }
 
 type CreateSessionResult struct {
-	Session SessionSnapshot
-	Group   domain.AgentGroup
-	Agent   domain.Agent
+	Session domainsession.Session
+	Agent   domainagent.Agent
 }
 
-// CreateProjectRequest provisions one Project and its default Workspace.
 type CreateProjectRequest struct {
-	ProjectID   domain.ProjectID
-	WorkspaceID domain.WorkspaceID
+	RequestID   domainfoundation.RequestID
+	ProjectID   domainfoundation.ProjectID
+	WorkspaceID domainfoundation.WorkspaceID
 	Name        string
 	Path        string
 }
 
 type CreateProjectResult struct {
-	Project   domain.Project
-	Workspace domain.Workspace
+	Project   domainproject.Project
+	Workspace domainworkspace.Workspace
 }
 
 type SessionSnapshot struct {
-	ID          domain.SessionID
-	ProjectID   domain.ProjectID
-	WorkspaceID domain.WorkspaceID
+	ID          domainfoundation.SessionID
+	ProjectID   domainfoundation.ProjectID
+	WorkspaceID domainfoundation.WorkspaceID
 	Goal        string
 }
 
-func (o *AgentOrchestrator) CreateProject(
-	ctx context.Context,
-	request CreateProjectRequest,
-) (CreateProjectResult, error) {
+func (o *AgentOrchestrator) CreateProject(ctx context.Context, request CreateProjectRequest) (CreateProjectResult, error) {
 	if ctx == nil {
 		return CreateProjectResult{}, errors.New("create project context is required")
 	}
 	if !o.Ready() {
 		return CreateProjectResult{}, commandError(CommandErrorNotReady)
 	}
-	if request.ProjectID == "" {
-		request.ProjectID = domain.NewProjectID()
+	if request.RequestID == "" {
+		return CreateProjectResult{}, commandError(CommandErrorInvalidRequest)
 	}
-	if request.WorkspaceID == "" {
-		request.WorkspaceID = domain.NewWorkspaceID()
-	}
-	name := strings.TrimSpace(request.Name)
-	path := filepath.Clean(strings.TrimSpace(request.Path))
-	if name == "" || strings.ContainsAny(name, "\x00\r\n") || !absolutePath(path) {
+	request.Name = strings.TrimSpace(request.Name)
+	request.Path = filepath.Clean(strings.TrimSpace(request.Path))
+	if request.Name == "" || strings.ContainsAny(request.Name, "\x00\r\n") || !absolutePath(request.Path) {
 		return CreateProjectResult{}, commandError(CommandErrorProjectWorkspaceInvalid)
 	}
-	at := o.clock.Now().UTC()
-	workspace, err := domain.NewWorkspace(
-		request.WorkspaceID,
-		request.ProjectID,
-		domain.WorkspaceProjectRoot,
-		path,
-		at,
-	)
-	if err != nil {
-		return CreateProjectResult{}, fmt.Errorf("create workspace: %w", err)
-	}
-	project, err := domain.NewProject(request.ProjectID, name, workspace.ID, at)
-	if err != nil {
-		return CreateProjectResult{}, fmt.Errorf("create project: %w", err)
-	}
-	if err := o.tx.InTx(ctx, func(txCtx context.Context) error {
+	digest := commandArgumentsDigest(struct {
+		ProjectID   domainfoundation.ProjectID
+		WorkspaceID domainfoundation.WorkspaceID
+		Name        string
+		Path        string
+	}{request.ProjectID, request.WorkspaceID, request.Name, request.Path})
+	var result CreateProjectResult
+	err := o.tx.InTx(ctx, func(txCtx context.Context) error {
+		if receipt, found, err := commandReceipt(txCtx, o.commandReceipts, request.RequestID, "create_project", digest); err != nil {
+			return err
+		} else if found {
+			var ids struct {
+				ProjectID   domainfoundation.ProjectID   `json:"projectId"`
+				WorkspaceID domainfoundation.WorkspaceID `json:"workspaceId"`
+			}
+			if err := json.Unmarshal(receipt.ResultPayload, &ids); err != nil {
+				return fmt.Errorf("decode create project receipt: %w", err)
+			}
+			project, err := o.projects.Get(txCtx, domainfoundation.ProjectID(ids.ProjectID))
+			if err != nil {
+				return err
+			}
+			workspace, err := o.workspaces.Get(txCtx, domainfoundation.WorkspaceID(ids.WorkspaceID))
+			if err != nil {
+				return err
+			}
+			result = CreateProjectResult{Project: project, Workspace: workspace}
+			return nil
+		}
+		if request.ProjectID == "" {
+			request.ProjectID = domainfoundation.ProjectID(o.newID("project"))
+		}
+		if request.WorkspaceID == "" {
+			request.WorkspaceID = domainfoundation.WorkspaceID(o.newID("workspace"))
+		}
+		at := o.clock.Now().UTC()
+		workspace, err := domainworkspace.NewWorkspace(request.WorkspaceID, request.ProjectID, domainworkspace.WorkspaceProjectRoot, request.Path, at)
+		if err != nil {
+			return fmt.Errorf("create workspace: %w", err)
+		}
+		project, err := domainproject.NewProject(request.ProjectID, request.Name, request.Path, workspace.ID, at)
+		if err != nil {
+			return fmt.Errorf("create project: %w", err)
+		}
 		if err := o.projects.Save(txCtx, project); err != nil {
 			return err
 		}
-		return o.workspaces.Save(txCtx, workspace)
-	}); err != nil {
-		return CreateProjectResult{}, err
-	}
-	return CreateProjectResult{Project: project, Workspace: workspace}, nil
+		if err := o.workspaces.Save(txCtx, workspace); err != nil {
+			return err
+		}
+		event := o.newEvent(domainfoundation.EventProjectCreated, at)
+		event.SessionID = ""
+		event.Payload = map[string]string{"projectId": project.ID.String(), "workspaceId": workspace.ID.String()}
+		if err := o.appendEvent(txCtx, event); err != nil {
+			return err
+		}
+		result = CreateProjectResult{Project: project, Workspace: workspace}
+		payload, _ := json.Marshal(struct {
+			ProjectID   domainfoundation.ProjectID   `json:"projectId"`
+			WorkspaceID domainfoundation.WorkspaceID `json:"workspaceId"`
+		}{project.ID, workspace.ID})
+		if err := o.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
+			RequestID: request.RequestID, Command: "create_project", ArgumentsDigest: digest,
+			ResultPayload: payload, CreatedAt: at,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	return result, err
 }
 
-// CreateSession creates one independent Session and its initial AgentGroup and
-// primary Agent. Project and workspace ownership is checked in the same
-// transaction as the new records.
-func (o *AgentOrchestrator) CreateSession(
-	ctx context.Context,
-	request CreateSessionRequest,
-) (CreateSessionResult, error) {
+func (o *AgentOrchestrator) CreateSession(ctx context.Context, request CreateSessionRequest) (CreateSessionResult, error) {
 	if ctx == nil {
 		return CreateSessionResult{}, errors.New("create session context is required")
 	}
 	if !o.Ready() {
 		return CreateSessionResult{}, commandError(CommandErrorNotReady)
 	}
-	if request.SessionID == "" {
-		request.SessionID = domain.NewSessionID()
-	}
-	if request.GroupID == "" {
-		request.GroupID = domain.NewAgentGroupID()
-	}
-	if request.AgentID == "" {
-		request.AgentID = domain.NewAgentID()
-	}
-	if request.MaxConcurrent < 1 {
-		request.MaxConcurrent = 1
-	}
-	if request.Profile == "" {
-		request.Profile = domain.ProfilePrimary
-	}
-	if request.ProjectID == "" || request.WorkspaceID == "" || !request.Profile.Valid() {
+	if request.RequestID == "" || request.ProjectID == "" || request.WorkspaceID == "" {
 		return CreateSessionResult{}, commandError(CommandErrorInvalidRequest)
 	}
-	result := CreateSessionResult{}
+	if request.Profile == "" {
+		request.Profile = domainsecurity.ProfilePrimary
+	}
+	if !request.Profile.Valid() {
+		return CreateSessionResult{}, commandError(CommandErrorInvalidRequest)
+	}
+	digest := commandArgumentsDigest(struct {
+		SessionID   domainfoundation.SessionID
+		AgentID     domainfoundation.AgentID
+		ProjectID   domainfoundation.ProjectID
+		WorkspaceID domainfoundation.WorkspaceID
+		Goal        string
+		Profile     domainsecurity.AgentProfile
+	}{request.SessionID, request.AgentID, request.ProjectID, request.WorkspaceID, strings.TrimSpace(request.Goal), request.Profile})
+	var result CreateSessionResult
 	err := o.tx.InTx(ctx, func(txCtx context.Context) error {
-		project, err := o.projects.Get(txCtx, request.ProjectID)
-		if err != nil {
+		if receipt, found, err := commandReceipt(txCtx, o.commandReceipts, request.RequestID, "create_session", digest); err != nil {
 			return err
+		} else if found {
+			var ids struct{ SessionID, AgentID string }
+			if err := json.Unmarshal(receipt.ResultPayload, &ids); err != nil {
+				return fmt.Errorf("decode create session receipt: %w", err)
+			}
+			session, err := o.sessions.Get(txCtx, domainfoundation.SessionID(ids.SessionID))
+			if err != nil {
+				return err
+			}
+			agent, err := o.agents.Get(txCtx, domainfoundation.AgentID(ids.AgentID))
+			if err != nil {
+				return err
+			}
+			result = CreateSessionResult{Session: session, Agent: agent}
+			return nil
 		}
-		if project.State != domain.ProjectActive {
+		project, err := o.projects.Get(txCtx, request.ProjectID)
+		if err != nil || project.State != domainproject.ProjectActive {
+			if err != nil {
+				return err
+			}
 			return commandError(CommandErrorProjectWorkspaceInvalid)
 		}
 		workspace, err := o.workspaces.Get(txCtx, request.WorkspaceID)
 		if err != nil {
 			return err
 		}
-		if workspace.ProjectID != project.ID || workspace.State != domain.WorkspaceReady {
+		if workspace.ProjectID != project.ID || workspace.State != domainworkspace.WorkspaceReady {
 			return commandError(CommandErrorProjectWorkspaceInvalid)
 		}
-		packet, manifest, grant, err := o.sessionInputs(request, workspace)
-		if err != nil {
-			return err
+		if request.SessionID == "" {
+			request.SessionID = domainfoundation.SessionID(o.newID("session"))
+		}
+		if request.AgentID == "" {
+			request.AgentID = domainfoundation.AgentID(o.newID("agent"))
 		}
 		at := o.clock.Now().UTC()
-		session, err := domain.NewSession(request.SessionID, project.ID, workspace.ID, request.Goal, at)
-		if err != nil {
-			return fmt.Errorf("create session: %w", err)
-		}
-		group, err := domain.NewAgentGroup(request.GroupID, session.ID, request.MaxConcurrent, at)
+		session, err := domainsession.NewSession(request.SessionID, project.ID, workspace.ID, request.Goal, at)
 		if err != nil {
 			return err
 		}
-		agent, err := domain.NewAgent(
-			request.AgentID,
-			session.ID,
-			group.ID,
-			request.Profile,
-			packet.ID,
-			manifest.ID,
-			grant.ID,
-			at,
-		)
+		policy := request.Policy
+		if policy.Revision == 0 {
+			var policyErr error
+			policy, policyErr = o.defaultAgentSecurityPolicy(workspace, request.Profile)
+			if policyErr != nil {
+				return policyErr
+			}
+		}
+		agent, err := domainagent.NewAgent(request.AgentID, session.ID, request.Profile, policy.Revision, at)
 		if err != nil {
 			return err
 		}
-		if request.Profile == domain.ProfilePrimary {
-			if err := group.SetPrimary(agent.ID, at); err != nil {
-				return err
-			}
+		if err := o.sessions.Save(txCtx, session); err != nil {
+			return err
 		}
-		for _, save := range []func(context.Context) error{
-			func(c context.Context) error { return o.packets.Save(c, packet) },
-			func(c context.Context) error { return o.manifests.Save(c, manifest) },
-			func(c context.Context) error { return o.grants.Save(c, grant) },
-			func(c context.Context) error { return o.sessions.Save(c, session) },
-			func(c context.Context) error { return o.groups.Save(c, group) },
-			func(c context.Context) error { return o.agents.Save(c, agent) },
-		} {
-			if err := save(txCtx); err != nil {
-				return err
-			}
+		if err := o.agents.Save(txCtx, agent); err != nil {
+			return err
 		}
-		result = CreateSessionResult{
-			Session: sessionSnapshot(session),
-			Group:   group,
-			Agent:   agent,
+		if err := o.policies.Save(txCtx, agent.ID, policy); err != nil {
+			return err
+		}
+		entry, err := domaincontext.NewSessionContextEntry(session.ID, 1, domaincontext.SessionContextUserMessage, "", session.Goal, at)
+		if err != nil {
+			return err
+		}
+		if err := o.contexts.Append(txCtx, entry, 0); err != nil {
+			return err
+		}
+		sessionEvent := o.newEvent(domainfoundation.EventSessionCreated, at)
+		sessionEvent.SessionID, sessionEvent.AgentID = session.ID, agent.ID
+		if err := o.appendEvent(txCtx, sessionEvent); err != nil {
+			return err
+		}
+		agentEvent := o.newEvent(domainfoundation.EventAgentCreated, at)
+		agentEvent.SessionID, agentEvent.AgentID = session.ID, agent.ID
+		if err := o.appendEvent(txCtx, agentEvent); err != nil {
+			return err
+		}
+		result = CreateSessionResult{Session: session, Agent: agent}
+		payload, _ := json.Marshal(struct{ SessionID, AgentID string }{session.ID.String(), agent.ID.String()})
+		if err := o.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
+			RequestID: request.RequestID, Command: "create_session", ArgumentsDigest: digest,
+			ResultPayload: payload, CreatedAt: at,
+		}); err != nil {
+			return err
 		}
 		return nil
 	})
-	if err != nil {
-		return CreateSessionResult{}, err
-	}
-	return result, nil
+	return result, err
 }
 
-// CreateSessionForProject is the compact command used by the desktop binding.
-func (o *AgentOrchestrator) CreateSessionForProject(
-	ctx context.Context,
-	projectID domain.ProjectID,
-	workspaceID domain.WorkspaceID,
-	goal string,
-) (CreateSessionResult, error) {
-	return o.CreateSession(ctx, CreateSessionRequest{
-		ProjectID: projectID, WorkspaceID: workspaceID, Goal: goal,
-		Profile: domain.ProfilePrimary, MaxConcurrent: 1,
-	})
+func (o *AgentOrchestrator) CreateSessionForProject(ctx context.Context, requestID domainfoundation.RequestID, projectID domainfoundation.ProjectID, workspaceID domainfoundation.WorkspaceID, goal string) (CreateSessionResult, error) {
+	return o.CreateSession(ctx, CreateSessionRequest{RequestID: requestID, ProjectID: projectID, WorkspaceID: workspaceID, Goal: goal, Profile: domainsecurity.ProfilePrimary})
 }
 
-// EnsurePrimaryAgent repairs a session created without an agent, while
-// preserving the same project/workspace identity.
-func (o *AgentOrchestrator) EnsurePrimaryAgent(
-	ctx context.Context,
-	sessionID domain.SessionID,
-) (CreateSessionResult, error) {
+func (o *AgentOrchestrator) EnsurePrimaryAgent(ctx context.Context, sessionID domainfoundation.SessionID, requestID domainfoundation.RequestID) (CreateSessionResult, error) {
 	if ctx == nil {
 		return CreateSessionResult{}, errors.New("ensure primary agent context is required")
 	}
-	if !o.Ready() {
-		return CreateSessionResult{}, commandError(CommandErrorNotReady)
+	if !o.Ready() || requestID == "" {
+		return CreateSessionResult{}, commandError(CommandErrorInvalidRequest)
 	}
 	session, err := o.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return CreateSessionResult{}, err
 	}
-	groups, err := o.groups.ListBySession(ctx, sessionID, 100)
+	agents, err := o.agents.ListBySession(ctx, sessionID, 1)
 	if err != nil {
 		return CreateSessionResult{}, err
 	}
-	for _, group := range groups {
-		agents, listErr := o.agents.ListByGroup(ctx, group.ID, 100)
-		if listErr != nil {
-			return CreateSessionResult{}, listErr
-		}
-		if len(agents) > 0 {
-			return CreateSessionResult{Session: sessionSnapshot(session), Group: group, Agent: agents[0]}, nil
-		}
+	if len(agents) > 0 {
+		return CreateSessionResult{Session: session, Agent: agents[0]}, nil
 	}
 	workspace, err := o.workspaces.Get(ctx, session.WorkspaceID)
 	if err != nil {
 		return CreateSessionResult{}, err
 	}
-	packet, manifest, grant, err := o.sessionInputs(CreateSessionRequest{Goal: session.Goal, Profile: domain.ProfilePrimary}, workspace)
+	policy, err := o.defaultAgentSecurityPolicy(workspace, domainsecurity.ProfilePrimary)
 	if err != nil {
 		return CreateSessionResult{}, err
 	}
-	at := o.clock.Now().UTC()
-	group, err := domain.NewAgentGroup(domain.NewAgentGroupID(), session.ID, 1, at)
-	if err != nil {
-		return CreateSessionResult{}, err
-	}
-	agent, err := domain.NewAgent(domain.NewAgentID(), session.ID, group.ID, domain.ProfilePrimary, packet.ID, manifest.ID, grant.ID, at)
-	if err != nil {
-		return CreateSessionResult{}, err
-	}
-	if err := group.SetPrimary(agent.ID, at); err != nil {
-		return CreateSessionResult{}, err
-	}
-	if err := o.tx.InTx(ctx, func(txCtx context.Context) error {
-		for _, save := range []func(context.Context) error{
-			func(c context.Context) error { return o.packets.Save(c, packet) },
-			func(c context.Context) error { return o.manifests.Save(c, manifest) },
-			func(c context.Context) error { return o.grants.Save(c, grant) },
-			func(c context.Context) error { return o.groups.Save(c, group) },
-			func(c context.Context) error { return o.agents.Save(c, agent) },
-		} {
-			if err := save(txCtx); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return CreateSessionResult{}, err
-	}
-	return CreateSessionResult{Session: sessionSnapshot(session), Group: group, Agent: agent}, nil
+	return o.CreateSession(ctx, CreateSessionRequest{RequestID: requestID, SessionID: session.ID, ProjectID: session.ProjectID, WorkspaceID: session.WorkspaceID, Goal: session.Goal, Profile: domainsecurity.ProfilePrimary, Policy: policy})
 }
 
-func (o *AgentOrchestrator) sessionInputs(
-	request CreateSessionRequest,
-	workspace domain.Workspace,
-) (domain.TaskPacket, domain.ContextManifest, domain.CapabilityGrant, error) {
-	packet := request.TaskPacket
-	manifest := request.ContextManifest
-	grant := request.Grant
-	at := o.clock.Now().UTC()
-	if packet.ID == "" {
-		var err error
-		packet, err = domain.NewTaskPacket(domain.NewTaskPacketID(), strings.TrimSpace(request.Goal), nil, nil)
-		if err != nil {
-			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
-		}
+func (o *AgentOrchestrator) defaultAgentSecurityPolicy(workspace domainworkspace.Workspace, profile domainsecurity.AgentProfile) (domainsecurity.AgentSecurityPolicy, error) {
+	if o.policyFactory != nil {
+		return o.policyFactory(workspace, profile)
 	}
-	if manifest.ID == "" {
-		var err error
-		manifest, err = domain.NewContextManifest(domain.NewContextManifestID(), packet.Goal, nil, at)
-		if err != nil {
-			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
-		}
-	}
-	if grant.ID == "" {
-		if o.models == nil {
-			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, commandError(CommandErrorModelNotConfigured)
-		}
-		model, err := o.models.ResolveModel(domain.ProfilePrimary)
-		if err != nil {
-			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, fmt.Errorf("%w: %v", commandError(CommandErrorModelNotConfigured), err)
-		}
-		grant, err = domain.NewCapabilityGrant(domain.CapabilityGrantSpec{
-			ID:                    domain.NewCapabilityGrantID(),
-			WorkspaceID:           workspace.ID,
-			WorkspacePathSnapshot: workspace.Path,
-			WorkspaceRevision:     workspace.Revision,
-			AllowedTools:          primaryTools(),
-			ReadScopes:            []string{workspace.Path},
-			CanProposeDelegation:  true,
-			ResultPermissions:     []domain.ResultPermission{domain.ResultPermissionAgentResult, domain.ResultPermissionBriefing},
-			Model:                 model,
-			ContextManifestRef:    manifest.ID,
-			ApprovalSource:        domain.ApprovalSourceUser,
-		})
-		if err != nil {
-			return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
-		}
-	}
-	if err := packet.Validate(); err != nil {
-		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
-	}
-	if err := manifest.Validate(); err != nil {
-		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
-	}
-	if err := grant.Validate(); err != nil {
-		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, err
-	}
-	if grant.ContextManifestRef != manifest.ID || grant.WorkspaceID != workspace.ID ||
-		grant.WorkspacePathSnapshot != workspace.Path || grant.WorkspaceRevision != workspace.Revision {
-		return domain.TaskPacket{}, domain.ContextManifest{}, domain.CapabilityGrant{}, commandError(CommandErrorInvalidRequest)
-	}
-	return packet, manifest, grant.Snapshot(), nil
+	return domainsecurity.NewAgentSecurityPolicy(1, domainsecurity.CapabilityPolicy{
+		AllowedTools: primaryTools(), ReadScopes: []string{workspace.Path},
+	}, domainsecurity.SandboxPolicy{Mode: domainsecurity.SandboxReadOnly}, domainsecurity.ApprovalPolicy{Mode: domainsecurity.ApprovalAlwaysAsk})
 }
 
-func primaryTools() []domain.ToolName {
-	return []domain.ToolName{
-		domain.ToolReadFile,
-		domain.ToolListDir,
-		domain.ToolSearchText,
-		domain.ToolProposeDelegate,
-		domain.ToolSubmitResult,
-		domain.ToolSubmitBriefing,
-	}
-}
-
-func sessionSnapshot(session domain.Session) SessionSnapshot {
-	return SessionSnapshot{
-		ID: session.ID, ProjectID: session.ProjectID, WorkspaceID: session.WorkspaceID, Goal: session.Goal,
-	}
+func primaryTools() []domainsecurity.ToolName {
+	return []domainsecurity.ToolName{domainsecurity.ToolReadFile, domainsecurity.ToolListDir, domainsecurity.ToolSearchText, domainsecurity.ToolProposeDelegate, domainsecurity.ToolSubmitResult, domainsecurity.ToolSubmitBriefing}
 }
 
 func absolutePath(path string) bool {
-	return path != "" && path != "." && filepath.IsAbs(path) && filepath.Clean(path) == path &&
-		!strings.ContainsAny(path, "\x00\r\n")
+	return path != "" && path != "." && filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, "\x00\r\n")
 }

@@ -40,8 +40,10 @@ func main() {
 		}
 		if err := a.Attach(app.Dependencies{
 			Readiness:   application,
+			Projects:    application,
 			Sessions:    application,
 			Agents:      application,
+			Events:      application,
 			Commands:    application,
 			Models:      application,
 			ModelConfig: application,

@@ -1,7 +1,8 @@
 package agentruntime
 
 import (
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
 	coreruntime "praxis/internal/core/runtime"
 )
 
@@ -43,10 +44,10 @@ const (
 )
 
 type AgentOutputEvent struct {
-	Kind        AgentOutputEventKind    `json:"kind"`
-	AgentID     domain.AgentID          `json:"agentId"`
-	ExecutionID domain.AgentExecutionID `json:"executionId"`
-	Text        string                  `json:"text"`
+	Kind        AgentOutputEventKind              `json:"kind"`
+	AgentID     domainfoundation.AgentID          `json:"agentId"`
+	ExecutionID domainfoundation.AgentExecutionID `json:"executionId"`
+	Text        string                            `json:"text"`
 }
 
 type AgentOutputObserver func(AgentOutputEvent)

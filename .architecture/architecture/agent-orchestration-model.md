@@ -1,7 +1,7 @@
 # Agent 持久化编排模型
 
 > 本文定义命令准入、SessionContext 版本、咨询流程、AgentExecution 状态、结算和恢复。
-> 领域关系见 [`structure.md`](structure.md)，单 Agent 执行环见 [`agent-runtime-model.md`](agent-runtime-model.md)，事实源见 [`storage-architecture.md`](storage-architecture.md)。
+> 领域关系见 [`structure.md`](structure.md)，源码归属见 [`directory-structure.md`](directory-structure.md)，单 Agent 执行环见 [`agent-runtime-model.md`](agent-runtime-model.md)，事实源见 [`storage-architecture.md`](storage-architecture.md)。
 > Agent 安全策略、execution 安全快照和工具审批见 [`../sandbox.md`](../sandbox.md)。
 
 ## 1. 核心规则
@@ -17,19 +17,19 @@
 
 | 对象 | 持久化事实 | 唯一 owner |
 |---|---|---|
-| `Session` | Project 归属、生命周期、当前上下文 revision 和工作目录属性 | `AgentOrchestrator` |
-| `SessionContextEntry` | Session 共享上下文的一条追加记录 | `AgentOrchestrator` |
-| `Agent` | Session 内稳定身份、角色、Profile、安全策略、状态和 transcript 引用 | `AgentOrchestrator` |
-| `AgentExecution` | 一次执行的 start request、上下文 revision、输入快照、安全快照、状态、结果和失败码 | `AgentOrchestrator` |
-| `ToolInvocation` | execution 下的规范化工具请求、审批、状态和结果引用 | `AgentOrchestrator` |
+| `Session` | Project 归属、生命周期、当前上下文 revision 和工作目录属性 | Session application service |
+| `SessionContextEntry` | Session 共享上下文的一条追加记录 | Session application service |
+| `Agent` | Session 内稳定身份、角色、Profile、安全策略、状态和 transcript 引用 | Agent application service |
+| `AgentExecution` | 一次执行的 start request、上下文 revision、输入快照、安全快照、状态、结果和失败码 | Execution application service |
+| `ToolInvocation` | execution 下的规范化工具请求、审批、状态和结果引用 | Execution application service |
 | `ManagedProcess` | Session 下长期受控进程的来源、命令快照、状态和结算 | `ManagedProcessCoordinator` |
-| `AgentResult` / `Briefing` | Agent 产出的结构化候选结果 | `AgentOrchestrator` |
-| `WaitCondition` | Agent 声明的外部依赖 | `AgentOrchestrator` |
-| `AgentControlRequest` | Pause、Close 等需要异步收敛的控制命令 | `AgentOrchestrator` |
+| `AgentResult` / `Briefing` | Agent 产出的结构化候选结果 | Agent application service |
+| `WaitCondition` | Agent 声明的外部依赖 | Execution application service |
+| `AgentControlRequest` | Pause、Close 等需要异步收敛的控制命令 | Execution application service |
 | Agent transcript | 一个 Agent 实际看过和产生的完整交互 | 该 Agent 的唯一 transcript writer |
 | `AgentRuntime` | 进程内 actor、当前 execution 和 provider/tool 临时状态 | `AgentRuntimeRegistry` |
 
-编排层负责产品状态和事务；runtime 只能执行已经创建的 AgentExecution，不能创建关系、提交共享上下文或修改其他 Agent 的 transcript。ManagedProcess 只能由 ToolBroker 通过 ManagedProcessCoordinator durable 创建，runtime 不能把普通命令提升为长期进程。
+Application service 负责产品状态和事务；orchestration 负责跨用例调度与恢复；runtime 只能执行已经创建的 AgentExecution，不能创建关系、提交共享上下文或修改其他 Agent 的 transcript。ManagedProcess 只能由 ToolBroker 通过 ManagedProcessCoordinator durable 创建，runtime 不能把普通命令提升为长期进程。
 
 ## 3. SessionContext 协议
 
@@ -155,7 +155,7 @@ AgentRuntime
   -> 完成 model/tool 边界
   -> append execution_settled(ExecutionID, Outcome, FailureCode)
   -> fsync Agent transcript
-  -> AgentOrchestrator.SettleExecution
+  -> ExecutionService.SettleExecution
        - 校验 active ExecutionID
        - 保存 outcome、usage 和 failure code
        - 创建或更新 WaitCondition

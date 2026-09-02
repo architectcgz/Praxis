@@ -1,8 +1,6 @@
 import { getSessionBinding } from './bindings'
 import type { AgentSnapshot } from './agents'
 
-export type GroupSnapshot = { id: string; primaryAgentId: string; maxConcurrent: number }
-
 export type SessionSnapshot = {
     id: string
     projectId: string
@@ -10,7 +8,6 @@ export type SessionSnapshot = {
     goal: string
     createdAt: string
     updatedAt: string
-    groups: GroupSnapshot[]
     agents: AgentSnapshot[]
 }
 
@@ -23,7 +20,7 @@ export type SessionSummary = {
     updatedAt: string
 }
 
-export type CreateSessionRequest = { projectId: string; workspaceId: string; goal: string }
+export type CreateSessionRequest = { projectId: string; workspaceId: string; goal: string; requestId: string }
 
 export type CreateSessionResponse = {
     sessionId: string

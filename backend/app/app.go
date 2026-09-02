@@ -13,6 +13,7 @@ type App struct {
 	projects *ProjectBindings
 	sessions *SessionBindings
 	agents   *AgentBindings
+	events   *EventBindings
 	commands *CommandBindings
 	models   *ModelBindings
 
@@ -34,6 +35,7 @@ func New(loggers ...*logging.Logger) *App {
 		projects: &ProjectBindings{runtime: runtime},
 		sessions: &SessionBindings{runtime: runtime},
 		agents:   &AgentBindings{runtime: runtime},
+		events:   &EventBindings{runtime: runtime},
 		commands: &CommandBindings{runtime: runtime},
 		models:   &ModelBindings{runtime: runtime},
 	}
@@ -46,6 +48,7 @@ func (a *App) Bindings() []interface{} {
 		a.projects,
 		a.sessions,
 		a.agents,
+		a.events,
 		a.commands,
 		a.models,
 	}

@@ -6,16 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
 	"strings"
-	"time"
 
-	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
 )
 
 func (s *Store) AppendExecutionStart(
 	ctx context.Context,
-	execution domain.AgentExecution,
+	execution domainexecution.AgentExecution,
 ) (coresession.ExecutionStartReceipt, error) {
 	if ctx == nil {
 		return coresession.ExecutionStartReceipt{}, errors.New("execution start context is required")
@@ -32,6 +32,19 @@ func (s *Store) AppendExecutionStart(
 	if receipt, err := startReceipt(entries, execution.ID); err != nil || receipt != nil {
 		if err != nil {
 			return coresession.ExecutionStartReceipt{}, err
+		}
+		for _, value := range entries {
+			if value.Kind != entryExecutionStarted || value.ExecutionID != execution.ID.String() {
+				continue
+			}
+			var existing executionStartedPayload
+			if err := json.Unmarshal(value.Payload, &existing); err != nil {
+				return coresession.ExecutionStartReceipt{}, fmt.Errorf("decode execution start payload: %w", err)
+			}
+			if existing.RequestID != execution.RequestID.String() || existing.Reason != execution.Reason {
+				return coresession.ExecutionStartReceipt{}, domainfoundation.ErrRequestConflict
+			}
+			break
 		}
 		if err := s.appendMissingInputLocked(execution, entries); err != nil {
 			return coresession.ExecutionStartReceipt{}, err
@@ -63,8 +76,8 @@ func (s *Store) AppendExecutionStart(
 		return coresession.ExecutionStartReceipt{}, fmt.Errorf("encode execution start: %w", err)
 	}
 	if err := s.appendLocked(entry{
-		ID:          domain.NewEventID().String(),
-		At:          time.Now().UTC(),
+		ID:          s.ids.New("event"),
+		At:          s.clock.Now().UTC(),
 		Kind:        entryExecutionStarted,
 		Version:     currentEntryVersion,
 		ExecutionID: execution.ID.String(),
@@ -88,7 +101,7 @@ func (s *Store) AppendExecutionSettlement(
 	if ctx == nil {
 		return coresession.ExecutionSettlementReceipt{}, errors.New("execution settlement context is required")
 	}
-	if receipt.ExecutionID == "" || !knownOutcome(receipt.Outcome) {
+	if receipt.ExecutionID == "" || receipt.RequestID == "" || !knownOutcome(receipt.Outcome) {
 		return coresession.ExecutionSettlementReceipt{}, errors.New("execution settlement is invalid")
 	}
 	s.mu.Lock()
@@ -101,6 +114,9 @@ func (s *Store) AppendExecutionSettlement(
 		if err != nil {
 			return coresession.ExecutionSettlementReceipt{}, err
 		}
+		if existing.RequestID != receipt.RequestID || existing.Outcome != receipt.Outcome || existing.FailureCode != receipt.FailureCode {
+			return coresession.ExecutionSettlementReceipt{}, domainfoundation.ErrRequestConflict
+		}
 		return *existing, nil
 	}
 	if start, err := startReceipt(entries, receipt.ExecutionID); err != nil {
@@ -108,13 +124,13 @@ func (s *Store) AppendExecutionSettlement(
 	} else if start == nil {
 		return coresession.ExecutionSettlementReceipt{}, errors.New("execution settlement has no start receipt")
 	}
-	payload, err := json.Marshal(settledPayload{Outcome: receipt.Outcome, FailureCode: receipt.FailureCode})
+	payload, err := json.Marshal(settledPayload{RequestID: receipt.RequestID.String(), Outcome: receipt.Outcome, FailureCode: receipt.FailureCode})
 	if err != nil {
 		return coresession.ExecutionSettlementReceipt{}, fmt.Errorf("encode execution settlement: %w", err)
 	}
 	if err := s.appendLocked(entry{
-		ID:          domain.NewEventID().String(),
-		At:          time.Now().UTC(),
+		ID:          s.ids.New("event"),
+		At:          s.clock.Now().UTC(),
 		Kind:        entryExecutionSettled,
 		Version:     currentEntryVersion,
 		ExecutionID: receipt.ExecutionID.String(),
@@ -159,7 +175,7 @@ func (s *Store) AppendContextArtifact(
 		if existingArtifact.Kind != strings.TrimSpace(artifact.Kind) ||
 			existingArtifact.ArtifactID != strings.TrimSpace(artifact.ArtifactID) ||
 			!bytes.Equal(existingArtifact.Body, artifact.Body) {
-			return coresession.ContextArtifactReceipt{}, domain.ErrRequestConflict
+			return coresession.ContextArtifactReceipt{}, domainfoundation.ErrRequestConflict
 		}
 		return *existing, nil
 	}
@@ -173,8 +189,8 @@ func (s *Store) AppendContextArtifact(
 		return coresession.ContextArtifactReceipt{}, fmt.Errorf("encode context artifact: %w", err)
 	}
 	if err := s.appendLocked(entry{
-		ID:      domain.NewEventID().String(),
-		At:      time.Now().UTC(),
+		ID:      s.ids.New("event"),
+		At:      s.clock.Now().UTC(),
 		Kind:    entryArtifact,
 		Version: currentEntryVersion,
 		Payload: payload,
@@ -187,40 +203,87 @@ func (s *Store) AppendContextArtifact(
 	return s.artifactReceiptLocked(artifact.DeliveryID)
 }
 
-// AppendMessage records a provider-neutral transcript message at a durable
-// execution boundary. Runtime adapters use this instead of writing JSONL.
-func (s *Store) AppendMessage(
+// AppendStructuredMessage records one provider-neutral turn, including tool
+// calls and tool results, in the same durable sequence as lifecycle receipts.
+func (s *Store) AppendStructuredMessage(
 	ctx context.Context,
-	executionID domain.AgentExecutionID,
+	executionID domainfoundation.AgentExecutionID,
+	messageID string,
 	role string,
-	sourceRequestID domain.RequestID,
-	content string,
+	sourceRequestID domainfoundation.RequestID,
+	blocks []coresession.TranscriptContentBlock,
 ) error {
 	if ctx == nil {
-		return errors.New("agent session message context is required")
+		return errors.New("agent session structured message context is required")
 	}
-	if executionID == "" || (role != "user" && role != "assistant") || strings.TrimSpace(content) == "" {
-		return errors.New("agent session message is invalid")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if executionID == "" || strings.TrimSpace(messageID) == "" || (role != "user" && role != "assistant") || len(blocks) == 0 {
+		return errors.New("agent session structured message is invalid")
+	}
+	if sourceRequestID == "" {
+		return errors.New("agent session structured message request id is required")
+	}
+	messageID = strings.TrimSpace(messageID)
+	cloned := make([]coresession.TranscriptContentBlock, len(blocks))
+	var content strings.Builder
+	for i, block := range blocks {
+		cloned[i] = block
+		cloned[i].Input = append([]byte(nil), block.Input...)
+		switch block.Kind {
+		case "text":
+			content.WriteString(block.Text)
+		case "tool_use":
+			content.WriteString("[tool:")
+			content.WriteString(block.ToolName)
+			content.WriteString("]")
+		case "tool_result":
+			content.WriteString(block.Text)
+		default:
+			return errors.New("agent session structured message has an unknown block")
+		}
+	}
+	if strings.TrimSpace(content.String()) == "" {
+		return errors.New("agent session structured message is empty")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
 		return err
 	}
-	payload, err := json.Marshal(messagePayload{
-		Role: role, SourceRequestID: sourceRequestID.String(), Content: content,
-	})
-	if err != nil {
-		return fmt.Errorf("encode agent session message: %w", err)
+	message := messagePayload{
+		MessageID: messageID, Role: role, SourceRequestID: sourceRequestID.String(), Content: content.String(), Blocks: cloned,
 	}
-	if err := s.appendLocked(entry{ID: domain.NewEventID().String(), At: time.Now().UTC(), Kind: entryMessage,
+	digest, err := digestMessagePayload(message)
+	if err != nil {
+		return fmt.Errorf("digest agent session structured message: %w", err)
+	}
+	message.PayloadDigest = digest
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("encode agent session structured message digest: %w", err)
+	}
+	entries, err := s.readEntriesLocked()
+	if err != nil {
+		return err
+	}
+	if existing, err := messageEntry(entries, executionID, messageID); err != nil {
+		return err
+	} else if existing != nil {
+		if existing.PayloadDigest != message.PayloadDigest {
+			return domainfoundation.ErrRequestConflict
+		}
+		return nil
+	}
+	if err := s.appendLocked(entry{ID: s.ids.New("event"), At: s.clock.Now().UTC(), Kind: entryMessage,
 		Version: currentEntryVersion, ExecutionID: executionID.String(), Payload: payload}); err != nil {
 		return err
 	}
 	return s.syncLocked()
 }
 
-func (s *Store) appendMissingInputLocked(execution domain.AgentExecution, entries []entry) error {
+func (s *Store) appendMissingInputLocked(execution domainexecution.AgentExecution, entries []entry) error {
 	if execution.StartContent == "" {
 		return nil
 	}
@@ -231,22 +294,33 @@ func (s *Store) appendMissingInputLocked(execution domain.AgentExecution, entrie
 			return err
 		}
 	}
-	if _, found, err := executionInputDigest(entries, execution.ID, execution.RequestID); err != nil {
-		return err
-	} else if found {
-		return nil
-	}
-	payload, err := json.Marshal(messagePayload{
+	message := messagePayload{
+		MessageID:       "input:" + execution.RequestID.String(),
 		Role:            "user",
 		SourceRequestID: execution.RequestID.String(),
 		Content:         execution.StartContent,
-	})
+		Blocks:          []coresession.TranscriptContentBlock{{Kind: "text", Text: execution.StartContent}},
+	}
+	digest, err := digestMessagePayload(message)
+	if err != nil {
+		return fmt.Errorf("digest execution input: %w", err)
+	}
+	message.PayloadDigest = digest
+	if existing, err := messageEntry(entries, execution.ID, message.MessageID); err != nil {
+		return err
+	} else if existing != nil {
+		if existing.PayloadDigest != message.PayloadDigest {
+			return domainfoundation.ErrRequestConflict
+		}
+		return nil
+	}
+	payload, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("encode execution input: %w", err)
 	}
 	return s.appendLocked(entry{
-		ID:          domain.NewEventID().String(),
-		At:          time.Now().UTC(),
+		ID:          s.ids.New("event"),
+		At:          s.clock.Now().UTC(),
 		Kind:        entryMessage,
 		Version:     currentEntryVersion,
 		ExecutionID: execution.ID.String(),

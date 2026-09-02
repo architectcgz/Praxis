@@ -1,7 +1,7 @@
 # Praxis 系统架构
 
 > 状态：规范性目标架构。本文描述系统分层、依赖方向、进程内通信、工程布局和验证边界。
-> 领域身份见 [`structure.md`](structure.md)，持久化分工见 [`storage-architecture.md`](storage-architecture.md)，目录总入口见 [`../architecture.md`](../architecture.md)。
+> 领域身份见 [`structure.md`](structure.md)，源码布局见 [`directory-structure.md`](directory-structure.md)，持久化分工见 [`storage-architecture.md`](storage-architecture.md)，目录总入口见 [`../architecture.md`](../architecture.md)。
 
 ## 1. 系统分层
 
@@ -10,15 +10,18 @@ frontend/ React UI
     │ Wails binding / event
     ▼
 backend/app/ + internal/contracts/
-    ├── 手动命令 ──────────────────────────┐
-    └── Workflow 命令                      │
+    ├── 手动操作 ──────────────────────────┐
+    └── Workflow 操作                      │
             ▼                              │
         internal/workflow/                 │
-            │ 核心命令 / 查询              │
+            │ 应用用例                      │
             ▼                              ▼
-        backend/internal/core/
-            │ core 定义的接口
-            ▼
+        internal/application/
+            │                              ▲
+            ▼                              │
+        internal/core/              internal/orchestration/
+            │ core 定义的端口               │
+            ▼                              ▼
         agentruntime / managedprocess / storage / providers / tools / sandbox
             │
             ├── 本机 DataRoot
@@ -29,17 +32,18 @@ internal/compose/ 负责组装全部模块和适配器。
 
 ## 2. 依赖方向
 
-依赖只能由外向内。`internal/core/domain` 是最内层，只允许 import 标准库。
+依赖只能由外向内。`internal/core/domain` 是最内层，只允许 import 标准库。完整包级依赖图见 [`directory-structure.md`](directory-structure.md)。
 
 | 禁止关系 | 原因 |
 |---|---|
-| `internal/core/**` 与 `internal/agentruntime/**` import Wails、SQLite driver、Provider SDK | core 与 runtime 必须能脱离桌面壳、数据库和厂商 SDK 单测 |
-| `internal/core/**` 与 `internal/agentruntime/**` import `app`、`storage`、`providers`、`tools`、`contracts`、`compose` | 内层只依赖自己定义的接口 |
+| `internal/core/**`、`internal/application/**` 与 `internal/agentruntime/**` import Wails、SQLite driver、Provider SDK | core、应用用例与 runtime 必须能脱离桌面壳、数据库和厂商 SDK 单测 |
+| `internal/core/**` 与 `internal/agentruntime/**` import `app`、`application`、`orchestration`、`storage`、`providers`、`tools`、`contracts`、`compose` | 内层只依赖自己定义的接口 |
+| `internal/application/**` import `app`、`contracts`、`orchestration`、`storage`、`providers`、`tools`、`sandbox`、`compose` | 应用用例只依赖 core 端口；协调器通过注入的端口接入 |
 | Provider SDK 出现在 `internal/providers/` 之外 | 模型协议细节不得泄漏进领域 |
 | SQLite driver 出现在 `internal/storage/` 之外 | 存储实现细节不得泄漏进领域 |
 | `internal/managedprocess`、`internal/providers`、`internal/storage`、`internal/tools`、`internal/sandbox` import `internal/agentruntime` | 同层适配器只认 `internal/core/runtime` 的接口 |
 | `internal/compose` 被 core 反向 import | compose 是组合根，只能被 `main` 使用 |
-| `internal/core/**` import `internal/workflow` | Workflow 是调用核心命令的独立上层模块，核心领域不能依赖具体流程 |
+| `internal/core/**` 与 `internal/application/**` import `internal/workflow` | Workflow 是调用应用用例的独立上层模块，核心领域和应用用例不能依赖具体流程 |
 
 ## 3. 通信方向
 
@@ -48,15 +52,15 @@ internal/compose/ 负责组装全部模块和适配器。
         │
         ▼
 React UI ──binding──► app 适配层
-   ▲                    ├──手动命令──────────────► AgentOrchestrator
-   │                    └──Workflow 命令──► WorkflowCoordinator
+   ▲                    ├──手动操作──────────────► Application Service
+   │                    └──Workflow 操作──► WorkflowCoordinator
    │                                              │
-   │                                              └──核心命令──► AgentOrchestrator
+   │                                              └──应用用例──► Application Service
    └──────────── event / 快照投影 ◄──────────────────────────────┘
 ```
 
-1. 手动 Agent 命令直接进入 `AgentOrchestrator`；Workflow 命令先改变 Workflow 状态，再由 `WorkflowCoordinator` 调用同一套核心命令。
-2. `AgentOrchestrator` 是核心领域的唯一写入口；`WorkflowCoordinator` 是 Workflow 状态的唯一写入口。
+1. 手动操作直接进入对应 application service；Workflow 操作先改变 Workflow 状态，再由 `WorkflowCoordinator` 调用同一套应用用例。
+2. 每个 application service 是其所属产品状态的唯一写入口；`WorkflowCoordinator` 是 Workflow 状态的唯一写入口。
 3. 事件与快照是可丢失的投影。断线重连和 Workflow 恢复必须能通过查询重建状态，不依赖事件连续性。
 4. 更换 UI 框架或增加 CLI 只需接入同一套命令与事件，不影响核心领域或 Workflow 模块。
 
@@ -73,54 +77,7 @@ React UI ──binding──► app 适配层
 
 ## 5. 工程布局
 
-```text
-Praxis/
-├── backend/
-│   ├── main.go
-│   ├── cmd/
-│   │   └── sandboxworker/     独立 Windows 沙箱 worker 入口
-│   ├── app/                    Wails 领域 binding、event 适配、桌面生命周期
-│   ├── internal/
-│   │   ├── contracts/          binding 命令、事件与快照 DTO
-│   │   ├── core/
-│   │   │   ├── domain/         领域模型与状态机（仅标准库）
-│   │   │   ├── orchestrate/    命令准入、事务编排、ToolBroker、调度、投递、恢复
-│   │   │   ├── persistence/    持久化接口与事务边界
-│   │   │   ├── runtime/        单 Agent 运行时接口
-│   │   │   ├── session/        Agent session store 接口
-│   │   │   └── system/         clock / id / 生命周期
-│   │   ├── agentruntime/       单 Agent 运行时适配器
-│   │   │   ├── execution/      单次 execution 的 phase、snapshot、model/tool loop、save point
-│   │   │   ├── transcript/     runtime 侧 transcript event、receipt 与 flush 时序
-│   │   │   └── runtimetest/    runtime 接口的可复用 fake 与测试支撑
-│   │   ├── managedprocess/     Session 长期进程、ConPTY 挂载和进程生命周期
-│   │   ├── workflow/           Workflow 定义、实例、节点编排与恢复
-│   │   ├── storage/
-│   │   │   ├── dataroot/       应用数据根、初始化与备份
-│   │   │   ├── sqlite/         编排事实与事务 repository
-│   │   │   ├── agentlog/       per-Agent JSONL transcript 适配器
-│   │   │   └── blob/           附件、Note 与大对象文件适配器
-│   │   ├── providers/
-│   │   │   ├── anthropic/      Anthropic 模型协议适配器
-│   │   │   ├── openaicompat/   OpenAI-compatible 模型协议适配器
-│   │   │   └── registry/       Provider 与 model 注册解析
-│   │   ├── tools/              工具 schema、参数规范化和执行适配器
-│   │   ├── sandbox/            worker IPC、沙箱进程生命周期和 Windows 隔离
-│   │   ├── compose/            组合根：装配具体适配器
-│   │   └── logging/
-│   ├── wails.json
-│   └── go.mod
-├── frontend/
-│   └── src/
-│       ├── app/                React 应用壳与错误边界
-│       ├── features/           按产品域组织的页面、组件与交互
-│       ├── shared/             binding API 与跨域基础设施
-│       └── styles/             全局 token 与共享样式
-├── scripts/                    仓库构建与测试门禁
-└── .architecture/              架构、契约与实现计划文档
-```
-
-所有后端源码与工程文件位于 `backend/`；`frontend/` 是唯一位于 `backend/` 外的应用源码目录；根级脚本是仓库工具，不是后端源码。`compose` 是唯一允许同时看到内外层的包。
+源码目录、Go 包职责、应用用例文件布局、`Tx` 端口和完整依赖方向统一定义在 [`directory-structure.md`](directory-structure.md)。`compose` 是唯一允许同时看到内外层具体实现的包。
 
 ### 5.1 桌面适配层内部边界
 

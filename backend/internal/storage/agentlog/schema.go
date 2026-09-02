@@ -1,13 +1,15 @@
 package agentlog
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	domainexecution "praxis/internal/core/domain/execution"
 	"strings"
 	"time"
 
-	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
 )
 
@@ -44,15 +46,28 @@ type headerPayload struct {
 }
 
 type executionStartedPayload struct {
-	RequestID string                        `json:"requestId"`
-	Reason    domain.ExecutionReason        `json:"reason"`
-	Input     domain.ExecutionInputSnapshot `json:"input"`
+	RequestID string                                 `json:"requestId"`
+	Reason    domainexecution.ExecutionReason        `json:"reason"`
+	Input     domainexecution.ExecutionInputSnapshot `json:"input"`
 }
 
 type messagePayload struct {
-	Role            string `json:"role"`
-	SourceRequestID string `json:"sourceRequestId"`
-	Content         string `json:"content"`
+	MessageID       string                               `json:"messageId"`
+	Role            string                               `json:"role"`
+	SourceRequestID string                               `json:"sourceRequestId"`
+	Content         string                               `json:"content"`
+	Blocks          []coresession.TranscriptContentBlock `json:"blocks,omitempty"`
+	PayloadDigest   string                               `json:"payloadDigest"`
+}
+
+func digestMessagePayload(payload messagePayload) (string, error) {
+	payload.PayloadDigest = ""
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 type artifactPayload struct {
@@ -63,8 +78,9 @@ type artifactPayload struct {
 }
 
 type settledPayload struct {
-	Outcome     domain.ExecutionOutcome     `json:"outcome"`
-	FailureCode domain.ExecutionFailureCode `json:"failureCode,omitempty"`
+	RequestID   string                               `json:"requestId"`
+	Outcome     domainexecution.ExecutionOutcome     `json:"outcome"`
+	FailureCode domainexecution.ExecutionFailureCode `json:"failureCode,omitempty"`
 }
 
 func decodeEntries(contents []byte) ([]entry, error) {
@@ -116,6 +132,23 @@ func validateEntry(value entry, previous uint64) error {
 	if containsSensitiveValue(payload) {
 		return errors.New("agent session payload contains a sensitive field")
 	}
+	if value.Kind == entryMessage {
+		var message messagePayload
+		if err := json.Unmarshal(value.Payload, &message); err != nil {
+			return fmt.Errorf("agent session message payload is invalid: %w", err)
+		}
+		if strings.TrimSpace(message.MessageID) == "" || strings.TrimSpace(message.PayloadDigest) == "" ||
+			(message.Role != "user" && message.Role != "assistant") || len(message.Blocks) == 0 {
+			return errors.New("agent session message identity and structured blocks are required")
+		}
+		digest, err := digestMessagePayload(message)
+		if err != nil {
+			return fmt.Errorf("digest agent session message payload: %w", err)
+		}
+		if digest != message.PayloadDigest {
+			return errors.New("agent session message payload digest does not match")
+		}
+	}
 	return nil
 }
 
@@ -128,10 +161,10 @@ func validateHeader(header coresession.AgentSessionHeader) error {
 	return nil
 }
 
-func knownOutcome(outcome domain.ExecutionOutcome) bool {
+func knownOutcome(outcome domainexecution.ExecutionOutcome) bool {
 	switch outcome {
-	case domain.ExecutionCompleted, domain.ExecutionYielded, domain.ExecutionPaused,
-		domain.ExecutionFailed, domain.ExecutionInterrupted:
+	case domainexecution.ExecutionCompleted, domainexecution.ExecutionYielded, domainexecution.ExecutionPaused,
+		domainexecution.ExecutionFailed, domainexecution.ExecutionInterrupted:
 		return true
 	default:
 		return false

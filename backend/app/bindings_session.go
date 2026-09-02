@@ -2,9 +2,9 @@ package app
 
 import (
 	"context"
+	domainfoundation "praxis/internal/core/domain/foundation"
 
 	"praxis/internal/contracts"
-	"praxis/internal/core/domain"
 )
 
 type SessionBindings struct {
@@ -20,7 +20,7 @@ func (b *SessionBindings) ListSessions(projectID string) (response []contracts.S
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := service.ListSessionsByProject(ctx, domain.ProjectID(projectID), 100)
+	sessions, err := service.ListSessionsByProject(ctx, domainfoundation.ProjectID(projectID), 100)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
@@ -49,8 +49,9 @@ func (b *SessionBindings) CreateSession(
 	}
 	result, err := service.CreateSessionForProject(
 		ctx,
-		domain.ProjectID(request.ProjectID),
-		domain.WorkspaceID(request.WorkspaceID),
+		domainfoundation.RequestID(request.RequestID),
+		domainfoundation.ProjectID(request.ProjectID),
+		domainfoundation.WorkspaceID(request.WorkspaceID),
 		request.Goal,
 	)
 	if err != nil {
@@ -74,7 +75,7 @@ func (b *SessionBindings) GetSession(
 	if err != nil {
 		return contracts.SessionSnapshot{}, err
 	}
-	projection, err := service.ProjectSession(ctx, domain.SessionID(sessionID), 100)
+	projection, err := service.ProjectSession(ctx, domainfoundation.SessionID(sessionID), 100)
 	if err != nil {
 		return contracts.SessionSnapshot{}, publicBindingError(err)
 	}
@@ -85,23 +86,13 @@ func (b *SessionBindings) GetSession(
 		Goal:        projection.Session.Goal,
 		CreatedAt:   projection.Session.CreatedAt,
 		UpdatedAt:   projection.Session.UpdatedAt,
-		Groups:      make([]contracts.GroupSnapshot, 0, len(projection.Groups)),
 		Agents:      make([]contracts.AgentSnapshot, 0, len(projection.Agents)),
-	}
-	for _, group := range projection.Groups {
-		result.Groups = append(result.Groups, contracts.GroupSnapshot{
-			ID:             group.ID.String(),
-			PrimaryAgentID: group.PrimaryAgentID.String(),
-			MaxConcurrent:  group.MaxConcurrent,
-		})
 	}
 	for _, agent := range projection.Agents {
 		result.Agents = append(result.Agents, contracts.AgentSnapshot{
-			ID:               agent.ID.String(),
-			SessionID:        agent.SessionID.String(),
-			GroupID:          agent.GroupID.String(),
-			Profile:          string(agent.Profile),
-			State:            string(agent.State),
+			ID: agent.ID.String(), SessionID: agent.SessionID.String(),
+			SecurityPolicyRevision: agent.SecurityPolicyRevision,
+			Profile:                string(agent.Profile), State: string(agent.State),
 			CurrentExecution: agent.CurrentExecutionID.String(),
 			Executions:       make([]contracts.ExecutionSnapshot, 0),
 		})

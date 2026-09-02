@@ -3,7 +3,8 @@ package compose
 import (
 	"path/filepath"
 
-	"praxis/internal/core/domain"
+	domainexecution "praxis/internal/core/domain/execution"
+
 	"praxis/internal/logging"
 	"praxis/internal/storage/dataroot"
 )
@@ -21,14 +22,14 @@ func openRuntimeLog(root dataroot.DataRoot) (*runtimeLog, error) {
 	return &runtimeLog{logger: logger}, nil
 }
 
-func (l *runtimeLog) Log(execution domain.AgentExecution, stage string, err error) {
+func (l *runtimeLog) Log(execution domainexecution.AgentExecution, stage string, err error) {
 	if l == nil || err == nil {
 		return
 	}
 	l.logger.Errorf("execution id=%s stage=%s failed: %v", execution.ID, stage, err)
 }
 
-func (l *runtimeLog) Event(execution domain.AgentExecution, stage string) {
+func (l *runtimeLog) Event(execution domainexecution.AgentExecution, stage string) {
 	if l == nil {
 		return
 	}

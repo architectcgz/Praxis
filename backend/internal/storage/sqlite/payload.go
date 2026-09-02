@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"strings"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
 )
 
 func (s *Store) loadPayload(ctx context.Context, table, id string, target any, validate func() error) error {
 	row := executorFromContext(ctx, s.db).QueryRowContext(ctx, `SELECT payload FROM `+table+` WHERE id = ?`, id)
 	var payload []byte
 	if err := row.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return domain.ErrNotFound
+		return domainfoundation.ErrNotFound
 	} else if err != nil {
 		return fmt.Errorf("read %s: %w", table, err)
 	}
@@ -105,7 +105,7 @@ func exactlyOne(result sql.Result, operation string) error {
 		return fmt.Errorf("check %s: %w", operation, err)
 	}
 	if affected != 1 {
-		return domain.ErrNotFound
+		return domainfoundation.ErrNotFound
 	}
 	return nil
 }

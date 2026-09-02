@@ -20,7 +20,7 @@ export type ProviderConfigOption = {
     providerName: string
     baseURL: string
     proxyURL: string
-    apiKey: string
+    hasAPIKey: boolean
 }
 
 export type ModelAPIFormat = 'anthropic_messages' | 'openai_responses' | 'openai_chat_completions'
@@ -77,6 +77,14 @@ export function listProviderModels(providerID: string) {
     })
 }
 
+export function setProviderKey(providerID: string, value: string) {
+    return getModelBinding().SetProviderKey(providerID, value)
+}
+
+export function clearProviderKey(providerID: string) {
+    return getModelBinding().ClearProviderKey(providerID)
+}
+
 function normalizeModelCatalog(value: unknown): ModelOption[] {
     if (!Array.isArray(value)) {
         throw new Error('The model catalog response is invalid.')
@@ -120,7 +128,7 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
                 providerName: stringValue(provider.providerName),
                 baseURL: stringValue(provider.baseURL),
                 proxyURL: stringValue(provider.proxyURL),
-                apiKey: stringValue(provider.apiKey),
+                hasAPIKey: provider.hasAPIKey === true,
             }
         }),
         models: value.models.map((model) => {

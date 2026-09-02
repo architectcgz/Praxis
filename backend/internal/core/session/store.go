@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
 )
 
 // ArtifactRef identifies an approved artifact already appended to a target
@@ -16,13 +16,13 @@ type ArtifactRef struct {
 // ArtifactLookup lets orchestration reconcile a delivery without reading a
 // transcript or depending on the JSONL storage representation.
 type ArtifactLookup interface {
-	FindArtifact(context.Context, domain.AgentID, string) (*ArtifactRef, error)
+	FindArtifact(context.Context, domainfoundation.AgentID, string) (*ArtifactRef, error)
 }
 
 // SessionRepairer performs conservative repair before startup recovery changes
 // product state. Physical paths and backup details stay inside storage.
 type SessionRepairer interface {
-	Repair(context.Context, domain.AgentID) error
+	Repair(context.Context, domainfoundation.AgentID) error
 }
 
 // SessionStore is the core-facing session maintenance interface. Transcript append

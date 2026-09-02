@@ -27,6 +27,7 @@ func (a *App) Attach(dependencies Dependencies) error {
 	a.sessions.service.set(dependencies.Sessions)
 	a.projects.service.set(dependencies.Projects)
 	a.agents.queries.set(dependencies.Agents)
+	a.events.queries.set(dependencies.Events)
 	a.commands.commands.set(dependencies.Commands)
 	a.models.catalog.set(dependencies.Models)
 	a.models.editor.set(dependencies.ModelConfig)

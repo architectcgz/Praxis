@@ -6,7 +6,8 @@ import (
 
 	"praxis/internal/agentruntime"
 	"praxis/internal/contracts"
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
 	"praxis/internal/core/orchestrate"
 )
 
@@ -26,25 +27,25 @@ func publicBindingError(err error) error {
 		return bindingError(contracts.ErrorCodeRequestCanceled)
 	case errors.Is(err, context.DeadlineExceeded):
 		return bindingError(contracts.ErrorCodeRequestTimeout)
-	case errors.Is(err, domain.ErrInvalidValue):
+	case errors.Is(err, domainfoundation.ErrInvalidValue):
 		return bindingError(contracts.ErrorCodeValidation)
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, domainfoundation.ErrInvalidTransition):
 		return bindingError(contracts.ErrorCodeInvalidTransition)
-	case errors.Is(err, domain.ErrLeaseConflict):
+	case errors.Is(err, domainfoundation.ErrLeaseConflict):
 		return bindingError(contracts.ErrorCodeWorkspaceConflict)
-	case errors.Is(err, domain.ErrAlreadySettled):
+	case errors.Is(err, domainfoundation.ErrAlreadySettled):
 		return bindingError(contracts.ErrorCodeAlreadySettled)
-	case errors.Is(err, domain.ErrWorkQueueEmpty):
+	case errors.Is(err, domainfoundation.ErrWorkQueueEmpty):
 		return bindingError(contracts.ErrorCodeWorkQueueEmpty)
-	case errors.Is(err, domain.ErrWorkItemActive):
+	case errors.Is(err, domainfoundation.ErrWorkItemActive):
 		return bindingError(contracts.ErrorCodeWorkItemActive)
-	case errors.Is(err, domain.ErrAlreadyDelivered):
+	case errors.Is(err, domainfoundation.ErrAlreadyDelivered):
 		return bindingError(contracts.ErrorCodeAlreadyDelivered)
-	case errors.Is(err, domain.ErrRequestNotFound):
+	case errors.Is(err, domainfoundation.ErrRequestNotFound):
 		return bindingError(contracts.ErrorCodeRequestNotFound)
-	case errors.Is(err, domain.ErrRequestConflict):
+	case errors.Is(err, domainfoundation.ErrRequestConflict):
 		return bindingError(contracts.ErrorCodeRequestConflict)
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, domainfoundation.ErrNotFound):
 		return bindingError(contracts.ErrorCodeNotFound)
 	}
 	return bindingError(contracts.ErrorCodeInternal)

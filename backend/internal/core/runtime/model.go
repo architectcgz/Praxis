@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"praxis/internal/core/domain"
+	domaincontext "praxis/internal/core/domain/context"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainsecurity "praxis/internal/core/domain/security"
 )
 
 // TurnMessageRole identifies the participant that produced a turn message.
@@ -46,7 +49,7 @@ type TurnMessage struct {
 
 // ToolDefinition describes a tool exposed to the model after Grant filtering.
 type ToolDefinition struct {
-	Name        domain.ToolName
+	Name        domainsecurity.ToolName
 	Description string
 	InputSchema json.RawMessage
 }
@@ -77,18 +80,18 @@ type ModelRequest struct {
 
 // TurnSnapshot is the immutable input for one model request.
 type TurnSnapshot struct {
-	ExecutionID          domain.AgentExecutionID
+	ExecutionID          domainfoundation.AgentExecutionID
 	SessionReference     string
 	Messages             []TurnMessage
-	TaskPacket           domain.TaskPacket
-	ContextManifest      domain.ContextManifest
+	ContextManifest      domaincontext.ContextManifest
+	ContextSelection     domainexecution.ContextSelection
 	SystemPrompt         string
 	SystemPromptHash     string
 	ArtifactTemplateHash string
-	Model                domain.ModelSelection
+	Model                domainsecurity.ModelSelection
 	Tools                []ToolDefinition
-	GrantID              domain.CapabilityGrantID
-	Execution            domain.RuntimeExecutionSnapshot
+	GrantID              domainfoundation.CapabilityGrantID
+	Execution            domainexecution.RuntimeExecutionSnapshot
 	TurnNumber           int
 }
 

@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"praxis/internal/core/domain"
+	domaincontext "praxis/internal/core/domain/context"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
 	"praxis/internal/storage/dataroot"
 )
 
@@ -22,23 +24,23 @@ func NewAttachmentStore(root dataroot.DataRoot) *AttachmentStore {
 }
 
 // Write stores a content-addressed attachment with a short, trusted identifier.
-func (s *AttachmentStore) Write(ctx context.Context, id string, contents []byte) (domain.ContentRef, error) {
+func (s *AttachmentStore) Write(ctx context.Context, id string, contents []byte) (domaincontext.ContentRef, error) {
 	if err := checkContext(ctx); err != nil {
-		return domain.ContentRef{}, err
+		return domaincontext.ContentRef{}, err
 	}
 	if !safeFileID(id) {
-		return domain.ContentRef{}, errors.New("attachment id is invalid")
+		return domaincontext.ContentRef{}, errors.New("attachment id is invalid")
 	}
 	if containsSecretText(contents) {
-		return domain.ContentRef{}, errors.New("refusing to store secret-like attachment content")
+		return domaincontext.ContentRef{}, errors.New("refusing to store secret-like attachment content")
 	}
 	path := filepath.Join(s.root, id+".blob")
 	if err := writeAtomically(path, s.temporary, contents); err != nil {
-		return domain.ContentRef{}, err
+		return domaincontext.ContentRef{}, err
 	}
 	sum := sha256.Sum256(contents)
-	return domain.NewContentRef(
-		domain.ContentRefArtifact,
+	return domaincontext.NewContentRef(
+		domaincontext.ContentRefArtifact,
 		path,
 		"sha256:"+hex.EncodeToString(sum[:]),
 		"",
@@ -46,7 +48,7 @@ func (s *AttachmentStore) Write(ctx context.Context, id string, contents []byte)
 	)
 }
 
-func (s *AttachmentStore) Read(ctx context.Context, ref domain.ContentRef) ([]byte, error) {
+func (s *AttachmentStore) Read(ctx context.Context, ref domaincontext.ContentRef) ([]byte, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -67,23 +69,23 @@ func NewNoteFileStore(root dataroot.DataRoot) *NoteFileStore {
 	return &NoteFileStore{root: root.Notes, temporary: root.Temporary}
 }
 
-func (s *NoteFileStore) Write(ctx context.Context, id domain.NoteID, contents []byte) (domain.ContentRef, error) {
+func (s *NoteFileStore) Write(ctx context.Context, id domainfoundation.NoteID, contents []byte) (domaincontext.ContentRef, error) {
 	if err := checkContext(ctx); err != nil {
-		return domain.ContentRef{}, err
+		return domaincontext.ContentRef{}, err
 	}
 	if !safeFileID(id.String()) {
-		return domain.ContentRef{}, errors.New("note id is invalid")
+		return domaincontext.ContentRef{}, errors.New("note id is invalid")
 	}
 	if containsSecretText(contents) {
-		return domain.ContentRef{}, errors.New("refusing to store secret-like note content")
+		return domaincontext.ContentRef{}, errors.New("refusing to store secret-like note content")
 	}
 	path := filepath.Join(s.root, id.String()+".md")
 	if err := writeAtomically(path, s.temporary, contents); err != nil {
-		return domain.ContentRef{}, err
+		return domaincontext.ContentRef{}, err
 	}
 	sum := sha256.Sum256(contents)
-	return domain.NewContentRef(
-		domain.ContentRefArtifact,
+	return domaincontext.NewContentRef(
+		domaincontext.ContentRefArtifact,
 		path,
 		"sha256:"+hex.EncodeToString(sum[:]),
 		"",
@@ -91,7 +93,7 @@ func (s *NoteFileStore) Write(ctx context.Context, id domain.NoteID, contents []
 	)
 }
 
-func (s *NoteFileStore) Read(ctx context.Context, ref domain.ContentRef) ([]byte, error) {
+func (s *NoteFileStore) Read(ctx context.Context, ref domaincontext.ContentRef) ([]byte, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}

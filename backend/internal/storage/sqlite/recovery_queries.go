@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
+	domainworkspace "praxis/internal/core/domain/workspace"
 )
 
 // RecoveryAgentRef identifies an Agent transcript that may need reconciliation.
 type RecoveryAgentRef struct {
-	SessionID domain.SessionID
-	AgentID   domain.AgentID
+	SessionID domainfoundation.SessionID
+	AgentID   domainfoundation.AgentID
 }
 
 func (s *Store) ListRecoveryAgents(ctx context.Context) ([]RecoveryAgentRef, error) {
@@ -29,8 +31,8 @@ func (s *Store) ListRecoveryAgents(ctx context.Context) ([]RecoveryAgentRef, err
 			return nil, fmt.Errorf("scan recovery agent: %w", err)
 		}
 		refs = append(refs, RecoveryAgentRef{
-			SessionID: domain.SessionID(sessionID),
-			AgentID:   domain.AgentID(agentID),
+			SessionID: domainfoundation.SessionID(sessionID),
+			AgentID:   domainfoundation.AgentID(agentID),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -39,7 +41,7 @@ func (s *Store) ListRecoveryAgents(ctx context.Context) ([]RecoveryAgentRef, err
 	return refs, nil
 }
 
-func (s *Store) ListUnsettledExecutionIDs(ctx context.Context) ([]domain.AgentExecutionID, error) {
+func (s *Store) ListUnsettledExecutionIDs(ctx context.Context) ([]domainfoundation.AgentExecutionID, error) {
 	rows, err := executorFromContext(ctx, s.db).QueryContext(
 		ctx,
 		`SELECT id FROM agent_executions WHERE status <> 'settled' ORDER BY id`,
@@ -48,13 +50,13 @@ func (s *Store) ListUnsettledExecutionIDs(ctx context.Context) ([]domain.AgentEx
 		return nil, fmt.Errorf("list unsettled executions: %w", err)
 	}
 	defer rows.Close()
-	ids := make([]domain.AgentExecutionID, 0)
+	ids := make([]domainfoundation.AgentExecutionID, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan unsettled execution: %w", err)
 		}
-		ids = append(ids, domain.AgentExecutionID(id))
+		ids = append(ids, domainfoundation.AgentExecutionID(id))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate unsettled executions: %w", err)
@@ -62,23 +64,23 @@ func (s *Store) ListUnsettledExecutionIDs(ctx context.Context) ([]domain.AgentEx
 	return ids, nil
 }
 
-func (s *Store) ListActiveLeaseIDs(ctx context.Context) ([]domain.WorkspaceLeaseID, error) {
+func (s *Store) ListActiveLeaseIDs(ctx context.Context) ([]domainfoundation.WorkspaceLeaseID, error) {
 	rows, err := executorFromContext(ctx, s.db).QueryContext(
 		ctx,
 		`SELECT id FROM workspace_write_leases WHERE state = ? ORDER BY id`,
-		string(domain.LeaseActive),
+		string(domainworkspace.LeaseActive),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list active workspace leases: %w", err)
 	}
 	defer rows.Close()
-	ids := make([]domain.WorkspaceLeaseID, 0)
+	ids := make([]domainfoundation.WorkspaceLeaseID, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan active workspace lease: %w", err)
 		}
-		ids = append(ids, domain.WorkspaceLeaseID(id))
+		ids = append(ids, domainfoundation.WorkspaceLeaseID(id))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate active workspace leases: %w", err)
@@ -86,23 +88,23 @@ func (s *Store) ListActiveLeaseIDs(ctx context.Context) ([]domain.WorkspaceLease
 	return ids, nil
 }
 
-func (s *Store) ListInFlightDeliveryIDs(ctx context.Context) ([]domain.DeliveryID, error) {
+func (s *Store) ListInFlightDeliveryIDs(ctx context.Context) ([]domainfoundation.DeliveryID, error) {
 	rows, err := executorFromContext(ctx, s.db).QueryContext(
 		ctx,
 		`SELECT id FROM context_deliveries WHERE status IN (?, ?) ORDER BY id`,
-		string(domain.ContextDeliveryPending), string(domain.ContextDeliveryDelivering),
+		string(domainworkflow.ContextDeliveryPending), string(domainworkflow.ContextDeliveryDelivering),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list in-flight deliveries: %w", err)
 	}
 	defer rows.Close()
-	ids := make([]domain.DeliveryID, 0)
+	ids := make([]domainfoundation.DeliveryID, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan in-flight delivery: %w", err)
 		}
-		ids = append(ids, domain.DeliveryID(id))
+		ids = append(ids, domainfoundation.DeliveryID(id))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate in-flight deliveries: %w", err)

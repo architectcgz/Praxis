@@ -2,43 +2,43 @@ package sqlite
 
 import (
 	"context"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainsession "praxis/internal/core/domain/session"
 	"time"
-
-	"praxis/internal/core/domain"
 )
 
-func (s *Store) GetSession(ctx context.Context, id domain.SessionID) (domain.Session, error) {
-	var value domain.Session
+func (s *Store) GetSession(ctx context.Context, id domainfoundation.SessionID) (domainsession.Session, error) {
+	var value domainsession.Session
 	return value, s.loadPayload(ctx, "sessions", id.String(), &value, func() error { return value.Validate() })
 }
 
-func (s *Store) ListSessions(ctx context.Context, limit int) ([]domain.Session, error) {
-	return listTargetPayloads[domain.Session](
+func (s *Store) ListSessions(ctx context.Context, limit int) ([]domainsession.Session, error) {
+	return listTargetPayloads[domainsession.Session](
 		ctx,
 		s,
 		`SELECT payload FROM sessions ORDER BY updated_at DESC, id LIMIT ?`,
 		[]any{targetLimit(limit)},
 		"sessions",
-		func(value domain.Session) error { return value.Validate() },
+		func(value domainsession.Session) error { return value.Validate() },
 	)
 }
 
 func (s *Store) ListSessionsByProject(
 	ctx context.Context,
-	projectID domain.ProjectID,
+	projectID domainfoundation.ProjectID,
 	limit int,
-) ([]domain.Session, error) {
-	return listTargetPayloads[domain.Session](
+) ([]domainsession.Session, error) {
+	return listTargetPayloads[domainsession.Session](
 		ctx,
 		s,
 		`SELECT payload FROM sessions WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ?`,
 		[]any{projectID.String(), targetLimit(limit)},
 		"project sessions",
-		func(value domain.Session) error { return value.Validate() },
+		func(value domainsession.Session) error { return value.Validate() },
 	)
 }
 
-func (s *Store) SaveSession(ctx context.Context, value domain.Session) error {
+func (s *Store) SaveSession(ctx context.Context, value domainsession.Session) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -62,22 +62,22 @@ func (s *Store) SaveSession(ctx context.Context, value domain.Session) error {
 
 type SessionRepository struct{ store *Store }
 
-func (r SessionRepository) Get(ctx context.Context, id domain.SessionID) (domain.Session, error) {
+func (r SessionRepository) Get(ctx context.Context, id domainfoundation.SessionID) (domainsession.Session, error) {
 	return r.store.GetSession(ctx, id)
 }
 
-func (r SessionRepository) Save(ctx context.Context, value domain.Session) error {
+func (r SessionRepository) Save(ctx context.Context, value domainsession.Session) error {
 	return r.store.SaveSession(ctx, value)
 }
 
-func (r SessionRepository) List(ctx context.Context, limit int) ([]domain.Session, error) {
+func (r SessionRepository) List(ctx context.Context, limit int) ([]domainsession.Session, error) {
 	return r.store.ListSessions(ctx, limit)
 }
 
 func (r SessionRepository) ListByProject(
 	ctx context.Context,
-	projectID domain.ProjectID,
+	projectID domainfoundation.ProjectID,
 	limit int,
-) ([]domain.Session, error) {
+) ([]domainsession.Session, error) {
 	return r.store.ListSessionsByProject(ctx, projectID, limit)
 }

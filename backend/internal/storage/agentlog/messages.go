@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	domainfoundation "praxis/internal/core/domain/foundation"
 
-	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
 )
 
-// ListMessages returns the latest transcript messages in chronological order.
-// The read is intentionally separate from TranscriptReceiptStore so runtime code
-// cannot use the UI projection to influence execution context or state.
+// ListMessages returns transcript messages in chronological order. A positive
+// limit applies a UI page bound; zero reads the complete Agent transcript for
+// runtime turn reconstruction.
 func (s *Store) ListMessages(
 	ctx context.Context,
 	limit int,
@@ -22,9 +22,6 @@ func (s *Store) ListMessages(
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	if limit <= 0 {
-		limit = 100
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -44,13 +41,27 @@ func (s *Store) ListMessages(
 		messages = append(messages, coresession.AgentSessionMessage{
 			Sequence:    value.Sequence,
 			At:          value.At,
-			ExecutionID: domain.AgentExecutionID(value.ExecutionID),
+			ExecutionID: domainfoundation.AgentExecutionID(value.ExecutionID),
+			MessageID:   payload.MessageID,
 			Role:        payload.Role,
 			Content:     payload.Content,
+			Blocks:      cloneBlocks(payload.Blocks),
 		})
 	}
-	if len(messages) > limit {
+	if limit > 0 && len(messages) > limit {
 		messages = messages[len(messages)-limit:]
 	}
 	return messages, nil
+}
+
+func cloneBlocks(blocks []coresession.TranscriptContentBlock) []coresession.TranscriptContentBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	cloned := make([]coresession.TranscriptContentBlock, len(blocks))
+	for i, block := range blocks {
+		cloned[i] = block
+		cloned[i].Input = append([]byte(nil), block.Input...)
+	}
+	return cloned
 }

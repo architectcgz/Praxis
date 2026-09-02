@@ -2,7 +2,7 @@
 
 > 本文定义 Praxis 的目标产品、领域关系、共享上下文、运行方式、持久化分工和交付范围。
 
-领域关系见 [`structure.md`](structure.md)，Workflow 模块见 [`workflow.md`](workflow.md)，系统分层见 [`system-architecture.md`](system-architecture.md)，执行时序见 [`agent-orchestration-model.md`](agent-orchestration-model.md)。
+领域关系见 [`structure.md`](structure.md)，Workflow 模块见 [`workflow.md`](workflow.md)，系统分层见 [`system-architecture.md`](system-architecture.md)，源码布局见 [`directory-structure.md`](directory-structure.md)，执行时序见 [`agent-orchestration-model.md`](agent-orchestration-model.md)。
 
 ## 1. 产品定位
 
@@ -117,7 +117,7 @@ Praxis 以单机 Wails 应用运行：
 ```text
 React UI (WebView)
         │ Wails binding / event
-Go application + core orchestrator
+Go application services + orchestration
         │
         ├── SQLite
         ├── Agent JSONL transcript
@@ -125,7 +125,7 @@ Go application + core orchestrator
         └── optional LLM provider APIs
 ```
 
-React 负责界面与投影；Go application 负责桌面生命周期、binding、文件系统和密钥边界；`internal/core` 负责领域状态、命令准入、上下文提交、执行调度和恢复；runtime 负责单 Agent execution loop；Provider 适配器只处理模型协议。
+React 负责界面与投影；Go app 负责桌面生命周期和 binding；`internal/application` 负责用例准入、事务边界和产品状态写入；`internal/orchestration` 负责执行调度、投递和恢复；`internal/core` 定义领域状态与内层端口；runtime 负责单 Agent execution loop；Provider 适配器只处理模型协议。
 
 ## 8. 交付范围
 
@@ -136,7 +136,7 @@ React 负责界面与投影；Go application 负责桌面生命周期、binding�
 ## 9. 工程约束
 
 1. 领域模型只依赖标准库；外层通过 core 定义的接口接入存储、Provider、工具和 Wails。
-2. 所有状态变更经过 `AgentOrchestrator`；UI、scheduler、runtime 和 adapter 不能绕过命令准入。
+2. 所有状态变更经过拥有对应状态的 application service；UI、scheduler、runtime 和 adapter 不能绕过用例准入。
 3. 密钥不写入 Project 文件、SQLite、JSONL、日志或 binding DTO。
 4. runtime phase、模型流和工具临时状态不提升为持久化身份；持久化执行身份始终是 `AgentExecutionID`。
 5. SessionContext 只允许追加和显式提交；私有 transcript 不自动镜像为共享上下文。

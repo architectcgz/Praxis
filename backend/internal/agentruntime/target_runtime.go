@@ -7,62 +7,61 @@ import (
 	"sync"
 	"time"
 
-	"praxis/internal/core/domain"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
 	coreruntime "praxis/internal/core/runtime"
 	coresession "praxis/internal/core/session"
 )
 
 // TargetSessionResolver returns the only JSONL writer for one Agent. The
 // runtime cannot inspect other Agents' transcripts through this interface.
-type TargetSessionResolver func(domain.SessionID, domain.AgentID) (coresession.TranscriptReceiptStore, error)
+type TargetSessionResolver func(domainfoundation.SessionID, domainfoundation.AgentID) (coresession.TranscriptReceiptStore, error)
 
 type TargetSessionHeaderResolver func(
 	context.Context,
-	domain.AgentExecution,
+	domainexecution.AgentExecution,
 ) (coresession.AgentSessionHeader, error)
 
 // TargetExecutionRunner is the provider/tool boundary. It receives a durable
-// immutable execution snapshot and returns only a stable settlement outcome.
+// immutable execution snapshot and the Agent-owned transcript port, then
+// returns only a stable settlement outcome.
 type TargetExecutionRunner interface {
-	Run(context.Context, domain.AgentExecution) (domain.ExecutionOutcome, domain.ExecutionFailureCode, error)
-}
-
-// TargetExecutionSessionRunner receives the already-open Agent transcript so
-// provider output and runtime receipts share one sequence allocator.
-type TargetExecutionSessionRunner interface {
 	RunWithSession(
 		context.Context,
-		domain.AgentExecution,
+		domainexecution.AgentExecution,
 		coresession.TranscriptReceiptStore,
-	) (domain.ExecutionOutcome, domain.ExecutionFailureCode, error)
+	) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error)
 }
 
 // TargetExecutionLogger receives sanitized runtime failures for diagnostics.
 // It must not be used for provider payloads or credentials.
-type TargetExecutionLogger func(domain.AgentExecution, string, error)
+type TargetExecutionLogger func(domainexecution.AgentExecution, string, error)
 
 // TargetExecutionEventLogger receives sanitized runtime lifecycle events.
-type TargetExecutionEventLogger func(domain.AgentExecution, string)
+type TargetExecutionEventLogger func(domainexecution.AgentExecution, string)
 
 type TargetRuntimeConfig struct {
-	AgentID           domain.AgentID
+	AgentID           domainfoundation.AgentID
 	Sessions          TargetSessionResolver
 	Header            TargetSessionHeaderResolver
 	Runner            TargetExecutionRunner
 	Logger            TargetExecutionLogger
 	EventLogger       TargetExecutionEventLogger
+	OutputObserver    AgentOutputObserver
 	SettlementTimeout time.Duration
 }
 
 // TargetRuntime is the long-lived process-local actor for one Agent. Its
 // active execution state is deliberately ephemeral; recovery uses receipts.
 type TargetRuntime struct {
-	agentID           domain.AgentID
+	agentID           domainfoundation.AgentID
 	sessions          TargetSessionResolver
 	header            TargetSessionHeaderResolver
 	runner            TargetExecutionRunner
 	logger            TargetExecutionLogger
 	eventLogger       TargetExecutionEventLogger
+	outputObserver    AgentOutputObserver
 	settlementTimeout time.Duration
 
 	mu     sync.Mutex
@@ -71,10 +70,10 @@ type TargetRuntime struct {
 }
 
 type targetRuntimeExecution struct {
-	id            domain.AgentExecutionID
+	id            domainfoundation.AgentExecutionID
 	cancel        context.CancelFunc
 	done          chan struct{}
-	cancelOutcome domain.ExecutionOutcome
+	cancelOutcome domainexecution.ExecutionOutcome
 	lifecycle     coreruntime.ExecutionLifecycle
 }
 
@@ -98,7 +97,7 @@ func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
 	}
 	eventLogger := config.EventLogger
 	if eventLogger == nil {
-		eventLogger = func(domain.AgentExecution, string) {}
+		eventLogger = func(domainexecution.AgentExecution, string) {}
 	}
 	return &TargetRuntime{
 		agentID:           config.AgentID,
@@ -107,6 +106,7 @@ func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
 		runner:            config.Runner,
 		logger:            logger,
 		eventLogger:       eventLogger,
+		outputObserver:    config.OutputObserver,
 		settlementTimeout: timeout,
 	}, nil
 }
@@ -116,7 +116,7 @@ func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
 // a second active execution is not.
 func (r *TargetRuntime) Activate(
 	ctx context.Context,
-	execution domain.AgentExecution,
+	execution domainexecution.AgentExecution,
 	lifecycle coreruntime.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
@@ -147,7 +147,7 @@ func (r *TargetRuntime) Activate(
 		id:            execution.ID,
 		cancel:        cancel,
 		done:          make(chan struct{}),
-		cancelOutcome: domain.ExecutionInterrupted,
+		cancelOutcome: domainexecution.ExecutionInterrupted,
 		lifecycle:     lifecycle,
 	}
 	r.active = active
@@ -158,8 +158,8 @@ func (r *TargetRuntime) Activate(
 
 func (r *TargetRuntime) Cancel(
 	ctx context.Context,
-	executionID domain.AgentExecutionID,
-	outcome domain.ExecutionOutcome,
+	executionID domainfoundation.AgentExecutionID,
+	outcome domainexecution.ExecutionOutcome,
 ) error {
 	if ctx == nil {
 		return errors.New("target runtime cancellation context is required")
@@ -188,7 +188,7 @@ func (r *TargetRuntime) Close(ctx context.Context) error {
 	r.closed = true
 	active := r.active
 	if active != nil {
-		active.cancelOutcome = domain.ExecutionInterrupted
+		active.cancelOutcome = domainexecution.ExecutionInterrupted
 		active.cancel()
 	}
 	r.mu.Unlock()
@@ -205,7 +205,7 @@ func (r *TargetRuntime) Close(ctx context.Context) error {
 
 func (r *TargetRuntime) run(
 	ctx context.Context,
-	execution domain.AgentExecution,
+	execution domainexecution.AgentExecution,
 	active *targetRuntimeExecution,
 ) {
 	r.logEvent(execution, "execution started")
@@ -249,13 +249,7 @@ func (r *TargetRuntime) run(
 		r.logError(execution, "confirm execution start", err)
 		return
 	}
-	var outcome domain.ExecutionOutcome
-	var failureCode domain.ExecutionFailureCode
-	if sessionRunner, ok := r.runner.(TargetExecutionSessionRunner); ok {
-		outcome, failureCode, err = sessionRunner.RunWithSession(ctx, execution, store)
-	} else {
-		outcome, failureCode, err = r.runner.Run(ctx, execution)
-	}
+	outcome, failureCode, err := r.runner.RunWithSession(ctx, execution, store)
 	r.logEvent(execution, "provider completed")
 	if err != nil {
 		r.logError(execution, "run provider", err)
@@ -264,28 +258,28 @@ func (r *TargetRuntime) run(
 		r.mu.Lock()
 		outcome = active.cancelOutcome
 		r.mu.Unlock()
-		failureCode = domain.ExecutionFailureRuntimeCancelled
+		failureCode = domainexecution.ExecutionFailureRuntimeCancelled
 	} else if err != nil {
-		outcome = domain.ExecutionFailed
+		outcome = domainexecution.ExecutionFailed
 		if failureCode == "" {
-			failureCode = domain.ExecutionFailureRuntimeFailed
+			failureCode = domainexecution.ExecutionFailureRuntimeFailed
 		}
 	}
 	if !knownTargetOutcome(outcome) {
-		outcome = domain.ExecutionFailed
-		failureCode = domain.ExecutionFailureRuntimeInvalid
+		outcome = domainexecution.ExecutionFailed
+		failureCode = domainexecution.ExecutionFailureRuntimeInvalid
 	}
-	if outcome == domain.ExecutionFailed && failureCode == "" {
-		failureCode = domain.ExecutionFailureRuntimeFailed
+	if outcome == domainexecution.ExecutionFailed && failureCode == "" {
+		failureCode = domainexecution.ExecutionFailureRuntimeFailed
 	}
 	if !failureCode.Valid() {
-		outcome = domain.ExecutionFailed
-		failureCode = domain.ExecutionFailureRuntimeFailed
+		outcome = domainexecution.ExecutionFailed
+		failureCode = domainexecution.ExecutionFailureRuntimeFailed
 	}
 	settlementContext, cancelSettlement := r.settlementContext()
 	defer cancelSettlement()
 	settlement, err := store.AppendExecutionSettlement(settlementContext, coresession.ExecutionSettlementReceipt{
-		ExecutionID: execution.ID,
+		ExecutionID: execution.ID, RequestID: execution.RequestID,
 		Outcome:     outcome,
 		FailureCode: failureCode,
 	})
@@ -300,26 +294,32 @@ func (r *TargetRuntime) run(
 		settlement.FailureCode,
 	); err != nil {
 		r.logError(execution, "settle product execution", err)
+		return
+	}
+	if r.outputObserver != nil {
+		r.outputObserver(AgentOutputEvent{
+			Kind: AgentOutputSettled, AgentID: execution.AgentID, ExecutionID: execution.ID,
+		})
 	}
 	r.logEvent(execution, "execution settled")
 }
 
-func (r *TargetRuntime) logError(execution domain.AgentExecution, stage string, err error) {
+func (r *TargetRuntime) logError(execution domainexecution.AgentExecution, stage string, err error) {
 	if err == nil {
 		return
 	}
 	r.logger(execution, stage, err)
 }
 
-func (r *TargetRuntime) logEvent(execution domain.AgentExecution, stage string) {
+func (r *TargetRuntime) logEvent(execution domainexecution.AgentExecution, stage string) {
 	r.eventLogger(execution, stage)
 }
 
-func (r *TargetRuntime) logEventLocked(executionID domain.AgentExecutionID, stage string) {
-	r.eventLogger(domain.AgentExecution{ID: executionID, AgentID: r.agentID}, stage)
+func (r *TargetRuntime) logEventLocked(executionID domainfoundation.AgentExecutionID, stage string) {
+	r.eventLogger(domainexecution.AgentExecution{ID: executionID, AgentID: r.agentID}, stage)
 }
 
-func defaultTargetExecutionLogger(execution domain.AgentExecution, stage string, err error) {
+func defaultTargetExecutionLogger(execution domainexecution.AgentExecution, stage string, err error) {
 	if err == nil {
 		return
 	}
@@ -330,10 +330,10 @@ func (r *TargetRuntime) settlementContext() (context.Context, context.CancelFunc
 	return context.WithTimeout(context.Background(), r.settlementTimeout)
 }
 
-func knownTargetOutcome(outcome domain.ExecutionOutcome) bool {
+func knownTargetOutcome(outcome domainexecution.ExecutionOutcome) bool {
 	switch outcome {
-	case domain.ExecutionCompleted, domain.ExecutionYielded, domain.ExecutionPaused,
-		domain.ExecutionFailed, domain.ExecutionInterrupted:
+	case domainexecution.ExecutionCompleted, domainexecution.ExecutionYielded, domainexecution.ExecutionPaused,
+		domainexecution.ExecutionFailed, domainexecution.ExecutionInterrupted:
 		return true
 	default:
 		return false

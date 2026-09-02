@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Repair preserves an incomplete final line in the temporary directory and
@@ -48,7 +47,7 @@ func (s *Store) Repair(ctx context.Context) (bool, error) {
 	if err := os.MkdirAll(s.temporaryDir, 0o700); err != nil {
 		return false, fmt.Errorf("create agent session repair directory: %w", err)
 	}
-	backup := filepath.Join(s.temporaryDir, filepath.Base(s.path)+".partial-"+fmt.Sprint(time.Now().UTC().UnixNano()))
+	backup := filepath.Join(s.temporaryDir, filepath.Base(s.path)+".partial-"+fmt.Sprint(s.clock.Now().UTC().UnixNano()))
 	if err := os.WriteFile(backup, tail, 0o600); err != nil {
 		return false, fmt.Errorf("backup agent session tail: %w", err)
 	}

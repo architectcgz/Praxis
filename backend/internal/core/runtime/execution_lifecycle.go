@@ -3,7 +3,9 @@ package runtime
 import (
 	"context"
 
-	"praxis/internal/core/domain"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
 	coresession "praxis/internal/core/session"
 )
 
@@ -14,8 +16,8 @@ type ExecutionLifecycle interface {
 	ConfirmExecutionStart(context.Context, coresession.ExecutionStartReceipt) error
 	SettleRuntimeExecution(
 		context.Context,
-		domain.AgentExecutionID,
-		domain.ExecutionOutcome,
-		domain.ExecutionFailureCode,
+		domainfoundation.AgentExecutionID,
+		domainexecution.ExecutionOutcome,
+		domainexecution.ExecutionFailureCode,
 	) error
 }

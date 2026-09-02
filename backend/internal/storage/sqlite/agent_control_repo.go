@@ -2,15 +2,16 @@ package sqlite
 
 import (
 	"context"
+	domainworkflow "praxis/internal/core/domain/workflow"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
 )
 
 func (s *Store) GetAgentControlRequest(
 	ctx context.Context,
-	id domain.AgentControlRequestID,
-) (domain.AgentControlRequest, error) {
-	var value domain.AgentControlRequest
+	id domainfoundation.AgentControlRequestID,
+) (domainworkflow.AgentControlRequest, error) {
+	var value domainworkflow.AgentControlRequest
 	return value, s.loadPayload(
 		ctx,
 		"agent_control_requests",
@@ -20,7 +21,7 @@ func (s *Store) GetAgentControlRequest(
 	)
 }
 
-func (s *Store) SaveAgentControlRequest(ctx context.Context, value domain.AgentControlRequest) error {
+func (s *Store) SaveAgentControlRequest(ctx context.Context, value domainworkflow.AgentControlRequest) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -42,37 +43,55 @@ func (s *Store) SaveAgentControlRequest(ctx context.Context, value domain.AgentC
 
 func (s *Store) ListOpenAgentControlRequestsByAgent(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 	limit int,
-) ([]domain.AgentControlRequest, error) {
-	return listTargetPayloads[domain.AgentControlRequest](
+) ([]domainworkflow.AgentControlRequest, error) {
+	return listTargetPayloads[domainworkflow.AgentControlRequest](
 		ctx,
 		s,
 		`SELECT payload FROM agent_control_requests
 		 WHERE agent_id = ? AND status = 'requested' ORDER BY id LIMIT ?`,
 		[]any{agentID.String(), targetLimit(limit)},
 		"open agent control requests",
-		func(value domain.AgentControlRequest) error { return value.Validate() },
+		func(value domainworkflow.AgentControlRequest) error { return value.Validate() },
 	)
+}
+
+func (s *Store) ListOpenAgentControlRequestsByAgentAfter(
+	ctx context.Context,
+	agentID domainfoundation.AgentID,
+	afterID domainfoundation.AgentControlRequestID,
+	limit int,
+) ([]domainworkflow.AgentControlRequest, error) {
+	return listTargetPayloads[domainworkflow.AgentControlRequest](ctx, s, `
+		SELECT payload FROM agent_control_requests
+		 WHERE agent_id = ? AND status = 'requested' AND id > ? ORDER BY id LIMIT ?`,
+		[]any{agentID.String(), afterID.String(), targetLimit(limit)}, "open agent control requests", func(value domainworkflow.AgentControlRequest) error {
+			return value.Validate()
+		})
 }
 
 type AgentControlRequestRepository struct{ store *Store }
 
 func (r AgentControlRequestRepository) Get(
 	ctx context.Context,
-	id domain.AgentControlRequestID,
-) (domain.AgentControlRequest, error) {
+	id domainfoundation.AgentControlRequestID,
+) (domainworkflow.AgentControlRequest, error) {
 	return r.store.GetAgentControlRequest(ctx, id)
 }
 
-func (r AgentControlRequestRepository) Save(ctx context.Context, value domain.AgentControlRequest) error {
+func (r AgentControlRequestRepository) Save(ctx context.Context, value domainworkflow.AgentControlRequest) error {
 	return r.store.SaveAgentControlRequest(ctx, value)
 }
 
 func (r AgentControlRequestRepository) ListOpenByAgent(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 	limit int,
-) ([]domain.AgentControlRequest, error) {
+) ([]domainworkflow.AgentControlRequest, error) {
 	return r.store.ListOpenAgentControlRequestsByAgent(ctx, agentID, limit)
+}
+
+func (r AgentControlRequestRepository) ListOpenByAgentAfter(ctx context.Context, agentID domainfoundation.AgentID, afterID domainfoundation.AgentControlRequestID, limit int) ([]domainworkflow.AgentControlRequest, error) {
+	return r.store.ListOpenAgentControlRequestsByAgentAfter(ctx, agentID, afterID, limit)
 }

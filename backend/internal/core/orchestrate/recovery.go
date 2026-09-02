@@ -4,40 +4,44 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
+	"time"
 
-	"praxis/internal/core/domain"
+	domainagent "praxis/internal/core/domain/agent"
 	"praxis/internal/core/persistence"
 	coresession "praxis/internal/core/session"
 )
 
-type AgentSessionResolver func(domain.SessionID, domain.AgentID) (coresession.TranscriptReceiptStore, error)
-
-type RuntimeSnapshotResolver func(context.Context, domain.Agent) (domain.RuntimeExecutionSnapshot, error)
+type AgentSessionResolver func(domainfoundation.SessionID, domainfoundation.AgentID) (coresession.TranscriptReceiptStore, error)
 
 type RecoveryCoordinatorConfig struct {
 	Agents       persistence.AgentRepository
+	Contexts     persistence.SessionContextRepository
 	Executions   persistence.AgentExecutionRepository
+	Waits        persistence.WaitConditionRepository
 	Controls     persistence.AgentControlRequestRepository
 	Deliveries   persistence.ContextDeliveryRepository
 	Orchestrator *AgentOrchestrator
 	Scheduler    *ExecutionScheduler
 	Delivery     *DeliveryCoordinator
 	Sessions     AgentSessionResolver
-	Snapshot     RuntimeSnapshotResolver
 }
 
 // RecoveryCoordinator rebuilds progress from SQLite and Agent JSONL receipts.
 // It never assumes an interrupted model or tool operation was safe to replay.
 type RecoveryCoordinator struct {
 	agents       persistence.AgentRepository
+	contexts     persistence.SessionContextRepository
 	executions   persistence.AgentExecutionRepository
+	waits        persistence.WaitConditionRepository
 	controls     persistence.AgentControlRequestRepository
 	deliveries   persistence.ContextDeliveryRepository
 	orchestrator *AgentOrchestrator
 	scheduler    *ExecutionScheduler
 	delivery     *DeliveryCoordinator
 	sessions     AgentSessionResolver
-	snapshot     RuntimeSnapshotResolver
 }
 
 func NewRecoveryCoordinator(config RecoveryCoordinatorConfig) (*RecoveryCoordinator, error) {
@@ -46,13 +50,15 @@ func NewRecoveryCoordinator(config RecoveryCoordinatorConfig) (*RecoveryCoordina
 		value any
 	}{
 		{name: "agents", value: config.Agents},
+		{name: "session contexts", value: config.Contexts},
 		{name: "executions", value: config.Executions},
+		{name: "waits", value: config.Waits},
+		{name: "controls", value: config.Controls},
 		{name: "deliveries", value: config.Deliveries},
 		{name: "orchestrator", value: config.Orchestrator},
 		{name: "scheduler", value: config.Scheduler},
 		{name: "delivery", value: config.Delivery},
 		{name: "sessions", value: config.Sessions},
-		{name: "snapshot", value: config.Snapshot},
 	} {
 		if required.value == nil {
 			return nil, fmt.Errorf("recovery coordinator %s is required", required.name)
@@ -60,14 +66,15 @@ func NewRecoveryCoordinator(config RecoveryCoordinatorConfig) (*RecoveryCoordina
 	}
 	return &RecoveryCoordinator{
 		agents:       config.Agents,
+		contexts:     config.Contexts,
 		executions:   config.Executions,
+		waits:        config.Waits,
 		controls:     config.Controls,
 		deliveries:   config.Deliveries,
 		orchestrator: config.Orchestrator,
 		scheduler:    config.Scheduler,
 		delivery:     config.Delivery,
 		sessions:     config.Sessions,
-		snapshot:     config.Snapshot,
 	}, nil
 }
 
@@ -89,7 +96,7 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 	}
 	c.orchestrator.SetReady(false)
 	report := RecoveryReport{}
-	agents, err := c.agents.ListAll(ctx, 1000)
+	agents, err := listRecoveryAgents(ctx, c.agents)
 	if err != nil {
 		return report, err
 	}
@@ -109,8 +116,14 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 			report.RepairedSessions++
 		}
 	}
+	if err := verifySessionContexts(ctx, c.contexts, agents); err != nil {
+		return report, err
+	}
+	if err := scanPendingWaits(ctx, c.waits, agents); err != nil {
+		return report, err
+	}
 
-	executions, err := c.executions.ListRecoverable(ctx, 1000)
+	executions, err := listRecoverableExecutions(ctx, c.executions)
 	if err != nil {
 		return report, err
 	}
@@ -138,33 +151,25 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 		if err != nil {
 			return report, fmt.Errorf("find start receipt %s: %w", execution.ID, err)
 		}
-		if execution.Status == domain.ExecutionStarting && start == nil {
+		if execution.Status == domainexecution.ExecutionStarting && start == nil {
 			continue
 		}
 		if err := c.orchestrator.SettleExecution(ctx, ExecutionSettlement{
 			ExecutionID: execution.ID,
-			Outcome:     domain.ExecutionInterrupted,
-			FailureCode: domain.ExecutionFailureRecoveryInterrupted,
+			Outcome:     domainexecution.ExecutionInterrupted,
+			FailureCode: domainexecution.ExecutionFailureRecoveryInterrupted,
 		}); err != nil {
 			return report, fmt.Errorf("interrupt recovered execution %s: %w", execution.ID, err)
 		}
 		report.InterruptedExecutions++
 	}
 
-	deliveries, err := c.deliveries.ListInFlight(ctx, 1000)
+	deliveries, err := listRecoverableDeliveries(ctx, c.deliveries)
 	if err != nil {
 		return report, err
 	}
 	for _, delivery := range deliveries {
-		agent, err := c.agents.Get(ctx, delivery.TargetAgentID)
-		if err != nil {
-			return report, fmt.Errorf("load delivery target agent %s: %w", delivery.ID, err)
-		}
-		snapshot, err := c.snapshot(ctx, agent)
-		if err != nil {
-			return report, fmt.Errorf("resolve delivery snapshot %s: %w", delivery.ID, err)
-		}
-		attempt, err := c.delivery.TryDeliver(context.WithoutCancel(ctx), delivery.ID, snapshot)
+		attempt, err := c.delivery.TryDeliver(context.WithoutCancel(ctx), delivery.ID)
 		if err != nil {
 			return report, fmt.Errorf("recover context delivery %s: %w", delivery.ID, err)
 		}
@@ -174,20 +179,18 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 	}
 
 	for _, agent := range agents {
-		if c.controls != nil {
-			controls, err := c.controls.ListOpenByAgent(ctx, agent.ID, 100)
-			if err != nil {
-				return report, fmt.Errorf("list control requests for agent %s: %w", agent.ID, err)
-			}
-			for _, control := range controls {
-				if err := c.orchestrator.ApplyControlRequest(ctx, control.ID); err != nil {
-					if hasCommandErrorCode(err, CommandErrorAgentUnavailable) {
-						continue
-					}
-					return report, fmt.Errorf("apply control request %s: %w", control.ID, err)
+		controls, err := listRecoverableControls(ctx, c.controls, agent.ID)
+		if err != nil {
+			return report, fmt.Errorf("list control requests for agent %s: %w", agent.ID, err)
+		}
+		for _, control := range controls {
+			if err := c.orchestrator.ApplyControlRequest(ctx, control.ID); err != nil {
+				if hasCommandErrorCode(err, CommandErrorAgentUnavailable) {
+					continue
 				}
-				report.AppliedControls++
+				return report, fmt.Errorf("apply control request %s: %w", control.ID, err)
 			}
+			report.AppliedControls++
 		}
 	}
 
@@ -201,14 +204,179 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 		}
 	}
 
-	starting, err := c.executions.ListStarting(ctx, 1000)
+	starting, err := listStartingExecutions(ctx, c.executions)
 	if err != nil {
 		return report, err
 	}
-	if err := c.scheduler.ActivateStarting(context.WithoutCancel(ctx), len(starting), c.orchestrator); err != nil {
+	if err := c.scheduler.ActivateStarting(context.WithoutCancel(ctx), starting, c.orchestrator); err != nil {
 		return report, err
 	}
 	report.ActivatedStarting = len(starting)
 	c.orchestrator.SetReady(true)
 	return report, nil
+}
+
+func scanPendingWaits(ctx context.Context, repository persistence.WaitConditionRepository, agents []domainagent.Agent) error {
+	paged, ok := repository.(persistence.WaitConditionRecoveryRepository)
+	if !ok {
+		return errors.New("wait condition recovery cursor is unavailable")
+	}
+	for _, agent := range agents {
+		var after domainfoundation.WaitConditionID
+		for {
+			page, err := paged.ListUnresolvedByAgentAfter(ctx, agent.ID, after, 512)
+			if err != nil {
+				return err
+			}
+			if len(page) == 0 {
+				break
+			}
+			after = page[len(page)-1].ID
+			if len(page) < 512 {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func verifySessionContexts(ctx context.Context, repository persistence.SessionContextRepository, agents []domainagent.Agent) error {
+	checked := make(map[domainfoundation.SessionID]struct{})
+	for _, agent := range agents {
+		if _, ok := checked[agent.SessionID]; ok {
+			continue
+		}
+		checked[agent.SessionID] = struct{}{}
+		current, err := repository.CurrentRevision(ctx, agent.SessionID)
+		if err != nil {
+			return err
+		}
+		if current == 0 {
+			return fmt.Errorf("session %s has no context revision", agent.SessionID)
+		}
+		var seen uint64
+		for seen < current {
+			page, err := repository.List(ctx, agent.SessionID, seen, 512)
+			if err != nil {
+				return err
+			}
+			if len(page) == 0 {
+				return fmt.Errorf("session %s context revision sequence is incomplete", agent.SessionID)
+			}
+			for _, entry := range page {
+				seen++
+				if entry.Revision != seen {
+					return fmt.Errorf("session %s context revision sequence is incomplete", agent.SessionID)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func listRecoverableControls(ctx context.Context, repository persistence.AgentControlRequestRepository, agentID domainfoundation.AgentID) ([]domainworkflow.AgentControlRequest, error) {
+	paged, ok := repository.(persistence.AgentControlRecoveryRepository)
+	if !ok {
+		return nil, errors.New("agent control recovery cursor is unavailable")
+	}
+	const pageSize = 512
+	result := make([]domainworkflow.AgentControlRequest, 0)
+	var after domainfoundation.AgentControlRequestID
+	for {
+		page, err := paged.ListOpenByAgentAfter(ctx, agentID, after, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page...)
+		if len(page) < pageSize {
+			return result, nil
+		}
+		after = page[len(page)-1].ID
+	}
+}
+
+func listRecoveryAgents(ctx context.Context, repository persistence.AgentRepository) ([]domainagent.Agent, error) {
+	if paged, ok := repository.(persistence.AgentRecoveryRepository); ok {
+		result := make([]domainagent.Agent, 0)
+		var sessionID domainfoundation.SessionID
+		var agentID domainfoundation.AgentID
+		for {
+			page, err := paged.ListAllAfter(ctx, sessionID, agentID, 512)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, page...)
+			if len(page) < 512 {
+				return result, nil
+			}
+			last := page[len(page)-1]
+			sessionID, agentID = last.SessionID, last.ID
+		}
+	}
+	return nil, errors.New("agent recovery cursor is unavailable")
+}
+
+func listRecoverableExecutions(ctx context.Context, repository persistence.AgentExecutionRepository) ([]domainexecution.AgentExecution, error) {
+	paged, ok := repository.(persistence.ExecutionRecoveryRepository)
+	if !ok {
+		return nil, errors.New("execution recovery cursor is unavailable")
+	}
+	result := make([]domainexecution.AgentExecution, 0)
+	var after time.Time
+	var afterID domainfoundation.AgentExecutionID
+	for {
+		page, err := paged.ListRecoverableAfter(ctx, after, afterID, 512)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page...)
+		if len(page) < 512 {
+			return result, nil
+		}
+		last := page[len(page)-1]
+		after, afterID = last.CreatedAt, last.ID
+	}
+}
+
+func listStartingExecutions(ctx context.Context, repository persistence.AgentExecutionRepository) ([]domainexecution.AgentExecution, error) {
+	paged, ok := repository.(persistence.ExecutionRecoveryRepository)
+	if !ok {
+		return nil, errors.New("starting execution recovery cursor is unavailable")
+	}
+	result := make([]domainexecution.AgentExecution, 0)
+	var after time.Time
+	var afterID domainfoundation.AgentExecutionID
+	for {
+		page, err := paged.ListStartingAfter(ctx, after, afterID, 512)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page...)
+		if len(page) < 512 {
+			return result, nil
+		}
+		last := page[len(page)-1]
+		after, afterID = last.CreatedAt, last.ID
+	}
+}
+
+func listRecoverableDeliveries(ctx context.Context, repository persistence.ContextDeliveryRepository) ([]domainworkflow.ContextDelivery, error) {
+	paged, ok := repository.(persistence.ContextDeliveryRecoveryRepository)
+	if !ok {
+		return nil, errors.New("context delivery recovery cursor is unavailable")
+	}
+	const pageSize = 512
+	result := make([]domainworkflow.ContextDelivery, 0)
+	var after domainfoundation.DeliveryID
+	for {
+		page, err := paged.ListInFlightAfter(ctx, after, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page...)
+		if len(page) < pageSize {
+			return result, nil
+		}
+		after = page[len(page)-1].ID
+	}
 }

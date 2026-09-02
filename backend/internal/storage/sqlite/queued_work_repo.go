@@ -3,22 +3,22 @@ package sqlite
 import (
 	"context"
 	"fmt"
-
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
 )
 
-func (s *Store) GetQueuedWork(ctx context.Context, id domain.WorkItemID) (domain.QueuedWork, error) {
-	return loadTargetPayload[domain.QueuedWork](
+func (s *Store) GetQueuedWork(ctx context.Context, id domainfoundation.WorkItemID) (domainworkflow.QueuedWork, error) {
+	return loadTargetPayload[domainworkflow.QueuedWork](
 		ctx,
 		s,
 		`SELECT payload FROM queued_work_items WHERE id = ?`,
 		[]any{id.String()},
 		"queued work",
-		func(value domain.QueuedWork) error { return value.Validate() },
+		func(value domainworkflow.QueuedWork) error { return value.Validate() },
 	)
 }
 
-func (s *Store) SaveQueuedWork(ctx context.Context, value domain.QueuedWork) error {
+func (s *Store) SaveQueuedWork(ctx context.Context, value domainworkflow.QueuedWork) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -51,15 +51,15 @@ func (s *Store) SaveQueuedWork(ctx context.Context, value domain.QueuedWork) err
 		payload,
 	)
 	if err != nil && isConstraintError(err, "queued_work_items.agent_id, queued_work_items.sequence") {
-		return fmt.Errorf("%w: queued work sequence for agent %s", domain.ErrRequestConflict, value.AgentID)
+		return fmt.Errorf("%w: queued work sequence for agent %s", domainfoundation.ErrRequestConflict, value.AgentID)
 	}
 	if err != nil && isConstraintError(err, "queued_work_items.execution_id") {
-		return fmt.Errorf("%w: queued work execution %s", domain.ErrRequestConflict, value.ExecutionID)
+		return fmt.Errorf("%w: queued work execution %s", domainfoundation.ErrRequestConflict, value.ExecutionID)
 	}
 	return err
 }
 
-func (s *Store) NextQueuedWorkSequence(ctx context.Context, agentID domain.AgentID) (uint64, error) {
+func (s *Store) NextQueuedWorkSequence(ctx context.Context, agentID domainfoundation.AgentID) (uint64, error) {
 	var sequence uint64
 	err := executorFromContext(ctx, s.db).QueryRowContext(
 		ctx,
@@ -74,51 +74,51 @@ func (s *Store) NextQueuedWorkSequence(ctx context.Context, agentID domain.Agent
 
 func (s *Store) FindNextPendingQueuedWork(
 	ctx context.Context,
-	agentID domain.AgentID,
-) (domain.QueuedWork, error) {
-	return loadTargetPayload[domain.QueuedWork](
+	agentID domainfoundation.AgentID,
+) (domainworkflow.QueuedWork, error) {
+	return loadTargetPayload[domainworkflow.QueuedWork](
 		ctx,
 		s,
 		`SELECT payload FROM queued_work_items
 		 WHERE agent_id = ? AND status = 'queued' ORDER BY sequence, id LIMIT 1`,
 		[]any{agentID.String()},
 		"next queued work",
-		func(value domain.QueuedWork) error { return value.Validate() },
+		func(value domainworkflow.QueuedWork) error { return value.Validate() },
 	)
 }
 
-func (s *Store) ListRunningQueuedWork(ctx context.Context, limit int) ([]domain.QueuedWork, error) {
-	return listTargetPayloads[domain.QueuedWork](
+func (s *Store) ListRunningQueuedWork(ctx context.Context, limit int) ([]domainworkflow.QueuedWork, error) {
+	return listTargetPayloads[domainworkflow.QueuedWork](
 		ctx,
 		s,
 		`SELECT payload FROM queued_work_items WHERE status = 'running' ORDER BY created_at, id LIMIT ?`,
 		[]any{targetLimit(limit)},
 		"running queued work",
-		func(value domain.QueuedWork) error { return value.Validate() },
+		func(value domainworkflow.QueuedWork) error { return value.Validate() },
 	)
 }
 
 type QueuedWorkRepository struct{ store *Store }
 
-func (r QueuedWorkRepository) Get(ctx context.Context, id domain.WorkItemID) (domain.QueuedWork, error) {
+func (r QueuedWorkRepository) Get(ctx context.Context, id domainfoundation.WorkItemID) (domainworkflow.QueuedWork, error) {
 	return r.store.GetQueuedWork(ctx, id)
 }
 
-func (r QueuedWorkRepository) Save(ctx context.Context, value domain.QueuedWork) error {
+func (r QueuedWorkRepository) Save(ctx context.Context, value domainworkflow.QueuedWork) error {
 	return r.store.SaveQueuedWork(ctx, value)
 }
 
-func (r QueuedWorkRepository) NextSequence(ctx context.Context, agentID domain.AgentID) (uint64, error) {
+func (r QueuedWorkRepository) NextSequence(ctx context.Context, agentID domainfoundation.AgentID) (uint64, error) {
 	return r.store.NextQueuedWorkSequence(ctx, agentID)
 }
 
 func (r QueuedWorkRepository) FindNextPendingByAgent(
 	ctx context.Context,
-	agentID domain.AgentID,
-) (domain.QueuedWork, error) {
+	agentID domainfoundation.AgentID,
+) (domainworkflow.QueuedWork, error) {
 	return r.store.FindNextPendingQueuedWork(ctx, agentID)
 }
 
-func (r QueuedWorkRepository) ListRunning(ctx context.Context, limit int) ([]domain.QueuedWork, error) {
+func (r QueuedWorkRepository) ListRunning(ctx context.Context, limit int) ([]domainworkflow.QueuedWork, error) {
 	return r.store.ListRunningQueuedWork(ctx, limit)
 }

@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
 
-	"praxis/internal/core/domain"
 	"praxis/internal/core/persistence"
 	coreruntime "praxis/internal/core/runtime"
 )
@@ -13,7 +14,7 @@ import (
 // RuntimeActivator is a generation-fenced registry boundary. It may lose a
 // notification because starting executions remain discoverable in SQLite.
 type RuntimeActivator interface {
-	Activate(context.Context, domain.AgentExecution, coreruntime.ExecutionLifecycle) error
+	Activate(context.Context, domainexecution.AgentExecution, coreruntime.ExecutionLifecycle) error
 }
 
 type ExecutionSchedulerConfig struct {
@@ -40,7 +41,7 @@ func NewExecutionScheduler(config ExecutionSchedulerConfig) (*ExecutionScheduler
 
 func (s *ExecutionScheduler) TryActivate(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 	lifecycle coreruntime.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
@@ -50,13 +51,13 @@ func (s *ExecutionScheduler) TryActivate(
 		return errors.New("execution lifecycle is required")
 	}
 	execution, err := s.executions.GetActiveByAgent(ctx, agentID)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, domainfoundation.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if execution.Status != domain.ExecutionStarting {
+	if execution.Status != domainexecution.ExecutionStarting {
 		return nil
 	}
 	if err := s.runtime.Activate(ctx, execution, lifecycle); err != nil {
@@ -65,11 +66,11 @@ func (s *ExecutionScheduler) TryActivate(
 	return nil
 }
 
-// ActivateStarting is used after recovery because runtime notifications are
-// an optimization, not a source of runnable execution state.
+// ActivateStarting activates the complete cursor-scanned set supplied by
+// recovery. Runtime notifications remain an optimization.
 func (s *ExecutionScheduler) ActivateStarting(
 	ctx context.Context,
-	limit int,
+	executions []domainexecution.AgentExecution,
 	lifecycle coreruntime.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
@@ -78,11 +79,10 @@ func (s *ExecutionScheduler) ActivateStarting(
 	if lifecycle == nil {
 		return errors.New("execution lifecycle is required")
 	}
-	executions, err := s.executions.ListStarting(ctx, limit)
-	if err != nil {
-		return err
-	}
 	for _, execution := range executions {
+		if execution.Status != domainexecution.ExecutionStarting {
+			return fmt.Errorf("execution %s is not starting", execution.ID)
+		}
 		if err := s.runtime.Activate(ctx, execution, lifecycle); err != nil {
 			return fmt.Errorf("activate execution %s: %w", execution.ID, err)
 		}

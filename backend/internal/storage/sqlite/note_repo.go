@@ -3,15 +3,16 @@ package sqlite
 import (
 	"context"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
 )
 
-func (s *Store) GetNote(ctx context.Context, id domain.NoteID) (domain.Note, error) {
-	var value domain.Note
+func (s *Store) GetNote(ctx context.Context, id domainfoundation.NoteID) (domainworkflow.Note, error) {
+	var value domainworkflow.Note
 	return value, s.loadPayload(ctx, "notes", id.String(), &value, func() error { return value.Validate() })
 }
 
-func (s *Store) SaveNote(ctx context.Context, value domain.Note) error {
+func (s *Store) SaveNote(ctx context.Context, value domainworkflow.Note) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -35,10 +36,10 @@ func (s *Store) SaveNote(ctx context.Context, value domain.Note) error {
 
 type NoteRepository struct{ store *Store }
 
-func (r NoteRepository) Get(ctx context.Context, id domain.NoteID) (domain.Note, error) {
+func (r NoteRepository) Get(ctx context.Context, id domainfoundation.NoteID) (domainworkflow.Note, error) {
 	return r.store.GetNote(ctx, id)
 }
 
-func (r NoteRepository) Save(ctx context.Context, value domain.Note) error {
+func (r NoteRepository) Save(ctx context.Context, value domainworkflow.Note) error {
 	return r.store.SaveNote(ctx, value)
 }

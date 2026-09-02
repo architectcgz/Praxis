@@ -16,6 +16,7 @@ export function NewProjectDialog({
     onClose,
 }: NewProjectDialogProps) {
     const [projectName, setProjectName] = useState('')
+    const [projectPath, setProjectPath] = useState('')
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState('')
 
@@ -28,7 +29,8 @@ export function NewProjectDialog({
     const submit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         const name = projectName.trim()
-        if (!name || busy || !bridgeAvailable) {
+        const path = projectPath.trim()
+        if (!name || !path || busy || !bridgeAvailable) {
             return
         }
         setBusy(true)
@@ -36,6 +38,8 @@ export function NewProjectDialog({
         try {
             const created = await createProject({
                 projectName: name,
+                path,
+                requestId: crypto.randomUUID(),
             })
             onCreated(created.projectId)
             onClose()
@@ -84,11 +88,21 @@ export function NewProjectDialog({
                         required
                         disabled={busy}
                     />
+                    <label htmlFor="project-path">项目路径</label>
+                    <input
+                        id="project-path"
+                        value={projectPath}
+                        onChange={(event) => setProjectPath(event.target.value)}
+                        placeholder="C:\\Projects\\my-project"
+                        autoComplete="off"
+                        required
+                        disabled={busy}
+                    />
                     <div className="modal-actions">
                         <button className="modal-secondary" type="button" onClick={close} disabled={busy}>
                             取消
                         </button>
-                        <button className="modal-primary" type="submit" disabled={busy || !projectName.trim() || !bridgeAvailable}>
+                        <button className="modal-primary" type="submit" disabled={busy || !projectName.trim() || !projectPath.trim() || !bridgeAvailable}>
                             {busy ? '创建中...' : '创建项目'}
                         </button>
                     </div>

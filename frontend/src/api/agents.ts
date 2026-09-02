@@ -6,7 +6,7 @@ export const AGENT_OUTPUT_EVENT_NAME = 'praxis:agent-output'
 export type AgentSnapshot = {
     id: string
     sessionId: string
-    groupId: string
+    securityPolicyRevision: number
     profile: string
     state: string
     currentExecutionId: string

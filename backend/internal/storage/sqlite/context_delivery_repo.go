@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
+
 	"praxis/internal/core/persistence"
 )
 
-func (s *Store) GetContextDelivery(ctx context.Context, id domain.DeliveryID) (domain.ContextDelivery, error) {
-	var value domain.ContextDelivery
+func (s *Store) GetContextDelivery(ctx context.Context, id domainfoundation.DeliveryID) (domainworkflow.ContextDelivery, error) {
+	var value domainworkflow.ContextDelivery
 	return value, s.loadPayload(
 		ctx,
 		"context_deliveries",
@@ -19,7 +21,7 @@ func (s *Store) GetContextDelivery(ctx context.Context, id domain.DeliveryID) (d
 	)
 }
 
-func (s *Store) SaveContextDelivery(ctx context.Context, value domain.ContextDelivery) error {
+func (s *Store) SaveContextDelivery(ctx context.Context, value domainworkflow.ContextDelivery) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -42,33 +44,42 @@ func (s *Store) SaveContextDelivery(ctx context.Context, value domain.ContextDel
 
 func (s *Store) ListPendingContextDeliveriesByTarget(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 	limit int,
-) ([]domain.ContextDelivery, error) {
-	return listTargetPayloads[domain.ContextDelivery](
+) ([]domainworkflow.ContextDelivery, error) {
+	return listTargetPayloads[domainworkflow.ContextDelivery](
 		ctx,
 		s,
 		`SELECT payload FROM context_deliveries
 		 WHERE target_agent_id = ? AND status IN ('pending', 'delivering') ORDER BY id LIMIT ?`,
 		[]any{agentID.String(), targetLimit(limit)},
 		"pending context deliveries",
-		func(value domain.ContextDelivery) error { return value.Validate() },
+		func(value domainworkflow.ContextDelivery) error { return value.Validate() },
 	)
 }
 
-func (s *Store) ListInFlightContextDeliveries(ctx context.Context, limit int) ([]domain.ContextDelivery, error) {
-	return listTargetPayloads[domain.ContextDelivery](
+func (s *Store) ListInFlightContextDeliveries(ctx context.Context, limit int) ([]domainworkflow.ContextDelivery, error) {
+	return listTargetPayloads[domainworkflow.ContextDelivery](
 		ctx,
 		s,
 		`SELECT payload FROM context_deliveries
 		 WHERE status IN ('pending', 'delivering') ORDER BY id LIMIT ?`,
 		[]any{targetLimit(limit)},
 		"in-flight context deliveries",
-		func(value domain.ContextDelivery) error { return value.Validate() },
+		func(value domainworkflow.ContextDelivery) error { return value.Validate() },
 	)
 }
 
-func (s *Store) HasDeliveringContextDeliveryByTarget(ctx context.Context, agentID domain.AgentID) (bool, error) {
+func (s *Store) ListInFlightContextDeliveriesAfter(ctx context.Context, afterID domainfoundation.DeliveryID, limit int) ([]domainworkflow.ContextDelivery, error) {
+	return listTargetPayloads[domainworkflow.ContextDelivery](ctx, s, `
+		SELECT payload FROM context_deliveries
+		 WHERE status IN ('pending', 'delivering') AND id > ? ORDER BY id LIMIT ?`,
+		[]any{afterID.String(), targetLimit(limit)}, "in-flight context deliveries", func(value domainworkflow.ContextDelivery) error {
+			return value.Validate()
+		})
+}
+
+func (s *Store) HasDeliveringContextDeliveryByTarget(ctx context.Context, agentID domainfoundation.AgentID) (bool, error) {
 	var exists bool
 	err := executorFromContext(ctx, s.db).QueryRowContext(
 		ctx,
@@ -87,41 +98,45 @@ type ContextDeliveryRepository struct{ store *Store }
 
 func (r ContextDeliveryRepository) Get(
 	ctx context.Context,
-	id domain.DeliveryID,
-) (domain.ContextDelivery, error) {
+	id domainfoundation.DeliveryID,
+) (domainworkflow.ContextDelivery, error) {
 	return r.store.GetContextDelivery(ctx, id)
 }
 
-func (r ContextDeliveryRepository) Save(ctx context.Context, value domain.ContextDelivery) error {
+func (r ContextDeliveryRepository) Save(ctx context.Context, value domainworkflow.ContextDelivery) error {
 	return r.store.SaveContextDelivery(ctx, value)
 }
 
 func (r ContextDeliveryRepository) ListPendingByTarget(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 	limit int,
-) ([]domain.ContextDelivery, error) {
+) ([]domainworkflow.ContextDelivery, error) {
 	return r.store.ListPendingContextDeliveriesByTarget(ctx, agentID, limit)
 }
 
 func (r ContextDeliveryRepository) ListInFlight(
 	ctx context.Context,
 	limit int,
-) ([]domain.ContextDelivery, error) {
+) ([]domainworkflow.ContextDelivery, error) {
 	return r.store.ListInFlightContextDeliveries(ctx, limit)
 }
 
-func (r ContextDeliveryRepository) HasDeliveringByTarget(ctx context.Context, agentID domain.AgentID) (bool, error) {
+func (r ContextDeliveryRepository) ListInFlightAfter(ctx context.Context, afterID domainfoundation.DeliveryID, limit int) ([]domainworkflow.ContextDelivery, error) {
+	return r.store.ListInFlightContextDeliveriesAfter(ctx, afterID, limit)
+}
+
+func (r ContextDeliveryRepository) HasDeliveringByTarget(ctx context.Context, agentID domainfoundation.AgentID) (bool, error) {
 	return r.store.HasDeliveringContextDeliveryByTarget(ctx, agentID)
 }
 
 var (
-	_ persistence.SessionRepository             = SessionRepository{}
-	_ persistence.AgentGroupRepository          = AgentGroupRepository{}
-	_ persistence.AgentRepository               = AgentRepository{}
-	_ persistence.AgentExecutionRepository      = AgentExecutionRepository{}
-	_ persistence.QueuedWorkRepository          = QueuedWorkRepository{}
-	_ persistence.WaitConditionRepository       = WaitConditionRepository{}
-	_ persistence.AgentControlRequestRepository = AgentControlRequestRepository{}
-	_ persistence.ContextDeliveryRepository     = ContextDeliveryRepository{}
+	_ persistence.SessionRepository                   = SessionRepository{}
+	_ persistence.AgentRepository                     = AgentRepository{}
+	_ persistence.AgentExecutionRepository            = AgentExecutionRepository{}
+	_ persistence.ExecutionSecuritySnapshotRepository = ExecutionSecuritySnapshotRepository{}
+	_ persistence.QueuedWorkRepository                = QueuedWorkRepository{}
+	_ persistence.WaitConditionRepository             = WaitConditionRepository{}
+	_ persistence.AgentControlRequestRepository       = AgentControlRequestRepository{}
+	_ persistence.ContextDeliveryRepository           = ContextDeliveryRepository{}
 )

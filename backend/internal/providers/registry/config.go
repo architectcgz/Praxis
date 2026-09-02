@@ -15,6 +15,10 @@ import (
 // file and the settings UI.
 var profileNames = []string{"primary", "delegate", "advisor", "curator"}
 
+var defaultReasoningLevels = []string{"low", "medium", "high"}
+
+const defaultReasoningLevel = "medium"
+
 // ProfileNames returns the bindable profile allowlist so the settings UI can
 // render exactly the bindings that will pass validation.
 func ProfileNames() []string {
@@ -179,8 +183,8 @@ func writeJSONAtomic(path string, payload any) error {
 }
 
 // ApplyConfig validates and atomically writes the model configuration, then
-// replaces the in-memory indexes in place. The orchestration layer, the
-// provider runner, and the bindings share this one *Registry, so an in-place
+// replaces the in-memory indexes in place. The runtime model resolver and the
+// bindings share this one *Registry, so an in-place
 // swap makes a save effective without restarting the process. A validation
 // failure writes nothing and leaves memory untouched.
 func (r *Registry) ApplyConfig(config FileConfig) error {
@@ -266,4 +270,10 @@ func (r *Registry) ProviderKey(providerID string) string {
 		return ""
 	}
 	return strings.TrimSpace(r.secrets[providerID])
+}
+
+// HasProviderKey reports secret presence without exposing the secret value to
+// application or binding layers.
+func (r *Registry) HasProviderKey(providerID string) bool {
+	return r.ProviderKey(providerID) != ""
 }

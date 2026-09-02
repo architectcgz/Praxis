@@ -10,12 +10,21 @@ import (
 	"time"
 
 	"praxis/internal/agentruntime"
-	"praxis/internal/core/domain"
+	domainagent "praxis/internal/core/domain/agent"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainproject "praxis/internal/core/domain/project"
+	domainsecurity "praxis/internal/core/domain/security"
+	domainsession "praxis/internal/core/domain/session"
+	domainworkflow "praxis/internal/core/domain/workflow"
+	domainworkspace "praxis/internal/core/domain/workspace"
+
 	"praxis/internal/core/orchestrate"
 	"praxis/internal/core/session"
 	"praxis/internal/logging"
 	"praxis/internal/providers/registry"
 	"praxis/internal/storage/agentlog"
+	"praxis/internal/storage/agentpolicy"
 	"praxis/internal/storage/dataroot"
 	"praxis/internal/storage/sqlite"
 )
@@ -25,7 +34,6 @@ import (
 // command/query surface used by the Wails binding.
 type Application struct {
 	*orchestrate.AgentOrchestrator
-	root       dataroot.DataRoot
 	store      *sqlite.Store
 	models     *registry.Registry
 	registry   *orchestrate.AgentRuntimeRegistry
@@ -34,47 +42,34 @@ type Application struct {
 	output     *agentOutputPublisher
 }
 
-func (a *Application) ListProjects(ctx context.Context, limit int) ([]domain.Project, error) {
-	return a.store.Repositories().Projects.List(ctx, limit)
+func (a *Application) ListProjects(ctx context.Context, limit int) ([]domainproject.Project, error) {
+	return a.AgentOrchestrator.ListProjects(ctx, limit)
 }
 
-func (a *Application) ListWorkspaces(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.Workspace, error) {
-	return a.store.TargetRepositories().Workspaces.ListByProject(ctx, projectID, limit)
+func (a *Application) ListWorkspaces(ctx context.Context, projectID domainfoundation.ProjectID, limit int) ([]domainworkspace.Workspace, error) {
+	return a.AgentOrchestrator.ListWorkspaces(ctx, projectID, limit)
 }
 
 func (a *Application) ListSessionsByProject(
 	ctx context.Context,
-	projectID domain.ProjectID,
+	projectID domainfoundation.ProjectID,
 	limit int,
-) ([]domain.Session, error) {
-	return a.store.TargetRepositories().Sessions.ListByProject(ctx, projectID, limit)
+) ([]domainsession.Session, error) {
+	return a.AgentOrchestrator.ListSessionsByProject(ctx, projectID, limit)
 }
 
-func (a *Application) CreateProject(ctx context.Context, name string) (result orchestrate.CreateProjectResult, err error) {
+func (a *Application) CreateProject(ctx context.Context, name, path string, requestID domainfoundation.RequestID) (result orchestrate.CreateProjectResult, err error) {
 	name = strings.TrimSpace(name)
-	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || filepath.Base(name) != name {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || !filepath.IsAbs(path) {
 		return result, &orchestrate.CommandError{Code: orchestrate.CommandErrorProjectWorkspaceInvalid}
 	}
-	path := filepath.Join(a.root.Projects, name)
-	if err := os.Mkdir(path, 0o700); err != nil {
-		if os.IsExist(err) {
-			return result, &orchestrate.CommandError{Code: orchestrate.CommandErrorProjectWorkspaceInvalid}
-		}
+	if err := os.MkdirAll(path, 0o700); err != nil {
 		return result, err
 	}
-	created := true
-	defer func() {
-		if err != nil && created {
-			_ = os.Remove(path)
-		}
-	}()
 	result, err = a.AgentOrchestrator.CreateProject(ctx, orchestrate.CreateProjectRequest{
-		ProjectID: domain.NewProjectID(), WorkspaceID: domain.NewWorkspaceID(), Name: name, Path: path,
+		RequestID: requestID, Name: name, Path: path,
 	})
-	if err != nil {
-		return orchestrate.CreateProjectResult{}, err
-	}
-	created = false
 	return result, nil
 }
 
@@ -113,13 +108,29 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	supporting := store.Repositories()
+	policyStore, err := agentpolicy.NewStore(root.AgentPolicyFile)
+	if err != nil {
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, err
+	}
+	systemPolicy, err := policyStore.Current(ctx)
+	if err != nil {
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, fmt.Errorf("load agent policy: %w", err)
+	}
 	target := store.TargetRepositories()
 	output := newAgentOutputPublisher()
 	if runner == nil {
-		runner = &providerRunner{
-			store: store, root: root, registry: modelRegistry, logger: diagnostics.Logger(),
-			outputObserver: output.Publish,
+		runner, err = agentruntime.NewExecutionEngine(agentruntime.ExecutionEngineConfig{
+			Models: providerModelResolver{registry: modelRegistry}, OutputObserver: output.Publish,
+			Logf: diagnostics.Logger().Infof,
+		})
+		if err != nil {
+			_ = diagnostics.Close()
+			closeStore()
+			return nil, err
 		}
 	}
 	factory := targetRuntimeFactory{
@@ -128,6 +139,7 @@ func Open(
 		header:      newSessionHeaderResolver(store),
 		logger:      diagnostics.Log,
 		eventLogger: diagnostics.Event,
+		output:      output.Publish,
 	}
 	registry, err := orchestrate.NewAgentRuntimeRegistry(factory)
 	if err != nil {
@@ -148,24 +160,26 @@ func Open(
 		return nil, err
 	}
 	orchestrator, err := orchestrate.NewAgentOrchestrator(orchestrate.AgentOrchestratorConfig{
-		Transactions:   store,
-		Projects:       target.Projects,
-		Workspaces:     target.Workspaces,
-		Sessions:       target.Sessions,
-		Groups:         target.Groups,
-		Agents:         target.Agents,
-		Executions:     target.Executions,
-		QueuedWork:     target.QueuedWork,
-		TaskPackets:    supporting.TaskPackets,
-		Manifests:      supporting.ContextManifests,
-		Grants:         supporting.CapabilityGrants,
-		Waits:          target.Waits,
-		Controls:       target.Controls,
-		Deliveries:     target.Deliveries,
-		Activator:      scheduler,
-		Canceller:      registry,
-		Models:         modelRegistry,
-		InitiallyReady: false,
+		Transactions:    store,
+		Projects:        target.Projects,
+		Workspaces:      target.Workspaces,
+		Sessions:        target.Sessions,
+		Contexts:        target.Contexts,
+		Policies:        target.Policies,
+		Agents:          target.Agents,
+		Executions:      target.Executions,
+		QueuedWork:      target.QueuedWork,
+		Waits:           target.Waits,
+		Controls:        target.Controls,
+		Deliveries:      target.Deliveries,
+		CommandReceipts: target.Commands,
+		Events:          target.Events,
+		Messages:        newAgentMessageQuery(root),
+		PolicyFactory:   policyFactory(systemPolicy),
+		Activator:       scheduler,
+		Canceller:       registry,
+		Models:          modelRegistry,
+		InitiallyReady:  false,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create agent orchestrator failed: %v", err)
@@ -190,14 +204,15 @@ func Open(
 	}
 	recovery, err := orchestrate.NewRecoveryCoordinator(orchestrate.RecoveryCoordinatorConfig{
 		Agents:       target.Agents,
+		Contexts:     target.Contexts,
 		Executions:   target.Executions,
+		Waits:        target.Waits,
 		Controls:     target.Controls,
 		Deliveries:   target.Deliveries,
 		Orchestrator: orchestrator,
 		Scheduler:    scheduler,
 		Delivery:     delivery,
 		Sessions:     sessions,
-		Snapshot:     recoverySnapshot,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create recovery coordinator failed: %v", err)
@@ -217,7 +232,6 @@ func Open(
 	diagnostics.logger.Infof("composition open completed ready=true")
 	return &Application{
 		AgentOrchestrator: orchestrator,
-		root:              root,
 		store:             store,
 		models:            modelRegistry,
 		registry:          registry,
@@ -290,12 +304,12 @@ func (a *Application) SetProviderKey(providerID, value string) error {
 	return nil
 }
 
-// ProviderKey returns the locally configured key for a provider.
-func (a *Application) ProviderKey(providerID string) string {
+// HasProviderKey reports secret presence without exposing the configured key.
+func (a *Application) HasProviderKey(providerID string) bool {
 	if a.models == nil {
-		return ""
+		return false
 	}
-	return a.models.ProviderKey(providerID)
+	return a.models.HasProviderKey(providerID)
 }
 
 // DiscoverProviderModels retrieves model IDs from the configured provider
@@ -347,25 +361,10 @@ func (a *Application) Close(ctx context.Context) error {
 
 func (a *Application) ListAgentMessages(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 	limit int,
 ) ([]session.AgentSessionMessage, error) {
-	if ctx == nil {
-		return nil, errors.New("agent message context is required")
-	}
-	if agentID == "" {
-		return nil, errors.New("agent message agent id is required")
-	}
-	projection, err := a.ProjectAgent(ctx, agentID, 1)
-	if err != nil {
-		return nil, err
-	}
-	store, err := agentlog.Open(a.root, projection.Agent.SessionID, agentID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = store.Close(context.Background()) }()
-	return store.ListMessages(ctx, limit)
+	return a.AgentOrchestrator.ListAgentMessages(ctx, agentID, limit)
 }
 
 type targetRuntimeFactory struct {
@@ -374,15 +373,16 @@ type targetRuntimeFactory struct {
 	header      agentruntime.TargetSessionHeaderResolver
 	logger      agentruntime.TargetExecutionLogger
 	eventLogger agentruntime.TargetExecutionEventLogger
+	output      agentruntime.AgentOutputObserver
 }
 
 func (f targetRuntimeFactory) New(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 ) (orchestrate.ManagedAgentRuntime, error) {
 	openSessions := func(
-		sessionID domain.SessionID,
-		targetAgentID domain.AgentID,
+		sessionID domainfoundation.SessionID,
+		targetAgentID domainfoundation.AgentID,
 	) (session.TranscriptReceiptStore, error) {
 		return agentlog.Open(f.root, sessionID, targetAgentID)
 	}
@@ -393,18 +393,50 @@ func (f targetRuntimeFactory) New(
 		Runner:            f.runner,
 		Logger:            f.logger,
 		EventLogger:       f.eventLogger,
+		OutputObserver:    f.output,
 		SettlementTimeout: 30 * time.Second,
 	})
 }
 
 func newAgentSessionResolver(root dataroot.DataRoot) orchestrate.AgentSessionResolver {
-	return func(sessionID domain.SessionID, agentID domain.AgentID) (session.TranscriptReceiptStore, error) {
+	return func(sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID) (session.TranscriptReceiptStore, error) {
 		return agentlog.Open(root, sessionID, agentID)
 	}
 }
 
+func newAgentMessageQuery(root dataroot.DataRoot) orchestrate.AgentMessageQuery {
+	return func(ctx context.Context, sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID, limit int) ([]session.AgentSessionMessage, error) {
+		store, err := agentlog.Open(root, sessionID, agentID)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = store.Close(context.Background()) }()
+		return store.ListMessages(ctx, limit)
+	}
+}
+
+func policyFactory(snapshot domainsecurity.AgentPolicySnapshot) orchestrate.AgentSecurityPolicyFactory {
+	return func(workspace domainworkspace.Workspace, profile domainsecurity.AgentProfile) (domainsecurity.AgentSecurityPolicy, error) {
+		template, ok := snapshot.TemplateFor(profile)
+		if !ok {
+			return domainsecurity.AgentSecurityPolicy{}, fmt.Errorf("agent policy has no template for profile %s", profile)
+		}
+		capabilities := domainsecurity.CapabilityPolicy{AllowedTools: template.AllowedTools}
+		switch template.WorkspaceAccess {
+		case domainsecurity.WorkspaceAccessRead:
+			capabilities.ReadScopes = []string{workspace.Path}
+		case domainsecurity.WorkspaceAccessReadWrite:
+			capabilities.ReadScopes = []string{workspace.Path}
+			capabilities.WriteScopes = []string{workspace.Path}
+		}
+		return domainsecurity.NewAgentSecurityPolicy(1, capabilities,
+			domainsecurity.SandboxPolicy{Mode: snapshot.SandboxMode},
+			domainsecurity.ApprovalPolicy{Mode: snapshot.ApprovalMode})
+	}
+}
+
 func newSessionHeaderResolver(store *sqlite.Store) agentruntime.TargetSessionHeaderResolver {
-	return func(ctx context.Context, execution domain.AgentExecution) (session.AgentSessionHeader, error) {
+	return func(ctx context.Context, execution domainexecution.AgentExecution) (session.AgentSessionHeader, error) {
 		agent, err := store.GetAgent(ctx, execution.AgentID)
 		if err != nil {
 			return session.AgentSessionHeader{}, err
@@ -414,7 +446,7 @@ func newSessionHeaderResolver(store *sqlite.Store) agentruntime.TargetSessionHea
 }
 
 func newDeliveryHeaderResolver(store *sqlite.Store) orchestrate.DeliverySessionHeaderResolver {
-	return func(ctx context.Context, delivery domain.ContextDelivery) (session.AgentSessionHeader, error) {
+	return func(ctx context.Context, delivery domainworkflow.ContextDelivery) (session.AgentSessionHeader, error) {
 		agent, err := store.GetAgent(ctx, delivery.TargetAgentID)
 		if err != nil {
 			return session.AgentSessionHeader{}, err
@@ -423,9 +455,9 @@ func newDeliveryHeaderResolver(store *sqlite.Store) orchestrate.DeliverySessionH
 	}
 }
 
-func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domain.Agent) session.AgentSessionHeader {
+func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domainagent.Agent) session.AgentSessionHeader {
 	sessionRecord, err := store.GetSession(ctx, agent.SessionID)
-	workspaceID := domain.WorkspaceID("")
+	workspaceID := domainfoundation.WorkspaceID("")
 	if err == nil {
 		workspaceID = sessionRecord.WorkspaceID
 	}
@@ -438,12 +470,4 @@ func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domain.Age
 		MinReaderVersion: 2,
 		WrittenBy:        "praxis/target",
 	}
-}
-
-func recoverySnapshot(context.Context, domain.Agent) (domain.RuntimeExecutionSnapshot, error) {
-	return domain.NewRuntimeExecutionSnapshot(
-		domain.SandboxReadOnly,
-		domain.ApprovalAlwaysAsk,
-		"recovery-v1",
-	)
 }

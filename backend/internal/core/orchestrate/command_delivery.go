@@ -2,15 +2,19 @@ package orchestrate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
-	"praxis/internal/core/domain"
+	domainagent "praxis/internal/core/domain/agent"
+	domaincommand "praxis/internal/core/domain/command"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
 )
 
 type ContextDeliveryClaim struct {
-	Delivery domain.ContextDelivery
+	Delivery domainworkflow.ContextDelivery
 	Claimed  bool
 }
 
@@ -18,7 +22,7 @@ type ContextDeliveryClaim struct {
 // artifact is being appended. It performs no transcript I/O itself.
 func (o *AgentOrchestrator) ClaimContextDelivery(
 	ctx context.Context,
-	deliveryID domain.DeliveryID,
+	deliveryID domainfoundation.DeliveryID,
 ) (ContextDeliveryClaim, error) {
 	if ctx == nil {
 		return ContextDeliveryClaim{}, errors.New("context delivery claim context is required")
@@ -33,18 +37,18 @@ func (o *AgentOrchestrator) ClaimContextDelivery(
 			return err
 		}
 		claim.Delivery = delivery
-		if delivery.Status == domain.ContextDeliveryDelivering {
+		if delivery.Status == domainworkflow.ContextDeliveryDelivering {
 			return nil
 		}
-		if delivery.Status != domain.ContextDeliveryPending {
+		if delivery.Status != domainworkflow.ContextDeliveryPending {
 			return nil
 		}
 		agent, err := o.agents.Get(txCtx, delivery.TargetAgentID)
 		if err != nil {
 			return err
 		}
-		if agent.State != domain.AgentIdle && agent.State != domain.AgentWaiting && agent.State != domain.AgentFailed &&
-			agent.State != domain.AgentClosed {
+		if agent.State != domainagent.AgentIdle && agent.State != domainagent.AgentWaiting && agent.State != domainagent.AgentFailed &&
+			agent.State != domainagent.AgentClosed {
 			return nil
 		}
 		if err := delivery.Begin(o.clock.Now()); err != nil {
@@ -64,14 +68,14 @@ func (o *AgentOrchestrator) ClaimContextDelivery(
 }
 
 type ContextDeliveryCompletionRequest struct {
-	DeliveryID       domain.DeliveryID
+	DeliveryID       domainfoundation.DeliveryID
 	ArtifactEntryRef string
-	RuntimeSnapshot  domain.RuntimeExecutionSnapshot
+	RequestID        domainfoundation.RequestID
 }
 
 type ContextDeliveryCompletion struct {
-	Delivery         domain.ContextDelivery
-	Execution        domain.AgentExecution
+	Delivery         domainworkflow.ContextDelivery
+	Execution        domainexecution.AgentExecution
 	ExistingDelivery bool
 	ActivationError  string
 }
@@ -86,38 +90,57 @@ func (o *AgentOrchestrator) CompleteContextDelivery(
 	if ctx == nil {
 		return ContextDeliveryCompletion{}, errors.New("context delivery completion context is required")
 	}
-	if strings.TrimSpace(request.DeliveryID.String()) == "" || strings.TrimSpace(request.ArtifactEntryRef) == "" {
+	if strings.TrimSpace(request.DeliveryID.String()) == "" || strings.TrimSpace(request.ArtifactEntryRef) == "" || request.RequestID == "" {
 		return ContextDeliveryCompletion{}, commandError(CommandErrorInvalidRequest)
 	}
-	if err := request.RuntimeSnapshot.Validate(); err != nil {
-		return ContextDeliveryCompletion{}, fmt.Errorf("%w: %v", commandError(CommandErrorInvalidRequest), err)
-	}
+	digest := commandArgumentsDigest(struct {
+		DeliveryID       domainfoundation.DeliveryID
+		ArtifactEntryRef string
+	}{request.DeliveryID, request.ArtifactEntryRef})
 	result := ContextDeliveryCompletion{}
 	err := o.tx.InTx(ctx, func(txCtx context.Context) error {
+		if receipt, found, err := commandReceipt(txCtx, o.commandReceipts, request.RequestID, "complete_context_delivery", digest); err != nil {
+			return err
+		} else if found {
+			var value struct{ ExecutionID string }
+			if err := json.Unmarshal(receipt.ResultPayload, &value); err != nil {
+				return err
+			}
+			delivery, err := o.deliveries.Get(txCtx, request.DeliveryID)
+			if err != nil {
+				return err
+			}
+			execution, err := o.executions.Get(txCtx, domainfoundation.AgentExecutionID(value.ExecutionID))
+			if err != nil {
+				return err
+			}
+			result = ContextDeliveryCompletion{Delivery: delivery, Execution: execution, ExistingDelivery: true}
+			return nil
+		}
 		delivery, err := o.deliveries.Get(txCtx, request.DeliveryID)
 		if err != nil {
 			return err
 		}
-		if delivery.Status == domain.ContextDeliveryDelivered {
+		if delivery.Status == domainworkflow.ContextDeliveryDelivered {
 			if delivery.ArtifactEntryRef != request.ArtifactEntryRef {
-				return domain.ErrRequestConflict
+				return domainfoundation.ErrRequestConflict
 			}
 			result.Delivery = delivery
 			result.ExistingDelivery = true
 			return nil
 		}
-		if delivery.Status != domain.ContextDeliveryDelivering {
+		if delivery.Status != domainworkflow.ContextDeliveryDelivering {
 			return commandError(CommandErrorAgentUnavailable)
 		}
 		agent, err := o.agents.Get(txCtx, delivery.TargetAgentID)
 		if err != nil {
 			return err
 		}
-		if agent.State != domain.AgentIdle && agent.State != domain.AgentWaiting && agent.State != domain.AgentFailed &&
-			agent.State != domain.AgentClosed {
+		if agent.State != domainagent.AgentIdle && agent.State != domainagent.AgentWaiting && agent.State != domainagent.AgentFailed &&
+			agent.State != domainagent.AgentClosed {
 			return commandError(CommandErrorAgentUnavailable)
 		}
-		if err := o.checkGroupCapacity(txCtx, agent.GroupID); err != nil {
+		if err := o.checkSessionCapacity(txCtx, agent.SessionID); err != nil {
 			return err
 		}
 		at := o.clock.Now()
@@ -143,20 +166,19 @@ func (o *AgentOrchestrator) CompleteContextDelivery(
 				}
 			}
 		}
-		requestID := domain.RequestID("delivery:" + delivery.ID.String())
-		execution, err := domain.NewAgentExecution(
-			domain.NewAgentExecutionID(),
+		requestID := domainfoundation.RequestID("delivery:" + delivery.ID.String())
+		input, err := o.materializeExecutionInput(txCtx, agent, "", "", "")
+		if err != nil {
+			return err
+		}
+		execution, err := domainexecution.NewAgentExecution(
+			domainfoundation.AgentExecutionID(o.newID("execution")),
 			agent.SessionID,
 			agent.ID,
 			requestID,
-			domain.ExecutionContextDelivery,
+			domainexecution.ExecutionContextDelivery,
 			"",
-			domain.ExecutionInputSnapshot{
-				TaskPacketID:      agent.TaskPacketID,
-				ContextManifestID: agent.ContextManifestID,
-				CapabilityGrantID: agent.GrantID,
-				Runtime:           request.RuntimeSnapshot,
-			},
+			input,
 			at,
 		)
 		if err != nil {
@@ -168,8 +190,27 @@ func (o *AgentOrchestrator) CompleteContextDelivery(
 		if err := o.deliveries.Save(txCtx, delivery); err != nil {
 			return err
 		}
+		deliveryEvent := o.newEvent(domainfoundation.EventDeliveryDelivered, at)
+		deliveryEvent.SessionID, deliveryEvent.AgentID, deliveryEvent.DeliveryID = delivery.SessionID, delivery.TargetAgentID, delivery.ID
+		if err := o.appendEvent(txCtx, deliveryEvent); err != nil {
+			return err
+		}
 		if err := o.executions.Save(txCtx, execution); err != nil {
 			return err
+		}
+		executionEvent := o.newEvent(domainfoundation.EventExecutionStarted, at)
+		executionEvent.SessionID, executionEvent.AgentID, executionEvent.AgentExecutionID = execution.SessionID, execution.AgentID, execution.ID
+		if err := o.appendEvent(txCtx, executionEvent); err != nil {
+			return err
+		}
+		if o.commandReceipts != nil {
+			payload, _ := json.Marshal(struct{ ExecutionID string }{execution.ID.String()})
+			if err := o.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
+				RequestID: request.RequestID, Command: "complete_context_delivery",
+				ArgumentsDigest: digest, ResultPayload: payload, CreatedAt: at,
+			}); err != nil {
+				return err
+			}
 		}
 		if err := o.agents.Save(txCtx, agent); err != nil {
 			return err
@@ -190,7 +231,7 @@ func (o *AgentOrchestrator) CompleteContextDelivery(
 	return result, nil
 }
 
-func waitTargets(wait *domain.WaitCondition, targetID string) bool {
+func waitTargets(wait *domainworkflow.WaitCondition, targetID string) bool {
 	for _, candidate := range wait.TargetIDs {
 		if candidate == targetID {
 			return true

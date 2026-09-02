@@ -16,7 +16,8 @@ import (
 	"strings"
 	"sync"
 
-	"praxis/internal/core/domain"
+	domainsecurity "praxis/internal/core/domain/security"
+
 	coreruntime "praxis/internal/core/runtime"
 	providerapi "praxis/internal/providers"
 	"praxis/internal/providers/anthropic"
@@ -336,42 +337,42 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 // ResolveModel returns the configured provider/model reference for an agent profile. Profiles
 // are resolved when a Grant is created so durable executions retain the exact
 // model selection that was approved for them.
-func (r *Registry) ResolveModel(profile domain.AgentProfile) (domain.ModelSelection, error) {
+func (r *Registry) ResolveModel(profile domainsecurity.AgentProfile) (domainsecurity.ModelSelection, error) {
 	if !profile.Valid() {
-		return domain.ModelSelection{}, fmt.Errorf("unknown agent profile %q", profile)
+		return domainsecurity.ModelSelection{}, fmt.Errorf("unknown agent profile %q", profile)
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	reference, ok := r.config.Profiles[string(profile)]
 	if !ok || strings.TrimSpace(reference.ProviderID) == "" || strings.TrimSpace(reference.ModelID) == "" {
-		return domain.ModelSelection{}, fmt.Errorf("model profile %q is not configured", profile)
+		return domainsecurity.ModelSelection{}, fmt.Errorf("model profile %q is not configured", profile)
 	}
 	model, err := r.modelLocked(reference.ProviderID, reference.ModelID)
 	if err != nil {
-		return domain.ModelSelection{}, fmt.Errorf("model profile %q: %w", profile, err)
+		return domainsecurity.ModelSelection{}, fmt.Errorf("model profile %q: %w", profile, err)
 	}
 	return r.modelSelection(model, "")
 }
 
 // ResolveModelSelection validates a model and optional thinking level before
 // the orchestration layer freezes it into an execution-specific Grant.
-func (r *Registry) ResolveModelSelection(providerID, modelID, reasoning string) (domain.ModelSelection, error) {
+func (r *Registry) ResolveModelSelection(providerID, modelID, reasoning string) (domainsecurity.ModelSelection, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	model, err := r.modelLocked(providerID, modelID)
 	if err != nil {
-		return domain.ModelSelection{}, err
+		return domainsecurity.ModelSelection{}, err
 	}
 	return r.modelSelection(model, reasoning)
 }
 
 // Stream resolves a configured provider/model selection into a model stream.
 func (r *Registry) Stream(providerID, modelID string) (coreruntime.ModelStream, error) {
-	return r.StreamFor(domain.ModelSelection{ProviderID: providerID, ModelID: modelID})
+	return r.StreamFor(domainsecurity.ModelSelection{ProviderID: providerID, ModelID: modelID})
 }
 
 // StreamFor builds a stream for the already-frozen model selection.
-func (r *Registry) StreamFor(selection domain.ModelSelection) (coreruntime.ModelStream, error) {
+func (r *Registry) StreamFor(selection domainsecurity.ModelSelection) (coreruntime.ModelStream, error) {
 	if strings.TrimSpace(selection.ProviderID) == "" || strings.TrimSpace(selection.ModelID) == "" {
 		return nil, errors.New("model selection provider and model IDs are required")
 	}
@@ -417,22 +418,22 @@ func (r *Registry) StreamFor(selection domain.ModelSelection) (coreruntime.Model
 	}
 }
 
-func (r *Registry) modelSelection(model ModelConfig, reasoning string) (domain.ModelSelection, error) {
+func (r *Registry) modelSelection(model ModelConfig, reasoning string) (domainsecurity.ModelSelection, error) {
 	reasoning = strings.TrimSpace(reasoning)
 	config := model.Reasoning
 	if !config.Supported {
 		if reasoning != "" {
-			return domain.ModelSelection{}, fmt.Errorf("model %q does not support reasoning", model.ModelID)
+			return domainsecurity.ModelSelection{}, fmt.Errorf("model %q does not support reasoning", model.ModelID)
 		}
-		return domain.ModelSelection{ProviderID: model.ProviderID, ModelID: model.ModelID}, nil
+		return domainsecurity.ModelSelection{ProviderID: model.ProviderID, ModelID: model.ModelID}, nil
 	}
 	if reasoning == "" {
 		reasoning = config.Default
 	}
 	if !containsReasoningLevel(config.Levels, reasoning) {
-		return domain.ModelSelection{}, fmt.Errorf("model %q does not support reasoning %q", model.ModelID, reasoning)
+		return domainsecurity.ModelSelection{}, fmt.Errorf("model %q does not support reasoning %q", model.ModelID, reasoning)
 	}
-	return domain.ModelSelection{ProviderID: model.ProviderID, ModelID: model.ModelID, Reasoning: reasoning}, nil
+	return domainsecurity.ModelSelection{ProviderID: model.ProviderID, ModelID: model.ModelID, Reasoning: reasoning}, nil
 }
 
 func cloneReasoning(config ReasoningConfig) ReasoningConfig {
@@ -458,7 +459,7 @@ func normalizeReasoning(config ReasoningConfig) (ReasoningConfig, error) {
 		if len(config.Levels) > 0 || config.Default != "" {
 			return ReasoningConfig{}, errors.New("unsupported reasoning cannot declare levels or a default")
 		}
-		return ReasoningConfig{}, nil
+		return defaultReasoningConfig(), nil
 	}
 	if len(config.Levels) == 0 {
 		return ReasoningConfig{}, errors.New("supported reasoning requires levels")
@@ -477,13 +478,21 @@ func normalizeReasoning(config ReasoningConfig) (ReasoningConfig, error) {
 		levels = append(levels, level)
 	}
 	if config.Default == "" {
-		config.Default = "medium"
+		config.Default = defaultReasoningLevel
 	}
 	if !containsReasoningLevel(levels, config.Default) {
 		return ReasoningConfig{}, fmt.Errorf("reasoning default %q is not supported", config.Default)
 	}
 	config.Levels = levels
 	return config, nil
+}
+
+func defaultReasoningConfig() ReasoningConfig {
+	return ReasoningConfig{
+		Supported: true,
+		Levels:    append([]string(nil), defaultReasoningLevels...),
+		Default:   defaultReasoningLevel,
+	}
 }
 
 func loadModels(path string) (FileConfig, error) {

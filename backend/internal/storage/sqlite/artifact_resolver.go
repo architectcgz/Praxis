@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"praxis/internal/core/domain"
+	domaincontext "praxis/internal/core/domain/context"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
+
 	coresession "praxis/internal/core/session"
 )
 
@@ -16,7 +19,7 @@ import (
 // transcript and does not expose provider payloads or secret-bearing fields.
 func (s *Store) ResolveContextArtifact(
 	ctx context.Context,
-	delivery domain.ContextDelivery,
+	delivery domainworkflow.ContextDelivery,
 ) (coresession.ContextArtifact, error) {
 	if ctx == nil {
 		return coresession.ContextArtifact{}, errors.New("context artifact resolver context is required")
@@ -28,37 +31,37 @@ func (s *Store) ResolveContextArtifact(
 	if explicit {
 		return s.resolveExplicitArtifact(ctx, delivery, kind, id)
 	}
-	result, resultErr := s.GetAgentResult(ctx, domain.AgentResultID(id))
+	result, resultErr := s.GetAgentResult(ctx, domainfoundation.AgentResultID(id))
 	if resultErr == nil {
 		return encodeAgentResultArtifact(delivery, result)
 	}
-	if !errors.Is(resultErr, domain.ErrNotFound) {
+	if !errors.Is(resultErr, domainfoundation.ErrNotFound) {
 		return coresession.ContextArtifact{}, resultErr
 	}
-	briefing, briefingErr := s.GetBriefing(ctx, domain.BriefingID(id))
+	briefing, briefingErr := s.GetBriefing(ctx, domainfoundation.BriefingID(id))
 	if briefingErr == nil {
 		return encodeBriefingArtifact(delivery, briefing)
 	}
-	if errors.Is(briefingErr, domain.ErrNotFound) {
-		return coresession.ContextArtifact{}, domain.ErrNotFound
+	if errors.Is(briefingErr, domainfoundation.ErrNotFound) {
+		return coresession.ContextArtifact{}, domainfoundation.ErrNotFound
 	}
 	return coresession.ContextArtifact{}, briefingErr
 }
 
 func (s *Store) resolveExplicitArtifact(
 	ctx context.Context,
-	delivery domain.ContextDelivery,
+	delivery domainworkflow.ContextDelivery,
 	kind, id string,
 ) (coresession.ContextArtifact, error) {
 	switch kind {
 	case "agent_result":
-		result, err := s.GetAgentResult(ctx, domain.AgentResultID(id))
+		result, err := s.GetAgentResult(ctx, domainfoundation.AgentResultID(id))
 		if err != nil {
 			return coresession.ContextArtifact{}, err
 		}
 		return encodeAgentResultArtifact(delivery, result)
 	case "briefing":
-		briefing, err := s.GetBriefing(ctx, domain.BriefingID(id))
+		briefing, err := s.GetBriefing(ctx, domainfoundation.BriefingID(id))
 		if err != nil {
 			return coresession.ContextArtifact{}, err
 		}
@@ -69,19 +72,19 @@ func (s *Store) resolveExplicitArtifact(
 }
 
 func encodeAgentResultArtifact(
-	delivery domain.ContextDelivery,
-	result domain.AgentResult,
+	delivery domainworkflow.ContextDelivery,
+	result domainworkflow.AgentResult,
 ) (coresession.ContextArtifact, error) {
-	if result.Status != domain.ArtifactApproved {
+	if result.Status != domainworkflow.ArtifactApproved {
 		return coresession.ContextArtifact{}, errors.New("agent result is not approved")
 	}
 	if delivery.SessionID != result.SessionID {
 		return coresession.ContextArtifact{}, errors.New("agent result session does not match delivery")
 	}
 	body, err := json.Marshal(struct {
-		Summary      string              `json:"summary"`
-		ChangedPaths []string            `json:"changedPaths,omitempty"`
-		EvidenceRefs []domain.ContentRef `json:"evidenceRefs,omitempty"`
+		Summary      string                     `json:"summary"`
+		ChangedPaths []string                   `json:"changedPaths,omitempty"`
+		EvidenceRefs []domaincontext.ContentRef `json:"evidenceRefs,omitempty"`
 	}{
 		Summary:      result.Summary,
 		ChangedPaths: append([]string(nil), result.ChangedPaths...),
@@ -99,10 +102,10 @@ func encodeAgentResultArtifact(
 }
 
 func encodeBriefingArtifact(
-	delivery domain.ContextDelivery,
-	briefing domain.Briefing,
+	delivery domainworkflow.ContextDelivery,
+	briefing domainworkflow.Briefing,
 ) (coresession.ContextArtifact, error) {
-	if briefing.Status != domain.ArtifactApproved {
+	if briefing.Status != domainworkflow.ArtifactApproved {
 		return coresession.ContextArtifact{}, errors.New("briefing is not approved")
 	}
 	if delivery.SessionID != briefing.SessionID {

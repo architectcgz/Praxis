@@ -7,14 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	domainfoundation "praxis/internal/core/domain/foundation"
 
-	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
 )
 
 func (s *Store) FindExecutionStart(
 	ctx context.Context,
-	executionID domain.AgentExecutionID,
+	executionID domainfoundation.AgentExecutionID,
 ) (*coresession.ExecutionStartReceipt, error) {
 	if ctx == nil {
 		return nil, errors.New("execution start lookup context is required")
@@ -30,7 +30,7 @@ func (s *Store) FindExecutionStart(
 
 func (s *Store) FindExecutionSettlement(
 	ctx context.Context,
-	executionID domain.AgentExecutionID,
+	executionID domainfoundation.AgentExecutionID,
 ) (*coresession.ExecutionSettlementReceipt, error) {
 	if ctx == nil {
 		return nil, errors.New("execution settlement lookup context is required")
@@ -46,7 +46,7 @@ func (s *Store) FindExecutionSettlement(
 
 func (s *Store) FindContextArtifact(
 	ctx context.Context,
-	deliveryID domain.DeliveryID,
+	deliveryID domainfoundation.DeliveryID,
 ) (*coresession.ContextArtifactReceipt, error) {
 	if ctx == nil {
 		return nil, errors.New("context artifact lookup context is required")
@@ -60,7 +60,7 @@ func (s *Store) FindContextArtifact(
 	return artifactReceipt(entries, deliveryID)
 }
 
-func (s *Store) startReceiptLocked(executionID domain.AgentExecutionID) (coresession.ExecutionStartReceipt, error) {
+func (s *Store) startReceiptLocked(executionID domainfoundation.AgentExecutionID) (coresession.ExecutionStartReceipt, error) {
 	entries, err := s.readEntriesLocked()
 	if err != nil {
 		return coresession.ExecutionStartReceipt{}, err
@@ -76,7 +76,7 @@ func (s *Store) startReceiptLocked(executionID domain.AgentExecutionID) (coreses
 }
 
 func (s *Store) settlementReceiptLocked(
-	executionID domain.AgentExecutionID,
+	executionID domainfoundation.AgentExecutionID,
 ) (coresession.ExecutionSettlementReceipt, error) {
 	entries, err := s.readEntriesLocked()
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *Store) settlementReceiptLocked(
 }
 
 func (s *Store) artifactReceiptLocked(
-	deliveryID domain.DeliveryID,
+	deliveryID domainfoundation.DeliveryID,
 ) (coresession.ContextArtifactReceipt, error) {
 	entries, err := s.readEntriesLocked()
 	if err != nil {
@@ -109,7 +109,7 @@ func (s *Store) artifactReceiptLocked(
 	return *receipt, nil
 }
 
-func startReceipt(entries []entry, executionID domain.AgentExecutionID) (*coresession.ExecutionStartReceipt, error) {
+func startReceipt(entries []entry, executionID domainfoundation.AgentExecutionID) (*coresession.ExecutionStartReceipt, error) {
 	for _, value := range entries {
 		if value.Kind != entryExecutionStarted || value.ExecutionID != executionID.String() {
 			continue
@@ -118,13 +118,13 @@ func startReceipt(entries []entry, executionID domain.AgentExecutionID) (*corese
 		if err := json.Unmarshal(value.Payload, &payload); err != nil {
 			return nil, fmt.Errorf("decode execution start receipt: %w", err)
 		}
-		digest, _, err := executionInputDigest(entries, executionID, domain.RequestID(payload.RequestID))
+		digest, _, err := executionInputDigest(entries, executionID, domainfoundation.RequestID(payload.RequestID))
 		if err != nil {
 			return nil, err
 		}
 		return &coresession.ExecutionStartReceipt{
 			ExecutionID: executionID,
-			RequestID:   domain.RequestID(payload.RequestID),
+			RequestID:   domainfoundation.RequestID(payload.RequestID),
 			EntryID:     value.ID,
 			Sequence:    value.Sequence,
 			InputDigest: digest,
@@ -135,8 +135,8 @@ func startReceipt(entries []entry, executionID domain.AgentExecutionID) (*corese
 
 func executionInputDigest(
 	entries []entry,
-	executionID domain.AgentExecutionID,
-	requestID domain.RequestID,
+	executionID domainfoundation.AgentExecutionID,
+	requestID domainfoundation.RequestID,
 ) (string, bool, error) {
 	for _, value := range entries {
 		if value.Kind != entryMessage || value.ExecutionID != executionID.String() {
@@ -146,7 +146,7 @@ func executionInputDigest(
 		if err := json.Unmarshal(value.Payload, &payload); err != nil {
 			return "", false, fmt.Errorf("decode execution input receipt: %w", err)
 		}
-		if payload.SourceRequestID != requestID.String() {
+		if payload.Role != "user" || payload.MessageID != "input:"+requestID.String() || payload.SourceRequestID != requestID.String() {
 			continue
 		}
 		digest := sha256.Sum256([]byte(payload.Content))
@@ -157,7 +157,7 @@ func executionInputDigest(
 
 func settlementReceipt(
 	entries []entry,
-	executionID domain.AgentExecutionID,
+	executionID domainfoundation.AgentExecutionID,
 ) (*coresession.ExecutionSettlementReceipt, error) {
 	for _, value := range entries {
 		if value.Kind != entryExecutionSettled || value.ExecutionID != executionID.String() {
@@ -167,8 +167,11 @@ func settlementReceipt(
 		if err := json.Unmarshal(value.Payload, &payload); err != nil {
 			return nil, fmt.Errorf("decode execution settlement receipt: %w", err)
 		}
+		if payload.RequestID == "" || !knownOutcome(payload.Outcome) {
+			return nil, errors.New("execution settlement receipt is missing request identity or outcome")
+		}
 		return &coresession.ExecutionSettlementReceipt{
-			ExecutionID: executionID,
+			ExecutionID: executionID, RequestID: domainfoundation.RequestID(payload.RequestID),
 			EntryID:     value.ID,
 			Sequence:    value.Sequence,
 			Outcome:     payload.Outcome,
@@ -178,14 +181,14 @@ func settlementReceipt(
 	return nil, nil
 }
 
-func artifactReceipt(entries []entry, deliveryID domain.DeliveryID) (*coresession.ContextArtifactReceipt, error) {
+func artifactReceipt(entries []entry, deliveryID domainfoundation.DeliveryID) (*coresession.ContextArtifactReceipt, error) {
 	_, receipt, err := artifactEntry(entries, deliveryID)
 	return receipt, err
 }
 
 func artifactEntry(
 	entries []entry,
-	deliveryID domain.DeliveryID,
+	deliveryID domainfoundation.DeliveryID,
 ) (*artifactPayload, *coresession.ContextArtifactReceipt, error) {
 	for _, value := range entries {
 		if value.Kind != entryArtifact {
@@ -207,4 +210,25 @@ func artifactEntry(
 	return nil, nil, nil
 }
 
+func messageEntry(
+	entries []entry,
+	executionID domainfoundation.AgentExecutionID,
+	messageID string,
+) (*messagePayload, error) {
+	for _, value := range entries {
+		if value.Kind != entryMessage || value.ExecutionID != executionID.String() {
+			continue
+		}
+		var payload messagePayload
+		if err := json.Unmarshal(value.Payload, &payload); err != nil {
+			return nil, fmt.Errorf("decode transcript message: %w", err)
+		}
+		if payload.MessageID == messageID {
+			return &payload, nil
+		}
+	}
+	return nil, nil
+}
+
 var _ coresession.TranscriptReceiptStore = (*Store)(nil)
+var _ coresession.TranscriptMessageStore = (*Store)(nil)

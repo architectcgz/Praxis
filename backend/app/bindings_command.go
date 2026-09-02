@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	domainworkflow "praxis/internal/core/domain/workflow"
+	"strings"
 
 	"praxis/internal/contracts"
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
 	"praxis/internal/core/orchestrate"
 )
 
@@ -18,23 +21,21 @@ func (b *CommandBindings) SendInput(
 ) (response contracts.SendInputResponse, err error) {
 	done := b.runtime.begin("SendInput")
 	defer func() { done(err) }()
+	if strings.TrimSpace(request.ProviderID) == "" || strings.TrimSpace(request.ModelID) == "" {
+		return contracts.SendInputResponse{}, bindingError(contracts.ErrorCodeModelNotConfigured)
+	}
 	ctx, commands, err := b.bindingContext()
 	if err != nil {
 		return contracts.SendInputResponse{}, err
 	}
-	runtime, err := runtimeSnapshot(request.SandboxMode, request.ApprovalMode, request.Revision)
-	if err != nil {
-		return contracts.SendInputResponse{}, publicBindingError(err)
-	}
 	result, err := commands.SendInput(ctx, orchestrate.SendInputRequest{
-		SessionID:       domain.SessionID(request.SessionID),
-		AgentID:         domain.AgentID(request.AgentID),
-		RequestID:       domain.RequestID(request.RequestID),
-		Content:         request.Content,
-		ProviderID:      request.ProviderID,
-		ModelID:         request.ModelID,
-		Reasoning:       request.Reasoning,
-		RuntimeSnapshot: runtime,
+		SessionID:  domainfoundation.SessionID(request.SessionID),
+		AgentID:    domainfoundation.AgentID(request.AgentID),
+		RequestID:  domainfoundation.RequestID(request.RequestID),
+		Content:    request.Content,
+		ProviderID: request.ProviderID,
+		ModelID:    request.ModelID,
+		Reasoning:  request.Reasoning,
 	})
 	if err != nil {
 		return contracts.SendInputResponse{}, publicBindingError(err)
@@ -54,13 +55,9 @@ func (b *CommandBindings) Resume(
 	if err != nil {
 		return contracts.SendInputResponse{}, err
 	}
-	runtime, err := runtimeSnapshot(request.SandboxMode, request.ApprovalMode, request.Revision)
-	if err != nil {
-		return contracts.SendInputResponse{}, publicBindingError(err)
-	}
 	result, err := commands.Resume(ctx, orchestrate.ResumeRequest{
-		AgentID: domain.AgentID(request.AgentID), RequestID: domain.RequestID(request.RequestID),
-		Content: request.Content, RuntimeSnapshot: runtime,
+		AgentID: domainfoundation.AgentID(request.AgentID), RequestID: domainfoundation.RequestID(request.RequestID),
+		Content: request.Content,
 	})
 	if err != nil {
 		return contracts.SendInputResponse{}, publicBindingError(err)
@@ -81,8 +78,8 @@ func (b *CommandBindings) RequestControl(
 		return contracts.ControlResponse{}, err
 	}
 	result, err := commands.RequestControl(ctx, orchestrate.ControlRequest{
-		ID: domain.AgentControlRequestID(request.ID), AgentID: domain.AgentID(request.AgentID),
-		Kind: domain.AgentControlKind(request.Kind),
+		RequestID: domainfoundation.AgentControlRequestID(request.RequestID), AgentID: domainfoundation.AgentID(request.AgentID),
+		Kind: domainworkflow.AgentControlKind(request.Kind),
 	})
 	if err != nil {
 		return contracts.ControlResponse{}, publicBindingError(err)
@@ -104,13 +101,9 @@ func (b *CommandBindings) QueueWork(
 	if err != nil {
 		return contracts.QueueWorkResponse{}, err
 	}
-	runtime, err := runtimeSnapshot(request.SandboxMode, request.ApprovalMode, request.Revision)
-	if err != nil {
-		return contracts.QueueWorkResponse{}, publicBindingError(err)
-	}
 	result, err := commands.EnqueueWork(ctx, orchestrate.QueueWorkRequest{
-		ID: domain.WorkItemID(request.ID), AgentID: domain.AgentID(request.AgentID),
-		Prompt: request.Prompt, RuntimeSnapshot: runtime,
+		ID: domainfoundation.WorkItemID(request.ID), RequestID: domainfoundation.RequestID(request.RequestID), AgentID: domainfoundation.AgentID(request.AgentID),
+		Prompt: request.Prompt,
 	})
 	if err != nil {
 		return contracts.QueueWorkResponse{}, publicBindingError(err)
@@ -132,10 +125,4 @@ func (b *CommandBindings) bindingContext() (context.Context, AgentCommands, erro
 		return nil, nil, bindingError(contracts.ErrorCodeBindingUnavailable)
 	}
 	return ctx, commands, nil
-}
-
-func runtimeSnapshot(sandbox, approval, revision string) (domain.RuntimeExecutionSnapshot, error) {
-	return domain.NewRuntimeExecutionSnapshot(
-		domain.SandboxMode(sandbox), domain.ApprovalMode(approval), revision,
-	)
 }

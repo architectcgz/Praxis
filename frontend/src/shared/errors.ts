@@ -18,7 +18,7 @@ function readableApiError(code: string) {
         case API_ERROR_CODES.projectWorkspaceInvalid:
             return 'Project name must not contain a path separator.'
         case API_ERROR_CODES.modelNotConfigured:
-            return 'No Primary model is configured. Add a model in ~/.praxis/config/models.json, then restart Praxis.'
+            return 'Select a configured Provider and Model before sending.'
         case API_ERROR_CODES.validation:
             return 'Some request values are invalid.'
         case API_ERROR_CODES.notFound:

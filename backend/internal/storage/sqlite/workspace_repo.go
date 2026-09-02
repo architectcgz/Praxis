@@ -2,32 +2,32 @@ package sqlite
 
 import (
 	"context"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkspace "praxis/internal/core/domain/workspace"
 	"time"
-
-	"praxis/internal/core/domain"
 )
 
-func (s *Store) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (domain.Workspace, error) {
-	var value domain.Workspace
+func (s *Store) GetWorkspace(ctx context.Context, id domainfoundation.WorkspaceID) (domainworkspace.Workspace, error) {
+	var value domainworkspace.Workspace
 	return value, s.loadPayload(ctx, "workspaces", id.String(), &value, func() error { return value.Validate() })
 }
 
 func (s *Store) ListWorkspacesByProject(
 	ctx context.Context,
-	projectID domain.ProjectID,
+	projectID domainfoundation.ProjectID,
 	limit int,
-) ([]domain.Workspace, error) {
-	return listTargetPayloads[domain.Workspace](
+) ([]domainworkspace.Workspace, error) {
+	return listTargetPayloads[domainworkspace.Workspace](
 		ctx,
 		s,
 		`SELECT payload FROM workspaces WHERE project_id = ? ORDER BY id LIMIT ?`,
 		[]any{projectID.String(), targetLimit(limit)},
 		"workspaces",
-		func(value domain.Workspace) error { return value.Validate() },
+		func(value domainworkspace.Workspace) error { return value.Validate() },
 	)
 }
 
-func (s *Store) SaveWorkspace(ctx context.Context, value domain.Workspace) error {
+func (s *Store) SaveWorkspace(ctx context.Context, value domainworkspace.Workspace) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -58,18 +58,18 @@ func (s *Store) SaveWorkspace(ctx context.Context, value domain.Workspace) error
 
 type WorkspaceRepository struct{ store *Store }
 
-func (r WorkspaceRepository) Get(ctx context.Context, id domain.WorkspaceID) (domain.Workspace, error) {
+func (r WorkspaceRepository) Get(ctx context.Context, id domainfoundation.WorkspaceID) (domainworkspace.Workspace, error) {
 	return r.store.GetWorkspace(ctx, id)
 }
 
-func (r WorkspaceRepository) Save(ctx context.Context, value domain.Workspace) error {
+func (r WorkspaceRepository) Save(ctx context.Context, value domainworkspace.Workspace) error {
 	return r.store.SaveWorkspace(ctx, value)
 }
 
 func (r WorkspaceRepository) ListByProject(
 	ctx context.Context,
-	projectID domain.ProjectID,
+	projectID domainfoundation.ProjectID,
 	limit int,
-) ([]domain.Workspace, error) {
+) ([]domainworkspace.Workspace, error) {
 	return r.store.ListWorkspacesByProject(ctx, projectID, limit)
 }

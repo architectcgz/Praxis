@@ -2,16 +2,17 @@ package sqlite
 
 import (
 	"context"
+	domainworkflow "praxis/internal/core/domain/workflow"
 
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
 )
 
-func (s *Store) GetAgentResult(ctx context.Context, id domain.AgentResultID) (domain.AgentResult, error) {
-	var value domain.AgentResult
+func (s *Store) GetAgentResult(ctx context.Context, id domainfoundation.AgentResultID) (domainworkflow.AgentResult, error) {
+	var value domainworkflow.AgentResult
 	return value, s.loadPayload(ctx, "agent_results", id.String(), &value, func() error { return value.Validate() })
 }
 
-func (s *Store) SaveAgentResult(ctx context.Context, value domain.AgentResult) error {
+func (s *Store) SaveAgentResult(ctx context.Context, value domainworkflow.AgentResult) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -37,10 +38,10 @@ func (s *Store) SaveAgentResult(ctx context.Context, value domain.AgentResult) e
 
 type AgentResultRepository struct{ store *Store }
 
-func (r AgentResultRepository) Get(ctx context.Context, id domain.AgentResultID) (domain.AgentResult, error) {
+func (r AgentResultRepository) Get(ctx context.Context, id domainfoundation.AgentResultID) (domainworkflow.AgentResult, error) {
 	return r.store.GetAgentResult(ctx, id)
 }
 
-func (r AgentResultRepository) Save(ctx context.Context, value domain.AgentResult) error {
+func (r AgentResultRepository) Save(ctx context.Context, value domainworkflow.AgentResult) error {
 	return r.store.SaveAgentResult(ctx, value)
 }

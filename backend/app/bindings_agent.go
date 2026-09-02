@@ -5,7 +5,8 @@ import (
 	"sort"
 
 	"praxis/internal/contracts"
-	"praxis/internal/core/domain"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
 )
 
 type AgentBindings struct {
@@ -20,22 +21,22 @@ func (b *AgentBindings) GetAgent(agentID string) (response contracts.AgentSnapsh
 	if err != nil {
 		return contracts.AgentSnapshot{}, err
 	}
-	projection, err := queries.ProjectAgent(ctx, domain.AgentID(agentID), 100)
+	projection, err := queries.ProjectAgent(ctx, domainfoundation.AgentID(agentID), 100)
 	if err != nil {
 		return contracts.AgentSnapshot{}, publicBindingError(err)
 	}
 	result := contracts.AgentSnapshot{
-		ID:                projection.Agent.ID.String(),
-		SessionID:         projection.Agent.SessionID.String(),
-		GroupID:           projection.Agent.GroupID.String(),
-		Profile:           string(projection.Agent.Profile),
-		State:             string(projection.Agent.State),
-		CurrentExecution:  projection.Agent.CurrentExecutionID.String(),
-		ExecutionIDs:      make([]string, 0, len(projection.Executions)),
-		Executions:        make([]contracts.ExecutionSnapshot, 0, len(projection.Executions)),
-		WaitConditionIDs:  make([]string, 0, len(projection.Waits)),
-		DeliveryIDs:       make([]string, 0, len(projection.Deliveries)),
-		ControlRequestIDs: make([]string, 0, len(projection.Controls)),
+		ID:                     projection.Agent.ID.String(),
+		SessionID:              projection.Agent.SessionID.String(),
+		SecurityPolicyRevision: projection.Agent.SecurityPolicyRevision,
+		Profile:                string(projection.Agent.Profile),
+		State:                  string(projection.Agent.State),
+		CurrentExecution:       projection.Agent.CurrentExecutionID.String(),
+		ExecutionIDs:           make([]string, 0, len(projection.Executions)),
+		Executions:             make([]contracts.ExecutionSnapshot, 0, len(projection.Executions)),
+		WaitConditionIDs:       make([]string, 0, len(projection.Waits)),
+		DeliveryIDs:            make([]string, 0, len(projection.Deliveries)),
+		ControlRequestIDs:      make([]string, 0, len(projection.Controls)),
 	}
 	for _, execution := range projection.Executions {
 		result.ExecutionIDs = append(result.ExecutionIDs, execution.ID.String())
@@ -71,7 +72,7 @@ func (b *AgentBindings) ListAgentMessages(
 	if err != nil {
 		return nil, err
 	}
-	messages, err := queries.ListAgentMessages(ctx, domain.AgentID(agentID), 200)
+	messages, err := queries.ListAgentMessages(ctx, domainfoundation.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
@@ -97,11 +98,11 @@ func (b *AgentBindings) ListAgentHistory(
 	if err != nil {
 		return nil, err
 	}
-	messages, err := queries.ListAgentMessages(ctx, domain.AgentID(agentID), 200)
+	messages, err := queries.ListAgentMessages(ctx, domainfoundation.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
-	projection, err := queries.ProjectAgent(ctx, domain.AgentID(agentID), 200)
+	projection, err := queries.ProjectAgent(ctx, domainfoundation.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
@@ -122,7 +123,7 @@ func (b *AgentBindings) ListAgentHistory(
 		})
 	}
 	for _, execution := range projection.Executions {
-		if execution.Status != domain.ExecutionSettled || execution.Outcome != domain.ExecutionFailed {
+		if execution.Status != domainexecution.ExecutionSettled || execution.Outcome != domainexecution.ExecutionFailed {
 			continue
 		}
 		at := execution.SettledAt

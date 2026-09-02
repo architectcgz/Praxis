@@ -69,8 +69,8 @@ func (c ToolCall) Snapshot() ToolCall {
 func (s TurnSnapshot) Snapshot() TurnSnapshot {
 	copied := s
 	copied.Messages = CloneTurnMessages(s.Messages)
-	copied.TaskPacket = s.TaskPacket
 	copied.ContextManifest = s.ContextManifest
+	copied.ContextSelection = s.ContextSelection.Snapshot()
 	copied.Tools = CloneToolDefinitions(s.Tools)
 	copied.Execution = s.Execution.Snapshot()
 	return copied

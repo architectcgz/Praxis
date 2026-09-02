@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 
-	"praxis/internal/core/domain"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainsecurity "praxis/internal/core/domain/security"
 )
 
 // ToolCall is a provider-neutral request to execute one tool.
 type ToolCall struct {
 	ID                  string
-	Name                domain.ToolName
+	Name                domainsecurity.ToolName
 	Input               json.RawMessage
 	Arguments           json.RawMessage
 	Path                string
@@ -22,8 +23,8 @@ type ToolCall struct {
 
 // ToolExecutionContext is the immutable authorization snapshot passed to a tool executor.
 type ToolExecutionContext struct {
-	Grant          domain.CapabilityGrant
-	Execution      domain.RuntimeExecutionSnapshot
+	Grant          domainsecurity.CapabilityGrant
+	Execution      domainexecution.RuntimeExecutionSnapshot
 	LeaseReference string
 }
 

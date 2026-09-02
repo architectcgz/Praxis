@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	domainfoundation "praxis/internal/core/domain/foundation"
 	"sync"
-	"time"
 
-	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
+	"praxis/internal/core/system"
 	"praxis/internal/storage/dataroot"
 )
 
@@ -26,9 +26,11 @@ type Store struct {
 	file         *os.File
 	loaded       bool
 	lastSequence uint64
+	ids          system.IDGenerator
+	clock        system.Clock
 }
 
-func Open(root dataroot.DataRoot, sessionID domain.SessionID, agentID domain.AgentID) (*Store, error) {
+func Open(root dataroot.DataRoot, sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID) (*Store, error) {
 	if sessionID == "" || agentID == "" {
 		return nil, errors.New("session and agent identifiers are required")
 	}
@@ -39,13 +41,22 @@ func Open(root dataroot.DataRoot, sessionID domain.SessionID, agentID domain.Age
 }
 
 func NewStore(path, temporaryDir string) (*Store, error) {
+	return NewStoreWithSystem(path, temporaryDir, system.SecureIDGenerator{}, system.UTCClock{})
+}
+
+// NewStoreWithSystem creates a transcript store with explicitly supplied ID
+// and clock capabilities.
+func NewStoreWithSystem(path, temporaryDir string, ids system.IDGenerator, clock system.Clock) (*Store, error) {
 	if !filepath.IsAbs(path) || filepath.Ext(path) != ".jsonl" {
 		return nil, errors.New("agent session path must be an absolute .jsonl path")
 	}
 	if !filepath.IsAbs(temporaryDir) {
 		return nil, errors.New("agent session temporary directory must be absolute")
 	}
-	return &Store{path: filepath.Clean(path), temporaryDir: filepath.Clean(temporaryDir)}, nil
+	if ids == nil || clock == nil {
+		return nil, errors.New("agent session system capabilities are required")
+	}
+	return &Store{path: filepath.Clean(path), temporaryDir: filepath.Clean(temporaryDir), ids: ids, clock: clock}, nil
 }
 
 func (s *Store) Initialize(ctx context.Context, header coresession.AgentSessionHeader) error {
@@ -76,8 +87,8 @@ func (s *Store) Initialize(ctx context.Context, header coresession.AgentSessionH
 		return fmt.Errorf("encode agent session header: %w", err)
 	}
 	if err := s.appendLocked(entry{
-		ID:      domain.NewEventID().String(),
-		At:      time.Now().UTC(),
+		ID:      s.ids.New("event"),
+		At:      s.clock.Now().UTC(),
 		Kind:    entryHeader,
 		Version: currentEntryVersion,
 		Payload: payload,

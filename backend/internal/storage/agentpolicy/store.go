@@ -12,14 +12,14 @@ import (
 	"path/filepath"
 	"sync"
 
-	"praxis/internal/core/domain"
+	domainsecurity "praxis/internal/core/domain/security"
 )
 
 // Store guards one agent-policy.json file.
 type Store struct {
 	path  string
 	mu    sync.RWMutex
-	cache *domain.AgentPolicySnapshot
+	cache *domainsecurity.AgentPolicySnapshot
 }
 
 // NewStore returns a store for one DataRoot. Current loads lazily so an
@@ -33,12 +33,12 @@ func NewStore(path string) (*Store, error) {
 
 // Current returns the effective policy, including conservative defaults for
 // profiles omitted from the user-owned JSON document.
-func (s *Store) Current(ctx context.Context) (domain.AgentPolicySnapshot, error) {
+func (s *Store) Current(ctx context.Context) (domainsecurity.AgentPolicySnapshot, error) {
 	if ctx == nil {
-		return domain.AgentPolicySnapshot{}, errors.New("agent policy context is required")
+		return domainsecurity.AgentPolicySnapshot{}, errors.New("agent policy context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return domain.AgentPolicySnapshot{}, err
+		return domainsecurity.AgentPolicySnapshot{}, err
 	}
 	s.mu.RLock()
 	if s.cache != nil {
@@ -53,7 +53,7 @@ func (s *Store) Current(ctx context.Context) (domain.AgentPolicySnapshot, error)
 	if s.cache == nil {
 		loaded, err := load(s.path)
 		if err != nil {
-			return domain.AgentPolicySnapshot{}, err
+			return domainsecurity.AgentPolicySnapshot{}, err
 		}
 		s.cache = &loaded
 	}
@@ -62,7 +62,7 @@ func (s *Store) Current(ctx context.Context) (domain.AgentPolicySnapshot, error)
 
 // Update atomically persists a fully validated policy. The cache changes only
 // after rename succeeds, so a failed write cannot widen later approvals.
-func (s *Store) Update(ctx context.Context, snapshot domain.AgentPolicySnapshot) error {
+func (s *Store) Update(ctx context.Context, snapshot domainsecurity.AgentPolicySnapshot) error {
 	if ctx == nil {
 		return errors.New("agent policy context is required")
 	}
@@ -127,6 +127,6 @@ func writePrivateAtomically(path string, contents []byte) error {
 }
 
 var _ interface {
-	Current(context.Context) (domain.AgentPolicySnapshot, error)
-	Update(context.Context, domain.AgentPolicySnapshot) error
+	Current(context.Context) (domainsecurity.AgentPolicySnapshot, error)
+	Update(context.Context, domainsecurity.AgentPolicySnapshot) error
 } = (*Store)(nil)

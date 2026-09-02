@@ -6,8 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
-	"praxis/internal/core/domain"
+	domainfoundation "praxis/internal/core/domain/foundation"
 )
 
 func targetLimit(limit int) int {
@@ -29,7 +28,7 @@ func loadTargetPayload[T any](
 	row := executorFromContext(ctx, store.db).QueryRowContext(ctx, query, args...)
 	var payload []byte
 	if err := row.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return zero, domain.ErrNotFound
+		return zero, domainfoundation.ErrNotFound
 	} else if err != nil {
 		return zero, fmt.Errorf("read %s: %w", name, err)
 	}

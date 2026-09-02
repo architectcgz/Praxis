@@ -48,6 +48,7 @@ export function NewSessionDialog({
                 projectId: projectID,
                 workspaceId: workspaceID,
                 goal,
+                requestId: crypto.randomUUID(),
             })
             onCreated(created.sessionId)
             onClose()

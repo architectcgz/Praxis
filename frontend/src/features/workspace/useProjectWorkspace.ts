@@ -28,12 +28,6 @@ import { readableError } from '../../shared/errors'
 import { readRememberedSession, rememberSelectedSession } from './sessionPreference'
 import { StreamingOutput } from '../sessions/types'
 
-const runtime = {
-    sandboxMode: 'read_only',
-    approvalMode: 'always_ask',
-    revision: 'ui-v1',
-}
-
 type StreamingOutputs = Record<string, StreamingOutput>
 
 function clearDurableStreamingOutput(outputs: StreamingOutputs, agentID: string, history: AgentHistoryItem[]): StreamingOutputs {
@@ -202,8 +196,6 @@ export function useProjectWorkspace() {
 
     useEffect(() => {
         void refresh()
-        const timer = window.setInterval(() => void refresh(), 10000)
-        return () => window.clearInterval(timer)
     }, [refresh])
 
     useEffect(() => subscribeAgentOutput((event: AgentOutputEvent) => {
@@ -329,6 +321,11 @@ export function useProjectWorkspace() {
         if (!session || !input.trim() || busy) {
             return
         }
+        if (!selectedProviderID.trim() || !selectedModelID.trim()) {
+            setError('Select a configured Provider and Model before sending.')
+            setErrorCode(API_ERROR_CODES.modelNotConfigured)
+            return
+        }
         setBusy(true)
         setAwaitingOutput(true)
         setError('')
@@ -342,7 +339,6 @@ export function useProjectWorkspace() {
                 providerId: selectedProviderID,
                 modelId: selectedModelID,
                 reasoning,
-                ...runtime,
             })
             setInput('')
             await refresh()
@@ -365,7 +361,7 @@ export function useProjectWorkspace() {
         setErrorCode(undefined)
         try {
             await requestControl({
-                id: crypto.randomUUID(),
+                requestId: crypto.randomUUID(),
                 agentId: agent.id,
                 kind,
             })

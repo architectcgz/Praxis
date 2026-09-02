@@ -4,29 +4,74 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	domaincontext "praxis/internal/core/domain/context"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainproject "praxis/internal/core/domain/project"
+	domainsession "praxis/internal/core/domain/session"
+	domainworkflow "praxis/internal/core/domain/workflow"
+	domainworkspace "praxis/internal/core/domain/workspace"
+	"time"
 
-	"praxis/internal/core/domain"
+	domainagent "praxis/internal/core/domain/agent"
 	"praxis/internal/core/persistence"
+	coresession "praxis/internal/core/session"
 )
 
 // AgentProjection is a read-only core view for bindings and recovery
 // diagnostics. It contains durable facts only; runtime actors and channels are
 // intentionally absent.
 type AgentProjection struct {
-	Agent           domain.Agent
-	ActiveExecution *domain.AgentExecution
-	Executions      []domain.AgentExecution
-	Waits           []domain.WaitCondition
-	Deliveries      []domain.ContextDelivery
-	Controls        []domain.AgentControlRequest
+	Agent           domainagent.Agent
+	ActiveExecution *domainexecution.AgentExecution
+	Executions      []domainexecution.AgentExecution
+	Waits           []domainworkflow.WaitCondition
+	Deliveries      []domainworkflow.ContextDelivery
+	Controls        []domainworkflow.AgentControlRequest
 }
 
 // SessionProjection is the smallest state tree needed to render a Session
 // workspace without giving the UI direct repository access.
 type SessionProjection struct {
-	Session domain.Session
-	Groups  []domain.AgentGroup
-	Agents  []domain.Agent
+	Session domainsession.Session
+	Agents  []domainagent.Agent
+}
+
+func (o *AgentOrchestrator) ListProjects(ctx context.Context, limit int) ([]domainproject.Project, error) {
+	if ctx == nil {
+		return nil, errors.New("project catalog context is required")
+	}
+	lister, ok := o.projects.(persistence.ProjectListRepository)
+	if !ok {
+		return nil, errors.New("project catalog is unavailable")
+	}
+	return lister.List(ctx, limit)
+}
+
+// ListWorkspaces returns the indexed workspace catalog for a Project.
+func (o *AgentOrchestrator) ListWorkspaces(ctx context.Context, projectID domainfoundation.ProjectID, limit int) ([]domainworkspace.Workspace, error) {
+	if ctx == nil {
+		return nil, errors.New("workspace catalog context is required")
+	}
+	if projectID == "" {
+		return nil, commandError(CommandErrorInvalidRequest)
+	}
+	return o.workspaces.ListByProject(ctx, projectID, limit)
+}
+
+// ListSessionsByProject returns the indexed Session catalog for a Project.
+func (o *AgentOrchestrator) ListSessionsByProject(ctx context.Context, projectID domainfoundation.ProjectID, limit int) ([]domainsession.Session, error) {
+	if ctx == nil {
+		return nil, errors.New("project session catalog context is required")
+	}
+	if projectID == "" {
+		return nil, commandError(CommandErrorInvalidRequest)
+	}
+	lister, ok := o.sessions.(persistence.ProjectSessionListRepository)
+	if !ok {
+		return nil, errors.New("project session catalog is unavailable")
+	}
+	return lister.ListByProject(ctx, projectID, limit)
 }
 
 // ListSessions returns the durable session catalog for the desktop shell. The
@@ -35,7 +80,7 @@ type SessionProjection struct {
 func (o *AgentOrchestrator) ListSessions(
 	ctx context.Context,
 	limit int,
-) ([]domain.Session, error) {
+) ([]domainsession.Session, error) {
 	if ctx == nil {
 		return nil, errors.New("session catalog context is required")
 	}
@@ -48,7 +93,7 @@ func (o *AgentOrchestrator) ListSessions(
 
 func (o *AgentOrchestrator) ProjectAgent(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 	limit int,
 ) (AgentProjection, error) {
 	if ctx == nil {
@@ -62,8 +107,8 @@ func (o *AgentOrchestrator) ProjectAgent(
 		return AgentProjection{}, err
 	}
 	active, err := o.executions.GetActiveByAgent(ctx, agentID)
-	if errors.Is(err, domain.ErrNotFound) {
-		active = domain.AgentExecution{}
+	if errors.Is(err, domainfoundation.ErrNotFound) {
+		active = domainexecution.AgentExecution{}
 	} else if err != nil {
 		return AgentProjection{}, fmt.Errorf("load active agent execution: %w", err)
 	}
@@ -99,7 +144,7 @@ func (o *AgentOrchestrator) ProjectAgent(
 
 func (o *AgentOrchestrator) ProjectSession(
 	ctx context.Context,
-	sessionID domain.SessionID,
+	sessionID domainfoundation.SessionID,
 	limit int,
 ) (SessionProjection, error) {
 	if ctx == nil {
@@ -112,17 +157,68 @@ func (o *AgentOrchestrator) ProjectSession(
 	if err != nil {
 		return SessionProjection{}, err
 	}
-	groups, err := o.groups.ListBySession(ctx, sessionID, limit)
+	agents, err := o.agents.ListBySession(ctx, sessionID, limit)
 	if err != nil {
-		return SessionProjection{}, err
+		return SessionProjection{}, fmt.Errorf("list agents in session %s: %w", sessionID, err)
 	}
-	agents := make([]domain.Agent, 0)
-	for _, group := range groups {
-		members, err := o.agents.ListByGroup(ctx, group.ID, limit)
-		if err != nil {
-			return SessionProjection{}, fmt.Errorf("list agents in group %s: %w", group.ID, err)
-		}
-		agents = append(agents, members...)
+	return SessionProjection{Session: session, Agents: agents}, nil
+}
+
+// ListAgentMessages projects an Agent-owned transcript through the injected
+// core port. Bindings never open JSONL files directly.
+func (o *AgentOrchestrator) ListAgentMessages(ctx context.Context, agentID domainfoundation.AgentID, limit int) ([]coresession.AgentSessionMessage, error) {
+	if ctx == nil {
+		return nil, errors.New("agent message context is required")
 	}
-	return SessionProjection{Session: session, Groups: groups, Agents: agents}, nil
+	if agentID == "" || o.messages == nil {
+		return nil, commandError(CommandErrorInvalidRequest)
+	}
+	agent, err := o.agents.Get(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return o.messages(ctx, agent.SessionID, agent.ID, limit)
+}
+
+func (o *AgentOrchestrator) ListSessionEvents(ctx context.Context, sessionID domainfoundation.SessionID, after time.Time, limit int) ([]domainfoundation.DomainEvent, error) {
+	if ctx == nil || sessionID == "" || o.events == nil {
+		return nil, commandError(CommandErrorInvalidRequest)
+	}
+	query, ok := o.events.(persistence.EventQueryRepository)
+	if !ok {
+		return nil, errors.New("event query is unavailable")
+	}
+	return query.ListBySession(ctx, sessionID, after, limit)
+}
+
+func (o *AgentOrchestrator) ListSessionContext(ctx context.Context, sessionID domainfoundation.SessionID, afterRevision uint64, limit int) ([]domaincontext.SessionContextEntry, error) {
+	if ctx == nil || sessionID == "" || o.contexts == nil {
+		return nil, commandError(CommandErrorInvalidRequest)
+	}
+	if _, err := o.sessions.Get(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	return o.contexts.List(ctx, sessionID, afterRevision, limit)
+}
+
+func (o *AgentOrchestrator) ListAgentEvents(ctx context.Context, agentID domainfoundation.AgentID, after time.Time, limit int) ([]domainfoundation.DomainEvent, error) {
+	if ctx == nil || agentID == "" || o.events == nil {
+		return nil, commandError(CommandErrorInvalidRequest)
+	}
+	query, ok := o.events.(persistence.EventQueryRepository)
+	if !ok {
+		return nil, errors.New("event query is unavailable")
+	}
+	return query.ListByAgent(ctx, agentID, after, limit)
+}
+
+func (o *AgentOrchestrator) ListExecutionEvents(ctx context.Context, executionID domainfoundation.AgentExecutionID, after time.Time, limit int) ([]domainfoundation.DomainEvent, error) {
+	if ctx == nil || executionID == "" || o.events == nil {
+		return nil, commandError(CommandErrorInvalidRequest)
+	}
+	query, ok := o.events.(persistence.EventQueryRepository)
+	if !ok {
+		return nil, errors.New("event query is unavailable")
+	}
+	return query.ListByExecution(ctx, executionID, after, limit)
 }

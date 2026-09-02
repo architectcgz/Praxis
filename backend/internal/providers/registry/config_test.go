@@ -1,6 +1,9 @@
 package registry
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestProviderNameIsOptional(t *testing.T) {
 	config := FileConfig{
@@ -13,6 +16,34 @@ func TestProviderNameIsOptional(t *testing.T) {
 
 	if _, err := Validate(config); err != nil {
 		t.Fatalf("validate configuration without provider name: %v", err)
+	}
+}
+
+func TestMissingReasoningUsesDefaultLevels(t *testing.T) {
+	config := FileConfig{
+		Providers: []ProviderConfig{{
+			ID: "gateway", BaseURL: "https://gateway.example.com",
+		}},
+		Models: []ModelConfig{{
+			ProviderID: "gateway", ModelID: "model",
+			APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192,
+		}},
+		Profiles: map[string]ModelReference{},
+	}
+
+	validated, err := Validate(config)
+	if err != nil {
+		t.Fatalf("validate model configuration without reasoning: %v", err)
+	}
+	reasoning := validated.Models[0].Reasoning
+	if !reasoning.Supported {
+		t.Fatal("expected missing reasoning configuration to be supported by default")
+	}
+	if got, want := strings.Join(reasoning.Levels, ","), "low,medium,high"; got != want {
+		t.Fatalf("default reasoning levels = %q, want %q", got, want)
+	}
+	if reasoning.Default != defaultReasoningLevel {
+		t.Fatalf("default reasoning level = %q, want %q", reasoning.Default, defaultReasoningLevel)
 	}
 }
 

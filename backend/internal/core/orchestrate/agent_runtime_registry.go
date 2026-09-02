@@ -6,20 +6,22 @@ import (
 	"fmt"
 	"sync"
 
-	"praxis/internal/core/domain"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+
 	coreruntime "praxis/internal/core/runtime"
 )
 
 // ManagedAgentRuntime is intentionally limited to process-local lifecycle
 // signals. It cannot create executions or persist product-owned payloads.
 type ManagedAgentRuntime interface {
-	Activate(context.Context, domain.AgentExecution, coreruntime.ExecutionLifecycle) error
-	Cancel(context.Context, domain.AgentExecutionID, domain.ExecutionOutcome) error
+	Activate(context.Context, domainexecution.AgentExecution, coreruntime.ExecutionLifecycle) error
+	Cancel(context.Context, domainfoundation.AgentExecutionID, domainexecution.ExecutionOutcome) error
 	Close(context.Context) error
 }
 
 type ManagedAgentRuntimeFactory interface {
-	New(context.Context, domain.AgentID) (ManagedAgentRuntime, error)
+	New(context.Context, domainfoundation.AgentID) (ManagedAgentRuntime, error)
 }
 
 // AgentRuntimeRegistry owns the process-local runtime generation for each
@@ -29,7 +31,7 @@ type AgentRuntimeRegistry struct {
 	factory ManagedAgentRuntimeFactory
 
 	mu             sync.Mutex
-	entries        map[domain.AgentID]runtimeRegistryEntry
+	entries        map[domainfoundation.AgentID]runtimeRegistryEntry
 	nextGeneration uint64
 	closed         bool
 }
@@ -45,13 +47,13 @@ func NewAgentRuntimeRegistry(factory ManagedAgentRuntimeFactory) (*AgentRuntimeR
 	}
 	return &AgentRuntimeRegistry{
 		factory: factory,
-		entries: make(map[domain.AgentID]runtimeRegistryEntry),
+		entries: make(map[domainfoundation.AgentID]runtimeRegistryEntry),
 	}, nil
 }
 
 func (r *AgentRuntimeRegistry) Activate(
 	ctx context.Context,
-	execution domain.AgentExecution,
+	execution domainexecution.AgentExecution,
 	lifecycle coreruntime.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
@@ -75,9 +77,9 @@ func (r *AgentRuntimeRegistry) Activate(
 
 func (r *AgentRuntimeRegistry) Cancel(
 	ctx context.Context,
-	agentID domain.AgentID,
-	executionID domain.AgentExecutionID,
-	outcome domain.ExecutionOutcome,
+	agentID domainfoundation.AgentID,
+	executionID domainfoundation.AgentExecutionID,
+	outcome domainexecution.ExecutionOutcome,
 ) error {
 	if ctx == nil {
 		return errors.New("runtime cancellation context is required")
@@ -121,7 +123,7 @@ func (r *AgentRuntimeRegistry) Close(ctx context.Context) error {
 
 func (r *AgentRuntimeRegistry) getOrCreate(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 ) (ManagedAgentRuntime, error) {
 	r.mu.Lock()
 	if r.closed {

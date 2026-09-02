@@ -1,6 +1,7 @@
 # Praxis 领域结构
 
 > 本文定义 Project、Session、Agent、AgentExecution 和 Session 运行资源的持久化关系、ownership、上下文边界和执行身份。
+> 领域源码目录和文件职责见 [`domain.md`](domain.md)。
 > 状态机与咨询流程见 [`agent-orchestration-model.md`](agent-orchestration-model.md)，Workflow 编排见 [`workflow.md`](workflow.md)，沙箱边界见 [`../sandbox.md`](../sandbox.md)，持久化事实源见 [`storage-architecture.md`](storage-architecture.md)。
 
 ## 1. 持久化关系

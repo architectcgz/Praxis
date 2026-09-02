@@ -2,24 +2,28 @@ package orchestrate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
+	domaincommand "praxis/internal/core/domain/command"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
 	"strings"
 
-	"praxis/internal/core/domain"
+	domainagent "praxis/internal/core/domain/agent"
 )
 
 // QueueWorkRequest contains one independent task. The caller retains ID for
 // retries; it is neither a user-input RequestID nor a transcript message.
 type QueueWorkRequest struct {
-	ID              domain.WorkItemID
-	AgentID         domain.AgentID
-	Prompt          string
-	RuntimeSnapshot domain.RuntimeExecutionSnapshot
+	ID        domainfoundation.WorkItemID
+	RequestID domainfoundation.RequestID
+	AgentID   domainfoundation.AgentID
+	Prompt    string
 }
 
 type QueueWorkResult struct {
-	Work            domain.QueuedWork
+	Work            domainworkflow.QueuedWork
 	ExistingWork    bool
 	ActivationError string
 }
@@ -34,27 +38,42 @@ func (o *AgentOrchestrator) EnqueueWork(ctx context.Context, request QueueWorkRe
 	if !o.Ready() {
 		return QueueWorkResult{}, commandError(CommandErrorNotReady)
 	}
-	if strings.TrimSpace(request.ID.String()) == "" || strings.TrimSpace(request.AgentID.String()) == "" ||
+	if strings.TrimSpace(request.ID.String()) == "" || strings.TrimSpace(request.RequestID.String()) == "" || strings.TrimSpace(request.AgentID.String()) == "" ||
 		strings.TrimSpace(request.Prompt) == "" {
 		return QueueWorkResult{}, commandError(CommandErrorInvalidRequest)
-	}
-	if err := request.RuntimeSnapshot.Validate(); err != nil {
-		return QueueWorkResult{}, fmt.Errorf("%w: %v", commandError(CommandErrorInvalidRequest), err)
 	}
 	result := QueueWorkResult{}
 	startEligible := false
 	err := o.tx.InTx(ctx, func(txCtx context.Context) error {
+		digest := commandArgumentsDigest(struct {
+			WorkID  domainfoundation.WorkItemID
+			AgentID domainfoundation.AgentID
+			Prompt  string
+		}{request.ID, request.AgentID, strings.TrimSpace(request.Prompt)})
+		if receipt, found, err := commandReceipt(txCtx, o.commandReceipts, request.RequestID, "queue_work", digest); err != nil {
+			return err
+		} else if found {
+			var value struct{ WorkID string }
+			if err := json.Unmarshal(receipt.ResultPayload, &value); err != nil {
+				return err
+			}
+			work, err := o.queuedWork.Get(txCtx, domainfoundation.WorkItemID(value.WorkID))
+			if err != nil {
+				return err
+			}
+			result.Work, result.ExistingWork = work, true
+			return nil
+		}
 		existing, err := o.queuedWork.Get(txCtx, request.ID)
 		if err == nil {
-			if existing.AgentID != request.AgentID || existing.Prompt != strings.TrimSpace(request.Prompt) ||
-				existing.Input.Runtime != request.RuntimeSnapshot {
+			if existing.AgentID != request.AgentID || existing.Prompt != strings.TrimSpace(request.Prompt) {
 				return commandError(CommandErrorInvalidRequest)
 			}
 			result.Work = existing
 			result.ExistingWork = true
 			return nil
 		}
-		if !errors.Is(err, domain.ErrNotFound) {
+		if !errors.Is(err, domainfoundation.ErrNotFound) {
 			return err
 		}
 		agent, err := o.agents.Get(txCtx, request.AgentID)
@@ -65,18 +84,17 @@ func (o *AgentOrchestrator) EnqueueWork(ctx context.Context, request QueueWorkRe
 		if err != nil {
 			return err
 		}
-		work, err := domain.NewQueuedWork(
+		input, err := o.materializeExecutionInput(txCtx, agent, "", "", "")
+		if err != nil {
+			return err
+		}
+		work, err := domainworkflow.NewQueuedWork(
 			request.ID,
 			agent.SessionID,
 			agent.ID,
 			sequence,
 			request.Prompt,
-			domain.ExecutionInputSnapshot{
-				TaskPacketID:      agent.TaskPacketID,
-				ContextManifestID: agent.ContextManifestID,
-				CapabilityGrantID: agent.GrantID,
-				Runtime:           request.RuntimeSnapshot,
-			},
+			input,
 			o.clock.Now(),
 		)
 		if err != nil {
@@ -85,9 +103,23 @@ func (o *AgentOrchestrator) EnqueueWork(ctx context.Context, request QueueWorkRe
 		if err := o.queuedWork.Save(txCtx, work); err != nil {
 			return err
 		}
+		event := o.newEvent(domainfoundation.EventQueuedWorkCreated, work.CreatedAt)
+		event.SessionID, event.AgentID, event.WorkItemID = work.SessionID, work.AgentID, work.ID
+		if err := o.appendEvent(txCtx, event); err != nil {
+			return err
+		}
+		if o.commandReceipts != nil {
+			payload, _ := json.Marshal(struct{ WorkID string }{work.ID.String()})
+			if err := o.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
+				RequestID: request.RequestID, Command: "queue_work", ArgumentsDigest: digest,
+				ResultPayload: payload, CreatedAt: work.CreatedAt,
+			}); err != nil {
+				return err
+			}
+		}
 		result.Work = work
-		startEligible = agent.State == domain.AgentIdle || agent.State == domain.AgentWaiting ||
-			agent.State == domain.AgentFailed || agent.State == domain.AgentClosed
+		startEligible = agent.State == domainagent.AgentIdle || agent.State == domainagent.AgentWaiting ||
+			agent.State == domainagent.AgentFailed || agent.State == domainagent.AgentClosed
 		return nil
 	})
 	if err != nil || result.ExistingWork || !startEligible {
@@ -103,8 +135,8 @@ func (o *AgentOrchestrator) EnqueueWork(ctx context.Context, request QueueWorkRe
 }
 
 type QueuedWorkStartResult struct {
-	Work            domain.QueuedWork
-	Execution       domain.AgentExecution
+	Work            domainworkflow.QueuedWork
+	Execution       domainexecution.AgentExecution
 	Started         bool
 	ActivationError string
 }
@@ -114,7 +146,7 @@ type QueuedWorkStartResult struct {
 // share one transaction and scheduler activation is only an optimization.
 func (o *AgentOrchestrator) StartNextQueuedWork(
 	ctx context.Context,
-	agentID domain.AgentID,
+	agentID domainfoundation.AgentID,
 ) (QueuedWorkStartResult, error) {
 	if ctx == nil {
 		return QueuedWorkStartResult{}, errors.New("start queued work context is required")
@@ -128,8 +160,8 @@ func (o *AgentOrchestrator) StartNextQueuedWork(
 		if err != nil {
 			return err
 		}
-		if agent.State != domain.AgentIdle && agent.State != domain.AgentWaiting && agent.State != domain.AgentFailed &&
-			agent.State != domain.AgentClosed {
+		if agent.State != domainagent.AgentIdle && agent.State != domainagent.AgentWaiting && agent.State != domainagent.AgentFailed &&
+			agent.State != domainagent.AgentClosed {
 			return nil
 		}
 		if err := o.rejectDeliveringInput(txCtx, agent.ID); err != nil {
@@ -138,22 +170,22 @@ func (o *AgentOrchestrator) StartNextQueuedWork(
 			}
 			return err
 		}
-		if err := o.checkGroupCapacity(txCtx, agent.GroupID); err != nil {
+		if err := o.checkSessionCapacity(txCtx, agent.SessionID); err != nil {
 			if hasCommandErrorCode(err, CommandErrorAgentUnavailable) {
 				return nil
 			}
 			return err
 		}
 		work, err := o.queuedWork.FindNextPendingByAgent(txCtx, agent.ID)
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, domainfoundation.ErrNotFound) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
 		at := o.clock.Now()
-		execution, err := domain.NewQueuedWorkExecution(
-			domain.NewAgentExecutionID(),
+		execution, err := domainexecution.NewQueuedWorkExecution(
+			domainfoundation.AgentExecutionID(o.newID("execution")),
 			agent.SessionID,
 			agent.ID,
 			work.ID,
@@ -176,6 +208,11 @@ func (o *AgentOrchestrator) StartNextQueuedWork(
 			return err
 		}
 		if err := o.agents.Save(txCtx, agent); err != nil {
+			return err
+		}
+		event := o.newEvent(domainfoundation.EventQueuedWorkStarted, at)
+		event.SessionID, event.AgentID, event.WorkItemID, event.AgentExecutionID = work.SessionID, work.AgentID, work.ID, execution.ID
+		if err := o.appendEvent(txCtx, event); err != nil {
 			return err
 		}
 		result.Work = work

@@ -3,9 +3,11 @@ package orchestrate
 import (
 	"context"
 	"errors"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
 	"strings"
 
-	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
 )
 
@@ -13,7 +15,7 @@ import (
 // reconciled its execution-start receipt. It is idempotent for repeated activation.
 func (o *AgentOrchestrator) MarkExecutionRunning(
 	ctx context.Context,
-	executionID domain.AgentExecutionID,
+	executionID domainfoundation.AgentExecutionID,
 ) error {
 	if ctx == nil {
 		return errors.New("mark running context is required")
@@ -23,10 +25,10 @@ func (o *AgentOrchestrator) MarkExecutionRunning(
 		if err != nil {
 			return err
 		}
-		if execution.Status == domain.ExecutionRunning {
+		if execution.Status == domainexecution.ExecutionRunning {
 			return nil
 		}
-		if execution.Status != domain.ExecutionStarting {
+		if execution.Status != domainexecution.ExecutionStarting {
 			return commandError(CommandErrorAgentUnavailable)
 		}
 		if err := execution.MarkRunning(o.clock.Now()); err != nil {
@@ -57,12 +59,12 @@ func (o *AgentOrchestrator) ConfirmExecutionStart(
 		if execution.RequestID != receipt.RequestID {
 			return commandError(CommandErrorInvalidRequest)
 		}
-		if execution.Status == domain.ExecutionStarting {
+		if execution.Status == domainexecution.ExecutionStarting {
 			if err := execution.MarkRunning(o.clock.Now()); err != nil {
 				return err
 			}
 		}
-		if execution.Status != domain.ExecutionRunning && execution.Status != domain.ExecutionSettling {
+		if execution.Status != domainexecution.ExecutionRunning && execution.Status != domainexecution.ExecutionSettling {
 			return commandError(CommandErrorAgentUnavailable)
 		}
 		if execution.StartContent != "" {
@@ -75,9 +77,9 @@ func (o *AgentOrchestrator) ConfirmExecutionStart(
 }
 
 type ExecutionSettlement struct {
-	ExecutionID domain.AgentExecutionID
-	Outcome     domain.ExecutionOutcome
-	FailureCode domain.ExecutionFailureCode
+	ExecutionID domainfoundation.AgentExecutionID
+	Outcome     domainexecution.ExecutionOutcome
+	FailureCode domainexecution.ExecutionFailureCode
 }
 
 // SettleExecution is called only after the runtime has fsynced its transcript
@@ -90,23 +92,23 @@ func (o *AgentOrchestrator) SettleExecution(ctx context.Context, settlement Exec
 	if strings.TrimSpace(settlement.ExecutionID.String()) == "" || !isKnownExecutionOutcome(settlement.Outcome) {
 		return commandError(CommandErrorInvalidRequest)
 	}
-	var settledAgentID domain.AgentID
+	var settledAgentID domainfoundation.AgentID
 	var advanceQueue bool
 	err := o.tx.InTx(ctx, func(txCtx context.Context) error {
 		execution, err := o.executions.Get(txCtx, settlement.ExecutionID)
 		if err != nil {
 			return err
 		}
-		if execution.Status == domain.ExecutionSettled {
+		if execution.Status == domainexecution.ExecutionSettled {
 			return nil
 		}
 		at := o.clock.Now()
-		if execution.Status == domain.ExecutionStarting {
+		if execution.Status == domainexecution.ExecutionStarting {
 			if err := execution.MarkRunning(at); err != nil {
 				return err
 			}
 		}
-		if execution.Status == domain.ExecutionRunning {
+		if execution.Status == domainexecution.ExecutionRunning {
 			if err := execution.BeginSettlement(at); err != nil {
 				return err
 			}
@@ -138,8 +140,14 @@ func (o *AgentOrchestrator) SettleExecution(ctx context.Context, settlement Exec
 			if err := o.queuedWork.Save(txCtx, work); err != nil {
 				return err
 			}
-			advanceQueue = settlement.Outcome == domain.ExecutionCompleted ||
-				settlement.Outcome == domain.ExecutionYielded
+			workEvent := o.newEvent(domainfoundation.EventQueuedWorkSettled, at)
+			workEvent.SessionID, workEvent.AgentID, workEvent.WorkItemID, workEvent.AgentExecutionID = work.SessionID, work.AgentID, work.ID, execution.ID
+			workEvent.Payload = map[string]string{"outcome": string(settlement.Outcome), "failureCode": string(settlement.FailureCode)}
+			if err := o.appendEvent(txCtx, workEvent); err != nil {
+				return err
+			}
+			advanceQueue = settlement.Outcome == domainexecution.ExecutionCompleted ||
+				settlement.Outcome == domainexecution.ExecutionYielded
 		}
 		controls, err := o.controls.ListOpenByAgent(txCtx, agent.ID, 100)
 		if err != nil {
@@ -150,7 +158,7 @@ func (o *AgentOrchestrator) SettleExecution(ctx context.Context, settlement Exec
 			if control.TargetExecutionID != execution.ID {
 				continue
 			}
-			if control.Kind == domain.ControlClose {
+			if control.Kind == domainworkflow.ControlClose {
 				if err := agent.Close(at); err != nil {
 					return err
 				}
@@ -163,6 +171,21 @@ func (o *AgentOrchestrator) SettleExecution(ctx context.Context, settlement Exec
 			}
 		}
 		if err := o.executions.Save(txCtx, execution); err != nil {
+			return err
+		}
+		eventType := domainfoundation.EventExecutionSettled
+		switch settlement.Outcome {
+		case domainexecution.ExecutionFailed:
+			eventType = domainfoundation.EventAgentFailed
+		case domainexecution.ExecutionInterrupted:
+			eventType = domainfoundation.EventAgentInterrupted
+		case domainexecution.ExecutionPaused:
+			eventType = domainfoundation.EventAgentPaused
+		}
+		event := o.newEvent(eventType, at)
+		event.SessionID, event.AgentID, event.AgentExecutionID = execution.SessionID, execution.AgentID, execution.ID
+		event.Payload = map[string]string{"outcome": string(settlement.Outcome), "failureCode": string(settlement.FailureCode)}
+		if err := o.appendEvent(txCtx, event); err != nil {
 			return err
 		}
 		settledAgentID = agent.ID
@@ -179,9 +202,9 @@ func (o *AgentOrchestrator) SettleExecution(ctx context.Context, settlement Exec
 // JSONL settlement context has durably recorded the final receipt.
 func (o *AgentOrchestrator) SettleRuntimeExecution(
 	ctx context.Context,
-	executionID domain.AgentExecutionID,
-	outcome domain.ExecutionOutcome,
-	failureCode domain.ExecutionFailureCode,
+	executionID domainfoundation.AgentExecutionID,
+	outcome domainexecution.ExecutionOutcome,
+	failureCode domainexecution.ExecutionFailureCode,
 ) error {
 	return o.SettleExecution(ctx, ExecutionSettlement{
 		ExecutionID: executionID,
@@ -190,10 +213,10 @@ func (o *AgentOrchestrator) SettleRuntimeExecution(
 	})
 }
 
-func isKnownExecutionOutcome(outcome domain.ExecutionOutcome) bool {
+func isKnownExecutionOutcome(outcome domainexecution.ExecutionOutcome) bool {
 	switch outcome {
-	case domain.ExecutionCompleted, domain.ExecutionYielded, domain.ExecutionPaused,
-		domain.ExecutionFailed, domain.ExecutionInterrupted:
+	case domainexecution.ExecutionCompleted, domainexecution.ExecutionYielded, domainexecution.ExecutionPaused,
+		domainexecution.ExecutionFailed, domainexecution.ExecutionInterrupted:
 		return true
 	default:
 		return false

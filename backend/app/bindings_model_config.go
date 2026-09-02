@@ -10,8 +10,7 @@ import (
 	"praxis/internal/providers/registry"
 )
 
-// GetModelConfig returns the editable model configuration, including each
-// provider's locally configured API key.
+// GetModelConfig returns editable provider metadata and secret presence only.
 func (b *ModelBindings) GetModelConfig() (response contracts.ModelConfigDocument, err error) {
 	done := b.runtime.begin("GetModelConfig")
 	defer func() { done(err) }()
@@ -29,7 +28,7 @@ func (b *ModelBindings) GetModelConfig() (response contracts.ModelConfigDocument
 	for _, provider := range config.Providers {
 		document.Providers = append(document.Providers, contracts.ProviderConfigOption{
 			ID: provider.ID, ProviderName: provider.ProviderName,
-			BaseURL: provider.BaseURL, ProxyURL: provider.ProxyURL, APIKey: editor.ProviderKey(provider.ID),
+			BaseURL: provider.BaseURL, ProxyURL: provider.ProxyURL, HasAPIKey: editor.HasProviderKey(provider.ID),
 		})
 	}
 	for _, model := range config.Models {
@@ -68,9 +67,6 @@ func (b *ModelBindings) SaveModelConfig(
 		Profiles:  make(map[string]registry.ModelReference, len(request.Profiles)),
 	}
 	for _, provider := range request.Providers {
-		if strings.TrimSpace(provider.APIKey) == "" {
-			return contracts.SaveModelConfigResponse{ValidationError: "each provider requires an API key"}, nil
-		}
 		config.Providers = append(config.Providers, registry.ProviderConfig{
 			ID:           strings.TrimSpace(provider.ID),
 			ProviderName: strings.TrimSpace(provider.ProviderName),
@@ -107,16 +103,24 @@ func (b *ModelBindings) SaveModelConfig(
 		}
 		return contracts.SaveModelConfigResponse{ValidationError: err.Error()}, nil
 	}
-	for _, provider := range request.Providers {
-		if err := editor.SetProviderKey(strings.TrimSpace(provider.ID), provider.APIKey); err != nil {
-			var configuration *registry.ConfigurationError
-			if errors.As(err, &configuration) {
-				return contracts.SaveModelConfigResponse{}, publicBindingError(err)
-			}
-			return contracts.SaveModelConfigResponse{ValidationError: err.Error()}, nil
-		}
-	}
 	return contracts.SaveModelConfigResponse{Saved: true}, nil
+}
+
+func (b *ModelBindings) SetProviderKey(providerID, value string) (err error) {
+	done := b.runtime.begin("SetProviderKey")
+	defer func() { done(err) }()
+	editor, err := b.configEditor()
+	if err != nil {
+		return err
+	}
+	if err := editor.SetProviderKey(strings.TrimSpace(providerID), value); err != nil {
+		return publicBindingError(err)
+	}
+	return nil
+}
+
+func (b *ModelBindings) ClearProviderKey(providerID string) error {
+	return b.SetProviderKey(providerID, "")
 }
 
 // ListProviderModels retrieves the remote model catalog for a saved provider.

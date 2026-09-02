@@ -32,6 +32,7 @@ import {
     ModelConfigOption,
     ProviderConfigOption,
     saveModelConfig,
+    setProviderKey,
 } from "../../api";
 import { readableError } from "../../shared/errors";
 import { Overlay } from "../../components/ui";
@@ -113,12 +114,15 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         }
     };
 
-    const saveProvider = async (provider: ProviderConfigOption) => {
+    const saveProvider = async (provider: ProviderConfigOption, key: string) => {
         if (!config || editor?.kind !== "provider") return;
         const providers = [...config.providers];
         if (editor.index === null) providers.push(provider);
         else providers[editor.index] = provider;
-        await persist({ ...config, providers });
+        const saved = await persist({ ...config, providers });
+        if (saved && key.trim()) {
+            await setProviderKey(provider.id, key.trim());
+        }
     };
 
     const saveModel = async (model: ModelConfigOption) => {
@@ -518,7 +522,7 @@ function ProviderDialog({
     modelCount: number;
     error: string;
     saving: boolean;
-    onSave: (provider: ProviderConfigOption) => void;
+    onSave: (provider: ProviderConfigOption, key: string) => void;
     onDelete?: () => void;
     onClose: () => void;
 }) {
@@ -529,9 +533,10 @@ function ProviderDialog({
                 providerName: "",
                 baseURL: "",
                 proxyURL: "",
-                apiKey: "",
+                hasAPIKey: false,
             },
     );
+    const [apiKey, setApiKey] = useState("");
     const [confirmDelete, setConfirmDelete] = useState(false);
     const submit = (event: FormEvent) => {
         event.preventDefault();
@@ -540,8 +545,7 @@ function ProviderDialog({
             providerName: draft.providerName.trim(),
             baseURL: draft.baseURL.trim(),
             proxyURL: draft.proxyURL.trim(),
-            apiKey: draft.apiKey.trim(),
-        });
+        }, apiKey);
     };
     return (
         <Overlay labelledBy="provider-dialog-title" onClose={onClose}>
@@ -605,11 +609,9 @@ function ProviderDialog({
                         <input
                             required
                             type="text"
-                            value={draft.apiKey}
-                            onChange={(event) =>
-                                setDraft({ ...draft, apiKey: event.target.value })
-                            }
-                            placeholder="sk-..."
+                            value={apiKey}
+                            onChange={(event) => setApiKey(event.target.value)}
+                            placeholder={draft.hasAPIKey ? "已配置，留空保持不变" : "sk-..."}
                             autoComplete="off"
                         />
                     </Field>
@@ -660,11 +662,11 @@ function ModelDialog({
                 apiFormat: "openai_responses",
                 contextWindow: 128000,
                 maxOutputTokens: 8192,
-                reasoning: { supported: false, levels: [], default: "medium" },
+                reasoning: { supported: true, levels: ["low", "medium", "high"], default: "medium" },
             },
     );
     const [levels, setLevels] = useState(
-        model?.reasoning.levels.join(", ") || "low, medium, high, xhigh, max",
+        model?.reasoning.levels.join(", ") || "low, medium, high",
     );
     const [providerModels, setProviderModels] = useState<string[]>([]);
     const [providerModelsLoading, setProviderModelsLoading] = useState(false);
@@ -672,7 +674,7 @@ function ModelDialog({
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [validationError, setValidationError] = useState("");
     const loadProviderModels = useCallback(async () => {
-        if (!provider.apiKey) {
+        if (!provider.hasAPIKey) {
             setProviderModels([]);
             setProviderModelsError("");
             return;
@@ -856,7 +858,7 @@ function ModelDialog({
                                 type="button"
                                 title="刷新 Provider Models"
                                 aria-label="刷新 Provider Models"
-                                disabled={providerModelsLoading || !provider.apiKey}
+                                disabled={providerModelsLoading || !provider.hasAPIKey}
                                 onClick={() => void loadProviderModels()}
                             >
                                 <RefreshCw
@@ -869,7 +871,7 @@ function ModelDialog({
                         {validationError === "请填写 Model ID" && (
                             <span className="config-field-error">{validationError}</span>
                         )}
-                        {provider.apiKey && (
+                        {provider.hasAPIKey && (
                             <span className="config-field-status" role="status">
                                 {providerModelsLoading
                                     ? "加载可用 Models 中"

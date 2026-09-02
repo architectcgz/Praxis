@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"praxis/internal/core/domain"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainsecurity "praxis/internal/core/domain/security"
 )
 
 // AgentSessionMessage is the UI-safe projection of one durable transcript
@@ -13,48 +15,63 @@ import (
 type AgentSessionMessage struct {
 	Sequence    uint64
 	At          time.Time
-	ExecutionID domain.AgentExecutionID
+	ExecutionID domainfoundation.AgentExecutionID
+	MessageID   string
 	Role        string
 	Content     string
+	// Blocks contains the complete provider-neutral turn representation.
+	Blocks []TranscriptContentBlock
+}
+
+// TranscriptContentBlock is the provider-neutral durable representation of a
+// message block. It contains only data required to reconstruct a model turn.
+type TranscriptContentBlock struct {
+	Kind       string
+	Text       string
+	ToolCallID string
+	ToolName   string
+	Input      json.RawMessage
+	IsError    bool
 }
 
 // AgentSessionHeader is the immutable identity record for one Agent-owned
 // transcript. The Session never directly owns a shared transcript.
 type AgentSessionHeader struct {
-	SessionID        domain.SessionID
-	AgentID          domain.AgentID
-	WorkspaceID      domain.WorkspaceID
-	Profile          domain.AgentProfile
+	SessionID        domainfoundation.SessionID
+	AgentID          domainfoundation.AgentID
+	WorkspaceID      domainfoundation.WorkspaceID
+	Profile          domainsecurity.AgentProfile
 	InjectionNonce   string
 	MinReaderVersion uint16
 	WrittenBy        string
 }
 
 type ExecutionStartReceipt struct {
-	ExecutionID domain.AgentExecutionID
-	RequestID   domain.RequestID
+	ExecutionID domainfoundation.AgentExecutionID
+	RequestID   domainfoundation.RequestID
 	EntryID     string
 	Sequence    uint64
 	InputDigest string
 }
 
 type ExecutionSettlementReceipt struct {
-	ExecutionID domain.AgentExecutionID
+	ExecutionID domainfoundation.AgentExecutionID
+	RequestID   domainfoundation.RequestID
 	EntryID     string
 	Sequence    uint64
-	Outcome     domain.ExecutionOutcome
-	FailureCode domain.ExecutionFailureCode
+	Outcome     domainexecution.ExecutionOutcome
+	FailureCode domainexecution.ExecutionFailureCode
 }
 
 type ContextArtifact struct {
-	DeliveryID domain.DeliveryID
+	DeliveryID domainfoundation.DeliveryID
 	Kind       string
 	ArtifactID string
 	Body       json.RawMessage
 }
 
 type ContextArtifactReceipt struct {
-	DeliveryID domain.DeliveryID
+	DeliveryID domainfoundation.DeliveryID
 	EntryID    string
 	Sequence   uint64
 }
@@ -63,12 +80,20 @@ type ContextArtifactReceipt struct {
 // reconciliation. Product state remains exclusively in AgentOrchestrator.
 type TranscriptReceiptStore interface {
 	Initialize(context.Context, AgentSessionHeader) error
-	AppendExecutionStart(context.Context, domain.AgentExecution) (ExecutionStartReceipt, error)
+	AppendExecutionStart(context.Context, domainexecution.AgentExecution) (ExecutionStartReceipt, error)
 	AppendExecutionSettlement(context.Context, ExecutionSettlementReceipt) (ExecutionSettlementReceipt, error)
 	AppendContextArtifact(context.Context, ContextArtifact) (ContextArtifactReceipt, error)
-	FindExecutionStart(context.Context, domain.AgentExecutionID) (*ExecutionStartReceipt, error)
-	FindExecutionSettlement(context.Context, domain.AgentExecutionID) (*ExecutionSettlementReceipt, error)
-	FindContextArtifact(context.Context, domain.DeliveryID) (*ContextArtifactReceipt, error)
+	FindExecutionStart(context.Context, domainfoundation.AgentExecutionID) (*ExecutionStartReceipt, error)
+	FindExecutionSettlement(context.Context, domainfoundation.AgentExecutionID) (*ExecutionSettlementReceipt, error)
+	FindContextArtifact(context.Context, domainfoundation.DeliveryID) (*ContextArtifactReceipt, error)
 	Repair(context.Context) (bool, error)
 	Close(context.Context) error
+}
+
+// TranscriptMessageStore is the runtime-facing message port. It is separate
+// from receipt reconciliation so callers that only need lifecycle receipts do
+// not gain access to transcript content.
+type TranscriptMessageStore interface {
+	ListMessages(context.Context, int) ([]AgentSessionMessage, error)
+	AppendStructuredMessage(context.Context, domainfoundation.AgentExecutionID, string, string, domainfoundation.RequestID, []TranscriptContentBlock) error
 }

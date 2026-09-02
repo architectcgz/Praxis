@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"praxis/internal/core/persistence"
+	"praxis/internal/core/system"
 
 	_ "modernc.org/sqlite"
 )
@@ -29,18 +30,26 @@ type transactionContextKey struct{}
 
 // Store owns the SQLite connection and all storage transactions.
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	clock system.Clock
 }
 
 // NewStore wraps an opened SQLite database without changing its schema.
 func NewStore(db *sql.DB) (*Store, error) {
+	return NewStoreWithClock(db, system.UTCClock{})
+}
+
+func NewStoreWithClock(db *sql.DB, clock system.Clock) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("sqlite database is required")
+	}
+	if clock == nil {
+		return nil, errors.New("sqlite clock is required")
 	}
 	// SQLite foreign-key settings are connection-local. One connection keeps
 	// target relation constraints effective for every repository operation.
 	db.SetMaxOpenConns(1)
-	return &Store{db: db}, nil
+	return &Store{db: db, clock: clock}, nil
 }
 
 // Open opens a SQLite database, verifies connectivity, and applies migrations.
@@ -76,10 +85,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("sqlite migration context is required")
 	}
-	if _, err := s.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-		return fmt.Errorf("enable sqlite foreign keys: %w", err)
+	if _, err := s.db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable sqlite foreign keys for migration: %w", err)
 	}
-	return s.InTx(ctx, func(ctx context.Context) error {
+	if err := s.InTx(ctx, func(ctx context.Context) error {
 		executor := executorFromContext(ctx, s.db)
 		if _, err := executor.ExecContext(ctx, `
 			CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -111,7 +120,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 				ctx,
 				`INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
 				migration.version,
-				time.Now().UTC().Format(time.RFC3339Nano),
+				s.clock.Now().UTC().Format(time.RFC3339Nano),
 			); err != nil {
 				return fmt.Errorf("record sqlite migration %d: %w", migration.version, err)
 			}
@@ -124,7 +133,21 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return errors.New("sqlite database does not contain the target schema")
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		return fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("check migrated sqlite foreign keys: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return errors.New("sqlite migration produced a foreign-key violation")
+	}
+	return rows.Err()
 }
 
 // InTx runs product metadata mutations in one SQLite transaction.

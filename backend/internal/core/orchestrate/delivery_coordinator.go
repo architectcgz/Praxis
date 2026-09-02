@@ -4,18 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	domainexecution "praxis/internal/core/domain/execution"
+	domainfoundation "praxis/internal/core/domain/foundation"
+	domainworkflow "praxis/internal/core/domain/workflow"
 
-	"praxis/internal/core/domain"
 	coresession "praxis/internal/core/session"
 )
 
 // ContextArtifactResolver returns approved, structured content for one durable
 // delivery. It must never load or return a source Agent's raw transcript.
-type ContextArtifactResolver func(context.Context, domain.ContextDelivery) (coresession.ContextArtifact, error)
+type ContextArtifactResolver func(context.Context, domainworkflow.ContextDelivery) (coresession.ContextArtifact, error)
 
 type DeliverySessionHeaderResolver func(
 	context.Context,
-	domain.ContextDelivery,
+	domainworkflow.ContextDelivery,
 ) (coresession.AgentSessionHeader, error)
 
 type DeliveryCoordinatorConfig struct {
@@ -53,10 +55,10 @@ func NewDeliveryCoordinator(config DeliveryCoordinatorConfig) (*DeliveryCoordina
 }
 
 type DeliveryAttemptResult struct {
-	Delivery        domain.ContextDelivery
+	Delivery        domainworkflow.ContextDelivery
 	Claimed         bool
 	Completed       bool
-	Execution       domain.AgentExecution
+	Execution       domainexecution.AgentExecution
 	ActivationError string
 }
 
@@ -65,8 +67,7 @@ type DeliveryAttemptResult struct {
 // not move their delivery out of pending.
 func (c *DeliveryCoordinator) TryDeliver(
 	ctx context.Context,
-	deliveryID domain.DeliveryID,
-	runtimeSnapshot domain.RuntimeExecutionSnapshot,
+	deliveryID domainfoundation.DeliveryID,
 ) (DeliveryAttemptResult, error) {
 	if ctx == nil {
 		return DeliveryAttemptResult{}, errors.New("delivery context is required")
@@ -76,7 +77,7 @@ func (c *DeliveryCoordinator) TryDeliver(
 		return DeliveryAttemptResult{}, err
 	}
 	result := DeliveryAttemptResult{Delivery: claim.Delivery, Claimed: claim.Claimed}
-	if claim.Delivery.Status != domain.ContextDeliveryDelivering {
+	if claim.Delivery.Status != domainworkflow.ContextDeliveryDelivering {
 		return result, nil
 	}
 	artifact, err := c.resolveArtifact(ctx, claim.Delivery)
@@ -108,7 +109,7 @@ func (c *DeliveryCoordinator) TryDeliver(
 	completion, err := c.orchestrator.CompleteContextDelivery(ctx, ContextDeliveryCompletionRequest{
 		DeliveryID:       claim.Delivery.ID,
 		ArtifactEntryRef: receipt.EntryID,
-		RuntimeSnapshot:  runtimeSnapshot,
+		RequestID:        domainfoundation.RequestID("delivery:" + claim.Delivery.ID.String()),
 	})
 	if err != nil {
 		return result, err

@@ -12,7 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"praxis/internal/core/domain"
+	domainsecurity "praxis/internal/core/domain/security"
+
 	coreruntime "praxis/internal/core/runtime"
 	"praxis/internal/providers"
 )
@@ -235,7 +236,7 @@ func emitTool(events chan<- coreruntime.ModelStreamEvent, tool *toolAccumulator)
 	events <- coreruntime.ModelStreamEvent{
 		Kind: coreruntime.StreamToolCall,
 		ToolCall: coreruntime.ToolCall{
-			ID: tool.id, Name: domain.ToolName(tool.name), Input: args, Arguments: args,
+			ID: tool.id, Name: domainsecurity.ToolName(tool.name), Input: args, Arguments: args,
 		},
 	}
 }

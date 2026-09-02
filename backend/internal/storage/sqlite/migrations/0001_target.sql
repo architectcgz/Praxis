@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     default_workspace_id TEXT NOT NULL,
+    path TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('active', 'archived')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -46,40 +47,50 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_by_project ON sessions(project_id, updated_at DESC, id);
 CREATE INDEX IF NOT EXISTS sessions_by_workspace ON sessions(workspace_id, id);
 
-CREATE TABLE IF NOT EXISTS agent_groups (
-    id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS session_context_entries (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
-    primary_agent_id TEXT NOT NULL DEFAULT '',
-    max_concurrent INTEGER NOT NULL CHECK (max_concurrent > 0),
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    kind TEXT NOT NULL CHECK (kind IN (
+        'user_message', 'agent_message', 'accepted_conclusion', 'decision', 'reference'
+    )),
+    source_execution_id TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    payload TEXT NOT NULL
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, revision),
+    FOREIGN KEY (source_execution_id) REFERENCES agent_executions(id) ON DELETE RESTRICT
 );
-CREATE INDEX IF NOT EXISTS agent_groups_by_session ON agent_groups(session_id, id);
-CREATE UNIQUE INDEX IF NOT EXISTS agent_groups_session_identity ON agent_groups(id, session_id);
+CREATE INDEX IF NOT EXISTS session_context_entries_by_session
+    ON session_context_entries(session_id, revision);
 
 CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    group_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
     profile TEXT NOT NULL,
-    task_packet_id TEXT NOT NULL,
-    context_manifest_id TEXT NOT NULL,
-    capability_grant_id TEXT NOT NULL,
+    security_policy_revision INTEGER NOT NULL CHECK (security_policy_revision > 0),
     state TEXT NOT NULL CHECK (state IN ('idle', 'executing', 'waiting', 'pausing', 'paused', 'interrupted', 'failed', 'closed')),
     current_execution_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     payload TEXT NOT NULL,
-    FOREIGN KEY (group_id, session_id) REFERENCES agent_groups(id, session_id) ON DELETE RESTRICT
+    UNIQUE (id, session_id)
 );
-CREATE INDEX IF NOT EXISTS agents_by_group ON agents(group_id, id);
 CREATE INDEX IF NOT EXISTS agents_by_session ON agents(session_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS agents_session_identity ON agents(id, session_id);
 
-CREATE TABLE IF NOT EXISTS task_packets (
-    id TEXT PRIMARY KEY,
-    payload TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS command_receipts (
+    request_id TEXT PRIMARY KEY,
+    command TEXT NOT NULL,
+    arguments_digest TEXT NOT NULL,
+    result_payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_security_policies (
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    created_at TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (agent_id, revision)
 );
 
 CREATE TABLE IF NOT EXISTS context_manifests (
@@ -103,7 +114,6 @@ CREATE TABLE IF NOT EXISTS delegation_requests (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
     source_agent_id TEXT NOT NULL,
     profile TEXT NOT NULL,
-    task_packet_id TEXT NOT NULL REFERENCES task_packets(id) ON DELETE RESTRICT,
     context_manifest_id TEXT NOT NULL REFERENCES context_manifests(id) ON DELETE RESTRICT,
     capability_grant_id TEXT NOT NULL REFERENCES capability_grants(id) ON DELETE RESTRICT,
     status TEXT NOT NULL CHECK (status IN ('draft', 'pending_approval', 'approved', 'rejected', 'cancelled')),
@@ -116,6 +126,10 @@ CREATE TABLE IF NOT EXISTS agent_executions (
     agent_id TEXT NOT NULL,
     request_id TEXT NOT NULL,
     work_item_id TEXT NOT NULL DEFAULT '',
+    parent_execution_id TEXT NOT NULL DEFAULT '',
+    context_revision INTEGER NOT NULL CHECK (context_revision > 0),
+    security_policy_revision INTEGER NOT NULL CHECK (security_policy_revision > 0),
+    security_fingerprint TEXT NOT NULL,
     reason TEXT NOT NULL CHECK (reason IN ('user_input', 'queued_work', 'context_delivery', 'resume')),
     status TEXT NOT NULL CHECK (status IN ('starting', 'running', 'settling', 'settled')),
     outcome TEXT NOT NULL DEFAULT '',
@@ -129,6 +143,15 @@ CREATE TABLE IF NOT EXISTS agent_executions (
 CREATE UNIQUE INDEX IF NOT EXISTS agent_executions_one_active_per_agent
     ON agent_executions(agent_id) WHERE status IN ('starting', 'running', 'settling');
 CREATE INDEX IF NOT EXISTS agent_executions_recovery ON agent_executions(status, created_at, id);
+
+CREATE TABLE IF NOT EXISTS execution_security_snapshots (
+    execution_id TEXT PRIMARY KEY REFERENCES agent_executions(id) ON DELETE RESTRICT,
+    agent_policy_revision INTEGER NOT NULL CHECK (agent_policy_revision > 0),
+    fingerprint TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS execution_security_snapshots_by_policy
+    ON execution_security_snapshots(agent_policy_revision, execution_id);
 
 CREATE TABLE IF NOT EXISTS queued_work_items (
     id TEXT PRIMARY KEY,

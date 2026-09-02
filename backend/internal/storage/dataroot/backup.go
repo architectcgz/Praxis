@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"praxis/internal/core/system"
 )
 
 const backupManifestName = "manifest.json"
@@ -24,6 +26,8 @@ type BackupOptions struct {
 	Destination      string
 	SnapshotID       string
 	At               time.Time
+	IDs              system.IDGenerator
+	Clock            system.Clock
 }
 
 type BackupFile struct {
@@ -86,15 +90,23 @@ func (d DataRoot) Backup(ctx context.Context, options BackupOptions) (BackupMani
 		return BackupManifest{}, fmt.Errorf("inspect backup destination: %w", err)
 	}
 	snapshotID := strings.TrimSpace(options.SnapshotID)
+	ids := options.IDs
+	if ids == nil {
+		ids = system.SecureIDGenerator{}
+	}
+	clock := options.Clock
+	if clock == nil {
+		clock = system.UTCClock{}
+	}
 	if snapshotID == "" {
-		snapshotID = fmt.Sprintf("backup-%d", time.Now().UTC().UnixNano())
+		snapshotID = ids.New("backup")
 	}
 	if !safeSnapshotID(snapshotID) {
 		return BackupManifest{}, errors.New("backup snapshot id is invalid")
 	}
 	at := options.At
 	if at.IsZero() {
-		at = time.Now().UTC()
+		at = clock.Now().UTC()
 	}
 	if at.IsZero() {
 		return BackupManifest{}, errors.New("backup timestamp is required")
