@@ -1,7 +1,7 @@
 # Praxis 目录结构
 
 > 本文定义 Praxis 源码目录、Go 包职责、应用用例文件布局和依赖方向。
-> 系统分层见 [`system-architecture.md`](system-architecture.md)，领域归属见 [`structure.md`](structure.md)，领域文件布局见 [`domain.md`](domain.md)。
+> 系统分层见 [`system-architecture.md`](system-architecture.md)，领域归属见 [`structure.md`](structure.md)，领域文件布局见 [`domain.md`](domain.md)，模型协议适配器见 [`model_provider.md`](model_provider.md)，模型配置注册表见 [`model_registry.md`](model_registry.md)。
 
 ## 1. 根目录
 
@@ -23,11 +23,12 @@ backend/
 ├── app/                     Wails binding、公开错误映射和桌面生命周期
 └── internal/
     ├── contracts/           binding 请求、响应、事件和快照 DTO
-    ├── application/         面向产品操作的应用用例
+    ├── application/         面向产品操作的应用用例与 execution loop
     │   ├── execution/       AgentExecution 业务用例子包
     │   ├── project/         Project 写入用例
     │   ├── session/         Session 写入与上下文用例
-    │   └── agent/           Agent policy 与结果用例
+    │   ├── agent/           Agent policy 与结果用例
+    │   └── agent_runtime/   AgentRuntime 生命周期与 model/tool loop
     ├── orchestration/       跨用例调度、投递和恢复
     ├── core/
     │   ├── domain/          领域实体、值对象、状态机和文件布局（见 `domain.md`）
@@ -37,11 +38,11 @@ backend/
     │   ├── runtime/         Provider-neutral runtime 端口
     │   ├── session/         transcript 与 receipt 端口
     │   └── system/          clock、ID 和生命周期端口
-    ├── agentruntime/        单 Agent execution loop
     ├── managedprocess/      Session 长期受控进程
     ├── workflow/            Workflow 定义、实例和 coordinator
     ├── storage/             SQLite、JSONL、blob 和 DataRoot 适配器
-    ├── providers/           模型协议与 Provider registry
+    ├── modelprovider/       模型协议请求编码与流响应适配器
+    ├── modelregistry/       模型配置、profile、credential 和解析索引
     ├── tools/               工具 schema、注册、规范化和执行适配器
     ├── compose/             唯一组合根
     └── logging/             诊断日志
@@ -50,6 +51,8 @@ backend/
 ## 3. 应用层
 
 `internal/application` 按产品用例划分包。应用服务负责命令准入、业务流程、原子边界和持久化端口调用，不依赖 Wails、SQLite、Provider SDK 或具体 runtime 实现。
+
+完整目录和职责见 [`application.md`](application.md)。
 
 外部协议 DTO 与应用参数使用不同类型：
 
@@ -95,7 +98,7 @@ type Service struct {
 }
 ```
 
-具体用例逻辑归对应业务子包。应用层输入使用各用例文件中的 `Params`；创建 execution 时，`start` 应用服务将参数和 core 端口读取结果组装为不可变的 `domain/execution.ExecutionInputSnapshot`，固定上下文选择、安全快照和 runtime 参数。`start/send_input.go` 创建新的 execution；`start/resume.go` 从 paused 或 interrupted 状态创建后续 execution；`control/request_control.go` 持久化 Pause 或 Close 请求并在提交后通知 runtime；`settlement/settlement.go` 接收 runtime 回调并更新权威执行状态。
+具体用例逻辑归对应业务子包。应用层输入使用各用例文件中的 `Params`；创建 execution 时，`start` 应用服务将参数和 core 端口读取结果组装为不可变的 `domain/execution.ExecutionInputSnapshot`，固定上下文选择、安全快照和 runtime 参数。`start/send_input.go` 创建新的 execution；`start/resume.go` 从 paused 或 interrupted 状态创建后续 execution；`control/request_control.go` 持久化 Pause 或 Close 请求并在提交后通知 AgentRuntime；`settlement/settlement.go` 接收 AgentRuntime 回调并更新权威执行状态。
 
 ### 3.2 Project、Session 与 Agent
 
@@ -131,7 +134,7 @@ internal/core/projection/
 └── event.go               审计事件投影
 ```
 
-每个 application 包只拥有本产品域的写入用例。跨包流程由 `internal/orchestration` 协调，查询由 `internal/core/projection` 提供，领域状态转换仍由 `internal/core/domain` 中的对象执行。
+产品 application 包拥有本产品域的写入用例，`application/agent_runtime` 拥有单 Agent 执行流程。跨包流程由 `internal/orchestration` 协调，查询由 `internal/core/projection` 提供，领域状态转换仍由 `internal/core/domain` 中的对象执行。
 
 ## 4. Tx 边界
 
@@ -155,11 +158,10 @@ type Tx interface {
 internal/orchestration/
 ├── scheduler.go            激活已经 durable 创建的 execution
 ├── recovery.go             根据权威状态恢复未完成流程
-├── delivery.go             跨 Agent 的持久化上下文投递
-└── runtime_registry.go     按 Agent 管理 runtime 生命周期
+└── delivery.go             跨 Agent 的持久化上下文投递
 ```
 
-orchestration 组合多个应用用例或 runtime 端口，不拥有领域状态。它可以调用 application service；application 不反向依赖 orchestration。需要由 scheduler、registry 或其他协调器实现的能力，由 application 或 core 定义窄端口并在 `compose` 中注入。
+orchestration 组合多个应用用例或 runtime 端口，不拥有领域状态。它可以调用 application service；application 不反向依赖 orchestration。需要由 scheduler 或其他协调器实现的能力，由 application 或 core 定义窄端口并在 `compose` 中注入。
 
 Execution settlement 属于 `application/execution`，因为它修改 AgentExecution 和 Agent 的权威状态。Scheduler 和 recovery 只负责触发、重试和收敛，不直接绕过应用服务写 repository。
 
@@ -175,15 +177,16 @@ Execution settlement 属于 `application/execution`，因为它修改 AgentExecu
 | `core/session` | transcript、receipt 和 session store 端口 | JSONL 文件实现 |
 | `core/system` | clock、ID 和进程生命周期端口 | 平台 API 实现 |
 
-`core/domain` 只依赖标准库。其余 core 包可以依赖 domain，但不能依赖 app、contracts、application、orchestration、storage、providers、tools 或 compose。
+`core/domain` 只依赖标准库。其余 core 包可以依赖 domain，但不能依赖 app、contracts、application、orchestration、storage、modelprovider、modelregistry、tools 或 compose。
 
 ## 7. 适配器与组合
 
 - `app` 把 `contracts` DTO 转换为 application `Params`，并把内部错误映射为公开错误码。
 - `storage` 实现 core persistence、session 和 blob 端口。
-- `providers` 和 `tools` 实现 core runtime 端口，工具由当前进程直接执行。
-- `tools` 的 Agent 工具注册表不包含删除文件、目录或业务对象的工具，`compose` 只向 `agentruntime` 注入该注册表中的工具。
-- `agentruntime` 执行已经由 application durable 创建的 execution，不创建产品关系或直接修改产品状态。
+- `modelprovider` 实现 core runtime 的 Provider-neutral 模型端口，负责具体 API format 的请求编码和流响应解析。
+- `modelregistry` 管理模型配置、profile、credential 状态和模型解析索引，不解析 Provider wire 协议。
+- `tools` 实现 core runtime 工具端口，工具由当前进程直接执行。
+- `tools` 的 Agent 工具注册表不包含删除文件、目录或业务对象的工具，`compose` 只向 `application/agent_runtime` 注入该注册表中的工具端口实现。
 - `compose` 创建具体实现并注入 application、orchestration、workflow 和 app；其他包不得 import `compose`。
 
 ## 8. 依赖方向
@@ -192,8 +195,7 @@ Execution settlement 属于 `application/execution`，因为它修改 AgentExecu
 app ───────────────► application ─────────► core
 workflow ──────────► application ─────────► core
 orchestration ─────► application + core
-agentruntime ──────► core
-storage/providers/tools ──────────────► core
+storage/modelprovider/modelregistry/tools ───────► core
 compose ───────────► all concrete packages
 ```
 

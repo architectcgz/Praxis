@@ -2,7 +2,6 @@
 
 > 本文定义 Project、Session、SessionContext、Agent transcript、AgentExecution、ManagedProcess 和文件数据的事实源及恢复边界。
 > 领域归属见 [`structure.md`](structure.md)，编排恢复时序见 [`agent-orchestration-model.md`](agent-orchestration-model.md)。
-> AgentSecurityPolicy、ExecutionSecuritySnapshot 和 ToolInvocation 的安全语义见 [`../sandbox.md`](../sandbox.md)。
 
 ## 1. 事实源分工
 

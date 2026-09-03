@@ -2,7 +2,6 @@
 
 > 本文定义命令准入、SessionContext 版本、咨询流程、AgentExecution 状态、结算和恢复。
 > 领域关系见 [`structure.md`](structure.md)，源码归属见 [`directory-structure.md`](directory-structure.md)，单 Agent 执行环见 [`agent-runtime-model.md`](agent-runtime-model.md)，事实源见 [`storage-architecture.md`](storage-architecture.md)。
-> Agent 安全策略、execution 安全快照和工具审批见 [`../sandbox.md`](../sandbox.md)。
 
 ## 1. 核心规则
 
@@ -27,9 +26,9 @@
 | `WaitCondition` | Agent 声明的外部依赖 | Execution application service |
 | `AgentControlRequest` | Pause、Close 等需要异步收敛的控制命令 | Execution application service |
 | Agent transcript | 一个 Agent 实际看过和产生的完整交互 | 该 Agent 的唯一 transcript writer |
-| `AgentRuntime` | 进程内 actor、当前 execution 和 provider/tool 临时状态 | `AgentRuntimeRegistry` |
+| `AgentRuntime` | 进程内 actor、当前 execution 和 provider/tool 临时状态 | `application/agent_runtime.Service` |
 
-Application service 负责产品状态和事务；orchestration 负责跨用例调度与恢复；runtime 只能执行已经创建的 AgentExecution，不能创建关系、提交共享上下文或修改其他 Agent 的 transcript。ManagedProcess 只能由 ToolBroker 通过 ManagedProcessCoordinator durable 创建，runtime 不能把普通命令提升为长期进程。
+Application service 负责产品状态、事务和单 Agent execution loop；orchestration 负责跨用例调度与恢复；AgentRuntime 只能执行已经创建的 AgentExecution，不能创建关系、提交共享上下文或修改其他 Agent 的 transcript。ManagedProcess 只能由 ToolBroker 通过 ManagedProcessCoordinator durable 创建，AgentRuntime 不能把普通命令提升为长期进程。
 
 ## 3. SessionContext 协议
 

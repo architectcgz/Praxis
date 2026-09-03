@@ -1,12 +1,11 @@
 # AgentRuntime 与 AgentExecution 执行模型
 
-> 本文定义进程内 AgentRuntime actor、execution activation、model/tool loop、transcript receipt 和取消传播。
+> 本文定义应用层 AgentRuntime、execution activation、model/tool loop、transcript receipt 和取消传播。
 > durable 状态与上下文协议见 [`agent-orchestration-model.md`](agent-orchestration-model.md)。
-> Agent 安全策略、execution 安全快照和操作系统隔离见 [`../sandbox.md`](../sandbox.md)。
 
 ## 1. 身份与 actor
 
-`Agent` 是持久化身份；`AgentExecution` 是一次持久化执行；`AgentRuntime` 是进程内长期 actor。runtime 不构成新的领域层次，也不能独立创建 AgentExecution。
+`Agent` 是持久化身份；`AgentExecution` 是一次持久化执行；`AgentRuntime` 是应用层的进程内执行服务。AgentRuntime 不构成新的领域层次，也不能独立创建 AgentExecution。
 
 ```text
 AgentRuntime(AgentID)
@@ -47,6 +46,8 @@ runtime 接收不可变 `InputSnapshot`，至少包括：
 
 ## 4. Execution loop
 
+model/tool loop 由 `internal/application/agent_runtime/loop.go` 实现。
+
 ```text
 preparing
   -> model_streaming
@@ -55,7 +56,7 @@ preparing
   -> settling
 ```
 
-一次 execution 可以包含多个 model turn、tool call 和 save point。tool executor 必须使用同一个 execution cancellation context，并在 ExecutionSecuritySnapshot 和 approval gate 全部通过后执行。
+一次 execution 可以包含多个 model turn、tool call 和 save point。model stream 与 tool executor 必须使用同一个 execution cancellation context，并在 ExecutionSecuritySnapshot 和 approval gate 全部通过后执行。
 
 SessionContext 只在 execution 开始时读取。模型输出、工具调用、工具结果和执行 receipt 追加到所属 Agent 的私有 transcript；runtime 不直接写 SessionContext。
 
@@ -64,7 +65,7 @@ SessionContext 只在 execution 开始时读取。模型输出、工具调用、
 Pause、Close、shutdown 和 execution timeout 都通过 execution context cancellation 传播：
 
 1. Orchestrator durable 记录 control request 或 timeout 状态；
-2. runtime 收到取消信号并停止启动新的 model turn 或 tool call；
+2. AgentRuntime 取消 execution context，并停止启动新的 model turn 或 tool call；
 3. 已在执行的外部操作按其边界返回；
 4. runtime 追加 `execution_settled` 并 fsync；
 5. Orchestrator 完成产品 settlement。
@@ -89,4 +90,4 @@ receipt durable 后才能通知 Orchestrator 推进对应产品状态。transcri
 2. runtime 不修改 SessionContext、其他 Agent transcript 或产品审批状态。
 3. 每个 Agent 同时最多一个 active execution；每个 execution 只使用一个 runtime actor。
 4. `ExecutionID` 是 runtime 与产品编排之间的唯一执行身份。
-5. provider stream、tool 临时状态和 cancellation context 在 execution settlement 后释放。
+5. loop 返回后释放 provider stream 和 tool 临时状态；execution settlement 后释放 cancellation context。

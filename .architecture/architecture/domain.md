@@ -5,7 +5,7 @@
 
 ## 1. 领域层边界
 
-`internal/core/domain` 只承载领域实体、值对象、领域事件、状态转换和不变量。每个子目录是独立 Go package；领域 package 可以依赖其他 domain package 和标准库，但不能依赖 `internal/application`、`app`、`contracts`、`internal/orchestration`、`internal/workflow`、`storage`、`providers`、`tools`、`agentruntime` 或 `compose`。
+`internal/core/domain` 只承载领域实体、值对象、领域事件、状态转换和不变量。每个子目录是独立 Go package；领域 package 可以依赖其他 domain package 和标准库，但不能依赖 `internal/application`、`app`、`contracts`、`internal/orchestration`、`internal/workflow`、`storage`、`modelprovider`、`modelregistry`、`tools` 或 `compose`。
 
 领域对象不持有 repository、数据库连接、Wails context、Provider client、runtime actor、goroutine、文件句柄或操作系统进程句柄。事务、跨聚合流程、外部副作用和持久化由 application、orchestration 和适配器负责。
 
