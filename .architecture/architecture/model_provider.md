@@ -2,6 +2,7 @@
 
 > 本文定义 `backend/internal/modelprovider` 的目标目录、模型协议适配器职责、流解析边界和依赖规则。
 > Provider-neutral 请求与事件契约由 `internal/core/runtime` 定义；模型配置和 credential 管理由 [`model_registry.md`](model_registry.md) 定义；单次模型流的应用层处理见 [`application/agent_runtime/stream.md`](application/agent_runtime/stream.md)。
+> 实现细节分别见 [adapter 生命周期与装配](application/model_provider/provider.md)、[request 映射](application/model_provider/request.md)、[流解析与事件归一化](application/model_provider/stream.md) 和 [HTTP 与安全](application/model_provider/http.md)。
 
 ## 1. 角色
 
@@ -74,6 +75,18 @@ openairesponses
 ```
 
 协议子包之间不得互相 import。共享的 HTTP 安全规则放在根 `modelprovider` 包；只有出现协议无关且稳定的重复逻辑时才允许放入根包。
+
+本架构文档的细节目录为：
+
+```text
+.architecture/architecture/application/model_provider/
+├── provider.md                    adapter 构造、装配、生命周期和错误语义
+├── request.md                     Provider-neutral 请求到 wire DTO 的映射
+├── stream.md                      SSE、协议事件、tool call 聚合和 terminal 语义
+└── http.md                        URL、header、transport、资源限制和敏感信息边界
+```
+
+该目录只用于组织架构细节，不表示生产代码位于 `internal/application/model_provider`。生产实现仍统一位于 `backend/internal/modelprovider`，应用层只能通过 `internal/core/runtime.ModelStream` 使用它。
 
 ## 3. 文件职责
 

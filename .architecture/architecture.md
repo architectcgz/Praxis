@@ -12,6 +12,16 @@
     ├── system-architecture.md
     ├── directory-structure.md
     ├── application.md
+    ├── application/
+    │   ├── agent_runtime/
+    │   │   ├── loop.md
+    │   │   ├── model_request.md
+    │   │   └── stream.md
+    │   └── model_provider/
+    │       ├── provider.md
+    │       ├── request.md
+    │       ├── stream.md
+    │       └── http.md
     ├── model_provider.md
     ├── model_registry.md
     ├── domain.md
@@ -29,7 +39,7 @@
 | [`system-architecture.md`](architecture/system-architecture.md) | 系统分层、依赖方向、UI 与 core 的通信、工程布局和验证边界 | 判断模块应该放在哪里、可以依赖谁 |
 | [`directory-structure.md`](architecture/directory-structure.md) | 源码目录、Go 包职责、应用用例文件布局和 Tx 边界 | 新增或移动包、类型与文件 |
 | [`application.md`](architecture/application.md) | `internal/application` 目录、应用服务、execution loop、事务和依赖边界 | 新增或修改写入用例与 Agent 执行环 |
-| [`model_provider.md`](architecture/model_provider.md) | 模型协议 adapter、请求编码、SSE 解析和网络安全边界 | 新增或修改模型 API format 与 Provider 协议实现 |
+| [`model_provider.md`](architecture/model_provider.md) | 模型协议 adapter 总览，以及 [adapter 生命周期](architecture/application/model_provider/provider.md)、[请求映射](architecture/application/model_provider/request.md)、[流解析](architecture/application/model_provider/stream.md)、[HTTP 与安全](architecture/application/model_provider/http.md)细节 | 新增或修改模型 API format 与 Provider 协议实现 |
 | [`model_registry.md`](architecture/model_registry.md) | 模型配置、profile、credential、解析索引和并发更新规则 | 新增或修改模型配置与选择逻辑 |
 | [`domain.md`](architecture/domain.md) | `core/domain` 子包、领域文件职责、领域依赖和领域层边界 | 新增或移动领域对象、值对象和状态机 |
 | [`structure.md`](architecture/structure.md) | 持久化主体关系、ManagedProcess、ownership、SessionContext、transcript 和授权对象 | 设计领域模型、命名和隔离边界 |
