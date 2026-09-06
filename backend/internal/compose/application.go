@@ -12,6 +12,7 @@ import (
 	applicationagent "praxis/internal/application/agent"
 	agentruntime "praxis/internal/application/agent_runtime"
 	executioncontrol "praxis/internal/application/execution/control"
+	executiondelivery "praxis/internal/application/execution/delivery"
 	executionqueue "praxis/internal/application/execution/queue"
 	executionsettlement "praxis/internal/application/execution/settlement"
 	executionstart "praxis/internal/application/execution/start"
@@ -47,6 +48,7 @@ type Application struct {
 	projects    *applicationproject.Service
 	sessions    *applicationsession.Service
 	controls    *executioncontrol.Service
+	deliveries  *executiondelivery.Service
 	agents      *applicationagent.Service
 	queues      *executionqueue.Service
 	settlements *executionsettlement.Service
@@ -335,6 +337,25 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	deliveryService, err := executiondelivery.NewService(executiondelivery.Config{
+		Transactions:    store,
+		Agents:          target.Agents,
+		Executions:      target.Executions,
+		Waits:           target.Waits,
+		Deliveries:      target.Deliveries,
+		CommandReceipts: target.Commands,
+		Events:          target.Events,
+		Inputs:          executionInputFactory{orchestrator: orchestrator},
+		Activator:       scheduler,
+		Lifecycle:       settlementService,
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create execution delivery service failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
 	startService, err := executionstart.NewService(executionstart.Config{
 		Transactions: store,
 		Agents:       target.Agents,
@@ -429,7 +450,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService, queues: queueService, settlements: settlementService}
+	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService, deliveries: deliveryService, queues: queueService, settlements: settlementService}
 	sessions := newAgentSessionResolver(root)
 	delivery, err := orchestration.NewDeliveryCoordinator(orchestration.DeliveryCoordinatorConfig{
 		Commands:        commands,
@@ -464,13 +485,6 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	if err := orchestrator.SetExecutionLifecycle(settlementService); err != nil {
-		diagnostics.logger.Errorf("configure execution lifecycle failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
 	if _, err := recovery.Recover(ctx); err != nil {
 		diagnostics.logger.Errorf("startup recovery failed: %v", err)
 		_ = diagnostics.Close()
@@ -486,6 +500,7 @@ func Open(
 		projects:          projectService,
 		sessions:          sessionService,
 		controls:          controlService,
+		deliveries:        deliveryService,
 		agents:            agentService,
 		queues:            queueService,
 		settlements:       settlementService,
@@ -639,6 +654,7 @@ type targetRuntimeFactory struct {
 type orchestrationCommandAdapter struct {
 	commands    *orchestrate.AgentOrchestrator
 	controls    *executioncontrol.Service
+	deliveries  *executiondelivery.Service
 	queues      *executionqueue.Service
 	settlements *executionsettlement.Service
 }
@@ -651,7 +667,7 @@ func (a orchestrationCommandAdapter) ClaimContextDelivery(
 	ctx context.Context,
 	deliveryID domainfoundation.DeliveryID,
 ) (orchestration.ContextDeliveryClaim, error) {
-	claim, err := a.commands.ClaimContextDelivery(ctx, deliveryID)
+	claim, err := a.deliveries.ClaimContextDelivery(ctx, deliveryID)
 	if err != nil {
 		return orchestration.ContextDeliveryClaim{}, err
 	}
@@ -665,7 +681,7 @@ func (a orchestrationCommandAdapter) CompleteContextDelivery(
 	ctx context.Context,
 	request orchestration.ContextDeliveryCompletionRequest,
 ) (orchestration.ContextDeliveryCompletion, error) {
-	completion, err := a.commands.CompleteContextDelivery(ctx, orchestrate.ContextDeliveryCompletionRequest{
+	completion, err := a.deliveries.CompleteContextDelivery(ctx, executiondelivery.CompleteParams{
 		DeliveryID:       request.DeliveryID,
 		ArtifactEntryRef: request.ArtifactEntryRef,
 		RequestID:        request.RequestID,

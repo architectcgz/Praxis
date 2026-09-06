@@ -86,8 +86,6 @@ type AgentOrchestrator struct {
 
 	readinessMu sync.RWMutex
 	ready       bool
-	lifecycleMu sync.RWMutex
-	lifecycle   coreruntime.ExecutionLifecycle
 }
 
 func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, error) {
@@ -169,24 +167,6 @@ func (o *AgentOrchestrator) Ready() bool {
 	o.readinessMu.RLock()
 	defer o.readinessMu.RUnlock()
 	return o.ready
-}
-
-// SetExecutionLifecycle supplies receipt acknowledgement for delivery-created
-// executions until the delivery command is migrated to an application service.
-func (o *AgentOrchestrator) SetExecutionLifecycle(lifecycle coreruntime.ExecutionLifecycle) error {
-	if lifecycle == nil {
-		return fmt.Errorf("execution lifecycle is required")
-	}
-	o.lifecycleMu.Lock()
-	o.lifecycle = lifecycle
-	o.lifecycleMu.Unlock()
-	return nil
-}
-
-func (o *AgentOrchestrator) executionLifecycle() coreruntime.ExecutionLifecycle {
-	o.lifecycleMu.RLock()
-	defer o.lifecycleMu.RUnlock()
-	return o.lifecycle
 }
 
 func (o *AgentOrchestrator) newID(prefix string) string {
