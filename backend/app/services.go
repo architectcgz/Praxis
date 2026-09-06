@@ -7,6 +7,7 @@ import (
 
 	"praxis/internal/application/agent_runtime"
 	"praxis/internal/application/execution/control"
+	"praxis/internal/application/execution/queue"
 	"praxis/internal/application/execution/start"
 	"praxis/internal/application/project"
 	applicationsession "praxis/internal/application/session"
@@ -15,7 +16,6 @@ import (
 	domainsession "praxis/internal/core/domain/session"
 	domainworkspace "praxis/internal/core/domain/workspace"
 
-	"praxis/internal/core/orchestrate"
 	"praxis/internal/core/projection"
 	coresession "praxis/internal/core/session"
 	"praxis/internal/logging"
@@ -54,7 +54,7 @@ type AgentCommands interface {
 	SendInput(context.Context, start.SendInputParams) (start.Result, error)
 	Resume(context.Context, start.ResumeParams) (start.Result, error)
 	RequestControl(context.Context, control.RequestParams) (control.RequestResult, error)
-	EnqueueWork(context.Context, orchestrate.QueueWorkRequest) (orchestrate.QueueWorkResult, error)
+	EnqueueWork(context.Context, queue.EnqueueParams) (queue.EnqueueResult, error)
 }
 
 type ModelCatalog interface {

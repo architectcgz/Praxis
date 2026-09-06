@@ -194,7 +194,7 @@ func (o *AgentOrchestrator) SettleExecution(ctx context.Context, settlement Exec
 	if err != nil || !advanceQueue {
 		return err
 	}
-	_, _ = o.StartNextQueuedWork(context.WithoutCancel(ctx), settledAgentID)
+	_, _ = o.startNextQueuedWork(context.WithoutCancel(ctx), settledAgentID)
 	return nil
 }
 

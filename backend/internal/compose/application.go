@@ -11,6 +11,7 @@ import (
 
 	agentruntime "praxis/internal/application/agent_runtime"
 	executioncontrol "praxis/internal/application/execution/control"
+	executionqueue "praxis/internal/application/execution/queue"
 	executionstart "praxis/internal/application/execution/start"
 	applicationproject "praxis/internal/application/project"
 	applicationsession "praxis/internal/application/session"
@@ -44,6 +45,7 @@ type Application struct {
 	projects    *applicationproject.Service
 	sessions    *applicationsession.Service
 	controls    *executioncontrol.Service
+	queues      *executionqueue.Service
 	starts      *executionstart.Service
 	store       *sqlite.Store
 	models      *registry.Registry
@@ -144,6 +146,10 @@ func (a *Application) SendInput(ctx context.Context, params executionstart.SendI
 
 func (a *Application) Resume(ctx context.Context, params executionstart.ResumeParams) (executionstart.Result, error) {
 	return a.starts.Resume(ctx, params)
+}
+
+func (a *Application) EnqueueWork(ctx context.Context, params executionqueue.EnqueueParams) (executionqueue.EnqueueResult, error) {
+	return a.queues.EnqueueWork(ctx, params)
 }
 
 func (a *Application) CreateSessionForProject(
@@ -326,6 +332,33 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	queueService, err := executionqueue.NewService(executionqueue.Config{
+		Transactions: store,
+		Agents:       target.Agents,
+		Executions:   target.Executions,
+		QueuedWork:   target.QueuedWork,
+		Deliveries:   target.Deliveries,
+		Receipts:     target.Commands,
+		Events:       target.Events,
+		Readiness:    orchestrator,
+		Inputs:       executionInputFactory{orchestrator: orchestrator},
+		Activator:    scheduler,
+		Lifecycle:    orchestrator,
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create execution queue service failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
+	if err := orchestrator.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
+		diagnostics.logger.Errorf("configure execution queue starter failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
 	projectService, err := applicationproject.NewService(applicationproject.Config{
 		Transactions:    store,
 		Projects:        target.Projects,
@@ -358,7 +391,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService}
+	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService, queues: queueService}
 	sessions := newAgentSessionResolver(root)
 	delivery, err := orchestration.NewDeliveryCoordinator(orchestration.DeliveryCoordinatorConfig{
 		Commands:        commands,
@@ -408,6 +441,7 @@ func Open(
 		projects:          projectService,
 		sessions:          sessionService,
 		controls:          controlService,
+		queues:            queueService,
 		starts:            startService,
 		store:             store,
 		models:            modelRegistry,
@@ -558,6 +592,7 @@ type targetRuntimeFactory struct {
 type orchestrationCommandAdapter struct {
 	commands *orchestrate.AgentOrchestrator
 	controls *executioncontrol.Service
+	queues   *executionqueue.Service
 }
 
 func (a orchestrationCommandAdapter) SetReady(ready bool) {
@@ -618,7 +653,7 @@ func (a orchestrationCommandAdapter) StartNextQueuedWork(
 	ctx context.Context,
 	agentID domainfoundation.AgentID,
 ) (bool, error) {
-	result, err := a.commands.StartNextQueuedWork(ctx, agentID)
+	result, err := a.queues.StartNextQueuedWork(ctx, agentID)
 	if err != nil {
 		return false, err
 	}
@@ -742,4 +777,13 @@ func (f executionInputFactory) MaterializeExecutionInput(
 	reasoning string,
 ) (domainexecution.ExecutionInputSnapshot, error) {
 	return f.orchestrator.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoning)
+}
+
+type queuedWorkStarter struct {
+	queue *executionqueue.Service
+}
+
+func (s queuedWorkStarter) StartNextQueuedWork(ctx context.Context, agentID domainfoundation.AgentID) (bool, error) {
+	result, err := s.queue.StartNextQueuedWork(ctx, agentID)
+	return result.Started, err
 }

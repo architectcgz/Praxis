@@ -3,14 +3,13 @@ package app
 import (
 	"context"
 	"praxis/internal/application/execution/control"
+	"praxis/internal/application/execution/queue"
 	"praxis/internal/application/execution/start"
 	domainworkflow "praxis/internal/core/domain/workflow"
 	"strings"
 
 	"praxis/internal/contracts"
 	domainfoundation "praxis/internal/core/domain/foundation"
-
-	"praxis/internal/core/orchestrate"
 )
 
 type CommandBindings struct {
@@ -103,7 +102,7 @@ func (b *CommandBindings) QueueWork(
 	if err != nil {
 		return contracts.QueueWorkResponse{}, err
 	}
-	result, err := commands.EnqueueWork(ctx, orchestrate.QueueWorkRequest{
+	result, err := commands.EnqueueWork(ctx, queue.EnqueueParams{
 		ID: domainfoundation.WorkItemID(request.ID), RequestID: domainfoundation.RequestID(request.RequestID), AgentID: domainfoundation.AgentID(request.AgentID),
 		Prompt: request.Prompt,
 	})
