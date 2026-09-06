@@ -1,4 +1,4 @@
-package orchestrate
+package orchestration
 
 import (
 	"context"
@@ -11,37 +11,56 @@ import (
 
 	domainagent "praxis/internal/core/domain/agent"
 	"praxis/internal/core/persistence"
+	coreruntime "praxis/internal/core/runtime"
 	coresession "praxis/internal/core/session"
 )
 
 type AgentSessionResolver func(domainfoundation.SessionID, domainfoundation.AgentID) (coresession.TranscriptReceiptStore, error)
 
+// StartingExecutionActivator is the only scheduler capability recovery needs.
+// Keeping it local prevents recovery from owning scheduler implementation.
+type StartingExecutionActivator interface {
+	ActivateStarting(context.Context, []domainexecution.AgentExecution, coreruntime.ExecutionLifecycle) error
+}
+
+// RecoveryCommands contains the durable command capabilities required to
+// converge interrupted work. Recovery never writes repositories directly.
+type RecoveryCommands interface {
+	SetReady(bool)
+	SettleRuntimeExecution(context.Context, domainfoundation.AgentExecutionID, domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode) error
+	ApplyControlRequest(context.Context, domainfoundation.AgentControlRequestID) error
+	StartNextQueuedWork(context.Context, domainfoundation.AgentID) (bool, error)
+	IsAgentUnavailable(error) bool
+}
+
 type RecoveryCoordinatorConfig struct {
-	Agents       persistence.AgentRepository
-	Contexts     persistence.SessionContextRepository
-	Executions   persistence.AgentExecutionRepository
-	Waits        persistence.WaitConditionRepository
-	Controls     persistence.AgentControlRequestRepository
-	Deliveries   persistence.ContextDeliveryRepository
-	Orchestrator *AgentOrchestrator
-	Scheduler    *ExecutionScheduler
-	Delivery     *DeliveryCoordinator
-	Sessions     AgentSessionResolver
+	Agents     persistence.AgentRepository
+	Contexts   persistence.SessionContextRepository
+	Executions persistence.AgentExecutionRepository
+	Waits      persistence.WaitConditionRepository
+	Controls   persistence.AgentControlRequestRepository
+	Deliveries persistence.ContextDeliveryRepository
+	Commands   RecoveryCommands
+	Lifecycle  coreruntime.ExecutionLifecycle
+	Scheduler  StartingExecutionActivator
+	Delivery   *DeliveryCoordinator
+	Sessions   AgentSessionResolver
 }
 
 // RecoveryCoordinator rebuilds progress from SQLite and Agent JSONL receipts.
 // It never assumes an interrupted model or tool operation was safe to replay.
 type RecoveryCoordinator struct {
-	agents       persistence.AgentRepository
-	contexts     persistence.SessionContextRepository
-	executions   persistence.AgentExecutionRepository
-	waits        persistence.WaitConditionRepository
-	controls     persistence.AgentControlRequestRepository
-	deliveries   persistence.ContextDeliveryRepository
-	orchestrator *AgentOrchestrator
-	scheduler    *ExecutionScheduler
-	delivery     *DeliveryCoordinator
-	sessions     AgentSessionResolver
+	agents     persistence.AgentRepository
+	contexts   persistence.SessionContextRepository
+	executions persistence.AgentExecutionRepository
+	waits      persistence.WaitConditionRepository
+	controls   persistence.AgentControlRequestRepository
+	deliveries persistence.ContextDeliveryRepository
+	commands   RecoveryCommands
+	lifecycle  coreruntime.ExecutionLifecycle
+	scheduler  StartingExecutionActivator
+	delivery   *DeliveryCoordinator
+	sessions   AgentSessionResolver
 }
 
 func NewRecoveryCoordinator(config RecoveryCoordinatorConfig) (*RecoveryCoordinator, error) {
@@ -55,7 +74,8 @@ func NewRecoveryCoordinator(config RecoveryCoordinatorConfig) (*RecoveryCoordina
 		{name: "waits", value: config.Waits},
 		{name: "controls", value: config.Controls},
 		{name: "deliveries", value: config.Deliveries},
-		{name: "orchestrator", value: config.Orchestrator},
+		{name: "commands", value: config.Commands},
+		{name: "execution lifecycle", value: config.Lifecycle},
 		{name: "scheduler", value: config.Scheduler},
 		{name: "delivery", value: config.Delivery},
 		{name: "sessions", value: config.Sessions},
@@ -65,16 +85,17 @@ func NewRecoveryCoordinator(config RecoveryCoordinatorConfig) (*RecoveryCoordina
 		}
 	}
 	return &RecoveryCoordinator{
-		agents:       config.Agents,
-		contexts:     config.Contexts,
-		executions:   config.Executions,
-		waits:        config.Waits,
-		controls:     config.Controls,
-		deliveries:   config.Deliveries,
-		orchestrator: config.Orchestrator,
-		scheduler:    config.Scheduler,
-		delivery:     config.Delivery,
-		sessions:     config.Sessions,
+		agents:     config.Agents,
+		contexts:   config.Contexts,
+		executions: config.Executions,
+		waits:      config.Waits,
+		controls:   config.Controls,
+		deliveries: config.Deliveries,
+		commands:   config.Commands,
+		lifecycle:  config.Lifecycle,
+		scheduler:  config.Scheduler,
+		delivery:   config.Delivery,
+		sessions:   config.Sessions,
 	}, nil
 }
 
@@ -94,7 +115,7 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 	if ctx == nil {
 		return RecoveryReport{}, errors.New("recovery context is required")
 	}
-	c.orchestrator.SetReady(false)
+	c.commands.SetReady(false)
 	report := RecoveryReport{}
 	agents, err := listRecoveryAgents(ctx, c.agents)
 	if err != nil {
@@ -137,11 +158,7 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 			return report, fmt.Errorf("find settlement receipt %s: %w", execution.ID, err)
 		}
 		if settlement != nil {
-			if err := c.orchestrator.SettleExecution(ctx, ExecutionSettlement{
-				ExecutionID: execution.ID,
-				Outcome:     settlement.Outcome,
-				FailureCode: settlement.FailureCode,
-			}); err != nil {
+			if err := c.commands.SettleRuntimeExecution(ctx, execution.ID, settlement.Outcome, settlement.FailureCode); err != nil {
 				return report, fmt.Errorf("recover settled execution %s: %w", execution.ID, err)
 			}
 			report.RecoveredSettlement++
@@ -154,11 +171,12 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 		if execution.Status == domainexecution.ExecutionStarting && start == nil {
 			continue
 		}
-		if err := c.orchestrator.SettleExecution(ctx, ExecutionSettlement{
-			ExecutionID: execution.ID,
-			Outcome:     domainexecution.ExecutionInterrupted,
-			FailureCode: domainexecution.ExecutionFailureRecoveryInterrupted,
-		}); err != nil {
+		if err := c.commands.SettleRuntimeExecution(
+			ctx,
+			execution.ID,
+			domainexecution.ExecutionInterrupted,
+			domainexecution.ExecutionFailureRecoveryInterrupted,
+		); err != nil {
 			return report, fmt.Errorf("interrupt recovered execution %s: %w", execution.ID, err)
 		}
 		report.InterruptedExecutions++
@@ -184,8 +202,8 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 			return report, fmt.Errorf("list control requests for agent %s: %w", agent.ID, err)
 		}
 		for _, control := range controls {
-			if err := c.orchestrator.ApplyControlRequest(ctx, control.ID); err != nil {
-				if hasCommandErrorCode(err, CommandErrorAgentUnavailable) {
+			if err := c.commands.ApplyControlRequest(ctx, control.ID); err != nil {
+				if c.commands.IsAgentUnavailable(err) {
 					continue
 				}
 				return report, fmt.Errorf("apply control request %s: %w", control.ID, err)
@@ -195,11 +213,11 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 	}
 
 	for _, agent := range agents {
-		started, err := c.orchestrator.StartNextQueuedWork(context.WithoutCancel(ctx), agent.ID)
+		started, err := c.commands.StartNextQueuedWork(context.WithoutCancel(ctx), agent.ID)
 		if err != nil {
 			return report, fmt.Errorf("start recovered queued work for agent %s: %w", agent.ID, err)
 		}
-		if started.Started {
+		if started {
 			report.StartedQueuedWork++
 		}
 	}
@@ -208,11 +226,11 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 	if err != nil {
 		return report, err
 	}
-	if err := c.scheduler.ActivateStarting(context.WithoutCancel(ctx), starting, c.orchestrator); err != nil {
+	if err := c.scheduler.ActivateStarting(context.WithoutCancel(ctx), starting, c.lifecycle); err != nil {
 		return report, err
 	}
 	report.ActivatedStarting = len(starting)
-	c.orchestrator.SetReady(true)
+	c.commands.SetReady(true)
 	return report, nil
 }
 

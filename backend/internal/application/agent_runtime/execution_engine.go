@@ -27,7 +27,7 @@ type ExecutionModelResolver interface {
 
 type ExecutionEngineConfig struct {
 	Models         ExecutionModelResolver
-	Tools          ToolRunner
+	ToolInvoker    ToolInvoker
 	OutputObserver AgentOutputObserver
 	Clock          system.Clock
 	Logf           func(string, ...any)
@@ -35,7 +35,7 @@ type ExecutionEngineConfig struct {
 
 type ExecutionEngine struct {
 	models         ExecutionModelResolver
-	tools          ToolRunner
+	toolInvoker    ToolInvoker
 	outputObserver AgentOutputObserver
 	clock          system.Clock
 	logf           func(string, ...any)
@@ -53,7 +53,13 @@ func NewExecutionEngine(config ExecutionEngineConfig) (*ExecutionEngine, error) 
 	if clock == nil {
 		clock = system.UTCClock{}
 	}
-	return &ExecutionEngine{models: config.Models, tools: config.Tools, outputObserver: config.OutputObserver, clock: clock, logf: logf}, nil
+	return &ExecutionEngine{
+		models:         config.Models,
+		toolInvoker:    config.ToolInvoker,
+		outputObserver: config.OutputObserver,
+		clock:          clock,
+		logf:           logf,
+	}, nil
 }
 
 func (e *ExecutionEngine) RunWithSession(ctx context.Context, execution domainexecution.AgentExecution, store coresession.TranscriptReceiptStore) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error) {
@@ -143,7 +149,7 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 		if len(calls) == 0 {
 			return domainexecution.ExecutionCompleted, "", nil
 		}
-		if e.tools == nil {
+		if e.toolInvoker == nil {
 			return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureTool,
 				&RuntimeError{Code: ErrorTool, Message: "tool capability is unavailable"}
 		}
@@ -157,11 +163,17 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 				return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureContract,
 					&RuntimeError{Code: ErrorContract, Message: "provider emitted an invalid tool call"}
 			}
-			if !grant.AllowsTool(call.Name) {
-				return domainexecution.ExecutionFailed, domainexecution.ExecutionFailurePolicyBlocked,
-					&RuntimeError{Code: ErrorPolicyBlocked, Message: "tool capability is not granted"}
-			}
-			result, err := e.tools.Execute(ctx, call, ToolExecutionContext{Grant: grant, Execution: execution.Input.Runtime})
+			result, err := e.toolInvoker.Invoke(
+				ctx,
+				call,
+				ToolInvocationContext{
+					ExecutionID: execution.ID,
+					SessionID:   execution.SessionID,
+					AgentID:     execution.AgentID,
+					Grant:       grant,
+					Execution:   execution.Input.Runtime,
+				},
+			)
 			if err != nil {
 				// Persist a bounded tool-result receipt before settling failure so
 				// recovery can account for the attempted side effect.

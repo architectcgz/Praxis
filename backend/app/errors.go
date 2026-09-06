@@ -4,20 +4,25 @@ import (
 	"context"
 	"errors"
 
-	"praxis/internal/agentruntime"
+	"praxis/internal/application/agent_runtime"
 	"praxis/internal/contracts"
+	corecommand "praxis/internal/core/command"
 	domainfoundation "praxis/internal/core/domain/foundation"
 
-	"praxis/internal/core/orchestrate"
+	"praxis/internal/core/projection"
 )
 
 func publicBindingError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var command *orchestrate.CommandError
+	var command *corecommand.Error
 	if errors.As(err, &command) {
 		return publicCommandError(command)
+	}
+	var query *projection.InvalidQueryError
+	if errors.As(err, &query) {
+		return bindingError(contracts.ErrorCodeInvalidRequest)
 	}
 	if executionError, ok := publicExecutionError(err); ok {
 		return executionError
@@ -55,22 +60,22 @@ func bindingError(code contracts.ErrorCode) error {
 	return errors.New(code.String())
 }
 
-func publicCommandError(command *orchestrate.CommandError) error {
+func publicCommandError(command *corecommand.Error) error {
 	if command == nil {
 		return bindingError(contracts.ErrorCodeInternal)
 	}
 	switch command.Code {
-	case orchestrate.CommandErrorAgentExecuting:
+	case corecommand.ErrorAgentExecuting:
 		return bindingError(contracts.ErrorCodeAgentExecuting)
-	case orchestrate.CommandErrorAgentUnavailable:
+	case corecommand.ErrorAgentUnavailable:
 		return bindingError(contracts.ErrorCodeAgentUnavailable)
-	case orchestrate.CommandErrorInvalidRequest:
+	case corecommand.ErrorInvalidRequest:
 		return bindingError(contracts.ErrorCodeInvalidRequest)
-	case orchestrate.CommandErrorNotReady:
+	case corecommand.ErrorNotReady:
 		return bindingError(contracts.ErrorCodeNotReady)
-	case orchestrate.CommandErrorProjectWorkspaceInvalid:
+	case corecommand.ErrorProjectWorkspaceInvalid:
 		return bindingError(contracts.ErrorCodeProjectWorkspaceInvalid)
-	case orchestrate.CommandErrorModelNotConfigured:
+	case corecommand.ErrorModelNotConfigured:
 		return bindingError(contracts.ErrorCodeModelNotConfigured)
 	default:
 		return bindingError(contracts.ErrorCodeInternal)

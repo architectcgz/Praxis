@@ -7,6 +7,7 @@ import (
 	domaincommand "praxis/internal/core/domain/command"
 	domainfoundation "praxis/internal/core/domain/foundation"
 	domainsecurity "praxis/internal/core/domain/security"
+	"strconv"
 )
 
 type UpdateAgentSecurityPolicyRequest struct {
@@ -73,7 +74,7 @@ func (o *AgentOrchestrator) UpdateAgentSecurityPolicy(ctx context.Context, reque
 		}
 		event := o.newEvent(domainfoundation.EventAgentPolicyUpdated, agent.UpdatedAt)
 		event.SessionID, event.AgentID = agent.SessionID, agent.ID
-		event.Payload = map[string]string{"revision": fmtUint(request.Policy.Revision)}
+		event.Payload = map[string]string{"revision": strconv.FormatUint(request.Policy.Revision, 10)}
 		if err := o.appendEvent(txCtx, event); err != nil {
 			return err
 		}

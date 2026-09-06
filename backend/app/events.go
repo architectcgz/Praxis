@@ -1,7 +1,7 @@
 package app
 
 import (
-	"praxis/internal/agentruntime"
+	"praxis/internal/application/agent_runtime"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )

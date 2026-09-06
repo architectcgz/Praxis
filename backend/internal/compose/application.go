@@ -9,7 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"praxis/internal/agentruntime"
+	agentruntime "praxis/internal/application/agent_runtime"
+	executioncontrol "praxis/internal/application/execution/control"
+	applicationproject "praxis/internal/application/project"
+	applicationsession "praxis/internal/application/session"
+	corecommand "praxis/internal/core/command"
 	domainagent "praxis/internal/core/domain/agent"
 	domainexecution "praxis/internal/core/domain/execution"
 	domainfoundation "praxis/internal/core/domain/foundation"
@@ -20,8 +24,10 @@ import (
 	domainworkspace "praxis/internal/core/domain/workspace"
 
 	"praxis/internal/core/orchestrate"
+	"praxis/internal/core/projection"
 	"praxis/internal/core/session"
 	"praxis/internal/logging"
+	"praxis/internal/orchestration"
 	"praxis/internal/providers/registry"
 	"praxis/internal/storage/agentlog"
 	"praxis/internal/storage/agentpolicy"
@@ -29,25 +35,28 @@ import (
 	"praxis/internal/storage/sqlite"
 )
 
-// Application is the production composition of target storage, orchestration,
-// runtime activation, delivery, and startup recovery. It embeds only the core
-// command/query surface used by the Wails binding.
+// Application is the production composition of target storage, application
+// services, orchestration, runtime activation, delivery, and startup recovery.
 type Application struct {
 	*orchestrate.AgentOrchestrator
-	store      *sqlite.Store
-	models     *registry.Registry
-	registry   *orchestrate.AgentRuntimeRegistry
-	scheduler  *orchestrate.ExecutionScheduler
-	runtimeLog *runtimeLog
-	output     *agentOutputPublisher
+	projections *projection.Service
+	projects    *applicationproject.Service
+	sessions    *applicationsession.Service
+	controls    *executioncontrol.Service
+	store       *sqlite.Store
+	models      *registry.Registry
+	registry    *agentruntime.Registry
+	scheduler   *orchestration.Scheduler
+	runtimeLog  *runtimeLog
+	output      *agentOutputPublisher
 }
 
 func (a *Application) ListProjects(ctx context.Context, limit int) ([]domainproject.Project, error) {
-	return a.AgentOrchestrator.ListProjects(ctx, limit)
+	return a.projections.ListProjects(ctx, limit)
 }
 
 func (a *Application) ListWorkspaces(ctx context.Context, projectID domainfoundation.ProjectID, limit int) ([]domainworkspace.Workspace, error) {
-	return a.AgentOrchestrator.ListWorkspaces(ctx, projectID, limit)
+	return a.projections.ListWorkspaces(ctx, projectID, limit)
 }
 
 func (a *Application) ListSessionsByProject(
@@ -55,22 +64,86 @@ func (a *Application) ListSessionsByProject(
 	projectID domainfoundation.ProjectID,
 	limit int,
 ) ([]domainsession.Session, error) {
-	return a.AgentOrchestrator.ListSessionsByProject(ctx, projectID, limit)
+	return a.projections.ListSessionsByProject(ctx, projectID, limit)
 }
 
-func (a *Application) CreateProject(ctx context.Context, name, path string, requestID domainfoundation.RequestID) (result orchestrate.CreateProjectResult, err error) {
+func (a *Application) ListSessions(ctx context.Context, limit int) ([]domainsession.Session, error) {
+	return a.projections.ListSessions(ctx, limit)
+}
+
+func (a *Application) ProjectSession(
+	ctx context.Context,
+	sessionID domainfoundation.SessionID,
+	limit int,
+) (projection.SessionProjection, error) {
+	return a.projections.ProjectSession(ctx, sessionID, limit)
+}
+
+func (a *Application) ProjectAgent(
+	ctx context.Context,
+	agentID domainfoundation.AgentID,
+	limit int,
+) (projection.AgentProjection, error) {
+	return a.projections.ProjectAgent(ctx, agentID, limit)
+}
+
+func (a *Application) ListSessionEvents(
+	ctx context.Context,
+	sessionID domainfoundation.SessionID,
+	after time.Time,
+	limit int,
+) ([]domainfoundation.DomainEvent, error) {
+	return a.projections.ListSessionEvents(ctx, sessionID, after, limit)
+}
+
+func (a *Application) ListAgentEvents(
+	ctx context.Context,
+	agentID domainfoundation.AgentID,
+	after time.Time,
+	limit int,
+) ([]domainfoundation.DomainEvent, error) {
+	return a.projections.ListAgentEvents(ctx, agentID, after, limit)
+}
+
+func (a *Application) ListExecutionEvents(
+	ctx context.Context,
+	executionID domainfoundation.AgentExecutionID,
+	after time.Time,
+	limit int,
+) ([]domainfoundation.DomainEvent, error) {
+	return a.projections.ListExecutionEvents(ctx, executionID, after, limit)
+}
+
+func (a *Application) CreateProject(ctx context.Context, name, path string, requestID domainfoundation.RequestID) (result applicationproject.CreateProjectResult, err error) {
 	name = strings.TrimSpace(name)
 	path = filepath.Clean(strings.TrimSpace(path))
 	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || !filepath.IsAbs(path) {
-		return result, &orchestrate.CommandError{Code: orchestrate.CommandErrorProjectWorkspaceInvalid}
+		return result, corecommand.NewError(corecommand.ErrorProjectWorkspaceInvalid)
 	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return result, err
 	}
-	result, err = a.AgentOrchestrator.CreateProject(ctx, orchestrate.CreateProjectRequest{
+	result, err = a.projects.CreateProject(ctx, applicationproject.CreateProjectParams{
 		RequestID: requestID, Name: name, Path: path,
 	})
 	return result, nil
+}
+
+func (a *Application) RequestControl(
+	ctx context.Context,
+	params executioncontrol.RequestParams,
+) (executioncontrol.RequestResult, error) {
+	return a.controls.RequestControl(ctx, params)
+}
+
+func (a *Application) CreateSessionForProject(
+	ctx context.Context,
+	requestID domainfoundation.RequestID,
+	projectID domainfoundation.ProjectID,
+	workspaceID domainfoundation.WorkspaceID,
+	goal string,
+) (applicationsession.CreateResult, error) {
+	return a.sessions.CreateSessionForProject(ctx, requestID, projectID, workspaceID, goal)
 }
 
 // Open builds a target application and completes recovery before returning a
@@ -141,14 +214,33 @@ func Open(
 		eventLogger: diagnostics.Event,
 		output:      output.Publish,
 	}
-	registry, err := orchestrate.NewAgentRuntimeRegistry(factory)
+	projections, err := projection.NewService(projection.Config{
+		Projects:   target.Projects,
+		Workspaces: target.Workspaces,
+		Sessions:   target.Sessions,
+		Contexts:   target.Contexts,
+		Agents:     target.Agents,
+		Executions: target.Executions,
+		Waits:      target.Waits,
+		Controls:   target.Controls,
+		Deliveries: target.Deliveries,
+		Events:     target.Events,
+		Messages:   newAgentMessageQuery(root),
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create projection service failed: %v", err)
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, err
+	}
+	registry, err := agentruntime.NewRegistry(factory)
 	if err != nil {
 		diagnostics.logger.Errorf("create runtime registry failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
-	scheduler, err := orchestrate.NewExecutionScheduler(orchestrate.ExecutionSchedulerConfig{
+	scheduler, err := orchestration.NewScheduler(orchestration.SchedulerConfig{
 		Executions: target.Executions,
 		Runtime:    registry,
 	})
@@ -161,7 +253,6 @@ func Open(
 	}
 	orchestrator, err := orchestrate.NewAgentOrchestrator(orchestrate.AgentOrchestratorConfig{
 		Transactions:    store,
-		Projects:        target.Projects,
 		Workspaces:      target.Workspaces,
 		Sessions:        target.Sessions,
 		Contexts:        target.Contexts,
@@ -174,10 +265,7 @@ func Open(
 		Deliveries:      target.Deliveries,
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
-		Messages:        newAgentMessageQuery(root),
-		PolicyFactory:   policyFactory(systemPolicy),
 		Activator:       scheduler,
-		Canceller:       registry,
 		Models:          modelRegistry,
 		InitiallyReady:  false,
 	})
@@ -188,9 +276,69 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	sessionService, err := applicationsession.NewService(applicationsession.Config{
+		Transactions:    store,
+		Projects:        target.Projects,
+		Workspaces:      target.Workspaces,
+		Sessions:        target.Sessions,
+		Contexts:        target.Contexts,
+		Policies:        target.Policies,
+		Agents:          target.Agents,
+		CommandReceipts: target.Commands,
+		Events:          target.Events,
+		Readiness:       orchestrator,
+		PolicyFactory:   policyFactory(systemPolicy),
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create session service failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
+	if err := orchestrator.SetPrimaryAgentProvider(sessionService); err != nil {
+		diagnostics.logger.Errorf("configure primary agent provider failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
+	projectService, err := applicationproject.NewService(applicationproject.Config{
+		Transactions:    store,
+		Projects:        target.Projects,
+		Workspaces:      target.Workspaces,
+		CommandReceipts: target.Commands,
+		Events:          target.Events,
+		Readiness:       orchestrator,
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create project service failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
+	controlService, err := executioncontrol.NewService(executioncontrol.Config{
+		Transactions:    store,
+		Agents:          target.Agents,
+		Executions:      target.Executions,
+		Controls:        target.Controls,
+		CommandReceipts: target.Commands,
+		Events:          target.Events,
+		Readiness:       orchestrator,
+		Canceller:       registry,
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create control service failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
+	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService}
 	sessions := newAgentSessionResolver(root)
-	delivery, err := orchestrate.NewDeliveryCoordinator(orchestrate.DeliveryCoordinatorConfig{
-		Orchestrator:    orchestrator,
+	delivery, err := orchestration.NewDeliveryCoordinator(orchestration.DeliveryCoordinatorConfig{
+		Commands:        commands,
 		Sessions:        sessions,
 		SessionHeader:   newDeliveryHeaderResolver(store),
 		ResolveArtifact: store.ResolveContextArtifact,
@@ -202,17 +350,18 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	recovery, err := orchestrate.NewRecoveryCoordinator(orchestrate.RecoveryCoordinatorConfig{
-		Agents:       target.Agents,
-		Contexts:     target.Contexts,
-		Executions:   target.Executions,
-		Waits:        target.Waits,
-		Controls:     target.Controls,
-		Deliveries:   target.Deliveries,
-		Orchestrator: orchestrator,
-		Scheduler:    scheduler,
-		Delivery:     delivery,
-		Sessions:     sessions,
+	recovery, err := orchestration.NewRecoveryCoordinator(orchestration.RecoveryCoordinatorConfig{
+		Agents:     target.Agents,
+		Contexts:   target.Contexts,
+		Executions: target.Executions,
+		Waits:      target.Waits,
+		Controls:   target.Controls,
+		Deliveries: target.Deliveries,
+		Commands:   commands,
+		Lifecycle:  orchestrator,
+		Scheduler:  scheduler,
+		Delivery:   delivery,
+		Sessions:   sessions,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create recovery coordinator failed: %v", err)
@@ -232,6 +381,10 @@ func Open(
 	diagnostics.logger.Infof("composition open completed ready=true")
 	return &Application{
 		AgentOrchestrator: orchestrator,
+		projections:       projections,
+		projects:          projectService,
+		sessions:          sessionService,
+		controls:          controlService,
 		store:             store,
 		models:            modelRegistry,
 		registry:          registry,
@@ -364,7 +517,7 @@ func (a *Application) ListAgentMessages(
 	agentID domainfoundation.AgentID,
 	limit int,
 ) ([]session.AgentSessionMessage, error) {
-	return a.AgentOrchestrator.ListAgentMessages(ctx, agentID, limit)
+	return a.projections.ListAgentMessages(ctx, agentID, limit)
 }
 
 type targetRuntimeFactory struct {
@@ -376,10 +529,91 @@ type targetRuntimeFactory struct {
 	output      agentruntime.AgentOutputObserver
 }
 
+// orchestrationCommandAdapter adapts application command results to the
+// narrow orchestration contracts at the composition root.
+type orchestrationCommandAdapter struct {
+	commands *orchestrate.AgentOrchestrator
+	controls *executioncontrol.Service
+}
+
+func (a orchestrationCommandAdapter) SetReady(ready bool) {
+	a.commands.SetReady(ready)
+}
+
+func (a orchestrationCommandAdapter) ClaimContextDelivery(
+	ctx context.Context,
+	deliveryID domainfoundation.DeliveryID,
+) (orchestration.ContextDeliveryClaim, error) {
+	claim, err := a.commands.ClaimContextDelivery(ctx, deliveryID)
+	if err != nil {
+		return orchestration.ContextDeliveryClaim{}, err
+	}
+	return orchestration.ContextDeliveryClaim{
+		Delivery: claim.Delivery,
+		Claimed:  claim.Claimed,
+	}, nil
+}
+
+func (a orchestrationCommandAdapter) CompleteContextDelivery(
+	ctx context.Context,
+	request orchestration.ContextDeliveryCompletionRequest,
+) (orchestration.ContextDeliveryCompletion, error) {
+	completion, err := a.commands.CompleteContextDelivery(ctx, orchestrate.ContextDeliveryCompletionRequest{
+		DeliveryID:       request.DeliveryID,
+		ArtifactEntryRef: request.ArtifactEntryRef,
+		RequestID:        request.RequestID,
+	})
+	if err != nil {
+		return orchestration.ContextDeliveryCompletion{}, err
+	}
+	return orchestration.ContextDeliveryCompletion{
+		Delivery:         completion.Delivery,
+		Execution:        completion.Execution,
+		ExistingDelivery: completion.ExistingDelivery,
+		ActivationError:  completion.ActivationError,
+	}, nil
+}
+
+func (a orchestrationCommandAdapter) SettleRuntimeExecution(
+	ctx context.Context,
+	executionID domainfoundation.AgentExecutionID,
+	outcome domainexecution.ExecutionOutcome,
+	failureCode domainexecution.ExecutionFailureCode,
+) error {
+	return a.commands.SettleRuntimeExecution(ctx, executionID, outcome, failureCode)
+}
+
+func (a orchestrationCommandAdapter) ApplyControlRequest(
+	ctx context.Context,
+	requestID domainfoundation.AgentControlRequestID,
+) error {
+	return a.controls.ApplyControlRequest(ctx, requestID)
+}
+
+func (a orchestrationCommandAdapter) StartNextQueuedWork(
+	ctx context.Context,
+	agentID domainfoundation.AgentID,
+) (bool, error) {
+	result, err := a.commands.StartNextQueuedWork(ctx, agentID)
+	if err != nil {
+		return false, err
+	}
+	return result.Started, nil
+}
+
+func (a orchestrationCommandAdapter) IsAgentUnavailable(err error) bool {
+	return corecommand.HasError(err, corecommand.ErrorAgentUnavailable)
+}
+
+var (
+	_ orchestration.DeliveryCommands = orchestrationCommandAdapter{}
+	_ orchestration.RecoveryCommands = orchestrationCommandAdapter{}
+)
+
 func (f targetRuntimeFactory) New(
 	ctx context.Context,
 	agentID domainfoundation.AgentID,
-) (orchestrate.ManagedAgentRuntime, error) {
+) (agentruntime.ManagedRuntime, error) {
 	openSessions := func(
 		sessionID domainfoundation.SessionID,
 		targetAgentID domainfoundation.AgentID,
@@ -398,13 +632,13 @@ func (f targetRuntimeFactory) New(
 	})
 }
 
-func newAgentSessionResolver(root dataroot.DataRoot) orchestrate.AgentSessionResolver {
+func newAgentSessionResolver(root dataroot.DataRoot) orchestration.AgentSessionResolver {
 	return func(sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID) (session.TranscriptReceiptStore, error) {
 		return agentlog.Open(root, sessionID, agentID)
 	}
 }
 
-func newAgentMessageQuery(root dataroot.DataRoot) orchestrate.AgentMessageQuery {
+func newAgentMessageQuery(root dataroot.DataRoot) projection.AgentMessageQuery {
 	return func(ctx context.Context, sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID, limit int) ([]session.AgentSessionMessage, error) {
 		store, err := agentlog.Open(root, sessionID, agentID)
 		if err != nil {
@@ -415,7 +649,7 @@ func newAgentMessageQuery(root dataroot.DataRoot) orchestrate.AgentMessageQuery 
 	}
 }
 
-func policyFactory(snapshot domainsecurity.AgentPolicySnapshot) orchestrate.AgentSecurityPolicyFactory {
+func policyFactory(snapshot domainsecurity.AgentPolicySnapshot) applicationsession.AgentSecurityPolicyFactory {
 	return func(workspace domainworkspace.Workspace, profile domainsecurity.AgentProfile) (domainsecurity.AgentSecurityPolicy, error) {
 		template, ok := snapshot.TemplateFor(profile)
 		if !ok {
@@ -445,7 +679,7 @@ func newSessionHeaderResolver(store *sqlite.Store) agentruntime.TargetSessionHea
 	}
 }
 
-func newDeliveryHeaderResolver(store *sqlite.Store) orchestrate.DeliverySessionHeaderResolver {
+func newDeliveryHeaderResolver(store *sqlite.Store) orchestration.DeliverySessionHeaderResolver {
 	return func(ctx context.Context, delivery domainworkflow.ContextDelivery) (session.AgentSessionHeader, error) {
 		agent, err := store.GetAgent(ctx, delivery.TargetAgentID)
 		if err != nil {

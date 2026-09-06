@@ -5,13 +5,17 @@ import (
 	"errors"
 	"time"
 
-	"praxis/internal/agentruntime"
+	"praxis/internal/application/agent_runtime"
+	"praxis/internal/application/execution/control"
+	"praxis/internal/application/project"
+	applicationsession "praxis/internal/application/session"
 	domainfoundation "praxis/internal/core/domain/foundation"
 	domainproject "praxis/internal/core/domain/project"
 	domainsession "praxis/internal/core/domain/session"
 	domainworkspace "praxis/internal/core/domain/workspace"
 
 	"praxis/internal/core/orchestrate"
+	"praxis/internal/core/projection"
 	coresession "praxis/internal/core/session"
 	"praxis/internal/logging"
 	"praxis/internal/providers/registry"
@@ -24,18 +28,18 @@ type ReadinessSource interface {
 type SessionService interface {
 	ListSessions(context.Context, int) ([]domainsession.Session, error)
 	ListSessionsByProject(context.Context, domainfoundation.ProjectID, int) ([]domainsession.Session, error)
-	CreateSessionForProject(context.Context, domainfoundation.RequestID, domainfoundation.ProjectID, domainfoundation.WorkspaceID, string) (orchestrate.CreateSessionResult, error)
-	ProjectSession(context.Context, domainfoundation.SessionID, int) (orchestrate.SessionProjection, error)
+	CreateSessionForProject(context.Context, domainfoundation.RequestID, domainfoundation.ProjectID, domainfoundation.WorkspaceID, string) (applicationsession.CreateResult, error)
+	ProjectSession(context.Context, domainfoundation.SessionID, int) (projection.SessionProjection, error)
 }
 
 type ProjectService interface {
 	ListProjects(context.Context, int) ([]domainproject.Project, error)
-	CreateProject(context.Context, string, string, domainfoundation.RequestID) (orchestrate.CreateProjectResult, error)
+	CreateProject(context.Context, string, string, domainfoundation.RequestID) (project.CreateProjectResult, error)
 	ListWorkspaces(context.Context, domainfoundation.ProjectID, int) ([]domainworkspace.Workspace, error)
 }
 
 type AgentQueries interface {
-	ProjectAgent(context.Context, domainfoundation.AgentID, int) (orchestrate.AgentProjection, error)
+	ProjectAgent(context.Context, domainfoundation.AgentID, int) (projection.AgentProjection, error)
 	ListAgentMessages(context.Context, domainfoundation.AgentID, int) ([]coresession.AgentSessionMessage, error)
 }
 
@@ -48,7 +52,7 @@ type EventQueries interface {
 type AgentCommands interface {
 	SendInput(context.Context, orchestrate.SendInputRequest) (orchestrate.SendInputResult, error)
 	Resume(context.Context, orchestrate.ResumeRequest) (orchestrate.SendInputResult, error)
-	RequestControl(context.Context, orchestrate.ControlRequest) (orchestrate.ControlResult, error)
+	RequestControl(context.Context, control.RequestParams) (control.RequestResult, error)
 	EnqueueWork(context.Context, orchestrate.QueueWorkRequest) (orchestrate.QueueWorkResult, error)
 }
 

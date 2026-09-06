@@ -44,11 +44,11 @@ func (o *AgentOrchestrator) SendInput(ctx context.Context, request SendInputRequ
 		return SendInputResult{}, commandError(CommandErrorModelNotConfigured)
 	}
 	if request.AgentID == "" {
-		created, err := o.EnsurePrimaryAgent(ctx, request.SessionID, request.RequestID)
+		agent, err := o.getOrCreatePrimaryAgent(ctx, request.SessionID, request.RequestID)
 		if err != nil {
 			return SendInputResult{}, err
 		}
-		request.AgentID = created.Agent.ID
+		request.AgentID = agent.ID
 	}
 	var result SendInputResult
 	err := o.tx.InTx(ctx, func(txCtx context.Context) error {

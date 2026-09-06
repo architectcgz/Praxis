@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"praxis/internal/application/execution/control"
 	domainworkflow "praxis/internal/core/domain/workflow"
 	"strings"
 
@@ -77,7 +78,7 @@ func (b *CommandBindings) RequestControl(
 	if err != nil {
 		return contracts.ControlResponse{}, err
 	}
-	result, err := commands.RequestControl(ctx, orchestrate.ControlRequest{
+	result, err := commands.RequestControl(ctx, control.RequestParams{
 		RequestID: domainfoundation.AgentControlRequestID(request.RequestID), AgentID: domainfoundation.AgentID(request.AgentID),
 		Kind: domainworkflow.AgentControlKind(request.Kind),
 	})

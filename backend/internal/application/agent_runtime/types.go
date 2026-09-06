@@ -7,20 +7,20 @@ import (
 )
 
 type (
-	ModelStream          = coreruntime.ModelStream
-	ModelRequest         = coreruntime.ModelRequest
-	ModelStreamEvent     = coreruntime.ModelStreamEvent
-	ModelStreamEventKind = coreruntime.ModelStreamEventKind
-	ToolRunner           = coreruntime.ToolRunner
-	ToolCall             = coreruntime.ToolCall
-	ToolDefinition       = coreruntime.ToolDefinition
-	ToolExecutionContext = coreruntime.ToolExecutionContext
-	ToolExecutionResult  = coreruntime.ToolExecutionResult
-	TurnSnapshot         = coreruntime.TurnSnapshot
-	TurnMessage          = coreruntime.TurnMessage
-	TurnMessageRole      = coreruntime.TurnMessageRole
-	TurnContentBlock     = coreruntime.TurnContentBlock
-	TurnContentBlockKind = coreruntime.TurnContentBlockKind
+	ModelStream           = coreruntime.ModelStream
+	ModelRequest          = coreruntime.ModelRequest
+	ModelStreamEvent      = coreruntime.ModelStreamEvent
+	ModelStreamEventKind  = coreruntime.ModelStreamEventKind
+	ToolInvoker           = coreruntime.ToolInvoker
+	ToolCall              = coreruntime.ToolCall
+	ToolDefinition        = coreruntime.ToolDefinition
+	ToolInvocationContext = coreruntime.ToolInvocationContext
+	ToolResult            = coreruntime.ToolResult
+	TurnSnapshot          = coreruntime.TurnSnapshot
+	TurnMessage           = coreruntime.TurnMessage
+	TurnMessageRole       = coreruntime.TurnMessageRole
+	TurnContentBlock      = coreruntime.TurnContentBlock
+	TurnContentBlockKind  = coreruntime.TurnContentBlockKind
 )
 
 const (

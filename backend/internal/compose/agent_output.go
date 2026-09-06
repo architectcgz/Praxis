@@ -3,7 +3,7 @@ package compose
 import (
 	"sync"
 
-	"praxis/internal/agentruntime"
+	"praxis/internal/application/agent_runtime"
 )
 
 // agentOutputPublisher fans out transient provider output without giving it

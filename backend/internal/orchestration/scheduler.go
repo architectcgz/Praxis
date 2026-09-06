@@ -1,45 +1,49 @@
-package orchestrate
+// Package orchestration coordinates durable application use cases.
+package orchestration
 
 import (
 	"context"
 	"errors"
 	"fmt"
+
 	domainexecution "praxis/internal/core/domain/execution"
 	domainfoundation "praxis/internal/core/domain/foundation"
-
 	"praxis/internal/core/persistence"
 	coreruntime "praxis/internal/core/runtime"
 )
 
-// RuntimeActivator is a generation-fenced registry boundary. It may lose a
-// notification because starting executions remain discoverable in SQLite.
+// RuntimeActivator activates a durable execution in its process-local runtime.
 type RuntimeActivator interface {
 	Activate(context.Context, domainexecution.AgentExecution, coreruntime.ExecutionLifecycle) error
 }
 
-type ExecutionSchedulerConfig struct {
+// SchedulerConfig describes the durable execution source and runtime boundary.
+type SchedulerConfig struct {
 	Executions persistence.AgentExecutionRepository
 	Runtime    RuntimeActivator
 }
 
-// ExecutionScheduler only discovers durable starting executions and requests
-// activation. It cannot create executions or carry user input payloads.
-type ExecutionScheduler struct {
+// Scheduler discovers durable starting executions and requests activation. It
+// cannot create executions or carry user input payloads.
+type Scheduler struct {
 	executions persistence.AgentExecutionRepository
 	runtime    RuntimeActivator
 }
 
-func NewExecutionScheduler(config ExecutionSchedulerConfig) (*ExecutionScheduler, error) {
+// NewScheduler validates and creates an execution scheduler.
+func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.Executions == nil {
 		return nil, errors.New("execution scheduler executions are required")
 	}
 	if config.Runtime == nil {
 		return nil, errors.New("execution scheduler runtime is required")
 	}
-	return &ExecutionScheduler{executions: config.Executions, runtime: config.Runtime}, nil
+	return &Scheduler{executions: config.Executions, runtime: config.Runtime}, nil
 }
 
-func (s *ExecutionScheduler) TryActivate(
+// TryActivate looks up one Agent's durable starting execution before notifying
+// its runtime. A lost notification is recoverable from persistent state.
+func (s *Scheduler) TryActivate(
 	ctx context.Context,
 	agentID domainfoundation.AgentID,
 	lifecycle coreruntime.ExecutionLifecycle,
@@ -66,9 +70,9 @@ func (s *ExecutionScheduler) TryActivate(
 	return nil
 }
 
-// ActivateStarting activates the complete cursor-scanned set supplied by
-// recovery. Runtime notifications remain an optimization.
-func (s *ExecutionScheduler) ActivateStarting(
+// ActivateStarting activates the cursor-scanned recovery set. Runtime
+// notifications remain an optimization rather than the source of truth.
+func (s *Scheduler) ActivateStarting(
 	ctx context.Context,
 	executions []domainexecution.AgentExecution,
 	lifecycle coreruntime.ExecutionLifecycle,
@@ -89,5 +93,3 @@ func (s *ExecutionScheduler) ActivateStarting(
 	}
 	return nil
 }
-
-var _ ExecutionActivation = (*ExecutionScheduler)(nil)

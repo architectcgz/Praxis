@@ -1,4 +1,4 @@
-package orchestrate
+package orchestration
 
 import (
 	"context"
@@ -20,25 +20,54 @@ type DeliverySessionHeaderResolver func(
 	domainworkflow.ContextDelivery,
 ) (coresession.AgentSessionHeader, error)
 
+// ContextDeliveryClaim records the durable state after a coordinator claims
+// one pending delivery for JSONL artifact append.
+type ContextDeliveryClaim struct {
+	Delivery domainworkflow.ContextDelivery
+	Claimed  bool
+}
+
+// ContextDeliveryCompletionRequest acknowledges the durable JSONL artifact.
+type ContextDeliveryCompletionRequest struct {
+	DeliveryID       domainfoundation.DeliveryID
+	ArtifactEntryRef string
+	RequestID        domainfoundation.RequestID
+}
+
+// ContextDeliveryCompletion contains the state produced by delivery completion.
+type ContextDeliveryCompletion struct {
+	Delivery         domainworkflow.ContextDelivery
+	Execution        domainexecution.AgentExecution
+	ExistingDelivery bool
+	ActivationError  string
+}
+
+// DeliveryCommands is the durable application boundary used by delivery
+// coordination. The coordinator never receives repositories directly.
+type DeliveryCommands interface {
+	ClaimContextDelivery(context.Context, domainfoundation.DeliveryID) (ContextDeliveryClaim, error)
+	CompleteContextDelivery(context.Context, ContextDeliveryCompletionRequest) (ContextDeliveryCompletion, error)
+}
+
 type DeliveryCoordinatorConfig struct {
-	Orchestrator    *AgentOrchestrator
+	Commands        DeliveryCommands
 	Sessions        AgentSessionResolver
 	SessionHeader   DeliverySessionHeaderResolver
 	ResolveArtifact ContextArtifactResolver
 }
 
-// DeliveryCoordinator bridges the SQLite claim with the target Agent's JSONL
-// receipt. SQLite state is mutated only through AgentOrchestrator.
+// DeliveryCoordinator bridges durable application commands with the target
+// Agent's JSONL receipt.
 type DeliveryCoordinator struct {
-	orchestrator    *AgentOrchestrator
+	commands        DeliveryCommands
 	sessions        AgentSessionResolver
 	sessionHeader   DeliverySessionHeaderResolver
 	resolveArtifact ContextArtifactResolver
 }
 
 func NewDeliveryCoordinator(config DeliveryCoordinatorConfig) (*DeliveryCoordinator, error) {
-	if config.Orchestrator == nil {
-		return nil, errors.New("delivery coordinator orchestrator is required")
+	if config.Commands == nil {
+		return nil, errors.New("delivery coordinator commands are required")
 	}
 	if config.Sessions == nil {
 		return nil, errors.New("delivery coordinator session resolver is required")
@@ -47,7 +76,7 @@ func NewDeliveryCoordinator(config DeliveryCoordinatorConfig) (*DeliveryCoordina
 		return nil, errors.New("delivery coordinator artifact resolver is required")
 	}
 	return &DeliveryCoordinator{
-		orchestrator:    config.Orchestrator,
+		commands:        config.Commands,
 		sessions:        config.Sessions,
 		sessionHeader:   config.SessionHeader,
 		resolveArtifact: config.ResolveArtifact,
@@ -72,7 +101,7 @@ func (c *DeliveryCoordinator) TryDeliver(
 	if ctx == nil {
 		return DeliveryAttemptResult{}, errors.New("delivery context is required")
 	}
-	claim, err := c.orchestrator.ClaimContextDelivery(ctx, deliveryID)
+	claim, err := c.commands.ClaimContextDelivery(ctx, deliveryID)
 	if err != nil {
 		return DeliveryAttemptResult{}, err
 	}
@@ -106,7 +135,7 @@ func (c *DeliveryCoordinator) TryDeliver(
 	if err != nil {
 		return result, fmt.Errorf("append target context artifact: %w", err)
 	}
-	completion, err := c.orchestrator.CompleteContextDelivery(ctx, ContextDeliveryCompletionRequest{
+	completion, err := c.commands.CompleteContextDelivery(ctx, ContextDeliveryCompletionRequest{
 		DeliveryID:       claim.Delivery.ID,
 		ArtifactEntryRef: receipt.EntryID,
 		RequestID:        domainfoundation.RequestID("delivery:" + claim.Delivery.ID.String()),
