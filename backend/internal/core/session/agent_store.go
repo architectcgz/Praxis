@@ -77,7 +77,7 @@ type ContextArtifactReceipt struct {
 }
 
 // TranscriptReceiptStore is the transcript-side interface used for cross-store receipt
-// reconciliation. Product state remains exclusively in AgentOrchestrator.
+// reconciliation. Product state remains exclusively in application services.
 type TranscriptReceiptStore interface {
 	Initialize(context.Context, AgentSessionHeader) error
 	AppendExecutionStart(context.Context, domainexecution.AgentExecution) (ExecutionStartReceipt, error)

@@ -78,7 +78,7 @@ type ExecutionRecoveryRepository interface {
 }
 
 // QueuedWorkRepository exposes only durable independent-task records. The
-// AgentOrchestrator composes queue, execution, and Agent state in one
+// application services compose queue, execution, and Agent state in one
 // transaction; runtime actors never call this interface.
 type QueuedWorkRepository interface {
 	Get(ctx context.Context, id domainfoundation.WorkItemID) (domainworkflow.QueuedWork, error)

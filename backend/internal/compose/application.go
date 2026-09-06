@@ -28,7 +28,6 @@ import (
 	domainworkflow "praxis/internal/core/domain/workflow"
 	domainworkspace "praxis/internal/core/domain/workspace"
 
-	"praxis/internal/core/orchestrate"
 	"praxis/internal/core/projection"
 	"praxis/internal/core/session"
 	"praxis/internal/logging"
@@ -43,7 +42,7 @@ import (
 // Application is the production composition of target storage, application
 // services, orchestration, runtime activation, delivery, and startup recovery.
 type Application struct {
-	*orchestrate.AgentOrchestrator
+	readiness   *orchestration.ReadinessGate
 	projections *projection.Service
 	projects    *applicationproject.Service
 	sessions    *applicationsession.Service
@@ -277,30 +276,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	orchestrator, err := orchestrate.NewAgentOrchestrator(orchestrate.AgentOrchestratorConfig{
-		Transactions:    store,
-		Workspaces:      target.Workspaces,
-		Sessions:        target.Sessions,
-		Contexts:        target.Contexts,
-		Policies:        target.Policies,
-		Agents:          target.Agents,
-		Executions:      target.Executions,
-		QueuedWork:      target.QueuedWork,
-		Waits:           target.Waits,
-		Controls:        target.Controls,
-		Deliveries:      target.Deliveries,
-		CommandReceipts: target.Commands,
-		Events:          target.Events,
-		Activator:       scheduler,
-		InitiallyReady:  false,
-	})
-	if err != nil {
-		diagnostics.logger.Errorf("create agent orchestrator failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
+	readiness := orchestration.NewReadinessGate(false)
 	sessionService, err := applicationsession.NewService(applicationsession.Config{
 		Transactions:    store,
 		Projects:        target.Projects,
@@ -311,7 +287,7 @@ func Open(
 		Agents:          target.Agents,
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
-		Readiness:       orchestrator,
+		Readiness:       readiness,
 		PolicyFactory:   policyFactory(systemPolicy),
 	})
 	if err != nil {
@@ -360,7 +336,7 @@ func Open(
 		Transactions: store, Workspaces: target.Workspaces, Sessions: target.Sessions,
 		Contexts: target.Contexts, Policies: target.Policies, Agents: target.Agents,
 		Executions: target.Executions, Deliveries: target.Deliveries, Events: target.Events,
-		Readiness: orchestrator, PrimaryAgent: sessionService, Activator: scheduler,
+		Readiness: readiness, PrimaryAgent: sessionService, Activator: scheduler,
 		Lifecycle: settlementService, Models: modelRegistry,
 	})
 	if err != nil {
@@ -378,7 +354,7 @@ func Open(
 		Deliveries:   target.Deliveries,
 		Receipts:     target.Commands,
 		Events:       target.Events,
-		Readiness:    orchestrator,
+		Readiness:    readiness,
 		Inputs:       startService,
 		Activator:    scheduler,
 		Lifecycle:    settlementService,
@@ -403,7 +379,7 @@ func Open(
 		Policies:        target.Policies,
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
-		Readiness:       orchestrator,
+		Readiness:       readiness,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create agent policy service failed: %v", err)
@@ -418,7 +394,7 @@ func Open(
 		Workspaces:      target.Workspaces,
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
-		Readiness:       orchestrator,
+		Readiness:       readiness,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create project service failed: %v", err)
@@ -434,7 +410,7 @@ func Open(
 		Controls:        target.Controls,
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
-		Readiness:       orchestrator,
+		Readiness:       readiness,
 		Canceller:       registry,
 	})
 	if err != nil {
@@ -444,7 +420,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService, deliveries: deliveryService, queues: queueService, settlements: settlementService}
+	commands := orchestrationCommandAdapter{readiness: readiness, controls: controlService, deliveries: deliveryService, queues: queueService, settlements: settlementService}
 	sessions := newAgentSessionResolver(root)
 	delivery, err := orchestration.NewDeliveryCoordinator(orchestration.DeliveryCoordinatorConfig{
 		Commands:        commands,
@@ -490,22 +466,22 @@ func Open(
 	diagnostics.logger.Infof("startup recovery completed")
 	diagnostics.logger.Infof("composition open completed ready=true")
 	return &Application{
-		AgentOrchestrator: orchestrator,
-		projections:       projections,
-		projects:          projectService,
-		sessions:          sessionService,
-		controls:          controlService,
-		deliveries:        deliveryService,
-		agents:            agentService,
-		queues:            queueService,
-		settlements:       settlementService,
-		starts:            startService,
-		store:             store,
-		models:            modelRegistry,
-		registry:          registry,
-		scheduler:         scheduler,
-		runtimeLog:        diagnostics,
-		output:            output,
+		readiness:   readiness,
+		projections: projections,
+		projects:    projectService,
+		sessions:    sessionService,
+		controls:    controlService,
+		deliveries:  deliveryService,
+		agents:      agentService,
+		queues:      queueService,
+		settlements: settlementService,
+		starts:      startService,
+		store:       store,
+		models:      modelRegistry,
+		registry:    registry,
+		scheduler:   scheduler,
+		runtimeLog:  diagnostics,
+		output:      output,
 	}, nil
 }
 
@@ -647,7 +623,7 @@ type targetRuntimeFactory struct {
 // orchestrationCommandAdapter adapts application command results to the
 // narrow orchestration contracts at the composition root.
 type orchestrationCommandAdapter struct {
-	commands    *orchestrate.AgentOrchestrator
+	readiness   *orchestration.ReadinessGate
 	controls    *executioncontrol.Service
 	deliveries  *executiondelivery.Service
 	queues      *executionqueue.Service
@@ -655,7 +631,7 @@ type orchestrationCommandAdapter struct {
 }
 
 func (a orchestrationCommandAdapter) SetReady(ready bool) {
-	a.commands.SetReady(ready)
+	a.readiness.SetReady(ready)
 }
 
 func (a orchestrationCommandAdapter) ClaimContextDelivery(
@@ -848,4 +824,12 @@ type queuedWorkStarter struct {
 func (s queuedWorkStarter) StartNextQueuedWork(ctx context.Context, agentID domainfoundation.AgentID) (bool, error) {
 	result, err := s.queue.StartNextQueuedWork(ctx, agentID)
 	return result.Started, err
+}
+
+func (a *Application) Ready() bool {
+	return a.readiness.Ready()
+}
+
+func (a *Application) SetReady(ready bool) {
+	a.readiness.SetReady(ready)
 }
