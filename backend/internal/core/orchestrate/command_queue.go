@@ -84,7 +84,7 @@ func (o *AgentOrchestrator) EnqueueWork(ctx context.Context, request QueueWorkRe
 		if err != nil {
 			return err
 		}
-		input, err := o.materializeExecutionInput(txCtx, agent, "", "", "")
+		input, err := o.MaterializeExecutionInput(txCtx, agent, "", "", "")
 		if err != nil {
 			return err
 		}

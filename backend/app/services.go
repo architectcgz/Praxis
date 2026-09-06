@@ -7,6 +7,7 @@ import (
 
 	"praxis/internal/application/agent_runtime"
 	"praxis/internal/application/execution/control"
+	"praxis/internal/application/execution/start"
 	"praxis/internal/application/project"
 	applicationsession "praxis/internal/application/session"
 	domainfoundation "praxis/internal/core/domain/foundation"
@@ -50,8 +51,8 @@ type EventQueries interface {
 }
 
 type AgentCommands interface {
-	SendInput(context.Context, orchestrate.SendInputRequest) (orchestrate.SendInputResult, error)
-	Resume(context.Context, orchestrate.ResumeRequest) (orchestrate.SendInputResult, error)
+	SendInput(context.Context, start.SendInputParams) (start.Result, error)
+	Resume(context.Context, start.ResumeParams) (start.Result, error)
 	RequestControl(context.Context, control.RequestParams) (control.RequestResult, error)
 	EnqueueWork(context.Context, orchestrate.QueueWorkRequest) (orchestrate.QueueWorkResult, error)
 }

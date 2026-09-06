@@ -167,7 +167,7 @@ func (o *AgentOrchestrator) CompleteContextDelivery(
 			}
 		}
 		requestID := domainfoundation.RequestID("delivery:" + delivery.ID.String())
-		input, err := o.materializeExecutionInput(txCtx, agent, "", "", "")
+		input, err := o.MaterializeExecutionInput(txCtx, agent, "", "", "")
 		if err != nil {
 			return err
 		}

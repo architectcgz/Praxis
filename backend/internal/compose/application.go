@@ -11,6 +11,7 @@ import (
 
 	agentruntime "praxis/internal/application/agent_runtime"
 	executioncontrol "praxis/internal/application/execution/control"
+	executionstart "praxis/internal/application/execution/start"
 	applicationproject "praxis/internal/application/project"
 	applicationsession "praxis/internal/application/session"
 	corecommand "praxis/internal/core/command"
@@ -43,6 +44,7 @@ type Application struct {
 	projects    *applicationproject.Service
 	sessions    *applicationsession.Service
 	controls    *executioncontrol.Service
+	starts      *executionstart.Service
 	store       *sqlite.Store
 	models      *registry.Registry
 	registry    *agentruntime.Registry
@@ -134,6 +136,14 @@ func (a *Application) RequestControl(
 	params executioncontrol.RequestParams,
 ) (executioncontrol.RequestResult, error) {
 	return a.controls.RequestControl(ctx, params)
+}
+
+func (a *Application) SendInput(ctx context.Context, params executionstart.SendInputParams) (executionstart.Result, error) {
+	return a.starts.SendInput(ctx, params)
+}
+
+func (a *Application) Resume(ctx context.Context, params executionstart.ResumeParams) (executionstart.Result, error) {
+	return a.starts.Resume(ctx, params)
 }
 
 func (a *Application) CreateSessionForProject(
@@ -296,8 +306,21 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	if err := orchestrator.SetPrimaryAgentProvider(sessionService); err != nil {
-		diagnostics.logger.Errorf("configure primary agent provider failed: %v", err)
+	startService, err := executionstart.NewService(executionstart.Config{
+		Transactions: store,
+		Agents:       target.Agents,
+		Executions:   target.Executions,
+		Deliveries:   target.Deliveries,
+		Events:       target.Events,
+		Readiness:    orchestrator,
+		PrimaryAgent: sessionService,
+		Inputs:       executionInputFactory{orchestrator: orchestrator},
+		Activator:    scheduler,
+		Lifecycle:    orchestrator,
+		Models:       modelRegistry,
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create execution start service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -385,6 +408,7 @@ func Open(
 		projects:          projectService,
 		sessions:          sessionService,
 		controls:          controlService,
+		starts:            startService,
 		store:             store,
 		models:            modelRegistry,
 		registry:          registry,
@@ -704,4 +728,18 @@ func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domainagen
 		MinReaderVersion: 2,
 		WrittenBy:        "praxis/target",
 	}
+}
+
+type executionInputFactory struct {
+	orchestrator *orchestrate.AgentOrchestrator
+}
+
+func (f executionInputFactory) MaterializeExecutionInput(
+	ctx context.Context,
+	agent domainagent.Agent,
+	providerID string,
+	modelID string,
+	reasoning string,
+) (domainexecution.ExecutionInputSnapshot, error) {
+	return f.orchestrator.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoning)
 }

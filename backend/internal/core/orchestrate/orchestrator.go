@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
 	domainfoundation "praxis/internal/core/domain/foundation"
 	domainsecurity "praxis/internal/core/domain/security"
 	"sync"
@@ -39,12 +38,6 @@ type ModelResolver interface {
 // is frozen into an execution-specific CapabilityGrant.
 type ModelSelectionResolver interface {
 	ResolveModelSelection(string, string, string) (domainsecurity.ModelSelection, error)
-}
-
-// PrimaryAgentProvider returns the durable Agent that owns a Session input,
-// creating the primary Agent when it has not been initialized yet.
-type PrimaryAgentProvider interface {
-	GetOrCreatePrimaryAgent(context.Context, domainfoundation.SessionID, domainfoundation.RequestID) (domainagent.Agent, error)
 }
 
 type AgentOrchestratorConfig struct {
@@ -91,10 +84,8 @@ type AgentOrchestrator struct {
 	activator       ExecutionActivation
 	models          ModelResolver
 
-	readinessMu     sync.RWMutex
-	ready           bool
-	primaryMu       sync.RWMutex
-	primaryProvider PrimaryAgentProvider
+	readinessMu sync.RWMutex
+	ready       bool
 }
 
 func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, error) {
@@ -208,29 +199,4 @@ func (o *AgentOrchestrator) rejectDeliveringInput(ctx context.Context, agentID d
 		return commandError(CommandErrorAgentUnavailable)
 	}
 	return nil
-}
-
-// SetPrimaryAgentProvider attaches the Session-owned Agent provider before
-// command admission is opened after startup recovery.
-func (o *AgentOrchestrator) SetPrimaryAgentProvider(provider PrimaryAgentProvider) error {
-	if provider == nil {
-		return fmt.Errorf("primary agent provider is required")
-	}
-	if o.Ready() {
-		return fmt.Errorf("cannot replace primary agent provider while ready")
-	}
-	o.primaryMu.Lock()
-	o.primaryProvider = provider
-	o.primaryMu.Unlock()
-	return nil
-}
-
-func (o *AgentOrchestrator) getOrCreatePrimaryAgent(ctx context.Context, sessionID domainfoundation.SessionID, requestID domainfoundation.RequestID) (domainagent.Agent, error) {
-	o.primaryMu.RLock()
-	provider := o.primaryProvider
-	o.primaryMu.RUnlock()
-	if provider == nil {
-		return domainagent.Agent{}, fmt.Errorf("primary agent provider is not configured")
-	}
-	return provider.GetOrCreatePrimaryAgent(ctx, sessionID, requestID)
 }

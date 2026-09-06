@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"praxis/internal/application/execution/control"
+	"praxis/internal/application/execution/start"
 	domainworkflow "praxis/internal/core/domain/workflow"
 	"strings"
 
@@ -29,7 +30,7 @@ func (b *CommandBindings) SendInput(
 	if err != nil {
 		return contracts.SendInputResponse{}, err
 	}
-	result, err := commands.SendInput(ctx, orchestrate.SendInputRequest{
+	result, err := commands.SendInput(ctx, start.SendInputParams{
 		SessionID:  domainfoundation.SessionID(request.SessionID),
 		AgentID:    domainfoundation.AgentID(request.AgentID),
 		RequestID:  domainfoundation.RequestID(request.RequestID),
@@ -56,7 +57,7 @@ func (b *CommandBindings) Resume(
 	if err != nil {
 		return contracts.SendInputResponse{}, err
 	}
-	result, err := commands.Resume(ctx, orchestrate.ResumeRequest{
+	result, err := commands.Resume(ctx, start.ResumeParams{
 		AgentID: domainfoundation.AgentID(request.AgentID), RequestID: domainfoundation.RequestID(request.RequestID),
 		Content: request.Content,
 	})
