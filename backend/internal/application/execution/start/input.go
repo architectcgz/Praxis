@@ -1,4 +1,4 @@
-package orchestrate
+package start
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	corecommand "praxis/internal/core/command"
 	domainagent "praxis/internal/core/domain/agent"
 	domaincontext "praxis/internal/core/domain/context"
 	domainexecution "praxis/internal/core/domain/execution"
@@ -15,31 +16,27 @@ import (
 
 // MaterializeExecutionInput freezes the current context, policy and model
 // selection into a durable input snapshot for queued and delivery work.
-func (o *AgentOrchestrator) MaterializeExecutionInput(ctx context.Context, agent domainagent.Agent, providerID, modelID, reasoning string) (domainexecution.ExecutionInputSnapshot, error) {
-	session, err := o.sessions.Get(ctx, agent.SessionID)
+func (s *Service) MaterializeExecutionInput(ctx context.Context, agent domainagent.Agent, providerID, modelID, reasoning string) (domainexecution.ExecutionInputSnapshot, error) {
+	session, err := s.sessions.Get(ctx, agent.SessionID)
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, err
 	}
-	workspace, err := o.workspaces.Get(ctx, session.WorkspaceID)
+	workspace, err := s.workspaces.Get(ctx, session.WorkspaceID)
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, err
 	}
-	policy, err := o.policies.GetCurrent(ctx, agent.ID)
+	policy, err := s.policies.GetCurrent(ctx, agent.ID)
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, err
 	}
 	if policy.Revision != agent.SecurityPolicyRevision {
 		return domainexecution.ExecutionInputSnapshot{}, domainfoundation.ErrRevisionConflict
 	}
-	selector, ok := o.models.(ModelSelectionResolver)
-	if !ok {
-		return domainexecution.ExecutionInputSnapshot{}, errors.New("model selection resolver is unavailable")
-	}
-	model, err := selector.ResolveModelSelection(providerID, modelID, reasoning)
+	model, err := s.models.ResolveModelSelection(providerID, modelID, reasoning)
 	if err != nil {
-		return domainexecution.ExecutionInputSnapshot{}, commandError(CommandErrorInvalidRequest)
+		return domainexecution.ExecutionInputSnapshot{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
 	}
-	contextRevision, err := o.contexts.CurrentRevision(ctx, agent.SessionID)
+	contextRevision, err := s.contexts.CurrentRevision(ctx, agent.SessionID)
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, err
 	}
@@ -48,7 +45,7 @@ func (o *AgentOrchestrator) MaterializeExecutionInput(ctx context.Context, agent
 	}
 	entries := make([]domaincontext.SessionContextEntry, 0, contextRevision)
 	for after := uint64(0); after < contextRevision; {
-		page, err := o.contexts.List(ctx, agent.SessionID, after, 512)
+		page, err := s.contexts.List(ctx, agent.SessionID, after, 512)
 		if err != nil {
 			return domainexecution.ExecutionInputSnapshot{}, err
 		}
@@ -68,11 +65,11 @@ func (o *AgentOrchestrator) MaterializeExecutionInput(ctx context.Context, agent
 		entryRevisions = append(entryRevisions, entry.Revision)
 	}
 	contextSummary := boundedContextSummary(entries)
-	manifest, err := domaincontext.NewContextManifest(domainfoundation.ContextManifestID(o.newID("manifest")), contextSummary, nil, o.clock.Now().UTC())
+	manifest, err := domaincontext.NewContextManifest(domainfoundation.ContextManifestID(s.ids.New("manifest")), contextSummary, nil, s.clock.Now().UTC())
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, err
 	}
-	security, err := o.security.Resolve(policy, domainsecurity.ExecutionRestrictions{}, workspace, model, manifest)
+	security, err := s.security.Resolve(policy, domainsecurity.ExecutionRestrictions{}, workspace, model, manifest)
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, err
 	}

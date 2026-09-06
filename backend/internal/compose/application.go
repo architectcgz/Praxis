@@ -292,7 +292,6 @@ func Open(
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
 		Activator:       scheduler,
-		Models:          modelRegistry,
 		InitiallyReady:  false,
 	})
 	if err != nil {
@@ -337,6 +336,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	deliveryInputs := &executionInputFactory{}
 	deliveryService, err := executiondelivery.NewService(executiondelivery.Config{
 		Transactions:    store,
 		Agents:          target.Agents,
@@ -345,7 +345,7 @@ func Open(
 		Deliveries:      target.Deliveries,
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
-		Inputs:          executionInputFactory{orchestrator: orchestrator},
+		Inputs:          deliveryInputs,
 		Activator:       scheduler,
 		Lifecycle:       settlementService,
 	})
@@ -357,17 +357,11 @@ func Open(
 		return nil, err
 	}
 	startService, err := executionstart.NewService(executionstart.Config{
-		Transactions: store,
-		Agents:       target.Agents,
-		Executions:   target.Executions,
-		Deliveries:   target.Deliveries,
-		Events:       target.Events,
-		Readiness:    orchestrator,
-		PrimaryAgent: sessionService,
-		Inputs:       executionInputFactory{orchestrator: orchestrator},
-		Activator:    scheduler,
-		Lifecycle:    settlementService,
-		Models:       modelRegistry,
+		Transactions: store, Workspaces: target.Workspaces, Sessions: target.Sessions,
+		Contexts: target.Contexts, Policies: target.Policies, Agents: target.Agents,
+		Executions: target.Executions, Deliveries: target.Deliveries, Events: target.Events,
+		Readiness: orchestrator, PrimaryAgent: sessionService, Activator: scheduler,
+		Lifecycle: settlementService, Models: modelRegistry,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create execution start service failed: %v", err)
@@ -385,7 +379,7 @@ func Open(
 		Receipts:     target.Commands,
 		Events:       target.Events,
 		Readiness:    orchestrator,
-		Inputs:       executionInputFactory{orchestrator: orchestrator},
+		Inputs:       startService,
 		Activator:    scheduler,
 		Lifecycle:    settlementService,
 	})
@@ -485,6 +479,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	deliveryInputs.start = startService
 	if _, err := recovery.Recover(ctx); err != nil {
 		diagnostics.logger.Errorf("startup recovery failed: %v", err)
 		_ = diagnostics.Close()
@@ -830,7 +825,7 @@ func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domainagen
 }
 
 type executionInputFactory struct {
-	orchestrator *orchestrate.AgentOrchestrator
+	start *executionstart.Service
 }
 
 func (f executionInputFactory) MaterializeExecutionInput(
@@ -840,7 +835,10 @@ func (f executionInputFactory) MaterializeExecutionInput(
 	modelID string,
 	reasoning string,
 ) (domainexecution.ExecutionInputSnapshot, error) {
-	return f.orchestrator.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoning)
+	if f.start == nil {
+		return domainexecution.ExecutionInputSnapshot{}, errors.New("execution start service is not configured")
+	}
+	return f.start.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoning)
 }
 
 type queuedWorkStarter struct {

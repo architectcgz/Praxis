@@ -5,7 +5,6 @@ import (
 	"fmt"
 	corecommand "praxis/internal/core/command"
 	domainfoundation "praxis/internal/core/domain/foundation"
-	domainsecurity "praxis/internal/core/domain/security"
 	"sync"
 
 	"praxis/internal/core/persistence"
@@ -28,38 +27,24 @@ type ExecutionActivation interface {
 	TryActivate(context.Context, domainfoundation.AgentID, coreruntime.ExecutionLifecycle) error
 }
 
-// ModelResolver maps an agent profile to a configured model snapshot before
-// a Grant is persisted. The model selection becomes immutable execution input.
-type ModelResolver interface {
-	ResolveModel(domainsecurity.AgentProfile) (domainsecurity.ModelSelection, error)
-}
-
-// ModelSelectionResolver validates a user-selected model capability before it
-// is frozen into an execution-specific CapabilityGrant.
-type ModelSelectionResolver interface {
-	ResolveModelSelection(string, string, string) (domainsecurity.ModelSelection, error)
-}
-
 type AgentOrchestratorConfig struct {
-	Transactions     persistence.TxRunner
-	Workspaces       persistence.WorkspaceRepository
-	Sessions         persistence.SessionRepository
-	Contexts         persistence.SessionContextRepository
-	Policies         persistence.AgentSecurityPolicyRepository
-	Agents           persistence.AgentRepository
-	Executions       persistence.AgentExecutionRepository
-	QueuedWork       persistence.QueuedWorkRepository
-	Waits            persistence.WaitConditionRepository
-	Controls         persistence.AgentControlRequestRepository
-	Deliveries       persistence.ContextDeliveryRepository
-	CommandReceipts  persistence.CommandReceiptRepository
-	Events           persistence.EventRepository
-	SecurityResolver *SecurityResolver
-	Clock            system.Clock
-	IDs              system.IDGenerator
-	Activator        ExecutionActivation
-	Models           ModelResolver
-	InitiallyReady   bool
+	Transactions    persistence.TxRunner
+	Workspaces      persistence.WorkspaceRepository
+	Sessions        persistence.SessionRepository
+	Contexts        persistence.SessionContextRepository
+	Policies        persistence.AgentSecurityPolicyRepository
+	Agents          persistence.AgentRepository
+	Executions      persistence.AgentExecutionRepository
+	QueuedWork      persistence.QueuedWorkRepository
+	Waits           persistence.WaitConditionRepository
+	Controls        persistence.AgentControlRequestRepository
+	Deliveries      persistence.ContextDeliveryRepository
+	CommandReceipts persistence.CommandReceiptRepository
+	Events          persistence.EventRepository
+	Clock           system.Clock
+	IDs             system.IDGenerator
+	Activator       ExecutionActivation
+	InitiallyReady  bool
 }
 
 // AgentOrchestrator owns all durable command admission and product state
@@ -78,11 +63,9 @@ type AgentOrchestrator struct {
 	deliveries      persistence.ContextDeliveryRepository
 	commandReceipts persistence.CommandReceiptRepository
 	events          persistence.EventRepository
-	security        SecurityResolver
 	clock           system.Clock
 	ids             system.IDGenerator
 	activator       ExecutionActivation
-	models          ModelResolver
 
 	readinessMu sync.RWMutex
 	ready       bool
@@ -106,7 +89,6 @@ func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, e
 		{name: "deliveries", value: config.Deliveries},
 		{name: "command receipts", value: config.CommandReceipts},
 		{name: "events", value: config.Events},
-		{name: "model resolver", value: config.Models},
 	} {
 		if required.value == nil {
 			return nil, fmt.Errorf("agent orchestrator %s is required", required.name)
@@ -119,18 +101,6 @@ func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, e
 	ids := config.IDs
 	if ids == nil {
 		ids = system.SecureIDGenerator{}
-	}
-	security := config.SecurityResolver
-	if security == nil {
-		baseline, err := systemSecurityBaseline()
-		if err != nil {
-			return nil, err
-		}
-		resolved, err := NewSecurityResolver(baseline, ids)
-		if err != nil {
-			return nil, err
-		}
-		security = &resolved
 	}
 	return &AgentOrchestrator{
 		tx:              config.Transactions,
@@ -146,11 +116,9 @@ func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, e
 		deliveries:      config.Deliveries,
 		commandReceipts: config.CommandReceipts,
 		events:          config.Events,
-		security:        *security,
 		clock:           clock,
 		ids:             ids,
 		activator:       config.Activator,
-		models:          config.Models,
 		ready:           config.InitiallyReady,
 	}, nil
 }

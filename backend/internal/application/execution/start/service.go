@@ -42,18 +42,23 @@ type RuntimeActivator interface {
 // ModelResolver resolves a durable model selection for resume requests.
 type ModelResolver interface {
 	ResolveModel(domainsecurity.AgentProfile) (domainsecurity.ModelSelection, error)
+	ResolveModelSelection(string, string, string) (domainsecurity.ModelSelection, error)
 }
 
 // Config contains the ports required by the execution start service.
 type Config struct {
 	Transactions persistence.TxRunner
+	Workspaces   persistence.WorkspaceRepository
+	Sessions     persistence.SessionRepository
+	Contexts     persistence.SessionContextRepository
+	Policies     persistence.AgentSecurityPolicyRepository
 	Agents       persistence.AgentRepository
 	Executions   persistence.AgentExecutionRepository
 	Deliveries   persistence.ContextDeliveryRepository
 	Events       persistence.EventRepository
 	Readiness    Readiness
 	PrimaryAgent PrimaryAgentProvider
-	Inputs       InputFactory
+	Security     *SecurityResolver
 	Activator    RuntimeActivator
 	Lifecycle    coreruntime.ExecutionLifecycle
 	Models       ModelResolver
@@ -64,13 +69,17 @@ type Config struct {
 // Service owns AgentExecution creation and post-commit activation.
 type Service struct {
 	tx         persistence.TxRunner
+	workspaces persistence.WorkspaceRepository
+	sessions   persistence.SessionRepository
+	contexts   persistence.SessionContextRepository
+	policies   persistence.AgentSecurityPolicyRepository
 	agents     persistence.AgentRepository
 	executions persistence.AgentExecutionRepository
 	deliveries persistence.ContextDeliveryRepository
 	events     persistence.EventRepository
 	readiness  Readiness
 	primary    PrimaryAgentProvider
-	inputs     InputFactory
+	security   SecurityResolver
 	activator  RuntimeActivator
 	lifecycle  coreruntime.ExecutionLifecycle
 	models     ModelResolver
@@ -110,13 +119,16 @@ func NewService(config Config) (*Service, error) {
 		value any
 	}{
 		{name: "transactions", value: config.Transactions},
+		{name: "workspaces", value: config.Workspaces},
+		{name: "sessions", value: config.Sessions},
+		{name: "session contexts", value: config.Contexts},
+		{name: "security policies", value: config.Policies},
 		{name: "agents", value: config.Agents},
 		{name: "executions", value: config.Executions},
 		{name: "deliveries", value: config.Deliveries},
 		{name: "events", value: config.Events},
 		{name: "readiness", value: config.Readiness},
 		{name: "primary agent provider", value: config.PrimaryAgent},
-		{name: "execution input factory", value: config.Inputs},
 		{name: "model resolver", value: config.Models},
 	} {
 		if required.value == nil {
@@ -131,7 +143,19 @@ func NewService(config Config) (*Service, error) {
 	if ids == nil {
 		ids = system.SecureIDGenerator{}
 	}
-	return &Service{tx: config.Transactions, agents: config.Agents, executions: config.Executions, deliveries: config.Deliveries, events: config.Events, readiness: config.Readiness, primary: config.PrimaryAgent, inputs: config.Inputs, activator: config.Activator, lifecycle: config.Lifecycle, models: config.Models, clock: clock, ids: ids}, nil
+	security := config.Security
+	if security == nil {
+		baseline, err := systemSecurityBaseline()
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := NewSecurityResolver(baseline, ids)
+		if err != nil {
+			return nil, err
+		}
+		security = &resolved
+	}
+	return &Service{tx: config.Transactions, workspaces: config.Workspaces, sessions: config.Sessions, contexts: config.Contexts, policies: config.Policies, agents: config.Agents, executions: config.Executions, deliveries: config.Deliveries, events: config.Events, readiness: config.Readiness, primary: config.PrimaryAgent, security: *security, activator: config.Activator, lifecycle: config.Lifecycle, models: config.Models, clock: clock, ids: ids}, nil
 }
 
 // SendInput creates one durable user-input execution and then requests activation.
@@ -196,7 +220,7 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 		if active >= 1 {
 			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
 		}
-		input, err := s.inputs.MaterializeExecutionInput(txCtx, agent, params.ProviderID, params.ModelID, params.Reasoning)
+		input, err := s.MaterializeExecutionInput(txCtx, agent, params.ProviderID, params.ModelID, params.Reasoning)
 		if err != nil {
 			return err
 		}
@@ -268,7 +292,7 @@ func (s *Service) Resume(ctx context.Context, params ResumeParams) (Result, erro
 		if err != nil {
 			return fmt.Errorf("resolve model: %w", err)
 		}
-		input, err := s.inputs.MaterializeExecutionInput(txCtx, agent, model.ProviderID, model.ModelID, model.Reasoning)
+		input, err := s.MaterializeExecutionInput(txCtx, agent, model.ProviderID, model.ModelID, model.Reasoning)
 		if err != nil {
 			return err
 		}

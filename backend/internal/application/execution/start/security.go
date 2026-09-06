@@ -1,4 +1,4 @@
-package orchestrate
+package start
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 	domainworkspace "praxis/internal/core/domain/workspace"
 	"strings"
 
+	corecommand "praxis/internal/core/command"
 	"praxis/internal/core/system"
 )
 
@@ -81,7 +82,7 @@ func (r SecurityResolver) Resolve(
 		CanProposeDelegation: containsTool(tools, domainsecurity.ToolProposeDelegate),
 		ResultPermissions:    resultPermissions(tools), Model: model,
 		ContextManifestRef: manifest.ID, ApprovalSource: domainsecurity.ApprovalSourcePolicyDefault,
-		ApprovalPolicyFingerprint: commandArgumentsDigest(policy),
+		ApprovalPolicyFingerprint: corecommand.ArgumentsDigest(policy),
 	})
 	if err != nil {
 		return domainsecurity.ExecutionSecuritySnapshot{}, err
@@ -90,7 +91,7 @@ func (r SecurityResolver) Resolve(
 		AgentPolicyRevision: policy.Revision, CapabilityGrant: grant,
 		Sandbox:       domainsecurity.SandboxConstraints{Mode: sandbox},
 		ApprovalRules: []domainsecurity.ApprovalRule{{Mode: approval}},
-		Fingerprint: commandArgumentsDigest(struct {
+		Fingerprint: corecommand.ArgumentsDigest(struct {
 			Policy uint64
 			Grant  domainsecurity.CapabilityGrant
 		}{policy.Revision, grant}),
