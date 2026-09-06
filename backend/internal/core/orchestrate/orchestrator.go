@@ -40,11 +40,6 @@ type ModelSelectionResolver interface {
 	ResolveModelSelection(string, string, string) (domainsecurity.ModelSelection, error)
 }
 
-// QueueStarter advances one pending work item after an execution settles.
-type QueueStarter interface {
-	StartNextQueuedWork(context.Context, domainfoundation.AgentID) (bool, error)
-}
-
 type AgentOrchestratorConfig struct {
 	Transactions     persistence.TxRunner
 	Workspaces       persistence.WorkspaceRepository
@@ -91,8 +86,8 @@ type AgentOrchestrator struct {
 
 	readinessMu sync.RWMutex
 	ready       bool
-	queueMu     sync.RWMutex
-	queue       QueueStarter
+	lifecycleMu sync.RWMutex
+	lifecycle   coreruntime.ExecutionLifecycle
 }
 
 func NewAgentOrchestrator(config AgentOrchestratorConfig) (*AgentOrchestrator, error) {
@@ -176,25 +171,22 @@ func (o *AgentOrchestrator) Ready() bool {
 	return o.ready
 }
 
-// SetQueueStarter attaches the application service that owns FIFO queue start.
-func (o *AgentOrchestrator) SetQueueStarter(starter QueueStarter) error {
-	if starter == nil {
-		return fmt.Errorf("queue starter is required")
+// SetExecutionLifecycle supplies receipt acknowledgement for delivery-created
+// executions until the delivery command is migrated to an application service.
+func (o *AgentOrchestrator) SetExecutionLifecycle(lifecycle coreruntime.ExecutionLifecycle) error {
+	if lifecycle == nil {
+		return fmt.Errorf("execution lifecycle is required")
 	}
-	o.queueMu.Lock()
-	o.queue = starter
-	o.queueMu.Unlock()
+	o.lifecycleMu.Lock()
+	o.lifecycle = lifecycle
+	o.lifecycleMu.Unlock()
 	return nil
 }
 
-func (o *AgentOrchestrator) startNextQueuedWork(ctx context.Context, agentID domainfoundation.AgentID) (bool, error) {
-	o.queueMu.RLock()
-	starter := o.queue
-	o.queueMu.RUnlock()
-	if starter == nil {
-		return false, fmt.Errorf("queue starter is not configured")
-	}
-	return starter.StartNextQueuedWork(ctx, agentID)
+func (o *AgentOrchestrator) executionLifecycle() coreruntime.ExecutionLifecycle {
+	o.lifecycleMu.RLock()
+	defer o.lifecycleMu.RUnlock()
+	return o.lifecycle
 }
 
 func (o *AgentOrchestrator) newID(prefix string) string {

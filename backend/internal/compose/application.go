@@ -13,6 +13,7 @@ import (
 	agentruntime "praxis/internal/application/agent_runtime"
 	executioncontrol "praxis/internal/application/execution/control"
 	executionqueue "praxis/internal/application/execution/queue"
+	executionsettlement "praxis/internal/application/execution/settlement"
 	executionstart "praxis/internal/application/execution/start"
 	applicationproject "praxis/internal/application/project"
 	applicationsession "praxis/internal/application/session"
@@ -48,6 +49,7 @@ type Application struct {
 	controls    *executioncontrol.Service
 	agents      *applicationagent.Service
 	queues      *executionqueue.Service
+	settlements *executionsettlement.Service
 	starts      *executionstart.Service
 	store       *sqlite.Store
 	models      *registry.Registry
@@ -318,6 +320,21 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	settlementService, err := executionsettlement.NewService(executionsettlement.Config{
+		Transactions: store,
+		Agents:       target.Agents,
+		Executions:   target.Executions,
+		QueuedWork:   target.QueuedWork,
+		Controls:     target.Controls,
+		Events:       target.Events,
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create execution settlement service failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
 	startService, err := executionstart.NewService(executionstart.Config{
 		Transactions: store,
 		Agents:       target.Agents,
@@ -328,7 +345,7 @@ func Open(
 		PrimaryAgent: sessionService,
 		Inputs:       executionInputFactory{orchestrator: orchestrator},
 		Activator:    scheduler,
-		Lifecycle:    orchestrator,
+		Lifecycle:    settlementService,
 		Models:       modelRegistry,
 	})
 	if err != nil {
@@ -349,7 +366,7 @@ func Open(
 		Readiness:    orchestrator,
 		Inputs:       executionInputFactory{orchestrator: orchestrator},
 		Activator:    scheduler,
-		Lifecycle:    orchestrator,
+		Lifecycle:    settlementService,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create execution queue service failed: %v", err)
@@ -358,8 +375,8 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	if err := orchestrator.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
-		diagnostics.logger.Errorf("configure execution queue starter failed: %v", err)
+	if err := settlementService.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
+		diagnostics.logger.Errorf("configure execution settlement queue starter failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -412,7 +429,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService, queues: queueService}
+	commands := orchestrationCommandAdapter{commands: orchestrator, controls: controlService, queues: queueService, settlements: settlementService}
 	sessions := newAgentSessionResolver(root)
 	delivery, err := orchestration.NewDeliveryCoordinator(orchestration.DeliveryCoordinatorConfig{
 		Commands:        commands,
@@ -435,13 +452,20 @@ func Open(
 		Controls:   target.Controls,
 		Deliveries: target.Deliveries,
 		Commands:   commands,
-		Lifecycle:  orchestrator,
+		Lifecycle:  settlementService,
 		Scheduler:  scheduler,
 		Delivery:   delivery,
 		Sessions:   sessions,
 	})
 	if err != nil {
 		diagnostics.logger.Errorf("create recovery coordinator failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
+	if err := orchestrator.SetExecutionLifecycle(settlementService); err != nil {
+		diagnostics.logger.Errorf("configure execution lifecycle failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -464,6 +488,7 @@ func Open(
 		controls:          controlService,
 		agents:            agentService,
 		queues:            queueService,
+		settlements:       settlementService,
 		starts:            startService,
 		store:             store,
 		models:            modelRegistry,
@@ -612,9 +637,10 @@ type targetRuntimeFactory struct {
 // orchestrationCommandAdapter adapts application command results to the
 // narrow orchestration contracts at the composition root.
 type orchestrationCommandAdapter struct {
-	commands *orchestrate.AgentOrchestrator
-	controls *executioncontrol.Service
-	queues   *executionqueue.Service
+	commands    *orchestrate.AgentOrchestrator
+	controls    *executioncontrol.Service
+	queues      *executionqueue.Service
+	settlements *executionsettlement.Service
 }
 
 func (a orchestrationCommandAdapter) SetReady(ready bool) {
@@ -661,7 +687,7 @@ func (a orchestrationCommandAdapter) SettleRuntimeExecution(
 	outcome domainexecution.ExecutionOutcome,
 	failureCode domainexecution.ExecutionFailureCode,
 ) error {
-	return a.commands.SettleRuntimeExecution(ctx, executionID, outcome, failureCode)
+	return a.settlements.SettleRuntimeExecution(ctx, executionID, outcome, failureCode)
 }
 
 func (a orchestrationCommandAdapter) ApplyControlRequest(

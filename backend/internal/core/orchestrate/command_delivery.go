@@ -222,10 +222,11 @@ func (o *AgentOrchestrator) CompleteContextDelivery(
 	if err != nil {
 		return ContextDeliveryCompletion{}, err
 	}
-	if result.ExistingDelivery || o.activator == nil {
+	lifecycle := o.executionLifecycle()
+	if result.ExistingDelivery || o.activator == nil || lifecycle == nil {
 		return result, nil
 	}
-	if err := o.activator.TryActivate(context.WithoutCancel(ctx), result.Execution.AgentID, o); err != nil {
+	if err := o.activator.TryActivate(context.WithoutCancel(ctx), result.Execution.AgentID, lifecycle); err != nil {
 		result.ActivationError = err.Error()
 	}
 	return result, nil
