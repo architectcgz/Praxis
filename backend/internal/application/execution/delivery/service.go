@@ -9,22 +9,22 @@ import (
 	"strings"
 	"time"
 
-	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
-	domaincommand "praxis/internal/core/domain/command"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
-	"praxis/internal/core/persistence"
-	coreruntime "praxis/internal/core/runtime"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domainagent "praxis/internal/domain/agent"
+	domaincommand "praxis/internal/domain/command"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
+	"praxis/internal/persistence"
+	runtimecontract "praxis/internal/runtime"
+	"praxis/internal/system"
 )
 
 type InputFactory interface {
 	MaterializeExecutionInput(context.Context, domainagent.Agent, string, string, string) (domainexecution.ExecutionInputSnapshot, error)
 }
 type RuntimeActivator interface {
-	TryActivate(context.Context, domainfoundation.AgentID, coreruntime.ExecutionLifecycle) error
+	TryActivate(context.Context, domainfoundation.AgentID, runtimecontract.ExecutionLifecycle) error
 }
 
 type Config struct {
@@ -37,7 +37,7 @@ type Config struct {
 	Events          persistence.EventRepository
 	Inputs          InputFactory
 	Activator       RuntimeActivator
-	Lifecycle       coreruntime.ExecutionLifecycle
+	Lifecycle       runtimecontract.ExecutionLifecycle
 	Clock           system.Clock
 	IDs             system.IDGenerator
 }
@@ -52,7 +52,7 @@ type Service struct {
 	events     persistence.EventRepository
 	inputs     InputFactory
 	activator  RuntimeActivator
-	lifecycle  coreruntime.ExecutionLifecycle
+	lifecycle  runtimecontract.ExecutionLifecycle
 	clock      system.Clock
 	ids        system.IDGenerator
 }
@@ -102,7 +102,7 @@ func (s *Service) ClaimContextDelivery(ctx context.Context, deliveryID domainfou
 		return Claim{}, errors.New("context delivery claim context is required")
 	}
 	if strings.TrimSpace(deliveryID.String()) == "" {
-		return Claim{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return Claim{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	claim := Claim{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -142,15 +142,15 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 		return Completion{}, errors.New("context delivery completion context is required")
 	}
 	if strings.TrimSpace(params.DeliveryID.String()) == "" || strings.TrimSpace(params.ArtifactEntryRef) == "" || params.RequestID == "" {
-		return Completion{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return Completion{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := corecommand.ArgumentsDigest(struct {
+	digest := commandprotocol.ArgumentsDigest(struct {
 		DeliveryID       domainfoundation.DeliveryID
 		ArtifactEntryRef string
 	}{params.DeliveryID, params.ArtifactEntryRef})
 	result := Completion{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		receipt, found, err := corecommand.FindReceipt(txCtx, s.receipts, params.RequestID, "complete_context_delivery", digest)
+		receipt, found, err := commandprotocol.FindReceipt(txCtx, s.receipts, params.RequestID, "complete_context_delivery", digest)
 		if err != nil {
 			return err
 		}
@@ -182,21 +182,21 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 			return nil
 		}
 		if delivery.Status != domainworkflow.ContextDeliveryDelivering {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		agent, err := s.agents.Get(txCtx, delivery.TargetAgentID)
 		if err != nil {
 			return err
 		}
 		if !startable(agent.State) {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		active, err := s.executions.CountActiveBySession(txCtx, agent.SessionID)
 		if err != nil {
 			return err
 		}
 		if active >= 1 {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		at := s.clock.Now()
 		if err := delivery.MarkDelivered(params.ArtifactEntryRef, at); err != nil {

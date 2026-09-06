@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"praxis/internal/contracts"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	sessionport "praxis/internal/session"
 )
 
 type AgentBindings struct {
@@ -78,13 +80,9 @@ func (b *AgentBindings) ListAgentMessages(
 	}
 	result := make([]contracts.AgentMessage, 0, len(messages))
 	for _, message := range messages {
-		result = append(result, contracts.AgentMessage{
-			Sequence:    message.Sequence,
-			At:          message.At,
-			ExecutionID: message.ExecutionID.String(),
-			Role:        message.Role,
-			Content:     message.Content,
-		})
+		if visible, ok := publicAgentMessage(message); ok {
+			result = append(result, visible)
+		}
 	}
 	return result, nil
 }
@@ -108,12 +106,9 @@ func (b *AgentBindings) ListAgentHistory(
 	}
 	result := make([]contracts.AgentHistoryItem, 0, len(messages)+len(projection.Executions))
 	for _, message := range messages {
-		value := contracts.AgentMessage{
-			Sequence:    message.Sequence,
-			At:          message.At,
-			ExecutionID: message.ExecutionID.String(),
-			Role:        message.Role,
-			Content:     message.Content,
+		value, visible := publicAgentMessage(message)
+		if !visible {
+			continue
 		}
 		result = append(result, contracts.AgentHistoryItem{
 			Kind:     "message",
@@ -153,6 +148,26 @@ func (b *AgentBindings) ListAgentHistory(
 		return result[i].At.Before(result[j].At)
 	})
 	return result, nil
+}
+
+func publicAgentMessage(message sessionport.AgentSessionMessage) (contracts.AgentMessage, bool) {
+	content := message.Content
+	if len(message.Blocks) > 0 {
+		var text strings.Builder
+		for _, block := range message.Blocks {
+			if block.Kind == "text" {
+				text.WriteString(block.Text)
+			}
+		}
+		content = text.String()
+	}
+	if (message.Role != "user" && message.Role != "assistant") || strings.TrimSpace(content) == "" {
+		return contracts.AgentMessage{}, false
+	}
+	return contracts.AgentMessage{
+		Sequence: message.Sequence, At: message.At, ExecutionID: message.ExecutionID.String(),
+		Role: message.Role, Content: content,
+	}, true
 }
 
 func (b *AgentBindings) bindingContext() (context.Context, AgentQueries, error) {

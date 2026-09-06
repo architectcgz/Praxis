@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"sync"
 
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	coreruntime "praxis/internal/core/runtime"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	runtimecontract "praxis/internal/runtime"
 )
 
 // ManagedRuntime only exposes process-local lifecycle operations. Durable
 // product state remains owned by the execution application services.
 type ManagedRuntime interface {
-	Activate(context.Context, domainexecution.AgentExecution, coreruntime.ExecutionLifecycle) error
+	Activate(context.Context, domainexecution.AgentExecution, runtimecontract.ExecutionLifecycle) error
 	Cancel(context.Context, domainfoundation.AgentExecutionID, domainexecution.ExecutionOutcome) error
 	Close(context.Context) error
 }
@@ -56,7 +56,7 @@ func NewRegistry(factory ManagedRuntimeFactory) (*Registry, error) {
 func (r *Registry) Activate(
 	ctx context.Context,
 	execution domainexecution.AgentExecution,
-	lifecycle coreruntime.ExecutionLifecycle,
+	lifecycle runtimecontract.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
 		return errors.New("runtime activation context is required")

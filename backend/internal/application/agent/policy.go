@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"strconv"
 
-	corecommand "praxis/internal/core/command"
-	domaincommand "praxis/internal/core/domain/command"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainsecurity "praxis/internal/core/domain/security"
-	"praxis/internal/core/persistence"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domaincommand "praxis/internal/domain/command"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainsecurity "praxis/internal/domain/security"
+	"praxis/internal/persistence"
+	"praxis/internal/system"
 )
 
 type Readiness interface{ Ready() bool }
@@ -83,19 +83,19 @@ func (s *Service) UpdatePolicy(ctx context.Context, params UpdatePolicyParams) (
 		return UpdatePolicyResult{}, errors.New("update agent security policy context is required")
 	}
 	if !s.readiness.Ready() || params.RequestID == "" || params.AgentID == "" || params.ExpectedRevision == 0 {
-		return UpdatePolicyResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return UpdatePolicyResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	if err := params.Policy.Validate(); err != nil {
-		return UpdatePolicyResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return UpdatePolicyResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := corecommand.ArgumentsDigest(struct {
+	digest := commandprotocol.ArgumentsDigest(struct {
 		AgentID  domainfoundation.AgentID
 		Expected uint64
 		Policy   domainsecurity.AgentSecurityPolicy
 	}{params.AgentID, params.ExpectedRevision, params.Policy})
 	result := UpdatePolicyResult{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		receipt, found, err := corecommand.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "update_agent_security_policy", digest)
+		receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "update_agent_security_policy", digest)
 		if err != nil {
 			return err
 		}

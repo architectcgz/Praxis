@@ -20,28 +20,35 @@ func (b *ModelBindings) GetModelConfig() (response contracts.ModelConfigDocument
 	}
 	config := editor.ModelConfig()
 	document := contracts.ModelConfigDocument{
+		Groups:       make([]contracts.GroupConfigOption, 0, len(config.Groups)),
 		Providers:    make([]contracts.ProviderConfigOption, 0, len(config.Providers)),
-		Models:       make([]contracts.ModelConfigOption, 0, len(config.Models)),
+		Models:       make([]contracts.ModelConfigOption, 0),
 		Profiles:     make(map[string]contracts.ModelReference, len(config.Profiles)),
 		ProfileNames: registry.ProfileNames(),
 	}
-	for _, provider := range config.Providers {
-		document.Providers = append(document.Providers, contracts.ProviderConfigOption{
-			ID: provider.ID, ProviderName: provider.ProviderName,
-			BaseURL: provider.BaseURL, ProxyURL: provider.ProxyURL, HasAPIKey: editor.HasProviderKey(provider.ID),
+	for _, group := range config.Groups {
+		document.Groups = append(document.Groups, contracts.GroupConfigOption{
+			ID: group.ID, DisplayName: group.DisplayName,
 		})
 	}
-	for _, model := range config.Models {
-		document.Models = append(document.Models, contracts.ModelConfigOption{
-			ProviderID: model.ProviderID, ModelID: model.ModelID, Label: model.Label,
-			APIFormat:     string(model.APIFormat),
-			ContextWindow: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens,
-			Reasoning: contracts.ReasoningOption{
-				Supported: model.Reasoning.Supported,
-				Levels:    append([]string{}, model.Reasoning.Levels...),
-				Default:   model.Reasoning.Default,
-			},
+	for _, provider := range config.Providers {
+		document.Providers = append(document.Providers, contracts.ProviderConfigOption{
+			ID: provider.ID, ProviderName: provider.DisplayName,
+			BaseURL: provider.BaseURL, ProxyURL: provider.ProxyURL,
+			DefaultAPIFormat: string(provider.DefaultAPIFormat), HasAPIKey: editor.HasProviderKey(provider.ID),
 		})
+		for _, model := range provider.Models {
+			apiFormat := registry.EffectiveAPIFormat(provider, model)
+			document.Models = append(document.Models, contracts.ModelConfigOption{
+				ProviderID: provider.ID, ModelID: model.ID, Label: model.DisplayName,
+				GroupID: model.GroupID, APIFormat: string(apiFormat),
+				ContextWindow: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens,
+				Reasoning: contracts.ReasoningOption{
+					Supported: model.Reasoning.Supported,
+					Levels:    append([]string{}, model.Reasoning.Levels...), Default: model.Reasoning.Default,
+				},
+			})
+		}
 	}
 	for profile, reference := range config.Profiles {
 		document.Profiles[profile] = contracts.ModelReference{ProviderID: reference.ProviderID, ModelID: reference.ModelID}
@@ -62,24 +69,28 @@ func (b *ModelBindings) SaveModelConfig(
 		return contracts.SaveModelConfigResponse{}, err
 	}
 	config := registry.FileConfig{
+		Groups:    make([]registry.GroupConfig, 0, len(request.Groups)),
 		Providers: make([]registry.ProviderConfig, 0, len(request.Providers)),
-		Models:    make([]registry.ModelConfig, 0, len(request.Models)),
 		Profiles:  make(map[string]registry.ModelReference, len(request.Profiles)),
+	}
+	for _, group := range request.Groups {
+		config.Groups = append(config.Groups, registry.GroupConfig{
+			ID: strings.TrimSpace(group.ID), DisplayName: strings.TrimSpace(group.DisplayName),
+		})
 	}
 	for _, provider := range request.Providers {
 		config.Providers = append(config.Providers, registry.ProviderConfig{
-			ID:           strings.TrimSpace(provider.ID),
-			ProviderName: strings.TrimSpace(provider.ProviderName),
-			BaseURL:      strings.TrimSpace(provider.BaseURL),
-			ProxyURL:     strings.TrimSpace(provider.ProxyURL),
+			ID: strings.TrimSpace(provider.ID), DisplayName: strings.TrimSpace(provider.ProviderName),
+			BaseURL: strings.TrimSpace(provider.BaseURL), ProxyURL: strings.TrimSpace(provider.ProxyURL),
+			DefaultAPIFormat: registry.ModelAPIFormat(strings.TrimSpace(provider.DefaultAPIFormat)),
 		})
 	}
 	for _, model := range request.Models {
-		config.Models = append(config.Models, registry.ModelConfig{
-			ProviderID:      strings.TrimSpace(model.ProviderID),
-			Label:           strings.TrimSpace(model.Label),
-			ModelID:         strings.TrimSpace(model.ModelID),
-			APIFormat:       registry.ModelAPIFormat(strings.TrimSpace(model.APIFormat)),
+		providerID := strings.TrimSpace(model.ProviderID)
+		apiFormat := registry.ModelAPIFormat(strings.TrimSpace(model.APIFormat))
+		modelConfig := registry.ModelConfig{
+			ID: strings.TrimSpace(model.ModelID), DisplayName: strings.TrimSpace(model.Label),
+			GroupID: strings.TrimSpace(model.GroupID), APIFormatOverride: &apiFormat,
 			ContextWindow:   model.ContextWindow,
 			MaxOutputTokens: model.MaxOutputTokens,
 			Reasoning: registry.ReasoningConfig{
@@ -87,7 +98,13 @@ func (b *ModelBindings) SaveModelConfig(
 				Levels:    trimmedLevels(model.Reasoning.Levels),
 				Default:   strings.TrimSpace(model.Reasoning.Default),
 			},
-		})
+		}
+		for index := range config.Providers {
+			if config.Providers[index].ID == providerID {
+				config.Providers[index].Models = append(config.Providers[index].Models, modelConfig)
+				break
+			}
+		}
 	}
 	for profile, reference := range request.Profiles {
 		reference.ProviderID = strings.TrimSpace(reference.ProviderID)

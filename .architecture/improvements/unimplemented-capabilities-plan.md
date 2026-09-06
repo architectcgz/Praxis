@@ -6,7 +6,7 @@
 
 - SessionContext 的追加、读取和 revision 校验；
 - AgentSecurityPolicy、ExecutionSecuritySnapshot 的完整生成与持久化；
-- ToolInvocation、ToolBroker 和逐次审批；
+- ToolInvocation、工具调用 application service 和逐次审批；
 - execution SandboxProcess、Windows worker 和平台隔离；
 - Session 所有的 ManagedProcess、Supervisor 和 terminal attachment；
 - Workflow definition、instance、node coordinator 和恢复；
@@ -21,17 +21,17 @@ React UI
     -> app bindings / contracts
         -> core commands and queries
             -> AgentOrchestrator / WorkflowCoordinator
-                -> AgentRuntime / ToolBroker / ManagedProcessCoordinator
+                -> AgentRuntime / tool_invocation application service / ManagedProcessCoordinator
                     -> core ports
                         -> storage / providers / tools / sandbox / managedprocess
 ```
 
 依赖规则：
 
-1. `core/domain` 只依赖标准库；`core` 不导入 Wails、SQLite driver、Provider SDK 或平台实现。
+1. `domain` 只依赖标准库；`core` 不导入 Wails、SQLite driver、Provider SDK 或平台实现。
 2. Workflow 只能调用 core 命令和查询，不能直接写 repository 或 transcript。
 3. AgentRuntime 只能执行已 durable 的 AgentExecution；不能创建 Agent、提交 SessionContext 或决定审批。
-4. ToolBroker 是 ToolInvocation 状态的唯一写入口；`internal/tools` 不读取 SQLite。
+4. `tool_invocation` application service 是 ToolInvocation 状态的唯一写入口；`internal/tools` 不读取 SQLite。
 5. Sandbox 只负责 OS 进程、IPC 和隔离，不理解 Agent、Workflow 或产品状态。
 6. ManagedProcessCoordinator 负责 Session 进程的产品状态；Supervisor 负责 PID、ConPTY、Job Object 等临时资源。
 7. `compose` 是唯一组合根，所有具体实现通过显式依赖装配。
@@ -66,7 +66,7 @@ AppendContext(SessionID, ExpectedRevision, Entry, RequestID) -> ContextRevision
 - `ContextSelection` 在 execution 创建时从固定 revision 生成并冻结。
 - transcript、草稿、未批准结果和中间推理不自动进入 SessionContext。
 
-目标位置：`core/domain`、`core/orchestrate`、`core/persistence`、`storage/sqlite`、`core/session`、`app`、`contracts` 和 `frontend/src/api/context.ts`。
+目标位置：`domain`、`orchestration`、`persistence`、`storage/sqlite`、`session`、`app`、`contracts` 和 `frontend/src/api/context.ts`。
 
 ### 3.2 SecurityPolicy 与 ExecutionSnapshot
 
@@ -90,9 +90,9 @@ SystemSecurityBaseline
 - execution 快照与 AgentExecution 一起 durable 保存，恢复时只读取快照，不重新解释当前 policy。
 - Provider key、DataRoot、SQLite 和宿主进程句柄不能进入快照或 sandbox 输入。
 
-目标位置：`core/domain`、`core/orchestrate/security_resolver.go`、`core/persistence/security.go`、`storage/sqlite/*security*`、`app` 和 `contracts`。
+目标位置：`domain`、`orchestration/security_resolver.go`、`persistence/security.go`、`storage/sqlite/*security*`、`app` 和 `contracts`。
 
-### 3.3 ToolInvocation 与 ToolBroker
+### 3.3 ToolInvocation application service
 
 每个 Provider tool call 映射为一个唯一 ToolInvocation：
 
@@ -103,7 +103,7 @@ requested
 └── running -> interrupted | unknown
 ```
 
-ToolBroker 的职责：
+`tool_invocation.Service` 的职责：
 
 1. 校验 ExecutionID、Agent、execution 状态和 tool call identity；
 2. 规范化参数并生成 ArgumentsDigest；
@@ -114,7 +114,7 @@ ToolBroker 的职责：
 
 同一 `(ExecutionID, ProviderToolCallID)` 必须幂等；参数摘要变化返回 conflict。Approval 只能放行已授权操作，不能扩大权限。
 
-目标位置：`core/domain/tool_invocation.go`、`core/orchestrate/tool_broker.go`、`core/orchestrate/tool_approval.go`、`core/runtime/tool.go`、`tools/catalog.go`、`tools/normalize.go` 和 SQLite repository。
+目标位置：`application/execution/tool_invocation/`、`runtime/tool.go`、`tools/catalog.go`、`tools/normalize.go` 和 SQLite repository。`tool_invocation.Service` 不直接 import `tools` 或 `managedprocess`，只通过 core port 派发已批准调用。
 
 ### 3.4 SandboxProcess 与 Windows worker
 
@@ -138,7 +138,7 @@ Execution
 - SandboxProcess 不能访问 DataRoot、SQLite、secrets、其他 execution 目录或 Provider credentials。
 - Windows 不可用时拒绝 activation/tool execution，并返回稳定 failure code；禁止宿主进程回退。
 
-目标位置：`internal/sandbox/client.go`、`protocol.go`、`windows/*_windows.go`、`cmd/sandboxworker/main_windows.go` 和 `core/runtime/sandbox.go`。
+目标位置：`internal/sandbox/client.go`、`protocol.go`、`windows/*_windows.go`、`cmd/sandboxworker/main_windows.go` 和 `runtime/sandbox.go`。
 
 ### 3.5 ManagedProcess
 
@@ -156,7 +156,7 @@ starting -> running -> stopping -> settled
 - 用户或后续 execution 通过 StopManagedProcess、SendManagedProcessInput 控制；detach 不停止进程。
 - graceful stop 超时后强制关闭 Job Object；重启时未结算进程标记 interrupted，不自动重启。
 
-目标位置：`core/domain/managed_process.go`、`core/orchestrate/managed_process.go`、`core/persistence/managed_process.go`、`internal/managedprocess/supervisor.go`、`terminal.go`、`conpty_windows.go` 和 SQLite repository。
+目标位置：`domain/managed_process.go`、`orchestration/managed_process.go`、`persistence/managed_process.go`、`internal/managedprocess/supervisor.go`、`terminal.go`、`conpty_windows.go` 和 SQLite repository。
 
 ### 3.6 Workflow
 
@@ -179,7 +179,7 @@ WorkflowDefinition
 - 事件只用于唤醒，恢复必须通过 Workflow 查询和核心查询重新计算 ready/active/completed。
 - Workflow 不直接修改 Agent policy、批准 ToolInvocation、写 transcript 或管理 OS 进程。
 
-目标位置：`internal/workflow/definition.go`、`instance.go`、`coordinator.go`、`recovery.go`、`core/persistence/workflow.go`、`storage/sqlite/*workflow*`、`app`、`contracts` 和 `frontend/src/features/workflows`。
+目标位置：`internal/workflow/definition.go`、`instance.go`、`coordinator.go`、`recovery.go`、`persistence/workflow.go`、`storage/sqlite/*workflow*`、`app`、`contracts` 和 `frontend/src/features/workflows`。
 
 ## 4. 实施顺序
 
@@ -199,11 +199,11 @@ WorkflowDefinition
 
 验收：并发 append 只有一个成功；execution 能在不读取当前配置的情况下重建输入和授权；revision conflict 可重试且不会覆盖内容。
 
-### 阶段 3：ToolBroker 与结构化工具
+### 阶段 3：ToolInvocation application service 与结构化工具
 
 - 添加 ToolInvocation 表、状态机、approval command 和结果引用。
 - 添加 ToolCatalog、参数规范化和 `read_file`、`list_dir`、`search_text`、`run_command` 的接口。
-- 将 runtime tool call 接入 ToolBroker；未装配工具返回稳定错误并完成 settlement。
+- 将 runtime tool call 接入 `tool_invocation` application service；未装配工具返回稳定错误并完成 settlement。
 
 验收：重复 provider tool call 不产生第二条 invocation；参数变化返回 conflict；未授权路径、工具或命令在副作用前被拒绝。
 
@@ -219,7 +219,7 @@ WorkflowDefinition
 
 - 实现 ManagedProcessCoordinator、Supervisor、ConPTY attachment 和停止命令。
 - 添加 Session 级进程查询、输入、停止和 recovery 收敛。
-- 将 `start_managed_process`、`stop_managed_process`、`send_process_input` 接入 ToolBroker。
+- 将 `start_managed_process`、`stop_managed_process`、`send_process_input` 接入 `tool_invocation` application service。
 
 验收：进程可在来源 execution 结算后继续运行；停止超时强制回收；应用重启不会自动重放或重启未知进程。
 
@@ -270,7 +270,7 @@ workflow_node_executions
 ## 6. 完成条件
 
 - [ ] 每项能力都有 core-owned domain、persistence 和 runtime port。
-- [ ] 所有副作用都经过 ToolBroker、ExecutionSecuritySnapshot 和对应 OS 边界。
+- [ ] 所有副作用都经过 `tool_invocation` application service、ExecutionSecuritySnapshot 和对应 OS 边界。
 - [ ] SessionContext 追加式 revision 和 Workflow dispatch 幂等协议可恢复。
 - [ ] SandboxProcess 与 ManagedProcess 的临时资源不进入产品事实。
 - [ ] Workflow 不拥有 Agent/Execution，不直接写 transcript 或 repository。

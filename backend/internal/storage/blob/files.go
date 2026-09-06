@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	domaincontext "praxis/internal/core/domain/context"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domaincontext "praxis/internal/domain/context"
+	domainfoundation "praxis/internal/domain/foundation"
 
 	"praxis/internal/storage/dataroot"
 )

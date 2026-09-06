@@ -19,19 +19,18 @@ const dataRootEnvironment = "PRAXIS_DATA_ROOT"
 // This type only resolves paths; the provider registry is the sole component
 // that reads or writes the model and secret files they point at.
 type DataRoot struct {
-	Root            string
-	Config          string
-	Secrets         string
-	Projects        string
-	Runtime         string
-	Database        string
-	Sessions        string
-	Attachments     string
-	Notes           string
-	Temporary       string
-	ModelsConfig    string
-	SecretsConfig   string
-	AgentPolicyFile string
+	Root                 string
+	Config               string
+	Secrets              string
+	Projects             string
+	Runtime              string
+	Database             string
+	Sessions             string
+	Attachments          string
+	Notes                string
+	Temporary            string
+	ModelProvidersConfig string
+	AgentPolicyFile      string
 }
 
 // Resolve chooses the explicit root, then PRAXIS_DATA_ROOT, then the current
@@ -60,19 +59,18 @@ func Resolve(root string) (DataRoot, error) {
 	secrets := filepath.Join(root, "secrets")
 	runtime := filepath.Join(root, "runtime")
 	return DataRoot{
-		Root:            root,
-		Config:          config,
-		Secrets:         secrets,
-		Projects:        filepath.Join(root, "projects"),
-		Runtime:         runtime,
-		Database:        filepath.Join(runtime, "praxis.db"),
-		Sessions:        filepath.Join(runtime, "agent-sessions"),
-		Attachments:     filepath.Join(runtime, "attachments"),
-		Notes:           filepath.Join(runtime, "notes"),
-		Temporary:       filepath.Join(runtime, "tmp"),
-		ModelsConfig:    filepath.Join(config, "models.json"),
-		SecretsConfig:   filepath.Join(secrets, "secrets.json"),
-		AgentPolicyFile: filepath.Join(config, "agent-policy.json"),
+		Root:                 root,
+		Config:               config,
+		Secrets:              secrets,
+		Projects:             filepath.Join(root, "projects"),
+		Runtime:              runtime,
+		Database:             filepath.Join(runtime, "praxis.db"),
+		Sessions:             filepath.Join(runtime, "agent-sessions"),
+		Attachments:          filepath.Join(runtime, "attachments"),
+		Notes:                filepath.Join(runtime, "notes"),
+		Temporary:            filepath.Join(runtime, "tmp"),
+		ModelProvidersConfig: filepath.Join(config, "models.json"),
+		AgentPolicyFile:      filepath.Join(config, "agent-policy.json"),
 	}, nil
 }
 

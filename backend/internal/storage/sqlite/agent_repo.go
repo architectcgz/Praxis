@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	domainagent "praxis/internal/core/domain/agent"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainagent "praxis/internal/domain/agent"
+	domainfoundation "praxis/internal/domain/foundation"
 )
 
 func (s *Store) GetAgent(ctx context.Context, id domainfoundation.AgentID) (domainagent.Agent, error) {

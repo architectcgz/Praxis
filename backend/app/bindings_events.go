@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"praxis/internal/contracts"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 )
 
 // EventBindings exposes durable orchestration events as a query-only surface.

@@ -153,6 +153,34 @@ CREATE TABLE IF NOT EXISTS execution_security_snapshots (
 CREATE INDEX IF NOT EXISTS execution_security_snapshots_by_policy
     ON execution_security_snapshots(agent_policy_revision, execution_id);
 
+CREATE TABLE IF NOT EXISTS tool_invocations (
+    id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL REFERENCES agent_executions(id) ON DELETE RESTRICT,
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    provider_tool_call_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    arguments_digest TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN (
+        'requested', 'awaiting_approval', 'approved', 'running',
+        'succeeded', 'failed', 'denied', 'interrupted', 'unknown'
+    )),
+    failure_code TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    approved_at TEXT,
+    started_at TEXT,
+    settled_at TEXT,
+    payload TEXT NOT NULL,
+    UNIQUE (execution_id, provider_tool_call_id),
+    FOREIGN KEY (agent_id, session_id) REFERENCES agents(id, session_id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS tool_invocations_by_execution
+    ON tool_invocations(execution_id, created_at, id);
+CREATE INDEX IF NOT EXISTS tool_invocations_unsettled
+    ON tool_invocations(status, created_at, id)
+    WHERE status IN ('requested', 'awaiting_approval', 'approved', 'running', 'unknown');
+
 CREATE TABLE IF NOT EXISTS queued_work_items (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,

@@ -5,18 +5,18 @@ import (
 	"errors"
 
 	"praxis/internal/application/agent_runtime"
+	commandprotocol "praxis/internal/command"
 	"praxis/internal/contracts"
-	corecommand "praxis/internal/core/command"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 
-	"praxis/internal/core/projection"
+	"praxis/internal/projection"
 )
 
 func publicBindingError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var command *corecommand.Error
+	var command *commandprotocol.Error
 	if errors.As(err, &command) {
 		return publicCommandError(command)
 	}
@@ -60,22 +60,22 @@ func bindingError(code contracts.ErrorCode) error {
 	return errors.New(code.String())
 }
 
-func publicCommandError(command *corecommand.Error) error {
+func publicCommandError(command *commandprotocol.Error) error {
 	if command == nil {
 		return bindingError(contracts.ErrorCodeInternal)
 	}
 	switch command.Code {
-	case corecommand.ErrorAgentExecuting:
+	case commandprotocol.ErrorAgentExecuting:
 		return bindingError(contracts.ErrorCodeAgentExecuting)
-	case corecommand.ErrorAgentUnavailable:
+	case commandprotocol.ErrorAgentUnavailable:
 		return bindingError(contracts.ErrorCodeAgentUnavailable)
-	case corecommand.ErrorInvalidRequest:
+	case commandprotocol.ErrorInvalidRequest:
 		return bindingError(contracts.ErrorCodeInvalidRequest)
-	case corecommand.ErrorNotReady:
+	case commandprotocol.ErrorNotReady:
 		return bindingError(contracts.ErrorCodeNotReady)
-	case corecommand.ErrorProjectWorkspaceInvalid:
+	case commandprotocol.ErrorProjectWorkspaceInvalid:
 		return bindingError(contracts.ErrorCodeProjectWorkspaceInvalid)
-	case corecommand.ErrorModelNotConfigured:
+	case commandprotocol.ErrorModelNotConfigured:
 		return bindingError(contracts.ErrorCodeModelNotConfigured)
 	default:
 		return bindingError(contracts.ErrorCodeInternal)

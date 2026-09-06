@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	domaincommand "praxis/internal/core/domain/command"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domaincommand "praxis/internal/domain/command"
+	domainfoundation "praxis/internal/domain/foundation"
 )
 
 func (s *Store) GetCommandReceipt(ctx context.Context, requestID domainfoundation.RequestID) (domaincommand.CommandReceipt, error) {

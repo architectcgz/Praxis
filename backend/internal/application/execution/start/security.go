@@ -3,14 +3,14 @@ package start
 import (
 	"errors"
 	"path/filepath"
-	domaincontext "praxis/internal/core/domain/context"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainsecurity "praxis/internal/core/domain/security"
-	domainworkspace "praxis/internal/core/domain/workspace"
+	domaincontext "praxis/internal/domain/context"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainsecurity "praxis/internal/domain/security"
+	domainworkspace "praxis/internal/domain/workspace"
 	"strings"
 
-	corecommand "praxis/internal/core/command"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	"praxis/internal/system"
 )
 
 // SecurityResolver combines system limits, the Agent policy ceiling, and
@@ -82,7 +82,7 @@ func (r SecurityResolver) Resolve(
 		CanProposeDelegation: containsTool(tools, domainsecurity.ToolProposeDelegate),
 		ResultPermissions:    resultPermissions(tools), Model: model,
 		ContextManifestRef: manifest.ID, ApprovalSource: domainsecurity.ApprovalSourcePolicyDefault,
-		ApprovalPolicyFingerprint: corecommand.ArgumentsDigest(policy),
+		ApprovalPolicyFingerprint: commandprotocol.ArgumentsDigest(policy),
 	})
 	if err != nil {
 		return domainsecurity.ExecutionSecuritySnapshot{}, err
@@ -91,7 +91,7 @@ func (r SecurityResolver) Resolve(
 		AgentPolicyRevision: policy.Revision, CapabilityGrant: grant,
 		Sandbox:       domainsecurity.SandboxConstraints{Mode: sandbox},
 		ApprovalRules: []domainsecurity.ApprovalRule{{Mode: approval}},
-		Fingerprint: corecommand.ArgumentsDigest(struct {
+		Fingerprint: commandprotocol.ArgumentsDigest(struct {
 			Policy uint64
 			Grant  domainsecurity.CapabilityGrant
 		}{policy.Revision, grant}),

@@ -6,32 +6,32 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
 	"strings"
 
-	coresession "praxis/internal/core/session"
+	sessionport "praxis/internal/session"
 )
 
 func (s *Store) AppendExecutionStart(
 	ctx context.Context,
 	execution domainexecution.AgentExecution,
-) (coresession.ExecutionStartReceipt, error) {
+) (sessionport.ExecutionStartReceipt, error) {
 	if ctx == nil {
-		return coresession.ExecutionStartReceipt{}, errors.New("execution start context is required")
+		return sessionport.ExecutionStartReceipt{}, errors.New("execution start context is required")
 	}
 	if err := execution.Validate(); err != nil {
-		return coresession.ExecutionStartReceipt{}, err
+		return sessionport.ExecutionStartReceipt{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entries, err := s.entriesLocked()
 	if err != nil {
-		return coresession.ExecutionStartReceipt{}, err
+		return sessionport.ExecutionStartReceipt{}, err
 	}
 	if receipt, err := startReceipt(entries, execution.ID); err != nil || receipt != nil {
 		if err != nil {
-			return coresession.ExecutionStartReceipt{}, err
+			return sessionport.ExecutionStartReceipt{}, err
 		}
 		for _, value := range entries {
 			if value.Kind != entryExecutionStarted || value.ExecutionID != execution.ID.String() {
@@ -39,31 +39,31 @@ func (s *Store) AppendExecutionStart(
 			}
 			var existing executionStartedPayload
 			if err := json.Unmarshal(value.Payload, &existing); err != nil {
-				return coresession.ExecutionStartReceipt{}, fmt.Errorf("decode execution start payload: %w", err)
+				return sessionport.ExecutionStartReceipt{}, fmt.Errorf("decode execution start payload: %w", err)
 			}
 			if existing.RequestID != execution.RequestID.String() || existing.Reason != execution.Reason {
-				return coresession.ExecutionStartReceipt{}, domainfoundation.ErrRequestConflict
+				return sessionport.ExecutionStartReceipt{}, domainfoundation.ErrRequestConflict
 			}
 			break
 		}
 		if err := s.appendMissingInputLocked(execution, entries); err != nil {
-			return coresession.ExecutionStartReceipt{}, err
+			return sessionport.ExecutionStartReceipt{}, err
 		}
 		if err := s.syncLocked(); err != nil {
-			return coresession.ExecutionStartReceipt{}, err
+			return sessionport.ExecutionStartReceipt{}, err
 		}
 		entries, err = s.readEntriesLocked()
 		if err != nil {
-			return coresession.ExecutionStartReceipt{}, err
+			return sessionport.ExecutionStartReceipt{}, err
 		}
 		receipt, err = startReceipt(entries, execution.ID)
 		if err != nil {
-			return coresession.ExecutionStartReceipt{}, err
+			return sessionport.ExecutionStartReceipt{}, err
 		}
 		return *receipt, nil
 	}
 	if len(entries) == 0 {
-		return coresession.ExecutionStartReceipt{}, errors.New(
+		return sessionport.ExecutionStartReceipt{}, errors.New(
 			"agent session must be initialized before execution start",
 		)
 	}
@@ -73,7 +73,7 @@ func (s *Store) AppendExecutionStart(
 		Input:     execution.Input,
 	})
 	if err != nil {
-		return coresession.ExecutionStartReceipt{}, fmt.Errorf("encode execution start: %w", err)
+		return sessionport.ExecutionStartReceipt{}, fmt.Errorf("encode execution start: %w", err)
 	}
 	if err := s.appendLocked(entry{
 		ID:          s.ids.New("event"),
@@ -83,50 +83,50 @@ func (s *Store) AppendExecutionStart(
 		ExecutionID: execution.ID.String(),
 		Payload:     payload,
 	}); err != nil {
-		return coresession.ExecutionStartReceipt{}, err
+		return sessionport.ExecutionStartReceipt{}, err
 	}
 	if err := s.appendMissingInputLocked(execution, nil); err != nil {
-		return coresession.ExecutionStartReceipt{}, err
+		return sessionport.ExecutionStartReceipt{}, err
 	}
 	if err := s.syncLocked(); err != nil {
-		return coresession.ExecutionStartReceipt{}, err
+		return sessionport.ExecutionStartReceipt{}, err
 	}
 	return s.startReceiptLocked(execution.ID)
 }
 
 func (s *Store) AppendExecutionSettlement(
 	ctx context.Context,
-	receipt coresession.ExecutionSettlementReceipt,
-) (coresession.ExecutionSettlementReceipt, error) {
+	receipt sessionport.ExecutionSettlementReceipt,
+) (sessionport.ExecutionSettlementReceipt, error) {
 	if ctx == nil {
-		return coresession.ExecutionSettlementReceipt{}, errors.New("execution settlement context is required")
+		return sessionport.ExecutionSettlementReceipt{}, errors.New("execution settlement context is required")
 	}
 	if receipt.ExecutionID == "" || receipt.RequestID == "" || !knownOutcome(receipt.Outcome) {
-		return coresession.ExecutionSettlementReceipt{}, errors.New("execution settlement is invalid")
+		return sessionport.ExecutionSettlementReceipt{}, errors.New("execution settlement is invalid")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entries, err := s.entriesLocked()
 	if err != nil {
-		return coresession.ExecutionSettlementReceipt{}, err
+		return sessionport.ExecutionSettlementReceipt{}, err
 	}
 	if existing, err := settlementReceipt(entries, receipt.ExecutionID); err != nil || existing != nil {
 		if err != nil {
-			return coresession.ExecutionSettlementReceipt{}, err
+			return sessionport.ExecutionSettlementReceipt{}, err
 		}
 		if existing.RequestID != receipt.RequestID || existing.Outcome != receipt.Outcome || existing.FailureCode != receipt.FailureCode {
-			return coresession.ExecutionSettlementReceipt{}, domainfoundation.ErrRequestConflict
+			return sessionport.ExecutionSettlementReceipt{}, domainfoundation.ErrRequestConflict
 		}
 		return *existing, nil
 	}
 	if start, err := startReceipt(entries, receipt.ExecutionID); err != nil {
-		return coresession.ExecutionSettlementReceipt{}, err
+		return sessionport.ExecutionSettlementReceipt{}, err
 	} else if start == nil {
-		return coresession.ExecutionSettlementReceipt{}, errors.New("execution settlement has no start receipt")
+		return sessionport.ExecutionSettlementReceipt{}, errors.New("execution settlement has no start receipt")
 	}
 	payload, err := json.Marshal(settledPayload{RequestID: receipt.RequestID.String(), Outcome: receipt.Outcome, FailureCode: receipt.FailureCode})
 	if err != nil {
-		return coresession.ExecutionSettlementReceipt{}, fmt.Errorf("encode execution settlement: %w", err)
+		return sessionport.ExecutionSettlementReceipt{}, fmt.Errorf("encode execution settlement: %w", err)
 	}
 	if err := s.appendLocked(entry{
 		ID:          s.ids.New("event"),
@@ -136,46 +136,46 @@ func (s *Store) AppendExecutionSettlement(
 		ExecutionID: receipt.ExecutionID.String(),
 		Payload:     payload,
 	}); err != nil {
-		return coresession.ExecutionSettlementReceipt{}, err
+		return sessionport.ExecutionSettlementReceipt{}, err
 	}
 	if err := s.syncLocked(); err != nil {
-		return coresession.ExecutionSettlementReceipt{}, err
+		return sessionport.ExecutionSettlementReceipt{}, err
 	}
 	return s.settlementReceiptLocked(receipt.ExecutionID)
 }
 
 func (s *Store) AppendContextArtifact(
 	ctx context.Context,
-	artifact coresession.ContextArtifact,
-) (coresession.ContextArtifactReceipt, error) {
+	artifact sessionport.ContextArtifact,
+) (sessionport.ContextArtifactReceipt, error) {
 	if ctx == nil {
-		return coresession.ContextArtifactReceipt{}, errors.New("context artifact context is required")
+		return sessionport.ContextArtifactReceipt{}, errors.New("context artifact context is required")
 	}
 	if artifact.DeliveryID == "" || strings.TrimSpace(artifact.Kind) == "" || len(artifact.Body) == 0 {
-		return coresession.ContextArtifactReceipt{}, errors.New("context artifact is invalid")
+		return sessionport.ContextArtifactReceipt{}, errors.New("context artifact is invalid")
 	}
 	var body any
 	if err := json.Unmarshal(artifact.Body, &body); err != nil {
-		return coresession.ContextArtifactReceipt{}, fmt.Errorf("context artifact body is invalid JSON: %w", err)
+		return sessionport.ContextArtifactReceipt{}, fmt.Errorf("context artifact body is invalid JSON: %w", err)
 	}
 	if containsSensitiveValue(body) {
-		return coresession.ContextArtifactReceipt{}, errors.New("context artifact body contains a sensitive field")
+		return sessionport.ContextArtifactReceipt{}, errors.New("context artifact body contains a sensitive field")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entries, err := s.entriesLocked()
 	if err != nil {
-		return coresession.ContextArtifactReceipt{}, err
+		return sessionport.ContextArtifactReceipt{}, err
 	}
 	existingArtifact, existing, err := artifactEntry(entries, artifact.DeliveryID)
 	if err != nil {
-		return coresession.ContextArtifactReceipt{}, err
+		return sessionport.ContextArtifactReceipt{}, err
 	}
 	if existing != nil {
 		if existingArtifact.Kind != strings.TrimSpace(artifact.Kind) ||
 			existingArtifact.ArtifactID != strings.TrimSpace(artifact.ArtifactID) ||
 			!bytes.Equal(existingArtifact.Body, artifact.Body) {
-			return coresession.ContextArtifactReceipt{}, domainfoundation.ErrRequestConflict
+			return sessionport.ContextArtifactReceipt{}, domainfoundation.ErrRequestConflict
 		}
 		return *existing, nil
 	}
@@ -186,7 +186,7 @@ func (s *Store) AppendContextArtifact(
 		Body:       append(json.RawMessage(nil), artifact.Body...),
 	})
 	if err != nil {
-		return coresession.ContextArtifactReceipt{}, fmt.Errorf("encode context artifact: %w", err)
+		return sessionport.ContextArtifactReceipt{}, fmt.Errorf("encode context artifact: %w", err)
 	}
 	if err := s.appendLocked(entry{
 		ID:      s.ids.New("event"),
@@ -195,10 +195,10 @@ func (s *Store) AppendContextArtifact(
 		Version: currentEntryVersion,
 		Payload: payload,
 	}); err != nil {
-		return coresession.ContextArtifactReceipt{}, err
+		return sessionport.ContextArtifactReceipt{}, err
 	}
 	if err := s.syncLocked(); err != nil {
-		return coresession.ContextArtifactReceipt{}, err
+		return sessionport.ContextArtifactReceipt{}, err
 	}
 	return s.artifactReceiptLocked(artifact.DeliveryID)
 }
@@ -211,7 +211,7 @@ func (s *Store) AppendStructuredMessage(
 	messageID string,
 	role string,
 	sourceRequestID domainfoundation.RequestID,
-	blocks []coresession.TranscriptContentBlock,
+	blocks []sessionport.TranscriptContentBlock,
 ) error {
 	if ctx == nil {
 		return errors.New("agent session structured message context is required")
@@ -219,14 +219,14 @@ func (s *Store) AppendStructuredMessage(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if executionID == "" || strings.TrimSpace(messageID) == "" || (role != "user" && role != "assistant") || len(blocks) == 0 {
+	if executionID == "" || strings.TrimSpace(messageID) == "" || !validMessageRole(role) || len(blocks) == 0 {
 		return errors.New("agent session structured message is invalid")
 	}
 	if sourceRequestID == "" {
 		return errors.New("agent session structured message request id is required")
 	}
 	messageID = strings.TrimSpace(messageID)
-	cloned := make([]coresession.TranscriptContentBlock, len(blocks))
+	cloned := make([]sessionport.TranscriptContentBlock, len(blocks))
 	var content strings.Builder
 	for i, block := range blocks {
 		cloned[i] = block
@@ -299,7 +299,7 @@ func (s *Store) appendMissingInputLocked(execution domainexecution.AgentExecutio
 		Role:            "user",
 		SourceRequestID: execution.RequestID.String(),
 		Content:         execution.StartContent,
-		Blocks:          []coresession.TranscriptContentBlock{{Kind: "text", Text: execution.StartContent}},
+		Blocks:          []sessionport.TranscriptContentBlock{{Kind: "text", Text: execution.StartContent}},
 	}
 	digest, err := digestMessagePayload(message)
 	if err != nil {

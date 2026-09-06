@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"strings"
 
-	domaincontext "praxis/internal/core/domain/context"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
+	domaincontext "praxis/internal/domain/context"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
 
-	coresession "praxis/internal/core/session"
+	sessionport "praxis/internal/session"
 )
 
 // ResolveContextArtifact projects an approved result or briefing into the
@@ -20,12 +20,12 @@ import (
 func (s *Store) ResolveContextArtifact(
 	ctx context.Context,
 	delivery domainworkflow.ContextDelivery,
-) (coresession.ContextArtifact, error) {
+) (sessionport.ContextArtifact, error) {
 	if ctx == nil {
-		return coresession.ContextArtifact{}, errors.New("context artifact resolver context is required")
+		return sessionport.ContextArtifact{}, errors.New("context artifact resolver context is required")
 	}
 	if err := delivery.Validate(); err != nil {
-		return coresession.ContextArtifact{}, err
+		return sessionport.ContextArtifact{}, err
 	}
 	kind, id, explicit := parseArtifactReference(delivery.SourceArtifactID)
 	if explicit {
@@ -36,50 +36,50 @@ func (s *Store) ResolveContextArtifact(
 		return encodeAgentResultArtifact(delivery, result)
 	}
 	if !errors.Is(resultErr, domainfoundation.ErrNotFound) {
-		return coresession.ContextArtifact{}, resultErr
+		return sessionport.ContextArtifact{}, resultErr
 	}
 	briefing, briefingErr := s.GetBriefing(ctx, domainfoundation.BriefingID(id))
 	if briefingErr == nil {
 		return encodeBriefingArtifact(delivery, briefing)
 	}
 	if errors.Is(briefingErr, domainfoundation.ErrNotFound) {
-		return coresession.ContextArtifact{}, domainfoundation.ErrNotFound
+		return sessionport.ContextArtifact{}, domainfoundation.ErrNotFound
 	}
-	return coresession.ContextArtifact{}, briefingErr
+	return sessionport.ContextArtifact{}, briefingErr
 }
 
 func (s *Store) resolveExplicitArtifact(
 	ctx context.Context,
 	delivery domainworkflow.ContextDelivery,
 	kind, id string,
-) (coresession.ContextArtifact, error) {
+) (sessionport.ContextArtifact, error) {
 	switch kind {
 	case "agent_result":
 		result, err := s.GetAgentResult(ctx, domainfoundation.AgentResultID(id))
 		if err != nil {
-			return coresession.ContextArtifact{}, err
+			return sessionport.ContextArtifact{}, err
 		}
 		return encodeAgentResultArtifact(delivery, result)
 	case "briefing":
 		briefing, err := s.GetBriefing(ctx, domainfoundation.BriefingID(id))
 		if err != nil {
-			return coresession.ContextArtifact{}, err
+			return sessionport.ContextArtifact{}, err
 		}
 		return encodeBriefingArtifact(delivery, briefing)
 	default:
-		return coresession.ContextArtifact{}, fmt.Errorf("unsupported source artifact kind %q", kind)
+		return sessionport.ContextArtifact{}, fmt.Errorf("unsupported source artifact kind %q", kind)
 	}
 }
 
 func encodeAgentResultArtifact(
 	delivery domainworkflow.ContextDelivery,
 	result domainworkflow.AgentResult,
-) (coresession.ContextArtifact, error) {
+) (sessionport.ContextArtifact, error) {
 	if result.Status != domainworkflow.ArtifactApproved {
-		return coresession.ContextArtifact{}, errors.New("agent result is not approved")
+		return sessionport.ContextArtifact{}, errors.New("agent result is not approved")
 	}
 	if delivery.SessionID != result.SessionID {
-		return coresession.ContextArtifact{}, errors.New("agent result session does not match delivery")
+		return sessionport.ContextArtifact{}, errors.New("agent result session does not match delivery")
 	}
 	body, err := json.Marshal(struct {
 		Summary      string                     `json:"summary"`
@@ -91,9 +91,9 @@ func encodeAgentResultArtifact(
 		EvidenceRefs: result.EvidenceRefs,
 	})
 	if err != nil {
-		return coresession.ContextArtifact{}, fmt.Errorf("encode agent result artifact: %w", err)
+		return sessionport.ContextArtifact{}, fmt.Errorf("encode agent result artifact: %w", err)
 	}
-	return coresession.ContextArtifact{
+	return sessionport.ContextArtifact{
 		DeliveryID: delivery.ID,
 		Kind:       "agent_result",
 		ArtifactID: result.ID.String(),
@@ -104,20 +104,20 @@ func encodeAgentResultArtifact(
 func encodeBriefingArtifact(
 	delivery domainworkflow.ContextDelivery,
 	briefing domainworkflow.Briefing,
-) (coresession.ContextArtifact, error) {
+) (sessionport.ContextArtifact, error) {
 	if briefing.Status != domainworkflow.ArtifactApproved {
-		return coresession.ContextArtifact{}, errors.New("briefing is not approved")
+		return sessionport.ContextArtifact{}, errors.New("briefing is not approved")
 	}
 	if delivery.SessionID != briefing.SessionID {
-		return coresession.ContextArtifact{}, errors.New("briefing session does not match delivery")
+		return sessionport.ContextArtifact{}, errors.New("briefing session does not match delivery")
 	}
 	body, err := json.Marshal(struct {
 		Body string `json:"body"`
 	}{Body: briefing.Body})
 	if err != nil {
-		return coresession.ContextArtifact{}, fmt.Errorf("encode briefing artifact: %w", err)
+		return sessionport.ContextArtifact{}, fmt.Errorf("encode briefing artifact: %w", err)
 	}
-	return coresession.ContextArtifact{
+	return sessionport.ContextArtifact{
 		DeliveryID: delivery.ID,
 		Kind:       "briefing",
 		ArtifactID: briefing.ID.String(),

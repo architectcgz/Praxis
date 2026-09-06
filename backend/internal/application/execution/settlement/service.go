@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	corecommand "praxis/internal/core/command"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
-	"praxis/internal/core/persistence"
-	coresession "praxis/internal/core/session"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
+	"praxis/internal/persistence"
+	sessionport "praxis/internal/session"
+	"praxis/internal/system"
 )
 
 type QueueStarter interface {
@@ -88,12 +88,12 @@ func (s *Service) SetQueueStarter(starter QueueStarter) error {
 
 // ConfirmExecutionStart accepts a fsynced execution-start receipt before
 // SQLite clears the temporary source content.
-func (s *Service) ConfirmExecutionStart(ctx context.Context, receipt coresession.ExecutionStartReceipt) error {
+func (s *Service) ConfirmExecutionStart(ctx context.Context, receipt sessionport.ExecutionStartReceipt) error {
 	if ctx == nil {
 		return errors.New("execution start receipt context is required")
 	}
 	if strings.TrimSpace(receipt.ExecutionID.String()) == "" || strings.TrimSpace(receipt.EntryID) == "" {
-		return corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	return s.tx.InTx(ctx, func(txCtx context.Context) error {
 		execution, err := s.executions.Get(txCtx, receipt.ExecutionID)
@@ -101,7 +101,7 @@ func (s *Service) ConfirmExecutionStart(ctx context.Context, receipt coresession
 			return err
 		}
 		if execution.RequestID != receipt.RequestID {
-			return corecommand.NewError(corecommand.ErrorInvalidRequest)
+			return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 		}
 		if execution.Status == domainexecution.ExecutionStarting {
 			if err := execution.MarkRunning(s.clock.Now()); err != nil {
@@ -109,7 +109,7 @@ func (s *Service) ConfirmExecutionStart(ctx context.Context, receipt coresession
 			}
 		}
 		if execution.Status != domainexecution.ExecutionRunning && execution.Status != domainexecution.ExecutionSettling {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		if execution.StartContent != "" {
 			if err := execution.ClearStartContent(receipt.InputDigest); err != nil {
@@ -132,7 +132,7 @@ func (s *Service) Settle(ctx context.Context, params Params) error {
 		return errors.New("settlement context is required")
 	}
 	if strings.TrimSpace(params.ExecutionID.String()) == "" || !knownOutcome(params.Outcome) {
-		return corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	var settledAgentID domainfoundation.AgentID
 	var advanceQueue bool
@@ -163,7 +163,7 @@ func (s *Service) Settle(ctx context.Context, params Params) error {
 			return err
 		}
 		if agent.CurrentExecutionID != execution.ID {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		if err := agent.Settle(params.Outcome, at); err != nil {
 			return err
@@ -174,7 +174,7 @@ func (s *Service) Settle(ctx context.Context, params Params) error {
 				return err
 			}
 			if work.AgentID != agent.ID || work.ExecutionID != execution.ID {
-				return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+				return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 			}
 			if err := work.Settle(execution.ID, params.Outcome, params.FailureCode, at); err != nil {
 				return err

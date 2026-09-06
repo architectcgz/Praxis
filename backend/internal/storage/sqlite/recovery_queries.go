@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
-	domainworkspace "praxis/internal/core/domain/workspace"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
+	domainworkspace "praxis/internal/domain/workspace"
 )
 
 // RecoveryAgentRef identifies an Agent transcript that may need reconciliation.

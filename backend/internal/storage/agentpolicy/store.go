@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	domainsecurity "praxis/internal/core/domain/security"
+	domainsecurity "praxis/internal/domain/security"
 )
 
 // Store guards one agent-policy.json file.

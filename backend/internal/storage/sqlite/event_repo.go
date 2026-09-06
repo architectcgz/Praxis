@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 
-	"praxis/internal/core/persistence"
+	"praxis/internal/persistence"
 )
 
 func (s *Store) AppendEvent(ctx context.Context, value domainfoundation.DomainEvent) error {

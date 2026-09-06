@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 	"sync"
 
-	coresession "praxis/internal/core/session"
-	"praxis/internal/core/system"
+	sessionport "praxis/internal/session"
 	"praxis/internal/storage/dataroot"
+	"praxis/internal/system"
 )
 
 // Store owns one Agent transcript writer. It assigns every sequence number
@@ -59,7 +59,7 @@ func NewStoreWithSystem(path, temporaryDir string, ids system.IDGenerator, clock
 	return &Store{path: filepath.Clean(path), temporaryDir: filepath.Clean(temporaryDir), ids: ids, clock: clock}, nil
 }
 
-func (s *Store) Initialize(ctx context.Context, header coresession.AgentSessionHeader) error {
+func (s *Store) Initialize(ctx context.Context, header sessionport.AgentSessionHeader) error {
 	if ctx == nil {
 		return errors.New("agent session initialization context is required")
 	}
@@ -203,7 +203,7 @@ func (s *Store) syncLocked() error {
 	return nil
 }
 
-func (s *Store) verifyHeaderLocked(header coresession.AgentSessionHeader) error {
+func (s *Store) verifyHeaderLocked(header sessionport.AgentSessionHeader) error {
 	entries, err := s.readEntriesLocked()
 	if err != nil {
 		return err

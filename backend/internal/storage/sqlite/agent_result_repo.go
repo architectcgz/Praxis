@@ -2,9 +2,9 @@ package sqlite
 
 import (
 	"context"
-	domainworkflow "praxis/internal/core/domain/workflow"
+	domainworkflow "praxis/internal/domain/workflow"
 
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 )
 
 func (s *Store) GetAgentResult(ctx context.Context, id domainfoundation.AgentResultID) (domainworkflow.AgentResult, error) {

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 )
 
 func (s *Store) loadPayload(ctx context.Context, table, id string, target any, validate func() error) error {

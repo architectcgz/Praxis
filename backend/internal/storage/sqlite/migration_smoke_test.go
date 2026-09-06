@@ -18,7 +18,7 @@ func TestMigrationSmoke(t *testing.T) {
 	}
 	var table string
 	if err := store.DB().QueryRowContext(context.Background(),
-		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'execution_security_snapshots'`).Scan(&table); err != nil {
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tool_invocations'`).Scan(&table); err != nil {
 		t.Fatal(err)
 	}
 }

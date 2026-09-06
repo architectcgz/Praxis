@@ -6,15 +6,15 @@ import (
 	"errors"
 	"fmt"
 
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	"praxis/internal/core/persistence"
-	coreruntime "praxis/internal/core/runtime"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	"praxis/internal/persistence"
+	runtimecontract "praxis/internal/runtime"
 )
 
 // RuntimeActivator activates a durable execution in its process-local runtime.
 type RuntimeActivator interface {
-	Activate(context.Context, domainexecution.AgentExecution, coreruntime.ExecutionLifecycle) error
+	Activate(context.Context, domainexecution.AgentExecution, runtimecontract.ExecutionLifecycle) error
 }
 
 // SchedulerConfig describes the durable execution source and runtime boundary.
@@ -46,7 +46,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 func (s *Scheduler) TryActivate(
 	ctx context.Context,
 	agentID domainfoundation.AgentID,
-	lifecycle coreruntime.ExecutionLifecycle,
+	lifecycle runtimecontract.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
 		return errors.New("execution activation context is required")
@@ -75,7 +75,7 @@ func (s *Scheduler) TryActivate(
 func (s *Scheduler) ActivateStarting(
 	ctx context.Context,
 	executions []domainexecution.AgentExecution,
-	lifecycle coreruntime.ExecutionLifecycle,
+	lifecycle runtimecontract.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
 		return errors.New("starting execution scan context is required")

@@ -10,17 +10,17 @@ import (
 	"strings"
 	"time"
 
-	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
-	domaincommand "praxis/internal/core/domain/command"
-	domaincontext "praxis/internal/core/domain/context"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainproject "praxis/internal/core/domain/project"
-	domainsecurity "praxis/internal/core/domain/security"
-	domainsession "praxis/internal/core/domain/session"
-	domainworkspace "praxis/internal/core/domain/workspace"
-	"praxis/internal/core/persistence"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domainagent "praxis/internal/domain/agent"
+	domaincommand "praxis/internal/domain/command"
+	domaincontext "praxis/internal/domain/context"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainproject "praxis/internal/domain/project"
+	domainsecurity "praxis/internal/domain/security"
+	domainsession "praxis/internal/domain/session"
+	domainworkspace "praxis/internal/domain/workspace"
+	"praxis/internal/persistence"
+	"praxis/internal/system"
 )
 
 // Readiness controls command admission while recovery or shutdown converges.
@@ -136,18 +136,18 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 		return CreateResult{}, errors.New("create session context is required")
 	}
 	if !s.readiness.Ready() {
-		return CreateResult{}, corecommand.NewError(corecommand.ErrorNotReady)
+		return CreateResult{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
 	if params.RequestID == "" || params.ProjectID == "" || params.WorkspaceID == "" {
-		return CreateResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return CreateResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	if params.Profile == "" {
 		params.Profile = domainsecurity.ProfilePrimary
 	}
 	if !params.Profile.Valid() {
-		return CreateResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return CreateResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := corecommand.ArgumentsDigest(struct {
+	digest := commandprotocol.ArgumentsDigest(struct {
 		SessionID   domainfoundation.SessionID
 		AgentID     domainfoundation.AgentID
 		ProjectID   domainfoundation.ProjectID
@@ -157,7 +157,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 	}{params.SessionID, params.AgentID, params.ProjectID, params.WorkspaceID, strings.TrimSpace(params.Goal), params.Profile})
 	var result CreateResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if receipt, found, err := corecommand.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "create_session", digest); err != nil {
+		if receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "create_session", digest); err != nil {
 			return err
 		} else if found {
 			var ids struct{ SessionID, AgentID string }
@@ -180,14 +180,14 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 			if err != nil {
 				return err
 			}
-			return corecommand.NewError(corecommand.ErrorProjectWorkspaceInvalid)
+			return commandprotocol.NewError(commandprotocol.ErrorProjectWorkspaceInvalid)
 		}
 		workspace, err := s.workspaces.Get(txCtx, params.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		if workspace.ProjectID != project.ID || workspace.State != domainworkspace.WorkspaceReady {
-			return corecommand.NewError(corecommand.ErrorProjectWorkspaceInvalid)
+			return commandprotocol.NewError(commandprotocol.ErrorProjectWorkspaceInvalid)
 		}
 		if params.SessionID == "" {
 			params.SessionID = domainfoundation.SessionID(s.ids.New("session"))
@@ -261,7 +261,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID domainf
 		return domainagent.Agent{}, errors.New("ensure primary agent context is required")
 	}
 	if !s.readiness.Ready() || requestID == "" {
-		return domainagent.Agent{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return domainagent.Agent{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -316,9 +316,9 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 		return AppendContextResult{}, errors.New("append session context is required")
 	}
 	if !s.readiness.Ready() || params.RequestID == "" || params.SessionID == "" || strings.TrimSpace(params.Content) == "" {
-		return AppendContextResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return AppendContextResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := corecommand.ArgumentsDigest(struct {
+	digest := commandprotocol.ArgumentsDigest(struct {
 		SessionID domainfoundation.SessionID
 		Revision  uint64
 		Kind      domaincontext.SessionContextKind
@@ -327,7 +327,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	}{params.SessionID, params.ExpectedRevision, params.Kind, params.SourceExecutionID, strings.TrimSpace(params.Content)})
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if receipt, found, err := corecommand.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "append_session_context", digest); err != nil {
+		if receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "append_session_context", digest); err != nil {
 			return err
 		} else if found {
 			var value struct {

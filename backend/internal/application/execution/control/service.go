@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"strings"
 
-	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
-	domaincommand "praxis/internal/core/domain/command"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
-	"praxis/internal/core/persistence"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domainagent "praxis/internal/domain/agent"
+	domaincommand "praxis/internal/domain/command"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
+	"praxis/internal/persistence"
+	"praxis/internal/system"
 )
 
 // Readiness controls command admission while durable startup recovery runs.
@@ -118,19 +118,19 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 		return RequestResult{}, errors.New("control request context is required")
 	}
 	if !s.readiness.Ready() {
-		return RequestResult{}, corecommand.NewError(corecommand.ErrorNotReady)
+		return RequestResult{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
 	if strings.TrimSpace(params.RequestID.String()) == "" || strings.TrimSpace(params.AgentID.String()) == "" ||
 		(params.Kind != domainworkflow.ControlPause && params.Kind != domainworkflow.ControlClose) {
-		return RequestResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return RequestResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	var result RequestResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		digest := corecommand.ArgumentsDigest(struct {
+		digest := commandprotocol.ArgumentsDigest(struct {
 			AgentID domainfoundation.AgentID
 			Kind    domainworkflow.AgentControlKind
 		}{params.AgentID, params.Kind})
-		if _, found, err := corecommand.FindReceipt(txCtx, s.commandReceipts, domainfoundation.RequestID(params.RequestID), "request_control", digest); err != nil {
+		if _, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, domainfoundation.RequestID(params.RequestID), "request_control", digest); err != nil {
 			return err
 		} else if found {
 			control, err := s.controls.Get(txCtx, params.RequestID)
@@ -143,7 +143,7 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 		existing, err := s.controls.Get(txCtx, params.RequestID)
 		if err == nil {
 			if existing.AgentID != params.AgentID || existing.Kind != params.Kind {
-				return corecommand.NewError(corecommand.ErrorInvalidRequest)
+				return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 			}
 			result = RequestResult{Request: existing, ExistingRequest: true}
 			return nil
@@ -165,7 +165,7 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 				return err
 			}
 		} else if agent.State == domainagent.AgentPausing {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		} else if params.Kind == domainworkflow.ControlClose {
 			if err := agent.Close(at); err != nil {
 				return err
@@ -174,7 +174,7 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 				return err
 			}
 		} else {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		if err := s.controls.Save(txCtx, control); err != nil {
 			return err
@@ -230,7 +230,7 @@ func (s *Service) ApplyControlRequest(ctx context.Context, requestID domainfound
 		return errors.New("apply control request context is required")
 	}
 	if strings.TrimSpace(requestID.String()) == "" {
-		return corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	return s.tx.InTx(ctx, func(txCtx context.Context) error {
 		control, err := s.controls.Get(txCtx, requestID)
@@ -250,13 +250,13 @@ func (s *Service) ApplyControlRequest(ctx context.Context, requestID domainfound
 				return err
 			}
 			if execution.Active() {
-				return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+				return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 			}
 		}
 		at := s.clock.Now()
 		if control.Kind == domainworkflow.ControlClose {
 			if agent.State == domainagent.AgentExecuting || agent.State == domainagent.AgentPausing {
-				return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+				return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 			}
 			if err := agent.Close(at); err != nil {
 				return err

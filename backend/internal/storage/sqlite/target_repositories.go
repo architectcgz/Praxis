@@ -1,6 +1,6 @@
 package sqlite
 
-import "praxis/internal/core/persistence"
+import "praxis/internal/persistence"
 
 // TargetRepositories groups the repositories used by the orchestration model.
 type TargetRepositories struct {
@@ -13,6 +13,7 @@ type TargetRepositories struct {
 	Agents            AgentRepository
 	Executions        AgentExecutionRepository
 	SecuritySnapshots ExecutionSecuritySnapshotRepository
+	ToolInvocations   ToolInvocationRepository
 	QueuedWork        QueuedWorkRepository
 	Waits             WaitConditionRepository
 	Controls          AgentControlRequestRepository
@@ -31,6 +32,7 @@ func (s *Store) TargetRepositories() TargetRepositories {
 		Agents:            AgentRepository{s},
 		Executions:        AgentExecutionRepository{s},
 		SecuritySnapshots: ExecutionSecuritySnapshotRepository{s},
+		ToolInvocations:   ToolInvocationRepository{s},
 		QueuedWork:        QueuedWorkRepository{s},
 		Waits:             WaitConditionRepository{s},
 		Controls:          AgentControlRequestRepository{s},

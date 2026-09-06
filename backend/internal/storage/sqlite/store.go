@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"praxis/internal/core/persistence"
-	"praxis/internal/core/system"
+	"praxis/internal/persistence"
+	"praxis/internal/system"
 
 	_ "modernc.org/sqlite"
 )

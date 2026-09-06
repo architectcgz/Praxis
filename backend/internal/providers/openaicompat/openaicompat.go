@@ -12,10 +12,10 @@ import (
 	"sort"
 	"strings"
 
-	domainsecurity "praxis/internal/core/domain/security"
+	domainsecurity "praxis/internal/domain/security"
 
-	coreruntime "praxis/internal/core/runtime"
 	"praxis/internal/providers"
+	runtimecontract "praxis/internal/runtime"
 )
 
 type Protocol string
@@ -69,12 +69,12 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
-var _ coreruntime.ModelStream = (*Provider)(nil)
+var _ runtimecontract.ModelStream = (*Provider)(nil)
 
 func (p *Provider) Stream(
 	ctx context.Context,
-	request coreruntime.ModelRequest,
-) (<-chan coreruntime.ModelStreamEvent, error) {
+	request runtimecontract.ModelRequest,
+) (<-chan runtimecontract.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("openai-compatible stream context is required")
 	}
@@ -99,7 +99,7 @@ func (p *Provider) Stream(
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, providers.DecodeErrorResponse(response)
 	}
-	events := make(chan coreruntime.ModelStreamEvent, 16)
+	events := make(chan runtimecontract.ModelStreamEvent, 16)
 	go func() {
 		defer close(events)
 		defer response.Body.Close()
@@ -112,7 +112,7 @@ func (p *Provider) Stream(
 	return events, nil
 }
 
-func (p *Provider) requestPayload(snapshot coreruntime.TurnSnapshot) ([]byte, string, error) {
+func (p *Provider) requestPayload(snapshot runtimecontract.TurnSnapshot) ([]byte, string, error) {
 	model := p.model
 	if model == "" {
 		model = snapshot.Model.ModelID
@@ -126,7 +126,7 @@ func (p *Provider) requestPayload(snapshot coreruntime.TurnSnapshot) ([]byte, st
 			input = append(input, map[string]any{"role": "system", "content": snapshot.SystemPrompt})
 		}
 		for _, message := range snapshot.Messages {
-			input = append(input, responseMessage(message))
+			input = append(input, responseItems(message)...)
 		}
 		body := map[string]any{"model": model, "input": input, "stream": true}
 		if p.reasoning != "" && p.reasoning != "off" {
@@ -148,7 +148,7 @@ func (p *Provider) requestPayload(snapshot coreruntime.TurnSnapshot) ([]byte, st
 			body["tools"] = tools
 		}
 		encoded, err := json.Marshal(body)
-		return encoded, "/responses", err
+		return encoded, "/v1/responses", err
 	}
 	messages := make([]map[string]any, 0, len(snapshot.Messages)+1)
 	if strings.TrimSpace(snapshot.SystemPrompt) != "" {
@@ -174,18 +174,18 @@ func (p *Provider) requestPayload(snapshot coreruntime.TurnSnapshot) ([]byte, st
 		body["tools"] = tools
 	}
 	encoded, err := json.Marshal(body)
-	return encoded, "/chat/completions", err
+	return encoded, "/v1/chat/completions", err
 }
 
-func chatMessage(message coreruntime.TurnMessage) map[string]any {
+func chatMessage(message runtimecontract.TurnMessage) map[string]any {
 	result := map[string]any{"role": string(message.Role)}
 	var text strings.Builder
 	toolCalls := make([]map[string]any, 0)
 	for _, block := range message.Content {
 		switch block.Kind {
-		case coreruntime.TurnContentText:
+		case runtimecontract.TurnContentText:
 			text.WriteString(block.Text)
-		case coreruntime.TurnContentToolUse:
+		case runtimecontract.TurnContentToolUse:
 			toolCalls = append(toolCalls, map[string]any{
 				"id":   block.ToolCallID,
 				"type": "function",
@@ -193,7 +193,7 @@ func chatMessage(message coreruntime.TurnMessage) map[string]any {
 					"name": block.ToolName, "arguments": string(block.Input),
 				},
 			})
-		case coreruntime.TurnContentToolResult:
+		case runtimecontract.TurnContentToolResult:
 			result["role"] = "tool"
 			result["tool_call_id"] = block.ToolCallID
 			text.WriteString(block.Text)
@@ -206,11 +206,40 @@ func chatMessage(message coreruntime.TurnMessage) map[string]any {
 	return result
 }
 
-func responseMessage(message coreruntime.TurnMessage) map[string]any {
-	return chatMessage(message)
+func responseItems(message runtimecontract.TurnMessage) []map[string]any {
+	items := make([]map[string]any, 0, len(message.Content))
+	var text strings.Builder
+	flushText := func() {
+		if text.Len() == 0 {
+			return
+		}
+		items = append(items, map[string]any{
+			"type": "message", "role": string(message.Role), "content": text.String(),
+		})
+		text.Reset()
+	}
+	for _, block := range message.Content {
+		switch block.Kind {
+		case runtimecontract.TurnContentText:
+			text.WriteString(block.Text)
+		case runtimecontract.TurnContentToolUse:
+			flushText()
+			items = append(items, map[string]any{
+				"type": "function_call", "call_id": block.ToolCallID,
+				"name": block.ToolName, "arguments": string(block.Input),
+			})
+		case runtimecontract.TurnContentToolResult:
+			flushText()
+			items = append(items, map[string]any{
+				"type": "function_call_output", "call_id": block.ToolCallID, "output": block.Text,
+			})
+		}
+	}
+	flushText()
+	return items
 }
 
-func parseChat(reader io.Reader, events chan<- coreruntime.ModelStreamEvent) {
+func parseChat(reader io.Reader, events chan<- runtimecontract.ModelStreamEvent) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024), 2*1024*1024)
 	var calls = map[int]*toolAccumulator{}
@@ -253,7 +282,7 @@ func parseChat(reader io.Reader, events chan<- coreruntime.ModelStreamEvent) {
 		}
 		choice := chunk.Choices[0]
 		if choice.Delta.Content != "" {
-			events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamTextDelta, Text: choice.Delta.Content}
+			events <- runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamTextDelta, Text: choice.Delta.Content}
 		}
 		for _, delta := range choice.Delta.ToolCalls {
 			call := calls[delta.Index]
@@ -284,7 +313,7 @@ func parseChat(reader io.Reader, events chan<- coreruntime.ModelStreamEvent) {
 
 type toolAccumulator struct{ id, name, arguments string }
 
-func emitTool(events chan<- coreruntime.ModelStreamEvent, call *toolAccumulator) {
+func emitTool(events chan<- runtimecontract.ModelStreamEvent, call *toolAccumulator) {
 	if call == nil || call.name == "" {
 		return
 	}
@@ -292,9 +321,9 @@ func emitTool(events chan<- coreruntime.ModelStreamEvent, call *toolAccumulator)
 	if len(bytes.TrimSpace(args)) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	events <- coreruntime.ModelStreamEvent{
-		Kind: coreruntime.StreamToolCall,
-		ToolCall: coreruntime.ToolCall{
+	events <- runtimecontract.ModelStreamEvent{
+		Kind: runtimecontract.StreamToolCall,
+		ToolCall: runtimecontract.ToolCall{
 			ID:        call.id,
 			Name:      domainsecurity.ToolName(call.name),
 			Input:     append(json.RawMessage(nil), args...),
@@ -303,7 +332,7 @@ func emitTool(events chan<- coreruntime.ModelStreamEvent, call *toolAccumulator)
 	}
 }
 
-func emitChatTools(events chan<- coreruntime.ModelStreamEvent, calls map[int]*toolAccumulator) {
+func emitChatTools(events chan<- runtimecontract.ModelStreamEvent, calls map[int]*toolAccumulator) {
 	indices := make([]int, 0, len(calls))
 	for index := range calls {
 		indices = append(indices, index)
@@ -314,7 +343,7 @@ func emitChatTools(events chan<- coreruntime.ModelStreamEvent, calls map[int]*to
 	}
 }
 
-func parseResponses(reader io.Reader, events chan<- coreruntime.ModelStreamEvent) {
+func parseResponses(reader io.Reader, events chan<- runtimecontract.ModelStreamEvent) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024), 2*1024*1024)
 	calls := map[string]*toolAccumulator{}
@@ -354,7 +383,7 @@ func parseResponses(reader io.Reader, events chan<- coreruntime.ModelStreamEvent
 		switch event.Type {
 		case "response.output_text.delta":
 			if event.Delta != "" {
-				events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamTextDelta, Text: event.Delta}
+				events <- runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamTextDelta, Text: event.Delta}
 			}
 		case "response.output_item.added":
 			if event.Item.Type == "function_call" {
@@ -407,11 +436,11 @@ func parseResponses(reader io.Reader, events chan<- coreruntime.ModelStreamEvent
 	}
 }
 
-func emitComplete(events chan<- coreruntime.ModelStreamEvent, reason string) {
-	events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamComplete, StopReason: reason}
+func emitComplete(events chan<- runtimecontract.ModelStreamEvent, reason string) {
+	events <- runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamComplete, StopReason: reason}
 }
 
-func emitResponseTools(events chan<- coreruntime.ModelStreamEvent, calls map[string]*toolAccumulator) {
+func emitResponseTools(events chan<- runtimecontract.ModelStreamEvent, calls map[string]*toolAccumulator) {
 	keys := make([]string, 0, len(calls))
 	for key := range calls {
 		keys = append(keys, key)
@@ -421,6 +450,6 @@ func emitResponseTools(events chan<- coreruntime.ModelStreamEvent, calls map[str
 		emitTool(events, calls[key])
 	}
 }
-func emitError(events chan<- coreruntime.ModelStreamEvent, err error) {
-	events <- coreruntime.ModelStreamEvent{Kind: coreruntime.StreamError, Err: err}
+func emitError(events chan<- runtimecontract.ModelStreamEvent, err error) {
+	events <- runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamError, Err: err}
 }

@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	domainsecurity "praxis/internal/core/domain/security"
+	domainsecurity "praxis/internal/domain/security"
 )
 
 const documentVersion = 1

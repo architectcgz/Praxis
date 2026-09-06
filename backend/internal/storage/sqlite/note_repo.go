@@ -3,8 +3,8 @@ package sqlite
 import (
 	"context"
 
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
 )
 
 func (s *Store) GetNote(ctx context.Context, id domainfoundation.NoteID) (domainworkflow.Note, error) {

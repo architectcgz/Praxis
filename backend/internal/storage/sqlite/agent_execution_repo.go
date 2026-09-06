@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"time"
 
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainsecurity "praxis/internal/core/domain/security"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainsecurity "praxis/internal/domain/security"
 )
 
 func (s *Store) GetAgentExecution(

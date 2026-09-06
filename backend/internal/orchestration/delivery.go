@@ -4,21 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
 
-	coresession "praxis/internal/core/session"
+	sessionport "praxis/internal/session"
 )
 
 // ContextArtifactResolver returns approved, structured content for one durable
 // delivery. It must never load or return a source Agent's raw transcript.
-type ContextArtifactResolver func(context.Context, domainworkflow.ContextDelivery) (coresession.ContextArtifact, error)
+type ContextArtifactResolver func(context.Context, domainworkflow.ContextDelivery) (sessionport.ContextArtifact, error)
 
 type DeliverySessionHeaderResolver func(
 	context.Context,
 	domainworkflow.ContextDelivery,
-) (coresession.AgentSessionHeader, error)
+) (sessionport.AgentSessionHeader, error)
 
 // ContextDeliveryClaim records the durable state after a coordinator claims
 // one pending delivery for JSONL artifact append.

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
 
-	"praxis/internal/core/persistence"
+	"praxis/internal/persistence"
 )
 
 func (s *Store) GetContextDelivery(ctx context.Context, id domainfoundation.DeliveryID) (domainworkflow.ContextDelivery, error) {

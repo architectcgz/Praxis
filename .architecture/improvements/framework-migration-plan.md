@@ -73,7 +73,7 @@ Project
 
 - 所有改变持久化状态的命令都携带稳定 `RequestID`；RequestID 与命令参数摘要一起持久化，重复请求返回原结果，参数变化返回 conflict。
 - CreateProject、CreateSession、CreateAgent、Context append、policy update、control、delivery 和 Workflow command 统一采用该协议。
-- 将 IDGenerator 和 Clock 从 `core/system` 注入 orchestrator、domain factory 和 storage adapter；生产实现使用安全随机 ID，测试使用可控序列。
+- 将 IDGenerator 和 Clock 从 `system` 注入 orchestrator、domain factory 和 storage adapter；生产实现使用安全随机 ID，测试使用可控序列。
 - 明确 command acknowledgement timeout、execution timeout、stop timeout 的 context 边界；调用方超时不得取消已 durable 的命令。
 
 ### 2.6 领域事件没有成为事实写入口
@@ -93,10 +93,10 @@ Project
 
 迁移要求：
 
-- 在 `core/orchestrate` 建立 Project、Session、Agent、Execution、Context 和 event query service，统一负责归属校验、分页上限和快照拼装。
+- 在 `orchestration` 建立 Project、Session、Agent、Execution、Context 和 event query service，统一负责归属校验、分页上限和快照拼装。
 - compose 只实现这些 service 所需的 repository adapter，不在 `Application` 暴露绕过 core 的 store 读取方法。
 - app binding 只依赖窄 query/command interface；frontend API 只处理稳定 DTO，不能根据 SQLite payload 或 JSONL 字段自行推断状态。
-- 将 transcript 读取封装为 core/session 的 projection 接口，provider runtime 使用独立的 execution context 读取接口，避免 UI 查询结果影响模型输入。
+- 将 transcript 读取封装为 session 的 projection 接口，provider runtime 使用独立的 execution context 读取接口，避免 UI 查询结果影响模型输入。
 
 ### 2.8 runtime 与 Provider 实现位置不符合边界
 
@@ -105,10 +105,10 @@ Project
 迁移要求：
 
 - 将 execution input materialization、turn loop、deadline、tool dispatch 和 settlement 顺序迁移到 `agentruntime/execution`。
-- `internal/core/runtime` 只保留 provider-neutral ModelStream、ToolRunner、ExecutionLifecycle、snapshot 类型。
+- `internal/runtime` 只保留 provider-neutral ModelStream、ToolInvoker、ExecutionLifecycle、snapshot 类型。
 - Provider adapter 接收不可变 TurnSnapshot，不读取 SQLite、Agent policy 或 Wails context。
-- runtime 通过 core/session 的 transcript port 写入消息和 receipt；compose/provider_runner 退化为 ModelStream 和 ToolRunner 的组合适配器。
-- tool call 不再在 provider runner 中直接失败，而是进入 ToolBroker 端口；未装配时返回稳定 capability error 并完成 execution settlement。
+- runtime 通过 session 的 transcript port 写入消息和 receipt；compose/provider_runner 退化为 ModelStream 组合适配器，工具调用通过 ToolInvoker 进入 application 用例。
+- tool call 不再在 provider runner 中直接失败，而是进入 `tool_invocation` application port；未装配时返回稳定 capability error 并完成 execution settlement。
 
 ### 2.9 transcript receipt 与输入投影不完整
 
@@ -116,7 +116,7 @@ Project
 
 迁移要求：
 
-- 在 `core/session` 定义 runtime 所需的消息追加、消息读取和 receipt 对账接口，禁止依赖 storage 具体类型断言。
+- 在 `session` 定义 runtime 所需的消息追加、消息读取和 receipt 对账接口，禁止依赖 storage 具体类型断言。
 - 每个 execution 的 source input、assistant message、tool invocation/result 和 settlement 都以 execution ID 与 request identity 关联。
 - 通过 ContextSelection 构造本次 TurnSnapshot；transcript 只提供该 Agent 私有历史，不自动等同于 SessionContext。
 - 保留 JSONL 单 writer、partial-tail repair 和 fsync 顺序，并为重复 message、重复 start、重复 settlement 增加 contract test。
@@ -158,8 +158,8 @@ Project
 
 ### 阶段 0：建立可验证的目标边界
 
-- 固定包职责和依赖方向，补齐 `core/system` 的 Clock/IDGenerator 注入点。
-- 为 core/domain、core/persistence、core/runtime、core/session、agentruntime、compose 建立 contract test 和最小 fake。
+- 固定包职责和依赖方向，补齐 `system` 的 Clock/IDGenerator 注入点。
+- 为 domain、persistence、runtime、session、agentruntime、compose 建立 contract test 和最小 fake。
 - 让 `go test ./...`、`go vet ./...`、前端 TypeScript 构建继续通过。
 
 验收：目标边界可独立编译；没有新增代码从 core 反向依赖 app、storage、providers、tools、sandbox 或 compose。
@@ -193,7 +193,7 @@ Project
 ### 阶段 4：校正 runtime、Provider 和前端技术边界
 
 - 将 provider runner 中的 execution loop 和输入组装迁移到 agentruntime execution 区。
-- Provider 只实现 ModelStream；工具调用统一进入 ToolBroker port。
+- Provider 只实现 ModelStream；工具调用统一进入 `tool_invocation` application port。
 - secrets binding 改为脱敏查询和独立 set/clear command。
 - 前端改为 projection + event invalidation，移除本地 technical policy 和状态机推断。
 

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"praxis/internal/contracts"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 )
 
 type ProjectBindings struct {

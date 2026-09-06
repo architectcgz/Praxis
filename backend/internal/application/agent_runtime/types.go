@@ -1,39 +1,42 @@
 package agentruntime
 
 import (
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 
-	coreruntime "praxis/internal/core/runtime"
+	runtimecontract "praxis/internal/runtime"
 )
 
 type (
-	ModelStream           = coreruntime.ModelStream
-	ModelRequest          = coreruntime.ModelRequest
-	ModelStreamEvent      = coreruntime.ModelStreamEvent
-	ModelStreamEventKind  = coreruntime.ModelStreamEventKind
-	ToolInvoker           = coreruntime.ToolInvoker
-	ToolCall              = coreruntime.ToolCall
-	ToolDefinition        = coreruntime.ToolDefinition
-	ToolInvocationContext = coreruntime.ToolInvocationContext
-	ToolResult            = coreruntime.ToolResult
-	TurnSnapshot          = coreruntime.TurnSnapshot
-	TurnMessage           = coreruntime.TurnMessage
-	TurnMessageRole       = coreruntime.TurnMessageRole
-	TurnContentBlock      = coreruntime.TurnContentBlock
-	TurnContentBlockKind  = coreruntime.TurnContentBlockKind
+	ModelStream           = runtimecontract.ModelStream
+	ModelRequest          = runtimecontract.ModelRequest
+	ModelStreamEvent      = runtimecontract.ModelStreamEvent
+	ModelStreamEventKind  = runtimecontract.ModelStreamEventKind
+	ToolInvoker           = runtimecontract.ToolInvoker
+	ToolCatalog           = runtimecontract.ToolCatalog
+	ToolCall              = runtimecontract.ToolCall
+	AuthorizedToolCall    = runtimecontract.AuthorizedToolCall
+	ToolDefinition        = runtimecontract.ToolDefinition
+	ToolInvocationContext = runtimecontract.ToolInvocationContext
+	ToolResult            = runtimecontract.ToolResult
+	TurnSnapshot          = runtimecontract.TurnSnapshot
+	TurnMessage           = runtimecontract.TurnMessage
+	TurnMessageRole       = runtimecontract.TurnMessageRole
+	TurnContentBlock      = runtimecontract.TurnContentBlock
+	TurnContentBlockKind  = runtimecontract.TurnContentBlockKind
 )
 
 const (
-	StreamTextDelta       = coreruntime.StreamTextDelta
-	StreamToolCall        = coreruntime.StreamToolCall
-	StreamComplete        = coreruntime.StreamComplete
-	StreamError           = coreruntime.StreamError
-	TurnRoleUser          = coreruntime.TurnRoleUser
-	TurnRoleAssistant     = coreruntime.TurnRoleAssistant
-	TurnContentText       = coreruntime.TurnContentText
-	TurnContentThinking   = coreruntime.TurnContentThinking
-	TurnContentToolUse    = coreruntime.TurnContentToolUse
-	TurnContentToolResult = coreruntime.TurnContentToolResult
+	StreamTextDelta       = runtimecontract.StreamTextDelta
+	StreamToolCall        = runtimecontract.StreamToolCall
+	StreamComplete        = runtimecontract.StreamComplete
+	StreamError           = runtimecontract.StreamError
+	TurnRoleUser          = runtimecontract.TurnRoleUser
+	TurnRoleAssistant     = runtimecontract.TurnRoleAssistant
+	TurnRoleTool          = runtimecontract.TurnRoleTool
+	TurnContentText       = runtimecontract.TurnContentText
+	TurnContentThinking   = runtimecontract.TurnContentThinking
+	TurnContentToolUse    = runtimecontract.TurnContentToolUse
+	TurnContentToolResult = runtimecontract.TurnContentToolResult
 )
 
 type AgentOutputEventKind string

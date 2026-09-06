@@ -4,23 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
 	"time"
 
-	domainagent "praxis/internal/core/domain/agent"
-	"praxis/internal/core/persistence"
-	coreruntime "praxis/internal/core/runtime"
-	coresession "praxis/internal/core/session"
+	domainagent "praxis/internal/domain/agent"
+	"praxis/internal/persistence"
+	runtimecontract "praxis/internal/runtime"
+	sessionport "praxis/internal/session"
 )
 
-type AgentSessionResolver func(domainfoundation.SessionID, domainfoundation.AgentID) (coresession.TranscriptReceiptStore, error)
+type AgentSessionResolver func(domainfoundation.SessionID, domainfoundation.AgentID) (sessionport.TranscriptReceiptStore, error)
 
 // StartingExecutionActivator is the only scheduler capability recovery needs.
 // Keeping it local prevents recovery from owning scheduler implementation.
 type StartingExecutionActivator interface {
-	ActivateStarting(context.Context, []domainexecution.AgentExecution, coreruntime.ExecutionLifecycle) error
+	ActivateStarting(context.Context, []domainexecution.AgentExecution, runtimecontract.ExecutionLifecycle) error
 }
 
 // RecoveryCommands contains the durable command capabilities required to
@@ -41,7 +41,7 @@ type RecoveryCoordinatorConfig struct {
 	Controls   persistence.AgentControlRequestRepository
 	Deliveries persistence.ContextDeliveryRepository
 	Commands   RecoveryCommands
-	Lifecycle  coreruntime.ExecutionLifecycle
+	Lifecycle  runtimecontract.ExecutionLifecycle
 	Scheduler  StartingExecutionActivator
 	Delivery   *DeliveryCoordinator
 	Sessions   AgentSessionResolver
@@ -57,7 +57,7 @@ type RecoveryCoordinator struct {
 	controls   persistence.AgentControlRequestRepository
 	deliveries persistence.ContextDeliveryRepository
 	commands   RecoveryCommands
-	lifecycle  coreruntime.ExecutionLifecycle
+	lifecycle  runtimecontract.ExecutionLifecycle
 	scheduler  StartingExecutionActivator
 	delivery   *DeliveryCoordinator
 	sessions   AgentSessionResolver

@@ -31,18 +31,25 @@ func ProfileNames() []string {
 // cannot drift: an error surfaced before saving is the same verdict the next
 // startup would reach. The argument is never mutated; the result is a deep copy.
 func Validate(config FileConfig) (FileConfig, error) {
+	config.Groups = append([]GroupConfig(nil), config.Groups...)
 	config.Providers = append([]ProviderConfig(nil), config.Providers...)
-	config.Models = cloneModels(config.Models)
+	for index := range config.Providers {
+		config.Providers[index].Models = cloneModels(config.Providers[index].Models)
+		if credential := config.Providers[index].Credential; credential != nil {
+			credentialCopy := *credential
+			config.Providers[index].Credential = &credentialCopy
+		}
+	}
 	profiles := make(map[string]ModelReference, len(config.Profiles))
 	for key, value := range config.Profiles {
 		profiles[key] = value
 	}
 	config.Profiles = profiles
-	providersSeen, err := validateProviders(config.Providers)
+	groupsSeen, err := validateGroups(config.Groups)
 	if err != nil {
 		return FileConfig{}, err
 	}
-	modelsSeen, err := validateModels(config.Models, providersSeen)
+	modelsSeen, err := validateProviders(config.Providers, groupsSeen)
 	if err != nil {
 		return FileConfig{}, err
 	}
@@ -71,9 +78,35 @@ func isKnownProfile(profile string) bool {
 	return false
 }
 
-func validateProviders(configs []ProviderConfig) (map[string]struct{}, error) {
+func validateGroups(configs []GroupConfig) (map[string]struct{}, error) {
 	seen := make(map[string]struct{}, len(configs))
-	for _, provider := range configs {
+	for index := range configs {
+		group := &configs[index]
+		group.ID = strings.TrimSpace(group.ID)
+		group.DisplayName = strings.TrimSpace(group.DisplayName)
+		if !idPattern.MatchString(group.ID) {
+			return nil, fmt.Errorf("models config: invalid group id %q", group.ID)
+		}
+		if group.DisplayName == "" {
+			return nil, fmt.Errorf("models config: group %q display name is required", group.ID)
+		}
+		if _, exists := seen[group.ID]; exists {
+			return nil, fmt.Errorf("models config: duplicate group id %q", group.ID)
+		}
+		seen[group.ID] = struct{}{}
+	}
+	return seen, nil
+}
+
+func validateProviders(configs []ProviderConfig, groupsSeen map[string]struct{}) (map[modelKey]struct{}, error) {
+	seen := make(map[string]struct{}, len(configs))
+	modelsSeen := make(map[modelKey]struct{})
+	for index := range configs {
+		provider := &configs[index]
+		provider.ID = strings.TrimSpace(provider.ID)
+		provider.DisplayName = strings.TrimSpace(provider.DisplayName)
+		provider.BaseURL = strings.TrimSpace(provider.BaseURL)
+		provider.ProxyURL = strings.TrimSpace(provider.ProxyURL)
 		if !idPattern.MatchString(provider.ID) {
 			return nil, fmt.Errorf("models config: invalid provider id %q", provider.ID)
 		}
@@ -87,44 +120,74 @@ func validateProviders(configs []ProviderConfig) (map[string]struct{}, error) {
 		if _, err := providers.ValidateProxyURL(provider.ProxyURL); err != nil {
 			return nil, fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
+		if provider.DisplayName == "" {
+			provider.DisplayName = provider.ID
+		}
+		if !validAPIFormat(provider.DefaultAPIFormat) {
+			return nil, fmt.Errorf("models config: provider %q has unsupported default API format %q", provider.ID, provider.DefaultAPIFormat)
+		}
+		if err := validateCredential(provider); err != nil {
+			return nil, fmt.Errorf("models config: provider %q: %w", provider.ID, err)
+		}
+		providerModels, err := validateProviderModels(provider, groupsSeen, modelsSeen)
+		if err != nil {
+			return nil, err
+		}
+		for key := range providerModels {
+			modelsSeen[key] = struct{}{}
+		}
 	}
-	return seen, nil
+	return modelsSeen, nil
 }
 
-func validateModels(configs []ModelConfig, providersSeen map[string]struct{}) (map[modelKey]struct{}, error) {
-	seen := make(map[modelKey]struct{}, len(configs))
-	for index := range configs {
-		model := &configs[index]
-		model.ProviderID = strings.TrimSpace(model.ProviderID)
-		model.ModelID = strings.TrimSpace(model.ModelID)
-		if model.ProviderID == "" {
-			return nil, errors.New("models config: model provider id is required")
+func validateCredential(provider *ProviderConfig) error {
+	if provider.Credential == nil {
+		return nil
+	}
+	provider.Credential.Type = CredentialType(strings.TrimSpace(string(provider.Credential.Type)))
+	provider.Credential.Key = strings.TrimSpace(provider.Credential.Key)
+	if provider.Credential.Type != CredentialTypeAPIKey {
+		return fmt.Errorf("unsupported credential type %q", provider.Credential.Type)
+	}
+	if provider.Credential.Key == "" {
+		return errors.New("credential key is required")
+	}
+	return nil
+}
+
+func validateProviderModels(provider *ProviderConfig, groupsSeen map[string]struct{}, existing map[modelKey]struct{}) (map[modelKey]struct{}, error) {
+	seen := make(map[modelKey]struct{}, len(provider.Models))
+	for index := range provider.Models {
+		model := &provider.Models[index]
+		model.ID = strings.TrimSpace(model.ID)
+		model.DisplayName = strings.TrimSpace(model.DisplayName)
+		model.GroupID = strings.TrimSpace(model.GroupID)
+		if model.ID == "" {
+			return nil, fmt.Errorf("models config: provider %q model id is required", provider.ID)
 		}
-		if model.ModelID == "" {
-			return nil, errors.New("models config: model id is required")
+		if model.DisplayName == "" {
+			model.DisplayName = model.ID
 		}
-		key := modelKey{model.ProviderID, model.ModelID}
+		if _, exists := groupsSeen[model.GroupID]; !exists {
+			return nil, fmt.Errorf("models config: model %q for provider %q references unknown group %q", model.ID, provider.ID, model.GroupID)
+		}
+		key := modelKey{provider.ID, model.ID}
 		if _, exists := seen[key]; exists {
-			return nil, fmt.Errorf("models config: duplicate model %q for provider %q", model.ModelID, model.ProviderID)
+			return nil, fmt.Errorf("models config: duplicate model %q for provider %q", model.ID, provider.ID)
+		}
+		if _, exists := existing[key]; exists {
+			return nil, fmt.Errorf("models config: duplicate model %q for provider %q", model.ID, provider.ID)
 		}
 		seen[key] = struct{}{}
-		if _, exists := providersSeen[model.ProviderID]; !exists {
-			return nil, fmt.Errorf(
-				"models config: model %q references unknown provider %q", model.ModelID, model.ProviderID,
-			)
+		if model.APIFormatOverride != nil && !validAPIFormat(*model.APIFormatOverride) {
+			return nil, fmt.Errorf("models config: model %q has unsupported API format %q", model.ID, *model.APIFormatOverride)
 		}
-		if !validAPIFormat(model.APIFormat) {
-			return nil, fmt.Errorf(
-				"models config: model %q has unsupported API format %q", model.ModelID, model.APIFormat,
-			)
-		}
-		if model.ContextWindow <= 0 ||
-			model.MaxOutputTokens <= 0 || model.MaxOutputTokens >= model.ContextWindow {
-			return nil, fmt.Errorf("models config: model %q has invalid capability limits", model.ModelID)
+		if model.ContextWindow <= 0 || model.MaxOutputTokens <= 0 || model.MaxOutputTokens >= model.ContextWindow {
+			return nil, fmt.Errorf("models config: model %q has invalid capability limits", model.ID)
 		}
 		normalized, err := normalizeReasoning(model.Reasoning)
 		if err != nil {
-			return nil, fmt.Errorf("models config: model %q: %w", model.ModelID, err)
+			return nil, fmt.Errorf("models config: model %q: %w", model.ID, err)
 		}
 		model.Reasoning = normalized
 	}
@@ -195,6 +258,20 @@ func (r *Registry) ApplyConfig(config FileConfig) error {
 	if err != nil {
 		return err
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index := range validated.Providers {
+		if validated.Providers[index].Credential != nil {
+			continue
+		}
+		if current, exists := r.byProvider[validated.Providers[index].ID]; exists {
+			if current.Credential != nil {
+				credentialCopy := *current.Credential
+				validated.Providers[index].Credential = &credentialCopy
+			}
+		}
+	}
+	validated.Revision = r.config.Revision + 1
 	providerClients, err := buildProviderClients(validated.Providers, r.client)
 	if err != nil {
 		return err
@@ -202,30 +279,18 @@ func (r *Registry) ApplyConfig(config FileConfig) error {
 	if err := writeJSONAtomic(r.modelsPath, validated); err != nil {
 		return &ConfigurationError{Path: r.modelsPath, Err: err}
 	}
-	byModel := make(map[modelKey]ModelConfig, len(validated.Models))
-	for _, model := range validated.Models {
-		byModel[modelKey{model.ProviderID, model.ModelID}] = model
-	}
+	byModel := make(map[modelKey]ModelConfig)
 	byProvider := make(map[string]ProviderConfig, len(validated.Providers))
 	for _, provider := range validated.Providers {
 		byProvider[provider.ID] = provider
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	keys := make(map[string]string, len(byProvider))
-	for providerID := range byProvider {
-		if key := strings.TrimSpace(r.secrets[providerID]); key != "" {
-			keys[providerID] = key
+		for _, model := range provider.Models {
+			byModel[modelKey{provider.ID, model.ID}] = model
 		}
-	}
-	if err := writeJSONAtomic(r.secretsPath, secretsFile{Keys: keys}); err != nil {
-		return &ConfigurationError{Path: r.secretsPath, Err: err}
 	}
 	r.config = validated
 	r.byModel = byModel
 	r.byProvider = byProvider
 	r.providerClients = providerClients
-	r.secrets = keys
 	return nil
 }
 
@@ -243,20 +308,28 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 	if _, exists := r.byProvider[providerID]; !exists {
 		return fmt.Errorf("provider %q is not configured", providerID)
 	}
-	keys := make(map[string]string, len(r.secrets)+1)
-	for key, secret := range r.secrets {
-		keys[key] = secret
+	config := r.configLocked(true)
+	value = strings.TrimSpace(value)
+	for index := range config.Providers {
+		if config.Providers[index].ID == providerID {
+			if value == "" {
+				config.Providers[index].Credential = nil
+			} else {
+				config.Providers[index].Credential = &CredentialRecord{
+					Type: CredentialTypeAPIKey,
+					Key:  value,
+				}
+			}
+			if err := writeJSONAtomic(r.modelsPath, config); err != nil {
+				return &ConfigurationError{Path: r.modelsPath, Err: err}
+			}
+			config.Revision = r.config.Revision + 1
+			r.config = config
+			r.byProvider[providerID] = config.Providers[index]
+			return nil
+		}
 	}
-	if value = strings.TrimSpace(value); value == "" {
-		delete(keys, providerID)
-	} else {
-		keys[providerID] = value
-	}
-	if err := writeJSONAtomic(r.secretsPath, secretsFile{Keys: keys}); err != nil {
-		return &ConfigurationError{Path: r.secretsPath, Err: err}
-	}
-	r.secrets = keys
-	return nil
+	return fmt.Errorf("provider %q is not present in model configuration", providerID)
 }
 
 // ProviderKey returns the API key stored for a configured provider.
@@ -269,7 +342,7 @@ func (r *Registry) ProviderKey(providerID string) string {
 	if _, exists := r.byProvider[providerID]; !exists {
 		return ""
 	}
-	return strings.TrimSpace(r.secrets[providerID])
+	return providerKey(r.byProvider[providerID])
 }
 
 // HasProviderKey reports secret presence without exposing the secret value to

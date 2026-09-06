@@ -6,12 +6,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
-	domaincontext "praxis/internal/core/domain/context"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainsecurity "praxis/internal/core/domain/security"
+	commandprotocol "praxis/internal/command"
+	domainagent "praxis/internal/domain/agent"
+	domaincontext "praxis/internal/domain/context"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainsecurity "praxis/internal/domain/security"
 )
 
 // MaterializeExecutionInput freezes the current context, policy and model
@@ -34,7 +34,7 @@ func (s *Service) MaterializeExecutionInput(ctx context.Context, agent domainage
 	}
 	model, err := s.models.ResolveModelSelection(providerID, modelID, reasoning)
 	if err != nil {
-		return domainexecution.ExecutionInputSnapshot{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return domainexecution.ExecutionInputSnapshot{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	contextRevision, err := s.contexts.CurrentRevision(ctx, agent.SessionID)
 	if err != nil {

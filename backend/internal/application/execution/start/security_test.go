@@ -2,9 +2,9 @@ package start
 
 import (
 	"path/filepath"
-	domaincontext "praxis/internal/core/domain/context"
-	domainsecurity "praxis/internal/core/domain/security"
-	domainworkspace "praxis/internal/core/domain/workspace"
+	domaincontext "praxis/internal/domain/context"
+	domainsecurity "praxis/internal/domain/security"
+	domainworkspace "praxis/internal/domain/workspace"
 	"testing"
 	"time"
 )

@@ -5,11 +5,11 @@ import (
 	"praxis/internal/application/execution/control"
 	"praxis/internal/application/execution/queue"
 	"praxis/internal/application/execution/start"
-	domainworkflow "praxis/internal/core/domain/workflow"
+	domainworkflow "praxis/internal/domain/workflow"
 	"strings"
 
 	"praxis/internal/contracts"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 )
 
 type CommandBindings struct {

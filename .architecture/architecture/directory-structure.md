@@ -1,7 +1,7 @@
 # Praxis 目录结构
 
 > 本文定义 Praxis 源码目录、Go 包职责、应用用例文件布局和依赖方向。
-> 系统分层见 [`system-architecture.md`](system-architecture.md)，领域归属见 [`structure.md`](structure.md)，领域文件布局见 [`domain.md`](domain.md)，模型协议适配器见 [`model_provider.md`](model_provider.md)，模型配置注册表见 [`model_registry.md`](model_registry.md)。
+> 系统分层见 [`system-architecture.md`](system-architecture.md)，统一命名规则见 [`naming-conventions.md`](naming-conventions.md)，领域归属见 [`domain/structure.md`](domain/structure.md)，领域文件布局见 [`domain/README.md`](domain/README.md)，ToolInvocation 应用目录见 [`application/execution/tool_invocation.md`](application/execution/tool_invocation.md)，ToolInvocation 领域模型见 [`domain/execution/tool_invocation.md`](domain/execution/tool_invocation.md)，模型协议适配器见 [`model_provider/README.md`](model_provider/README.md)，模型配置注册表见 [`model_registry/README.md`](model_registry/README.md)。
 
 ## 1. 根目录
 
@@ -30,14 +30,13 @@ backend/
     │   ├── agent/           Agent policy 与结果用例
     │   └── agent_runtime/   AgentRuntime 生命周期与 model/tool loop
     ├── orchestration/       跨用例调度、投递和恢复
-    ├── core/
-    │   ├── domain/          领域实体、值对象、状态机和文件布局（见 `domain.md`）
-    │   ├── command/         durable command 身份和回执协议
-    │   ├── persistence/     repository 与 Tx 端口
-    │   ├── projection/      只读快照、列表和审计事件投影
-    │   ├── runtime/         Provider-neutral runtime 端口
-    │   ├── session/         transcript 与 receipt 端口
-    │   └── system/          clock、ID 和生命周期端口
+    ├── domain/              领域实体、值对象、状态机和文件布局（见 `domain/README.md`）
+    ├── command/             durable command 身份和回执协议
+    ├── persistence/         repository 与 Tx 端口
+    ├── projection/          只读快照、列表和审计事件投影
+    ├── runtime/             Provider-neutral runtime 端口
+    ├── session/             transcript 与 receipt 端口
+    ├── system/              clock、ID 和生命周期端口
     ├── managedprocess/      Session 长期受控进程
     ├── workflow/            Workflow 定义、实例和 coordinator
     ├── storage/             SQLite、JSONL、blob 和 DataRoot 适配器
@@ -52,7 +51,7 @@ backend/
 
 `internal/application` 按产品用例划分包。应用服务负责命令准入、业务流程、原子边界和持久化端口调用，不依赖 Wails、SQLite、Provider SDK 或具体 runtime 实现。
 
-完整目录和职责见 [`application.md`](application.md)。
+完整目录和职责见 [`application/README.md`](application/README.md)。
 
 外部协议 DTO 与应用参数使用不同类型：
 
@@ -82,9 +81,16 @@ internal/application/execution/
 ├── settlement/            execution 启动确认与结算
 │   ├── service.go         Service、Config、端口和构造函数
 │   └── settlement.go      runtime start confirmation 与 durable settlement
+└── tool_invocation/       ToolInvocation 准入、审批、派发和结算
+    ├── service.go         Service、Config、端口和构造函数
+    ├── invoke.go          工具调用准入与幂等处理
+    ├── approval.go        工具审批命令与授权校验
+    └── settle.go          工具结果持久化与 execution 关联
 ```
 
 `execution` 目录按业务能力划分为独立 Go 子包。每个子包的 `service.go` 只定义本业务用例共享的接收者和依赖，不放置具体用例的输入或输出参数；每个用例的 `Params`、`Result` 和实现放在同一个用例文件中。
+
+`tool_invocation` 是 execution application service 的工具调用子包。包内使用 `Service` 作为唯一应用服务类型，拥有 `ToolInvocation` 的命令准入、审批、幂等和持久化状态；具体工具副作用通过 `ToolExecutor` 端口执行，不能在该子包内直接 import `tools`、`managedprocess` 或平台实现。完整文件职责见 [`application/execution/tool_invocation.md`](application/execution/tool_invocation.md)。
 
 例如 `start/service.go` 定义启动与恢复用例共享的依赖：
 
@@ -119,14 +125,14 @@ internal/application/agent/
 └── briefing.go            Briefing 定向 Agent 交接用例
 ```
 
-`service.go` 定义本产品域 application service 的具体 `Service` 结构体、共享依赖、`Config`、端口和构造函数；它不是另一个业务服务，也不要求在此定义 application service 接口。`create.go` 定义同一个 `Service` 结构体的 `CreateProject` 方法，并在同一文件放置该用例的 `Params` 和 `Result`。项目生命周期、路径或工作区的其他写入用例按业务新增独立文件，并继续使用该结构体接收者和依赖。Go 会将同一目录下的这些文件编译为同一个 package，因此文件拆分不改变 service 的归属；`session` 和 `agent` 遵循相同规则，输入输出参数不回填到 `service.go`。`agent_result.go` 承载结构化执行结果的提交、审批和拒绝用例；`briefing.go` 承载面向指定目标 Agent 的内部简报投递、审批和拒绝用例。`AgentResult` 与 `Briefing` 的领域实体、字段校验和状态转换属于 `core/domain/workflow`，application 文件只负责调用这些领域行为并完成事务和持久化。两者都不是 Provider stream 或通用输出参数容器。
+`service.go` 定义本产品域 application service 的具体 `Service` 结构体、共享依赖、`Config`、端口和构造函数；它不是另一个业务服务，也不要求在此定义 application service 接口。`create.go` 定义同一个 `Service` 结构体的 `CreateProject` 方法，并在同一文件放置该用例的 `Params` 和 `Result`。项目生命周期、路径或工作区的其他写入用例按业务新增独立文件，并继续使用该结构体接收者和依赖。Go 会将同一目录下的这些文件编译为同一个 package，因此文件拆分不改变 service 的归属；`session` 和 `agent` 遵循相同规则，输入输出参数不回填到 `service.go`。`agent_result.go` 承载结构化执行结果的提交、审批和拒绝用例；`briefing.go` 承载面向指定目标 Agent 的内部简报投递、审批和拒绝用例。`AgentResult` 与 `Briefing` 的领域实体、字段校验和状态转换属于 `domain/workflow`，application 文件只负责调用这些领域行为并完成事务和持久化。两者都不是 Provider stream 或通用输出参数容器。
 
 新增写入用例时，继续在同一 package 下按用例新增文件，例如 `update.go` 中定义 `func (s *Service) UpdateProject(...)` 及其 `UpdateProjectParams`、`UpdateProjectResult`；如果操作具有更具体的业务语义，则使用 `rename.go`、`move.go` 等名称。需要抽象时，接口由使用方按最小能力定义，application service 包不在 `service.go` 集中声明调用方接口。
 
 只读查询和快照投影不属于 application service，统一放在 core 的 projection 边界：
 
 ```text
-internal/core/projection/
+internal/projection/
 ├── project.go             Project 与 Workspace 投影
 ├── session.go             Session 与 SessionContext 投影
 ├── agent.go               Agent 与 Agent policy 投影
@@ -134,7 +140,7 @@ internal/core/projection/
 └── event.go               审计事件投影
 ```
 
-产品 application 包拥有本产品域的写入用例，`application/agent_runtime` 拥有单 Agent 执行流程。跨包流程由 `internal/orchestration` 协调，查询由 `internal/core/projection` 提供，领域状态转换仍由 `internal/core/domain` 中的对象执行。
+产品 application 包拥有本产品域的写入用例，`application/agent_runtime` 拥有单 Agent 执行流程。跨包流程由 `internal/orchestration` 协调，查询由 `internal/projection` 提供，领域状态转换仍由 `internal/domain` 中的对象执行。
 
 ## 4. Tx 边界
 
@@ -165,19 +171,19 @@ orchestration 组合多个应用用例或 runtime 端口，不拥有领域状态
 
 Execution settlement 属于 `application/execution`，因为它修改 AgentExecution 和 Agent 的权威状态。Scheduler 和 recovery 只负责触发、重试和收敛，不直接绕过应用服务写 repository。
 
-## 6. Core
+## 6. 内层包
 
 | 目录 | 职责 | 不包含 |
 |---|---|---|
-| `core/domain` | 实体、值对象、状态机和领域不变量 | repository、binding DTO、runtime actor |
-| `core/command` | durable command 身份、参数摘要和结果回执 | 业务状态转换、传输 DTO、命令处理流程 |
-| `core/persistence` | repository、查询和 `Tx` 端口 | SQLite driver、SQL、文件格式 |
-| `core/projection` | 跨领域只读快照、列表和审计事件投影 | 状态写入、binding DTO、存储实现 |
-| `core/runtime` | 模型流、工具执行和 execution lifecycle 端口 | Provider SDK、工具副作用实现 |
-| `core/session` | transcript、receipt 和 session store 端口 | JSONL 文件实现 |
-| `core/system` | clock、ID 和进程生命周期端口 | 平台 API 实现 |
+| `domain` | 实体、值对象、状态机和领域不变量 | repository、binding DTO、runtime actor |
+| `command` | durable command 身份、参数摘要和结果回执 | 业务状态转换、传输 DTO、命令处理流程 |
+| `persistence` | repository、查询和 `Tx` 端口 | SQLite driver、SQL、文件格式 |
+| `projection` | 跨领域只读快照、列表和审计事件投影 | 状态写入、binding DTO、存储实现 |
+| `runtime` | 模型流、工具执行和 execution lifecycle 端口 | Provider SDK、工具副作用实现 |
+| `session` | transcript、receipt 和 session store 端口 | JSONL 文件实现 |
+| `system` | clock、ID 和进程生命周期端口 | 平台 API 实现 |
 
-`core/domain` 只依赖标准库。其余 core 包可以依赖 domain，但不能依赖 app、contracts、application、orchestration、storage、modelprovider、modelregistry、tools 或 compose。
+`domain` 只依赖标准库。其余内层包可以依赖 domain，但不能依赖 app、contracts、application、orchestration、storage、modelprovider、modelregistry、tools 或 compose。
 
 ## 7. 适配器与组合
 
@@ -185,8 +191,8 @@ Execution settlement 属于 `application/execution`，因为它修改 AgentExecu
 - `storage` 实现 core persistence、session 和 blob 端口。
 - `modelprovider` 实现 core runtime 的 Provider-neutral 模型端口，负责具体 API format 的请求编码和流响应解析。
 - `modelregistry` 管理模型配置、profile、credential 状态和模型解析索引，不解析 Provider wire 协议。
-- `tools` 实现 core runtime 工具端口，工具由当前进程直接执行。
-- `tools` 的 Agent 工具注册表不包含删除文件、目录或业务对象的工具，`compose` 只向 `application/agent_runtime` 注入该注册表中的工具端口实现。
+- `tools` 实现经过准入后的 `ToolExecutor` 端口；需要进程隔离的工具交给 sandbox adapter 执行。
+- `tools` 的 Agent 工具注册表不包含删除文件、目录或业务对象的工具，`compose` 只向 `application/execution/tool_invocation` 注入该注册表中的执行端口实现；`application/agent_runtime` 只接收 `ToolInvoker`。
 - `compose` 创建具体实现并注入 application、orchestration、workflow 和 app；其他包不得 import `compose`。
 
 ## 8. 依赖方向
@@ -203,10 +209,12 @@ compose ───────────► all concrete packages
 
 ## 9. 文件命名
 
+跨 Go、TypeScript、Wails contract、领域类型和前端组件的命名统一遵循 [`naming-conventions.md`](naming-conventions.md)。本节只定义与源码目录布局直接相关的文件规则。
+
 Go 包路径使用简短、全小写、无下划线的名称。文件名按用例或职责命名：
 
 - `service.go`：共享接收者、依赖、端口和构造函数；
 - `<use_case>.go`：参数、结果和用例实现；
-- `<projection>.go`：core 只读快照和列表投影；
+- `<projection>.go`：内层只读快照和列表投影；
 - `repository`、`adapter`、`manager` 不作为无具体语义的通用包名；
 - 文件名中的下划线只用于分隔语义，例如 `send_input.go` 和 `request_control.go`。

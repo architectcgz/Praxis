@@ -1,7 +1,7 @@
 # Model Stream
 
 > 本文定义 `application/agent_runtime/stream.go` 对单次模型调用流的消费、实时转发、结果收敛和终止语义。
-> 多轮 model/tool 流程见 [`loop.md`](loop.md)，模型请求构造见 [`model_request.md`](model_request.md)，AgentRuntime 总体职责见 [`../../application.md`](../../application.md)。
+> 多轮 model/tool 流程见 [`loop.md`](loop.md)，模型请求构造见 [`model_request.md`](model_request.md)，AgentRuntime 总体职责见 [`README.md`](README.md)，Application 模块入口见 [`application/README.md`](../README.md)。
 
 ## 1. 角色
 

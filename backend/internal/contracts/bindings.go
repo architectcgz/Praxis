@@ -145,11 +145,17 @@ type ModelOption struct {
 
 // ProviderConfigOption carries editable provider metadata and secret status.
 type ProviderConfigOption struct {
-	ID           string `json:"id"`
-	ProviderName string `json:"providerName"`
-	BaseURL      string `json:"baseURL"`
-	ProxyURL     string `json:"proxyURL"`
-	HasAPIKey    bool   `json:"hasAPIKey"`
+	ID               string `json:"id"`
+	ProviderName     string `json:"providerName"`
+	BaseURL          string `json:"baseURL"`
+	ProxyURL         string `json:"proxyURL"`
+	DefaultAPIFormat string `json:"defaultAPIFormat"`
+	HasAPIKey        bool   `json:"hasAPIKey"`
+}
+
+type GroupConfigOption struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
 }
 
 // ModelConfigOption carries every field the settings UI needs to edit a model.
@@ -157,6 +163,7 @@ type ModelConfigOption struct {
 	ProviderID      string          `json:"providerId"`
 	ModelID         string          `json:"modelId"`
 	Label           string          `json:"label"`
+	GroupID         string          `json:"groupId"`
 	APIFormat       string          `json:"apiFormat"`
 	ContextWindow   int             `json:"contextWindow"`
 	MaxOutputTokens int             `json:"maxOutputTokens"`
@@ -167,6 +174,7 @@ type ModelConfigOption struct {
 // whole so per-entry edits cannot leave dangling references, such as deleting a
 // model that a profile still binds.
 type ModelConfigDocument struct {
+	Groups    []GroupConfigOption       `json:"groups"`
 	Providers []ProviderConfigOption    `json:"providers"`
 	Models    []ModelConfigOption       `json:"models"`
 	Profiles  map[string]ModelReference `json:"profiles"`
@@ -176,6 +184,7 @@ type ModelConfigDocument struct {
 }
 
 type SaveModelConfigRequest struct {
+	Groups    []GroupConfigOption       `json:"groups"`
 	Providers []ProviderConfigOption    `json:"providers"`
 	Models    []ModelConfigOption       `json:"models"`
 	Profiles  map[string]ModelReference `json:"profiles"`

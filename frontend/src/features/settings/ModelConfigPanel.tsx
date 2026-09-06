@@ -30,6 +30,7 @@ import {
     ModelAPIFormat,
     ModelConfigDocument,
     ModelConfigOption,
+    GroupConfigOption,
     ProviderConfigOption,
     saveModelConfig,
     setProviderKey,
@@ -301,6 +302,7 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
                 <ModelDialog
                     model={editor.index === null ? null : config.models[editor.index]}
                     provider={modelEditorProvider}
+                    groups={config.groups}
                     assignedProfiles={
                         editor.index === null
                             ? []
@@ -533,6 +535,7 @@ function ProviderDialog({
                 providerName: "",
                 baseURL: "",
                 proxyURL: "",
+                defaultAPIFormat: "openai_responses",
                 hasAPIKey: false,
             },
     );
@@ -605,6 +608,21 @@ function ProviderDialog({
                             placeholder="http://127.0.0.1:7897"
                         />
                     </Field>
+                    <Field label="默认 API Format">
+                        <select
+                            value={draft.defaultAPIFormat}
+                            onChange={(event) =>
+                                setDraft({
+                                    ...draft,
+                                    defaultAPIFormat: event.target.value as ModelAPIFormat,
+                                })
+                            }
+                        >
+                            <option value="anthropic_messages">Anthropic Messages</option>
+                            <option value="openai_responses">OpenAI Responses</option>
+                            <option value="openai_chat_completions">OpenAI Chat Completions</option>
+                        </select>
+                    </Field>
                     <Field label="API Key">
                         <input
                             required
@@ -636,6 +654,7 @@ function ProviderDialog({
 function ModelDialog({
     model,
     provider,
+    groups,
     assignedProfiles,
     error,
     saving,
@@ -645,6 +664,7 @@ function ModelDialog({
 }: {
     model: ModelConfigOption | null;
     provider: ProviderConfigOption;
+    groups: GroupConfigOption[];
     assignedProfiles: string[];
     error: string;
     saving: boolean;
@@ -659,7 +679,8 @@ function ModelDialog({
                 providerId: provider.id,
                 modelId: "",
                 label: "",
-                apiFormat: "openai_responses",
+                groupId: groups[0]?.id || "",
+                apiFormat: provider.defaultAPIFormat,
                 contextWindow: 128000,
                 maxOutputTokens: 8192,
                 reasoning: { supported: true, levels: ["low", "medium", "high"], default: "medium" },
@@ -704,6 +725,10 @@ function ModelDialog({
         }
         if (!draft.modelId.trim()) {
             setValidationError("请填写 Model ID");
+            return;
+        }
+        if (!draft.groupId.trim()) {
+            setValidationError("请选择 Model 分组");
             return;
         }
         if (draft.contextWindow < 2) {
@@ -801,6 +826,18 @@ function ModelDialog({
                             )}
                         </Field>
                     </div>
+                    <Field label="Model 分组">
+                        <select
+                            required
+                            value={draft.groupId}
+                            onChange={(event) => setDraft({ ...draft, groupId: event.target.value })}
+                        >
+                            <option value="">选择分组</option>
+                            {groups.map((group) => (
+                                <option value={group.id} key={group.id}>{group.displayName}</option>
+                            ))}
+                        </select>
+                    </Field>
                     <Field label="API Format">
                         <select
                             value={draft.apiFormat}

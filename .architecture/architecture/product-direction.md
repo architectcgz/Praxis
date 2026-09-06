@@ -2,7 +2,7 @@
 
 > 本文定义 Praxis 的目标产品、领域关系、共享上下文、运行方式、持久化分工和交付范围。
 
-领域关系见 [`structure.md`](structure.md)，Workflow 模块见 [`workflow.md`](workflow.md)，系统分层见 [`system-architecture.md`](system-architecture.md)，源码布局见 [`directory-structure.md`](directory-structure.md)，执行时序见 [`agent-orchestration-model.md`](agent-orchestration-model.md)。
+领域关系见 [`domain/structure.md`](domain/structure.md)，Workflow 模块见 [`workflow/README.md`](workflow/README.md)，系统分层见 [`system-architecture.md`](system-architecture.md)，源码布局见 [`directory-structure.md`](directory-structure.md)，执行时序见 [`orchestration/README.md`](orchestration/README.md)。
 
 ## 1. 产品定位
 
@@ -125,7 +125,7 @@ Go application services + orchestration
         └── optional LLM provider APIs
 ```
 
-React 负责界面与投影；Go app 负责桌面生命周期和 binding；`internal/application` 负责用例准入、事务边界、产品状态写入和 AgentRuntime；`internal/orchestration` 负责执行调度、投递和恢复；`internal/core` 定义领域状态与内层端口；`application/agent_runtime` 负责 activation、取消和单 Agent execution loop；Provider 适配器只处理模型协议。
+React 负责界面与投影；Go app 负责桌面生命周期和 binding；`internal/application` 负责用例准入、事务边界、产品状态写入和 AgentRuntime；`internal/orchestration` 负责执行调度、投递和恢复；`internal` 定义领域状态与内层端口；`application/agent_runtime` 负责 activation、取消和单 Agent execution loop；Provider 适配器只处理模型协议。
 
 ## 8. 交付范围
 

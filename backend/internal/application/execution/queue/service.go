@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
-	domaincommand "praxis/internal/core/domain/command"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkflow "praxis/internal/core/domain/workflow"
-	"praxis/internal/core/persistence"
-	coreruntime "praxis/internal/core/runtime"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domainagent "praxis/internal/domain/agent"
+	domaincommand "praxis/internal/domain/command"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkflow "praxis/internal/domain/workflow"
+	"praxis/internal/persistence"
+	runtimecontract "praxis/internal/runtime"
+	"praxis/internal/system"
 )
 
 type Readiness interface{ Ready() bool }
@@ -27,7 +27,7 @@ type InputFactory interface {
 }
 
 type RuntimeActivator interface {
-	TryActivate(context.Context, domainfoundation.AgentID, coreruntime.ExecutionLifecycle) error
+	TryActivate(context.Context, domainfoundation.AgentID, runtimecontract.ExecutionLifecycle) error
 }
 
 type Config struct {
@@ -41,7 +41,7 @@ type Config struct {
 	Readiness    Readiness
 	Inputs       InputFactory
 	Activator    RuntimeActivator
-	Lifecycle    coreruntime.ExecutionLifecycle
+	Lifecycle    runtimecontract.ExecutionLifecycle
 	Clock        system.Clock
 	IDs          system.IDGenerator
 }
@@ -57,7 +57,7 @@ type Service struct {
 	readiness  Readiness
 	inputs     InputFactory
 	activator  RuntimeActivator
-	lifecycle  coreruntime.ExecutionLifecycle
+	lifecycle  runtimecontract.ExecutionLifecycle
 	clock      system.Clock
 	ids        system.IDGenerator
 }
@@ -111,20 +111,20 @@ func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (Enqueu
 		return EnqueueResult{}, errors.New("enqueue work context is required")
 	}
 	if !s.readiness.Ready() {
-		return EnqueueResult{}, corecommand.NewError(corecommand.ErrorNotReady)
+		return EnqueueResult{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
 	if strings.TrimSpace(params.ID.String()) == "" || strings.TrimSpace(params.RequestID.String()) == "" || strings.TrimSpace(params.AgentID.String()) == "" || strings.TrimSpace(params.Prompt) == "" {
-		return EnqueueResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return EnqueueResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	result := EnqueueResult{}
 	startEligible := false
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		digest := corecommand.ArgumentsDigest(struct {
+		digest := commandprotocol.ArgumentsDigest(struct {
 			WorkID  domainfoundation.WorkItemID
 			AgentID domainfoundation.AgentID
 			Prompt  string
 		}{params.ID, params.AgentID, strings.TrimSpace(params.Prompt)})
-		receipt, found, err := corecommand.FindReceipt(txCtx, s.receipts, params.RequestID, "queue_work", digest)
+		receipt, found, err := commandprotocol.FindReceipt(txCtx, s.receipts, params.RequestID, "queue_work", digest)
 		if err != nil {
 			return err
 		}
@@ -143,7 +143,7 @@ func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (Enqueu
 		existing, err := s.queuedWork.Get(txCtx, params.ID)
 		if err == nil {
 			if existing.AgentID != params.AgentID || existing.Prompt != strings.TrimSpace(params.Prompt) {
-				return corecommand.NewError(corecommand.ErrorInvalidRequest)
+				return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 			}
 			result.Work, result.ExistingWork = existing, true
 			return nil
@@ -199,7 +199,7 @@ func (s *Service) StartNextQueuedWork(ctx context.Context, agentID domainfoundat
 		return StartResult{}, errors.New("start queued work context is required")
 	}
 	if strings.TrimSpace(agentID.String()) == "" {
-		return StartResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return StartResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	result := StartResult{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {

@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainsecurity "praxis/internal/core/domain/security"
-	"praxis/internal/core/persistence"
-	coreruntime "praxis/internal/core/runtime"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domainagent "praxis/internal/domain/agent"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainsecurity "praxis/internal/domain/security"
+	"praxis/internal/persistence"
+	runtimecontract "praxis/internal/runtime"
+	"praxis/internal/system"
 )
 
 // Readiness controls command admission while startup recovery is in progress.
@@ -36,7 +36,7 @@ type InputFactory interface {
 
 // RuntimeActivator notifies the scheduler after execution creation commits.
 type RuntimeActivator interface {
-	TryActivate(context.Context, domainfoundation.AgentID, coreruntime.ExecutionLifecycle) error
+	TryActivate(context.Context, domainfoundation.AgentID, runtimecontract.ExecutionLifecycle) error
 }
 
 // ModelResolver resolves a durable model selection for resume requests.
@@ -60,7 +60,7 @@ type Config struct {
 	PrimaryAgent PrimaryAgentProvider
 	Security     *SecurityResolver
 	Activator    RuntimeActivator
-	Lifecycle    coreruntime.ExecutionLifecycle
+	Lifecycle    runtimecontract.ExecutionLifecycle
 	Models       ModelResolver
 	Clock        system.Clock
 	IDs          system.IDGenerator
@@ -81,7 +81,7 @@ type Service struct {
 	primary    PrimaryAgentProvider
 	security   SecurityResolver
 	activator  RuntimeActivator
-	lifecycle  coreruntime.ExecutionLifecycle
+	lifecycle  runtimecontract.ExecutionLifecycle
 	models     ModelResolver
 	clock      system.Clock
 	ids        system.IDGenerator
@@ -164,13 +164,13 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 		return Result{}, errors.New("send input context is required")
 	}
 	if !s.readiness.Ready() {
-		return Result{}, corecommand.NewError(corecommand.ErrorNotReady)
+		return Result{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
 	if params.RequestID == "" || strings.TrimSpace(params.Content) == "" || (params.SessionID == "" && params.AgentID == "") {
-		return Result{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return Result{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	if strings.TrimSpace(params.ProviderID) == "" || strings.TrimSpace(params.ModelID) == "" {
-		return Result{}, corecommand.NewError(corecommand.ErrorModelNotConfigured)
+		return Result{}, commandprotocol.NewError(commandprotocol.ErrorModelNotConfigured)
 	}
 	if params.AgentID == "" {
 		agent, err := s.primary.GetOrCreatePrimaryAgent(ctx, params.SessionID, params.RequestID)
@@ -197,28 +197,28 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 			return err
 		}
 		if agent.SessionID != params.SessionID && params.SessionID != "" {
-			return corecommand.NewError(corecommand.ErrorInvalidRequest)
+			return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 		}
 		switch agent.State {
 		case domainagent.AgentExecuting, domainagent.AgentPausing:
-			return corecommand.NewError(corecommand.ErrorAgentExecuting)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentExecuting)
 		case domainagent.AgentIdle, domainagent.AgentWaiting, domainagent.AgentFailed, domainagent.AgentClosed:
 		default:
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		delivering, err := s.deliveries.HasDeliveringByTarget(txCtx, agent.ID)
 		if err != nil {
 			return err
 		}
 		if delivering {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		active, err := s.executions.CountActiveBySession(txCtx, agent.SessionID)
 		if err != nil {
 			return err
 		}
 		if active >= 1 {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		input, err := s.MaterializeExecutionInput(txCtx, agent, params.ProviderID, params.ModelID, params.Reasoning)
 		if err != nil {
@@ -266,7 +266,7 @@ func (s *Service) Resume(ctx context.Context, params ResumeParams) (Result, erro
 		return Result{}, errors.New("resume context is required")
 	}
 	if !s.readiness.Ready() || params.AgentID == "" || params.RequestID == "" {
-		return Result{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return Result{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	var result Result
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -286,7 +286,7 @@ func (s *Service) Resume(ctx context.Context, params ResumeParams) (Result, erro
 			return err
 		}
 		if agent.State != domainagent.AgentPaused && agent.State != domainagent.AgentInterrupted {
-			return corecommand.NewError(corecommand.ErrorAgentUnavailable)
+			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		model, err := s.models.ResolveModel(agent.Profile)
 		if err != nil {

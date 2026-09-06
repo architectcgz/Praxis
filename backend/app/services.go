@@ -11,15 +11,15 @@ import (
 	"praxis/internal/application/execution/start"
 	"praxis/internal/application/project"
 	applicationsession "praxis/internal/application/session"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainproject "praxis/internal/core/domain/project"
-	domainsession "praxis/internal/core/domain/session"
-	domainworkspace "praxis/internal/core/domain/workspace"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainproject "praxis/internal/domain/project"
+	domainsession "praxis/internal/domain/session"
+	domainworkspace "praxis/internal/domain/workspace"
 
-	"praxis/internal/core/projection"
-	coresession "praxis/internal/core/session"
 	"praxis/internal/logging"
+	"praxis/internal/projection"
 	"praxis/internal/providers/registry"
+	sessionport "praxis/internal/session"
 )
 
 type ReadinessSource interface {
@@ -41,7 +41,7 @@ type ProjectService interface {
 
 type AgentQueries interface {
 	ProjectAgent(context.Context, domainfoundation.AgentID, int) (projection.AgentProjection, error)
-	ListAgentMessages(context.Context, domainfoundation.AgentID, int) ([]coresession.AgentSessionMessage, error)
+	ListAgentMessages(context.Context, domainfoundation.AgentID, int) ([]sessionport.AgentSessionMessage, error)
 }
 
 type EventQueries interface {

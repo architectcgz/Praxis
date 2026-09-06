@@ -1,7 +1,7 @@
 # AgentLoop
 
 > 本文定义一个 Agent 的长期运行 loop、message 序列、execution 编排和并发边界。
-> AgentRuntime 总体职责见 [`application.md`](../../application.md)，模型请求边界见 [`model_request.md`](model_request.md)，执行状态与 receipt 语义见 [`agent-runtime-model.md`](../../agent-runtime-model.md)，领域状态转换见 [`domain.md`](../../domain.md)。
+> AgentRuntime 模块入口见 [`README.md`](README.md)，Application 总体职责见 [`application/README.md`](../README.md)，模型请求边界见 [`model_request.md`](model_request.md)，领域状态转换见 [`domain/README.md`](../../domain/README.md)。
 
 ## 1. 角色
 
@@ -227,7 +227,7 @@ AgentLoop 不依赖 goroutine 是否存在来判断产品状态。进程启动�
 
 | 能力 | 所属组件 |
 |---|---|
-| Agent 和 AgentExecution 产品状态转换 | `core/domain` + application service |
+| Agent 和 AgentExecution 产品状态转换 | `domain` + application service |
 | AgentLoop 命令串行化、`messages` 和当前 execution | `application/agent_runtime` |
 | 跨 Agent 调度、投递和 recovery | `orchestration` |
 | Model、tool、transcript 和 lifecycle 端口契约 | `core` |

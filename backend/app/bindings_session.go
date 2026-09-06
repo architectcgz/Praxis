@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainfoundation "praxis/internal/domain/foundation"
 
 	"praxis/internal/contracts"
 )

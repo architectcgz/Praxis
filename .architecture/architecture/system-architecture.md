@@ -1,7 +1,7 @@
 # Praxis 系统架构
 
 > 状态：规范性目标架构。本文描述系统分层、依赖方向、进程内通信、工程布局和验证边界。
-> 领域身份见 [`structure.md`](structure.md)，Application 目录见 [`application.md`](application.md)，源码布局见 [`directory-structure.md`](directory-structure.md)，持久化分工见 [`storage-architecture.md`](storage-architecture.md)，目录总入口见 [`../architecture.md`](../architecture.md)。
+> 领域身份见 [`domain/structure.md`](domain/structure.md)，Application 目录见 [`application/README.md`](application/README.md)，源码布局见 [`directory-structure.md`](directory-structure.md)，持久化分工见 [`storage/README.md`](storage/README.md)，目录总入口见 [`../architecture.md`](../architecture.md)。
 
 ## 1. 系统分层
 
@@ -19,9 +19,10 @@ backend/app/ + internal/contracts/
         internal/application/
             │                              ▲
             ▼                              │
-        internal/core/              internal/orchestration/
-            │ core 定义的端口               │
-            ▼                              ▼
+        internal/{domain,command,persistence,
+        projection,runtime,session,system}/
+            │ 内层包定义的端口
+            ▼
         managedprocess / storage / modelprovider / modelregistry / tools
             │
             ├── 本机 DataRoot
@@ -32,18 +33,18 @@ internal/compose/ 负责组装全部模块和适配器。
 
 ## 2. 依赖方向
 
-依赖只能由外向内。`internal/core/domain` 是最内层，只允许 import 标准库。完整包级依赖图见 [`directory-structure.md`](directory-structure.md)。
+依赖只能由外向内。`internal/domain` 是最内层，只允许 import 标准库。完整包级依赖图见 [`directory-structure.md`](directory-structure.md)。
 
 | 禁止关系 | 原因 |
 |---|---|
-| `internal/core/**` 与 `internal/application/**` import Wails、SQLite driver、Provider SDK | core 与应用用例必须能脱离桌面壳、数据库和厂商 SDK 单测 |
-| `internal/core/**` import `app`、`application`、`orchestration`、`storage`、`modelprovider`、`modelregistry`、`tools`、`contracts`、`compose` | 内层只依赖自己定义的接口 |
-| `internal/application/**` import `app`、`contracts`、`orchestration`、`storage`、`modelprovider`、`modelregistry`、`tools`、`compose` | 应用用例只依赖 core 端口；协调器和适配器通过注入的端口接入 |
+| `internal/{domain,command,persistence,projection,runtime,session,system}/**` 与 `internal/application/**` import Wails、SQLite driver、Provider SDK | 内层包与应用用例必须能脱离桌面壳、数据库和厂商 SDK 单测 |
+| `internal/{domain,command,persistence,projection,runtime,session,system}/**` import `app`、`application`、`orchestration`、`storage`、`modelprovider`、`modelregistry`、`tools`、`contracts`、`compose` | 内层只依赖自己定义的接口 |
+| `internal/application/**` import `app`、`contracts`、`orchestration`、`storage`、`modelprovider`、`modelregistry`、`tools`、`compose` | 应用用例只依赖内层端口；协调器和适配器通过注入的端口接入 |
 | Provider SDK 出现在 `internal/modelprovider/` 之外 | 模型协议细节不得泄漏进领域 |
 | SQLite driver 出现在 `internal/storage/` 之外 | 存储实现细节不得泄漏进领域 |
-| `internal/managedprocess`、`internal/modelprovider`、`internal/modelregistry`、`internal/storage`、`internal/tools` import `internal/application` | 适配器只实现 `internal/core` 定义的端口 |
-| `internal/compose` 被 core 反向 import | compose 是组合根，只能被 `main` 使用 |
-| `internal/core/**` 与 `internal/application/**` import `internal/workflow` | Workflow 是调用应用用例的独立上层模块，核心领域和应用用例不能依赖具体流程 |
+| `internal/managedprocess`、`internal/modelprovider`、`internal/modelregistry`、`internal/storage`、`internal/tools` import `internal/application` | 适配器只实现 `internal` 定义的端口 |
+| `internal/compose` 被内层包反向 import | compose 是组合根，只能被 `main` 使用 |
+| `internal/{domain,command,persistence,projection,runtime,session,system}/**` 与 `internal/application/**` import `internal/workflow` | Workflow 是调用应用用例的独立上层模块，核心领域和应用用例不能依赖具体流程 |
 
 ## 3. 通信方向
 
@@ -106,14 +107,14 @@ app/
 ### 5.2 `application/agent_runtime` 内部边界
 
 ```text
-application/agent_runtime ─► internal/core/{domain,runtime,session,system}
+application/agent_runtime ─► internal/{domain,runtime,session,system}
 compose                   ─► application + storage + modelprovider + modelregistry + tools
 ```
 
 | 模块 | 唯一职责 | 明确不负责 |
 |---|---|---|
 | `application/agent_runtime` | 按 Agent 串行化 activation、cancel 与 close；协调 model request、tool call、transcript receipt 和 settlement 回调 | 创建 durable execution、决定产品状态、调用具体存储或 Provider SDK |
-| `internal/core/runtime` | 定义 model、tool、execution lifecycle 和不可变 `ModelRequest`；提供防御性快照 | 实现具体 Provider、工具副作用或 JSONL 文件格式 |
+| `internal/runtime` | 定义 model、tool、execution lifecycle 和不可变 `ModelRequest`；提供防御性快照 | 实现具体 Provider、工具副作用或 JSONL 文件格式 |
 | `runtimetest` | 提供 runtime 测试所需的公开边界和替身 | 被生产组合根依赖 |
 
 #### 5.2.1 文件布局
@@ -129,8 +130,8 @@ application/agent_runtime/
 ├── stream.go               Provider-neutral stream 收集
 ├── output.go               瞬时输出批处理与观察事件
 └── errors.go               稳定运行时错误分类
-internal/core/runtime/
-├── doc.go                  core-owned runtime boundary
+internal/runtime/
+├── doc.go                  内层 runtime 边界
 ├── execution_lifecycle.go  execution receipt 与产品状态回调
 ├── model.go                provider-neutral model stream 与 ModelRequest
 ├── tool.go                 provider-neutral tool execution contract
@@ -139,18 +140,18 @@ internal/core/runtime/
 
 文件职责遵循以下约束：
 
-1. `service.go` 是 durable AgentExecution 进入 AgentRuntime 的唯一入口；它只接受 core 已创建的 execution。
+1. `service.go` 是 durable AgentExecution 进入 AgentRuntime 的唯一入口；它只接受内层已创建的 execution。
 2. `registry.go` 和 `runtime.go` 持有进程内 Agent runtime，不把 actor 状态写入领域对象。
 3. AgentRuntime 固定执行“追加 start receipt → 确认 start → 执行 loop → 追加 settlement receipt → 产品 settlement callback → 释放资源”的顺序。
-4. model、tool、execution lifecycle 和快照类型归 `internal/core/runtime`，不依赖具体 Provider 或存储。
-5. JSONL 的具体格式和 receipt 查询归 `internal/core/session` 与 `internal/storage/agentlog`，AgentRuntime 只使用其接口。
-6. 领域类型与接口类型归属 `internal/core`；`application/agent_runtime` 只保存应用流程和进程内生命周期状态。
+4. model、tool、execution lifecycle 和快照类型归 `internal/runtime`，不依赖具体 Provider 或存储。
+5. JSONL 的具体格式和 receipt 查询归 `internal/session` 与 `internal/storage/agentlog`，AgentRuntime 只使用其接口。
+6. 领域类型与接口类型归属 `internal` 下的内层包；`application/agent_runtime` 只保存应用流程和进程内生命周期状态。
 
-`application/agent_runtime` 是 AgentRuntime 的实现边界。它不向 app、compose 或适配器暴露业务入口以外的状态写入能力，只依赖 core 定义的领域对象、runtime、session 和 system 接口，不得 import `storage`、`modelprovider`、`modelregistry`、`tools` 或 `compose`。
+`application/agent_runtime` 是 AgentRuntime 的实现边界。它不向 app、compose 或适配器暴露业务入口以外的状态写入能力，只依赖内层包定义的领域对象、runtime、session 和 system 接口，不得 import `storage`、`modelprovider`、`modelregistry`、`tools` 或 `compose`。
 
 ### 5.3 Go 包命名
 
-Go package identifier 使用简短、全小写、无下划线的名称。Application 多词目录使用下划线表达概念边界，因此目录命名为 `agent_runtime`，其中的 package identifier 为 `agentruntime`；core runtime 契约包命名为 `runtime`。
+Go package identifier 使用简短、全小写、无下划线的名称。Application 多词目录使用下划线表达概念边界，因此目录命名为 `agent_runtime`，其中的 package identifier 为 `agentruntime`；runtime 契约包命名为 `runtime`。
 
 ## 6. 验证边界
 
@@ -161,7 +162,7 @@ Go package identifier 使用简短、全小写、无下划线的名称。Applica
 
 ## 7. 系统不变量
 
-1. UI 是 core 状态的投影，不拥有权威状态，也不能绕过命令准入。
-2. 依赖方向由外向内；core 与 application 不认识 Wails、SQLite driver、Provider SDK 或外层适配器。
+1. UI 是内层状态的投影，不拥有权威状态，也不能绕过命令准入。
+2. 依赖方向由外向内；内层包与 application 不认识 Wails、SQLite driver、Provider SDK 或外层适配器。
 3. Provider SDK 只负责模型协议，不拥有产品状态机、durability 或 recovery。
 4. 组合与实现替换发生在 `compose`，领域语义不依赖具体适配器。

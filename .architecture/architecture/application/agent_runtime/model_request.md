@@ -1,7 +1,7 @@
 # ModelRequest
 
 > 本文定义 AgentRuntime 向模型 Provider 发起一次调用时的请求结构、构造边界和不可变性。
-> AgentLoop 的长期状态和执行流程见 [`loop.md`](loop.md)，AgentRuntime 总体职责见 [`../../application.md`](../../application.md)。
+> AgentLoop 的长期状态和执行流程见 [`loop.md`](loop.md)，AgentRuntime 总体职责见 [`README.md`](README.md)，Application 模块入口见 [`application/README.md`](../README.md)。
 
 ## 1. 角色
 
@@ -73,19 +73,21 @@ Provider adapter 不得通过 `ModelRequest` 修改 AgentLoop 状态。AgentLoop
 
 `ModelRequest` 不嵌入 `AgentExecution`、`ExecutionInputSnapshot`、`ExecutionSecuritySnapshot` 或 `RuntimeExecutionSnapshot`。这些对象由 `ExecutionRun` 保留，AgentRuntime 只把最终的模型可见输入投影到 `ModelRequest`。
 
-`RuntimeExecutionSnapshot` 中的 sandbox mode、approval mode 和 security revision 属于工具副作用边界。它只在执行工具时与 capability grant 一起进入 `ToolExecutionContext`，不向模型 Provider 传递。
+`RuntimeExecutionSnapshot` 中的 sandbox mode、approval mode 和 security revision 属于工具副作用边界。它只在提交工具调用时与 capability grant 一起进入 `ToolInvocationContext`，不向模型 Provider 传递。
 
 ```text
 ModelRequest
     -> ModelStream
 
 ToolCall + CapabilityGrant + RuntimeExecutionSnapshot
-    -> authorization and approval gate
-    -> ToolExecutionContext
-    -> ToolRunner
+    -> ToolInvocationContext
+    -> ToolInvoker
+    -> toolinvocation.Service
+         -> schema, capability grant, approval and idempotency checks
+         -> ToolExecutor
 ```
 
-`Tools` 只表示允许向模型公布的工具集合，不代表 Provider 返回的 tool call 已获得执行授权。AgentRuntime 在每次工具执行前仍必须校验 `ToolCallID`、工具名称、输入结构、capability grant 和 approval gate。
+`Tools` 只表示允许向模型公布的工具集合，不代表 Provider 返回的 tool call 已获得执行授权。AgentRuntime 校验 `ToolCallID`、工具名称、Provider-neutral 输入结构和 execution 资源预算；`toolinvocation.Service` 负责 schema、capability grant、approval、幂等和副作用准入。具体工具执行器不能绕过该 application service 被 AgentRuntime 直接调用。
 
 ## 6. Provider adapter 边界
 

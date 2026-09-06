@@ -16,21 +16,38 @@ import (
 	"strings"
 	"sync"
 
-	domainsecurity "praxis/internal/core/domain/security"
+	domainsecurity "praxis/internal/domain/security"
 
-	coreruntime "praxis/internal/core/runtime"
 	providerapi "praxis/internal/providers"
 	"praxis/internal/providers/anthropic"
 	"praxis/internal/providers/openaicompat"
+	runtimecontract "praxis/internal/runtime"
 )
 
 const maxProviderCatalogBytes = 1 << 20
 
 type ProviderConfig struct {
-	ID           string `json:"id"`
-	ProviderName string `json:"providerName,omitempty"`
-	BaseURL      string `json:"baseURL"`
-	ProxyURL     string `json:"proxyURL,omitempty"`
+	ID               string            `json:"id"`
+	DisplayName      string            `json:"displayName"`
+	BaseURL          string            `json:"baseUrl"`
+	ProxyURL         string            `json:"proxyUrl,omitempty"`
+	Credential       *CredentialRecord `json:"credential,omitempty"`
+	DefaultAPIFormat ModelAPIFormat    `json:"defaultApiFormat"`
+	Models           []ModelConfig     `json:"models"`
+}
+
+type CredentialRecord struct {
+	Type CredentialType `json:"type"`
+	Key  string         `json:"key"`
+}
+
+type CredentialType string
+
+const CredentialTypeAPIKey CredentialType = "api_key"
+
+type GroupConfig struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
 }
 
 type ModelAPIFormat string
@@ -42,13 +59,13 @@ const (
 )
 
 type ModelConfig struct {
-	ProviderID      string          `json:"providerId"`
-	ModelID         string          `json:"modelId"`
-	Label           string          `json:"label"`
-	APIFormat       ModelAPIFormat  `json:"apiFormat"`
-	ContextWindow   int             `json:"contextWindow"`
-	MaxOutputTokens int             `json:"maxOutputTokens"`
-	Reasoning       ReasoningConfig `json:"reasoning,omitempty"`
+	ID                string          `json:"id"`
+	DisplayName       string          `json:"displayName"`
+	GroupID           string          `json:"groupId"`
+	APIFormatOverride *ModelAPIFormat `json:"apiFormatOverride,omitempty"`
+	ContextWindow     int             `json:"contextWindow"`
+	MaxOutputTokens   int             `json:"maxOutputTokens"`
+	Reasoning         ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 // ReasoningConfig declares the levels a confirmed model accepts. The provider
@@ -61,6 +78,7 @@ type ReasoningConfig struct {
 
 // ModelOption is the execution catalog exposed to desktop clients.
 type ModelOption struct {
+	GroupID         string
 	ProviderID      string
 	ModelID         string
 	Label           string
@@ -70,8 +88,9 @@ type ModelOption struct {
 }
 
 type FileConfig struct {
+	Revision  uint64                    `json:"revision"`
+	Groups    []GroupConfig             `json:"groups"`
 	Providers []ProviderConfig          `json:"providers"`
-	Models    []ModelConfig             `json:"models"`
 	Profiles  map[string]ModelReference `json:"profiles"`
 }
 
@@ -85,19 +104,13 @@ type modelKey struct {
 	ModelID    string
 }
 
-type secretsFile struct {
-	Keys map[string]string `json:"keys"`
-}
-
 // Registry is the single in-process owner of the model configuration. Saving
 // from the UI replaces the config and its indexes in place, so every read path
 // must hold mu; holders of this pointer never observe the swap.
 type Registry struct {
 	mu              sync.RWMutex
 	modelsPath      string
-	secretsPath     string
 	config          FileConfig
-	secrets         map[string]string
 	client          *http.Client
 	providerClients map[string]*http.Client
 	byModel         map[modelKey]ModelConfig
@@ -127,29 +140,25 @@ func (e *ConfigurationError) Unwrap() error {
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-func Load(modelsPath, secretsPath string, client *http.Client) (*Registry, error) {
+func Load(modelsPath string, client *http.Client) (*Registry, error) {
 	config, err := loadModels(modelsPath)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
-	}
-	secrets, err := loadSecrets(secretsPath)
-	if err != nil {
-		return nil, &ConfigurationError{Path: secretsPath, Err: err}
 	}
 	providerClients, err := buildProviderClients(config.Providers, client)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
 	registry := &Registry{
-		modelsPath: modelsPath, secretsPath: secretsPath,
-		config: config, secrets: secrets, client: client, providerClients: providerClients,
+		modelsPath: modelsPath,
+		config:     config, client: client, providerClients: providerClients,
 		byModel: make(map[modelKey]ModelConfig), byProvider: make(map[string]ProviderConfig),
 	}
 	for _, provider := range config.Providers {
 		registry.byProvider[provider.ID] = provider
-	}
-	for _, model := range config.Models {
-		registry.byModel[modelKey{model.ProviderID, model.ModelID}] = model
+		for _, model := range provider.Models {
+			registry.byModel[modelKey{provider.ID, model.ID}] = model
+		}
 	}
 	return registry, nil
 }
@@ -177,13 +186,24 @@ func (r *Registry) providerClientLocked(providerID string) *http.Client {
 func (r *Registry) Config() FileConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.configLocked()
+	return r.configLocked(false)
 }
 
-func (r *Registry) configLocked() FileConfig {
+func (r *Registry) configLocked(includeCredentials bool) FileConfig {
 	copy := r.config
+	copy.Groups = append([]GroupConfig(nil), r.config.Groups...)
 	copy.Providers = append([]ProviderConfig(nil), r.config.Providers...)
-	copy.Models = cloneModels(r.config.Models)
+	for index := range copy.Providers {
+		copy.Providers[index].Models = cloneModels(r.config.Providers[index].Models)
+		if includeCredentials {
+			if credential := r.config.Providers[index].Credential; credential != nil {
+				credentialCopy := *credential
+				copy.Providers[index].Credential = &credentialCopy
+			}
+		} else {
+			copy.Providers[index].Credential = nil
+		}
+	}
 	copy.Profiles = make(map[string]ModelReference, len(r.config.Profiles))
 	for key, value := range r.config.Profiles {
 		copy.Profiles[key] = value
@@ -220,30 +240,47 @@ func (r *Registry) modelLocked(providerID, modelID string) (ModelConfig, error) 
 func (r *Registry) ListModels() []ModelOption {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	options := make([]ModelOption, 0, len(r.config.Models))
-	for _, model := range r.config.Models {
-		provider := r.byProvider[model.ProviderID]
-		profiles := make([]string, 0, len(r.config.Profiles))
-		for profile, modelID := range r.config.Profiles {
-			if modelID.ProviderID == model.ProviderID && modelID.ModelID == model.ModelID {
-				profiles = append(profiles, profile)
+	options := make([]ModelOption, 0)
+	for _, provider := range r.config.Providers {
+		for _, model := range provider.Models {
+			profiles := make([]string, 0, len(r.config.Profiles))
+			for profile, modelID := range r.config.Profiles {
+				if modelID.ProviderID == provider.ID && modelID.ModelID == model.ID {
+					profiles = append(profiles, profile)
+				}
 			}
+			sort.Strings(profiles)
+			label := strings.TrimSpace(model.DisplayName)
+			if label == "" {
+				label = model.ID
+			}
+			providerName := strings.TrimSpace(provider.DisplayName)
+			if providerName == "" {
+				providerName = provider.BaseURL
+			}
+			options = append(options, ModelOption{
+				GroupID: model.GroupID, ProviderID: provider.ID, ModelID: model.ID, Label: label, ProviderName: providerName,
+				Reasoning: cloneReasoning(model.Reasoning), DefaultProfiles: profiles,
+			})
 		}
-		sort.Strings(profiles)
-		label := strings.TrimSpace(model.Label)
-		if label == "" {
-			label = model.ModelID
-		}
-		providerName := strings.TrimSpace(provider.ProviderName)
-		if providerName == "" {
-			providerName = provider.BaseURL
-		}
-		options = append(options, ModelOption{
-			ProviderID: model.ProviderID, ModelID: model.ModelID, Label: label, ProviderName: providerName,
-			Reasoning: cloneReasoning(model.Reasoning), DefaultProfiles: profiles,
-		})
 	}
-	sort.Slice(options, func(i, j int) bool {
+	return orderModelOptions(options, r.config.Groups)
+}
+
+func orderModelOptions(options []ModelOption, groups []GroupConfig) []ModelOption {
+	groupOrder := make(map[string]int, len(groups))
+	for index, group := range groups {
+		groupOrder[group.ID] = index
+	}
+	sort.SliceStable(options, func(i, j int) bool {
+		leftGroup, leftOK := groupOrder[options[i].GroupID]
+		rightGroup, rightOK := groupOrder[options[j].GroupID]
+		if leftOK && rightOK && leftGroup != rightGroup {
+			return leftGroup < rightGroup
+		}
+		if leftOK != rightOK {
+			return leftOK
+		}
 		if options[i].Label == options[j].Label {
 			if options[i].ProviderID == options[j].ProviderID {
 				return options[i].ModelID < options[j].ModelID
@@ -351,7 +388,7 @@ func (r *Registry) ResolveModel(profile domainsecurity.AgentProfile) (domainsecu
 	if err != nil {
 		return domainsecurity.ModelSelection{}, fmt.Errorf("model profile %q: %w", profile, err)
 	}
-	return r.modelSelection(model, "")
+	return r.modelSelection(reference.ProviderID, model, "")
 }
 
 // ResolveModelSelection validates a model and optional thinking level before
@@ -363,16 +400,16 @@ func (r *Registry) ResolveModelSelection(providerID, modelID, reasoning string) 
 	if err != nil {
 		return domainsecurity.ModelSelection{}, err
 	}
-	return r.modelSelection(model, reasoning)
+	return r.modelSelection(providerID, model, reasoning)
 }
 
 // Stream resolves a configured provider/model selection into a model stream.
-func (r *Registry) Stream(providerID, modelID string) (coreruntime.ModelStream, error) {
+func (r *Registry) Stream(providerID, modelID string) (runtimecontract.ModelStream, error) {
 	return r.StreamFor(domainsecurity.ModelSelection{ProviderID: providerID, ModelID: modelID})
 }
 
 // StreamFor builds a stream for the already-frozen model selection.
-func (r *Registry) StreamFor(selection domainsecurity.ModelSelection) (coreruntime.ModelStream, error) {
+func (r *Registry) StreamFor(selection domainsecurity.ModelSelection) (runtimecontract.ModelStream, error) {
 	if strings.TrimSpace(selection.ProviderID) == "" || strings.TrimSpace(selection.ModelID) == "" {
 		return nil, errors.New("model selection provider and model IDs are required")
 	}
@@ -382,58 +419,59 @@ func (r *Registry) StreamFor(selection domainsecurity.ModelSelection) (corerunti
 	if err != nil {
 		return nil, err
 	}
-	selection, err = r.modelSelection(model, selection.Reasoning)
+	selection, err = r.modelSelection(selection.ProviderID, model, selection.Reasoning)
 	if err != nil {
 		return nil, err
 	}
-	provider, ok := r.byProvider[model.ProviderID]
+	provider, ok := r.byProvider[selection.ProviderID]
 	if !ok {
-		return nil, fmt.Errorf("provider %q is not configured", model.ProviderID)
+		return nil, fmt.Errorf("provider %q is not configured", selection.ProviderID)
 	}
 	client := r.providerClientLocked(provider.ID)
-	key := strings.TrimSpace(r.secrets[provider.ID])
+	key := providerKey(provider)
 	if key == "" {
 		return nil, fmt.Errorf("API key is not configured for provider %q", provider.ID)
 	}
-	switch model.APIFormat {
+	apiFormat := EffectiveAPIFormat(provider, model)
+	switch apiFormat {
 	case APIFormatAnthropicMessages:
 		return anthropic.New(anthropic.Config{
 			BaseURL: provider.BaseURL, APIKey: key, HTTPClient: client,
-			Model: model.ModelID, MaxOutputTokens: model.MaxOutputTokens,
+			Model: model.ID, MaxOutputTokens: model.MaxOutputTokens,
 			Reasoning: selection.Reasoning,
 		})
 	case APIFormatOpenAIResponses, APIFormatOpenAIChatCompletions:
 		protocol := openaicompat.ProtocolResponses
-		if model.APIFormat == APIFormatOpenAIChatCompletions {
+		if apiFormat == APIFormatOpenAIChatCompletions {
 			protocol = openaicompat.ProtocolChatCompletions
 		}
 		return openaicompat.New(openaicompat.Config{
 			BaseURL: provider.BaseURL, APIKey: key, HTTPClient: client,
 			Protocol: protocol,
-			Model:    model.ModelID, MaxOutputTokens: model.MaxOutputTokens,
+			Model:    model.ID, MaxOutputTokens: model.MaxOutputTokens,
 			Reasoning: selection.Reasoning,
 		})
 	default:
-		return nil, fmt.Errorf("model %q has unsupported API format %q", model.ModelID, model.APIFormat)
+		return nil, fmt.Errorf("model %q has unsupported API format %q", model.ID, apiFormat)
 	}
 }
 
-func (r *Registry) modelSelection(model ModelConfig, reasoning string) (domainsecurity.ModelSelection, error) {
+func (r *Registry) modelSelection(providerID string, model ModelConfig, reasoning string) (domainsecurity.ModelSelection, error) {
 	reasoning = strings.TrimSpace(reasoning)
 	config := model.Reasoning
 	if !config.Supported {
 		if reasoning != "" {
-			return domainsecurity.ModelSelection{}, fmt.Errorf("model %q does not support reasoning", model.ModelID)
+			return domainsecurity.ModelSelection{}, fmt.Errorf("model %q does not support reasoning", model.ID)
 		}
-		return domainsecurity.ModelSelection{ProviderID: model.ProviderID, ModelID: model.ModelID}, nil
+		return domainsecurity.ModelSelection{ProviderID: providerID, ModelID: model.ID}, nil
 	}
 	if reasoning == "" {
 		reasoning = config.Default
 	}
 	if !containsReasoningLevel(config.Levels, reasoning) {
-		return domainsecurity.ModelSelection{}, fmt.Errorf("model %q does not support reasoning %q", model.ModelID, reasoning)
+		return domainsecurity.ModelSelection{}, fmt.Errorf("model %q does not support reasoning %q", model.ID, reasoning)
 	}
-	return domainsecurity.ModelSelection{ProviderID: model.ProviderID, ModelID: model.ModelID, Reasoning: reasoning}, nil
+	return domainsecurity.ModelSelection{ProviderID: providerID, ModelID: model.ID, Reasoning: reasoning}, nil
 }
 
 func cloneReasoning(config ReasoningConfig) ReasoningConfig {
@@ -499,7 +537,7 @@ func loadModels(path string) (FileConfig, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		config := FileConfig{
-			Providers: []ProviderConfig{}, Models: []ModelConfig{},
+			Groups: []GroupConfig{}, Providers: []ProviderConfig{},
 			Profiles: map[string]ModelReference{},
 		}
 		payload, marshalErr := json.MarshalIndent(config, "", "  ")
@@ -530,39 +568,26 @@ func loadModels(path string) (FileConfig, error) {
 	return Validate(config)
 }
 
-func loadSecrets(path string) (map[string]string, error) {
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return map[string]string{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("open secrets config: %w", err)
-	}
-	defer file.Close()
-	var config secretsFile
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
-		return nil, fmt.Errorf("secrets config: invalid JSON: %w", err)
-	}
-	if err := ensureEOF(decoder); err != nil {
-		return nil, fmt.Errorf("secrets config: invalid JSON: %w", err)
-	}
-	for providerID := range config.Keys {
-		if !idPattern.MatchString(providerID) {
-			return nil, fmt.Errorf("secrets config: invalid provider id %q", providerID)
-		}
-	}
-	if config.Keys == nil {
-		return map[string]string{}, nil
-	}
-	return config.Keys, nil
-}
-
 func ensureEOF(decoder *json.Decoder) error {
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return errors.New("trailing data")
 	}
 	return nil
+}
+
+func providerKey(provider ProviderConfig) string {
+	if provider.Credential == nil || provider.Credential.Type != CredentialTypeAPIKey {
+		return ""
+	}
+	return strings.TrimSpace(provider.Credential.Key)
+}
+
+// EffectiveAPIFormat returns the protocol selected by the provider default and
+// an optional model override.
+func EffectiveAPIFormat(provider ProviderConfig, model ModelConfig) ModelAPIFormat {
+	if model.APIFormatOverride != nil {
+		return *model.APIFormatOverride
+	}
+	return provider.DefaultAPIFormat
 }

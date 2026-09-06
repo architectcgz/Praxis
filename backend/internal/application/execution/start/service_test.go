@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	corecommand "praxis/internal/core/command"
+	commandprotocol "praxis/internal/command"
 )
 
 type readyReadiness bool
@@ -21,9 +21,9 @@ func TestSendInputRequiresExplicitModelSelection(t *testing.T) {
 		{SessionID: "session", RequestID: "request", Content: "hello", ProviderID: "provider"},
 	} {
 		_, err := service.SendInput(context.Background(), params)
-		var commandError *corecommand.Error
-		if !errors.As(err, &commandError) || commandError.Code != corecommand.ErrorModelNotConfigured {
-			t.Fatalf("SendInput() error = %v, want %s", err, corecommand.ErrorModelNotConfigured)
+		var commandError *commandprotocol.Error
+		if !errors.As(err, &commandError) || commandError.Code != commandprotocol.ErrorModelNotConfigured {
+			t.Fatalf("SendInput() error = %v, want %s", err, commandprotocol.ErrorModelNotConfigured)
 		}
 	}
 }

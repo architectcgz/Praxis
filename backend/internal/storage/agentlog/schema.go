@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	domainexecution "praxis/internal/core/domain/execution"
+	domainexecution "praxis/internal/domain/execution"
 	"strings"
 	"time"
 
-	coresession "praxis/internal/core/session"
+	sessionport "praxis/internal/session"
 )
 
 const currentEntryVersion uint16 = 2
@@ -56,7 +56,7 @@ type messagePayload struct {
 	Role            string                               `json:"role"`
 	SourceRequestID string                               `json:"sourceRequestId"`
 	Content         string                               `json:"content"`
-	Blocks          []coresession.TranscriptContentBlock `json:"blocks,omitempty"`
+	Blocks          []sessionport.TranscriptContentBlock `json:"blocks,omitempty"`
 	PayloadDigest   string                               `json:"payloadDigest"`
 }
 
@@ -138,7 +138,7 @@ func validateEntry(value entry, previous uint64) error {
 			return fmt.Errorf("agent session message payload is invalid: %w", err)
 		}
 		if strings.TrimSpace(message.MessageID) == "" || strings.TrimSpace(message.PayloadDigest) == "" ||
-			(message.Role != "user" && message.Role != "assistant") || len(message.Blocks) == 0 {
+			!validMessageRole(message.Role) || len(message.Blocks) == 0 {
 			return errors.New("agent session message identity and structured blocks are required")
 		}
 		digest, err := digestMessagePayload(message)
@@ -152,7 +152,11 @@ func validateEntry(value entry, previous uint64) error {
 	return nil
 }
 
-func validateHeader(header coresession.AgentSessionHeader) error {
+func validMessageRole(role string) bool {
+	return role == "user" || role == "assistant" || role == "tool"
+}
+
+func validateHeader(header sessionport.AgentSessionHeader) error {
 	if header.SessionID == "" || header.AgentID == "" || !header.Profile.Valid() ||
 		strings.TrimSpace(header.WorkspaceID.String()) == "" || strings.TrimSpace(header.InjectionNonce) == "" ||
 		header.MinReaderVersion == 0 || strings.TrimSpace(header.WrittenBy) == "" {

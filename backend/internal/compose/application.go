@@ -16,27 +16,29 @@ import (
 	executionqueue "praxis/internal/application/execution/queue"
 	executionsettlement "praxis/internal/application/execution/settlement"
 	executionstart "praxis/internal/application/execution/start"
+	toolinvocation "praxis/internal/application/execution/tool_invocation"
 	applicationproject "praxis/internal/application/project"
 	applicationsession "praxis/internal/application/session"
-	corecommand "praxis/internal/core/command"
-	domainagent "praxis/internal/core/domain/agent"
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainproject "praxis/internal/core/domain/project"
-	domainsecurity "praxis/internal/core/domain/security"
-	domainsession "praxis/internal/core/domain/session"
-	domainworkflow "praxis/internal/core/domain/workflow"
-	domainworkspace "praxis/internal/core/domain/workspace"
+	commandprotocol "praxis/internal/command"
+	domainagent "praxis/internal/domain/agent"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainproject "praxis/internal/domain/project"
+	domainsecurity "praxis/internal/domain/security"
+	domainsession "praxis/internal/domain/session"
+	domainworkflow "praxis/internal/domain/workflow"
+	domainworkspace "praxis/internal/domain/workspace"
 
-	"praxis/internal/core/projection"
-	"praxis/internal/core/session"
 	"praxis/internal/logging"
 	"praxis/internal/orchestration"
+	"praxis/internal/projection"
 	"praxis/internal/providers/registry"
+	"praxis/internal/session"
 	"praxis/internal/storage/agentlog"
 	"praxis/internal/storage/agentpolicy"
 	"praxis/internal/storage/dataroot"
 	"praxis/internal/storage/sqlite"
+	"praxis/internal/tools"
 )
 
 // Application is the production composition of target storage, application
@@ -127,7 +129,7 @@ func (a *Application) CreateProject(ctx context.Context, name, path string, requ
 	name = strings.TrimSpace(name)
 	path = filepath.Clean(strings.TrimSpace(path))
 	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || !filepath.IsAbs(path) {
-		return result, corecommand.NewError(corecommand.ErrorProjectWorkspaceInvalid)
+		return result, commandprotocol.NewError(commandprotocol.ErrorProjectWorkspaceInvalid)
 	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return result, err
@@ -199,7 +201,7 @@ func Open(
 		return nil, fmt.Errorf("open runtime log: %w", err)
 	}
 	diagnostics.logger.Infof("composition open started root=%s database=%s", root.Root, root.Database)
-	modelRegistry, err := registry.Load(root.ModelsConfig, root.SecretsConfig, nil)
+	modelRegistry, err := registry.Load(root.ModelProvidersConfig, nil)
 	if err != nil {
 		diagnostics.logger.Errorf("load model registry failed: %v", err)
 		_ = diagnostics.Close()
@@ -221,8 +223,19 @@ func Open(
 	target := store.TargetRepositories()
 	output := newAgentOutputPublisher()
 	if runner == nil {
+		toolCatalog := tools.NewCatalog()
+		toolService, serviceErr := toolinvocation.NewService(toolinvocation.Config{
+			Transactions: store, Executions: target.Executions, SecuritySnapshots: target.SecuritySnapshots,
+			Invocations: target.ToolInvocations, Catalog: toolCatalog, Executor: tools.NewExecutor(),
+		})
+		if serviceErr != nil {
+			_ = diagnostics.Close()
+			closeStore()
+			return nil, serviceErr
+		}
 		runner, err = agentruntime.NewExecutionEngine(agentruntime.ExecutionEngineConfig{
-			Models: providerModelResolver{registry: modelRegistry}, OutputObserver: output.Publish,
+			Models: providerModelResolver{registry: modelRegistry}, Tools: toolCatalog,
+			ToolInvoker: toolService, OutputObserver: output.Publish,
 			Logf: diagnostics.Logger().Infof,
 		})
 		if err != nil {
@@ -531,7 +544,7 @@ func (a *Application) SaveModelConfig(config registry.FileConfig) error {
 		return err
 	}
 	a.RuntimeLogger().Infof(
-		"model config saved providers=%d models=%d", len(config.Providers), len(config.Models),
+		"model config saved providers=%d groups=%d", len(config.Providers), len(config.Groups),
 	)
 	return nil
 }
@@ -696,7 +709,7 @@ func (a orchestrationCommandAdapter) StartNextQueuedWork(
 }
 
 func (a orchestrationCommandAdapter) IsAgentUnavailable(err error) bool {
-	return corecommand.HasError(err, corecommand.ErrorAgentUnavailable)
+	return commandprotocol.HasError(err, commandprotocol.ErrorAgentUnavailable)
 }
 
 var (

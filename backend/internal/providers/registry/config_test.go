@@ -5,155 +5,132 @@ import (
 	"testing"
 )
 
-func TestProviderNameIsOptional(t *testing.T) {
-	config := FileConfig{
-		Providers: []ProviderConfig{{
-			ID: "gateway", BaseURL: "https://gateway.example.com",
-		}},
-		Models:   []ModelConfig{},
-		Profiles: map[string]ModelReference{},
-	}
+func testGroups() []GroupConfig {
+	return []GroupConfig{{ID: "gpt", DisplayName: "GPT"}, {ID: "claude", DisplayName: "Claude"}}
+}
 
-	if _, err := Validate(config); err != nil {
-		t.Fatalf("validate configuration without provider name: %v", err)
+func testProvider(id string, format ModelAPIFormat, models ...ModelConfig) ProviderConfig {
+	return ProviderConfig{
+		ID: id, DisplayName: id, BaseURL: "https://gateway.example.com",
+		DefaultAPIFormat: format, Models: models,
+		Credential: &CredentialRecord{Type: CredentialTypeAPIKey, Key: "test-key"},
 	}
 }
 
-func TestMissingReasoningUsesDefaultLevels(t *testing.T) {
+func TestProviderOwnsModelsAndGroupNormalizesReasoning(t *testing.T) {
 	config := FileConfig{
-		Providers: []ProviderConfig{{
-			ID: "gateway", BaseURL: "https://gateway.example.com",
-		}},
-		Models: []ModelConfig{{
-			ProviderID: "gateway", ModelID: "model",
-			APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192,
-		}},
+		Groups: testGroups(),
+		Providers: []ProviderConfig{testProvider("gateway", APIFormatOpenAIResponses, ModelConfig{
+			ID: "model", DisplayName: "", GroupID: "gpt", ContextWindow: 128000, MaxOutputTokens: 8192,
+		})},
 		Profiles: map[string]ModelReference{},
 	}
 
 	validated, err := Validate(config)
 	if err != nil {
-		t.Fatalf("validate model configuration without reasoning: %v", err)
+		t.Fatalf("validate nested model configuration: %v", err)
 	}
-	reasoning := validated.Models[0].Reasoning
-	if !reasoning.Supported {
-		t.Fatal("expected missing reasoning configuration to be supported by default")
+	model := validated.Providers[0].Models[0]
+	if model.DisplayName != "model" {
+		t.Fatalf("model display name = %q, want model", model.DisplayName)
 	}
-	if got, want := strings.Join(reasoning.Levels, ","), "low,medium,high"; got != want {
+	if !model.Reasoning.Supported {
+		t.Fatal("expected missing reasoning configuration to use defaults")
+	}
+	if got, want := strings.Join(model.Reasoning.Levels, ","), "low,medium,high"; got != want {
 		t.Fatalf("default reasoning levels = %q, want %q", got, want)
 	}
-	if reasoning.Default != defaultReasoningLevel {
-		t.Fatalf("default reasoning level = %q, want %q", reasoning.Default, defaultReasoningLevel)
+	if got := EffectiveAPIFormat(validated.Providers[0], model); got != APIFormatOpenAIResponses {
+		t.Fatalf("effective API format = %q, want %q", got, APIFormatOpenAIResponses)
 	}
 }
 
-func TestModelsChooseAPIFormatIndependently(t *testing.T) {
+func TestModelAPIFormatOverrideUsesProviderDefault(t *testing.T) {
+	claude := APIFormatAnthropicMessages
 	config := FileConfig{
-		Providers: []ProviderConfig{{
-			ID: "gateway", ProviderName: "Gateway", BaseURL: "https://gateway.example.com",
-		}},
-		Models: []ModelConfig{
-			{
-				ProviderID: "gateway", ModelID: "claude-sonnet",
-				APIFormat: APIFormatAnthropicMessages, ContextWindow: 200000, MaxOutputTokens: 8192,
-			},
-			{
-				ProviderID: "gateway", ModelID: "gpt-5",
-				APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192,
-			},
-		},
+		Groups: testGroups(),
+		Providers: []ProviderConfig{testProvider("gateway", APIFormatOpenAIResponses,
+			ModelConfig{ID: "gpt", GroupID: "gpt", ContextWindow: 128000, MaxOutputTokens: 8192},
+			ModelConfig{ID: "claude", GroupID: "claude", APIFormatOverride: &claude, ContextWindow: 200000, MaxOutputTokens: 8192},
+		)},
 		Profiles: map[string]ModelReference{},
 	}
 
 	validated, err := Validate(config)
 	if err != nil {
-		t.Fatalf("validate model configuration: %v", err)
+		t.Fatalf("validate API format configuration: %v", err)
 	}
-	registry := &Registry{
-		config:     validated,
-		byProvider: map[string]ProviderConfig{"gateway": validated.Providers[0]},
-		byModel: map[modelKey]ModelConfig{
-			{ProviderID: "gateway", ModelID: "claude-sonnet"}: validated.Models[0],
-			{ProviderID: "gateway", ModelID: "gpt-5"}:         validated.Models[1],
-		},
-		secrets: map[string]string{"gateway": "test-key"},
+	models := validated.Providers[0].Models
+	if got := EffectiveAPIFormat(validated.Providers[0], models[0]); got != APIFormatOpenAIResponses {
+		t.Fatalf("default model format = %q, want %q", got, APIFormatOpenAIResponses)
 	}
-	for _, modelID := range []string{"claude-sonnet", "gpt-5"} {
-		if _, err := registry.Stream("gateway", modelID); err != nil {
-			t.Fatalf("create model stream for %s: %v", modelID, err)
-		}
+	if got := EffectiveAPIFormat(validated.Providers[0], models[1]); got != APIFormatAnthropicMessages {
+		t.Fatalf("overridden model format = %q, want %q", got, APIFormatAnthropicMessages)
 	}
 }
 
-func TestModelAPIFormatIsRequired(t *testing.T) {
+func TestValidateRejectsUnknownGroup(t *testing.T) {
 	config := FileConfig{
-		Providers: []ProviderConfig{{
-			ID: "gateway", BaseURL: "https://gateway.example.com",
-		}},
-		Models: []ModelConfig{{
-			ProviderID: "gateway", ModelID: "model",
-			ContextWindow: 128000, MaxOutputTokens: 8192,
-		}},
+		Groups: []GroupConfig{{ID: "gpt", DisplayName: "GPT"}},
+		Providers: []ProviderConfig{testProvider("gateway", APIFormatOpenAIResponses, ModelConfig{
+			ID: "model", GroupID: "claude", ContextWindow: 128000, MaxOutputTokens: 8192,
+		})},
 		Profiles: map[string]ModelReference{},
 	}
-
 	if _, err := Validate(config); err == nil {
-		t.Fatal("expected missing model API format to fail validation")
+		t.Fatal("expected unknown group reference to fail")
+	}
+}
+
+func TestValidateRejectsDuplicateModelWithinProvider(t *testing.T) {
+	config := FileConfig{
+		Groups: testGroups(),
+		Providers: []ProviderConfig{testProvider("gateway", APIFormatOpenAIResponses,
+			ModelConfig{ID: "shared", GroupID: "gpt", ContextWindow: 128000, MaxOutputTokens: 8192},
+			ModelConfig{ID: "shared", GroupID: "claude", ContextWindow: 128000, MaxOutputTokens: 8192},
+		)},
+		Profiles: map[string]ModelReference{},
+	}
+	if _, err := Validate(config); err == nil {
+		t.Fatal("expected duplicate provider model to fail")
+	}
+}
+
+func TestSameModelIDMayBeUsedByDifferentProviders(t *testing.T) {
+	config := FileConfig{
+		Groups: testGroups(),
+		Providers: []ProviderConfig{
+			testProvider("one", APIFormatOpenAIResponses, ModelConfig{ID: "shared", GroupID: "gpt", ContextWindow: 128000, MaxOutputTokens: 8192}),
+			testProvider("two", APIFormatOpenAIResponses, ModelConfig{ID: "shared", GroupID: "gpt", ContextWindow: 128000, MaxOutputTokens: 8192}),
+		},
+		Profiles: map[string]ModelReference{"primary": {ProviderID: "one", ModelID: "shared"}},
+	}
+	if _, err := Validate(config); err != nil {
+		t.Fatalf("validate same model ID across providers: %v", err)
 	}
 }
 
 func TestProviderProxyURLMustUseHTTPOrHTTPS(t *testing.T) {
 	config := FileConfig{
+		Groups: testGroups(),
 		Providers: []ProviderConfig{{
-			ID: "gateway", BaseURL: "https://gateway.example.com", ProxyURL: "socks5://127.0.0.1:7897",
+			ID: "gateway", DisplayName: "Gateway", BaseURL: "https://gateway.example.com",
+			ProxyURL: "socks5://127.0.0.1:7897", DefaultAPIFormat: APIFormatOpenAIResponses,
 		}},
-		Models:   []ModelConfig{},
 		Profiles: map[string]ModelReference{},
 	}
-
 	if _, err := Validate(config); err == nil {
 		t.Fatal("expected unsupported proxy protocol to fail validation")
 	}
 }
 
-func TestSameRemoteModelIDMayBeConfiguredForDifferentProviders(t *testing.T) {
-	config := FileConfig{
-		Providers: []ProviderConfig{
-			{ID: "one", BaseURL: "https://one.example.com"},
-			{ID: "two", BaseURL: "https://two.example.com"},
-		},
-		Models: []ModelConfig{
-			{ProviderID: "one", ModelID: "shared", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192},
-			{ProviderID: "two", ModelID: "shared", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192},
-		},
-		Profiles: map[string]ModelReference{
-			"primary": {ProviderID: "one", ModelID: "shared"},
-		},
-	}
-	if _, err := Validate(config); err != nil {
-		t.Fatalf("validate shared model ID across providers: %v", err)
-	}
-}
-
-func TestDuplicateRemoteModelIDForSameProviderFails(t *testing.T) {
-	config := FileConfig{
-		Providers: []ProviderConfig{{ID: "gateway", BaseURL: "https://gateway.example.com"}},
-		Models: []ModelConfig{
-			{ProviderID: "gateway", ModelID: "shared", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192},
-			{ProviderID: "gateway", ModelID: "shared", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192},
-		},
-		Profiles: map[string]ModelReference{},
-	}
-	if _, err := Validate(config); err == nil {
-		t.Fatal("expected duplicate provider/model reference to fail")
-	}
-}
-
 func TestProfileReferenceUsesProviderAndModelID(t *testing.T) {
 	config := FileConfig{
-		Providers: []ProviderConfig{{ID: "gateway", BaseURL: "https://gateway.example.com"}},
-		Models:    []ModelConfig{{ProviderID: "gateway", ModelID: "shared", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192}},
-		Profiles:  map[string]ModelReference{"primary": {ProviderID: "other", ModelID: "shared"}},
+		Groups: testGroups(),
+		Providers: []ProviderConfig{testProvider("gateway", APIFormatOpenAIResponses, ModelConfig{
+			ID: "shared", GroupID: "gpt", ContextWindow: 128000, MaxOutputTokens: 8192,
+		})},
+		Profiles: map[string]ModelReference{"primary": {ProviderID: "other", ModelID: "shared"}},
 	}
 	if _, err := Validate(config); err == nil {
 		t.Fatal("expected unknown composite profile reference to fail")

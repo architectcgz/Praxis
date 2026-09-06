@@ -20,6 +20,7 @@ var requiredTables = []string{
 	"delegation_requests",
 	"agent_executions",
 	"execution_security_snapshots",
+	"tool_invocations",
 	"queued_work_items",
 	"wait_conditions",
 	"agent_control_requests",

@@ -2,7 +2,7 @@ package compose
 
 import (
 	"praxis/internal/application/agent_runtime"
-	domainsecurity "praxis/internal/core/domain/security"
+	domainsecurity "praxis/internal/domain/security"
 
 	"praxis/internal/providers/registry"
 )

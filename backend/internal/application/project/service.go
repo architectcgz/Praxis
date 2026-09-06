@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	corecommand "praxis/internal/core/command"
-	domaincommand "praxis/internal/core/domain/command"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainproject "praxis/internal/core/domain/project"
-	domainworkspace "praxis/internal/core/domain/workspace"
-	"praxis/internal/core/persistence"
-	"praxis/internal/core/system"
+	commandprotocol "praxis/internal/command"
+	domaincommand "praxis/internal/domain/command"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainproject "praxis/internal/domain/project"
+	domainworkspace "praxis/internal/domain/workspace"
+	"praxis/internal/persistence"
+	"praxis/internal/system"
 )
 
 // Readiness controls command admission while startup recovery or shutdown is
@@ -108,17 +108,17 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 		return CreateProjectResult{}, errors.New("create project context is required")
 	}
 	if !s.readiness.Ready() {
-		return CreateProjectResult{}, corecommand.NewError(corecommand.ErrorNotReady)
+		return CreateProjectResult{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
 	if params.RequestID == "" {
-		return CreateProjectResult{}, corecommand.NewError(corecommand.ErrorInvalidRequest)
+		return CreateProjectResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	params.Name = strings.TrimSpace(params.Name)
 	params.Path = filepath.Clean(strings.TrimSpace(params.Path))
 	if params.Name == "" || strings.ContainsAny(params.Name, "\x00\r\n") || !absolutePath(params.Path) {
-		return CreateProjectResult{}, corecommand.NewError(corecommand.ErrorProjectWorkspaceInvalid)
+		return CreateProjectResult{}, commandprotocol.NewError(commandprotocol.ErrorProjectWorkspaceInvalid)
 	}
-	digest := corecommand.ArgumentsDigest(struct {
+	digest := commandprotocol.ArgumentsDigest(struct {
 		ProjectID   domainfoundation.ProjectID
 		WorkspaceID domainfoundation.WorkspaceID
 		Name        string
@@ -126,7 +126,7 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 	}{params.ProjectID, params.WorkspaceID, params.Name, params.Path})
 	var result CreateProjectResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if receipt, found, err := corecommand.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "create_project", digest); err != nil {
+		if receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "create_project", digest); err != nil {
 			return err
 		} else if found {
 			var ids struct {

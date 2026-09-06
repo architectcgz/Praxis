@@ -7,21 +7,21 @@ import (
 	"sync"
 	"time"
 
-	domainexecution "praxis/internal/core/domain/execution"
-	domainfoundation "praxis/internal/core/domain/foundation"
+	domainexecution "praxis/internal/domain/execution"
+	domainfoundation "praxis/internal/domain/foundation"
 
-	coreruntime "praxis/internal/core/runtime"
-	coresession "praxis/internal/core/session"
+	runtimecontract "praxis/internal/runtime"
+	sessionport "praxis/internal/session"
 )
 
 // TargetSessionResolver returns the only JSONL writer for one Agent. The
 // runtime cannot inspect other Agents' transcripts through this interface.
-type TargetSessionResolver func(domainfoundation.SessionID, domainfoundation.AgentID) (coresession.TranscriptReceiptStore, error)
+type TargetSessionResolver func(domainfoundation.SessionID, domainfoundation.AgentID) (sessionport.TranscriptReceiptStore, error)
 
 type TargetSessionHeaderResolver func(
 	context.Context,
 	domainexecution.AgentExecution,
-) (coresession.AgentSessionHeader, error)
+) (sessionport.AgentSessionHeader, error)
 
 // TargetExecutionRunner is the provider/tool boundary. It receives a durable
 // immutable execution snapshot and the Agent-owned transcript port, then
@@ -30,7 +30,7 @@ type TargetExecutionRunner interface {
 	RunWithSession(
 		context.Context,
 		domainexecution.AgentExecution,
-		coresession.TranscriptReceiptStore,
+		sessionport.TranscriptReceiptStore,
 	) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error)
 }
 
@@ -74,7 +74,7 @@ type targetRuntimeExecution struct {
 	cancel        context.CancelFunc
 	done          chan struct{}
 	cancelOutcome domainexecution.ExecutionOutcome
-	lifecycle     coreruntime.ExecutionLifecycle
+	lifecycle     runtimecontract.ExecutionLifecycle
 }
 
 func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
@@ -117,7 +117,7 @@ func NewTargetRuntime(config TargetRuntimeConfig) (*TargetRuntime, error) {
 func (r *TargetRuntime) Activate(
 	ctx context.Context,
 	execution domainexecution.AgentExecution,
-	lifecycle coreruntime.ExecutionLifecycle,
+	lifecycle runtimecontract.ExecutionLifecycle,
 ) error {
 	if ctx == nil {
 		return errors.New("target runtime activation context is required")
@@ -278,7 +278,7 @@ func (r *TargetRuntime) run(
 	}
 	settlementContext, cancelSettlement := r.settlementContext()
 	defer cancelSettlement()
-	settlement, err := store.AppendExecutionSettlement(settlementContext, coresession.ExecutionSettlementReceipt{
+	settlement, err := store.AppendExecutionSettlement(settlementContext, sessionport.ExecutionSettlementReceipt{
 		ExecutionID: execution.ID, RequestID: execution.RequestID,
 		Outcome:     outcome,
 		FailureCode: failureCode,

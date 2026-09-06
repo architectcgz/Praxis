@@ -2,8 +2,8 @@ package sqlite
 
 import (
 	"context"
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainworkspace "praxis/internal/core/domain/workspace"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainworkspace "praxis/internal/domain/workspace"
 	"time"
 )
 

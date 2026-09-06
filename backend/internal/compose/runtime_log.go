@@ -3,7 +3,7 @@ package compose
 import (
 	"path/filepath"
 
-	domainexecution "praxis/internal/core/domain/execution"
+	domainexecution "praxis/internal/domain/execution"
 
 	"praxis/internal/logging"
 	"praxis/internal/storage/dataroot"

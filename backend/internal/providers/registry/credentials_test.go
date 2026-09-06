@@ -7,13 +7,16 @@ import (
 	"testing"
 )
 
-func TestProviderKeyIsStoredByProviderID(t *testing.T) {
-	secretsPath := filepath.Join(t.TempDir(), "secrets.json")
+func TestProviderKeyIsStoredInNestedCredential(t *testing.T) {
+	modelsPath := filepath.Join(t.TempDir(), "models.json")
 	registry := &Registry{
-		secretsPath: secretsPath,
-		secrets:     map[string]string{},
+		modelsPath: modelsPath,
+		config: FileConfig{Groups: testGroups(), Providers: []ProviderConfig{{
+			ID: "gateway", DisplayName: "Gateway", BaseURL: "https://gateway.example.com",
+			DefaultAPIFormat: APIFormatOpenAIResponses,
+		}}},
 		byProvider: map[string]ProviderConfig{
-			"gateway": {ID: "gateway"},
+			"gateway": {ID: "gateway", DisplayName: "Gateway", BaseURL: "https://gateway.example.com", DefaultAPIFormat: APIFormatOpenAIResponses},
 		},
 	}
 
@@ -24,15 +27,16 @@ func TestProviderKeyIsStoredByProviderID(t *testing.T) {
 		t.Fatalf("provider key = %q, want test-key", key)
 	}
 
-	payload, err := os.ReadFile(secretsPath)
+	payload, err := os.ReadFile(modelsPath)
 	if err != nil {
-		t.Fatalf("read secrets file: %v", err)
+		t.Fatalf("read model providers file: %v", err)
 	}
-	var saved secretsFile
+	var saved FileConfig
 	if err := json.Unmarshal(payload, &saved); err != nil {
-		t.Fatalf("decode secrets file: %v", err)
+		t.Fatalf("decode model providers file: %v", err)
 	}
-	if saved.Keys["gateway"] != "test-key" {
-		t.Fatalf("saved provider key = %q, want test-key", saved.Keys["gateway"])
+	credential := saved.Providers[0].Credential
+	if credential == nil || credential.Type != CredentialTypeAPIKey || credential.Key != "test-key" {
+		t.Fatalf("saved credential = %#v, want api key credential", credential)
 	}
 }

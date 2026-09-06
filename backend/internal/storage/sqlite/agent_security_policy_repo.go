@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	domainfoundation "praxis/internal/core/domain/foundation"
-	domainsecurity "praxis/internal/core/domain/security"
+	domainfoundation "praxis/internal/domain/foundation"
+	domainsecurity "praxis/internal/domain/security"
 )
 
 func (s *Store) GetCurrentAgentSecurityPolicy(ctx context.Context, agentID domainfoundation.AgentID) (domainsecurity.AgentSecurityPolicy, error) {

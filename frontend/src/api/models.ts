@@ -20,7 +20,13 @@ export type ProviderConfigOption = {
     providerName: string
     baseURL: string
     proxyURL: string
+    defaultAPIFormat: ModelAPIFormat
     hasAPIKey: boolean
+}
+
+export type GroupConfigOption = {
+    id: string
+    displayName: string
 }
 
 export type ModelAPIFormat = 'anthropic_messages' | 'openai_responses' | 'openai_chat_completions'
@@ -29,6 +35,7 @@ export type ModelConfigOption = {
     providerId: string
     modelId: string
     label: string
+    groupId: string
     apiFormat: ModelAPIFormat
     contextWindow: number
     maxOutputTokens: number
@@ -36,6 +43,7 @@ export type ModelConfigOption = {
 }
 
 export type ModelConfigDocument = {
+    groups: GroupConfigOption[]
     providers: ProviderConfigOption[]
     models: ModelConfigOption[]
     profiles: Record<string, ModelReference>
@@ -62,6 +70,7 @@ export function getModelConfig() {
 
 export function saveModelConfig(config: ModelConfigDocument) {
     return getModelBinding().SaveModelConfig({
+        groups: config.groups,
         providers: config.providers,
         models: config.models,
         profiles: config.profiles,
@@ -121,6 +130,10 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
         throw new Error('The model configuration response is invalid.')
     }
     return {
+        groups: !Array.isArray(value.groups) ? [] : value.groups.map((group: unknown) => {
+            if (!isRecord(group)) throw new Error('The model configuration response is invalid.')
+            return { id: stringValue(group.id), displayName: stringValue(group.displayName) }
+        }),
         providers: value.providers.map((provider) => {
             if (!isRecord(provider)) throw new Error('The model configuration response is invalid.')
             return {
@@ -128,6 +141,7 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
                 providerName: stringValue(provider.providerName),
                 baseURL: stringValue(provider.baseURL),
                 proxyURL: stringValue(provider.proxyURL),
+                defaultAPIFormat: apiFormatValue(provider.defaultAPIFormat),
                 hasAPIKey: provider.hasAPIKey === true,
             }
         }),
@@ -146,6 +160,7 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
                 providerId: stringValue(model.providerId),
                 modelId: stringValue(model.modelId),
                 label: stringValue(model.label),
+                groupId: stringValue(model.groupId),
                 apiFormat,
                 contextWindow: model.contextWindow,
                 maxOutputTokens: model.maxOutputTokens,
@@ -183,4 +198,12 @@ function stringArray(value: unknown): string[] {
         throw new Error('The model catalog response is invalid.')
     }
     return value
+}
+
+function apiFormatValue(value: unknown): ModelAPIFormat {
+    const format = stringValue(value)
+    if (format !== 'anthropic_messages' && format !== 'openai_responses' && format !== 'openai_chat_completions') {
+        throw new Error('The model configuration response is invalid.')
+    }
+    return format
 }

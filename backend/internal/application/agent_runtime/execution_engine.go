@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
-	domainexecution "praxis/internal/core/domain/execution"
-	domainsecurity "praxis/internal/core/domain/security"
+	domainexecution "praxis/internal/domain/execution"
+	domainsecurity "praxis/internal/domain/security"
 
-	coresession "praxis/internal/core/session"
-	"praxis/internal/core/system"
+	runtimecontract "praxis/internal/runtime"
+	sessionport "praxis/internal/session"
+	"praxis/internal/system"
 )
 
 type ExecutionModel struct {
@@ -27,6 +28,7 @@ type ExecutionModelResolver interface {
 
 type ExecutionEngineConfig struct {
 	Models         ExecutionModelResolver
+	Tools          ToolCatalog
 	ToolInvoker    ToolInvoker
 	OutputObserver AgentOutputObserver
 	Clock          system.Clock
@@ -35,6 +37,7 @@ type ExecutionEngineConfig struct {
 
 type ExecutionEngine struct {
 	models         ExecutionModelResolver
+	tools          ToolCatalog
 	toolInvoker    ToolInvoker
 	outputObserver AgentOutputObserver
 	clock          system.Clock
@@ -55,6 +58,7 @@ func NewExecutionEngine(config ExecutionEngineConfig) (*ExecutionEngine, error) 
 	}
 	return &ExecutionEngine{
 		models:         config.Models,
+		tools:          config.Tools,
 		toolInvoker:    config.ToolInvoker,
 		outputObserver: config.OutputObserver,
 		clock:          clock,
@@ -62,18 +66,18 @@ func NewExecutionEngine(config ExecutionEngineConfig) (*ExecutionEngine, error) 
 	}, nil
 }
 
-func (e *ExecutionEngine) RunWithSession(ctx context.Context, execution domainexecution.AgentExecution, store coresession.TranscriptReceiptStore) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error) {
+func (e *ExecutionEngine) RunWithSession(ctx context.Context, execution domainexecution.AgentExecution, store sessionport.TranscriptReceiptStore) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error) {
 	if store == nil {
 		return failedExecution(errors.New("transcript store is required"))
 	}
-	messages, ok := store.(coresession.TranscriptMessageStore)
+	messages, ok := store.(sessionport.TranscriptMessageStore)
 	if !ok {
 		return failedExecution(errors.New("transcript does not implement the target message port"))
 	}
 	return e.run(ctx, execution, messages)
 }
 
-func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.AgentExecution, transcript coresession.TranscriptMessageStore) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error) {
+func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.AgentExecution, transcript sessionport.TranscriptMessageStore) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error) {
 	output := newOutputBatcher(e.outputObserver, execution, e.clock)
 	defer output.Flush()
 	if ctx == nil {
@@ -109,10 +113,10 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 	var toolCalls int
 	for turn := 1; turn <= maxTurns; turn++ {
 		snapshot := TurnSnapshot{
-			ExecutionID: execution.ID, SessionReference: execution.SessionID.String(), Messages: coreruntimeCloneMessages(turnMessages),
+			ExecutionID: execution.ID, SessionReference: execution.SessionID.String(), Messages: runtimecontract.CloneTurnMessages(turnMessages),
 			ContextManifest:  execution.Input.ContextManifest,
 			ContextSelection: execution.Input.ContextSelection, SystemPrompt: execution.Input.ContextManifest.Summary,
-			Model: grant.Model, Tools: toolDefinitions(grant), Execution: execution.Input.Runtime, TurnNumber: turn, GrantID: grant.ID,
+			Model: grant.Model, Tools: toolDefinitions(grant, e.tools), Execution: execution.Input.Runtime, TurnNumber: turn, GrantID: grant.ID,
 		}
 		if limits.MaxInputBytes > 0 && turnInputBytes(snapshot) > limits.MaxInputBytes {
 			return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureResourceLimit, &RuntimeError{Code: ErrorResourceLimit, Message: "execution input limit exceeded"}
@@ -177,9 +181,13 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 			if err != nil {
 				// Persist a bounded tool-result receipt before settling failure so
 				// recovery can account for the attempted side effect.
-				if receiptErr := transcript.AppendStructuredMessage(ctx, execution.ID, fmt.Sprintf("tool-result:%d:%d:%s", turn, callIndex, call.ID), "user", execution.RequestID, transcriptBlocks([]TurnContentBlock{{
-					Kind: TurnContentToolResult, ToolCallID: call.ID, ToolName: string(call.Name), Text: "tool execution failed", IsError: true,
-				}})); receiptErr != nil {
+				if receiptErr := transcript.AppendStructuredMessage(
+					ctx, execution.ID, fmt.Sprintf("tool-result:%d:%d:%s", turn, callIndex, call.ID),
+					"tool", execution.RequestID, transcriptBlocks([]TurnContentBlock{{
+						Kind: TurnContentToolResult, ToolCallID: call.ID, ToolName: string(call.Name),
+						Text: "tool execution failed", IsError: true,
+					}}),
+				); receiptErr != nil {
 					return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureStorage, &RuntimeError{Code: ErrorStorage, Message: "tool result receipt failed", Cause: receiptErr}
 				}
 				return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureTool,
@@ -199,21 +207,26 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 			}
 			outputBytes += int64(len([]byte(resultText)))
 			resultBlock := TurnContentBlock{Kind: TurnContentToolResult, ToolCallID: call.ID, ToolName: string(call.Name), Text: resultText, IsError: result.ErrorClass != ""}
-			if err := transcript.AppendStructuredMessage(ctx, execution.ID, fmt.Sprintf("tool-result:%d:%d:%s", turn, callIndex, call.ID), "user", execution.RequestID, transcriptBlocks([]TurnContentBlock{resultBlock})); err != nil {
+			if err := transcript.AppendStructuredMessage(
+				ctx, execution.ID, fmt.Sprintf("tool-result:%d:%d:%s", turn, callIndex, call.ID),
+				"tool", execution.RequestID, transcriptBlocks([]TurnContentBlock{resultBlock}),
+			); err != nil {
 				return failedExecution(err)
 			}
-			turnMessages = append(turnMessages, TurnMessage{Role: TurnRoleUser, Content: []TurnContentBlock{resultBlock}})
+			turnMessages = append(turnMessages, TurnMessage{
+				Role: TurnRoleTool, Content: []TurnContentBlock{resultBlock},
+			})
 		}
 	}
 	return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureResourceLimit, &RuntimeError{Code: ErrorResourceLimit, Message: "execution turn limit exceeded"}
 }
 
-func transcriptTurns(messages []coresession.AgentSessionMessage) []TurnMessage {
+func transcriptTurns(messages []sessionport.AgentSessionMessage) []TurnMessage {
 	turns := make([]TurnMessage, 0, len(messages))
 	for _, message := range messages {
-		role := TurnRoleUser
-		if message.Role == "assistant" {
-			role = TurnRoleAssistant
+		role := TurnMessageRole(message.Role)
+		if role != TurnRoleUser && role != TurnRoleAssistant && role != TurnRoleTool {
+			role = TurnRoleUser
 		}
 		blocks := make([]TurnContentBlock, 0, len(message.Blocks))
 		for _, block := range message.Blocks {
@@ -227,26 +240,23 @@ func transcriptTurns(messages []coresession.AgentSessionMessage) []TurnMessage {
 	return turns
 }
 
-func transcriptBlocks(blocks []TurnContentBlock) []coresession.TranscriptContentBlock {
-	result := make([]coresession.TranscriptContentBlock, len(blocks))
+func transcriptBlocks(blocks []TurnContentBlock) []sessionport.TranscriptContentBlock {
+	result := make([]sessionport.TranscriptContentBlock, len(blocks))
 	for i, block := range blocks {
-		result[i] = coresession.TranscriptContentBlock{Kind: string(block.Kind), Text: block.Text, ToolCallID: block.ToolCallID, ToolName: block.ToolName, Input: append([]byte(nil), block.Input...), IsError: block.IsError}
+		result[i] = sessionport.TranscriptContentBlock{Kind: string(block.Kind), Text: block.Text, ToolCallID: block.ToolCallID, ToolName: block.ToolName, Input: append([]byte(nil), block.Input...), IsError: block.IsError}
 	}
 	return result
 }
 
-func coreruntimeCloneMessages(messages []TurnMessage) []TurnMessage {
-	cloned := make([]TurnMessage, len(messages))
-	for i, message := range messages {
-		cloned[i] = message.Snapshot()
+func toolDefinitions(grant domainsecurity.CapabilityGrant, catalog ToolCatalog) []ToolDefinition {
+	if catalog == nil {
+		return nil
 	}
-	return cloned
-}
-
-func toolDefinitions(grant domainsecurity.CapabilityGrant) []ToolDefinition {
 	definitions := make([]ToolDefinition, 0, len(grant.AllowedTools))
 	for _, name := range grant.AllowedTools {
-		definitions = append(definitions, ToolDefinition{Name: name, Description: "Praxis execution tool", InputSchema: []byte(`{"type":"object"}`)})
+		if definition, ok := catalog.Definition(name); ok {
+			definitions = append(definitions, definition.Snapshot())
+		}
 	}
 	return definitions
 }
