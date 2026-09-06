@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	applicationagent "praxis/internal/application/agent"
 	agentruntime "praxis/internal/application/agent_runtime"
 	executioncontrol "praxis/internal/application/execution/control"
 	executionqueue "praxis/internal/application/execution/queue"
@@ -45,6 +46,7 @@ type Application struct {
 	projects    *applicationproject.Service
 	sessions    *applicationsession.Service
 	controls    *executioncontrol.Service
+	agents      *applicationagent.Service
 	queues      *executionqueue.Service
 	starts      *executionstart.Service
 	store       *sqlite.Store
@@ -150,6 +152,10 @@ func (a *Application) Resume(ctx context.Context, params executionstart.ResumePa
 
 func (a *Application) EnqueueWork(ctx context.Context, params executionqueue.EnqueueParams) (executionqueue.EnqueueResult, error) {
 	return a.queues.EnqueueWork(ctx, params)
+}
+
+func (a *Application) UpdateAgentPolicy(ctx context.Context, params applicationagent.UpdatePolicyParams) (applicationagent.UpdatePolicyResult, error) {
+	return a.agents.UpdatePolicy(ctx, params)
 }
 
 func (a *Application) CreateSessionForProject(
@@ -359,6 +365,21 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	agentService, err := applicationagent.NewService(applicationagent.Config{
+		Transactions:    store,
+		Agents:          target.Agents,
+		Policies:        target.Policies,
+		CommandReceipts: target.Commands,
+		Events:          target.Events,
+		Readiness:       orchestrator,
+	})
+	if err != nil {
+		diagnostics.logger.Errorf("create agent policy service failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, err
+	}
 	projectService, err := applicationproject.NewService(applicationproject.Config{
 		Transactions:    store,
 		Projects:        target.Projects,
@@ -441,6 +462,7 @@ func Open(
 		projects:          projectService,
 		sessions:          sessionService,
 		controls:          controlService,
+		agents:            agentService,
 		queues:            queueService,
 		starts:            startService,
 		store:             store,
