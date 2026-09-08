@@ -23,24 +23,24 @@ func (b *AgentBindings) GetAgent(agentID string) (response contracts.AgentSnapsh
 	if err != nil {
 		return contracts.AgentSnapshot{}, err
 	}
-	projection, err := queries.ProjectAgent(ctx, domainfoundation.AgentID(agentID), 100)
+	agentView, err := queries.GetAgentView(ctx, domainfoundation.AgentID(agentID), 100)
 	if err != nil {
 		return contracts.AgentSnapshot{}, publicBindingError(err)
 	}
 	result := contracts.AgentSnapshot{
-		ID:                     projection.Agent.ID.String(),
-		SessionID:              projection.Agent.SessionID.String(),
-		SecurityPolicyRevision: projection.Agent.SecurityPolicyRevision,
-		Profile:                string(projection.Agent.Profile),
-		State:                  string(projection.Agent.State),
-		CurrentExecution:       projection.Agent.CurrentExecutionID.String(),
-		ExecutionIDs:           make([]string, 0, len(projection.Executions)),
-		Executions:             make([]contracts.ExecutionSnapshot, 0, len(projection.Executions)),
-		WaitConditionIDs:       make([]string, 0, len(projection.Waits)),
-		DeliveryIDs:            make([]string, 0, len(projection.Deliveries)),
-		ControlRequestIDs:      make([]string, 0, len(projection.Controls)),
+		ID:                     agentView.Agent.ID.String(),
+		SessionID:              agentView.Agent.SessionID.String(),
+		SecurityPolicyRevision: agentView.Agent.SecurityPolicyRevision,
+		Profile:                string(agentView.Agent.Profile),
+		State:                  string(agentView.Agent.State),
+		CurrentExecution:       agentView.Agent.CurrentExecutionID.String(),
+		ExecutionIDs:           make([]string, 0, len(agentView.Executions)),
+		Executions:             make([]contracts.ExecutionSnapshot, 0, len(agentView.Executions)),
+		WaitConditionIDs:       make([]string, 0, len(agentView.Waits)),
+		DeliveryIDs:            make([]string, 0, len(agentView.Deliveries)),
+		ControlRequestIDs:      make([]string, 0, len(agentView.Controls)),
 	}
-	for _, execution := range projection.Executions {
+	for _, execution := range agentView.Executions {
 		result.ExecutionIDs = append(result.ExecutionIDs, execution.ID.String())
 		result.Executions = append(result.Executions, contracts.ExecutionSnapshot{
 			ID:          execution.ID.String(),
@@ -53,13 +53,13 @@ func (b *AgentBindings) GetAgent(agentID string) (response contracts.AgentSnapsh
 			SettledAt:   execution.SettledAt,
 		})
 	}
-	for _, wait := range projection.Waits {
+	for _, wait := range agentView.Waits {
 		result.WaitConditionIDs = append(result.WaitConditionIDs, wait.ID.String())
 	}
-	for _, delivery := range projection.Deliveries {
+	for _, delivery := range agentView.Deliveries {
 		result.DeliveryIDs = append(result.DeliveryIDs, delivery.ID.String())
 	}
-	for _, control := range projection.Controls {
+	for _, control := range agentView.Controls {
 		result.ControlRequestIDs = append(result.ControlRequestIDs, control.ID.String())
 	}
 	return result, nil
@@ -100,11 +100,11 @@ func (b *AgentBindings) ListAgentHistory(
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
-	projection, err := queries.ProjectAgent(ctx, domainfoundation.AgentID(agentID), 200)
+	agentView, err := queries.GetAgentView(ctx, domainfoundation.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicBindingError(err)
 	}
-	result := make([]contracts.AgentHistoryItem, 0, len(messages)+len(projection.Executions))
+	result := make([]contracts.AgentHistoryItem, 0, len(messages)+len(agentView.Executions))
 	for _, message := range messages {
 		value, visible := publicAgentMessage(message)
 		if !visible {
@@ -117,7 +117,7 @@ func (b *AgentBindings) ListAgentHistory(
 			Message:  &value,
 		})
 	}
-	for _, execution := range projection.Executions {
+	for _, execution := range agentView.Executions {
 		if execution.Status != domainexecution.ExecutionSettled || execution.Outcome != domainexecution.ExecutionFailed {
 			continue
 		}

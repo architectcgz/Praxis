@@ -18,6 +18,7 @@ import (
 	executionstart "praxis/internal/application/execution/start"
 	toolinvocation "praxis/internal/application/execution/tool_invocation"
 	applicationproject "praxis/internal/application/project"
+	applicationquery "praxis/internal/application/query"
 	applicationsession "praxis/internal/application/session"
 	commandprotocol "praxis/internal/command"
 	domainagent "praxis/internal/domain/agent"
@@ -31,7 +32,6 @@ import (
 
 	"praxis/internal/logging"
 	"praxis/internal/orchestration"
-	"praxis/internal/projection"
 	"praxis/internal/providers/registry"
 	"praxis/internal/session"
 	"praxis/internal/storage/agentlog"
@@ -45,7 +45,7 @@ import (
 // services, orchestration, runtime activation, delivery, and startup recovery.
 type Application struct {
 	readiness   *orchestration.ReadinessGate
-	projections *projection.Service
+	queries     *applicationquery.Service
 	projects    *applicationproject.Service
 	sessions    *applicationsession.Service
 	controls    *executioncontrol.Service
@@ -58,16 +58,16 @@ type Application struct {
 	models      *registry.Registry
 	registry    *agentruntime.Registry
 	scheduler   *orchestration.Scheduler
-	runtimeLog  *runtimeLog
+	logger      *logging.Logger
 	output      *agentOutputPublisher
 }
 
 func (a *Application) ListProjects(ctx context.Context, limit int) ([]domainproject.Project, error) {
-	return a.projections.ListProjects(ctx, limit)
+	return a.queries.ListProjects(ctx, limit)
 }
 
 func (a *Application) ListWorkspaces(ctx context.Context, projectID domainfoundation.ProjectID, limit int) ([]domainworkspace.Workspace, error) {
-	return a.projections.ListWorkspaces(ctx, projectID, limit)
+	return a.queries.ListWorkspaces(ctx, projectID, limit)
 }
 
 func (a *Application) ListSessionsByProject(
@@ -75,27 +75,27 @@ func (a *Application) ListSessionsByProject(
 	projectID domainfoundation.ProjectID,
 	limit int,
 ) ([]domainsession.Session, error) {
-	return a.projections.ListSessionsByProject(ctx, projectID, limit)
+	return a.queries.ListSessionsByProject(ctx, projectID, limit)
 }
 
 func (a *Application) ListSessions(ctx context.Context, limit int) ([]domainsession.Session, error) {
-	return a.projections.ListSessions(ctx, limit)
+	return a.queries.ListSessions(ctx, limit)
 }
 
-func (a *Application) ProjectSession(
+func (a *Application) GetSessionView(
 	ctx context.Context,
 	sessionID domainfoundation.SessionID,
 	limit int,
-) (projection.SessionProjection, error) {
-	return a.projections.ProjectSession(ctx, sessionID, limit)
+) (applicationquery.SessionView, error) {
+	return a.queries.GetSessionView(ctx, sessionID, limit)
 }
 
-func (a *Application) ProjectAgent(
+func (a *Application) GetAgentView(
 	ctx context.Context,
 	agentID domainfoundation.AgentID,
 	limit int,
-) (projection.AgentProjection, error) {
-	return a.projections.ProjectAgent(ctx, agentID, limit)
+) (applicationquery.AgentView, error) {
+	return a.queries.GetAgentView(ctx, agentID, limit)
 }
 
 func (a *Application) ListSessionEvents(
@@ -104,7 +104,7 @@ func (a *Application) ListSessionEvents(
 	after time.Time,
 	limit int,
 ) ([]domainfoundation.DomainEvent, error) {
-	return a.projections.ListSessionEvents(ctx, sessionID, after, limit)
+	return a.queries.ListSessionEvents(ctx, sessionID, after, limit)
 }
 
 func (a *Application) ListAgentEvents(
@@ -113,7 +113,7 @@ func (a *Application) ListAgentEvents(
 	after time.Time,
 	limit int,
 ) ([]domainfoundation.DomainEvent, error) {
-	return a.projections.ListAgentEvents(ctx, agentID, after, limit)
+	return a.queries.ListAgentEvents(ctx, agentID, after, limit)
 }
 
 func (a *Application) ListExecutionEvents(
@@ -122,7 +122,7 @@ func (a *Application) ListExecutionEvents(
 	after time.Time,
 	limit int,
 ) ([]domainfoundation.DomainEvent, error) {
-	return a.projections.ListExecutionEvents(ctx, executionID, after, limit)
+	return a.queries.ListExecutionEvents(ctx, executionID, after, limit)
 }
 
 func (a *Application) CreateProject(ctx context.Context, name, path string, requestID domainfoundation.RequestID) (result applicationproject.CreateProjectResult, err error) {
@@ -195,15 +195,15 @@ func Open(
 		closeStore()
 		return nil, fmt.Errorf("verify target schema: %w", err)
 	}
-	diagnostics, err := openRuntimeLog(root)
+	diagnostics, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
 	if err != nil {
 		closeStore()
 		return nil, fmt.Errorf("open runtime log: %w", err)
 	}
-	diagnostics.logger.Infof("composition open started root=%s database=%s", root.Root, root.Database)
+	diagnostics.Infof("composition open started root=%s database=%s", root.Root, root.Database)
 	modelRegistry, err := registry.Load(root.ModelProvidersConfig, nil)
 	if err != nil {
-		diagnostics.logger.Errorf("load model registry failed: %v", err)
+		diagnostics.Errorf("load model registry failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
@@ -234,9 +234,9 @@ func Open(
 			return nil, serviceErr
 		}
 		runner, err = agentruntime.NewExecutionEngine(agentruntime.ExecutionEngineConfig{
-			Models: providerModelResolver{registry: modelRegistry}, Tools: toolRegistry,
+			Models: modelRegistry, Tools: toolRegistry,
 			ToolInvoker: toolService, OutputObserver: output.Publish,
-			Logf: diagnostics.Logger().Infof,
+			Logf: diagnostics.Infof,
 		})
 		if err != nil {
 			_ = diagnostics.Close()
@@ -245,14 +245,20 @@ func Open(
 		}
 	}
 	factory := targetRuntimeFactory{
-		root:        root,
-		runner:      runner,
-		header:      newSessionHeaderResolver(store),
-		logger:      diagnostics.Log,
-		eventLogger: diagnostics.Event,
-		output:      output.Publish,
+		root:   root,
+		runner: runner,
+		header: newSessionHeaderResolver(store),
+		logger: func(execution domainexecution.AgentExecution, stage string, err error) {
+			if err != nil {
+				diagnostics.Errorf("execution id=%s stage=%s failed: %v", execution.ID, stage, err)
+			}
+		},
+		eventLogger: func(execution domainexecution.AgentExecution, stage string) {
+			diagnostics.Infof("execution id=%s stage=%s", execution.ID, stage)
+		},
+		output: output.Publish,
 	}
-	projections, err := projection.NewService(projection.Config{
+	queries, err := applicationquery.NewService(applicationquery.Config{
 		Projects:   target.Projects,
 		Workspaces: target.Workspaces,
 		Sessions:   target.Sessions,
@@ -266,14 +272,14 @@ func Open(
 		Messages:   newAgentMessageQuery(root),
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create projection service failed: %v", err)
+		diagnostics.Errorf("create query service failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
 	registry, err := agentruntime.NewRegistry(factory)
 	if err != nil {
-		diagnostics.logger.Errorf("create runtime registry failed: %v", err)
+		diagnostics.Errorf("create runtime registry failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
@@ -283,7 +289,7 @@ func Open(
 		Runtime:    registry,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create execution scheduler failed: %v", err)
+		diagnostics.Errorf("create execution scheduler failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -304,7 +310,7 @@ func Open(
 		PolicyFactory:   policyFactory(systemPolicy),
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create session service failed: %v", err)
+		diagnostics.Errorf("create session service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -319,7 +325,7 @@ func Open(
 		Events:       target.Events,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create execution settlement service failed: %v", err)
+		diagnostics.Errorf("create execution settlement service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -339,7 +345,7 @@ func Open(
 		Lifecycle:       settlementService,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create execution delivery service failed: %v", err)
+		diagnostics.Errorf("create execution delivery service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -353,7 +359,7 @@ func Open(
 		Lifecycle: settlementService, Models: modelRegistry,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create execution start service failed: %v", err)
+		diagnostics.Errorf("create execution start service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -373,14 +379,14 @@ func Open(
 		Lifecycle:    settlementService,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create execution queue service failed: %v", err)
+		diagnostics.Errorf("create execution queue service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
 	if err := settlementService.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
-		diagnostics.logger.Errorf("configure execution settlement queue starter failed: %v", err)
+		diagnostics.Errorf("configure execution settlement queue starter failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -395,7 +401,7 @@ func Open(
 		Readiness:       readiness,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create agent policy service failed: %v", err)
+		diagnostics.Errorf("create agent policy service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -410,7 +416,7 @@ func Open(
 		Readiness:       readiness,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create project service failed: %v", err)
+		diagnostics.Errorf("create project service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -427,7 +433,7 @@ func Open(
 		Canceller:       registry,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create control service failed: %v", err)
+		diagnostics.Errorf("create control service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -442,7 +448,7 @@ func Open(
 		ResolveArtifact: store.ResolveContextArtifact,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create delivery coordinator failed: %v", err)
+		diagnostics.Errorf("create delivery coordinator failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -462,7 +468,7 @@ func Open(
 		Sessions:   sessions,
 	})
 	if err != nil {
-		diagnostics.logger.Errorf("create recovery coordinator failed: %v", err)
+		diagnostics.Errorf("create recovery coordinator failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -470,17 +476,17 @@ func Open(
 	}
 	deliveryInputs.start = startService
 	if _, err := recovery.Recover(ctx); err != nil {
-		diagnostics.logger.Errorf("startup recovery failed: %v", err)
+		diagnostics.Errorf("startup recovery failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, fmt.Errorf("startup recovery: %w", err)
 	}
-	diagnostics.logger.Infof("startup recovery completed")
-	diagnostics.logger.Infof("composition open completed ready=true")
+	diagnostics.Infof("startup recovery completed")
+	diagnostics.Infof("composition open completed ready=true")
 	return &Application{
 		readiness:   readiness,
-		projections: projections,
+		queries:     queries,
 		projects:    projectService,
 		sessions:    sessionService,
 		controls:    controlService,
@@ -493,7 +499,7 @@ func Open(
 		models:      modelRegistry,
 		registry:    registry,
 		scheduler:   scheduler,
-		runtimeLog:  diagnostics,
+		logger:      diagnostics,
 		output:      output,
 	}, nil
 }
@@ -502,10 +508,10 @@ func Open(
 // layer without exposing composition internals or storage adapters.
 func (a *Application) RuntimeLogger() *logging.Logger {
 	factory := logging.NewFactory()
-	if a == nil || a.runtimeLog == nil {
+	if a == nil || a.logger == nil {
 		return factory.Nop()
 	}
-	return factory.Ensure(a.runtimeLog.Logger())
+	return factory.Ensure(a.logger)
 }
 
 // SubscribeAgentOutput registers a listener for transient provider output.
@@ -594,7 +600,7 @@ func (a *Application) Close(ctx context.Context) error {
 	if runtimeErr == nil && storeErr == nil {
 		logger.Infof("composition close completed")
 	}
-	logErr := a.runtimeLog.Close()
+	logErr := logger.Close()
 	if runtimeErr != nil && storeErr != nil && logErr != nil {
 		return fmt.Errorf("close runtimes: %v; close store: %v; close runtime log: %w", runtimeErr, storeErr, logErr)
 	}
@@ -621,7 +627,7 @@ func (a *Application) ListAgentMessages(
 	agentID domainfoundation.AgentID,
 	limit int,
 ) ([]session.AgentSessionMessage, error) {
-	return a.projections.ListAgentMessages(ctx, agentID, limit)
+	return a.queries.ListAgentMessages(ctx, agentID, limit)
 }
 
 type targetRuntimeFactory struct {
@@ -745,7 +751,7 @@ func newAgentSessionResolver(root dataroot.DataRoot) orchestration.AgentSessionR
 	}
 }
 
-func newAgentMessageQuery(root dataroot.DataRoot) projection.AgentMessageQuery {
+func newAgentMessageQuery(root dataroot.DataRoot) applicationquery.AgentMessageQuery {
 	return func(ctx context.Context, sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID, limit int) ([]session.AgentSessionMessage, error) {
 		store, err := agentlog.Open(root, sessionID, agentID)
 		if err != nil {

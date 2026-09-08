@@ -1,5 +1,5 @@
-// Package projection provides core-owned read models over durable state.
-package projection
+// Package query provides application read models over durable state.
+package query
 
 import (
 	"context"
@@ -38,8 +38,8 @@ type Config struct {
 	Messages   AgentMessageQuery
 }
 
-// Service composes durable read models for desktop bindings and recovery
-// diagnostics. Runtime actors and channels are intentionally excluded.
+// Service executes application read use cases for desktop bindings and
+// recovery diagnostics. Runtime actors and channels are intentionally excluded.
 type Service struct {
 	projects   persistence.ProjectRepository
 	workspaces persistence.WorkspaceRepository
@@ -54,7 +54,7 @@ type Service struct {
 	messages   AgentMessageQuery
 }
 
-// NewService creates the projection service from core-owned query ports.
+// NewService creates the query service from core-owned query ports.
 func NewService(config Config) (*Service, error) {
 	for _, required := range []struct {
 		name  string
@@ -73,7 +73,7 @@ func NewService(config Config) (*Service, error) {
 		{name: "agent message query", value: config.Messages},
 	} {
 		if required.value == nil {
-			return nil, fmt.Errorf("projection %s is required", required.name)
+			return nil, fmt.Errorf("query %s is required", required.name)
 		}
 	}
 	return &Service{
@@ -91,8 +91,8 @@ func NewService(config Config) (*Service, error) {
 	}, nil
 }
 
-// AgentProjection is the durable state tree for a single Agent.
-type AgentProjection struct {
+// AgentView is the durable detail view for a single Agent.
+type AgentView struct {
 	Agent           domainagent.Agent
 	ActiveExecution *domainexecution.AgentExecution
 	Executions      []domainexecution.AgentExecution
@@ -101,9 +101,9 @@ type AgentProjection struct {
 	Controls        []domainworkflow.AgentControlRequest
 }
 
-// SessionProjection is the smallest durable state tree required to render a
-// Session workspace without granting bindings repository access.
-type SessionProjection struct {
+// SessionView is the smallest durable detail view required to render a Session
+// workspace without granting bindings repository access.
+type SessionView struct {
 	Session domainsession.Session
 	Agents  []domainagent.Agent
 }
@@ -158,41 +158,41 @@ func (s *Service) ListSessions(ctx context.Context, limit int) ([]domainsession.
 	return lister.List(ctx, limit)
 }
 
-// ProjectAgent returns the complete durable projection for one Agent.
-func (s *Service) ProjectAgent(ctx context.Context, agentID domainfoundation.AgentID, limit int) (AgentProjection, error) {
+// GetAgentView returns the complete durable detail view for one Agent.
+func (s *Service) GetAgentView(ctx context.Context, agentID domainfoundation.AgentID, limit int) (AgentView, error) {
 	if ctx == nil {
-		return AgentProjection{}, errors.New("agent projection context is required")
+		return AgentView{}, errors.New("agent query context is required")
 	}
 	if agentID == "" {
-		return AgentProjection{}, invalidQuery("agent id is required")
+		return AgentView{}, invalidQuery("agent id is required")
 	}
 	agent, err := s.agents.Get(ctx, agentID)
 	if err != nil {
-		return AgentProjection{}, err
+		return AgentView{}, err
 	}
 	active, err := s.executions.GetActiveByAgent(ctx, agentID)
 	if errors.Is(err, domainfoundation.ErrNotFound) {
 		active = domainexecution.AgentExecution{}
 	} else if err != nil {
-		return AgentProjection{}, fmt.Errorf("load active agent execution: %w", err)
+		return AgentView{}, fmt.Errorf("load active agent execution: %w", err)
 	}
 	executions, err := s.executions.ListByAgent(ctx, agentID, limit)
 	if err != nil {
-		return AgentProjection{}, err
+		return AgentView{}, err
 	}
 	waits, err := s.waits.ListUnresolvedByAgent(ctx, agentID, limit)
 	if err != nil {
-		return AgentProjection{}, err
+		return AgentView{}, err
 	}
 	deliveries, err := s.deliveries.ListPendingByTarget(ctx, agentID, limit)
 	if err != nil {
-		return AgentProjection{}, err
+		return AgentView{}, err
 	}
 	controls, err := s.controls.ListOpenByAgent(ctx, agentID, limit)
 	if err != nil {
-		return AgentProjection{}, err
+		return AgentView{}, err
 	}
-	projection := AgentProjection{
+	view := AgentView{
 		Agent:      agent,
 		Executions: executions,
 		Waits:      waits,
@@ -201,28 +201,28 @@ func (s *Service) ProjectAgent(ctx context.Context, agentID domainfoundation.Age
 	}
 	if active.ID != "" {
 		activeCopy := active
-		projection.ActiveExecution = &activeCopy
+		view.ActiveExecution = &activeCopy
 	}
-	return projection, nil
+	return view, nil
 }
 
-// ProjectSession returns the Session and its indexed Agent catalog.
-func (s *Service) ProjectSession(ctx context.Context, sessionID domainfoundation.SessionID, limit int) (SessionProjection, error) {
+// GetSessionView returns the Session and its indexed Agent catalog.
+func (s *Service) GetSessionView(ctx context.Context, sessionID domainfoundation.SessionID, limit int) (SessionView, error) {
 	if ctx == nil {
-		return SessionProjection{}, errors.New("session projection context is required")
+		return SessionView{}, errors.New("session query context is required")
 	}
 	if sessionID == "" {
-		return SessionProjection{}, invalidQuery("session id is required")
+		return SessionView{}, invalidQuery("session id is required")
 	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return SessionProjection{}, err
+		return SessionView{}, err
 	}
 	agents, err := s.agents.ListBySession(ctx, sessionID, limit)
 	if err != nil {
-		return SessionProjection{}, fmt.Errorf("list agents in session %s: %w", sessionID, err)
+		return SessionView{}, fmt.Errorf("list agents in session %s: %w", sessionID, err)
 	}
-	return SessionProjection{Session: session, Agents: agents}, nil
+	return SessionView{Session: session, Agents: agents}, nil
 }
 
 // ListAgentMessages reads an Agent transcript through the injected core port.
@@ -291,7 +291,7 @@ func invalidQuery(message string) error {
 	return &InvalidQueryError{message: message}
 }
 
-// InvalidQueryError reports an invalid projection request without exposing a
+// InvalidQueryError reports an invalid query request without exposing a
 // repository or storage implementation error to the desktop binding.
 type InvalidQueryError struct {
 	message string

@@ -5,11 +5,10 @@ import (
 	"errors"
 
 	"praxis/internal/application/agent_runtime"
+	applicationquery "praxis/internal/application/query"
 	commandprotocol "praxis/internal/command"
 	"praxis/internal/contracts"
 	domainfoundation "praxis/internal/domain/foundation"
-
-	"praxis/internal/projection"
 )
 
 func publicBindingError(err error) error {
@@ -20,7 +19,7 @@ func publicBindingError(err error) error {
 	if errors.As(err, &command) {
 		return publicCommandError(command)
 	}
-	var query *projection.InvalidQueryError
+	var query *applicationquery.InvalidQueryError
 	if errors.As(err, &query) {
 		return bindingError(contracts.ErrorCodeInvalidRequest)
 	}

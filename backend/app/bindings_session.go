@@ -75,20 +75,20 @@ func (b *SessionBindings) GetSession(
 	if err != nil {
 		return contracts.SessionSnapshot{}, err
 	}
-	projection, err := service.ProjectSession(ctx, domainfoundation.SessionID(sessionID), 100)
+	sessionView, err := service.GetSessionView(ctx, domainfoundation.SessionID(sessionID), 100)
 	if err != nil {
 		return contracts.SessionSnapshot{}, publicBindingError(err)
 	}
 	result := contracts.SessionSnapshot{
-		ID:          projection.Session.ID.String(),
-		ProjectID:   projection.Session.ProjectID.String(),
-		WorkspaceID: projection.Session.WorkspaceID.String(),
-		Goal:        projection.Session.Goal,
-		CreatedAt:   projection.Session.CreatedAt,
-		UpdatedAt:   projection.Session.UpdatedAt,
-		Agents:      make([]contracts.AgentSnapshot, 0, len(projection.Agents)),
+		ID:          sessionView.Session.ID.String(),
+		ProjectID:   sessionView.Session.ProjectID.String(),
+		WorkspaceID: sessionView.Session.WorkspaceID.String(),
+		Goal:        sessionView.Session.Goal,
+		CreatedAt:   sessionView.Session.CreatedAt,
+		UpdatedAt:   sessionView.Session.UpdatedAt,
+		Agents:      make([]contracts.AgentSnapshot, 0, len(sessionView.Agents)),
 	}
-	for _, agent := range projection.Agents {
+	for _, agent := range sessionView.Agents {
 		result.Agents = append(result.Agents, contracts.AgentSnapshot{
 			ID: agent.ID.String(), SessionID: agent.SessionID.String(),
 			SecurityPolicyRevision: agent.SecurityPolicyRevision,

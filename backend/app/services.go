@@ -10,6 +10,7 @@ import (
 	"praxis/internal/application/execution/queue"
 	"praxis/internal/application/execution/start"
 	"praxis/internal/application/project"
+	applicationquery "praxis/internal/application/query"
 	applicationsession "praxis/internal/application/session"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainproject "praxis/internal/domain/project"
@@ -17,7 +18,6 @@ import (
 	domainworkspace "praxis/internal/domain/workspace"
 
 	"praxis/internal/logging"
-	"praxis/internal/projection"
 	"praxis/internal/providers/registry"
 	sessionport "praxis/internal/session"
 )
@@ -30,7 +30,7 @@ type SessionService interface {
 	ListSessions(context.Context, int) ([]domainsession.Session, error)
 	ListSessionsByProject(context.Context, domainfoundation.ProjectID, int) ([]domainsession.Session, error)
 	CreateSessionForProject(context.Context, domainfoundation.RequestID, domainfoundation.ProjectID, domainfoundation.WorkspaceID, string) (applicationsession.CreateResult, error)
-	ProjectSession(context.Context, domainfoundation.SessionID, int) (projection.SessionProjection, error)
+	GetSessionView(context.Context, domainfoundation.SessionID, int) (applicationquery.SessionView, error)
 }
 
 type ProjectService interface {
@@ -40,7 +40,7 @@ type ProjectService interface {
 }
 
 type AgentQueries interface {
-	ProjectAgent(context.Context, domainfoundation.AgentID, int) (projection.AgentProjection, error)
+	GetAgentView(context.Context, domainfoundation.AgentID, int) (applicationquery.AgentView, error)
 	ListAgentMessages(context.Context, domainfoundation.AgentID, int) ([]sessionport.AgentSessionMessage, error)
 }
 
