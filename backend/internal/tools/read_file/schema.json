@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Regular file path, absolute or relative to the execution workspace"
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero-based UTF-8 byte offset"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 4,
+      "maximum": 51200,
+      "description": "Maximum UTF-8 content bytes to return"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

@@ -100,14 +100,14 @@ func (s *Service) Invoke(
 			}
 			return interrupted, ctx.Err()
 		}
-		failed := toolError(string(domainexecution.ToolFailureExecutionFailed), "The directory could not be listed.")
+		failed := toolError(string(domainexecution.ToolFailureExecutionFailed), "The file tool could not be executed.")
 		if err := s.fail(ctx, invocation.ID, failed); err != nil {
 			return runtimecontract.ToolResult{}, err
 		}
 		return failed, nil
 	}
 	if result.ErrorClass != "" || result.SideEffect {
-		failed := toolError(string(domainexecution.ToolFailureExecutionFailed), "The directory could not be listed.")
+		failed := toolError(string(domainexecution.ToolFailureExecutionFailed), "The file tool could not be executed.")
 		if err := s.fail(ctx, invocation.ID, failed); err != nil {
 			return runtimecontract.ToolResult{}, err
 		}
@@ -219,7 +219,7 @@ func (s *Service) admit(
 			denied := domainexecution.ToolInvocationResult{
 				InlineContent: toolErrorContent(
 					string(domainexecution.ToolFailureNotAllowed),
-					"The directory is outside the authorized read scope.",
+					"The requested path is outside the authorized read scope.",
 				),
 				ErrorCode: domainexecution.ToolFailureNotAllowed,
 			}

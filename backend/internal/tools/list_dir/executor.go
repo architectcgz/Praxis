@@ -1,4 +1,4 @@
-package tools
+package listdir
 
 import (
 	"context"
@@ -15,14 +15,22 @@ import (
 	runtimecontract "praxis/internal/runtime"
 )
 
-type Executor struct{}
+type entry struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
 
-func NewExecutor() *Executor { return &Executor{} }
+type output struct {
+	Path       string  `json:"path"`
+	Offset     int     `json:"offset"`
+	Limit      int     `json:"limit"`
+	Total      int     `json:"total"`
+	Entries    []entry `json:"entries"`
+	NextOffset *int    `json:"nextOffset,omitempty"`
+}
 
-func (e *Executor) Execute(
-	ctx context.Context,
-	call runtimecontract.AuthorizedToolCall,
-) (runtimecontract.ToolResult, error) {
+// Execute lists the authorized directory and returns one bounded result page.
+func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runtimecontract.ToolResult, error) {
 	if ctx == nil {
 		return runtimecontract.ToolResult{}, errors.New("tool execution context is required")
 	}
@@ -30,79 +38,62 @@ func (e *Executor) Execute(
 		return runtimecontract.ToolResult{}, err
 	}
 	if call.Name != domainsecurity.ToolListDir {
-		return runtimecontract.ToolResult{}, errors.New("tool executor does not support the call")
+		return runtimecontract.ToolResult{}, errors.New("list_dir executor does not support the call")
 	}
-	return executeListDir(ctx, call.Snapshot())
-}
-
-type listDirEntry struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-}
-
-type listDirOutput struct {
-	Path       string         `json:"path"`
-	Offset     int            `json:"offset"`
-	Limit      int            `json:"limit"`
-	Total      int            `json:"total"`
-	Entries    []listDirEntry `json:"entries"`
-	NextOffset *int           `json:"nextOffset,omitempty"`
-}
-
-func executeListDir(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runtimecontract.ToolResult, error) {
-	var arguments listDirArguments
-	if err := json.Unmarshal(call.NormalizedArguments, &arguments); err != nil {
+	call = call.Snapshot()
+	var toolArguments arguments
+	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil {
 		return runtimecontract.ToolResult{}, errors.New("normalized list_dir arguments are invalid")
 	}
-	if arguments.Path != call.Path || !authorizedRealDirectory(arguments.Path, call.ReadScopes) {
+	if toolArguments.Path != call.Path || !authorizedRealDirectory(toolArguments.Path, call.ReadScopes) {
 		return runtimecontract.ToolResult{}, errors.New("list_dir path is outside an authorized directory")
 	}
-	entries, err := os.ReadDir(arguments.Path)
+	entries, err := os.ReadDir(toolArguments.Path)
 	if err != nil {
 		return runtimecontract.ToolResult{}, errors.New("list_dir could not read the directory")
 	}
 	sort.Slice(entries, func(left, right int) bool { return entries[left].Name() < entries[right].Name() })
-	if arguments.Offset > len(entries) {
-		arguments.Offset = len(entries)
+	if toolArguments.Offset > len(entries) {
+		toolArguments.Offset = len(entries)
 	}
-	end := arguments.Offset + arguments.Limit
+	end := toolArguments.Offset + toolArguments.Limit
 	if end > len(entries) {
 		end = len(entries)
 	}
-	output := listDirOutput{
-		Path: arguments.Path, Offset: arguments.Offset, Limit: arguments.Limit,
-		Total: len(entries), Entries: make([]listDirEntry, 0, end-arguments.Offset),
+	toolOutput := output{
+		Path: toolArguments.Path, Offset: toolArguments.Offset, Limit: toolArguments.Limit,
+		Total: len(entries), Entries: make([]entry, 0, end-toolArguments.Offset),
 	}
 	truncated := false
-	for index := arguments.Offset; index < end; index++ {
+	for index := toolArguments.Offset; index < end; index++ {
 		if err := ctx.Err(); err != nil {
 			return runtimecontract.ToolResult{}, err
 		}
-		entry := listDirEntry{Name: entries[index].Name(), Type: directoryEntryType(entries[index])}
-		output.Entries = append(output.Entries, entry)
+		toolEntry := entry{Name: entries[index].Name(), Type: directoryEntryType(entries[index])}
+		toolOutput.Entries = append(toolOutput.Entries, toolEntry)
 		next := index + 1
 		if next < len(entries) {
-			output.NextOffset = &next
+			toolOutput.NextOffset = &next
 		}
-		if encoded, err := json.Marshal(output); err != nil {
+		if encoded, err := json.Marshal(toolOutput); err != nil {
 			return runtimecontract.ToolResult{}, errors.New("list_dir could not encode its result")
 		} else if len(encoded) > domainexecution.MaxInlineToolResultBytes {
-			output.Entries = output.Entries[:len(output.Entries)-1]
+			toolOutput.Entries = toolOutput.Entries[:len(toolOutput.Entries)-1]
 			end = index
 			next = index
-			output.NextOffset = &next
+			toolOutput.NextOffset = &next
 			truncated = true
 			break
 		}
 	}
 	if end < len(entries) {
 		next := end
-		output.NextOffset = &next
+		toolOutput.NextOffset = &next
 		truncated = true
 	} else {
-		output.NextOffset = nil
+		toolOutput.NextOffset = nil
 	}
-	encoded, err := json.Marshal(output)
+	encoded, err := json.Marshal(toolOutput)
 	if err != nil {
 		return runtimecontract.ToolResult{}, errors.New("list_dir could not encode its result")
 	}
@@ -112,12 +103,12 @@ func executeListDir(ctx context.Context, call runtimecontract.AuthorizedToolCall
 	return runtimecontract.ToolResult{Content: string(encoded), Truncated: truncated}, nil
 }
 
-func directoryEntryType(entry os.DirEntry) string {
-	mode := entry.Type()
+func directoryEntryType(directoryEntry os.DirEntry) string {
+	mode := directoryEntry.Type()
 	if mode&os.ModeSymlink != 0 {
 		return "symlink"
 	}
-	if entry.IsDir() {
+	if directoryEntry.IsDir() {
 		return "directory"
 	}
 	if mode.IsRegular() {

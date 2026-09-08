@@ -223,10 +223,10 @@ func Open(
 	target := store.TargetRepositories()
 	output := newAgentOutputPublisher()
 	if runner == nil {
-		toolCatalog := tools.NewCatalog()
+		toolRegistry := tools.NewToolRegistry()
 		toolService, serviceErr := toolinvocation.NewService(toolinvocation.Config{
 			Transactions: store, Executions: target.Executions, SecuritySnapshots: target.SecuritySnapshots,
-			Invocations: target.ToolInvocations, Catalog: toolCatalog, Executor: tools.NewExecutor(),
+			Invocations: target.ToolInvocations, Catalog: toolRegistry, Executor: tools.NewExecutor(),
 		})
 		if serviceErr != nil {
 			_ = diagnostics.Close()
@@ -234,7 +234,7 @@ func Open(
 			return nil, serviceErr
 		}
 		runner, err = agentruntime.NewExecutionEngine(agentruntime.ExecutionEngineConfig{
-			Models: providerModelResolver{registry: modelRegistry}, Tools: toolCatalog,
+			Models: providerModelResolver{registry: modelRegistry}, Tools: toolRegistry,
 			ToolInvoker: toolService, OutputObserver: output.Publish,
 			Logf: diagnostics.Logger().Infof,
 		})
