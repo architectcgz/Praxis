@@ -18,7 +18,7 @@ type (
 	ToolDefinition        = runtimecontract.ToolDefinition
 	ToolInvocationContext = runtimecontract.ToolInvocationContext
 	ToolResult            = runtimecontract.ToolResult
-	TurnSnapshot          = runtimecontract.TurnSnapshot
+	ExecutionTurnSnapshot = runtimecontract.ExecutionTurnSnapshot
 	TurnMessage           = runtimecontract.TurnMessage
 	TurnMessageRole       = runtimecontract.TurnMessageRole
 	TurnContentBlock      = runtimecontract.TurnContentBlock

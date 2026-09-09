@@ -437,8 +437,6 @@ func (r *Registry) StreamFor(selection domainsecurity.ModelSelection) (runtimeco
 	case APIFormatAnthropicMessages:
 		return anthropic.New(anthropic.Config{
 			BaseURL: provider.BaseURL, APIKey: key, HTTPClient: client,
-			Model: model.ID, MaxOutputTokens: model.MaxOutputTokens,
-			Reasoning: selection.Reasoning,
 		})
 	case APIFormatOpenAIResponses, APIFormatOpenAIChatCompletions:
 		protocol := openaicompat.ProtocolResponses
@@ -448,8 +446,6 @@ func (r *Registry) StreamFor(selection domainsecurity.ModelSelection) (runtimeco
 		return openaicompat.New(openaicompat.Config{
 			BaseURL: provider.BaseURL, APIKey: key, HTTPClient: client,
 			Protocol: protocol,
-			Model:    model.ID, MaxOutputTokens: model.MaxOutputTokens,
-			Reasoning: selection.Reasoning,
 		})
 	default:
 		return nil, fmt.Errorf("model %q has unsupported API format %q", model.ID, apiFormat)

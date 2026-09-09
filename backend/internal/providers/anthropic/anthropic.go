@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,24 +14,20 @@ import (
 	domainsecurity "praxis/internal/domain/security"
 
 	"praxis/internal/providers"
+	"praxis/internal/providers/streaming"
 	runtimecontract "praxis/internal/runtime"
 )
 
 type Config struct {
-	BaseURL         string
-	APIKey          string
-	HTTPClient      *http.Client
-	Model           string
-	Version         string
-	MaxOutputTokens int
-	Reasoning       string
+	BaseURL    string
+	APIKey     string
+	HTTPClient *http.Client
+	Version    string
 }
 
 type Provider struct {
-	baseURL, apiKey, model, version string
-	reasoning                       string
-	maxOutputTokens                 int
-	client                          *http.Client
+	baseURL, apiKey, version string
+	client                   *http.Client
 }
 
 func New(config Config) (*Provider, error) {
@@ -44,19 +39,12 @@ func New(config Config) (*Provider, error) {
 	if apiKey == "" {
 		return nil, errors.New("anthropic API key is required")
 	}
-	reasoning := strings.TrimSpace(config.Reasoning)
 	version := strings.TrimSpace(config.Version)
 	if version == "" {
 		version = "2023-06-01"
 	}
-	maxOutputTokens := config.MaxOutputTokens
-	if maxOutputTokens <= 0 {
-		maxOutputTokens = 4096
-	}
 	return &Provider{baseURL: baseURL, apiKey: apiKey,
-		model: strings.TrimSpace(config.Model), version: version, reasoning: reasoning,
-		client:          config.HTTPClient,
-		maxOutputTokens: maxOutputTokens}, nil
+		version: version, client: config.HTTPClient}, nil
 }
 
 var _ runtimecontract.ModelStream = (*Provider)(nil)
@@ -71,24 +59,22 @@ func (p *Provider) Stream(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	model := p.model
-	if model == "" {
-		model = request.Snapshot.Model.ModelID
-	}
+	model := strings.TrimSpace(request.Snapshot.Model.ModelID)
 	if model == "" {
 		return nil, errors.New("anthropic model is required")
+	}
+	if request.Snapshot.MaxOutputTokens <= 0 {
+		return nil, errors.New("anthropic max output tokens is required")
 	}
 	messages := make([]map[string]any, 0, len(request.Snapshot.Messages))
 	for _, message := range request.Snapshot.Messages {
 		messages = append(messages, anthropicMessage(message))
 	}
 	body := map[string]any{"model": model, "messages": messages, "stream": true}
-	if p.reasoning != "" && p.reasoning != "off" {
-		body["output_config"] = map[string]string{"effort": p.reasoning}
+	if reasoning := strings.TrimSpace(request.Snapshot.Model.Reasoning); reasoning != "" && reasoning != "off" {
+		body["output_config"] = map[string]string{"effort": reasoning}
 	}
-	if p.maxOutputTokens > 0 {
-		body["max_tokens"] = p.maxOutputTokens
-	}
+	body["max_tokens"] = request.Snapshot.MaxOutputTokens
 	if strings.TrimSpace(request.Snapshot.SystemPrompt) != "" {
 		body["system"] = request.Snapshot.SystemPrompt
 	}
@@ -116,16 +102,11 @@ func (p *Provider) Stream(
 	httpRequest.Header.Set("anthropic-version", p.version)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")
-	response, err := providers.RequestClient(p.client).Do(httpRequest)
+	response, err := streaming.Open(providers.RequestClient(p.client), httpRequest)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request: %w", err)
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, providers.DecodeErrorResponse(response)
-	}
-	events := make(chan runtimecontract.ModelStreamEvent, 16)
-	go func() { defer close(events); defer response.Body.Close(); parse(response.Body, events) }()
-	return events, nil
+	return streaming.Start(ctx, response, messagesDecoder{}), nil
 }
 
 func anthropicMessage(message runtimecontract.TurnMessage) map[string]any {
@@ -151,19 +132,29 @@ func anthropicMessage(message runtimecontract.TurnMessage) map[string]any {
 	return map[string]any{"role": role, "content": content}
 }
 
-func parse(reader io.Reader, events chan<- runtimecontract.ModelStreamEvent) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 1024), 2*1024*1024)
-	var tools = map[int]*toolAccumulator{}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
+type messagesDecoder struct{}
+
+func (messagesDecoder) Decode(
+	ctx context.Context,
+	reader *streaming.SSEReader,
+	emit streaming.EmitFunc,
+) (string, error) {
+	tools := map[int]*toolAccumulator{}
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
+		sseEvent, err := reader.Next()
+		if err == io.EOF {
+			if err := emitTools(emit, tools); err != nil {
+				return "", err
+			}
+			return "", nil
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if err != nil {
+			return "", err
+		}
+		data := strings.TrimSpace(sseEvent.Data)
 		var event struct {
 			Type  string `json:"type"`
 			Index int    `json:"index"`
@@ -183,8 +174,7 @@ func parse(reader io.Reader, events chan<- runtimecontract.ModelStreamEvent) {
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			emitError(events, fmt.Errorf("decode anthropic stream event: %w", err))
-			return
+			return "", fmt.Errorf("decode anthropic stream event: %w", err)
 		}
 		switch event.Type {
 		case "content_block_start":
@@ -195,7 +185,9 @@ func parse(reader io.Reader, events chan<- runtimecontract.ModelStreamEvent) {
 			switch event.Delta.Type {
 			case "text_delta":
 				if event.Delta.Text != "" {
-					events <- runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamTextDelta, Text: event.Delta.Text}
+					if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamTextDelta, Text: event.Delta.Text}); err != nil {
+						return "", err
+					}
 				}
 			case "input_json_delta":
 				if tool := tools[event.Index]; tool != nil {
@@ -203,57 +195,49 @@ func parse(reader io.Reader, events chan<- runtimecontract.ModelStreamEvent) {
 				}
 			}
 		case "message_delta":
-			emitTools(events, tools)
-			emitComplete(events, event.Delta.StopReason)
-			return
+			if err := emitTools(emit, tools); err != nil {
+				return "", err
+			}
+			return event.Delta.StopReason, nil
 		case "message_stop":
-			emitTools(events, tools)
-			emitComplete(events, "")
-			return
+			if err := emitTools(emit, tools); err != nil {
+				return "", err
+			}
+			return "", nil
 		case "error":
-			emitError(events, errors.New("anthropic stream returned an error"))
-			return
+			return "", errors.New("anthropic stream returned an error")
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		emitError(events, err)
-	} else {
-		emitTools(events, tools)
-		emitComplete(events, "")
 	}
 }
 
 type toolAccumulator struct{ id, name, arguments string }
 
-func emitTool(events chan<- runtimecontract.ModelStreamEvent, tool *toolAccumulator) {
+func emitTool(emit streaming.EmitFunc, tool *toolAccumulator) error {
 	if tool == nil || tool.name == "" {
-		return
+		return nil
 	}
 	args := json.RawMessage(tool.arguments)
 	if len(bytes.TrimSpace(args)) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	events <- runtimecontract.ModelStreamEvent{
+	return emit(runtimecontract.ModelStreamEvent{
 		Kind: runtimecontract.StreamToolCall,
 		ToolCall: runtimecontract.ToolCall{
 			ID: tool.id, Name: domainsecurity.ToolName(tool.name), Input: args, Arguments: args,
 		},
-	}
-}
-func emitComplete(events chan<- runtimecontract.ModelStreamEvent, reason string) {
-	events <- runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamComplete, StopReason: reason}
-}
-func emitError(events chan<- runtimecontract.ModelStreamEvent, err error) {
-	events <- runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamError, Err: err}
+	})
 }
 
-func emitTools(events chan<- runtimecontract.ModelStreamEvent, tools map[int]*toolAccumulator) {
+func emitTools(emit streaming.EmitFunc, tools map[int]*toolAccumulator) error {
 	indices := make([]int, 0, len(tools))
 	for index := range tools {
 		indices = append(indices, index)
 	}
 	sort.Ints(indices)
 	for _, index := range indices {
-		emitTool(events, tools[index])
+		if err := emitTool(emit, tools[index]); err != nil {
+			return err
+		}
 	}
+	return nil
 }

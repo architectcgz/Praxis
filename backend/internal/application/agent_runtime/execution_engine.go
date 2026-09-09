@@ -112,11 +112,12 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 	var outputBytes int64
 	var toolCalls int
 	for turn := 1; turn <= maxTurns; turn++ {
-		snapshot := TurnSnapshot{
+		snapshot := ExecutionTurnSnapshot{
 			ExecutionID: execution.ID, SessionReference: execution.SessionID.String(), Messages: runtimecontract.CloneTurnMessages(turnMessages),
 			ContextManifest:  execution.Input.ContextManifest,
 			ContextSelection: execution.Input.ContextSelection, SystemPrompt: execution.Input.ContextManifest.Summary,
-			Model: grant.Model, Tools: toolDefinitions(grant, e.tools), Execution: execution.Input.Runtime, TurnNumber: turn, GrantID: grant.ID,
+			Model: grant.Model, MaxOutputTokens: model.MaxOutputTokens, Tools: toolDefinitions(grant, e.tools),
+			Execution: execution.Input.Runtime, TurnNumber: turn, GrantID: grant.ID,
 		}
 		if limits.MaxInputBytes > 0 && turnInputBytes(snapshot) > limits.MaxInputBytes {
 			return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureResourceLimit, &RuntimeError{Code: ErrorResourceLimit, Message: "execution input limit exceeded"}
@@ -294,7 +295,7 @@ func collectStream(ctx context.Context, stream <-chan ModelStreamEvent, onTextDe
 	}
 }
 
-func estimatedTokens(snapshot TurnSnapshot) int {
+func estimatedTokens(snapshot ExecutionTurnSnapshot) int {
 	characters := len(snapshot.SystemPrompt)
 	for _, message := range snapshot.Messages {
 		for _, block := range message.Content {
@@ -304,7 +305,7 @@ func estimatedTokens(snapshot TurnSnapshot) int {
 	return characters / 4
 }
 
-func turnInputBytes(snapshot TurnSnapshot) int64 {
+func turnInputBytes(snapshot ExecutionTurnSnapshot) int64 {
 	var total int64
 	total += int64(len([]byte(snapshot.SystemPrompt)))
 	for _, message := range snapshot.Messages {

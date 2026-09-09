@@ -238,3 +238,20 @@ func TestExecutionEngineExposesOnlyRegisteredGrantedTools(t *testing.T) {
 		t.Fatalf("invalid model-visible definition: %#v", definition)
 	}
 }
+
+func TestExecutionEngineSetsExecutionTurnOutputTokenLimit(t *testing.T) {
+	stream := &testStream{responses: [][]ModelStreamEvent{{{Kind: StreamComplete}}}}
+	engine, err := NewExecutionEngine(ExecutionEngineConfig{
+		Models: testModelResolver{model: ExecutionModel{Stream: stream, ContextWindow: 4096, MaxOutputTokens: 256}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, _, err := engine.RunWithSession(context.Background(), testExecution(t, nil, domainsecurity.ResourceLimits{}), transcriptWithInput())
+	if err != nil || outcome != domainexecution.ExecutionCompleted {
+		t.Fatalf("RunWithSession() outcome=%s err=%v", outcome, err)
+	}
+	if len(stream.requests) != 1 || stream.requests[0].Snapshot.MaxOutputTokens != 256 {
+		t.Fatalf("unexpected execution turn snapshots: %#v", stream.requests)
+	}
+}

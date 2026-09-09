@@ -71,9 +71,9 @@ func (c AuthorizedToolCall) Snapshot() AuthorizedToolCall {
 	return c
 }
 
-// Snapshot returns a defensive copy of the turn input so provider code cannot
+// Snapshot returns a defensive copy of the execution turn input so provider code cannot
 // mutate runtime state.
-func (s TurnSnapshot) Snapshot() TurnSnapshot {
+func (s ExecutionTurnSnapshot) Snapshot() ExecutionTurnSnapshot {
 	copied := s
 	copied.Messages = CloneTurnMessages(s.Messages)
 	copied.ContextManifest = s.ContextManifest

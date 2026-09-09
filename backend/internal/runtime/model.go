@@ -76,11 +76,11 @@ type ModelStreamEvent struct {
 
 // ModelRequest is the request sent to a model provider. It contains no credential fields.
 type ModelRequest struct {
-	Snapshot TurnSnapshot
+	Snapshot ExecutionTurnSnapshot
 }
 
-// TurnSnapshot is the immutable input for one model request.
-type TurnSnapshot struct {
+// ExecutionTurnSnapshot is the immutable input for one execution turn model request.
+type ExecutionTurnSnapshot struct {
 	ExecutionID          domainfoundation.AgentExecutionID
 	SessionReference     string
 	Messages             []TurnMessage
@@ -90,6 +90,7 @@ type TurnSnapshot struct {
 	SystemPromptHash     string
 	ArtifactTemplateHash string
 	Model                domainsecurity.ModelSelection
+	MaxOutputTokens      int
 	Tools                []ToolDefinition
 	GrantID              domainfoundation.CapabilityGrantID
 	Execution            domainexecution.RuntimeExecutionSnapshot
