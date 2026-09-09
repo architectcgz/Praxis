@@ -3,13 +3,11 @@ import {
     ReactNode,
     useCallback,
     useEffect,
-    useMemo,
     useState,
 } from "react";
 import {
     AlertCircle,
     ArrowLeft,
-    Bot,
     BrainCircuit,
     Check,
     ChevronDown,
@@ -47,6 +45,10 @@ type Editor =
     | { kind: "provider"; index: number | null }
     | { kind: "model"; index: number | null; providerID: string };
 
+type ModelDraft = Omit<ModelConfigOption, "apiFormat"> & {
+    apiFormat: ModelAPIFormat | "";
+};
+
 function createProviderID(): string {
     return `provider-${crypto.randomUUID()}`;
 }
@@ -59,7 +61,7 @@ function modelKey(providerId: string, modelId: string): string {
     return `${providerId}\u0000${modelId}`;
 }
 
-function modelDraftWithID(current: ModelConfigOption, modelId: string): ModelConfigOption {
+function modelDraftWithID(current: ModelDraft, modelId: string): ModelDraft {
     return {
         ...current,
         modelId,
@@ -129,7 +131,6 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
     const saveModel = async (model: ModelConfigOption) => {
         if (!config || editor?.kind !== "model") return;
         const nextModel = { ...model, providerId: editor.providerID };
-        const previous = editor.index === null ? null : config.models[editor.index];
         if (
             config.models.some(
                 (item, index) => modelKey(item.providerId, item.modelId) === modelKey(nextModel.providerId, nextModel.modelId) && index !== editor.index,
@@ -141,37 +142,16 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         const models = [...config.models];
         if (editor.index === null) models.push(nextModel);
         else models[editor.index] = nextModel;
-        const profiles =
-            previous && modelKey(previous.providerId, previous.modelId) !== modelKey(nextModel.providerId, nextModel.modelId)
-                ? Object.fromEntries(
-                    Object.entries(config.profiles).map(([profile, reference]) => [
-                        profile,
-                        modelKey(reference.providerId, reference.modelId) === modelKey(previous.providerId, previous.modelId)
-                            ? { providerId: nextModel.providerId, modelId: nextModel.modelId }
-                            : reference,
-                    ]),
-                )
-                : config.profiles;
-        await persist({ ...config, models, profiles });
+        await persist({ ...config, models });
     };
 
     const deleteProvider = async (index: number) => {
         if (!config) return;
         const provider = config.providers[index];
-        const removedModelKeys = new Set(
-            config.models
-                .filter((model) => model.providerId === provider.id)
-                .map((model) => modelKey(model.providerId, model.modelId)),
-        );
         await persist({
             ...config,
             providers: config.providers.filter((_, itemIndex) => itemIndex !== index),
             models: config.models.filter((model) => model.providerId !== provider.id),
-            profiles: Object.fromEntries(
-                Object.entries(config.profiles).filter(
-                    ([, reference]) => !removedModelKeys.has(modelKey(reference.providerId, reference.modelId)),
-                ),
-            ),
         });
     };
 
@@ -181,22 +161,8 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         await persist({
             ...config,
             models: config.models.filter((_, itemIndex) => itemIndex !== index),
-            profiles: Object.fromEntries(
-                Object.entries(config.profiles).filter(
-                    ([, reference]) => modelKey(reference.providerId, reference.modelId) !== modelKey(model.providerId, model.modelId),
-                ),
-            ),
         });
     };
-
-    const assignedProfiles = useMemo(() => {
-        const result = new Map<string, string[]>();
-        Object.entries(config?.profiles || {}).forEach(([profile, reference]) => {
-            const key = modelKey(reference.providerId, reference.modelId)
-            result.set(key, [...(result.get(key) || []), profile]);
-        });
-        return result;
-    }, [config]);
     const modelEditorProvider =
         editor?.kind === "model"
             ? config?.providers.find((provider) => provider.id === editor.providerID)
@@ -257,7 +223,6 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
                     <ProviderDirectoryList
                         providers={config?.providers || []}
                         models={config?.models || []}
-                        assignedProfiles={assignedProfiles}
                         onEditProvider={(index) => {
                             setError("");
                             setEditor({ kind: "provider", index });
@@ -303,11 +268,6 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
                     model={editor.index === null ? null : config.models[editor.index]}
                     provider={modelEditorProvider}
                     groups={config.groups}
-                    assignedProfiles={
-                        editor.index === null
-                            ? []
-                            : assignedProfiles.get(modelKey(config.models[editor.index].providerId, config.models[editor.index].modelId)) || []
-                    }
                     error={error}
                     saving={saving}
                     onSave={saveModel}
@@ -326,14 +286,12 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
 function ProviderDirectoryList({
     providers,
     models,
-    assignedProfiles,
     onEditProvider,
     onEditModel,
     onAddModel,
 }: {
     providers: ProviderConfigOption[];
     models: ModelConfigOption[];
-    assignedProfiles: Map<string, string[]>;
     onEditProvider: (index: number) => void;
     onEditModel: (index: number, providerID: string) => void;
     onAddModel: (providerID: string) => void;
@@ -426,7 +384,6 @@ function ProviderDirectoryList({
                                             <ProviderModelItem
                                                 key={modelKey(model.providerId, model.modelId)}
                                                 model={model}
-                                                assignedProfiles={assignedProfiles.get(modelKey(model.providerId, model.modelId)) || []}
                                                 onEdit={() => onEditModel(index, provider.id)}
                                             />
                                         ))}
@@ -455,11 +412,9 @@ function ProviderDirectoryList({
 
 function ProviderModelItem({
     model,
-    assignedProfiles,
     onEdit,
 }: {
     model: ModelConfigOption;
-    assignedProfiles: string[];
     onEdit: () => void;
 }) {
     return (
@@ -470,12 +425,6 @@ function ProviderModelItem({
             <div className="provider-model-main">
                 <div className="provider-model-title">
                     <h4>{model.label || model.modelId}</h4>
-                    {assignedProfiles.map((profile) => (
-                        <span className="model-config-tag is-green" key={profile}>
-                            <Bot size={11} />
-                            {profile}
-                        </span>
-                    ))}
                 </div>
                 <p>
                     <code>{model.modelId}</code>
@@ -490,10 +439,10 @@ function ProviderModelItem({
                     <span className="model-config-tag">
                         {model.maxOutputTokens.toLocaleString()} 最大输出
                     </span>
-                    {model.reasoning.supported && (
+                    {model.reasoningLevels.length > 0 && (
                         <span className="model-config-tag is-blue">
                             <BrainCircuit size={11} />
-                            {model.reasoning.levels.length} 个推理级别
+                            {model.reasoningLevels.length} 个推理级别
                         </span>
                     )}
                 </div>
@@ -535,7 +484,6 @@ function ProviderDialog({
                 providerName: "",
                 baseURL: "",
                 proxyURL: "",
-                defaultAPIFormat: "openai_responses",
                 hasAPIKey: false,
             },
     );
@@ -608,21 +556,6 @@ function ProviderDialog({
                             placeholder="http://127.0.0.1:7897"
                         />
                     </Field>
-                    <Field label="默认 API Format">
-                        <select
-                            value={draft.defaultAPIFormat}
-                            onChange={(event) =>
-                                setDraft({
-                                    ...draft,
-                                    defaultAPIFormat: event.target.value as ModelAPIFormat,
-                                })
-                            }
-                        >
-                            <option value="anthropic_messages">Anthropic Messages</option>
-                            <option value="openai_responses">OpenAI Responses</option>
-                            <option value="openai_chat_completions">OpenAI Chat Completions</option>
-                        </select>
-                    </Field>
                     <Field label="API Key">
                         <input
                             required
@@ -641,7 +574,7 @@ function ProviderDialog({
                         setConfirmDelete={setConfirmDelete}
                         deleteDetail={
                             modelCount
-                                ? `这也会移除 ${modelCount} 个 Model 及其 Agent 分配。`
+                                ? `这也会移除 ${modelCount} 个 Model。`
                                 : "此 Provider 将被移除。"
                         }
                     />
@@ -655,7 +588,6 @@ function ModelDialog({
     model,
     provider,
     groups,
-    assignedProfiles,
     error,
     saving,
     onSave,
@@ -665,14 +597,13 @@ function ModelDialog({
     model: ModelConfigOption | null;
     provider: ProviderConfigOption;
     groups: GroupConfigOption[];
-    assignedProfiles: string[];
     error: string;
     saving: boolean;
     onSave: (model: ModelConfigOption) => void;
     onDelete?: () => void;
     onClose: () => void;
 }) {
-    const [draft, setDraft] = useState<ModelConfigOption>(
+    const [draft, setDraft] = useState<ModelDraft>(
         model
             ? { ...model, label: model.label || model.modelId }
             : {
@@ -680,14 +611,12 @@ function ModelDialog({
                 modelId: "",
                 label: "",
                 groupId: groups[0]?.id || "",
-                apiFormat: provider.defaultAPIFormat,
+                apiFormat: "",
                 contextWindow: 128000,
                 maxOutputTokens: 8192,
-                reasoning: { supported: true, levels: ["low", "medium", "high"], default: "medium" },
+                reasoningLevels: ["low", "medium", "high"],
+                defaultReasoningLevel: "medium",
             },
-    );
-    const [levels, setLevels] = useState(
-        model?.reasoning.levels.join(", ") || "low, medium, high",
     );
     const [providerModels, setProviderModels] = useState<string[]>([]);
     const [providerModelsLoading, setProviderModelsLoading] = useState(false);
@@ -731,6 +660,11 @@ function ModelDialog({
             setValidationError("请选择 Model 分组");
             return;
         }
+        const apiFormat = draft.apiFormat;
+        if (!apiFormat) {
+            setValidationError("请选择 API Format");
+            return;
+        }
         if (draft.contextWindow < 2) {
             setValidationError("Context Window 必须大于等于 2");
             return;
@@ -740,30 +674,15 @@ function ModelDialog({
             return;
         }
 
-        const normalizedLevels = levels
-            .split(",")
-            .map((level) => level.trim())
-            .filter(Boolean);
-
-        if (draft.reasoning.supported && normalizedLevels.length === 0) {
-            setValidationError("启用 Reasoning 时必须填写至少一个级别");
-            return;
-        }
-
         onSave({
             ...draft,
+            apiFormat,
             providerId: draft.providerId.trim(),
             modelId: draft.modelId.trim(),
             label: draft.label.trim(),
-            reasoning: draft.reasoning.supported
-                ? {
-                    supported: true,
-                    levels: normalizedLevels,
-                    default: normalizedLevels.includes(draft.reasoning.default)
-                        ? draft.reasoning.default
-                        : normalizedLevels[0] || "",
-                }
-                : { supported: false, levels: [], default: "" },
+            defaultReasoningLevel: draft.reasoningLevels.includes(draft.defaultReasoningLevel)
+                ? draft.defaultReasoningLevel
+                : draft.reasoningLevels[0] || "",
         });
     };
     return (
@@ -840,20 +759,26 @@ function ModelDialog({
                     </Field>
                     <Field label="API Format">
                         <select
+                            required
                             value={draft.apiFormat}
                             onChange={(event) =>
                                 setDraft({
                                     ...draft,
-                                    apiFormat: event.target.value as ModelAPIFormat,
+                                    apiFormat: event.target.value as ModelAPIFormat | "",
                                 })
                             }
+                            className={validationError === "请选择 API Format" ? "has-error" : ""}
                         >
+                            <option value="">选择 API Format</option>
                             <option value="anthropic_messages">Anthropic Messages</option>
                             <option value="openai_responses">OpenAI Responses</option>
                             <option value="openai_chat_completions">
                                 OpenAI Chat Completions
                             </option>
                         </select>
+                        {validationError === "请选择 API Format" && (
+                            <span className="config-field-error">{validationError}</span>
+                        )}
                     </Field>
                     <Field label="Model ID">
                         <div className="config-model-picker">
@@ -919,8 +844,6 @@ function ModelDialog({
                     <AdvancedOptions
                         draft={draft}
                         setDraft={setDraft}
-                        levels={levels}
-                        setLevels={setLevels}
                     />
                     <DialogActions
                         saving={saving}
@@ -928,11 +851,7 @@ function ModelDialog({
                         onDelete={onDelete}
                         confirmDelete={confirmDelete}
                         setConfirmDelete={setConfirmDelete}
-                        deleteDetail={
-                            assignedProfiles.length
-                                ? `这也会清除 ${assignedProfiles.join(", ")} 的分配。`
-                                : "此 Model 将被移除。"
-                        }
+                        deleteDetail="此 Model 将被移除。"
                     />
                 </form>
             </section>
@@ -1044,13 +963,9 @@ function formatAPIFormat(format: ModelAPIFormat) {
 function AdvancedOptions({
     draft,
     setDraft,
-    levels,
-    setLevels,
 }: {
-    draft: ModelConfigOption;
-    setDraft: (draft: ModelConfigOption) => void;
-    levels: string;
-    setLevels: (levels: string) => void;
+    draft: ModelDraft;
+    setDraft: (draft: ModelDraft) => void;
 }) {
     const [isExpanded, setIsExpanded] = useState(false);
 
@@ -1101,66 +1016,44 @@ function AdvancedOptions({
                             />
                         </Field>
                     </div>
-                    <label className="config-check">
+                    <Field label="Reasoning 级别">
                         <input
-                            type="checkbox"
-                            checked={draft.reasoning.supported}
+                            value={draft.reasoningLevels.join(", ")}
                             onChange={(event) => {
-                                const supported = event.target.checked;
-                                const parsedLevels = levels
+                                const reasoningLevels = event.target.value
                                     .split(",")
                                     .map((level) => level.trim())
                                     .filter(Boolean);
                                 setDraft({
                                     ...draft,
-                                    reasoning: {
-                                        supported,
-                                        levels: parsedLevels,
-                                        default: supported
-                                            ? (parsedLevels.includes("medium") ? "medium" : parsedLevels[0] || "")
-                                            : "",
-                                    },
+                                    reasoningLevels,
+                                    defaultReasoningLevel: reasoningLevels.includes(draft.defaultReasoningLevel)
+                                        ? draft.defaultReasoningLevel
+                                        : reasoningLevels[0] || "",
                                 });
                             }}
+                            placeholder="low, medium, high, xhigh, max"
                         />
-                        <span>支持 Reasoning 级别</span>
-                    </label>
-                    {draft.reasoning.supported && (
-                        <>
-                            <Field label="Reasoning 级别">
-                                <input
-                                    required
-                                    value={levels}
-                                    onChange={(event) => setLevels(event.target.value)}
-                                    placeholder="low, medium, high, xhigh, max"
-                                />
-                            </Field>
-                            <Field label="默认 Reasoning">
-                                <select
-                                    required
-                                    value={draft.reasoning.default}
-                                    onChange={(event) =>
-                                        setDraft({
-                                            ...draft,
-                                            reasoning: {
-                                                ...draft.reasoning,
-                                                default: event.target.value,
-                                            },
-                                        })
-                                    }
-                                >
-                                    {levels
-                                        .split(",")
-                                        .map((level) => level.trim())
-                                        .filter(Boolean)
-                                        .map((level) => (
-                                            <option key={level} value={level}>
-                                                {level}
-                                            </option>
-                                        ))}
-                                </select>
-                            </Field>
-                        </>
+                    </Field>
+                    {draft.reasoningLevels.length > 0 && (
+                        <Field label="默认 Reasoning">
+                            <select
+                                required
+                                value={draft.defaultReasoningLevel}
+                                onChange={(event) =>
+                                    setDraft({
+                                        ...draft,
+                                        defaultReasoningLevel: event.target.value,
+                                    })
+                                }
+                            >
+                                {draft.reasoningLevels.map((level) => (
+                                    <option key={level} value={level}>
+                                        {level}
+                                    </option>
+                                ))}
+                            </select>
+                        </Field>
                     )}
                 </div>
             )}

@@ -122,7 +122,7 @@ export function useProjectWorkspace() {
             }
             catalogSessions = catalog
             setModels(configuredModels)
-            const primaryConfigured = configuredModels.some((model) => model.defaultProfiles.includes('primary'))
+            const primaryConfigured = configuredModels.some((model) => model.assignedAgents.includes('primary'))
             if (errorCodeRef.current !== API_ERROR_CODES.modelNotConfigured || primaryConfigured) {
                 setError('')
                 setErrorCode(undefined)
@@ -225,14 +225,13 @@ export function useProjectWorkspace() {
     const modelCatalogKey = models.map((model) => [
         model.providerId,
         model.modelId,
-        model.reasoning.supported,
-        model.reasoning.levels.join(','),
-        model.reasoning.default,
-        model.defaultProfiles.join(','),
+        model.reasoningLevels.join(','),
+        model.defaultReasoningLevel,
+        model.assignedAgents.join(','),
     ].join(':')).join('|')
 
     useEffect(() => {
-        const defaultModel = models.find((model) => model.defaultProfiles.includes(agent?.profile || '')) || models[0]
+        const defaultModel = models.find((model) => model.assignedAgents.includes(agent?.profile || '')) || models[0]
         if (!defaultModel) {
             setSelectedProviderID('')
             setSelectedModelID('')
@@ -241,7 +240,7 @@ export function useProjectWorkspace() {
         }
         setSelectedProviderID(defaultModel.providerId)
         setSelectedModelID(defaultModel.modelId)
-        setReasoning(defaultModel.reasoning.supported ? defaultModel.reasoning.default : '')
+        setReasoning(defaultModel.reasoningLevels.length > 0 ? defaultModel.defaultReasoningLevel : '')
     }, [agent?.id, modelCatalogKey])
 
     const selectSession = useCallback((id: string) => {
@@ -271,12 +270,12 @@ export function useProjectWorkspace() {
         }
         setSelectedProviderID(model.providerId)
         setSelectedModelID(model.modelId)
-        setReasoning(model.reasoning.supported ? model.reasoning.default : '')
+        setReasoning(model.reasoningLevels.length > 0 ? model.defaultReasoningLevel : '')
     }, [models])
 
     const selectReasoning = useCallback((level: string) => {
         const model = models.find((item) => item.providerId === selectedProviderID && item.modelId === selectedModelID)
-        if (!model?.reasoning.supported || !model.reasoning.levels.includes(level)) {
+        if (!model?.reasoningLevels.includes(level)) {
             return
         }
         setReasoning(level)
@@ -338,7 +337,7 @@ export function useProjectWorkspace() {
                 content: input,
                 providerId: selectedProviderID,
                 modelId: selectedModelID,
-                reasoning,
+                reasoningLevel: reasoning,
             })
             setInput('')
             await refresh()

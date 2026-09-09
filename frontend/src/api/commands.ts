@@ -8,7 +8,7 @@ export type SendInputRequest = {
     content: string
     providerId: string
     modelId: string
-    reasoning: string
+    reasoningLevel: string
 }
 
 export type SendInputResponse = { executionId: string; existingRequest: boolean; activationError?: string }

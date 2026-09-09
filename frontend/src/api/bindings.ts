@@ -41,7 +41,7 @@ type CommandBinding = {
 type ModelBinding = {
     ListModels(): Promise<ModelOption[]>
     GetModelConfig(): Promise<ModelConfigDocument>
-    SaveModelConfig(request: Omit<ModelConfigDocument, 'profileNames'>): Promise<SaveModelConfigResponse>
+    SaveModelConfig(request: ModelConfigDocument): Promise<SaveModelConfigResponse>
     SetProviderKey(providerId: string, value: string): Promise<void>
     ClearProviderKey(providerId: string): Promise<void>
     ListProviderModels(providerID: string): Promise<string[]>

@@ -26,8 +26,8 @@ export function AgentTaskInput({ active, closed, input, setInput, models, select
     const [modelPickerOpen, setModelPickerOpen] = useState(false)
     const [reasoningPickerOpen, setReasoningPickerOpen] = useState(false)
     const selectedModel = models.find((model) => model.providerId === selectedProviderID && model.modelId === selectedModelID)
-    const reasoningAvailable = Boolean(selectedModel?.reasoning.supported)
-    const reasoningLevels = selectedModel?.reasoning.levels || []
+    const reasoningAvailable = (selectedModel?.reasoningLevels.length || 0) > 0
+    const reasoningLevels = selectedModel?.reasoningLevels || []
     const selectedReasoningIndex = Math.max(0, reasoningLevels.indexOf(reasoning))
     const selectedReasoning = reasoningLevels[selectedReasoningIndex] || '无推理'
     const reasoningProgress = reasoningLevels.length > 1

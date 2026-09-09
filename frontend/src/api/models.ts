@@ -1,18 +1,13 @@
 import { getModelBinding } from './bindings'
 
-export type ReasoningOption = {
-    supported: boolean
-    levels: string[]
-    default: string
-}
-
 export type ModelOption = {
     providerId: string
     modelId: string
     label: string
     providerName: string
-    reasoning: ReasoningOption
-    defaultProfiles: string[]
+    reasoningLevels: string[]
+    defaultReasoningLevel: string
+    assignedAgents: string[]
 }
 
 export type ProviderConfigOption = {
@@ -20,7 +15,6 @@ export type ProviderConfigOption = {
     providerName: string
     baseURL: string
     proxyURL: string
-    defaultAPIFormat: ModelAPIFormat
     hasAPIKey: boolean
 }
 
@@ -39,20 +33,14 @@ export type ModelConfigOption = {
     apiFormat: ModelAPIFormat
     contextWindow: number
     maxOutputTokens: number
-    reasoning: ReasoningOption
+    reasoningLevels: string[]
+    defaultReasoningLevel: string
 }
 
 export type ModelConfigDocument = {
     groups: GroupConfigOption[]
     providers: ProviderConfigOption[]
     models: ModelConfigOption[]
-    profiles: Record<string, ModelReference>
-    profileNames: string[]
-}
-
-export type ModelReference = {
-    providerId: string
-    modelId: string
 }
 
 export type SaveModelConfigResponse = {
@@ -73,7 +61,6 @@ export function saveModelConfig(config: ModelConfigDocument) {
         groups: config.groups,
         providers: config.providers,
         models: config.models,
-        profiles: config.profiles,
     })
 }
 
@@ -99,34 +86,23 @@ function normalizeModelCatalog(value: unknown): ModelOption[] {
         throw new Error('The model catalog response is invalid.')
     }
     return value.map((model) => {
-        if (!isRecord(model) || !isRecord(model.reasoning)) {
+        if (!isRecord(model)) {
             throw new Error('The model catalog response is invalid.')
         }
-        const reasoning = model.reasoning
-        if (typeof reasoning.supported !== 'boolean') {
-            throw new Error('The model catalog response is invalid.')
-        }
-        const levels = reasoning.levels == null && !reasoning.supported
-            ? []
-            : stringArray(reasoning.levels)
         return {
             providerId: stringValue(model.providerId),
             modelId: stringValue(model.modelId),
             label: stringValue(model.label),
             providerName: stringValue(model.providerName),
-            reasoning: {
-                supported: reasoning.supported,
-                levels,
-                default: stringValue(reasoning.default),
-            },
-            defaultProfiles: stringArray(model.defaultProfiles),
+            reasoningLevels: model.reasoningLevels == null ? [] : stringArray(model.reasoningLevels),
+            defaultReasoningLevel: model.defaultReasoningLevel == null ? '' : stringValue(model.defaultReasoningLevel),
+            assignedAgents: stringArray(model.assignedAgents),
         }
     })
 }
 
 function normalizeModelConfig(value: unknown): ModelConfigDocument {
-    if (!isRecord(value) || !Array.isArray(value.providers) || !Array.isArray(value.models) ||
-        !isRecord(value.profiles)) {
+    if (!isRecord(value) || !Array.isArray(value.providers) || !Array.isArray(value.models)) {
         throw new Error('The model configuration response is invalid.')
     }
     return {
@@ -141,14 +117,12 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
                 providerName: stringValue(provider.providerName),
                 baseURL: stringValue(provider.baseURL),
                 proxyURL: stringValue(provider.proxyURL),
-                defaultAPIFormat: apiFormatValue(provider.defaultAPIFormat),
                 hasAPIKey: provider.hasAPIKey === true,
             }
         }),
         models: value.models.map((model) => {
-            if (!isRecord(model) || !isRecord(model.reasoning) ||
-                typeof model.contextWindow !== 'number' || typeof model.maxOutputTokens !== 'number' ||
-                typeof model.reasoning.supported !== 'boolean') {
+            if (!isRecord(model) ||
+                typeof model.contextWindow !== 'number' || typeof model.maxOutputTokens !== 'number') {
                 throw new Error('The model configuration response is invalid.')
             }
             const apiFormat = stringValue(model.apiFormat)
@@ -164,21 +138,10 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
                 apiFormat,
                 contextWindow: model.contextWindow,
                 maxOutputTokens: model.maxOutputTokens,
-                reasoning: {
-                    supported: model.reasoning.supported,
-                    levels: stringArray(model.reasoning.levels),
-                    default: stringValue(model.reasoning.default),
-                },
+                reasoningLevels: model.reasoningLevels == null ? [] : stringArray(model.reasoningLevels),
+                defaultReasoningLevel: model.defaultReasoningLevel == null ? '' : stringValue(model.defaultReasoningLevel),
             }
         }),
-        profiles: Object.fromEntries(Object.entries(value.profiles).map(([profile, reference]) => {
-            if (!isRecord(reference)) throw new Error('The model configuration response is invalid.')
-            return [profile, {
-                providerId: stringValue(reference.providerId),
-                modelId: stringValue(reference.modelId),
-            }]
-        })),
-        profileNames: value.profileNames == null ? [] : stringArray(value.profileNames),
     }
 }
 
