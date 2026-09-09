@@ -36,12 +36,8 @@ func (b *ModelBindings) ListModels() (response []contracts.ModelOption, err erro
 	for _, model := range models {
 		result = append(result, contracts.ModelOption{
 			ProviderID: model.ProviderID, ModelID: model.ModelID, Label: model.Label, ProviderName: model.ProviderName,
-			Reasoning: contracts.ReasoningOption{
-				Supported: model.Reasoning.Supported,
-				Levels:    append([]string{}, model.Reasoning.Levels...),
-				Default:   model.Reasoning.Default,
-			},
-			DefaultProfiles: append([]string{}, model.DefaultProfiles...),
+			ReasoningLevels: append([]string{}, model.ReasoningLevels...), DefaultReasoningLevel: model.DefaultReasoningLevel,
+			AssignedAgents: append([]string{}, model.AssignedAgents...),
 		})
 	}
 	return result, nil

@@ -17,8 +17,8 @@ import (
 	domainsession "praxis/internal/domain/session"
 	domainworkspace "praxis/internal/domain/workspace"
 
+	modelregistry "praxis/internal/infrastructure/model_registry"
 	"praxis/internal/logging"
-	"praxis/internal/providers/registry"
 	sessionport "praxis/internal/session"
 )
 
@@ -58,12 +58,12 @@ type AgentCommands interface {
 }
 
 type ModelCatalog interface {
-	ListModels() []registry.ModelOption
+	ListModels() []modelregistry.ModelOption
 }
 
 type ModelConfigEditor interface {
-	ModelConfig() registry.FileConfig
-	SaveModelConfig(registry.FileConfig) error
+	ModelConfig() modelregistry.FileConfig
+	SaveModelConfig(modelregistry.FileConfig) error
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
 	DiscoverProviderModels(context.Context, string) ([]string, error)

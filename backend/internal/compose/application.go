@@ -24,20 +24,21 @@ import (
 	domainagent "praxis/internal/domain/agent"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
+	domainmodel "praxis/internal/domain/model"
 	domainproject "praxis/internal/domain/project"
 	domainsecurity "praxis/internal/domain/security"
 	domainsession "praxis/internal/domain/session"
 	domainworkflow "praxis/internal/domain/workflow"
 	domainworkspace "praxis/internal/domain/workspace"
 
+	agentregistry "praxis/internal/infrastructure/agent_registry"
+	"praxis/internal/infrastructure/agentlog"
+	"praxis/internal/infrastructure/dataroot"
+	modelregistry "praxis/internal/infrastructure/model_registry"
+	"praxis/internal/infrastructure/sqlite"
 	"praxis/internal/logging"
 	"praxis/internal/orchestration"
-	"praxis/internal/providers/registry"
 	"praxis/internal/session"
-	"praxis/internal/storage/agentlog"
-	"praxis/internal/storage/agentpolicy"
-	"praxis/internal/storage/dataroot"
-	"praxis/internal/storage/sqlite"
 	"praxis/internal/tools"
 )
 
@@ -55,7 +56,8 @@ type Application struct {
 	settlements *executionsettlement.Service
 	starts      *executionstart.Service
 	store       *sqlite.Store
-	models      *registry.Registry
+	models      *modelregistry.Registry
+	agentConfig *agentregistry.Registry
 	registry    *agentruntime.Registry
 	scheduler   *orchestration.Scheduler
 	logger      *logging.Logger
@@ -201,24 +203,23 @@ func Open(
 		return nil, fmt.Errorf("open runtime log: %w", err)
 	}
 	diagnostics.Infof("composition open started root=%s database=%s", root.Root, root.Database)
-	modelRegistry, err := registry.Load(root.ModelProvidersConfig, nil)
+	modelRegistry, err := modelregistry.Load(root.ModelProvidersConfig, nil)
 	if err != nil {
 		diagnostics.Errorf("load model registry failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
-	policyStore, err := agentpolicy.NewStore(root.AgentPolicyFile)
+	agentRegistry, err := agentregistry.Load(root.AgentConfigFile, func(providerID, modelID string) error {
+		if !modelregistry.ContainsModel(modelRegistry.Config(), providerID, modelID) {
+			return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
+		}
+		return nil
+	})
 	if err != nil {
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
-	}
-	systemPolicy, err := policyStore.Current(ctx)
-	if err != nil {
-		_ = diagnostics.Close()
-		closeStore()
-		return nil, fmt.Errorf("load agent policy: %w", err)
 	}
 	target := store.TargetRepositories()
 	output := newAgentOutputPublisher()
@@ -307,7 +308,7 @@ func Open(
 		CommandReceipts: target.Commands,
 		Events:          target.Events,
 		Readiness:       readiness,
-		PolicyFactory:   policyFactory(systemPolicy),
+		PolicyFactory:   agentRegistry.SecurityPolicy,
 	})
 	if err != nil {
 		diagnostics.Errorf("create session service failed: %v", err)
@@ -356,7 +357,7 @@ func Open(
 		Contexts: target.Contexts, Policies: target.Policies, Agents: target.Agents,
 		Executions: target.Executions, Deliveries: target.Deliveries, Events: target.Events,
 		Readiness: readiness, PrimaryAgent: sessionService, Activator: scheduler,
-		Lifecycle: settlementService, Models: modelRegistry,
+		Lifecycle: settlementService, Models: agentModelResolver{agents: agentRegistry, models: modelRegistry},
 	})
 	if err != nil {
 		diagnostics.Errorf("create execution start service failed: %v", err)
@@ -496,11 +497,11 @@ func Open(
 		settlements: settlementService,
 		starts:      startService,
 		store:       store,
-		models:      modelRegistry,
-		registry:    registry,
-		scheduler:   scheduler,
-		logger:      diagnostics,
-		output:      output,
+		models:      modelRegistry, agentConfig: agentRegistry,
+		registry:  registry,
+		scheduler: scheduler,
+		logger:    diagnostics,
+		output:    output,
 	}, nil
 }
 
@@ -524,29 +525,50 @@ func (a *Application) SubscribeAgentOutput(observer agentruntime.AgentOutputObse
 }
 
 // ListModels returns configured model capabilities for the desktop binding.
-func (a *Application) ListModels() []registry.ModelOption {
+func (a *Application) ListModels() []modelregistry.ModelOption {
 	if a.models == nil {
-		return []registry.ModelOption{}
+		return []modelregistry.ModelOption{}
 	}
-	return a.models.ListModels()
+	models := a.models.ListModels()
+	if a.agentConfig == nil {
+		return models
+	}
+	for index := range models {
+		models[index].AssignedAgents = a.agentConfig.AgentsForModel(models[index].ProviderID, models[index].ModelID)
+	}
+	return models
 }
 
 // ModelConfig returns an editable copy of the full model configuration for
 // the settings UI to render.
-func (a *Application) ModelConfig() registry.FileConfig {
+func (a *Application) ModelConfig() modelregistry.FileConfig {
 	if a.models == nil {
-		return registry.FileConfig{}
+		return modelregistry.FileConfig{}
 	}
 	return a.models.Config()
 }
 
 // SaveModelConfig validates and persists a new model configuration. A saved
 // configuration takes effect immediately for the running orchestration layer.
-func (a *Application) SaveModelConfig(config registry.FileConfig) error {
+func (a *Application) SaveModelConfig(config modelregistry.FileConfig) error {
 	if a.models == nil {
 		return errors.New("model registry is not available")
 	}
-	if err := a.models.ApplyConfig(config); err != nil {
+	validated, err := modelregistry.Validate(config)
+	if err != nil {
+		return err
+	}
+	if a.agentConfig != nil {
+		if err := a.agentConfig.ValidateModelReferences(func(providerID, modelID string) error {
+			if !modelregistry.ContainsModel(validated, providerID, modelID) {
+				return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if err := a.models.ApplyConfig(validated); err != nil {
 		return err
 	}
 	a.RuntimeLogger().Infof(
@@ -762,24 +784,17 @@ func newAgentMessageQuery(root dataroot.DataRoot) applicationquery.AgentMessageQ
 	}
 }
 
-func policyFactory(snapshot domainsecurity.AgentPolicySnapshot) applicationsession.AgentSecurityPolicyFactory {
-	return func(workspace domainworkspace.Workspace, profile domainsecurity.AgentProfile) (domainsecurity.AgentSecurityPolicy, error) {
-		template, ok := snapshot.TemplateFor(profile)
-		if !ok {
-			return domainsecurity.AgentSecurityPolicy{}, fmt.Errorf("agent policy has no template for profile %s", profile)
-		}
-		capabilities := domainsecurity.CapabilityPolicy{AllowedTools: template.AllowedTools}
-		switch template.WorkspaceAccess {
-		case domainsecurity.WorkspaceAccessRead:
-			capabilities.ReadScopes = []string{workspace.Path}
-		case domainsecurity.WorkspaceAccessReadWrite:
-			capabilities.ReadScopes = []string{workspace.Path}
-			capabilities.WriteScopes = []string{workspace.Path}
-		}
-		return domainsecurity.NewAgentSecurityPolicy(1, capabilities,
-			domainsecurity.SandboxPolicy{Mode: snapshot.SandboxMode},
-			domainsecurity.ApprovalPolicy{Mode: snapshot.ApprovalMode})
-	}
+type agentModelResolver struct {
+	agents *agentregistry.Registry
+	models *modelregistry.Registry
+}
+
+func (r agentModelResolver) ResolveModel(profile domainsecurity.AgentProfile) (domainmodel.ModelSelection, error) {
+	return r.agents.ResolveModel(profile)
+}
+
+func (r agentModelResolver) ResolveModelSelection(providerID, modelID, reasoningLevel string) (domainmodel.ModelSelection, error) {
+	return r.models.ResolveModelSelection(providerID, modelID, reasoningLevel)
 }
 
 func newSessionHeaderResolver(store *sqlite.Store) agentruntime.TargetSessionHeaderResolver {
@@ -828,12 +843,12 @@ func (f executionInputFactory) MaterializeExecutionInput(
 	agent domainagent.Agent,
 	providerID string,
 	modelID string,
-	reasoning string,
+	reasoningLevel string,
 ) (domainexecution.ExecutionInputSnapshot, error) {
 	if f.start == nil {
 		return domainexecution.ExecutionInputSnapshot{}, errors.New("execution start service is not configured")
 	}
-	return f.start.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoning)
+	return f.start.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoningLevel)
 }
 
 type queuedWorkStarter struct {

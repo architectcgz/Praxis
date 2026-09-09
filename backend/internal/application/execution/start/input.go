@@ -16,7 +16,7 @@ import (
 
 // MaterializeExecutionInput freezes the current context, policy and model
 // selection into a durable input snapshot for queued and delivery work.
-func (s *Service) MaterializeExecutionInput(ctx context.Context, agent domainagent.Agent, providerID, modelID, reasoning string) (domainexecution.ExecutionInputSnapshot, error) {
+func (s *Service) MaterializeExecutionInput(ctx context.Context, agent domainagent.Agent, providerID, modelID, reasoningLevel string) (domainexecution.ExecutionInputSnapshot, error) {
 	session, err := s.sessions.Get(ctx, agent.SessionID)
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, err
@@ -32,7 +32,7 @@ func (s *Service) MaterializeExecutionInput(ctx context.Context, agent domainage
 	if policy.Revision != agent.SecurityPolicyRevision {
 		return domainexecution.ExecutionInputSnapshot{}, domainfoundation.ErrRevisionConflict
 	}
-	model, err := s.models.ResolveModelSelection(providerID, modelID, reasoning)
+	model, err := s.models.ResolveModelSelection(providerID, modelID, reasoningLevel)
 	if err != nil {
 		return domainexecution.ExecutionInputSnapshot{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}

@@ -3,6 +3,7 @@ package start
 import (
 	"path/filepath"
 	domaincontext "praxis/internal/domain/context"
+	domainmodel "praxis/internal/domain/model"
 	domainsecurity "praxis/internal/domain/security"
 	domainworkspace "praxis/internal/domain/workspace"
 	"testing"
@@ -38,7 +39,7 @@ func TestSecurityResolverAllowsWorkspaceRootAndFreezesPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, err := resolver.Resolve(policy, domainsecurity.ExecutionRestrictions{ReadScopes: []string{root}}, workspace,
-		domainsecurity.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
+		domainmodel.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestSecurityResolverRejectsWiderRestriction(t *testing.T) {
 	resolver, _ := NewSecurityResolver(baseline, fixedIDs{})
 	manifest, _ := domaincontext.NewContextManifest("manifest_test", "test context", nil, time.Now())
 	_, err := resolver.Resolve(policy, domainsecurity.ExecutionRestrictions{ReadScopes: []string{root}}, workspace,
-		domainsecurity.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
+		domainmodel.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
 	if err == nil {
 		t.Fatal("expected wider read restriction to be rejected")
 	}
@@ -80,7 +81,7 @@ func TestSecurityResolverUsesNarrowerBaselineScope(t *testing.T) {
 	resolver, _ := NewSecurityResolver(baseline, fixedIDs{})
 	manifest, _ := domaincontext.NewContextManifest("manifest_test", "test context", nil, time.Now())
 	snapshot, err := resolver.Resolve(policy, domainsecurity.ExecutionRestrictions{}, workspace,
-		domainsecurity.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
+		domainmodel.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

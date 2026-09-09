@@ -8,8 +8,8 @@ import (
 
 	"praxis/app"
 	"praxis/internal/compose"
+	"praxis/internal/infrastructure/dataroot"
 	"praxis/internal/logging"
-	"praxis/internal/storage/dataroot"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"

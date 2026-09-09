@@ -59,7 +59,7 @@ func (p *Provider) Stream(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	model := strings.TrimSpace(request.Snapshot.Model.ModelID)
+	model := request.Snapshot.Model.ModelID
 	if model == "" {
 		return nil, errors.New("anthropic model is required")
 	}
@@ -71,7 +71,7 @@ func (p *Provider) Stream(
 		messages = append(messages, anthropicMessage(message))
 	}
 	body := map[string]any{"model": model, "messages": messages, "stream": true}
-	if reasoning := strings.TrimSpace(request.Snapshot.Model.Reasoning); reasoning != "" && reasoning != "off" {
+	if reasoning := request.Snapshot.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
 		body["output_config"] = map[string]string{"effort": reasoning}
 	}
 	body["max_tokens"] = request.Snapshot.MaxOutputTokens

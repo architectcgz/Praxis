@@ -17,7 +17,7 @@ type chatCompletionsProtocol struct{}
 func (chatCompletionsProtocol) requestPayload(
 	snapshot runtimecontract.ExecutionTurnSnapshot,
 ) ([]byte, string, error) {
-	model := strings.TrimSpace(snapshot.Model.ModelID)
+	model := snapshot.Model.ModelID
 	if model == "" {
 		return nil, "", fmt.Errorf("openai-compatible model is required")
 	}
@@ -32,7 +32,7 @@ func (chatCompletionsProtocol) requestPayload(
 		messages = append(messages, chatMessage(message))
 	}
 	body := map[string]any{"model": model, "messages": messages, "stream": true}
-	if reasoning := strings.TrimSpace(snapshot.Model.Reasoning); reasoning != "" && reasoning != "off" {
+	if reasoning := snapshot.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
 		body["reasoning_effort"] = reasoning
 	}
 	body["max_tokens"] = snapshot.MaxOutputTokens

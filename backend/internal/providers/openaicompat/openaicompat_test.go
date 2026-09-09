@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	domainsecurity "praxis/internal/domain/security"
+	domainmodel "praxis/internal/domain/model"
 	"praxis/internal/providers/streaming"
 	runtimecontract "praxis/internal/runtime"
 )
 
 func testExecutionTurnSnapshot() runtimecontract.ExecutionTurnSnapshot {
 	return runtimecontract.ExecutionTurnSnapshot{
-		Model:           domainsecurity.ModelSelection{ModelID: "model", Reasoning: "high"},
+		Model:           domainmodel.ModelSelection{ProviderID: "provider", ModelID: "model", ReasoningLevel: "high"},
 		MaxOutputTokens: 1024,
 	}
 }
@@ -83,14 +83,14 @@ func TestRequestPayloadUsesExecutionTurnModelConfiguration(t *testing.T) {
 				t.Fatalf("%s = %#v, want %d", test.maxTokensField, body[test.maxTokensField], snapshot.MaxOutputTokens)
 			}
 			if test.reasoningField == "reasoning_effort" {
-				if body[test.reasoningField] != snapshot.Model.Reasoning {
-					t.Fatalf("%s = %#v, want %q", test.reasoningField, body[test.reasoningField], snapshot.Model.Reasoning)
+				if body[test.reasoningField] != snapshot.Model.ReasoningLevel {
+					t.Fatalf("%s = %#v, want %q", test.reasoningField, body[test.reasoningField], snapshot.Model.ReasoningLevel)
 				}
 				return
 			}
 			reasoning, ok := body[test.reasoningField].(map[string]any)
-			if !ok || reasoning["effort"] != snapshot.Model.Reasoning {
-				t.Fatalf("%s = %#v, want effort %q", test.reasoningField, body[test.reasoningField], snapshot.Model.Reasoning)
+			if !ok || reasoning["effort"] != snapshot.Model.ReasoningLevel {
+				t.Fatalf("%s = %#v, want effort %q", test.reasoningField, body[test.reasoningField], snapshot.Model.ReasoningLevel)
 			}
 		})
 	}

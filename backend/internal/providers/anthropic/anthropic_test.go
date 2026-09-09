@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	domainsecurity "praxis/internal/domain/security"
+	domainmodel "praxis/internal/domain/model"
 	"praxis/internal/providers/streaming"
 	runtimecontract "praxis/internal/runtime"
 )
@@ -39,7 +39,7 @@ func TestProviderUsesExecutionTurnModelConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream, err := provider.Stream(context.Background(), runtimecontract.ModelRequest{Snapshot: runtimecontract.ExecutionTurnSnapshot{
-		Model:           domainsecurity.ModelSelection{ModelID: "claude-test", Reasoning: "high"},
+		Model:           domainmodel.ModelSelection{ProviderID: "provider", ModelID: "claude-test", ReasoningLevel: "high"},
 		MaxOutputTokens: 2048,
 	}})
 	if err != nil {

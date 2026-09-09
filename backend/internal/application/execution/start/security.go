@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	domaincontext "praxis/internal/domain/context"
 	domainfoundation "praxis/internal/domain/foundation"
+	domainmodel "praxis/internal/domain/model"
 	domainsecurity "praxis/internal/domain/security"
 	domainworkspace "praxis/internal/domain/workspace"
 	"strings"
@@ -35,7 +36,7 @@ func (r SecurityResolver) Resolve(
 	policy domainsecurity.AgentSecurityPolicy,
 	restrictions domainsecurity.ExecutionRestrictions,
 	workspace domainworkspace.Workspace,
-	model domainsecurity.ModelSelection,
+	model domainmodel.ModelSelection,
 	manifest domaincontext.ContextManifest,
 ) (domainsecurity.ExecutionSecuritySnapshot, error) {
 	ids := r.ids

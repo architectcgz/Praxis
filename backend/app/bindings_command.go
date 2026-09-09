@@ -30,13 +30,13 @@ func (b *CommandBindings) SendInput(
 		return contracts.SendInputResponse{}, err
 	}
 	result, err := commands.SendInput(ctx, start.SendInputParams{
-		SessionID:  domainfoundation.SessionID(request.SessionID),
-		AgentID:    domainfoundation.AgentID(request.AgentID),
-		RequestID:  domainfoundation.RequestID(request.RequestID),
-		Content:    request.Content,
-		ProviderID: request.ProviderID,
-		ModelID:    request.ModelID,
-		Reasoning:  request.Reasoning,
+		SessionID:      domainfoundation.SessionID(request.SessionID),
+		AgentID:        domainfoundation.AgentID(request.AgentID),
+		RequestID:      domainfoundation.RequestID(request.RequestID),
+		Content:        request.Content,
+		ProviderID:     request.ProviderID,
+		ModelID:        request.ModelID,
+		ReasoningLevel: request.ReasoningLevel,
 	})
 	if err != nil {
 		return contracts.SendInputResponse{}, publicBindingError(err)

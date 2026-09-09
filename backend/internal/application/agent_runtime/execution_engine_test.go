@@ -10,6 +10,7 @@ import (
 	domaincontext "praxis/internal/domain/context"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
+	domainmodel "praxis/internal/domain/model"
 	domainsecurity "praxis/internal/domain/security"
 
 	sessionport "praxis/internal/session"
@@ -17,7 +18,7 @@ import (
 
 type testModelResolver struct{ model ExecutionModel }
 
-func (r testModelResolver) ResolveExecutionModel(domainsecurity.ModelSelection) (ExecutionModel, error) {
+func (r testModelResolver) ResolveExecutionModel(domainmodel.ModelSelection) (ExecutionModel, error) {
 	return r.model, nil
 }
 
@@ -96,7 +97,7 @@ func testExecution(t *testing.T, tools []domainsecurity.ToolName, limits domains
 	t.Helper()
 	grant, err := domainsecurity.NewCapabilityGrant(domainsecurity.CapabilityGrantSpec{
 		ID: "grant_test", WorkspaceID: "workspace_test", WorkspacePathSnapshot: `C:\workspace`, WorkspaceRevision: 1,
-		AllowedTools: tools, ReadScopes: []string{`C:\workspace`}, Model: domainsecurity.ModelSelection{ProviderID: "provider", ModelID: "model"},
+		AllowedTools: tools, ReadScopes: []string{`C:\workspace`}, Model: domainmodel.ModelSelection{ProviderID: "provider", ModelID: "model"},
 		ResourceLimits: limits, ContextManifestRef: "manifest_test", ApprovalSource: domainsecurity.ApprovalSourcePolicyDefault,
 		ApprovalPolicyFingerprint: "policy", CanProposeDelegation: containsToolForTest(tools, domainsecurity.ToolProposeDelegate),
 		ResultPermissions: resultPermissionsForTest(tools),

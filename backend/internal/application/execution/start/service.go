@@ -12,6 +12,7 @@ import (
 	domainagent "praxis/internal/domain/agent"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
+	domainmodel "praxis/internal/domain/model"
 	domainsecurity "praxis/internal/domain/security"
 	"praxis/internal/persistence"
 	runtimecontract "praxis/internal/runtime"
@@ -41,8 +42,8 @@ type RuntimeActivator interface {
 
 // ModelResolver resolves a durable model selection for resume requests.
 type ModelResolver interface {
-	ResolveModel(domainsecurity.AgentProfile) (domainsecurity.ModelSelection, error)
-	ResolveModelSelection(string, string, string) (domainsecurity.ModelSelection, error)
+	ResolveModel(domainsecurity.AgentProfile) (domainmodel.ModelSelection, error)
+	ResolveModelSelection(string, string, string) (domainmodel.ModelSelection, error)
 }
 
 // Config contains the ports required by the execution start service.
@@ -89,13 +90,13 @@ type Service struct {
 
 // SendInputParams identifies one user-input execution request.
 type SendInputParams struct {
-	SessionID  domainfoundation.SessionID
-	AgentID    domainfoundation.AgentID
-	RequestID  domainfoundation.RequestID
-	Content    string
-	ProviderID string
-	ModelID    string
-	Reasoning  string
+	SessionID      domainfoundation.SessionID
+	AgentID        domainfoundation.AgentID
+	RequestID      domainfoundation.RequestID
+	Content        string
+	ProviderID     string
+	ModelID        string
+	ReasoningLevel string
 }
 
 // ResumeParams identifies one resumed execution request.
@@ -183,7 +184,7 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.executions.FindByRequest(txCtx, params.AgentID, params.RequestID)
 		if err == nil {
-			if !requestMatches(existing, domainexecution.ExecutionUserInput, params.Content) || !modelMatches(existing, params.ProviderID, params.ModelID, params.Reasoning) {
+			if !requestMatches(existing, domainexecution.ExecutionUserInput, params.Content) || !modelMatches(existing, params.ProviderID, params.ModelID, params.ReasoningLevel) {
 				return domainfoundation.ErrRequestConflict
 			}
 			result = Result{Execution: existing, ExistingRequest: true}
@@ -220,7 +221,7 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 		if active >= 1 {
 			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
-		input, err := s.MaterializeExecutionInput(txCtx, agent, params.ProviderID, params.ModelID, params.Reasoning)
+		input, err := s.MaterializeExecutionInput(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel)
 		if err != nil {
 			return err
 		}
@@ -250,7 +251,7 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 			if lookupErr != nil {
 				return Result{}, lookupErr
 			}
-			if !requestMatches(existing, domainexecution.ExecutionUserInput, params.Content) || !modelMatches(existing, params.ProviderID, params.ModelID, params.Reasoning) {
+			if !requestMatches(existing, domainexecution.ExecutionUserInput, params.Content) || !modelMatches(existing, params.ProviderID, params.ModelID, params.ReasoningLevel) {
 				return Result{}, err
 			}
 			return Result{Execution: existing, ExistingRequest: true}, nil
@@ -292,7 +293,7 @@ func (s *Service) Resume(ctx context.Context, params ResumeParams) (Result, erro
 		if err != nil {
 			return fmt.Errorf("resolve model: %w", err)
 		}
-		input, err := s.MaterializeExecutionInput(txCtx, agent, model.ProviderID, model.ModelID, model.Reasoning)
+		input, err := s.MaterializeExecutionInput(txCtx, agent, model.ProviderID, model.ModelID, model.ReasoningLevel)
 		if err != nil {
 			return err
 		}
@@ -350,7 +351,7 @@ func requestMatches(execution domainexecution.AgentExecution, reason domainexecu
 	return execution.Reason == reason && (execution.StartContent == content || execution.StartContent == "" && content == "")
 }
 
-func modelMatches(execution domainexecution.AgentExecution, providerID, modelID, reasoning string) bool {
+func modelMatches(execution domainexecution.AgentExecution, providerID, modelID, reasoningLevel string) bool {
 	grant := execution.Input.Security.CapabilityGrant
-	return (providerID == "" || grant.Model.ProviderID == providerID) && (modelID == "" || grant.Model.ModelID == modelID) && (reasoning == "" || grant.Model.Reasoning == reasoning)
+	return (providerID == "" || grant.Model.ProviderID == providerID) && (modelID == "" || grant.Model.ModelID == modelID) && (reasoningLevel == "" || grant.Model.ReasoningLevel == reasoningLevel)
 }

@@ -7,6 +7,7 @@ import (
 	domaincontext "praxis/internal/domain/context"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
+	domainmodel "praxis/internal/domain/model"
 	domainsecurity "praxis/internal/domain/security"
 )
 
@@ -89,7 +90,7 @@ type ExecutionTurnSnapshot struct {
 	SystemPrompt         string
 	SystemPromptHash     string
 	ArtifactTemplateHash string
-	Model                domainsecurity.ModelSelection
+	Model                domainmodel.ModelSelection
 	MaxOutputTokens      int
 	Tools                []ToolDefinition
 	GrantID              domainfoundation.CapabilityGrantID

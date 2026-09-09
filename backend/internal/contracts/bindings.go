@@ -126,31 +126,23 @@ type EventSnapshot struct {
 	Payload     map[string]string `json:"payload,omitempty"`
 }
 
-// ReasoningOption is the model-declared reasoning capability presented by the
-// frontend. It never contains provider credentials or endpoint details.
-type ReasoningOption struct {
-	Supported bool     `json:"supported"`
-	Levels    []string `json:"levels"`
-	Default   string   `json:"default"`
-}
-
 type ModelOption struct {
-	ProviderID      string          `json:"providerId"`
-	ModelID         string          `json:"modelId"`
-	Label           string          `json:"label"`
-	ProviderName    string          `json:"providerName"`
-	Reasoning       ReasoningOption `json:"reasoning"`
-	DefaultProfiles []string        `json:"defaultProfiles"`
+	ProviderID            string   `json:"providerId"`
+	ModelID               string   `json:"modelId"`
+	Label                 string   `json:"label"`
+	ProviderName          string   `json:"providerName"`
+	ReasoningLevels       []string `json:"reasoningLevels"`
+	DefaultReasoningLevel string   `json:"defaultReasoningLevel"`
+	AssignedAgents        []string `json:"assignedAgents"`
 }
 
 // ProviderConfigOption carries editable provider metadata and secret status.
 type ProviderConfigOption struct {
-	ID               string `json:"id"`
-	ProviderName     string `json:"providerName"`
-	BaseURL          string `json:"baseURL"`
-	ProxyURL         string `json:"proxyURL"`
-	DefaultAPIFormat string `json:"defaultAPIFormat"`
-	HasAPIKey        bool   `json:"hasAPIKey"`
+	ID           string `json:"id"`
+	ProviderName string `json:"providerName"`
+	BaseURL      string `json:"baseURL"`
+	ProxyURL     string `json:"proxyURL"`
+	HasAPIKey    bool   `json:"hasAPIKey"`
 }
 
 type GroupConfigOption struct {
@@ -160,34 +152,28 @@ type GroupConfigOption struct {
 
 // ModelConfigOption carries every field the settings UI needs to edit a model.
 type ModelConfigOption struct {
-	ProviderID      string          `json:"providerId"`
-	ModelID         string          `json:"modelId"`
-	Label           string          `json:"label"`
-	GroupID         string          `json:"groupId"`
-	APIFormat       string          `json:"apiFormat"`
-	ContextWindow   int             `json:"contextWindow"`
-	MaxOutputTokens int             `json:"maxOutputTokens"`
-	Reasoning       ReasoningOption `json:"reasoning"`
+	ProviderID            string   `json:"providerId"`
+	ModelID               string   `json:"modelId"`
+	Label                 string   `json:"label"`
+	GroupID               string   `json:"groupId"`
+	APIFormat             string   `json:"apiFormat"`
+	ContextWindow         int      `json:"contextWindow"`
+	MaxOutputTokens       int      `json:"maxOutputTokens"`
+	ReasoningLevels       []string `json:"reasoningLevels"`
+	DefaultReasoningLevel string   `json:"defaultReasoningLevel"`
 }
 
-// ModelConfigDocument is one editable configuration document. The UI submits it
-// whole so per-entry edits cannot leave dangling references, such as deleting a
-// model that a profile still binds.
+// ModelConfigDocument is one editable model registry document.
 type ModelConfigDocument struct {
-	Groups    []GroupConfigOption       `json:"groups"`
-	Providers []ProviderConfigOption    `json:"providers"`
-	Models    []ModelConfigOption       `json:"models"`
-	Profiles  map[string]ModelReference `json:"profiles"`
-	// ProfileNames is the profile allowlist the backend accepts, so the UI renders
-	// exactly the bindings that will validate.
-	ProfileNames []string `json:"profileNames"`
+	Groups    []GroupConfigOption    `json:"groups"`
+	Providers []ProviderConfigOption `json:"providers"`
+	Models    []ModelConfigOption    `json:"models"`
 }
 
 type SaveModelConfigRequest struct {
-	Groups    []GroupConfigOption       `json:"groups"`
-	Providers []ProviderConfigOption    `json:"providers"`
-	Models    []ModelConfigOption       `json:"models"`
-	Profiles  map[string]ModelReference `json:"profiles"`
+	Groups    []GroupConfigOption    `json:"groups"`
+	Providers []ProviderConfigOption `json:"providers"`
+	Models    []ModelConfigOption    `json:"models"`
 }
 
 // SaveModelConfigResponse reports user-fixable configuration problems through
@@ -198,19 +184,14 @@ type SaveModelConfigResponse struct {
 	ValidationError string `json:"validationError,omitempty"`
 }
 
-type ModelReference struct {
-	ProviderID string `json:"providerId"`
-	ModelID    string `json:"modelId"`
-}
-
 type SendInputRequest struct {
-	SessionID  string `json:"sessionId"`
-	AgentID    string `json:"agentId"`
-	RequestID  string `json:"requestId"`
-	Content    string `json:"content"`
-	ProviderID string `json:"providerId"`
-	ModelID    string `json:"modelId"`
-	Reasoning  string `json:"reasoning"`
+	SessionID      string `json:"sessionId"`
+	AgentID        string `json:"agentId"`
+	RequestID      string `json:"requestId"`
+	Content        string `json:"content"`
+	ProviderID     string `json:"providerId"`
+	ModelID        string `json:"modelId"`
+	ReasoningLevel string `json:"reasoningLevel"`
 }
 
 type SendInputResponse struct {

@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"praxis/internal/contracts"
+	agentregistry "praxis/internal/infrastructure/agent_registry"
+	"praxis/internal/infrastructure/dataroot"
+	modelregistry "praxis/internal/infrastructure/model_registry"
 	"praxis/internal/logging"
-	"praxis/internal/providers/registry"
-	"praxis/internal/storage/dataroot"
 )
 
 // SetDataRoot configures the project domain with the resolved application root.
@@ -88,15 +89,27 @@ func (a *App) Shutdown(ctx context.Context) {
 }
 
 func startupIssue(err error) *contracts.StartupIssue {
-	var configurationError *registry.ConfigurationError
+	var configurationError *modelregistry.ConfigurationError
 	if errors.As(err, &configurationError) {
-		message := "Configuration could not be loaded."
+		message := "Model configuration could not be loaded."
 		if configurationError.Err != nil {
 			message = configurationError.Err.Error()
 		}
 		return &contracts.StartupIssue{
 			Code:    contracts.ErrorCodeConfiguration,
 			Path:    configurationError.Path,
+			Message: message,
+		}
+	}
+	var agentConfigurationError *agentregistry.ConfigurationError
+	if errors.As(err, &agentConfigurationError) {
+		message := "Agent configuration could not be loaded."
+		if agentConfigurationError.Err != nil {
+			message = agentConfigurationError.Err.Error()
+		}
+		return &contracts.StartupIssue{
+			Code:    contracts.ErrorCodeConfiguration,
+			Path:    agentConfigurationError.Path,
 			Message: message,
 		}
 	}

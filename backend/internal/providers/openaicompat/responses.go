@@ -18,7 +18,7 @@ type responsesProtocol struct{}
 func (responsesProtocol) requestPayload(
 	snapshot runtimecontract.ExecutionTurnSnapshot,
 ) ([]byte, string, error) {
-	model := strings.TrimSpace(snapshot.Model.ModelID)
+	model := snapshot.Model.ModelID
 	if model == "" {
 		return nil, "", errors.New("openai-compatible model is required")
 	}
@@ -33,7 +33,7 @@ func (responsesProtocol) requestPayload(
 		input = append(input, responseItems(message)...)
 	}
 	body := map[string]any{"model": model, "input": input, "stream": true}
-	if reasoning := strings.TrimSpace(snapshot.Model.Reasoning); reasoning != "" && reasoning != "off" {
+	if reasoning := snapshot.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
 		body["reasoning"] = map[string]string{"effort": reasoning}
 	}
 	body["max_output_tokens"] = snapshot.MaxOutputTokens

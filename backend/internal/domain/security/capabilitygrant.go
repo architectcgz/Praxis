@@ -4,13 +4,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-)
 
-type ModelSelection struct {
-	ProviderID string
-	ModelID    string
-	Reasoning  string
-}
+	domainmodel "praxis/internal/domain/model"
+)
 
 type ResourceLimits struct {
 	MaxTurns       int
@@ -37,7 +33,7 @@ type CapabilityGrantSpec struct {
 	WriteScopes               []string
 	CanProposeDelegation      bool
 	ResultPermissions         []ResultPermission
-	Model                     ModelSelection
+	Model                     domainmodel.ModelSelection
 	ResourceLimits            ResourceLimits
 	ContextManifestRef        ContextManifestID
 	ApprovalSource            ApprovalSource
@@ -55,7 +51,7 @@ type CapabilityGrant struct {
 	WriteScopes               []string
 	CanProposeDelegation      bool
 	ResultPermissions         []ResultPermission
-	Model                     ModelSelection
+	Model                     domainmodel.ModelSelection
 	ResourceLimits            ResourceLimits
 	ContextManifestRef        ContextManifestID
 	ApprovalSource            ApprovalSource
@@ -63,22 +59,22 @@ type CapabilityGrant struct {
 }
 
 func NewCapabilityGrant(spec CapabilityGrantSpec) (CapabilityGrant, error) {
+	model, err := domainmodel.NewModelSelection(spec.Model.ProviderID, spec.Model.ModelID, spec.Model.ReasoningLevel)
+	if err != nil {
+		return CapabilityGrant{}, err
+	}
 	grant := CapabilityGrant{
-		ID:                    spec.ID,
-		WorkspaceID:           spec.WorkspaceID,
-		WorkspacePathSnapshot: strings.TrimSpace(spec.WorkspacePathSnapshot),
-		WorkspaceRevision:     spec.WorkspaceRevision,
-		AllowedTools:          cloneTools(spec.AllowedTools),
-		AllowedExecutables:    cloneStrings(spec.AllowedExecutables),
-		ReadScopes:            cloneStrings(spec.ReadScopes),
-		WriteScopes:           cloneStrings(spec.WriteScopes),
-		CanProposeDelegation:  spec.CanProposeDelegation,
-		ResultPermissions:     cloneResultPermissions(spec.ResultPermissions),
-		Model: ModelSelection{
-			ProviderID: strings.TrimSpace(spec.Model.ProviderID),
-			ModelID:    strings.TrimSpace(spec.Model.ModelID),
-			Reasoning:  strings.TrimSpace(spec.Model.Reasoning),
-		},
+		ID:                        spec.ID,
+		WorkspaceID:               spec.WorkspaceID,
+		WorkspacePathSnapshot:     strings.TrimSpace(spec.WorkspacePathSnapshot),
+		WorkspaceRevision:         spec.WorkspaceRevision,
+		AllowedTools:              cloneTools(spec.AllowedTools),
+		AllowedExecutables:        cloneStrings(spec.AllowedExecutables),
+		ReadScopes:                cloneStrings(spec.ReadScopes),
+		WriteScopes:               cloneStrings(spec.WriteScopes),
+		CanProposeDelegation:      spec.CanProposeDelegation,
+		ResultPermissions:         cloneResultPermissions(spec.ResultPermissions),
+		Model:                     model,
 		ResourceLimits:            spec.ResourceLimits,
 		ContextManifestRef:        spec.ContextManifestRef,
 		ApprovalSource:            spec.ApprovalSource,
@@ -117,8 +113,8 @@ func (g CapabilityGrant) Validate() error {
 	if idIsEmpty(string(g.ContextManifestRef)) {
 		return invalidValue("grant.contextManifestRef", "context manifest reference is required")
 	}
-	if g.Model.ProviderID == "" || g.Model.ModelID == "" {
-		return invalidValue("grant.model", "provider and model IDs are required")
+	if err := g.Model.Validate(); err != nil {
+		return invalidValue("grant.model", err.Error())
 	}
 	if err := g.ResourceLimits.Validate(); err != nil {
 		return err

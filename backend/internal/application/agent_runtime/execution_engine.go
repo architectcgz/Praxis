@@ -9,6 +9,7 @@ import (
 	"time"
 
 	domainexecution "praxis/internal/domain/execution"
+	domainmodel "praxis/internal/domain/model"
 	domainsecurity "praxis/internal/domain/security"
 
 	runtimecontract "praxis/internal/runtime"
@@ -23,7 +24,7 @@ type ExecutionModel struct {
 }
 
 type ExecutionModelResolver interface {
-	ResolveExecutionModel(domainsecurity.ModelSelection) (ExecutionModel, error)
+	ResolveExecutionModel(domainmodel.ModelSelection) (ExecutionModel, error)
 }
 
 type ExecutionEngineConfig struct {

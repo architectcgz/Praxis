@@ -6,7 +6,6 @@ import (
 
 	domainfoundation "praxis/internal/domain/foundation"
 	domainproject "praxis/internal/domain/project"
-	domainsecurity "praxis/internal/domain/security"
 	domainworkflow "praxis/internal/domain/workflow"
 	domainworkspace "praxis/internal/domain/workspace"
 )
@@ -63,11 +62,6 @@ type EventQueryRepository interface {
 	ListBySession(context.Context, domainfoundation.SessionID, time.Time, int) ([]domainfoundation.DomainEvent, error)
 	ListByAgent(context.Context, domainfoundation.AgentID, time.Time, int) ([]domainfoundation.DomainEvent, error)
 	ListByExecution(context.Context, domainfoundation.AgentExecutionID, time.Time, int) ([]domainfoundation.DomainEvent, error)
-}
-
-type AgentPolicyStore interface {
-	Current(context.Context) (domainsecurity.AgentPolicySnapshot, error)
-	Update(context.Context, domainsecurity.AgentPolicySnapshot) error
 }
 
 type TxRunner interface {
