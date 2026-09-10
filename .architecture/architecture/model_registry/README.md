@@ -2,7 +2,7 @@
 
 > 本文定义 `backend/internal/modelregistry` 的 Provider 配置聚合、Group 语义、credential 边界、模型目录投影和运行时解析规则。协议 adapter 的生命周期见 [`model_provider/provider.md`](../model_provider/provider.md)，请求映射见 [`model_provider/request.md`](../model_provider/request.md)，流解析见 [`model_provider/stream.md`](../model_provider/stream.md)，HTTP 安全约束见 [`model_provider/http.md`](../model_provider/http.md)。
 
-`modelregistry` 是 Model Provider 配置的唯一 owner。它管理配置文档、不可变索引和运行时解析，不编码 Provider 请求、不发起模型调用，也不解析远程流。
+`modelregistry` 是 Model Provider 配置的唯一 owner。它管理模型配置与 auth 文档、不可变索引和运行时解析，不编码 Provider 请求、不发起模型调用，也不解析远程流。
 
 ## 源码目录
 
@@ -11,10 +11,10 @@ backend/internal/modelregistry/
 ├── doc.go                         包职责、并发和敏感信息边界
 ├── types.go                       配置聚合、API format 和公开投影类型
 ├── registry.go                    Registry、不可变快照和只读索引
-├── load.go                        owner-only 配置文件加载
+├── load.go                        owner-only 模型配置与 auth 文档加载
 ├── validate.go                    聚合校验与规范化
 ├── update.go                      revision 检查和原子配置替换
-├── credentials.go                 Provider credential mutation 与脱敏
+├── credentials.go                 auth 文档校验、credential mutation 与脱敏
 ├── catalog.go                     Group 化模型目录投影
 ├── resolve.go                     Profile 与敏感运行配置解析
 ├── discovery.go                   Provider 远程模型发现
@@ -25,7 +25,7 @@ backend/internal/modelregistry/
 
 ## 1. 聚合模型
 
-Model Provider 配置以 Provider 为聚合根。Provider 同时拥有访问端点、credential、默认 API format 和可用 Model，不存在与 Provider 平行维护的全局 Model 或 API key 配置。
+Model Provider 配置以 Provider 为聚合根。Provider 拥有访问端点、默认 API format 和可用 Model；credential 以 `ProviderID` 为键在独立 auth 文档中持久化，不存在与 Provider 平行维护的全局 Model 或 API key 配置。
 
 Group 是用户定义的模型组织维度。Model 通过 `GroupID` 归入一个 Group；Group 不参与远程路由，也不进入 execution 的模型身份。
 
@@ -34,7 +34,6 @@ ModelProviderConfig
 ├── Revision
 ├── Groups[] GroupConfig
 ├── Providers[] ProviderConfig
-│   ├── Credential?
 │   └── Models[] ModelConfig
 └── Profiles map[AgentProfile] ModelReference
 
@@ -47,7 +46,6 @@ ProviderConfig
 ├── DisplayName
 ├── BaseURL
 ├── ProxyURL?
-├── Credential?
 ├── DefaultAPIFormat
 └── Models[] ModelConfig
 
@@ -63,7 +61,7 @@ ModelConfig
 
 类型之间遵守以下所有权规则：
 
-1. Provider 是 endpoint、credential 和 Models 的唯一所有者。
+1. Provider 是 endpoint、默认 API format 和 Models 的唯一所有者；credential 以 `ProviderID` 为键独立持久化。
 2. Model 只存在于一个 Provider 内，不能作为顶层独立配置重复保存。
 3. 每个 Model 必须属于且只属于一个 Group。
 4. 一个 Group 可以包含来自多个 Provider 的 Model。
@@ -106,7 +104,6 @@ type ProviderConfig struct {
     DisplayName      string
     BaseURL           string
     ProxyURL          string
-    Credential       *CredentialRecord
     DefaultAPIFormat ModelAPIFormat
     Models            []ModelConfig
 }
@@ -119,8 +116,8 @@ Provider 规则如下：
 - `BaseURL` 和 `ProxyURL` 经过结构化 URL 校验与规范化；
 - `DefaultAPIFormat` 定义该 Provider 下 Model 的默认协议；
 - `Models` 的数组顺序是该 Provider 配置中的稳定顺序；
-- credential 嵌套在 Provider 内，并随 Provider 一起创建、更新和删除；
-- Provider 删除时，其 Models、credential 和运行时索引在同一次配置提交中删除；
+- credential 以 `ProviderID` 为键独立持久化，并随 Provider 删除在同一用户操作中被修剪；
+- Provider 删除时，其 Models 和运行时索引在同一次配置提交中删除，auth 文档中的 credential 同步修剪；
 - 存在 Profile 引用时，提交方必须同时提供新的有效绑定或删除对应绑定，不能产生悬空引用。
 
 Provider 的展示名、Group 名称或 Model 展示名均不能用于选择协议。有效 API format 只能来自已校验的 `DefaultAPIFormat` 或 Model override。
@@ -172,9 +169,11 @@ Group、展示名、credential 和 endpoint 不进入 `ModelSelection`。Executi
 
 ## 5. Credential
 
-Credential 是 Provider 聚合内的敏感值对象，不是独立业务资源。
+Credential 是按 `ProviderID` 索引的敏感值对象，独立于模型配置文档持久化。
 
 ```go
+type CredentialsDocument map[string]CredentialRecord
+
 type CredentialRecord struct {
     Type CredentialType
     Key  string
@@ -185,7 +184,12 @@ type CredentialType string
 const CredentialTypeAPIKey CredentialType = "api_key"
 ```
 
-目标配置只提供 Provider 级 credential 操作，不提供脱离 Provider 的 key map、key 列表或公开读取命令。
+模型配置文档不包含 credential 字段。credential 操作以已配置 Provider 为前提，并且只提供以下命令：
+
+```text
+SetProviderKey(ProviderID, Key)
+ClearProviderKey(ProviderID)
+```
 
 持久化记录可以包含明文 key；管理查询和前端 DTO 只能获得脱敏状态：
 
@@ -196,35 +200,26 @@ type CredentialStatus struct {
 }
 ```
 
-配置写入使用显式 mutation，避免编辑 Provider 元数据时覆盖现有 key：
-
-```go
-type CredentialChange struct {
-    Operation CredentialOperation // keep | replace | clear
-    Key       string              // Used only by replace.
-}
-```
-
 约束如下：
 
-- `keep` 保留该 Provider 当前 credential；
-- `replace` 要求非空 key，并用新值替换当前 credential；
-- `clear` 删除该 Provider credential；
-- 新 Provider 不能使用 `keep` 继承其他 Provider 的 credential；
-- Provider 删除会删除其 credential；
+- `SetProviderKey` 要求 `ProviderID` 已存在于模型配置，并用非空 key 替换当前 credential；
+- `ClearProviderKey` 删除该 Provider credential；
+- Provider 删除的配置提交会同步修剪 auth 文档中失去归属的 credential；
+- `ProviderID` 是模型配置与 auth 文档之间唯一的关联键；
 - credential key 不通过任何 query、event、error、log、metric 或 test snapshot 返回；
 - credential 不进入 `ModelRequest`、`ModelStreamEvent`、SQLite、transcript 或 execution snapshot；
 - 只有 registry 内部 runtime resolver 可以取得包含明文 credential 的运行配置。
 
 ## 6. 持久化文档
 
-完整配置保存在一个 owner-only 文件中，默认路径为：
+模型配置和 credential 保存在两个 owner-only 文件中：
 
 ```text
-~/.praxis/config/models.json
+~/.praxis/config/models.json      Group、Provider、Model 与 Profile
+~/.praxis/config/auth.json        ProviderID -> CredentialRecord
 ```
 
-该文件由 `DataRoot.ModelProvidersConfig` 定位，权限为 `0600`。Group、Provider、credential、Model 和 Profile 作为一个 revision 原子持久化。
+两个路径分别由 `DataRoot.ModelProvidersConfig` 和 `DataRoot.ModelCredentialsFile` 定位，权限均为 `0600`。`models.json` 严格拒绝 `credential` 等未知字段，因此配置文档、公开投影和备份永远不会包含 key。
 
 ```json
 {
@@ -239,10 +234,6 @@ type CredentialChange struct {
       "displayName": "Codex Gateway",
       "baseUrl": "https://gateway.example.com",
       "proxyUrl": "http://127.0.0.1:7897",
-      "credential": {
-        "type": "api_key",
-        "key": "<secret>"
-      },
       "defaultApiFormat": "openai_responses",
       "models": [
         {
@@ -263,10 +254,6 @@ type CredentialChange struct {
       "id": "gateway-claude",
       "displayName": "Claude Gateway",
       "baseUrl": "https://gateway.example.com",
-      "credential": {
-        "type": "api_key",
-        "key": "<secret>"
-      },
       "defaultApiFormat": "anthropic_messages",
       "models": [
         {
@@ -290,26 +277,36 @@ type CredentialChange struct {
 }
 ```
 
-持久化必须使用严格 JSON 解码、文件大小上限、临时文件、`fsync` 和同目录原子 rename。损坏、超限或包含未知字段的文档不能进入内存 registry，也不能被默认配置覆盖。
+auth.json 只按 `ProviderID` 索引 credential，不重复 endpoint、Model 或其他配置：
+
+```json
+{
+  "gateway-codex": { "type": "api_key", "key": "<secret>" },
+  "gateway-claude": { "type": "api_key", "key": "<secret>" }
+}
+```
+
+持久化必须使用严格 JSON 解码、文件大小上限、临时文件、`fsync` 和同目录原子 rename。损坏、超限或包含未知字段的文档不能进入内存 registry，也不能被默认配置覆盖。模型配置提交先修剪 auth 文档中已失去 Provider 的条目，再替换 models 文档，两个文件各自保持原子替换。
 
 ## 7. 配置命令
 
-配置管理使用一个 revision 化文档接口：
+模型配置使用一个 revision 化文档接口，credential 使用独立的 Provider 级命令：
 
 ```text
 GetModelProviderConfig()
     -> GetModelProviderConfigResponse
 
-SaveModelProviderConfig(
-    ExpectedRevision,
-    Groups,
-    Providers with CredentialChange,
-    Profiles
-)
+SaveModelProviderConfig(ExpectedRevision, Groups, Providers, Profiles)
     -> SavedRevision | ValidationError | RevisionConflict
+
+SetProviderKey(ProviderID, Key)
+    -> Saved | ValidationError
+
+ClearProviderKey(ProviderID)
+    -> Saved | ValidationError
 ```
 
-`GetModelProviderConfigResponse` 保留 Provider 聚合结构，但把 `CredentialRecord` 投影为 `CredentialStatus`。调用方看不到 key，也不需要通过第二个资源拼接 Provider 与 credential 状态。
+`GetModelProviderConfigResponse` 保留 Provider 聚合结构，但只把 credential 投影为 `CredentialStatus`。调用方看不到 key，也不需要读取 auth 文档来拼接 Provider 状态。
 
 保存顺序固定为：
 
@@ -317,31 +314,34 @@ SaveModelProviderConfig(
 serialize writers
     -> compare ExpectedRevision
     -> copy current snapshot
-    -> apply credential mutations to matching Providers
-    -> normalize and validate complete aggregate
+    -> normalize and validate complete model document
+    -> prune credentials whose Provider disappeared
+    -> write owner-only temporary auth file (when pruned)
+    -> fsync and atomic rename
     -> build replacement indexes and catalog
-    -> write owner-only temporary file
+    -> write owner-only temporary models file
     -> fsync and atomic rename
     -> swap in-memory snapshot
     -> publish new revision
 ```
 
-任何步骤失败时，当前 durable 文件、内存 snapshot 和 revision 保持不变。并发编辑使用 `ExpectedRevision` 检测冲突，不能以最后写入覆盖其他用户已经保存的 Provider、Group、Model 或 credential 更新。
+Key mutation 只写 auth 文档；模型配置提交先落盘被修剪的 auth 文档，再落盘 models 文档，任一步骤失败都会把错误返回给调用方。模型文档写入失败时，当前内存 snapshot 和 revision 保持不变，auth 文档最多只会丢失调用方正在删除的 Provider credential。并发编辑使用 `ExpectedRevision` 检测冲突，不能以最后写入覆盖其他用户已经保存的 Provider、Group 或 Model 更新。
 
 ## 8. Registry 索引
 
 Registry 从同一个不可变 snapshot 构建以下索引：
 
 ```text
-groupsByID       GroupID -> GroupConfig
-groupOrder       GroupID -> ordinal
-providersByID    ProviderID -> ProviderConfig
-modelsByKey      (ProviderID, ModelID) -> ModelConfig
-profiles         AgentProfile -> ModelReference
-catalog          grouped ModelOption[]
+groupsByID               GroupID -> GroupConfig
+groupOrder               GroupID -> ordinal
+providersByID            ProviderID -> ProviderConfig
+credentialsByProviderID  ProviderID -> CredentialRecord
+modelsByKey              (ProviderID, ModelID) -> ModelConfig
+profiles                 AgentProfile -> ModelReference
+catalog                  grouped ModelOption[]
 ```
 
-索引不成为第二事实源。每次配置提交都从完整文档重新构建并整体替换。
+索引不成为第二事实源。每次配置提交都从完整文档重新构建并整体替换。auth 文档构建 `credentialsByProviderID`；未出现在 `providersByID` 的 credential 不参与解析。
 
 读取规则如下：
 
@@ -392,7 +392,7 @@ type ModelOption struct {
 - 当前选中 Model 所属 Group 由 `GroupID` 直接定位；
 - Group 改名或 Model 换组后，现有 `ProviderID + ModelID` 选择仍然有效。
 
-设置管理投影保持 Provider 为第一层，以便在同一聚合内编辑 endpoint、credential、默认协议和 Models。选择目录保持 Group 为第一层，以便用户按自己定义的分类查找 Model。两个投影都由同一个 registry snapshot 生成。
+设置管理投影保持 Provider 为第一层，以便在同一聚合内编辑 endpoint、默认协议和 Models，并通过独立命令管理 credential。选择目录保持 Group 为第一层，以便用户按自己定义的分类查找 Model。两个投影都由同一个 registry snapshot 生成。
 
 ## 10. 运行时解析
 
@@ -434,7 +434,7 @@ type ResolvedRuntimeModel struct {
 6. 记录当前 registry revision；
 7. 由 compose 穷举选择具体协议 adapter。
 
-Group 不参与以上步骤。活动 execution 使用已经冻结的 `ModelSelection` 和解析 revision，配置更新只影响之后创建的 model stream。
+Group 不参与以上步骤。`APIKey` 只在 runtime resolver 中从 auth 文档按 `ProviderID` 解析；公开配置、catalog 和 binding DTO 都不提供 key。活动 execution 使用已经冻结的 `ModelSelection` 和解析 revision，配置更新只影响之后创建的 model stream。
 
 ## 11. 远程模型发现
 
@@ -490,7 +490,8 @@ modelprovider/*
 - 不同 Provider 使用相同 Model ID；
 - Provider 默认 API format 和 Model override 解析；
 - Profile 复合引用完整性；
-- credential 的 keep、replace、clear 和 Provider 删除；
+- auth 文档的 set/clear、无效记录和 Provider 删除修剪；
+- models.json 严格解码拒绝 credential 字段；
 - 配置 query、catalog、错误和日志不包含 key；
 - revision conflict 不写文件、不替换 snapshot；
 - 原子保存失败保留当前 revision；
@@ -502,14 +503,14 @@ modelprovider/*
 
 ## 14. 不变量
 
-1. Provider 是 endpoint、credential、默认 API format 和 Models 的单一聚合根。
-2. Credential 只能作为 Provider 的敏感子对象存在。
+1. Provider 是 endpoint、默认 API format 和 Models 的单一聚合根；credential 以 ProviderID 为键独立持久化。
+2. Credential 只存在于 owner-only auth 文档和 registry 敏感内存中，并以已配置 ProviderID 为有效前提。
 3. 每个 Model 必须属于一个用户定义 Group；Group 不参与远程路由。
 4. 一个 Group 可以聚合多个 Provider 的 Model，一个 Provider 也可以向多个 Group 提供 Model。
 5. `ProviderID + ModelID` 是配置、Profile、execution 和运行时解析共享的唯一模型身份。
-6. 配置文件、内存 snapshot、索引和 grouped catalog 在任意时刻对应同一个 revision。
-7. 配置保存与 credential 更新是一次原子聚合提交。
-8. 明文 credential 只存在于 owner-only 持久化文件、registry 敏感内存和 adapter 认证 header。
+6. 模型配置文件、auth 文档、内存 snapshot、索引和 grouped catalog 在任意时刻对应同一个 revision。
+7. 模型配置保存和 credential 更新分别原子写入各自文档；配置保存同步修剪失去 Provider 的 credential。
+8. 明文 credential 只存在于 owner-only auth 文档、registry 敏感内存和 adapter 认证 header。
 9. Binding、前端、日志、错误、事件、transcript 和 execution snapshot 永远不包含明文 credential。
 10. 配置管理使用 Provider 视角，模型选择使用 Group 视角，两者由同一个事实源生成。
 11. Group 改动不能改变活动 execution 已冻结的模型选择。

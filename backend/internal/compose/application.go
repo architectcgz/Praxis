@@ -203,7 +203,7 @@ func Open(
 		return nil, fmt.Errorf("open runtime log: %w", err)
 	}
 	diagnostics.Infof("composition open started root=%s database=%s", root.Root, root.Database)
-	modelRegistry, err := modelregistry.Load(root.ModelProvidersConfig, nil)
+	modelRegistry, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil)
 	if err != nil {
 		diagnostics.Errorf("load model registry failed: %v", err)
 		_ = diagnostics.Close()

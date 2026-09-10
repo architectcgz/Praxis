@@ -28,10 +28,10 @@ func TestDiscoverProviderModelsRequestsConfiguredCatalog(t *testing.T) {
 	registry := &Registry{
 		client: server.Client(),
 		providersByID: map[string]ProviderConfig{
-			"gateway": {
-				ID: "gateway", BaseURL: server.URL,
-				Credential: &CredentialRecord{Type: CredentialTypeAPIKey, Key: "test-key"},
-			},
+			"gateway": {ID: "gateway", BaseURL: server.URL},
+		},
+		credentials: ProviderCredentials{
+			"gateway": {Type: CredentialTypeAPIKey, Key: "test-key"},
 		},
 	}
 
@@ -55,10 +55,10 @@ func TestDiscoverProviderModelsRejectsInvalidCatalog(t *testing.T) {
 	registry := &Registry{
 		client: server.Client(),
 		providersByID: map[string]ProviderConfig{
-			"gateway": {
-				ID: "gateway", BaseURL: server.URL,
-				Credential: &CredentialRecord{Type: CredentialTypeAPIKey, Key: "test-key"},
-			},
+			"gateway": {ID: "gateway", BaseURL: server.URL},
+		},
+		credentials: ProviderCredentials{
+			"gateway": {Type: CredentialTypeAPIKey, Key: "test-key"},
 		},
 	}
 
@@ -85,12 +85,15 @@ func TestDiscoverProviderModelsUsesConfiguredProxy(t *testing.T) {
 
 	provider := ProviderConfig{
 		ID: "gateway", DisplayName: "Gateway", BaseURL: "http://provider.invalid",
-		ProxyURL:   proxy.URL,
-		Credential: &CredentialRecord{Type: CredentialTypeAPIKey, Key: "test-key"},
+		ProxyURL: proxy.URL,
 	}
 	registry := &Registry{
-		modelsPath: filepath.Join(t.TempDir(), "models.json"),
-		config:     RegistryConfig{Groups: testGroups()},
+		modelsPath:      filepath.Join(t.TempDir(), "models.json"),
+		credentialsPath: filepath.Join(t.TempDir(), "auth.json"),
+		config:          RegistryConfig{Groups: testGroups()},
+		credentials: ProviderCredentials{
+			"gateway": {Type: CredentialTypeAPIKey, Key: "test-key"},
+		},
 	}
 	if err := registry.ApplyConfig(RegistryConfig{
 		Providers: []ProviderConfig{provider},

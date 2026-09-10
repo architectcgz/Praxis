@@ -1,5 +1,5 @@
-// Package modelregistry loads the user-owned model and secret configuration and
-// materializes provider-neutral model interfaces.
+// Package modelregistry loads the user-owned model configuration and auth
+// documents and materializes provider-neutral model interfaces.
 package modelregistry
 
 import (
@@ -30,16 +30,13 @@ const maxProviderCatalogBytes = 1 << 20
 type Registry struct {
 	mu              sync.RWMutex
 	modelsPath      string
+	credentialsPath string
 	config          RegistryConfig
+	credentials     ProviderCredentials
 	client          *http.Client
 	providerClients map[string]*http.Client
-	modelsByKey     map[modelKey]registeredModel
+	modelsByKey     map[modelKey]ModelConfig
 	providersByID   map[string]ProviderConfig
-}
-
-type registeredModel struct {
-	config ModelConfig
-	domain domainmodel.Model
 }
 
 func (r *Registry) providerClientLocked(providerID string) *http.Client {
@@ -53,32 +50,14 @@ func (r *Registry) providerClientLocked(providerID string) *http.Client {
 func (r *Registry) Config() RegistryConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.configLocked(false)
-}
-
-func (r *Registry) configLocked(includeCredentials bool) RegistryConfig {
-	copy := r.config
-	copy.Groups = append([]GroupConfig(nil), r.config.Groups...)
-	copy.Providers = append([]ProviderConfig(nil), r.config.Providers...)
-	for index := range copy.Providers {
-		copy.Providers[index].Models = cloneModels(r.config.Providers[index].Models)
-		if includeCredentials {
-			if credential := r.config.Providers[index].Credential; credential != nil {
-				credentialCopy := *credential
-				copy.Providers[index].Credential = &credentialCopy
-			}
-		} else {
-			copy.Providers[index].Credential = nil
-		}
-	}
-	return copy
+	return cloneRegistryConfig(r.config)
 }
 
 // modelByKeyLocked 要求调用方已持有 r.mu，且 key 已完成规范化。
-func (r *Registry) modelByKeyLocked(key modelKey) (registeredModel, error) {
+func (r *Registry) modelByKeyLocked(key modelKey) (ModelConfig, error) {
 	model, ok := r.modelsByKey[key]
 	if !ok {
-		return registeredModel{}, fmt.Errorf("model %q for provider %q is not configured", key.ModelID, key.ProviderID)
+		return ModelConfig{}, fmt.Errorf("model %q for provider %q is not configured", key.ModelID, key.ProviderID)
 	}
 	return model, nil
 }
@@ -151,6 +130,7 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	r.mu.RLock()
 	provider, exists := r.providersByID[providerID]
 	client := r.providerClientLocked(providerID)
+	key := r.credentialKeyLocked(providerID)
 	r.mu.RUnlock()
 	if !exists {
 		return nil, fmt.Errorf("provider %q is not configured", providerID)
@@ -159,7 +139,6 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	if err != nil {
 		return nil, fmt.Errorf("provider %q: %w", providerID, err)
 	}
-	key := r.ProviderKey(providerID)
 	if key == "" {
 		return nil, fmt.Errorf("API key is not configured for provider %q", providerID)
 	}
@@ -241,7 +220,7 @@ func (r *Registry) Stream(providerID, modelID string) (runtimecontract.ModelStre
 	if err != nil {
 		return nil, err
 	}
-	return r.streamForLocked(model.config, selected)
+	return r.streamForLocked(model, selected)
 }
 
 // StreamFor builds a stream for the already-frozen model selection.
@@ -255,17 +234,17 @@ func (r *Registry) StreamFor(selection domainmodel.ModelSelection) (runtimecontr
 	if err != nil {
 		return nil, err
 	}
-	return r.streamForLocked(model.config, selected)
+	return r.streamForLocked(model, selected)
 }
 
-func (r *Registry) selectModelLocked(selection domainmodel.ModelSelection) (registeredModel, domainmodel.ModelSelection, error) {
+func (r *Registry) selectModelLocked(selection domainmodel.ModelSelection) (ModelConfig, domainmodel.ModelSelection, error) {
 	model, err := r.modelByKeyLocked(modelKey{ProviderID: selection.ProviderID, ModelID: selection.ModelID})
 	if err != nil {
-		return registeredModel{}, domainmodel.ModelSelection{}, err
+		return ModelConfig{}, domainmodel.ModelSelection{}, err
 	}
-	selected, err := model.domain.Select(selection.ProviderID, selection.ReasoningLevel)
+	selected, err := model.selectReasoning(selection.ProviderID, selection.ReasoningLevel)
 	if err != nil {
-		return registeredModel{}, domainmodel.ModelSelection{}, err
+		return ModelConfig{}, domainmodel.ModelSelection{}, err
 	}
 	return model, selected, nil
 }
@@ -276,7 +255,7 @@ func (r *Registry) streamForLocked(model ModelConfig, selected domainmodel.Model
 		return nil, fmt.Errorf("provider %q is not configured", selected.ProviderID)
 	}
 	client := r.providerClientLocked(provider.ID)
-	key := providerKey(provider)
+	key := r.credentialKeyLocked(provider.ID)
 	if key == "" {
 		return nil, fmt.Errorf("API key is not configured for provider %q", provider.ID)
 	}
@@ -298,11 +277,4 @@ func (r *Registry) streamForLocked(model ModelConfig, selected domainmodel.Model
 	default:
 		return nil, fmt.Errorf("model %q has unsupported API format %q", model.ID, apiFormat)
 	}
-}
-
-func providerKey(provider ProviderConfig) string {
-	if provider.Credential == nil || provider.Credential.Type != CredentialTypeAPIKey {
-		return ""
-	}
-	return strings.TrimSpace(provider.Credential.Key)
 }

@@ -2,8 +2,6 @@ package modelregistry
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 )
 
 // ApplyConfig validates and atomically writes the model configuration, then
@@ -27,87 +25,27 @@ func (r *Registry) ApplyValidatedConfig(validated ValidatedConfig) error {
 	if !validated.prepared {
 		return errors.New("model configuration has not been prepared")
 	}
-	config := validated.config
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for index := range config.Providers {
-		if config.Providers[index].Credential != nil {
-			continue
-		}
-		if current, exists := r.providersByID[config.Providers[index].ID]; exists {
-			if current.Credential != nil {
-				credentialCopy := *current.Credential
-				config.Providers[index].Credential = &credentialCopy
-			}
-		}
-	}
-	providerClients, err := buildProviderClients(config.Providers, r.client)
+	nextConfig := validated.config
+	providerClients, err := buildProviderClients(nextConfig.Providers, r.client)
 	if err != nil {
 		return err
 	}
-	if err := writeConfigAtomically(r.modelsPath, config); err != nil {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	nextCredentials := retainCredentialsForProviders(r.credentials, nextConfig.Providers)
+	modelsByKey, providersByID := buildIndexes(nextConfig.Providers)
+	if credentialsChanged(r.credentials, nextCredentials) && r.credentialsPath != "" {
+		if err := writeConfigAtomically(r.credentialsPath, nextCredentials); err != nil {
+			return &ConfigurationError{Path: r.credentialsPath, Err: err}
+		}
+	}
+	if err := writeConfigAtomically(r.modelsPath, nextConfig); err != nil {
 		return &ConfigurationError{Path: r.modelsPath, Err: err}
 	}
-	modelsByKey, providersByID := buildIndexes(config.Providers, validated.models)
-	r.config = config
+	r.config = nextConfig
+	r.credentials = nextCredentials
 	r.modelsByKey = modelsByKey
 	r.providersByID = providersByID
 	r.providerClients = providerClients
 	return nil
-}
-
-// SetProviderKey stores or clears the API key associated with one provider.
-func (r *Registry) SetProviderKey(providerID, value string) error {
-	if r == nil {
-		return errors.New("registry is not initialized")
-	}
-	providerID = strings.TrimSpace(providerID)
-	if !idPattern.MatchString(providerID) {
-		return fmt.Errorf("invalid provider id %q", providerID)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.providersByID[providerID]; !exists {
-		return fmt.Errorf("provider %q is not configured", providerID)
-	}
-	config := r.configLocked(true)
-	value = strings.TrimSpace(value)
-	for index := range config.Providers {
-		if config.Providers[index].ID == providerID {
-			if value == "" {
-				config.Providers[index].Credential = nil
-			} else {
-				config.Providers[index].Credential = &CredentialRecord{
-					Type: CredentialTypeAPIKey,
-					Key:  value,
-				}
-			}
-			if err := writeConfigAtomically(r.modelsPath, config); err != nil {
-				return &ConfigurationError{Path: r.modelsPath, Err: err}
-			}
-			r.config = config
-			r.providersByID[providerID] = config.Providers[index]
-			return nil
-		}
-	}
-	return fmt.Errorf("provider %q is not present in model configuration", providerID)
-}
-
-// ProviderKey returns the API key stored for a configured provider.
-func (r *Registry) ProviderKey(providerID string) string {
-	if r == nil || !idPattern.MatchString(providerID) {
-		return ""
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if _, exists := r.providersByID[providerID]; !exists {
-		return ""
-	}
-	return providerKey(r.providersByID[providerID])
-}
-
-// HasProviderKey reports secret presence without exposing the secret value to
-// application or binding layers.
-func (r *Registry) HasProviderKey(providerID string) bool {
-	return r.ProviderKey(providerID) != ""
 }

@@ -558,7 +558,7 @@ function ProviderDialog({
                     </Field>
                     <Field label="API Key">
                         <input
-                            required
+                            required={!draft.hasAPIKey}
                             type="text"
                             value={apiKey}
                             onChange={(event) => setApiKey(event.target.value)}

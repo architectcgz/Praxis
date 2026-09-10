@@ -75,8 +75,8 @@ SQLite 与 JSONL 不共享事务。一致性依靠稳定身份、receipt 和 com
 ```text
 {DataRoot}/
 ├── config/                    应用配置、策略配置和 Provider 配置聚合
-│   └── models.json            Provider 配置聚合与 credential，权限 0600
-├── secrets/                   其他独立敏感数据
+│   ├── models.json            Group、Provider、Model 与 Profile 配置，权限 0600
+│   └── auth.json              Provider credential，权限 0600
 ├── runtime/
 │   ├── praxis.db              SQLite 编排事实
 │   ├── agent-sessions/        per-Agent JSONL transcript
@@ -110,5 +110,5 @@ Recovery 不加载全部 transcript 到内存猜测产品状态，也不重放�
 2. 每个 Agent transcript 只有一个 writer；runtime 不能写其他 Agent 的 transcript。
 3. SessionContext 只追加不覆盖；后续执行只能读取某个已存在的 revision。
 4. 稳定 ID 是关系和恢复的唯一身份；路径和显示名称不能替代 ID。
-5. 密钥不进入 Project 文件、SQLite、JSONL、日志或 binding DTO。
+5. 密钥不进入 Project 文件、SQLite、JSONL、日志或 binding DTO；auth.json 是 credential 的唯一持久化位置。
 6. ManagedProcess 的 PID、ConPTY handle、Job Object 和实时输出不是持久化事实；应用重启后未结算记录统一收敛为 interrupted。

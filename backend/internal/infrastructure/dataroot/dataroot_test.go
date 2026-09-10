@@ -32,3 +32,17 @@ func TestResolveUsesConfigForAgents(t *testing.T) {
 		t.Fatalf("AgentConfigFile = %q, want %q", resolved.AgentConfigFile, want)
 	}
 }
+
+func TestResolveUsesConfigForModelCredentials(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "praxis")
+
+	resolved, err := Resolve(root)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	want := filepath.Join(root, "config", "auth.json")
+	if resolved.ModelCredentialsFile != want {
+		t.Fatalf("ModelCredentialsFile = %q, want %q", resolved.ModelCredentialsFile, want)
+	}
+}

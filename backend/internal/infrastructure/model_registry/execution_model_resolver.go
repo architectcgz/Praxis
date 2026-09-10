@@ -17,11 +17,11 @@ func (r *Registry) ResolveExecutionModel(selection domainmodel.ModelSelection) (
 	if err != nil {
 		return agentruntime.ExecutionModel{}, err
 	}
-	stream, err := r.streamForLocked(model.config, selected)
+	stream, err := r.streamForLocked(model, selected)
 	if err != nil {
 		return agentruntime.ExecutionModel{}, err
 	}
 	return agentruntime.ExecutionModel{
-		Stream: stream, ContextWindow: model.config.ContextWindow, MaxOutputTokens: model.config.MaxOutputTokens,
+		Stream: stream, ContextWindow: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens,
 	}, nil
 }

@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"net/http"
 
-	domainmodel "praxis/internal/domain/model"
 	providerapi "praxis/internal/providers"
 )
 
-// Load reads the persisted configuration, validates it, and constructs its runtime registry.
-func Load(modelsPath string, client *http.Client) (*Registry, error) {
+// Load reads the persisted model configuration and auth documents, validates
+// both, and constructs the runtime registry. The two documents are separate
+// facts: models.json never contains a secret, and auth.json is keyed by
+// ProviderID.
+func Load(modelsPath, credentialsPath string, client *http.Client) (*Registry, error) {
 	config, err := readModelConfigFile(modelsPath)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
@@ -18,23 +20,32 @@ func Load(modelsPath string, client *http.Client) (*Registry, error) {
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
-	registry, err := newRegistry(modelsPath, validated, client)
+	credentials, err := readCredentialsFile(credentialsPath)
+	if err != nil {
+		return nil, &ConfigurationError{Path: credentialsPath, Err: err}
+	}
+	credentials, err = normalizeCredentials(credentials)
+	if err != nil {
+		return nil, &ConfigurationError{Path: credentialsPath, Err: err}
+	}
+	registry, err := newRegistry(modelsPath, credentialsPath, validated, credentials, client)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
 	return registry, nil
 }
 
-func newRegistry(modelsPath string, validated ValidatedConfig, client *http.Client) (*Registry, error) {
+func newRegistry(modelsPath, credentialsPath string, validated ValidatedConfig, credentials ProviderCredentials, client *http.Client) (*Registry, error) {
 	config := validated.config
 	providerClients, err := buildProviderClients(config.Providers, client)
 	if err != nil {
 		return nil, err
 	}
-	modelsByKey, providersByID := buildIndexes(config.Providers, validated.models)
+	modelsByKey, providersByID := buildIndexes(config.Providers)
 	return &Registry{
-		modelsPath: modelsPath,
-		config:     config, client: client, providerClients: providerClients,
+		modelsPath: modelsPath, credentialsPath: credentialsPath,
+		config: config, credentials: credentials,
+		client: client, providerClients: providerClients,
 		modelsByKey: modelsByKey, providersByID: providersByID,
 	}, nil
 }
@@ -51,14 +62,13 @@ func buildProviderClients(providers []ProviderConfig, base *http.Client) (map[st
 	return clients, nil
 }
 
-func buildIndexes(providers []ProviderConfig, domainModels map[modelKey]domainmodel.Model) (map[modelKey]registeredModel, map[string]ProviderConfig) {
-	modelsByKey := make(map[modelKey]registeredModel)
+func buildIndexes(providers []ProviderConfig) (map[modelKey]ModelConfig, map[string]ProviderConfig) {
+	modelsByKey := make(map[modelKey]ModelConfig)
 	providersByID := make(map[string]ProviderConfig, len(providers))
 	for _, provider := range providers {
 		providersByID[provider.ID] = provider
 		for _, model := range provider.Models {
-			key := modelKey{provider.ID, model.ID}
-			modelsByKey[key] = registeredModel{config: model, domain: domainModels[key]}
+			modelsByKey[modelKey{provider.ID, model.ID}] = model
 		}
 	}
 	return modelsByKey, providersByID

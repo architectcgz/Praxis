@@ -14,14 +14,13 @@ import (
 
 const dataRootEnvironment = "PRAXIS_DATA_ROOT"
 
-// DataRoot contains every local product-data path. Configuration, secrets,
-// projects, and runtime state have separate ownership boundaries below Root.
-// This type only resolves paths; the provider registry is the sole component
-// that reads or writes the model and secret files they point at.
+// DataRoot contains every local product-data path. Configuration, projects,
+// and runtime state have separate ownership boundaries below Root. This type
+// only resolves paths; the provider registry is the sole component that reads
+// or writes the model and credential files they point at.
 type DataRoot struct {
 	Root                 string
 	Config               string
-	Secrets              string
 	Projects             string
 	Runtime              string
 	Database             string
@@ -30,6 +29,7 @@ type DataRoot struct {
 	Notes                string
 	Temporary            string
 	ModelProvidersConfig string
+	ModelCredentialsFile string
 	AgentConfigFile      string
 }
 
@@ -56,12 +56,10 @@ func Resolve(root string) (DataRoot, error) {
 		return DataRoot{}, errors.New("data root cannot be the filesystem root")
 	}
 	config := filepath.Join(root, "config")
-	secrets := filepath.Join(root, "secrets")
 	runtime := filepath.Join(root, "runtime")
 	return DataRoot{
 		Root:                 root,
 		Config:               config,
-		Secrets:              secrets,
 		Projects:             filepath.Join(root, "projects"),
 		Runtime:              runtime,
 		Database:             filepath.Join(runtime, "praxis.db"),
@@ -70,6 +68,7 @@ func Resolve(root string) (DataRoot, error) {
 		Notes:                filepath.Join(runtime, "notes"),
 		Temporary:            filepath.Join(runtime, "tmp"),
 		ModelProvidersConfig: filepath.Join(config, "models.json"),
+		ModelCredentialsFile: filepath.Join(config, "auth.json"),
 		AgentConfigFile:      filepath.Join(config, "agents.json"),
 	}, nil
 }
@@ -85,7 +84,6 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 	for _, path := range []string{
 		d.Root,
 		d.Config,
-		d.Secrets,
 		d.Projects,
 		d.Runtime,
 		d.Sessions,

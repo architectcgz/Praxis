@@ -61,12 +61,47 @@ func readModelConfigFile(path string) (RegistryConfig, error) {
 	return config, nil
 }
 
+// readCredentialsFile reads the owner-only credential document. A missing
+// document is created as an empty template so a fresh data root always has an
+// editable auth file.
+func readCredentialsFile(path string) (ProviderCredentials, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create auth config directory: %w", err)
+	}
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		document := ProviderCredentials{}
+		payload, marshalErr := json.MarshalIndent(document, "", "  ")
+		if marshalErr != nil {
+			return nil, fmt.Errorf("encode auth config template: %w", marshalErr)
+		}
+		if writeErr := os.WriteFile(path, append(payload, '\n'), 0o600); writeErr != nil {
+			return nil, fmt.Errorf("create auth config: %w", writeErr)
+		}
+		file, err = os.Open(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open auth config: %w", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	document := ProviderCredentials{}
+	if err := decoder.Decode(&document); err != nil {
+		return nil, fmt.Errorf("auth config: invalid JSON: %w", err)
+	}
+	if err := ensureEOF(decoder); err != nil {
+		return nil, fmt.Errorf("auth config: invalid JSON: %w", err)
+	}
+	return document, nil
+}
+
 // writeConfigAtomically persists a complete replacement configuration without ever
-// exposing a partially written models file to startup or settings readers.
+// exposing a partially written file to startup or settings readers.
 //
 // The temporary file and same-directory rename preserve the previous valid
-// configuration if writing fails. Mode stays 0600 because both files may hold
-// provider credentials.
+// document if writing fails. Mode stays 0600 because the auth document holds
+// provider credentials and the model document is still owner-only config.
 func writeConfigAtomically(path string, payload any) error {
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

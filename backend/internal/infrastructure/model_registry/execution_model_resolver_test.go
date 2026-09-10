@@ -10,16 +10,16 @@ import (
 func TestResolveExecutionModelMapsConfiguredCapabilities(t *testing.T) {
 	registry := &Registry{
 		client: http.DefaultClient,
-		modelsByKey: map[modelKey]registeredModel{
-			{ProviderID: "gateway", ModelID: "gpt-test"}: testRegisteredModel(t, ModelConfig{
+		modelsByKey: map[modelKey]ModelConfig{
+			{ProviderID: "gateway", ModelID: "gpt-test"}: {
 				ID: "gpt-test", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192,
-			}),
+			},
 		},
 		providersByID: map[string]ProviderConfig{
-			"gateway": {
-				ID: "gateway", BaseURL: "https://gateway.example.com",
-				Credential: &CredentialRecord{Type: CredentialTypeAPIKey, Key: "test-key"},
-			},
+			"gateway": {ID: "gateway", BaseURL: "https://gateway.example.com"},
+		},
+		credentials: ProviderCredentials{
+			"gateway": {Type: CredentialTypeAPIKey, Key: "test-key"},
 		},
 	}
 
@@ -40,12 +40,12 @@ func TestResolveExecutionModelMapsConfiguredCapabilities(t *testing.T) {
 	}
 }
 
-func TestResolveModelSelectionUsesDomainReasoningDefault(t *testing.T) {
-	registry := &Registry{modelsByKey: map[modelKey]registeredModel{
-		{ProviderID: "gateway", ModelID: "gpt-test"}: testRegisteredModel(t, ModelConfig{
+func TestResolveModelSelectionUsesConfiguredReasoningDefault(t *testing.T) {
+	registry := &Registry{modelsByKey: map[modelKey]ModelConfig{
+		{ProviderID: "gateway", ModelID: "gpt-test"}: {
 			ID: "gpt-test", ContextWindow: 128000, MaxOutputTokens: 8192,
 			ReasoningLevels: []string{"low", "high"}, DefaultReasoningLevel: "high",
-		}),
+		},
 	}}
 
 	selection, err := registry.ResolveModelSelection(" gateway ", " gpt-test ", "")
@@ -57,7 +57,7 @@ func TestResolveModelSelectionUsesDomainReasoningDefault(t *testing.T) {
 	}
 }
 
-func TestApplyValidatedConfigReplacesMaterializedDomainModels(t *testing.T) {
+func TestApplyValidatedConfigReplacesResolvedReasoningDefault(t *testing.T) {
 	registry := &Registry{modelsPath: t.TempDir() + "/models.json", client: http.DefaultClient}
 	initial := testPreparedConfig(t, "high")
 	if err := registry.ApplyValidatedConfig(initial); err != nil {
@@ -82,15 +82,6 @@ func TestApplyValidatedConfigReplacesMaterializedDomainModels(t *testing.T) {
 	if selection.ReasoningLevel != "low" {
 		t.Fatalf("updated reasoning level = %q, want low", selection.ReasoningLevel)
 	}
-}
-
-func testRegisteredModel(t *testing.T, config ModelConfig) registeredModel {
-	t.Helper()
-	model, err := config.DomainModel()
-	if err != nil {
-		t.Fatalf("materialize domain model: %v", err)
-	}
-	return registeredModel{config: config, domain: model}
 }
 
 func testPreparedConfig(t *testing.T, defaultReasoningLevel string) ValidatedConfig {
