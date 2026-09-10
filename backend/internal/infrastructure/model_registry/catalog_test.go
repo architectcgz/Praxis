@@ -27,7 +27,7 @@ func TestDiscoverProviderModelsRequestsConfiguredCatalog(t *testing.T) {
 
 	registry := &Registry{
 		client: server.Client(),
-		byProvider: map[string]ProviderConfig{
+		providersByID: map[string]ProviderConfig{
 			"gateway": {
 				ID: "gateway", BaseURL: server.URL,
 				Credential: &CredentialRecord{Type: CredentialTypeAPIKey, Key: "test-key"},
@@ -54,7 +54,7 @@ func TestDiscoverProviderModelsRejectsInvalidCatalog(t *testing.T) {
 
 	registry := &Registry{
 		client: server.Client(),
-		byProvider: map[string]ProviderConfig{
+		providersByID: map[string]ProviderConfig{
 			"gateway": {
 				ID: "gateway", BaseURL: server.URL,
 				Credential: &CredentialRecord{Type: CredentialTypeAPIKey, Key: "test-key"},
@@ -90,9 +90,9 @@ func TestDiscoverProviderModelsUsesConfiguredProxy(t *testing.T) {
 	}
 	registry := &Registry{
 		modelsPath: filepath.Join(t.TempDir(), "models.json"),
-		config:     FileConfig{Groups: testGroups()},
+		config:     RegistryConfig{Groups: testGroups()},
 	}
-	if err := registry.ApplyConfig(FileConfig{
+	if err := registry.ApplyConfig(RegistryConfig{
 		Providers: []ProviderConfig{provider},
 		Groups:    testGroups(),
 	}); err != nil {

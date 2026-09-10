@@ -1,7 +1,6 @@
 package modelregistry
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,46 +30,33 @@ func (e *ConfigurationError) Unwrap() error {
 	return e.Err
 }
 
-func readFileConfig(path string) (FileConfig, error) {
+func readModelConfigFile(path string) (RegistryConfig, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		config := FileConfig{
+		config := RegistryConfig{
 			Groups: []GroupConfig{}, Providers: []ProviderConfig{},
 		}
 		payload, marshalErr := json.MarshalIndent(config, "", "  ")
 		if marshalErr != nil {
-			return FileConfig{}, fmt.Errorf("encode models config template: %w", marshalErr)
+			return RegistryConfig{}, fmt.Errorf("encode models config template: %w", marshalErr)
 		}
 		if writeErr := os.WriteFile(path, append(payload, '\n'), 0o600); writeErr != nil {
-			return FileConfig{}, fmt.Errorf("create models config: %w", writeErr)
+			return RegistryConfig{}, fmt.Errorf("create models config: %w", writeErr)
 		}
 		file, err = os.Open(path)
 	}
 	if err != nil {
-		return FileConfig{}, fmt.Errorf("open models config: %w", err)
+		return RegistryConfig{}, fmt.Errorf("open models config: %w", err)
 	}
 	defer file.Close()
-	var payload map[string]json.RawMessage
 	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&payload); err != nil {
-		return FileConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
+	decoder.DisallowUnknownFields()
+	var config RegistryConfig
+	if err := decoder.Decode(&config); err != nil {
+		return RegistryConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return FileConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
-	}
-	// The old role binding is deliberately ignored here so an existing empty
-	// profiles object cannot prevent the application from starting after the
-	// binding moves to agents.json. Model saves rewrite the document without it.
-	delete(payload, "profiles")
-	cleaned, err := json.Marshal(payload)
-	if err != nil {
-		return FileConfig{}, fmt.Errorf("models config: normalize JSON: %w", err)
-	}
-	var config FileConfig
-	decoder = json.NewDecoder(bytes.NewReader(cleaned))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
-		return FileConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return RegistryConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
 	return config, nil
 }

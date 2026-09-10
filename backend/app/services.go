@@ -62,8 +62,8 @@ type ModelCatalog interface {
 }
 
 type ModelConfigEditor interface {
-	ModelConfig() modelregistry.FileConfig
-	SaveModelConfig(modelregistry.FileConfig) error
+	ModelConfig() modelregistry.RegistryConfig
+	SaveModelConfig(modelregistry.RegistryConfig) error
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
 	DiscoverProviderModels(context.Context, string) ([]string, error)

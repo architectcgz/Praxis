@@ -541,23 +541,24 @@ func (a *Application) ListModels() []modelregistry.ModelOption {
 
 // ModelConfig returns an editable copy of the full model configuration for
 // the settings UI to render.
-func (a *Application) ModelConfig() modelregistry.FileConfig {
+func (a *Application) ModelConfig() modelregistry.RegistryConfig {
 	if a.models == nil {
-		return modelregistry.FileConfig{}
+		return modelregistry.RegistryConfig{}
 	}
 	return a.models.Config()
 }
 
 // SaveModelConfig validates and persists a new model configuration. A saved
 // configuration takes effect immediately for the running orchestration layer.
-func (a *Application) SaveModelConfig(config modelregistry.FileConfig) error {
+func (a *Application) SaveModelConfig(config modelregistry.RegistryConfig) error {
 	if a.models == nil {
 		return errors.New("model registry is not available")
 	}
-	validated, err := modelregistry.Validate(config)
+	prepared, err := modelregistry.Prepare(config)
 	if err != nil {
 		return err
 	}
+	validated := prepared.Config()
 	if a.agentConfig != nil {
 		if err := a.agentConfig.ValidateModelReferences(func(providerID, modelID string) error {
 			if !modelregistry.ContainsModel(validated, providerID, modelID) {
@@ -568,7 +569,7 @@ func (a *Application) SaveModelConfig(config modelregistry.FileConfig) error {
 			return err
 		}
 	}
-	if err := a.models.ApplyConfig(validated); err != nil {
+	if err := a.models.ApplyValidatedConfig(prepared); err != nil {
 		return err
 	}
 	a.RuntimeLogger().Infof(

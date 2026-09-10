@@ -19,7 +19,7 @@ func testProvider(id string, models ...ModelConfig) ProviderConfig {
 }
 
 func TestProviderOwnsModelsAndGroupNormalizesReasoning(t *testing.T) {
-	config := FileConfig{
+	config := RegistryConfig{
 		Groups: testGroups(),
 		Providers: []ProviderConfig{testProvider("gateway", ModelConfig{
 			ID: "model", DisplayName: "", GroupID: "gpt", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192,
@@ -43,7 +43,7 @@ func TestProviderOwnsModelsAndGroupNormalizesReasoning(t *testing.T) {
 }
 
 func TestModelsMayUseDifferentAPIFormats(t *testing.T) {
-	config := FileConfig{
+	config := RegistryConfig{
 		Groups: testGroups(),
 		Providers: []ProviderConfig{testProvider("gateway",
 			ModelConfig{ID: "gpt", GroupID: "gpt", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192},
@@ -65,7 +65,7 @@ func TestModelsMayUseDifferentAPIFormats(t *testing.T) {
 }
 
 func TestValidateRejectsMissingModelAPIFormat(t *testing.T) {
-	config := FileConfig{
+	config := RegistryConfig{
 		Groups: testGroups(),
 		Providers: []ProviderConfig{{
 			ID: "gateway", DisplayName: "Gateway", BaseURL: "https://gateway.example.com",
@@ -81,7 +81,7 @@ func TestValidateRejectsMissingModelAPIFormat(t *testing.T) {
 }
 
 func TestValidateRejectsUnknownGroup(t *testing.T) {
-	config := FileConfig{
+	config := RegistryConfig{
 		Groups: []GroupConfig{{ID: "gpt", DisplayName: "GPT"}},
 		Providers: []ProviderConfig{testProvider("gateway", ModelConfig{
 			ID: "model", GroupID: "claude", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192,
@@ -93,7 +93,7 @@ func TestValidateRejectsUnknownGroup(t *testing.T) {
 }
 
 func TestValidateRejectsDuplicateModelWithinProvider(t *testing.T) {
-	config := FileConfig{
+	config := RegistryConfig{
 		Groups: testGroups(),
 		Providers: []ProviderConfig{testProvider("gateway",
 			ModelConfig{ID: "shared", GroupID: "gpt", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192},
@@ -106,7 +106,7 @@ func TestValidateRejectsDuplicateModelWithinProvider(t *testing.T) {
 }
 
 func TestSameModelIDMayBeUsedByDifferentProviders(t *testing.T) {
-	config := FileConfig{
+	config := RegistryConfig{
 		Groups: testGroups(),
 		Providers: []ProviderConfig{
 			testProvider("one", ModelConfig{ID: "shared", GroupID: "gpt", APIFormat: APIFormatOpenAIResponses, ContextWindow: 128000, MaxOutputTokens: 8192}),
@@ -119,7 +119,7 @@ func TestSameModelIDMayBeUsedByDifferentProviders(t *testing.T) {
 }
 
 func TestProviderProxyURLMustUseHTTPOrHTTPS(t *testing.T) {
-	config := FileConfig{
+	config := RegistryConfig{
 		Groups: testGroups(),
 		Providers: []ProviderConfig{{
 			ID: "gateway", DisplayName: "Gateway", BaseURL: "https://gateway.example.com",
@@ -131,17 +131,34 @@ func TestProviderProxyURLMustUseHTTPOrHTTPS(t *testing.T) {
 	}
 }
 
-func TestReadFileConfigIgnoresLegacyProfileBindings(t *testing.T) {
+func TestReadRegistryConfigRejectsUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "models.json")
 	content := `{"groups":[],"providers":[],"profiles":{}}`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write models config: %v", err)
 	}
-	config, err := readFileConfig(path)
-	if err != nil {
-		t.Fatalf("read models config with legacy bindings: %v", err)
+	if _, err := readModelConfigFile(path); err == nil {
+		t.Fatal("expected unknown field to fail")
 	}
-	if len(config.Groups) != 0 || len(config.Providers) != 0 {
-		t.Fatalf("config = %#v", config)
+}
+
+func TestPrepareMaterializesNormalizedDomainModels(t *testing.T) {
+	prepared, err := Prepare(RegistryConfig{
+		Groups: testGroups(),
+		Providers: []ProviderConfig{testProvider("gateway", ModelConfig{
+			ID: "model", GroupID: "gpt", APIFormat: APIFormatOpenAIResponses,
+			ContextWindow: 128000, MaxOutputTokens: 8192,
+			ReasoningLevels: []string{" low ", "high"}, DefaultReasoningLevel: " low ",
+		})},
+	})
+	if err != nil {
+		t.Fatalf("prepare model configuration: %v", err)
+	}
+	model, exists := prepared.models[modelKey{ProviderID: "gateway", ModelID: "model"}]
+	if !exists {
+		t.Fatal("expected materialized domain model")
+	}
+	if model.DefaultReasoningLevel != "low" || len(model.ReasoningLevels) != 2 || model.ReasoningLevels[0] != "low" {
+		t.Fatalf("materialized model = %#v", model)
 	}
 }

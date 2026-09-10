@@ -4,36 +4,38 @@ import (
 	"fmt"
 	"net/http"
 
+	domainmodel "praxis/internal/domain/model"
 	providerapi "praxis/internal/providers"
 )
 
 // Load reads the persisted configuration, validates it, and constructs its runtime registry.
 func Load(modelsPath string, client *http.Client) (*Registry, error) {
-	config, err := readFileConfig(modelsPath)
+	config, err := readModelConfigFile(modelsPath)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
-	config, err = Validate(config)
+	validated, err := Prepare(config)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
-	registry, err := newRegistry(modelsPath, config, client)
+	registry, err := newRegistry(modelsPath, validated, client)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
 	return registry, nil
 }
 
-func newRegistry(modelsPath string, config FileConfig, client *http.Client) (*Registry, error) {
+func newRegistry(modelsPath string, validated ValidatedConfig, client *http.Client) (*Registry, error) {
+	config := validated.config
 	providerClients, err := buildProviderClients(config.Providers, client)
 	if err != nil {
 		return nil, err
 	}
-	byModel, byProvider := buildIndexes(config.Providers)
+	modelsByKey, providersByID := buildIndexes(config.Providers, validated.models)
 	return &Registry{
 		modelsPath: modelsPath,
 		config:     config, client: client, providerClients: providerClients,
-		byModel: byModel, byProvider: byProvider,
+		modelsByKey: modelsByKey, providersByID: providersByID,
 	}, nil
 }
 
@@ -49,14 +51,15 @@ func buildProviderClients(providers []ProviderConfig, base *http.Client) (map[st
 	return clients, nil
 }
 
-func buildIndexes(providers []ProviderConfig) (map[modelKey]ModelConfig, map[string]ProviderConfig) {
-	byModel := make(map[modelKey]ModelConfig)
-	byProvider := make(map[string]ProviderConfig, len(providers))
+func buildIndexes(providers []ProviderConfig, domainModels map[modelKey]domainmodel.Model) (map[modelKey]registeredModel, map[string]ProviderConfig) {
+	modelsByKey := make(map[modelKey]registeredModel)
+	providersByID := make(map[string]ProviderConfig, len(providers))
 	for _, provider := range providers {
-		byProvider[provider.ID] = provider
+		providersByID[provider.ID] = provider
 		for _, model := range provider.Models {
-			byModel[modelKey{provider.ID, model.ID}] = model
+			key := modelKey{provider.ID, model.ID}
+			modelsByKey[key] = registeredModel{config: model, domain: domainModels[key]}
 		}
 	}
-	return byModel, byProvider
+	return modelsByKey, providersByID
 }

@@ -17,13 +17,6 @@ type Model struct {
 	DefaultReasoningLevel string
 }
 
-// SelectedModel is the immutable model configuration selected for one execution.
-type SelectedModel struct {
-	Selection       ModelSelection
-	ContextWindow   int
-	MaxOutputTokens int
-}
-
 // NewModel normalizes and validates model capabilities loaded from configuration.
 func NewModel(id string, contextWindow, maxOutputTokens int, reasoningLevels []string, defaultReasoningLevel string) (Model, error) {
 	normalizedLevels, normalizedDefault, err := normalizeReasoningLevels(reasoningLevels, defaultReasoningLevel)
@@ -47,29 +40,29 @@ func NewModel(id string, contextWindow, maxOutputTokens int, reasoningLevels []s
 }
 
 // Select resolves the requested reasoning level into an execution-specific model selection.
-func (m Model) Select(providerID, reasoningLevel string) (SelectedModel, error) {
+func (m Model) Select(providerID, reasoningLevel string) (ModelSelection, error) {
 	reasoningLevel = strings.TrimSpace(reasoningLevel)
 	if len(m.ReasoningLevels) == 0 {
 		if reasoningLevel != "" {
-			return SelectedModel{}, fmt.Errorf("model %q does not support reasoning", m.ID)
+			return ModelSelection{}, fmt.Errorf("model %q does not support reasoning", m.ID)
 		}
 		selection, err := NewModelSelection(providerID, m.ID, "")
 		if err != nil {
-			return SelectedModel{}, err
+			return ModelSelection{}, err
 		}
-		return SelectedModel{Selection: selection, ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens}, nil
+		return selection, nil
 	}
 	if reasoningLevel == "" {
 		reasoningLevel = m.DefaultReasoningLevel
 	}
 	if !containsReasoningLevel(m.ReasoningLevels, reasoningLevel) {
-		return SelectedModel{}, fmt.Errorf("model %q does not support reasoning %q", m.ID, reasoningLevel)
+		return ModelSelection{}, fmt.Errorf("model %q does not support reasoning %q", m.ID, reasoningLevel)
 	}
 	selection, err := NewModelSelection(providerID, m.ID, reasoningLevel)
 	if err != nil {
-		return SelectedModel{}, err
+		return ModelSelection{}, err
 	}
-	return SelectedModel{Selection: selection, ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens}, nil
+	return selection, nil
 }
 
 func normalizeReasoningLevels(reasoningLevels []string, defaultReasoningLevel string) ([]string, string, error) {

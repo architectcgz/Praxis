@@ -28,8 +28,7 @@ func TestModelSelectAppliesConfiguredDefaultReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected.Selection.ProviderID != "provider" || selected.Selection.ModelID != "model" ||
-		selected.Selection.ReasoningLevel != "medium" || selected.ContextWindow != 128000 || selected.MaxOutputTokens != 8192 {
+	if selected.ProviderID != "provider" || selected.ModelID != "model" || selected.ReasoningLevel != "medium" {
 		t.Fatalf("unexpected selected model: %#v", selected)
 	}
 }

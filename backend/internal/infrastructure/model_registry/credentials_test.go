@@ -11,10 +11,10 @@ func TestProviderKeyIsStoredInNestedCredential(t *testing.T) {
 	modelsPath := filepath.Join(t.TempDir(), "models.json")
 	registry := &Registry{
 		modelsPath: modelsPath,
-		config: FileConfig{Groups: testGroups(), Providers: []ProviderConfig{{
+		config: RegistryConfig{Groups: testGroups(), Providers: []ProviderConfig{{
 			ID: "gateway", DisplayName: "Gateway", BaseURL: "https://gateway.example.com",
 		}}},
-		byProvider: map[string]ProviderConfig{
+		providersByID: map[string]ProviderConfig{
 			"gateway": {ID: "gateway", DisplayName: "Gateway", BaseURL: "https://gateway.example.com"},
 		},
 	}
@@ -30,7 +30,7 @@ func TestProviderKeyIsStoredInNestedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read model providers file: %v", err)
 	}
-	var saved FileConfig
+	var saved RegistryConfig
 	if err := json.Unmarshal(payload, &saved); err != nil {
 		t.Fatalf("decode model providers file: %v", err)
 	}

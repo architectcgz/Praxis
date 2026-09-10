@@ -60,7 +60,7 @@ func (b *ModelBindings) SaveModelConfig(
 	if err != nil {
 		return contracts.SaveModelConfigResponse{}, err
 	}
-	config := modelregistry.FileConfig{
+	config := modelregistry.RegistryConfig{
 		Groups:    make([]modelregistry.GroupConfig, 0, len(request.Groups)),
 		Providers: make([]modelregistry.ProviderConfig, 0, len(request.Providers)),
 	}

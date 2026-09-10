@@ -65,7 +65,9 @@ type ModelOption struct {
 	AssignedAgents        []string
 }
 
-type FileConfig struct {
+// RegistryConfig 是模型注册表的完整可编辑配置文档。
+// 它描述配置语义，不绑定具体的文件存储实现。
+type RegistryConfig struct {
 	Groups    []GroupConfig    `json:"groups"`
 	Providers []ProviderConfig `json:"providers"`
 }
@@ -77,7 +79,7 @@ type modelKey struct {
 
 // ContainsModel reports whether a model reference exists in a validated or
 // candidate model configuration.
-func ContainsModel(config FileConfig, providerID, modelID string) bool {
+func ContainsModel(config RegistryConfig, providerID, modelID string) bool {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
 	for _, provider := range config.Providers {

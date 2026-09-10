@@ -11,38 +11,47 @@ import (
 // bindings share this one *Registry, so an in-place
 // swap makes a save effective without restarting the process. A validation
 // failure writes nothing and leaves memory untouched.
-func (r *Registry) ApplyConfig(config FileConfig) error {
+func (r *Registry) ApplyConfig(config RegistryConfig) error {
+	validated, err := Prepare(config)
+	if err != nil {
+		return err
+	}
+	return r.ApplyValidatedConfig(validated)
+}
+
+// ApplyValidatedConfig 原子持久化已准备的配置并替换内存索引。
+func (r *Registry) ApplyValidatedConfig(validated ValidatedConfig) error {
 	if r == nil {
 		return errors.New("registry is not initialized")
 	}
-	validated, err := Validate(config)
-	if err != nil {
-		return err
+	if !validated.prepared {
+		return errors.New("model configuration has not been prepared")
 	}
+	config := validated.config
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for index := range validated.Providers {
-		if validated.Providers[index].Credential != nil {
+	for index := range config.Providers {
+		if config.Providers[index].Credential != nil {
 			continue
 		}
-		if current, exists := r.byProvider[validated.Providers[index].ID]; exists {
+		if current, exists := r.providersByID[config.Providers[index].ID]; exists {
 			if current.Credential != nil {
 				credentialCopy := *current.Credential
-				validated.Providers[index].Credential = &credentialCopy
+				config.Providers[index].Credential = &credentialCopy
 			}
 		}
 	}
-	providerClients, err := buildProviderClients(validated.Providers, r.client)
+	providerClients, err := buildProviderClients(config.Providers, r.client)
 	if err != nil {
 		return err
 	}
-	if err := writeConfigAtomically(r.modelsPath, validated); err != nil {
+	if err := writeConfigAtomically(r.modelsPath, config); err != nil {
 		return &ConfigurationError{Path: r.modelsPath, Err: err}
 	}
-	byModel, byProvider := buildIndexes(validated.Providers)
-	r.config = validated
-	r.byModel = byModel
-	r.byProvider = byProvider
+	modelsByKey, providersByID := buildIndexes(config.Providers, validated.models)
+	r.config = config
+	r.modelsByKey = modelsByKey
+	r.providersByID = providersByID
 	r.providerClients = providerClients
 	return nil
 }
@@ -58,7 +67,7 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.byProvider[providerID]; !exists {
+	if _, exists := r.providersByID[providerID]; !exists {
 		return fmt.Errorf("provider %q is not configured", providerID)
 	}
 	config := r.configLocked(true)
@@ -77,7 +86,7 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 				return &ConfigurationError{Path: r.modelsPath, Err: err}
 			}
 			r.config = config
-			r.byProvider[providerID] = config.Providers[index]
+			r.providersByID[providerID] = config.Providers[index]
 			return nil
 		}
 	}
@@ -91,10 +100,10 @@ func (r *Registry) ProviderKey(providerID string) string {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if _, exists := r.byProvider[providerID]; !exists {
+	if _, exists := r.providersByID[providerID]; !exists {
 		return ""
 	}
-	return providerKey(r.byProvider[providerID])
+	return providerKey(r.providersByID[providerID])
 }
 
 // HasProviderKey reports secret presence without exposing the secret value to
