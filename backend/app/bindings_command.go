@@ -5,7 +5,6 @@ import (
 	"praxis/internal/application/execution/control"
 	"praxis/internal/application/execution/queue"
 	"praxis/internal/application/execution/start"
-	domainworkflow "praxis/internal/domain/workflow"
 	"strings"
 
 	"praxis/internal/contracts"
@@ -69,26 +68,37 @@ func (b *CommandBindings) Resume(
 	}, nil
 }
 
-func (b *CommandBindings) RequestControl(
-	request contracts.ControlRequest,
-) (response contracts.ControlResponse, err error) {
-	done := b.runtime.begin("RequestControl")
+func (b *CommandBindings) PauseAgent(request contracts.PauseAgentRequest) (contracts.PauseAgentResponse, error) {
+	return b.controlAgent("PauseAgent", request, func(ctx context.Context, commands AgentCommands, params control.Params) (control.Result, error) {
+		return commands.PauseAgent(ctx, params)
+	})
+}
+
+func (b *CommandBindings) CloseAgent(request contracts.CloseAgentRequest) (contracts.CloseAgentResponse, error) {
+	return b.controlAgent("CloseAgent", request, func(ctx context.Context, commands AgentCommands, params control.Params) (control.Result, error) {
+		return commands.CloseAgent(ctx, params)
+	})
+}
+
+func (b *CommandBindings) controlAgent(name string, request contracts.PauseAgentRequest, apply func(context.Context, AgentCommands, control.Params) (control.Result, error)) (contracts.AgentControlResponse, error) {
+	var err error
+	done := b.runtime.begin(name)
 	defer func() { done(err) }()
 	ctx, commands, err := b.bindingContext()
 	if err != nil {
-		return contracts.ControlResponse{}, err
+		return contracts.AgentControlResponse{}, err
 	}
-	result, err := commands.RequestControl(ctx, control.RequestParams{
-		RequestID: domainfoundation.AgentControlRequestID(request.RequestID), AgentID: domainfoundation.AgentID(request.AgentID),
-		Kind: domainworkflow.AgentControlKind(request.Kind),
+	result, err := apply(ctx, commands, control.Params{
+		CommandID: domainfoundation.AgentControlCommandID(request.CommandID),
+		AgentID:   domainfoundation.AgentID(request.AgentID),
 	})
 	if err != nil {
-		return contracts.ControlResponse{}, publicBindingError(err)
+		return contracts.AgentControlResponse{}, publicBindingError(err)
 	}
-	return contracts.ControlResponse{
-		RequestID: result.Request.ID.String(), AgentID: result.Request.AgentID.String(),
-		TargetExecutionID: result.Request.TargetExecutionID.String(), Kind: string(result.Request.Kind),
-		Status: string(result.Request.Status), ExistingRequest: result.ExistingRequest,
+	return contracts.AgentControlResponse{
+		CommandID: result.Command.ID.String(), AgentID: result.Command.AgentID.String(),
+		TargetExecutionID: result.Command.TargetExecutionID.String(), Kind: string(result.Command.Kind),
+		Status: string(result.Command.Status), ExistingCommand: result.ExistingCommand,
 		CancellationError: result.CancellationError,
 	}, nil
 }

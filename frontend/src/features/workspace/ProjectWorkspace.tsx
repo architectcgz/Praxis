@@ -155,6 +155,7 @@ export function ProjectWorkspace() {
                                 agent={workspace.agent}
                                 history={workspace.history}
                                 streamingOutput={workspace.streamingOutput}
+                                pendingUserMessages={workspace.pendingUserMessages}
                                 awaitingOutput={workspace.awaitingOutput}
                                 input={workspace.input}
                                 setInput={workspace.setInput}

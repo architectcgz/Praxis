@@ -1,11 +1,11 @@
-package sqlite
+package storage
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
+
 	domainfoundation "praxis/internal/domain/foundation"
 )
 
@@ -16,7 +16,7 @@ func targetLimit(limit int) int {
 	return limit
 }
 
-func loadTargetPayload[T any](
+func loadDocumentRef[T any](
 	ctx context.Context,
 	store *Store,
 	query string,
@@ -25,24 +25,21 @@ func loadTargetPayload[T any](
 	validate func(T) error,
 ) (T, error) {
 	var zero T
-	row := executorFromContext(ctx, store.db).QueryRowContext(ctx, query, args...)
-	var payload []byte
-	if err := row.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
+	row := store.executor(ctx).QueryRowContext(ctx, query, args...)
+	var ref string
+	if err := row.Scan(&ref); errors.Is(err, sql.ErrNoRows) {
 		return zero, domainfoundation.ErrNotFound
 	} else if err != nil {
 		return zero, fmt.Errorf("read %s: %w", name, err)
 	}
 	var value T
-	if err := json.Unmarshal(payload, &value); err != nil {
-		return zero, fmt.Errorf("decode stored %s: %w", name, err)
-	}
-	if err := validate(value); err != nil {
-		return zero, fmt.Errorf("validate stored %s: %w", name, err)
+	if err := store.loadDocument(ctx, ref, &value, name, func() error { return validate(value) }); err != nil {
+		return zero, err
 	}
 	return value, nil
 }
 
-func listTargetPayloads[T any](
+func listDocumentRefs[T any](
 	ctx context.Context,
 	store *Store,
 	query string,
@@ -50,23 +47,20 @@ func listTargetPayloads[T any](
 	name string,
 	validate func(T) error,
 ) ([]T, error) {
-	rows, err := executorFromContext(ctx, store.db).QueryContext(ctx, query, args...)
+	rows, err := store.executor(ctx).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", name, err)
 	}
 	defer rows.Close()
 	values := make([]T, 0)
 	for rows.Next() {
-		var payload []byte
-		if err := rows.Scan(&payload); err != nil {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
 			return nil, fmt.Errorf("scan %s: %w", name, err)
 		}
 		var value T
-		if err := json.Unmarshal(payload, &value); err != nil {
-			return nil, fmt.Errorf("decode stored %s: %w", name, err)
-		}
-		if err := validate(value); err != nil {
-			return nil, fmt.Errorf("validate stored %s: %w", name, err)
+		if err := store.loadDocument(ctx, ref, &value, name, func() error { return validate(value) }); err != nil {
+			return nil, err
 		}
 		values = append(values, value)
 	}

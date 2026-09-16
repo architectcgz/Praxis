@@ -2,7 +2,7 @@ import type { AgentHistoryItem, AgentSnapshot, ModelOption, SessionSnapshot } fr
 import { PrimaryAgentTaskInput } from './PrimaryAgentTaskInput'
 import { AgentConversation } from './AgentConversation'
 import { SessionEmptyState } from './SessionEmptyState'
-import type { StreamingOutput } from './types'
+import type { StreamingOutput, PendingUserMessage } from './types'
 
 type SessionPanelProps = {
     loading: boolean
@@ -11,6 +11,7 @@ type SessionPanelProps = {
     agent: AgentSnapshot | null
     history: AgentHistoryItem[]
     streamingOutput: StreamingOutput | null
+    pendingUserMessages: PendingUserMessage[]
     awaitingOutput: boolean
     input: string
     setInput: (value: string) => void
@@ -25,7 +26,7 @@ type SessionPanelProps = {
     onReasoningChange: (level: string) => void
 }
 
-export function SessionPanel({ loading, session, sessionsCount, agent, history, streamingOutput, awaitingOutput, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange }: SessionPanelProps) {
+export function SessionPanel({ loading, session, sessionsCount, agent, history, streamingOutput, pendingUserMessages, awaitingOutput, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange }: SessionPanelProps) {
     if (!session) {
         if (loading) {
             return <section className="session-loading" aria-busy="true" aria-label="加载会话中" />
@@ -46,7 +47,7 @@ export function SessionPanel({ loading, session, sessionsCount, agent, history, 
             ) : !agent ? (
                 <PrimaryAgentTaskInput input={input} setInput={setInput} busy={busy} onSend={onSend} />
             ) : (
-                <AgentConversation agent={agent} history={history} streamingOutput={streamingOutput} awaitingOutput={awaitingOutput} input={input} setInput={setInput} models={models} selectedProviderID={selectedProviderID} selectedModelID={selectedModelID} reasoning={reasoning} busy={busy} onSend={onSend} onControl={onControl} onModelChange={onModelChange} onReasoningChange={onReasoningChange} />
+                <AgentConversation agent={agent} history={history} streamingOutput={streamingOutput} pendingUserMessages={pendingUserMessages} awaitingOutput={awaitingOutput} input={input} setInput={setInput} models={models} selectedProviderID={selectedProviderID} selectedModelID={selectedModelID} reasoning={reasoning} busy={busy} onSend={onSend} onControl={onControl} onModelChange={onModelChange} onReasoningChange={onReasoningChange} />
             )}
         </section>
     )

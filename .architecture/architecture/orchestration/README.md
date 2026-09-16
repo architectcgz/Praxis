@@ -26,7 +26,7 @@ command acknowledgement、execution、上下文提交、暂停和关闭的 deadl
 | `ManagedProcess` | Session 下长期受控进程的来源、命令快照、状态和结算 | `ManagedProcessCoordinator` |
 | `AgentResult` / `Briefing` | Agent 产出的结构化候选结果 | Agent application service |
 | `WaitCondition` | Agent 声明的外部依赖 | Execution application service |
-| `AgentControlRequest` | Pause、Close 等需要异步收敛的控制命令 | Execution application service |
+| `AgentControlCommand` | Pause、Close 等需要异步收敛的控制命令 | Execution application service |
 | Agent transcript | 一个 Agent 实际看过和产生的完整交互 | 该 Agent 的唯一 transcript writer |
 | `AgentRuntime` | 进程内 actor、当前 execution 和 provider/tool 临时状态 | `application/agent_runtime.Service` |
 

@@ -8,6 +8,7 @@ import (
 
 type (
 	AgentExecutionID  = foundation.AgentExecutionID
+	ContextEntryID    = foundation.ContextEntryID
 	ContextManifestID = foundation.ContextManifestID
 	SessionID         = foundation.SessionID
 )
@@ -37,4 +38,11 @@ func cloneContentRefs(values []ContentRef) []ContentRef {
 		return nil
 	}
 	return append([]ContentRef(nil), values...)
+}
+
+func cloneContextEntryIDs(values []ContextEntryID) []ContextEntryID {
+	if values == nil {
+		return nil
+	}
+	return append([]ContextEntryID(nil), values...)
 }

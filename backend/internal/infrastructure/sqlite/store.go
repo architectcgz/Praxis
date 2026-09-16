@@ -80,6 +80,9 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 // DB returns the underlying database for composition and health checks.
 func (s *Store) DB() *sql.DB { return s.db }
 
+// Now returns the clock value used by SQLite metadata adapters.
+func (s *Store) Now() time.Time { return s.clock.Now() }
+
 // Migrate applies the versioned SQLite schema owned by this package.
 func (s *Store) Migrate(ctx context.Context) error {
 	if ctx == nil {
@@ -125,12 +128,16 @@ func (s *Store) Migrate(ctx context.Context) error {
 				return fmt.Errorf("record sqlite migration %d: %w", migration.version, err)
 			}
 		}
-		inventory, err := s.inspectSchema(ctx)
-		if err != nil {
-			return err
+		var currentSchema bool
+		if err := executor.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM pragma_table_info('session_context_entries')
+				WHERE name = 'id'
+			)`).Scan(&currentSchema); err != nil {
+			return fmt.Errorf("verify sqlite target schema: %w", err)
 		}
-		if !inventory.HasRequiredTables() {
-			return errors.New("sqlite database does not contain the target schema")
+		if !currentSchema {
+			return errors.New("sqlite schema is obsolete; recreate the database")
 		}
 		return nil
 	}); err != nil {
@@ -192,13 +199,22 @@ func (s *Store) Close(ctx context.Context) error {
 
 var _ persistence.TxRunner = (*Store)(nil)
 
-type sqlExecutor interface {
+type SQLExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func executorFromContext(ctx context.Context, db *sql.DB) sqlExecutor {
+// Executor returns the transaction carried by ctx, or the database connection.
+func (s *Store) Executor(ctx context.Context) SQLExecutor { return executorFromContext(ctx, s.db) }
+
+// HasTransaction reports whether ctx is inside Store.InTx.
+func HasTransaction(ctx context.Context) bool {
+	_, ok := contextTx(ctx)
+	return ok
+}
+
+func executorFromContext(ctx context.Context, db *sql.DB) SQLExecutor {
 	if tx, ok := contextTx(ctx); ok {
 		return tx
 	}

@@ -102,7 +102,7 @@ func (r *bindingRuntime) begin(name string) func(error) {
 
 func commandBinding(name string) bool {
 	switch name {
-	case "CreateProject", "CreateSession", "SendInput", "Resume", "RequestControl", "QueueWork":
+	case "CreateProject", "CreateSession", "SendInput", "Resume", "PauseAgent", "CloseAgent", "QueueWork":
 		return true
 	default:
 		return false

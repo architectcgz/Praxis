@@ -222,3 +222,19 @@ func (s *Store) verifyHeaderLocked(header sessionport.AgentSessionHeader) error 
 	}
 	return nil
 }
+
+// CurrentSequence returns the last durable transcript sequence.
+func (s *Store) CurrentSequence(ctx context.Context) (uint64, error) {
+	if ctx == nil {
+		return 0, errors.New("agent session sequence context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.loadLocked(); err != nil {
+		return 0, err
+	}
+	return s.lastSequence, nil
+}

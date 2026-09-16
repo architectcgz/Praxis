@@ -12,7 +12,7 @@ import (
 
 type (
 	AgentID                = foundation.AgentID
-	AgentControlRequestID  = foundation.AgentControlRequestID
+	AgentControlCommandID  = foundation.AgentControlCommandID
 	AgentExecutionID       = foundation.AgentExecutionID
 	AgentResultID          = foundation.AgentResultID
 	ApprovalRecord         = security.ApprovalRecord

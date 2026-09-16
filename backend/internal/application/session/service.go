@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -220,7 +219,10 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 		if err := s.policies.Save(txCtx, agent.ID, policy); err != nil {
 			return err
 		}
-		entry, err := domaincontext.NewSessionContextEntry(session.ID, 1, domaincontext.SessionContextUserMessage, "", session.Goal, at)
+		entry, err := domaincontext.NewSessionContextEntry(
+			domainfoundation.ContextEntryID(s.ids.New("context")),
+			session.ID, 1, domaincontext.SessionContextUserMessage, "", session.Goal, at,
+		)
 		if err != nil {
 			return err
 		}
@@ -295,6 +297,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID domainf
 
 // AppendContextParams describes one compare-and-append SessionContext write.
 type AppendContextParams struct {
+	EntryID           domainfoundation.ContextEntryID
 	RequestID         domainfoundation.RequestID
 	SessionID         domainfoundation.SessionID
 	ExpectedRevision  uint64
@@ -315,16 +318,17 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	if ctx == nil {
 		return AppendContextResult{}, errors.New("append session context is required")
 	}
-	if !s.readiness.Ready() || params.RequestID == "" || params.SessionID == "" || strings.TrimSpace(params.Content) == "" {
+	if !s.readiness.Ready() || params.EntryID == "" || params.RequestID == "" || params.SessionID == "" || strings.TrimSpace(params.Content) == "" {
 		return AppendContextResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	digest := commandprotocol.ArgumentsDigest(struct {
+		EntryID   domainfoundation.ContextEntryID
 		SessionID domainfoundation.SessionID
 		Revision  uint64
 		Kind      domaincontext.SessionContextKind
 		Source    domainfoundation.AgentExecutionID
 		Content   string
-	}{params.SessionID, params.ExpectedRevision, params.Kind, params.SourceExecutionID, strings.TrimSpace(params.Content)})
+	}{params.EntryID, params.SessionID, params.ExpectedRevision, params.Kind, params.SourceExecutionID, strings.TrimSpace(params.Content)})
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		if receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "append_session_context", digest); err != nil {
@@ -355,6 +359,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 			return domainfoundation.ErrRevisionConflict
 		}
 		entry, err := domaincontext.NewSessionContextEntry(
+			params.EntryID,
 			params.SessionID,
 			current+1,
 			params.Kind,
@@ -369,14 +374,12 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 			return err
 		}
 		event := domainfoundation.DomainEvent{
-			ID:         domainfoundation.EventID(s.ids.New("event")),
-			Type:       domainfoundation.EventSessionContextAppended,
-			SessionID:  entry.SessionID,
-			OccurredAt: entry.CreatedAt.UTC(),
-			Payload: map[string]string{
-				"revision": strconv.FormatUint(entry.Revision, 10),
-				"kind":     string(entry.Kind),
-			},
+			ID:              domainfoundation.EventID(s.ids.New("event")),
+			Type:            domainfoundation.EventSessionContextAppended,
+			SessionID:       entry.SessionID,
+			OccurredAt:      entry.CreatedAt.UTC(),
+			ContextRevision: entry.Revision,
+			ContextKind:     string(entry.Kind),
 		}
 		if err := s.events.Append(txCtx, event); err != nil {
 			return err

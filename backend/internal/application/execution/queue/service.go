@@ -23,7 +23,7 @@ import (
 type Readiness interface{ Ready() bool }
 
 type InputFactory interface {
-	MaterializeExecutionInput(context.Context, domainagent.Agent, string, string, string) (domainexecution.ExecutionInputSnapshot, error)
+	MaterializeExecutionInput(context.Context, domainagent.Agent, string, string, string, []string) (domainexecution.ExecutionInputSnapshot, error)
 }
 
 type RuntimeActivator interface {
@@ -159,12 +159,8 @@ func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (Enqueu
 		if err != nil {
 			return err
 		}
-		input, err := s.inputs.MaterializeExecutionInput(txCtx, agent, "", "", "")
-		if err != nil {
-			return err
-		}
 		at := s.clock.Now()
-		work, err := domainworkflow.NewQueuedWork(params.ID, agent.SessionID, agent.ID, sequence, params.Prompt, input, at)
+		work, err := domainworkflow.NewQueuedWork(params.ID, agent.SessionID, agent.ID, sequence, params.Prompt, at)
 		if err != nil {
 			return err
 		}
@@ -231,8 +227,15 @@ func (s *Service) StartNextQueuedWork(ctx context.Context, agentID domainfoundat
 		if err != nil {
 			return err
 		}
+		input, err := s.inputs.MaterializeExecutionInput(txCtx, agent, "", "", "", nil)
+		if err != nil {
+			return err
+		}
 		at := s.clock.Now()
-		execution, err := domainexecution.NewQueuedWorkExecution(domainfoundation.AgentExecutionID(s.ids.New("execution")), agent.SessionID, agent.ID, work.ID, work.Input, at)
+		execution, err := domainexecution.NewQueuedWorkExecution(
+			domainfoundation.AgentExecutionID(s.ids.New("execution")), agent.SessionID, agent.ID,
+			work.ID, work.Prompt, input, at,
+		)
 		if err != nil {
 			return err
 		}

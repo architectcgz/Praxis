@@ -136,7 +136,7 @@ WaitCondition
 - 生命周期枚举使用 `Status`，终止结果使用 `Outcome`，稳定失败分类使用 `FailureCode`；
 - 领域行为使用业务动词，例如 `Start`、`Pause`、`Settle`、`Approve`；
 - 领域对象不使用 transport 的 `Request`、`Response`、`Option` 或 UI 组件后缀；
-- 业务中真实存在的请求对象可以使用 `Request`，例如持久化的 `AgentControlRequest`，其注释必须明确它不是传输 DTO。
+- 业务中真实存在的请求对象可以使用 `Request`；持久化命令对象使用业务语义名称，例如 `AgentControlCommand`，其注释必须明确它不是传输 DTO。
 
 ## 6. 查询与只读类型
 

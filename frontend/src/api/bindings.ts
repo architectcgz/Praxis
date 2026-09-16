@@ -1,5 +1,12 @@
 import type { AgentHistoryItem, AgentMessage, AgentSnapshot } from './agents'
-import type { ControlRequest, ControlResponse, SendInputRequest, SendInputResponse } from './commands'
+import type {
+    CloseAgentRequest,
+    CloseAgentResponse,
+    PauseAgentRequest,
+    PauseAgentResponse,
+    SendInputRequest,
+    SendInputResponse,
+} from './commands'
 import type { ModelConfigDocument, ModelOption, SaveModelConfigResponse } from './models'
 import type { CreateProjectRequest, CreateProjectResponse, ProjectSummary } from './projects'
 import type { CreateSessionRequest, CreateSessionResponse, SessionSnapshot, SessionSummary } from './sessions'
@@ -35,7 +42,8 @@ type EventBinding = {
 
 type CommandBinding = {
     SendInput(request: SendInputRequest): Promise<SendInputResponse>
-    RequestControl(request: ControlRequest): Promise<ControlResponse>
+    PauseAgent(request: PauseAgentRequest): Promise<PauseAgentResponse>
+    CloseAgent(request: CloseAgentRequest): Promise<CloseAgentResponse>
 }
 
 type ModelBinding = {

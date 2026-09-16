@@ -119,6 +119,18 @@ function codeLanguageLabel(className: string | undefined) {
     return codeLanguageLabels[language] || language.toUpperCase()
 }
 
+export const PendingUserMessageView = memo(function PendingUserMessageView({ content, at }: { content: string; at: string }) {
+    return (
+        <article className="message message-user">
+            <div className="message-meta">
+                <strong>你</strong>
+                <time dateTime={at} title={at}>{formatMessageTime(at)}</time>
+            </div>
+            <p>{content}</p>
+        </article>
+    )
+})
+
 export function PendingOutputView({ agentProfile }: { agentProfile: string }) {
     return (
         <article className="message message-assistant message-pending" role="status">

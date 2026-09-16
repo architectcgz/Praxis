@@ -175,13 +175,11 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 			return err
 		}
 		event := domainfoundation.DomainEvent{
-			ID:         domainfoundation.EventID(s.ids.New("event")),
-			Type:       domainfoundation.EventProjectCreated,
-			OccurredAt: at,
-			Payload: map[string]string{
-				"projectId":   project.ID.String(),
-				"workspaceId": workspace.ID.String(),
-			},
+			ID:          domainfoundation.EventID(s.ids.New("event")),
+			Type:        domainfoundation.EventProjectCreated,
+			OccurredAt:  at,
+			ProjectID:   project.ID,
+			WorkspaceID: workspace.ID,
 		}
 		if err := s.events.Append(txCtx, event); err != nil {
 			return err

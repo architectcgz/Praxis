@@ -22,15 +22,14 @@ const (
 	QueuedWorkCancelled   QueuedWorkStatus = "cancelled"
 )
 
-// QueuedWork owns an independent task body and the immutable snapshot that
-// will be copied into its single queued_work execution when policy selects it.
+// QueuedWork owns an independent task body. Its execution input is frozen only
+// when the task starts so queued time does not hide newer Session context.
 type QueuedWork struct {
 	ID          WorkItemID
 	SessionID   SessionID
 	AgentID     AgentID
 	Sequence    uint64
 	Prompt      string
-	Input       ExecutionInputSnapshot
 	Status      QueuedWorkStatus
 	ExecutionID AgentExecutionID
 	CreatedAt   time.Time
@@ -45,7 +44,6 @@ func NewQueuedWork(
 	agentID AgentID,
 	sequence uint64,
 	prompt string,
-	input ExecutionInputSnapshot,
 	at time.Time,
 ) (QueuedWork, error) {
 	work := QueuedWork{
@@ -54,7 +52,6 @@ func NewQueuedWork(
 		AgentID:   agentID,
 		Sequence:  sequence,
 		Prompt:    strings.TrimSpace(prompt),
-		Input:     input,
 		Status:    QueuedWorkPending,
 		CreatedAt: at.UTC(),
 	}
@@ -73,9 +70,6 @@ func (w QueuedWork) Validate() error {
 	}
 	if w.Prompt == "" || len([]byte(w.Prompt)) > MaxQueuedWorkPromptBytes || !utf8.ValidString(w.Prompt) {
 		return invalidValue("queuedWork.prompt", "prompt is empty, invalid UTF-8, or exceeds the bounded limit")
-	}
-	if err := w.Input.Validate(); err != nil {
-		return fmtField("queuedWork.input", err)
 	}
 	if !validQueuedWorkStatus(w.Status) {
 		return invalidValue("queuedWork.status", "unknown status")

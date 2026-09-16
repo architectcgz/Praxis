@@ -4,10 +4,23 @@ export type EventSnapshot = {
     id: string
     type: string
     occurredAt: string
+    projectId?: string
+    workspaceId?: string
     sessionId?: string
     agentId?: string
+    targetAgentId?: string
     executionId?: string
-    payload?: Record<string, string>
+    workItemId?: string
+    delegationId?: string
+    deliveryId?: string
+    artifactKind?: string
+    artifactId?: string
+    approvalSource?: string
+    policyRevision?: number
+    contextRevision?: number
+    contextKind?: string
+    executionOutcome?: string
+    failureCode?: string
 }
 
 export function listSessionEvents(sessionID: string, after?: string, limit = 200) {

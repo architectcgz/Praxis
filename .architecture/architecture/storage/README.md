@@ -7,7 +7,7 @@
 
 | 存储 | 保存 | 不保存 |
 |---|---|---|
-| SQLite | Project、Session、SessionContextEntry、Agent、AgentSecurityPolicy、AgentExecution、ExecutionSecuritySnapshot、ToolInvocation、ManagedProcess、WorkflowDefinition、WorkflowInstance、WorkflowNodeInstance、WaitCondition、ControlRequest、Result、Briefing、Note 元数据和审计事件 | Agent transcript 正文、provider 逐 delta 流、ManagedProcess 实时终端输出 |
+| SQLite | Project、Session、SessionContextEntry、Agent、AgentSecurityPolicy、AgentExecution、ExecutionSecuritySnapshot、ToolInvocation、ManagedProcess、WorkflowDefinition、WorkflowInstance、WorkflowNodeInstance、WaitCondition、AgentControlCommand、Result、Briefing、Note 元数据和审计事件 | Agent transcript 正文、provider 逐 delta 流、ManagedProcess 实时终端输出 |
 | per-Agent JSONL | 该 Agent 实际看过和产生的 user、assistant、tool message、`execution_started`、`execution_settled` receipt | 其他 Agent transcript、未提交 SessionContext、pending command |
 | 文件树 | attachments、过长 tool output、patch、Note 正文和 Session 工作目录引用的外部文件 | 产品状态机和关系身份 |
 

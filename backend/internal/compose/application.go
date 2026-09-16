@@ -34,8 +34,10 @@ import (
 	agentregistry "praxis/internal/infrastructure/agent_registry"
 	"praxis/internal/infrastructure/agentlog"
 	"praxis/internal/infrastructure/dataroot"
+	"praxis/internal/infrastructure/document"
 	modelregistry "praxis/internal/infrastructure/model_registry"
 	"praxis/internal/infrastructure/sqlite"
+	"praxis/internal/infrastructure/storage"
 	"praxis/internal/logging"
 	"praxis/internal/orchestration"
 	"praxis/internal/session"
@@ -142,11 +144,18 @@ func (a *Application) CreateProject(ctx context.Context, name, path string, requ
 	return result, nil
 }
 
-func (a *Application) RequestControl(
+func (a *Application) PauseAgent(
 	ctx context.Context,
-	params executioncontrol.RequestParams,
-) (executioncontrol.RequestResult, error) {
-	return a.controls.RequestControl(ctx, params)
+	params executioncontrol.Params,
+) (executioncontrol.Result, error) {
+	return a.controls.PauseAgent(ctx, params)
+}
+
+func (a *Application) CloseAgent(
+	ctx context.Context,
+	params executioncontrol.Params,
+) (executioncontrol.Result, error) {
+	return a.controls.CloseAgent(ctx, params)
 }
 
 func (a *Application) SendInput(ctx context.Context, params executionstart.SendInputParams) (executionstart.Result, error) {
@@ -193,10 +202,6 @@ func Open(
 		return nil, err
 	}
 	closeStore := func() { _ = store.Close(context.Background()) }
-	if err := store.VerifyTargetIntegrity(ctx); err != nil {
-		closeStore()
-		return nil, fmt.Errorf("verify target schema: %w", err)
-	}
 	diagnostics, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
 	if err != nil {
 		closeStore()
@@ -221,7 +226,16 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	target := store.TargetRepositories()
+	documents, err := document.New(root.Documents)
+	if err != nil {
+		closeStore()
+		return nil, fmt.Errorf("open document store: %w", err)
+	}
+	target, err := storage.NewTargetRepositories(store, documents)
+	if err != nil {
+		closeStore()
+		return nil, err
+	}
 	output := newAgentOutputPublisher()
 	if runner == nil {
 		toolRegistry := tools.NewToolRegistry()
@@ -358,6 +372,7 @@ func Open(
 		Executions: target.Executions, Deliveries: target.Deliveries, Events: target.Events,
 		Readiness: readiness, PrimaryAgent: sessionService, Activator: scheduler,
 		Lifecycle: settlementService, Models: agentModelResolver{agents: agentRegistry, models: modelRegistry},
+		Transcripts: agentTranscriptCursor{root: root},
 	})
 	if err != nil {
 		diagnostics.Errorf("create execution start service failed: %v", err)
@@ -424,14 +439,13 @@ func Open(
 		return nil, err
 	}
 	controlService, err := executioncontrol.NewService(executioncontrol.Config{
-		Transactions:    store,
-		Agents:          target.Agents,
-		Executions:      target.Executions,
-		Controls:        target.Controls,
-		CommandReceipts: target.Commands,
-		Events:          target.Events,
-		Readiness:       readiness,
-		Canceller:       registry,
+		Transactions: store,
+		Agents:       target.Agents,
+		Executions:   target.Executions,
+		Controls:     target.Controls,
+		Events:       target.Events,
+		Readiness:    readiness,
+		Canceller:    registry,
 	})
 	if err != nil {
 		diagnostics.Errorf("create control service failed: %v", err)
@@ -446,7 +460,7 @@ func Open(
 		Commands:        commands,
 		Sessions:        sessions,
 		SessionHeader:   newDeliveryHeaderResolver(store),
-		ResolveArtifact: store.ResolveContextArtifact,
+		ResolveArtifact: target.ResolveContextArtifact,
 	})
 	if err != nil {
 		diagnostics.Errorf("create delivery coordinator failed: %v", err)
@@ -719,11 +733,11 @@ func (a orchestrationCommandAdapter) SettleRuntimeExecution(
 	return a.settlements.SettleRuntimeExecution(ctx, executionID, outcome, failureCode)
 }
 
-func (a orchestrationCommandAdapter) ApplyControlRequest(
+func (a orchestrationCommandAdapter) ApplyPendingAgentControl(
 	ctx context.Context,
-	requestID domainfoundation.AgentControlRequestID,
+	requestID domainfoundation.AgentControlCommandID,
 ) error {
-	return a.controls.ApplyControlRequest(ctx, requestID)
+	return a.controls.ApplyPendingAgentControl(ctx, requestID)
 }
 
 func (a orchestrationCommandAdapter) StartNextQueuedWork(
@@ -830,7 +844,7 @@ func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domainagen
 		Profile:          agent.Profile,
 		WorkspaceID:      workspaceID,
 		InjectionNonce:   agent.SessionID.String() + ":" + agent.ID.String(),
-		MinReaderVersion: 2,
+		MinReaderVersion: 3,
 		WrittenBy:        "praxis/target",
 	}
 }
@@ -845,11 +859,12 @@ func (f executionInputFactory) MaterializeExecutionInput(
 	providerID string,
 	modelID string,
 	reasoningLevel string,
+	artifactEntryRefs []string,
 ) (domainexecution.ExecutionInputSnapshot, error) {
 	if f.start == nil {
 		return domainexecution.ExecutionInputSnapshot{}, errors.New("execution start service is not configured")
 	}
-	return f.start.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoningLevel)
+	return f.start.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoningLevel, artifactEntryRefs)
 }
 
 type queuedWorkStarter struct {
@@ -867,4 +882,21 @@ func (a *Application) Ready() bool {
 
 func (a *Application) SetReady(ready bool) {
 	a.readiness.SetReady(ready)
+}
+
+type agentTranscriptCursor struct {
+	root dataroot.DataRoot
+}
+
+func (c agentTranscriptCursor) SnapshotTranscript(
+	ctx context.Context,
+	sessionID domainfoundation.SessionID,
+	agentID domainfoundation.AgentID,
+) (session.AgentTranscriptSnapshot, error) {
+	store, err := agentlog.Open(c.root, sessionID, agentID)
+	if err != nil {
+		return session.AgentTranscriptSnapshot{}, err
+	}
+	defer func() { _ = store.Close(context.Background()) }()
+	return store.SnapshotContext(ctx)
 }

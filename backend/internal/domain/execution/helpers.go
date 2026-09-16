@@ -11,10 +11,12 @@ import (
 type (
 	AgentID                   = foundation.AgentID
 	AgentExecutionID          = foundation.AgentExecutionID
+	ContextEntryID            = foundation.ContextEntryID
 	RequestID                 = foundation.RequestID
 	SessionID                 = foundation.SessionID
 	WorkItemID                = foundation.WorkItemID
 	ContextManifest           = domaincontext.ContextManifest
+	SessionContextEntry       = domaincontext.SessionContextEntry
 	CapabilityGrant           = security.CapabilityGrant
 	ExecutionSecuritySnapshot = security.ExecutionSecuritySnapshot
 	SandboxMode               = security.SandboxMode

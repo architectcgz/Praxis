@@ -162,19 +162,19 @@ func (w *WaitCondition) Cancel(at time.Time) error {
 type AgentControlKind string
 
 const (
-	ControlPause AgentControlKind = "pause"
-	ControlClose AgentControlKind = "close"
+	AgentControlPause AgentControlKind = "pause"
+	AgentControlClose AgentControlKind = "close"
 )
 
 type AgentControlStatus string
 
 const (
-	ControlRequested AgentControlStatus = "requested"
-	ControlApplied   AgentControlStatus = "applied"
+	AgentControlPending AgentControlStatus = "pending"
+	AgentControlApplied AgentControlStatus = "applied"
 )
 
-type AgentControlRequest struct {
-	ID                AgentControlRequestID
+type AgentControlCommand struct {
+	ID                AgentControlCommandID
 	AgentID           AgentID
 	TargetExecutionID AgentExecutionID
 	Kind              AgentControlKind
@@ -183,54 +183,54 @@ type AgentControlRequest struct {
 	AppliedAt         time.Time
 }
 
-func NewAgentControlRequest(
-	id AgentControlRequestID,
+func NewAgentControlCommand(
+	id AgentControlCommandID,
 	agentID AgentID,
 	targetExecutionID AgentExecutionID,
 	kind AgentControlKind,
 	at time.Time,
-) (AgentControlRequest, error) {
-	request := AgentControlRequest{
+) (AgentControlCommand, error) {
+	request := AgentControlCommand{
 		ID:                id,
 		AgentID:           agentID,
 		TargetExecutionID: targetExecutionID,
 		Kind:              kind,
-		Status:            ControlRequested,
+		Status:            AgentControlPending,
 		CreatedAt:         at.UTC(),
 	}
 	if err := request.Validate(); err != nil {
-		return AgentControlRequest{}, err
+		return AgentControlCommand{}, err
 	}
 	return request, nil
 }
 
-func (r AgentControlRequest) Validate() error {
+func (r AgentControlCommand) Validate() error {
 	if idIsEmpty(string(r.ID)) || idIsEmpty(string(r.AgentID)) {
-		return invalidValue("agentControlRequest", "required reference is missing")
+		return invalidValue("agentControlCommand", "required reference is missing")
 	}
-	if r.Kind != ControlPause && r.Kind != ControlClose {
-		return invalidValue("agentControlRequest.kind", "unknown control kind")
+	if r.Kind != AgentControlPause && r.Kind != AgentControlClose {
+		return invalidValue("agentControlCommand.kind", "unknown control kind")
 	}
-	if r.Status != ControlRequested && r.Status != ControlApplied {
-		return invalidValue("agentControlRequest.status", "unknown control status")
+	if r.Status != AgentControlPending && r.Status != AgentControlApplied {
+		return invalidValue("agentControlCommand.status", "unknown control status")
 	}
 	if r.CreatedAt.IsZero() || (!r.AppliedAt.IsZero() && r.AppliedAt.Before(r.CreatedAt)) {
-		return invalidValue("agentControlRequest.timestamps", "timestamps are invalid")
+		return invalidValue("agentControlCommand.timestamps", "timestamps are invalid")
 	}
-	if r.Status == ControlRequested && !r.AppliedAt.IsZero() {
-		return invalidValue("agentControlRequest.appliedAt", "requested control has an apply time")
+	if r.Status == AgentControlPending && !r.AppliedAt.IsZero() {
+		return invalidValue("agentControlCommand.appliedAt", "pending control has an apply time")
 	}
-	if r.Status == ControlApplied && r.AppliedAt.IsZero() {
-		return invalidValue("agentControlRequest.appliedAt", "applied control requires a time")
+	if r.Status == AgentControlApplied && r.AppliedAt.IsZero() {
+		return invalidValue("agentControlCommand.appliedAt", "applied control requires a time")
 	}
 	return nil
 }
 
-func (r *AgentControlRequest) MarkApplied(at time.Time) error {
-	if r.Status != ControlRequested {
-		return invalidTransition("agentControlRequest", string(r.Status), string(ControlApplied))
+func (r *AgentControlCommand) MarkApplied(at time.Time) error {
+	if r.Status != AgentControlPending {
+		return invalidTransition("agentControlCommand", string(r.Status), string(AgentControlApplied))
 	}
-	r.Status = ControlApplied
+	r.Status = AgentControlApplied
 	r.AppliedAt = at.UTC()
 	return nil
 }

@@ -16,6 +16,7 @@ import (
 	domainsecurity "praxis/internal/domain/security"
 	"praxis/internal/persistence"
 	runtimecontract "praxis/internal/runtime"
+	sessionport "praxis/internal/session"
 	"praxis/internal/system"
 )
 
@@ -32,7 +33,7 @@ type PrimaryAgentProvider interface {
 // InputFactory freezes the current context, policy and model selection into
 // an immutable execution input snapshot.
 type InputFactory interface {
-	MaterializeExecutionInput(context.Context, domainagent.Agent, string, string, string) (domainexecution.ExecutionInputSnapshot, error)
+	MaterializeExecutionInput(context.Context, domainagent.Agent, string, string, string, []string) (domainexecution.ExecutionInputSnapshot, error)
 }
 
 // RuntimeActivator notifies the scheduler after execution creation commits.
@@ -63,29 +64,31 @@ type Config struct {
 	Activator    RuntimeActivator
 	Lifecycle    runtimecontract.ExecutionLifecycle
 	Models       ModelResolver
+	Transcripts  TranscriptCursor
 	Clock        system.Clock
 	IDs          system.IDGenerator
 }
 
 // Service owns AgentExecution creation and post-commit activation.
 type Service struct {
-	tx         persistence.TxRunner
-	workspaces persistence.WorkspaceRepository
-	sessions   persistence.SessionRepository
-	contexts   persistence.SessionContextRepository
-	policies   persistence.AgentSecurityPolicyRepository
-	agents     persistence.AgentRepository
-	executions persistence.AgentExecutionRepository
-	deliveries persistence.ContextDeliveryRepository
-	events     persistence.EventRepository
-	readiness  Readiness
-	primary    PrimaryAgentProvider
-	security   SecurityResolver
-	activator  RuntimeActivator
-	lifecycle  runtimecontract.ExecutionLifecycle
-	models     ModelResolver
-	clock      system.Clock
-	ids        system.IDGenerator
+	tx          persistence.TxRunner
+	workspaces  persistence.WorkspaceRepository
+	sessions    persistence.SessionRepository
+	contexts    persistence.SessionContextRepository
+	policies    persistence.AgentSecurityPolicyRepository
+	agents      persistence.AgentRepository
+	executions  persistence.AgentExecutionRepository
+	deliveries  persistence.ContextDeliveryRepository
+	events      persistence.EventRepository
+	readiness   Readiness
+	primary     PrimaryAgentProvider
+	security    SecurityResolver
+	activator   RuntimeActivator
+	lifecycle   runtimecontract.ExecutionLifecycle
+	models      ModelResolver
+	transcripts TranscriptCursor
+	clock       system.Clock
+	ids         system.IDGenerator
 }
 
 // SendInputParams identifies one user-input execution request.
@@ -131,6 +134,7 @@ func NewService(config Config) (*Service, error) {
 		{name: "readiness", value: config.Readiness},
 		{name: "primary agent provider", value: config.PrimaryAgent},
 		{name: "model resolver", value: config.Models},
+		{name: "transcript cursor", value: config.Transcripts},
 	} {
 		if required.value == nil {
 			return nil, fmt.Errorf("execution start service %s is required", required.name)
@@ -156,7 +160,7 @@ func NewService(config Config) (*Service, error) {
 		}
 		security = &resolved
 	}
-	return &Service{tx: config.Transactions, workspaces: config.Workspaces, sessions: config.Sessions, contexts: config.Contexts, policies: config.Policies, agents: config.Agents, executions: config.Executions, deliveries: config.Deliveries, events: config.Events, readiness: config.Readiness, primary: config.PrimaryAgent, security: *security, activator: config.Activator, lifecycle: config.Lifecycle, models: config.Models, clock: clock, ids: ids}, nil
+	return &Service{tx: config.Transactions, workspaces: config.Workspaces, sessions: config.Sessions, contexts: config.Contexts, policies: config.Policies, agents: config.Agents, executions: config.Executions, deliveries: config.Deliveries, events: config.Events, readiness: config.Readiness, primary: config.PrimaryAgent, security: *security, activator: config.Activator, lifecycle: config.Lifecycle, models: config.Models, transcripts: config.Transcripts, clock: clock, ids: ids}, nil
 }
 
 // SendInput creates one durable user-input execution and then requests activation.
@@ -221,7 +225,7 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 		if active >= 1 {
 			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
-		input, err := s.MaterializeExecutionInput(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel)
+		input, err := s.MaterializeExecutionInput(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel, nil)
 		if err != nil {
 			return err
 		}
@@ -293,7 +297,7 @@ func (s *Service) Resume(ctx context.Context, params ResumeParams) (Result, erro
 		if err != nil {
 			return fmt.Errorf("resolve model: %w", err)
 		}
-		input, err := s.MaterializeExecutionInput(txCtx, agent, model.ProviderID, model.ModelID, model.ReasoningLevel)
+		input, err := s.MaterializeExecutionInput(txCtx, agent, model.ProviderID, model.ModelID, model.ReasoningLevel, nil)
 		if err != nil {
 			return err
 		}
@@ -354,4 +358,9 @@ func requestMatches(execution domainexecution.AgentExecution, reason domainexecu
 func modelMatches(execution domainexecution.AgentExecution, providerID, modelID, reasoningLevel string) bool {
 	grant := execution.Input.Security.CapabilityGrant
 	return (providerID == "" || grant.Model.ProviderID == providerID) && (modelID == "" || grant.Model.ModelID == modelID) && (reasoningLevel == "" || grant.Model.ReasoningLevel == reasoningLevel)
+}
+
+// TranscriptSnapshotReader returns the durable messages visible when an execution input is frozen.
+type TranscriptCursor interface {
+	SnapshotTranscript(context.Context, domainfoundation.SessionID, domainfoundation.AgentID) (sessionport.AgentTranscriptSnapshot, error)
 }

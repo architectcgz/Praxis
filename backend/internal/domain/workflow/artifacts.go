@@ -207,7 +207,7 @@ func (b *Briefing) Approve(at time.Time) (DomainEvent, error) {
 		b.ID.String(),
 	)
 	if err == nil {
-		event.Payload["targetAgentId"] = b.TargetAgentID.String()
+		event.TargetAgentID = b.TargetAgentID
 	}
 	return event, err
 }
@@ -242,7 +242,7 @@ func submitArtifact(
 	*status, *updatedAt = ArtifactPendingApproval, at.UTC()
 	event := newDomainEvent(EventArtifactSubmitted, at)
 	event.SessionID, event.AgentID = sessionID, sourceID
-	event.Payload = map[string]string{"kind": kind, "id": id}
+	event.ArtifactKind, event.ArtifactID = kind, id
 	return event, nil
 }
 
@@ -261,7 +261,7 @@ func approveArtifact(
 	*status, *updatedAt = ArtifactApproved, at.UTC()
 	event := newDomainEvent(EventArtifactApproved, at)
 	event.SessionID, event.AgentID = sessionID, sourceID
-	event.Payload = map[string]string{"kind": kind, "id": id}
+	event.ArtifactKind, event.ArtifactID = kind, id
 	return event, nil
 }
 
@@ -280,7 +280,7 @@ func rejectArtifact(
 	*status, *updatedAt = ArtifactRejected, at.UTC()
 	event := newDomainEvent(EventArtifactRejected, at)
 	event.SessionID, event.AgentID = sessionID, sourceID
-	event.Payload = map[string]string{"kind": kind, "id": id}
+	event.ArtifactKind, event.ArtifactID = kind, id
 	return event, nil
 }
 

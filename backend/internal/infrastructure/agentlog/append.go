@@ -179,12 +179,17 @@ func (s *Store) AppendContextArtifact(
 		}
 		return *existing, nil
 	}
-	payload, err := json.Marshal(artifactPayload{
+	artifactValue := artifactPayload{
 		DeliveryID: artifact.DeliveryID.String(),
 		Kind:       strings.TrimSpace(artifact.Kind),
 		ArtifactID: strings.TrimSpace(artifact.ArtifactID),
 		Body:       append(json.RawMessage(nil), artifact.Body...),
-	})
+	}
+	artifactValue.PayloadDigest, err = digestArtifactPayload(artifactValue)
+	if err != nil {
+		return sessionport.ContextArtifactReceipt{}, fmt.Errorf("digest context artifact: %w", err)
+	}
+	payload, err := json.Marshal(artifactValue)
 	if err != nil {
 		return sessionport.ContextArtifactReceipt{}, fmt.Errorf("encode context artifact: %w", err)
 	}

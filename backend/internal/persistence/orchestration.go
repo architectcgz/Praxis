@@ -110,14 +110,14 @@ type WaitConditionRecoveryRepository interface {
 	ListUnresolvedByAgentAfter(context.Context, domainfoundation.AgentID, domainfoundation.WaitConditionID, int) ([]domainworkflow.WaitCondition, error)
 }
 
-type AgentControlRequestRepository interface {
-	Get(ctx context.Context, id domainfoundation.AgentControlRequestID) (domainworkflow.AgentControlRequest, error)
-	Save(ctx context.Context, request domainworkflow.AgentControlRequest) error
-	ListOpenByAgent(ctx context.Context, agentID domainfoundation.AgentID, limit int) ([]domainworkflow.AgentControlRequest, error)
+type AgentControlCommandRepository interface {
+	Get(ctx context.Context, id domainfoundation.AgentControlCommandID) (domainworkflow.AgentControlCommand, error)
+	Save(ctx context.Context, request domainworkflow.AgentControlCommand) error
+	ListOpenByAgent(ctx context.Context, agentID domainfoundation.AgentID, limit int) ([]domainworkflow.AgentControlCommand, error)
 }
 
 type AgentControlRecoveryRepository interface {
-	ListOpenByAgentAfter(context.Context, domainfoundation.AgentID, domainfoundation.AgentControlRequestID, int) ([]domainworkflow.AgentControlRequest, error)
+	ListOpenByAgentAfter(context.Context, domainfoundation.AgentID, domainfoundation.AgentControlCommandID, int) ([]domainworkflow.AgentControlCommand, error)
 }
 
 type ContextDeliveryRepository interface {

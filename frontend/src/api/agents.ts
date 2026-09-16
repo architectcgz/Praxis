@@ -14,7 +14,7 @@ export type AgentSnapshot = {
     executions: ExecutionSnapshot[]
     waitConditionIds: string[]
     deliveryIds: string[]
-    controlRequestIds: string[]
+    controlCommandIds: string[]
 }
 
 export type ExecutionSnapshot = {

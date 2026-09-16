@@ -6,7 +6,6 @@ import (
 
 	domainfoundation "praxis/internal/domain/foundation"
 	domainworkflow "praxis/internal/domain/workflow"
-	domainworkspace "praxis/internal/domain/workspace"
 )
 
 // RecoveryAgentRef identifies an Agent transcript that may need reconciliation.
@@ -60,30 +59,6 @@ func (s *Store) ListUnsettledExecutionIDs(ctx context.Context) ([]domainfoundati
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate unsettled executions: %w", err)
-	}
-	return ids, nil
-}
-
-func (s *Store) ListActiveLeaseIDs(ctx context.Context) ([]domainfoundation.WorkspaceLeaseID, error) {
-	rows, err := executorFromContext(ctx, s.db).QueryContext(
-		ctx,
-		`SELECT id FROM workspace_write_leases WHERE state = ? ORDER BY id`,
-		string(domainworkspace.LeaseActive),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list active workspace leases: %w", err)
-	}
-	defer rows.Close()
-	ids := make([]domainfoundation.WorkspaceLeaseID, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan active workspace lease: %w", err)
-		}
-		ids = append(ids, domainfoundation.WorkspaceLeaseID(id))
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active workspace leases: %w", err)
 	}
 	return ids, nil
 }

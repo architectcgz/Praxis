@@ -17,6 +17,7 @@ type AgentSessionMessage struct {
 	At          time.Time
 	ExecutionID domainfoundation.AgentExecutionID
 	MessageID   string
+	Digest      string
 	Role        string
 	Content     string
 	// Blocks contains the complete provider-neutral turn representation.
@@ -95,5 +96,28 @@ type TranscriptReceiptStore interface {
 // not gain access to transcript content.
 type TranscriptMessageStore interface {
 	ListMessages(context.Context, int) ([]AgentSessionMessage, error)
+	ListExecutionMessages(context.Context, []domainexecution.TranscriptMessageRef, domainfoundation.AgentExecutionID) ([]AgentSessionMessage, error)
 	AppendStructuredMessage(context.Context, domainfoundation.AgentExecutionID, string, string, domainfoundation.RequestID, []TranscriptContentBlock) error
+}
+
+// AgentContextArtifact is an immutable artifact selected from the Agent transcript.
+type AgentContextArtifact struct {
+	EntryID    string
+	Sequence   uint64
+	DeliveryID domainfoundation.DeliveryID
+	Kind       string
+	ArtifactID string
+	Body       json.RawMessage
+}
+
+// TranscriptContextStore exposes only explicitly selected context artifacts.
+type TranscriptContextStore interface {
+	ListContextArtifacts(context.Context, []string) ([]AgentContextArtifact, error)
+}
+
+// AgentTranscriptSnapshot is the durable input boundary captured for one execution.
+type AgentTranscriptSnapshot struct {
+	ThroughSequence uint64
+	Messages        []AgentSessionMessage
+	Artifacts       []AgentContextArtifact
 }

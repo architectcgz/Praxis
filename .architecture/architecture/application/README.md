@@ -43,7 +43,7 @@ backend/internal/application/
 │   │   └── resume.go              创建恢复 execution
 │   ├── control/
 │   │   ├── service.go             控制用例依赖和端口
-│   │   └── request_control.go     Pause、Close 请求及应用
+│   │   └── agent_control.go       Pause、Close 命令及应用
 │   ├── queue/
 │   │   ├── service.go             排队用例依赖和端口
 │   │   └── queue.go               入队、领取和完成

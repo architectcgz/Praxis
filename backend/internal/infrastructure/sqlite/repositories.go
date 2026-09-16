@@ -1,28 +1,25 @@
 package sqlite
 
-// Repositories contains repositories for durable supporting aggregates. The
-// orchestration repositories are exposed separately so composition can wire a
-// single, explicit target model.
+// Repositories contains only aggregates whose complete state is relational
+// metadata. Content-bearing repositories live in infrastructure/storage.
 type Repositories struct {
-	Projects        ProjectRepository
-	Workspaces      WorkspaceRepository
-	Delegations     DelegationRepository
-	WorkspaceLeases WorkspaceLeaseRepository
-	AgentResults    AgentResultRepository
-	Briefings       BriefingRepository
-	Notes           NoteRepository
-	Events          EventRepository
+	Projects   ProjectRepository
+	Workspaces WorkspaceRepository
+	Agents     AgentRepository
+	Sessions   SessionRepository
+	Controls   AgentControlCommandRepository
+	Deliveries ContextDeliveryRepository
+	Events     EventRepository
 }
 
 func (s *Store) Repositories() Repositories {
 	return Repositories{
-		Projects:        ProjectRepository{s},
-		Workspaces:      WorkspaceRepository{s},
-		Delegations:     DelegationRepository{s},
-		WorkspaceLeases: WorkspaceLeaseRepository{s},
-		AgentResults:    AgentResultRepository{s},
-		Briefings:       BriefingRepository{s},
-		Notes:           NoteRepository{s},
-		Events:          EventRepository{s},
+		Projects:   ProjectRepository{s},
+		Workspaces: WorkspaceRepository{s},
+		Agents:     AgentRepository{s},
+		Sessions:   SessionRepository{s},
+		Controls:   AgentControlCommandRepository{s},
+		Deliveries: ContextDeliveryRepository{s},
+		Events:     EventRepository{s},
 	}
 }

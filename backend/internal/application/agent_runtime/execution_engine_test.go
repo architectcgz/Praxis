@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +56,9 @@ func (i *testToolInvoker) Invoke(_ context.Context, _ ToolCall, invocationContex
 }
 
 type testTranscript struct {
-	messages []sessionport.AgentSessionMessage
+	messages           []sessionport.AgentSessionMessage
+	artifacts          map[string]sessionport.AgentContextArtifact
+	requestedArtifacts []string
 }
 
 func (s *testTranscript) Initialize(context.Context, sessionport.AgentSessionHeader) error {
@@ -84,6 +87,31 @@ func (s *testTranscript) Close(context.Context) error          { return nil }
 func (s *testTranscript) ListMessages(context.Context, int) ([]sessionport.AgentSessionMessage, error) {
 	return append([]sessionport.AgentSessionMessage(nil), s.messages...), nil
 }
+func (s *testTranscript) ListExecutionMessages(_ context.Context, references []domainexecution.TranscriptMessageRef, currentExecutionID domainfoundation.AgentExecutionID) ([]sessionport.AgentSessionMessage, error) {
+	wanted := make(map[uint64]domainexecution.TranscriptMessageRef, len(references))
+	for _, reference := range references {
+		wanted[reference.Sequence] = reference
+	}
+	messages := make([]sessionport.AgentSessionMessage, 0, len(s.messages))
+	for _, message := range s.messages {
+		if _, ok := wanted[message.Sequence]; ok || message.ExecutionID == currentExecutionID {
+			messages = append(messages, message)
+		}
+	}
+	return messages, nil
+}
+func (s *testTranscript) ListContextArtifacts(_ context.Context, entryIDs []string) ([]sessionport.AgentContextArtifact, error) {
+	s.requestedArtifacts = append([]string(nil), entryIDs...)
+	artifacts := make([]sessionport.AgentContextArtifact, 0, len(entryIDs))
+	for _, entryID := range entryIDs {
+		artifact, ok := s.artifacts[entryID]
+		if !ok {
+			return nil, errors.New("artifact not found")
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	return artifacts, nil
+}
 func (s *testTranscript) AppendStructuredMessage(_ context.Context, executionID domainfoundation.AgentExecutionID, messageID string, role string, _ domainfoundation.RequestID, blocks []sessionport.TranscriptContentBlock) error {
 	var content string
 	for _, block := range blocks {
@@ -94,6 +122,10 @@ func (s *testTranscript) AppendStructuredMessage(_ context.Context, executionID 
 }
 
 func testExecution(t *testing.T, tools []domainsecurity.ToolName, limits domainsecurity.ResourceLimits) domainexecution.AgentExecution {
+	return testExecutionWithArtifacts(t, tools, limits, nil)
+}
+
+func testExecutionWithArtifacts(t *testing.T, tools []domainsecurity.ToolName, limits domainsecurity.ResourceLimits, artifactEntryRefs []string) domainexecution.AgentExecution {
 	t.Helper()
 	grant, err := domainsecurity.NewCapabilityGrant(domainsecurity.CapabilityGrantSpec{
 		ID: "grant_test", WorkspaceID: "workspace_test", WorkspacePathSnapshot: `C:\workspace`, WorkspaceRevision: 1,
@@ -105,7 +137,19 @@ func testExecution(t *testing.T, tools []domainsecurity.ToolName, limits domains
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := domaincontext.NewContextManifest("manifest_test", "context", nil, time.Now())
+	entry, err := domaincontext.NewSessionContextEntry(
+		"context_test", "session_test", 1, domaincontext.SessionContextDecision, "", "shared-decision", time.Now(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := domainexecution.NewContextSelection(1, []domaincontext.SessionContextEntry{entry}, 0, nil, artifactEntryRefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := domaincontext.NewContextManifest(
+		"manifest_test", 1, []domaincontext.ContextEntryID{entry.ID}, artifactEntryRefs, selection.Digest, nil, time.Now(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +158,7 @@ func testExecution(t *testing.T, tools []domainsecurity.ToolName, limits domains
 		t.Fatal(err)
 	}
 	input := domainexecution.ExecutionInputSnapshot{
-		ContextManifest: manifest, ContextSelection: domainexecution.ContextSelection{Revision: 1, Summary: "context"},
+		ContextManifest: manifest, ContextSelection: selection, SystemPrompt: "You are a test agent.",
 		Security: domainsecurity.ExecutionSecuritySnapshot{AgentPolicyRevision: 1, CapabilityGrant: grant, Sandbox: domainsecurity.SandboxConstraints{Mode: domainsecurity.SandboxReadOnly}, ApprovalRules: []domainsecurity.ApprovalRule{{Mode: domainsecurity.ApprovalAlwaysAsk}}, Fingerprint: "fingerprint"},
 		Runtime:  runtimeSnapshot,
 	}
@@ -254,5 +298,36 @@ func TestExecutionEngineSetsExecutionTurnOutputTokenLimit(t *testing.T) {
 	}
 	if len(stream.requests) != 1 || stream.requests[0].Snapshot.MaxOutputTokens != 256 {
 		t.Fatalf("unexpected execution turn snapshots: %#v", stream.requests)
+	}
+}
+
+func TestExecutionEngineInjectsOnlySelectedContextArtifacts(t *testing.T) {
+	stream := &testStream{responses: [][]ModelStreamEvent{{{Kind: StreamComplete}}}}
+	engine, err := NewExecutionEngine(ExecutionEngineConfig{
+		Models: testModelResolver{model: ExecutionModel{Stream: stream, ContextWindow: 4096, MaxOutputTokens: 128}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript := transcriptWithInput()
+	transcript.artifacts = map[string]sessionport.AgentContextArtifact{
+		"artifact-selected": {EntryID: "artifact-selected", Kind: "briefing", ArtifactID: "briefing-1", Body: json.RawMessage(`{"summary":"selected"}`)},
+		"artifact-other":    {EntryID: "artifact-other", Kind: "briefing", ArtifactID: "briefing-2", Body: json.RawMessage(`{"summary":"other"}`)},
+	}
+	execution := testExecutionWithArtifacts(t, nil, domainsecurity.ResourceLimits{}, []string{"artifact-selected"})
+	outcome, _, err := engine.RunWithSession(t.Context(), execution, transcript)
+	if err != nil || outcome != domainexecution.ExecutionCompleted {
+		t.Fatalf("RunWithSession() outcome=%s err=%v", outcome, err)
+	}
+	if len(transcript.requestedArtifacts) != 1 || transcript.requestedArtifacts[0] != "artifact-selected" {
+		t.Fatalf("unexpected artifact selection: %#v", transcript.requestedArtifacts)
+	}
+	messages := stream.requests[0].Snapshot.Messages
+	if len(messages) != 3 ||
+		!strings.Contains(messages[0].Content[0].Text, "shared-decision") ||
+		!strings.Contains(messages[1].Content[0].Text, `{"summary":"selected"}`) ||
+		strings.Contains(messages[1].Content[0].Text, "other") ||
+		messages[2].Content[0].Text != "input" {
+		t.Fatalf("unexpected model context: %#v", messages)
 	}
 }

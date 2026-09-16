@@ -32,7 +32,7 @@ type Config struct {
 	Agents     persistence.AgentRepository
 	Executions persistence.AgentExecutionRepository
 	Waits      persistence.WaitConditionRepository
-	Controls   persistence.AgentControlRequestRepository
+	Controls   persistence.AgentControlCommandRepository
 	Deliveries persistence.ContextDeliveryRepository
 	Events     persistence.EventRepository
 	Messages   AgentMessageQuery
@@ -48,7 +48,7 @@ type Service struct {
 	agents     persistence.AgentRepository
 	executions persistence.AgentExecutionRepository
 	waits      persistence.WaitConditionRepository
-	controls   persistence.AgentControlRequestRepository
+	controls   persistence.AgentControlCommandRepository
 	deliveries persistence.ContextDeliveryRepository
 	events     persistence.EventRepository
 	messages   AgentMessageQuery
@@ -98,7 +98,7 @@ type AgentView struct {
 	Executions      []domainexecution.AgentExecution
 	Waits           []domainworkflow.WaitCondition
 	Deliveries      []domainworkflow.ContextDelivery
-	Controls        []domainworkflow.AgentControlRequest
+	Controls        []domainworkflow.AgentControlCommand
 }
 
 // SessionView is the smallest durable detail view required to render a Session

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	commandprotocol "praxis/internal/command"
 	domainagent "praxis/internal/domain/agent"
@@ -21,7 +20,7 @@ import (
 )
 
 type InputFactory interface {
-	MaterializeExecutionInput(context.Context, domainagent.Agent, string, string, string) (domainexecution.ExecutionInputSnapshot, error)
+	MaterializeExecutionInput(context.Context, domainagent.Agent, string, string, string, []string) (domainexecution.ExecutionInputSnapshot, error)
 }
 type RuntimeActivator interface {
 	TryActivate(context.Context, domainfoundation.AgentID, runtimecontract.ExecutionLifecycle) error
@@ -221,7 +220,7 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 				}
 			}
 		}
-		input, err := s.inputs.MaterializeExecutionInput(txCtx, agent, "", "", "")
+		input, err := s.inputs.MaterializeExecutionInput(txCtx, agent, "", "", "", []string{params.ArtifactEntryRef})
 		if err != nil {
 			return err
 		}
@@ -235,13 +234,19 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 		if err := s.deliveries.Save(txCtx, delivery); err != nil {
 			return err
 		}
-		if err := s.appendEvent(txCtx, domainfoundation.EventDeliveryDelivered, delivery.SessionID, delivery.TargetAgentID, delivery.ID, "", nil, at); err != nil {
+		delivered := domainfoundation.NewDomainEvent(domainfoundation.EventDeliveryDelivered, at)
+		delivered.ID = domainfoundation.EventID(s.ids.New("event"))
+		delivered.SessionID, delivered.TargetAgentID, delivered.DeliveryID = delivery.SessionID, delivery.TargetAgentID, delivery.ID
+		if err := s.events.Append(txCtx, delivered); err != nil {
 			return err
 		}
 		if err := s.executions.Save(txCtx, execution); err != nil {
 			return err
 		}
-		if err := s.appendEvent(txCtx, domainfoundation.EventExecutionStarted, execution.SessionID, execution.AgentID, "", execution.ID, nil, at); err != nil {
+		started := domainfoundation.NewDomainEvent(domainfoundation.EventExecutionStarted, at)
+		started.ID = domainfoundation.EventID(s.ids.New("event"))
+		started.SessionID, started.AgentID, started.AgentExecutionID = execution.SessionID, execution.AgentID, execution.ID
+		if err := s.events.Append(txCtx, started); err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(struct{ ExecutionID string }{execution.ID.String()})
@@ -276,10 +281,4 @@ func waitTargets(wait *domainworkflow.WaitCondition, targetID string) bool {
 		}
 	}
 	return false
-}
-func (s *Service) appendEvent(ctx context.Context, eventType domainfoundation.DomainEventType, sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID, deliveryID domainfoundation.DeliveryID, executionID domainfoundation.AgentExecutionID, payload map[string]string, at time.Time) error {
-	event := domainfoundation.NewDomainEvent(eventType, at)
-	event.ID = domainfoundation.EventID(s.ids.New("event"))
-	event.SessionID, event.AgentID, event.DeliveryID, event.AgentExecutionID, event.Payload = sessionID, agentID, deliveryID, executionID, payload
-	return s.events.Append(ctx, event)
 }

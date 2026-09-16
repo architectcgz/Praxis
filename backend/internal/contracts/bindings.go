@@ -84,7 +84,7 @@ type AgentSnapshot struct {
 	Executions             []ExecutionSnapshot `json:"executions"`
 	WaitConditionIDs       []string            `json:"waitConditionIds"`
 	DeliveryIDs            []string            `json:"deliveryIds"`
-	ControlRequestIDs      []string            `json:"controlRequestIds"`
+	ControlCommandIDs      []string            `json:"controlCommandIds"`
 }
 
 // ExecutionSnapshot exposes the durable lifecycle and safe failure code of
@@ -117,13 +117,26 @@ type AgentHistoryItem struct {
 }
 
 type EventSnapshot struct {
-	ID          string            `json:"id"`
-	Type        string            `json:"type"`
-	OccurredAt  time.Time         `json:"occurredAt"`
-	SessionID   string            `json:"sessionId,omitempty"`
-	AgentID     string            `json:"agentId,omitempty"`
-	ExecutionID string            `json:"executionId,omitempty"`
-	Payload     map[string]string `json:"payload,omitempty"`
+	ID               string    `json:"id"`
+	Type             string    `json:"type"`
+	OccurredAt       time.Time `json:"occurredAt"`
+	ProjectID        string    `json:"projectId,omitempty"`
+	WorkspaceID      string    `json:"workspaceId,omitempty"`
+	SessionID        string    `json:"sessionId,omitempty"`
+	AgentID          string    `json:"agentId,omitempty"`
+	TargetAgentID    string    `json:"targetAgentId,omitempty"`
+	ExecutionID      string    `json:"executionId,omitempty"`
+	WorkItemID       string    `json:"workItemId,omitempty"`
+	DelegationID     string    `json:"delegationId,omitempty"`
+	DeliveryID       string    `json:"deliveryId,omitempty"`
+	ArtifactKind     string    `json:"artifactKind,omitempty"`
+	ArtifactID       string    `json:"artifactId,omitempty"`
+	ApprovalSource   string    `json:"approvalSource,omitempty"`
+	PolicyRevision   uint64    `json:"policyRevision,omitempty"`
+	ContextRevision  uint64    `json:"contextRevision,omitempty"`
+	ContextKind      string    `json:"contextKind,omitempty"`
+	ExecutionOutcome string    `json:"executionOutcome,omitempty"`
+	FailureCode      string    `json:"failureCode,omitempty"`
 }
 
 type ModelOption struct {
@@ -206,21 +219,25 @@ type ResumeRequest struct {
 	Content   string `json:"content"`
 }
 
-type ControlRequest struct {
-	RequestID string `json:"requestId"`
+type PauseAgentRequest struct {
+	CommandID string `json:"commandId"`
 	AgentID   string `json:"agentId"`
-	Kind      string `json:"kind"`
 }
 
-type ControlResponse struct {
-	RequestID         string `json:"requestId"`
+type CloseAgentRequest = PauseAgentRequest
+
+type AgentControlResponse struct {
+	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
 	TargetExecutionID string `json:"targetExecutionId,omitempty"`
 	Kind              string `json:"kind"`
 	Status            string `json:"status"`
-	ExistingRequest   bool   `json:"existingRequest"`
+	ExistingCommand   bool   `json:"existingCommand"`
 	CancellationError string `json:"cancellationError,omitempty"`
 }
+
+type PauseAgentResponse = AgentControlResponse
+type CloseAgentResponse = AgentControlResponse
 
 type QueueWorkRequest struct {
 	ID        string `json:"id"`

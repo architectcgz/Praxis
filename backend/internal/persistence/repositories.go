@@ -28,17 +28,6 @@ type WorkspaceRepository interface {
 	ListByProject(context.Context, domainfoundation.ProjectID, int) ([]domainworkspace.Workspace, error)
 }
 
-type DelegationRepository interface {
-	Get(context.Context, domainfoundation.DelegationRequestID) (domainworkflow.DelegationRequest, error)
-	Save(context.Context, domainworkflow.DelegationRequest) error
-}
-
-type WorkspaceLeaseRepository interface {
-	GetActiveByWorkspace(context.Context, domainfoundation.WorkspaceID) (domainworkspace.WorkspaceWriteLease, error)
-	Save(context.Context, domainworkspace.WorkspaceWriteLease) error
-	Release(context.Context, domainworkspace.WorkspaceWriteLease) error
-}
-
 type AgentResultRepository interface {
 	Get(context.Context, domainfoundation.AgentResultID) (domainworkflow.AgentResult, error)
 	Save(context.Context, domainworkflow.AgentResult) error

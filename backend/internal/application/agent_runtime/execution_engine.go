@@ -75,10 +75,14 @@ func (e *ExecutionEngine) RunWithSession(ctx context.Context, execution domainex
 	if !ok {
 		return failedExecution(errors.New("transcript does not implement the target message port"))
 	}
-	return e.run(ctx, execution, messages)
+	artifacts, ok := store.(sessionport.TranscriptContextStore)
+	if !ok {
+		return failedExecution(errors.New("transcript does not implement the context artifact port"))
+	}
+	return e.run(ctx, execution, messages, artifacts)
 }
 
-func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.AgentExecution, transcript sessionport.TranscriptMessageStore) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error) {
+func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.AgentExecution, transcript sessionport.TranscriptMessageStore, contextArtifacts sessionport.TranscriptContextStore) (domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode, error) {
 	output := newOutputBatcher(e.outputObserver, execution, e.clock)
 	defer output.Flush()
 	if ctx == nil {
@@ -92,11 +96,19 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 	if model.Stream == nil {
 		return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureProviderUnavailable, errors.New("execution model stream is unavailable")
 	}
-	messages, err := transcript.ListMessages(ctx, 0)
+	messages, err := transcript.ListExecutionMessages(
+		ctx, execution.Input.ContextSelection.TranscriptMessages, execution.ID,
+	)
 	if err != nil {
 		return failedExecution(err)
 	}
 	turnMessages := transcriptTurns(messages)
+	artifacts, err := contextArtifacts.ListContextArtifacts(ctx, execution.Input.ContextSelection.ArtifactEntryRefs)
+	if err != nil {
+		return failedExecution(err)
+	}
+	prefix := append(contextTurns(execution.Input.ContextSelection), artifactTurns(artifacts)...)
+	turnMessages = append(prefix, turnMessages...)
 	if len(turnMessages) == 0 {
 		return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureStorage,
 			&RuntimeError{Code: ErrorStorage, Message: "execution transcript has no messages"}
@@ -116,7 +128,7 @@ func (e *ExecutionEngine) run(ctx context.Context, execution domainexecution.Age
 		snapshot := ExecutionTurnSnapshot{
 			ExecutionID: execution.ID, SessionReference: execution.SessionID.String(), Messages: runtimecontract.CloneTurnMessages(turnMessages),
 			ContextManifest:  execution.Input.ContextManifest,
-			ContextSelection: execution.Input.ContextSelection, SystemPrompt: execution.Input.ContextManifest.Summary,
+			ContextSelection: execution.Input.ContextSelection, SystemPrompt: execution.Input.SystemPrompt,
 			Model: grant.Model, MaxOutputTokens: model.MaxOutputTokens, Tools: toolDefinitions(grant, e.tools),
 			Execution: execution.Input.Runtime, TurnNumber: turn, GrantID: grant.ID,
 		}
@@ -359,4 +371,32 @@ func failedExecution(err error) (domainexecution.ExecutionOutcome, domainexecuti
 		err = errors.New("execution engine failed")
 	}
 	return domainexecution.ExecutionFailed, domainexecution.ExecutionFailureRuntimeFailed, fmt.Errorf("execution engine: %w", err)
+}
+
+func contextTurns(selection domainexecution.ContextSelection) []TurnMessage {
+	turns := make([]TurnMessage, 0, len(selection.Entries))
+	for _, entry := range selection.Entries {
+		turns = append(turns, TurnMessage{
+			Role: TurnRoleUser,
+			Content: []TurnContentBlock{{
+				Kind: TurnContentText,
+				Text: fmt.Sprintf("[Session context: %s, revision %d]\n%s", entry.Kind, entry.Revision, entry.Content),
+			}},
+		})
+	}
+	return turns
+}
+
+func artifactTurns(artifacts []sessionport.AgentContextArtifact) []TurnMessage {
+	turns := make([]TurnMessage, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		turns = append(turns, TurnMessage{
+			Role: TurnRoleUser,
+			Content: []TurnContentBlock{{
+				Kind: TurnContentText,
+				Text: fmt.Sprintf("[Delivered context artifact: %s, id %s]\n%s", artifact.Kind, artifact.ArtifactID, artifact.Body),
+			}},
+		})
+	}
+	return turns
 }

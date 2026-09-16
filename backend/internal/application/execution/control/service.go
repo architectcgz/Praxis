@@ -3,14 +3,12 @@ package control
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	commandprotocol "praxis/internal/command"
 	domainagent "praxis/internal/domain/agent"
-	domaincommand "praxis/internal/domain/command"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainworkflow "praxis/internal/domain/workflow"
@@ -31,43 +29,40 @@ type RuntimeCancellation interface {
 
 // Config contains the ports required by the control application service.
 type Config struct {
-	Transactions    persistence.TxRunner
-	Agents          persistence.AgentRepository
-	Executions      persistence.AgentExecutionRepository
-	Controls        persistence.AgentControlRequestRepository
-	CommandReceipts persistence.CommandReceiptRepository
-	Events          persistence.EventRepository
-	Readiness       Readiness
-	Canceller       RuntimeCancellation
-	Clock           system.Clock
-	IDs             system.IDGenerator
+	Transactions persistence.TxRunner
+	Agents       persistence.AgentRepository
+	Executions   persistence.AgentExecutionRepository
+	Controls     persistence.AgentControlCommandRepository
+	Events       persistence.EventRepository
+	Readiness    Readiness
+	Canceller    RuntimeCancellation
+	Clock        system.Clock
+	IDs          system.IDGenerator
 }
 
 // Service owns the control-request transaction and post-commit cancellation.
 type Service struct {
-	tx              persistence.TxRunner
-	agents          persistence.AgentRepository
-	executions      persistence.AgentExecutionRepository
-	controls        persistence.AgentControlRequestRepository
-	commandReceipts persistence.CommandReceiptRepository
-	events          persistence.EventRepository
-	readiness       Readiness
-	canceller       RuntimeCancellation
-	clock           system.Clock
-	ids             system.IDGenerator
+	tx         persistence.TxRunner
+	agents     persistence.AgentRepository
+	executions persistence.AgentExecutionRepository
+	controls   persistence.AgentControlCommandRepository
+	events     persistence.EventRepository
+	readiness  Readiness
+	canceller  RuntimeCancellation
+	clock      system.Clock
+	ids        system.IDGenerator
 }
 
-// RequestParams identifies one Pause or Close command.
-type RequestParams struct {
-	RequestID domainfoundation.AgentControlRequestID
+// Params identifies one Pause or Close command.
+type Params struct {
+	CommandID domainfoundation.AgentControlCommandID
 	AgentID   domainfoundation.AgentID
-	Kind      domainworkflow.AgentControlKind
 }
 
-// RequestResult returns the durable control request and cancellation outcome.
-type RequestResult struct {
-	Request           domainworkflow.AgentControlRequest
-	ExistingRequest   bool
+// Result returns the durable control command and cancellation outcome.
+type Result struct {
+	Command           domainworkflow.AgentControlCommand
+	ExistingCommand   bool
 	CancellationError string
 }
 
@@ -81,7 +76,6 @@ func NewService(config Config) (*Service, error) {
 		{name: "agents", value: config.Agents},
 		{name: "executions", value: config.Executions},
 		{name: "controls", value: config.Controls},
-		{name: "command receipts", value: config.CommandReceipts},
 		{name: "events", value: config.Events},
 		{name: "readiness", value: config.Readiness},
 	} {
@@ -98,54 +92,49 @@ func NewService(config Config) (*Service, error) {
 		ids = system.SecureIDGenerator{}
 	}
 	return &Service{
-		tx:              config.Transactions,
-		agents:          config.Agents,
-		executions:      config.Executions,
-		controls:        config.Controls,
-		commandReceipts: config.CommandReceipts,
-		events:          config.Events,
-		readiness:       config.Readiness,
-		canceller:       config.Canceller,
-		clock:           clock,
-		ids:             ids,
+		tx:         config.Transactions,
+		agents:     config.Agents,
+		executions: config.Executions,
+		controls:   config.Controls,
+		events:     config.Events,
+		readiness:  config.Readiness,
+		canceller:  config.Canceller,
+		clock:      clock,
+		ids:        ids,
 	}, nil
 }
 
-// RequestControl records Pause or Close before signaling runtime cancellation.
-// A caller timeout cannot retract the committed control request.
-func (s *Service) RequestControl(ctx context.Context, params RequestParams) (RequestResult, error) {
+// PauseAgent records a durable pause command before signaling cancellation.
+func (s *Service) PauseAgent(ctx context.Context, params Params) (Result, error) {
+	return s.apply(ctx, params, domainworkflow.AgentControlPause)
+}
+
+// CloseAgent records a durable close command before signaling cancellation.
+func (s *Service) CloseAgent(ctx context.Context, params Params) (Result, error) {
+	return s.apply(ctx, params, domainworkflow.AgentControlClose)
+}
+
+// apply records Pause or Close before signaling runtime cancellation. A caller
+// timeout cannot retract the committed control command.
+func (s *Service) apply(ctx context.Context, params Params, kind domainworkflow.AgentControlKind) (Result, error) {
 	if ctx == nil {
-		return RequestResult{}, errors.New("control request context is required")
+		return Result{}, errors.New("control command context is required")
 	}
 	if !s.readiness.Ready() {
-		return RequestResult{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
+		return Result{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
-	if strings.TrimSpace(params.RequestID.String()) == "" || strings.TrimSpace(params.AgentID.String()) == "" ||
-		(params.Kind != domainworkflow.ControlPause && params.Kind != domainworkflow.ControlClose) {
-		return RequestResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
+	if strings.TrimSpace(params.CommandID.String()) == "" || strings.TrimSpace(params.AgentID.String()) == "" ||
+		(kind != domainworkflow.AgentControlPause && kind != domainworkflow.AgentControlClose) {
+		return Result{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	var result RequestResult
+	var result Result
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		digest := commandprotocol.ArgumentsDigest(struct {
-			AgentID domainfoundation.AgentID
-			Kind    domainworkflow.AgentControlKind
-		}{params.AgentID, params.Kind})
-		if _, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, domainfoundation.RequestID(params.RequestID), "request_control", digest); err != nil {
-			return err
-		} else if found {
-			control, err := s.controls.Get(txCtx, params.RequestID)
-			if err != nil {
-				return err
-			}
-			result = RequestResult{Request: control, ExistingRequest: true}
-			return nil
-		}
-		existing, err := s.controls.Get(txCtx, params.RequestID)
+		existing, err := s.controls.Get(txCtx, params.CommandID)
 		if err == nil {
-			if existing.AgentID != params.AgentID || existing.Kind != params.Kind {
+			if existing.AgentID != params.AgentID || existing.Kind != kind {
 				return commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 			}
-			result = RequestResult{Request: existing, ExistingRequest: true}
+			result = Result{Command: existing, ExistingCommand: true}
 			return nil
 		}
 		if !errors.Is(err, domainfoundation.ErrNotFound) {
@@ -156,7 +145,7 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 			return err
 		}
 		at := s.clock.Now()
-		control, err := domainworkflow.NewAgentControlRequest(params.RequestID, agent.ID, agent.CurrentExecutionID, params.Kind, at)
+		control, err := domainworkflow.NewAgentControlCommand(params.CommandID, agent.ID, agent.CurrentExecutionID, kind, at)
 		if err != nil {
 			return err
 		}
@@ -166,7 +155,7 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 			}
 		} else if agent.State == domainagent.AgentPausing {
 			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
-		} else if params.Kind == domainworkflow.ControlClose {
+		} else if kind == domainworkflow.AgentControlClose {
 			if err := agent.Close(at); err != nil {
 				return err
 			}
@@ -183,12 +172,13 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 			return err
 		}
 		eventType := domainfoundation.EventAgentPausing
-		if params.Kind == domainworkflow.ControlClose {
+		if kind == domainworkflow.AgentControlClose {
 			eventType = domainfoundation.EventAgentClosed
 		}
 		event := domainfoundation.DomainEvent{
 			ID:               domainfoundation.EventID(s.ids.New("event")),
 			Type:             eventType,
+			SessionID:        agent.SessionID,
 			AgentID:          agent.ID,
 			AgentExecutionID: control.TargetExecutionID,
 			OccurredAt:       at.UTC(),
@@ -196,36 +186,29 @@ func (s *Service) RequestControl(ctx context.Context, params RequestParams) (Req
 		if err := s.events.Append(txCtx, event); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(struct{ RequestID string }{control.ID.String()})
-		if err := s.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
-			RequestID: domainfoundation.RequestID(params.RequestID), Command: "request_control",
-			ArgumentsDigest: digest, ResultPayload: payload, CreatedAt: at,
-		}); err != nil {
-			return err
-		}
-		result.Request = control
+		result.Command = control
 		return nil
 	})
 	if err != nil {
-		return RequestResult{}, err
+		return Result{}, err
 	}
-	if result.ExistingRequest || result.Request.Status == domainworkflow.ControlApplied || s.canceller == nil {
+	if result.ExistingCommand || result.Command.Status == domainworkflow.AgentControlApplied || s.canceller == nil {
 		return result, nil
 	}
 	if err := s.canceller.Cancel(
 		context.WithoutCancel(ctx),
-		result.Request.AgentID,
-		result.Request.TargetExecutionID,
-		cancellationOutcome(result.Request.Kind),
+		result.Command.AgentID,
+		result.Command.TargetExecutionID,
+		cancellationOutcome(result.Command.Kind),
 	); err != nil {
 		result.CancellationError = err.Error()
 	}
 	return result, nil
 }
 
-// ApplyControlRequest finishes a control whose target execution is already
+// ApplyPendingAgentControl finishes a control whose target execution is already
 // durable-settled. Recovery calls this after lost runtime notifications.
-func (s *Service) ApplyControlRequest(ctx context.Context, requestID domainfoundation.AgentControlRequestID) error {
+func (s *Service) ApplyPendingAgentControl(ctx context.Context, requestID domainfoundation.AgentControlCommandID) error {
 	if ctx == nil {
 		return errors.New("apply control request context is required")
 	}
@@ -237,7 +220,7 @@ func (s *Service) ApplyControlRequest(ctx context.Context, requestID domainfound
 		if err != nil {
 			return err
 		}
-		if control.Status == domainworkflow.ControlApplied {
+		if control.Status == domainworkflow.AgentControlApplied {
 			return nil
 		}
 		agent, err := s.agents.Get(txCtx, control.AgentID)
@@ -254,7 +237,7 @@ func (s *Service) ApplyControlRequest(ctx context.Context, requestID domainfound
 			}
 		}
 		at := s.clock.Now()
-		if control.Kind == domainworkflow.ControlClose {
+		if control.Kind == domainworkflow.AgentControlClose {
 			if agent.State == domainagent.AgentExecuting || agent.State == domainagent.AgentPausing {
 				return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 			}
@@ -273,7 +256,7 @@ func (s *Service) ApplyControlRequest(ctx context.Context, requestID domainfound
 }
 
 func cancellationOutcome(kind domainworkflow.AgentControlKind) domainexecution.ExecutionOutcome {
-	if kind == domainworkflow.ControlPause {
+	if kind == domainworkflow.AgentControlPause {
 		return domainexecution.ExecutionPaused
 	}
 	return domainexecution.ExecutionInterrupted

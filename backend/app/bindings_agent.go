@@ -38,7 +38,7 @@ func (b *AgentBindings) GetAgent(agentID string) (response contracts.AgentSnapsh
 		Executions:             make([]contracts.ExecutionSnapshot, 0, len(agentView.Executions)),
 		WaitConditionIDs:       make([]string, 0, len(agentView.Waits)),
 		DeliveryIDs:            make([]string, 0, len(agentView.Deliveries)),
-		ControlRequestIDs:      make([]string, 0, len(agentView.Controls)),
+		ControlCommandIDs:      make([]string, 0, len(agentView.Controls)),
 	}
 	for _, execution := range agentView.Executions {
 		result.ExecutionIDs = append(result.ExecutionIDs, execution.ID.String())
@@ -60,7 +60,7 @@ func (b *AgentBindings) GetAgent(agentID string) (response contracts.AgentSnapsh
 		result.DeliveryIDs = append(result.DeliveryIDs, delivery.ID.String())
 	}
 	for _, control := range agentView.Controls {
-		result.ControlRequestIDs = append(result.ControlRequestIDs, control.ID.String())
+		result.ControlCommandIDs = append(result.ControlCommandIDs, control.ID.String())
 	}
 	return result, nil
 }

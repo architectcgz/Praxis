@@ -1,6 +1,10 @@
 package execution
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 )
@@ -38,6 +42,7 @@ const (
 type ExecutionInputSnapshot struct {
 	ContextManifest  ContextManifest
 	ContextSelection ContextSelection
+	SystemPrompt     string
 	Security         ExecutionSecuritySnapshot
 	Runtime          RuntimeExecutionSnapshot
 }
@@ -48,6 +53,19 @@ func (s ExecutionInputSnapshot) Validate() error {
 	}
 	if err := s.ContextSelection.Validate(); err != nil {
 		return fmtField("executionInput.contextSelection", err)
+	}
+	if strings.TrimSpace(s.SystemPrompt) == "" {
+		return invalidValue("executionInput.systemPrompt", "system prompt is required")
+	}
+	entryIDs := make([]ContextEntryID, len(s.ContextSelection.Entries))
+	for index, entry := range s.ContextSelection.Entries {
+		entryIDs[index] = entry.ID
+	}
+	if s.ContextManifest.SessionRevision != s.ContextSelection.Revision ||
+		s.ContextManifest.SelectionDigest != s.ContextSelection.Digest ||
+		!slices.Equal(s.ContextManifest.EntryIDs, entryIDs) ||
+		!slices.Equal(s.ContextManifest.ArtifactEntryRefs, s.ContextSelection.ArtifactEntryRefs) {
+		return invalidValue("executionInput.contextManifest", "manifest does not match the selected context")
 	}
 	if err := s.Security.Validate(); err != nil {
 		return fmtField("executionInput.security", err)
@@ -64,28 +82,116 @@ func (s ExecutionInputSnapshot) Validate() error {
 }
 
 type ContextSelection struct {
-	Revision       uint64
-	EntryRevisions []uint64
-	Summary        string
+	Revision                  uint64
+	Entries                   []SessionContextEntry
+	TranscriptThroughSequence uint64
+	TranscriptMessages        []TranscriptMessageRef
+	ArtifactEntryRefs         []string
+	Digest                    string
+}
+
+type TranscriptMessageRef struct {
+	Sequence    uint64
+	ExecutionID AgentExecutionID
+	MessageID   string
+	Digest      string
+}
+
+func NewContextSelection(revision uint64, entries []SessionContextEntry, transcriptThroughSequence uint64, transcriptMessages []TranscriptMessageRef, artifactEntryRefs []string) (ContextSelection, error) {
+	selection := ContextSelection{
+		Revision: revision, Entries: slices.Clone(entries), TranscriptThroughSequence: transcriptThroughSequence,
+		TranscriptMessages: slices.Clone(transcriptMessages), ArtifactEntryRefs: slices.Clone(artifactEntryRefs),
+	}
+	digest, err := selectionDigest(selection.Revision, selection.Entries, selection.TranscriptThroughSequence, selection.TranscriptMessages, selection.ArtifactEntryRefs)
+	if err != nil {
+		return ContextSelection{}, err
+	}
+	selection.Digest = digest
+	if err := selection.Validate(); err != nil {
+		return ContextSelection{}, err
+	}
+	return selection, nil
 }
 
 func (s ContextSelection) Validate() error {
 	if s.Revision == 0 {
 		return invalidValue("contextSelection.revision", "revision must be positive")
 	}
-	if s.Summary == "" && len(s.EntryRevisions) == 0 {
+	if len(s.Entries) == 0 {
 		return invalidValue("contextSelection", "selection cannot be empty")
 	}
-	for _, revision := range s.EntryRevisions {
-		if revision == 0 || revision > s.Revision {
+	var sessionID SessionID
+	var previousRevision uint64
+	for _, entry := range s.Entries {
+		if err := entry.Validate(); err != nil {
+			return fmtField("contextSelection.entries", err)
+		}
+		if entry.Revision > s.Revision || entry.Revision <= previousRevision {
 			return invalidValue("contextSelection.entryRevisions", "entry revision is outside the selected context")
 		}
+		if sessionID == "" {
+			sessionID = entry.SessionID
+		} else if entry.SessionID != sessionID {
+			return invalidValue("contextSelection.entries", "entries belong to different sessions")
+		}
+		previousRevision = entry.Revision
+	}
+	var previousSequence uint64
+	seenMessages := make(map[string]struct{}, len(s.TranscriptMessages))
+	for _, message := range s.TranscriptMessages {
+		if message.Sequence == 0 || message.Sequence > s.TranscriptThroughSequence || message.Sequence <= previousSequence ||
+			idIsEmpty(string(message.ExecutionID)) || idIsEmpty(message.MessageID) || idIsEmpty(message.Digest) {
+			return invalidValue("contextSelection.transcriptMessages", "transcript message reference is invalid")
+		}
+		key := message.ExecutionID.String() + "\x00" + message.MessageID
+		if _, ok := seenMessages[key]; ok {
+			return invalidValue("contextSelection.transcriptMessages", "transcript message reference is duplicated")
+		}
+		seenMessages[key] = struct{}{}
+		previousSequence = message.Sequence
+	}
+	seenArtifacts := make(map[string]struct{}, len(s.ArtifactEntryRefs))
+	for _, ref := range s.ArtifactEntryRefs {
+		if strings.TrimSpace(ref) == "" || strings.ContainsAny(ref, "\x00\r\n") {
+			return invalidValue("contextSelection.artifactEntryRefs", "artifact entry reference is invalid")
+		}
+		if _, ok := seenArtifacts[ref]; ok {
+			return invalidValue("contextSelection.artifactEntryRefs", "artifact entry reference is duplicated")
+		}
+		seenArtifacts[ref] = struct{}{}
+	}
+	digest, err := selectionDigest(s.Revision, s.Entries, s.TranscriptThroughSequence, s.TranscriptMessages, s.ArtifactEntryRefs)
+	if err != nil {
+		return err
+	}
+	if s.Digest != digest {
+		return invalidValue("contextSelection.digest", "selection digest does not match entries")
 	}
 	return nil
 }
 
 func (s ContextSelection) Snapshot() ContextSelection {
-	return ContextSelection{Revision: s.Revision, EntryRevisions: append([]uint64(nil), s.EntryRevisions...), Summary: s.Summary}
+	return ContextSelection{
+		Revision: s.Revision, Entries: slices.Clone(s.Entries),
+		TranscriptThroughSequence: s.TranscriptThroughSequence,
+		TranscriptMessages:        slices.Clone(s.TranscriptMessages),
+		ArtifactEntryRefs:         slices.Clone(s.ArtifactEntryRefs), Digest: s.Digest,
+	}
+}
+
+func selectionDigest(revision uint64, entries []SessionContextEntry, transcriptThroughSequence uint64, transcriptMessages []TranscriptMessageRef, artifactEntryRefs []string) (string, error) {
+	encoded, err := json.Marshal(struct {
+		Revision                  uint64                 `json:"revision"`
+		Entries                   []SessionContextEntry  `json:"entries"`
+		TranscriptThroughSequence uint64                 `json:"transcriptThroughSequence"`
+		TranscriptMessages        []TranscriptMessageRef `json:"transcriptMessages"`
+		ArtifactEntryRefs         []string               `json:"artifactEntryRefs"`
+	}{revision, entries, transcriptThroughSequence, transcriptMessages, artifactEntryRefs})
+	if err != nil {
+		return "", invalidValue("contextSelection", "selection cannot be encoded")
+	}
+	digest := sha256.Sum256(encoded)
+	return "sha256-" + hex.EncodeToString(digest[:]), nil
 }
 
 type AgentExecution struct {
@@ -144,6 +250,7 @@ func NewQueuedWorkExecution(
 	sessionID SessionID,
 	agentID AgentID,
 	workItemID WorkItemID,
+	prompt string,
 	input ExecutionInputSnapshot,
 	at time.Time,
 ) (AgentExecution, error) {
@@ -154,7 +261,8 @@ func NewQueuedWorkExecution(
 		ID: id, SessionID: sessionID, AgentID: agentID,
 		ContextRevision: input.ContextSelection.Revision,
 		RequestID:       RequestID("work:" + workItemID.String()), WorkItemID: workItemID,
-		Reason: ExecutionQueuedWork, Status: ExecutionStarting, Input: input, CreatedAt: at.UTC(),
+		Reason: ExecutionQueuedWork, Status: ExecutionStarting, StartContent: strings.TrimSpace(prompt),
+		Input: input, CreatedAt: at.UTC(),
 	}
 	if err := execution.Validate(); err != nil {
 		return AgentExecution{}, err
@@ -172,6 +280,9 @@ func (e AgentExecution) Validate() error {
 	}
 	if e.Reason == ExecutionQueuedWork && idIsEmpty(string(e.WorkItemID)) {
 		return invalidValue("agentExecution.workItemID", "queued work execution requires a work item")
+	}
+	if e.Reason == ExecutionQueuedWork && strings.TrimSpace(e.StartContent) == "" && e.StartContentDigest == "" {
+		return invalidValue("agentExecution.startContent", "queued work execution requires its task prompt")
 	}
 	if e.Reason != ExecutionQueuedWork && e.WorkItemID != "" {
 		return invalidValue("agentExecution.workItemID", "only queued work executions may reference a work item")

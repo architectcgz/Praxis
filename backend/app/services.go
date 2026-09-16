@@ -53,7 +53,8 @@ type EventQueries interface {
 type AgentCommands interface {
 	SendInput(context.Context, start.SendInputParams) (start.Result, error)
 	Resume(context.Context, start.ResumeParams) (start.Result, error)
-	RequestControl(context.Context, control.RequestParams) (control.RequestResult, error)
+	PauseAgent(context.Context, control.Params) (control.Result, error)
+	CloseAgent(context.Context, control.Params) (control.Result, error)
 	EnqueueWork(context.Context, queue.EnqueueParams) (queue.EnqueueResult, error)
 }
 

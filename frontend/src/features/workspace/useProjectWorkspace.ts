@@ -18,7 +18,8 @@ import {
     listProjects,
     listSessions,
     loadReadiness,
-    requestControl,
+    closeAgent,
+    pauseAgent,
     sendInput,
     subscribeAgentOutput,
     isApiErrorCode,
@@ -26,7 +27,7 @@ import {
 } from '../../api'
 import { readableError } from '../../shared/errors'
 import { readRememberedSession, rememberSelectedSession } from './sessionPreference'
-import { StreamingOutput } from '../sessions/types'
+import { PendingUserMessage, StreamingOutput } from '../sessions/types'
 
 type StreamingOutputs = Record<string, StreamingOutput>
 
@@ -46,6 +47,24 @@ function clearDurableStreamingOutput(outputs: StreamingOutputs, agentID: string,
     return remaining
 }
 
+// Drop optimistic messages once the durable transcript contains their execution's user message.
+function clearDurablePendingUserMessages(pending: PendingUserMessage[], history: AgentHistoryItem[]): PendingUserMessage[] {
+    if (pending.length === 0) {
+        return pending
+    }
+    const persistedExecutionIDs = new Set<string>()
+    for (const item of history) {
+        if (item.message?.role === 'user' && item.message.executionId) {
+            persistedExecutionIDs.add(item.message.executionId)
+        }
+    }
+    if (persistedExecutionIDs.size === 0) {
+        return pending
+    }
+    const remaining = pending.filter((message) => message.executionId === '' || !persistedExecutionIDs.has(message.executionId))
+    return remaining.length === pending.length ? pending : remaining
+}
+
 export function useProjectWorkspace() {
     const [health, setHealth] = useState<HealthSnapshot>({ ready: false })
     const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -57,6 +76,7 @@ export function useProjectWorkspace() {
     const [agentLoading, setAgentLoading] = useState(false)
     const [history, setHistory] = useState<AgentHistoryItem[]>([])
     const [streamingOutputs, setStreamingOutputs] = useState<StreamingOutputs>({})
+    const [pendingUserMessages, setPendingUserMessages] = useState<PendingUserMessage[]>([])
     const [awaitingOutput, setAwaitingOutput] = useState(false)
     const [models, setModels] = useState<ModelOption[]>([])
     const [selectedProviderID, setSelectedProviderID] = useState('')
@@ -173,6 +193,7 @@ export function useProjectWorkspace() {
             setAgentLoading(false)
             setHistory(nextHistory)
             setStreamingOutputs((current) => clearDurableStreamingOutput(current, nextAgentID, nextHistory))
+            setPendingUserMessages((current) => clearDurablePendingUserMessages(current, nextHistory))
         } catch (err) {
             if (!isCurrentRequest()) {
                 return
@@ -306,6 +327,7 @@ export function useProjectWorkspace() {
             setAgentLoading(false)
             setHistory(nextHistory)
             setStreamingOutputs((current) => clearDurableStreamingOutput(current, id, nextHistory))
+            setPendingUserMessages((current) => clearDurablePendingUserMessages(current, nextHistory))
         } catch (err) {
             if (requestID !== viewRequestRef.current) {
                 return
@@ -325,30 +347,41 @@ export function useProjectWorkspace() {
             setErrorCode(API_ERROR_CODES.modelNotConfigured)
             return
         }
+        const requestID = crypto.randomUUID()
+        const content = input
+        const agentID = agent?.id || ''
         setBusy(true)
         setAwaitingOutput(true)
+        setPendingUserMessages((current) => [
+            ...current,
+            { requestId: requestID, executionId: '', sessionId: session.id, agentId: agentID, content, at: new Date().toISOString() },
+        ])
         setError('')
         setErrorCode(undefined)
         try {
-            await sendInput({
+            const response = await sendInput({
                 sessionId: session.id,
-                agentId: agent?.id || '',
-                requestId: crypto.randomUUID(),
-                content: input,
+                agentId: agentID,
+                requestId: requestID,
+                content,
                 providerId: selectedProviderID,
                 modelId: selectedModelID,
                 reasoningLevel: reasoning,
             })
+            setPendingUserMessages((current) => current.map((message) => (
+                message.requestId === requestID ? { ...message, executionId: response.executionId } : message
+            )))
             setInput('')
             await refresh()
         } catch (err) {
+            setPendingUserMessages((current) => current.filter((message) => message.requestId !== requestID))
             setAwaitingOutput(false)
             setError(readableError(err))
             setErrorCode(apiErrorCode(err))
         } finally {
             setBusy(false)
         }
-    }, [agent, busy, input, reasoning, refresh, selectedProviderID, selectedModelID])
+    }, [agent, busy, input, reasoning, refresh, session, selectedProviderID, selectedModelID])
 
     const control = useCallback(async (kind: 'pause' | 'close') => {
         if (!agent || busy) {
@@ -359,11 +392,12 @@ export function useProjectWorkspace() {
         setError('')
         setErrorCode(undefined)
         try {
-            await requestControl({
-                requestId: crypto.randomUUID(),
-                agentId: agent.id,
-                kind,
-            })
+            const commandId = crypto.randomUUID()
+            if (kind === 'pause') {
+                await pauseAgent({ commandId, agentId: agent.id })
+            } else {
+                await closeAgent({ commandId, agentId: agent.id })
+            }
             await refresh()
         } catch (err) {
             setError(readableError(err))
@@ -396,6 +430,7 @@ export function useProjectWorkspace() {
         errorCode,
         health,
         history,
+        pendingUserMessages,
         streamingOutput,
         awaitingOutput,
         input,

@@ -74,7 +74,7 @@ internal/application/execution/
 │   └── resume.go          ResumeParams、Resume
 ├── control/               execution 暂停与关闭控制
 │   ├── service.go         Service、Config、端口和构造函数
-│   └── request_control.go  RequestControlParams、RequestControl、ApplyControlRequest
+│   └── agent_control.go    PauseAgent、CloseAgent、ApplyPendingAgentControl
 ├── queue/                 execution 排队工作
 │   ├── service.go         Service、Config、端口和构造函数
 │   └── queue.go           入队、出队和启动协调
@@ -104,7 +104,7 @@ type Service struct {
 }
 ```
 
-具体用例逻辑归对应业务子包。应用层输入使用各用例文件中的 `Params`；创建 execution 时，`start` 应用服务将参数和 core 端口读取结果组装为不可变的 `domain/execution.ExecutionInputSnapshot`，固定上下文选择、安全快照和 runtime 参数。`start/send_input.go` 创建新的 execution；`start/resume.go` 从 paused 或 interrupted 状态创建后续 execution；`control/request_control.go` 持久化 Pause 或 Close 请求并在提交后通知 AgentRuntime；`settlement/settlement.go` 接收 AgentRuntime 回调并更新权威执行状态。
+具体用例逻辑归对应业务子包。应用层输入使用各用例文件中的 `Params`；创建 execution 时，`start` 应用服务将参数和 core 端口读取结果组装为不可变的 `domain/execution.ExecutionInputSnapshot`，固定上下文选择、安全快照和 runtime 参数。`start/send_input.go` 创建新的 execution；`start/resume.go` 从 paused 或 interrupted 状态创建后续 execution；`control/agent_control.go` 持久化 Pause 或 Close 命令并在提交后通知 AgentRuntime；`settlement/settlement.go` 接收 AgentRuntime 回调并更新权威执行状态。
 
 ### 3.2 Project、Session 与 Agent
 
@@ -217,4 +217,4 @@ Go 包路径使用简短、全小写、无下划线的名称。文件名按用�
 - `<use_case>.go`：参数、结果和用例实现；
 - `<projection>.go`：内层只读快照和列表投影；
 - `repository`、`adapter`、`manager` 不作为无具体语义的通用包名；
-- 文件名中的下划线只用于分隔语义，例如 `send_input.go` 和 `request_control.go`。
+- 文件名中的下划线只用于分隔语义，例如 `send_input.go` 和 `agent_control.go`。

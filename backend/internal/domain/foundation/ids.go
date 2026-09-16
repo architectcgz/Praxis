@@ -19,10 +19,11 @@ type (
 	ToolInvocationID      string
 	RequestID             string
 	WaitConditionID       string
-	AgentControlRequestID string
+	AgentControlCommandID string
 	WorkItemID            string
 	CapabilityGrantID     string
 	ContextManifestID     string
+	ContextEntryID        string
 	DelegationRequestID   string
 	WorkspaceLeaseID      string
 	AgentResultID         string
@@ -57,14 +58,15 @@ func NewRequestID() RequestID               { return RequestID(newOpaqueID("requ
 func NewWaitConditionID() WaitConditionID {
 	return WaitConditionID(newOpaqueID("wait"))
 }
-func NewAgentControlRequestID() AgentControlRequestID {
-	return AgentControlRequestID(newOpaqueID("control"))
+func NewAgentControlCommandID() AgentControlCommandID {
+	return AgentControlCommandID(newOpaqueID("control"))
 }
 func NewWorkItemID() WorkItemID { return WorkItemID(newOpaqueID("work")) }
 func NewCapabilityGrantID() CapabilityGrantID {
 	return CapabilityGrantID(newOpaqueID("grant"))
 }
 func NewContextManifestID() ContextManifestID { return ContextManifestID(newOpaqueID("manifest")) }
+func NewContextEntryID() ContextEntryID       { return ContextEntryID(newOpaqueID("context")) }
 func NewDelegationRequestID() DelegationRequestID {
 	return DelegationRequestID(newOpaqueID("delegation"))
 }
@@ -83,12 +85,13 @@ func (id AgentExecutionID) String() string { return string(id) }
 func (id ToolInvocationID) String() string { return string(id) }
 func (id RequestID) String() string        { return string(id) }
 func (id WaitConditionID) String() string  { return string(id) }
-func (id AgentControlRequestID) String() string {
+func (id AgentControlCommandID) String() string {
 	return string(id)
 }
 func (id WorkItemID) String() string          { return string(id) }
 func (id CapabilityGrantID) String() string   { return string(id) }
 func (id ContextManifestID) String() string   { return string(id) }
+func (id ContextEntryID) String() string      { return string(id) }
 func (id DelegationRequestID) String() string { return string(id) }
 func (id WorkspaceLeaseID) String() string    { return string(id) }
 func (id AgentResultID) String() string       { return string(id) }

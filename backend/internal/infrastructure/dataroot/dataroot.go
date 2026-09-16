@@ -24,6 +24,7 @@ type DataRoot struct {
 	Projects             string
 	Runtime              string
 	Database             string
+	Documents            string
 	Sessions             string
 	Attachments          string
 	Notes                string
@@ -63,6 +64,7 @@ func Resolve(root string) (DataRoot, error) {
 		Projects:             filepath.Join(root, "projects"),
 		Runtime:              runtime,
 		Database:             filepath.Join(runtime, "praxis.db"),
+		Documents:            filepath.Join(runtime, "documents"),
 		Sessions:             filepath.Join(runtime, "agent-sessions"),
 		Attachments:          filepath.Join(runtime, "attachments"),
 		Notes:                filepath.Join(runtime, "notes"),
@@ -86,6 +88,7 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 		d.Config,
 		d.Projects,
 		d.Runtime,
+		d.Documents,
 		d.Sessions,
 		d.Attachments,
 		d.Notes,

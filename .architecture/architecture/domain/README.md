@@ -55,7 +55,7 @@ backend/internal/domain/
 └── workflow/
     ├── artifacts.go          AgentResult、Briefing 和审核状态
     ├── delegation.go         Agent 间 DelegationRequest
-    ├── orchestration.go      WaitCondition、ControlRequest 和 ContextDelivery
+    ├── orchestration.go      WaitCondition、AgentControlCommand 和 ContextDelivery
     ├── queuedwork.go         排队工作及其 execution 绑定
     ├── note.go               Note 实体
     └── helpers.go             workflow package 的校验、事件和别名
@@ -146,7 +146,7 @@ Project、Workspace 和 Session 只表达资源身份与领域状态，不执行
 |---|---|
 | `workflow/artifacts.go` | 定义 AgentResult、Briefing、审核状态以及提交、批准、拒绝状态转换。AgentResult 是结构化执行结果；Briefing 是面向指定目标 Agent 的内部简报投递载荷。 |
 | `workflow/delegation.go` | 定义 Agent 间委派请求、目标、状态和批准/拒绝/取消转换。 |
-| `workflow/orchestration.go` | 定义 WaitCondition、AgentControlRequest 和 ContextDelivery 的状态、目标和幂等转换。 |
+| `workflow/orchestration.go` | 定义 WaitCondition、AgentControlCommand 和 ContextDelivery 的状态、目标和幂等转换。 |
 | `workflow/queuedwork.go` | 定义独立排队工作、任务正文、execution 绑定和结算转换。 |
 | `workflow/note.go` | 定义与 Session 关联的 Note 内容、范围和生命周期。 |
 | `workflow/helpers.go` | 提供 Workflow 对象共用的校验、事件构造、切片复制和 domain package 别名。 |

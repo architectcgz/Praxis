@@ -58,7 +58,7 @@ func AcquireWorkspaceWriteLease(
 	}
 	event := newDomainEvent(EventLeaseAcquired, at)
 	event.AgentID = ownerAgentID
-	event.Payload = map[string]string{"workspaceId": lease.WorkspaceID.String()}
+	event.WorkspaceID = lease.WorkspaceID
 	return lease, event, nil
 }
 
@@ -91,6 +91,6 @@ func (l *WorkspaceWriteLease) Release(at time.Time) (DomainEvent, error) {
 	l.State, l.ReleasedAt = LeaseReleased, at.UTC()
 	event := newDomainEvent(EventLeaseReleased, at)
 	event.AgentID = l.OwnerAgentID
-	event.Payload = map[string]string{"workspaceId": l.WorkspaceID.String()}
+	event.WorkspaceID = l.WorkspaceID
 	return event, nil
 }

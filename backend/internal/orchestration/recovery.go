@@ -28,7 +28,7 @@ type StartingExecutionActivator interface {
 type RecoveryCommands interface {
 	SetReady(bool)
 	SettleRuntimeExecution(context.Context, domainfoundation.AgentExecutionID, domainexecution.ExecutionOutcome, domainexecution.ExecutionFailureCode) error
-	ApplyControlRequest(context.Context, domainfoundation.AgentControlRequestID) error
+	ApplyPendingAgentControl(context.Context, domainfoundation.AgentControlCommandID) error
 	StartNextQueuedWork(context.Context, domainfoundation.AgentID) (bool, error)
 	IsAgentUnavailable(error) bool
 }
@@ -38,7 +38,7 @@ type RecoveryCoordinatorConfig struct {
 	Contexts   persistence.SessionContextRepository
 	Executions persistence.AgentExecutionRepository
 	Waits      persistence.WaitConditionRepository
-	Controls   persistence.AgentControlRequestRepository
+	Controls   persistence.AgentControlCommandRepository
 	Deliveries persistence.ContextDeliveryRepository
 	Commands   RecoveryCommands
 	Lifecycle  runtimecontract.ExecutionLifecycle
@@ -54,7 +54,7 @@ type RecoveryCoordinator struct {
 	contexts   persistence.SessionContextRepository
 	executions persistence.AgentExecutionRepository
 	waits      persistence.WaitConditionRepository
-	controls   persistence.AgentControlRequestRepository
+	controls   persistence.AgentControlCommandRepository
 	deliveries persistence.ContextDeliveryRepository
 	commands   RecoveryCommands
 	lifecycle  runtimecontract.ExecutionLifecycle
@@ -202,7 +202,7 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context) (RecoveryReport, erro
 			return report, fmt.Errorf("list control requests for agent %s: %w", agent.ID, err)
 		}
 		for _, control := range controls {
-			if err := c.commands.ApplyControlRequest(ctx, control.ID); err != nil {
+			if err := c.commands.ApplyPendingAgentControl(ctx, control.ID); err != nil {
 				if c.commands.IsAgentUnavailable(err) {
 					continue
 				}
@@ -292,14 +292,14 @@ func verifySessionContexts(ctx context.Context, repository persistence.SessionCo
 	return nil
 }
 
-func listRecoverableControls(ctx context.Context, repository persistence.AgentControlRequestRepository, agentID domainfoundation.AgentID) ([]domainworkflow.AgentControlRequest, error) {
+func listRecoverableControls(ctx context.Context, repository persistence.AgentControlCommandRepository, agentID domainfoundation.AgentID) ([]domainworkflow.AgentControlCommand, error) {
 	paged, ok := repository.(persistence.AgentControlRecoveryRepository)
 	if !ok {
 		return nil, errors.New("agent control recovery cursor is unavailable")
 	}
 	const pageSize = 512
-	result := make([]domainworkflow.AgentControlRequest, 0)
-	var after domainfoundation.AgentControlRequestID
+	result := make([]domainworkflow.AgentControlCommand, 0)
+	var after domainfoundation.AgentControlCommandID
 	for {
 		page, err := paged.ListOpenByAgentAfter(ctx, agentID, after, pageSize)
 		if err != nil {

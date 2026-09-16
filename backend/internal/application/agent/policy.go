@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 
 	commandprotocol "praxis/internal/command"
 	domaincommand "praxis/internal/domain/command"
@@ -132,7 +131,7 @@ func (s *Service) UpdatePolicy(ctx context.Context, params UpdatePolicyParams) (
 		event := domainfoundation.NewDomainEvent(domainfoundation.EventAgentPolicyUpdated, agent.UpdatedAt)
 		event.ID = domainfoundation.EventID(s.ids.New("event"))
 		event.SessionID, event.AgentID = agent.SessionID, agent.ID
-		event.Payload = map[string]string{"revision": strconv.FormatUint(params.Policy.Revision, 10)}
+		event.PolicyRevision = params.Policy.Revision
 		if err := s.events.Append(txCtx, event); err != nil {
 			return err
 		}

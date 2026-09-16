@@ -27,7 +27,7 @@ type Config struct {
 	Agents       persistence.AgentRepository
 	Executions   persistence.AgentExecutionRepository
 	QueuedWork   persistence.QueuedWorkRepository
-	Controls     persistence.AgentControlRequestRepository
+	Controls     persistence.AgentControlCommandRepository
 	Events       persistence.EventRepository
 	Clock        system.Clock
 	IDs          system.IDGenerator
@@ -38,7 +38,7 @@ type Service struct {
 	agents     persistence.AgentRepository
 	executions persistence.AgentExecutionRepository
 	queuedWork persistence.QueuedWorkRepository
-	controls   persistence.AgentControlRequestRepository
+	controls   persistence.AgentControlCommandRepository
 	events     persistence.EventRepository
 	clock      system.Clock
 	ids        system.IDGenerator
@@ -196,7 +196,7 @@ func (s *Service) Settle(ctx context.Context, params Params) error {
 			if control.TargetExecutionID != execution.ID {
 				continue
 			}
-			if control.Kind == domainworkflow.ControlClose {
+			if control.Kind == domainworkflow.AgentControlClose {
 				if err := agent.Close(at); err != nil {
 					return err
 				}
@@ -242,7 +242,8 @@ func (s *Service) appendEvent(ctx context.Context, eventType domainfoundation.Do
 	event := domainfoundation.NewDomainEvent(eventType, at)
 	event.ID = domainfoundation.EventID(s.ids.New("event"))
 	event.SessionID, event.AgentID, event.WorkItemID, event.AgentExecutionID = sessionID, agentID, workID, executionID
-	event.Payload = map[string]string{"outcome": string(params.Outcome), "failureCode": string(params.FailureCode)}
+	event.ExecutionOutcome = string(params.Outcome)
+	event.FailureCode = string(params.FailureCode)
 	return s.events.Append(ctx, event)
 }
 

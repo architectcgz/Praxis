@@ -34,7 +34,7 @@ func TestSecurityResolverAllowsWorkspaceRootAndFreezesPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := domaincontext.NewContextManifest("manifest_test", "test context", nil, time.Now())
+	manifest, err := testContextManifest()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestSecurityResolverRejectsWiderRestriction(t *testing.T) {
 	}, domainsecurity.SandboxPolicy{Mode: domainsecurity.SandboxReadOnly}, domainsecurity.ApprovalPolicy{Mode: domainsecurity.ApprovalAlwaysAsk})
 	baseline, _ := systemSecurityBaseline()
 	resolver, _ := NewSecurityResolver(baseline, fixedIDs{})
-	manifest, _ := domaincontext.NewContextManifest("manifest_test", "test context", nil, time.Now())
+	manifest, _ := testContextManifest()
 	_, err := resolver.Resolve(policy, domainsecurity.ExecutionRestrictions{ReadScopes: []string{root}}, workspace,
 		domainmodel.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
 	if err == nil {
@@ -79,7 +79,7 @@ func TestSecurityResolverUsesNarrowerBaselineScope(t *testing.T) {
 		AllowedTools: []domainsecurity.ToolName{domainsecurity.ToolReadFile}, ReadScopes: []string{source},
 	}, domainsecurity.SandboxPolicy{Mode: domainsecurity.SandboxReadOnly}, domainsecurity.ApprovalPolicy{Mode: domainsecurity.ApprovalAlwaysAsk})
 	resolver, _ := NewSecurityResolver(baseline, fixedIDs{})
-	manifest, _ := domaincontext.NewContextManifest("manifest_test", "test context", nil, time.Now())
+	manifest, _ := testContextManifest()
 	snapshot, err := resolver.Resolve(policy, domainsecurity.ExecutionRestrictions{}, workspace,
 		domainmodel.ModelSelection{ProviderID: "provider", ModelID: "model"}, manifest)
 	if err != nil {
@@ -88,4 +88,10 @@ func TestSecurityResolverUsesNarrowerBaselineScope(t *testing.T) {
 	if got := snapshot.CapabilityGrant.ReadScopes; len(got) != 1 || got[0] != source {
 		t.Fatalf("read scopes=%v want=[%s]", got, source)
 	}
+}
+
+func testContextManifest() (domaincontext.ContextManifest, error) {
+	return domaincontext.NewContextManifest(
+		"manifest_test", 1, []domaincontext.ContextEntryID{"context_test"}, nil, "sha256-test", nil, time.Now(),
+	)
 }

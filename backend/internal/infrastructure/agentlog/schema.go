@@ -13,7 +13,7 @@ import (
 	sessionport "praxis/internal/session"
 )
 
-const currentEntryVersion uint16 = 2
+const currentEntryVersion uint16 = 3
 
 type entryKind string
 
@@ -71,10 +71,21 @@ func digestMessagePayload(payload messagePayload) (string, error) {
 }
 
 type artifactPayload struct {
-	DeliveryID string          `json:"deliveryId"`
-	Kind       string          `json:"kind"`
-	ArtifactID string          `json:"artifactId,omitempty"`
-	Body       json.RawMessage `json:"body"`
+	DeliveryID    string          `json:"deliveryId"`
+	Kind          string          `json:"kind"`
+	ArtifactID    string          `json:"artifactId,omitempty"`
+	Body          json.RawMessage `json:"body"`
+	PayloadDigest string          `json:"payloadDigest"`
+}
+
+func digestArtifactPayload(payload artifactPayload) (string, error) {
+	payload.PayloadDigest = ""
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 type settledPayload struct {
@@ -147,6 +158,23 @@ func validateEntry(value entry, previous uint64) error {
 		}
 		if digest != message.PayloadDigest {
 			return errors.New("agent session message payload digest does not match")
+		}
+	}
+	if value.Kind == entryArtifact {
+		var artifact artifactPayload
+		if err := json.Unmarshal(value.Payload, &artifact); err != nil {
+			return fmt.Errorf("agent session artifact payload is invalid: %w", err)
+		}
+		if strings.TrimSpace(artifact.DeliveryID) == "" || strings.TrimSpace(artifact.Kind) == "" ||
+			len(artifact.Body) == 0 || strings.TrimSpace(artifact.PayloadDigest) == "" {
+			return errors.New("agent session artifact identity, body and digest are required")
+		}
+		digest, err := digestArtifactPayload(artifact)
+		if err != nil {
+			return fmt.Errorf("digest agent session artifact payload: %w", err)
+		}
+		if digest != artifact.PayloadDigest {
+			return errors.New("agent session artifact payload digest does not match")
 		}
 	}
 	return nil

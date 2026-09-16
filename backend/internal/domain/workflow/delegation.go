@@ -102,7 +102,7 @@ func (r *DelegationRequest) Approve(approval ApprovalRecord, at time.Time) (Doma
 	event.SessionID = r.SessionID
 	event.AgentID = r.SourceAgentID
 	event.DelegationID = r.ID
-	event.Payload = map[string]string{"approvalSource": string(approval.Source)}
+	event.ApprovalSource = string(approval.Source)
 	return event, nil
 }
 

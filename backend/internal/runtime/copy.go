@@ -76,7 +76,7 @@ func (c AuthorizedToolCall) Snapshot() AuthorizedToolCall {
 func (s ExecutionTurnSnapshot) Snapshot() ExecutionTurnSnapshot {
 	copied := s
 	copied.Messages = CloneTurnMessages(s.Messages)
-	copied.ContextManifest = s.ContextManifest
+	copied.ContextManifest = s.ContextManifest.Snapshot()
 	copied.ContextSelection = s.ContextSelection.Snapshot()
 	copied.Tools = CloneToolDefinitions(s.Tools)
 	copied.Execution = s.Execution.Snapshot()

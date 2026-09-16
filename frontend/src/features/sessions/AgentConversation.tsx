@@ -1,14 +1,15 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, MessageSquare } from 'lucide-react'
 import type { AgentHistoryItem, AgentSnapshot, ModelOption } from '../../api'
-import type { StreamingOutput } from './types'
+import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
-import { HistoryItemView, PendingOutputView, StreamingOutputView } from './MessageViews'
+import { HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingOutputView } from './MessageViews'
 
 export type AgentConversationProps = {
     agent: AgentSnapshot
     history: AgentHistoryItem[]
     streamingOutput: StreamingOutput | null
+    pendingUserMessages: PendingUserMessageItem[]
     awaitingOutput: boolean
     input: string
     setInput: (value: string) => void
@@ -23,7 +24,7 @@ export type AgentConversationProps = {
     onReasoningChange: (level: string) => void
 }
 
-export function AgentConversation({ agent, history, streamingOutput, awaitingOutput, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange }: AgentConversationProps) {
+export function AgentConversation({ agent, history, streamingOutput, pendingUserMessages, awaitingOutput, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -47,6 +48,13 @@ export function AgentConversation({ agent, history, streamingOutput, awaitingOut
         ? `${latestItem.kind}-${latestItem.sequence}-${latestItem.at}-${latestItem.message?.content || latestItem.execution?.id || ''}`
         : ''
 
+    // Pending messages belong to the agent that was active when they were sent.
+    const visiblePendingMessages = useMemo(() => pendingUserMessages.filter((message) => (
+        message.agentId ? message.agentId === agent.id : message.sessionId === agent.sessionId
+    )), [agent.id, agent.sessionId, pendingUserMessages])
+    const pendingMessagesKey = visiblePendingMessages.map((message) => `${message.requestId}:${message.content}`).join('|')
+    const threadEmpty = orderedHistory.length === 0 && visiblePendingMessages.length === 0 && !streamingOutput && !waitingForOutput
+
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
         if (!messageThread) {
@@ -62,7 +70,7 @@ export function AgentConversation({ agent, history, streamingOutput, awaitingOut
         })
         followingOutputRef.current = true
         previousAgentIDRef.current = agent.id
-    }, [agent.id, latestItemKey, streamingOutput?.content, waitingForOutput])
+    }, [agent.id, latestItemKey, pendingMessagesKey, streamingOutput?.content, waitingForOutput])
 
     const updateOutputFollowing = useCallback(() => {
         const messageThread = messageThreadRef.current
@@ -90,11 +98,11 @@ export function AgentConversation({ agent, history, streamingOutput, awaitingOut
     return (
         <div className="agent-conversation">
             <div
-                className={`message-thread ${orderedHistory.length === 0 && !streamingOutput && !waitingForOutput ? 'empty' : ''}`}
+                className={`message-thread ${threadEmpty ? 'empty' : ''}`}
                 ref={messageThreadRef}
                 onScroll={updateOutputFollowing}
             >
-                {orderedHistory.length === 0 && !streamingOutput && !waitingForOutput ? (
+                {threadEmpty ? (
                     <div className="message-empty" role="status">
                         <div className="message-empty-content">
                             <div className="message-empty-icon" aria-hidden="true">
@@ -111,6 +119,9 @@ export function AgentConversation({ agent, history, streamingOutput, awaitingOut
                         <HistoryItemView agentProfile={agent.profile} item={item} key={`${item.kind}-${item.sequence}-${item.message?.executionId || item.execution?.id || item.at}`} />
                     ))
                 )}
+                {visiblePendingMessages.map((message) => (
+                    <PendingUserMessageView content={message.content} at={message.at} key={message.requestId} />
+                ))}
                 {streamingOutput && <StreamingOutputView agentProfile={agent.profile} content={streamingOutput.content} />}
                 {waitingForOutput && <PendingOutputView agentProfile={agent.profile} />}
             </div>
