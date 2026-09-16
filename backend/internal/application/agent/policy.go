@@ -3,12 +3,10 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	commandprotocol "praxis/internal/command"
-	domaincommand "praxis/internal/domain/command"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainsecurity "praxis/internal/domain/security"
 	"praxis/internal/persistence"
@@ -18,25 +16,23 @@ import (
 type Readiness interface{ Ready() bool }
 
 type Config struct {
-	Transactions    persistence.TxRunner
-	Agents          persistence.AgentRepository
-	Policies        persistence.AgentSecurityPolicyRepository
-	CommandReceipts persistence.CommandReceiptRepository
-	Events          persistence.EventRepository
-	Readiness       Readiness
-	Clock           system.Clock
-	IDs             system.IDGenerator
+	Transactions persistence.TxRunner
+	Agents       persistence.AgentRepository
+	Policies     persistence.AgentSecurityPolicyRepository
+	Events       persistence.EventRepository
+	Readiness    Readiness
+	Clock        system.Clock
+	IDs          system.IDGenerator
 }
 
 type Service struct {
-	tx              persistence.TxRunner
-	agents          persistence.AgentRepository
-	policies        persistence.AgentSecurityPolicyRepository
-	commandReceipts persistence.CommandReceiptRepository
-	events          persistence.EventRepository
-	readiness       Readiness
-	clock           system.Clock
-	ids             system.IDGenerator
+	tx        persistence.TxRunner
+	agents    persistence.AgentRepository
+	policies  persistence.AgentSecurityPolicyRepository
+	events    persistence.EventRepository
+	readiness Readiness
+	clock     system.Clock
+	ids       system.IDGenerator
 }
 
 type UpdatePolicyParams struct {
@@ -58,7 +54,7 @@ func NewService(config Config) (*Service, error) {
 		value any
 	}{
 		{"transactions", config.Transactions}, {"agents", config.Agents}, {"security policies", config.Policies},
-		{"command receipts", config.CommandReceipts}, {"events", config.Events}, {"readiness", config.Readiness},
+		{"events", config.Events}, {"readiness", config.Readiness},
 	} {
 		if required.value == nil {
 			return nil, fmt.Errorf("agent policy service %s is required", required.name)
@@ -72,7 +68,7 @@ func NewService(config Config) (*Service, error) {
 	if ids == nil {
 		ids = system.SecureIDGenerator{}
 	}
-	return &Service{tx: config.Transactions, agents: config.Agents, policies: config.Policies, commandReceipts: config.CommandReceipts, events: config.Events, readiness: config.Readiness, clock: clock, ids: ids}, nil
+	return &Service{tx: config.Transactions, agents: config.Agents, policies: config.Policies, events: config.Events, readiness: config.Readiness, clock: clock, ids: ids}, nil
 }
 
 // UpdatePolicy atomically writes one policy revision, Agent revision pointer,
@@ -87,30 +83,17 @@ func (s *Service) UpdatePolicy(ctx context.Context, params UpdatePolicyParams) (
 	if err := params.Policy.Validate(); err != nil {
 		return UpdatePolicyResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := commandprotocol.ArgumentsDigest(struct {
-		AgentID  domainfoundation.AgentID
-		Expected uint64
-		Policy   domainsecurity.AgentSecurityPolicy
-	}{params.AgentID, params.ExpectedRevision, params.Policy})
 	result := UpdatePolicyResult{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "update_agent_security_policy", digest)
+		existing, found, err := s.policies.GetByRevision(txCtx, params.AgentID, params.Policy.Revision)
 		if err != nil {
 			return err
 		}
 		if found {
-			var value struct {
-				AgentID  string
-				Revision uint64
+			if commandprotocol.ArgumentsDigest(existing) != commandprotocol.ArgumentsDigest(params.Policy) {
+				return domainfoundation.ErrRequestConflict
 			}
-			if err := json.Unmarshal(receipt.ResultPayload, &value); err != nil {
-				return err
-			}
-			policy, err := s.policies.GetCurrent(txCtx, domainfoundation.AgentID(value.AgentID))
-			if err != nil {
-				return err
-			}
-			result = UpdatePolicyResult{AgentID: domainfoundation.AgentID(value.AgentID), Policy: policy, ExistingRequest: true}
+			result = UpdatePolicyResult{AgentID: params.AgentID, Policy: existing, ExistingRequest: true}
 			return nil
 		}
 		agent, err := s.agents.Get(txCtx, params.AgentID)
@@ -133,13 +116,6 @@ func (s *Service) UpdatePolicy(ctx context.Context, params UpdatePolicyParams) (
 		event.SessionID, event.AgentID = agent.SessionID, agent.ID
 		event.PolicyRevision = params.Policy.Revision
 		if err := s.events.Append(txCtx, event); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(struct {
-			AgentID  string
-			Revision uint64
-		}{agent.ID.String(), params.Policy.Revision})
-		if err := s.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{RequestID: params.RequestID, Command: "update_agent_security_policy", ArgumentsDigest: digest, ResultPayload: payload, CreatedAt: agent.UpdatedAt}); err != nil {
 			return err
 		}
 		result = UpdatePolicyResult{AgentID: agent.ID, Policy: params.Policy}

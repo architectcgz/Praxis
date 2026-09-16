@@ -3,14 +3,12 @@ package project
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	commandprotocol "praxis/internal/command"
-	domaincommand "praxis/internal/domain/command"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainproject "praxis/internal/domain/project"
 	domainworkspace "praxis/internal/domain/workspace"
@@ -26,26 +24,24 @@ type Readiness interface {
 
 // Config contains the ports required to create Project-owned durable state.
 type Config struct {
-	Transactions    persistence.TxRunner
-	Projects        persistence.ProjectRepository
-	Workspaces      persistence.WorkspaceRepository
-	CommandReceipts persistence.CommandReceiptRepository
-	Events          persistence.EventRepository
-	Readiness       Readiness
-	Clock           system.Clock
-	IDs             system.IDGenerator
+	Transactions persistence.TxRunner
+	Projects     persistence.ProjectRepository
+	Workspaces   persistence.WorkspaceRepository
+	Events       persistence.EventRepository
+	Readiness    Readiness
+	Clock        system.Clock
+	IDs          system.IDGenerator
 }
 
 // Service owns Project mutations and their transaction boundaries.
 type Service struct {
-	tx              persistence.TxRunner
-	projects        persistence.ProjectRepository
-	workspaces      persistence.WorkspaceRepository
-	commandReceipts persistence.CommandReceiptRepository
-	events          persistence.EventRepository
-	readiness       Readiness
-	clock           system.Clock
-	ids             system.IDGenerator
+	tx         persistence.TxRunner
+	projects   persistence.ProjectRepository
+	workspaces persistence.WorkspaceRepository
+	events     persistence.EventRepository
+	readiness  Readiness
+	clock      system.Clock
+	ids        system.IDGenerator
 }
 
 // CreateProjectParams contains the durable identity and initial workspace
@@ -73,7 +69,6 @@ func NewService(config Config) (*Service, error) {
 		{name: "transactions", value: config.Transactions},
 		{name: "projects", value: config.Projects},
 		{name: "workspaces", value: config.Workspaces},
-		{name: "command receipts", value: config.CommandReceipts},
 		{name: "events", value: config.Events},
 		{name: "readiness", value: config.Readiness},
 	} {
@@ -90,14 +85,13 @@ func NewService(config Config) (*Service, error) {
 		ids = system.SecureIDGenerator{}
 	}
 	return &Service{
-		tx:              config.Transactions,
-		projects:        config.Projects,
-		workspaces:      config.Workspaces,
-		commandReceipts: config.CommandReceipts,
-		events:          config.Events,
-		readiness:       config.Readiness,
-		clock:           clock,
-		ids:             ids,
+		tx:         config.Transactions,
+		projects:   config.Projects,
+		workspaces: config.Workspaces,
+		events:     config.Events,
+		readiness:  config.Readiness,
+		clock:      clock,
+		ids:        ids,
 	}, nil
 }
 
@@ -110,48 +104,37 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 	if !s.readiness.Ready() {
 		return CreateProjectResult{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
-	if params.RequestID == "" {
-		return CreateProjectResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
-	}
 	params.Name = strings.TrimSpace(params.Name)
 	params.Path = filepath.Clean(strings.TrimSpace(params.Path))
+	if params.ProjectID == "" || params.WorkspaceID == "" {
+		return CreateProjectResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
+	}
 	if params.Name == "" || strings.ContainsAny(params.Name, "\x00\r\n") || !absolutePath(params.Path) {
 		return CreateProjectResult{}, commandprotocol.NewError(commandprotocol.ErrorProjectWorkspaceInvalid)
 	}
-	digest := commandprotocol.ArgumentsDigest(struct {
-		ProjectID   domainfoundation.ProjectID
-		WorkspaceID domainfoundation.WorkspaceID
-		Name        string
-		Path        string
-	}{params.ProjectID, params.WorkspaceID, params.Name, params.Path})
 	var result CreateProjectResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "create_project", digest); err != nil {
-			return err
-		} else if found {
-			var ids struct {
-				ProjectID   domainfoundation.ProjectID   `json:"projectId"`
-				WorkspaceID domainfoundation.WorkspaceID `json:"workspaceId"`
+		existing, err := s.projects.Get(txCtx, params.ProjectID)
+		if err == nil {
+			workspace, workspaceErr := s.workspaces.Get(txCtx, params.WorkspaceID)
+			if workspaceErr != nil {
+				return workspaceErr
 			}
-			if err := json.Unmarshal(receipt.ResultPayload, &ids); err != nil {
-				return fmt.Errorf("decode create project receipt: %w", err)
+			if existing.Name != params.Name || existing.Path != params.Path ||
+				existing.DefaultWorkspaceID != params.WorkspaceID ||
+				workspace.ProjectID != params.ProjectID || workspace.Path != params.Path {
+				return domainfoundation.ErrRequestConflict
 			}
-			project, err := s.projects.Get(txCtx, ids.ProjectID)
-			if err != nil {
-				return err
-			}
-			workspace, err := s.workspaces.Get(txCtx, ids.WorkspaceID)
-			if err != nil {
-				return err
-			}
-			result = CreateProjectResult{Project: project, Workspace: workspace}
+			result = CreateProjectResult{Project: existing, Workspace: workspace}
 			return nil
 		}
-		if params.ProjectID == "" {
-			params.ProjectID = domainfoundation.ProjectID(s.ids.New("project"))
+		if !errors.Is(err, domainfoundation.ErrNotFound) {
+			return err
 		}
-		if params.WorkspaceID == "" {
-			params.WorkspaceID = domainfoundation.WorkspaceID(s.ids.New("workspace"))
+		if _, err := s.workspaces.Get(txCtx, params.WorkspaceID); err == nil {
+			return domainfoundation.ErrRequestConflict
+		} else if !errors.Is(err, domainfoundation.ErrNotFound) {
+			return err
 		}
 		at := s.clock.Now().UTC()
 		workspace, err := domainworkspace.NewWorkspace(
@@ -182,16 +165,6 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 			WorkspaceID: workspace.ID,
 		}
 		if err := s.events.Append(txCtx, event); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(struct {
-			ProjectID   domainfoundation.ProjectID   `json:"projectId"`
-			WorkspaceID domainfoundation.WorkspaceID `json:"workspaceId"`
-		}{project.ID, workspace.ID})
-		if err := s.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
-			RequestID: params.RequestID, Command: "create_project", ArgumentsDigest: digest,
-			ResultPayload: payload, CreatedAt: at,
-		}); err != nil {
 			return err
 		}
 		result = CreateProjectResult{Project: project, Workspace: workspace}

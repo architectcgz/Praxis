@@ -75,14 +75,6 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 CREATE INDEX IF NOT EXISTS agents_by_session ON agents(session_id, id);
 
-CREATE TABLE IF NOT EXISTS command_receipts (
-    request_id TEXT PRIMARY KEY,
-    command TEXT NOT NULL,
-    arguments_digest TEXT NOT NULL,
-    result_ref TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS agent_security_policies (
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
     revision INTEGER NOT NULL CHECK (revision > 0),
@@ -205,6 +197,7 @@ CREATE TABLE IF NOT EXISTS context_deliveries (
     dedupe_key TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'rejected', 'cancelled', 'failed')),
     artifact_entry_ref TEXT NOT NULL DEFAULT '',
+    result_execution_id TEXT,
     failure_code TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

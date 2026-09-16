@@ -6,7 +6,6 @@ import (
 	"time"
 
 	domainagent "praxis/internal/domain/agent"
-	domaincommand "praxis/internal/domain/command"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainsecurity "praxis/internal/domain/security"
@@ -36,11 +35,7 @@ type SessionContextRepository interface {
 	CurrentRevision(context.Context, domainfoundation.SessionID) (uint64, error)
 	Append(context.Context, domaincontext.SessionContextEntry, uint64) error
 	List(context.Context, domainfoundation.SessionID, uint64, int) ([]domaincontext.SessionContextEntry, error)
-}
-
-type CommandReceiptRepository interface {
-	Get(context.Context, domainfoundation.RequestID) (domaincommand.CommandReceipt, error)
-	Save(context.Context, domaincommand.CommandReceipt) error
+	GetByID(context.Context, domainfoundation.ContextEntryID) (domaincontext.SessionContextEntry, bool, error)
 }
 
 type AgentRepository interface {

@@ -249,16 +249,17 @@ const (
 // ContextDelivery references an approved, structured artifact. It never
 // carries a source Agent's transcript or acts as a normal user input mailbox.
 type ContextDelivery struct {
-	ID               DeliveryID
-	SessionID        SessionID
-	SourceArtifactID string
-	TargetAgentID    AgentID
-	DedupeKey        string
-	ArtifactEntryRef string
-	Status           ContextDeliveryStatus
-	FailureCode      string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                DeliveryID
+	SessionID         SessionID
+	SourceArtifactID  string
+	TargetAgentID     AgentID
+	DedupeKey         string
+	ArtifactEntryRef  string
+	ResultExecutionID AgentExecutionID
+	Status            ContextDeliveryStatus
+	FailureCode       string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func NewContextDelivery(
@@ -296,8 +297,8 @@ func (d ContextDelivery) Validate() error {
 	if d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() || d.UpdatedAt.Before(d.CreatedAt) {
 		return invalidValue("contextDelivery.timestamps", "timestamps are invalid")
 	}
-	if d.Status == ContextDeliveryDelivered && d.ArtifactEntryRef == "" {
-		return invalidValue("contextDelivery.artifactEntryRef", "delivered entry reference is required")
+	if d.Status == ContextDeliveryDelivered && (d.ArtifactEntryRef == "" || d.ResultExecutionID == "") {
+		return invalidValue("contextDelivery.artifactEntryRef", "delivered entry reference and execution are required")
 	}
 	return nil
 }
@@ -311,15 +312,16 @@ func (d *ContextDelivery) Begin(at time.Time) error {
 	return nil
 }
 
-func (d *ContextDelivery) MarkDelivered(entryRef string, at time.Time) error {
+func (d *ContextDelivery) MarkDelivered(entryRef string, executionID AgentExecutionID, at time.Time) error {
 	if d.Status != ContextDeliveryDelivering {
 		return invalidTransition("contextDelivery", string(d.Status), string(ContextDeliveryDelivered))
 	}
-	if strings.TrimSpace(entryRef) == "" {
-		return invalidValue("contextDelivery.artifactEntryRef", "entry reference is required")
+	if strings.TrimSpace(entryRef) == "" || idIsEmpty(string(executionID)) {
+		return invalidValue("contextDelivery.artifactEntryRef", "entry reference and execution are required")
 	}
 	d.Status = ContextDeliveryDelivered
 	d.ArtifactEntryRef = strings.TrimSpace(entryRef)
+	d.ResultExecutionID = executionID
 	d.UpdatedAt = at.UTC()
 	return nil
 }

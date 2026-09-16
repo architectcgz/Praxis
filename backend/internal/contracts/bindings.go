@@ -38,6 +38,8 @@ type SessionSummary struct {
 }
 
 type CreateProjectRequest struct {
+	ProjectID   string `json:"projectId"`
+	WorkspaceID string `json:"workspaceId"`
 	ProjectName string `json:"projectName"`
 	Path        string `json:"path"`
 	RequestID   string `json:"requestId"`
@@ -59,6 +61,8 @@ type ProjectSummary struct {
 }
 
 type CreateSessionRequest struct {
+	SessionID   string `json:"sessionId"`
+	AgentID     string `json:"agentId"`
 	ProjectID   string `json:"projectId"`
 	WorkspaceID string `json:"workspaceId"`
 	Goal        string `json:"goal"`

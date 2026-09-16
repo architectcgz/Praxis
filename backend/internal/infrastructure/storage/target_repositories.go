@@ -13,7 +13,6 @@ import (
 // TargetRepositories is the composition boundary between relational indexes
 // and file-backed aggregate documents.
 type TargetRepositories struct {
-	Commands          CommandReceiptRepository
 	Projects          sqlite.ProjectRepository
 	Workspaces        sqlite.WorkspaceRepository
 	Sessions          sqlite.SessionRepository
@@ -40,7 +39,6 @@ func NewTargetRepositories(db *sqlite.Store, documents *document.Store) (TargetR
 	}
 	relational := db.Repositories()
 	return TargetRepositories{
-		Commands:          CommandReceiptRepository{adapter},
 		Projects:          relational.Projects,
 		Workspaces:        relational.Workspaces,
 		Sessions:          relational.Sessions,

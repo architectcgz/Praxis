@@ -3,14 +3,12 @@ package delivery
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	commandprotocol "praxis/internal/command"
 	domainagent "praxis/internal/domain/agent"
-	domaincommand "praxis/internal/domain/command"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainworkflow "praxis/internal/domain/workflow"
@@ -27,18 +25,17 @@ type RuntimeActivator interface {
 }
 
 type Config struct {
-	Transactions    persistence.TxRunner
-	Agents          persistence.AgentRepository
-	Executions      persistence.AgentExecutionRepository
-	Waits           persistence.WaitConditionRepository
-	Deliveries      persistence.ContextDeliveryRepository
-	CommandReceipts persistence.CommandReceiptRepository
-	Events          persistence.EventRepository
-	Inputs          InputFactory
-	Activator       RuntimeActivator
-	Lifecycle       runtimecontract.ExecutionLifecycle
-	Clock           system.Clock
-	IDs             system.IDGenerator
+	Transactions persistence.TxRunner
+	Agents       persistence.AgentRepository
+	Executions   persistence.AgentExecutionRepository
+	Waits        persistence.WaitConditionRepository
+	Deliveries   persistence.ContextDeliveryRepository
+	Events       persistence.EventRepository
+	Inputs       InputFactory
+	Activator    RuntimeActivator
+	Lifecycle    runtimecontract.ExecutionLifecycle
+	Clock        system.Clock
+	IDs          system.IDGenerator
 }
 
 type Service struct {
@@ -47,7 +44,6 @@ type Service struct {
 	executions persistence.AgentExecutionRepository
 	waits      persistence.WaitConditionRepository
 	deliveries persistence.ContextDeliveryRepository
-	receipts   persistence.CommandReceiptRepository
 	events     persistence.EventRepository
 	inputs     InputFactory
 	activator  RuntimeActivator
@@ -78,7 +74,7 @@ func NewService(config Config) (*Service, error) {
 		value any
 	}{
 		{"transactions", config.Transactions}, {"agents", config.Agents}, {"executions", config.Executions}, {"waits", config.Waits},
-		{"deliveries", config.Deliveries}, {"command receipts", config.CommandReceipts}, {"events", config.Events}, {"execution input factory", config.Inputs},
+		{"deliveries", config.Deliveries}, {"events", config.Events}, {"execution input factory", config.Inputs},
 	} {
 		if required.value == nil {
 			return nil, fmt.Errorf("execution delivery service %s is required", required.name)
@@ -92,7 +88,7 @@ func NewService(config Config) (*Service, error) {
 	if ids == nil {
 		ids = system.SecureIDGenerator{}
 	}
-	return &Service{tx: config.Transactions, agents: config.Agents, executions: config.Executions, waits: config.Waits, deliveries: config.Deliveries, receipts: config.CommandReceipts, events: config.Events, inputs: config.Inputs, activator: config.Activator, lifecycle: config.Lifecycle, clock: clock, ids: ids}, nil
+	return &Service{tx: config.Transactions, agents: config.Agents, executions: config.Executions, waits: config.Waits, deliveries: config.Deliveries, events: config.Events, inputs: config.Inputs, activator: config.Activator, lifecycle: config.Lifecycle, clock: clock, ids: ids}, nil
 }
 
 // ClaimContextDelivery exclusively claims a pending delivery before JSONL artifact I/O.
@@ -143,32 +139,8 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 	if strings.TrimSpace(params.DeliveryID.String()) == "" || strings.TrimSpace(params.ArtifactEntryRef) == "" || params.RequestID == "" {
 		return Completion{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := commandprotocol.ArgumentsDigest(struct {
-		DeliveryID       domainfoundation.DeliveryID
-		ArtifactEntryRef string
-	}{params.DeliveryID, params.ArtifactEntryRef})
 	result := Completion{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		receipt, found, err := commandprotocol.FindReceipt(txCtx, s.receipts, params.RequestID, "complete_context_delivery", digest)
-		if err != nil {
-			return err
-		}
-		if found {
-			var value struct{ ExecutionID string }
-			if err := json.Unmarshal(receipt.ResultPayload, &value); err != nil {
-				return err
-			}
-			delivery, err := s.deliveries.Get(txCtx, params.DeliveryID)
-			if err != nil {
-				return err
-			}
-			execution, err := s.executions.Get(txCtx, domainfoundation.AgentExecutionID(value.ExecutionID))
-			if err != nil {
-				return err
-			}
-			result = Completion{Delivery: delivery, Execution: execution, ExistingDelivery: true}
-			return nil
-		}
 		delivery, err := s.deliveries.Get(txCtx, params.DeliveryID)
 		if err != nil {
 			return err
@@ -177,7 +149,11 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 			if delivery.ArtifactEntryRef != params.ArtifactEntryRef {
 				return domainfoundation.ErrRequestConflict
 			}
-			result.Delivery, result.ExistingDelivery = delivery, true
+			execution, err := s.executions.Get(txCtx, delivery.ResultExecutionID)
+			if err != nil {
+				return err
+			}
+			result = Completion{Delivery: delivery, Execution: execution, ExistingDelivery: true}
 			return nil
 		}
 		if delivery.Status != domainworkflow.ContextDeliveryDelivering {
@@ -198,9 +174,6 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 			return commandprotocol.NewError(commandprotocol.ErrorAgentUnavailable)
 		}
 		at := s.clock.Now()
-		if err := delivery.MarkDelivered(params.ArtifactEntryRef, at); err != nil {
-			return err
-		}
 		waits, err := s.waits.ListUnresolvedByAgent(txCtx, agent.ID, 100)
 		if err != nil {
 			return err
@@ -228,6 +201,9 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 		if err != nil {
 			return err
 		}
+		if err := delivery.MarkDelivered(params.ArtifactEntryRef, execution.ID, at); err != nil {
+			return err
+		}
 		if err := agent.Start(execution.ID, at); err != nil {
 			return err
 		}
@@ -247,10 +223,6 @@ func (s *Service) CompleteContextDelivery(ctx context.Context, params CompletePa
 		started.ID = domainfoundation.EventID(s.ids.New("event"))
 		started.SessionID, started.AgentID, started.AgentExecutionID = execution.SessionID, execution.AgentID, execution.ID
 		if err := s.events.Append(txCtx, started); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(struct{ ExecutionID string }{execution.ID.String()})
-		if err := s.receipts.Save(txCtx, domaincommand.CommandReceipt{RequestID: params.RequestID, Command: "complete_context_delivery", ArgumentsDigest: digest, ResultPayload: payload, CreatedAt: at}); err != nil {
 			return err
 		}
 		if err := s.agents.Save(txCtx, agent); err != nil {

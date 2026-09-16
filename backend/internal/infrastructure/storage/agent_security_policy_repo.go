@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -42,4 +43,23 @@ func (r AgentSecurityPolicyRepository) GetCurrent(ctx context.Context, id domain
 }
 func (r AgentSecurityPolicyRepository) Save(ctx context.Context, id domainfoundation.AgentID, value domainsecurity.AgentSecurityPolicy) error {
 	return r.store.SaveAgentSecurityPolicy(ctx, id, value)
+}
+func (r AgentSecurityPolicyRepository) GetByRevision(ctx context.Context, id domainfoundation.AgentID, revision uint64) (domainsecurity.AgentSecurityPolicy, bool, error) {
+	return r.store.GetAgentSecurityPolicy(ctx, id, revision)
+}
+
+// GetAgentSecurityPolicy resolves one revision for policy update idempotency.
+func (s *Store) GetAgentSecurityPolicy(ctx context.Context, agentID domainfoundation.AgentID, revision uint64) (domainsecurity.AgentSecurityPolicy, bool, error) {
+	row := s.executor(ctx).QueryRowContext(ctx, `SELECT document_ref FROM agent_security_policies WHERE agent_id = ? AND revision = ?`, agentID.String(), revision)
+	var ref string
+	if err := row.Scan(&ref); errors.Is(err, sql.ErrNoRows) {
+		return domainsecurity.AgentSecurityPolicy{}, false, nil
+	} else if err != nil {
+		return domainsecurity.AgentSecurityPolicy{}, false, fmt.Errorf("read agent security policy revision: %w", err)
+	}
+	var value domainsecurity.AgentSecurityPolicy
+	if err := s.loadDocument(ctx, ref, &value, "agent security policy", func() error { return value.Validate() }); err != nil {
+		return domainsecurity.AgentSecurityPolicy{}, false, err
+	}
+	return value, true, nil
 }

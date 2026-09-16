@@ -43,7 +43,14 @@ func (b *ProjectBindings) CreateProject(
 	if err != nil {
 		return contracts.CreateProjectResponse{}, err
 	}
-	result, err := service.CreateProject(ctx, request.ProjectName, request.Path, domainfoundation.RequestID(request.RequestID))
+	result, err := service.CreateProject(
+		ctx,
+		domainfoundation.ProjectID(request.ProjectID),
+		domainfoundation.WorkspaceID(request.WorkspaceID),
+		request.ProjectName,
+		request.Path,
+		domainfoundation.RequestID(request.RequestID),
+	)
 	if err != nil {
 		return contracts.CreateProjectResponse{}, publicBindingError(err)
 	}

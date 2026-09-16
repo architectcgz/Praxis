@@ -20,7 +20,14 @@ export type SessionSummary = {
     updatedAt: string
 }
 
-export type CreateSessionRequest = { projectId: string; workspaceId: string; goal: string; requestId: string }
+export type CreateSessionRequest = {
+    sessionId: string
+    agentId: string
+    projectId: string
+    workspaceId: string
+    goal: string
+    requestId: string
+}
 
 export type CreateSessionResponse = {
     sessionId: string

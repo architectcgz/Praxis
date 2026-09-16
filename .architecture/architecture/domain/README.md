@@ -9,7 +9,7 @@
 
 领域对象不持有 repository、数据库连接、Wails context、Provider client、runtime actor、goroutine、文件句柄或操作系统进程句柄。事务、跨聚合流程、外部副作用和持久化由 application、orchestration 和适配器负责。
 
-命令的 RequestID、参数摘要和 durable receipt 属于 `internal/command` 的跨用例协议，不属于 `domain` 的业务对象。
+命令重试的幂等事实由拥有业务结果的表保存：资源 ID、revision 和唯一约束属于 repository 与数据库 schema，`ParametersDigest` 这类比较 helper 属于 `internal/command`，都不属于 `domain` 的业务对象。
 
 ## 2. 目录树
 

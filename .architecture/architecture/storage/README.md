@@ -65,7 +65,12 @@ SQLite 与 JSONL 不共享事务。一致性依靠稳定身份、receipt 和 com
 | execution settlement | `ExecutionID` | `execution_settled` receipt |
 | ManagedProcess start | `StartedByInvocationID` + `ManagedProcessID` | ToolInvocation result 与 ManagedProcess 状态 |
 | ManagedProcess settlement | `ManagedProcessID` | stop request、Supervisor exit report 与 settled 状态 |
-| SessionContext append | 提交 identity + `ExpectedRevision` | 已提交 revision 或 revision conflict |
+| CreateProject / CreateSession | 调用方提供的资源 ID | `projects`、`workspaces`、`sessions`、`agents` 主键与字段一致性 |
+| QueueWork | `WorkItemID` | `queued_work_items` 主键与 agent、prompt 一致性 |
+| PauseAgent / CloseAgent | `AgentControlCommandID` | `agent_control_commands` 主键 |
+| UpdateAgentSecurityPolicy | `AgentID` + `PolicyRevision` | `agent_security_policies` 主键与 policy 摘要 |
+| SessionContext append | `EntryID` + `ExpectedRevision` | `session_context_entries` 主键与 `(session_id, revision)` 唯一约束 |
+| CompleteContextDelivery | `DeliveryID` | `context_deliveries.result_execution_id` |
 | Agent message | `sourceRequestId` 或消息 identity | transcript sequence 与 JSONL 重复检查 |
 
 不使用伪造的跨文件共享事务。任何跨存储操作都必须允许 recovery 继续重试或收敛。

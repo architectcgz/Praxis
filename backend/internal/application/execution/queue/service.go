@@ -3,7 +3,6 @@ package queue
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +10,6 @@ import (
 
 	commandprotocol "praxis/internal/command"
 	domainagent "praxis/internal/domain/agent"
-	domaincommand "praxis/internal/domain/command"
 	domainexecution "praxis/internal/domain/execution"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainworkflow "praxis/internal/domain/workflow"
@@ -36,7 +34,6 @@ type Config struct {
 	Executions   persistence.AgentExecutionRepository
 	QueuedWork   persistence.QueuedWorkRepository
 	Deliveries   persistence.ContextDeliveryRepository
-	Receipts     persistence.CommandReceiptRepository
 	Events       persistence.EventRepository
 	Readiness    Readiness
 	Inputs       InputFactory
@@ -52,7 +49,6 @@ type Service struct {
 	executions persistence.AgentExecutionRepository
 	queuedWork persistence.QueuedWorkRepository
 	deliveries persistence.ContextDeliveryRepository
-	receipts   persistence.CommandReceiptRepository
 	events     persistence.EventRepository
 	readiness  Readiness
 	inputs     InputFactory
@@ -88,7 +84,7 @@ func NewService(config Config) (*Service, error) {
 		value any
 	}{
 		{"transactions", config.Transactions}, {"agents", config.Agents}, {"executions", config.Executions},
-		{"queued work", config.QueuedWork}, {"deliveries", config.Deliveries}, {"command receipts", config.Receipts},
+		{"queued work", config.QueuedWork}, {"deliveries", config.Deliveries},
 		{"events", config.Events}, {"readiness", config.Readiness}, {"execution input factory", config.Inputs},
 	} {
 		if required.value == nil {
@@ -103,7 +99,7 @@ func NewService(config Config) (*Service, error) {
 	if ids == nil {
 		ids = system.SecureIDGenerator{}
 	}
-	return &Service{tx: config.Transactions, agents: config.Agents, executions: config.Executions, queuedWork: config.QueuedWork, deliveries: config.Deliveries, receipts: config.Receipts, events: config.Events, readiness: config.Readiness, inputs: config.Inputs, activator: config.Activator, lifecycle: config.Lifecycle, clock: clock, ids: ids}, nil
+	return &Service{tx: config.Transactions, agents: config.Agents, executions: config.Executions, queuedWork: config.QueuedWork, deliveries: config.Deliveries, events: config.Events, readiness: config.Readiness, inputs: config.Inputs, activator: config.Activator, lifecycle: config.Lifecycle, clock: clock, ids: ids}, nil
 }
 
 func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (EnqueueResult, error) {
@@ -119,27 +115,6 @@ func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (Enqueu
 	result := EnqueueResult{}
 	startEligible := false
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		digest := commandprotocol.ArgumentsDigest(struct {
-			WorkID  domainfoundation.WorkItemID
-			AgentID domainfoundation.AgentID
-			Prompt  string
-		}{params.ID, params.AgentID, strings.TrimSpace(params.Prompt)})
-		receipt, found, err := commandprotocol.FindReceipt(txCtx, s.receipts, params.RequestID, "queue_work", digest)
-		if err != nil {
-			return err
-		}
-		if found {
-			var value struct{ WorkID string }
-			if err := json.Unmarshal(receipt.ResultPayload, &value); err != nil {
-				return err
-			}
-			work, err := s.queuedWork.Get(txCtx, domainfoundation.WorkItemID(value.WorkID))
-			if err != nil {
-				return err
-			}
-			result.Work, result.ExistingWork = work, true
-			return nil
-		}
 		existing, err := s.queuedWork.Get(txCtx, params.ID)
 		if err == nil {
 			if existing.AgentID != params.AgentID || existing.Prompt != strings.TrimSpace(params.Prompt) {
@@ -168,10 +143,6 @@ func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (Enqueu
 			return err
 		}
 		if err := s.appendEvent(txCtx, domainfoundation.EventQueuedWorkCreated, work.SessionID, work.AgentID, work.ID, "", at); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(struct{ WorkID string }{work.ID.String()})
-		if err := s.receipts.Save(txCtx, domaincommand.CommandReceipt{RequestID: params.RequestID, Command: "queue_work", ArgumentsDigest: digest, ResultPayload: payload, CreatedAt: at}); err != nil {
 			return err
 		}
 		result.Work = work

@@ -49,6 +49,8 @@ func (b *SessionBindings) CreateSession(
 	}
 	result, err := service.CreateSessionForProject(
 		ctx,
+		domainfoundation.SessionID(request.SessionID),
+		domainfoundation.AgentID(request.AgentID),
 		domainfoundation.RequestID(request.RequestID),
 		domainfoundation.ProjectID(request.ProjectID),
 		domainfoundation.WorkspaceID(request.WorkspaceID),

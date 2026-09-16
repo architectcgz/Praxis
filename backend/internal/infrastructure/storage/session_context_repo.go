@@ -109,3 +109,23 @@ func (r SessionContextRepository) Append(ctx context.Context, value domaincontex
 func (r SessionContextRepository) List(ctx context.Context, id domainfoundation.SessionID, after uint64, limit int) ([]domaincontext.SessionContextEntry, error) {
 	return r.store.ListSessionContext(ctx, id, after, limit)
 }
+func (r SessionContextRepository) GetByID(ctx context.Context, id domainfoundation.ContextEntryID) (domaincontext.SessionContextEntry, bool, error) {
+	return r.store.GetSessionContextEntryByID(ctx, id)
+}
+
+// GetSessionContextEntryByID resolves an append command's idempotency identity.
+func (s *Store) GetSessionContextEntryByID(ctx context.Context, entryID domainfoundation.ContextEntryID) (domaincontext.SessionContextEntry, bool, error) {
+	var ref string
+	err := s.executor(ctx).QueryRowContext(ctx, `SELECT document_ref FROM session_context_entries WHERE id = ?`, entryID.String()).Scan(&ref)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domaincontext.SessionContextEntry{}, false, nil
+	}
+	if err != nil {
+		return domaincontext.SessionContextEntry{}, false, fmt.Errorf("read session context entry identity: %w", err)
+	}
+	var entry domaincontext.SessionContextEntry
+	if err := s.loadDocument(ctx, ref, &entry, "session context entry", func() error { return entry.Validate() }); err != nil {
+		return domaincontext.SessionContextEntry{}, false, err
+	}
+	return entry, true, nil
+}

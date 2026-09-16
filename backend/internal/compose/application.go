@@ -129,7 +129,7 @@ func (a *Application) ListExecutionEvents(
 	return a.queries.ListExecutionEvents(ctx, executionID, after, limit)
 }
 
-func (a *Application) CreateProject(ctx context.Context, name, path string, requestID domainfoundation.RequestID) (result applicationproject.CreateProjectResult, err error) {
+func (a *Application) CreateProject(ctx context.Context, projectID domainfoundation.ProjectID, workspaceID domainfoundation.WorkspaceID, name, path string, requestID domainfoundation.RequestID) (result applicationproject.CreateProjectResult, err error) {
 	name = strings.TrimSpace(name)
 	path = filepath.Clean(strings.TrimSpace(path))
 	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || !filepath.IsAbs(path) {
@@ -139,7 +139,7 @@ func (a *Application) CreateProject(ctx context.Context, name, path string, requ
 		return result, err
 	}
 	result, err = a.projects.CreateProject(ctx, applicationproject.CreateProjectParams{
-		RequestID: requestID, Name: name, Path: path,
+		RequestID: requestID, ProjectID: projectID, WorkspaceID: workspaceID, Name: name, Path: path,
 	})
 	return result, nil
 }
@@ -176,12 +176,14 @@ func (a *Application) UpdateAgentPolicy(ctx context.Context, params applicationa
 
 func (a *Application) CreateSessionForProject(
 	ctx context.Context,
+	sessionID domainfoundation.SessionID,
+	agentID domainfoundation.AgentID,
 	requestID domainfoundation.RequestID,
 	projectID domainfoundation.ProjectID,
 	workspaceID domainfoundation.WorkspaceID,
 	goal string,
 ) (applicationsession.CreateResult, error) {
-	return a.sessions.CreateSessionForProject(ctx, requestID, projectID, workspaceID, goal)
+	return a.sessions.CreateSessionForProject(ctx, sessionID, agentID, requestID, projectID, workspaceID, goal)
 }
 
 // Open builds a target application and completes recovery before returning a
@@ -319,7 +321,6 @@ func Open(
 		Contexts:        target.Contexts,
 		Policies:        target.Policies,
 		Agents:          target.Agents,
-		CommandReceipts: target.Commands,
 		Events:          target.Events,
 		Readiness:       readiness,
 		PolicyFactory:   agentRegistry.SecurityPolicy,
@@ -353,7 +354,6 @@ func Open(
 		Executions:      target.Executions,
 		Waits:           target.Waits,
 		Deliveries:      target.Deliveries,
-		CommandReceipts: target.Commands,
 		Events:          target.Events,
 		Inputs:          deliveryInputs,
 		Activator:       scheduler,
@@ -387,7 +387,6 @@ func Open(
 		Executions:   target.Executions,
 		QueuedWork:   target.QueuedWork,
 		Deliveries:   target.Deliveries,
-		Receipts:     target.Commands,
 		Events:       target.Events,
 		Readiness:    readiness,
 		Inputs:       startService,
@@ -412,7 +411,6 @@ func Open(
 		Transactions:    store,
 		Agents:          target.Agents,
 		Policies:        target.Policies,
-		CommandReceipts: target.Commands,
 		Events:          target.Events,
 		Readiness:       readiness,
 	})
@@ -427,7 +425,6 @@ func Open(
 		Transactions:    store,
 		Projects:        target.Projects,
 		Workspaces:      target.Workspaces,
-		CommandReceipts: target.Commands,
 		Events:          target.Events,
 		Readiness:       readiness,
 	})

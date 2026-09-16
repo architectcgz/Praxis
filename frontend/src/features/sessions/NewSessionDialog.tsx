@@ -45,6 +45,8 @@ export function NewSessionDialog({
         setModelConfigError(false)
         try {
             const created = await createSession({
+                sessionId: crypto.randomUUID(),
+                agentId: crypto.randomUUID(),
                 projectId: projectID,
                 workspaceId: workspaceID,
                 goal,

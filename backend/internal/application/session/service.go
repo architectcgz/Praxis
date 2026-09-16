@@ -3,7 +3,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +10,6 @@ import (
 
 	commandprotocol "praxis/internal/command"
 	domainagent "praxis/internal/domain/agent"
-	domaincommand "praxis/internal/domain/command"
 	domaincontext "praxis/internal/domain/context"
 	domainfoundation "praxis/internal/domain/foundation"
 	domainproject "praxis/internal/domain/project"
@@ -32,36 +30,34 @@ type AgentSecurityPolicyFactory func(domainworkspace.Workspace, domainsecurity.A
 
 // Config contains the ports required to initialize a Session and primary Agent.
 type Config struct {
-	Transactions    persistence.TxRunner
-	Projects        persistence.ProjectRepository
-	Workspaces      persistence.WorkspaceRepository
-	Sessions        persistence.SessionRepository
-	Contexts        persistence.SessionContextRepository
-	Policies        persistence.AgentSecurityPolicyRepository
-	Agents          persistence.AgentRepository
-	CommandReceipts persistence.CommandReceiptRepository
-	Events          persistence.EventRepository
-	Readiness       Readiness
-	PolicyFactory   AgentSecurityPolicyFactory
-	Clock           system.Clock
-	IDs             system.IDGenerator
+	Transactions  persistence.TxRunner
+	Projects      persistence.ProjectRepository
+	Workspaces    persistence.WorkspaceRepository
+	Sessions      persistence.SessionRepository
+	Contexts      persistence.SessionContextRepository
+	Policies      persistence.AgentSecurityPolicyRepository
+	Agents        persistence.AgentRepository
+	Events        persistence.EventRepository
+	Readiness     Readiness
+	PolicyFactory AgentSecurityPolicyFactory
+	Clock         system.Clock
+	IDs           system.IDGenerator
 }
 
 // Service owns Session initialization and primary Agent lookup.
 type Service struct {
-	tx              persistence.TxRunner
-	projects        persistence.ProjectRepository
-	workspaces      persistence.WorkspaceRepository
-	sessions        persistence.SessionRepository
-	contexts        persistence.SessionContextRepository
-	policies        persistence.AgentSecurityPolicyRepository
-	agents          persistence.AgentRepository
-	commandReceipts persistence.CommandReceiptRepository
-	events          persistence.EventRepository
-	readiness       Readiness
-	policyFactory   AgentSecurityPolicyFactory
-	clock           system.Clock
-	ids             system.IDGenerator
+	tx            persistence.TxRunner
+	projects      persistence.ProjectRepository
+	workspaces    persistence.WorkspaceRepository
+	sessions      persistence.SessionRepository
+	contexts      persistence.SessionContextRepository
+	policies      persistence.AgentSecurityPolicyRepository
+	agents        persistence.AgentRepository
+	events        persistence.EventRepository
+	readiness     Readiness
+	policyFactory AgentSecurityPolicyFactory
+	clock         system.Clock
+	ids           system.IDGenerator
 }
 
 // CreateParams contains the durable identity and initial state for a Session.
@@ -95,7 +91,6 @@ func NewService(config Config) (*Service, error) {
 		{name: "session contexts", value: config.Contexts},
 		{name: "security policies", value: config.Policies},
 		{name: "agents", value: config.Agents},
-		{name: "command receipts", value: config.CommandReceipts},
 		{name: "events", value: config.Events},
 		{name: "readiness", value: config.Readiness},
 	} {
@@ -112,19 +107,18 @@ func NewService(config Config) (*Service, error) {
 		ids = system.SecureIDGenerator{}
 	}
 	return &Service{
-		tx:              config.Transactions,
-		projects:        config.Projects,
-		workspaces:      config.Workspaces,
-		sessions:        config.Sessions,
-		contexts:        config.Contexts,
-		policies:        config.Policies,
-		agents:          config.Agents,
-		commandReceipts: config.CommandReceipts,
-		events:          config.Events,
-		readiness:       config.Readiness,
-		policyFactory:   config.PolicyFactory,
-		clock:           clock,
-		ids:             ids,
+		tx:            config.Transactions,
+		projects:      config.Projects,
+		workspaces:    config.Workspaces,
+		sessions:      config.Sessions,
+		contexts:      config.Contexts,
+		policies:      config.Policies,
+		agents:        config.Agents,
+		events:        config.Events,
+		readiness:     config.Readiness,
+		policyFactory: config.PolicyFactory,
+		clock:         clock,
+		ids:           ids,
 	}, nil
 }
 
@@ -137,7 +131,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 	if !s.readiness.Ready() {
 		return CreateResult{}, commandprotocol.NewError(commandprotocol.ErrorNotReady)
 	}
-	if params.RequestID == "" || params.ProjectID == "" || params.WorkspaceID == "" {
+	if params.SessionID == "" || params.AgentID == "" || params.ProjectID == "" || params.WorkspaceID == "" {
 		return CreateResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	if params.Profile == "" {
@@ -146,33 +140,29 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 	if !params.Profile.Valid() {
 		return CreateResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := commandprotocol.ArgumentsDigest(struct {
-		SessionID   domainfoundation.SessionID
-		AgentID     domainfoundation.AgentID
-		ProjectID   domainfoundation.ProjectID
-		WorkspaceID domainfoundation.WorkspaceID
-		Goal        string
-		Profile     domainsecurity.AgentProfile
-	}{params.SessionID, params.AgentID, params.ProjectID, params.WorkspaceID, strings.TrimSpace(params.Goal), params.Profile})
 	var result CreateResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "create_session", digest); err != nil {
-			return err
-		} else if found {
-			var ids struct{ SessionID, AgentID string }
-			if err := json.Unmarshal(receipt.ResultPayload, &ids); err != nil {
-				return fmt.Errorf("decode create session receipt: %w", err)
+		existing, err := s.sessions.Get(txCtx, params.SessionID)
+		if err == nil {
+			agent, agentErr := s.agents.Get(txCtx, params.AgentID)
+			if agentErr != nil {
+				return domainfoundation.ErrRequestConflict
 			}
-			session, err := s.sessions.Get(txCtx, domainfoundation.SessionID(ids.SessionID))
-			if err != nil {
-				return err
+			if existing.ProjectID != params.ProjectID || existing.WorkspaceID != params.WorkspaceID ||
+				existing.Goal != strings.TrimSpace(params.Goal) ||
+				agent.SessionID != params.SessionID || agent.Profile != params.Profile {
+				return domainfoundation.ErrRequestConflict
 			}
-			agent, err := s.agents.Get(txCtx, domainfoundation.AgentID(ids.AgentID))
-			if err != nil {
-				return err
-			}
-			result = CreateResult{Session: session, Agent: agent}
+			result = CreateResult{Session: existing, Agent: agent}
 			return nil
+		}
+		if !errors.Is(err, domainfoundation.ErrNotFound) {
+			return err
+		}
+		if _, err := s.agents.Get(txCtx, params.AgentID); err == nil {
+			return domainfoundation.ErrRequestConflict
+		} else if !errors.Is(err, domainfoundation.ErrNotFound) {
+			return err
 		}
 		project, err := s.projects.Get(txCtx, params.ProjectID)
 		if err != nil || project.State != domainproject.ProjectActive {
@@ -187,12 +177,6 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 		}
 		if workspace.ProjectID != project.ID || workspace.State != domainworkspace.WorkspaceReady {
 			return commandprotocol.NewError(commandprotocol.ErrorProjectWorkspaceInvalid)
-		}
-		if params.SessionID == "" {
-			params.SessionID = domainfoundation.SessionID(s.ids.New("session"))
-		}
-		if params.AgentID == "" {
-			params.AgentID = domainfoundation.AgentID(s.ids.New("agent"))
 		}
 		at := s.clock.Now().UTC()
 		session, err := domainsession.NewSession(params.SessionID, project.ID, workspace.ID, params.Goal, at)
@@ -235,13 +219,6 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 		if err := s.appendEvent(txCtx, domainfoundation.EventAgentCreated, at, session.ID, agent.ID); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(struct{ SessionID, AgentID string }{session.ID.String(), agent.ID.String()})
-		if err := s.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
-			RequestID: params.RequestID, Command: "create_session", ArgumentsDigest: digest,
-			ResultPayload: payload, CreatedAt: at,
-		}); err != nil {
-			return err
-		}
 		result = CreateResult{Session: session, Agent: agent}
 		return nil
 	})
@@ -249,20 +226,21 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 }
 
 // CreateSessionForProject initializes a primary Session for one Project.
-func (s *Service) CreateSessionForProject(ctx context.Context, requestID domainfoundation.RequestID, projectID domainfoundation.ProjectID, workspaceID domainfoundation.WorkspaceID, goal string) (CreateResult, error) {
+func (s *Service) CreateSessionForProject(ctx context.Context, sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID, requestID domainfoundation.RequestID, projectID domainfoundation.ProjectID, workspaceID domainfoundation.WorkspaceID, goal string) (CreateResult, error) {
 	return s.CreateSession(ctx, CreateParams{
-		RequestID: requestID, ProjectID: projectID, WorkspaceID: workspaceID,
+		RequestID: requestID, SessionID: sessionID, AgentID: agentID,
+		ProjectID: projectID, WorkspaceID: workspaceID,
 		Goal: goal, Profile: domainsecurity.ProfilePrimary,
 	})
 }
 
 // GetOrCreatePrimaryAgent returns an existing Session Agent or atomically
-// creates the missing primary Agent through the Session initialization use case.
+// creates the missing primary Agent for an already-initialized Session.
 func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID domainfoundation.SessionID, requestID domainfoundation.RequestID) (domainagent.Agent, error) {
 	if ctx == nil {
 		return domainagent.Agent{}, errors.New("ensure primary agent context is required")
 	}
-	if !s.readiness.Ready() || requestID == "" {
+	if !s.readiness.Ready() || requestID == "" || sessionID == "" {
 		return domainagent.Agent{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
 	session, err := s.sessions.Get(ctx, sessionID)
@@ -284,21 +262,42 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID domainf
 	if err != nil {
 		return domainagent.Agent{}, err
 	}
-	result, err := s.CreateSession(ctx, CreateParams{
-		RequestID: requestID, SessionID: session.ID, ProjectID: session.ProjectID,
-		WorkspaceID: session.WorkspaceID, Goal: session.Goal,
-		Profile: domainsecurity.ProfilePrimary, Policy: policy,
+	var created domainagent.Agent
+	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+		existing, err := s.agents.ListBySession(txCtx, sessionID, 1)
+		if err != nil {
+			return err
+		}
+		if len(existing) > 0 {
+			created = existing[0]
+			return nil
+		}
+		at := s.clock.Now().UTC()
+		agent, err := domainagent.NewAgent(domainfoundation.AgentID(s.ids.New("agent")), session.ID, domainsecurity.ProfilePrimary, policy.Revision, at)
+		if err != nil {
+			return err
+		}
+		if err := s.policies.Save(txCtx, agent.ID, policy); err != nil {
+			return err
+		}
+		if err := s.agents.Save(txCtx, agent); err != nil {
+			return err
+		}
+		if err := s.appendEvent(txCtx, domainfoundation.EventAgentCreated, at, session.ID, agent.ID); err != nil {
+			return err
+		}
+		created = agent
+		return nil
 	})
 	if err != nil {
 		return domainagent.Agent{}, err
 	}
-	return result.Agent, nil
+	return created, nil
 }
 
 // AppendContextParams describes one compare-and-append SessionContext write.
 type AppendContextParams struct {
 	EntryID           domainfoundation.ContextEntryID
-	RequestID         domainfoundation.RequestID
 	SessionID         domainfoundation.SessionID
 	ExpectedRevision  uint64
 	Kind              domaincontext.SessionContextKind
@@ -308,8 +307,8 @@ type AppendContextParams struct {
 
 // AppendContextResult returns the durable entry and retry state.
 type AppendContextResult struct {
-	Entry           domaincontext.SessionContextEntry
-	ExistingRequest bool
+	Entry         domaincontext.SessionContextEntry
+	ExistingEntry bool
 }
 
 // AppendSessionContext appends immutable shared context after checking the
@@ -318,37 +317,22 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	if ctx == nil {
 		return AppendContextResult{}, errors.New("append session context is required")
 	}
-	if !s.readiness.Ready() || params.EntryID == "" || params.RequestID == "" || params.SessionID == "" || strings.TrimSpace(params.Content) == "" {
+	content := strings.TrimSpace(params.Content)
+	if !s.readiness.Ready() || params.EntryID == "" || params.SessionID == "" || content == "" {
 		return AppendContextResult{}, commandprotocol.NewError(commandprotocol.ErrorInvalidRequest)
 	}
-	digest := commandprotocol.ArgumentsDigest(struct {
-		EntryID   domainfoundation.ContextEntryID
-		SessionID domainfoundation.SessionID
-		Revision  uint64
-		Kind      domaincontext.SessionContextKind
-		Source    domainfoundation.AgentExecutionID
-		Content   string
-	}{params.EntryID, params.SessionID, params.ExpectedRevision, params.Kind, params.SourceExecutionID, strings.TrimSpace(params.Content)})
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if receipt, found, err := commandprotocol.FindReceipt(txCtx, s.commandReceipts, params.RequestID, "append_session_context", digest); err != nil {
+		existing, found, err := s.contexts.GetByID(txCtx, params.EntryID)
+		if err != nil {
 			return err
-		} else if found {
-			var value struct {
-				SessionID string
-				Revision  uint64
+		}
+		if found {
+			if existing.SessionID != params.SessionID || existing.Kind != params.Kind ||
+				existing.SourceExecutionID != params.SourceExecutionID || existing.Content != content {
+				return domainfoundation.ErrRequestConflict
 			}
-			if err := json.Unmarshal(receipt.ResultPayload, &value); err != nil {
-				return err
-			}
-			entries, err := s.contexts.List(txCtx, domainfoundation.SessionID(value.SessionID), value.Revision-1, 1)
-			if err != nil {
-				return err
-			}
-			if len(entries) == 0 {
-				return domainfoundation.ErrNotFound
-			}
-			result = AppendContextResult{Entry: entries[0], ExistingRequest: true}
+			result = AppendContextResult{Entry: existing, ExistingEntry: true}
 			return nil
 		}
 		current, err := s.contexts.CurrentRevision(txCtx, params.SessionID)
@@ -364,7 +348,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 			current+1,
 			params.Kind,
 			params.SourceExecutionID,
-			strings.TrimSpace(params.Content),
+			content,
 			s.clock.Now(),
 		)
 		if err != nil {
@@ -382,16 +366,6 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 			ContextKind:     string(entry.Kind),
 		}
 		if err := s.events.Append(txCtx, event); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(struct {
-			SessionID string
-			Revision  uint64
-		}{entry.SessionID.String(), entry.Revision})
-		if err := s.commandReceipts.Save(txCtx, domaincommand.CommandReceipt{
-			RequestID: params.RequestID, Command: "append_session_context", ArgumentsDigest: digest,
-			ResultPayload: payload, CreatedAt: entry.CreatedAt,
-		}); err != nil {
 			return err
 		}
 		result.Entry = entry

@@ -29,13 +29,13 @@ type ReadinessSource interface {
 type SessionService interface {
 	ListSessions(context.Context, int) ([]domainsession.Session, error)
 	ListSessionsByProject(context.Context, domainfoundation.ProjectID, int) ([]domainsession.Session, error)
-	CreateSessionForProject(context.Context, domainfoundation.RequestID, domainfoundation.ProjectID, domainfoundation.WorkspaceID, string) (applicationsession.CreateResult, error)
+	CreateSessionForProject(context.Context, domainfoundation.SessionID, domainfoundation.AgentID, domainfoundation.RequestID, domainfoundation.ProjectID, domainfoundation.WorkspaceID, string) (applicationsession.CreateResult, error)
 	GetSessionView(context.Context, domainfoundation.SessionID, int) (applicationquery.SessionView, error)
 }
 
 type ProjectService interface {
 	ListProjects(context.Context, int) ([]domainproject.Project, error)
-	CreateProject(context.Context, string, string, domainfoundation.RequestID) (project.CreateProjectResult, error)
+	CreateProject(context.Context, domainfoundation.ProjectID, domainfoundation.WorkspaceID, string, string, domainfoundation.RequestID) (project.CreateProjectResult, error)
 	ListWorkspaces(context.Context, domainfoundation.ProjectID, int) ([]domainworkspace.Workspace, error)
 }
 

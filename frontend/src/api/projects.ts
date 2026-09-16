@@ -1,6 +1,12 @@
 import { getProjectBinding } from './bindings'
 
-export type CreateProjectRequest = { projectName: string; path: string; requestId: string }
+export type CreateProjectRequest = {
+    projectId: string
+    workspaceId: string
+    projectName: string
+    path: string
+    requestId: string
+}
 
 export type CreateProjectResponse = {
     projectId: string
