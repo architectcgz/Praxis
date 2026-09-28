@@ -804,6 +804,21 @@
     gap: 32px;
 }
 
+.model-config-header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: flex-end;
+    gap: 12px;
+}
+
+.model-config-default-provider {
+    min-width: 190px;
+}
+
+.model-config-default-provider .config-field select {
+    min-height: 44px;
+}
+
 .model-config-header-text {
     flex: 1;
     min-width: 0;

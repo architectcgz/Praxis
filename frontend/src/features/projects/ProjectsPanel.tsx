@@ -11,7 +11,6 @@ export function ProjectsPanel({
     collapsedProjects,
     busy,
     bridgeAvailable,
-    healthReady,
     onLookupChange,
     onLoadSession,
     onToggleSearch,
@@ -35,7 +34,7 @@ export function ProjectsPanel({
                         title="新建项目"
                         aria-label="新建项目"
                         onClick={onOpenProject}
-                        disabled={busy || !bridgeAvailable || !healthReady}
+                        disabled={busy || !bridgeAvailable}
                     >
                         <FolderPlus size={16} strokeWidth={1.8} aria-hidden="true" />
                     </button>
@@ -86,7 +85,6 @@ export function ProjectsPanel({
                             selectedProjectID={selectedProjectID}
                             busy={busy}
                             bridgeAvailable={bridgeAvailable}
-                            healthReady={healthReady}
                             onSelectSession={onSelectSession}
                             onSelectProject={onSelectProject}
                             onToggleProject={onToggleProject}
@@ -120,7 +118,6 @@ type ProjectSectionProps = {
     selectedProjectID: string
     busy: boolean
     bridgeAvailable: boolean
-    healthReady: boolean
     onSelectSession: (id: string) => void
     onSelectProject: (project: ProjectGroup) => void
     onToggleProject: (id: string) => void
@@ -134,7 +131,6 @@ function ProjectSection({
     selectedProjectID,
     busy,
     bridgeAvailable,
-    healthReady,
     onSelectSession,
     onSelectProject,
     onToggleProject,
@@ -176,7 +172,7 @@ function ProjectSection({
                     title={`在 ${project.name} 中新建会话`}
                     aria-label={`在 ${project.name} 中新建会话`}
                     onClick={() => onOpenSession(project)}
-                    disabled={busy || !bridgeAvailable || !healthReady}
+                    disabled={busy || !bridgeAvailable}
                 >
                     <MessageSquarePlus size={15} strokeWidth={1.8} aria-hidden="true" />
                 </button>
@@ -190,7 +186,7 @@ function ProjectSection({
                         onClick={() => onSelectSession(item.id)}
                     >
                         <span className="session-row-copy">
-                            <strong>{item.goal || '未命名会话'}</strong>
+                            <strong>{item.title || '未命名会话'}</strong>
                         </span>
                     </button>
                 ))}

@@ -21,6 +21,41 @@ func DecodeOptionalInteger(encoded json.RawMessage, target *int) error {
 	return json.Unmarshal(encoded, target)
 }
 
+// RejectDuplicateFields 要求 JSON 对象中的字段名只能出现一次。
+func RejectDuplicateFields(encoded json.RawMessage) error {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
+		return errors.New("arguments must be an object")
+	}
+	seen := make(map[string]struct{}, 3)
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		name, ok := key.(string)
+		if !ok {
+			return errors.New("argument name is invalid")
+		}
+		if _, exists := seen[name]; exists {
+			return errors.New("duplicate argument")
+		}
+		seen[name] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	return RejectTrailingJSON(decoder)
+}
+
 // RejectTrailingJSON verifies that the decoder consumed exactly one JSON value.
 func RejectTrailingJSON(decoder *json.Decoder) error {
 	var extra any

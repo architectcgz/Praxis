@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
-import { Brain, ChevronDown, Cpu, Mic, Plus, Send, Square } from 'lucide-react'
+import { Brain, ChevronDown, Cpu, Mic, Plus, Send, Server, Square } from 'lucide-react'
 import type { ModelOption } from '../../api'
 
 type AgentTaskInputProps = {
@@ -21,10 +21,15 @@ type AgentTaskInputProps = {
 export function AgentTaskInput({ active, closed, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange }: AgentTaskInputProps) {
     const maxInputHeight = 220
     const inputRef = useRef<HTMLTextAreaElement>(null)
+    const providerPickerRef = useRef<HTMLDivElement>(null)
     const modelPickerRef = useRef<HTMLDivElement>(null)
     const reasoningPickerRef = useRef<HTMLDivElement>(null)
+    const [providerPickerOpen, setProviderPickerOpen] = useState(false)
     const [modelPickerOpen, setModelPickerOpen] = useState(false)
     const [reasoningPickerOpen, setReasoningPickerOpen] = useState(false)
+    const providerOptions = Array.from(new Map(models.map((model) => [model.providerId, model])).values())
+    const providerModels = models.filter((model) => model.providerId === selectedProviderID)
+    const selectedProvider = providerOptions.find((provider) => provider.providerId === selectedProviderID)
     const selectedModel = models.find((model) => model.providerId === selectedProviderID && model.modelId === selectedModelID)
     const reasoningAvailable = (selectedModel?.reasoningLevels.length || 0) > 0
     const reasoningLevels = selectedModel?.reasoningLevels || []
@@ -53,15 +58,19 @@ export function AgentTaskInput({ active, closed, input, setInput, models, select
         const closeOnOutsidePress = (event: PointerEvent) => {
             const target = event.target
             const clickedInsidePicker = target instanceof Node && (
-                modelPickerRef.current?.contains(target) || reasoningPickerRef.current?.contains(target)
+                providerPickerRef.current?.contains(target) ||
+                modelPickerRef.current?.contains(target) ||
+                reasoningPickerRef.current?.contains(target)
             )
             if (!clickedInsidePicker) {
+                setProviderPickerOpen(false)
                 setModelPickerOpen(false)
                 setReasoningPickerOpen(false)
             }
         }
         const closeOnEscape = (event: globalThis.KeyboardEvent) => {
             if (event.key === 'Escape') {
+                setProviderPickerOpen(false)
                 setModelPickerOpen(false)
                 setReasoningPickerOpen(false)
             }
@@ -77,6 +86,7 @@ export function AgentTaskInput({ active, closed, input, setInput, models, select
 
     useEffect(() => {
         if (busy || active || models.length === 0) {
+            setProviderPickerOpen(false)
             setModelPickerOpen(false)
         }
         if (busy || active || !reasoningAvailable) {
@@ -129,6 +139,49 @@ export function AgentTaskInput({ active, closed, input, setInput, models, select
                     rows={1}
                 />
                 <div className="composer-tools">
+                    <div className={`composer-provider-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={providerPickerRef}>
+                        <button
+                            className="composer-provider-trigger"
+                            type="button"
+                            title={selectedProvider?.providerName || '没有配置的 Provider'}
+                            aria-label={selectedProvider ? `Provider: ${selectedProvider.providerName}` : '没有配置的 Provider'}
+                            aria-expanded={providerPickerOpen}
+                            aria-controls="provider-picker-menu"
+                            onClick={() => {
+                                setModelPickerOpen(false)
+                                setReasoningPickerOpen(false)
+                                setProviderPickerOpen((open) => !open)
+                            }}
+                            disabled={busy || active || models.length === 0}
+                        >
+                            <Server size={15} strokeWidth={1.8} aria-hidden="true" />
+                            <span>{selectedProvider?.providerName || '无 Provider'}</span>
+                            <ChevronDown className={`composer-select-chevron ${providerPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
+                        </button>
+                        {providerPickerOpen && (
+                            <div className="model-picker-menu" id="provider-picker-menu" aria-label="Provider 选择">
+                                {providerOptions.map((provider) => (
+                                    <button
+                                        className={`model-picker-option ${provider.providerId === selectedProviderID ? 'is-selected' : ''}`}
+                                        type="button"
+                                        key={provider.providerId}
+                                        aria-current={provider.providerId === selectedProviderID ? 'true' : undefined}
+                                        onClick={() => {
+                                            const providerModel = models.find((model) => model.providerId === provider.providerId && model.modelId === model.defaultModelId) ||
+                                                models.find((model) => model.providerId === provider.providerId)
+                                            if (providerModel) {
+                                                onModelChange(providerModel.providerId, providerModel.modelId)
+                                            }
+                                            setProviderPickerOpen(false)
+                                        }}
+                                    >
+                                        <span className="model-picker-option-label">{provider.providerName}</span>
+                                        <span className="model-picker-option-provider">{provider.providerId}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <div className={`composer-model-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={modelPickerRef}>
                         <button
                             className="composer-model-trigger"
@@ -149,7 +202,7 @@ export function AgentTaskInput({ active, closed, input, setInput, models, select
                         </button>
                         {modelPickerOpen && (
                             <div className="model-picker-menu" id="model-picker-menu" aria-label="模型选择">
-                                {models.map((model) => (
+                                {providerModels.map((model) => (
                                     <button
                                         className={`model-picker-option ${model.providerId === selectedProviderID && model.modelId === selectedModelID ? 'is-selected' : ''}`}
                                         type="button"

@@ -1,38 +1,80 @@
+// wails 层错误码：入参校验与传输/宿主。
+// 业务错误码来自 internal/contracts，由 wails 层原样透传，前端直接识别。
 export const API_ERROR_CODES = {
+    // wails 层
     invalidRequest: 'invalid_request',
-    validation: 'validation_error',
-    invalidTransition: 'invalid_transition',
-    notReady: 'orchestration_not_ready',
     bindingUnavailable: 'binding_unavailable',
-    notFound: 'not_found',
-    agentExecuting: 'agent_executing',
-    agentUnavailable: 'agent_unavailable',
-    requestNotFound: 'request_not_found',
-    requestConflict: 'request_conflict',
-    workspaceConflict: 'workspace_conflict',
-    alreadySettled: 'already_settled',
-    workQueueEmpty: 'work_queue_empty',
-    workItemActive: 'work_item_active',
-    alreadyDelivered: 'already_delivered',
-    projectWorkspaceInvalid: 'project_workspace_invalid',
-    modelNotConfigured: 'model_not_configured',
     requestCanceled: 'request_canceled',
     requestTimeout: 'request_timeout',
-    executionContract: 'execution_contract_error',
-    executionPolicyBlocked: 'execution_policy_blocked',
-    executionApprovalRequired: 'execution_approval_required',
-    executionStorage: 'execution_storage_error',
-    executionProvider: 'execution_provider_error',
-    executionTool: 'execution_tool_error',
-    executionResourceLimit: 'execution_resource_limit',
-    executionBusy: 'execution_busy',
-    executionClosed: 'execution_closed',
-    executionInterrupted: 'execution_interrupted',
     internal: 'internal_error',
+
+    // 业务层（internal/contracts）
+    validation: 'generic.invalid_value',
+    invalidTransition: 'generic.invalid_transition',
+    notFound: 'generic.not_found',
+    notReady: 'orchestration.not_ready',
+    projectWorkspaceInvalid: 'project.workspace_invalid',
+    workspaceConflict: 'project.lease_conflict',
+    revisionConflict: 'project.revision_conflict',
+    agentExecuting: 'agent.executing',
+    agentUnavailable: 'agent.unavailable',
+    alreadySettled: 'agent.already_settled',
+    workQueueEmpty: 'work.queue_empty',
+    workItemActive: 'work.item_active',
+    requestNotFound: 'request.not_found',
+    requestConflict: 'request.conflict',
+    modelNotConfigured: 'model.not_configured',
+    executionContract: 'execution.contract_error',
+    executionPolicyBlocked: 'execution.policy_blocked',
+    executionApprovalRequired: 'execution.approval_required',
+    executionStorage: 'execution.storage_error',
+    executionProvider: 'execution.provider_error',
+    executionTool: 'execution.tool_error',
+    executionResourceLimit: 'execution.resource_limit',
+    executionBusy: 'execution.busy',
+    executionClosed: 'execution.closed',
+    executionInterrupted: 'execution.interrupted',
 } as const
 
 export type ApiErrorCode = typeof API_ERROR_CODES[keyof typeof API_ERROR_CODES]
 
+export interface ApiErrorEnvelope {
+    code: string
+    message: string
+}
+
 export function isApiErrorCode(value: string): value is ApiErrorCode {
     return Object.values(API_ERROR_CODES).includes(value as ApiErrorCode)
+}
+
+// 解析绑定错误：
+//   - 后端 wire 为 JSON {"code","message"}；
+//   - 兼容前端合成的裸码字符串（如 commands.ts 抛出的 modelNotConfigured）。
+export function parseApiError(error: unknown): ApiErrorEnvelope | undefined {
+    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined
+    if (message === undefined) {
+        return undefined
+    }
+    const trimmed = message.trim()
+    const start = trimmed.indexOf('{')
+    const end = trimmed.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+        try {
+            const parsed = JSON.parse(trimmed.slice(start, end + 1)) as { code?: unknown; message?: unknown }
+            if (typeof parsed.code === 'string') {
+                return {
+                    code: parsed.code,
+                    message: typeof parsed.message === 'string' ? parsed.message : '',
+                }
+            }
+        } catch {
+            // 非法 JSON 时回退到裸码解析
+        }
+    }
+    const [rawCode, ...rest] = trimmed.split(':')
+    const code = rawCode.trim()
+    if (isApiErrorCode(code)) {
+        return { code, message: rest.join(':').trim() }
+    }
+    return undefined
 }

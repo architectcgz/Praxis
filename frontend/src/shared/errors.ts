@@ -1,13 +1,14 @@
-import { API_ERROR_CODES, BindingUnavailableError, isApiErrorCode } from '../api'
+import { API_ERROR_CODES, BindingUnavailableError, parseApiError } from '../api'
 
 export function readableError(error: unknown) {
     if (error instanceof BindingUnavailableError) {
         return 'Wails bridge is unavailable. Run the desktop app to connect to the core.'
     }
+    const parsed = parseApiError(error)
+    if (parsed) {
+        return parsed.message || readableApiError(parsed.code)
+    }
     if (error instanceof Error && error.message) {
-        if (isApiErrorCode(error.message)) {
-            return readableApiError(error.message)
-        }
         return error.message
     }
     return 'The command could not be completed.'
@@ -21,6 +22,8 @@ function readableApiError(code: string) {
             return 'Select a configured Provider and Model before sending.'
         case API_ERROR_CODES.validation:
             return 'Some request values are invalid.'
+        case API_ERROR_CODES.revisionConflict:
+            return 'This item changed since it was loaded. Reload and try again.'
         case API_ERROR_CODES.notFound:
             return 'The requested resource could not be found.'
         case API_ERROR_CODES.notReady:

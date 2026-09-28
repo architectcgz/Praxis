@@ -1,9 +1,9 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, MessageSquare } from 'lucide-react'
-import type { AgentHistoryItem, AgentSnapshot, ModelOption } from '../../api'
+import type { AgentHistoryItem, AgentMessageBlock, AgentSnapshot, ModelOption } from '../../api'
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
-import { HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingOutputView } from './MessageViews'
+import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './MessageViews'
 
 export type AgentConversationProps = {
     agent: AgentSnapshot
@@ -43,6 +43,38 @@ export function AgentConversation({ agent, history, streamingOutput, pendingUser
         })
     }, [history])
 
+    const { visibleHistory, toolResults } = useMemo(() => {
+        const visibleHistory: AgentHistoryItem[] = []
+        const toolResults = new Map<number, AgentMessageBlock[]>()
+        const calls = new Map<string, number>()
+        for (const item of orderedHistory) {
+            const message = item.message
+            if (message?.role === 'assistant') {
+                for (const block of message.blocks || []) {
+                    if (block.kind === 'tool_call' && block.callId) {
+                        calls.set(`${message.executionId}:${block.callId}`, item.sequence)
+                    }
+                }
+            }
+            if (message?.role === 'tool') {
+                const unpaired: AgentMessageBlock[] = []
+                for (const block of message.blocks || []) {
+                    const sequence = calls.get(`${message.executionId}:${block.callId}`)
+                    if (block.kind !== 'tool_result' || sequence === undefined) {
+                        unpaired.push(block)
+                    } else {
+                        toolResults.set(sequence, [...(toolResults.get(sequence) || []), block])
+                    }
+                }
+                if (unpaired.length === 0) continue
+                visibleHistory.push({ ...item, message: { ...message, blocks: unpaired } })
+            } else {
+                visibleHistory.push(item)
+            }
+        }
+        return { visibleHistory, toolResults }
+    }, [orderedHistory])
+
     const latestItem = orderedHistory[orderedHistory.length - 1]
     const latestItemKey = latestItem
         ? `${latestItem.kind}-${latestItem.sequence}-${latestItem.at}-${latestItem.message?.content || latestItem.execution?.id || ''}`
@@ -70,7 +102,7 @@ export function AgentConversation({ agent, history, streamingOutput, pendingUser
         })
         followingOutputRef.current = true
         previousAgentIDRef.current = agent.id
-    }, [agent.id, latestItemKey, pendingMessagesKey, streamingOutput?.content, waitingForOutput])
+    }, [agent.id, latestItemKey, pendingMessagesKey, streamingOutput, waitingForOutput])
 
     const updateOutputFollowing = useCallback(() => {
         const messageThread = messageThreadRef.current
@@ -115,14 +147,17 @@ export function AgentConversation({ agent, history, streamingOutput, pendingUser
                         </div>
                     </div>
                 ) : (
-                    orderedHistory.map((item) => (
-                        <HistoryItemView agentProfile={agent.profile} item={item} key={`${item.kind}-${item.sequence}-${item.message?.executionId || item.execution?.id || item.at}`} />
+                    visibleHistory.map((item) => (
+                        <HistoryItemView agentProfile={agent.profile} item={item} toolResults={toolResults.get(item.sequence)} key={`${item.kind}-${item.sequence}-${item.message?.executionId || item.execution?.id || item.at}`} />
                     ))
                 )}
                 {visiblePendingMessages.map((message) => (
                     <PendingUserMessageView content={message.content} at={message.at} key={message.requestId} />
                 ))}
-                {streamingOutput && <StreamingOutputView agentProfile={agent.profile} content={streamingOutput.content} />}
+                {streamingOutput?.turns.map((turn) => (
+                    <StreamingTurnView agentProfile={agent.profile} events={turn.events} key={`${streamingOutput.executionId}-${turn.turn}`} />
+                ))}
+                {streamingOutput?.error && <AgentActivityView error={streamingOutput.error} />}
                 {waitingForOutput && <PendingOutputView agentProfile={agent.profile} />}
             </div>
             {showScrollButton && (

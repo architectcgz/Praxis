@@ -94,12 +94,14 @@
 }
 
 .composer-model-picker,
+.composer-provider-picker,
 .composer-reasoning-picker {
     position: relative;
     flex: 0 0 auto;
 }
 
 .composer-model-trigger,
+.composer-provider-trigger,
 .composer-reasoning-trigger {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -123,7 +125,12 @@
     width: 132px;
 }
 
+.composer-provider-trigger {
+    width: 112px;
+}
+
 .composer-model-trigger > span,
+.composer-provider-trigger > span,
 .composer-reasoning-trigger > span {
     min-width: 0;
     overflow: hidden;
@@ -133,6 +140,8 @@
 
 .composer-model-trigger:hover:not(:disabled),
 .composer-model-trigger[aria-expanded='true'],
+.composer-provider-trigger:hover:not(:disabled),
+.composer-provider-trigger[aria-expanded='true'],
 .composer-reasoning-trigger:hover:not(:disabled),
 .composer-reasoning-trigger[aria-expanded='true'] {
     border-color: var(--line);
@@ -141,6 +150,7 @@
 }
 
 .composer-model-trigger:focus-visible,
+.composer-provider-trigger:focus-visible,
 .composer-reasoning-trigger:focus-visible {
     outline: 0;
     border-color: var(--blue);
@@ -149,6 +159,7 @@
 }
 
 .composer-model-picker.is-disabled .composer-model-trigger,
+.composer-provider-picker.is-disabled .composer-provider-trigger,
 .composer-reasoning-picker.is-disabled .composer-reasoning-trigger {
     background: rgba(118, 118, 128, 0.05);
     color: var(--ink-tertiary);

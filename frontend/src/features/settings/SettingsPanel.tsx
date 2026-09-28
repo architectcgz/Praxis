@@ -9,7 +9,7 @@ type SettingsPanelProps = {
 }
 
 export function SettingsPanel({ models, onOpenModels }: SettingsPanelProps) {
-    const configured = models.some((model) => model.assignedAgents.includes('primary'))
+    const configured = models.some((model) => model.assignedAgentDefinitions.includes('primary'))
     const providers = new Set(models.map((model) => model.providerName)).size
     const modelsDetail = models.length
         ? `${models.length} 个 Model · ${providers} 个 Provider`
@@ -49,7 +49,7 @@ export function SettingsPanel({ models, onOpenModels }: SettingsPanelProps) {
                                 </div>
                                 <div className="settings-alert-body">
                                     <strong>需要操作</strong>
-                                    <p>配置主 Model 以启用 Agent 会话。<code>agents.json</code> 中的 <code>primary</code> Agent 必须绑定 Model。</p>
+                                    <p>配置主 Model 以启用 Agent 会话。<code>agents/primary/agent.json</code> 必须绑定 Model。</p>
                                 </div>
                             </div>
                         </div>

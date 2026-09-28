@@ -19,7 +19,6 @@ export type ProjectPanelProps = {
     collapsedProjects: Record<string, boolean>
     busy: boolean
     bridgeAvailable: boolean
-    healthReady: boolean
     onLookupChange: (value: string) => void
     onLoadSession: (event: FormEvent<HTMLFormElement>) => void
     onToggleSearch: () => void

@@ -10,16 +10,11 @@ import type {
 import type { ModelConfigDocument, ModelOption, SaveModelConfigResponse } from './models'
 import type { CreateProjectRequest, CreateProjectResponse, ProjectSummary } from './projects'
 import type { CreateSessionRequest, CreateSessionResponse, SessionSnapshot, SessionSummary } from './sessions'
-import type { HealthSnapshot } from './system'
-import type { EventSnapshot } from './events'
-
-type SystemBinding = {
-    Readiness(): Promise<HealthSnapshot>
-}
 
 type ProjectBinding = {
     ListProjects(): Promise<ProjectSummary[]>
     CreateProject(request: CreateProjectRequest): Promise<CreateProjectResponse>
+    SelectProjectPath(): Promise<string>
 }
 
 type SessionBinding = {
@@ -32,12 +27,6 @@ type AgentBinding = {
     GetAgent(agentID: string): Promise<AgentSnapshot>
     ListAgentMessages(agentID: string): Promise<AgentMessage[]>
     ListAgentHistory(agentID: string): Promise<AgentHistoryItem[]>
-}
-
-type EventBinding = {
-    ListSessionEvents(sessionID: string, after: string, limit: number): Promise<EventSnapshot[]>
-    ListAgentEvents(agentID: string, after: string, limit: number): Promise<EventSnapshot[]>
-    ListExecutionEvents(executionID: string, after: string, limit: number): Promise<EventSnapshot[]>
 }
 
 type CommandBinding = {
@@ -63,23 +52,21 @@ export class BindingUnavailableError extends Error {
 }
 
 type WailsBindings = {
-    SystemBindings?: SystemBinding
     ProjectBindings?: ProjectBinding
     SessionBindings?: SessionBinding
     AgentBindings?: AgentBinding
-    EventBindings?: EventBinding
     CommandBindings?: CommandBinding
     ModelBindings?: ModelBinding
 }
 
 type WailsWindow = Window & {
     go?: {
-        app?: WailsBindings
+        bindings?: WailsBindings
     }
 }
 
 function bindingNamespace(): WailsBindings {
-    const bindings = (window as WailsWindow).go?.app
+    const bindings = (window as WailsWindow).go?.bindings
     if (!bindings) {
         throw new BindingUnavailableError()
     }
@@ -94,20 +81,14 @@ function requireBinding<T>(binding: T | undefined): T {
 }
 
 export function isBindingAvailable() {
-    const bindings = (window as WailsWindow).go?.app
+    const bindings = (window as WailsWindow).go?.bindings
     return Boolean(
-        bindings?.SystemBindings &&
-        bindings.ProjectBindings &&
+        bindings?.ProjectBindings &&
         bindings.SessionBindings &&
         bindings.AgentBindings &&
-        bindings.EventBindings &&
         bindings.CommandBindings &&
         bindings.ModelBindings,
     )
-}
-
-export function getSystemBinding() {
-    return requireBinding(bindingNamespace().SystemBindings)
 }
 
 export function getProjectBinding() {
@@ -128,8 +109,4 @@ export function getCommandBinding() {
 
 export function getModelBinding() {
     return requireBinding(bindingNamespace().ModelBindings)
-}
-
-export function getEventBinding() {
-    return requireBinding(bindingNamespace().EventBindings)
 }

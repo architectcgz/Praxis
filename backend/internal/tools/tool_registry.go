@@ -1,64 +1,107 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 
-	domainsecurity "praxis/internal/domain/security"
-	runtimecontract "praxis/internal/runtime"
+	bash "praxis/internal/tools/bash"
+	toolcontracts "praxis/internal/tools/contracts"
 	listdir "praxis/internal/tools/list_dir"
 	readfile "praxis/internal/tools/read_file"
 )
 
-type toolNormalizer func(
-	runtimecontract.ToolCall,
-	runtimecontract.ToolInvocationContext,
-) (runtimecontract.AuthorizedToolCall, error)
-
-type registeredTool struct {
-	definition runtimecontract.ToolDefinition
-	normalize  toolNormalizer
+type builtinTool struct {
+	definition func() toolcontracts.ToolDefinition
+	normalize  func(toolcontracts.ToolCall) (toolcontracts.NormalizedToolCall, error)
+	execute    func(context.Context, toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error)
 }
 
-// ToolRegistry owns the registered tools and dispatches their input normalization.
+func (t builtinTool) Definition() toolcontracts.ToolDefinition { return t.definition() }
+
+func (t builtinTool) Normalize(
+	call toolcontracts.ToolCall,
+) (toolcontracts.NormalizedToolCall, error) {
+	return t.normalize(call)
+}
+
+func (t builtinTool) Execute(
+	ctx context.Context,
+	call toolcontracts.AuthorizedToolCall,
+) (toolcontracts.ToolResult, error) {
+	return t.execute(ctx, call)
+}
+
+// ToolRegistry 保存工具实现，并对外提供完整的已注册工具目录。
 type ToolRegistry struct {
-	tools map[domainsecurity.ToolName]registeredTool
+	tools map[toolcontracts.ToolName]toolcontracts.Tool
 }
 
-// NewToolRegistry creates the registry with all tools supported by this package.
+// NewToolRegistry 注册内置工具；可通过 Register 添加扩展工具。
 func NewToolRegistry() *ToolRegistry {
-	return &ToolRegistry{
-		tools: map[domainsecurity.ToolName]registeredTool{
-			domainsecurity.ToolReadFile: {
-				definition: readfile.Definition(),
-				normalize:  readfile.Normalize,
-			},
-			domainsecurity.ToolListDir: {
-				definition: listdir.Definition(),
-				normalize:  listdir.Normalize,
-			},
+	return &ToolRegistry{tools: map[toolcontracts.ToolName]toolcontracts.Tool{
+		toolcontracts.ToolReadFile: builtinTool{
+			definition: readfile.Definition,
+			normalize:  readfile.Normalize,
+			execute:    readfile.Execute,
 		},
-	}
+		toolcontracts.ToolListDir: builtinTool{
+			definition: listdir.Definition,
+			normalize:  listdir.Normalize,
+			execute:    listdir.Execute,
+		},
+		toolcontracts.ToolBash: builtinTool{
+			definition: bash.Definition,
+			normalize:  bash.Normalize,
+			execute:    bash.Execute,
+		},
+	}}
 }
 
-// Definition returns a defensive copy of the model-visible tool definition.
-func (r *ToolRegistry) Definition(name domainsecurity.ToolName) (runtimecontract.ToolDefinition, bool) {
+// Register 注册扩展工具；名称或 Schema 无效、名称已被占用时返回错误。
+func (r *ToolRegistry) Register(tool toolcontracts.Tool) error {
+	if r == nil || tool == nil {
+		return errors.New("tool registry and tool are required")
+	}
+	definition := tool.Definition()
+	if !definition.Name.Valid() || !json.Valid(definition.InputSchema) || definition.Description == "" {
+		return errors.New("tool definition is invalid")
+	}
+	if _, exists := r.tools[definition.Name]; exists {
+		return fmt.Errorf("tool %q is already registered", definition.Name)
+	}
+	r.tools[definition.Name] = tool
+	return nil
+}
+
+// Get 根据名称查找工具；注册表不负责决定工具是否可用。
+func (r *ToolRegistry) Get(name toolcontracts.ToolName) (toolcontracts.Tool, bool) {
+	if r == nil {
+		return nil, false
+	}
 	tool, ok := r.tools[name]
-	if !ok {
-		return runtimecontract.ToolDefinition{}, false
-	}
-	return tool.definition.Snapshot(), true
+	return tool, ok
 }
 
-// Normalize dispatches a provider tool call to the registered tool normalizer.
-func (r *ToolRegistry) Normalize(
-	call runtimecontract.ToolCall,
-	invocation runtimecontract.ToolInvocationContext,
-) (runtimecontract.AuthorizedToolCall, error) {
-	tool, ok := r.tools[call.Name]
-	if !ok || tool.normalize == nil {
-		return runtimecontract.AuthorizedToolCall{}, errors.New("tool is not registered")
+// List 返回所有已注册工具的定义副本，按名称排序且不做权限筛选。
+func (r *ToolRegistry) List() []toolcontracts.ToolDefinition {
+	if r == nil {
+		return nil
 	}
-	return tool.normalize(call, invocation)
+	definitions := make([]toolcontracts.ToolDefinition, 0, len(r.tools))
+	for _, tool := range r.tools {
+		definitions = append(definitions, tool.Definition().Snapshot())
+	}
+	slices.SortFunc(definitions, func(left, right toolcontracts.ToolDefinition) int {
+		if left.Name < right.Name {
+			return -1
+		}
+		if left.Name > right.Name {
+			return 1
+		}
+		return 0
+	})
+	return definitions
 }
-
-var _ runtimecontract.ToolCatalog = (*ToolRegistry)(nil)

@@ -43,7 +43,7 @@ export function ProjectOverview({ project, selectedSessionID, onSelectSession, o
                         <div className="project-overview-sessions">
                             {project.sessions.map((session) => (
                                 <button className={`project-overview-session ${session.id === selectedSessionID ? 'selected' : ''}`} key={session.id} type="button" onClick={() => onSelectSession(session.id)}>
-                                    <span className="project-overview-session-copy"><strong>{session.goal || '未命名会话'}</strong><small>{formatDate(session.updatedAt)}</small></span>
+                                    <span className="project-overview-session-copy"><strong>{session.title || '未命名会话'}</strong><small>{formatDate(session.updatedAt)}</small></span>
                                     <CalendarClock size={16} strokeWidth={1.8} aria-hidden="true" />
                                 </button>
                             ))}

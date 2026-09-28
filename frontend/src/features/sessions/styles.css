@@ -100,6 +100,92 @@
     align-content: stretch;
 }
 
+.agent-activity {
+    width: 100%;
+    max-width: var(--session-content-width);
+    justify-self: center;
+    color: var(--ink-tertiary);
+    font-size: 0.82rem;
+}
+
+.streaming-turn {
+    display: grid;
+    justify-items: center;
+    width: 100%;
+    gap: 8px;
+}
+
+.agent-activity details {
+    padding: 5px 0;
+}
+
+.agent-activity summary {
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+
+.thinking-details {
+    max-width: 100%;
+    margin: 10px 0 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(118, 118, 128, 0.04);
+}
+
+.agent-activity .thinking-details {
+    padding: 0;
+}
+
+.thinking-details > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 6px 12px;
+    color: var(--ink-secondary);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    list-style: none;
+}
+
+.thinking-details > summary:hover {
+    background: rgba(118, 118, 128, 0.07);
+}
+
+.thinking-details > summary:focus-visible {
+    outline: 2px solid var(--blue-strong);
+    outline-offset: -2px;
+}
+
+.thinking-details > summary::-webkit-details-marker,
+.markdown-code-toolbar::-webkit-details-marker {
+    display: none;
+}
+
+.thinking-details[open] > summary {
+    border-bottom: 1px solid var(--line);
+}
+
+.thinking-details[open] > summary svg,
+.markdown-code-block details[open] summary svg {
+    transform: rotate(90deg);
+}
+
+.thinking-content {
+    max-height: 280px;
+    overflow: auto;
+    padding: 10px 12px;
+}
+
+.thinking-details .message-markdown {
+    margin: 0;
+    color: var(--ink-secondary);
+    font-size: 0.88rem;
+    line-height: 1.55;
+}
+
 .message-thread::-webkit-scrollbar {
     width: 12px;
 }
@@ -156,6 +242,68 @@
 
 .message-user .message-meta strong {
     color: var(--ink);
+}
+
+.message-tool {
+    padding-top: 0;
+    padding-left: 24px;
+}
+
+.message-tool .message-meta strong,
+.tool-result-label {
+    color: var(--ink-secondary);
+}
+
+.message-tool-calls,
+.agent-tool-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.tool-call,
+.agent-tool {
+    overflow: hidden;
+    border-left: 2px solid var(--line-strong);
+}
+
+.tool-call summary,
+.agent-tool summary {
+    padding: 6px 10px;
+    color: var(--ink-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+
+.tool-call pre,
+.agent-tool > pre,
+.tool-result pre {
+    max-height: 220px;
+    margin: 0;
+    overflow: auto;
+    padding: 8px 10px;
+    background: rgba(118, 118, 128, 0.07);
+    color: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.tool-result {
+    margin: 8px 10px 10px;
+    border-top: 1px solid var(--line);
+}
+
+.tool-result-label {
+    padding: 7px 0 4px;
+    font-size: 0.74rem;
+}
+
+.tool-result-error .tool-result-label {
+    color: var(--red);
 }
 
 .message-meta time {
@@ -258,6 +406,7 @@
 }
 
 .markdown-code-block {
+    position: relative;
     max-width: 100%;
     margin: 0 0 10px;
     overflow: hidden;
@@ -270,17 +419,49 @@
     display: flex;
     min-height: 34px;
     align-items: center;
-    justify-content: space-between;
-    padding: 3px 6px 3px 12px;
+    gap: 8px;
+    padding: 3px 42px 3px 12px;
     border-bottom: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.56);
+    cursor: pointer;
+    list-style: none;
+}
+
+.markdown-code-block details:not([open]) .markdown-code-toolbar {
+    border-bottom: 0;
+}
+
+.markdown-code-changes {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.markdown-code-changes span:first-child {
+    color: #217a37;
+}
+
+.markdown-code-changes span:last-child {
+    color: #bd3028;
+}
+
+.markdown-code-copy-button {
+    position: absolute;
+    top: 3px;
+    right: 6px;
 }
 
 .markdown-code-language {
+    min-width: 0;
+    overflow: hidden;
     color: var(--ink-secondary);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.72rem;
     line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .markdown-code-block pre {
@@ -759,4 +940,8 @@
         right: 16px;
         bottom: 80px;
     }
+}
+
+.agent-activity .thinking-details details {
+    padding: 0;
 }

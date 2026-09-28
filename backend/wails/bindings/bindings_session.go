@@ -1,0 +1,94 @@
+package bindings
+
+import (
+	"praxis/internal/contracts"
+
+	"praxis/wails/dto"
+	"praxis/wails/validation"
+)
+
+type SessionBindings struct {
+	runtime Runtime
+}
+
+// ListSessions exposes the durable sessions belonging to one Project.
+func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, error) {
+	if err := validation.ValidateProjectID(projectID); err != nil {
+		return nil, err
+	}
+	ctx, service, err := b.runtime.BindingContext()
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := service.Sessions.ListSessionsByProject(ctx, contracts.ProjectID(projectID), 100)
+	if err != nil {
+		return nil, publicError(b.runtime, "SessionBindings.ListSessions", err)
+	}
+	result := make([]dto.SessionSummary, 0, len(sessions))
+	for _, session := range sessions {
+		result = append(result, dto.SessionSummary{
+			ID: session.ID.String(), ProjectID: session.ProjectID.String(),
+			WorkspaceID: session.WorkspaceID.String(), Title: session.Title,
+			CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt,
+		})
+	}
+	return result, nil
+}
+
+func (b *SessionBindings) CreateSession(request dto.CreateSessionRequest) (dto.CreateSessionResponse, error) {
+	if err := validation.ValidateCreateSession(request); err != nil {
+		return dto.CreateSessionResponse{}, err
+	}
+	ctx, service, err := b.runtime.BindingContext()
+	if err != nil {
+		return dto.CreateSessionResponse{}, err
+	}
+	result, err := service.Sessions.CreateSessionForProject(
+		ctx,
+		contracts.SessionID(request.SessionID),
+		contracts.AgentID(request.AgentID),
+		contracts.RequestID(request.RequestID),
+		contracts.ProjectID(request.ProjectID),
+		contracts.WorkspaceID(request.WorkspaceID),
+		contracts.AgentDefinitionID(request.AgentDefinitionID),
+	)
+	if err != nil {
+		return dto.CreateSessionResponse{}, publicError(b.runtime, "SessionBindings.CreateSession", err)
+	}
+	return dto.CreateSessionResponse{
+		SessionID: result.Session.ID.String(), ProjectID: result.Session.ProjectID.String(),
+		WorkspaceID: result.Session.WorkspaceID.String(), AgentID: result.Agent.ID.String(),
+		AgentDefinitionID: result.Agent.DefinitionID.String(),
+	}, nil
+}
+
+func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, error) {
+	if err := validation.ValidateSessionID(sessionID); err != nil {
+		return dto.SessionSnapshot{}, err
+	}
+	ctx, service, err := b.runtime.BindingContext()
+	if err != nil {
+		return dto.SessionSnapshot{}, err
+	}
+	view, err := service.Sessions.GetSessionView(ctx, contracts.SessionID(sessionID), 100)
+	if err != nil {
+		return dto.SessionSnapshot{}, publicError(b.runtime, "SessionBindings.GetSession", err)
+	}
+	result := dto.SessionSnapshot{
+		ID: view.Session.ID.String(), ProjectID: view.Session.ProjectID.String(),
+		WorkspaceID: view.Session.WorkspaceID.String(), Title: view.Session.Title,
+		CreatedAt: view.Session.CreatedAt, UpdatedAt: view.Session.UpdatedAt,
+		Agents: make([]dto.AgentSnapshot, 0, len(view.Agents)),
+	}
+	for _, agent := range view.Agents {
+		result.Agents = append(result.Agents, dto.AgentSnapshot{
+			ID: agent.ID.String(), SessionID: agent.SessionID.String(),
+			DefinitionID:           agent.DefinitionID.String(),
+			SecurityPolicyRevision: agent.SecurityPolicyRevision,
+			Profile:                string(agent.Profile), State: string(agent.State),
+			CurrentExecution: agent.CurrentExecutionID.String(),
+			Executions:       make([]dto.ExecutionSnapshot, 0),
+		})
+	}
+	return result, nil
+}

@@ -11,7 +11,7 @@ export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }
             {session ? (
                 <>
                     <div className="session-meta">
-                        <span className="session-goal">{session.goal}</span>
+                        <span className="session-title">{session.title || '未命名会话'}</span>
                         <span>{session.agents.length} 个代理在此会话中</span>
                     </div>
                     <div className="scroll-region">
@@ -25,7 +25,7 @@ export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }
                                 >
                                     <span className={`state-marker state-${item.state}`} />
                                     <span className="agent-row-copy">
-                                        <strong>{item.profile}</strong>
+                                        <strong>{item.definitionId}</strong>
                                         <small>{item.id}</small>
                                     </span>
                                     <span className="state-text">{item.state}</span>

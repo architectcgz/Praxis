@@ -1,6 +1,9 @@
 package readfile
 
 import (
+	toolmodel "praxis/internal/tool_invocation"
+	toolcontracts "praxis/internal/tools/contracts"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,10 +13,6 @@ import (
 	"runtime"
 	"strings"
 	"unicode/utf8"
-
-	domainexecution "praxis/internal/domain/execution"
-	domainsecurity "praxis/internal/domain/security"
-	runtimecontract "praxis/internal/runtime"
 )
 
 type output struct {
@@ -26,37 +25,37 @@ type output struct {
 }
 
 // Execute reads an authorized UTF-8 regular file and returns one bounded page.
-func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runtimecontract.ToolResult, error) {
+func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
-		return runtimecontract.ToolResult{}, errors.New("tool execution context is required")
+		return toolcontracts.ToolResult{}, errors.New("tool execution context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return runtimecontract.ToolResult{}, err
+		return toolcontracts.ToolResult{}, err
 	}
-	if call.Name != domainsecurity.ToolReadFile {
-		return runtimecontract.ToolResult{}, errors.New("read_file executor does not support the call")
+	if call.Name != toolcontracts.ToolReadFile {
+		return toolcontracts.ToolResult{}, errors.New("read_file executor does not support the call")
 	}
 	call = call.Snapshot()
 	var toolArguments arguments
 	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil {
-		return runtimecontract.ToolResult{}, errors.New("normalized read_file arguments are invalid")
+		return toolcontracts.ToolResult{}, errors.New("normalized read_file arguments are invalid")
 	}
 	if toolArguments.Path != call.Path || toolArguments.Offset < 0 ||
 		toolArguments.Limit < minLimit || toolArguments.Limit > maxLimit ||
 		!authorizedRealFile(toolArguments.Path, call.ReadScopes) {
-		return runtimecontract.ToolResult{}, errors.New("read_file path is outside an authorized regular file")
+		return toolcontracts.ToolResult{}, errors.New("read_file path is outside an authorized regular file")
 	}
 	file, err := os.Open(toolArguments.Path)
 	if err != nil {
-		return runtimecontract.ToolResult{}, errors.New("read_file could not open the file")
+		return toolcontracts.ToolResult{}, errors.New("read_file could not open the file")
 	}
 	defer file.Close()
 	fileInfo, err := file.Stat()
 	if err != nil || !fileInfo.Mode().IsRegular() || !authorizedRealFile(toolArguments.Path, call.ReadScopes) {
-		return runtimecontract.ToolResult{}, errors.New("read_file path is outside an authorized regular file")
+		return toolcontracts.ToolResult{}, errors.New("read_file path is outside an authorized regular file")
 	}
 	if err := ctx.Err(); err != nil {
-		return runtimecontract.ToolResult{}, err
+		return toolcontracts.ToolResult{}, err
 	}
 	fileSize := fileInfo.Size()
 	offset := toolArguments.Offset
@@ -64,7 +63,7 @@ func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runt
 		offset = int(fileSize)
 	}
 	if _, err := file.Seek(int64(offset), io.SeekStart); err != nil {
-		return runtimecontract.ToolResult{}, errors.New("read_file could not seek to the requested offset")
+		return toolcontracts.ToolResult{}, errors.New("read_file could not seek to the requested offset")
 	}
 	available := fileSize - int64(offset)
 	// Read enough trailing bytes to identify a character crossing the byte limit.
@@ -74,23 +73,24 @@ func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runt
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, readLimit))
 	if err != nil {
-		return runtimecontract.ToolResult{}, errors.New("read_file could not read the file")
+		return toolcontracts.ToolResult{}, errors.New("read_file could not read the file")
 	}
 	if err := ctx.Err(); err != nil {
-		return runtimecontract.ToolResult{}, err
+		return toolcontracts.ToolResult{}, err
 	}
 	contentEnd, err := contentEndAtLimit(raw, toolArguments.Limit)
 	if err != nil {
-		return runtimecontract.ToolResult{}, err
+		return toolcontracts.ToolResult{}, err
 	}
 	content := raw[:contentEnd]
 	encoded, contentEnd, err := encodeBoundedOutput(toolArguments, offset, fileSize, content)
 	if err != nil {
-		return runtimecontract.ToolResult{}, err
+		return toolcontracts.ToolResult{}, err
 	}
-	return runtimecontract.ToolResult{
-		Content: string(encoded), Truncated: int64(offset+contentEnd) < fileSize,
-	}, nil
+	return toolcontracts.NewToolSuccess(
+		string(encoded),
+		int64(offset+contentEnd) < fileSize,
+	), nil
 }
 
 // contentEndAtLimit returns a UTF-8 character boundary at or before limit.
@@ -128,7 +128,7 @@ func encodeBoundedOutput(
 		if err != nil {
 			return nil, 0, errors.New("read_file could not encode its result")
 		}
-		if len(candidate) <= domainexecution.MaxInlineToolResultBytes {
+		if len(candidate) <= toolmodel.MaxInlineToolResultBytes {
 			best, encoded, low = middle, candidate, middle+1
 			continue
 		}
@@ -138,7 +138,7 @@ func encodeBoundedOutput(
 		return encoded, ends[best], nil
 	}
 	empty, err := encodeOutput(toolArguments, offset, fileSize, "")
-	if err != nil || len(empty) > domainexecution.MaxInlineToolResultBytes {
+	if err != nil || len(empty) > toolmodel.MaxInlineToolResultBytes {
 		return nil, 0, errors.New("read_file result metadata exceeds the size limit")
 	}
 	return empty, 0, nil

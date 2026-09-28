@@ -30,3 +30,7 @@ export function listProjects() {
 export function createProject(request: CreateProjectRequest) {
     return getProjectBinding().CreateProject(request)
 }
+
+export function selectProjectPath() {
+    return getProjectBinding().SelectProjectPath()
+}

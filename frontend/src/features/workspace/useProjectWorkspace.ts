@@ -1,15 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
     API_ERROR_CODES,
     AgentHistoryItem,
-    AgentOutputEvent,
+    AgentEvent,
     AgentSnapshot,
-    HealthSnapshot,
     ModelOption,
     ProjectSummary,
     SessionSnapshot,
     SessionSummary,
-    StartupIssue,
     getAgent,
     getSession,
     isBindingAvailable,
@@ -17,12 +15,13 @@ import {
     listModels,
     listProjects,
     listSessions,
-    loadReadiness,
     closeAgent,
     pauseAgent,
+    createSession,
     sendInput,
-    subscribeAgentOutput,
+    subscribeAgentEvents,
     isApiErrorCode,
+    parseApiError,
     type ApiErrorCode,
 } from '../../api'
 import { readableError } from '../../shared/errors'
@@ -31,15 +30,22 @@ import { PendingUserMessage, StreamingOutput } from '../sessions/types'
 
 type StreamingOutputs = Record<string, StreamingOutput>
 
-function clearDurableStreamingOutput(outputs: StreamingOutputs, agentID: string, history: AgentHistoryItem[]): StreamingOutputs {
+function clearDurableStreamingOutput(outputs: StreamingOutputs, agent: AgentSnapshot, history: AgentHistoryItem[]): StreamingOutputs {
+    const agentID = agent.id
     const output = outputs[agentID]
     if (!output) {
         return outputs
     }
+    const settled = agent.executions.some((execution) => execution.id === output.executionId && execution.status === 'settled')
     const persisted = history.some((item) => (
         item.message?.role === 'assistant' && item.message.executionId === output.executionId
     ) || item.execution?.id === output.executionId)
-    if (!persisted) {
+    const hasToolOutput = output.turns.some((turn) => turn.events.some((event) => event.kind === 'tool_call' || event.kind === 'tool_result'))
+    const persistedToolOutput = history.some((item) => (
+        item.message?.executionId === output.executionId &&
+        item.message.blocks?.some((block) => block.kind === 'tool_call' || block.kind === 'tool_result')
+    ))
+    if (!settled || !persisted || hasToolOutput && !persistedToolOutput) {
         return outputs
     }
     const remaining = { ...outputs }
@@ -66,7 +72,6 @@ function clearDurablePendingUserMessages(pending: PendingUserMessage[], history:
 }
 
 export function useProjectWorkspace() {
-    const [health, setHealth] = useState<HealthSnapshot>({ ready: false })
     const [sessions, setSessions] = useState<SessionSummary[]>([])
     const [projects, setProjects] = useState<ProjectSummary[]>([])
     const [selectedSessionID, setSelectedSessionID] = useState(readRememberedSession)
@@ -97,7 +102,6 @@ export function useProjectWorkspace() {
         const requestID = ++viewRequestRef.current
         const isCurrentRequest = () => viewRequestRef.current === requestID
         if (!isBindingAvailable()) {
-            setHealth({ ready: false })
             setSessions([])
             setProjects([])
             setSession(null)
@@ -116,22 +120,6 @@ export function useProjectWorkspace() {
         setRefreshing(true)
         let catalogSessions: SessionSummary[] = []
         try {
-            const nextHealth = await loadReadiness()
-            if (!isCurrentRequest()) {
-                return
-            }
-            setHealth(nextHealth)
-            if (!nextHealth.ready) {
-                if (nextHealth.issue) {
-                    setError(startupIssueMessage(nextHealth.issue))
-                    setErrorCode(isApiErrorCode(nextHealth.issue.code) ? nextHealth.issue.code : undefined)
-                } else if (manual) {
-                    setError('Praxis is still starting. Try refreshing again in a moment.')
-                    setErrorCode('orchestration_not_ready')
-                }
-                return
-            }
-
             const [projectCatalog, configuredModels] = await Promise.all([listProjects(), listModels()])
             const sessionCatalogs = await Promise.all(projectCatalog.map((project) => listSessions(project.id)))
             const catalog = sessionCatalogs
@@ -142,7 +130,7 @@ export function useProjectWorkspace() {
             }
             catalogSessions = catalog
             setModels(configuredModels)
-            const primaryConfigured = configuredModels.some((model) => model.assignedAgents.includes('primary'))
+            const primaryConfigured = configuredModels.some((model) => model.assignedAgentDefinitions.includes('primary'))
             if (errorCodeRef.current !== API_ERROR_CODES.modelNotConfigured || primaryConfigured) {
                 setError('')
                 setErrorCode(undefined)
@@ -192,7 +180,7 @@ export function useProjectWorkspace() {
             setAgent(nextAgent)
             setAgentLoading(false)
             setHistory(nextHistory)
-            setStreamingOutputs((current) => clearDurableStreamingOutput(current, nextAgentID, nextHistory))
+            setStreamingOutputs((current) => clearDurableStreamingOutput(current, nextAgent, nextHistory))
             setPendingUserMessages((current) => clearDurablePendingUserMessages(current, nextHistory))
         } catch (err) {
             if (!isCurrentRequest()) {
@@ -219,17 +207,47 @@ export function useProjectWorkspace() {
         void refresh()
     }, [refresh])
 
-    useEffect(() => subscribeAgentOutput((event: AgentOutputEvent) => {
+    useEffect(() => subscribeAgentEvents((event: AgentEvent) => {
         if (event.kind === 'settled') {
             void refreshRef.current()
             return
         }
+        if (event.kind === 'turn_started' || event.kind === 'turn_completed') {
+            return
+        }
         setStreamingOutputs((current) => {
-            const output = current[event.agentId]
-            if (output?.executionId === event.executionId) {
-                return { ...current, [event.agentId]: { ...output, content: output.content + event.text } }
+            const previous = current[event.agentId]
+            const output: StreamingOutput = previous?.executionId === event.executionId
+                ? previous
+                : { executionId: event.executionId, turns: [], error: '' }
+            switch (event.kind) {
+                case 'text_delta':
+                case 'thinking_delta':
+                case 'tool_call':
+                case 'tool_result': {
+                    const turn = event.turn || 1
+                    const turns = [...output.turns]
+                    const index = turns.findIndex((item) => item.turn === turn)
+                    const previousTurn = turns[index] || { turn, events: [] }
+                    const events = [...previousTurn.events]
+                    const last = events[events.length - 1]
+                    if ((event.kind === 'text_delta' || event.kind === 'thinking_delta') && last?.kind === event.kind) {
+                        events[events.length - 1] = { ...last, text: (last.text || '') + (event.text || '') }
+                    } else {
+                        events.push(event)
+                    }
+                    const nextTurn = { ...previousTurn, events }
+                    if (index < 0) {
+                        turns.push(nextTurn)
+                    } else {
+                        turns[index] = nextTurn
+                    }
+                    return { ...current, [event.agentId]: { ...output, turns } }
+                }
+                case 'error':
+                    return { ...current, [event.agentId]: { ...output, error: event.error || '' } }
             }
-            return { ...current, [event.agentId]: { executionId: event.executionId, content: event.text } }
+            return current
         })
     }), [])
 
@@ -248,11 +266,16 @@ export function useProjectWorkspace() {
         model.modelId,
         model.reasoningLevels.join(','),
         model.defaultReasoningLevel,
-        model.assignedAgents.join(','),
+        model.defaultProviderId,
+        model.defaultModelId,
+        model.assignedAgentDefinitions.join(','),
     ].join(':')).join('|')
 
     useEffect(() => {
-        const defaultModel = models.find((model) => model.assignedAgents.includes(agent?.profile || '')) || models[0]
+        const defaultModel = models.find((model) => model.assignedAgentDefinitions.includes(agent?.definitionId || '')) ||
+            models.find((model) => model.providerId === model.defaultProviderId && model.modelId === model.defaultModelId) ||
+            models.find((model) => model.providerId === model.defaultProviderId) ||
+            models[0]
         if (!defaultModel) {
             setSelectedProviderID('')
             setSelectedModelID('')
@@ -278,6 +301,31 @@ export function useProjectWorkspace() {
         setInput('')
         setSelectedAgentID('')
     }, [])
+
+    const createNewSession = useCallback(async (projectID: string, workspaceID: string) => {
+        if (busy || !projectID || !workspaceID || !isBindingAvailable()) {
+            return
+        }
+        setBusy(true)
+        setError('')
+        setErrorCode(undefined)
+        try {
+            const created = await createSession({
+                sessionId: crypto.randomUUID(),
+                agentId: crypto.randomUUID(),
+                projectId: projectID,
+                workspaceId: workspaceID,
+                agentDefinitionId: 'primary',
+                requestId: crypto.randomUUID(),
+            })
+            selectSession(created.sessionId)
+        } catch (err) {
+            setError(readableError(err))
+            setErrorCode(apiErrorCode(err))
+        } finally {
+            setBusy(false)
+        }
+    }, [busy, selectSession])
 
     const clearError = useCallback(() => {
         setError('')
@@ -326,7 +374,7 @@ export function useProjectWorkspace() {
             setAgent(nextAgent)
             setAgentLoading(false)
             setHistory(nextHistory)
-            setStreamingOutputs((current) => clearDurableStreamingOutput(current, id, nextHistory))
+            setStreamingOutputs((current) => clearDurableStreamingOutput(current, nextAgent, nextHistory))
             setPendingUserMessages((current) => clearDurablePendingUserMessages(current, nextHistory))
         } catch (err) {
             if (requestID !== viewRequestRef.current) {
@@ -408,27 +456,17 @@ export function useProjectWorkspace() {
     }, [agent, busy, refresh])
 
     const bridgeAvailable = isBindingAvailable()
-    const bridgeState = useMemo(() => {
-        if (!bridgeAvailable) {
-            return 'Web preview'
-        }
-        if (health.issue) {
-            return 'Configuration error'
-        }
-        return health.ready ? 'Ready' : 'Recovering'
-    }, [bridgeAvailable, health.issue, health.ready])
 
     return {
         agent,
         agentLoading,
         bridgeAvailable,
-        bridgeState,
         busy,
         clearError,
         control,
+        createNewSession,
         error,
         errorCode,
-        health,
         history,
         pendingUserMessages,
         streamingOutput,
@@ -454,16 +492,10 @@ export function useProjectWorkspace() {
     }
 }
 
-function startupIssueMessage(issue: StartupIssue) {
-    if (issue.path) {
-        return `${issue.path}: ${issue.message}`
-    }
-    return issue.message
-}
-
 function apiErrorCode(error: unknown): ApiErrorCode | undefined {
-    if (!(error instanceof Error) || !isApiErrorCode(error.message)) {
+    const parsed = parseApiError(error)
+    if (!parsed || !isApiErrorCode(parsed.code)) {
         return undefined
     }
-    return error.message
+    return parsed.code
 }

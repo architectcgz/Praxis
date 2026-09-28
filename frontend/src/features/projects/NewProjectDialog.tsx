@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
-import { X } from 'lucide-react'
+import { FolderOpen, X } from 'lucide-react'
 import { Overlay } from '../../components/ui'
-import { createProject } from '../../api'
+import { createProject, selectProjectPath } from '../../api'
 import { readableError } from '../../shared/errors'
 
 type NewProjectDialogProps = {
@@ -23,6 +23,24 @@ export function NewProjectDialog({
     const close = () => {
         if (!busy) {
             onClose()
+        }
+    }
+
+    const chooseProjectPath = async () => {
+        if (busy || !bridgeAvailable) {
+            return
+        }
+        setBusy(true)
+        setError('')
+        try {
+            const selectedPath = await selectProjectPath()
+            if (selectedPath) {
+                setProjectPath(selectedPath)
+            }
+        } catch (err) {
+            setError(readableError(err))
+        } finally {
+            setBusy(false)
         }
     }
 
@@ -91,15 +109,27 @@ export function NewProjectDialog({
                         disabled={busy}
                     />
                     <label htmlFor="project-path">项目路径</label>
-                    <input
-                        id="project-path"
-                        value={projectPath}
-                        onChange={(event) => setProjectPath(event.target.value)}
-                        placeholder="C:\\Projects\\my-project"
-                        autoComplete="off"
-                        required
-                        disabled={busy}
-                    />
+                    <div className="project-path-control">
+                        <input
+                            id="project-path"
+                            value={projectPath}
+                            onChange={(event) => setProjectPath(event.target.value)}
+                            placeholder="C:\\Projects\\my-project"
+                            autoComplete="off"
+                            required
+                            disabled={busy}
+                        />
+                        <button
+                            className="path-picker-button"
+                            type="button"
+                            title="打开系统目录选择器"
+                            onClick={() => void chooseProjectPath()}
+                            disabled={busy || !bridgeAvailable}
+                        >
+                            <FolderOpen size={16} strokeWidth={1.8} aria-hidden="true" />
+                            <span>选择目录</span>
+                        </button>
+                    </div>
                     <div className="modal-actions">
                         <button className="modal-secondary" type="button" onClick={close} disabled={busy}>
                             取消

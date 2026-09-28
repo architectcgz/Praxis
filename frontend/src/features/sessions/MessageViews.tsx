@@ -1,12 +1,11 @@
 import { Children, isValidElement, memo, useEffect, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
-import { Check, Copy, LoaderCircle } from 'lucide-react'
+import { Check, ChevronRight, Copy, LoaderCircle } from 'lucide-react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentHistoryItem } from '../../api'
+import type { AgentEvent, AgentHistoryItem, AgentMessageBlock } from '../../api'
 
 const markdownPlugins = [remarkGfm]
 const markdownComponents: Components = {
-    pre: MarkdownCodeBlock,
     table: MarkdownTable,
 }
 
@@ -51,43 +50,58 @@ export const StreamingOutputView = memo(function StreamingOutputView({ agentProf
             <div className="message-meta">
                 <strong>{agentProfile}</strong>
             </div>
-            <MessageMarkdown content={content} />
+            <MessageMarkdown content={content} streaming />
         </article>
     )
 })
 
-const MessageMarkdown = memo(function MessageMarkdown({ content }: { content: string }) {
+const MessageMarkdown = memo(function MessageMarkdown({ content, streaming = false }: { content: string; streaming?: boolean }) {
     return (
         <div className="message-markdown">
-            <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins} skipHtml>
+            <ReactMarkdown components={{ ...markdownComponents, pre: (props) => <MarkdownCodeBlock {...props} streaming={streaming} /> }} remarkPlugins={markdownPlugins} skipHtml>
                 {content}
             </ReactMarkdown>
         </div>
     )
 })
 
-function MarkdownCodeBlock({ children }: ComponentPropsWithoutRef<'pre'>) {
+function MarkdownCodeBlock({ children, streaming }: ComponentPropsWithoutRef<'pre'> & { streaming: boolean }) {
     const code = Children.toArray(children)[0]
     if (!isValidElement<ComponentPropsWithoutRef<'code'>>(code)) {
         return <pre>{children}</pre>
     }
     const language = codeLanguageLabel(code.props.className)
     const content = extractTextContent(code.props.children).replace(/\n$/, '')
+    const { added, removed } = codeLineChanges(content, code.props.className)
 
     return (
         <div className="markdown-code-block">
-            <div className="markdown-code-toolbar">
-                <span className="markdown-code-language">{language}</span>
-                <CopyIconButton
-                    className="markdown-code-copy-button"
-                    copiedLabel={`${language} 代码已复制`}
-                    label={`复制 ${language} 代码`}
-                    onCopy={() => copyText(content)}
-                />
-            </div>
-            <pre>{code}</pre>
+            <details open={streaming || undefined}>
+                <summary className="markdown-code-toolbar">
+                    <ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" />
+                    <span className="markdown-code-language">{language}</span>
+                    <span className="markdown-code-changes"><span>+{added}</span><span>-{removed}</span></span>
+                </summary>
+                <pre>{code}</pre>
+            </details>
+            <CopyIconButton
+                className="markdown-code-copy-button"
+                copiedLabel={`${language} 代码已复制`}
+                label={`复制 ${language} 代码`}
+                onCopy={() => copyText(content)}
+            />
         </div>
     )
+}
+
+function codeLineChanges(content: string, className?: string) {
+    const lines = content ? content.split('\n') : []
+    const isDiff = /language-(diff|patch)\b/i.test(className || '') || lines.some((line) => line.startsWith('diff --git ') || line.startsWith('@@ ') || line.startsWith('*** Begin Patch'))
+    if (!isDiff) return { added: lines.length, removed: 0 }
+    return {
+        added: lines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length,
+        removed: lines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length,
+    }
 }
 
 function MarkdownTable({ children }: ComponentPropsWithoutRef<'table'>) {
@@ -145,7 +159,7 @@ export function PendingOutputView({ agentProfile }: { agentProfile: string }) {
     )
 }
 
-export const HistoryItemView = memo(function HistoryItemView({ agentProfile, item }: { agentProfile: string; item: AgentHistoryItem }) {
+export const HistoryItemView = memo(function HistoryItemView({ agentProfile, item, toolResults }: { agentProfile: string; item: AgentHistoryItem; toolResults?: AgentMessageBlock[] }) {
     if (item.kind === 'execution' && item.execution) {
         const content = failureMessage(item.execution.failureCode)
         return (
@@ -162,6 +176,19 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
     if (!item.message) {
         return null
     }
+    const messageBlocks = item.message.blocks || []
+    const resultBlocks = messageBlocks.filter((block) => block.kind === 'tool_result')
+    if (item.message.role === 'tool') {
+        return (
+            <article className="message message-tool">
+                <div className="message-meta">
+                    <strong>工具输出</strong>
+                    <time dateTime={item.message.at} title={item.message.at}>{formatMessageTime(item.message.at)}</time>
+                </div>
+                {resultBlocks.map((block, index) => <ToolResultBlock block={block} key={`${block.callId}-${index}`} />)}
+            </article>
+        )
+    }
     return (
         <article className={`message message-${item.message.role}`}>
             <div className="message-meta">
@@ -169,11 +196,21 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
                 <time dateTime={item.message.at} title={item.message.at}>{formatMessageTime(item.message.at)}</time>
             </div>
             {item.message.role === 'assistant' ? (
-                <MessageMarkdown content={item.message.content} />
-            ) : (
-                <p>{item.message.content}</p>
-            )}
-            <MessageCopyButton content={item.message.content} />
+                <>
+                    {item.message.thinking && <ThinkingDetails content={item.message.thinking} />}
+                    {messageBlocks.length > 0 ? messageBlocks.map((block, index) => {
+                        if (block.kind === 'thinking') return <ThinkingDetails content={block.text || ''} key={index} />
+                        if (block.kind === 'text') return <MessageMarkdown content={block.text || ''} key={index} />
+                        if (block.kind === 'tool_call') return (
+                            <div className="message-tool-calls" key={index}>
+                                <ToolCallBlock block={block} result={toolResults?.find((result) => result.callId === block.callId)} />
+                            </div>
+                        )
+                        return null
+                    }) : item.message.content && <MessageMarkdown content={item.message.content} />}
+                </>
+            ) : item.message.content && <p>{item.message.content}</p>}
+            {item.message.content && <MessageCopyButton content={item.message.content} />}
         </article>
     )
 }, (prev, next) => {
@@ -182,9 +219,146 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
     if (prev.item.sequence !== next.item.sequence) return false
     if (prev.item.at !== next.item.at) return false
     if (prev.item.message?.content !== next.item.message?.content) return false
+    if (prev.item.message?.thinking !== next.item.message?.thinking) return false
+    if (messageBlocksKey(prev.item.message?.blocks) !== messageBlocksKey(next.item.message?.blocks)) return false
+    if (messageBlocksKey(prev.toolResults) !== messageBlocksKey(next.toolResults)) return false
     if (prev.item.execution?.id !== next.item.execution?.id) return false
     return true
 })
+
+export const AgentActivityView = memo(function AgentActivityView({ thinking, error }: { thinking?: string; error?: string }) {
+    return (
+        <div className="agent-activity" aria-live="polite">
+            {thinking && <ThinkingDetails content={thinking} streaming />}
+            {error && <p role="alert">{error}</p>}
+        </div>
+    )
+})
+
+export function StreamingTurnView({ agentProfile, events }: { agentProfile: string; events: AgentEvent[] }) {
+    const segments: ReactNode[] = []
+    let tools: AgentEvent[] = []
+    events.forEach((event, index) => {
+        if (event.kind === 'tool_call' || event.kind === 'tool_result') {
+            tools.push(event)
+            return
+        }
+        if (tools.length > 0) {
+            segments.push(<StreamingToolCallsView tools={tools} key={`tools-${index}`} />)
+            tools = []
+        }
+        if (event.kind === 'thinking_delta' && event.text) {
+            segments.push(<AgentActivityView thinking={event.text} key={`thinking-${index}`} />)
+        } else if (event.kind === 'text_delta' && event.text) {
+            segments.push(<StreamingOutputView agentProfile={agentProfile} content={event.text} key={`text-${index}`} />)
+        }
+    })
+    if (tools.length > 0) {
+        segments.push(<StreamingToolCallsView tools={tools} key={`tools-${events.length}`} />)
+    }
+    return <div className="streaming-turn">{segments}</div>
+}
+
+function ThinkingDetails({ content, streaming = false }: { content: string; streaming?: boolean }) {
+    // 相邻的加粗片段缺少分隔时，Markdown 会把四个星号显示为正文。
+    const formattedContent = content.replace(/(\S)\*{4}(?=\S)/g, '$1**\n\n**')
+    return (
+        <details className="thinking-details" open={streaming || undefined}>
+            <summary><ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" /><span>思考过程</span></summary>
+            <div className="thinking-content"><MessageMarkdown content={formattedContent} streaming={streaming} /></div>
+        </details>
+    )
+}
+
+export function StreamingToolCallsView({ tools }: { tools: AgentEvent[] }) {
+    return <div className="agent-activity" aria-live="polite"><ToolActivityList events={tools} /></div>
+}
+
+function ToolCallBlock({ block, result }: { block: AgentMessageBlock; result?: AgentMessageBlock }) {
+    return (
+        <details className="tool-call">
+            <summary>调用 {block.name || '工具'}</summary>
+            <pre>{formatToolInput(block.input)}</pre>
+            {result && <ToolResultBlock block={result} />}
+        </details>
+    )
+}
+
+function ToolResultBlock({ block }: { block: AgentMessageBlock }) {
+    return (
+        <div className={`tool-result ${block.isError ? 'tool-result-error' : ''}`}>
+            <div className="tool-result-label">{block.isError ? '工具失败' : '工具输出'} {block.name || ''}</div>
+            <pre>{block.text || '（无输出）'}</pre>
+        </div>
+    )
+}
+
+type ToolActivity = {
+    key: string
+    call?: AgentEvent
+    result?: AgentEvent
+}
+
+function ToolActivityList({ events }: { events: AgentEvent[] }) {
+    const activities = groupToolEvents(events)
+    return (
+        <div className="agent-tool-list">
+            {activities.map((activity) => {
+                const name = activity.call?.name || activity.result?.name || '工具'
+                return (
+                    <details className="agent-tool" key={activity.key} open>
+                        <summary>调用 {name}</summary>
+                        {activity.call && <pre>{formatToolInput(activity.call.input)}</pre>}
+                        {activity.result ? (
+                            <div className={`tool-result ${activity.result.isError ? 'tool-result-error' : ''}`}>
+                                <div className="tool-result-label">{activity.result.isError ? '工具失败' : '工具输出'} {name}</div>
+                                <pre>{activity.result.result || '（无输出）'}</pre>
+                            </div>
+                        ) : (
+                            <div className="tool-result-label">执行中</div>
+                        )}
+                    </details>
+                )
+            })}
+        </div>
+    )
+}
+
+function groupToolEvents(events: AgentEvent[]): ToolActivity[] {
+    const activities: ToolActivity[] = []
+    const byCallID = new Map<string, ToolActivity>()
+    events.forEach((event, index) => {
+        const callID = event.callId || `tool-${index}`
+        let activity = byCallID.get(callID)
+        if (!activity) {
+            activity = { key: `${event.turn}-${callID}`, call: event.kind === 'tool_call' ? event : undefined, result: event.kind === 'tool_result' ? event : undefined }
+            byCallID.set(callID, activity)
+            activities.push(activity)
+            return
+        }
+        if (event.kind === 'tool_call') {
+            activity.call = event
+        } else {
+            activity.result = event
+        }
+    })
+    return activities
+}
+
+function formatToolInput(input: unknown) {
+    if (typeof input === 'string') {
+        return input
+    }
+    try {
+        return JSON.stringify(input ?? {}, null, 2) || '{}'
+    } catch {
+        return String(input)
+    }
+}
+
+function messageBlocksKey(blocks: AgentMessageBlock[] | undefined) {
+    return blocks?.map((block) => `${block.kind}:${block.callId || ''}:${block.name || ''}:${block.text || ''}:${JSON.stringify(block.input)}`).join('|') || ''
+}
 
 function MessageCopyButton({ content }: { content: string }) {
     return (

@@ -5,7 +5,7 @@ export type SessionSnapshot = {
     id: string
     projectId: string
     workspaceId: string
-    goal: string
+    title: string
     createdAt: string
     updatedAt: string
     agents: AgentSnapshot[]
@@ -15,7 +15,7 @@ export type SessionSummary = {
     id: string
     projectId: string
     workspaceId: string
-    goal: string
+    title: string
     createdAt: string
     updatedAt: string
 }
@@ -25,7 +25,7 @@ export type CreateSessionRequest = {
     agentId: string
     projectId: string
     workspaceId: string
-    goal: string
+    agentDefinitionId: string
     requestId: string
 }
 
@@ -34,7 +34,7 @@ export type CreateSessionResponse = {
     projectId: string
     workspaceId: string
     agentId: string
-    goal: string
+    agentDefinitionId: string
 }
 
 export function listSessions(projectID: string) {

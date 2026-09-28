@@ -16,3 +16,11 @@ func (SecureIDGenerator) New(prefix string) string {
 	}
 	return prefix + "_" + hex.EncodeToString(bytes[:])
 }
+
+// IDsOrDefault returns the production secure generator when none is injected.
+func IDsOrDefault(ids IDGenerator) IDGenerator {
+	if ids == nil {
+		return SecureIDGenerator{}
+	}
+	return ids
+}

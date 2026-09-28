@@ -1,6 +1,9 @@
+import type { AgentEvent } from '../../api'
+
 export type StreamingOutput = {
     executionId: string
-    content: string
+    turns: { turn: number; events: AgentEvent[] }[]
+    error: string
 }
 
 export type PendingUserMessage = {

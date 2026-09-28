@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { AgentsPanel } from '../agents/AgentsPanel'
 import { NewProjectDialog } from '../projects/NewProjectDialog'
-import { NewSessionDialog } from '../sessions/NewSessionDialog'
 import { ProjectsPanel } from '../projects/ProjectsPanel'
 import { groupSessions } from '../projects/projectGroups'
 import { SessionPanel } from '../sessions/SessionPanel'
@@ -18,7 +17,6 @@ export function ProjectWorkspace() {
     const [lookupID, setLookupID] = useState(workspace.selectedSessionID)
     const [searchOpen, setSearchOpen] = useState(false)
     const [projectOpen, setProjectOpen] = useState(false)
-    const [sessionProject, setSessionProject] = useState<ProjectGroup | null>(null)
     const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({})
     const [page, setPage] = useState<'project' | 'session' | 'settings' | 'models'>('session')
     const [selectedProjectID, setSelectedProjectID] = useState('')
@@ -60,7 +58,8 @@ export function ProjectWorkspace() {
     const openSession = (project: ProjectGroup) => {
         workspace.clearError()
         setPage('session')
-        setSessionProject(project)
+        setSelectedProjectID(project.id)
+        void workspace.createNewSession(project.id, project.workspaceID)
     }
 
     const selectProject = (project: ProjectGroup) => {
@@ -72,7 +71,6 @@ export function ProjectWorkspace() {
 
     const openSettings = () => {
         setProjectOpen(false)
-        setSessionProject(null)
         if (workspace.errorCode !== API_ERROR_CODES.modelNotConfigured) {
             workspace.clearError()
         }
@@ -82,9 +80,6 @@ export function ProjectWorkspace() {
     return (
         <div className="app-shell">
             <WorkspaceHeader
-                bridgeState={workspace.bridgeState}
-                ready={workspace.health.ready}
-                issue={Boolean(workspace.health.issue)}
                 busy={workspace.busy}
                 refreshing={workspace.refreshing}
                 onRefresh={() => void workspace.refresh(true)}
@@ -101,7 +96,6 @@ export function ProjectWorkspace() {
                     collapsedProjects={collapsedProjects}
                     busy={workspace.busy}
                     bridgeAvailable={workspace.bridgeAvailable}
-                    healthReady={workspace.health.ready}
                     onLookupChange={setLookupID}
                     onLoadSession={loadSession}
                     onToggleSearch={() => setSearchOpen((open) => !open)}
@@ -190,17 +184,6 @@ export function ProjectWorkspace() {
                         setPage('project')
                     }}
                     onClose={() => setProjectOpen(false)}
-                />
-            )}
-            {sessionProject && (
-                <NewSessionDialog
-                    bridgeAvailable={workspace.bridgeAvailable}
-                    projectName={sessionProject.name}
-                    projectID={sessionProject.id}
-                    workspaceID={sessionProject.workspaceID}
-                    onCreated={selectSession}
-                    onClose={() => setSessionProject(null)}
-                    onOpenSettings={openSettings}
                 />
             )}
         </div>

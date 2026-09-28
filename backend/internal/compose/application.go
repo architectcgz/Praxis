@@ -1,197 +1,83 @@
 package compose
 
 import (
+	agentmodel "praxis/internal/agent"
+	agentassembly "praxis/internal/agent_runtime"
+	"praxis/internal/contracts"
+	executionmodel "praxis/internal/execution"
+
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 
-	applicationagent "praxis/internal/application/agent"
-	agentruntime "praxis/internal/application/agent_runtime"
-	executioncontrol "praxis/internal/application/execution/control"
-	executiondelivery "praxis/internal/application/execution/delivery"
-	executionqueue "praxis/internal/application/execution/queue"
-	executionsettlement "praxis/internal/application/execution/settlement"
-	executionstart "praxis/internal/application/execution/start"
-	toolinvocation "praxis/internal/application/execution/tool_invocation"
-	applicationproject "praxis/internal/application/project"
-	applicationquery "praxis/internal/application/query"
-	applicationsession "praxis/internal/application/session"
-	commandprotocol "praxis/internal/command"
-	domainagent "praxis/internal/domain/agent"
-	domainexecution "praxis/internal/domain/execution"
-	domainfoundation "praxis/internal/domain/foundation"
-	domainmodel "praxis/internal/domain/model"
-	domainproject "praxis/internal/domain/project"
-	domainsecurity "praxis/internal/domain/security"
-	domainsession "praxis/internal/domain/session"
-	domainworkflow "praxis/internal/domain/workflow"
-	domainworkspace "praxis/internal/domain/workspace"
+	agentruntime "praxis/internal/runtime/agent"
+	appservices "praxis/internal/service"
+	applicationagent "praxis/internal/service/agent"
+	executioncontrol "praxis/internal/service/execution/control"
+	executionqueue "praxis/internal/service/execution/queue"
+	executionsettlement "praxis/internal/service/execution/settlement"
+	executionstart "praxis/internal/service/execution/start"
+	toolinvocation "praxis/internal/service/execution/tool_invocation"
+	applicationproject "praxis/internal/service/project"
+	applicationsession "praxis/internal/service/session"
 
-	agentregistry "praxis/internal/infrastructure/agent_registry"
-	"praxis/internal/infrastructure/agentlog"
-	"praxis/internal/infrastructure/dataroot"
-	"praxis/internal/infrastructure/document"
-	modelregistry "praxis/internal/infrastructure/model_registry"
-	"praxis/internal/infrastructure/sqlite"
-	"praxis/internal/infrastructure/storage"
+	agentregistry "praxis/internal/infra/agent_registry"
+	"praxis/internal/infra/agentlog"
+	"praxis/internal/infra/dataroot"
+	"praxis/internal/infra/document"
+	modelregistry "praxis/internal/infra/model_registry"
+	"praxis/internal/infra/providers/anthropicmessages"
+	openaichat "praxis/internal/infra/providers/openai_chat"
+	openairesponses "praxis/internal/infra/providers/openai_responses"
+	"praxis/internal/infra/sqlite"
+	"praxis/internal/infra/storage"
+	"praxis/internal/infra/toolconfig"
 	"praxis/internal/logging"
 	"praxis/internal/orchestration"
-	"praxis/internal/session"
+	"praxis/internal/runtime"
+	securitymodel "praxis/internal/security"
 	"praxis/internal/tools"
+	toolcontracts "praxis/internal/tools/contracts"
+	"praxis/wails/bindings"
 )
 
-// Application is the production composition of target storage, application
-// services, orchestration, runtime activation, delivery, and startup recovery.
+// Application 是目标架构的组合根：创建具体实现、注入 service 与
+// orchestration，并持有进程级生命周期资源。前端端口由
+// praxis/internal/service 实现，这里只负责装配与释放。
 type Application struct {
-	readiness   *orchestration.ReadinessGate
-	queries     *applicationquery.Service
-	projects    *applicationproject.Service
-	sessions    *applicationsession.Service
-	controls    *executioncontrol.Service
-	deliveries  *executiondelivery.Service
-	agents      *applicationagent.Service
-	queues      *executionqueue.Service
-	settlements *executionsettlement.Service
-	starts      *executionstart.Service
-	store       *sqlite.Store
-	models      *modelregistry.Registry
-	agentConfig *agentregistry.Registry
-	registry    *agentruntime.Registry
-	scheduler   *orchestration.Scheduler
-	logger      *logging.Logger
-	output      *agentOutputPublisher
+	frontend *appservices.Services
+	store    *sqlite.Store
+	registry *agentruntime.Registry
+	logger   *logging.Logger
 }
 
-func (a *Application) ListProjects(ctx context.Context, limit int) ([]domainproject.Project, error) {
-	return a.queries.ListProjects(ctx, limit)
-}
-
-func (a *Application) ListWorkspaces(ctx context.Context, projectID domainfoundation.ProjectID, limit int) ([]domainworkspace.Workspace, error) {
-	return a.queries.ListWorkspaces(ctx, projectID, limit)
-}
-
-func (a *Application) ListSessionsByProject(
-	ctx context.Context,
-	projectID domainfoundation.ProjectID,
-	limit int,
-) ([]domainsession.Session, error) {
-	return a.queries.ListSessionsByProject(ctx, projectID, limit)
-}
-
-func (a *Application) ListSessions(ctx context.Context, limit int) ([]domainsession.Session, error) {
-	return a.queries.ListSessions(ctx, limit)
-}
-
-func (a *Application) GetSessionView(
-	ctx context.Context,
-	sessionID domainfoundation.SessionID,
-	limit int,
-) (applicationquery.SessionView, error) {
-	return a.queries.GetSessionView(ctx, sessionID, limit)
-}
-
-func (a *Application) GetAgentView(
-	ctx context.Context,
-	agentID domainfoundation.AgentID,
-	limit int,
-) (applicationquery.AgentView, error) {
-	return a.queries.GetAgentView(ctx, agentID, limit)
-}
-
-func (a *Application) ListSessionEvents(
-	ctx context.Context,
-	sessionID domainfoundation.SessionID,
-	after time.Time,
-	limit int,
-) ([]domainfoundation.DomainEvent, error) {
-	return a.queries.ListSessionEvents(ctx, sessionID, after, limit)
-}
-
-func (a *Application) ListAgentEvents(
-	ctx context.Context,
-	agentID domainfoundation.AgentID,
-	after time.Time,
-	limit int,
-) ([]domainfoundation.DomainEvent, error) {
-	return a.queries.ListAgentEvents(ctx, agentID, after, limit)
-}
-
-func (a *Application) ListExecutionEvents(
-	ctx context.Context,
-	executionID domainfoundation.AgentExecutionID,
-	after time.Time,
-	limit int,
-) ([]domainfoundation.DomainEvent, error) {
-	return a.queries.ListExecutionEvents(ctx, executionID, after, limit)
-}
-
-func (a *Application) CreateProject(ctx context.Context, projectID domainfoundation.ProjectID, workspaceID domainfoundation.WorkspaceID, name, path string, requestID domainfoundation.RequestID) (result applicationproject.CreateProjectResult, err error) {
-	name = strings.TrimSpace(name)
-	path = filepath.Clean(strings.TrimSpace(path))
-	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || !filepath.IsAbs(path) {
-		return result, commandprotocol.NewError(commandprotocol.ErrorProjectWorkspaceInvalid)
+// Services 组装 wails 层注入所需的前端服务集。把 *appservices.Services 赋给
+// bindings 的接口字段，编译期即可确认它满足全部端口。
+func (a *Application) Services() bindings.Services {
+	if a == nil || a.frontend == nil {
+		return bindings.Services{}
 	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return result, err
+	impl := a.frontend
+	return bindings.Services{
+		Projects:    impl,
+		Sessions:    impl,
+		Agents:      impl,
+		Commands:    impl,
+		Models:      impl,
+		ModelConfig: impl,
+		Events:      impl,
 	}
-	result, err = a.projects.CreateProject(ctx, applicationproject.CreateProjectParams{
-		RequestID: requestID, ProjectID: projectID, WorkspaceID: workspaceID, Name: name, Path: path,
-	})
-	return result, nil
 }
 
-func (a *Application) PauseAgent(
-	ctx context.Context,
-	params executioncontrol.Params,
-) (executioncontrol.Result, error) {
-	return a.controls.PauseAgent(ctx, params)
-}
-
-func (a *Application) CloseAgent(
-	ctx context.Context,
-	params executioncontrol.Params,
-) (executioncontrol.Result, error) {
-	return a.controls.CloseAgent(ctx, params)
-}
-
-func (a *Application) SendInput(ctx context.Context, params executionstart.SendInputParams) (executionstart.Result, error) {
-	return a.starts.SendInput(ctx, params)
-}
-
-func (a *Application) Resume(ctx context.Context, params executionstart.ResumeParams) (executionstart.Result, error) {
-	return a.starts.Resume(ctx, params)
-}
-
-func (a *Application) EnqueueWork(ctx context.Context, params executionqueue.EnqueueParams) (executionqueue.EnqueueResult, error) {
-	return a.queues.EnqueueWork(ctx, params)
-}
-
-func (a *Application) UpdateAgentPolicy(ctx context.Context, params applicationagent.UpdatePolicyParams) (applicationagent.UpdatePolicyResult, error) {
-	return a.agents.UpdatePolicy(ctx, params)
-}
-
-func (a *Application) CreateSessionForProject(
-	ctx context.Context,
-	sessionID domainfoundation.SessionID,
-	agentID domainfoundation.AgentID,
-	requestID domainfoundation.RequestID,
-	projectID domainfoundation.ProjectID,
-	workspaceID domainfoundation.WorkspaceID,
-	goal string,
-) (applicationsession.CreateResult, error) {
-	return a.sessions.CreateSessionForProject(ctx, sessionID, agentID, requestID, projectID, workspaceID, goal)
-}
-
-// Open builds a target application and completes recovery before returning a
-// ready command owner. The runner is the only provider/tool integration point.
+// Open 构建应用并返回一个就绪的命令持有者。runner 是唯一的 provider/tool 接入点。
 func Open(
 	ctx context.Context,
 	root dataroot.DataRoot,
-	runner agentruntime.TargetExecutionRunner,
+	runner agentruntime.ExecutionRunner,
+	registeredTools ...toolcontracts.Tool,
 ) (*Application, error) {
 	if ctx == nil {
 		return nil, errors.New("application composition context is required")
@@ -199,25 +85,57 @@ func Open(
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
 	}
+	diagnostics, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
+	if err != nil {
+		return nil, fmt.Errorf("open runtime log: %w", err)
+	}
 	store, err := sqlite.Open(ctx, root.Database)
 	if err != nil {
+		diagnostics.Errorf("open sqlite failed: %v", err)
+		_ = diagnostics.Close()
 		return nil, err
 	}
 	closeStore := func() { _ = store.Close(context.Background()) }
-	diagnostics, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
-	if err != nil {
-		closeStore()
-		return nil, fmt.Errorf("open runtime log: %w", err)
-	}
 	diagnostics.Infof("composition open started root=%s database=%s", root.Root, root.Database)
-	modelRegistry, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil)
+	modelRegistry, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil, newModelStream)
 	if err != nil {
 		diagnostics.Errorf("load model registry failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
-	agentRegistry, err := agentregistry.Load(root.AgentConfigFile, func(providerID, modelID string) error {
+	modelConfig := modelregistry.NewApplicationAdapter(modelRegistry)
+	toolConfig, err := toolconfig.Load(root.ToolConfig)
+	if err != nil {
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, err
+	}
+	toolPermissions, err := securitymodel.NewToolPermissionPolicy(toolConfig.Tools)
+	if err != nil {
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, err
+	}
+	toolRegistry := tools.NewToolRegistry()
+	for _, tool := range registeredTools {
+		if err := toolRegistry.Register(tool); err != nil {
+			_ = diagnostics.Close()
+			closeStore()
+			return nil, err
+		}
+	}
+	definitions := toolRegistry.List()
+	registeredToolNames := make([]contracts.ToolName, 0, len(definitions))
+	for _, definition := range definitions {
+		registeredToolNames = append(registeredToolNames, definition.Name)
+	}
+	if err := toolPermissions.ValidateRegistered(registeredToolNames); err != nil {
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, err
+	}
+	agentRegistry, err := agentregistry.Load(root.AgentDefinitions, func(providerID, modelID string) error {
 		if !modelregistry.ContainsModel(modelRegistry.Config(), providerID, modelID) {
 			return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
 		}
@@ -233,27 +151,24 @@ func Open(
 		closeStore()
 		return nil, fmt.Errorf("open document store: %w", err)
 	}
-	target, err := storage.NewTargetRepositories(store, documents)
+	repos, err := storage.NewRepositories(store, documents)
 	if err != nil {
 		closeStore()
 		return nil, err
 	}
-	output := newAgentOutputPublisher()
+	events := appservices.NewEventPublisher()
 	if runner == nil {
-		toolRegistry := tools.NewToolRegistry()
-		toolService, serviceErr := toolinvocation.NewService(toolinvocation.Config{
-			Transactions: store, Executions: target.Executions, SecuritySnapshots: target.SecuritySnapshots,
-			Invocations: target.ToolInvocations, Catalog: toolRegistry, Executor: tools.NewExecutor(),
-		})
-		if serviceErr != nil {
-			_ = diagnostics.Close()
-			closeStore()
-			return nil, serviceErr
-		}
-		runner, err = agentruntime.NewExecutionEngine(agentruntime.ExecutionEngineConfig{
-			Models: modelRegistry, Tools: toolRegistry,
-			ToolInvoker: toolService, OutputObserver: output.Publish,
-			Logf: diagnostics.Infof,
+		runner, err = agentassembly.NewRunner(agentassembly.RunnerConfig{
+			ModelBuilder: modelRegistry,
+			ToolInvocations: toolinvocation.Config{
+				Transactions:      store,
+				Executions:        repos.Executions,
+				SecuritySnapshots: repos.SecuritySnapshots,
+				Invocations:       repos.ToolInvocations,
+				Catalog:           toolRegistry,
+			},
+			EventObserver: events.Publish,
+			Logf:          diagnostics.Infof,
 		})
 		if err != nil {
 			_ = diagnostics.Close()
@@ -261,35 +176,31 @@ func Open(
 			return nil, err
 		}
 	}
-	factory := targetRuntimeFactory{
+	factory := runtimeFactory{
 		root:   root,
 		runner: runner,
 		header: newSessionHeaderResolver(store),
-		logger: func(execution domainexecution.AgentExecution, stage string, err error) {
+		logger: func(execution executionmodel.AgentExecution, stage string, err error) {
 			if err != nil {
 				diagnostics.Errorf("execution id=%s stage=%s failed: %v", execution.ID, stage, err)
 			}
 		},
-		eventLogger: func(execution domainexecution.AgentExecution, stage string) {
+		eventLogger: func(execution executionmodel.AgentExecution, stage string) {
 			diagnostics.Infof("execution id=%s stage=%s", execution.ID, stage)
 		},
-		output: output.Publish,
+		eventObserver: events.Publish,
 	}
-	queries, err := applicationquery.NewService(applicationquery.Config{
-		Projects:   target.Projects,
-		Workspaces: target.Workspaces,
-		Sessions:   target.Sessions,
-		Contexts:   target.Contexts,
-		Agents:     target.Agents,
-		Executions: target.Executions,
-		Waits:      target.Waits,
-		Controls:   target.Controls,
-		Deliveries: target.Deliveries,
-		Events:     target.Events,
-		Messages:   newAgentMessageQuery(root),
+	agentService, err := applicationagent.NewService(applicationagent.Config{
+		Transactions: store,
+		Agents:       repos.Agents,
+		Policies:     repos.Policies,
+		Executions:   repos.Executions,
+		Waits:        repos.Waits,
+		Controls:     repos.Controls,
+		Messages:     newAgentMessageReader(root),
 	})
 	if err != nil {
-		diagnostics.Errorf("create query service failed: %v", err)
+		diagnostics.Errorf("create agent service failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
@@ -302,8 +213,7 @@ func Open(
 		return nil, err
 	}
 	scheduler, err := orchestration.NewScheduler(orchestration.SchedulerConfig{
-		Executions: target.Executions,
-		Runtime:    registry,
+		Runtime: registry,
 	})
 	if err != nil {
 		diagnostics.Errorf("create execution scheduler failed: %v", err)
@@ -312,18 +222,17 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	readiness := orchestration.NewReadinessGate(false)
 	sessionService, err := applicationsession.NewService(applicationsession.Config{
-		Transactions:    store,
-		Projects:        target.Projects,
-		Workspaces:      target.Workspaces,
-		Sessions:        target.Sessions,
-		Contexts:        target.Contexts,
-		Policies:        target.Policies,
-		Agents:          target.Agents,
-		Events:          target.Events,
-		Readiness:       readiness,
-		PolicyFactory:   agentRegistry.SecurityPolicy,
+		Transactions:  store,
+		Projects:      repos.Projects,
+		Workspaces:    repos.Workspaces,
+		Sessions:      repos.Sessions,
+		Contexts:      repos.Contexts,
+		Policies:      repos.Policies,
+		Agents:        repos.Agents,
+		Definitions:   agentRegistry.Definition,
+		PolicyFactory: agentRegistry.SecurityPolicy,
+		Transcripts:   agentTranscriptLoader{root: root},
 	})
 	if err != nil {
 		diagnostics.Errorf("create session service failed: %v", err)
@@ -334,11 +243,13 @@ func Open(
 	}
 	settlementService, err := executionsettlement.NewService(executionsettlement.Config{
 		Transactions: store,
-		Agents:       target.Agents,
-		Executions:   target.Executions,
-		QueuedWork:   target.QueuedWork,
-		Controls:     target.Controls,
-		Events:       target.Events,
+		Sessions:     repos.Sessions,
+		Agents:       repos.Agents,
+		Executions:   repos.Executions,
+		QueuedWork:   repos.QueuedWork,
+		Controls:     repos.Controls,
+		Transcripts:  agentTranscriptLoader{root: root},
+		Logger:       diagnostics,
 	})
 	if err != nil {
 		diagnostics.Errorf("create execution settlement service failed: %v", err)
@@ -347,32 +258,17 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	deliveryInputs := &executionInputFactory{}
-	deliveryService, err := executiondelivery.NewService(executiondelivery.Config{
-		Transactions:    store,
-		Agents:          target.Agents,
-		Executions:      target.Executions,
-		Waits:           target.Waits,
-		Deliveries:      target.Deliveries,
-		Events:          target.Events,
-		Inputs:          deliveryInputs,
-		Activator:       scheduler,
-		Lifecycle:       settlementService,
-	})
-	if err != nil {
-		diagnostics.Errorf("create execution delivery service failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
 	startService, err := executionstart.NewService(executionstart.Config{
-		Transactions: store, Workspaces: target.Workspaces, Sessions: target.Sessions,
-		Contexts: target.Contexts, Policies: target.Policies, Agents: target.Agents,
-		Executions: target.Executions, Deliveries: target.Deliveries, Events: target.Events,
-		Readiness: readiness, PrimaryAgent: sessionService, Activator: scheduler,
-		Lifecycle: settlementService, Models: agentModelResolver{agents: agentRegistry, models: modelRegistry},
-		Transcripts: agentTranscriptCursor{root: root},
+		Transactions: store, Workspaces: repos.Workspaces, Sessions: repos.Sessions,
+		Policies: repos.Policies, Agents: repos.Agents,
+		Executions:      repos.Executions,
+		ToolPermissions: toolPermissions,
+		RegisteredTools: registeredToolNames,
+		PrimaryAgent:    sessionService, Activator: scheduler,
+		Lifecycle:       settlementService,
+		Definitions:     executionInputProvider{agents: agentRegistry, models: modelRegistry},
+		Models:          executionInputProvider{agents: agentRegistry, models: modelRegistry},
+		ContextProvider: newExecutionContextProvider(repos.Contexts, agentTranscriptLoader{root: root}),
 	})
 	if err != nil {
 		diagnostics.Errorf("create execution start service failed: %v", err)
@@ -383,12 +279,9 @@ func Open(
 	}
 	queueService, err := executionqueue.NewService(executionqueue.Config{
 		Transactions: store,
-		Agents:       target.Agents,
-		Executions:   target.Executions,
-		QueuedWork:   target.QueuedWork,
-		Deliveries:   target.Deliveries,
-		Events:       target.Events,
-		Readiness:    readiness,
+		Agents:       repos.Agents,
+		Executions:   repos.Executions,
+		QueuedWork:   repos.QueuedWork,
 		Inputs:       startService,
 		Activator:    scheduler,
 		Lifecycle:    settlementService,
@@ -407,26 +300,10 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	agentService, err := applicationagent.NewService(applicationagent.Config{
-		Transactions:    store,
-		Agents:          target.Agents,
-		Policies:        target.Policies,
-		Events:          target.Events,
-		Readiness:       readiness,
-	})
-	if err != nil {
-		diagnostics.Errorf("create agent policy service failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
 	projectService, err := applicationproject.NewService(applicationproject.Config{
-		Transactions:    store,
-		Projects:        target.Projects,
-		Workspaces:      target.Workspaces,
-		Events:          target.Events,
-		Readiness:       readiness,
+		Transactions: store,
+		Projects:     repos.Projects,
+		Workspaces:   repos.Workspaces,
 	})
 	if err != nil {
 		diagnostics.Errorf("create project service failed: %v", err)
@@ -437,12 +314,10 @@ func Open(
 	}
 	controlService, err := executioncontrol.NewService(executioncontrol.Config{
 		Transactions: store,
-		Agents:       target.Agents,
-		Executions:   target.Executions,
-		Controls:     target.Controls,
-		Events:       target.Events,
-		Readiness:    readiness,
+		Agents:       repos.Agents,
+		Controls:     repos.Controls,
 		Canceller:    registry,
+		Settler:      settlementService,
 	})
 	if err != nil {
 		diagnostics.Errorf("create control service failed: %v", err)
@@ -451,73 +326,63 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	commands := orchestrationCommandAdapter{readiness: readiness, controls: controlService, deliveries: deliveryService, queues: queueService, settlements: settlementService}
-	sessions := newAgentSessionResolver(root)
-	delivery, err := orchestration.NewDeliveryCoordinator(orchestration.DeliveryCoordinatorConfig{
-		Commands:        commands,
-		Sessions:        sessions,
-		SessionHeader:   newDeliveryHeaderResolver(store),
-		ResolveArtifact: target.ResolveContextArtifact,
-	})
-	if err != nil {
-		diagnostics.Errorf("create delivery coordinator failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
-	recovery, err := orchestration.NewRecoveryCoordinator(orchestration.RecoveryCoordinatorConfig{
-		Agents:     target.Agents,
-		Contexts:   target.Contexts,
-		Executions: target.Executions,
-		Waits:      target.Waits,
-		Controls:   target.Controls,
-		Deliveries: target.Deliveries,
-		Commands:   commands,
-		Lifecycle:  settlementService,
-		Scheduler:  scheduler,
-		Delivery:   delivery,
-		Sessions:   sessions,
-	})
-	if err != nil {
-		diagnostics.Errorf("create recovery coordinator failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
-	deliveryInputs.start = startService
-	if _, err := recovery.Recover(ctx); err != nil {
-		diagnostics.Errorf("startup recovery failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, fmt.Errorf("startup recovery: %w", err)
-	}
-	diagnostics.Infof("startup recovery completed")
 	diagnostics.Infof("composition open completed ready=true")
+	frontend := appservices.New(appservices.Config{
+		Agents:      agentService,
+		Projects:    projectService,
+		Sessions:    sessionService,
+		Controls:    controlService,
+		Queues:      queueService,
+		Settlements: settlementService,
+		Starts:      startService,
+		Models:      modelConfig,
+		AgentConfig: agentRegistry,
+		Events:      events,
+		Logger:      diagnostics,
+	})
 	return &Application{
-		readiness:   readiness,
-		queries:     queries,
-		projects:    projectService,
-		sessions:    sessionService,
-		controls:    controlService,
-		deliveries:  deliveryService,
-		agents:      agentService,
-		queues:      queueService,
-		settlements: settlementService,
-		starts:      startService,
-		store:       store,
-		models:      modelRegistry, agentConfig: agentRegistry,
-		registry:  registry,
-		scheduler: scheduler,
-		logger:    diagnostics,
-		output:    output,
+		frontend: frontend,
+		store:    store,
+		registry: registry,
+		logger:   diagnostics,
 	}, nil
 }
 
-// RuntimeLogger exposes the shared diagnostics sink to the Wails binding
-// layer without exposing composition internals or storage adapters.
+func newModelStream(
+	format modelregistry.ModelAPIFormat,
+	provider modelregistry.ProviderConfig,
+	modelConfig modelregistry.ModelConfig,
+	apiKey string,
+	client *http.Client,
+) (runtime.ModelStream, error) {
+	switch format {
+	case modelregistry.APIFormatAnthropicMessages:
+		return anthropicmessages.New(anthropicmessages.Config{
+			BaseURL:       provider.BaseURL,
+			APIKey:        apiKey,
+			HTTPClient:    client,
+			ContextWindow: modelConfig.ContextWindow,
+		})
+	case modelregistry.APIFormatOpenAIChatCompletions:
+		return openaichat.New(openaichat.Config{
+			BaseURL:       provider.BaseURL,
+			APIKey:        apiKey,
+			HTTPClient:    client,
+			ContextWindow: modelConfig.ContextWindow,
+		})
+	case modelregistry.APIFormatOpenAIResponses:
+		return openairesponses.New(openairesponses.Config{
+			BaseURL:       provider.BaseURL,
+			APIKey:        apiKey,
+			HTTPClient:    client,
+			ContextWindow: modelConfig.ContextWindow,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported model API format %q", format)
+	}
+}
+
+// RuntimeLogger 暴露共享诊断日志给 Wails binding，但不暴露组合根内部实现。
 func (a *Application) RuntimeLogger() *logging.Logger {
 	factory := logging.NewFactory()
 	if a == nil || a.logger == nil {
@@ -526,104 +391,11 @@ func (a *Application) RuntimeLogger() *logging.Logger {
 	return factory.Ensure(a.logger)
 }
 
-// SubscribeAgentOutput registers a listener for transient provider output.
-// Consumers must use the durable transcript after a settled notification.
-func (a *Application) SubscribeAgentOutput(observer agentruntime.AgentOutputObserver) func() {
-	if a == nil || a.output == nil {
-		return func() {}
-	}
-	return a.output.Subscribe(observer)
-}
-
-// ListModels returns configured model capabilities for the desktop binding.
-func (a *Application) ListModels() []modelregistry.ModelOption {
-	if a.models == nil {
-		return []modelregistry.ModelOption{}
-	}
-	models := a.models.ListModels()
-	if a.agentConfig == nil {
-		return models
-	}
-	for index := range models {
-		models[index].AssignedAgents = a.agentConfig.AgentsForModel(models[index].ProviderID, models[index].ModelID)
-	}
-	return models
-}
-
-// ModelConfig returns an editable copy of the full model configuration for
-// the settings UI to render.
-func (a *Application) ModelConfig() modelregistry.RegistryConfig {
-	if a.models == nil {
-		return modelregistry.RegistryConfig{}
-	}
-	return a.models.Config()
-}
-
-// SaveModelConfig validates and persists a new model configuration. A saved
-// configuration takes effect immediately for the running orchestration layer.
-func (a *Application) SaveModelConfig(config modelregistry.RegistryConfig) error {
-	if a.models == nil {
-		return errors.New("model registry is not available")
-	}
-	prepared, err := modelregistry.Prepare(config)
-	if err != nil {
-		return err
-	}
-	validated := prepared.Config()
-	if a.agentConfig != nil {
-		if err := a.agentConfig.ValidateModelReferences(func(providerID, modelID string) error {
-			if !modelregistry.ContainsModel(validated, providerID, modelID) {
-				return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	if err := a.models.ApplyValidatedConfig(prepared); err != nil {
-		return err
-	}
-	a.RuntimeLogger().Infof(
-		"model config saved providers=%d groups=%d", len(config.Providers), len(config.Groups),
-	)
-	return nil
-}
-
-// SetProviderKey stores or clears the API key for one configured provider.
-func (a *Application) SetProviderKey(providerID, value string) error {
-	if a.models == nil {
-		return errors.New("model registry is not available")
-	}
-	if err := a.models.SetProviderKey(providerID, value); err != nil {
-		return err
-	}
-	a.RuntimeLogger().Infof("provider API key updated provider=%s cleared=%t", providerID, value == "")
-	return nil
-}
-
-// HasProviderKey reports secret presence without exposing the configured key.
-func (a *Application) HasProviderKey(providerID string) bool {
-	if a.models == nil {
-		return false
-	}
-	return a.models.HasProviderKey(providerID)
-}
-
-// DiscoverProviderModels retrieves model IDs from the configured provider
-// endpoint while keeping the resolved API key inside the registry.
-func (a *Application) DiscoverProviderModels(ctx context.Context, providerID string) ([]string, error) {
-	if a.models == nil {
-		return nil, errors.New("model registry is not available")
-	}
-	return a.models.DiscoverProviderModels(ctx, providerID)
-}
-
 // Close prevents new commands before stopping runtime actors and storage.
 func (a *Application) Close(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("application close context is required")
 	}
-	a.SetReady(false)
 	logger := a.RuntimeLogger()
 	logger.Infof("composition close started")
 	runtimeErr := a.registry.Close(ctx)
@@ -656,137 +428,39 @@ func (a *Application) Close(ctx context.Context) error {
 	return logErr
 }
 
-func (a *Application) ListAgentMessages(
+type runtimeFactory struct {
+	root          dataroot.DataRoot
+	runner        agentruntime.ExecutionRunner
+	header        agentruntime.SessionHeaderResolver
+	logger        agentruntime.ExecutionLogger
+	eventLogger   agentruntime.ExecutionEventLogger
+	eventObserver agentruntime.AgentEventObserver
+}
+
+func (f runtimeFactory) New(
 	ctx context.Context,
-	agentID domainfoundation.AgentID,
-	limit int,
-) ([]session.AgentSessionMessage, error) {
-	return a.queries.ListAgentMessages(ctx, agentID, limit)
-}
-
-type targetRuntimeFactory struct {
-	root        dataroot.DataRoot
-	runner      agentruntime.TargetExecutionRunner
-	header      agentruntime.TargetSessionHeaderResolver
-	logger      agentruntime.TargetExecutionLogger
-	eventLogger agentruntime.TargetExecutionEventLogger
-	output      agentruntime.AgentOutputObserver
-}
-
-// orchestrationCommandAdapter adapts application command results to the
-// narrow orchestration contracts at the composition root.
-type orchestrationCommandAdapter struct {
-	readiness   *orchestration.ReadinessGate
-	controls    *executioncontrol.Service
-	deliveries  *executiondelivery.Service
-	queues      *executionqueue.Service
-	settlements *executionsettlement.Service
-}
-
-func (a orchestrationCommandAdapter) SetReady(ready bool) {
-	a.readiness.SetReady(ready)
-}
-
-func (a orchestrationCommandAdapter) ClaimContextDelivery(
-	ctx context.Context,
-	deliveryID domainfoundation.DeliveryID,
-) (orchestration.ContextDeliveryClaim, error) {
-	claim, err := a.deliveries.ClaimContextDelivery(ctx, deliveryID)
-	if err != nil {
-		return orchestration.ContextDeliveryClaim{}, err
-	}
-	return orchestration.ContextDeliveryClaim{
-		Delivery: claim.Delivery,
-		Claimed:  claim.Claimed,
-	}, nil
-}
-
-func (a orchestrationCommandAdapter) CompleteContextDelivery(
-	ctx context.Context,
-	request orchestration.ContextDeliveryCompletionRequest,
-) (orchestration.ContextDeliveryCompletion, error) {
-	completion, err := a.deliveries.CompleteContextDelivery(ctx, executiondelivery.CompleteParams{
-		DeliveryID:       request.DeliveryID,
-		ArtifactEntryRef: request.ArtifactEntryRef,
-		RequestID:        request.RequestID,
-	})
-	if err != nil {
-		return orchestration.ContextDeliveryCompletion{}, err
-	}
-	return orchestration.ContextDeliveryCompletion{
-		Delivery:         completion.Delivery,
-		Execution:        completion.Execution,
-		ExistingDelivery: completion.ExistingDelivery,
-		ActivationError:  completion.ActivationError,
-	}, nil
-}
-
-func (a orchestrationCommandAdapter) SettleRuntimeExecution(
-	ctx context.Context,
-	executionID domainfoundation.AgentExecutionID,
-	outcome domainexecution.ExecutionOutcome,
-	failureCode domainexecution.ExecutionFailureCode,
-) error {
-	return a.settlements.SettleRuntimeExecution(ctx, executionID, outcome, failureCode)
-}
-
-func (a orchestrationCommandAdapter) ApplyPendingAgentControl(
-	ctx context.Context,
-	requestID domainfoundation.AgentControlCommandID,
-) error {
-	return a.controls.ApplyPendingAgentControl(ctx, requestID)
-}
-
-func (a orchestrationCommandAdapter) StartNextQueuedWork(
-	ctx context.Context,
-	agentID domainfoundation.AgentID,
-) (bool, error) {
-	result, err := a.queues.StartNextQueuedWork(ctx, agentID)
-	if err != nil {
-		return false, err
-	}
-	return result.Started, nil
-}
-
-func (a orchestrationCommandAdapter) IsAgentUnavailable(err error) bool {
-	return commandprotocol.HasError(err, commandprotocol.ErrorAgentUnavailable)
-}
-
-var (
-	_ orchestration.DeliveryCommands = orchestrationCommandAdapter{}
-	_ orchestration.RecoveryCommands = orchestrationCommandAdapter{}
-)
-
-func (f targetRuntimeFactory) New(
-	ctx context.Context,
-	agentID domainfoundation.AgentID,
+	agentID contracts.AgentID,
 ) (agentruntime.ManagedRuntime, error) {
 	openSessions := func(
-		sessionID domainfoundation.SessionID,
-		targetAgentID domainfoundation.AgentID,
-	) (session.TranscriptReceiptStore, error) {
+		sessionID contracts.SessionID,
+		targetAgentID contracts.AgentID,
+	) (runtime.TranscriptStore, error) {
 		return agentlog.Open(f.root, sessionID, targetAgentID)
 	}
-	return agentruntime.NewTargetRuntime(agentruntime.TargetRuntimeConfig{
+	return agentruntime.NewRuntime(agentruntime.RuntimeConfig{
 		AgentID:           agentID,
 		Sessions:          openSessions,
 		Header:            f.header,
 		Runner:            f.runner,
 		Logger:            f.logger,
 		EventLogger:       f.eventLogger,
-		OutputObserver:    f.output,
+		EventObserver:     f.eventObserver,
 		SettlementTimeout: 30 * time.Second,
 	})
 }
 
-func newAgentSessionResolver(root dataroot.DataRoot) orchestration.AgentSessionResolver {
-	return func(sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID) (session.TranscriptReceiptStore, error) {
-		return agentlog.Open(root, sessionID, agentID)
-	}
-}
-
-func newAgentMessageQuery(root dataroot.DataRoot) applicationquery.AgentMessageQuery {
-	return func(ctx context.Context, sessionID domainfoundation.SessionID, agentID domainfoundation.AgentID, limit int) ([]session.AgentSessionMessage, error) {
+func newAgentMessageReader(root dataroot.DataRoot) func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]runtime.AgentSessionMessage, error) {
+	return func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID, limit int) ([]runtime.AgentSessionMessage, error) {
 		store, err := agentlog.Open(root, sessionID, agentID)
 		if err != nil {
 			return nil, err
@@ -796,104 +470,77 @@ func newAgentMessageQuery(root dataroot.DataRoot) applicationquery.AgentMessageQ
 	}
 }
 
-type agentModelResolver struct {
+type executionInputProvider struct {
 	agents *agentregistry.Registry
 	models *modelregistry.Registry
 }
 
-func (r agentModelResolver) ResolveModel(profile domainsecurity.AgentProfile) (domainmodel.ModelSelection, error) {
-	return r.agents.ResolveModel(profile)
+func (r executionInputProvider) Definition(definitionID contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
+	return r.agents.Definition(definitionID)
 }
 
-func (r agentModelResolver) ResolveModelSelection(providerID, modelID, reasoningLevel string) (domainmodel.ModelSelection, error) {
-	return r.models.ResolveModelSelection(providerID, modelID, reasoningLevel)
+func (r executionInputProvider) FreezeExecutionModel(providerID, modelID, reasoningLevel string) (contracts.ExecutionModelSnapshot, error) {
+	return r.models.FreezeExecutionModel(providerID, modelID, reasoningLevel)
 }
 
-func newSessionHeaderResolver(store *sqlite.Store) agentruntime.TargetSessionHeaderResolver {
-	return func(ctx context.Context, execution domainexecution.AgentExecution) (session.AgentSessionHeader, error) {
+func (r executionInputProvider) FreezeDefaultExecutionModel(definitionID contracts.AgentDefinitionID) (contracts.ExecutionModelSnapshot, error) {
+	reference, err := r.agents.ResolveModelReference(definitionID)
+	if err != nil {
+		return contracts.ExecutionModelSnapshot{}, err
+	}
+	return r.models.FreezeExecutionModel(reference.ProviderID, reference.ModelID, "")
+}
+
+func newSessionHeaderResolver(store *sqlite.Store) agentruntime.SessionHeaderResolver {
+	return func(ctx context.Context, execution executionmodel.AgentExecution) (runtime.AgentSessionHeader, error) {
 		agent, err := store.GetAgent(ctx, execution.AgentID)
 		if err != nil {
-			return session.AgentSessionHeader{}, err
+			return runtime.AgentSessionHeader{}, err
 		}
 		return newSessionHeader(ctx, store, agent), nil
 	}
 }
 
-func newDeliveryHeaderResolver(store *sqlite.Store) orchestration.DeliverySessionHeaderResolver {
-	return func(ctx context.Context, delivery domainworkflow.ContextDelivery) (session.AgentSessionHeader, error) {
-		agent, err := store.GetAgent(ctx, delivery.TargetAgentID)
-		if err != nil {
-			return session.AgentSessionHeader{}, err
-		}
-		return newSessionHeader(ctx, store, agent), nil
-	}
-}
-
-func newSessionHeader(ctx context.Context, store *sqlite.Store, agent domainagent.Agent) session.AgentSessionHeader {
+func newSessionHeader(ctx context.Context, store *sqlite.Store, agent agentmodel.Agent) runtime.AgentSessionHeader {
 	sessionRecord, err := store.GetSession(ctx, agent.SessionID)
-	workspaceID := domainfoundation.WorkspaceID("")
+	workspaceID := contracts.WorkspaceID("")
 	if err == nil {
 		workspaceID = sessionRecord.WorkspaceID
 	}
-	return session.AgentSessionHeader{
+	return runtime.AgentSessionHeader{
 		SessionID:        agent.SessionID,
 		AgentID:          agent.ID,
+		DefinitionID:     agent.DefinitionID,
 		Profile:          agent.Profile,
 		WorkspaceID:      workspaceID,
 		InjectionNonce:   agent.SessionID.String() + ":" + agent.ID.String(),
-		MinReaderVersion: 3,
-		WrittenBy:        "praxis/target",
+		MinReaderVersion: 4,
+		WrittenBy:        "praxis",
 	}
-}
-
-type executionInputFactory struct {
-	start *executionstart.Service
-}
-
-func (f executionInputFactory) MaterializeExecutionInput(
-	ctx context.Context,
-	agent domainagent.Agent,
-	providerID string,
-	modelID string,
-	reasoningLevel string,
-	artifactEntryRefs []string,
-) (domainexecution.ExecutionInputSnapshot, error) {
-	if f.start == nil {
-		return domainexecution.ExecutionInputSnapshot{}, errors.New("execution start service is not configured")
-	}
-	return f.start.MaterializeExecutionInput(ctx, agent, providerID, modelID, reasoningLevel, artifactEntryRefs)
 }
 
 type queuedWorkStarter struct {
 	queue *executionqueue.Service
 }
 
-func (s queuedWorkStarter) StartNextQueuedWork(ctx context.Context, agentID domainfoundation.AgentID) (bool, error) {
+func (s queuedWorkStarter) StartNextQueuedWork(ctx context.Context, agentID contracts.AgentID) (bool, error) {
 	result, err := s.queue.StartNextQueuedWork(ctx, agentID)
 	return result.Started, err
 }
 
-func (a *Application) Ready() bool {
-	return a.readiness.Ready()
-}
-
-func (a *Application) SetReady(ready bool) {
-	a.readiness.SetReady(ready)
-}
-
-type agentTranscriptCursor struct {
+type agentTranscriptLoader struct {
 	root dataroot.DataRoot
 }
 
-func (c agentTranscriptCursor) SnapshotTranscript(
+func (c agentTranscriptLoader) LoadTranscript(
 	ctx context.Context,
-	sessionID domainfoundation.SessionID,
-	agentID domainfoundation.AgentID,
-) (session.AgentTranscriptSnapshot, error) {
+	sessionID contracts.SessionID,
+	agentID contracts.AgentID,
+) (runtime.AgentTranscript, error) {
 	store, err := agentlog.Open(c.root, sessionID, agentID)
 	if err != nil {
-		return session.AgentTranscriptSnapshot{}, err
+		return runtime.AgentTranscript{}, err
 	}
 	defer func() { _ = store.Close(context.Background()) }()
-	return store.SnapshotContext(ctx)
+	return store.LoadTranscript(ctx)
 }

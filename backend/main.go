@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"os"
 
-	"praxis/app"
 	"praxis/internal/compose"
-	"praxis/internal/infrastructure/dataroot"
+	"praxis/internal/infra/dataroot"
 	"praxis/internal/logging"
+	"praxis/wails"
 
-	"github.com/wailsapp/wails/v2"
+	wailslib "github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
@@ -22,42 +22,26 @@ import (
 var assets embed.FS
 
 func main() {
-	a := app.New(logging.NewFactory().Console())
+	a := wails.New(logging.NewFactory().Console())
 	startup := func(ctx context.Context) {
 		a.Startup(ctx)
 		root, err := dataroot.Resolve("")
 		if err != nil {
-			a.SetStartupError(err)
 			_, _ = fmt.Fprintf(os.Stderr, "fatal: resolve data root: %v\n", err)
 			return
 		}
-		a.SetDataRoot(root)
 		application, err := compose.Open(ctx, root, nil)
 		if err != nil {
-			a.SetStartupError(err)
 			_, _ = fmt.Fprintf(os.Stderr, "fatal: open application: %v\n", err)
 			return
 		}
-		if err := a.Attach(app.Dependencies{
-			Readiness:   application,
-			Projects:    application,
-			Sessions:    application,
-			Agents:      application,
-			Events:      application,
-			Commands:    application,
-			Models:      application,
-			ModelConfig: application,
-			Output:      application,
-			Diagnostics: application,
-			Lifecycle:   application,
-		}); err != nil {
-			a.SetStartupError(err)
+		if err := a.Attach(application.Services(), application.RuntimeLogger(), application); err != nil {
 			_ = application.Close(context.Background())
 			_, _ = fmt.Fprintf(os.Stderr, "fatal: attach desktop dependencies: %v\n", err)
 		}
 	}
 
-	err := wails.Run(&options.App{
+	err := wailslib.Run(&options.App{
 		Title:       "Praxis",
 		Width:       1280,
 		Height:      800,

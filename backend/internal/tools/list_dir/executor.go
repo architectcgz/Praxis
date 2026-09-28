@@ -1,6 +1,9 @@
 package listdir
 
 import (
+	toolmodel "praxis/internal/tool_invocation"
+	toolcontracts "praxis/internal/tools/contracts"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,10 +12,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-
-	domainexecution "praxis/internal/domain/execution"
-	domainsecurity "praxis/internal/domain/security"
-	runtimecontract "praxis/internal/runtime"
 )
 
 type entry struct {
@@ -30,27 +29,27 @@ type output struct {
 }
 
 // Execute lists the authorized directory and returns one bounded result page.
-func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runtimecontract.ToolResult, error) {
+func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
-		return runtimecontract.ToolResult{}, errors.New("tool execution context is required")
+		return toolcontracts.ToolResult{}, errors.New("tool execution context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return runtimecontract.ToolResult{}, err
+		return toolcontracts.ToolResult{}, err
 	}
-	if call.Name != domainsecurity.ToolListDir {
-		return runtimecontract.ToolResult{}, errors.New("list_dir executor does not support the call")
+	if call.Name != toolcontracts.ToolListDir {
+		return toolcontracts.ToolResult{}, errors.New("list_dir executor does not support the call")
 	}
 	call = call.Snapshot()
 	var toolArguments arguments
 	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil {
-		return runtimecontract.ToolResult{}, errors.New("normalized list_dir arguments are invalid")
+		return toolcontracts.ToolResult{}, errors.New("normalized list_dir arguments are invalid")
 	}
 	if toolArguments.Path != call.Path || !authorizedRealDirectory(toolArguments.Path, call.ReadScopes) {
-		return runtimecontract.ToolResult{}, errors.New("list_dir path is outside an authorized directory")
+		return toolcontracts.ToolResult{}, errors.New("list_dir path is outside an authorized directory")
 	}
 	entries, err := os.ReadDir(toolArguments.Path)
 	if err != nil {
-		return runtimecontract.ToolResult{}, errors.New("list_dir could not read the directory")
+		return toolcontracts.ToolResult{}, errors.New("list_dir could not read the directory")
 	}
 	sort.Slice(entries, func(left, right int) bool { return entries[left].Name() < entries[right].Name() })
 	if toolArguments.Offset > len(entries) {
@@ -67,7 +66,7 @@ func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runt
 	truncated := false
 	for index := toolArguments.Offset; index < end; index++ {
 		if err := ctx.Err(); err != nil {
-			return runtimecontract.ToolResult{}, err
+			return toolcontracts.ToolResult{}, err
 		}
 		toolEntry := entry{Name: entries[index].Name(), Type: directoryEntryType(entries[index])}
 		toolOutput.Entries = append(toolOutput.Entries, toolEntry)
@@ -76,8 +75,8 @@ func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runt
 			toolOutput.NextOffset = &next
 		}
 		if encoded, err := json.Marshal(toolOutput); err != nil {
-			return runtimecontract.ToolResult{}, errors.New("list_dir could not encode its result")
-		} else if len(encoded) > domainexecution.MaxInlineToolResultBytes {
+			return toolcontracts.ToolResult{}, errors.New("list_dir could not encode its result")
+		} else if len(encoded) > toolmodel.MaxInlineToolResultBytes {
 			toolOutput.Entries = toolOutput.Entries[:len(toolOutput.Entries)-1]
 			end = index
 			next = index
@@ -95,12 +94,12 @@ func Execute(ctx context.Context, call runtimecontract.AuthorizedToolCall) (runt
 	}
 	encoded, err := json.Marshal(toolOutput)
 	if err != nil {
-		return runtimecontract.ToolResult{}, errors.New("list_dir could not encode its result")
+		return toolcontracts.ToolResult{}, errors.New("list_dir could not encode its result")
 	}
-	if len(encoded) > domainexecution.MaxInlineToolResultBytes {
-		return runtimecontract.ToolResult{}, errors.New("list_dir result metadata exceeds the size limit")
+	if len(encoded) > toolmodel.MaxInlineToolResultBytes {
+		return toolcontracts.ToolResult{}, errors.New("list_dir result metadata exceeds the size limit")
 	}
-	return runtimecontract.ToolResult{Content: string(encoded), Truncated: truncated}, nil
+	return toolcontracts.NewToolSuccess(string(encoded), truncated), nil
 }
 
 func directoryEntryType(directoryEntry os.DirEntry) string {
