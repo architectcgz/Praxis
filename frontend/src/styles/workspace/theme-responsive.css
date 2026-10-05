@@ -1,0 +1,9 @@
+/* 减少动效时同步禁用视觉过渡，布局断点由 responsive.css 拥有。 */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0s !important;
+    }
+}

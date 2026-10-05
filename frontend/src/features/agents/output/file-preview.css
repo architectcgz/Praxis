@@ -1,0 +1,102 @@
+/* 预览沿用工作区纸面与弹窗层级，不把本地内容作为可执行网页加载。 */
+.message-file-link {
+    display: inline;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--accent-ink);
+    font: inherit;
+    text-align: inherit;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.message-file-link:disabled {
+    color: var(--muted);
+    cursor: default;
+}
+
+.file-preview-dialog {
+    display: flex;
+    flex-direction: column;
+    width: min(860px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--paper);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.file-preview-heading {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+}
+
+.file-preview-heading > div {
+    min-width: 0;
+    flex: 1;
+}
+
+.file-preview-heading h2 {
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+}
+
+.file-preview-heading p {
+    margin: 4px 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-secondary);
+}
+
+.file-preview-body {
+    min-height: 0;
+    padding: 16px 20px;
+    overflow: auto;
+}
+
+.file-preview-text {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: var(--font-size-code)/1.65 var(--mono);
+}
+
+.file-preview-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.file-preview-loading,
+.file-preview-empty {
+    color: var(--muted);
+}
+
+.file-preview-error {
+    color: var(--danger);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 460px) {
+    .file-preview-heading,
+    .file-preview-body {
+        padding: 12px;
+    }
+
+    .file-preview-heading .icon-button {
+        min-width: 32px;
+        min-height: 32px;
+    }
+}

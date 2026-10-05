@@ -1,0 +1,52 @@
+/* Agent 对话滚动容器与滚动条样式。 */
+.message-thread-container {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+}
+
+.message-thread {
+    position: relative;
+    z-index: var(--z-base);
+    overflow-anchor: none;
+}
+
+.thread,.message-thread {
+    --message-content-gap: 12px;
+    display: grid;
+    align-content: start;
+    grid-auto-rows: max-content;
+    gap: 0;
+    min-height: 0;
+    min-width: 0;
+    flex: 1;
+    margin-top: 0;
+    overflow: auto;
+    overflow-x: hidden;
+    padding: 22px 0 16px;
+    scrollbar-color: #c4c4bc transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+}
+
+.message-thread.empty {
+    align-content: stretch;
+}
+
+.thread::-webkit-scrollbar,.message-thread::-webkit-scrollbar {
+    width: 10px;
+}
+
+.message-thread::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.thread::-webkit-scrollbar-thumb,.message-thread::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 99px;
+    background: #c4c4bc;
+    background-clip: padding-box;
+}

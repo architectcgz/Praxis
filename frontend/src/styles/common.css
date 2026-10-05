@@ -1,0 +1,142 @@
+/* 跨功能的错误提示、空状态、面板标题和状态控件。 */
+.toast-notice {
+    position: fixed;
+    z-index: var(--z-modal);
+    top: 56px;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: max-content;
+    max-width: calc(100dvw - 32px);
+    padding: 10px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: var(--surface-solid);
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    overflow-wrap: anywhere;
+    box-shadow: var(--shadow-soft);
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.toast-notice > svg {
+    flex: 0 0 auto;
+    color: var(--accent);
+}
+
+.error-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex: 0 0 auto;
+    margin: 0 auto 20px;
+    padding: 11px 14px;
+    border: 1px solid #e0b9b4;
+    font-size: var(--font-size-ui);
+    overflow-wrap: anywhere;
+    border-radius: 6px;
+    background: #fff6f4;
+    color: var(--danger);
+    box-shadow: none;
+}
+
+.error-banner-action {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid #e0b9b4;
+    font-size: var(--font-size-secondary);
+    font-weight: 650;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--danger);
+}
+
+.error-banner-action:hover {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.empty-state {
+    --page-width: 660px;
+
+    margin-block-start: 12vh;
+}
+
+.empty-kicker {
+    color: var(--blue);
+    font-size: var(--font-size-secondary);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.empty-state p {
+    max-width: 470px;
+    margin: 18px 0 0;
+    color: var(--ink-secondary);
+    line-height: 1.6;
+}
+
+.panel-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--line);
+}
+
+.panel-heading h1 {
+    font-size: var(--font-size-title);
+}
+
+.identifier {
+    margin: 8px 0 0;
+    color: var(--ink-tertiary);
+    font-size: var(--font-size-caption);
+}
+
+.state-badge {
+    padding: 6px 9px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--ink-secondary);
+    font-size: var(--font-size-caption);
+    font-weight: 650;
+}
+
+.state-badge-executing,
+.state-badge-pausing {
+    border-color: rgba(255, 149, 0, 0.35);
+    color: #b26a00;
+}
+
+.state-badge-idle,
+.state-badge-waiting {
+    border-color: rgba(52, 199, 89, 0.35);
+    color: #248a40;
+}
+
+.is-spinning {
+    animation: output-wait-spin var(--motion-duration-spinner) linear var(--motion-iteration-count);
+}
+
+@keyframes output-wait-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 460px) {
+    .error-banner {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .error-banner-action {
+        align-self: flex-start;
+    }
+}

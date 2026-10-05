@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { RefreshCw, TriangleAlert } from 'lucide-react'
+import './error-boundary.css'
 
 type WorkspaceErrorBoundaryProps = {
     children: ReactNode
@@ -9,7 +10,7 @@ type WorkspaceErrorBoundaryState = {
     failed: boolean
 }
 
-// This is the final UI safety net when a boundary contract regresses.
+// 当边界契约发生回归时，统一提供可恢复的错误界面。
 export class WorkspaceErrorBoundary extends Component<WorkspaceErrorBoundaryProps, WorkspaceErrorBoundaryState> {
     state: WorkspaceErrorBoundaryState = { failed: false }
 
@@ -18,7 +19,7 @@ export class WorkspaceErrorBoundary extends Component<WorkspaceErrorBoundaryProp
     }
 
     componentDidCatch(error: Error, info: ErrorInfo) {
-        console.error('Workspace render failed.', error, info)
+        console.error('工作区渲染失败。', error, info)
     }
 
     render() {
@@ -31,14 +32,14 @@ export class WorkspaceErrorBoundary extends Component<WorkspaceErrorBoundaryProp
                     <TriangleAlert size={22} strokeWidth={1.8} />
                 </span>
                 <div>
-                    <h1>Workspace unavailable</h1>
-                    <p>Praxis could not render the workspace. Check the configuration and reload.</p>
+                    <h1>工作区暂不可用</h1>
+                    <p>Praxis 无法渲染工作区，请检查配置后重新加载。</p>
                 </div>
                 <button
                     className="icon-button app-error-reload"
                     type="button"
-                    title="Reload workspace"
-                    aria-label="Reload workspace"
+                    title="重新加载工作区"
+                    aria-label="重新加载工作区"
                     onClick={() => window.location.reload()}
                 >
                     <RefreshCw size={17} strokeWidth={1.9} aria-hidden="true" />

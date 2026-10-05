@@ -1,0 +1,93 @@
+/* Agent 对话区、滚动控件和任务输入基础样式。 */
+@import './composer.css';
+@import './conversation.css';
+
+.agent-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
+    color: var(--ink-secondary);
+    font-size: var(--font-size-secondary);
+}
+
+.agent-conversation {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    margin-top: 0;
+    position: relative;
+}
+
+.scroll-to-bottom-button {
+    position: absolute;
+    bottom: 16px;
+    right: max(24px, var(--session-content-padding));
+    z-index: var(--z-raised);
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--ink-secondary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+    transition: all var(--motion-duration) ease;
+    animation: fade-slide-in 0.2s ease-out;
+}
+
+.scroll-to-bottom-button:hover {
+    background: #fff;
+    color: var(--blue-strong);
+    border-color: var(--blue-strong);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.scroll-to-bottom-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+@keyframes fade-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 768px) {
+    .scroll-to-bottom-button {
+        right: 16px;
+        bottom: 12px;
+    }
+}
+
+.pulse {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 8px;
+}
+
+.agent-activity .thinking-details-streaming {
+    padding-right: 0;
+}
+
+.scroll-to-bottom-button {
+    width: 28px;
+    height: 28px;
+}
+
+.scroll-to-bottom-button:hover {
+    transform: none;
+}

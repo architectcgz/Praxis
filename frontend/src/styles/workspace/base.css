@@ -1,12 +1,7 @@
-/* Shared workspace shell, typography, controls, and status tokens. */
+/* 工作区顶部栏、通用控件与状态布局。 */
 .topbar {
     position: relative;
     z-index: var(--z-sticky);
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    min-height: 64px;
-    padding: 0 28px;
     border-bottom: 1px solid var(--line);
     background: rgba(250, 250, 252, 0.78);
     box-shadow: 0 1px 12px rgba(0, 0, 0, 0.03);
@@ -15,14 +10,10 @@
 }
 
 .brand-mark {
-    display: grid;
-    width: 30px;
-    height: 30px;
-    place-items: center;
     border-radius: 9px;
     background: var(--ink);
     color: #fff;
-    font-size: 0.9rem;
+    font-size: var(--font-size-ui);
     font-weight: 700;
     letter-spacing: 0;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.16);
@@ -35,7 +26,7 @@
 
 .topbar strong {
     color: var(--ink);
-    font-size: 0.94rem;
+    font-size: var(--font-size-ui);
     font-weight: 650;
     letter-spacing: 0;
 }
@@ -43,7 +34,7 @@
 .topbar > div:nth-child(2) span {
     margin-top: 1px;
     color: var(--ink-tertiary);
-    font-size: 0.72rem;
+    font-size: var(--font-size-caption);
 }
 
 .health {
@@ -52,11 +43,10 @@
     gap: 7px;
     margin-left: auto;
     color: var(--ink-secondary);
-    font-size: 0.78rem;
+    font-size: var(--font-size-secondary);
 }
 
-.health-dot,
-.state-marker {
+.health-dot {
     display: inline-block;
     flex: 0 0 auto;
     width: 8px;
@@ -91,13 +81,6 @@
     background: #8e8e93;
 }
 
-.round-notice {
-    margin: 0 0 10px;
-    color: var(--ink-secondary);
-    font-size: 0.78rem;
-    line-height: 1.5;
-}
-
 button,
 input,
 textarea {
@@ -118,26 +101,23 @@ button:focus-visible {
     outline-offset: 2px;
 }
 
-.quiet-button,
-.lookup-button {
+.quiet-button {
     min-height: 36px;
     padding: 0 15px;
     border: 1px solid transparent;
     border-radius: 9px;
     background: var(--blue);
     color: #fff;
-    font-size: 0.8rem;
+    font-size: var(--font-size-ui);
     font-weight: 650;
     transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease, transform var(--motion-duration) ease;
 }
 
-.quiet-button:hover:not(:disabled),
-.lookup-button:hover:not(:disabled) {
+.quiet-button:hover:not(:disabled) {
     background: var(--blue-strong);
 }
 
-.quiet-button:active:not(:disabled),
-.lookup-button:active:not(:disabled) {
+.quiet-button:active:not(:disabled) {
     transform: scale(0.98);
 }
 
@@ -150,4 +130,81 @@ button:focus-visible {
 
 .quiet-button:hover:not(:disabled) {
     background: rgba(118, 118, 128, 0.2);
+}
+
+svg {
+    display: block;
+}
+
+.top,
+.topbar {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    height: 42px;
+    padding: 0 14px;
+}
+
+.mark,
+.brand-mark {
+    display: grid;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    place-items: center;
+}
+
+.spacer {
+    flex: 1;
+}
+
+.status,
+.header-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dot,
+.header-status-dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+}
+
+.ghost,
+.topbar .quiet-button {
+    height: 30px;
+    min-height: 30px;
+    margin-left: 0;
+    padding: 0 8px;
+}
+
+.quiet-button-label {
+    white-space: nowrap;
+}
+
+.crumb {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.topbar > .status,
+.topbar > .quiet-button {
+    flex: 0 0 auto;
+}
+
+.topbar > .quiet-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.topbar .crumb span {
+    display: inline;
 }

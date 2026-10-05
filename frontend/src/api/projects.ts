@@ -8,13 +8,6 @@ export type CreateProjectRequest = {
     requestId: string
 }
 
-export type CreateProjectResponse = {
-    projectId: string
-    name: string
-    workspaceId: string
-    path: string
-}
-
 export type ProjectSummary = {
     id: string
     name: string

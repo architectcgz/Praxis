@@ -1,0 +1,55 @@
+.project-overview-icon {
+    border-radius: 6px;
+    background: var(--selected);
+    color: var(--accent);
+}
+
+.project-overview h1 {
+    font-size: var(--font-size-title);
+    font-weight: 650;
+}
+
+.project-overview-action {
+    border-radius: 5px;
+}
+
+.project-overview-path {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: var(--font-size-secondary);
+}
+
+.project-overview-stats strong {
+    font-size: var(--font-size-body);
+}
+
+.project-overview-session {
+    border: 0;
+    border-radius: 5px;
+}
+
+.project-overview-session:hover,
+.project-overview-session.selected {
+    border-color: transparent;
+    background: var(--fill);
+    color: var(--ink);
+}
+
+.path-picker-button {
+    border-radius: 6px;
+}
+
+.dialog-error {
+    border-color: #e0b9b4;
+    border-radius: 6px;
+    background: #fff6f4;
+    color: var(--danger);
+    box-shadow: none;
+}
+
+.dialog-error-action {
+    border-color: #e0b9b4;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--danger);
+}

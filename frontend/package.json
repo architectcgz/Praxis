@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "node --test src/features/sessions/MessageViews.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

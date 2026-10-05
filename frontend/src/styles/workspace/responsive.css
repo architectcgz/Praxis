@@ -1,168 +1,51 @@
-/* Breakpoint and reduced-motion overrides are kept after component rules. */
-@media (max-width: 900px) {
+/* 工作区断点集中定义，窄屏保留同一套 Grid 收缩约束。 */
+@media (max-width: 1180px) {
     .workspace-grid {
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: 248px minmax(0, 1fr);
     }
 
-    .sidebar,
     .agents-panel {
         display: none;
     }
 }
 
+@media (max-width: 860px) {
+    .workspace-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .projects-panel {
+        display: none;
+    }
+
+    .workspace-navigation-trigger {
+        display: grid;
+    }
+}
+
 @media (max-width: 720px) {
     .topbar {
-        padding: 0 16px;
+        padding: 0 12px;
     }
 
-    .workspace-grid {
-        display: block;
-    }
-
-    .main-panel {
-        height: 100%;
-        --main-panel-inline-padding: 18px;
-        padding: 28px 18px 52px;
-    }
-
-    .session-panel {
-        width: 100%;
-        margin: 0;
-    }
-
-    .project-overview-header {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .project-overview-action {
-        width: 100%;
-        justify-content: center;
-    }
-
-    .management-title-row {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 16px;
-    }
-
-    h1 {
-        font-size: 2.5rem;
-    }
-
-    .panel-heading h1 {
-        font-size: 2.2rem;
+    .crumb {
+        display: none;
     }
 }
 
 @media (max-width: 460px) {
-    .management-title-row h1 {
-        font-size: 1.9rem;
+    .topbar {
+        gap: 8px;
+        padding: 0 10px;
     }
 
-    .management-primary {
-        width: 100%;
-        justify-content: center;
+    .topbar .quiet-button {
+        width: 32px;
+        padding: 0;
     }
 
-    .provider-directory-header,
-    .provider-model-item {
-        grid-template-columns: 34px minmax(0, 1fr) 32px;
-        gap: 9px;
-    }
-
-    .provider-model-item {
-        padding: 11px;
-    }
-
-    .provider-directory-icon,
-    .provider-model-icon {
-        width: 34px;
-        height: 34px;
-    }
-
-    .provider-model-directory {
-        margin-left: 43px;
-    }
-
-    .config-form-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .config-delete-confirm {
-        grid-template-columns: 18px minmax(0, 1fr);
-    }
-
-    .config-delete-confirm button {
-        grid-column: 1 / -1;
-    }
-
-    .config-actions {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .config-action-spacer {
+    .topbar .quiet-button-label {
         display: none;
-    }
-
-    .config-actions .config-delete {
-        grid-column: 1 / -1;
-    }
-
-    .settings-row-title {
-        flex-wrap: wrap;
-    }
-
-    .settings-row-detail {
-        white-space: normal;
-    }
-
-    .error-banner {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .error-banner-action {
-        align-self: flex-start;
-    }
-
-    .dialog-error {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .dialog-error-action {
-        align-self: flex-start;
-    }
-
-    .topbar > div:nth-child(2) span,
-    .quiet-button {
-        display: none;
-    }
-
-    .health {
-        margin-left: auto;
-    }
-
-    .composer-select-control {
-        gap: 4px;
-        padding-inline: 7px 6px;
-    }
-
-    .composer-model-trigger {
-        width: 78px;
-    }
-
-    .composer-provider-trigger {
-        width: 84px;
-    }
-
-    .composer-reasoning-trigger {
-        width: 84px;
-    }
-
-    .thinking-intensity-picker {
-        width: 198px;
     }
 
     .modal-backdrop {
@@ -171,19 +54,22 @@
     }
 
     .project-dialog {
-        max-height: calc(100vh - 24px);
-        overflow: auto;
+        max-height: calc(100dvh - 24px);
         padding: 20px;
-        border-radius: 16px;
     }
 
     .modal-actions {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .modal-actions button {
         width: 100%;
+    }
+
+    .icon-button {
+        min-width: 32px;
+        min-height: 32px;
     }
 }
 
@@ -193,5 +79,12 @@
         --motion-duration-emphasized: 0ms;
         --motion-duration-spinner: 0ms;
         --motion-iteration-count: 1;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
     }
 }

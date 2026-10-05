@@ -1,32 +1,51 @@
 :root {
     color-scheme: light;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
-    --ink: #1d1d1f;
-    --ink-secondary: #6e6e73;
-    --ink-tertiary: #86868b;
-    --blue: #007aff;
-    --blue-strong: #0066d6;
-    --blue-soft: #e8f2ff;
-    --green: #34c759;
-    --orange: #ff9500;
-    --red: #ff3b30;
-    --surface: rgba(255, 255, 255, 0.84);
-    --surface-solid: #ffffff;
-    --surface-muted: rgba(242, 242, 247, 0.86);
-    --line: rgba(60, 60, 67, 0.16);
-    --line-strong: rgba(60, 60, 67, 0.26);
-    --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.06);
-    --shadow-float: 0 22px 60px rgba(0, 0, 0, 0.14);
+    --bg: #efefec;
+    --side: #e7e7e3;
+    --paper: #f7f7f5;
+    --ink: #1b1b19;
+    --muted: #6a6a64;
+    --faint: #8d8d86;
+    --line: #d8d8d2;
+    --line-strong: #c8c8c0;
+    --fill: #deded8;
+    --selected: #e1e1db;
+    --accent: #0e6b52;
+    --accent-ink: #085443;
+    --warn: #9a6700;
+    --danger: #b42318;
+    --ink-secondary: var(--muted);
+    --ink-tertiary: var(--faint);
+    --blue: var(--accent);
+    --blue-strong: var(--accent-ink);
+    --blue-soft: var(--selected);
+    --green: var(--accent);
+    --orange: var(--warn);
+    --red: var(--danger);
+    --surface: var(--paper);
+    --surface-solid: #fff;
+    --surface-muted: var(--side);
+    --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.08);
+    --shadow-float: 0 4px 16px rgba(0, 0, 0, 0.12);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --font-size-base: 14px;
+    --font-size-body: 15px;
+    --font-size-ui: 14px;
+    --font-size-secondary: 12px;
+    --font-size-caption: 11px;
+    --font-size-code: 12px;
+    --font-size-title: 22px;
     --motion-duration: 140ms;
     --motion-duration-emphasized: 180ms;
     --motion-duration-spinner: 900ms;
     --motion-iteration-count: infinite;
-    /* Width reserved for a scroll gutter; see .scroll-region in workspace/layout.css. */
-    --scroll-gutter: 12px;
-    /* Stacking order. Never write a raw z-index outside this scale. */
+    /* 滚动槽宽度由通用 Scroll 容器使用。 */
+    --scroll-gutter: 10px;
+    /* 所有组件使用此处的层级令牌。 */
     --z-base: 0;
     --z-raised: 1;
     --z-popover: 10;
@@ -37,25 +56,34 @@
 html {
     min-width: 320px;
     min-height: 100%;
-    background: #f5f5f7;
+    background: #d9d9d4;
     color: var(--ink);
 }
 
 body {
     margin: 0;
     min-width: 320px;
-    min-height: 100vh;
+    min-height: 100dvh;
     color: inherit;
-    font-size: 15px;
-    line-height: 1.45;
+    font-size: var(--font-size-base);
+    line-height: 1.5;
 }
 
 #root {
-    min-height: 100vh;
+    min-height: 100dvh;
 }
 
 *,
 *::before,
 *::after {
     box-sizing: border-box;
+}
+
+h1 {
+    margin: 12px 0 0;
+    color: var(--ink);
+    font-size: var(--font-size-title);
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: 0;
 }

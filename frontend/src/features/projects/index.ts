@@ -1,5 +1,0 @@
-export { NewProjectDialog } from './NewProjectDialog'
-export { ProjectsPanel } from './ProjectsPanel'
-export { ProjectOverview } from './ProjectOverview'
-export { groupSessions } from './projectGroups'
-export type { ProjectGroup, ProjectPanelProps } from './types'

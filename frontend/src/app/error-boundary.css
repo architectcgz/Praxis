@@ -1,0 +1,35 @@
+/* 应用错误边界的回退页面样式。 */
+.app-error-state {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) 32px;
+    gap: 14px;
+    align-items: start;
+    max-width: 720px;
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 18vh 24px 48px;
+}
+
+.app-error-icon {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    border-radius: 9px;
+    background: rgba(255, 59, 48, 0.1);
+    color: #c9342c;
+}
+
+.app-error-state h1 {
+    margin: 0;
+    font-size: var(--font-size-title);
+}
+
+.app-error-state p {
+    margin: 8px 0 0;
+    color: var(--ink-secondary);
+}
+
+.app-error-reload {
+    margin-top: 4px;
+}

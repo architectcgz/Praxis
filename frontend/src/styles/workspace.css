@@ -1,14 +1,22 @@
-/* Stable workspace style entrypoint. Keep imports ordered by cascade dependency. */
+/* Workspace 样式统一入口，顺序体现公共布局、功能样式及响应式的层叠关系。 */
 @import './workspace/base.css';
 @import './workspace/layout.css';
 @import './workspace/navigation.css';
 
-/* Feature-specific styles */
-@import '../features/shared/styles.css';
+/* 公共控件与功能样式。 */
+@import './common.css';
 @import '../features/projects/styles.css';
-@import '../features/sessions/styles.css';
+@import '../features/agents/styles.css';
 @import '../features/settings/styles.css';
 @import '../features/workspace/styles.css';
 
 @import './workspace/dialogs.css';
+@import './praxis-theme.css';
+@import '../features/sessions/styles.css';
+@import '../features/agents/output/conversation.css';
+@import '../features/agents/theme.css';
+@import '../features/projects/theme.css';
+@import './workspace/theme-dialogs.css';
+@import './workspace/theme-responsive.css';
+@import '../features/agents/output/styles.css';
 @import './workspace/responsive.css';

@@ -1,0 +1,738 @@
+/* Agent 消息、Markdown 与思考内容样式。 */
+.message-meta strong {
+    color: var(--blue-strong);
+}
+
+.message-error .message-meta strong {
+    color: #c9342c;
+}
+
+.message-user .message-meta strong {
+    color: var(--ink);
+}
+
+.message-tool .message-meta strong,.tool-result-label {
+    color: var(--ink-secondary);
+}
+
+.message-tool-calls,.agent-tool-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.tool-call summary,.agent-tool summary {
+    padding: 6px 10px;
+    color: var(--ink-secondary);
+    cursor: pointer;
+    font-size: var(--font-size-ui);
+    overflow-wrap: anywhere;
+}
+
+.message-markdown h1,.message-markdown h2,.message-markdown h3,.message-markdown h4,.message-markdown h5,.message-markdown h6 {
+    margin: 18px 0 8px;
+    color: var(--ink);
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.message-markdown h1 {
+    font-size: var(--font-size-title);
+}
+
+.message-markdown h2 {
+    font-size: var(--font-size-ui);
+}
+
+.message-markdown h3,.message-markdown h4,.message-markdown h5,.message-markdown h6 {
+    font-size: var(--font-size-ui);
+}
+
+.message-markdown ul,.message-markdown ol {
+    margin: 0 0 10px;
+    padding-left: 22px;
+}
+
+.message-markdown li + li {
+    margin-top: 4px;
+}
+
+.message-markdown blockquote {
+    margin: 0 0 10px;
+    padding-left: 12px;
+    border-left: 2px solid var(--line-strong);
+    color: var(--ink-secondary);
+}
+
+.markdown-code-block details:not([open]) .markdown-code-toolbar {
+    border-bottom: 0;
+}
+
+.markdown-code-changes {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+    font-size: var(--font-size-secondary);
+    white-space: nowrap;
+}
+
+.markdown-code-changes span:first-child {
+    color: #217a37;
+}
+
+.markdown-code-changes span:last-child {
+    color: #bd3028;
+}
+
+.message-markdown pre code {
+    color: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: var(--font-size-code);
+    line-height: 1.5;
+}
+
+.markdown-code-diff,.diff-code {
+    padding: 0;
+}
+
+.tool-result .diff-code {
+    white-space: normal;
+    overflow-wrap: normal;
+}
+
+.markdown-table {
+    max-width: 100%;
+    margin: 0 0 10px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.markdown-table-toolbar {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3px 6px 3px 12px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.56);
+}
+
+.markdown-table-label {
+    color: var(--ink-secondary);
+    font-size: var(--font-size-secondary);
+    font-weight: 650;
+    line-height: 1;
+}
+
+.markdown-table-scroll {
+    overflow: auto;
+}
+
+.message-markdown table {
+    width: 100%;
+    min-width: 440px;
+    margin: 0;
+    border-spacing: 0;
+    border-collapse: separate;
+    white-space: nowrap;
+}
+
+.message-markdown th,.message-markdown td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+.message-markdown th {
+    background: rgba(118, 118, 128, 0.07);
+    color: var(--ink-secondary);
+    font-size: var(--font-size-secondary);
+    font-weight: 650;
+}
+
+.message-markdown th + th,.message-markdown td + td {
+    border-left: 1px solid var(--line);
+}
+
+.message-markdown tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.message-markdown tbody tr:hover td {
+    background: rgba(118, 118, 128, 0.04);
+}
+
+.message-markdown .contains-task-list {
+    padding-left: 0;
+    list-style: none;
+}
+
+.message-markdown .task-list-item {
+    list-style: none;
+}
+
+.message-markdown .task-list-item > input[type="checkbox"] {
+    box-sizing: border-box;
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    margin: 0 8px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    accent-color: var(--blue);
+    cursor: default;
+    vertical-align: text-top;
+}
+
+.message-pending-status svg {
+    animation: output-wait-spin var(--motion-duration-spinner) linear var(--motion-iteration-count);
+}
+
+@keyframes output-wait-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.message-user .message-copy-actions {
+    justify-content: flex-end;
+}
+
+.message-copy-button:active:not(:disabled),.markdown-code-copy-button:active:not(:disabled),.markdown-table-copy-button:active:not(:disabled) {
+    transform: scale(0.94);
+}
+
+.message-copy-button.copied,.markdown-code-copy-button.copied,.markdown-table-copy-button.copied {
+    color: var(--green);
+}
+
+.message-empty {
+    width: 100%;
+    max-width: var(--session-content-width);
+    justify-self: center;
+    display: flex;
+    min-height: 100%;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: clamp(24px, 5vh, 48px) var(--session-content-padding);
+    text-align: center;
+}
+
+.message-empty-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    max-width: 440px;
+}
+
+.message-empty-title {
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--font-size-title);
+    font-weight: 660;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+}
+
+.message-empty-text {
+    margin: 0;
+    color: var(--ink-secondary);
+    font-size: var(--font-size-body);
+    line-height: 1.6;
+}
+
+.agent-activity .thinking-details details {
+    padding: 0;
+}
+
+.message {
+    border: 0;
+    width: min(var(--session-content-width), calc(100% - 32px));
+    max-width: var(--session-content-width);
+    min-width: 0;
+    justify-self: center;
+    margin: 0 auto 18px;
+    padding: 0 8px;
+    background: transparent;
+}
+
+.message-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 4px;
+    color: var(--faint);
+    font-size: var(--font-size-secondary);
+}
+
+/* 名称保留在外层，内容与操作缩进到同一阅读列。 */
+.message-assistant,
+.streaming-step {
+    --agent-output-indent: 20px;
+}
+
+.message-assistant {
+    margin-bottom: 24px;
+}
+
+.message-assistant > :not(.message-meta) {
+    margin-inline-start: var(--agent-output-indent);
+}
+
+.message-assistant > .message-meta {
+    margin-bottom: 8px;
+}
+
+.message-assistant > .message-pending-status {
+    margin-top: 0;
+}
+
+.message-user .message-meta {
+    justify-content: flex-end;
+}
+
+.message-meta strong,.message-user .message-meta strong {
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+}
+
+.message-meta time {
+    color: var(--faint);
+    font-size: var(--font-size-secondary);
+}
+
+.message > p {
+    margin: 0 0 8px;
+    color: var(--ink);
+    font-size: var(--font-size-body);
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.message > p:last-child {
+    margin-bottom: 0;
+}
+
+.message-tool {
+    padding-top: 0;
+    padding-left: 0;
+}
+
+.message-user {
+    text-align: right;
+}
+
+.message-user > p {
+    display: inline-block;
+    width: fit-content;
+    max-width: 78%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: #e8f4ed;
+    color: var(--accent-ink);
+    font-size: var(--font-size-body);
+    line-height: 1.6;
+    text-align: left;
+}
+
+.message-markdown {
+    margin-top: 0;
+    color: var(--ink);
+    font-size: var(--font-size-body);
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+
+.message-markdown p {
+    white-space: pre-wrap;
+    margin: 0 0 8px;
+}
+
+.message-markdown > :first-child {
+    margin-top: 0;
+}
+
+.message-markdown > :last-child {
+    margin-bottom: 0;
+}
+
+.message-markdown a {
+    color: var(--accent-ink);
+}
+
+.message-markdown :not(pre) > code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--fill);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: var(--font-size-code);
+}
+
+.tool-call,.agent-tool,.markdown-code-block,.markdown-table {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fbfbfa;
+}
+
+.thinking-details {
+    min-width: 0;
+    max-width: 100%;
+    margin: 0 0 var(--message-content-gap);
+    color: var(--muted);
+}
+
+.thinking-toggle {
+    display: flex;
+    min-height: 32px;
+    align-items: center;
+    gap: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    list-style: none;
+    transition: color var(--motion-duration) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.thinking-toggle::-webkit-details-marker {
+    display: none;
+}
+
+.thinking-toggle:hover {
+    color: var(--ink);
+}
+
+.thinking-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.thinking-mark,
+.thinking-label,
+.thinking-chevron {
+    flex: none;
+}
+
+.thinking-label {
+    font-size: var(--font-size-ui);
+    font-weight: 600;
+}
+
+.thinking-chevron {
+    margin-inline-start: auto;
+    transition: transform var(--motion-duration) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.thinking-preview {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 展开后只保留标题，避免摘要与正文重复；仅旋转箭头，不旋转思考图标。 */
+.thinking-details[open] > .thinking-toggle .thinking-preview {
+    display: none;
+}
+
+.thinking-details[open] > .thinking-toggle .thinking-chevron {
+    transform: rotate(180deg);
+}
+
+.thinking-content {
+    min-width: 0;
+    margin: 4px 0 4px 6px;
+    padding: 4px 0 6px 15px;
+    border-inline-start: 1px solid var(--line);
+}
+
+.thinking-content .message-markdown {
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+    line-height: 1.65;
+}
+
+.thinking-content :is(strong, h1, h2, h3, h4, h5, h6) {
+    color: var(--ink);
+    font-size: inherit;
+    font-weight: 600;
+}
+
+.thinking-content .message-markdown > :not(:last-child) {
+    margin-bottom: 10px;
+}
+
+.markdown-code-block details[open] summary svg {
+    transform: rotate(180deg);
+}
+
+.tool-call,.agent-tool {
+    overflow: hidden;
+    border-left: 2px solid var(--line-strong);
+    margin: 12px 0 0;
+}
+
+.tool-call pre,.agent-tool > pre,.tool-result pre {
+    max-height: 220px;
+    margin: 0;
+    overflow: auto;
+    padding: 8px 10px;
+    background: #f8f8f6;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: var(--font-size-secondary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.tool-result {
+    margin: 8px 10px 10px;
+    border-top: 1px solid var(--line);
+}
+
+.tool-result-label {
+    padding: 7px 0 4px;
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+}
+
+.tool-result-error .tool-result-label {
+    color: var(--danger);
+}
+
+.markdown-code-block,.markdown-table {
+    margin: 12px 0 0;
+}
+
+.markdown-code-toolbar,.markdown-table-toolbar {
+    background: transparent;
+}
+
+.markdown-code-language,.markdown-table-label {
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+}
+
+.markdown-code-block {
+    position: relative;
+    max-width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    margin: var(--message-content-gap) 0;
+    border-color: #e6e1d8;
+    border-radius: 14px;
+    background: #fffefc;
+    box-shadow: 0 1px 2px #1e1c190a;
+}
+
+.markdown-code-toolbar {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    list-style: none;
+    min-height: 40px;
+    gap: 10px;
+    padding: 8px 44px 8px 16px;
+    border-color: #efebe4;
+    background: transparent;
+}
+
+.markdown-code-toolbar:hover {
+    background: #faf8f4;
+}
+
+.markdown-code-language {
+    min-width: 0;
+    overflow: hidden;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #6c655a;
+    font-size: var(--font-size-code);
+}
+
+.markdown-code-copy-button {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+}
+
+.markdown-code-block pre {
+    max-width: none;
+    margin: 0;
+    overflow: auto;
+    border: 0;
+    border-radius: 0;
+    max-height: 400px;
+    padding: 12px 16px;
+    background: #fcfbf8;
+}
+
+.markdown-code-block .markdown-code-diff {
+    padding-inline: 0;
+}
+
+.markdown-code-block pre code {
+    font: var(--font-size-code)/1.75 var(--mono);
+}
+
+.markdown-code-diff,.diff-code,.tool-result .diff-code {
+    padding: 0;
+    white-space: normal;
+    overflow-wrap: normal;
+}
+
+.diff-code-lines {
+    display: block;
+    min-width: max-content;
+}
+
+.markdown-code-line {
+    display: block;
+    min-height: 1.5em;
+    padding: 0 12px;
+    white-space: pre;
+}
+
+.markdown-code-line-added {
+    background: rgba(50, 128, 71, 0.12);
+    color: #216e39;
+}
+
+.markdown-code-line-removed {
+    background: rgba(180, 55, 47, 0.12);
+    color: #a52b25;
+}
+
+.message-pending-status {
+    margin-top: 8px;
+    line-height: 1.55;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--warn);
+    font-size: var(--font-size-ui);
+}
+
+.message-copy-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.message-copy-actions:empty {
+    display: none;
+}
+
+.message-copy-actions .message-copy-button {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+}
+
+@media (max-width: 460px) {
+    .message-copy-actions .message-copy-button {
+        width: 32px;
+        height: 32px;
+    }
+}
+
+.message-copy-button,.markdown-code-copy-button,.markdown-table-copy-button {
+    transition: background var(--motion-duration) ease, color var(--motion-duration) ease, transform var(--motion-duration) ease;
+    display: grid;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--faint);
+}
+
+.message-copy-button:hover:not(:disabled),.markdown-code-copy-button:hover:not(:disabled),.markdown-table-copy-button:hover:not(:disabled) {
+    background: var(--fill);
+    color: var(--ink);
+}
+
+.agent-activity {
+    width: min(var(--session-content-width), calc(100% - 32px));
+    min-width: 0;
+    max-width: var(--session-content-width);
+    justify-self: center;
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+}
+
+.streaming-step {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: var(--message-content-gap);
+    justify-items: center;
+    margin-bottom: 24px;
+}
+
+/* 轮内间距仅由 gap 控制，避免消息、思考与工具各自的外边距叠加。 */
+.streaming-step > .message,
+.streaming-step > .agent-activity,
+.streaming-step > .agent-activity > .thinking-details,
+.streaming-step > .agent-activity > .message-pending-status {
+    margin-block: 0;
+}
+
+.streaming-step > .agent-activity {
+    padding-inline: calc(8px + var(--agent-output-indent)) 8px;
+}
+
+.streaming-step-header > .message-meta {
+    margin-bottom: 0;
+}
+
+/* 同一任务的后续回答接在工具结果下方，不重复制造新消息的视觉起点。 */
+.message-continued,
+.streaming-step-continued {
+    margin-bottom: var(--message-content-gap);
+}
+
+.message-empty-icon {
+    display: grid;
+    width: 64px;
+    height: 64px;
+    place-items: center;
+    border-radius: 6px;
+    background: var(--selected);
+    color: var(--accent);
+    box-shadow: none;
+}
+
+@media (max-width: 720px) {
+
+    .message-assistant,
+    .streaming-step {
+        --agent-output-indent: 12px;
+    }
+
+    .message,.agent-activity {
+        width: calc(100% - 24px);
+    }
+
+    .message-user > p {
+        max-width: 88%;
+    }
+}

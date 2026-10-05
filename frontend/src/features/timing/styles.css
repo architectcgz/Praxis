@@ -1,0 +1,39 @@
+/* 耗时是辅助信息，不与正文和操作状态争夺视觉层级。 */
+.operation-duration {
+    flex: 0 1 auto;
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.message-timing {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+}
+
+.operation-timing-error {
+    color: var(--danger);
+    font-size: var(--font-size-secondary);
+}
+
+@media (max-width: 460px) {
+    .output-tool-header,
+    .output-handoff-task > summary,
+    .output-files > summary {
+        flex-wrap: wrap;
+    }
+
+    .output-tool-header .output-tool-summary {
+        flex-basis: 100%;
+    }
+}
+
+.message-assistant .message-meta {
+    flex-wrap: wrap;
+}

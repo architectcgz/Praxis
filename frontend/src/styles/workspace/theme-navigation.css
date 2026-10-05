@@ -1,0 +1,135 @@
+/* 工作区导航壳层和 Agent 侧栏主题。 */
+.workspace-grid {
+    background: var(--bg);
+}
+
+.side,
+.sidebar {
+    border-right: 1px solid var(--line);
+    background: var(--side);
+    backdrop-filter: none;
+}
+
+.side.right,
+.agents-panel {
+    border-right: 0;
+    border-left: 1px solid var(--line);
+}
+
+.side-head,
+.sidebar-heading {
+    color: var(--faint);
+    font-size: var(--font-size-caption);
+    font-weight: 650;
+    line-height: 1.35;
+}
+
+.sidebar-heading .section-label {
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    text-transform: none;
+}
+
+.icon-btn,
+.icon-button {
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--muted);
+}
+
+.icon-btn:hover,
+.icon-button:hover:not(:disabled),
+.icon-button.active {
+    border-color: transparent;
+    background: var(--fill);
+    color: var(--ink);
+}
+
+.scroll-region {
+    scrollbar-color: #c4c4bc transparent;
+}
+
+.scroll-region::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 99px;
+    background: #c4c4bc;
+    background-clip: padding-box;
+}
+
+.session-note {
+    border-bottom: 1px solid var(--line);
+}
+
+.session-note b,
+.session-title {
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+    line-height: 1.35;
+}
+
+.session-note span:not(.session-title) {
+    color: var(--faint);
+    font-size: var(--font-size-secondary);
+}
+
+.astate,
+.state-marker {
+    border-radius: 50%;
+    background: var(--faint);
+}
+
+.astate.run,
+.state-executing,
+.state-pausing {
+    background: #c4841d;
+}
+
+.astate.wait,
+.state-idle,
+.state-waiting {
+    background: var(--accent);
+}
+
+.agent .nm,
+.agent-row-copy strong {
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    font-weight: 400;
+    line-height: 1.35;
+}
+
+.agent .sub,
+.agent-row-copy small {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: var(--font-size-code);
+}
+
+.st,
+.state-text {
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+}
+
+.agent-row-metrics {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: var(--font-size-secondary);
+    line-height: 1;
+}
+
+.agent-metric-danger {
+    color: var(--danger);
+}
+
+.panel-placeholder {
+    color: var(--faint);
+    text-align: center;
+}
+
+.panel-placeholder p {
+    font-size: var(--font-size-secondary);
+}

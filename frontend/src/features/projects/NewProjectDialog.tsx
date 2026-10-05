@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react'
+import { useState, type SubmitEvent } from 'react'
 import { FolderOpen, X } from 'lucide-react'
 import { Overlay } from '../../components/ui'
 import { createProject, selectProjectPath } from '../../api'
@@ -44,7 +44,7 @@ export function NewProjectDialog({
         }
     }
 
-    const submit = async (event: FormEvent<HTMLFormElement>) => {
+    const submit = async (event: SubmitEvent<HTMLFormElement>) => {
         event.preventDefault()
         const name = projectName.trim()
         const path = projectPath.trim()

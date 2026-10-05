@@ -11,21 +11,17 @@ export type SendInputRequest = {
     reasoningLevel: string
 }
 
-export type SendInputResponse = { executionId: string; existingRequest: boolean; activationError?: string }
-export type QueueWorkRequest = { id: string; requestId: string; agentId: string; prompt: string }
 export type PauseAgentRequest = { commandId: string; agentId: string }
 export type CloseAgentRequest = PauseAgentRequest
 export type AgentControlResponse = {
     commandId: string
     agentId?: string
-    targetExecutionId?: string
+    targetTurnId?: string
     kind?: string
     status: string
     existingCommand?: boolean
     cancellationError?: string
 }
-export type PauseAgentResponse = AgentControlResponse
-export type CloseAgentResponse = AgentControlResponse
 
 export function sendInput(request: SendInputRequest) {
     if (!request.providerId.trim() || !request.modelId.trim()) {

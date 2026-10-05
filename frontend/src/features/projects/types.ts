@@ -1,4 +1,4 @@
-import { FormEvent } from 'react'
+import type { SubmitEvent } from 'react'
 import { SessionSummary } from '../../api'
 
 export type ProjectGroup = {
@@ -20,13 +20,17 @@ export type ProjectPanelProps = {
     busy: boolean
     bridgeAvailable: boolean
     onLookupChange: (value: string) => void
-    onLoadSession: (event: FormEvent<HTMLFormElement>) => void
+    onLoadSession: (event: SubmitEvent<HTMLFormElement>) => void
     onToggleSearch: () => void
     onOpenProject: () => void
     onOpenSession: (project: ProjectGroup) => void
+    onDeleteSession: (id: string) => Promise<boolean>
+    onRenameSession: (id: string, title: string) => Promise<boolean>
     onSelectProject: (project: ProjectGroup) => void
     onSelectSession: (id: string) => void
     onToggleProject: (key: string) => void
     onOpenSettings: () => void
     settingsOpen: boolean
+    /** 抽屉模式的关闭操作；桌面侧栏不传入。 */
+    onCloseNavigation?: () => void
 }

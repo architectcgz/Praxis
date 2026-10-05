@@ -1,43 +1,202 @@
-/* Project Overview Styles */
+/* 项目概览与项目表单布局。 */
+@import './navigation.css';
 
-.project-overview {
-    padding-bottom: 48px;
-}
-
-.project-overview-header,
 .project-overview-title-row,
 .project-overview-section-heading > div,
-.project-overview-path,
+.project-overview-path {
+    display: flex;
+    align-items: center;
+}
+
 .project-overview-session {
     display: flex;
     align-items: center;
 }
 
 .project-overview-header {
+    display: flex;
+    align-items: center;
+}
+
+.project-overview-header {
+    flex-wrap: wrap;
     justify-content: space-between;
     gap: 20px;
-    padding-bottom: 26px;
     border-bottom: 1px solid var(--line);
 }
 
-.project-overview-title-row { gap: 14px; }
-.project-overview-icon { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 12px; background: var(--blue-soft); color: var(--blue-strong); }
-.project-overview h1 { margin: 5px 0 0; font-size: 1.7rem; font-weight: 650; }
+.project-overview-title-row { gap: 14px; min-width: 0; overflow-wrap: anywhere; }
+.project-overview-icon { display: grid; place-items: center; border-radius: 12px; background: var(--blue-soft); color: var(--blue-strong); }
+.project-overview h1 { font-size: var(--font-size-title); font-weight: 650; }
 .project-overview-action { display: inline-flex; align-items: center; gap: 7px; }
-.project-overview-path { gap: 7px; margin: 20px 0 0; color: var(--ink-secondary); font-size: 0.8rem; overflow-wrap: anywhere; }
-.project-overview-stats { display: flex; gap: 48px; margin: 28px 0 34px; }
+.project-overview-path { gap: 7px; margin: 20px 0 0; color: var(--ink-secondary); font-size: var(--font-size-secondary); overflow-wrap: anywhere; }
+.project-overview-stats { display: flex; gap: 48px; }
 .project-overview-stats div { display: grid; gap: 4px; }
-.project-overview-stats strong { color: var(--ink); font-size: 1.15rem; font-weight: 650; }
-.project-overview-stats span { color: var(--ink-tertiary); font-size: 0.74rem; }
+.project-overview-stats strong { color: var(--ink); font-size: var(--font-size-ui); font-weight: 650; }
+.project-overview-stats span { color: var(--ink-tertiary); font-size: var(--font-size-caption); }
 .project-overview-section { border-top: 1px solid var(--line); }
 .project-overview-section-heading { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 11px; }
 .project-overview-section-heading > div { gap: 8px; }
-.project-overview-section-heading h2 { margin: 0; font-size: 1rem; font-weight: 650; }
-.project-overview-section-heading > span { color: var(--ink-tertiary); font-size: 0.75rem; }
-.project-overview-sessions { display: grid; gap: 6px; }
-.project-overview-session { justify-content: space-between; gap: 14px; width: 100%; min-height: 52px; padding: 9px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--ink-secondary); text-align: left; }
+.project-overview-section-heading h2 { margin: 0; font-size: var(--font-size-ui); font-weight: 650; }
+.project-overview-section-heading > span { color: var(--ink-tertiary); font-size: var(--font-size-secondary); }
+.project-overview-sessions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.project-overview-session { justify-content: space-between; gap: 14px; width: 100%; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--ink-secondary); text-align: left; }
 .project-overview-session:hover, .project-overview-session.selected { border-color: rgba(0, 122, 255, 0.2); background: var(--blue-soft); color: var(--blue-strong); }
-.project-overview-session-copy { min-width: 0; }
+.project-overview-session-copy { min-width: 0; flex: 1; }
 .project-overview-session-copy strong, .project-overview-session-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-overview-session-copy strong { color: inherit; font-size: 0.84rem; font-weight: 600; }
-.project-overview-session-copy small { margin-top: 3px; color: var(--ink-tertiary); font-size: 0.7rem; }
+.project-overview-session-copy strong { color: inherit; font-size: var(--font-size-ui); font-weight: 600; }
+.project-overview-session-copy small { margin-top: 3px; color: var(--ink-tertiary); font-size: var(--font-size-secondary); }
+
+.dialog-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 59, 48, 0.18);
+    border-radius: 9px;
+    background: rgba(255, 59, 48, 0.08);
+    color: #c9342c;
+    font-size: var(--font-size-secondary);
+    line-height: 1.45;
+}
+
+.dialog-error-action {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 59, 48, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.55);
+    color: #c9342c;
+    font-size: var(--font-size-secondary);
+    font-weight: 650;
+}
+
+.dialog-error-action:hover {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.project-form {
+    display: grid;
+    gap: 9px;
+    padding-top: 20px;
+}
+
+.project-form label {
+    color: var(--ink-secondary);
+    font-size: var(--font-size-secondary);
+    font-weight: 600;
+}
+
+.project-form label span {
+    color: var(--ink-tertiary);
+    font-weight: 400;
+}
+
+.project-form input + label {
+    margin-top: 8px;
+}
+
+.project-path-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.path-picker-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 9px;
+    background: rgba(118, 118, 128, 0.1);
+    color: var(--ink-secondary);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+    transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease, transform var(--motion-duration) ease;
+}
+
+.path-picker-button:hover:not(:disabled) {
+    border-color: var(--blue);
+    background: var(--blue-soft);
+    color: var(--blue-strong);
+}
+
+.path-picker-button:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.session-dialog {
+    width: min(100%, 420px);
+}
+
+.session-dialog-message {
+    margin: 20px 0 0;
+    color: var(--ink-secondary);
+    line-height: 1.6;
+}
+
+.project-overview {
+    width: min(760px, calc(100% - 48px));
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 22px 0 40px;
+}
+
+.project-overview-header {
+    padding-bottom: 16px;
+}
+
+.project-overview-icon {
+    width: 30px;
+    height: 30px;
+}
+
+.project-overview h1 {
+    margin: 3px 0 0;
+}
+
+.project-overview-action {
+    min-height: 28px;
+}
+
+.project-overview-stats {
+    margin: 20px 0 24px;
+}
+
+.project-overview-session {
+    min-height: 40px;
+    padding: 7px 10px;
+}
+
+@media (max-width: 720px) {
+    .project-overview-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .project-overview-action {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .project-overview {
+        width: calc(100% - 24px);
+    }
+}
+
+@media (max-width: 460px) {
+    .dialog-error {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .dialog-error-action {
+        align-self: flex-start;
+    }
+}

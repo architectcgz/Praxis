@@ -1,0 +1,3 @@
+/* 暖灰 + 深绿主题的工作区基础覆盖。 */
+@import './workspace/theme-shell.css';
+@import './workspace/theme-navigation.css';

@@ -1,28 +1,33 @@
-/* Container layers: Shell -> Region -> Scroll -> Page. Overlays render in #overlay-root. */
+/* 容器依次划分 Shell、Region、Scroll、Page，模态框挂载到 #overlay-root。 */
 
-/* L0 Shell owns the viewport and never uses transform, filter, contain, or perspective. */
+/* Shell 独占视口，避免建立影响浮层定位的变换上下文。 */
 .app-shell {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: 42px minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
     height: 100dvh;
     overflow: hidden;
-    background: #f5f5f7;
-    color: var(--ink);
 }
 
-/* L2 Scroll is the single scrolling element in its region. */
+/* Region 分配剩余空间，滚动交给内部的 Scroll。 */
+.region {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* Scroll 是所在区域的主要滚动容器。 */
 .scroll-region {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior: contain;
     scrollbar-color: rgba(60, 60, 67, 0.24) transparent;
-    scrollbar-gutter: stable;
-    scrollbar-width: auto;
-}
-
-.scroll-region::-webkit-scrollbar {
-    width: var(--scroll-gutter);
 }
 
 .scroll-region::-webkit-scrollbar-track {
@@ -36,14 +41,23 @@
     background-clip: padding-box;
 }
 
-/* L3 Page owns width and rhythm without overflow or transform. */
+/* Page 只控制阅读宽度和排版，不创建裁剪或层叠上下文。 */
 .page {
-    width: min(100%, var(--page-width, 860px));
+    width: min(100%, var(--page-width, 920px));
+    min-width: 0;
     margin-inline: auto;
-    animation: content-enter var(--motion-duration-emphasized) ease-out both;
 }
 
-/* Non-scrolling page header, paired with a .scroll-region sibling. */
+/* 固定头部与滚动内容为兄弟节点。 */
 .page-header {
     flex: 0 0 auto;
+}
+
+.scroll-region {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+}
+
+.scroll-region::-webkit-scrollbar {
+    width: 10px;
 }

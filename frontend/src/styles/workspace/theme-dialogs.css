@@ -1,0 +1,43 @@
+.modal-backdrop {
+    background: rgba(27, 27, 25, 0.32);
+    backdrop-filter: none;
+}
+
+.project-dialog {
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: var(--shadow-float);
+    backdrop-filter: none;
+}
+
+.modal-actions button {
+    border-radius: 6px;
+}
+
+.modal-secondary {
+    background: var(--fill);
+    color: var(--muted);
+}
+
+.modal-actions .modal-primary {
+    border-color: var(--ink);
+    border-radius: 5px;
+    background: var(--ink);
+    box-shadow: none;
+}
+
+.modal-actions .modal-primary:hover {
+    background: #000;
+    box-shadow: none;
+}
+
+.modal-actions .modal-danger {
+    border-color: var(--danger);
+    background: var(--danger);
+}
+
+.modal-actions .modal-danger:hover:not(:disabled) {
+    border-color: #8f1d14;
+    background: #8f1d14;
+}

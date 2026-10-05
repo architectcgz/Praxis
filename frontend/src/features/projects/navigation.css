@@ -1,0 +1,334 @@
+/* Project 与 Session 导航样式。 */
+.projects-panel {
+    padding: 0;
+}
+
+.projects-panel > .sidebar-heading {
+    flex: 0 0 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 12px 0 14px;
+    border-bottom: 1px solid var(--line);
+}
+
+.projects-panel > .scroll-region {
+    margin-right: 0;
+    padding: 10px 10px 12px;
+}
+
+.project-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 0;
+    width: 100%;
+}
+
+.project-section {
+    align-self: stretch;
+    max-width: 100%;
+    width: 100%;
+    min-width: 0;
+    margin-bottom: 2px;
+}
+
+.project-heading,
+.session-row {
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    max-width: 100%;
+    width: 100%;
+    min-height: 32px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    line-height: 1.35;
+    text-align: left;
+}
+
+.project-heading {
+    gap: 6px;
+    padding: 0 6px;
+    color: var(--ink);
+}
+
+.session-row {
+    gap: 0;
+    padding: 0 6px 0 26px;
+    color: var(--ink);
+}
+
+.project-heading:hover,
+.project-heading:focus-within,
+.project-heading.selected,
+.session-row:hover,
+.session-row.selected {
+    background: var(--fill);
+}
+
+.project-toggle,
+.project-select {
+    min-width: 0;
+    min-height: 32px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.project-toggle {
+    display: grid;
+    flex: 0 0 20px;
+    place-items: center;
+    padding: 0;
+}
+
+.project-select {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    padding: 0;
+}
+
+.project-chevron {
+    display: grid;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    place-items: center;
+    color: var(--faint);
+}
+
+.project-chevron.collapsed {
+    transform: rotate(-90deg);
+}
+
+.project-heading-copy {
+    display: contents;
+}
+
+.project-heading-copy strong {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    color: inherit;
+    font-size: var(--font-size-ui);
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-heading-copy small {
+    display: none;
+}
+
+.project-count {
+    color: var(--faint);
+    font-size: var(--font-size-caption);
+    font-variant-numeric: tabular-nums;
+}
+
+.project-session-button {
+    width: 24px;
+    height: 24px;
+    margin-left: 0;
+    flex: 0 0 24px;
+}
+
+.project-path {
+    margin: -2px 0 6px 26px;
+    overflow: hidden;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: var(--font-size-code);
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.session-list {
+    display: grid;
+    gap: 2px;
+    align-self: stretch;
+    max-width: 100%;
+    width: 100%;
+    margin: 0 0 2px;
+}
+
+.session-list.collapsed {
+    display: none;
+}
+
+.session-row-select {
+    display: flex;
+    min-width: 0;
+    min-height: 32px;
+    flex: 1 1 auto;
+    align-items: center;
+    overflow: hidden;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.session-row-copy {
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+    width: max-content;
+    max-width: 100%;
+}
+
+.session-row-copy strong {
+    display: block;
+    overflow: hidden;
+    color: inherit;
+    font-size: var(--font-size-ui);
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.session-row.selected .session-row-copy strong {
+    font-weight: 650;
+}
+
+.session-row-actions {
+    position: relative;
+    flex: 0 0 24px;
+    margin-left: auto;
+}
+
+.session-menu-trigger {
+    width: 20px;
+    height: 20px;
+    opacity: 1;
+}
+
+.session-actions-menu {
+    position: absolute;
+    z-index: var(--z-popover);
+    top: calc(100% + 4px);
+    right: 0;
+    width: 132px;
+    max-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    visibility: hidden;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--paper);
+    box-shadow: var(--shadow-soft);
+}
+
+.session-actions-menu[data-placement='top'] {
+    top: auto;
+    bottom: calc(100% + 4px);
+}
+
+.session-action,
+.session-action-danger {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    min-height: 30px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    font-size: var(--font-size-ui);
+    text-align: left;
+}
+
+.session-action {
+    color: var(--ink);
+}
+
+.session-action:hover {
+    background: var(--fill);
+}
+
+.session-action-danger {
+    color: var(--danger);
+}
+
+.session-action-danger:hover {
+    background: rgba(180, 35, 24, 0.08);
+}
+
+.session-lookup {
+    display: grid;
+    gap: 8px;
+    margin: 0 8px 10px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+}
+
+.session-lookup label {
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+}
+
+.lookup-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px;
+    gap: 6px;
+}
+
+.lookup-button {
+    min-width: 32px;
+    padding: 0;
+    border-radius: 5px;
+    background: var(--ink);
+    color: #fff;
+}
+
+#session-id:focus-visible {
+    outline: none;
+}
+
+.muted-copy {
+    margin: 20px 0;
+    color: var(--ink-tertiary);
+    font-size: var(--font-size-secondary);
+    line-height: 1.5;
+}
+
+.sidebar-footer {
+    flex: 0 0 auto;
+    padding: 8px 10px 10px;
+    border-top: 1px solid var(--line);
+}
+
+.settings-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 34px;
+    min-height: 34px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+    line-height: 1.35;
+    font-weight: 400;
+    text-align: left;
+}
+
+.settings-nav:hover,
+.settings-nav.active {
+    background: var(--fill);
+    color: var(--ink);
+}

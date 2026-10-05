@@ -1,35 +1,19 @@
-import type { AgentHistoryItem, AgentSnapshot, ModelOption, SessionSnapshot } from '../../api'
-import { PrimaryAgentTaskInput } from './PrimaryAgentTaskInput'
-import { AgentConversation } from './AgentConversation'
+import type { ReactNode } from 'react'
+import { LoaderCircle } from 'lucide-react'
 import { SessionEmptyState } from './SessionEmptyState'
-import type { StreamingOutput, PendingUserMessage } from './types'
 
 type SessionPanelProps = {
     loading: boolean
-    session: SessionSnapshot | null
+    hasSession: boolean
     sessionsCount: number
-    agent: AgentSnapshot | null
-    history: AgentHistoryItem[]
-    streamingOutput: StreamingOutput | null
-    pendingUserMessages: PendingUserMessage[]
-    awaitingOutput: boolean
-    input: string
-    setInput: (value: string) => void
-    models: ModelOption[]
-    selectedProviderID: string
-    selectedModelID: string
-    reasoning: string
-    busy: boolean
-    onSend: () => void
-    onControl: (kind: 'pause' | 'close') => void
-    onModelChange: (providerId: string, modelId: string) => void
-    onReasoningChange: (level: string) => void
+    children?: ReactNode
 }
 
-export function SessionPanel({ loading, session, sessionsCount, agent, history, streamingOutput, pendingUserMessages, awaitingOutput, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange }: SessionPanelProps) {
-    if (!session) {
+/** 管理 Session 页面外壳、加载态与空状态。 */
+export function SessionPanel({ loading, hasSession, sessionsCount, children }: SessionPanelProps) {
+    if (!hasSession) {
         if (loading) {
-            return <section className="session-loading" aria-busy="true" aria-label="加载会话中" />
+            return <section className="session-loading" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>加载会话中</span></section>
         }
         return (
             <div className="scroll-region">
@@ -42,13 +26,7 @@ export function SessionPanel({ loading, session, sessionsCount, agent, history, 
 
     return (
         <section className="session-panel">
-            {loading ? (
-                <div className="session-loading" aria-busy="true" aria-label="加载代理中" />
-            ) : !agent ? (
-                <PrimaryAgentTaskInput input={input} setInput={setInput} busy={busy} onSend={onSend} />
-            ) : (
-                <AgentConversation agent={agent} history={history} streamingOutput={streamingOutput} pendingUserMessages={pendingUserMessages} awaitingOutput={awaitingOutput} input={input} setInput={setInput} models={models} selectedProviderID={selectedProviderID} selectedModelID={selectedModelID} reasoning={reasoning} busy={busy} onSend={onSend} onControl={onControl} onModelChange={onModelChange} onReasoningChange={onReasoningChange} />
-            )}
+            {children}
         </section>
     )
 }

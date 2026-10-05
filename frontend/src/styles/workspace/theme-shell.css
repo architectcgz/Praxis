@@ -1,0 +1,114 @@
+button,
+input,
+textarea,
+select {
+    font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    letter-spacing: 0;
+}
+
+body {
+    line-height: 1.5;
+}
+
+button {
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
+button:focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.app-shell {
+    background: var(--bg);
+}
+
+.main-panel {
+    background: var(--paper);
+}
+
+.top,
+.topbar {
+    border-bottom: 1px solid var(--line);
+    background: var(--side);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.mark,
+.brand-mark {
+    border: 1.5px solid var(--ink);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--ink);
+    font-size: var(--font-size-caption);
+    font-weight: 700;
+    box-shadow: none;
+}
+
+.top > b,
+.topbar > b,
+.topbar strong {
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+}
+
+.crumb {
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+}
+
+.crumb span {
+    color: var(--ink);
+}
+
+.status,
+.header-status {
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+}
+
+.dot,
+.header-status-dot {
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.dot.warn,
+.header-status-dot.is-busy {
+    background: #c4841d;
+}
+
+.ghost,
+.topbar .quiet-button {
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+    line-height: 1.35;
+    font-weight: 400;
+    box-shadow: none;
+}
+
+.ghost:hover:not(:disabled),
+.topbar .quiet-button:hover:not(:disabled) {
+    background: var(--fill);
+    color: var(--ink);
+}
+
+@media (max-width: 460px) {
+
+    .status {
+        font-size: var(--font-size-secondary);
+    }
+}

@@ -1,4 +1,5 @@
 import { getModelBinding } from './bindings'
+import { dto } from '../../wailsjs/go/models'
 
 export type ModelOption = {
     providerId: string
@@ -47,13 +48,12 @@ export type ModelConfigDocument = {
     models: ModelConfigOption[]
 }
 
-export type SaveModelConfigResponse = {
-    saved: boolean
-    validationError?: string
-}
-
 export function listModels() {
     return getModelBinding().ListModels().then(normalizeModelCatalog)
+}
+
+export function reloadConfig() {
+    return getModelBinding().ReloadConfig()
 }
 
 export function getModelConfig() {
@@ -61,18 +61,18 @@ export function getModelConfig() {
 }
 
 export function saveModelConfig(config: ModelConfigDocument) {
-    return getModelBinding().SaveModelConfig({
+    return getModelBinding().SaveModelConfig(new dto.SaveModelConfigRequest({
         groups: config.groups,
         defaultProviderId: config.defaultProviderId,
         providers: config.providers,
         models: config.models,
-    })
+    }))
 }
 
 export function listProviderModels(providerID: string) {
     return getModelBinding().ListProviderModels(providerID).then((models) => {
         if (!Array.isArray(models) || !models.every((model) => typeof model === 'string')) {
-            throw new Error('The provider model catalog response is invalid.')
+            throw new Error('Provider Model 列表响应无效。')
         }
         return models
     })
@@ -82,17 +82,13 @@ export function setProviderKey(providerID: string, value: string) {
     return getModelBinding().SetProviderKey(providerID, value)
 }
 
-export function clearProviderKey(providerID: string) {
-    return getModelBinding().ClearProviderKey(providerID)
-}
-
 function normalizeModelCatalog(value: unknown): ModelOption[] {
     if (!Array.isArray(value)) {
-        throw new Error('The model catalog response is invalid.')
+        throw new Error('Model 列表响应无效。')
     }
     return value.map((model) => {
         if (!isRecord(model)) {
-            throw new Error('The model catalog response is invalid.')
+            throw new Error('Model 列表响应无效。')
         }
         return {
             providerId: stringValue(model.providerId),
@@ -110,16 +106,16 @@ function normalizeModelCatalog(value: unknown): ModelOption[] {
 
 function normalizeModelConfig(value: unknown): ModelConfigDocument {
     if (!isRecord(value) || !Array.isArray(value.providers) || !Array.isArray(value.models)) {
-        throw new Error('The model configuration response is invalid.')
+        throw new Error('Model 配置响应无效。')
     }
     return {
         groups: !Array.isArray(value.groups) ? [] : value.groups.map((group: unknown) => {
-            if (!isRecord(group)) throw new Error('The model configuration response is invalid.')
+            if (!isRecord(group)) throw new Error('Model 配置响应无效。')
             return { id: stringValue(group.id), displayName: stringValue(group.displayName) }
         }),
         defaultProviderId: stringValue(value.defaultProviderId),
         providers: value.providers.map((provider) => {
-            if (!isRecord(provider)) throw new Error('The model configuration response is invalid.')
+            if (!isRecord(provider)) throw new Error('Model 配置响应无效。')
             return {
                 id: stringValue(provider.id),
                 providerName: stringValue(provider.providerName),
@@ -132,12 +128,12 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
         models: value.models.map((model) => {
             if (!isRecord(model) ||
                 typeof model.contextWindow !== 'number' || typeof model.maxOutputTokens !== 'number') {
-                throw new Error('The model configuration response is invalid.')
+                throw new Error('Model 配置响应无效。')
             }
             const apiFormat = stringValue(model.apiFormat)
             if (apiFormat !== 'anthropic_messages' && apiFormat !== 'openai_responses' &&
                 apiFormat !== 'openai_chat_completions') {
-                throw new Error('The model configuration response is invalid.')
+                throw new Error('Model 配置响应无效。')
             }
             return {
                 providerId: stringValue(model.providerId),
@@ -160,22 +156,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string {
     if (typeof value !== 'string') {
-        throw new Error('The model catalog response is invalid.')
+        throw new Error('Model 列表响应无效。')
     }
     return value
 }
 
 function stringArray(value: unknown): string[] {
     if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-        throw new Error('The model catalog response is invalid.')
+        throw new Error('Model 列表响应无效。')
     }
     return value
-}
-
-function apiFormatValue(value: unknown): ModelAPIFormat {
-    const format = stringValue(value)
-    if (format !== 'anthropic_messages' && format !== 'openai_responses' && format !== 'openai_chat_completions') {
-        throw new Error('The model configuration response is invalid.')
-    }
-    return format
 }

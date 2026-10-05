@@ -1,48 +1,14 @@
-import type { AgentHistoryItem, AgentMessage, AgentSnapshot } from './agents'
-import type {
-    CloseAgentRequest,
-    CloseAgentResponse,
-    PauseAgentRequest,
-    PauseAgentResponse,
-    SendInputRequest,
-    SendInputResponse,
-} from './commands'
-import type { ModelConfigDocument, ModelOption, SaveModelConfigResponse } from './models'
-import type { CreateProjectRequest, CreateProjectResponse, ProjectSummary } from './projects'
-import type { CreateSessionRequest, CreateSessionResponse, SessionSnapshot, SessionSummary } from './sessions'
+import type * as GeneratedAgentBinding from '../../wailsjs/go/bindings/AgentBindings'
+import type * as GeneratedCommandBinding from '../../wailsjs/go/bindings/CommandBindings'
+import type * as GeneratedModelBinding from '../../wailsjs/go/bindings/ModelBindings'
+import type * as GeneratedProjectBinding from '../../wailsjs/go/bindings/ProjectBindings'
+import type * as GeneratedSessionBinding from '../../wailsjs/go/bindings/SessionBindings'
 
-type ProjectBinding = {
-    ListProjects(): Promise<ProjectSummary[]>
-    CreateProject(request: CreateProjectRequest): Promise<CreateProjectResponse>
-    SelectProjectPath(): Promise<string>
-}
-
-type SessionBinding = {
-    ListSessions(projectID: string): Promise<SessionSummary[]>
-    CreateSession(request: CreateSessionRequest): Promise<CreateSessionResponse>
-    GetSession(sessionID: string): Promise<SessionSnapshot>
-}
-
-type AgentBinding = {
-    GetAgent(agentID: string): Promise<AgentSnapshot>
-    ListAgentMessages(agentID: string): Promise<AgentMessage[]>
-    ListAgentHistory(agentID: string): Promise<AgentHistoryItem[]>
-}
-
-type CommandBinding = {
-    SendInput(request: SendInputRequest): Promise<SendInputResponse>
-    PauseAgent(request: PauseAgentRequest): Promise<PauseAgentResponse>
-    CloseAgent(request: CloseAgentRequest): Promise<CloseAgentResponse>
-}
-
-type ModelBinding = {
-    ListModels(): Promise<ModelOption[]>
-    GetModelConfig(): Promise<ModelConfigDocument>
-    SaveModelConfig(request: ModelConfigDocument): Promise<SaveModelConfigResponse>
-    SetProviderKey(providerId: string, value: string): Promise<void>
-    ClearProviderKey(providerId: string): Promise<void>
-    ListProviderModels(providerID: string): Promise<string[]>
-}
+type ProjectBinding = typeof GeneratedProjectBinding
+type SessionBinding = typeof GeneratedSessionBinding
+type AgentBinding = typeof GeneratedAgentBinding
+type CommandBinding = typeof GeneratedCommandBinding
+type ModelBinding = typeof GeneratedModelBinding
 
 export class BindingUnavailableError extends Error {
     constructor() {
