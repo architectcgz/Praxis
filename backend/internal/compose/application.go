@@ -1,57 +1,51 @@
 package compose
 
 import (
-	agentmodel "praxis/internal/agent"
-	agentassembly "praxis/internal/agent_runtime"
+	agentruntime "praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
-	executionmodel "praxis/internal/execution"
+	agentmodel "praxis/internal/core/agent"
+	turnmodel "praxis/internal/core/turn"
 
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"time"
 
-	agentruntime "praxis/internal/runtime/agent"
 	appservices "praxis/internal/service"
 	applicationagent "praxis/internal/service/agent"
-	executioncontrol "praxis/internal/service/execution/control"
-	executionqueue "praxis/internal/service/execution/queue"
-	executionsettlement "praxis/internal/service/execution/settlement"
-	executionstart "praxis/internal/service/execution/start"
-	toolinvocation "praxis/internal/service/execution/tool_invocation"
 	applicationproject "praxis/internal/service/project"
 	applicationsession "praxis/internal/service/session"
+	turncontrol "praxis/internal/service/turn/control"
+	turnqueue "praxis/internal/service/turn/queue"
+	turnsettlement "praxis/internal/service/turn/settlement"
+	turnstart "praxis/internal/service/turn/start"
+	toolinvocation "praxis/internal/service/turn/tool_invocation"
 
+	securitymodel "praxis/internal/core/security"
 	agentregistry "praxis/internal/infra/agent_registry"
-	"praxis/internal/infra/agentlog"
 	"praxis/internal/infra/dataroot"
 	"praxis/internal/infra/document"
+	"praxis/internal/infra/jsonl"
 	modelregistry "praxis/internal/infra/model_registry"
-	"praxis/internal/infra/providers/anthropicmessages"
-	openaichat "praxis/internal/infra/providers/openai_chat"
-	openairesponses "praxis/internal/infra/providers/openai_responses"
-	"praxis/internal/infra/sqlite"
-	"praxis/internal/infra/storage"
 	"praxis/internal/infra/toolconfig"
 	"praxis/internal/logging"
-	"praxis/internal/orchestration"
-	"praxis/internal/runtime"
-	securitymodel "praxis/internal/security"
+	"praxis/internal/timing"
 	"praxis/internal/tools"
 	toolcontracts "praxis/internal/tools/contracts"
 	"praxis/wails/bindings"
 )
 
 // Application 是目标架构的组合根：创建具体实现、注入 service 与
-// orchestration，并持有进程级生命周期资源。前端端口由
+// runtime，并持有进程级生命周期资源。前端端口由
 // praxis/internal/service 实现，这里只负责装配与释放。
 type Application struct {
 	frontend *appservices.Services
-	store    *sqlite.Store
+	store    *jsonl.Store
 	registry *agentruntime.Registry
 	logger   *logging.Logger
+	timings  *timing.Recorder
+	usages   jsonl.ModelUsageStore
 }
 
 // Services 组装 wails 层注入所需的前端服务集。把 *appservices.Services 赋给
@@ -69,6 +63,8 @@ func (a *Application) Services() bindings.Services {
 		Models:      impl,
 		ModelConfig: impl,
 		Events:      impl,
+		Timings:     a.timings,
+		Usages:      a.usages,
 	}
 }
 
@@ -76,7 +72,7 @@ func (a *Application) Services() bindings.Services {
 func Open(
 	ctx context.Context,
 	root dataroot.DataRoot,
-	runner agentruntime.ExecutionRunner,
+	runner agentruntime.TurnRunner,
 	registeredTools ...toolcontracts.Tool,
 ) (*Application, error) {
 	if ctx == nil {
@@ -89,14 +85,14 @@ func Open(
 	if err != nil {
 		return nil, fmt.Errorf("open runtime log: %w", err)
 	}
-	store, err := sqlite.Open(ctx, root.Database)
+	store, err := jsonl.Open(ctx, root.Runtime)
 	if err != nil {
-		diagnostics.Errorf("open sqlite failed: %v", err)
+		diagnostics.Errorf("open JSONL failed: %v", err)
 		_ = diagnostics.Close()
 		return nil, err
 	}
 	closeStore := func() { _ = store.Close(context.Background()) }
-	diagnostics.Infof("composition open started root=%s database=%s", root.Root, root.Database)
+	diagnostics.Infof("composition open started root=%s logs=%s", root.Root, root.Runtime)
 	modelRegistry, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil, newModelStream)
 	if err != nil {
 		diagnostics.Errorf("load model registry failed: %v", err)
@@ -151,25 +147,57 @@ func Open(
 		closeStore()
 		return nil, fmt.Errorf("open document store: %w", err)
 	}
-	repos, err := storage.NewRepositories(store, documents)
+	repos := store.Repositories()
+	messages := applicationsession.NewMessageStore(
+		store, repos.Agents, repos.SessionMessages, repos.AgentMessages,
+	)
+	events := appservices.NewEventPublisher()
+	usages := jsonl.ModelUsageStore{Store: store}
+	observe := func(event agentruntime.AgentEvent) {
+		if event.Kind == agentruntime.AgentEventModelUsage && event.Usage != nil {
+			// 用量写入不继承业务取消，保存失败只影响统计，不改变模型响应。
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err := usages.Save(ctx, agentruntime.ModelUsageRecord{
+				SessionID: event.SessionID.String(),
+				AgentID:   event.AgentID.String(),
+				TurnID:    event.TurnID.String(),
+				Step:      event.Step,
+				Usage:     *event.Usage,
+			})
+			cancel()
+			if err != nil {
+				diagnostics.Errorf("token usage save failed turn=%s step=%d: %v", event.TurnID, event.Step, err)
+			}
+		}
+		events.Publish(event)
+	}
+	timingStore := jsonl.TimingStore{Store: store}
+	if err := timingStore.RecoverInterrupted(ctx); err != nil {
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, fmt.Errorf("recover operation timings: %w", err)
+	}
+	timings, err := timing.New(timingStore, func(record timing.Record) {
+		events.Publish(agentruntime.AgentEvent{
+			Kind:    agentruntime.AgentEventTiming,
+			AgentID: contracts.AgentID(record.AgentID),
+			TurnID:  contracts.TurnID(record.TurnID),
+			Timing:  &record,
+		})
+	}, diagnostics.Errorf)
 	if err != nil {
+		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
-	events := appservices.NewEventPublisher()
 	if runner == nil {
-		runner, err = agentassembly.NewRunner(agentassembly.RunnerConfig{
-			ModelBuilder: modelRegistry,
-			ToolInvocations: toolinvocation.Config{
-				Transactions:      store,
-				Executions:        repos.Executions,
-				SecuritySnapshots: repos.SecuritySnapshots,
-				Invocations:       repos.ToolInvocations,
-				Catalog:           toolRegistry,
-			},
-			EventObserver: events.Publish,
-			Logf:          diagnostics.Infof,
-		})
+		runner, err = newTurnRunner(modelRegistry, toolinvocation.Config{
+			Transactions:      store,
+			Turns:             repos.Turns,
+			SecuritySnapshots: repos.SecuritySnapshots,
+			Invocations:       repos.ToolInvocations,
+			Catalog:           toolRegistry,
+		}, timings, observe, diagnostics.Infof)
 		if err != nil {
 			_ = diagnostics.Close()
 			closeStore()
@@ -177,27 +205,24 @@ func Open(
 		}
 	}
 	factory := runtimeFactory{
-		root:   root,
-		runner: runner,
-		header: newSessionHeaderResolver(store),
-		logger: func(execution executionmodel.AgentExecution, stage string, err error) {
+		runner:   timedRunner{next: runner, recorder: timings},
+		messages: messages.Resolve,
+		logger: func(turn turnmodel.Turn, stage string, err error) {
 			if err != nil {
-				diagnostics.Errorf("execution id=%s stage=%s failed: %v", execution.ID, stage, err)
+				diagnostics.Errorf("turn id=%s stage=%s failed: %v", turn.ID, stage, err)
 			}
 		},
-		eventLogger: func(execution executionmodel.AgentExecution, stage string) {
-			diagnostics.Infof("execution id=%s stage=%s", execution.ID, stage)
+		eventLogger: func(turn turnmodel.Turn, stage string) {
+			diagnostics.Infof("turn id=%s stage=%s", turn.ID, stage)
 		},
 		eventObserver: events.Publish,
 	}
 	agentService, err := applicationagent.NewService(applicationagent.Config{
-		Transactions: store,
-		Agents:       repos.Agents,
-		Policies:     repos.Policies,
-		Executions:   repos.Executions,
-		Waits:        repos.Waits,
-		Controls:     repos.Controls,
-		Messages:     newAgentMessageReader(root),
+		Agents:   repos.Agents,
+		Turns:    repos.Turns,
+		Waits:    repos.Waits,
+		Controls: repos.Controls,
+		Messages: messages.ListAgent,
 	})
 	if err != nil {
 		diagnostics.Errorf("create agent service failed: %v", err)
@@ -212,27 +237,32 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	scheduler, err := orchestration.NewScheduler(orchestration.SchedulerConfig{
-		Runtime: registry,
-	})
-	if err != nil {
-		diagnostics.Errorf("create execution scheduler failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
 	sessionService, err := applicationsession.NewService(applicationsession.Config{
-		Transactions:  store,
-		Projects:      repos.Projects,
-		Workspaces:    repos.Workspaces,
-		Sessions:      repos.Sessions,
-		Contexts:      repos.Contexts,
-		Policies:      repos.Policies,
-		Agents:        repos.Agents,
-		Definitions:   agentRegistry.Definition,
-		PolicyFactory: agentRegistry.SecurityPolicy,
-		Transcripts:   agentTranscriptLoader{root: root},
+		Transactions:    store,
+		Projects:        repos.Projects,
+		Workspaces:      repos.Workspaces,
+		Sessions:        repos.Sessions,
+		Contexts:        repos.Contexts,
+		Policies:        repos.Policies,
+		Agents:          repos.Agents,
+		Turns:           repos.Turns,
+		ToolInvocations: repos.ToolInvocations,
+		QueuedWork:      repos.QueuedWork,
+		SessionMessages: repos.SessionMessages,
+		AgentMessages:   repos.AgentMessages,
+		Definitions:     agentRegistry.Definition,
+		PolicyFactory:   agentRegistry.SecurityPolicy,
+		Messages:        messages,
+		RemoveSessionData: func(ctx context.Context, sessionID contracts.SessionID, documentRefs []string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			var cleanupErr error
+			for _, ref := range documentRefs {
+				cleanupErr = errors.Join(cleanupErr, documents.Remove(ctx, ref))
+			}
+			return cleanupErr
+		},
 	})
 	if err != nil {
 		diagnostics.Errorf("create session service failed: %v", err)
@@ -241,60 +271,72 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	settlementService, err := executionsettlement.NewService(executionsettlement.Config{
+	if err := sessionService.RecoverStaleTurns(ctx); err != nil {
+		diagnostics.Errorf("recover stale turns failed: %v", err)
+		_ = diagnostics.Close()
+		_ = registry.Close(context.Background())
+		closeStore()
+		return nil, fmt.Errorf("recover stale turns: %w", err)
+	}
+	settlementService, err := turnsettlement.NewService(turnsettlement.Config{
 		Transactions: store,
 		Sessions:     repos.Sessions,
 		Agents:       repos.Agents,
-		Executions:   repos.Executions,
+		Turns:        repos.Turns,
 		QueuedWork:   repos.QueuedWork,
 		Controls:     repos.Controls,
-		Transcripts:  agentTranscriptLoader{root: root},
+		Messages:     messages,
 		Logger:       diagnostics,
 	})
 	if err != nil {
-		diagnostics.Errorf("create execution settlement service failed: %v", err)
+		diagnostics.Errorf("create turn settlement service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
-	startService, err := executionstart.NewService(executionstart.Config{
+	startService, err := turnstart.NewService(turnstart.Config{
 		Transactions: store, Workspaces: repos.Workspaces, Sessions: repos.Sessions,
 		Policies: repos.Policies, Agents: repos.Agents,
-		Executions:      repos.Executions,
+		Turns:           repos.Turns,
+		SessionMessages: repos.SessionMessages,
+		AgentMessages:   repos.AgentMessages,
 		ToolPermissions: toolPermissions,
 		RegisteredTools: registeredToolNames,
-		PrimaryAgent:    sessionService, Activator: scheduler,
-		Lifecycle:       settlementService,
-		Definitions:     executionInputProvider{agents: agentRegistry, models: modelRegistry},
-		Models:          executionInputProvider{agents: agentRegistry, models: modelRegistry},
-		ContextProvider: newExecutionContextProvider(repos.Contexts, agentTranscriptLoader{root: root}),
+		PrimaryAgent:    sessionService, Activator: registry,
+		Lifecycle:           settlementService,
+		Definitions:         turnInputProvider{agents: agentRegistry, models: modelRegistry},
+		AgentDefinitionsDir: root.AgentDefinitions,
+		Models:              turnInputProvider{agents: agentRegistry, models: modelRegistry},
+		ContextProvider:     sessionService,
 	})
 	if err != nil {
-		diagnostics.Errorf("create execution start service failed: %v", err)
+		diagnostics.Errorf("create turn start service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
-	queueService, err := executionqueue.NewService(executionqueue.Config{
-		Transactions: store,
-		Agents:       repos.Agents,
-		Executions:   repos.Executions,
-		QueuedWork:   repos.QueuedWork,
-		Inputs:       startService,
-		Activator:    scheduler,
-		Lifecycle:    settlementService,
+	queueService, err := turnqueue.NewService(turnqueue.Config{
+		Transactions:    store,
+		Agents:          repos.Agents,
+		Turns:           repos.Turns,
+		QueuedWork:      repos.QueuedWork,
+		SessionMessages: repos.SessionMessages,
+		AgentMessages:   repos.AgentMessages,
+		Inputs:          startService,
+		Activator:       registry,
+		Lifecycle:       settlementService,
 	})
 	if err != nil {
-		diagnostics.Errorf("create execution queue service failed: %v", err)
+		diagnostics.Errorf("create turn queue service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
 	if err := settlementService.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
-		diagnostics.Errorf("configure execution settlement queue starter failed: %v", err)
+		diagnostics.Errorf("configure turn settlement queue starter failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -312,7 +354,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	controlService, err := executioncontrol.NewService(executioncontrol.Config{
+	controlService, err := turncontrol.NewService(turncontrol.Config{
 		Transactions: store,
 		Agents:       repos.Agents,
 		Controls:     repos.Controls,
@@ -337,49 +379,57 @@ func Open(
 		Starts:      startService,
 		Models:      modelConfig,
 		AgentConfig: agentRegistry,
-		Events:      events,
-		Logger:      diagnostics,
+		ReloadConfig: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			candidateModels, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil, newModelStream)
+			if err != nil {
+				return err
+			}
+			candidateConfig := candidateModels.Config()
+			candidateAgents, err := agentregistry.Load(root.AgentDefinitions, func(providerID, modelID string) error {
+				if !modelregistry.ContainsModel(candidateConfig, providerID, modelID) {
+					return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			candidateTools, err := toolconfig.Load(root.ToolConfig)
+			if err != nil {
+				return err
+			}
+			candidatePermissions, err := securitymodel.NewToolPermissionPolicy(candidateTools.Tools)
+			if err != nil {
+				return err
+			}
+			if err := candidatePermissions.ValidateRegistered(registeredToolNames); err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// 与 Turn 准入共用事务边界，避免后台队列读到混合版本的模型、定义和权限。
+			return store.InTx(ctx, func(context.Context) error {
+				modelRegistry.ReplaceFrom(candidateModels)
+				agentRegistry.ReplaceFrom(candidateAgents)
+				startService.UpdateToolPermissions(candidatePermissions)
+				return nil
+			})
+		},
+		Events: events,
+		Logger: diagnostics,
 	})
 	return &Application{
 		frontend: frontend,
 		store:    store,
 		registry: registry,
 		logger:   diagnostics,
+		timings:  timings,
+		usages:   usages,
 	}, nil
-}
-
-func newModelStream(
-	format modelregistry.ModelAPIFormat,
-	provider modelregistry.ProviderConfig,
-	modelConfig modelregistry.ModelConfig,
-	apiKey string,
-	client *http.Client,
-) (runtime.ModelStream, error) {
-	switch format {
-	case modelregistry.APIFormatAnthropicMessages:
-		return anthropicmessages.New(anthropicmessages.Config{
-			BaseURL:       provider.BaseURL,
-			APIKey:        apiKey,
-			HTTPClient:    client,
-			ContextWindow: modelConfig.ContextWindow,
-		})
-	case modelregistry.APIFormatOpenAIChatCompletions:
-		return openaichat.New(openaichat.Config{
-			BaseURL:       provider.BaseURL,
-			APIKey:        apiKey,
-			HTTPClient:    client,
-			ContextWindow: modelConfig.ContextWindow,
-		})
-	case modelregistry.APIFormatOpenAIResponses:
-		return openairesponses.New(openairesponses.Config{
-			BaseURL:       provider.BaseURL,
-			APIKey:        apiKey,
-			HTTPClient:    client,
-			ContextWindow: modelConfig.ContextWindow,
-		})
-	default:
-		return nil, fmt.Errorf("unsupported model API format %q", format)
-	}
 }
 
 // RuntimeLogger 暴露共享诊断日志给 Wails binding，但不暴露组合根内部实现。
@@ -428,119 +478,32 @@ func (a *Application) Close(ctx context.Context) error {
 	return logErr
 }
 
-type runtimeFactory struct {
-	root          dataroot.DataRoot
-	runner        agentruntime.ExecutionRunner
-	header        agentruntime.SessionHeaderResolver
-	logger        agentruntime.ExecutionLogger
-	eventLogger   agentruntime.ExecutionEventLogger
-	eventObserver agentruntime.AgentEventObserver
-}
-
-func (f runtimeFactory) New(
-	ctx context.Context,
-	agentID contracts.AgentID,
-) (agentruntime.ManagedRuntime, error) {
-	openSessions := func(
-		sessionID contracts.SessionID,
-		targetAgentID contracts.AgentID,
-	) (runtime.TranscriptStore, error) {
-		return agentlog.Open(f.root, sessionID, targetAgentID)
-	}
-	return agentruntime.NewRuntime(agentruntime.RuntimeConfig{
-		AgentID:           agentID,
-		Sessions:          openSessions,
-		Header:            f.header,
-		Runner:            f.runner,
-		Logger:            f.logger,
-		EventLogger:       f.eventLogger,
-		EventObserver:     f.eventObserver,
-		SettlementTimeout: 30 * time.Second,
-	})
-}
-
-func newAgentMessageReader(root dataroot.DataRoot) func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]runtime.AgentSessionMessage, error) {
-	return func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID, limit int) ([]runtime.AgentSessionMessage, error) {
-		store, err := agentlog.Open(root, sessionID, agentID)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = store.Close(context.Background()) }()
-		return store.ListMessages(ctx, limit)
-	}
-}
-
-type executionInputProvider struct {
+type turnInputProvider struct {
 	agents *agentregistry.Registry
 	models *modelregistry.Registry
 }
 
-func (r executionInputProvider) Definition(definitionID contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
+func (r turnInputProvider) Definition(definitionID contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
 	return r.agents.Definition(definitionID)
 }
 
-func (r executionInputProvider) FreezeExecutionModel(providerID, modelID, reasoningLevel string) (contracts.ExecutionModelSnapshot, error) {
-	return r.models.FreezeExecutionModel(providerID, modelID, reasoningLevel)
+func (r turnInputProvider) FreezeTurnModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
+	return r.models.FreezeTurnModel(providerID, modelID, reasoningLevel)
 }
 
-func (r executionInputProvider) FreezeDefaultExecutionModel(definitionID contracts.AgentDefinitionID) (contracts.ExecutionModelSnapshot, error) {
+func (r turnInputProvider) FreezeDefaultTurnModel(definitionID contracts.AgentDefinitionID) (contracts.ModelSnapshot, error) {
 	reference, err := r.agents.ResolveModelReference(definitionID)
 	if err != nil {
-		return contracts.ExecutionModelSnapshot{}, err
+		return contracts.ModelSnapshot{}, err
 	}
-	return r.models.FreezeExecutionModel(reference.ProviderID, reference.ModelID, "")
-}
-
-func newSessionHeaderResolver(store *sqlite.Store) agentruntime.SessionHeaderResolver {
-	return func(ctx context.Context, execution executionmodel.AgentExecution) (runtime.AgentSessionHeader, error) {
-		agent, err := store.GetAgent(ctx, execution.AgentID)
-		if err != nil {
-			return runtime.AgentSessionHeader{}, err
-		}
-		return newSessionHeader(ctx, store, agent), nil
-	}
-}
-
-func newSessionHeader(ctx context.Context, store *sqlite.Store, agent agentmodel.Agent) runtime.AgentSessionHeader {
-	sessionRecord, err := store.GetSession(ctx, agent.SessionID)
-	workspaceID := contracts.WorkspaceID("")
-	if err == nil {
-		workspaceID = sessionRecord.WorkspaceID
-	}
-	return runtime.AgentSessionHeader{
-		SessionID:        agent.SessionID,
-		AgentID:          agent.ID,
-		DefinitionID:     agent.DefinitionID,
-		Profile:          agent.Profile,
-		WorkspaceID:      workspaceID,
-		InjectionNonce:   agent.SessionID.String() + ":" + agent.ID.String(),
-		MinReaderVersion: 4,
-		WrittenBy:        "praxis",
-	}
+	return r.models.FreezeTurnModel(reference.ProviderID, reference.ModelID, "")
 }
 
 type queuedWorkStarter struct {
-	queue *executionqueue.Service
+	queue *turnqueue.Service
 }
 
 func (s queuedWorkStarter) StartNextQueuedWork(ctx context.Context, agentID contracts.AgentID) (bool, error) {
 	result, err := s.queue.StartNextQueuedWork(ctx, agentID)
 	return result.Started, err
-}
-
-type agentTranscriptLoader struct {
-	root dataroot.DataRoot
-}
-
-func (c agentTranscriptLoader) LoadTranscript(
-	ctx context.Context,
-	sessionID contracts.SessionID,
-	agentID contracts.AgentID,
-) (runtime.AgentTranscript, error) {
-	store, err := agentlog.Open(c.root, sessionID, agentID)
-	if err != nil {
-		return runtime.AgentTranscript{}, err
-	}
-	defer func() { _ = store.Close(context.Background()) }()
-	return store.LoadTranscript(ctx)
 }

@@ -3,13 +3,13 @@ package project
 
 import (
 	"praxis/internal/contracts"
-	projectmodel "praxis/internal/project"
-	workspacemodel "praxis/internal/workspace"
+	projectmodel "praxis/internal/core/project"
+	workspacemodel "praxis/internal/core/workspace"
+	"praxis/internal/utils/pathutil"
 
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"praxis/internal/repository"
@@ -72,12 +72,10 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 	if ctx == nil {
 		return CreateProjectResult{}, errors.New("create project context is required")
 	}
-	params.Name = strings.TrimSpace(params.Name)
-	params.Path = filepath.Clean(strings.TrimSpace(params.Path))
 	if params.ProjectID == "" || params.WorkspaceID == "" {
 		return CreateProjectResult{}, contracts.New(contracts.InvalidRequest, "")
 	}
-	if params.Name == "" || strings.ContainsAny(params.Name, "\x00\r\n") || !absolutePath(params.Path) {
+	if params.Name == "" || strings.ContainsAny(params.Name, "\x00\r\n") || !pathutil.IsAbsoluteNormalized(params.Path) {
 		return CreateProjectResult{}, contracts.New(contracts.ProjectWorkspaceInvalid, "")
 	}
 	var result CreateProjectResult
@@ -152,8 +150,4 @@ func (s *Service) ListWorkspaces(ctx context.Context, projectID contracts.Projec
 		return nil, contracts.New(contracts.InvalidRequest, "project id is required")
 	}
 	return s.workspaces.ListByProject(ctx, projectID, limit)
-}
-
-func absolutePath(path string) bool {
-	return path != "" && path != "." && filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, "\x00\r\n")
 }

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	runtimecontract "praxis/internal/runtime"
+	runtimecontract "praxis/internal/agent_runtime"
 )
 
 const maxProviderCatalogBytes = 1 << 20
@@ -62,6 +62,17 @@ func (r *Registry) Config() RegistryConfig {
 	return cloneRegistryConfig(r.config)
 }
 
+// ReplaceFrom 用已校验的磁盘快照替换运行时配置与凭据；运行中的 Turn 保持原快照。
+func (r *Registry) ReplaceFrom(candidate *Registry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.config = candidate.config
+	r.credentials = candidate.credentials
+	r.providerClients = candidate.providerClients
+	r.modelsByKey = candidate.modelsByKey
+	r.providersByID = candidate.providersByID
+}
+
 // modelByKeyLocked 要求调用方已持有 r.mu，且 key 已完成规范化。
 func (r *Registry) modelByKeyLocked(key modelKey) (ModelConfig, error) {
 	config, ok := r.modelsByKey[key]
@@ -71,8 +82,7 @@ func (r *Registry) modelByKeyLocked(key modelKey) (ModelConfig, error) {
 	return config, nil
 }
 
-// ListModels returns confirmed models and their configured reasoning levels for
-// the next execution.
+// ListModels 返回可用于下一 Turn 的模型及推理等级。
 func (r *Registry) ListModels() []ModelOption {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -140,7 +150,6 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	providerID = strings.TrimSpace(providerID)
 	r.mu.RLock()
 	provider, exists := r.providersByID[providerID]
 	client := r.providerClientLocked(providerID)
@@ -206,24 +215,23 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	return models, nil
 }
 
-// FreezeExecutionModel validates the current registry configuration and copies
-// every non-secret request parameter into an execution-owned snapshot.
-func (r *Registry) FreezeExecutionModel(providerID, modelID, reasoningLevel string) (contracts.ExecutionModelSnapshot, error) {
+// FreezeTurnModel 校验当前配置并冻结非敏感模型参数，失败时不生成快照。
+func (r *Registry) FreezeTurnModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
 	selection, err := newModelSelection(providerID, modelID, reasoningLevel)
 	if err != nil {
-		return contracts.ExecutionModelSnapshot{}, err
+		return contracts.ModelSnapshot{}, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	configured, selected, err := r.selectModelLocked(selection)
 	if err != nil {
-		return contracts.ExecutionModelSnapshot{}, err
+		return contracts.ModelSnapshot{}, err
 	}
 	provider, ok := r.providersByID[selected.ProviderID]
 	if !ok {
-		return contracts.ExecutionModelSnapshot{}, fmt.Errorf("provider %q is not configured", selected.ProviderID)
+		return contracts.ModelSnapshot{}, fmt.Errorf("provider %q is not configured", selected.ProviderID)
 	}
-	snapshot := contracts.ExecutionModelSnapshot{
+	snapshot := contracts.ModelSnapshot{
 		ProviderID:      selected.ProviderID,
 		ModelID:         selected.ModelID,
 		ReasoningLevel:  selected.ReasoningLevel,
@@ -234,7 +242,7 @@ func (r *Registry) FreezeExecutionModel(providerID, modelID, reasoningLevel stri
 		ProxyURL:        provider.ProxyURL,
 	}
 	if err := snapshot.Validate(); err != nil {
-		return contracts.ExecutionModelSnapshot{}, err
+		return contracts.ModelSnapshot{}, err
 	}
 	return snapshot, nil
 }

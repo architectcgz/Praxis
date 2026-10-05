@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	runtimecontract "praxis/internal/runtime"
+	runtimecontract "praxis/internal/agent_runtime"
 )
 
 // ToolAccumulator 用于累积流式响应中的工具调用分片。
@@ -32,7 +32,6 @@ func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
 		ToolCall: toolcontracts.ToolCall{
 			ID:        call.ID,
 			Name:      contracts.ToolName(call.Name),
-			Input:     bytes.Clone(args),
 			Arguments: bytes.Clone(args),
 		},
 	})

@@ -2,6 +2,7 @@ package bindings
 
 import (
 	"praxis/internal/contracts"
+	agentmodel "praxis/internal/core/agent"
 
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -82,13 +83,43 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 	}
 	for _, agent := range view.Agents {
 		result.Agents = append(result.Agents, dto.AgentSnapshot{
-			ID: agent.ID.String(), SessionID: agent.SessionID.String(),
+			ID: agent.ID.String(), Name: agentmodel.DisplayName(agent.DefinitionID), SessionID: agent.SessionID.String(),
 			DefinitionID:           agent.DefinitionID.String(),
 			SecurityPolicyRevision: agent.SecurityPolicyRevision,
 			Profile:                string(agent.Profile), State: string(agent.State),
-			CurrentExecution: agent.CurrentExecutionID.String(),
-			Executions:       make([]dto.ExecutionSnapshot, 0),
+			CurrentTurn: agent.CurrentTurnID.String(),
+			Turns:       make([]dto.TurnSnapshot, 0),
 		})
 	}
 	return result, nil
+}
+
+// DeleteSession 删除指定会话，并将业务错误转换为前端可识别的错误码。
+func (b *SessionBindings) DeleteSession(sessionID string) error {
+	if err := validation.ValidateSessionID(sessionID); err != nil {
+		return err
+	}
+	ctx, service, err := b.runtime.BindingContext()
+	if err != nil {
+		return err
+	}
+	if err := service.Sessions.DeleteSession(ctx, contracts.SessionID(sessionID)); err != nil {
+		return publicError(b.runtime, "SessionBindings.DeleteSession", err)
+	}
+	return nil
+}
+
+// RenameSession 更新指定会话标题，并将业务错误转换为前端可识别的错误码。
+func (b *SessionBindings) RenameSession(sessionID, title string) error {
+	if err := validation.ValidateSessionID(sessionID); err != nil {
+		return err
+	}
+	ctx, service, err := b.runtime.BindingContext()
+	if err != nil {
+		return err
+	}
+	if err := service.Sessions.RenameSession(ctx, contracts.SessionID(sessionID), title); err != nil {
+		return publicError(b.runtime, "SessionBindings.RenameSession", err)
+	}
+	return nil
 }

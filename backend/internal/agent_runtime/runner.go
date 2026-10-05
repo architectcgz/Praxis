@@ -1,30 +1,18 @@
-// Package agentruntime 组装 Agent execution 的模型循环与工具调用流程。
 package agentruntime
 
 import (
-	"praxis/internal/loop"
-	agent "praxis/internal/runtime/agent"
-	toolinvocation "praxis/internal/service/execution/tool_invocation"
+	"context"
+
+	"praxis/internal/contracts"
+	turnmodel "praxis/internal/core/turn"
 )
 
-type RunnerConfig struct {
-	ModelBuilder    loop.ExecutionModelBuilder
-	ToolInvocations toolinvocation.Config
-	EventObserver   agent.AgentEventObserver
-	Logf            func(string, ...any)
-}
-
-// NewRunner 组装默认的 Agent execution runner；依赖缺失时返回错误。
-func NewRunner(config RunnerConfig) (agent.ExecutionRunner, error) {
-	toolCalls, err := toolinvocation.NewService(config.ToolInvocations)
-	if err != nil {
-		return nil, err
-	}
-	return loop.NewExecutionEngine(loop.ExecutionEngineConfig{
-		ModelBuilder:  config.ModelBuilder,
-		Tools:         config.ToolInvocations.Catalog,
-		ToolCalls:     toolCalls,
-		EventObserver: config.EventObserver,
-		Logf:          config.Logf,
-	})
+// TurnRunner 接收持久化执行快照与 owner 限定的消息存储，返回执行结果和失败分类。
+// 实现只负责模型与工具循环，不负责最终结算；取消或执行失败通过 error 返回。
+type TurnRunner interface {
+	RunWithSession(
+		context.Context,
+		turnmodel.Turn,
+		TurnMessageStore,
+	) (turnmodel.TurnOutcome, contracts.TurnFailureCode, error)
 }

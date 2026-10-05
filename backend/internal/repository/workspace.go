@@ -2,7 +2,7 @@ package repository
 
 import (
 	"praxis/internal/contracts"
-	workspacemodel "praxis/internal/workspace"
+	workspacemodel "praxis/internal/core/workspace"
 
 	"context"
 )

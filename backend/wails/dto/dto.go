@@ -65,40 +65,44 @@ type CreateSessionResponse struct {
 }
 
 type AgentSnapshot struct {
-	ID                     string              `json:"id"`
-	SessionID              string              `json:"sessionId"`
-	DefinitionID           string              `json:"definitionId"`
-	SecurityPolicyRevision uint64              `json:"securityPolicyRevision"`
-	Profile                string              `json:"profile"`
-	State                  string              `json:"state"`
-	CurrentExecution       string              `json:"currentExecutionId"`
-	ExecutionIDs           []string            `json:"executionIds"`
-	Executions             []ExecutionSnapshot `json:"executions"`
-	WaitConditionIDs       []string            `json:"waitConditionIds"`
-	ControlCommandIDs      []string            `json:"controlCommandIds"`
+	ID                     string         `json:"id"`
+	Name                   string         `json:"name"`
+	SessionID              string         `json:"sessionId"`
+	DefinitionID           string         `json:"definitionId"`
+	SecurityPolicyRevision uint64         `json:"securityPolicyRevision"`
+	Profile                string         `json:"profile"`
+	State                  string         `json:"state"`
+	CurrentTurn            string         `json:"currentTurnId"`
+	TurnIDs                []string       `json:"turnIds"`
+	Turns                  []TurnSnapshot `json:"turns"`
+	WaitConditionIDs       []string       `json:"waitConditionIds"`
+	ControlCommandIDs      []string       `json:"controlCommandIds"`
 }
 
-// ExecutionSnapshot exposes the durable lifecycle and safe failure code of
-// an Agent execution without exposing provider credentials or raw errors.
-type ExecutionSnapshot struct {
-	ID          string    `json:"id"`
-	Reason      string    `json:"reason"`
-	Status      string    `json:"status"`
-	Outcome     string    `json:"outcome,omitempty"`
-	FailureCode string    `json:"failureCode,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
-	SettledAt   time.Time `json:"settledAt,omitempty"`
+// TurnSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。
+type TurnSnapshot struct {
+	ID             string    `json:"id"`
+	Reason         string    `json:"reason"`
+	Status         string    `json:"status"`
+	Outcome        string    `json:"outcome,omitempty"`
+	FailureCode    string    `json:"failureCode,omitempty"`
+	FailureMessage string    `json:"failureMessage,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	StartedAt      time.Time `json:"startedAt,omitempty"`
+	SettledAt      time.Time `json:"settledAt,omitempty"`
 }
 
 type AgentMessage struct {
-	Sequence    uint64              `json:"sequence"`
-	At          time.Time           `json:"at"`
-	ExecutionID string              `json:"executionId"`
-	Role        string              `json:"role"`
-	Content     string              `json:"content"`
-	Thinking    string              `json:"thinking,omitempty"`
-	Blocks      []AgentMessageBlock `json:"blocks,omitempty"`
+	ID         string              `json:"id"`
+	Sequence   uint64              `json:"sequence"`
+	At         time.Time           `json:"at"`
+	TurnID     string              `json:"turnId"`
+	Role       string              `json:"role"`
+	AuthorKind string              `json:"authorKind"`
+	AuthorID   string              `json:"authorId,omitempty"`
+	Content    string              `json:"content"`
+	Thinking   string              `json:"thinking,omitempty"`
+	Blocks     []AgentMessageBlock `json:"blocks,omitempty"`
 }
 
 // AgentMessageBlock 是消息中可安全展示的结构化内容块。
@@ -112,11 +116,11 @@ type AgentMessageBlock struct {
 }
 
 type AgentHistoryItem struct {
-	Kind      string             `json:"kind"`
-	Sequence  uint64             `json:"sequence,omitempty"`
-	At        time.Time          `json:"at"`
-	Message   *AgentMessage      `json:"message,omitempty"`
-	Execution *ExecutionSnapshot `json:"execution,omitempty"`
+	Kind     string        `json:"kind"`
+	Sequence uint64        `json:"sequence,omitempty"`
+	At       time.Time     `json:"at"`
+	Message  *AgentMessage `json:"message,omitempty"`
+	Turn     *TurnSnapshot `json:"turn,omitempty"`
 }
 
 type ModelOption struct {
@@ -193,7 +197,7 @@ type SendInputRequest struct {
 }
 
 type SendInputResponse struct {
-	ExecutionID     string `json:"executionId"`
+	TurnID          string `json:"turnId"`
 	ExistingRequest bool   `json:"existingRequest"`
 	ActivationError string `json:"activationError,omitempty"`
 }
@@ -214,15 +218,12 @@ type CloseAgentRequest = PauseAgentRequest
 type AgentControlResponse struct {
 	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
-	TargetExecutionID string `json:"targetExecutionId,omitempty"`
+	TargetTurnID      string `json:"targetTurnId,omitempty"`
 	Kind              string `json:"kind"`
 	Status            string `json:"status"`
 	ExistingCommand   bool   `json:"existingCommand"`
 	CancellationError string `json:"cancellationError,omitempty"`
 }
-
-type PauseAgentResponse = AgentControlResponse
-type CloseAgentResponse = AgentControlResponse
 
 type QueueWorkRequest struct {
 	ID        string `json:"id"`
@@ -233,7 +234,7 @@ type QueueWorkRequest struct {
 
 type QueueWorkResponse struct {
 	WorkID          string `json:"workId"`
-	ExecutionID     string `json:"executionId,omitempty"`
+	TurnID          string `json:"turnId,omitempty"`
 	Status          string `json:"status"`
 	ExistingWork    bool   `json:"existingWork"`
 	ActivationError string `json:"activationError,omitempty"`

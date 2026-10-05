@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strings"
 
-	appcontext "praxis/internal/context"
+	runtimecontract "praxis/internal/agent_runtime"
+	appcontext "praxis/internal/core/context"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
-	runtimecontract "praxis/internal/runtime"
 )
 
 type Config struct {
@@ -96,7 +96,7 @@ func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error)
 		return nil, "", errors.New("openai responses max output tokens is required")
 	}
 	input := make([]responseItem, 0, len(request.Context.Entries)+1)
-	if strings.TrimSpace(request.Context.SystemPrompt) != "" {
+	if request.Context.SystemPrompt != "" {
 		input = append(input, responseItem{
 			Type: "message",
 			Role: "system",
@@ -139,12 +139,12 @@ func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error)
 	return encoded, "/v1/responses", nil
 }
 
-func requestInputItemCount(modelContext appcontext.ExecutionContext) int {
+func requestInputItemCount(modelContext appcontext.ModelContext) int {
 	count := 0
 	for _, entry := range modelContext.Entries {
 		count += len(responseItems(entry))
 	}
-	if strings.TrimSpace(modelContext.SystemPrompt) != "" {
+	if modelContext.SystemPrompt != "" {
 		count++
 	}
 	return count

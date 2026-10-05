@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
-
+	applypatch "praxis/internal/tools/apply_patch"
 	bash "praxis/internal/tools/bash"
 	toolcontracts "praxis/internal/tools/contracts"
-	listdir "praxis/internal/tools/list_dir"
 	readfile "praxis/internal/tools/read_file"
+	"slices"
 )
 
 type builtinTool struct {
@@ -47,15 +46,15 @@ func NewToolRegistry() *ToolRegistry {
 			normalize:  readfile.Normalize,
 			execute:    readfile.Execute,
 		},
-		toolcontracts.ToolListDir: builtinTool{
-			definition: listdir.Definition,
-			normalize:  listdir.Normalize,
-			execute:    listdir.Execute,
-		},
 		toolcontracts.ToolBash: builtinTool{
 			definition: bash.Definition,
 			normalize:  bash.Normalize,
 			execute:    bash.Execute,
+		},
+		toolcontracts.ToolApplyPatch: builtinTool{
+			definition: applypatch.Definition,
+			normalize:  applypatch.Normalize,
+			execute:    applypatch.Execute,
 		},
 	}}
 }

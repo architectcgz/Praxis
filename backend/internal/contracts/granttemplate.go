@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -9,11 +10,11 @@ type ToolName string
 
 const (
 	ToolReadFile   ToolName = "read_file"
-	ToolListDir    ToolName = "list_dir"
 	ToolSearchText ToolName = "search_text"
 	ToolWriteFile  ToolName = "write_file"
 	ToolRunCommand ToolName = "run_command"
 	ToolBash       ToolName = "bash"
+	ToolApplyPatch ToolName = "apply_patch"
 )
 
 func (t ToolName) Valid() bool {
@@ -55,7 +56,7 @@ func NewDefaultGrantTemplate(
 	workspaceAccess WorkspaceAccess,
 ) (DefaultGrantTemplate, error) {
 	template := DefaultGrantTemplate{
-		AllowedTools:    cloneTools(tools),
+		AllowedTools:    slices.Clone(tools),
 		WorkspaceAccess: workspaceAccess,
 	}
 	canonicalizeTemplate(&template)
@@ -85,18 +86,14 @@ func (t DefaultGrantTemplate) Validate() error {
 	if t.WorkspaceAccess == WorkspaceAccessRead && containsTool(t.AllowedTools, ToolWriteFile) {
 		return InvalidValue("grantTemplate.workspaceAccess", "write_file requires read_write access")
 	}
+	if t.WorkspaceAccess == WorkspaceAccessRead && containsTool(t.AllowedTools, ToolApplyPatch) {
+		return InvalidValue("grantTemplate.workspaceAccess", "apply_patch requires read_write access")
+	}
 	return nil
 }
 
 func (t DefaultGrantTemplate) AllowsTool(tool ToolName) bool {
 	return containsTool(t.AllowedTools, tool)
-}
-
-func (t DefaultGrantTemplate) Snapshot() DefaultGrantTemplate {
-	return DefaultGrantTemplate{
-		AllowedTools:    cloneTools(t.AllowedTools),
-		WorkspaceAccess: t.WorkspaceAccess,
-	}
 }
 
 func canonicalizeTemplate(template *DefaultGrantTemplate) {
@@ -116,14 +113,11 @@ func containsTool(tools []ToolName, target ToolName) bool {
 }
 
 func containsFilesystemTool(tools []ToolName) bool {
-	return containsTool(tools, ToolReadFile) || containsTool(tools, ToolListDir) ||
+	return containsTool(tools, ToolReadFile) ||
 		containsTool(tools, ToolSearchText) ||
-		containsTool(tools, ToolWriteFile) || containsTool(tools, ToolBash)
+		containsWriteTool(tools) || containsTool(tools, ToolBash)
 }
 
-func cloneTools(values []ToolName) []ToolName {
-	if values == nil {
-		return nil
-	}
-	return append([]ToolName(nil), values...)
+func containsWriteTool(tools []ToolName) bool {
+	return containsTool(tools, ToolWriteFile) || containsTool(tools, ToolApplyPatch)
 }

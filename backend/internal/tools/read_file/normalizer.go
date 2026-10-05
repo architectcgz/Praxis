@@ -1,7 +1,7 @@
 package readfile
 
 import (
-	toolmodel "praxis/internal/tool_invocation"
+	toolmodel "praxis/internal/core/tool_invocation"
 	"unicode/utf8"
 
 	toolcontracts "praxis/internal/tools/contracts"

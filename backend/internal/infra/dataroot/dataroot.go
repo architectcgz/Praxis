@@ -23,9 +23,7 @@ type DataRoot struct {
 	Config               string
 	Projects             string
 	Runtime              string
-	Database             string
 	Documents            string
-	Sessions             string
 	Attachments          string
 	Temporary            string
 	ModelProvidersConfig string
@@ -63,15 +61,13 @@ func Resolve(root string) (DataRoot, error) {
 		Config:               config,
 		Projects:             filepath.Join(root, "projects"),
 		Runtime:              runtime,
-		Database:             filepath.Join(runtime, "praxis.db"),
 		Documents:            filepath.Join(runtime, "documents"),
-		Sessions:             filepath.Join(runtime, "agent-sessions"),
 		Attachments:          filepath.Join(runtime, "attachments"),
 		Temporary:            filepath.Join(runtime, "tmp"),
 		ModelProvidersConfig: filepath.Join(config, "models.json"),
 		ModelCredentialsFile: filepath.Join(config, "auth.json"),
 		ToolConfig:           filepath.Join(config, "tools.json"),
-		AgentDefinitions:     filepath.Join(root, "agents"),
+		AgentDefinitions:     filepath.Join(config, "agents"),
 	}, nil
 }
 
@@ -90,7 +86,6 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 		d.Runtime,
 		d.Documents,
 		d.AgentDefinitions,
-		d.Sessions,
 		d.Attachments,
 		d.Temporary,
 	} {
@@ -102,20 +97,4 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func validateDataRootPath(path string) error {
-	if !filepath.IsAbs(path) || filepath.Clean(path) == string(filepath.Separator) {
-		return errors.New("data root path must be an absolute non-root path")
-	}
-	return nil
-}
-
-func sameOrNestedPath(parent, child string) bool {
-	relative, err := filepath.Rel(filepath.Clean(parent), filepath.Clean(child))
-	if err != nil {
-		return false
-	}
-	return relative == "." ||
-		(relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
 }

@@ -70,10 +70,8 @@ func (c *ModelConfig) normalizeCapabilities() error {
 	return nil
 }
 
-// selectReasoning resolves the requested reasoning level into the frozen model
-// selection that one execution binds to.
+// selectReasoning 解析推理等级，生成 Turn 绑定的冻结模型选择。
 func (c ModelConfig) selectReasoning(providerID, reasoningLevel string) (modelSelection, error) {
-	reasoningLevel = strings.TrimSpace(reasoningLevel)
 	if len(c.ReasoningLevels) == 0 {
 		if reasoningLevel != "" {
 			return modelSelection{}, fmt.Errorf("model %q does not support reasoning", c.ID)
@@ -128,7 +126,7 @@ func containsReasoningLevel(levels []string, target string) bool {
 	return false
 }
 
-// ModelOption is the execution catalog exposed to desktop clients.
+// ModelOption 是桌面客户端可选择的模型条目。
 type ModelOption struct {
 	GroupID                  string
 	ProviderID               string
@@ -156,8 +154,6 @@ type modelKey struct {
 // ContainsModel reports whether a model reference exists in a validated or
 // candidate model configuration.
 func ContainsModel(config RegistryConfig, providerID, modelID string) bool {
-	providerID = strings.TrimSpace(providerID)
-	modelID = strings.TrimSpace(modelID)
 	for _, provider := range config.Providers {
 		if provider.ID != providerID {
 			continue
@@ -187,26 +183,15 @@ type modelSelection struct {
 
 func newModelSelection(providerID, modelID, reasoningLevel string) (modelSelection, error) {
 	selection := modelSelection{
-		ProviderID:     strings.TrimSpace(providerID),
-		ModelID:        strings.TrimSpace(modelID),
-		ReasoningLevel: strings.TrimSpace(reasoningLevel),
+		ProviderID:     providerID,
+		ModelID:        modelID,
+		ReasoningLevel: reasoningLevel,
 	}
-	if err := selection.Validate(); err != nil {
-		return modelSelection{}, err
+	if selection.ProviderID == "" {
+		return modelSelection{}, errors.New("model selection provider ID is required")
+	}
+	if selection.ModelID == "" {
+		return modelSelection{}, errors.New("model selection model ID is required")
 	}
 	return selection, nil
-}
-
-func (s modelSelection) Validate() error {
-	if s.ProviderID == "" {
-		return errors.New("model selection provider ID is required")
-	}
-	if s.ModelID == "" {
-		return errors.New("model selection model ID is required")
-	}
-	if s.ProviderID != strings.TrimSpace(s.ProviderID) || s.ModelID != strings.TrimSpace(s.ModelID) ||
-		s.ReasoningLevel != strings.TrimSpace(s.ReasoningLevel) {
-		return errors.New("model selection fields must be normalized")
-	}
-	return nil
 }

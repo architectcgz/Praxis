@@ -22,34 +22,12 @@ func (c ValidatedConfig) Config() RegistryConfig {
 	return cloneRegistryConfig(c.config)
 }
 
-// Validate reports whether a whole model configuration is acceptable. It
-// applies the same rules as Normalize and Prepare but retains no runtime
-// state, so callers that only need a verdict never materialize the model
-// index. The argument is never mutated.
-func Validate(config RegistryConfig) error {
-	_, err := Normalize(config)
-	return err
-}
-
-// Normalize validates the configuration and returns a deep copy with defaults
-// applied, whitespace trimmed, and reasoning levels canonicalized. Loading
-// from disk and saving from the UI share these rules so the two paths cannot
-// drift: an error surfaced before saving is the same verdict the next startup
-// would reach. The argument is never mutated.
-func Normalize(config RegistryConfig) (RegistryConfig, error) {
-	normalized := cloneRegistryConfig(config)
-	if err := validateRegistryConfig(&normalized); err != nil {
-		return RegistryConfig{}, err
-	}
-	return normalized, nil
-}
-
 // Prepare validates and normalizes a configuration before the Registry may
 // apply it. The returned value carries the prepared marker that
 // ApplyValidatedConfig requires.
 func Prepare(config RegistryConfig) (ValidatedConfig, error) {
-	normalized, err := Normalize(config)
-	if err != nil {
+	normalized := cloneRegistryConfig(config)
+	if err := validateRegistryConfig(&normalized); err != nil {
 		return ValidatedConfig{}, err
 	}
 	return ValidatedConfig{config: normalized, prepared: true}, nil
@@ -114,8 +92,6 @@ func validateProviders(configs []ProviderConfig, groupsSeen map[string]struct{})
 		provider := &configs[index]
 		provider.ID = strings.TrimSpace(provider.ID)
 		provider.DisplayName = strings.TrimSpace(provider.DisplayName)
-		provider.BaseURL = strings.TrimSpace(provider.BaseURL)
-		provider.ProxyURL = strings.TrimSpace(provider.ProxyURL)
 		provider.DefaultModelID = strings.TrimSpace(provider.DefaultModelID)
 		if !idPattern.MatchString(provider.ID) {
 			return fmt.Errorf("models config: invalid provider id %q", provider.ID)
@@ -124,12 +100,16 @@ func validateProviders(configs []ProviderConfig, groupsSeen map[string]struct{})
 			return fmt.Errorf("models config: duplicate provider id %q", provider.ID)
 		}
 		seen[provider.ID] = struct{}{}
-		if _, err := providers.ValidateBaseURL(provider.BaseURL); err != nil {
+		baseURL, err := providers.ValidateBaseURL(provider.BaseURL)
+		if err != nil {
 			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
-		if _, err := providers.ValidateProxyURL(provider.ProxyURL); err != nil {
+		provider.BaseURL = baseURL
+		proxyURL, err := providers.ValidateProxyURL(provider.ProxyURL)
+		if err != nil {
 			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
+		provider.ProxyURL = proxyURL
 		if provider.DisplayName == "" {
 			provider.DisplayName = provider.ID
 		}
@@ -159,6 +139,7 @@ func validateProviderModels(provider *ProviderConfig, groupsSeen map[string]stru
 		model.ID = strings.TrimSpace(model.ID)
 		model.DisplayName = strings.TrimSpace(model.DisplayName)
 		model.GroupID = strings.TrimSpace(model.GroupID)
+		model.APIFormat = ModelAPIFormat(strings.TrimSpace(string(model.APIFormat)))
 		if model.ID == "" {
 			return fmt.Errorf("models config: provider %q model id is required", provider.ID)
 		}

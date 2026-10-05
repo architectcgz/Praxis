@@ -4,17 +4,6 @@ import (
 	"errors"
 )
 
-// ApplyConfig 校验并原子写入模型配置，然后原地替换内存索引。运行时模型构建器
-// 与 binding 共用同一个 Registry 指针；原地替换可使保存后的配置立即对新 execution 生效，
-// 已创建 execution 仍只使用自身保存的模型快照。校验失败时不写入文件，也不修改内存。
-func (r *Registry) ApplyConfig(config RegistryConfig) error {
-	validated, err := Prepare(config)
-	if err != nil {
-		return err
-	}
-	return r.ApplyValidatedConfig(validated)
-}
-
 // ApplyValidatedConfig 原子持久化已准备的配置并替换内存索引。
 func (r *Registry) ApplyValidatedConfig(validated ValidatedConfig) error {
 	if r == nil {

@@ -39,7 +39,6 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 	if r == nil {
 		return errors.New("registry is not initialized")
 	}
-	providerID = strings.TrimSpace(providerID)
 	if !idPattern.MatchString(providerID) {
 		return fmt.Errorf("invalid provider id %q", providerID)
 	}
@@ -93,7 +92,7 @@ func (r *Registry) credentialKeyLocked(providerID string) string {
 	if !exists || credential.Type != CredentialTypeAPIKey {
 		return ""
 	}
-	return strings.TrimSpace(credential.Key)
+	return credential.Key
 }
 
 func cloneCredentials(credentials ProviderCredentials) ProviderCredentials {

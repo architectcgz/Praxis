@@ -3,7 +3,7 @@ package openairesponses
 import (
 	"strings"
 
-	appcontext "praxis/internal/context"
+	appcontext "praxis/internal/core/context"
 )
 
 func responseItems(entry appcontext.ContextEntry) []responseItem {

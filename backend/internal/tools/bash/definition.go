@@ -37,7 +37,7 @@ func Definition() toolcontracts.ToolDefinition {
 		Description: "在已授权的工作区内执行 Bash 命令或多行脚本，返回合并后的 stdout 和 stderr。" +
 			"输入 command，可选 path 和 timeout（秒）；相对 path 按工作区解析。" +
 			"脚本在宿主机执行；只在用户显式授予命令权限时可用。" +
-			"脚本受当前 execution 的取消、超时和输出大小限制；不适合启动长期进程。",
+			"脚本受当前 turn 的取消、超时和输出大小限制；不适合启动长期进程。",
 		InputSchema: append(json.RawMessage(nil), inputSchema...),
 	}
 }

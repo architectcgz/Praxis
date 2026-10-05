@@ -6,23 +6,17 @@ import "praxis/internal/contracts"
 type ErrorCode = contracts.Code
 
 const (
-	ErrorBusy             = contracts.ExecutionBusy
-	ErrorContract         = contracts.ExecutionContract
-	ErrorPolicyBlocked    = contracts.ExecutionPolicyBlocked
-	ErrorApprovalRequired = contracts.ExecutionApproval
-	ErrorStorage          = contracts.ExecutionStorage
-	ErrorProvider         = contracts.ExecutionProvider
-	ErrorTool             = contracts.ExecutionTool
-	ErrorInterrupted      = contracts.ExecutionInterrupted
-	ErrorResourceLimit    = contracts.ExecutionResourceLimit
-	ErrorClosed           = contracts.ExecutionClosed
+	ErrorBusy             = contracts.TurnBusy
+	ErrorContract         = contracts.TurnContract
+	ErrorPolicyBlocked    = contracts.TurnPolicyBlocked
+	ErrorApprovalRequired = contracts.TurnApproval
+	ErrorStorage          = contracts.TurnStorage
+	ErrorProvider         = contracts.TurnProvider
+	ErrorTool             = contracts.TurnTool
+	ErrorInterrupted      = contracts.TurnInterrupted
+	ErrorResourceLimit    = contracts.TurnResourceLimit
+	ErrorClosed           = contracts.TurnClosed
 )
 
 // RuntimeError 复用业务错误载体，低敏感、可安全分类。
 type RuntimeError = contracts.Error
-
-// IsCode 判断错误链是否包含指定的运行时错误码。
-func IsCode(err error, code ErrorCode) bool {
-	found, ok := contracts.CodeOf(err)
-	return ok && found == code
-}

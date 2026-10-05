@@ -25,7 +25,7 @@ func NewToolSuccess(payload string, truncated bool) ToolResult {
 func NewToolError(code, message string) ToolResult {
 	encoded, _ := json.Marshal(struct {
 		Error   string `json:"error"`
-		Message string `json:"message"`
+		Message string `json:"message,omitempty"`
 	}{
 		Error:   code,
 		Message: message,

@@ -8,8 +8,8 @@ import (
 	"io"
 	"slices"
 
+	runtimecontract "praxis/internal/agent_runtime"
 	"praxis/internal/infra/providers/streaming"
-	runtimecontract "praxis/internal/runtime"
 )
 
 type streamDecoder struct{}
@@ -46,6 +46,13 @@ func (streamDecoder) Decode(
 			Arguments string `json:"arguments"`
 			Response  struct {
 				Status string `json:"status"`
+				Usage  *struct {
+					InputTokens        *int64 `json:"input_tokens"`
+					OutputTokens       *int64 `json:"output_tokens"`
+					InputTokensDetails *struct {
+						CachedTokens *int64 `json:"cached_tokens"`
+					} `json:"input_tokens_details"`
+				} `json:"usage"`
 			} `json:"response"`
 		}
 		if err := json.Unmarshal([]byte(event.Data), &eventPayload); err != nil {
@@ -99,6 +106,20 @@ func (streamDecoder) Decode(
 		case "response.completed", "response.done":
 			if err := emitResponseTools(emit, calls); err != nil {
 				return "", err
+			}
+			if reported := eventPayload.Response.Usage; reported != nil && reported.InputTokens != nil {
+				usage := &runtimecontract.ModelUsage{
+					InputTokens:  *reported.InputTokens,
+					OutputTokens: reported.OutputTokens,
+				}
+				if reported.InputTokensDetails != nil {
+					usage.CacheReadInputTokens = reported.InputTokensDetails.CachedTokens
+				}
+				if usage.Valid() {
+					if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
+						return "", err
+					}
+				}
 			}
 			return eventPayload.Response.Status, nil
 		case "error":

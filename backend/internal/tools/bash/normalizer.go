@@ -39,11 +39,10 @@ func Normalize(call toolcontracts.ToolCall) (toolcontracts.NormalizedToolCall, e
 	if call.Name != toolcontracts.ToolBash {
 		return toolcontracts.NormalizedToolCall{}, errors.New("tool is not registered")
 	}
-	call = call.Snapshot()
-	if err := toolshared.RejectDuplicateFields(call.Input); err != nil {
+	if err := toolshared.RejectDuplicateFields(call.Arguments); err != nil {
 		return invalidArguments(err.Error())
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Input))
+	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
 	decoder.DisallowUnknownFields()
 	var raw input
 	if err := decoder.Decode(&raw); err != nil {

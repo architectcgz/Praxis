@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strings"
 
-	appcontext "praxis/internal/context"
+	runtimecontract "praxis/internal/agent_runtime"
+	appcontext "praxis/internal/core/context"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
-	runtimecontract "praxis/internal/runtime"
 )
 
 type Config struct {
@@ -93,7 +93,7 @@ func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error)
 		return nil, "", errors.New("openai chat max output tokens is required")
 	}
 	messages := make([]chatMessage, 0, len(request.Context.Entries)+1)
-	if strings.TrimSpace(request.Context.SystemPrompt) != "" {
+	if request.Context.SystemPrompt != "" {
 		messages = append(messages, chatMessage{
 			Role:    "system",
 			Content: request.Context.SystemPrompt,
@@ -103,9 +103,12 @@ func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error)
 		messages = append(messages, chatMessageFromContext(entry))
 	}
 	payload := chatRequest{
-		Model:     request.Model.ModelID,
-		Messages:  messages,
-		Stream:    true,
+		Model:    request.Model.ModelID,
+		Messages: messages,
+		Stream:   true,
+		StreamOptions: chatStreamOptions{
+			IncludeUsage: true,
+		},
 		MaxTokens: request.MaxOutputTokens,
 	}
 	if reasoning := request.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
@@ -132,12 +135,17 @@ func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error)
 }
 
 type chatRequest struct {
-	Model           string        `json:"model"`
-	Messages        []chatMessage `json:"messages"`
-	Stream          bool          `json:"stream"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
-	MaxTokens       int           `json:"max_tokens"`
-	Tools           []chatTool    `json:"tools,omitempty"`
+	Model           string            `json:"model"`
+	Messages        []chatMessage     `json:"messages"`
+	Stream          bool              `json:"stream"`
+	StreamOptions   chatStreamOptions `json:"stream_options"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	MaxTokens       int               `json:"max_tokens"`
+	Tools           []chatTool        `json:"tools,omitempty"`
+}
+
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatMessage struct {

@@ -3,7 +3,6 @@ package bindings
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	appmodelconfig "praxis/internal/modelconfig"
@@ -67,30 +66,30 @@ func (b *ModelBindings) SaveModelConfig(request dto.SaveModelConfigRequest) (dto
 	}
 	config := appmodelconfig.Config{
 		Groups:            make([]appmodelconfig.Group, 0, len(request.Groups)),
-		DefaultProviderID: strings.TrimSpace(request.DefaultProviderID),
+		DefaultProviderID: request.DefaultProviderID,
 		Providers:         make([]appmodelconfig.Provider, 0, len(request.Providers)),
 	}
 	for _, group := range request.Groups {
 		config.Groups = append(config.Groups, appmodelconfig.Group{
-			ID: strings.TrimSpace(group.ID), DisplayName: strings.TrimSpace(group.DisplayName),
+			ID: group.ID, DisplayName: group.DisplayName,
 		})
 	}
 	for _, provider := range request.Providers {
 		config.Providers = append(config.Providers, appmodelconfig.Provider{
-			ID: strings.TrimSpace(provider.ID), DisplayName: strings.TrimSpace(provider.ProviderName),
-			BaseURL: strings.TrimSpace(provider.BaseURL), ProxyURL: strings.TrimSpace(provider.ProxyURL),
-			DefaultModelID: strings.TrimSpace(provider.DefaultModelID),
+			ID: provider.ID, DisplayName: provider.ProviderName,
+			BaseURL: provider.BaseURL, ProxyURL: provider.ProxyURL,
+			DefaultModelID: provider.DefaultModelID,
 		})
 	}
 	for _, option := range request.Models {
-		providerID := strings.TrimSpace(option.ProviderID)
+		providerID := option.ProviderID
 		configured := appmodelconfig.Model{
-			ID: strings.TrimSpace(option.ModelID), DisplayName: strings.TrimSpace(option.Label),
-			GroupID:       strings.TrimSpace(option.GroupID),
-			APIFormat:     appmodelconfig.APIFormat(strings.TrimSpace(option.APIFormat)),
+			ID: option.ModelID, DisplayName: option.Label,
+			GroupID:       option.GroupID,
+			APIFormat:     appmodelconfig.APIFormat(option.APIFormat),
 			ContextWindow: option.ContextWindow, MaxOutputTokens: option.MaxOutputTokens,
-			ReasoningLevels:       trimmedLevels(option.ReasoningLevels),
-			DefaultReasoningLevel: strings.TrimSpace(option.DefaultReasoningLevel),
+			ReasoningLevels:       append([]string(nil), option.ReasoningLevels...),
+			DefaultReasoningLevel: option.DefaultReasoningLevel,
 		}
 		for index := range config.Providers {
 			if config.Providers[index].ID == providerID {
@@ -121,7 +120,7 @@ func (b *ModelBindings) SetProviderKey(providerID, value string) error {
 	if err := ctx.Err(); err != nil {
 		return publicError(b.runtime, "ModelBindings.SetProviderKey.context", err)
 	}
-	if err := service.ModelConfig.SetProviderKey(strings.TrimSpace(providerID), value); err != nil {
+	if err := service.ModelConfig.SetProviderKey(providerID, value); err != nil {
 		return publicError(b.runtime, "ModelBindings.SetProviderKey", err)
 	}
 	return nil
@@ -143,19 +142,21 @@ func (b *ModelBindings) ListProviderModels(providerID string) ([]string, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	models, err := service.ModelConfig.DiscoverProviderModels(ctx, strings.TrimSpace(providerID))
+	models, err := service.ModelConfig.DiscoverProviderModels(ctx, providerID)
 	if err != nil {
 		return nil, publicError(b.runtime, "ModelBindings.ListProviderModels", err)
 	}
 	return append([]string{}, models...), nil
 }
 
-func trimmedLevels(levels []string) []string {
-	result := make([]string, 0, len(levels))
-	for _, level := range levels {
-		if level = strings.TrimSpace(level); level != "" {
-			result = append(result, level)
-		}
+// ReloadConfig 从磁盘重新读取 Praxis 配置；失败时保留原运行时配置。
+func (b *ModelBindings) ReloadConfig() error {
+	ctx, service, err := b.runtime.BindingContext()
+	if err != nil {
+		return err
 	}
-	return result
+	if err := service.ModelConfig.ReloadConfig(ctx); err != nil {
+		return publicError(b.runtime, "ModelBindings.ReloadConfig", err)
+	}
+	return nil
 }

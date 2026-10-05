@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	runtimecontract "praxis/internal/agent_runtime"
 	"praxis/internal/infra/providers/streaming"
-	runtimecontract "praxis/internal/runtime"
 )
 
 type streamDecoder struct{}
@@ -21,12 +21,29 @@ func (streamDecoder) Decode(
 	emit streaming.EmitFunc,
 ) (string, error) {
 	calls := map[int]*streaming.ToolAccumulator{}
+	var usage *runtimecontract.ModelUsage
+	var stopReason string
+	finished := false
+	finish := func() (string, error) {
+		if err := emitChatTools(emit, calls); err != nil {
+			return "", err
+		}
+		if usage != nil {
+			if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
+				return "", err
+			}
+		}
+		return stopReason, nil
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
 		event, err := reader.Next()
 		if errors.Is(err, io.EOF) {
+			if finished {
+				return finish()
+			}
 			return "", streaming.ErrUnexpectedEOF
 		}
 		if err != nil {
@@ -34,12 +51,16 @@ func (streamDecoder) Decode(
 		}
 		data := strings.TrimSpace(event.Data)
 		if data == "[DONE]" {
-			if err := emitChatTools(emit, calls); err != nil {
-				return "", err
-			}
-			return "", nil
+			return finish()
 		}
 		var chunk struct {
+			Usage *struct {
+				PromptTokens        *int64 `json:"prompt_tokens"`
+				CompletionTokens    *int64 `json:"completion_tokens"`
+				PromptTokensDetails *struct {
+					CachedTokens *int64 `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
+			} `json:"usage"`
 			Choices []struct {
 				Delta struct {
 					Content          string `json:"content"`
@@ -58,6 +79,18 @@ func (streamDecoder) Decode(
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return "", fmt.Errorf("decode openai chat stream event: %w", err)
+		}
+		if chunk.Usage != nil && chunk.Usage.PromptTokens != nil {
+			candidate := &runtimecontract.ModelUsage{
+				InputTokens:  *chunk.Usage.PromptTokens,
+				OutputTokens: chunk.Usage.CompletionTokens,
+			}
+			if chunk.Usage.PromptTokensDetails != nil {
+				candidate.CacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			}
+			if candidate.Valid() {
+				usage = candidate
+			}
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -94,10 +127,8 @@ func (streamDecoder) Decode(
 			call.Arguments += delta.Function.Arguments
 		}
 		if choice.FinishReason != "" {
-			if err := emitChatTools(emit, calls); err != nil {
-				return "", err
-			}
-			return choice.FinishReason, nil
+			stopReason = choice.FinishReason
+			finished = true
 		}
 	}
 }

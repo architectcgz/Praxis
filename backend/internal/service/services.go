@@ -1,14 +1,14 @@
 // Package service 实现桌面 binding 所依赖的前端端口集。
 //
-// 它是 Wails binding 与 core 之间唯一的适配点：将前端端口签名转换为 service 用例参数，
+// 它是 Wails binding 与具体用例服务之间唯一的适配点：将前端端口签名转换为 service 用例参数，
 // 不直接访问 repository 或 store，也不依赖 Wails 包。
 package service
 
 import (
 	"praxis/internal/contracts"
-	projectmodel "praxis/internal/project"
-	sessionmodel "praxis/internal/session"
-	workspacemodel "praxis/internal/workspace"
+	projectmodel "praxis/internal/core/project"
+	sessionmodel "praxis/internal/core/session"
+	workspacemodel "praxis/internal/core/workspace"
 
 	"context"
 	"errors"
@@ -17,63 +17,66 @@ import (
 	"strings"
 	"sync"
 
+	runtimecontract "praxis/internal/agent_runtime"
 	"praxis/internal/logging"
 	appmodelconfig "praxis/internal/modelconfig"
-	runtimecontract "praxis/internal/runtime"
-	agentruntime "praxis/internal/runtime/agent"
 	applicationagent "praxis/internal/service/agent"
-	executioncontrol "praxis/internal/service/execution/control"
-	executionqueue "praxis/internal/service/execution/queue"
-	executionsettlement "praxis/internal/service/execution/settlement"
-	executionstart "praxis/internal/service/execution/start"
 	applicationproject "praxis/internal/service/project"
 	applicationsession "praxis/internal/service/session"
+	turncontrol "praxis/internal/service/turn/control"
+	turnqueue "praxis/internal/service/turn/queue"
+	turnsettlement "praxis/internal/service/turn/settlement"
+	turnstart "praxis/internal/service/turn/start"
 )
 
 // Config 收集实现前端端口所需的 service 与配置适配器。
 type Config struct {
-	Agents      *applicationagent.Service
-	Projects    *applicationproject.Service
-	Sessions    *applicationsession.Service
-	Controls    *executioncontrol.Service
-	Queues      *executionqueue.Service
-	Settlements *executionsettlement.Service
-	Starts      *executionstart.Service
-	Models      appmodelconfig.Editor
-	AgentConfig appmodelconfig.AgentDefinitions
-	Events      *EventPublisher
-	Logger      *logging.Logger
+	Agents       *applicationagent.Service
+	Projects     *applicationproject.Service
+	Sessions     *applicationsession.Service
+	Controls     *turncontrol.Service
+	Queues       *turnqueue.Service
+	Settlements  *turnsettlement.Service
+	Starts       *turnstart.Service
+	Models       appmodelconfig.Editor
+	AgentConfig  appmodelconfig.AgentDefinitions
+	ReloadConfig func(context.Context) error
+	Events       *EventPublisher
+	Logger       *logging.Logger
 }
 
 // Services 是前端端口的实现，由组合根装配后交给 wails 层。
 type Services struct {
-	agents      *applicationagent.Service
-	projects    *applicationproject.Service
-	sessions    *applicationsession.Service
-	controls    *executioncontrol.Service
-	queues      *executionqueue.Service
-	settlements *executionsettlement.Service
-	starts      *executionstart.Service
-	models      appmodelconfig.Editor
-	agentConfig appmodelconfig.AgentDefinitions
-	events      *EventPublisher
-	logger      *logging.Logger
+	agents       *applicationagent.Service
+	projects     *applicationproject.Service
+	sessions     *applicationsession.Service
+	controls     *turncontrol.Service
+	queues       *turnqueue.Service
+	settlements  *turnsettlement.Service
+	starts       *turnstart.Service
+	models       appmodelconfig.Editor
+	agentConfig  appmodelconfig.AgentDefinitions
+	reloadConfig func(context.Context) error
+	configMu     sync.RWMutex
+	events       *EventPublisher
+	logger       *logging.Logger
 }
 
 // New 组装实现。可选依赖（AgentConfig、Events）留空时会退化为安全默认行为。
 func New(config Config) *Services {
 	return &Services{
-		agents:      config.Agents,
-		projects:    config.Projects,
-		sessions:    config.Sessions,
-		controls:    config.Controls,
-		queues:      config.Queues,
-		settlements: config.Settlements,
-		starts:      config.Starts,
-		models:      config.Models,
-		agentConfig: config.AgentConfig,
-		events:      config.Events,
-		logger:      logging.NewFactory().Ensure(config.Logger),
+		agents:       config.Agents,
+		projects:     config.Projects,
+		sessions:     config.Sessions,
+		controls:     config.Controls,
+		queues:       config.Queues,
+		settlements:  config.Settlements,
+		starts:       config.Starts,
+		models:       config.Models,
+		agentConfig:  config.AgentConfig,
+		reloadConfig: config.ReloadConfig,
+		events:       config.Events,
+		logger:       logging.NewFactory().Ensure(config.Logger),
 	}
 }
 
@@ -105,6 +108,21 @@ func (s *Services) GetSessionView(
 	return s.sessions.GetSessionView(ctx, sessionID, limit)
 }
 
+// DeleteSession 删除指定会话和关联文档。
+func (s *Services) DeleteSession(ctx context.Context, sessionID contracts.SessionID) error {
+	return s.sessions.DeleteSession(ctx, sessionID)
+}
+
+// PreviewFile 返回当前会话工作区内的文本快照；越界、非文本或过大文件返回错误。
+func (s *Services) PreviewFile(ctx context.Context, sessionID contracts.SessionID, path string) (applicationsession.FilePreview, error) {
+	return s.sessions.PreviewFile(ctx, sessionID, path)
+}
+
+// RenameSession 更新指定会话的标题。
+func (s *Services) RenameSession(ctx context.Context, sessionID contracts.SessionID, title string) error {
+	return s.sessions.RenameSession(ctx, sessionID, title)
+}
+
 func (s *Services) GetAgentView(
 	ctx context.Context,
 	agentID contracts.AgentID,
@@ -117,7 +135,7 @@ func (s *Services) ListAgentMessages(
 	ctx context.Context,
 	agentID contracts.AgentID,
 	limit int,
-) ([]runtimecontract.AgentSessionMessage, error) {
+) ([]sessionmodel.MessageData, error) {
 	return s.agents.ListAgentMessages(ctx, agentID, limit)
 }
 
@@ -147,27 +165,38 @@ func (s *Services) CreateSessionForProject(
 	workspaceID contracts.WorkspaceID,
 	definitionID contracts.AgentDefinitionID,
 ) (applicationsession.CreateResult, error) {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
 	return s.sessions.CreateSessionForProject(ctx, sessionID, agentID, requestID, projectID, workspaceID, definitionID)
 }
 
-func (s *Services) SendInput(ctx context.Context, params executionstart.SendInputParams) (executionstart.Result, error) {
-	agent, built, err := s.sessions.BuildExecutionContext(
+func (s *Services) SendInput(ctx context.Context, params turnstart.SendInputParams) (turnstart.Result, error) {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	params.Content = strings.TrimSpace(params.Content)
+	params.ProviderID = strings.TrimSpace(params.ProviderID)
+	params.ModelID = strings.TrimSpace(params.ModelID)
+	params.ReasoningLevel = strings.TrimSpace(params.ReasoningLevel)
+	agent, built, err := s.sessions.BuildModelContext(
 		ctx, params.SessionID, params.AgentID, params.RequestID, params.Content,
 	)
 	if err != nil {
-		return executionstart.Result{}, err
+		return turnstart.Result{}, err
 	}
 	params.AgentID = agent.ID
 	params.Context = built
 	return s.starts.SendInput(ctx, params)
 }
 
-func (s *Services) Resume(ctx context.Context, params executionstart.ResumeParams) (executionstart.Result, error) {
-	agent, built, err := s.sessions.BuildExecutionContext(
+func (s *Services) Resume(ctx context.Context, params turnstart.ResumeParams) (turnstart.Result, error) {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	params.Content = strings.TrimSpace(params.Content)
+	agent, built, err := s.sessions.BuildModelContext(
 		ctx, "", params.AgentID, params.RequestID, params.Content,
 	)
 	if err != nil {
-		return executionstart.Result{}, err
+		return turnstart.Result{}, err
 	}
 	params.AgentID = agent.ID
 	params.Context = built
@@ -176,24 +205,26 @@ func (s *Services) Resume(ctx context.Context, params executionstart.ResumeParam
 
 func (s *Services) PauseAgent(
 	ctx context.Context,
-	params executioncontrol.Params,
-) (executioncontrol.Result, error) {
+	params turncontrol.Params,
+) (turncontrol.Result, error) {
 	return s.controls.PauseAgent(ctx, params)
 }
 
 func (s *Services) CloseAgent(
 	ctx context.Context,
-	params executioncontrol.Params,
-) (executioncontrol.Result, error) {
+	params turncontrol.Params,
+) (turncontrol.Result, error) {
 	return s.controls.CloseAgent(ctx, params)
 }
 
-func (s *Services) EnqueueWork(ctx context.Context, params executionqueue.EnqueueParams) (executionqueue.EnqueueResult, error) {
+func (s *Services) EnqueueWork(ctx context.Context, params turnqueue.EnqueueParams) (turnqueue.EnqueueResult, error) {
 	return s.queues.EnqueueWork(ctx, params)
 }
 
 // ListModels 返回已确认的模型能力，并补上引用该模型的所有 Agent。
 func (s *Services) ListModels() []appmodelconfig.Option {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
 	if s.models == nil {
 		return []appmodelconfig.Option{}
 	}
@@ -217,6 +248,8 @@ func (s *Services) ModelConfig() appmodelconfig.Config {
 
 // SaveModelConfig 校验并持久化整份模型配置。保存后立即对运行中的编排层生效。
 func (s *Services) SaveModelConfig(config appmodelconfig.Config) error {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
 	if s.models == nil {
 		return errors.New("model registry is not available")
 	}
@@ -234,6 +267,8 @@ func (s *Services) SaveModelConfig(config appmodelconfig.Config) error {
 
 // SetProviderKey 写入或清除一个已配置 Provider 的 API key。
 func (s *Services) SetProviderKey(providerID, value string) error {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
 	if s.models == nil {
 		return errors.New("model registry is not available")
 	}
@@ -262,29 +297,29 @@ func (s *Services) DiscoverProviderModels(ctx context.Context, providerID string
 }
 
 // SubscribeAgentEvents 注册瞬时 Agent runtime 事件的监听者。收到 settled 通知后，
-// 消费方必须改以 durable transcript 为准。
-func (s *Services) SubscribeAgentEvents(observer agentruntime.AgentEventObserver) func() {
+// 消费方应重新查询持久化消息和执行状态。
+func (s *Services) SubscribeAgentEvents(observer runtimecontract.AgentEventObserver) func() {
 	if s == nil || s.events == nil {
 		return func() {}
 	}
 	return s.events.Subscribe(observer)
 }
 
-// EventPublisher 扇出瞬时 Agent runtime 事件，不给它 durable ownership。
-// 调用方必须在结算后改查 transcript。
+// EventPublisher 扇出瞬时 Agent runtime 事件，不拥有持久化状态。
+// 调用方应在结算后重新查询消息和执行状态。
 type EventPublisher struct {
 	mu        sync.RWMutex
 	nextID    uint64
-	observers map[uint64]agentruntime.AgentEventObserver
+	observers map[uint64]runtimecontract.AgentEventObserver
 }
 
 // NewEventPublisher 创建空的 Agent 事件扇出器。
 func NewEventPublisher() *EventPublisher {
-	return &EventPublisher{observers: make(map[uint64]agentruntime.AgentEventObserver)}
+	return &EventPublisher{observers: make(map[uint64]runtimecontract.AgentEventObserver)}
 }
 
 // Subscribe 注册监听者并返回注销函数。
-func (p *EventPublisher) Subscribe(observer agentruntime.AgentEventObserver) func() {
+func (p *EventPublisher) Subscribe(observer runtimecontract.AgentEventObserver) func() {
 	if p == nil || observer == nil {
 		return func() {}
 	}
@@ -301,12 +336,12 @@ func (p *EventPublisher) Subscribe(observer agentruntime.AgentEventObserver) fun
 }
 
 // Publish 把一条输出事件交给当前所有监听者。
-func (p *EventPublisher) Publish(event agentruntime.AgentEvent) {
-	if p == nil || event.AgentID == "" || event.ExecutionID == "" {
+func (p *EventPublisher) Publish(event runtimecontract.AgentEvent) {
+	if p == nil || event.AgentID == "" || event.TurnID == "" {
 		return
 	}
 	p.mu.RLock()
-	observers := make([]agentruntime.AgentEventObserver, 0, len(p.observers))
+	observers := make([]runtimecontract.AgentEventObserver, 0, len(p.observers))
 	for _, observer := range p.observers {
 		observers = append(observers, observer)
 	}
@@ -314,4 +349,21 @@ func (p *EventPublisher) Publish(event agentruntime.AgentEvent) {
 	for _, observer := range observers {
 		observer(event)
 	}
+}
+
+// ReloadConfig 重新读取全部配置，校验失败时保留当前运行时快照。
+func (s *Services) ReloadConfig(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.reloadConfig == nil {
+		return errors.New("configuration reload is not available")
+	}
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	if err := s.reloadConfig(ctx); err != nil {
+		return err
+	}
+	s.logger.Infof("configuration reloaded")
+	return nil
 }

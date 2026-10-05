@@ -39,11 +39,10 @@ func NormalizePathArguments(
 	if call.Name != name {
 		return toolcontracts.NormalizedToolCall{}, errors.New("tool is not registered")
 	}
-	call = call.Snapshot()
-	if err := RejectDuplicateFields(call.Input); err != nil {
+	if err := RejectDuplicateFields(call.Arguments); err != nil {
 		return invalidArguments(err.Error())
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Input))
+	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
 	decoder.DisallowUnknownFields()
 	var toolInput pathInput
 	if err := decoder.Decode(&toolInput); err != nil {

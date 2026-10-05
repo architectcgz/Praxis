@@ -1,8 +1,9 @@
 package readfile
 
 import (
-	toolmodel "praxis/internal/tool_invocation"
+	toolmodel "praxis/internal/core/tool_invocation"
 	toolcontracts "praxis/internal/tools/contracts"
+	"praxis/internal/utils/pathutil"
 
 	"context"
 	"encoding/json"
@@ -10,8 +11,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"unicode/utf8"
 )
 
@@ -27,7 +26,7 @@ type output struct {
 // Execute reads an authorized UTF-8 regular file and returns one bounded page.
 func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
-		return toolcontracts.ToolResult{}, errors.New("tool execution context is required")
+		return toolcontracts.ToolResult{}, errors.New("tool turn context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err
@@ -35,7 +34,6 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 	if call.Name != toolcontracts.ToolReadFile {
 		return toolcontracts.ToolResult{}, errors.New("read_file executor does not support the call")
 	}
-	call = call.Snapshot()
 	var toolArguments arguments
 	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil {
 		return toolcontracts.ToolResult{}, errors.New("normalized read_file arguments are invalid")
@@ -170,7 +168,7 @@ func encodeOutput(toolArguments arguments, offset int, fileSize int64, content s
 func authorizedRealFile(path string, scopes []string) bool {
 	cleanPath := filepath.Clean(path)
 	realPath, err := filepath.EvalSymlinks(cleanPath)
-	if err != nil || !samePath(cleanPath, realPath) {
+	if err != nil || !pathutil.SamePath(cleanPath, realPath) {
 		return false
 	}
 	info, err := os.Stat(realPath)
@@ -179,26 +177,13 @@ func authorizedRealFile(path string, scopes []string) bool {
 	}
 	for _, scope := range scopes {
 		cleanScope := filepath.Clean(scope)
-		if !pathWithin(cleanScope, cleanPath) {
+		if !pathutil.IsWithin(cleanScope, cleanPath) {
 			continue
 		}
 		realScope, err := filepath.EvalSymlinks(cleanScope)
-		if err == nil && samePath(cleanScope, realScope) && pathWithin(realScope, realPath) {
+		if err == nil && pathutil.SamePath(cleanScope, realScope) && pathutil.IsWithin(realScope, realPath) {
 			return true
 		}
 	}
 	return false
-}
-
-func samePath(left, right string) bool {
-	left, right = filepath.Clean(left), filepath.Clean(right)
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(left, right)
-	}
-	return left == right
-}
-
-func pathWithin(root, candidate string) bool {
-	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }

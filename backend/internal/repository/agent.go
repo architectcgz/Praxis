@@ -1,8 +1,8 @@
 package repository
 
 import (
-	agentmodel "praxis/internal/agent"
 	"praxis/internal/contracts"
+	agentmodel "praxis/internal/core/agent"
 
 	"context"
 )

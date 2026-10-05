@@ -27,17 +27,23 @@ func Encode(code, message string) string {
 	return string(encoded)
 }
 
-// PublicError 只做出口序列化：
-//   - 业务错误：原样透传其业务码，message 留空由前端按码取文案；
-//   - 上下文错误：映射为传输码；
-//   - 未知错误：收敛为 internal_error，避免泄漏内部信息。
+// PublicError 保留业务码和错误详情，供桌面端显示具体失败原因。
+// 仅有业务码或属于取消、超时的错误由前端提供文案；未知错误使用 internal_error。
 func PublicError(err error) error {
 	if err == nil {
 		return nil
 	}
+	var encoded codedError
+	if errors.As(err, &encoded) {
+		return encoded
+	}
 	var coded Coded
 	if errors.As(err, &coded) {
-		return codedError{code: coded.ErrorCode()}
+		message := err.Error()
+		if message == coded.ErrorCode() {
+			message = ""
+		}
+		return codedError{code: coded.ErrorCode(), message: message}
 	}
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -45,17 +51,12 @@ func PublicError(err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return codedError{code: ErrorCodeRequestTimeout.String()}
 	}
-	return codedError{code: ErrorCodeInternal.String()}
+	return codedError{code: ErrorCodeInternal.String(), message: err.Error()}
 }
 
 // CodedError 构造 app 层自身的错误码错误，无附加信息。
 func CodedError(code ErrorCode) error {
 	return codedError{code: code.String()}
-}
-
-// CodedErrorf 构造 app 层错误码错误，并携带具体信息（如字段校验细节）。
-func CodedErrorf(code ErrorCode, message string) error {
-	return codedError{code: code.String(), message: message}
 }
 
 type codedError struct {

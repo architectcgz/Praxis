@@ -28,11 +28,6 @@ func (m ApprovalMode) Valid() bool {
 	return m == ApprovalAlwaysAsk || m == ApprovalAutoApproveDefaults || m == ApprovalYolo
 }
 
-// SkipsCommandConfirmation reports whether an already authorized command may execute without a user prompt.
-func (m ApprovalMode) SkipsCommandConfirmation() bool {
-	return m == ApprovalYolo
-}
-
 type ApprovalRecord struct {
 	Source            ApprovalSource
 	PolicyFingerprint string
@@ -50,10 +45,6 @@ func (a ApprovalRecord) Validate() error {
 		return InvalidValue("approval.policyFingerprint", "policy approval requires a fingerprint")
 	}
 	return nil
-}
-
-func NewUserApproval(at time.Time) ApprovalRecord {
-	return ApprovalRecord{Source: ApprovalSourceUser, ApprovedAt: at.UTC()}
 }
 
 func NewPolicyApproval(fingerprint string, at time.Time) (ApprovalRecord, error) {

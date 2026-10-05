@@ -1,5 +1,4 @@
-// Package document 负责将聚合的不可变 JSON 快照存放在关系型数据库之外：
-// SQLite 行只保存文档引用，聚合负载交给本包维护。
+// Package document 负责以内容寻址方式保存不可变 JSON 文档。
 package document
 
 import (
@@ -17,12 +16,11 @@ import (
 
 // Store 是基于内容寻址的文档存储：文档名由内容哈希决定，同一内容天然幂等复用。
 //
-// 业务约束：必须先发布文档、再提交 SQLite 引用（见 Put）。这样即使事务失败，
-// 也只会残留一份无人引用的文档，绝不会出现数据库引用指向缺失数据。
+// 业务约束：必须先发布文档、再提交日志中的文档引用（见 Put）。这样即使事务失败，
+// 也只会残留一份无人引用的文档，绝不会出现日志引用指向缺失数据。
 type Store struct {
-	root   string
-	memory map[string][]byte
-	mu     sync.RWMutex
+	root string
+	mu   sync.RWMutex
 }
 
 // New 创建落盘到文件系统的文档存储，root 为存储根目录。
@@ -34,14 +32,9 @@ func New(root string) (*Store, error) {
 	return &Store{root: filepath.Clean(root)}, nil
 }
 
-// NewMemory 创建仅存在于内存的文档存储，用于测试或无文件系统的嵌入式场景。
-func NewMemory() *Store {
-	return &Store{memory: make(map[string][]byte)}
-}
-
-// Put 校验并原子发布一份不可变 JSON 文档，返回可写入 SQLite 行的引用。
+// Put 校验并原子发布一份不可变 JSON 文档，返回可写入日志记录的引用。
 //
-// collection 与 id 代表业务维度（聚合类型与聚合 ID，如 execution/<id>），
+// collection 与 id 代表业务维度（聚合类型与聚合 ID，如 turn/<id>），
 // 二者共同决定目录；文件名由内容哈希决定，因此重复写入同一内容会直接复用。
 // 写入前会拒绝含敏感字段或非法路径片段的文档。
 func (s *Store) Put(ctx context.Context, collection, id string, value any) (string, error) {
@@ -71,12 +64,6 @@ func (s *Store) Put(ctx context.Context, collection, id string, value any) (stri
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.memory != nil {
-		if _, exists := s.memory[ref]; !exists {
-			s.memory[ref] = append([]byte(nil), encoded...)
-		}
-		return ref, nil
-	}
 	destination := filepath.Join(s.root, filepath.FromSlash(ref))
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return "", fmt.Errorf("create document directory: %w", err)
@@ -113,7 +100,7 @@ func (s *Store) Put(ctx context.Context, collection, id string, value any) (stri
 	return ref, nil
 }
 
-// Get 按 SQLite 行中的引用读取文档并反序列化到 target。
+// Get 按日志记录中的引用读取文档并反序列化到 target。
 // 引用格式非法或文档不存在时返回错误（不存在时返回 os.ErrNotExist）。
 func (s *Store) Get(ctx context.Context, ref string, target any) error {
 	if ctx == nil {
@@ -127,25 +114,36 @@ func (s *Store) Get(ctx context.Context, ref string, target any) error {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var encoded []byte
-	if s.memory != nil {
-		value, ok := s.memory[filepath.ToSlash(ref)]
-		if !ok {
-			return os.ErrNotExist
-		}
-		encoded = append([]byte(nil), value...)
-	} else {
-		value, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(ref)))
-		if errors.Is(err, os.ErrNotExist) {
-			return os.ErrNotExist
-		}
-		if err != nil {
-			return fmt.Errorf("read document: %w", err)
-		}
-		encoded = value
+	encoded, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(ref)))
+	if errors.Is(err, os.ErrNotExist) {
+		return os.ErrNotExist
+	}
+	if err != nil {
+		return fmt.Errorf("read document: %w", err)
 	}
 	if err := json.Unmarshal(encoded, target); err != nil {
 		return fmt.Errorf("decode document: %w", err)
+	}
+	return nil
+}
+
+// Remove 删除一份不再被业务日志引用的文档。
+func (s *Store) Remove(ctx context.Context, ref string) error {
+	if ctx == nil {
+		return errors.New("document removal context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !isValidDocumentRef(ref) {
+		return errors.New("document reference is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.Remove(filepath.Join(s.root, filepath.FromSlash(ref))); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("remove document: %w", err)
 	}
 	return nil
 }
@@ -158,7 +156,7 @@ func isValidDocumentKeyPart(value string) bool {
 }
 
 // isValidDocumentRef 判断 value 是否为格式正确的内容寻址引用，
-// 即 SQLite 行中保存的 <collection>/<id>/sha256-<hex>.json。
+// 即 日志记录中保存的 <collection>/<id>/sha256-<hex>.json。
 func isValidDocumentRef(value string) bool {
 	value = filepath.ToSlash(strings.TrimSpace(value))
 	if value == "" || filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\r\n") {

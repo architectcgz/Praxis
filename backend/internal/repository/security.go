@@ -2,7 +2,7 @@ package repository
 
 import (
 	"praxis/internal/contracts"
-	securitymodel "praxis/internal/security"
+	securitymodel "praxis/internal/core/security"
 
 	"context"
 )

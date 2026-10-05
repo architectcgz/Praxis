@@ -1,8 +1,9 @@
 package bash
 
 import (
-	toolmodel "praxis/internal/tool_invocation"
+	toolmodel "praxis/internal/core/tool_invocation"
 	toolcontracts "praxis/internal/tools/contracts"
+	"praxis/internal/utils/pathutil"
 
 	"bytes"
 	"context"
@@ -47,7 +48,7 @@ func (w *outputWriter) Write(value []byte) (int, error) {
 // Execute 在授权工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
 func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
-		return toolcontracts.ToolResult{}, errors.New("tool execution context is required")
+		return toolcontracts.ToolResult{}, errors.New("tool turn context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err
@@ -55,7 +56,6 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 	if call.Name != toolcontracts.ToolBash {
 		return toolcontracts.ToolResult{}, errors.New("bash executor does not support the call")
 	}
-	call = call.Snapshot()
 	if strings.TrimSpace(call.Path) == "" || !authorizedDirectory(call.Path, call.WriteScopes) {
 		return toolcontracts.ToolResult{}, errors.New("bash working directory is outside an authorized write scope")
 	}
@@ -169,7 +169,7 @@ func encodeOutput(toolOutput output) ([]byte, bool, error) {
 func authorizedDirectory(path string, scopes []string) bool {
 	cleanPath := filepath.Clean(path)
 	realPath, err := filepath.EvalSymlinks(cleanPath)
-	if err != nil || !samePath(cleanPath, realPath) {
+	if err != nil || !pathutil.SamePath(cleanPath, realPath) {
 		return false
 	}
 	info, err := os.Stat(realPath)
@@ -178,26 +178,13 @@ func authorizedDirectory(path string, scopes []string) bool {
 	}
 	for _, scope := range scopes {
 		cleanScope := filepath.Clean(scope)
-		if !pathWithin(cleanScope, cleanPath) {
+		if !pathutil.IsWithin(cleanScope, cleanPath) {
 			continue
 		}
 		realScope, err := filepath.EvalSymlinks(cleanScope)
-		if err == nil && samePath(cleanScope, realScope) && pathWithin(realScope, realPath) {
+		if err == nil && pathutil.SamePath(cleanScope, realScope) && pathutil.IsWithin(realScope, realPath) {
 			return true
 		}
 	}
 	return false
-}
-
-func samePath(left, right string) bool {
-	left, right = filepath.Clean(left), filepath.Clean(right)
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(left, right)
-	}
-	return left == right
-}
-
-func pathWithin(root, candidate string) bool {
-	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }

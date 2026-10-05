@@ -9,14 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
 
-	appcontext "praxis/internal/context"
+	runtimecontract "praxis/internal/agent_runtime"
+	appcontext "praxis/internal/core/context"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
-	runtimecontract "praxis/internal/runtime"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -84,7 +85,7 @@ func (p *Provider) Stream(
 		body["output_config"] = map[string]string{"effort": reasoning}
 	}
 	body["max_tokens"] = request.MaxOutputTokens
-	if strings.TrimSpace(request.Context.SystemPrompt) != "" {
+	if request.Context.SystemPrompt != "" {
 		body["system"] = request.Context.SystemPrompt
 	}
 	if len(request.Tools) > 0 {
@@ -152,6 +153,8 @@ func (messagesDecoder) Decode(
 	emit streaming.EmitFunc,
 ) (string, error) {
 	tools := map[int]*toolAccumulator{}
+	var usage *runtimecontract.ModelUsage
+	var stopReason string
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -161,15 +164,16 @@ func (messagesDecoder) Decode(
 			if err := emitTools(emit, tools); err != nil {
 				return "", err
 			}
-			return "", nil
+			return stopReason, nil
 		}
 		if err != nil {
 			return "", err
 		}
 		data := strings.TrimSpace(sseEvent.Data)
 		var event struct {
-			Type  string `json:"type"`
-			Index int    `json:"index"`
+			Type  string        `json:"type"`
+			Index int           `json:"index"`
+			Usage *messageUsage `json:"usage"`
 			Delta struct {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
@@ -182,11 +186,21 @@ func (messagesDecoder) Decode(
 				ID   string `json:"id"`
 				Name string `json:"name"`
 			} `json:"content_block"`
+			Message struct {
+				Usage *messageUsage `json:"usage"`
+			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			return "", fmt.Errorf("decode anthropic stream event: %w", err)
 		}
 		switch event.Type {
+		case "message_start":
+			usage = normalizeMessageUsage(event.Message.Usage)
+			if usage != nil {
+				if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
+					return "", err
+				}
+			}
 		case "content_block_start":
 			if event.ContentBlock.Type == "tool_use" {
 				tools[event.Index] = &toolAccumulator{id: event.ContentBlock.ID, name: event.ContentBlock.Name}
@@ -211,19 +225,62 @@ func (messagesDecoder) Decode(
 				}
 			}
 		case "message_delta":
-			if err := emitTools(emit, tools); err != nil {
-				return "", err
+			// message_delta 的输出计数是累计值，保留起始输入计数并替换输出。
+			if usage != nil && event.Usage != nil && event.Usage.OutputTokens != nil {
+				next := *usage
+				next.OutputTokens = event.Usage.OutputTokens
+				if next.Valid() && (usage.OutputTokens == nil || *next.OutputTokens >= *usage.OutputTokens) {
+					usage = &next
+					if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
+						return "", err
+					}
+				}
 			}
-			return event.Delta.StopReason, nil
+			if event.Delta.StopReason != "" {
+				stopReason = event.Delta.StopReason
+			}
 		case "message_stop":
 			if err := emitTools(emit, tools); err != nil {
 				return "", err
 			}
-			return "", nil
+			return stopReason, nil
 		case "error":
 			return "", errors.New("anthropic stream returned an error")
 		}
 	}
+}
+
+type messageUsage struct {
+	InputTokens              *int64 `json:"input_tokens"`
+	OutputTokens             *int64 `json:"output_tokens"`
+	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+}
+
+func normalizeMessageUsage(reported *messageUsage) *runtimecontract.ModelUsage {
+	if reported == nil || reported.InputTokens == nil || *reported.InputTokens < 0 {
+		return nil
+	}
+	// Anthropic 的 input_tokens 不含缓存读取和写入，统一分母时需补上两者。
+	total := *reported.InputTokens
+	for _, count := range []*int64{reported.CacheReadInputTokens, reported.CacheCreationInputTokens} {
+		if count != nil {
+			if *count < 0 || *count > math.MaxInt64-total {
+				return nil
+			}
+			total += *count
+		}
+	}
+	usage := &runtimecontract.ModelUsage{
+		InputTokens:              total,
+		OutputTokens:             reported.OutputTokens,
+		CacheReadInputTokens:     reported.CacheReadInputTokens,
+		CacheCreationInputTokens: reported.CacheCreationInputTokens,
+	}
+	if !usage.Valid() {
+		return nil
+	}
+	return usage
 }
 
 type toolAccumulator struct{ id, name, arguments string }
@@ -239,7 +296,7 @@ func emitTool(emit streaming.EmitFunc, tool *toolAccumulator) error {
 	return emit(runtimecontract.ModelStreamEvent{
 		Kind: runtimecontract.StreamToolCall,
 		ToolCall: toolcontracts.ToolCall{
-			ID: tool.id, Name: contracts.ToolName(tool.name), Input: args, Arguments: args,
+			ID: tool.id, Name: contracts.ToolName(tool.name), Arguments: args,
 		},
 	})
 }

@@ -1,7 +1,6 @@
 package contracts
 
-// SandboxMode fixes the filesystem and network boundary for command
-// It is copied into a runtime execution snapshot and cannot be changed by a running agent.
+// SandboxMode 固定命令的文件和网络边界，由 Turn 的 SecuritySnapshot 保存。
 type SandboxMode string
 
 const (
@@ -10,7 +9,7 @@ const (
 	SandboxWorkspaceNetwork SandboxMode = "workspace_network"
 )
 
-// Valid reports whether the mode is supported by the P1 execution policy.
+// Valid 判断当前 Sandbox 模式是否受支持。
 func (m SandboxMode) Valid() bool {
 	switch m {
 	case SandboxReadOnly, SandboxWorkspaceWrite, SandboxWorkspaceNetwork:

@@ -20,14 +20,6 @@ func (p AgentProfile) Valid() bool {
 	}
 }
 
-func ParseAgentProfile(raw string) (AgentProfile, error) {
-	profile := AgentProfile(raw)
-	if !profile.Valid() {
-		return "", InvalidValue("profile", "unknown agent profile")
-	}
-	return profile, nil
-}
-
 // Valid 判断定义 ID 是否可安全用作本地目录名。
 func (id AgentDefinitionID) Valid() bool {
 	raw := string(id)

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	agentruntime "praxis/internal/runtime/agent"
+	runtimecontract "praxis/internal/agent_runtime"
 )
 
 const agentEventName = "praxis:agent-event"
@@ -50,8 +50,8 @@ func (b *Bindings) All() []interface{} {
 }
 
 // EmitAgentEvent 把瞬时 Agent runtime 事件作为 Wails 事件推给前端。
-func (b *Bindings) EmitAgentEvent(event agentruntime.AgentEvent) {
-	if event.AgentID == "" || event.ExecutionID == "" {
+func (b *Bindings) EmitAgentEvent(event runtimecontract.AgentEvent) {
+	if event.AgentID == "" || event.TurnID == "" {
 		return
 	}
 	ctx := b.runtime.EventContext()

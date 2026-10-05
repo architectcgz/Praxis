@@ -5,22 +5,22 @@ import (
 	"errors"
 
 	"praxis/internal/contracts"
-	projectmodel "praxis/internal/project"
-	sessionmodel "praxis/internal/session"
-	workspacemodel "praxis/internal/workspace"
+	projectmodel "praxis/internal/core/project"
+	sessionmodel "praxis/internal/core/session"
+	workspacemodel "praxis/internal/core/workspace"
+	"praxis/internal/timing"
 
+	runtimecontract "praxis/internal/agent_runtime"
 	appmodelconfig "praxis/internal/modelconfig"
-	runtimecontract "praxis/internal/runtime"
-	agentruntime "praxis/internal/runtime/agent"
 	applicationagent "praxis/internal/service/agent"
-	executioncontrol "praxis/internal/service/execution/control"
-	executionqueue "praxis/internal/service/execution/queue"
-	executionstart "praxis/internal/service/execution/start"
 	applicationproject "praxis/internal/service/project"
 	applicationsession "praxis/internal/service/session"
+	turncontrol "praxis/internal/service/turn/control"
+	turnqueue "praxis/internal/service/turn/queue"
+	turnstart "praxis/internal/service/turn/start"
 )
 
-// 本文件定义 binding 层向 core 请求的窄接口集。
+// 本文件定义 binding 层向应用服务请求的窄接口集。
 //
 // 接口定义在消费方（此处），实现在 praxis/internal/service；只描述能力，
 // 不包含传输代码、DTO 与错误词汇。
@@ -38,21 +38,24 @@ type SessionService interface {
 	ListSessionsByProject(context.Context, contracts.ProjectID, int) ([]sessionmodel.Session, error)
 	CreateSessionForProject(context.Context, contracts.SessionID, contracts.AgentID, contracts.RequestID, contracts.ProjectID, contracts.WorkspaceID, contracts.AgentDefinitionID) (applicationsession.CreateResult, error)
 	GetSessionView(context.Context, contracts.SessionID, int) (applicationsession.SessionView, error)
+	DeleteSession(context.Context, contracts.SessionID) error
+	RenameSession(context.Context, contracts.SessionID, string) error
+	PreviewFile(context.Context, contracts.SessionID, string) (applicationsession.FilePreview, error)
 }
 
-// AgentService 暴露 Agent 详情与 transcript 消息。
+// AgentService 暴露 Agent 详情和专属消息流。
 type AgentService interface {
 	GetAgentView(context.Context, contracts.AgentID, int) (applicationagent.AgentView, error)
-	ListAgentMessages(context.Context, contracts.AgentID, int) ([]runtimecontract.AgentSessionMessage, error)
+	ListAgentMessages(context.Context, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
 }
 
 // AgentCommands 接收持久化的 Agent 执行与控制命令。
 type AgentCommands interface {
-	SendInput(context.Context, executionstart.SendInputParams) (executionstart.Result, error)
-	Resume(context.Context, executionstart.ResumeParams) (executionstart.Result, error)
-	PauseAgent(context.Context, executioncontrol.Params) (executioncontrol.Result, error)
-	CloseAgent(context.Context, executioncontrol.Params) (executioncontrol.Result, error)
-	EnqueueWork(context.Context, executionqueue.EnqueueParams) (executionqueue.EnqueueResult, error)
+	SendInput(context.Context, turnstart.SendInputParams) (turnstart.Result, error)
+	Resume(context.Context, turnstart.ResumeParams) (turnstart.Result, error)
+	PauseAgent(context.Context, turncontrol.Params) (turncontrol.Result, error)
+	CloseAgent(context.Context, turncontrol.Params) (turncontrol.Result, error)
+	EnqueueWork(context.Context, turnqueue.EnqueueParams) (turnqueue.EnqueueResult, error)
 }
 
 // ModelCatalog 列出已确认的模型标签与能力。
@@ -64,14 +67,25 @@ type ModelCatalog interface {
 type ModelConfigEditor interface {
 	ModelConfig() appmodelconfig.Config
 	SaveModelConfig(appmodelconfig.Config) error
+	ReloadConfig(context.Context) error
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
 	DiscoverProviderModels(context.Context, string) ([]string, error)
 }
 
-// AgentEventSource 流出单次 execution 的瞬时 runtime 事件。
+// AgentEventSource 流出单次 turn 的瞬时 runtime 事件。
 type AgentEventSource interface {
-	SubscribeAgentEvents(agentruntime.AgentEventObserver) func()
+	SubscribeAgentEvents(runtimecontract.AgentEventObserver) func()
+}
+
+// TimingService 独立查询计时事实，不读取或改写消息正文。
+type TimingService interface {
+	ListAgent(context.Context, string, int) ([]timing.Record, error)
+}
+
+// UsageService 查询会话完整的请求用量，不受消息和计时分页影响。
+type UsageService interface {
+	ListSession(context.Context, string) ([]runtimecontract.ModelUsageRecord, error)
 }
 
 // Services 是 binding 层所需的全部窄能力。
@@ -83,6 +97,8 @@ type Services struct {
 	Models      ModelCatalog
 	ModelConfig ModelConfigEditor
 	Events      AgentEventSource
+	Timings     TimingService
+	Usages      UsageService
 }
 
 // Validate 检查所有前端服务都已注入。
@@ -102,6 +118,10 @@ func (s Services) Validate() error {
 		return errors.New("frontend model configuration editor is required")
 	case s.Events == nil:
 		return errors.New("frontend agent event source is required")
+	case s.Timings == nil:
+		return errors.New("frontend timing service is required")
+	case s.Usages == nil:
+		return errors.New("frontend token usage service is required")
 	default:
 		return nil
 	}

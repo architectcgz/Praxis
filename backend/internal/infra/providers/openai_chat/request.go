@@ -1,6 +1,6 @@
 package openaichat
 
-import appcontext "praxis/internal/context"
+import appcontext "praxis/internal/core/context"
 
 func chatMessageFromContext(entry appcontext.ContextEntry) chatMessage {
 	result := chatMessage{Role: string(entry.Role)}

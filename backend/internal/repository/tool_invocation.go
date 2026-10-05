@@ -2,7 +2,7 @@ package repository
 
 import (
 	"praxis/internal/contracts"
-	toolmodel "praxis/internal/tool_invocation"
+	toolmodel "praxis/internal/core/tool_invocation"
 
 	"context"
 )
@@ -11,11 +11,16 @@ import (
 type ToolInvocationRepository interface {
 	Get(ctx context.Context, id contracts.ToolInvocationID) (toolmodel.ToolInvocation, error)
 
-	FindByExecutionCall(
+	FindByTurnCall(
 		ctx context.Context,
-		executionID contracts.AgentExecutionID,
+		turnID contracts.TurnID,
 		providerToolCallID string,
 	) (toolmodel.ToolInvocation, error)
+
+	ListUnsettledByTurn(
+		ctx context.Context,
+		turnID contracts.TurnID,
+	) ([]toolmodel.ToolInvocation, error)
 
 	Save(ctx context.Context, invocation toolmodel.ToolInvocation) error
 }

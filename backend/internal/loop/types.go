@@ -1,10 +1,10 @@
 package loop
 
 import (
-	appcontext "praxis/internal/context"
+	appcontext "praxis/internal/core/context"
 	toolcontracts "praxis/internal/tools/contracts"
 
-	runtimecontract "praxis/internal/runtime"
+	runtimecontract "praxis/internal/agent_runtime"
 )
 
 type (
@@ -15,8 +15,8 @@ type (
 	ToolCall                   = toolcontracts.ToolCall
 	ToolDefinition             = toolcontracts.ToolDefinition
 	ToolInvocationMetadata     = runtimecontract.ToolInvocationMetadata
-	ExecutionContext           = appcontext.ExecutionContext
-	ExecutionModel             = runtimecontract.ExecutionModel
+	ModelContext               = appcontext.ModelContext
+	TurnModel                  = runtimecontract.TurnModel
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
@@ -24,6 +24,7 @@ const (
 	StreamTextDelta     = runtimecontract.StreamTextDelta
 	StreamThinkingDelta = runtimecontract.StreamThinkingDelta
 	StreamToolCall      = runtimecontract.StreamToolCall
+	StreamUsage         = runtimecontract.StreamUsage
 	StreamComplete      = runtimecontract.StreamComplete
 	StreamError         = runtimecontract.StreamError
 )

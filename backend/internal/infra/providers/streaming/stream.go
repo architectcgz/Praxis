@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	runtimecontract "praxis/internal/agent_runtime"
 	"praxis/internal/infra/providers"
-	runtimecontract "praxis/internal/runtime"
 )
 
 type EmitFunc func(runtimecontract.ModelStreamEvent) error

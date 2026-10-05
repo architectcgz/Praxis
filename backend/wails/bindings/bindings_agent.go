@@ -1,11 +1,10 @@
 package bindings
 
 import (
-	appcontext "praxis/internal/context"
 	"praxis/internal/contracts"
-	executionmodel "praxis/internal/execution"
-
-	runtimecontract "praxis/internal/runtime"
+	agentmodel "praxis/internal/core/agent"
+	sessionmodel "praxis/internal/core/session"
+	turnmodel "praxis/internal/core/turn"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"sort"
@@ -29,20 +28,20 @@ func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 		return dto.AgentSnapshot{}, publicError(b.runtime, "AgentBindings.GetAgent", err)
 	}
 	result := dto.AgentSnapshot{
-		ID: view.Agent.ID.String(), SessionID: view.Agent.SessionID.String(),
+		ID: view.Agent.ID.String(), Name: agentmodel.DisplayName(view.Agent.DefinitionID), SessionID: view.Agent.SessionID.String(),
 		DefinitionID:           view.Agent.DefinitionID.String(),
 		SecurityPolicyRevision: view.Agent.SecurityPolicyRevision,
 		Profile:                string(view.Agent.Profile),
 		State:                  string(view.Agent.State),
-		CurrentExecution:       view.Agent.CurrentExecutionID.String(),
-		ExecutionIDs:           make([]string, 0, len(view.Executions)),
-		Executions:             make([]dto.ExecutionSnapshot, 0, len(view.Executions)),
+		CurrentTurn:            view.Agent.CurrentTurnID.String(),
+		TurnIDs:                make([]string, 0, len(view.Turns)),
+		Turns:                  make([]dto.TurnSnapshot, 0, len(view.Turns)),
 		WaitConditionIDs:       make([]string, 0, len(view.Waits)),
 		ControlCommandIDs:      make([]string, 0, len(view.Controls)),
 	}
-	for _, execution := range view.Executions {
-		result.ExecutionIDs = append(result.ExecutionIDs, execution.ID.String())
-		result.Executions = append(result.Executions, executionSnapshot(execution))
+	for _, turn := range view.Turns {
+		result.TurnIDs = append(result.TurnIDs, turn.ID.String())
+		result.Turns = append(result.Turns, turnSnapshot(turn))
 	}
 	for _, wait := range view.Waits {
 		result.WaitConditionIDs = append(result.WaitConditionIDs, wait.ID.String())
@@ -90,27 +89,27 @@ func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem
 	if err != nil {
 		return nil, publicError(b.runtime, "AgentBindings.ListAgentHistory.view", err)
 	}
-	result := make([]dto.AgentHistoryItem, 0, len(messages)+len(view.Executions))
+	result := make([]dto.AgentHistoryItem, 0, len(messages)+len(view.Turns))
 	for _, message := range messages {
 		value, visible := publicAgentMessage(message)
 		if !visible {
 			continue
 		}
 		result = append(result, dto.AgentHistoryItem{
-			Kind: "message", At: message.At, Sequence: message.Sequence, Message: &value,
+			Kind: "message", At: message.CreatedAt, Sequence: message.Sequence, Message: &value,
 		})
 	}
-	for _, execution := range view.Executions {
-		if execution.Status != executionmodel.ExecutionSettled || execution.Outcome != executionmodel.ExecutionFailed {
+	for _, turn := range view.Turns {
+		if turn.Status != turnmodel.TurnSettled || turn.Outcome != turnmodel.TurnFailed {
 			continue
 		}
-		at := execution.SettledAt
+		at := turn.SettledAt
 		if at.IsZero() {
-			at = execution.CreatedAt
+			at = turn.CreatedAt
 		}
-		value := executionSnapshot(execution)
+		value := turnSnapshot(turn)
 		result = append(result, dto.AgentHistoryItem{
-			Kind: "execution", At: at, Execution: &value,
+			Kind: "turn", At: at, Turn: &value,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -122,50 +121,42 @@ func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem
 	return result, nil
 }
 
-func publicAgentMessage(message runtimecontract.AgentSessionMessage) (dto.AgentMessage, bool) {
-	content := message.Content
-	if len(message.Blocks) > 0 {
-		var text strings.Builder
-		for _, block := range message.Blocks {
-			if block.Kind == "text" {
-				text.WriteString(block.Text)
-			}
+func publicAgentMessage(value sessionmodel.MessageData) (dto.AgentMessage, bool) {
+	var content strings.Builder
+	var thinking strings.Builder
+	blocks := make([]dto.AgentMessageBlock, 0, len(value.Blocks))
+	for _, block := range value.Blocks {
+		if block.Kind == sessionmodel.BlockText {
+			content.WriteString(block.Text)
 		}
-		content = text.String()
+		if block.Kind == sessionmodel.BlockThinking {
+			thinking.WriteString(block.Text)
+		}
+		if block.Kind == sessionmodel.BlockText || block.Kind == sessionmodel.BlockThinking ||
+			block.Kind == sessionmodel.BlockToolCall || block.Kind == sessionmodel.BlockToolResult {
+			blocks = append(blocks, dto.AgentMessageBlock{
+				Kind: string(block.Kind), Text: block.Text, CallID: block.CallID, Name: block.Name,
+				Input: append([]byte(nil), block.Input...), IsError: block.IsError,
+			})
+		}
 	}
-	blocks := publicAgentMessageBlocks(message.Blocks)
-	if (message.Role != "user" && message.Role != "assistant" && message.Role != "tool") ||
-		(strings.TrimSpace(content) == "" && len(blocks) == 0 && strings.TrimSpace(message.Thinking) == "") {
+	if (value.Role != sessionmodel.RoleUser && value.Role != sessionmodel.RoleAssistant && value.Role != sessionmodel.RoleTool) ||
+		(strings.TrimSpace(content.String()) == "" && len(blocks) == 0 && strings.TrimSpace(thinking.String()) == "") {
 		return dto.AgentMessage{}, false
 	}
 	return dto.AgentMessage{
-		Sequence: message.Sequence, At: message.At, ExecutionID: message.ExecutionID.String(),
-		Role: message.Role, Content: content, Thinking: message.Thinking, Blocks: blocks,
+		ID:       value.ID,
+		Sequence: value.Sequence, At: value.CreatedAt, TurnID: value.TurnID,
+		Role: string(value.Role), AuthorKind: string(value.AuthorKind), AuthorID: value.AuthorID,
+		Content: content.String(), Thinking: thinking.String(), Blocks: blocks,
 	}, true
 }
 
-func publicAgentMessageBlocks(blocks []appcontext.ContextBlock) []dto.AgentMessageBlock {
-	if len(blocks) == 0 {
-		return nil
-	}
-	result := make([]dto.AgentMessageBlock, 0, len(blocks))
-	for _, block := range blocks {
-		if block.Kind != appcontext.ContextBlockText && block.Kind != appcontext.ContextBlockThinking && block.Kind != appcontext.ContextBlockToolCall &&
-			block.Kind != appcontext.ContextBlockToolResult {
-			continue
-		}
-		result = append(result, dto.AgentMessageBlock{
-			Kind: string(block.Kind), Text: block.Text, CallID: block.CallID, Name: block.Name,
-			Input: append([]byte(nil), block.Input...), IsError: block.IsError,
-		})
-	}
-	return result
-}
-
-func executionSnapshot(execution executionmodel.AgentExecution) dto.ExecutionSnapshot {
-	return dto.ExecutionSnapshot{
-		ID: execution.ID.String(), Reason: string(execution.Reason), Status: string(execution.Status),
-		Outcome: string(execution.Outcome), FailureCode: string(execution.FailureCode),
-		CreatedAt: execution.CreatedAt, StartedAt: execution.StartedAt, SettledAt: execution.SettledAt,
+func turnSnapshot(turn turnmodel.Turn) dto.TurnSnapshot {
+	return dto.TurnSnapshot{
+		ID: turn.ID.String(), Reason: string(turn.Reason), Status: string(turn.Status),
+		Outcome: string(turn.Outcome), FailureCode: string(turn.FailureCode),
+		FailureMessage: turn.FailureMessage,
+		CreatedAt:      turn.CreatedAt, StartedAt: turn.StartedAt, SettledAt: turn.SettledAt,
 	}
 }

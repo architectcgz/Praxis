@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -19,11 +18,6 @@ type Error struct {
 // New 构造一个业务错误。
 func New(code Code, message string) *Error {
 	return &Error{Code: code, Message: message}
-}
-
-// Wrap 构造一个带 cause 的业务错误，cause 不参与对外文案。
-func Wrap(code Code, message string, cause error) *Error {
-	return &Error{Code: code, Message: message, Cause: cause}
 }
 
 // Error 实现 error；有 Message 时优先返回 Message，否则退化为业务码。
@@ -59,15 +53,6 @@ func (e *Error) Is(target error) bool {
 	return ok && other != nil && e != nil && other.Code == e.Code
 }
 
-// CodeOf 从错误链中提取最外层业务码。
-func CodeOf(err error) (Code, bool) {
-	var target *Error
-	if errors.As(err, &target) && target != nil {
-		return target.Code, true
-	}
-	return "", false
-}
-
 // 通用/校验域：与具体业务对象无关的请求与基础设施类错误。
 const (
 	InvalidValueCode      Code = "generic.invalid_value"
@@ -79,28 +64,12 @@ const (
 	Internal              Code = "generic.internal_error"
 )
 
-var genericCodes = []Code{
-	InvalidValueCode,
-	InvalidTransitionCode,
-	InvalidRequest,
-	NotFound,
-	RequestCanceled,
-	RequestTimeout,
-	Internal,
-}
-
 // 项目/工作区域：项目、工作区与乐观并发相关的冲突。
 const (
 	ProjectWorkspaceInvalid Code = "project.workspace_invalid"
 	LeaseConflict           Code = "project.lease_conflict"
 	RevisionConflict        Code = "project.revision_conflict"
 )
-
-var projectCodes = []Code{
-	ProjectWorkspaceInvalid,
-	LeaseConflict,
-	RevisionConflict,
-}
 
 // Agent 域：Agent 生命周期、工作项、投递与请求幂等相关错误。
 const (
@@ -114,64 +83,25 @@ const (
 	RequestConflict Code = "request.conflict"
 )
 
-var agentCodes = []Code{
-	AgentExecuting,
-	AgentUnavailable,
-	AlreadySettled,
-	WorkQueueEmpty,
-	WorkItemActive,
-	RequestNotFound,
-	RequestConflict,
-}
-
 // 执行运行域：Agent 执行运行时的失败分类。
 const (
-	ExecutionBusy          Code = "execution.busy"
-	ExecutionContract      Code = "execution.contract_error"
-	ExecutionPolicyBlocked Code = "execution.policy_blocked"
-	ExecutionApproval      Code = "execution.approval_required"
-	ExecutionStorage       Code = "execution.storage_error"
-	ExecutionProvider      Code = "execution.provider_error"
-	ExecutionTool          Code = "execution.tool_error"
-	ExecutionResourceLimit Code = "execution.resource_limit"
-	ExecutionClosed        Code = "execution.closed"
-	ExecutionInterrupted   Code = "execution.interrupted"
+	TurnBusy          Code = "turn.busy"
+	TurnContract      Code = "turn.contract_error"
+	TurnPolicyBlocked Code = "turn.policy_blocked"
+	TurnApproval      Code = "turn.approval_required"
+	TurnStorage       Code = "turn.storage_error"
+	TurnProvider      Code = "turn.provider_error"
+	TurnTool          Code = "turn.tool_error"
+	TurnResourceLimit Code = "turn.resource_limit"
+	TurnClosed        Code = "turn.closed"
+	TurnInterrupted   Code = "turn.interrupted"
 )
-
-var executionCodes = []Code{
-	ExecutionBusy,
-	ExecutionContract,
-	ExecutionPolicyBlocked,
-	ExecutionApproval,
-	ExecutionStorage,
-	ExecutionProvider,
-	ExecutionTool,
-	ExecutionResourceLimit,
-	ExecutionClosed,
-	ExecutionInterrupted,
-}
 
 // 平台域：模型配置与编排启动状态。
 const (
 	ModelNotConfigured Code = "model.not_configured"
 	NotReady           Code = "orchestration.not_ready"
 )
-
-var platformCodes = []Code{
-	ModelNotConfigured,
-	NotReady,
-}
-
-// Codes 返回全部业务码，供边界映射的穷举校验使用。
-func Codes() []Code {
-	codes := make([]Code, 0, len(genericCodes)+len(projectCodes)+len(agentCodes)+len(executionCodes)+len(platformCodes))
-	codes = append(codes, genericCodes...)
-	codes = append(codes, projectCodes...)
-	codes = append(codes, agentCodes...)
-	codes = append(codes, executionCodes...)
-	codes = append(codes, platformCodes...)
-	return codes
-}
 
 // 领域哨兵错误统一承载业务码，app 层据业务码翻译为前端错误码。
 var (

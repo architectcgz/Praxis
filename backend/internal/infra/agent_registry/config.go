@@ -3,10 +3,10 @@
 package agentregistry
 
 import (
-	agentmodel "praxis/internal/agent"
 	"praxis/internal/contracts"
-	securitymodel "praxis/internal/security"
-	workspacemodel "praxis/internal/workspace"
+	agentmodel "praxis/internal/core/agent"
+	securitymodel "praxis/internal/core/security"
+	workspacemodel "praxis/internal/core/workspace"
 
 	"bytes"
 	"crypto/sha256"
@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	appconfig "praxis/internal/modelconfig"
 )
@@ -69,6 +70,7 @@ func (e *ConfigurationError) Unwrap() error {
 
 // Registry 保存进程启动时加载并校验的 Agent 定义。
 type Registry struct {
+	mu          sync.RWMutex
 	configs     map[contracts.AgentDefinitionID]AgentConfig
 	definitions map[contracts.AgentDefinitionID]agentmodel.AgentDefinition
 }
@@ -94,6 +96,8 @@ func (r *Registry) Definition(id contracts.AgentDefinitionID) (agentmodel.AgentD
 	if r == nil {
 		return agentmodel.AgentDefinition{}, errors.New("agent registry is not initialized")
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	definition, ok := r.definitions[id]
 	if !ok {
 		return agentmodel.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
@@ -109,6 +113,8 @@ func (r *Registry) ResolveModelReference(id contracts.AgentDefinitionID) (ModelR
 	if !id.Valid() {
 		return ModelReference{}, fmt.Errorf("invalid agent definition %q", id)
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	agent, ok := r.configs[id]
 	if !ok || agent.Model == nil {
 		return ModelReference{}, fmt.Errorf("agent definition %q has no configured model", id)
@@ -124,6 +130,8 @@ func (r *Registry) SecurityPolicy(
 	if r == nil {
 		return securitymodel.AgentSecurityPolicy{}, errors.New("agent registry is not initialized")
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	agent, ok := r.configs[id]
 	if !ok {
 		return securitymodel.AgentSecurityPolicy{}, fmt.Errorf("agent definition %q is not configured", id)
@@ -152,6 +160,8 @@ func (r *Registry) DefinitionsForModel(providerID, modelID string) []string {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	agents := make([]string, 0)
 	for id, agent := range r.configs {
 		if agent.Model != nil && agent.Model.ProviderID == providerID && agent.Model.ModelID == modelID {
@@ -170,6 +180,8 @@ func (r *Registry) ValidateModelReferences(validateModel ModelValidator) error {
 	if validateModel == nil {
 		return errors.New("agent model validator is required")
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for id, agent := range r.configs {
 		if agent.Model == nil {
 			continue
@@ -378,7 +390,6 @@ func definitionRevision(config AgentConfig, instructions string) (string, error)
 func defaultAgentConfigs() map[contracts.AgentDefinitionID]AgentConfig {
 	readTools := []contracts.ToolName{
 		contracts.ToolReadFile,
-		contracts.ToolListDir,
 	}
 	basePolicy := func(tools []contracts.ToolName, access contracts.WorkspaceAccess) PolicyConfig {
 		return PolicyConfig{
@@ -392,9 +403,13 @@ func defaultAgentConfigs() map[contracts.AgentDefinitionID]AgentConfig {
 		agentmodel.DefinitionPrimary: {
 			Profile: contracts.ProfilePrimary,
 			Policy: PolicyConfig{
-				ApprovalMode:       contracts.ApprovalYolo,
-				SandboxMode:        contracts.SandboxWorkspaceWrite,
-				AllowedTools:       []contracts.ToolName{contracts.ToolReadFile, contracts.ToolListDir, contracts.ToolBash},
+				ApprovalMode: contracts.ApprovalYolo,
+				SandboxMode:  contracts.SandboxWorkspaceWrite,
+				AllowedTools: []contracts.ToolName{
+					contracts.ToolReadFile,
+					contracts.ToolBash,
+					contracts.ToolApplyPatch,
+				},
 				AllowedExecutables: []string{"bash"},
 				WorkspaceAccess:    contracts.WorkspaceAccessReadWrite,
 			},
@@ -447,4 +462,12 @@ func (r *Registry) ValidateModelConfiguration(config appconfig.Config) error {
 		}
 		return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
 	})
+}
+
+// ReplaceFrom 用已校验的磁盘快照替换 Agent 定义；已有会话的权限不随之提升。
+func (r *Registry) ReplaceFrom(candidate *Registry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configs = candidate.configs
+	r.definitions = candidate.definitions
 }
