@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Praxis 会话样式选型</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #efefec;
+            --side: #e7e7e3;
+            --paper: #f7f7f5;
+            --ink: #1b1b19;
+            --muted: #6a6a64;
+            --faint: #8d8d86;
+            --line: #d8d8d2;
+            --line-strong: #c8c8c0;
+            --fill: #deded8;
+            --accent: #0e6b52;
+            --accent-ink: #085443;
+            --danger: #b42318;
+            --danger-soft: #fcebea;
+            --success: #216e39;
+            --success-soft: #e9f5ec;
+            --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+            font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+            color: var(--ink);
+            background: var(--bg);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-width: 320px;
+            min-height: 100vh;
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        button {
+            font: inherit;
+        }
+
+        .app {
+            min-height: 100vh;
+        }
+
+        .topbar {
+            display: flex;
+            min-height: 48px;
+            align-items: center;
+            gap: 10px;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--line);
+            background: var(--side);
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 650;
+        }
+
+        .brand-mark {
+            display: grid;
+            width: 20px;
+            height: 20px;
+            place-items: center;
+            border: 1px solid var(--ink);
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .topbar-title {
+            color: var(--muted);
+        }
+
+        .topbar-note {
+            margin-left: auto;
+            color: var(--faint);
+            font-size: 12px;
+        }
+
+        .selector {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            max-width: 1050px;
+            margin: 0 auto;
+            padding: 20px 24px 10px;
+        }
+
+        .selector-label {
+            margin-right: 4px;
+            color: var(--muted);
+            font-weight: 650;
+        }
+
+        .style-button {
+            min-height: 30px;
+            padding: 0 12px;
+            border: 1px solid var(--line-strong);
+            border-radius: 6px;
+            background: var(--paper);
+            color: var(--muted);
+            cursor: pointer;
+        }
+
+        .style-button:hover,
+        .style-button[aria-pressed="true"] {
+            border-color: var(--accent);
+            background: #e8f1ed;
+            color: var(--accent-ink);
+        }
+
+        .style-button:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .preview {
+            --thought-surface: #fbfbfa;
+            --thought-border: var(--line);
+            --thought-title: var(--accent-ink);
+            --thought-rule: var(--line);
+            --diff-surface: #fbfbfa;
+            --diff-border: var(--line);
+            max-width: 1050px;
+            margin: 0 auto;
+            padding: 10px 24px 48px;
+        }
+
+        .preview[hidden] {
+            display: none;
+        }
+
+        .preview-heading {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 16px;
+            margin: 18px 0 16px;
+        }
+
+        .preview-heading h1 {
+            margin: 0;
+            font-size: 19px;
+            font-weight: 650;
+            letter-spacing: 0;
+        }
+
+        .preview-heading p {
+            max-width: 540px;
+            margin: 4px 0 0;
+            color: var(--muted);
+        }
+
+        .preview-status {
+            flex: 0 0 auto;
+            color: var(--accent);
+            font-size: 12px;
+        }
+
+        .conversation {
+            display: grid;
+            gap: 18px;
+        }
+
+        .message-meta {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            margin-bottom: 6px;
+            color: var(--faint);
+            font-size: 11px;
+        }
+
+        .message-meta strong {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 650;
+        }
+
+        .message p {
+            margin: 0;
+            color: var(--ink);
+            line-height: 1.6;
+        }
+
+        .thought,
+        .edit-block {
+            overflow: hidden;
+            border: 1px solid var(--thought-border);
+            border-radius: 6px;
+            background: var(--thought-surface);
+        }
+
+        .thought-header,
+        .edit-header {
+            display: flex;
+            min-height: 38px;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--thought-rule);
+            color: var(--thought-title);
+            font-size: 12px;
+            font-weight: 650;
+        }
+
+        .thought-mark {
+            width: 7px;
+            height: 7px;
+            flex: 0 0 7px;
+            border-radius: 50%;
+            background: var(--accent);
+        }
+
+        .live-label {
+            margin-left: auto;
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .thought-content {
+            display: grid;
+            gap: 8px;
+            padding: 12px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .thought-content p {
+            margin: 0;
+        }
+
+        .edit-block {
+            --thought-surface: var(--diff-surface);
+            border-color: var(--diff-border);
+        }
+
+        .edit-header {
+            color: var(--ink);
+        }
+
+        .edit-icon {
+            display: inline-grid;
+            width: 18px;
+            height: 18px;
+            place-items: center;
+            border: 1px solid currentColor;
+            border-radius: 4px;
+            color: var(--accent);
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .file-name {
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .change-count {
+            display: inline-flex;
+            gap: 8px;
+            margin-left: auto;
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .add-count {
+            color: var(--success);
+        }
+
+        .remove-count {
+            color: var(--danger);
+        }
+
+        .diff {
+            overflow: auto;
+            padding: 8px 0;
+            background: var(--diff-surface);
+            color: var(--ink);
+            font-family: var(--mono);
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .line {
+            display: grid;
+            grid-template-columns: 42px 22px minmax(max-content, 1fr);
+            min-width: 680px;
+            padding-right: 14px;
+            white-space: pre;
+        }
+
+        .line-number {
+            padding-right: 10px;
+            color: var(--faint);
+            text-align: right;
+            user-select: none;
+        }
+
+        .line-sign {
+            color: var(--faint);
+            text-align: center;
+            user-select: none;
+        }
+
+        .line-code {
+            overflow: visible;
+        }
+
+        .line.added {
+            background: var(--success-soft);
+            color: var(--success);
+        }
+
+        .line.removed {
+            background: var(--danger-soft);
+            color: var(--danger);
+        }
+
+        .line.added .line-sign,
+        .line.removed .line-sign {
+            color: currentColor;
+            font-weight: 700;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 8px 12px 10px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-swatch {
+            width: 12px;
+            height: 12px;
+            border: 1px solid transparent;
+            border-radius: 2px;
+        }
+
+        .legend-swatch.added {
+            border-color: #c5e5cc;
+            background: var(--success-soft);
+        }
+
+        .legend-swatch.removed {
+            border-color: #f1c7c4;
+            background: var(--danger-soft);
+        }
+
+        .assistant-note {
+            padding-top: 2px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .collapse-toggle,
+        .thought-toggle {
+            display: grid;
+            width: 24px;
+            height: 24px;
+            flex: 0 0 24px;
+            place-items: center;
+            padding: 0;
+            border: 0;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--faint);
+            cursor: pointer;
+        }
+
+        .collapse-toggle:hover,
+        .thought-toggle:hover {
+            background: var(--fill);
+            color: var(--ink);
+        }
+
+        .collapse-toggle svg,
+        .thought-toggle svg {
+            width: 15px;
+            height: 15px;
+            transition: transform 140ms ease;
+        }
+
+        .edit-block.is-collapsed .diff,
+        .edit-block.is-collapsed .legend {
+            display: none;
+        }
+
+        .edit-block.is-collapsed .collapse-toggle svg {
+            transform: none;
+        }
+
+        .thought-toggle {
+            position: absolute;
+            top: 2px;
+            right: 0;
+        }
+
+        .thought.is-collapsed .thought-content {
+            display: block;
+            max-height: 24px;
+            overflow: hidden;
+            padding-right: 32px;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .thought.is-collapsed .thought-content p {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .thought:not(.is-collapsed) .thought-toggle svg {
+            transform: rotate(180deg);
+        }
+
+        /* 方案 A：轻量内联，内容最接近普通消息流。 */
+        .preview[data-variant="a"] .thought {
+            position: relative;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+        }
+
+        .preview[data-variant="a"] .thought-content {
+            margin: 0;
+            padding: 2px 32px 2px 0;
+            border: 0;
+            color: var(--muted);
+        }
+
+        .preview[data-variant="a"] .thought:not(.is-collapsed) .thought-content {
+            display: grid;
+            gap: 8px;
+            max-height: none;
+            overflow: visible;
+            white-space: normal;
+        }
+
+        .preview[data-variant="a"] .thought:not(.is-collapsed) .thought-content p {
+            overflow: visible;
+            white-space: normal;
+        }
+
+        .preview[data-variant="a"] .edit-block {
+            border-radius: 6px;
+        }
+
+        /* 方案 B：编辑器风格，信息密度最高。 */
+        .preview[data-variant="b"] {
+            --thought-surface: #e8eee9;
+            --thought-border: #c4d5ca;
+            --thought-title: var(--accent-ink);
+            --thought-rule: #cbd9cf;
+            --diff-surface: #f4f5f1;
+            --diff-border: #bfc9c0;
+        }
+
+        .preview[data-variant="b"] .thought,
+        .preview[data-variant="b"] .edit-block {
+            border-radius: 4px;
+        }
+
+        .preview[data-variant="b"] .thought-header,
+        .preview[data-variant="b"] .edit-header {
+            min-height: 34px;
+            padding: 6px 10px;
+            font-family: var(--mono);
+            font-size: 11px;
+        }
+
+        .preview[data-variant="b"] .thought-content {
+            padding: 9px 10px;
+            font-size: 12px;
+        }
+
+        .preview[data-variant="b"] .diff {
+            padding: 6px 0;
+            font-size: 11px;
+            line-height: 1.55;
+        }
+
+        .preview[data-variant="b"] .line {
+            grid-template-columns: 46px 24px minmax(max-content, 1fr);
+        }
+
+        /* 方案 C：时间轴风格，强调思考与编辑的顺序关系。 */
+        .preview[data-variant="c"] .conversation {
+            position: relative;
+            gap: 14px;
+            padding-left: 30px;
+        }
+
+        .preview[data-variant="c"] .conversation::before {
+            position: absolute;
+            top: 5px;
+            bottom: 5px;
+            left: 9px;
+            width: 1px;
+            background: var(--line);
+            content: "";
+        }
+
+        .preview[data-variant="c"] .message,
+        .preview[data-variant="c"] .thought,
+        .preview[data-variant="c"] .edit-block {
+            position: relative;
+        }
+
+        .preview[data-variant="c"] .message::before,
+        .preview[data-variant="c"] .thought::before,
+        .preview[data-variant="c"] .edit-block::before {
+            position: absolute;
+            top: 13px;
+            left: -25px;
+            width: 9px;
+            height: 9px;
+            border: 2px solid var(--bg);
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+            content: "";
+        }
+
+        .preview[data-variant="c"] .thought {
+            --thought-surface: var(--paper);
+            border-radius: 6px;
+        }
+
+        .preview[data-variant="c"] .edit-block {
+            --diff-surface: var(--paper);
+            border-radius: 6px;
+        }
+
+        /* 方案 D：分区卡片，标题和正文层级最明显。 */
+        .preview[data-variant="d"] {
+            --thought-surface: #f0f4f0;
+            --thought-border: #c6d8cc;
+            --thought-title: var(--accent-ink);
+            --thought-rule: #d5e1d8;
+            --diff-surface: #ffffff;
+            --diff-border: var(--line-strong);
+        }
+
+        .preview[data-variant="d"] .conversation {
+            gap: 20px;
+        }
+
+        .preview[data-variant="d"] .thought,
+        .preview[data-variant="d"] .edit-block {
+            border-radius: 8px;
+        }
+
+        .preview[data-variant="d"] .thought-header,
+        .preview[data-variant="d"] .edit-header {
+            min-height: 42px;
+            padding: 10px 14px;
+        }
+
+        .preview[data-variant="d"] .thought-content {
+            padding: 14px;
+            font-size: 13px;
+        }
+
+        .preview[data-variant="d"] .diff {
+            padding: 10px 0;
+        }
+
+        @media (max-width: 720px) {
+            .topbar,
+            .selector,
+            .preview {
+                padding-right: 16px;
+                padding-left: 16px;
+            }
+
+            .topbar-note {
+                display: none;
+            }
+
+            .preview-heading {
+                align-items: start;
+                flex-direction: column;
+                gap: 4px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="topbar">
+            <div class="brand"><span class="brand-mark">P</span><span>Praxis</span></div>
+            <span class="topbar-title">会话样式选型预览</span>
+            <span class="topbar-note">思考中展开，完成后自动收起 · 编辑 diff 按行着色</span>
+        </header>
+
+        <nav class="selector" aria-label="样式方案">
+            <span class="selector-label">选择方案</span>
+            <button class="style-button" type="button" data-select="a" aria-pressed="true">A · 轻量内联</button>
+            <button class="style-button" type="button" data-select="b" aria-pressed="false">B · 编辑器</button>
+            <button class="style-button" type="button" data-select="c" aria-pressed="false">C · 时间轴</button>
+            <button class="style-button" type="button" data-select="d" aria-pressed="false">D · 分区卡片</button>
+        </nav>
+
+        <main>
+            <section class="preview" data-variant="a">
+                <div class="preview-heading">
+                    <div>
+                        <h1>代理执行记录</h1>
+                        <p>以下内容模拟 Praxis 在一次任务中的思考过程和文件编辑结果。</p>
+                    </div>
+                    <span class="preview-status">当前：A · 轻量内联</span>
+                </div>
+
+                <div class="conversation">
+                    <article class="message">
+                        <div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div>
+                        <div class="thought is-collapsed" data-state="complete">
+                            <div class="thought-content">
+                                <p>先检查会话消息的展示组件，确认思考内容与工具输出是否走同一条渲染链路。</p>
+                                <p>编辑结果需要保留上下文行，同时让新增和删除内容在阅读时一眼可区分。</p>
+                            </div>
+                            <button class="thought-toggle" type="button" aria-label="展开思考内容" title="展开思考内容">
+                                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 6 5 5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" /></svg>
+                            </button>
+                        </div>
+                    </article>
+
+                    <article class="message">
+                        <div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div>
+                        <p>已更新会话视图。下面是本次编辑内容：</p>
+                        <div class="edit-block">
+                            <div class="edit-header">
+                                <span class="edit-icon" aria-hidden="true">≡</span>
+                                <span class="file-name">src/features/sessions/MessageViews.tsx</span>
+                                <span class="change-count"><span class="add-count">+2</span><span class="remove-count">−1</span></span>
+                            </div>
+                            <div class="diff" role="region" aria-label="代码差异">
+                                <div class="line"><span class="line-number">148</span><span class="line-sign"> </span><span class="line-code">function ThinkingDetails({ content }) {</span></div>
+                                <div class="line removed"><span class="line-number">149</span><span class="line-sign">−</span><span class="line-code">    return &lt;details className="thinking-details"&gt;</span></div>
+                                <div class="line added"><span class="line-number">149</span><span class="line-sign">+</span><span class="line-code">    return &lt;section className="thinking-details"&gt;</span></div>
+                                <div class="line added"><span class="line-number">150</span><span class="line-sign">+</span><span class="line-code">        &lt;div className="thinking-header"&gt;思考过程&lt;/div&gt;</span></div>
+                                <div class="line"><span class="line-number">151</span><span class="line-sign"> </span><span class="line-code">        &lt;MessageMarkdown content={content} /&gt;</span></div>
+                            </div>
+                            <div class="legend"><span class="legend-item"><span class="legend-swatch added"></span>新增行</span><span class="legend-item"><span class="legend-swatch removed"></span>删除行</span></div>
+                        </div>
+                    </article>
+
+                    <p class="assistant-note">这里是普通回复内容，用来观察思考块和编辑块之间的间距。</p>
+                </div>
+            </section>
+
+            <section class="preview" data-variant="b" hidden>
+                <div class="preview-heading">
+                    <div>
+                        <h1>代理执行记录</h1>
+                        <p>紧凑的编辑器式布局，适合频繁查看代码和高信息密度场景。</p>
+                    </div>
+                    <span class="preview-status">当前：B · 编辑器</span>
+                </div>
+                <div class="conversation">
+                    <article class="message">
+                        <div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div>
+                        <div class="thought">
+                            <div class="thought-header"><span class="thought-mark" aria-hidden="true"></span><span>思考过程</span><span class="live-label">已完成</span></div>
+                            <div class="thought-content"><p>先检查会话消息的展示组件，确认思考内容与工具输出是否走同一条渲染链路。</p><p>编辑结果需要保留上下文行，同时让新增和删除内容在阅读时一眼可区分。</p></div>
+                        </div>
+                    </article>
+                    <article class="message">
+                        <div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div>
+                        <p>已更新会话视图。下面是本次编辑内容：</p>
+                        <div class="edit-block">
+                            <div class="edit-header"><span class="edit-icon" aria-hidden="true">≡</span><span class="file-name">src/features/sessions/MessageViews.tsx</span><span class="change-count"><span class="add-count">+2</span><span class="remove-count">−1</span></span></div>
+                            <div class="diff"><div class="line"><span class="line-number">148</span><span class="line-sign"> </span><span class="line-code">function ThinkingDetails({ content }) {</span></div><div class="line removed"><span class="line-number">149</span><span class="line-sign">−</span><span class="line-code">    return &lt;details className="thinking-details"&gt;</span></div><div class="line added"><span class="line-number">149</span><span class="line-sign">+</span><span class="line-code">    return &lt;section className="thinking-details"&gt;</span></div><div class="line added"><span class="line-number">150</span><span class="line-sign">+</span><span class="line-code">        &lt;div className="thinking-header"&gt;思考过程&lt;/div&gt;</span></div><div class="line"><span class="line-number">151</span><span class="line-sign"> </span><span class="line-code">        &lt;MessageMarkdown content={content} /&gt;</span></div></div>
+                            <div class="legend"><span class="legend-item"><span class="legend-swatch added"></span>新增行</span><span class="legend-item"><span class="legend-swatch removed"></span>删除行</span></div>
+                        </div>
+                    </article>
+                    <p class="assistant-note">这里是普通回复内容，用来观察思考块和编辑块之间的间距。</p>
+                </div>
+            </section>
+
+            <section class="preview" data-variant="c" hidden>
+                <div class="preview-heading">
+                    <div>
+                        <h1>代理执行记录</h1>
+                        <p>用时间线表达执行顺序，思考、回复和编辑动作有明确的垂直关系。</p>
+                    </div>
+                    <span class="preview-status">当前：C · 时间轴</span>
+                </div>
+                <div class="conversation">
+                    <article class="message"><div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div><div class="thought"><div class="thought-header"><span class="thought-mark" aria-hidden="true"></span><span>思考过程</span><span class="live-label">已完成</span></div><div class="thought-content"><p>先检查会话消息的展示组件，确认思考内容与工具输出是否走同一条渲染链路。</p><p>编辑结果需要保留上下文行，同时让新增和删除内容在阅读时一眼可区分。</p></div></div></article>
+                    <article class="message"><div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div><p>已更新会话视图。下面是本次编辑内容：</p><div class="edit-block"><div class="edit-header"><span class="edit-icon" aria-hidden="true">≡</span><span class="file-name">src/features/sessions/MessageViews.tsx</span><span class="change-count"><span class="add-count">+2</span><span class="remove-count">−1</span></span></div><div class="diff"><div class="line"><span class="line-number">148</span><span class="line-sign"> </span><span class="line-code">function ThinkingDetails({ content }) {</span></div><div class="line removed"><span class="line-number">149</span><span class="line-sign">−</span><span class="line-code">    return &lt;details className="thinking-details"&gt;</span></div><div class="line added"><span class="line-number">149</span><span class="line-sign">+</span><span class="line-code">    return &lt;section className="thinking-details"&gt;</span></div><div class="line added"><span class="line-number">150</span><span class="line-sign">+</span><span class="line-code">        &lt;div className="thinking-header"&gt;思考过程&lt;/div&gt;</span></div><div class="line"><span class="line-number">151</span><span class="line-sign"> </span><span class="line-code">        &lt;MessageMarkdown content={content} /&gt;</span></div></div><div class="legend"><span class="legend-item"><span class="legend-swatch added"></span>新增行</span><span class="legend-item"><span class="legend-swatch removed"></span>删除行</span></div></div></article>
+                    <p class="assistant-note">这里是普通回复内容，用来观察思考块和编辑块之间的间距。</p>
+                </div>
+            </section>
+
+            <section class="preview" data-variant="d" hidden>
+                <div class="preview-heading">
+                    <div>
+                        <h1>代理执行记录</h1>
+                        <p>分区边界更清晰，适合希望快速区分思考、回复和编辑内容的场景。</p>
+                    </div>
+                    <span class="preview-status">当前：D · 分区卡片</span>
+                </div>
+                <div class="conversation">
+                    <article class="message"><div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div><div class="thought"><div class="thought-header"><span class="thought-mark" aria-hidden="true"></span><span>思考过程</span><span class="live-label">已完成</span></div><div class="thought-content"><p>先检查会话消息的展示组件，确认思考内容与工具输出是否走同一条渲染链路。</p><p>编辑结果需要保留上下文行，同时让新增和删除内容在阅读时一眼可区分。</p></div></div></article>
+                    <article class="message"><div class="message-meta"><strong>Praxis</strong><time>刚刚</time></div><p>已更新会话视图。下面是本次编辑内容：</p><div class="edit-block"><div class="edit-header"><span class="edit-icon" aria-hidden="true">≡</span><span class="file-name">src/features/sessions/MessageViews.tsx</span><span class="change-count"><span class="add-count">+2</span><span class="remove-count">−1</span></span></div><div class="diff"><div class="line"><span class="line-number">148</span><span class="line-sign"> </span><span class="line-code">function ThinkingDetails({ content }) {</span></div><div class="line removed"><span class="line-number">149</span><span class="line-sign">−</span><span class="line-code">    return &lt;details className="thinking-details"&gt;</span></div><div class="line added"><span class="line-number">149</span><span class="line-sign">+</span><span class="line-code">    return &lt;section className="thinking-details"&gt;</span></div><div class="line added"><span class="line-number">150</span><span class="line-sign">+</span><span class="line-code">        &lt;div className="thinking-header"&gt;思考过程&lt;/div&gt;</span></div><div class="line"><span class="line-number">151</span><span class="line-sign"> </span><span class="line-code">        &lt;MessageMarkdown content={content} /&gt;</span></div></div><div class="legend"><span class="legend-item"><span class="legend-swatch added"></span>新增行</span><span class="legend-item"><span class="legend-swatch removed"></span>删除行</span></div></div></article>
+                    <p class="assistant-note">这里是普通回复内容，用来观察思考块和编辑块之间的间距。</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const buttons = [...document.querySelectorAll('[data-select]')]
+        const previews = [...document.querySelectorAll('.preview')]
+
+        buttons.forEach((button) => {
+            button.addEventListener('click', () => {
+                const variant = button.dataset.select
+                buttons.forEach((item) => item.setAttribute('aria-pressed', String(item === button)))
+                previews.forEach((preview) => {
+                    preview.hidden = preview.dataset.variant !== variant
+                })
+            })
+        })
+
+        document.querySelectorAll('.edit-header').forEach((header) => {
+            const editBlock = header.closest('.edit-block')
+            if (!editBlock) {
+                return
+            }
+            header.querySelector('.edit-icon')?.remove()
+
+            const toggle = document.createElement('button')
+            toggle.className = 'collapse-toggle'
+            toggle.type = 'button'
+            toggle.setAttribute('aria-expanded', 'true')
+            toggle.setAttribute('aria-label', '收起编辑内容')
+            toggle.title = '收起编辑内容'
+            toggle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 6 5 5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" /></svg>'
+            toggle.addEventListener('click', () => {
+                const collapsed = editBlock.classList.toggle('is-collapsed')
+                toggle.setAttribute('aria-expanded', String(!collapsed))
+                toggle.setAttribute('aria-label', collapsed ? '展开编辑内容' : '收起编辑内容')
+                toggle.title = collapsed ? '展开编辑内容' : '收起编辑内容'
+            })
+            header.append(toggle)
+        })
+
+        const thoughtToggle = document.querySelector('[data-variant="a"] .thought-toggle')
+        const thought = document.querySelector('[data-variant="a"] .thought')
+        thoughtToggle?.addEventListener('click', () => {
+            const collapsed = thought?.classList.toggle('is-collapsed') ?? false
+            thoughtToggle.setAttribute('aria-expanded', String(!collapsed))
+            thoughtToggle.setAttribute('aria-label', collapsed ? '展开思考内容' : '收起思考内容')
+            thoughtToggle.title = collapsed ? '展开思考内容' : '收起思考内容'
+        })
+    </script>
+</body>
+</html>
