@@ -6,15 +6,15 @@ import "praxis/internal/contracts"
 type ErrorCode = contracts.Code
 
 const (
-	ErrorBusy             = contracts.TurnBusy
-	ErrorContract         = contracts.TurnContract
-	ErrorPolicyBlocked    = contracts.TurnPolicyBlocked
-	ErrorApprovalRequired = contracts.TurnApproval
-	ErrorStorage          = contracts.TurnStorage
-	ErrorProvider         = contracts.TurnProvider
-	ErrorTool             = contracts.TurnTool
-	ErrorInterrupted      = contracts.TurnInterrupted
-	ErrorResourceLimit    = contracts.TurnResourceLimit
+	ErrorBusy             = contracts.TaskBusy
+	ErrorContract         = contracts.TaskContract
+	ErrorPolicyBlocked    = contracts.TaskPolicyBlocked
+	ErrorApprovalRequired = contracts.TaskApproval
+	ErrorStorage          = contracts.TaskStorage
+	ErrorProvider         = contracts.TaskProvider
+	ErrorTool             = contracts.TaskTool
+	ErrorInterrupted      = contracts.TaskInterrupted
+	ErrorResourceLimit    = contracts.TaskResourceLimit
 )
 
 // RuntimeError 复用业务错误载体，低敏感、可安全分类。

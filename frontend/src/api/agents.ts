@@ -5,21 +5,20 @@ import { normalizeOperationTiming, type OperationTiming } from './timings'
 export const AGENT_EVENT_NAME = 'praxis:agent-event'
 
 export type AgentState = 'idle' | 'executing' | 'waiting' | 'pausing' | 'paused' | 'interrupted' | 'failed' | 'unknown'
-export type TurnReason = 'user_input' | 'queued_work' | 'resume' | 'unknown'
-export type TurnStatus = 'starting' | 'running' | 'ending' | 'ended' | 'unknown'
-export type TurnOutcome = '' | 'completed' | 'yielded' | 'paused' | 'failed' | 'interrupted' | 'unknown'
-export type TurnFailureCode =
+export type TaskStatus = 'pending' | 'starting' | 'running' | 'ending' | 'ended' | 'unknown'
+export type TaskOutcome = '' | 'completed' | 'yielded' | 'paused' | 'failed' | 'interrupted' | 'unknown'
+export type TaskFailureCode =
     | ''
     | 'provider_unavailable'
-    | 'turn_provider_error'
-    | 'turn_tool_error'
-    | 'turn_policy_blocked'
-    | 'turn_approval_required'
-    | 'turn_resource_limit'
-    | 'turn_storage_error'
-    | 'turn_contract_error'
-    | 'turn_busy'
-    | 'turn_interrupted'
+    | 'task_provider_error'
+    | 'task_tool_error'
+    | 'task_policy_blocked'
+    | 'task_approval_required'
+    | 'task_resource_limit'
+    | 'task_storage_error'
+    | 'task_contract_error'
+    | 'task_busy'
+    | 'task_interrupted'
     | 'request_canceled'
     | 'runtime_cancelled'
     | 'runtime_failed'
@@ -27,7 +26,7 @@ export type TurnFailureCode =
     | 'unknown'
 export type AgentMessageRole = 'user' | 'assistant' | 'tool' | 'unknown'
 export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'unknown'
-export type AgentHistoryKind = 'message' | 'turn' | 'request_canceled' | 'unknown'
+export type AgentHistoryKind = 'message' | 'task' | 'request_canceled' | 'unknown'
 
 export type AgentSnapshot = {
     id: string
@@ -37,20 +36,17 @@ export type AgentSnapshot = {
     securityPolicyRevision: number
     profile: string
     state: AgentState
-    currentTurnId: string
-    turnIds: string[]
-    turns: TurnSnapshot[]
-    waitConditionIds: string[]
-    deliveryIds: string[]
+    currentTaskId: string
+    taskIds: string[]
+    tasks: TaskSnapshot[]
     controlCommandIds: string[]
 }
 
-export type TurnSnapshot = {
+export type TaskSnapshot = {
     id: string
-    reason: TurnReason
-    status: TurnStatus
-    outcome: TurnOutcome
-    failureCode: TurnFailureCode
+    status: TaskStatus
+    outcome: TaskOutcome
+    failureCode: TaskFailureCode
     failureMessage: string
     createdAt: string
     startedAt: string
@@ -61,7 +57,7 @@ export type AgentMessage = {
     id?: string
     sequence: number
     at: string
-    turnId: string
+    taskId: string
     role: AgentMessageRole
     content: string
     thinking?: string
@@ -82,7 +78,7 @@ export type AgentHistoryItem = {
     sequence?: number
     at: string
     message?: AgentMessage
-    turn?: TurnSnapshot
+    task?: TaskSnapshot
 }
 
 export type ModelUsage = {
@@ -95,22 +91,22 @@ export type ModelUsage = {
 export type ModelUsageRecord = {
     sessionId: string
     agentId: string
+    taskId: string
     turnId: string
-    step: number
     usage: ModelUsage
 }
 
 export type AgentEvent = {
-    kind: 'step_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_result' | 'step_completed' | 'model_usage' | 'request_canceled' | 'turn_ended' | 'error' | 'operation_timing'
-    outcome?: TurnOutcome
-    failureCode?: TurnFailureCode
+    kind: 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'task_ended' | 'error' | 'operation_timing'
+    outcome?: TaskOutcome
+    failureCode?: TaskFailureCode
     failureMessage?: string
     timing?: OperationTiming
     usage?: ModelUsage
     sessionId?: string
     agentId: string
-    turnId: string
-    step?: number
+    taskId: string
+    turnId?: string
     text?: string
     callId?: string
     name?: string
@@ -139,13 +135,14 @@ export function normalizeModelUsageRecords(values: unknown, sessionId: string): 
     return requiredArray(values).map((value) => {
         const record = requiredRecord(value)
         const usage = normalizeModelUsage(record.usage)
-        if (record.sessionId !== sessionId || !Number.isSafeInteger(record.step) || Number(record.step) < 1 || !usage) {
+        if (record.sessionId !== sessionId || !usage) {
             throw new Error('Token 用量数据格式无效。')
         }
         const agentId = requiredString(record.agentId)
+        const taskId = requiredString(record.taskId)
         const turnId = requiredString(record.turnId)
-        if (!agentId || !turnId) throw new Error('Token 用量数据格式无效。')
-        return { sessionId, agentId, turnId, step: record.step as number, usage }
+        if (!agentId || !taskId || !turnId) throw new Error('Token 用量数据格式无效。')
+        return { sessionId, agentId, taskId, turnId, usage }
     })
 }
 
@@ -160,11 +157,9 @@ export function normalizeAgentSnapshot(value: unknown): AgentSnapshot {
         securityPolicyRevision: requiredNumber(record.securityPolicyRevision),
         profile: requiredString(record.profile),
         state: enumValue(record.state, agentStates, 'unknown'),
-        currentTurnId: requiredString(record.currentTurnId),
-        turnIds: optionalStringArray(record.turnIds),
-        turns: requiredArray(record.turns).map(normalizeTurnSnapshot),
-        waitConditionIds: optionalStringArray(record.waitConditionIds),
-        deliveryIds: optionalStringArray(record.deliveryIds),
+        currentTaskId: requiredString(record.currentTaskId),
+        taskIds: optionalStringArray(record.taskIds),
+        tasks: requiredArray(record.tasks).map(normalizeTaskSnapshot),
         controlCommandIds: optionalStringArray(record.controlCommandIds),
     }
 }
@@ -178,7 +173,7 @@ export function normalizeAgentHistory(value: unknown): AgentHistoryItem[] {
             sequence: kind === 'message' ? requiredNumber(record.sequence) : optionalNumber(record.sequence),
             at: requiredString(record.at),
             message: record.message == null ? undefined : normalizeAgentMessage(record.message),
-            turn: record.turn == null ? undefined : normalizeTurnSnapshot(record.turn),
+            task: record.task == null ? undefined : normalizeTaskSnapshot(record.task),
         }
     })
 }
@@ -197,12 +192,12 @@ export function subscribeAgentEvents(listener: (event: AgentEvent) => void) {
 
 function parseAgentEvent(value: unknown): AgentEvent | null {
     if (!isRecord(value) || typeof value.agentId !== 'string' ||
-        typeof value.turnId !== 'string') {
+        typeof value.taskId !== 'string') {
         return null
     }
-    if (value.kind !== 'step_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
-        value.kind !== 'tool_call' && value.kind !== 'tool_result' && value.kind !== 'step_completed' &&
-        value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'turn_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
+    if (value.kind !== 'turn_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
+        value.kind !== 'tool_call' && value.kind !== 'tool_result' && value.kind !== 'turn_completed' &&
+        value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'task_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
         return null
     }
     if ((value.kind === 'text_delta' || value.kind === 'thinking_delta') && typeof value.text !== 'string') {
@@ -212,20 +207,20 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         (typeof value.callId !== 'string' || typeof value.name !== 'string')) {
         return null
     }
-    const terminal = value.kind === 'turn_ended' || value.kind === 'request_canceled'
-    const outcome = terminal ? enumValue(value.outcome, turnOutcomes, 'unknown') : undefined
+    const terminal = value.kind === 'task_ended' || value.kind === 'request_canceled'
+    const outcome = terminal ? enumValue(value.outcome, taskOutcomes, 'unknown') : undefined
     const failureCode = terminal ? failureCodeValue(value.failureCode) : undefined
     if (terminal && (outcome === '' || outcome === 'unknown' || failureCode === 'unknown' ||
-        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.turnId)) return null
+        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.taskId)) return null
     if (value.kind === 'request_canceled' && (failureCode !== 'request_canceled' || outcome !== 'paused' && outcome !== 'interrupted')) return null
     const reportedUsage = value.kind === 'model_usage' ? normalizeModelUsage(value.usage) : undefined
-    if (value.kind === 'model_usage' && (!reportedUsage || !Number.isSafeInteger(value.step) || Number(value.step) < 1 ||
-        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.turnId)) return null
+    if (value.kind === 'model_usage' && (!reportedUsage || typeof value.turnId !== 'string' || !value.turnId ||
+        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.taskId)) return null
     let timing: OperationTiming | undefined
     if (value.kind === 'operation_timing') {
         try {
             timing = normalizeOperationTiming(value.timing)
-            if (timing.agentId !== value.agentId || timing.turnId !== value.turnId) return null
+            if (timing.agentId !== value.agentId || timing.taskId !== value.taskId) return null
         } catch {
             return null
         }
@@ -239,8 +234,8 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         usage: reportedUsage ?? undefined,
         sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined,
         agentId: value.agentId,
-        turnId: value.turnId,
-        step: typeof value.step === 'number' ? value.step : undefined,
+        taskId: value.taskId,
+        turnId: typeof value.turnId === 'string' && value.turnId ? value.turnId : undefined,
         text: typeof value.text === 'string' ? value.text : undefined,
         callId: typeof value.callId === 'string' ? value.callId : undefined,
         name: typeof value.name === 'string' ? value.name : undefined,
@@ -273,21 +268,20 @@ function normalizeModelUsage(value: unknown): ModelUsage | null {
 }
 
 const agentStates = ['idle', 'executing', 'waiting', 'pausing', 'paused', 'interrupted', 'failed'] as const
-const turnReasons = ['user_input', 'queued_work', 'resume'] as const
-const turnStatuses = ['starting', 'running', 'ending', 'ended'] as const
-const turnOutcomes = ['', 'completed', 'yielded', 'paused', 'failed', 'interrupted'] as const
-const turnFailureCodes = [
+const taskStatuses = ['pending', 'starting', 'running', 'ending', 'ended'] as const
+const taskOutcomes = ['', 'completed', 'yielded', 'paused', 'failed', 'interrupted'] as const
+const taskFailureCodes = [
     '',
     'provider_unavailable',
-    'turn_provider_error',
-    'turn_tool_error',
-    'turn_policy_blocked',
-    'turn_approval_required',
-    'turn_resource_limit',
-    'turn_storage_error',
-    'turn_contract_error',
-    'turn_busy',
-    'turn_interrupted',
+    'task_provider_error',
+    'task_tool_error',
+    'task_policy_blocked',
+    'task_approval_required',
+    'task_resource_limit',
+    'task_storage_error',
+    'task_contract_error',
+    'task_busy',
+    'task_interrupted',
     'request_canceled',
     'runtime_cancelled',
     'runtime_failed',
@@ -295,15 +289,14 @@ const turnFailureCodes = [
 ] as const
 const messageRoles = ['user', 'assistant', 'tool'] as const
 const blockKinds = ['text', 'thinking', 'tool_call', 'tool_result'] as const
-const historyKinds = ['message', 'turn', 'request_canceled'] as const
+const historyKinds = ['message', 'task', 'request_canceled'] as const
 
-function normalizeTurnSnapshot(value: unknown): TurnSnapshot {
+function normalizeTaskSnapshot(value: unknown): TaskSnapshot {
     const record = requiredRecord(value)
     return {
         id: requiredString(record.id),
-        reason: enumValue(record.reason, turnReasons, 'unknown'),
-        status: enumValue(record.status, turnStatuses, 'unknown'),
-        outcome: enumValue(record.outcome, turnOutcomes, 'unknown'),
+        status: enumValue(record.status, taskStatuses, 'unknown'),
+        outcome: enumValue(record.outcome, taskOutcomes, 'unknown'),
         failureCode: failureCodeValue(record.failureCode),
         failureMessage: optionalString(record.failureMessage),
         createdAt: requiredString(record.createdAt),
@@ -318,7 +311,7 @@ function normalizeAgentMessage(value: unknown): AgentMessage {
         id: optionalString(record.id),
         sequence: requiredNumber(record.sequence),
         at: requiredString(record.at),
-        turnId: requiredString(record.turnId),
+        taskId: requiredString(record.taskId),
         role: enumValue(record.role, messageRoles, 'unknown'),
         content: optionalString(record.content),
         thinking: optionalString(record.thinking),
@@ -338,11 +331,11 @@ function normalizeAgentMessageBlock(value: unknown): AgentMessageBlock {
     }
 }
 
-function failureCodeValue(value: unknown): TurnFailureCode {
+function failureCodeValue(value: unknown): TaskFailureCode {
     if (value == null) {
         return ''
     }
-    return enumValue(value, turnFailureCodes, 'unknown')
+    return enumValue(value, taskFailureCodes, 'unknown')
 }
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {

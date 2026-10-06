@@ -12,20 +12,21 @@ import (
 
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/logging"
 	appmodelconfig "praxis/internal/modelconfig"
 	applicationagent "praxis/internal/service/agent"
 	applicationproject "praxis/internal/service/project"
+	applicationruntime "praxis/internal/service/runtime"
+	taskqueue "praxis/internal/service/runtime/queue"
+	taskstart "praxis/internal/service/runtime/task/start"
 	applicationsession "praxis/internal/service/session"
-	turncontrol "praxis/internal/service/turn/control"
-	turnqueue "praxis/internal/service/turn/queue"
-	turnstart "praxis/internal/service/turn/start"
 )
 
 // Config 收集实现前端端口所需的 service 与配置适配器。
@@ -33,9 +34,7 @@ type Config struct {
 	Agents       *applicationagent.Service
 	Projects     *applicationproject.Service
 	Sessions     *applicationsession.Service
-	Controls     *turncontrol.Service
-	Queues       *turnqueue.Service
-	Starts       *turnstart.Service
+	Runtime      *applicationruntime.Service
 	Models       appmodelconfig.Editor
 	AgentConfig  appmodelconfig.AgentDefinitions
 	ReloadConfig func(context.Context) error
@@ -48,9 +47,7 @@ type Services struct {
 	agents       *applicationagent.Service
 	projects     *applicationproject.Service
 	sessions     *applicationsession.Service
-	controls     *turncontrol.Service
-	queues       *turnqueue.Service
-	starts       *turnstart.Service
+	runtime      *applicationruntime.Service
 	models       appmodelconfig.Editor
 	agentConfig  appmodelconfig.AgentDefinitions
 	reloadConfig func(context.Context) error
@@ -65,9 +62,7 @@ func New(config Config) *Services {
 		agents:       config.Agents,
 		projects:     config.Projects,
 		sessions:     config.Sessions,
-		controls:     config.Controls,
-		queues:       config.Queues,
-		starts:       config.Starts,
+		runtime:      config.Runtime,
 		models:       config.Models,
 		agentConfig:  config.AgentConfig,
 		reloadConfig: config.ReloadConfig,
@@ -142,18 +137,28 @@ func (s *Services) ListAgentMessages(
 
 // CreateProject 承担前端端口与用例参数之间的差异：端口接收位置参数，用例接收
 // Params。项目目录的规范化与创建属于适配层职责，core 只校验稳定引用和状态。
+// 落库失败时只回收本次新建的空目录：用户可能直接选中已有目录，递归删除会丢数据。
 func (s *Services) CreateProject(ctx context.Context, projectID contracts.ProjectID, workspaceID contracts.WorkspaceID, name, path string, requestID contracts.RequestID) (result applicationproject.CreateProjectResult, err error) {
 	name = strings.TrimSpace(name)
 	path = filepath.Clean(strings.TrimSpace(path))
 	if name == "" || strings.ContainsAny(name, "\\/:*?\"<>|\x00\r\n") || name == "." || name == ".." || !filepath.IsAbs(path) {
 		return result, contracts.New(contracts.ProjectWorkspaceInvalid, "")
 	}
+	// 只有目录原本不存在时才允许失败后回收；已存在（哪怕为空）视为用户既有路径。
+	_, statErr := os.Stat(path)
+	created := errors.Is(statErr, os.ErrNotExist)
 	if err := os.MkdirAll(path, 0o700); err != nil {
-		return result, err
+		return result, fmt.Errorf("创建项目目录 %s: %w", path, err)
 	}
 	result, err = s.projects.CreateProject(ctx, applicationproject.CreateProjectParams{
 		RequestID: requestID, ProjectID: projectID, WorkspaceID: workspaceID, Name: name, Path: path,
 	})
+	if err != nil && created {
+		// os.Remove 只删空目录：已被写入内容时保留现场，失败只记日志，不覆盖原始错误。
+		if removeErr := os.Remove(path); removeErr != nil {
+			s.logger.Warnf("回收未落库的项目目录失败 path=%s err=%v", path, removeErr)
+		}
+	}
 	return result, err
 }
 
@@ -171,7 +176,7 @@ func (s *Services) CreateSessionForProject(
 	return s.sessions.CreateSessionForProject(ctx, sessionID, agentID, requestID, projectID, workspaceID, definitionID)
 }
 
-func (s *Services) SendInput(ctx context.Context, params turnstart.SendInputParams) (turnstart.Result, error) {
+func (s *Services) SendInput(ctx context.Context, params taskstart.SendInputParams) (applicationruntime.StartResult, error) {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
 	params.Content = strings.TrimSpace(params.Content)
@@ -179,51 +184,28 @@ func (s *Services) SendInput(ctx context.Context, params turnstart.SendInputPara
 	params.ModelID = strings.TrimSpace(params.ModelID)
 	params.ReasoningLevel = strings.TrimSpace(params.ReasoningLevel)
 	if params.ProviderID == "" || params.ModelID == "" {
-		return turnstart.Result{}, contracts.New(contracts.ModelNotConfigured, "")
+		return applicationruntime.StartResult{}, contracts.New(contracts.ModelNotConfigured, "")
 	}
-	agent, built, err := s.sessions.BuildModelContext(
-		ctx, params.SessionID, params.AgentID, params.RequestID, params.Content,
-	)
-	if err != nil {
-		return turnstart.Result{}, err
-	}
-	params.AgentID = agent.ID
-	params.Context = built
-	return s.starts.SendInput(ctx, params)
-}
-
-func (s *Services) Resume(ctx context.Context, params turnstart.ResumeParams) (turnstart.Result, error) {
-	s.configMu.RLock()
-	defer s.configMu.RUnlock()
-	params.Content = strings.TrimSpace(params.Content)
-	agent, built, err := s.sessions.BuildModelContext(
-		ctx, "", params.AgentID, params.RequestID, params.Content,
-	)
-	if err != nil {
-		return turnstart.Result{}, err
-	}
-	params.AgentID = agent.ID
-	params.Context = built
-	return s.starts.Resume(ctx, params)
+	return s.runtime.SendInput(ctx, params)
 }
 
 func (s *Services) PauseAgent(
 	ctx context.Context,
-	params turncontrol.Params,
-) (turncontrol.Result, error) {
-	return s.controls.PauseAgent(ctx, params)
+	params applicationagent.ControlParams,
+) (applicationagent.ControlResult, error) {
+	return s.agents.PauseAgent(ctx, params)
 }
 
-func (s *Services) CancelTurn(
+func (s *Services) CancelTask(
 	ctx context.Context,
-	params turncontrol.Params,
-) (turncontrol.Result, error) {
-	return s.controls.CancelTurn(ctx, params)
+	params applicationagent.ControlParams,
+) (applicationagent.ControlResult, error) {
+	return s.agents.StopAgent(ctx, params)
 }
 
-func (s *Services) EnqueueWork(ctx context.Context, params turnqueue.EnqueueParams) (turnqueue.EnqueueResult, error) {
+func (s *Services) EnqueueTask(ctx context.Context, params taskqueue.EnqueueParams) (applicationruntime.EnqueueResult, error) {
 	params.Prompt = strings.TrimSpace(params.Prompt)
-	return s.queues.EnqueueWork(ctx, params)
+	return s.runtime.EnqueueTask(ctx, params)
 }
 
 // ListModels 返回已确认的模型能力，并补上引用该模型的所有 Agent。
@@ -301,9 +283,9 @@ func (s *Services) DiscoverProviderModels(ctx context.Context, providerID string
 	return s.models.DiscoverProviderModels(ctx, providerID)
 }
 
-// SubscribeAgentEvents 注册瞬时 Agent runtime 事件的监听者。收到 turn_ended 或 request_canceled 后，
+// SubscribeAgentEvents 注册瞬时 Agent runtime 事件的监听者。收到 task_ended 或 request_canceled 后，
 // 消费方应重新查询持久化消息和执行状态。
-func (s *Services) SubscribeAgentEvents(observer runtimecontract.AgentEventObserver) func() {
+func (s *Services) SubscribeAgentEvents(observer agentruntime.AgentEventObserver) func() {
 	if s == nil || s.events == nil {
 		return func() {}
 	}
@@ -315,16 +297,16 @@ func (s *Services) SubscribeAgentEvents(observer runtimecontract.AgentEventObser
 type EventPublisher struct {
 	mu        sync.RWMutex
 	nextID    uint64
-	observers map[uint64]runtimecontract.AgentEventObserver
+	observers map[uint64]agentruntime.AgentEventObserver
 }
 
 // NewEventPublisher 创建空的 Agent 事件扇出器。
 func NewEventPublisher() *EventPublisher {
-	return &EventPublisher{observers: make(map[uint64]runtimecontract.AgentEventObserver)}
+	return &EventPublisher{observers: make(map[uint64]agentruntime.AgentEventObserver)}
 }
 
 // Subscribe 注册监听者并返回注销函数。
-func (p *EventPublisher) Subscribe(observer runtimecontract.AgentEventObserver) func() {
+func (p *EventPublisher) Subscribe(observer agentruntime.AgentEventObserver) func() {
 	if p == nil || observer == nil {
 		return func() {}
 	}
@@ -341,12 +323,12 @@ func (p *EventPublisher) Subscribe(observer runtimecontract.AgentEventObserver) 
 }
 
 // Publish 把一条输出事件交给当前所有监听者。
-func (p *EventPublisher) Publish(event runtimecontract.AgentEvent) {
-	if p == nil || event.AgentID == "" || event.TurnID == "" {
+func (p *EventPublisher) Publish(event agentruntime.AgentEvent) {
+	if p == nil || event.AgentID == "" || event.TaskID == "" {
 		return
 	}
 	p.mu.RLock()
-	observers := make([]runtimecontract.AgentEventObserver, 0, len(p.observers))
+	observers := make([]agentruntime.AgentEventObserver, 0, len(p.observers))
 	for _, observer := range p.observers {
 		observers = append(observers, observer)
 	}

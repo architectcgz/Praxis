@@ -3,7 +3,7 @@ package context
 import "fmt"
 
 // ContextWindowExceededError 表示一次请求连同输出预留会超出模型的上下文窗口。
-// provider adapter 在真正发送前返回它，turn engine 据此产出稳定的资源上限失败。
+// provider adapter 在真正发送前返回它，task engine 据此产出稳定的资源上限失败。
 type ContextWindowExceededError struct {
 	EstimatedInputTokens int
 	MaxOutputTokens      int
@@ -21,7 +21,7 @@ func (e *ContextWindowExceededError) Error() string {
 // 输入 token，加上本次预留的输出 token，再与窗口比较。装得下、或窗口未记录（<=0）时
 // 返回 nil。
 //
-// 判定放在 provider adapter 而不是 turn engine：只有 adapter 知道本协议最终序列
+// 判定放在 provider adapter 而不是 task engine：只有 adapter 知道本协议最终序列
 // 化出的请求体（含工具 schema、system prompt、tool result），引擎侧的全局启发式必然漏项。
 //
 // ponytail: 字节数 / 4 仍是近似，非 ASCII（中文 3 字节/字）会低估。它只用于提前拒绝明显

@@ -9,6 +9,7 @@ import (
 
 // ToolInvocationMetadata 描述 runtime 发起一次 Tool 调用时的执行归属和运行边界。
 type ToolInvocationMetadata struct {
+	TaskID              contracts.TaskID
 	TurnID              contracts.TurnID
 	SessionID           contracts.SessionID
 	AgentID             contracts.AgentID

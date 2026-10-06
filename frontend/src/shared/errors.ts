@@ -57,29 +57,27 @@ function readableApiError(code: string) {
             return '此执行已经结束。'
         case API_ERROR_CODES.workQueueEmpty:
             return '当前没有可执行的工作。'
-        case API_ERROR_CODES.workItemActive:
-            return '此工作项正在执行中。'
         case API_ERROR_CODES.requestNotFound:
             return '找不到对应请求。'
         case API_ERROR_CODES.requestConflict:
             return '请求冲突，请刷新后重试。'
-        case API_ERROR_CODES.turnContract:
+        case API_ERROR_CODES.taskContract:
             return '执行契约无效。'
-        case API_ERROR_CODES.turnPolicyBlocked:
+        case API_ERROR_CODES.taskPolicyBlocked:
             return '请求被执行策略阻止。'
-        case API_ERROR_CODES.turnApprovalRequired:
+        case API_ERROR_CODES.taskApprovalRequired:
             return '此操作需要批准后才能继续。'
-        case API_ERROR_CODES.turnStorage:
+        case API_ERROR_CODES.taskStorage:
             return '执行状态保存失败。'
-        case API_ERROR_CODES.turnProvider:
+        case API_ERROR_CODES.taskProvider:
             return '模型 Provider 无法完成请求。'
-        case API_ERROR_CODES.turnTool:
+        case API_ERROR_CODES.taskTool:
             return '执行所需工具失败。'
-        case API_ERROR_CODES.turnResourceLimit:
+        case API_ERROR_CODES.taskResourceLimit:
             return '执行达到资源限制。'
-        case API_ERROR_CODES.turnBusy:
+        case API_ERROR_CODES.taskBusy:
             return '代理正忙，请稍后重试。'
-        case API_ERROR_CODES.turnInterrupted:
+        case API_ERROR_CODES.taskInterrupted:
             return '执行已中断。'
         case API_ERROR_CODES.bindingUnavailable:
             return '请求的桌面能力不可用。'

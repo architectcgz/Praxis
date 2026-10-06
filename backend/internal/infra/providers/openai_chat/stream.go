@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -75,7 +75,7 @@ func (streamDecoder) Decode(
 			return "", fmt.Errorf("decode openai chat stream event: %w", err)
 		}
 		if chunk.Usage != nil && chunk.Usage.PromptTokens != nil {
-			candidate := &runtimecontract.ModelUsage{
+			candidate := &agentruntime.ModelUsage{
 				InputTokens:  *chunk.Usage.PromptTokens,
 				OutputTokens: chunk.Usage.CompletionTokens,
 			}
@@ -83,7 +83,7 @@ func (streamDecoder) Decode(
 				candidate.CacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
 			if candidate.Valid() {
-				if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: candidate}); err != nil {
+				if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamUsage, Usage: candidate}); err != nil {
 					return "", err
 				}
 			}
@@ -93,16 +93,16 @@ func (streamDecoder) Decode(
 		}
 		choice := chunk.Choices[0]
 		if choice.Delta.ReasoningContent != "" {
-			if err := emit(runtimecontract.ModelStreamEvent{
-				Kind: runtimecontract.StreamThinkingDelta,
+			if err := emit(agentruntime.ModelStreamEvent{
+				Kind: agentruntime.StreamThinkingDelta,
 				Text: choice.Delta.ReasoningContent,
 			}); err != nil {
 				return "", err
 			}
 		}
 		if choice.Delta.Content != "" {
-			if err := emit(runtimecontract.ModelStreamEvent{
-				Kind: runtimecontract.StreamTextDelta,
+			if err := emit(agentruntime.ModelStreamEvent{
+				Kind: agentruntime.StreamTextDelta,
 				Text: choice.Delta.Content,
 			}); err != nil {
 				return "", err

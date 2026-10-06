@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	agentruntime "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 )
 

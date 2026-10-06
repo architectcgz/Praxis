@@ -7,11 +7,11 @@ import { MessageTiming, useOperationTiming } from '../../timing/OperationTimings
 
 const failureMessages: Record<string, string> = {
     provider_unavailable: '代理无法响应，因为没有配置模型提供者。',
-    turn_provider_error: '模型提供者无法完成请求。',
-    turn_tool_error: '代理无法响应，因为必需的工具失败了。',
-    turn_policy_blocked: '请求被配置的执行策略阻止。',
-    turn_approval_required: '代理正在等待批准才能响应。',
-    turn_storage_error: '代理无法响应，因为无法保存其持久状态。',
+    task_provider_error: '模型提供者无法完成请求。',
+    task_tool_error: '代理无法响应，因为必需的工具失败了。',
+    task_policy_blocked: '请求被配置的执行策略阻止。',
+    task_approval_required: '代理正在等待批准才能响应。',
+    task_storage_error: '代理无法响应，因为无法保存其持久状态。',
     runtime_cancelled: '执行在代理响应之前被取消。',
     request_canceled: '请求已取消。',
     runtime_invalid_outcome: '代理返回了无效的执行结果。',
@@ -26,11 +26,11 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
     hasContinuation?: boolean
     copyContent?: string
 }) {
-    if (item.kind === 'request_canceled' && item.turn) {
-        return <CanceledRequestView agentProfile={agentProfile} turnId={item.turn.id} at={item.at} />
+    if (item.kind === 'request_canceled' && item.task) {
+        return <CanceledRequestView agentProfile={agentProfile} taskId={item.task.id} at={item.at} />
     }
-    if (item.kind === 'turn' && item.turn) {
-        const content = item.turn.failureMessage || failureMessage(item.turn.failureCode)
+    if (item.kind === 'task' && item.task) {
+        const content = item.task.failureMessage || failureMessage(item.task.failureCode)
         return (
             <article className="message message-error">
                 <div className="message-meta">
@@ -52,7 +52,7 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
                     <strong>工具输出</strong>
                     <time dateTime={item.message.at} title={item.message.at}>{formatMessageTime(item.message.at)}</time>
                 </div>
-                {resultBlocks.map((block, index) => <ToolResultBlock block={block} turnId={item.message!.turnId} key={`${block.callId}-${index}`} />)}
+                {resultBlocks.map((block, index) => <ToolResultBlock block={block} taskId={item.message!.taskId} key={`${block.callId}-${index}`} />)}
             </article>
         )
     }
@@ -74,7 +74,7 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
                         if (block.kind === 'text') return <MessageMarkdown content={block.text || ''} key={index} />
                         if (block.kind === 'tool_call') return (
                             <div className="message-tool-calls" key={index}>
-                                <ToolCallBlock block={block} turnId={item.message!.turnId} result={toolResults?.find((result) => result.callId === block.callId)} />
+                                <ToolCallBlock block={block} taskId={item.message!.taskId} result={toolResults?.find((result) => result.callId === block.callId)} />
                             </div>
                         )
                         return null
@@ -82,22 +82,22 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
                 </>
             ) : item.message.content && <p>{item.message.content}</p>}
             <MessageActions content={hasContinuation ? '' : contentToCopy}>
-                {messageRole === 'assistant' && item.message.id && <MessageTiming turnId={item.message.turnId} referenceId={item.message.id} />}
+                {messageRole === 'assistant' && item.message.id && <MessageTiming taskId={item.message.taskId} referenceId={item.message.id} />}
             </MessageActions>
         </article>
     )
 })
 
-/** 取消记录来自持久化 Turn；请求耗时单独查询，重启后保持相同状态。 */
-function CanceledRequestView({ agentProfile, turnId, at }: { agentProfile: string; turnId: string; at: string }) {
-    const timing = useOperationTiming(turnId, 'provider')
+/** 取消记录来自持久化 Task；请求耗时单独查询，重启后保持相同状态。 */
+function CanceledRequestView({ agentProfile, taskId, at }: { agentProfile: string; taskId: string; at: string }) {
+    const timing = useOperationTiming(taskId, 'provider')
     return <article className="message message-assistant" role="status">
         <div className="message-meta">
             <strong>{agentProfile}</strong>
             <time dateTime={at} title={at}>{formatMessageTime(at)}</time>
         </div>
         <p>请求已取消</p>
-        {timing?.referenceId && <MessageTiming turnId={turnId} referenceId={timing.referenceId} />}
+        {timing?.referenceId && <MessageTiming taskId={taskId} referenceId={timing.referenceId} />}
     </article>
 }
 

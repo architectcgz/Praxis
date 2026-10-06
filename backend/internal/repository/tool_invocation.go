@@ -11,15 +11,15 @@ import (
 type ToolInvocationRepository interface {
 	Get(ctx context.Context, id contracts.ToolInvocationID) (toolmodel.ToolInvocation, error)
 
-	FindByTurnCall(
+	FindByTaskCall(
 		ctx context.Context,
-		turnID contracts.TurnID,
+		taskID contracts.TaskID,
 		providerToolCallID string,
 	) (toolmodel.ToolInvocation, error)
 
-	ListUnsettledByTurn(
+	ListUnsettledByTask(
 		ctx context.Context,
-		turnID contracts.TurnID,
+		taskID contracts.TaskID,
 	) ([]toolmodel.ToolInvocation, error)
 
 	Save(ctx context.Context, invocation toolmodel.ToolInvocation) error

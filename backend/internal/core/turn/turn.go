@@ -1,299 +1,160 @@
+// Package turn 定义 loop 一次迭代的持久化身份、状态转换与结算不变量。
+// 一次 Turn 对应一次 Provider 调用及其派生的工具调用；Task 是其归属的输入任务。
+// 状态修改不提供并发同步；调用方必须在事务内读取、转换并保存，终态不得重新执行。
 package turn
 
 import (
-	"praxis/internal/contracts"
-	"praxis/internal/utils/pathutil"
-
+	"fmt"
 	"strings"
 	"time"
 
-	appcontext "praxis/internal/core/context"
+	"praxis/internal/contracts"
 )
 
-type TurnReason string
-
-const (
-	TurnUserInput  TurnReason = "user_input"
-	TurnQueuedWork TurnReason = "queued_work"
-	TurnResume     TurnReason = "resume"
-)
-
+// TurnStatus 表示本次迭代是否已结算。
 type TurnStatus string
 
 const (
-	TurnStarting TurnStatus = "starting"
-	TurnRunning  TurnStatus = "running"
-	TurnEnding   TurnStatus = "ending"
-	TurnEnded    TurnStatus = "ended"
+	TurnRunning TurnStatus = "running"
+	TurnEnded   TurnStatus = "ended"
 )
 
+// Valid 判断状态是否属于受支持的持久化状态集合。
+func (s TurnStatus) Valid() bool {
+	return s == TurnRunning || s == TurnEnded
+}
+
+// TurnOutcome 是已结算迭代的稳定结果分类。
 type TurnOutcome string
 
 const (
 	TurnCompleted   TurnOutcome = "completed"
-	TurnYielded     TurnOutcome = "yielded"
-	TurnPaused      TurnOutcome = "paused"
 	TurnFailed      TurnOutcome = "failed"
 	TurnInterrupted TurnOutcome = "interrupted"
 )
 
-// InputSnapshot 冻结一次 turn 激活所需的全部持久化输入。
-type InputSnapshot struct {
-	AgentDefinitionID       contracts.AgentDefinitionID
-	AgentDefinitionRevision string
-	ContextDigest           string
-	MessageSequenceBoundary uint64 `json:"messageSequenceBoundary"`
-	CurrentInputMessageID   string `json:"currentInputMessageId"`
-	Context                 appcontext.ModelContext
-	Model                   contracts.ModelSnapshot
-	WorkspacePath           string
-	Security                contracts.SecuritySnapshot
+// Valid 判断结果是否属于受支持的集合。
+func (o TurnOutcome) Valid() bool {
+	return o == TurnCompleted || o == TurnFailed || o == TurnInterrupted
 }
 
-func (s InputSnapshot) Validate() error {
-	if !s.AgentDefinitionID.Valid() || s.AgentDefinitionRevision == "" ||
-		s.AgentDefinitionRevision != strings.TrimSpace(s.AgentDefinitionRevision) {
-		return contracts.InvalidValue("turnInput.agentDefinition", "definition id and revision are required")
-	}
-	if s.ContextDigest == "" || s.ContextDigest != strings.TrimSpace(s.ContextDigest) {
-		return contracts.InvalidValue("turnInput.context", "context digest is required")
-	}
-	if err := s.Context.Validate(); err != nil {
-		return contracts.FieldError("turnInput.context", err)
-	}
-	digest, err := s.Context.Digest()
-	if err != nil {
-		return contracts.FieldError("turnInput.context", err)
-	}
-	if digest != s.ContextDigest {
-		return contracts.InvalidValue("turnInput.contextDigest", "context digest does not match context")
-	}
-	if err := s.Model.Validate(); err != nil {
-		return contracts.FieldError("turnInput.model", err)
-	}
-	if !pathutil.IsAbsoluteNormalized(s.WorkspacePath) {
-		return contracts.InvalidValue("turnInput.workspacePath", "workspace path must be an absolute normalized path")
-	}
-	if err := s.Security.Validate(); err != nil {
-		return contracts.FieldError("turnInput.security", err)
-	}
-	return nil
-}
-
+// Turn 归属于一次 Task，以 Sequence 标记 loop 内的迭代次序。
+// 身份由 NewTurnID 推导，因此同一迭代重复执行不会产生第二条记录。
 type Turn struct {
 	ID             contracts.TurnID
+	TaskID         contracts.TaskID
 	SessionID      contracts.SessionID
 	AgentID        contracts.AgentID
-	ParentTurnID   contracts.TurnID
-	RequestID      contracts.RequestID
-	WorkItemID     contracts.WorkItemID
-	Reason         TurnReason
+	Sequence       uint64
 	Status         TurnStatus
-	StartContent   string
-	Input          InputSnapshot
-	CreatedAt      time.Time
-	StartedAt      time.Time
-	EndedAt        time.Time
 	Outcome        TurnOutcome
-	FailureCode    contracts.TurnFailureCode
+	FailureCode    contracts.TaskFailureCode
 	FailureMessage string
+	CreatedAt      time.Time
+	EndedAt        time.Time
 }
 
-func NewTurn(
+// NewTurnID 由 Task 身份与迭代序号生成稳定标识，保证重复准入幂等。
+func NewTurnID(taskID contracts.TaskID, sequence uint64) (contracts.TurnID, error) {
+	if contracts.EmptyID(string(taskID)) || sequence == 0 {
+		return "", contracts.InvalidValue("turn.id", "task and sequence are required")
+	}
+	return contracts.TurnID(fmt.Sprintf("turn:%s:%d", taskID, sequence)), nil
+}
+
+// NewRunning 创建 running 迭代，复制归属标识并把创建时间转换为 UTC。
+func NewRunning(
 	id contracts.TurnID,
+	taskID contracts.TaskID,
 	sessionID contracts.SessionID,
 	agentID contracts.AgentID,
-	requestID contracts.RequestID,
-	reason TurnReason,
-	startContent string,
-	input InputSnapshot,
+	sequence uint64,
 	at time.Time,
 ) (Turn, error) {
-	turn := Turn{
-		ID: id, SessionID: sessionID, AgentID: agentID,
-		RequestID: requestID, Reason: reason, Status: TurnStarting,
-		StartContent: startContent, Input: input, CreatedAt: at.UTC(),
+	value := Turn{
+		ID:        id,
+		TaskID:    taskID,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Sequence:  sequence,
+		Status:    TurnRunning,
+		CreatedAt: at.UTC(),
 	}
-	if err := turn.Validate(); err != nil {
+	if err := value.Validate(); err != nil {
 		return Turn{}, err
 	}
-	return turn, nil
+	return value, nil
 }
 
-// NewQueuedWorkTurn 创建一个关联到排队用户输入消息的执行。
-func NewQueuedWorkTurn(
-	id contracts.TurnID,
-	sessionID contracts.SessionID,
-	agentID contracts.AgentID,
-	workItemID contracts.WorkItemID,
-	requestID contracts.RequestID,
-	input InputSnapshot,
-	at time.Time,
-) (Turn, error) {
-	if contracts.EmptyID(string(workItemID)) {
-		return Turn{}, contracts.InvalidValue("turn.workItemID", "work item id is required")
-	}
-	if contracts.EmptyID(string(requestID)) {
-		return Turn{}, contracts.InvalidValue("turn.requestID", "request id is required")
-	}
-	turn := Turn{
-		ID: id, SessionID: sessionID, AgentID: agentID,
-		RequestID: requestID, WorkItemID: workItemID,
-		Reason: TurnQueuedWork, Status: TurnStarting,
-		Input: input, CreatedAt: at.UTC(),
-	}
-	if err := turn.Validate(); err != nil {
-		return Turn{}, err
-	}
-	return turn, nil
-}
-
-func (e Turn) Validate() error {
-	if contracts.EmptyID(string(e.ID)) || contracts.EmptyID(string(e.SessionID)) || contracts.EmptyID(string(e.AgentID)) ||
-		contracts.EmptyID(string(e.RequestID)) {
-		return contracts.InvalidValue("turn", "required reference is missing")
-	}
-	if !validTurnReason(e.Reason) || !validTurnStatus(e.Status) {
-		return contracts.InvalidValue("turn", "unknown reason or status")
-	}
-	if e.Reason == TurnQueuedWork && contracts.EmptyID(string(e.WorkItemID)) {
-		return contracts.InvalidValue("turn.workItemID", "queued work turn requires a work item")
-	}
-	if e.Reason != TurnQueuedWork && e.WorkItemID != "" {
-		return contracts.InvalidValue("turn.workItemID", "only queued work turns may reference a work item")
-	}
-	if err := e.Input.Validate(); err != nil {
-		return contracts.FieldError("turn.input", err)
-	}
-	if e.CreatedAt.IsZero() {
-		return contracts.InvalidValue("turn.createdAt", "creation time is required")
-	}
-	if (!e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt)) ||
-		(!e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt)) {
-		return contracts.InvalidValue("turn.timestamps", "timestamps cannot precede creation")
-	}
-	if e.StartContent != strings.TrimSpace(e.StartContent) {
-		return contracts.InvalidValue("turn.startContent", "input content must be normalized")
-	}
-	if e.Reason == TurnUserInput && e.StartContent == "" && e.Input.CurrentInputMessageID == "" {
-		return contracts.InvalidValue("turn.startContent", "user input turn requires content or an input message reference")
-	}
-	if e.Status == TurnStarting {
-		if !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" {
-			return contracts.InvalidValue("turn", "starting turn has terminal fields")
-		}
-		if e.Reason == TurnUserInput && e.StartContent == "" {
-			return contracts.InvalidValue("turn.startContent", "user input turn requires content")
+// Validate 只读校验身份、状态和时间顺序；持久化恢复必须调用。
+// 非 canonical 字符串与互相矛盾的生命周期字段会被拒绝，不会被静默修正。
+func (t Turn) Validate() error {
+	for _, value := range []string{
+		string(t.ID),
+		string(t.TaskID),
+		string(t.SessionID),
+		string(t.AgentID),
+	} {
+		if value == "" || value != strings.TrimSpace(value) || strings.ContainsAny(value, "\x00\r\n") {
+			return contracts.InvalidValue("turn", "identity must be a non-empty canonical value")
 		}
 	}
-	if e.Status == TurnRunning || e.Status == TurnEnding {
-		if e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" {
-			return contracts.InvalidValue("turn", "active turn has invalid lifecycle fields")
-		}
+	if !t.Status.Valid() || t.Sequence == 0 || t.CreatedAt.IsZero() {
+		return contracts.InvalidValue("turn", "status, sequence, or creation time is invalid")
 	}
-	if e.Status == TurnEnded {
-		if e.StartedAt.IsZero() || e.EndedAt.IsZero() || !validTurnOutcome(e.Outcome) {
-			return contracts.InvalidValue("turn", "ended turn has invalid terminal fields")
-		}
-		if e.Outcome == TurnFailed && e.FailureCode == "" {
-			return contracts.InvalidValue("turn.failureCode", "failed turn requires a failure code")
-		}
+	// 身份必须可由 Task 与序号重建，否则恢复时无法定位同一迭代。
+	expected, err := NewTurnID(t.TaskID, t.Sequence)
+	if err != nil || expected != t.ID {
+		return contracts.InvalidValue("turn.id", "identity must be derived from task and sequence")
 	}
-	if !e.FailureCode.Valid() {
+	if t.FailureMessage != strings.TrimSpace(t.FailureMessage) ||
+		strings.ContainsAny(t.FailureMessage, "\x00\r\n") ||
+		len([]rune(t.FailureMessage)) > contracts.MaxTaskFailureMessageRunes {
+		return contracts.InvalidValue("turn.failureMessage", "failure message must be canonical and bounded")
+	}
+	if !t.FailureCode.Valid() {
 		return contracts.InvalidValue("turn.failureCode", "unknown failure code")
 	}
-	if e.FailureCode == contracts.TurnFailureRequestCanceled && e.Outcome != TurnPaused && e.Outcome != TurnInterrupted {
-		return contracts.InvalidValue("turn.failureCode", "request cancellation requires a paused or interrupted outcome")
+	if t.Status == TurnRunning {
+		if !t.EndedAt.IsZero() || t.Outcome != "" || t.FailureCode != "" || t.FailureMessage != "" {
+			return contracts.InvalidValue("turn", "running iteration contains settlement fields")
+		}
+		return nil
 	}
-	if e.FailureMessage != strings.TrimSpace(e.FailureMessage) ||
-		len([]rune(e.FailureMessage)) > contracts.MaxTurnFailureMessageRunes {
-		return contracts.InvalidValue("turn.failureMessage", "failure message must be normalized and bounded")
+	if !t.Outcome.Valid() || t.EndedAt.IsZero() || t.EndedAt.Before(t.CreatedAt) {
+		return contracts.InvalidValue("turn", "ended iteration requires an outcome and a settlement time")
 	}
-	if e.Status != TurnEnded && e.FailureMessage != "" {
-		return contracts.InvalidValue("turn.failureMessage", "active turn cannot have a failure message")
-	}
-	if e.Status == TurnEnded && e.Outcome != TurnFailed && e.FailureMessage != "" {
-		return contracts.InvalidValue("turn.failureMessage", "only failed turn may have a failure message")
+	switch t.Outcome {
+	case TurnCompleted:
+		if t.FailureCode != "" || t.FailureMessage != "" {
+			return contracts.InvalidValue("turn", "completed iteration cannot contain a failure")
+		}
+	case TurnFailed:
+		if t.FailureCode == "" {
+			return contracts.InvalidValue("turn.failureCode", "failed iteration requires a failure code")
+		}
+	case TurnInterrupted:
+		if t.FailureCode == "" || t.FailureMessage != "" {
+			return contracts.InvalidValue("turn", "interrupted iteration requires a failure code and no message")
+		}
 	}
 	return nil
 }
 
-func (e Turn) Active() bool {
-	return e.Status == TurnStarting || e.Status == TurnRunning || e.Status == TurnEnding
-}
-
-func (e *Turn) MarkRunning(at time.Time) error {
-	if e.Status != TurnStarting {
-		return contracts.InvalidTransition("turn", string(e.Status), string(TurnRunning))
+// End 结算 running 迭代；重复结算或时间早于创建时间时拒绝修改。
+func (t *Turn) End(outcome TurnOutcome, code contracts.TaskFailureCode, message string, at time.Time) error {
+	if t.Status != TurnRunning {
+		return contracts.InvalidTransition("turn", string(t.Status), string(TurnEnded))
 	}
-	e.Status = TurnRunning
-	e.StartedAt = at.UTC()
+	next := *t
+	next.Status = TurnEnded
+	next.Outcome = outcome
+	next.FailureCode = code
+	next.FailureMessage = message
+	next.EndedAt = at.UTC()
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	*t = next
 	return nil
-}
-
-// BeginEnding 标记执行已返回；结束时间不得早于启动时间，失败时不改变状态。
-func (e *Turn) BeginEnding(at time.Time) error {
-	if e.Status != TurnRunning {
-		return contracts.InvalidTransition("turn", string(e.Status), string(TurnEnding))
-	}
-	if at.Before(e.StartedAt) {
-		return contracts.InvalidValue("turn.endingAt", "ending cannot precede start")
-	}
-	e.Status = TurnEnding
-	return nil
-}
-
-// End 固定最终结果和结束时间；已结束的 Turn 不允许重新结束或改变结果。
-func (e *Turn) End(
-	outcome TurnOutcome,
-	failureCode contracts.TurnFailureCode,
-	at time.Time,
-) error {
-	if e.Status != TurnRunning && e.Status != TurnEnding {
-		return contracts.InvalidTransition("turn", string(e.Status), string(TurnEnded))
-	}
-	if !validTurnOutcome(outcome) {
-		return contracts.InvalidValue("turn.outcome", "unknown turn outcome")
-	}
-	if at.Before(e.StartedAt) {
-		return contracts.InvalidValue("turn.endedAt", "ending cannot precede start")
-	}
-	if !failureCode.Valid() || (outcome == TurnFailed && failureCode == "") {
-		return contracts.InvalidValue("turn.failureCode", "unknown or missing failure code")
-	}
-	if failureCode == contracts.TurnFailureRequestCanceled && outcome != TurnPaused && outcome != TurnInterrupted {
-		return contracts.InvalidValue("turn.failureCode", "request cancellation requires a paused or interrupted outcome")
-	}
-	e.Status = TurnEnded
-	e.Outcome = outcome
-	e.FailureCode = failureCode
-	e.EndedAt = at.UTC()
-	return nil
-}
-
-func validTurnReason(reason TurnReason) bool {
-	switch reason {
-	case TurnUserInput, TurnQueuedWork, TurnResume:
-		return true
-	default:
-		return false
-	}
-}
-
-func validTurnStatus(status TurnStatus) bool {
-	switch status {
-	case TurnStarting, TurnRunning, TurnEnding, TurnEnded:
-		return true
-	default:
-		return false
-	}
-}
-
-func validTurnOutcome(outcome TurnOutcome) bool {
-	switch outcome {
-	case TurnCompleted, TurnYielded, TurnPaused, TurnFailed, TurnInterrupted:
-		return true
-	default:
-		return false
-	}
 }

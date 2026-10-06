@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/infra/providers"
 )
 
-type EmitFunc func(runtimecontract.ModelStreamEvent) error
+type EmitFunc func(agentruntime.ModelStreamEvent) error
 
 const eventBufferCapacity = 16
 
@@ -44,13 +44,13 @@ func Start(
 	ctx context.Context,
 	response *http.Response,
 	decoder Decoder,
-) <-chan runtimecontract.ModelStreamEvent {
-	events := make(chan runtimecontract.ModelStreamEvent, eventBufferCapacity)
+) <-chan agentruntime.ModelStreamEvent {
+	events := make(chan agentruntime.ModelStreamEvent, eventBufferCapacity)
 	go func() {
 		defer close(events)
 		defer response.Body.Close()
 		// The decoder calls emit to forward each text, tool call, or other event to the consumer.
-		emit := func(event runtimecontract.ModelStreamEvent) error {
+		emit := func(event agentruntime.ModelStreamEvent) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -60,11 +60,11 @@ func Start(
 		}
 		stopReason, err := decoder.Decode(ctx, NewSSEReader(response.Body), emit)
 		if err != nil {
-			_ = emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamError, Err: err})
+			_ = emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamError, Err: err})
 			return
 		}
-		_ = emit(runtimecontract.ModelStreamEvent{
-			Kind:       runtimecontract.StreamComplete,
+		_ = emit(agentruntime.ModelStreamEvent{
+			Kind:       agentruntime.StreamComplete,
 			StopReason: stopReason,
 		})
 	}()

@@ -72,17 +72,15 @@ type AgentSnapshot struct {
 	SecurityPolicyRevision uint64         `json:"securityPolicyRevision"`
 	Profile                string         `json:"profile"`
 	State                  string         `json:"state"`
-	CurrentTurn            string         `json:"currentTurnId"`
-	TurnIDs                []string       `json:"turnIds"`
-	Turns                  []TurnSnapshot `json:"turns"`
-	WaitConditionIDs       []string       `json:"waitConditionIds"`
+	CurrentTask            string         `json:"currentTaskId"`
+	TaskIDs                []string       `json:"taskIds"`
+	Tasks                  []TaskSnapshot `json:"tasks"`
 	ControlCommandIDs      []string       `json:"controlCommandIds"`
 }
 
-// TurnSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。
-type TurnSnapshot struct {
+// TaskSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。
+type TaskSnapshot struct {
 	ID             string    `json:"id"`
-	Reason         string    `json:"reason"`
 	Status         string    `json:"status"`
 	Outcome        string    `json:"outcome,omitempty"`
 	FailureCode    string    `json:"failureCode,omitempty"`
@@ -96,7 +94,7 @@ type AgentMessage struct {
 	ID         string              `json:"id"`
 	Sequence   uint64              `json:"sequence"`
 	At         time.Time           `json:"at"`
-	TurnID     string              `json:"turnId"`
+	TaskID     string              `json:"taskId"`
 	Role       string              `json:"role"`
 	AuthorKind string              `json:"authorKind"`
 	AuthorID   string              `json:"authorId,omitempty"`
@@ -120,7 +118,7 @@ type AgentHistoryItem struct {
 	Sequence uint64        `json:"sequence,omitempty"`
 	At       time.Time     `json:"at"`
 	Message  *AgentMessage `json:"message,omitempty"`
-	Turn     *TurnSnapshot `json:"turn,omitempty"`
+	Task     *TaskSnapshot `json:"task,omitempty"`
 }
 
 type ModelOption struct {
@@ -197,46 +195,41 @@ type SendInputRequest struct {
 }
 
 type SendInputResponse struct {
-	TurnID          string `json:"turnId"`
+	TaskID          string `json:"taskId"`
 	ExistingRequest bool   `json:"existingRequest"`
 	ActivationError string `json:"activationError,omitempty"`
-}
-
-type ResumeRequest struct {
-	AgentID   string `json:"agentId"`
-	RequestID string `json:"requestId"`
-	Content   string `json:"content"`
 }
 
 type PauseAgentRequest struct {
 	CommandID    string `json:"commandId"`
 	AgentID      string `json:"agentId"`
-	TargetTurnID string `json:"targetTurnId"`
+	TargetTaskID string `json:"targetTaskId"`
 }
 
-type CancelTurnRequest = PauseAgentRequest
+type CancelTaskRequest = PauseAgentRequest
 
 type AgentControlResponse struct {
 	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
-	TargetTurnID      string `json:"targetTurnId,omitempty"`
+	TargetTaskID      string `json:"targetTaskId,omitempty"`
 	Kind              string `json:"kind"`
 	Status            string `json:"status"`
 	ExistingCommand   bool   `json:"existingCommand"`
 	CancellationError string `json:"cancellationError,omitempty"`
 }
 
-type QueueWorkRequest struct {
-	ID        string `json:"id"`
-	RequestID string `json:"requestId"`
-	AgentID   string `json:"agentId"`
-	Prompt    string `json:"prompt"`
+type QueueTaskRequest struct {
+	TaskID         string `json:"taskId"`
+	RequestID      string `json:"requestId"`
+	AgentID        string `json:"agentId"`
+	Prompt         string `json:"prompt"`
+	ProviderID     string `json:"providerId"`
+	ModelID        string `json:"modelId"`
+	ReasoningLevel string `json:"reasoningLevel"`
 }
 
-type QueueWorkResponse struct {
-	WorkID          string `json:"workId"`
-	TurnID          string `json:"turnId,omitempty"`
-	Status          string `json:"status"`
-	ExistingWork    bool   `json:"existingWork"`
-	ActivationError string `json:"activationError,omitempty"`
+type QueueTaskResponse struct {
+	TaskID       string `json:"taskId"`
+	Status       string `json:"status"`
+	ExistingTask bool   `json:"existingTask"`
 }

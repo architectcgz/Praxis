@@ -28,7 +28,7 @@ type Entry struct {
 	ID            string
 	SessionID     string
 	Kind          EntryKind
-	SourceTurnID  string
+	SourceTaskID  string
 	Content       string
 	ContentDigest string
 	CreatedAt     time.Time
@@ -130,11 +130,11 @@ func (c ModelContext) Digest() (string, error) {
 // Validate 校验完整模型上下文的基本结构。
 func (c ModelContext) Validate() error {
 	if len(c.Entries) == 0 {
-		return errors.New("turn context requires entries")
+		return errors.New("task context requires entries")
 	}
 	for _, entry := range c.Entries {
 		if !validContextEntryKind(entry.Kind) || !validContextRole(entry.Role) || len(entry.Content) == 0 {
-			return errors.New("turn context contains an invalid entry")
+			return errors.New("task context contains an invalid entry")
 		}
 		for _, block := range entry.Content {
 			if err := validateContextBlock(block); err != nil {
@@ -168,21 +168,21 @@ func validateContextBlock(block ContextBlock) error {
 	switch block.Kind {
 	case ContextBlockText:
 		if strings.TrimSpace(block.Text) == "" {
-			return errors.New("turn context contains an empty text block")
+			return errors.New("task context contains an empty text block")
 		}
 	case ContextBlockToolCall, ContextBlockMCPCall:
 		if strings.TrimSpace(block.CallID) == "" || strings.TrimSpace(block.Name) == "" {
-			return errors.New("turn context contains an invalid call block")
+			return errors.New("task context contains an invalid call block")
 		}
 		if len(block.Input) > 0 && !json.Valid(block.Input) {
-			return errors.New("turn context contains invalid call input")
+			return errors.New("task context contains invalid call input")
 		}
 	case ContextBlockToolResult, ContextBlockMCPResult:
 		if strings.TrimSpace(block.CallID) == "" || strings.TrimSpace(block.Name) == "" {
-			return errors.New("turn context contains an invalid result block")
+			return errors.New("task context contains an invalid result block")
 		}
 	default:
-		return errors.New("turn context contains an unknown block kind")
+		return errors.New("task context contains an unknown block kind")
 	}
 	return nil
 }

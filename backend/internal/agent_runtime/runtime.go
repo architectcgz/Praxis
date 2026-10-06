@@ -2,155 +2,166 @@ package agentruntime
 
 import (
 	"praxis/internal/contracts"
-	turnmodel "praxis/internal/core/turn"
+	agentmodel "praxis/internal/core/agent"
+	taskmodel "praxis/internal/core/task"
+	"praxis/internal/logging"
 
 	"context"
 	"errors"
-	"log"
 	"sync"
 	"time"
 )
 
-// TurnLogger 接收已脱敏的运行时失败，仅用于诊断。
-// 不能用它记录 Provider payload 或凭据。
-type TurnLogger func(turnmodel.Turn, string, error)
-
-// TurnEventLogger 接收已脱敏的运行时生命周期事件。
-type TurnEventLogger func(turnmodel.Turn, string)
-
 type RuntimeConfig struct {
 	AgentID          contracts.AgentID
-	Messages         MessageStoreResolver
-	Runner           TurnRunner
-	Logger           TurnLogger
-	EventLogger      TurnEventLogger
+	Executions       *agentmodel.Executions
+	MessageRecorders MessageRecorderResolver
+	RunLoop          LoopFunc
+	TaskBuilder      TaskBuilder
+	Lifecycle        TaskLifecycle
+	Queue            TaskQueue
+	// Logger 仅记录已脱敏的诊断信息，不得记录 Provider payload 或凭据；nil 时禁用日志。
+	Logger           *logging.Logger
 	LifecycleTimeout time.Duration
 }
 
 // Runtime 是单个 Agent 的进程内执行器，活动状态不会跨进程恢复。
 type Runtime struct {
 	agentID          contracts.AgentID
-	messages         MessageStoreResolver
-	runner           TurnRunner
-	logger           TurnLogger
-	eventLogger      TurnEventLogger
+	executions       *agentmodel.Executions
+	messageRecorders MessageRecorderResolver
+	runLoop          LoopFunc
+	taskBuilder      TaskBuilder
+	lifecycle        TaskLifecycle
+	queue            TaskQueue
+	logger           *logging.Logger
 	lifecycleTimeout time.Duration
 
 	mu      sync.Mutex
-	active  *runtimeTurn
+	active  *runtimeTask
 	closed  bool
 	running sync.WaitGroup
 }
 
-type runtimeTurn struct {
-	id            contracts.TurnID
-	cancel        context.CancelFunc
-	cancelOutcome turnmodel.TurnOutcome
-	lifecycle     TurnLifecycle
-	ending        bool
+type runtimeTask struct {
+	id     contracts.TaskID
+	ending bool
 }
 
 func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	if config.AgentID == "" {
 		return nil, errors.New("target runtime agent id is required")
 	}
-	if config.Messages == nil {
-		return nil, errors.New("target runtime message resolver is required")
+	if config.Executions == nil {
+		return nil, errors.New("agent execution state is required")
 	}
-	if config.Runner == nil {
-		return nil, errors.New("target runtime turn runner is required")
+	if config.MessageRecorders == nil {
+		return nil, errors.New("target runtime message recorder resolver is required")
+	}
+	if config.RunLoop == nil {
+		return nil, errors.New("target runtime loop function is required")
+	}
+	if config.TaskBuilder == nil {
+		return nil, errors.New("target runtime task builder is required")
+	}
+	if config.Lifecycle == nil {
+		return nil, errors.New("target runtime task lifecycle is required")
+	}
+	if config.Queue == nil {
+		return nil, errors.New("target runtime task queue is required")
 	}
 	timeout := config.LifecycleTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	logger := config.Logger
-	if logger == nil {
-		logger = defaultTurnLogger
-	}
-	eventLogger := config.EventLogger
-	if eventLogger == nil {
-		eventLogger = func(turnmodel.Turn, string) {}
-	}
 	return &Runtime{
 		agentID:          config.AgentID,
-		messages:         config.Messages,
-		runner:           config.Runner,
-		logger:           logger,
-		eventLogger:      eventLogger,
+		executions:       config.Executions,
+		messageRecorders: config.MessageRecorders,
+		runLoop:          config.RunLoop,
+		taskBuilder:      config.TaskBuilder,
+		lifecycle:        config.Lifecycle,
+		queue:            config.Queue,
+		logger:           logging.NewFactory().Ensure(config.Logger),
 		lifecycleTimeout: timeout,
 	}, nil
 }
 
-// Activate 只接受属于当前 Agent 且已持久化的 turn。
-// lifecycle 负责执行开始和结束的状态更新；重复激活幂等，仍在执行的另一个 turn 会被拒绝。
+// Activate 只接受属于当前 Agent 且已持久化的 task。
+// lifecycle 负责执行开始和结束的状态更新；重复激活幂等，仍在执行的另一个 task 会被拒绝。
 func (r *Runtime) Activate(
 	ctx context.Context,
-	turn turnmodel.Turn,
-	lifecycle TurnLifecycle,
+	task taskmodel.Task,
 ) error {
 	if ctx == nil {
 		return errors.New("target runtime activation context is required")
 	}
-	if lifecycle == nil {
-		return errors.New("target runtime turn lifecycle is required")
-	}
-	if err := turn.Validate(); err != nil {
+	if err := task.Validate(); err != nil {
 		return err
 	}
-	if turn.AgentID != r.agentID || !turn.Active() {
-		return errors.New("target runtime received an ineligible turn")
+	if task.AgentID != r.agentID || !task.Active() {
+		return errors.New("target runtime received an ineligible task")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.activateLocked(task)
+}
+
+func (r *Runtime) activateLocked(task taskmodel.Task) error {
 	if r.closed {
 		return errors.New("target runtime is closed")
 	}
 	if r.active != nil {
-		if r.active.id == turn.ID {
+		if r.active.id == task.ID {
 			return nil
 		}
 		if !r.active.ending {
-			return errors.New("target runtime already has an active turn")
+			return errors.New("target runtime already has an active task")
 		}
 	}
-	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	active := &runtimeTurn{
-		id:            turn.ID,
-		cancel:        cancel,
-		cancelOutcome: turnmodel.TurnInterrupted,
-		lifecycle:     lifecycle,
+	taskCtx, err := r.executions.Context(r.agentID, task.ID)
+	if err != nil {
+		return err
 	}
+	active := &runtimeTask{id: task.ID}
 	r.active = active
-	r.running.Go(func() { r.run(turnCtx, turn, active) })
-	r.logEvent(turn, "activation accepted")
+	r.running.Go(func() { r.run(taskCtx, task, active) })
+	r.logEvent(task.ID, "activation accepted")
 	return nil
 }
 
-// Cancel 通知指定的活动 Turn 停止；返回 true 只表示信号已发送，不表示结束已持久化。
-func (r *Runtime) Cancel(
-	ctx context.Context,
-	turnID contracts.TurnID,
-	outcome turnmodel.TurnOutcome,
-) (bool, error) {
+// StartNext 从 runtime 持有的队列领取并执行下一项；正在执行时保持排队，关闭后拒绝领取。
+// 领取和执行槽交接共用锁，避免并发唤醒重复领取或关闭后留下尚未执行的任务。
+func (r *Runtime) StartNext(ctx context.Context) (bool, error) {
 	if ctx == nil {
-		return false, errors.New("target runtime cancellation context is required")
-	}
-	if outcome != turnmodel.TurnPaused && outcome != turnmodel.TurnInterrupted {
-		return false, errors.New("target runtime cancellation outcome is invalid")
+		return false, errors.New("runtime queue context is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.active == nil || r.active.id != turnID || r.active.ending {
+	if r.closed {
+		return false, errors.New("target runtime is closed")
+	}
+	if r.active != nil {
 		return false, nil
 	}
-	r.active.cancelOutcome = outcome
-	r.active.cancel()
-	r.logEventLocked(turnID, "cancellation requested")
+	pending, found, err := r.queue.Next(ctx)
+	if err != nil || !found {
+		return false, err
+	}
+	task, prepared, err := r.taskBuilder.BuildTask(ctx, pending)
+	if err != nil || !prepared {
+		return false, err
+	}
+	if task.AgentID != r.agentID {
+		return false, errors.New("runtime task belongs to another agent")
+	}
+	if err := r.activateLocked(task); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
-// Close 取消活动执行，并仅等待到调用方给定的 deadline。
+// Close 拒绝新调度，请求 Agent 停止活动执行，并等待至调用方给定的 deadline。
 func (r *Runtime) Close(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("target runtime close context is required")
@@ -159,11 +170,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 	r.closed = true
 	active := r.active
 	if active != nil {
-		active.cancelOutcome = turnmodel.TurnInterrupted
-		active.cancel()
+		r.executions.Stop(r.agentID, active.id)
 	}
 	r.mu.Unlock()
-	// 下一轮可能在上一轮终态回调内启动；关闭必须同时等待所有结束事务和回调。
+	// 关闭必须同时等待执行、结束事务和队列交接，防止释放持久化资源后继续写入。
 	done := make(chan struct{})
 	go func() {
 		r.running.Wait()
@@ -179,175 +189,179 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 func (r *Runtime) run(
 	ctx context.Context,
-	turn turnmodel.Turn,
-	active *runtimeTurn,
+	task taskmodel.Task,
+	active *runtimeTask,
 ) {
-	r.logEvent(turn, "turn started")
-	defer r.finishTurn(active)
-	defer active.cancel()
+	r.logEvent(task.ID, "task started")
+	defer r.finishTask(active)
 
-	if !r.startTurn(turn, active) {
+	if err := r.startTask(task); err != nil {
+		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, err)
+		r.endTask(task, active, outcome, code, message)
+		return
+	}
+	if ctx.Err() != nil {
+		outcome, code, message := r.executionResult(ctx, taskmodel.TaskInterrupted, contracts.TaskFailureRuntimeCancelled, ctx.Err())
+		r.endTask(task, active, outcome, code, message)
 		return
 	}
 
-	messages, err := r.messages(ctx, turn.SessionID, turn.AgentID)
-	if err != nil || messages == nil {
+	messageRecorder, err := r.messageRecorders(ctx, task.SessionID, task.AgentID)
+	if err != nil || messageRecorder == nil {
 		if err == nil {
 			err = errors.New("message resolver returned a nil store")
 		}
-		r.logError(turn, "open messages", err)
-		outcome, code, message := r.executionResult(ctx, active, turnmodel.TurnFailed, contracts.TurnFailureRuntimeFailed, err)
-		r.endTurn(turn, active, outcome, code, message)
+		r.logError(task, "resolve message recorder", err)
+		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, err)
+		r.endTask(task, active, outcome, code, message)
 		return
 	}
 
-	outcome, failureCode, failureMessage := r.execute(ctx, turn, messages, active)
-	if !r.endTurn(turn, active, outcome, failureCode, failureMessage) {
+	outcome, failureCode, failureMessage := r.execute(ctx, task, messageRecorder)
+	if !r.endTask(task, active, outcome, failureCode, failureMessage) {
 		return
 	}
-	r.logEvent(turn, "turn ended")
+	r.logEvent(task.ID, "task ended")
 }
 
-// finishTurn 仅释放属于本轮的活动槽位，不清除终态回调已启动的下一轮。
-func (r *Runtime) finishTurn(active *runtimeTurn) {
+// finishTask 仅释放属于本轮的活动槽位，不清除队列交接已启动的下一轮。
+func (r *Runtime) finishTask(active *runtimeTask) {
 	r.mu.Lock()
+	r.executions.End(r.agentID, active.id)
 	if r.active == active {
 		r.active = nil
 	}
 	r.mu.Unlock()
 }
 
-func (r *Runtime) startTurn(
-	turn turnmodel.Turn,
-	active *runtimeTurn,
-) bool {
+func (r *Runtime) startTask(task taskmodel.Task) error {
 	startContext, cancelStart := r.lifecycleContext()
 	defer cancelStart()
-	if err := active.lifecycle.StartRuntimeTurn(startContext, turn.ID); err != nil {
-		r.logError(turn, "start product turn", err)
-		return false
+	if err := r.lifecycle.Start(startContext, task.ID); err != nil {
+		r.logError(task, "start product task", err)
+		return err
 	}
-	return true
+	return nil
 }
 
 // execute 运行 Provider/tool loop，并把取消转换为可持久化的结果。
-// runner 不拥有持久化生命周期，因此 context 取消后仍会交由业务服务保存结束状态。
+// loop 不拥有持久化生命周期，因此 context 取消后仍会交由业务服务保存结束状态。
 func (r *Runtime) execute(
 	ctx context.Context,
-	turn turnmodel.Turn,
-	store TurnMessageStore,
-	active *runtimeTurn,
-) (turnmodel.TurnOutcome, contracts.TurnFailureCode, string) {
-	outcome, failureCode, err := r.runner.RunWithSession(ctx, turn, store)
-	r.logEvent(turn, "provider completed")
+	task taskmodel.Task,
+	messageRecorder MessageRecorder,
+) (taskmodel.TaskOutcome, contracts.TaskFailureCode, string) {
+	outcome, failureCode, err := r.runLoop(ctx, task, messageRecorder)
+	r.logEvent(task.ID, "provider completed")
 	if err != nil {
-		r.logError(turn, "run provider", err)
+		r.logError(task, "run provider", err)
 	}
-	return r.executionResult(ctx, active, outcome, failureCode, err)
+	return r.executionResult(ctx, outcome, failureCode, err)
 }
 
-// executionResult 在同一把锁内读取取消结果；持久化控制命令由结束事务最终仲裁。
+// executionResult 读取 Agent 提供的取消原因；持久化控制命令由结束事务最终仲裁。
 func (r *Runtime) executionResult(
 	ctx context.Context,
-	active *runtimeTurn,
-	outcome turnmodel.TurnOutcome,
-	failureCode contracts.TurnFailureCode,
+	outcome taskmodel.TaskOutcome,
+	failureCode contracts.TaskFailureCode,
 	err error,
-) (turnmodel.TurnOutcome, contracts.TurnFailureCode, string) {
-	failureMessage := contracts.TurnFailureMessage(failureCode, err)
-	r.mu.Lock()
+) (taskmodel.TaskOutcome, contracts.TaskFailureCode, string) {
+	failureMessage := contracts.TaskFailureMessage(failureCode, err)
 	if ctx.Err() != nil {
-		outcome = active.cancelOutcome
-		failureCode = contracts.TurnFailureRuntimeCancelled
+		outcome = taskmodel.TaskInterrupted
+		if errors.Is(context.Cause(ctx), agentmodel.ErrExecutionPaused) {
+			outcome = taskmodel.TaskPaused
+		}
+		failureCode = contracts.TaskFailureRuntimeCancelled
 		failureMessage = ""
 	} else if err != nil {
-		outcome = turnmodel.TurnFailed
+		outcome = taskmodel.TaskFailed
 		if failureCode == "" {
-			failureCode = contracts.TurnFailureRuntimeFailed
+			failureCode = contracts.TaskFailureRuntimeFailed
 		}
 	}
-	r.mu.Unlock()
 	outcome, failureCode = normalizeOutcome(outcome, failureCode)
-	if failureCode != contracts.TurnFailureProvider {
+	if failureCode != contracts.TaskFailureProvider {
 		failureMessage = ""
 	}
 	return outcome, failureCode, failureMessage
 }
 
-func (r *Runtime) endTurn(
-	turn turnmodel.Turn,
-	active *runtimeTurn,
-	outcome turnmodel.TurnOutcome,
-	failureCode contracts.TurnFailureCode,
+func (r *Runtime) endTask(
+	task taskmodel.Task,
+	active *runtimeTask,
+	outcome taskmodel.TaskOutcome,
+	failureCode contracts.TaskFailureCode,
 	failureMessage string,
 ) bool {
-	// runner 已返回，允许已通过持久化准入的下一轮接管；同一 Turn 的重复激活仍保持幂等。
+	// loop 已返回，允许已通过持久化准入的下一轮接管；同一 Task 的重复激活仍保持幂等。
 	r.mu.Lock()
 	active.ending = true
+	r.executions.BeginEnding(r.agentID, active.id)
 	r.mu.Unlock()
 	endContext, cancelEnd := r.lifecycleContext()
 	defer cancelEnd()
-	if err := active.lifecycle.EndRuntimeTurn(
+	endedTask, err := r.lifecycle.End(
 		endContext,
-		turn.ID,
+		task.ID,
 		outcome,
 		failureCode,
 		failureMessage,
-	); err != nil {
-		r.logError(turn, "end product turn", err)
+	)
+	if err != nil {
+		r.logError(task, "end product task", err)
 		return false
+	}
+	// 结算提交后才释放执行槽；入队唤醒不能在暂停或取消结算途中抢先续跑。
+	r.finishTask(active)
+	// 只有已提交的最终结果允许续跑；已提交的暂停或取消可以覆盖 loop 的正常完成。
+	if endedTask.Outcome == taskmodel.TaskCompleted || endedTask.Outcome == taskmodel.TaskYielded {
+		queueContext, cancelQueue := r.lifecycleContext()
+		defer cancelQueue()
+		if _, err := r.StartNext(queueContext); err != nil {
+			r.logError(task, "prepare next queued task", err)
+		}
 	}
 	return true
 }
 
 func normalizeOutcome(
-	outcome turnmodel.TurnOutcome,
-	failureCode contracts.TurnFailureCode,
-) (turnmodel.TurnOutcome, contracts.TurnFailureCode) {
+	outcome taskmodel.TaskOutcome,
+	failureCode contracts.TaskFailureCode,
+) (taskmodel.TaskOutcome, contracts.TaskFailureCode) {
 	if !knownOutcome(outcome) {
-		outcome = turnmodel.TurnFailed
-		failureCode = contracts.TurnFailureRuntimeInvalid
+		outcome = taskmodel.TaskFailed
+		failureCode = contracts.TaskFailureRuntimeInvalid
 	}
-	if outcome == turnmodel.TurnFailed && failureCode == "" {
-		failureCode = contracts.TurnFailureRuntimeFailed
+	if outcome == taskmodel.TaskFailed && failureCode == "" {
+		failureCode = contracts.TaskFailureRuntimeFailed
 	}
 	if !failureCode.Valid() {
-		outcome = turnmodel.TurnFailed
-		failureCode = contracts.TurnFailureRuntimeFailed
+		outcome = taskmodel.TaskFailed
+		failureCode = contracts.TaskFailureRuntimeFailed
 	}
 	return outcome, failureCode
 }
 
-func (r *Runtime) logError(turn turnmodel.Turn, stage string, err error) {
+func (r *Runtime) logError(task taskmodel.Task, stage string, err error) {
 	if err == nil {
 		return
 	}
-	r.logger(turn, stage, err)
+	r.logger.Errorf("task id=%s stage=%s failed: %v", task.ID, stage, err)
 }
 
-func (r *Runtime) logEvent(turn turnmodel.Turn, stage string) {
-	r.eventLogger(turn, stage)
-}
-
-func (r *Runtime) logEventLocked(turnID contracts.TurnID, stage string) {
-	r.eventLogger(turnmodel.Turn{ID: turnID, AgentID: r.agentID}, stage)
-}
-
-func defaultTurnLogger(turn turnmodel.Turn, stage string, err error) {
-	if err == nil {
-		return
-	}
-	log.Printf("praxis turn %s %s failed: %v", turn.ID, stage, err)
+func (r *Runtime) logEvent(taskID contracts.TaskID, stage string) {
+	r.logger.Infof("task id=%s stage=%s", taskID, stage)
 }
 
 func (r *Runtime) lifecycleContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), r.lifecycleTimeout)
 }
 
-func knownOutcome(outcome turnmodel.TurnOutcome) bool {
+func knownOutcome(outcome taskmodel.TaskOutcome) bool {
 	switch outcome {
-	case turnmodel.TurnCompleted, turnmodel.TurnYielded, turnmodel.TurnPaused,
-		turnmodel.TurnFailed, turnmodel.TurnInterrupted:
+	case taskmodel.TaskCompleted, taskmodel.TaskYielded, taskmodel.TaskPaused,
+		taskmodel.TaskFailed, taskmodel.TaskInterrupted:
 		return true
 	default:
 		return false

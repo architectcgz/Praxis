@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -59,8 +59,8 @@ func (streamDecoder) Decode(
 		if previous == "" && len(reasoning) > 0 {
 			delta = "\n\n" + text
 		}
-		if err := emit(runtimecontract.ModelStreamEvent{
-			Kind: runtimecontract.StreamThinkingDelta,
+		if err := emit(agentruntime.ModelStreamEvent{
+			Kind: agentruntime.StreamThinkingDelta,
 			Text: delta,
 		}); err != nil {
 			return err
@@ -147,8 +147,8 @@ func (streamDecoder) Decode(
 		switch eventPayload.Type {
 		case "response.output_text.delta":
 			if eventPayload.Delta != "" {
-				if err := emit(runtimecontract.ModelStreamEvent{
-					Kind: runtimecontract.StreamTextDelta,
+				if err := emit(agentruntime.ModelStreamEvent{
+					Kind: agentruntime.StreamTextDelta,
 					Text: eventPayload.Delta,
 				}); err != nil {
 					return "", err
@@ -217,7 +217,7 @@ func (streamDecoder) Decode(
 				return "", err
 			}
 			if reported := eventPayload.Response.Usage; reported != nil && reported.InputTokens != nil {
-				usage := &runtimecontract.ModelUsage{
+				usage := &agentruntime.ModelUsage{
 					InputTokens:  *reported.InputTokens,
 					OutputTokens: reported.OutputTokens,
 				}
@@ -225,7 +225,7 @@ func (streamDecoder) Decode(
 					usage.CacheReadInputTokens = reported.InputTokensDetails.CachedTokens
 				}
 				if usage.Valid() {
-					if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
+					if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamUsage, Usage: usage}); err != nil {
 						return "", err
 					}
 				}

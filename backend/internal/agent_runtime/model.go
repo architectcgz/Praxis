@@ -6,7 +6,6 @@ import (
 
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"strings"
 
@@ -52,29 +51,29 @@ func (u ModelUsage) Valid() bool {
 	return read >= 0 && creation >= 0 && creation <= u.InputTokens && read <= u.InputTokens-creation
 }
 
-// ModelUsageRecord 按 Turn 和 step 保存请求用量，同一请求的累计更新不重复计费。
+// ModelUsageRecord 按 loop 迭代保存请求用量，同一迭代的累计更新不重复计费。
 type ModelUsageRecord struct {
-	SessionID string     `json:"sessionId"`
-	AgentID   string     `json:"agentId"`
-	TurnID    string     `json:"turnId"`
-	Step      int        `json:"step"`
-	Usage     ModelUsage `json:"usage"`
+	SessionID string           `json:"sessionId"`
+	AgentID   string           `json:"agentId"`
+	TaskID    string           `json:"taskId"`
+	TurnID    contracts.TurnID `json:"turnId"`
+	Usage     ModelUsage       `json:"usage"`
 }
 
 // Key 返回请求的稳定身份，供持久化和实时更新去重。
 func (r ModelUsageRecord) Key() string {
-	return fmt.Sprintf("usage:%s:%d", r.TurnID, r.Step)
+	return "usage:" + r.TurnID.String()
 }
 
 // Validate 拒绝非规范化身份和无效计数，不修正持久化数据。
 func (r ModelUsageRecord) Validate() error {
-	for _, id := range []string{r.SessionID, r.AgentID, r.TurnID} {
-		if id == "" || id != strings.TrimSpace(id) {
+	for _, id := range []string{r.SessionID, r.AgentID, r.TaskID, r.TurnID.String()} {
+		if id == "" || id != strings.TrimSpace(id) || strings.ContainsAny(id, "\x00\r\n") {
 			return errors.New("token 用量身份必须是规范化非空字符串")
 		}
 	}
-	if r.Step < 1 || !r.Usage.Valid() {
-		return errors.New("token 用量的 step 或计数无效")
+	if !r.Usage.Valid() {
+		return errors.New("token 用量的计数无效")
 	}
 	return nil
 }
@@ -91,20 +90,20 @@ type ModelStreamEvent struct {
 
 // ModelRequest 是发送给 Provider 的一次完整模型上下文请求，不包含凭据字段。
 type ModelRequest struct {
-	TurnID           contracts.TurnID
+	TaskID           contracts.TaskID
 	SessionReference string
 	Context          appcontext.ModelContext
 	Model            contracts.ModelSnapshot
 	MaxOutputTokens  int
 	Tools            []toolcontracts.ToolDefinition
-	Step             int
+	TurnID           contracts.TurnID
 }
 
-// TurnModel 根据冻结模型配置解析 Provider 流和输出预算，凭据只在运行时读取。
+// TaskModel 根据冻结模型配置解析 Provider 流和输出预算，凭据只在运行时读取。
 //
 // 模型的上下文窗口不在这里：窗口只用于本地提前拒绝，所有权归 provider adapter
 // （它才知道本协议序列化出的请求体）。
-type TurnModel struct {
+type TaskModel struct {
 	Stream          ModelStream
 	MaxOutputTokens int
 }

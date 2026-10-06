@@ -14,9 +14,9 @@ import (
 	projectmodel "praxis/internal/core/project"
 	securitymodel "praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
+	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
 	turnmodel "praxis/internal/core/turn"
-	workflowmodel "praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/repository"
 )
@@ -27,14 +27,13 @@ type Repositories struct {
 	Workspaces        WorkspaceRepository
 	Sessions          SessionRepository
 	Agents            AgentRepository
-	Turns             TurnRepository
+	Tasks             TaskRepository
 	SecuritySnapshots SecuritySnapshotRepository
 	Policies          PolicyRepository
 	Contexts          ContextRepository
 	ToolInvocations   ToolRepository
-	QueuedWork        QueueRepository
-	Waits             WaitRepository
 	Controls          ControlRepository
+	Turns             TurnRepository
 	SessionMessages   SessionMessageRepository
 	AgentMessages     AgentMessageRepository
 }
@@ -46,14 +45,13 @@ func (s *Store) Repositories() Repositories {
 		Workspaces:        WorkspaceRepository{s},
 		Sessions:          SessionRepository{s},
 		Agents:            AgentRepository{s},
-		Turns:             TurnRepository{s},
+		Tasks:             TaskRepository{s},
 		SecuritySnapshots: SecuritySnapshotRepository{s},
 		Policies:          PolicyRepository{s},
 		Contexts:          ContextRepository{s},
 		ToolInvocations:   ToolRepository{s},
-		QueuedWork:        QueueRepository{s},
-		Waits:             WaitRepository{s},
 		Controls:          ControlRepository{s},
+		Turns:             TurnRepository{s},
 		SessionMessages:   SessionMessageRepository{s},
 		AgentMessages:     AgentMessageRepository{s},
 	}
@@ -63,14 +61,37 @@ type ProjectRepository struct{ s *Store }
 type WorkspaceRepository struct{ s *Store }
 type SessionRepository struct{ s *Store }
 type AgentRepository struct{ s *Store }
-type TurnRepository struct{ s *Store }
+type TaskRepository struct{ s *Store }
 type SecuritySnapshotRepository struct{ s *Store }
 type PolicyRepository struct{ s *Store }
 type ContextRepository struct{ s *Store }
 type ToolRepository struct{ s *Store }
-type QueueRepository struct{ s *Store }
-type WaitRepository struct{ s *Store }
 type ControlRepository struct{ s *Store }
+type TurnRepository struct{ s *Store }
+
+// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
+func (r TurnRepository) Get(ctx context.Context, id contracts.TurnID) (turnmodel.Turn, error) {
+	return get[turnmodel.Turn](ctx, r.s, "turn", id.String())
+}
+
+// Save 校验并保存对象，事务未提交时只更新工作区。
+func (r TurnRepository) Save(ctx context.Context, v turnmodel.Turn) error {
+	return save(ctx, r.s, v.SessionID.String(), "turn", v.ID.String(), "turn.saved", v)
+}
+
+// ListOpen 返回全部尚未结算的迭代，供启动恢复发现待收敛的 Session。
+func (r TurnRepository) ListOpen(ctx context.Context) ([]turnmodel.Turn, error) {
+	v, e := list[turnmodel.Turn](ctx, r.s, "turn", func(v turnmodel.Turn) bool {
+		return v.Status == turnmodel.TurnRunning
+	})
+	return sorted(v, func(a, b turnmodel.Turn) int {
+		return cmp.Or(
+			cmp.Compare(a.SessionID, b.SessionID),
+			cmp.Compare(a.TaskID, b.TaskID),
+			cmp.Compare(a.Sequence, b.Sequence),
+		)
+	}), e
+}
 
 // Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
 func (r ProjectRepository) Get(ctx context.Context, id contracts.ProjectID) (projectmodel.Project, error) {
@@ -153,12 +174,12 @@ func (r SessionRepository) Rename(ctx context.Context, id contracts.SessionID, t
 	return r.Save(ctx, v)
 }
 
-// Delete 追加删除标记并清除关联投影；仍有活动 Turn 时拒绝删除。
+// Delete 追加删除标记并清除关联投影；仍有活动 Task 时拒绝删除。
 func (r SessionRepository) Delete(ctx context.Context, id contracts.SessionID) ([]string, error) {
 	if _, e := r.Get(ctx, id); e != nil {
 		return nil, e
 	}
-	n, e := (TurnRepository{r.s}).CountActiveBySession(ctx, id)
+	n, e := (TaskRepository{r.s}).CountActiveBySession(ctx, id)
 	if e != nil {
 		return nil, e
 	}
@@ -198,64 +219,64 @@ func (r AgentRepository) GetBySessionAndDefinition(ctx context.Context, id contr
 }
 
 // Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r TurnRepository) Get(ctx context.Context, id contracts.TurnID) (turnmodel.Turn, error) {
-	return get[turnmodel.Turn](ctx, r.s, "turn", id.String())
+func (r TaskRepository) Get(ctx context.Context, id contracts.TaskID) (taskmodel.Task, error) {
+	return get[taskmodel.Task](ctx, r.s, "task", id.String())
 }
 
 // Save 校验并保存对象，事务未提交时只更新工作区。
-func (r TurnRepository) Save(ctx context.Context, v turnmodel.Turn) error {
-	return save(ctx, r.s, v.SessionID.String(), "turn", v.ID.String(), "turn.saved", v)
+func (r TaskRepository) Save(ctx context.Context, v taskmodel.Task) error {
+	return save(ctx, r.s, v.SessionID.String(), "task", v.ID.String(), "task.saved", v)
 }
 
 // FindByRequest 按 Agent 与请求身份查找，未找到时返回 contracts.ErrNotFound。
-func (r TurnRepository) FindByRequest(ctx context.Context, id contracts.AgentID, request contracts.RequestID) (turnmodel.Turn, error) {
-	v, e := list[turnmodel.Turn](ctx, r.s, "turn", func(v turnmodel.Turn) bool { return v.AgentID == id && v.RequestID == request })
+func (r TaskRepository) FindByRequest(ctx context.Context, id contracts.AgentID, request contracts.RequestID) (taskmodel.Task, error) {
+	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool { return v.AgentID == id && v.RequestID == request })
 	if e != nil {
-		return turnmodel.Turn{}, e
+		return taskmodel.Task{}, e
 	}
 	if len(v) == 0 {
-		return turnmodel.Turn{}, contracts.ErrNotFound
+		return taskmodel.Task{}, contracts.ErrNotFound
 	}
 	return v[0], nil
 }
 
-// GetActiveByAgent 读取 Agent 唯一的活动 Turn，未找到时返回 contracts.ErrNotFound。
-func (r TurnRepository) GetActiveByAgent(ctx context.Context, id contracts.AgentID) (turnmodel.Turn, error) {
-	v, e := list[turnmodel.Turn](ctx, r.s, "turn", func(v turnmodel.Turn) bool { return v.AgentID == id && v.Active() })
+// GetActiveByAgent 读取 Agent 唯一的活动 Task，未找到时返回 contracts.ErrNotFound。
+func (r TaskRepository) GetActiveByAgent(ctx context.Context, id contracts.AgentID) (taskmodel.Task, error) {
+	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool { return v.AgentID == id && v.Active() })
 	if e != nil {
-		return turnmodel.Turn{}, e
+		return taskmodel.Task{}, e
 	}
 	if len(v) == 0 {
-		return turnmodel.Turn{}, contracts.ErrNotFound
+		return taskmodel.Task{}, contracts.ErrNotFound
 	}
 	return v[0], nil
 }
 
-// ListActive 按创建时间返回所有活动 Turn，供启动恢复使用。
-func (r TurnRepository) ListActive(ctx context.Context) ([]turnmodel.Turn, error) {
-	v, e := list[turnmodel.Turn](ctx, r.s, "turn", func(v turnmodel.Turn) bool { return v.Active() })
-	return sorted(v, func(a, b turnmodel.Turn) int {
+// ListActive 按创建时间返回所有活动 Task，供启动恢复使用。
+func (r TaskRepository) ListActive(ctx context.Context) ([]taskmodel.Task, error) {
+	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool { return v.Active() })
+	return sorted(v, func(a, b taskmodel.Task) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	}), e
 }
 
 // ListByAgent 返回指定 Agent 的对象副本。
-func (r TurnRepository) ListByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]turnmodel.Turn, error) {
-	v, e := list[turnmodel.Turn](ctx, r.s, "turn", func(v turnmodel.Turn) bool { return v.AgentID == id })
-	return capped(sorted(v, func(a, b turnmodel.Turn) int {
+func (r TaskRepository) ListByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]taskmodel.Task, error) {
+	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool { return v.AgentID == id })
+	return capped(sorted(v, func(a, b taskmodel.Task) int {
 		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), cmp.Compare(b.ID, a.ID))
 	}), limit), e
 }
 
-// CountActiveBySession 返回 Session 内活动 Turn 的数量。
-func (r TurnRepository) CountActiveBySession(ctx context.Context, id contracts.SessionID) (int, error) {
-	v, e := list[turnmodel.Turn](ctx, r.s, "turn", func(v turnmodel.Turn) bool { return v.SessionID == id && v.Active() })
+// CountActiveBySession 返回 Session 内活动 Task 的数量。
+func (r TaskRepository) CountActiveBySession(ctx context.Context, id contracts.SessionID) (int, error) {
+	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool { return v.SessionID == id && v.Active() })
 	return len(v), e
 }
 
 // Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r SecuritySnapshotRepository) Get(ctx context.Context, id contracts.TurnID) (contracts.SecuritySnapshot, error) {
-	v, e := (TurnRepository{r.s}).Get(ctx, id)
+func (r SecuritySnapshotRepository) Get(ctx context.Context, id contracts.TaskID) (contracts.SecuritySnapshot, error) {
+	v, e := (TaskRepository{r.s}).Get(ctx, id)
 	return v.Input.Security, e
 }
 
@@ -355,9 +376,9 @@ func (r ToolRepository) Save(ctx context.Context, v toolmodel.ToolInvocation) er
 	return save(ctx, r.s, v.SessionID.String(), "tool", v.ID.String(), "tool.saved", v)
 }
 
-// FindByTurnCall 按 Turn 和 Provider 调用身份查询，第二个返回值表示是否存在。
-func (r ToolRepository) FindByTurnCall(ctx context.Context, id contracts.TurnID, call string) (toolmodel.ToolInvocation, error) {
-	v, e := list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool { return v.TurnID == id && v.ProviderToolCallID == call })
+// FindByTaskCall 按 Task 和 Provider 调用身份查询，第二个返回值表示是否存在。
+func (r ToolRepository) FindByTaskCall(ctx context.Context, id contracts.TaskID, call string) (toolmodel.ToolInvocation, error) {
+	v, e := list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool { return v.TaskID == id && v.ProviderToolCallID == call })
 	if e != nil {
 		return toolmodel.ToolInvocation{}, e
 	}
@@ -367,39 +388,17 @@ func (r ToolRepository) FindByTurnCall(ctx context.Context, id contracts.TurnID,
 	return v[0], nil
 }
 
-// ListUnsettledByTurn 返回指定 Turn 尚未结算的工具调用，供恢复使用。
-func (r ToolRepository) ListUnsettledByTurn(ctx context.Context, id contracts.TurnID) ([]toolmodel.ToolInvocation, error) {
-	v, e := list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool { return v.TurnID == id && !v.Status.Terminal() })
+// ListUnsettledByTask 返回指定 Task 尚未结算的工具调用，供恢复使用。
+func (r ToolRepository) ListUnsettledByTask(ctx context.Context, id contracts.TaskID) ([]toolmodel.ToolInvocation, error) {
+	v, e := list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool { return v.TaskID == id && !v.Status.Terminal() })
 	return sorted(v, func(a, b toolmodel.ToolInvocation) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	}), e
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r QueueRepository) Get(ctx context.Context, id contracts.WorkItemID) (workflowmodel.QueuedWork, error) {
-	return get[workflowmodel.QueuedWork](ctx, r.s, "queue", id.String())
-}
-
-// Save 校验并保存对象，事务未提交时只更新工作区。
-func (r QueueRepository) Save(ctx context.Context, v workflowmodel.QueuedWork) error {
-	return save(ctx, r.s, v.SessionID.String(), "queue", v.ID.String(), "queue.saved", v)
-}
-
-// FindByRequest 按 Agent 与请求身份查找，未找到时返回 contracts.ErrNotFound。
-func (r QueueRepository) FindByRequest(ctx context.Context, id contracts.AgentID, request contracts.RequestID) (workflowmodel.QueuedWork, error) {
-	v, e := list[workflowmodel.QueuedWork](ctx, r.s, "queue", func(v workflowmodel.QueuedWork) bool { return v.AgentID == id && v.RequestID == request })
-	if e != nil {
-		return workflowmodel.QueuedWork{}, e
-	}
-	if len(v) == 0 {
-		return workflowmodel.QueuedWork{}, contracts.ErrNotFound
-	}
-	return v[0], nil
-}
-
 // NextSequence 返回指定 Agent 的下一队列序号，必须在入队事务中调用。
-func (r QueueRepository) NextSequence(ctx context.Context, id contracts.AgentID) (uint64, error) {
-	v, e := list[workflowmodel.QueuedWork](ctx, r.s, "queue", func(v workflowmodel.QueuedWork) bool { return v.AgentID == id })
+func (r TaskRepository) NextSequence(ctx context.Context, id contracts.AgentID) (uint64, error) {
+	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool { return v.AgentID == id })
 	var seq uint64
 	for _, item := range v {
 		seq = max(seq, item.Sequence)
@@ -407,50 +406,28 @@ func (r QueueRepository) NextSequence(ctx context.Context, id contracts.AgentID)
 	return seq + 1, e
 }
 
-// FindNextPendingByAgent 按 FIFO 顺序返回待处理队列项，第二个返回值表示是否存在。
-func (r QueueRepository) FindNextPendingByAgent(ctx context.Context, id contracts.AgentID) (workflowmodel.QueuedWork, error) {
-	v, e := list[workflowmodel.QueuedWork](ctx, r.s, "queue", func(v workflowmodel.QueuedWork) bool {
-		return v.AgentID == id && v.Status == workflowmodel.QueuedWorkPending
+// FindNextPendingByAgent 按 FIFO 顺序返回待执行 Task，空队列返回 ErrNotFound。
+func (r TaskRepository) FindNextPendingByAgent(ctx context.Context, id contracts.AgentID) (taskmodel.Task, error) {
+	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool {
+		return v.AgentID == id && v.Status == taskmodel.TaskPending
 	})
 	if e != nil {
-		return workflowmodel.QueuedWork{}, e
+		return taskmodel.Task{}, e
 	}
 	if len(v) == 0 {
-		return workflowmodel.QueuedWork{}, contracts.ErrNotFound
+		return taskmodel.Task{}, contracts.ErrNotFound
 	}
-	sorted(v, func(a, b workflowmodel.QueuedWork) int { return cmp.Compare(a.Sequence, b.Sequence) })
+	sorted(v, func(a, b taskmodel.Task) int { return cmp.Compare(a.Sequence, b.Sequence) })
 	return v[0], nil
 }
 
 // Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r WaitRepository) Get(ctx context.Context, id contracts.WaitConditionID) (workflowmodel.WaitCondition, error) {
-	return get[workflowmodel.WaitCondition](ctx, r.s, "wait", id.String())
+func (r ControlRepository) Get(ctx context.Context, id contracts.AgentControlCommandID) (agentmodel.AgentControlCommand, error) {
+	return get[agentmodel.AgentControlCommand](ctx, r.s, "control", id.String())
 }
 
 // Save 校验并保存对象，事务未提交时只更新工作区。
-func (r WaitRepository) Save(ctx context.Context, v workflowmodel.WaitCondition) error {
-	a, e := (AgentRepository{r.s}).Get(ctx, v.AgentID)
-	if e != nil {
-		return e
-	}
-	return save(ctx, r.s, a.SessionID.String(), "wait", v.ID.String(), "wait.saved", v)
-}
-
-// ListUnresolvedByAgent 返回 Agent 尚未解除的等待条件。
-func (r WaitRepository) ListUnresolvedByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]workflowmodel.WaitCondition, error) {
-	v, e := list[workflowmodel.WaitCondition](ctx, r.s, "wait", func(v workflowmodel.WaitCondition) bool {
-		return v.AgentID == id && v.Status == workflowmodel.WaitPending
-	})
-	return capped(sorted(v, func(a, b workflowmodel.WaitCondition) int { return cmp.Compare(a.ID, b.ID) }), limit), e
-}
-
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r ControlRepository) Get(ctx context.Context, id contracts.AgentControlCommandID) (workflowmodel.AgentControlCommand, error) {
-	return get[workflowmodel.AgentControlCommand](ctx, r.s, "control", id.String())
-}
-
-// Save 校验并保存对象，事务未提交时只更新工作区。
-func (r ControlRepository) Save(ctx context.Context, v workflowmodel.AgentControlCommand) error {
+func (r ControlRepository) Save(ctx context.Context, v agentmodel.AgentControlCommand) error {
 	a, e := (AgentRepository{r.s}).Get(ctx, v.AgentID)
 	if e != nil {
 		return e
@@ -459,11 +436,11 @@ func (r ControlRepository) Save(ctx context.Context, v workflowmodel.AgentContro
 }
 
 // ListOpenByAgent 返回 Agent 尚未应用的控制命令。
-func (r ControlRepository) ListOpenByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]workflowmodel.AgentControlCommand, error) {
-	v, e := list[workflowmodel.AgentControlCommand](ctx, r.s, "control", func(v workflowmodel.AgentControlCommand) bool {
-		return v.AgentID == id && v.Status == workflowmodel.AgentControlPending
+func (r ControlRepository) ListOpenByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]agentmodel.AgentControlCommand, error) {
+	v, e := list[agentmodel.AgentControlCommand](ctx, r.s, "control", func(v agentmodel.AgentControlCommand) bool {
+		return v.AgentID == id && v.Status == agentmodel.AgentControlPending
 	})
-	return capped(sorted(v, func(a, b workflowmodel.AgentControlCommand) int {
+	return capped(sorted(v, func(a, b agentmodel.AgentControlCommand) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	}), limit), e
 }
@@ -474,11 +451,10 @@ var (
 	_ repository.WorkspaceRepository           = WorkspaceRepository{}
 	_ repository.SessionRepository             = SessionRepository{}
 	_ repository.SessionAgentRepository        = AgentRepository{}
-	_ repository.TurnRepository                = TurnRepository{}
+	_ repository.TaskRepository                = TaskRepository{}
 	_ repository.ToolInvocationRepository      = ToolRepository{}
 	_ repository.AgentSecurityPolicyRepository = PolicyRepository{}
 	_ repository.SessionContextRepository      = ContextRepository{}
-	_ repository.QueuedWorkRepository          = QueueRepository{}
-	_ repository.WaitConditionRepository       = WaitRepository{}
 	_ repository.AgentControlCommandRepository = ControlRepository{}
+	_ repository.TurnRepository                = TurnRepository{}
 )

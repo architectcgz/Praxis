@@ -26,7 +26,7 @@ type output struct {
 // Execute reads an authorized UTF-8 regular file and returns one bounded page.
 func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
-		return toolcontracts.ToolResult{}, errors.New("tool turn context is required")
+		return toolcontracts.ToolResult{}, errors.New("tool task context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err

@@ -1,6 +1,6 @@
 package contracts
 
-// SandboxMode 固定命令的文件和网络边界，由 Turn 的 SecuritySnapshot 保存。
+// SandboxMode 固定命令的文件和网络边界，由 Task 的 SecuritySnapshot 保存。
 type SandboxMode string
 
 const (

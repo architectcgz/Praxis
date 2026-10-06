@@ -10,12 +10,13 @@ import (
 	"slices"
 	"strings"
 
-	agentruntime "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
+	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
 	turnmodel "praxis/internal/core/turn"
 	workflowmodel "praxis/internal/core/workflow"
@@ -50,7 +51,7 @@ func decode[T any](collection string, value object) (T, error) {
 	switch collection {
 	case "session":
 		fields["ID"], _ = json.Marshal(value.scope)
-	case "agent", "turn", "tool", "queue", "context":
+	case "agent", "task", "tool", "turn", "context":
 		fields["SessionID"], _ = json.Marshal(value.scope)
 	case "timing", "usage":
 		fields["sessionId"], _ = json.Marshal(value.scope)
@@ -148,18 +149,23 @@ func immutable(collection string, before, after json.RawMessage) error {
 	}
 	var fields []string
 	switch collection {
-	case "turn":
-		fields = []string{"ID", "AgentID", "RequestID", "WorkItemID", "ParentTurnID", "Reason", "CreatedAt", "Input"}
+	case "task":
+		fields = []string{"ID", "AgentID", "RequestID", "Sequence", "ProviderID", "ModelID", "ReasoningLevel", "CreatedAt"}
+		if string(left["Status"]) != `"pending"` {
+			fields = append(fields, "Input")
+		} else if string(right["Status"]) != `"pending"` && string(right["Status"]) != `"starting"` {
+			return contracts.ErrRequestConflict
+		}
 	case "tool":
-		fields = []string{"ID", "TurnID", "AgentID", "ProviderToolCallID", "Name", "NormalizedArguments", "ArgumentsDigest", "CreatedAt"}
-	case "queue":
-		fields = []string{"ID", "AgentID", "Sequence", "RequestID", "InputMessageID", "CreatedAt"}
+		fields = []string{"ID", "TaskID", "TurnID", "AgentID", "ProviderToolCallID", "Name", "NormalizedArguments", "ArgumentsDigest", "CreatedAt"}
+	case "turn":
+		fields = []string{"ID", "TaskID", "AgentID", "Sequence", "CreatedAt"}
 	case "agent":
 		fields = []string{"ID", "DefinitionID", "Profile", "CreatedAt"}
 	case "session":
 		fields = []string{"ProjectID", "WorkspaceID", "CreatedAt"}
 	case "usage":
-		fields = []string{"agentId", "turnId", "step"}
+		fields = []string{"agentId", "taskId", "turnId"}
 	case "policy", "context", "message":
 		if !bytes.Equal(before, after) {
 			return contracts.ErrRequestConflict
@@ -170,7 +176,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return fmt.Errorf("%w: %s.%s 不可变", contracts.ErrRequestConflict, collection, field)
 		}
 	}
-	if collection == "turn" && string(left["Status"]) == `"ended"` && !bytes.Equal(before, after) {
+	if collection == "task" && string(left["Status"]) == `"ended"` && !bytes.Equal(before, after) {
 		return contracts.ErrRequestConflict
 	}
 	if collection == "tool" {
@@ -179,6 +185,15 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return err
 		}
 		if status.Terminal() && !bytes.Equal(before, after) {
+			return contracts.ErrRequestConflict
+		}
+	}
+	if collection == "turn" {
+		var status turnmodel.TurnStatus
+		if err := json.Unmarshal(left["Status"], &status); err != nil {
+			return err
+		}
+		if status == turnmodel.TurnEnded && !bytes.Equal(before, after) {
 			return contracts.ErrRequestConflict
 		}
 	}
@@ -196,12 +211,12 @@ func validateEvent(scope string, event Event) error {
 		"workspace": "workspace.saved",
 		"session":   "session.saved",
 		"agent":     "agent.saved",
-		"turn":      "turn.saved",
+		"task":      "task.saved",
 		"tool":      "tool.saved",
 		"policy":    "policy.saved",
-		"queue":     "queue.saved",
 		"wait":      "wait.saved",
 		"control":   "control.saved",
+		"turn":      "turn.saved",
 		"context":   "context.entry_appended",
 		"message":   "message.appended",
 		"timing":    "timing.saved",
@@ -323,17 +338,17 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			if err == nil && v.DefinitionID == agentmodel.DefinitionPrimary {
 				err = claim("primary:" + value.scope)
 			}
-			if err == nil && v.CurrentTurnID != "" {
-				err = reference("turn", v.CurrentTurnID.String(), value.scope)
+			if err == nil && v.CurrentTaskID != "" {
+				err = reference("task", v.CurrentTaskID.String(), value.scope)
 				if err == nil {
-					t, _ := decode[turnmodel.Turn]("turn", objects[objectKey{"turn", v.CurrentTurnID.String()}])
+					t, _ := decode[taskmodel.Task]("task", objects[objectKey{"task", v.CurrentTaskID.String()}])
 					if t.AgentID != v.ID || !t.Active() {
-						err = errors.New("Agent 活动 Turn 不匹配")
+						err = errors.New("Agent 活动 Task 不匹配")
 					}
 				}
 			}
-		case "turn":
-			v, e := decode[turnmodel.Turn](key.collection, value)
+		case "task":
+			v, e := decode[taskmodel.Task](key.collection, value)
 			err = e
 			item = v
 			identity = v.ID.String()
@@ -343,29 +358,15 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			if err == nil {
 				err = claim("request:" + v.AgentID.String() + ":" + v.RequestID.String())
 			}
+			if err == nil && v.Sequence != 0 {
+				err = claim(fmt.Sprintf("queue:%s:%d", v.AgentID, v.Sequence))
+			}
 			if err == nil && v.Active() {
 				err = claim("active:" + v.AgentID.String())
 				if err == nil {
 					a, _ := decode[agentmodel.Agent]("agent", objects[objectKey{"agent", v.AgentID.String()}])
-					if a.CurrentTurnID != v.ID {
-						err = errors.New("活动 Turn 与 Agent 不一致")
-					}
-				}
-			}
-			if err == nil && v.ParentTurnID != "" {
-				if v.ParentTurnID == v.ID {
-					err = errors.New("Turn 不能引用自身为父回合")
-				} else {
-					err = turnOwner(objects, v.ParentTurnID, v.AgentID, value.scope)
-				}
-			}
-			if err == nil && v.WorkItemID != "" {
-				err = reference("queue", v.WorkItemID.String(), value.scope)
-				if err == nil {
-					work, decodeErr := decode[workflowmodel.QueuedWork]("queue", objects[objectKey{"queue", v.WorkItemID.String()}])
-					err = decodeErr
-					if err == nil && (work.TurnID != v.ID || work.AgentID != v.AgentID || work.RequestID != v.RequestID) {
-						err = errors.New("Turn 与队列项关联不一致")
+					if a.CurrentTaskID != v.ID {
+						err = errors.New("活动 Task 与 Agent 不一致")
 					}
 				}
 			}
@@ -375,37 +376,21 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			item = v
 			identity = v.ID.String()
 			if err == nil {
-				err = turnOwner(objects, v.TurnID, v.AgentID, value.scope)
+				err = taskOwner(objects, v.TaskID, v.AgentID, value.scope)
 			}
 			if err == nil {
-				err = claim("call:" + v.TurnID.String() + ":" + v.ProviderToolCallID)
+				err = claim("call:" + v.TaskID.String() + ":" + v.ProviderToolCallID)
 			}
-		case "queue":
-			v, e := decode[workflowmodel.QueuedWork](key.collection, value)
+		case "turn":
+			v, e := decode[turnmodel.Turn](key.collection, value)
 			err = e
 			item = v
 			identity = v.ID.String()
 			if err == nil {
-				err = reference("agent", v.AgentID.String(), value.scope)
+				err = taskOwner(objects, v.TaskID, v.AgentID, value.scope)
 			}
 			if err == nil {
-				err = claim(fmt.Sprintf("queue:%s:%d", v.AgentID, v.Sequence))
-			}
-			if err == nil && v.RequestID != "" {
-				err = claim("queued-request:" + v.AgentID.String() + ":" + v.RequestID.String())
-			}
-			if err == nil && v.TurnID != "" {
-				err = turnOwner(objects, v.TurnID, v.AgentID, value.scope)
-			}
-			if err == nil && v.Status == workflowmodel.QueuedWorkRunning {
-				err = claim("queued-running:" + v.AgentID.String())
-				if err == nil {
-					turn, decodeErr := decode[turnmodel.Turn]("turn", objects[objectKey{"turn", v.TurnID.String()}])
-					err = decodeErr
-					if err == nil && (!turn.Active() || turn.WorkItemID != v.ID) {
-						err = errors.New("运行队列项没有对应的活动 Turn")
-					}
-				}
+				err = claim(fmt.Sprintf("turn:%s:%d", v.TaskID, v.Sequence))
 			}
 		case "policy":
 			v, e := decode[policyRecord](key.collection, value)
@@ -423,8 +408,8 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			if err == nil {
 				err = reference("session", value.scope, value.scope)
 			}
-			if err == nil && v.SourceTurnID != "" {
-				err = reference("turn", v.SourceTurnID.String(), value.scope)
+			if err == nil && v.SourceTaskID != "" {
+				err = reference("task", v.SourceTaskID.String(), value.scope)
 			}
 		case "wait":
 			v, e := decode[workflowmodel.WaitCondition](key.collection, value)
@@ -432,18 +417,18 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			item = v
 			identity = v.ID.String()
 			if err == nil {
-				err = turnOwner(objects, v.TurnID, v.AgentID, value.scope)
+				err = taskOwner(objects, v.TaskID, v.AgentID, value.scope)
 			}
 		case "control":
-			v, e := decode[workflowmodel.AgentControlCommand](key.collection, value)
+			v, e := decode[agentmodel.AgentControlCommand](key.collection, value)
 			err = e
 			item = v
 			identity = v.ID.String()
 			if err == nil {
 				err = reference("agent", v.AgentID.String(), value.scope)
 			}
-			if err == nil && v.TargetTurnID != "" {
-				err = turnOwner(objects, v.TargetTurnID, v.AgentID, value.scope)
+			if err == nil && v.TargetTaskID != "" {
+				err = taskOwner(objects, v.TargetTaskID, v.AgentID, value.scope)
 			}
 		case "message":
 			v, e := decode[messageRecord](key.collection, value)
@@ -456,10 +441,10 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			if err == nil && v.OwnerID != "" {
 				err = reference("agent", v.OwnerID, value.scope)
 			}
-			if err == nil && v.Data.TurnID != "" {
-				err = reference("turn", v.Data.TurnID, value.scope)
+			if err == nil && v.Data.TaskID != "" {
+				err = reference("task", v.Data.TaskID, value.scope)
 				if err == nil && v.OwnerID != "" {
-					err = turnOwner(objects, contracts.TurnID(v.Data.TurnID), contracts.AgentID(v.OwnerID), value.scope)
+					err = taskOwner(objects, contracts.TaskID(v.Data.TaskID), contracts.AgentID(v.OwnerID), value.scope)
 				}
 			}
 			if err == nil {
@@ -471,7 +456,7 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			item = v
 			identity = v.Key()
 			if err == nil {
-				err = turnOwner(objects, contracts.TurnID(v.TurnID), contracts.AgentID(v.AgentID), value.scope)
+				err = taskOwner(objects, contracts.TaskID(v.TaskID), contracts.AgentID(v.AgentID), value.scope)
 			}
 		case "timing":
 			v, e := decode[timing.Record](key.collection, value)
@@ -479,7 +464,7 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			item = v
 			identity = v.ID
 			if err == nil {
-				err = turnOwner(objects, contracts.TurnID(v.TurnID), contracts.AgentID(v.AgentID), value.scope)
+				err = taskOwner(objects, contracts.TaskID(v.TaskID), contracts.AgentID(v.AgentID), value.scope)
 			}
 		default:
 			return errors.New("未知投影类型")
@@ -496,17 +481,17 @@ func (s *Store) validate(objects map[objectKey]object) error {
 	}
 	return nil
 }
-func turnOwner(objects map[objectKey]object, id contracts.TurnID, agent contracts.AgentID, scope string) error {
-	object, ok := objects[objectKey{"turn", id.String()}]
+func taskOwner(objects map[objectKey]object, id contracts.TaskID, agent contracts.AgentID, scope string) error {
+	object, ok := objects[objectKey{"task", id.String()}]
 	if !ok || object.scope != scope {
-		return errors.New("Turn 引用不存在或跨 Session")
+		return errors.New("Task 引用不存在或跨 Session")
 	}
-	value, err := decode[turnmodel.Turn]("turn", object)
+	value, err := decode[taskmodel.Task]("task", object)
 	if err != nil {
 		return err
 	}
 	if value.AgentID != agent {
-		return errors.New("Turn 与 Agent 归属不符")
+		return errors.New("Task 与 Agent 归属不符")
 	}
 	return nil
 }

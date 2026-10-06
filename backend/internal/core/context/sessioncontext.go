@@ -27,7 +27,7 @@ type SessionContextEntry struct {
 	ID            contracts.ContextEntryID
 	SessionID     contracts.SessionID
 	Kind          SessionContextKind
-	SourceTurnID  contracts.TurnID
+	SourceTaskID  contracts.TaskID
 	Content       string
 	ContentDigest string
 	CreatedAt     time.Time
@@ -37,14 +37,14 @@ func NewSessionContextEntry(
 	id contracts.ContextEntryID,
 	sessionID contracts.SessionID,
 	kind SessionContextKind,
-	sourceTurnID contracts.TurnID,
+	sourceTaskID contracts.TaskID,
 	content string,
 	at time.Time,
 ) (SessionContextEntry, error) {
 	content = strings.TrimSpace(content)
 	entry := SessionContextEntry{
 		ID: id, SessionID: sessionID, Kind: kind,
-		SourceTurnID: sourceTurnID, Content: content,
+		SourceTaskID: sourceTaskID, Content: content,
 		ContentDigest: contentDigest(content), CreatedAt: at.UTC(),
 	}
 	if err := entry.Validate(); err != nil {

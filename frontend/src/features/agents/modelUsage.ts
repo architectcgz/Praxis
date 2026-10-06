@@ -2,7 +2,7 @@ import type { ModelUsageRecord } from '../../api/agents'
 
 /** 按请求身份替换累计用量；查询返回的旧快照不得覆盖实时事件中的新计数。 */
 export function mergeModelUsageRecords(current: ModelUsageRecord[], incoming: ModelUsageRecord[]): ModelUsageRecord[] {
-    const key = (record: ModelUsageRecord) => JSON.stringify([record.sessionId, record.agentId, record.turnId, record.step])
+    const key = (record: ModelUsageRecord) => JSON.stringify([record.sessionId, record.agentId, record.taskId, record.turnId])
     const records = new Map(current.map((record) => [key(record), record]))
     for (const record of incoming) {
         const previous = records.get(key(record))

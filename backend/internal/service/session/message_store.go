@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	agentruntime "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
@@ -38,7 +38,7 @@ func (r MessageStore) resolve(
 	ctx context.Context,
 	sessionID contracts.SessionID,
 	agentID contracts.AgentID,
-) (agentruntime.TurnMessageStore, agentmodel.Agent, error) {
+) (agentruntime.MessageRecorder, agentmodel.Agent, error) {
 	if ctx == nil {
 		return nil, agentmodel.Agent{}, errors.New("message route context is required")
 	}
@@ -49,15 +49,15 @@ func (r MessageStore) resolve(
 	if agent.SessionID != sessionID {
 		return nil, agentmodel.Agent{}, contracts.ErrNotFound
 	}
-	return routedMessageStore{router: r, agent: agent}, agent, nil
+	return routedMessageRecorder{router: r, agent: agent}, agent, nil
 }
 
-// Resolve 为指定执行主体解析其 owner 限定的消息存储。
+// Resolve 为指定执行主体解析其 owner 限定的消息记录器。
 func (r MessageStore) Resolve(
 	ctx context.Context,
 	sessionID contracts.SessionID,
 	agentID contracts.AgentID,
-) (agentruntime.TurnMessageStore, error) {
+) (agentruntime.MessageRecorder, error) {
 	store, _, err := r.resolve(ctx, sessionID, agentID)
 	return store, err
 }
@@ -118,27 +118,18 @@ func (r MessageStore) ListAgent(
 	return stream.Messages, nil
 }
 
-type routedMessageStore struct {
+type routedMessageRecorder struct {
 	router MessageStore
 	agent  agentmodel.Agent
 }
 
-func (s routedMessageStore) Append(ctx context.Context, value sessionmodel.MessageData) (sessionmodel.MessageData, error) {
+func (s routedMessageRecorder) Append(ctx context.Context, value sessionmodel.MessageData) (sessionmodel.MessageData, error) {
 	if s.agent.CanReadSessionContext() {
 		stored, err := s.router.sessions.Append(ctx, sessionMessage(s.agent.SessionID, value))
 		return stored.Data, err
 	}
 	stored, err := s.router.private.Append(ctx, agentmodel.AgentMessage{AgentID: s.agent.ID, Data: value})
 	return stored.Data, err
-}
-
-func (s routedMessageStore) ListByTurn(ctx context.Context, turnID contracts.TurnID) ([]sessionmodel.MessageData, error) {
-	if s.agent.CanReadSessionContext() {
-		values, err := s.router.sessions.ListByTurn(ctx, s.agent.SessionID, turnID)
-		return sessionMessageData(values), err
-	}
-	values, err := s.router.private.ListByTurn(ctx, s.agent.ID, turnID)
-	return agentMessageData(values), err
 }
 
 func sessionMessage(id contracts.SessionID, value sessionmodel.MessageData) sessionmodel.SessionMessage {

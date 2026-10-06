@@ -7,11 +7,10 @@ import (
 	sessionmodel "praxis/internal/core/session"
 )
 
-// TurnMessageStore 读写当前 Agent 执行产生的持久化消息。
-type TurnMessageStore interface {
+// MessageRecorder 只写当前 Agent 执行产生的持久化消息（会话历史不回读）。
+type MessageRecorder interface {
 	Append(context.Context, sessionmodel.MessageData) (sessionmodel.MessageData, error)
-	ListByTurn(context.Context, contracts.TurnID) ([]sessionmodel.MessageData, error)
 }
 
-// MessageStoreResolver 为一次执行解析其 owner 限定的消息存储。
-type MessageStoreResolver func(context.Context, contracts.SessionID, contracts.AgentID) (TurnMessageStore, error)
+// MessageRecorderResolver 为一次执行解析其 owner 限定的消息记录器（Session 消息或 Agent 私有消息）。
+type MessageRecorderResolver func(context.Context, contracts.SessionID, contracts.AgentID) (MessageRecorder, error)

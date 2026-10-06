@@ -23,7 +23,6 @@ type MessageLoader interface {
 type SessionMessageRepository interface {
 	Append(context.Context, session.SessionMessage) (session.SessionMessage, error)
 	List(context.Context, contracts.SessionID, uint64, int) ([]session.SessionMessage, error)
-	ListByTurn(context.Context, contracts.SessionID, contracts.TurnID) ([]session.SessionMessage, error)
 	LatestSequence(context.Context, contracts.SessionID) (uint64, error)
 }
 
@@ -31,6 +30,5 @@ type SessionMessageRepository interface {
 type AgentMessageRepository interface {
 	Append(context.Context, agent.AgentMessage) (agent.AgentMessage, error)
 	List(context.Context, contracts.AgentID, uint64, int) ([]agent.AgentMessage, error)
-	ListByTurn(context.Context, contracts.AgentID, contracts.TurnID) ([]agent.AgentMessage, error)
 	LatestSequence(context.Context, contracts.AgentID) (uint64, error)
 }

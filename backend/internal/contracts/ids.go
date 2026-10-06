@@ -8,12 +8,12 @@ type (
 	SessionID             string
 	AgentDefinitionID     string
 	AgentID               string
+	TaskID                string
 	TurnID                string
 	ToolInvocationID      string
 	RequestID             string
 	WaitConditionID       string
 	AgentControlCommandID string
-	WorkItemID            string
 	ContextEntryID        string
 )
 
@@ -22,6 +22,7 @@ func (id WorkspaceID) String() string       { return string(id) }
 func (id SessionID) String() string         { return string(id) }
 func (id AgentDefinitionID) String() string { return string(id) }
 func (id AgentID) String() string           { return string(id) }
+func (id TaskID) String() string            { return string(id) }
 func (id TurnID) String() string            { return string(id) }
 func (id ToolInvocationID) String() string  { return string(id) }
 func (id RequestID) String() string         { return string(id) }
@@ -29,5 +30,4 @@ func (id WaitConditionID) String() string   { return string(id) }
 func (id AgentControlCommandID) String() string {
 	return string(id)
 }
-func (id WorkItemID) String() string     { return string(id) }
 func (id ContextEntryID) String() string { return string(id) }

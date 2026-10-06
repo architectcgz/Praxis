@@ -1,10 +1,9 @@
 package compose
 
 import (
-	agentruntime "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
-	turnmodel "praxis/internal/core/turn"
 
 	"context"
 	"errors"
@@ -15,12 +14,14 @@ import (
 	appservices "praxis/internal/service"
 	applicationagent "praxis/internal/service/agent"
 	applicationproject "praxis/internal/service/project"
+	applicationruntime "praxis/internal/service/runtime"
+	runtimequeue "praxis/internal/service/runtime/queue"
+	applicationtask "praxis/internal/service/runtime/task"
+	tasklifecycle "praxis/internal/service/runtime/task/lifecycle"
+	taskstart "praxis/internal/service/runtime/task/start"
+	toolinvocation "praxis/internal/service/runtime/task/tool_invocation"
+	taskturn "praxis/internal/service/runtime/task/turn"
 	applicationsession "praxis/internal/service/session"
-	turncontrol "praxis/internal/service/turn/control"
-	turnlifecycle "praxis/internal/service/turn/lifecycle"
-	turnqueue "praxis/internal/service/turn/queue"
-	turnstart "praxis/internal/service/turn/start"
-	toolinvocation "praxis/internal/service/turn/tool_invocation"
 
 	securitymodel "praxis/internal/core/security"
 	agentregistry "praxis/internal/infra/agent_registry"
@@ -70,11 +71,11 @@ func (a *Application) Services() bindings.Services {
 	}
 }
 
-// Open 构建应用并返回一个就绪的命令持有者。runner 是唯一的 provider/tool 接入点。
+// Open 构建应用并返回就绪的服务集；runLoop 为空时装配默认的 loop.Run 执行函数。
 func Open(
 	ctx context.Context,
 	root dataroot.DataRoot,
-	runner agentruntime.TurnRunner,
+	runLoop agentruntime.LoopFunc,
 	registeredTools ...toolcontracts.Tool,
 ) (*Application, error) {
 	if ctx == nil {
@@ -162,13 +163,13 @@ func Open(
 			err := usages.Save(ctx, agentruntime.ModelUsageRecord{
 				SessionID: event.SessionID.String(),
 				AgentID:   event.AgentID.String(),
-				TurnID:    event.TurnID.String(),
-				Step:      event.Step,
+				TaskID:    event.TaskID.String(),
+				TurnID:    event.TurnID,
 				Usage:     *event.Usage,
 			})
 			cancel()
 			if err != nil {
-				diagnostics.Errorf("token usage save failed turn=%s step=%d: %v", event.TurnID, event.Step, err)
+				diagnostics.Errorf("token usage save failed task=%s turn=%s: %v", event.TaskID, event.TurnID, err)
 			}
 		}
 		events.Publish(event)
@@ -183,7 +184,7 @@ func Open(
 		events.Publish(agentruntime.AgentEvent{
 			Kind:    agentruntime.AgentEventTiming,
 			AgentID: contracts.AgentID(record.AgentID),
-			TurnID:  contracts.TurnID(record.TurnID),
+			TaskID:  contracts.TaskID(record.TaskID),
 			Timing:  &record,
 		})
 	}, diagnostics.Errorf)
@@ -192,13 +193,16 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	if runner == nil {
-		runner, err = newTurnRunner(modelRegistry, toolinvocation.Config{
+	if runLoop == nil {
+		runLoop, err = newLoop(modelRegistry, toolinvocation.Config{
 			Transactions:      store,
-			Turns:             repos.Turns,
+			Tasks:             repos.Tasks,
 			SecuritySnapshots: repos.SecuritySnapshots,
 			Invocations:       repos.ToolInvocations,
 			Catalog:           toolRegistry,
+		}, taskturn.Config{
+			Transactions: store,
+			Turns:        repos.Turns,
 		}, timings, observe, diagnostics.Infof)
 		if err != nil {
 			_ = diagnostics.Close()
@@ -206,34 +210,17 @@ func Open(
 			return nil, err
 		}
 	}
-	factory := runtimeFactory{
-		runner:   timedRunner{next: runner, recorder: timings},
-		messages: messages.Resolve,
-		logger: func(turn turnmodel.Turn, stage string, err error) {
-			if err != nil {
-				diagnostics.Errorf("turn id=%s stage=%s failed: %v", turn.ID, stage, err)
-			}
-		},
-		eventLogger: func(turn turnmodel.Turn, stage string) {
-			diagnostics.Infof("turn id=%s stage=%s", turn.ID, stage)
-		},
-	}
+	executions := &agentmodel.Executions{}
 	agentService, err := applicationagent.NewService(applicationagent.Config{
-		Agents:   repos.Agents,
-		Turns:    repos.Turns,
-		Waits:    repos.Waits,
-		Controls: repos.Controls,
-		Messages: messages.ListAgent,
+		Transactions: store,
+		Agents:       repos.Agents,
+		Tasks:        repos.Tasks,
+		Controls:     repos.Controls,
+		Executions:   executions,
+		Messages:     messages.ListAgent,
 	})
 	if err != nil {
 		diagnostics.Errorf("create agent service failed: %v", err)
-		_ = diagnostics.Close()
-		closeStore()
-		return nil, err
-	}
-	registry, err := agentruntime.NewRegistry(factory)
-	if err != nil {
-		diagnostics.Errorf("create runtime registry failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
@@ -246,10 +233,10 @@ func Open(
 		Contexts:        repos.Contexts,
 		Policies:        repos.Policies,
 		Agents:          repos.Agents,
-		Turns:           repos.Turns,
+		Tasks:           repos.Tasks,
 		ToolInvocations: repos.ToolInvocations,
-		QueuedWork:      repos.QueuedWork,
 		Controls:        repos.Controls,
+		Turns:           repos.Turns,
 		SessionMessages: repos.SessionMessages,
 		AgentMessages:   repos.AgentMessages,
 		Definitions:     agentRegistry.Definition,
@@ -270,79 +257,64 @@ func Open(
 	if err != nil {
 		diagnostics.Errorf("create session service failed: %v", err)
 		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
-	if err := sessionService.RecoverStaleTurns(ctx); err != nil {
-		diagnostics.Errorf("recover stale turns failed: %v", err)
+	if err := sessionService.RecoverStaleTasks(ctx); err != nil {
+		diagnostics.Errorf("recover stale tasks failed: %v", err)
 		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
 		closeStore()
-		return nil, fmt.Errorf("recover stale turns: %w", err)
+		return nil, fmt.Errorf("recover stale tasks: %w", err)
 	}
-	lifecycleService, err := turnlifecycle.NewService(turnlifecycle.Config{
+	lifecycleService, err := tasklifecycle.NewService(tasklifecycle.Config{
 		Transactions:  store,
 		Sessions:      repos.Sessions,
 		Agents:        repos.Agents,
-		Turns:         repos.Turns,
-		QueuedWork:    repos.QueuedWork,
+		Tasks:         repos.Tasks,
 		Controls:      repos.Controls,
 		Messages:      messages,
 		Logger:        diagnostics,
 		EventObserver: events.Publish,
 	})
 	if err != nil {
-		diagnostics.Errorf("create turn lifecycle service failed: %v", err)
+		diagnostics.Errorf("create task lifecycle service failed: %v", err)
 		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
-	startService, err := turnstart.NewService(turnstart.Config{
-		Transactions: store, Workspaces: repos.Workspaces, Sessions: repos.Sessions,
-		Policies: repos.Policies, Agents: repos.Agents,
-		Turns:           repos.Turns,
-		SessionMessages: repos.SessionMessages,
-		AgentMessages:   repos.AgentMessages,
-		ToolPermissions: toolPermissions,
-		RegisteredTools: registeredToolNames,
-		PrimaryAgent:    sessionService, Activator: registry,
-		Lifecycle:           lifecycleService,
-		Definitions:         turnInputProvider{agents: agentRegistry, models: modelRegistry},
+	startService, err := taskstart.NewService(taskstart.Config{
+		Transactions:        store,
+		Workspaces:          repos.Workspaces,
+		Sessions:            repos.Sessions,
+		Policies:            repos.Policies,
+		Agents:              repos.Agents,
+		Tasks:               repos.Tasks,
+		Executions:          executions,
+		SessionMessages:     repos.SessionMessages,
+		AgentMessages:       repos.AgentMessages,
+		ToolPermissions:     toolPermissions,
+		RegisteredTools:     registeredToolNames,
+		PrimaryAgent:        sessionService,
+		Definitions:         taskInputProvider{agents: agentRegistry, models: modelRegistry},
 		AgentDefinitionsDir: root.AgentDefinitions,
-		Models:              turnInputProvider{agents: agentRegistry, models: modelRegistry},
+		Models:              taskInputProvider{agents: agentRegistry, models: modelRegistry},
 		ContextProvider:     sessionService,
 	})
 	if err != nil {
-		diagnostics.Errorf("create turn start service failed: %v", err)
+		diagnostics.Errorf("create task start service failed: %v", err)
 		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
-	queueService, err := turnqueue.NewService(turnqueue.Config{
+	queueService, err := runtimequeue.NewService(runtimequeue.Config{
 		Transactions:    store,
 		Agents:          repos.Agents,
-		Turns:           repos.Turns,
-		QueuedWork:      repos.QueuedWork,
+		Tasks:           repos.Tasks,
 		SessionMessages: repos.SessionMessages,
-		AgentMessages:   repos.AgentMessages,
-		Inputs:          startService,
-		Activator:       registry,
-		Lifecycle:       lifecycleService,
 	})
 	if err != nil {
-		diagnostics.Errorf("create turn queue service failed: %v", err)
+		diagnostics.Errorf("create task queue service failed: %v", err)
 		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
-		closeStore()
-		return nil, err
-	}
-	if err := lifecycleService.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
-		diagnostics.Errorf("configure turn lifecycle queue starter failed: %v", err)
-		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
@@ -354,22 +326,39 @@ func Open(
 	if err != nil {
 		diagnostics.Errorf("create project service failed: %v", err)
 		_ = diagnostics.Close()
-		_ = registry.Close(context.Background())
 		closeStore()
 		return nil, err
 	}
-	controlService, err := turncontrol.NewService(turncontrol.Config{
-		Transactions: store,
-		Agents:       repos.Agents,
-		Turns:        repos.Turns,
-		Controls:     repos.Controls,
-		Canceller:    registry,
-		Ender:        lifecycleService,
+	taskService, err := applicationtask.NewService(startService, lifecycleService)
+	if err != nil {
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, err
+	}
+	factory := runtimeFactory{
+		executions:       executions,
+		runLoop:          timedLoop(runLoop, timings),
+		messageRecorders: messages.Resolve,
+		taskBuilder:      startService,
+		lifecycle:        taskService,
+		tasks:            repos.Tasks,
+		logger:           diagnostics,
+	}
+	registry, err := agentruntime.NewRegistry(factory)
+	if err != nil {
+		diagnostics.Errorf("create runtime registry failed: %v", err)
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, err
+	}
+	runtimeService, err := applicationruntime.NewService(applicationruntime.Config{
+		Tasks:    taskService,
+		Queue:    queueService,
+		Registry: registry,
 	})
 	if err != nil {
-		diagnostics.Errorf("create control service failed: %v", err)
-		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
+		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
@@ -378,9 +367,7 @@ func Open(
 		Agents:      agentService,
 		Projects:    projectService,
 		Sessions:    sessionService,
-		Controls:    controlService,
-		Queues:      queueService,
-		Starts:      startService,
+		Runtime:     runtimeService,
 		Models:      modelConfig,
 		AgentConfig: agentRegistry,
 		ReloadConfig: func(ctx context.Context) error {
@@ -415,7 +402,7 @@ func Open(
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			// 与 Turn 准入共用事务边界，避免后台队列读到混合版本的模型、定义和权限。
+			// 与 Task 准入共用事务边界，避免后台队列读到混合版本的模型、定义和权限。
 			return store.InTx(ctx, func(context.Context) error {
 				modelRegistry.ReplaceFrom(candidateModels)
 				agentRegistry.ReplaceFrom(candidateAgents)
@@ -469,32 +456,23 @@ func (a *Application) Close(ctx context.Context) error {
 	return errors.Join(runtimeErr, sessionErr, storeErr, logErr)
 }
 
-type turnInputProvider struct {
+type taskInputProvider struct {
 	agents *agentregistry.Registry
 	models *modelregistry.Registry
 }
 
-func (r turnInputProvider) Definition(definitionID contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
+func (r taskInputProvider) Definition(definitionID contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
 	return r.agents.Definition(definitionID)
 }
 
-func (r turnInputProvider) FreezeTurnModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
-	return r.models.FreezeTurnModel(providerID, modelID, reasoningLevel)
+func (r taskInputProvider) FreezeTaskModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
+	return r.models.FreezeTaskModel(providerID, modelID, reasoningLevel)
 }
 
-func (r turnInputProvider) FreezeDefaultTurnModel(definitionID contracts.AgentDefinitionID) (contracts.ModelSnapshot, error) {
+func (r taskInputProvider) FreezeDefaultTaskModel(definitionID contracts.AgentDefinitionID) (contracts.ModelSnapshot, error) {
 	reference, err := r.agents.ResolveModelReference(definitionID)
 	if err != nil {
 		return contracts.ModelSnapshot{}, err
 	}
-	return r.models.FreezeTurnModel(reference.ProviderID, reference.ModelID, "")
-}
-
-type queuedWorkStarter struct {
-	queue *turnqueue.Service
-}
-
-func (s queuedWorkStarter) StartNextQueuedWork(ctx context.Context, agentID contracts.AgentID) (bool, error) {
-	result, err := s.queue.StartNextQueuedWork(ctx, agentID)
-	return result.Started, err
+	return r.models.FreezeTaskModel(reference.ProviderID, reference.ModelID, "")
 }

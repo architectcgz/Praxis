@@ -1,92 +1,93 @@
-// Package agent 提供 Agent 状态和消息查询用例。
+// Package agent 提供 Agent 状态查询、消息查询和执行控制用例。
 package agent
 
 import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
-	turnmodel "praxis/internal/core/turn"
-	workflowmodel "praxis/internal/core/workflow"
+	taskmodel "praxis/internal/core/task"
 
 	"context"
 	"errors"
 	"fmt"
 
 	"praxis/internal/repository"
+	"praxis/internal/system"
 )
 
 type Config struct {
-	Agents   repository.SessionAgentRepository
-	Turns    repository.TurnRepository
-	Waits    repository.WaitConditionRepository
-	Controls repository.AgentControlCommandRepository
-	Messages func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
+	Transactions repository.TxRunner
+	Agents       repository.SessionAgentRepository
+	Tasks        repository.TaskRepository
+	Controls     repository.AgentControlCommandRepository
+	Executions   *agentmodel.Executions
+	Messages     func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
+	Clock        system.Clock
 }
 
 type Service struct {
-	agents   repository.SessionAgentRepository
-	turns    repository.TurnRepository
-	waits    repository.WaitConditionRepository
-	controls repository.AgentControlCommandRepository
-	messages func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
+	tx         repository.TxRunner
+	agents     repository.SessionAgentRepository
+	tasks      repository.TaskRepository
+	controls   repository.AgentControlCommandRepository
+	executions *agentmodel.Executions
+	messages   func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
+	clock      system.Clock
 }
 
 // AgentView 是单个 Agent 的持久化详情视图。
 type AgentView struct {
 	Agent      agentmodel.Agent
-	ActiveTurn *turnmodel.Turn
-	Turns      []turnmodel.Turn
-	Waits      []workflowmodel.WaitCondition
-	Controls   []workflowmodel.AgentControlCommand
+	ActiveTask *taskmodel.Task
+	Tasks      []taskmodel.Task
+	Controls   []agentmodel.AgentControlCommand
 }
 
 // NewService 校验查询依赖并创建 Agent 查询服务；缺少仓储或消息读取函数时返回错误。
 func NewService(config Config) (*Service, error) {
 	for name, value := range map[string]any{
+		"transactions":     config.Transactions,
 		"agents":           config.Agents,
-		"turns":            config.Turns,
-		"wait conditions":  config.Waits,
+		"tasks":            config.Tasks,
 		"control requests": config.Controls,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("agent service %s is required", name)
 		}
 	}
-	if config.Messages == nil {
-		return nil, errors.New("agent service messages is required")
+	if config.Messages == nil || config.Executions == nil {
+		return nil, errors.New("agent service messages and executions are required")
 	}
 	return &Service{
-		agents:   config.Agents,
-		turns:    config.Turns,
-		waits:    config.Waits,
-		controls: config.Controls,
-		messages: config.Messages,
+		tx:         config.Transactions,
+		agents:     config.Agents,
+		tasks:      config.Tasks,
+		controls:   config.Controls,
+		executions: config.Executions,
+		messages:   config.Messages,
+		clock:      system.ClockOrDefault(config.Clock),
 	}, nil
 }
 
-// GetAgentView 返回 Agent、执行、等待和控制状态的持久化详情。
+// GetAgentView 返回 Agent、Task 和控制状态，不包含 workflow 编排状态。
 func (s *Service) GetAgentView(ctx context.Context, agentID contracts.AgentID, limit int) (AgentView, error) {
 	if ctx == nil {
 		return AgentView{}, errors.New("agent query context is required")
 	}
-	if s.turns == nil || s.waits == nil || s.controls == nil {
+	if s.tasks == nil || s.controls == nil {
 		return AgentView{}, errors.New("agent detail query is unavailable")
 	}
 	agent, err := s.agents.Get(ctx, agentID)
 	if err != nil {
 		return AgentView{}, err
 	}
-	active, err := s.turns.GetActiveByAgent(ctx, agentID)
+	active, err := s.tasks.GetActiveByAgent(ctx, agentID)
 	if errors.Is(err, contracts.ErrNotFound) {
-		active = turnmodel.Turn{}
+		active = taskmodel.Task{}
 	} else if err != nil {
-		return AgentView{}, fmt.Errorf("load active agent turn: %w", err)
+		return AgentView{}, fmt.Errorf("load active agent task: %w", err)
 	}
-	turns, err := s.turns.ListByAgent(ctx, agentID, limit)
-	if err != nil {
-		return AgentView{}, err
-	}
-	waits, err := s.waits.ListUnresolvedByAgent(ctx, agentID, limit)
+	tasks, err := s.tasks.ListByAgent(ctx, agentID, limit)
 	if err != nil {
 		return AgentView{}, err
 	}
@@ -96,13 +97,12 @@ func (s *Service) GetAgentView(ctx context.Context, agentID contracts.AgentID, l
 	}
 	view := AgentView{
 		Agent:    agent,
-		Turns:    turns,
-		Waits:    waits,
+		Tasks:    tasks,
 		Controls: controls,
 	}
 	if active.ID != "" {
 		activeCopy := active
-		view.ActiveTurn = &activeCopy
+		view.ActiveTask = &activeCopy
 	}
 	return view, nil
 }

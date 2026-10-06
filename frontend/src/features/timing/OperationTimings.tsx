@@ -34,7 +34,7 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
         const unsubscribe = subscribeAgentEvents((event) => {
             if (!ids.has(event.agentId)) return
             if (event.kind === 'operation_timing' && event.timing) setRecords((current) => mergeTimings(current, [event.timing!]))
-            if (event.kind === 'turn_ended' || event.kind === 'request_canceled') void load(event.agentId)
+            if (event.kind === 'task_ended' || event.kind === 'request_canceled') void load(event.agentId)
         })
         for (const id of ids) void load(id)
         return () => { active = false; unsubscribe() }
@@ -46,8 +46,8 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
 }
 
 /** 查找关联操作的独立计时记录；没有记录时返回 undefined。 */
-export function useOperationTiming(turnId: string, kind: OperationTiming['kind'], referenceId?: string) {
-    return findTiming(useContext(TimingContext), turnId, kind, referenceId)
+export function useOperationTiming(taskId: string, kind: OperationTiming['kind'], referenceId?: string) {
+    return findTiming(useContext(TimingContext), taskId, kind, referenceId)
 }
 
 /** 运行中显示估算值，结束后只显示后端单调时钟测量值；异常退出不持续计时。 */
@@ -70,20 +70,20 @@ export function DurationLabel({ record, label = '耗时' }: { record?: Operation
 }
 
 /** 将计时标签关联到消息或工具卡片，不把计时信息拼进业务内容。 */
-export function OperationDuration({ turnId, kind, referenceId, label }: { turnId: string; kind: OperationTiming['kind']; referenceId?: string; label?: string }) {
-    return <DurationLabel record={useOperationTiming(turnId, kind, referenceId)} label={label} />
+export function OperationDuration({ taskId, kind, referenceId, label }: { taskId: string; kind: OperationTiming['kind']; referenceId?: string; label?: string }) {
+    return <DurationLabel record={useOperationTiming(taskId, kind, referenceId)} label={label} />
 }
 
 const statusLabels: Record<OperationTiming['status'], string> = {
     running: '进行中', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断',
 }
 /** 按消息引用展示每轮 Provider 状态、耗时与用量；缺失输出不补零，缓存不重复计入。 */
-export function MessageTiming({ turnId, referenceId }: { turnId: string; referenceId: string }) {
-    const record = useOperationTiming(turnId, 'provider', referenceId)
+export function MessageTiming({ taskId, referenceId }: { taskId: string; referenceId: string }) {
+    const record = useOperationTiming(taskId, 'provider', referenceId)
     const { records, loading, error } = useSessionModelUsage()
     if (!record) return null
     const request = records.find((item) => item.sessionId === record.sessionId && item.agentId === record.agentId &&
-        item.turnId === turnId && referenceId === `assistant:${item.turnId}:${item.step}`)
+        item.taskId === taskId && referenceId === `assistant:${item.turnId}`)
     const usage = request ? formatModelUsage(summarizeModelUsage([request])) : undefined
     const tokens = loading ? '... tokens' : error ? '用量不可用' : '-- tokens'
     const title = usage ? `本次模型请求\n${usage.details}`
@@ -99,7 +99,7 @@ export function MessageTiming({ turnId, referenceId }: { turnId: string; referen
 }
 
 /** 在当前 Agent 名称旁显示执行中的总计时；执行结束或计时缺失时不展示。 */
-export function AgentRuntime({ turnId }: { turnId: string }) {
-    const record = useOperationTiming(turnId, 'agent')
+export function AgentRuntime({ taskId }: { taskId: string }) {
+    const record = useOperationTiming(taskId, 'agent')
     return record?.status === 'running' ? <DurationLabel record={record} label="运行中" /> : null
 }

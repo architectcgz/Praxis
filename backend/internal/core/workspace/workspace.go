@@ -16,7 +16,7 @@ const (
 	WorkspaceTemporary   WorkspaceKind = "temporary"
 )
 
-// WorkspaceState 表示工作区是否可用于执行 Turn。
+// WorkspaceState 表示工作区是否可用于执行 Task。
 type WorkspaceState string
 
 const (

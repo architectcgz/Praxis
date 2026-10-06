@@ -16,24 +16,24 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
             result={activity.result?.result}
             isError={activity.result?.isError}
             pendingStatus={pendingStatus}
-            turnId={activity.call?.turnId || activity.result?.turnId || ''}
+            taskId={activity.call?.taskId || activity.result?.taskId || ''}
             callId={activity.call?.callId || activity.result?.callId}
         />)}
     </div></div>
 }
 
-export function ToolCallBlock({ block, result, turnId }: { block: AgentMessageBlock; result?: AgentMessageBlock; turnId: string }) {
-    return <ToolCard name={block.name || ''} input={block.input} result={result ? result.text || '' : undefined} isError={result?.isError} pendingStatus="unknown" turnId={turnId} callId={block.callId} />
+export function ToolCallBlock({ block, result, taskId }: { block: AgentMessageBlock; result?: AgentMessageBlock; taskId: string }) {
+    return <ToolCard name={block.name || ''} input={block.input} result={result ? result.text || '' : undefined} isError={result?.isError} pendingStatus="unknown" taskId={taskId} callId={block.callId} />
 }
 
-export function ToolResultBlock({ block, turnId }: { block: AgentMessageBlock; turnId: string }) {
-    return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} pendingStatus="unknown" turnId={turnId} callId={block.callId} />
+export function ToolResultBlock({ block, taskId }: { block: AgentMessageBlock; taskId: string }) {
+    return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} pendingStatus="unknown" taskId={taskId} callId={block.callId} />
 }
 
-function ToolCard({ name, input, result, isError = false, pendingStatus = 'running', turnId, callId }: {
-    name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; turnId: string; callId?: string
+function ToolCard({ name, input, result, isError = false, pendingStatus = 'running', taskId, callId }: {
+    name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; taskId: string; callId?: string
 }) {
-    const record = useOperationTiming(turnId, 'tool', callId)
+    const record = useOperationTiming(taskId, 'tool', callId)
     const duration = <DurationLabel record={record} />
     const tool = presentTool(name, input, result, isError, pendingStatus)
     if (result === undefined) {
@@ -74,7 +74,7 @@ function groupToolEvents(events: AgentEvent[]): ToolActivity[] {
     const byCallID = new Map<string, ToolActivity>()
     events.forEach((event, index) => {
         if (event.kind !== 'tool_call' && event.kind !== 'tool_result') return
-        const key = `${event.turnId}:${event.step}:${event.callId || `tool-${index}`}`
+        const key = `${event.taskId}:${event.turnId}:${event.callId || `tool-${index}`}`
         let activity = byCallID.get(key)
         if (!activity) {
             activity = { key }

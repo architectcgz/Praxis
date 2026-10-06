@@ -4,7 +4,7 @@ import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
-	turnmodel "praxis/internal/core/turn"
+	taskmodel "praxis/internal/core/task"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"sort"
@@ -33,18 +33,14 @@ func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 		SecurityPolicyRevision: view.Agent.SecurityPolicyRevision,
 		Profile:                string(view.Agent.Profile),
 		State:                  string(view.Agent.State),
-		CurrentTurn:            view.Agent.CurrentTurnID.String(),
-		TurnIDs:                make([]string, 0, len(view.Turns)),
-		Turns:                  make([]dto.TurnSnapshot, 0, len(view.Turns)),
-		WaitConditionIDs:       make([]string, 0, len(view.Waits)),
+		CurrentTask:            view.Agent.CurrentTaskID.String(),
+		TaskIDs:                make([]string, 0, len(view.Tasks)),
+		Tasks:                  make([]dto.TaskSnapshot, 0, len(view.Tasks)),
 		ControlCommandIDs:      make([]string, 0, len(view.Controls)),
 	}
-	for _, turn := range view.Turns {
-		result.TurnIDs = append(result.TurnIDs, turn.ID.String())
-		result.Turns = append(result.Turns, turnSnapshot(turn))
-	}
-	for _, wait := range view.Waits {
-		result.WaitConditionIDs = append(result.WaitConditionIDs, wait.ID.String())
+	for _, task := range view.Tasks {
+		result.TaskIDs = append(result.TaskIDs, task.ID.String())
+		result.Tasks = append(result.Tasks, taskSnapshot(task))
 	}
 	for _, control := range view.Controls {
 		result.ControlCommandIDs = append(result.ControlCommandIDs, control.ID.String())
@@ -89,7 +85,7 @@ func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem
 	if err != nil {
 		return nil, publicError(b.runtime, "AgentBindings.ListAgentHistory.view", err)
 	}
-	result := make([]dto.AgentHistoryItem, 0, len(messages)+len(view.Turns))
+	result := make([]dto.AgentHistoryItem, 0, len(messages)+len(view.Tasks))
 	for _, message := range messages {
 		value, visible := publicAgentMessage(message)
 		if !visible {
@@ -99,23 +95,23 @@ func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem
 			Kind: "message", At: message.CreatedAt, Sequence: message.Sequence, Message: &value,
 		})
 	}
-	for _, turn := range view.Turns {
-		if turn.Status != turnmodel.TurnEnded {
+	for _, task := range view.Tasks {
+		if task.Status != taskmodel.TaskEnded {
 			continue
 		}
-		kind := "turn"
-		if turn.FailureCode == contracts.TurnFailureRequestCanceled {
+		kind := "task"
+		if task.FailureCode == contracts.TaskFailureRequestCanceled {
 			kind = "request_canceled"
-		} else if turn.Outcome != turnmodel.TurnFailed {
+		} else if task.Outcome != taskmodel.TaskFailed {
 			continue
 		}
-		at := turn.EndedAt
+		at := task.EndedAt
 		if at.IsZero() {
-			at = turn.CreatedAt
+			at = task.CreatedAt
 		}
-		value := turnSnapshot(turn)
+		value := taskSnapshot(task)
 		result = append(result, dto.AgentHistoryItem{
-			Kind: kind, At: at, Turn: &value,
+			Kind: kind, At: at, Task: &value,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -152,17 +148,17 @@ func publicAgentMessage(value sessionmodel.MessageData) (dto.AgentMessage, bool)
 	}
 	return dto.AgentMessage{
 		ID:       value.ID,
-		Sequence: value.Sequence, At: value.CreatedAt, TurnID: value.TurnID,
+		Sequence: value.Sequence, At: value.CreatedAt, TaskID: value.TaskID,
 		Role: string(value.Role), AuthorKind: string(value.AuthorKind), AuthorID: value.AuthorID,
 		Content: content.String(), Thinking: thinking.String(), Blocks: blocks,
 	}, true
 }
 
-func turnSnapshot(turn turnmodel.Turn) dto.TurnSnapshot {
-	return dto.TurnSnapshot{
-		ID: turn.ID.String(), Reason: string(turn.Reason), Status: string(turn.Status),
-		Outcome: string(turn.Outcome), FailureCode: string(turn.FailureCode),
-		FailureMessage: turn.FailureMessage,
-		CreatedAt:      turn.CreatedAt, StartedAt: turn.StartedAt, EndedAt: turn.EndedAt,
+func taskSnapshot(task taskmodel.Task) dto.TaskSnapshot {
+	return dto.TaskSnapshot{
+		ID: task.ID.String(), Status: string(task.Status),
+		Outcome: string(task.Outcome), FailureCode: string(task.FailureCode),
+		FailureMessage: task.FailureMessage,
+		CreatedAt:      task.CreatedAt, StartedAt: task.StartedAt, EndedAt: task.EndedAt,
 	}
 }

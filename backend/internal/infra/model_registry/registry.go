@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 )
 
 const maxProviderCatalogBytes = 1 << 20
@@ -30,7 +30,7 @@ type StreamFactory func(
 	model ModelConfig,
 	apiKey string,
 	client *http.Client,
-) (runtimecontract.ModelStream, error)
+) (agentruntime.ModelStream, error)
 
 // Registry is the single in-process owner of the model configuration. Saving
 // from the UI replaces the config and its indexes in place, so every read path
@@ -62,7 +62,7 @@ func (r *Registry) Config() RegistryConfig {
 	return cloneRegistryConfig(r.config)
 }
 
-// ReplaceFrom 用已校验的磁盘快照替换运行时配置与凭据；运行中的 Turn 保持原快照。
+// ReplaceFrom 用已校验的磁盘快照替换运行时配置与凭据；运行中的 Task 保持原快照。
 func (r *Registry) ReplaceFrom(candidate *Registry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -82,7 +82,7 @@ func (r *Registry) modelByKeyLocked(key modelKey) (ModelConfig, error) {
 	return config, nil
 }
 
-// ListModels 返回可用于下一 Turn 的模型及推理等级。
+// ListModels 返回可用于下一 Task 的模型及推理等级。
 func (r *Registry) ListModels() []ModelOption {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -215,8 +215,8 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	return models, nil
 }
 
-// FreezeTurnModel 校验当前配置并冻结非敏感模型参数，失败时不生成快照。
-func (r *Registry) FreezeTurnModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
+// FreezeTaskModel 校验当前配置并冻结非敏感模型参数，失败时不生成快照。
+func (r *Registry) FreezeTaskModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
 	selection, err := newModelSelection(providerID, modelID, reasoningLevel)
 	if err != nil {
 		return contracts.ModelSnapshot{}, err

@@ -2,7 +2,7 @@ package agentruntime
 
 import (
 	"praxis/internal/contracts"
-	turnmodel "praxis/internal/core/turn"
+	taskmodel "praxis/internal/core/task"
 	"praxis/internal/timing"
 
 	"encoding/json"
@@ -12,31 +12,31 @@ import (
 type AgentEventKind string
 
 const (
-	AgentEventStepStarted     AgentEventKind = "step_started"
+	AgentEventTurnStarted     AgentEventKind = "turn_started"
 	AgentEventProviderWaiting AgentEventKind = "provider_waiting"
 	AgentEventTextDelta       AgentEventKind = "text_delta"
 	AgentEventThinkingDelta   AgentEventKind = "thinking_delta"
 	AgentEventToolCall        AgentEventKind = "tool_call"
 	AgentEventToolResult      AgentEventKind = "tool_result"
-	AgentEventStepCompleted   AgentEventKind = "step_completed"
+	AgentEventTurnCompleted   AgentEventKind = "turn_completed"
 	AgentEventModelUsage      AgentEventKind = "model_usage"
 	AgentEventRequestCanceled AgentEventKind = "request_canceled"
-	AgentEventTurnEnded       AgentEventKind = "turn_ended"
+	AgentEventTaskEnded       AgentEventKind = "task_ended"
 	AgentEventError           AgentEventKind = "error"
 	AgentEventTiming          AgentEventKind = "operation_timing"
 )
 
-// AgentEvent 是单次 turn 的瞬时 runtime 事件；持久化消息与执行状态是最终事实。
+// AgentEvent 是单次 task 的瞬时 runtime 事件；持久化消息与执行状态是最终事实。
 // 前端断线后应重新读取对应消息流和执行状态恢复视图。
 type AgentEvent struct {
 	Kind           AgentEventKind            `json:"kind"`
 	SessionID      contracts.SessionID       `json:"sessionId,omitempty"`
 	AgentID        contracts.AgentID         `json:"agentId"`
-	TurnID         contracts.TurnID          `json:"turnId"`
-	Outcome        turnmodel.TurnOutcome     `json:"outcome,omitempty"`
-	FailureCode    contracts.TurnFailureCode `json:"failureCode,omitempty"`
+	TaskID         contracts.TaskID          `json:"taskId"`
+	Outcome        taskmodel.TaskOutcome     `json:"outcome,omitempty"`
+	FailureCode    contracts.TaskFailureCode `json:"failureCode,omitempty"`
 	FailureMessage string                    `json:"failureMessage,omitempty"`
-	Step           int                       `json:"step,omitzero"`
+	TurnID         contracts.TurnID          `json:"turnId,omitempty"`
 	Text           string                    `json:"text,omitempty"`
 	CallID         string                    `json:"callId,omitempty"`
 	Name           string                    `json:"name,omitempty"`

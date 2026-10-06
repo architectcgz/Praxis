@@ -195,8 +195,8 @@ func selectMessages(messages []sessionmodel.MessageData, budget int) []sessionmo
 	used := 0
 	for end := len(messages); end > 0; {
 		start := end - 1
-		turnID := messages[end-1].TurnID
-		for start > 0 && turnID != "" && messages[start-1].TurnID == turnID {
+		taskID := messages[end-1].TaskID
+		for start > 0 && taskID != "" && messages[start-1].TaskID == taskID {
 			start--
 		}
 		size := 0

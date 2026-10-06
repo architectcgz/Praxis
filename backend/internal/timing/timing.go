@@ -31,7 +31,7 @@ const (
 type Operation struct {
 	SessionID   string `json:"sessionId"`
 	AgentID     string `json:"agentId"`
-	TurnID      string `json:"turnId"`
+	TaskID      string `json:"taskId"`
 	Kind        Kind   `json:"kind"`
 	Name        string `json:"name"`
 	ReferenceID string `json:"referenceId,omitempty"`
@@ -52,7 +52,7 @@ type Record struct {
 
 // Validate 只读校验存储恢复和写入边界；不修正非法字段，也不推算未知耗时。
 func (r Record) Validate() error {
-	for _, value := range []string{r.ID, r.SessionID, r.AgentID, r.TurnID, r.Name} {
+	for _, value := range []string{r.ID, r.SessionID, r.AgentID, r.TaskID, r.Name} {
 		if value == "" || value != strings.TrimSpace(value) {
 			return errors.New("timing identity and name must be canonical and nonempty")
 		}
@@ -141,8 +141,8 @@ func (r *Recorder) Start(ctx context.Context, operation Operation) (context.Cont
 			if operation.AgentID == "" {
 				operation.AgentID = parent.AgentID
 			}
-			if operation.TurnID == "" {
-				operation.TurnID = parent.TurnID
+			if operation.TaskID == "" {
+				operation.TaskID = parent.TaskID
 			}
 			parentID = parent.ID
 		}

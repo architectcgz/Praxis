@@ -87,8 +87,8 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 			DefinitionID:           agent.DefinitionID.String(),
 			SecurityPolicyRevision: agent.SecurityPolicyRevision,
 			Profile:                string(agent.Profile), State: string(agent.State),
-			CurrentTurn: agent.CurrentTurnID.String(),
-			Turns:       make([]dto.TurnSnapshot, 0),
+			CurrentTask: agent.CurrentTaskID.String(),
+			Tasks:       make([]dto.TaskSnapshot, 0),
 		})
 	}
 	return result, nil

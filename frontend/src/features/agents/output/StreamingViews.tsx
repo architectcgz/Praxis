@@ -26,12 +26,12 @@ export const PendingUserMessageView = memo(function PendingUserMessageView({ con
     )
 })
 
-export function PendingOutputView({ agentProfile, turnId }: { agentProfile: string; turnId: string }) {
+export function PendingOutputView({ agentProfile, taskId }: { agentProfile: string; taskId: string }) {
     return (
         <article className="message message-assistant message-pending" role="status">
             <div className="message-meta">
                 <strong>{agentProfile}</strong>
-                <AgentRuntime turnId={turnId} />
+                <AgentRuntime taskId={taskId} />
             </div>
             <div className="message-pending-status">
                 <LoaderCircle size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -51,11 +51,11 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, pro
     )
 })
 
-export function StreamingStepView({ agentProfile, events, turnId, step, active, continuation = false, hasContinuation = false }: {
+export function StreamingTurnView({ agentProfile, events, taskId, turnId, active, continuation = false, hasContinuation = false }: {
     agentProfile: string
     events: AgentEvent[]
+    taskId: string
     turnId: string
-    step: number
     active: boolean
     continuation?: boolean
     hasContinuation?: boolean
@@ -80,16 +80,16 @@ export function StreamingStepView({ agentProfile, events, turnId, step, active, 
         }
     })
     if (tools.length > 0) segments.push(<StreamingToolCallsView tools={tools} key={`tools-${events.length}`} />)
-    return <div className={`streaming-step${hasContinuation ? ' streaming-step-continued' : ''}`}>
-        {!continuation && <div className="message message-assistant streaming-step-header">
+    return <div className={`streaming-turn${hasContinuation ? ' streaming-turn-continued' : ''}`}>
+        {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">
                 <strong>{agentProfile}</strong>
-                {active && <AgentRuntime turnId={turnId} />}
+                {active && <AgentRuntime taskId={taskId} />}
             </div>
         </div>}
         {segments}
         <div className="agent-activity">
-            <MessageTiming turnId={turnId} referenceId={`assistant:${turnId}:${step}`} />
+            <MessageTiming taskId={taskId} referenceId={`assistant:${turnId}`} />
         </div>
     </div>
 }

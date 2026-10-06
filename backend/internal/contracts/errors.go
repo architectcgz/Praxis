@@ -78,22 +78,21 @@ const (
 	AlreadyEnded     Code = "agent.already_ended"
 
 	WorkQueueEmpty  Code = "work.queue_empty"
-	WorkItemActive  Code = "work.item_active"
 	RequestNotFound Code = "request.not_found"
 	RequestConflict Code = "request.conflict"
 )
 
 // 执行运行域：Agent 执行运行时的失败分类。
 const (
-	TurnBusy          Code = "turn.busy"
-	TurnContract      Code = "turn.contract_error"
-	TurnPolicyBlocked Code = "turn.policy_blocked"
-	TurnApproval      Code = "turn.approval_required"
-	TurnStorage       Code = "turn.storage_error"
-	TurnProvider      Code = "turn.provider_error"
-	TurnTool          Code = "turn.tool_error"
-	TurnResourceLimit Code = "turn.resource_limit"
-	TurnInterrupted   Code = "turn.interrupted"
+	TaskBusy          Code = "task.busy"
+	TaskContract      Code = "task.contract_error"
+	TaskPolicyBlocked Code = "task.policy_blocked"
+	TaskApproval      Code = "task.approval_required"
+	TaskStorage       Code = "task.storage_error"
+	TaskProvider      Code = "task.provider_error"
+	TaskTool          Code = "task.tool_error"
+	TaskResourceLimit Code = "task.resource_limit"
+	TaskInterrupted   Code = "task.interrupted"
 )
 
 // 平台域：模型配置与编排启动状态。
@@ -109,7 +108,6 @@ var (
 	ErrLeaseConflict     = New(LeaseConflict, "")
 	ErrAlreadyEnded      = New(AlreadyEnded, "")
 	ErrWorkQueueEmpty    = New(WorkQueueEmpty, "")
-	ErrWorkItemActive    = New(WorkItemActive, "")
 	ErrAgentExecuting    = New(AgentExecuting, "")
 	ErrAgentUnavailable  = New(AgentUnavailable, "")
 	ErrRequestNotFound   = New(RequestNotFound, "")

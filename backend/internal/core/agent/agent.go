@@ -2,7 +2,7 @@ package agent
 
 import (
 	"praxis/internal/contracts"
-	turn "praxis/internal/core/turn"
+	task "praxis/internal/core/task"
 
 	"time"
 )
@@ -27,15 +27,15 @@ type Agent struct {
 	Profile                contracts.AgentProfile
 	SecurityPolicyRevision uint64
 	State                  AgentState
-	CurrentTurnID          contracts.TurnID
+	CurrentTaskID          contracts.TaskID
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 }
 
-// Startable 判断当前状态是否允许开始新的 Turn。
+// Startable 判断当前状态是否允许开始新的 Task。
 func (s AgentState) Startable() bool {
 	switch s {
-	case AgentIdle, AgentWaiting, AgentInterrupted, AgentFailed:
+	case AgentIdle, AgentWaiting, AgentInterrupted, AgentFailed, AgentPaused:
 		return true
 	default:
 		return false
@@ -78,11 +78,11 @@ func (a Agent) Validate() error {
 		return contracts.InvalidValue("agent.state", "unknown agent state")
 	}
 	if a.State == AgentExecuting || a.State == AgentPausing {
-		if contracts.EmptyID(string(a.CurrentTurnID)) {
-			return contracts.InvalidValue("agent.currentTurnID", "active state requires an turn")
+		if contracts.EmptyID(string(a.CurrentTaskID)) {
+			return contracts.InvalidValue("agent.currentTaskID", "active state requires an task")
 		}
-	} else if a.CurrentTurnID != "" {
-		return contracts.InvalidValue("agent.currentTurnID", "inactive state cannot retain an turn")
+	} else if a.CurrentTaskID != "" {
+		return contracts.InvalidValue("agent.currentTaskID", "inactive state cannot retain an task")
 	}
 	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return contracts.InvalidValue("agent.timestamps", "timestamps are invalid")
@@ -90,25 +90,14 @@ func (a Agent) Validate() error {
 	return nil
 }
 
-func (a *Agent) Start(turnID contracts.TurnID, at time.Time) error {
+func (a *Agent) Start(taskID contracts.TaskID, at time.Time) error {
 	if !a.State.Startable() {
 		return contracts.InvalidTransition("agent", string(a.State), string(AgentExecuting))
 	}
-	if contracts.EmptyID(string(turnID)) {
-		return contracts.InvalidValue("agent.currentTurnID", "turn id is required")
+	if contracts.EmptyID(string(taskID)) {
+		return contracts.InvalidValue("agent.currentTaskID", "task id is required")
 	}
-	a.State, a.CurrentTurnID, a.UpdatedAt = AgentExecuting, turnID, at.UTC()
-	return nil
-}
-
-func (a *Agent) Resume(turnID contracts.TurnID, at time.Time) error {
-	if a.State != AgentPaused && a.State != AgentInterrupted {
-		return contracts.InvalidTransition("agent", string(a.State), string(AgentExecuting))
-	}
-	if contracts.EmptyID(string(turnID)) {
-		return contracts.InvalidValue("agent.currentTurnID", "turn id is required")
-	}
-	a.State, a.CurrentTurnID, a.UpdatedAt = AgentExecuting, turnID, at.UTC()
+	a.State, a.CurrentTaskID, a.UpdatedAt = AgentExecuting, taskID, at.UTC()
 	return nil
 }
 
@@ -120,30 +109,30 @@ func (a *Agent) RequestPause(at time.Time) error {
 	return nil
 }
 
-// EndTurn 根据本轮最终结果释放活动回合；中断后仍可开始新回合。
-func (a *Agent) EndTurn(outcome turn.TurnOutcome, at time.Time) error {
+// EndTask 根据本轮最终结果释放活动回合；中断后仍可开始新回合。
+func (a *Agent) EndTask(outcome task.TaskOutcome, at time.Time) error {
 	if a.State != AgentExecuting && a.State != AgentPausing {
 		return contracts.InvalidTransition("agent", string(a.State), "ended")
 	}
-	if !turn.ValidTurnOutcome(outcome) {
-		return contracts.InvalidValue("agent.outcome", "unknown turn outcome")
+	if !task.ValidTaskOutcome(outcome) {
+		return contracts.InvalidValue("agent.outcome", "unknown task outcome")
 	}
-	if outcome == turn.TurnPaused && a.State != AgentPausing {
+	if outcome == task.TaskPaused && a.State != AgentPausing {
 		return contracts.InvalidTransition("agent", string(a.State), string(AgentPaused))
 	}
 	switch outcome {
-	case turn.TurnCompleted:
+	case task.TaskCompleted:
 		a.State = AgentIdle
-	case turn.TurnYielded:
+	case task.TaskYielded:
 		a.State = AgentWaiting
-	case turn.TurnPaused:
+	case task.TaskPaused:
 		a.State = AgentPaused
-	case turn.TurnInterrupted:
+	case task.TaskInterrupted:
 		a.State = AgentInterrupted
-	case turn.TurnFailed:
+	case task.TaskFailed:
 		a.State = AgentFailed
 	}
-	a.CurrentTurnID, a.UpdatedAt = "", at.UTC()
+	a.CurrentTaskID, a.UpdatedAt = "", at.UTC()
 	return nil
 }
 

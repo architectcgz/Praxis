@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
@@ -57,12 +57,12 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
-var _ runtimecontract.ModelStream = (*Provider)(nil)
+var _ agentruntime.ModelStream = (*Provider)(nil)
 
 func (p *Provider) Stream(
 	ctx context.Context,
-	request runtimecontract.ModelRequest,
-) (<-chan runtimecontract.ModelStreamEvent, error) {
+	request agentruntime.ModelRequest,
+) (<-chan agentruntime.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("anthropic stream context is required")
 	}
@@ -159,7 +159,7 @@ func (messagesDecoder) Decode(
 	emit streaming.EmitFunc,
 ) (string, error) {
 	tools := map[int]*toolAccumulator{}
-	var usage *runtimecontract.ModelUsage
+	var usage *agentruntime.ModelUsage
 	var stopReason string
 	for {
 		if err := ctx.Err(); err != nil {
@@ -203,7 +203,7 @@ func (messagesDecoder) Decode(
 		case "message_start":
 			usage = normalizeMessageUsage(event.Message.Usage)
 			if usage != nil {
-				if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
+				if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamUsage, Usage: usage}); err != nil {
 					return "", err
 				}
 			}
@@ -215,13 +215,13 @@ func (messagesDecoder) Decode(
 			switch event.Delta.Type {
 			case "text_delta":
 				if event.Delta.Text != "" {
-					if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamTextDelta, Text: event.Delta.Text}); err != nil {
+					if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamTextDelta, Text: event.Delta.Text}); err != nil {
 						return "", err
 					}
 				}
 			case "thinking_delta":
 				if event.Delta.Thinking != "" {
-					if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamThinkingDelta, Text: event.Delta.Thinking}); err != nil {
+					if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamThinkingDelta, Text: event.Delta.Thinking}); err != nil {
 						return "", err
 					}
 				}
@@ -237,7 +237,7 @@ func (messagesDecoder) Decode(
 				next.OutputTokens = event.Usage.OutputTokens
 				if next.Valid() && (usage.OutputTokens == nil || *next.OutputTokens >= *usage.OutputTokens) {
 					usage = &next
-					if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
+					if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamUsage, Usage: usage}); err != nil {
 						return "", err
 					}
 				}
@@ -263,7 +263,7 @@ type messageUsage struct {
 	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
 }
 
-func normalizeMessageUsage(reported *messageUsage) *runtimecontract.ModelUsage {
+func normalizeMessageUsage(reported *messageUsage) *agentruntime.ModelUsage {
 	if reported == nil || reported.InputTokens == nil || *reported.InputTokens < 0 {
 		return nil
 	}
@@ -277,7 +277,7 @@ func normalizeMessageUsage(reported *messageUsage) *runtimecontract.ModelUsage {
 			total += *count
 		}
 	}
-	usage := &runtimecontract.ModelUsage{
+	usage := &agentruntime.ModelUsage{
 		InputTokens:              total,
 		OutputTokens:             reported.OutputTokens,
 		CacheReadInputTokens:     reported.CacheReadInputTokens,
@@ -299,8 +299,8 @@ func emitTool(emit streaming.EmitFunc, tool *toolAccumulator) error {
 	if len(bytes.TrimSpace(args)) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	return emit(runtimecontract.ModelStreamEvent{
-		Kind: runtimecontract.StreamToolCall,
+	return emit(agentruntime.ModelStreamEvent{
+		Kind: agentruntime.StreamToolCall,
 		ToolCall: toolcontracts.ToolCall{
 			ID: tool.id, Name: contracts.ToolName(tool.name), Arguments: args,
 		},

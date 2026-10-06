@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
@@ -47,13 +47,13 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
-var _ runtimecontract.ModelStream = (*Provider)(nil)
+var _ agentruntime.ModelStream = (*Provider)(nil)
 
 // Stream 将一次 provider-neutral 请求编码为 Responses 流并返回事件通道。
 func (p *Provider) Stream(
 	ctx context.Context,
-	request runtimecontract.ModelRequest,
-) (<-chan runtimecontract.ModelStreamEvent, error) {
+	request agentruntime.ModelRequest,
+) (<-chan agentruntime.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("openai responses stream context is required")
 	}
@@ -84,11 +84,11 @@ func (p *Provider) Stream(
 	return streaming.Start(ctx, response, streamDecoder{}), nil
 }
 
-func (p *Provider) requestPayload(request runtimecontract.ModelRequest) ([]byte, string, error) {
+func (p *Provider) requestPayload(request agentruntime.ModelRequest) ([]byte, string, error) {
 	return encodeRequest(request)
 }
 
-func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error) {
+func encodeRequest(request agentruntime.ModelRequest) ([]byte, string, error) {
 	if request.Model.ModelID == "" {
 		return nil, "", errors.New("openai responses model is required")
 	}
@@ -114,7 +114,7 @@ func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error)
 		Input:           input,
 		Stream:          true,
 		MaxOutputTokens: request.MaxOutputTokens,
-		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Turn ID 或上下文摘要。
+		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Task ID 或上下文摘要。
 		PromptCacheKey: request.SessionReference,
 	}
 	if reasoning := request.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {

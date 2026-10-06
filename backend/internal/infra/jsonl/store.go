@@ -366,6 +366,9 @@ func (s *Store) replay(path string) error {
 			if err = validateEvent(scope, event); err != nil {
 				return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
 			}
+			if err = validateRestoredEvent(scope, event); err != nil {
+				return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
+			}
 			if err = apply(s.objects, scope, event); err != nil {
 				return err
 			}

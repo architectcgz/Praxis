@@ -2,23 +2,25 @@
 package session
 
 import (
-	agentruntime "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
 	projectmodel "praxis/internal/core/project"
 	securitymodel "praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
+	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
 	turnmodel "praxis/internal/core/turn"
-	workflowmodel "praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -42,10 +44,10 @@ type Config struct {
 	Contexts          repository.SessionContextRepository
 	Policies          repository.AgentSecurityPolicyRepository
 	Agents            repository.SessionAgentRepository
-	Turns             repository.TurnRepository
+	Tasks             repository.TaskRepository
 	ToolInvocations   repository.ToolInvocationRepository
-	QueuedWork        repository.QueuedWorkRepository
 	Controls          repository.AgentControlCommandRepository
+	Turns             repository.TurnRepository
 	SessionMessages   repository.SessionMessageRepository
 	AgentMessages     repository.AgentMessageRepository
 	Definitions       AgentDefinitionFactory
@@ -66,10 +68,10 @@ type Service struct {
 	contexts          repository.SessionContextRepository
 	policies          repository.AgentSecurityPolicyRepository
 	agents            repository.SessionAgentRepository
-	turns             repository.TurnRepository
+	tasks             repository.TaskRepository
 	toolInvocations   repository.ToolInvocationRepository
-	queuedWork        repository.QueuedWorkRepository
 	controls          repository.AgentControlCommandRepository
+	turns             repository.TurnRepository
 	sessionMessages   repository.SessionMessageRepository
 	agentMessages     repository.AgentMessageRepository
 	definitions       AgentDefinitionFactory
@@ -116,10 +118,10 @@ func NewService(config Config) (*Service, error) {
 		"session contexts":  config.Contexts,
 		"security policies": config.Policies,
 		"agents":            config.Agents,
-		"turns":             config.Turns,
+		"tasks":             config.Tasks,
 		"tool invocations":  config.ToolInvocations,
-		"queued work":       config.QueuedWork,
 		"controls":          config.Controls,
+		"turns":             config.Turns,
 		"session messages":  config.SessionMessages,
 		"agent messages":    config.AgentMessages,
 		"agent definitions": config.Definitions,
@@ -138,10 +140,10 @@ func NewService(config Config) (*Service, error) {
 		contexts:          config.Contexts,
 		policies:          config.Policies,
 		agents:            config.Agents,
-		turns:             config.Turns,
+		tasks:             config.Tasks,
 		toolInvocations:   config.ToolInvocations,
-		queuedWork:        config.QueuedWork,
 		controls:          config.Controls,
+		turns:             config.Turns,
 		sessionMessages:   config.SessionMessages,
 		agentMessages:     config.AgentMessages,
 		definitions:       config.Definitions,
@@ -186,51 +188,106 @@ func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.S
 	return lister.List(ctx, limit)
 }
 
-// RecoverStaleTurns 将上一次进程异常退出留下的活动 Turn 收敛为中断。
+// RecoverStaleTasks 逐个 Session 收敛上一次进程异常退出留下的执行状态。
+// 恢复以 Session 为事务边界：一次事务只能写入一个日志文件，跨 Session 批量提交会掩盖部分失败。
 // 工具调用结果未知时只写入短错误结果，不自动重放可能已经产生副作用的调用。
-func (s *Service) RecoverStaleTurns(ctx context.Context) error {
+func (s *Service) RecoverStaleTasks(ctx context.Context) error {
 	if ctx == nil {
-		return errors.New("stale turn recovery context is required")
+		return errors.New("stale task recovery context is required")
 	}
-	turns, err := s.turns.ListActive(ctx)
+	tasks, err := s.tasks.ListActive(ctx)
 	if err != nil {
 		return err
 	}
-	for index := range turns {
-		if err := s.recoverStaleTurn(ctx, turns[index].ID); err != nil {
-			return fmt.Errorf("recover stale turn %s: %w", turns[index].ID, err)
+	bySession := make(map[contracts.SessionID][]contracts.TaskID)
+	for _, task := range tasks {
+		bySession[task.SessionID] = append(bySession[task.SessionID], task.ID)
+	}
+	open, err := s.turns.ListOpen(ctx)
+	if err != nil {
+		return err
+	}
+	turnsBySession := make(map[contracts.SessionID][]contracts.TurnID)
+	for _, turn := range open {
+		turnsBySession[turn.SessionID] = append(turnsBySession[turn.SessionID], turn.ID)
+	}
+	pending := make(map[contracts.SessionID]struct{}, len(bySession)+len(turnsBySession))
+	for sessionID := range bySession {
+		pending[sessionID] = struct{}{}
+	}
+	for sessionID := range turnsBySession {
+		pending[sessionID] = struct{}{}
+	}
+	for _, sessionID := range slices.Sorted(maps.Keys(pending)) {
+		if err := s.recoverSession(ctx, bySession[sessionID], turnsBySession[sessionID]); err != nil {
+			return fmt.Errorf("recover session %s: %w", sessionID, err)
 		}
 	}
 	return nil
 }
 
-func (s *Service) recoverStaleTurn(ctx context.Context, turnID contracts.TurnID) error {
+// recoverSession 在 Session 的单个事务中收敛活动 Task 与残留的未结算迭代。
+func (s *Service) recoverSession(
+	ctx context.Context,
+	taskIDs []contracts.TaskID,
+	turnIDs []contracts.TurnID,
+) error {
 	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		turn, err := s.turns.Get(txCtx, turnID)
+		for _, taskID := range taskIDs {
+			if err := s.recoverStaleTask(txCtx, taskID); err != nil {
+				return fmt.Errorf("recover stale task %s: %w", taskID, err)
+			}
+		}
+		at := s.clock.Now().UTC()
+		for _, turnID := range turnIDs {
+			turn, err := s.turns.Get(txCtx, turnID)
+			if errors.Is(err, contracts.ErrNotFound) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			// 事务内重新确认状态：已被其他路径收敛的迭代不重复结算。
+			if turn.Status != turnmodel.TurnRunning {
+				continue
+			}
+			if err := turn.End(turnmodel.TurnInterrupted, contracts.TaskFailureInterrupted, "", at); err != nil {
+				return err
+			}
+			if err := s.turns.Save(txCtx, turn); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Service) recoverStaleTask(ctx context.Context, taskID contracts.TaskID) error {
+	return s.tx.InTx(ctx, func(txCtx context.Context) error {
+		task, err := s.tasks.Get(txCtx, taskID)
 		if errors.Is(err, contracts.ErrNotFound) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if !turn.Active() {
+		if !task.Active() {
 			return nil
 		}
-		agent, err := s.agents.Get(txCtx, turn.AgentID)
+		agent, err := s.agents.Get(txCtx, task.AgentID)
 		if err != nil {
 			return err
 		}
-		if agent.CurrentTurnID != turn.ID ||
+		if agent.CurrentTaskID != task.ID ||
 			(agent.State != agentmodel.AgentExecuting && agent.State != agentmodel.AgentPausing) {
-			return fmt.Errorf("active turn does not match agent state")
+			return fmt.Errorf("active task does not match agent state")
 		}
-		invocations, err := s.toolInvocations.ListUnsettledByTurn(txCtx, turn.ID)
+		invocations, err := s.toolInvocations.ListUnsettledByTask(txCtx, task.ID)
 		if err != nil {
 			return err
 		}
 		at := s.clock.Now().UTC()
-		outcome := turnmodel.TurnInterrupted
-		failureCode := contracts.TurnFailureInterrupted
+		outcome := taskmodel.TaskInterrupted
+		failureCode := contracts.TaskFailureInterrupted
 		controls, err := s.controls.ListOpenByAgent(txCtx, agent.ID, 100)
 		if err != nil {
 			return err
@@ -238,16 +295,16 @@ func (s *Service) recoverStaleTurn(ctx context.Context, turnID contracts.TurnID)
 		// 恢复只收敛状态，不重放执行；已提交的用户控制命令仍保留其取消原因。
 		for index := range controls {
 			control := &controls[index]
-			if control.TargetTurnID != turn.ID {
+			if control.TargetTaskID != task.ID {
 				continue
 			}
-			if failureCode != contracts.TurnFailureRequestCanceled {
-				outcome = turnmodel.TurnPaused
+			if failureCode != contracts.TaskFailureRequestCanceled {
+				outcome = taskmodel.TaskPaused
 			}
-			if control.Kind == workflowmodel.AgentControlCancel {
-				outcome = turnmodel.TurnInterrupted
+			if control.Kind == agentmodel.AgentControlCancel {
+				outcome = taskmodel.TaskInterrupted
 			}
-			failureCode = contracts.TurnFailureRequestCanceled
+			failureCode = contracts.TaskFailureRequestCanceled
 			if err := control.MarkApplied(at); err != nil {
 				return err
 			}
@@ -264,39 +321,27 @@ func (s *Service) recoverStaleTurn(ctx context.Context, turnID contracts.TurnID)
 			if err := s.toolInvocations.Save(txCtx, invocation); err != nil {
 				return err
 			}
-			if err := s.appendRecoveredToolResult(txCtx, agent, turn, invocation, result, at); err != nil {
+			if err := s.appendRecoveredToolResult(txCtx, agent, task, invocation, result, at); err != nil {
 				return err
 			}
 		}
-		if turn.Status == turnmodel.TurnStarting {
-			if err := turn.MarkRunning(at); err != nil {
+		if task.Status == taskmodel.TaskStarting {
+			if err := task.MarkRunning(at); err != nil {
 				return err
 			}
 		}
-		if turn.Status == turnmodel.TurnRunning {
-			if err := turn.BeginEnding(at); err != nil {
+		if task.Status == taskmodel.TaskRunning {
+			if err := task.BeginEnding(at); err != nil {
 				return err
 			}
 		}
-		if err := turn.End(outcome, failureCode, at); err != nil {
+		if err := task.End(outcome, failureCode, at); err != nil {
 			return err
 		}
-		if err := agent.EndTurn(outcome, at); err != nil {
+		if err := agent.EndTask(outcome, at); err != nil {
 			return err
 		}
-		if turn.WorkItemID != "" {
-			work, err := s.queuedWork.Get(txCtx, turn.WorkItemID)
-			if err != nil {
-				return err
-			}
-			if err := work.End(turn.ID, outcome, failureCode, at); err != nil {
-				return err
-			}
-			if err := s.queuedWork.Save(txCtx, work); err != nil {
-				return err
-			}
-		}
-		if err := s.turns.Save(txCtx, turn); err != nil {
+		if err := s.tasks.Save(txCtx, task); err != nil {
 			return err
 		}
 		return s.agents.Save(txCtx, agent)
@@ -328,15 +373,15 @@ func recoverToolInvocation(invocation *toolmodel.ToolInvocation, at time.Time) (
 func (s *Service) appendRecoveredToolResult(
 	ctx context.Context,
 	agent agentmodel.Agent,
-	turn turnmodel.Turn,
+	task taskmodel.Task,
 	invocation toolmodel.ToolInvocation,
 	result toolcontracts.ToolResult,
 	at time.Time,
 ) error {
 	message := sessionmodel.MessageData{
 		ID:         "tool-recovery:" + invocation.ID.String(),
-		RequestID:  turn.RequestID.String(),
-		TurnID:     turn.ID.String(),
+		RequestID:  task.RequestID.String(),
+		TaskID:     task.ID.String(),
 		Role:       sessionmodel.RoleTool,
 		AuthorKind: sessionmodel.AuthorTool,
 		AuthorID:   string(invocation.Name),
@@ -548,7 +593,7 @@ type AppendContextParams struct {
 	EntryID      contracts.ContextEntryID
 	SessionID    contracts.SessionID
 	Kind         contextmodel.SessionContextKind
-	SourceTurnID contracts.TurnID
+	SourceTaskID contracts.TaskID
 	Content      string
 }
 
@@ -569,7 +614,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 			params.EntryID,
 			params.SessionID,
 			params.Kind,
-			params.SourceTurnID,
+			params.SourceTaskID,
 			params.Content,
 			s.clock.Now(),
 		)
@@ -582,7 +627,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 		}
 		if found {
 			if existing.SessionID != params.SessionID || existing.Kind != params.Kind ||
-				existing.SourceTurnID != params.SourceTurnID || existing.Content != entry.Content {
+				existing.SourceTaskID != params.SourceTaskID || existing.Content != entry.Content {
 				return contracts.ErrRequestConflict
 			}
 			result = AppendContextResult{Entry: existing, ExistingEntry: true}

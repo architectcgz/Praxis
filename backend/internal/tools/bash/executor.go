@@ -48,7 +48,7 @@ func (w *outputWriter) Write(value []byte) (int, error) {
 // Execute 在授权工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
 func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
-		return toolcontracts.ToolResult{}, errors.New("tool turn context is required")
+		return toolcontracts.ToolResult{}, errors.New("tool task context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err

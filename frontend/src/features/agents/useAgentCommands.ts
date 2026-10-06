@@ -1,7 +1,7 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import {
     API_ERROR_CODES,
-    cancelTurn,
+    cancelTask,
     pauseAgent,
     sendInput,
     type AgentSnapshot,
@@ -67,7 +67,7 @@ export function useAgentCommands({
         setAwaitingOutput(true)
         setPendingUserMessages((current) => [
             ...current,
-            { requestId: requestID, turnId: '', sessionId: sessionID, agentId: agentID, content, at: new Date().toISOString() },
+            { requestId: requestID, taskId: '', sessionId: sessionID, agentId: agentID, content, at: new Date().toISOString() },
         ])
         setError('')
         setErrorCode(undefined)
@@ -82,7 +82,7 @@ export function useAgentCommands({
                 reasoningLevel: reasoning,
             })
             setPendingUserMessages((current) => current.map((message) => (
-                message.requestId === requestID ? { ...message, turnId: response.turnId } : message
+                message.requestId === requestID ? { ...message, taskId: response.taskId } : message
             )))
             if (isCurrentView()) {
                 setInput('')
@@ -101,11 +101,11 @@ export function useAgentCommands({
     }, [agent, busy, input, reasoning, sessionID, selectedModelID, selectedProviderID, refreshAgent, selectedAgentIDRef])
 
     const control = useCallback(async (kind: 'pause' | 'cancel') => {
-        if (!agent?.currentTurnId || busy) {
+        if (!agent?.currentTaskId || busy) {
             return
         }
         const agentID = agent.id
-        const targetTurnId = agent.currentTurnId
+        const targetTaskId = agent.currentTaskId
         const selectedAgentID = selectedAgentIDRef.current
         const viewRequestID = viewRequestRef.current
         const isCurrentView = () => viewRequestRef.current === viewRequestID && selectedAgentIDRef.current === selectedAgentID
@@ -115,8 +115,8 @@ export function useAgentCommands({
         setErrorCode(undefined)
         try {
             const commandId = crypto.randomUUID()
-            const apply = kind === 'pause' ? pauseAgent : cancelTurn
-            const response = await apply({ commandId, agentId: agentID, targetTurnId })
+            const apply = kind === 'pause' ? pauseAgent : cancelTask
+            const response = await apply({ commandId, agentId: agentID, targetTaskId })
             if (response.cancellationError) throw new Error('取消通知失败，请重试。')
             await refreshAgent(agentID)
         } catch (err) {

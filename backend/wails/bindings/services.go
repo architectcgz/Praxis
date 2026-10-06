@@ -10,14 +10,14 @@ import (
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/timing"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	appmodelconfig "praxis/internal/modelconfig"
 	applicationagent "praxis/internal/service/agent"
 	applicationproject "praxis/internal/service/project"
+	applicationruntime "praxis/internal/service/runtime"
+	taskqueue "praxis/internal/service/runtime/queue"
+	taskstart "praxis/internal/service/runtime/task/start"
 	applicationsession "praxis/internal/service/session"
-	turncontrol "praxis/internal/service/turn/control"
-	turnqueue "praxis/internal/service/turn/queue"
-	turnstart "praxis/internal/service/turn/start"
 )
 
 // 本文件定义 binding 层向应用服务请求的窄接口集。
@@ -52,11 +52,10 @@ type AgentService interface {
 
 // AgentCommands 接收持久化的 Agent 执行与控制命令。
 type AgentCommands interface {
-	SendInput(context.Context, turnstart.SendInputParams) (turnstart.Result, error)
-	Resume(context.Context, turnstart.ResumeParams) (turnstart.Result, error)
-	PauseAgent(context.Context, turncontrol.Params) (turncontrol.Result, error)
-	CancelTurn(context.Context, turncontrol.Params) (turncontrol.Result, error)
-	EnqueueWork(context.Context, turnqueue.EnqueueParams) (turnqueue.EnqueueResult, error)
+	SendInput(context.Context, taskstart.SendInputParams) (applicationruntime.StartResult, error)
+	PauseAgent(context.Context, applicationagent.ControlParams) (applicationagent.ControlResult, error)
+	CancelTask(context.Context, applicationagent.ControlParams) (applicationagent.ControlResult, error)
+	EnqueueTask(context.Context, taskqueue.EnqueueParams) (applicationruntime.EnqueueResult, error)
 }
 
 // ModelCatalog 列出已确认的模型标签与能力。
@@ -74,9 +73,9 @@ type ModelConfigEditor interface {
 	DiscoverProviderModels(context.Context, string) ([]string, error)
 }
 
-// AgentEventSource 流出单次 turn 的瞬时 runtime 事件。
+// AgentEventSource 流出单次 task 的瞬时 runtime 事件。
 type AgentEventSource interface {
-	SubscribeAgentEvents(runtimecontract.AgentEventObserver) func()
+	SubscribeAgentEvents(agentruntime.AgentEventObserver) func()
 }
 
 // TimingService 独立查询计时事实，不读取或改写消息正文。
@@ -86,7 +85,7 @@ type TimingService interface {
 
 // UsageService 查询会话完整的请求用量，不受消息和计时分页影响。
 type UsageService interface {
-	ListSession(context.Context, string) ([]runtimecontract.ModelUsageRecord, error)
+	ListSession(context.Context, string) ([]agentruntime.ModelUsageRecord, error)
 }
 
 // Services 是 binding 层所需的全部窄能力。

@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 )
 
 // ToolAccumulator 用于累积流式响应中的工具调用分片。
@@ -27,8 +27,8 @@ func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
 	if len(bytes.TrimSpace(args)) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	return emit(runtimecontract.ModelStreamEvent{
-		Kind: runtimecontract.StreamToolCall,
+	return emit(agentruntime.ModelStreamEvent{
+		Kind: agentruntime.StreamToolCall,
 		ToolCall: toolcontracts.ToolCall{
 			ID:        call.ID,
 			Name:      contracts.ToolName(call.Name),

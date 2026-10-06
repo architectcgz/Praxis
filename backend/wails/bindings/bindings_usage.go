@@ -1,7 +1,7 @@
 package bindings
 
 import (
-	agentruntime "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 	"praxis/wails/validation"
 )
 

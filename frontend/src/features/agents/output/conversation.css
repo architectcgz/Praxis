@@ -272,7 +272,7 @@
 
 /* 名称保留在外层，内容与操作缩进到同一阅读列。 */
 .message-assistant,
-.streaming-step {
+.streaming-turn {
     --agent-output-indent: 20px;
 }
 
@@ -679,7 +679,7 @@
     font-size: var(--font-size-ui);
 }
 
-.streaming-step {
+.streaming-turn {
     display: grid;
     width: 100%;
     min-width: 0;
@@ -689,24 +689,24 @@
 }
 
 /* 轮内间距仅由 gap 控制，避免消息、思考与工具各自的外边距叠加。 */
-.streaming-step > .message,
-.streaming-step > .agent-activity,
-.streaming-step > .agent-activity > .thinking-details,
-.streaming-step > .agent-activity > .message-pending-status {
+.streaming-turn > .message,
+.streaming-turn > .agent-activity,
+.streaming-turn > .agent-activity > .thinking-details,
+.streaming-turn > .agent-activity > .message-pending-status {
     margin-block: 0;
 }
 
-.streaming-step > .agent-activity {
+.streaming-turn > .agent-activity {
     padding-inline: calc(8px + var(--agent-output-indent)) 8px;
 }
 
-.streaming-step-header > .message-meta {
+.streaming-turn-header > .message-meta {
     margin-bottom: 0;
 }
 
 /* 同一任务的后续回答接在工具结果下方，不重复制造新消息的视觉起点。 */
 .message-continued,
-.streaming-step-continued {
+.streaming-turn-continued {
     margin-bottom: var(--message-content-gap);
 }
 
@@ -724,7 +724,7 @@
 @media (max-width: 720px) {
 
     .message-assistant,
-    .streaming-step {
+    .streaming-turn {
         --agent-output-indent: 12px;
     }
 

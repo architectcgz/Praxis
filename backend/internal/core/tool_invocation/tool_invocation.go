@@ -94,10 +94,12 @@ func (r ToolInvocationResult) Validate() error {
 	return nil
 }
 
-// ToolInvocation 归属于一次 Turn，以 ProviderToolCallID 和参数摘要识别重试。
-// 仓储负责保证 (TurnID, ProviderToolCallID) 唯一，身份及规范化参数不可变。
+// ToolInvocation 归属于一次 Task 的一次 loop 迭代（Turn），以 ProviderToolCallID
+// 和参数摘要识别重试。仓储负责保证 (TaskID, ProviderToolCallID) 唯一，
+// 身份及规范化参数不可变。
 type ToolInvocation struct {
 	ID                  contracts.ToolInvocationID
+	TaskID              contracts.TaskID
 	TurnID              contracts.TurnID
 	SessionID           contracts.SessionID
 	AgentID             contracts.AgentID
@@ -119,6 +121,7 @@ type ToolInvocation struct {
 // 身份、Provider call ID、参数及摘要须由输入边界规范化；非法或空输入返回错误。
 func NewToolInvocation(
 	id contracts.ToolInvocationID,
+	taskID contracts.TaskID,
 	turnID contracts.TurnID,
 	sessionID contracts.SessionID,
 	agentID contracts.AgentID,
@@ -130,6 +133,7 @@ func NewToolInvocation(
 ) (ToolInvocation, error) {
 	invocation := ToolInvocation{
 		ID:                  id,
+		TaskID:              taskID,
 		TurnID:              turnID,
 		SessionID:           sessionID,
 		AgentID:             agentID,
@@ -151,6 +155,7 @@ func NewToolInvocation(
 func (i ToolInvocation) Validate() error {
 	for _, value := range []string{
 		string(i.ID),
+		string(i.TaskID),
 		string(i.TurnID),
 		string(i.SessionID),
 		string(i.AgentID),

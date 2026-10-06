@@ -2,7 +2,7 @@ package agentruntime
 
 import (
 	"praxis/internal/contracts"
-	turnmodel "praxis/internal/core/turn"
+	taskmodel "praxis/internal/core/task"
 
 	"context"
 	"errors"
@@ -11,10 +11,10 @@ import (
 )
 
 // ManagedRuntime 只暴露进程内生命周期操作。
-// 持久化产品状态仍由 turn application service 负责。
+// 持久化产品状态仍由 task application service 负责。
 type ManagedRuntime interface {
-	Activate(context.Context, turnmodel.Turn, TurnLifecycle) error
-	Cancel(context.Context, contracts.TurnID, turnmodel.TurnOutcome) (bool, error)
+	Activate(context.Context, taskmodel.Task) error
+	StartNext(context.Context) (bool, error)
 	Close(context.Context) error
 }
 
@@ -24,7 +24,7 @@ type ManagedRuntimeFactory interface {
 }
 
 // Registry 管理每个 Agent 的进程内 runtime。
-// 产品所有权仍以 日志投影的活动 Turn 约束为准。
+// 产品所有权仍以 日志投影的活动 Task 约束为准。
 type Registry struct {
 	factory ManagedRuntimeFactory
 
@@ -44,52 +44,37 @@ func NewRegistry(factory ManagedRuntimeFactory) (*Registry, error) {
 	}, nil
 }
 
-// Activate 把已持久化的 turn 交给所属 Agent 的 runtime。
+// Activate 把已持久化的 task 交给所属 Agent 的 runtime。
 func (r *Registry) Activate(
 	ctx context.Context,
-	turn turnmodel.Turn,
-	lifecycle TurnLifecycle,
+	task taskmodel.Task,
 ) error {
 	if ctx == nil {
 		return errors.New("runtime activation context is required")
 	}
-	if lifecycle == nil {
-		return errors.New("runtime turn lifecycle is required")
-	}
-	if turn.Status != turnmodel.TurnStarting {
+	if task.Status != taskmodel.TaskStarting {
 		return nil
 	}
-	runtime, err := r.getOrCreate(ctx, turn.AgentID)
+	runtime, err := r.getOrCreate(ctx, task.AgentID)
 	if err != nil {
 		return err
 	}
-	if err := runtime.Activate(ctx, turn, lifecycle); err != nil {
+	if err := runtime.Activate(ctx, task); err != nil {
 		return fmt.Errorf("activate agent runtime: %w", err)
 	}
 	return nil
 }
 
-// Cancel 在 runtime 存在时转发已持久化的控制请求。
-func (r *Registry) Cancel(
-	ctx context.Context,
-	agentID contracts.AgentID,
-	turnID contracts.TurnID,
-	outcome turnmodel.TurnOutcome,
-) (bool, error) {
+// StartNext 唤醒指定 Agent 的队列；首次入队时创建 runtime，忙碌时由当前回合结束后继续领取。
+func (r *Registry) StartNext(ctx context.Context, agentID contracts.AgentID) (bool, error) {
 	if ctx == nil {
-		return false, errors.New("runtime cancellation context is required")
+		return false, errors.New("runtime queue context is required")
 	}
-	r.mu.Lock()
-	entry, found := r.entries[agentID]
-	r.mu.Unlock()
-	if !found {
-		return false, nil
-	}
-	cancelled, err := entry.Cancel(ctx, turnID, outcome)
+	runtime, err := r.getOrCreate(ctx, agentID)
 	if err != nil {
-		return cancelled, fmt.Errorf("cancel agent runtime: %w", err)
+		return false, err
 	}
-	return cancelled, nil
+	return runtime.StartNext(ctx)
 }
 
 // Close 停止所有已创建的 runtime，并拒绝后续激活请求。

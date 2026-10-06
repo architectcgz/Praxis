@@ -3,7 +3,7 @@ import { ArrowDown, MessageSquare } from 'lucide-react'
 import type { AgentHistoryItem, AgentMessageBlock, AgentSnapshot, ModelOption } from '../../api'
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
-import { HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingStepView } from './output/MessageViews'
+import { HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
 export type AgentConversationProps = {
     agent: AgentSnapshot
@@ -53,14 +53,14 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
             if (message?.role === 'assistant') {
                 for (const block of message.blocks || []) {
                     if (block.kind === 'tool_call' && block.callId && item.sequence !== undefined) {
-                        calls.set(`${message.turnId}:${block.callId}`, item.sequence)
+                        calls.set(`${message.taskId}:${block.callId}`, item.sequence)
                     }
                 }
             }
             if (message?.role === 'tool') {
                 const unpaired: AgentMessageBlock[] = []
                 for (const block of message.blocks || []) {
-                    const sequence = calls.get(`${message.turnId}:${block.callId}`)
+                    const sequence = calls.get(`${message.taskId}:${block.callId}`)
                     if (block.kind !== 'tool_result' || sequence === undefined) {
                         unpaired.push(block)
                     } else {
@@ -159,11 +159,11 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                         </div>
                     ) : (
                         visibleHistory.map((item, index) => {
-                            const continuation = sameAssistantTurn(visibleHistory[index - 1], item)
-                            const hasContinuation = sameAssistantTurn(item, visibleHistory[index + 1])
+                            const continuation = sameAssistantTask(visibleHistory[index - 1], item)
+                            const hasContinuation = sameAssistantTask(item, visibleHistory[index + 1])
                             let start = index
                             if (!hasContinuation) {
-                                while (sameAssistantTurn(visibleHistory[start - 1], item)) start -= 1
+                                while (sameAssistantTask(visibleHistory[start - 1], item)) start -= 1
                             }
                             const copyContent = visibleHistory.slice(start, index + 1).map((entry) => entry.message?.content || '').filter(Boolean).join('\n\n')
                             return <HistoryItemView
@@ -173,7 +173,7 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                                 hasContinuation={hasContinuation}
                                 copyContent={copyContent}
                                 toolResults={item.sequence === undefined ? undefined : toolResults.get(item.sequence)}
-                                key={`${item.kind}-${item.sequence ?? 'at'}-${item.message?.turnId || item.turn?.id || item.at}`}
+                                key={`${item.kind}-${item.sequence ?? 'at'}-${item.message?.taskId || item.task?.id || item.at}`}
                             />
                         })
                     )}
@@ -181,19 +181,19 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                     {visiblePendingMessages.map((message) => (
                         <PendingUserMessageView content={message.content} at={message.at} key={message.requestId} />
                     ))}
-                    {streamingOutput?.steps.map((step, index) => (
-                        <StreamingStepView
+                    {streamingOutput?.turns.map((turn, index) => (
+                        <StreamingTurnView
                             agentProfile={agent.name}
-                            events={step.events}
-                            turnId={streamingOutput.turnId}
-                            step={step.step}
+                            events={turn.events}
+                            taskId={streamingOutput.taskId}
+                            turnId={turn.turnId}
                             active={active}
                             continuation={index > 0}
-                            hasContinuation={index < streamingOutput.steps.length - 1}
-                            key={`${streamingOutput.turnId}-${step.step}`}
+                            hasContinuation={index < streamingOutput.turns.length - 1}
+                            key={`${streamingOutput.taskId}-${turn.turnId}`}
                         />
                     ))}
-                    {waitingForOutput && <PendingOutputView agentProfile={agent.name} turnId={agent.currentTurnId} />}
+                    {waitingForOutput && <PendingOutputView agentProfile={agent.name} taskId={agent.currentTaskId} />}
                 </div>
                 {showScrollButton && (
                     <button
@@ -229,8 +229,8 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
 }
 
 /** 仅衔接同一次执行中相邻的助手消息；用户消息、错误和不同任务都保留独立边界。 */
-function sameAssistantTurn(left?: AgentHistoryItem, right?: AgentHistoryItem): boolean {
+function sameAssistantTask(left?: AgentHistoryItem, right?: AgentHistoryItem): boolean {
     return left?.kind === 'message' && right?.kind === 'message' &&
         left.message?.role === 'assistant' && right.message?.role === 'assistant' &&
-        !!left.message.turnId && left.message.turnId === right.message.turnId
+        !!left.message.taskId && left.message.taskId === right.message.taskId
 }

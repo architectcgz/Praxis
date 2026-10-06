@@ -271,12 +271,12 @@ export function useAgentData({ models, setError, setErrorCode, viewRequestRef }:
         if (!sessionAgentIDsRef.current.has(event.agentId)) {
             return
         }
-        if (event.kind === 'turn_ended' || event.kind === 'request_canceled') {
+        if (event.kind === 'task_ended' || event.kind === 'request_canceled') {
             setStreamingOutputs((current) => mergeStreamingEvent(current, event))
             void refreshAgent(event.agentId)
             return
         }
-        if (event.kind === 'step_started' || event.kind === 'operation_timing') {
+        if (event.kind === 'turn_started' || event.kind === 'operation_timing') {
             return
         }
         setStreamingOutputs((current) => mergeStreamingEvent(current, event))

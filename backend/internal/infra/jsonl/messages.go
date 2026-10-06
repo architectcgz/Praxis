@@ -63,7 +63,7 @@ func (s *Store) appendMessage(ctx context.Context, scope, owner string, data ses
 	})
 	return result, err
 }
-func (s *Store) messages(ctx context.Context, scope, owner string, turn contracts.TurnID, after uint64, limit int) ([]sessionmodel.MessageData, error) {
+func (s *Store) messages(ctx context.Context, scope, owner string, after uint64, limit int) ([]sessionmodel.MessageData, error) {
 	result := make([]sessionmodel.MessageData, 0)
 	err := s.view(ctx, func(objects map[objectKey]object) error {
 		for key, value := range objects {
@@ -74,7 +74,7 @@ func (s *Store) messages(ctx context.Context, scope, owner string, turn contract
 			if e != nil {
 				return e
 			}
-			if record.OwnerID == owner && record.Data.Sequence > after && (turn == "" || record.Data.TurnID == turn.String()) {
+			if record.OwnerID == owner && record.Data.Sequence > after {
 				result = append(result, record.Data)
 			}
 		}
@@ -108,17 +108,7 @@ func (r AgentMessageRepository) Append(ctx context.Context, v agentmodel.AgentMe
 
 // List 返回指定归属及游标之后的记录副本，非正数 limit 表示不限制。
 func (r SessionMessageRepository) List(ctx context.Context, id contracts.SessionID, after uint64, limit int) ([]sessionmodel.SessionMessage, error) {
-	v, e := r.s.messages(ctx, id.String(), "", "", after, limit)
-	result := make([]sessionmodel.SessionMessage, len(v))
-	for i, data := range v {
-		result[i] = sessionmodel.SessionMessage{SessionID: id, Data: data}
-	}
-	return result, e
-}
-
-// ListByTurn 返回指定 Turn 的有序记录。
-func (r SessionMessageRepository) ListByTurn(ctx context.Context, id contracts.SessionID, turn contracts.TurnID) ([]sessionmodel.SessionMessage, error) {
-	v, e := r.s.messages(ctx, id.String(), "", turn, 0, 0)
+	v, e := r.s.messages(ctx, id.String(), "", after, limit)
 	result := make([]sessionmodel.SessionMessage, len(v))
 	for i, data := range v {
 		result[i] = sessionmodel.SessionMessage{SessionID: id, Data: data}
@@ -132,21 +122,7 @@ func (r AgentMessageRepository) List(ctx context.Context, id contracts.AgentID, 
 	if e != nil {
 		return nil, e
 	}
-	v, e := r.s.messages(ctx, a.SessionID.String(), id.String(), "", after, limit)
-	result := make([]agentmodel.AgentMessage, len(v))
-	for i, data := range v {
-		result[i] = agentmodel.AgentMessage{AgentID: id, Data: data}
-	}
-	return result, e
-}
-
-// ListByTurn 返回指定 Turn 的有序记录。
-func (r AgentMessageRepository) ListByTurn(ctx context.Context, id contracts.AgentID, turn contracts.TurnID) ([]agentmodel.AgentMessage, error) {
-	a, e := (AgentRepository{r.s}).Get(ctx, id)
-	if e != nil {
-		return nil, e
-	}
-	v, e := r.s.messages(ctx, a.SessionID.String(), id.String(), turn, 0, 0)
+	v, e := r.s.messages(ctx, a.SessionID.String(), id.String(), after, limit)
 	result := make([]agentmodel.AgentMessage, len(v))
 	for i, data := range v {
 		result[i] = agentmodel.AgentMessage{AgentID: id, Data: data}

@@ -55,7 +55,7 @@ func (p ToolPermissionPolicy) SnapshotFor(names []contracts.ToolName) map[contra
 	return result
 }
 
-// FilterTools 根据全局策略和 Turn 能力筛选模型可见的 Tool 集合。
+// FilterTools 根据全局策略和 Task 能力筛选模型可见的 Tool 集合。
 func (p ToolPermissionPolicy) FilterTools(
 	names []contracts.ToolName,
 	sandbox contracts.SandboxMode,
@@ -73,7 +73,7 @@ func (p ToolPermissionPolicy) FilterTools(
 	return result
 }
 
-// Allows 判断一次已经归一化的调用是否满足全局权限策略和 Turn 边界。
+// Allows 判断一次已经归一化的调用是否满足全局权限策略和 Task 边界。
 func AllowsToolCall(
 	snapshot contracts.SecuritySnapshot,
 	name contracts.ToolName,

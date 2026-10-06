@@ -21,8 +21,8 @@ export function formatDuration(milliseconds: number): string {
 }
 
 /** 关联消息与操作，重试分别保留；行内标签展示同一引用的最近一次尝试。 */
-export function findTiming(records: OperationTiming[], turnId: string, kind: OperationTiming['kind'], referenceId?: string): OperationTiming | undefined {
-    return records.filter((record) => record.turnId === turnId && record.kind === kind &&
+export function findTiming(records: OperationTiming[], taskId: string, kind: OperationTiming['kind'], referenceId?: string): OperationTiming | undefined {
+    return records.filter((record) => record.taskId === taskId && record.kind === kind &&
         (referenceId === undefined || record.referenceId === referenceId))
         .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt))[0]
 }

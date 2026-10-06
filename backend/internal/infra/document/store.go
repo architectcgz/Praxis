@@ -34,7 +34,7 @@ func New(root string) (*Store, error) {
 
 // Put 校验并原子发布一份不可变 JSON 文档，返回可写入日志记录的引用。
 //
-// collection 与 id 代表业务维度（聚合类型与聚合 ID，如 turn/<id>），
+// collection 与 id 代表业务维度（聚合类型与聚合 ID，如 task/<id>），
 // 二者共同决定目录；文件名由内容哈希决定，因此重复写入同一内容会直接复用。
 // 写入前会拒绝含敏感字段或非法路径片段的文档。
 func (s *Store) Put(ctx context.Context, collection, id string, value any) (string, error) {

@@ -73,7 +73,7 @@ function agentStats(history: AgentHistoryItem[]) {
                 if (block.kind === 'tool_result' && block.isError) failures++
             }
         }
-        if (item.turn?.outcome === 'failed') failures++
+        if (item.task?.outcome === 'failed') failures++
     }
     return { messages, tools, failures }
 }

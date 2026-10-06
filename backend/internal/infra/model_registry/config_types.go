@@ -70,7 +70,7 @@ func (c *ModelConfig) normalizeCapabilities() error {
 	return nil
 }
 
-// selectReasoning 解析推理等级，生成 Turn 绑定的冻结模型选择。
+// selectReasoning 解析推理等级，生成 Task 绑定的冻结模型选择。
 func (c ModelConfig) selectReasoning(providerID, reasoningLevel string) (modelSelection, error) {
 	if len(c.ReasoningLevels) == 0 {
 		if reasoningLevel != "" {

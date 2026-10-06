@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	workflowmodel "praxis/internal/core/workflow"
+	taskmodel "praxis/internal/core/task"
 	"praxis/wails/dto"
 	apperr "praxis/wails/error"
 )
@@ -96,7 +96,7 @@ func ValidateSendInput(request dto.SendInputRequest) error {
 	return nil
 }
 
-// ValidateAgentControl 校验暂停或取消请求的 commandId、agentId、targetTurnId 必填且已规范化。
+// ValidateAgentControl 校验暂停或取消请求的 commandId、agentId、targetTaskId 必填且已规范化。
 func ValidateAgentControl(request dto.PauseAgentRequest) error {
 	if err := requireID("commandId", request.CommandID); err != nil {
 		return err
@@ -104,12 +104,12 @@ func ValidateAgentControl(request dto.PauseAgentRequest) error {
 	if err := requireID("agentId", request.AgentID); err != nil {
 		return err
 	}
-	return requireID("targetTurnId", request.TargetTurnID)
+	return requireID("targetTaskId", request.TargetTaskID)
 }
 
-// ValidateQueueWork 校验队列请求的 ID 与 Prompt；大小限制按规范化后的 UTF-8 字节数计算。
-func ValidateQueueWork(request dto.QueueWorkRequest) error {
-	if err := requireID("id", request.ID); err != nil {
+// ValidateQueueTask 校验预约 Task 的身份和输入，大小限制按规范化后的 UTF-8 字节数计算。
+func ValidateQueueTask(request dto.QueueTaskRequest) error {
+	if err := requireID("taskId", request.TaskID); err != nil {
 		return err
 	}
 	if err := requireID("requestId", request.RequestID); err != nil {
@@ -122,25 +122,8 @@ func ValidateQueueWork(request dto.QueueWorkRequest) error {
 	if prompt == "" {
 		return invalid("prompt", "required")
 	}
-	if len(prompt) > workflowmodel.MaxQueuedWorkPromptBytes || !utf8.ValidString(prompt) {
+	if len(prompt) > taskmodel.MaxInputBytes || !utf8.ValidString(prompt) {
 		return invalid("prompt", "must be valid UTF-8 within the size limit")
-	}
-	return nil
-}
-
-// ValidateResume 校验恢复请求的必填字段。
-//
-// content 必填：core 的 Turn 只对 user_input 强制要求起始内容，
-// resume 原因可以带着空内容落库，因此这里必须在边界拦住。
-func ValidateResume(request dto.ResumeRequest) error {
-	if err := requireID("agentId", request.AgentID); err != nil {
-		return err
-	}
-	if err := requireID("requestId", request.RequestID); err != nil {
-		return err
-	}
-	if blank(request.Content) {
-		return invalid("content", "required")
 	}
 	return nil
 }

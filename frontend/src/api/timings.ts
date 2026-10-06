@@ -5,7 +5,7 @@ export type OperationTiming = {
     parentId?: string
     sessionId: string
     agentId: string
-    turnId: string
+    taskId: string
     kind: 'agent' | 'provider' | 'tool'
     name: string
     referenceId?: string
@@ -28,7 +28,7 @@ export async function listAgentTimings(agentId: string): Promise<OperationTiming
 export function normalizeOperationTiming(value: unknown): OperationTiming {
     if (typeof value !== 'object' || value === null) throw new Error('计时数据格式无效。')
     const record = value as Record<string, unknown>
-    for (const key of ['id', 'sessionId', 'agentId', 'turnId', 'name', 'startedAt']) {
+    for (const key of ['id', 'sessionId', 'agentId', 'taskId', 'name', 'startedAt']) {
         if (typeof record[key] !== 'string' || !record[key]) throw new Error('计时数据格式无效。')
     }
     if (!['agent', 'provider', 'tool'].includes(String(record.kind)) ||
@@ -46,7 +46,7 @@ export function normalizeOperationTiming(value: unknown): OperationTiming {
         parentId: typeof record.parentId === 'string' ? record.parentId : undefined,
         sessionId: record.sessionId as string,
         agentId: record.agentId as string,
-        turnId: record.turnId as string,
+        taskId: record.taskId as string,
         kind: record.kind as OperationTiming['kind'],
         name: record.name as string,
         referenceId: typeof record.referenceId === 'string' ? record.referenceId : undefined,

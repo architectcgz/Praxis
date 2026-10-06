@@ -4,27 +4,29 @@ import (
 	appcontext "praxis/internal/core/context"
 	toolcontracts "praxis/internal/tools/contracts"
 
-	runtimecontract "praxis/internal/agent_runtime"
+	"praxis/internal/agent_runtime"
 )
 
 type (
-	ModelRequest               = runtimecontract.ModelRequest
-	ModelStreamEvent           = runtimecontract.ModelStreamEvent
-	ToolCallHandler            = runtimecontract.ToolCallHandler
-	ToolCatalog                = runtimecontract.ToolCatalog
+	ModelRequest               = agentruntime.ModelRequest
+	ModelStreamEvent           = agentruntime.ModelStreamEvent
+	ToolCallHandler            = agentruntime.ToolCallHandler
+	ToolCatalog                = agentruntime.ToolCatalog
+	TurnRecorder               = agentruntime.TurnRecorder
+	TurnParams                 = agentruntime.TurnParams
 	ToolCall                   = toolcontracts.ToolCall
 	ToolDefinition             = toolcontracts.ToolDefinition
-	ToolInvocationMetadata     = runtimecontract.ToolInvocationMetadata
+	ToolInvocationMetadata     = agentruntime.ToolInvocationMetadata
 	ModelContext               = appcontext.ModelContext
-	TurnModel                  = runtimecontract.TurnModel
+	TaskModel                  = agentruntime.TaskModel
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
 const (
-	StreamTextDelta     = runtimecontract.StreamTextDelta
-	StreamThinkingDelta = runtimecontract.StreamThinkingDelta
-	StreamToolCall      = runtimecontract.StreamToolCall
-	StreamUsage         = runtimecontract.StreamUsage
-	StreamComplete      = runtimecontract.StreamComplete
-	StreamError         = runtimecontract.StreamError
+	StreamTextDelta     = agentruntime.StreamTextDelta
+	StreamThinkingDelta = agentruntime.StreamThinkingDelta
+	StreamToolCall      = agentruntime.StreamToolCall
+	StreamUsage         = agentruntime.StreamUsage
+	StreamComplete      = agentruntime.StreamComplete
+	StreamError         = agentruntime.StreamError
 )

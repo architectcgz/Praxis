@@ -49,7 +49,7 @@ type MessageData struct {
 	Sequence   uint64
 	RequestID  string
 	HandoffID  string
-	TurnID     string
+	TaskID     string
 	Role       Role
 	AuthorKind AuthorKind
 	AuthorID   string
@@ -119,6 +119,17 @@ func validateBlock(role Role, block Block) error {
 type SessionMessage struct {
 	SessionID contracts.SessionID
 	Data      MessageData
+}
+
+// TextContent 返回消息中的文本块拼接结果；思考、工具调用和工具结果不属于正文。
+func (m MessageData) TextContent() string {
+	var content strings.Builder
+	for _, block := range m.Blocks {
+		if block.Kind == BlockText {
+			content.WriteString(block.Text)
+		}
+	}
+	return content.String()
 }
 
 // Validate 校验消息归属到 Session 且消息数据有效。
