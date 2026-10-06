@@ -21,17 +21,11 @@ func (streamDecoder) Decode(
 	emit streaming.EmitFunc,
 ) (string, error) {
 	calls := map[int]*streaming.ToolAccumulator{}
-	var usage *runtimecontract.ModelUsage
 	var stopReason string
 	finished := false
 	finish := func() (string, error) {
 		if err := emitChatTools(emit, calls); err != nil {
 			return "", err
-		}
-		if usage != nil {
-			if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: usage}); err != nil {
-				return "", err
-			}
 		}
 		return stopReason, nil
 	}
@@ -89,7 +83,9 @@ func (streamDecoder) Decode(
 				candidate.CacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
 			if candidate.Valid() {
-				usage = candidate
+				if err := emit(runtimecontract.ModelStreamEvent{Kind: runtimecontract.StreamUsage, Usage: candidate}); err != nil {
+					return "", err
+				}
 			}
 		}
 		if len(chunk.Choices) == 0 {

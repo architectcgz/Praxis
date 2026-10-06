@@ -1,4 +1,4 @@
-// Package control owns durable Pause and Close command handling.
+// Package control 负责持久化暂停或取消命令，并在提交后通知 runtime。
 package control
 
 import (
@@ -10,63 +10,65 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"praxis/internal/repository"
 	"praxis/internal/system"
 )
 
-// RuntimeCancellation sends a durable control request to a process-local
-// runtime after the transaction that recorded it has committed.
+// RuntimeCancellation 只转发已提交的控制命令，按 Turn ID 取消对应的进程内执行。
 type RuntimeCancellation interface {
 	Cancel(context.Context, contracts.AgentID, contracts.TurnID, turnmodel.TurnOutcome) (bool, error)
 }
 
-// TurnSettler 在人工控制找不到进程内 runtime 时完成持久化结算。
-type TurnSettler interface {
-	SettleRuntimeTurn(context.Context, contracts.TurnID, turnmodel.TurnOutcome, contracts.TurnFailureCode, string) error
+// TurnEnder 在控制命令找不到进程内 runtime 时持久化最终结果。
+type TurnEnder interface {
+	EndRuntimeTurn(context.Context, contracts.TurnID, turnmodel.TurnOutcome, contracts.TurnFailureCode, string) error
 }
 
 // Config 包含控制类应用服务所需的依赖。
 type Config struct {
 	Transactions repository.TxRunner
 	Agents       repository.SessionAgentRepository
+	Turns        repository.TurnRepository
 	Controls     repository.AgentControlCommandRepository
 	Canceller    RuntimeCancellation
-	Settler      TurnSettler
+	Ender        TurnEnder
 	Clock        system.Clock
 }
 
-// Service owns the control-request transaction and post-commit cancellation.
+// Service 管理控制命令事务与提交后的取消通知，不关闭 Agent。
 type Service struct {
 	tx        repository.TxRunner
 	agents    repository.SessionAgentRepository
+	turns     repository.TurnRepository
 	controls  repository.AgentControlCommandRepository
 	canceller RuntimeCancellation
-	settler   TurnSettler
+	ender     TurnEnder
 	clock     system.Clock
 }
 
-// Params identifies one Pause or Close command.
+// Params 标识暂停或取消的目标回合；必须使用前端观察到的 Turn ID，不能隐式选择下一轮。
 type Params struct {
-	CommandID contracts.AgentControlCommandID
-	AgentID   contracts.AgentID
+	CommandID    contracts.AgentControlCommandID
+	AgentID      contracts.AgentID
+	TargetTurnID contracts.TurnID
 }
 
-// Result returns the durable control command and cancellation outcome.
+// Result 返回已持久化的命令；CancellationError 表示命令已提交但执行通知失败。
 type Result struct {
 	Command           workflowmodel.AgentControlCommand
 	ExistingCommand   bool
 	CancellationError string
 }
 
-// NewService creates the control application service.
+// NewService 创建控制服务；缺少持久化或结束依赖时返回错误。
 func NewService(config Config) (*Service, error) {
 	for name, value := range map[string]any{
 		"transactions": config.Transactions,
 		"agents":       config.Agents,
+		"turns":        config.Turns,
 		"controls":     config.Controls,
-		"settler":      config.Settler,
+		"ender":        config.Ender,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("control service %s is required", name)
@@ -75,40 +77,34 @@ func NewService(config Config) (*Service, error) {
 	return &Service{
 		tx:        config.Transactions,
 		agents:    config.Agents,
+		turns:     config.Turns,
 		controls:  config.Controls,
 		canceller: config.Canceller,
-		settler:   config.Settler,
+		ender:     config.Ender,
 		clock:     system.ClockOrDefault(config.Clock),
 	}, nil
 }
 
-// PauseAgent records a durable pause command before signaling cancellation.
+// PauseAgent 先保存暂停指定回合的命令，再取消运行；重复命令保持幂等。
 func (s *Service) PauseAgent(ctx context.Context, params Params) (Result, error) {
 	return s.apply(ctx, params, workflowmodel.AgentControlPause)
 }
 
-// CloseAgent records a durable close command before signaling cancellation.
-func (s *Service) CloseAgent(ctx context.Context, params Params) (Result, error) {
-	return s.apply(ctx, params, workflowmodel.AgentControlClose)
+// CancelTurn 只取消指定回合，Agent 中断后仍可接收新的输入。
+func (s *Service) CancelTurn(ctx context.Context, params Params) (Result, error) {
+	return s.apply(ctx, params, workflowmodel.AgentControlCancel)
 }
 
-// apply records Pause or Close before signaling runtime cancellation. A caller
-// timeout cannot retract the committed control command.
+// apply 先提交控制命令；调用方超时不能撤销已提交命令，旧回合请求不能影响下一轮。
 func (s *Service) apply(ctx context.Context, params Params, kind workflowmodel.AgentControlKind) (Result, error) {
 	if ctx == nil {
 		return Result{}, errors.New("control command context is required")
-	}
-	params.CommandID = contracts.AgentControlCommandID(strings.TrimSpace(params.CommandID.String()))
-	params.AgentID = contracts.AgentID(strings.TrimSpace(params.AgentID.String()))
-	if params.CommandID == "" || params.AgentID == "" ||
-		(kind != workflowmodel.AgentControlPause && kind != workflowmodel.AgentControlClose) {
-		return Result{}, contracts.New(contracts.InvalidRequest, "")
 	}
 	var result Result
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.controls.Get(txCtx, params.CommandID)
 		if err == nil {
-			if existing.AgentID != params.AgentID || existing.Kind != kind {
+			if existing.AgentID != params.AgentID || existing.TargetTurnID != params.TargetTurnID || existing.Kind != kind {
 				return contracts.New(contracts.InvalidRequest, "")
 			}
 			result = Result{Command: existing, ExistingCommand: true}
@@ -121,24 +117,30 @@ func (s *Service) apply(ctx context.Context, params Params, kind workflowmodel.A
 		if err != nil {
 			return err
 		}
-		at := s.clock.Now()
-		control, err := workflowmodel.NewAgentControlCommand(params.CommandID, agent.ID, agent.CurrentTurnID, kind, at)
+		turn, err := s.turns.Get(txCtx, params.TargetTurnID)
 		if err != nil {
 			return err
 		}
-		if agent.State == agentmodel.AgentExecuting {
+		if turn.AgentID != agent.ID {
+			return contracts.New(contracts.InvalidRequest, "")
+		}
+		at := s.clock.Now()
+		control, err := workflowmodel.NewAgentControlCommand(params.CommandID, agent.ID, turn.ID, kind, at)
+		if err != nil {
+			return err
+		}
+		if turn.Status == turnmodel.TurnEnded {
+			if err := control.MarkApplied(at); err != nil {
+				return err
+			}
+		} else if agent.CurrentTurnID != turn.ID {
+			return contracts.New(contracts.AgentUnavailable, "")
+		} else if agent.State == agentmodel.AgentExecuting {
 			if err := agent.RequestPause(at); err != nil {
 				return err
 			}
 		} else if agent.State == agentmodel.AgentPausing {
 			// 人工重试可以接管上一次未完成的进程内取消。
-		} else if kind == workflowmodel.AgentControlClose {
-			if err := agent.Close(at); err != nil {
-				return err
-			}
-			if err := control.MarkApplied(at); err != nil {
-				return err
-			}
 		} else {
 			return contracts.New(contracts.AgentUnavailable, "")
 		}
@@ -172,11 +174,11 @@ func (s *Service) apply(ctx context.Context, params Params, kind workflowmodel.A
 			return result, nil
 		}
 	}
-	if err := s.settler.SettleRuntimeTurn(
+	if err := s.ender.EndRuntimeTurn(
 		context.WithoutCancel(ctx),
 		result.Command.TargetTurnID,
 		cancellationOutcome(result.Command.Kind),
-		"",
+		contracts.TurnFailureRequestCanceled,
 		"",
 	); err != nil {
 		result.CancellationError = err.Error()

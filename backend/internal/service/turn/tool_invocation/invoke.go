@@ -25,7 +25,7 @@ type invocationIdentity struct {
 	Arguments json.RawMessage
 }
 
-// Invoke validates the runtime context, durably admits the call, and executes it at most once.
+// Invoke 在工具输入边界校验调用和归属标识，持久化准入后最多执行一次。
 func (s *Service) Invoke(
 	ctx context.Context,
 	call toolcontracts.ToolCall,
@@ -37,6 +37,9 @@ func (s *Service) Invoke(
 	call = call.Snapshot()
 	if call.ID == "" || !call.Name.Valid() || len(call.Arguments) == 0 || !json.Valid(call.Arguments) {
 		return toolcontracts.NewToolError("invalid_tool_call", "The tool call is invalid."), nil
+	}
+	if invocationContext.TurnID == "" || invocationContext.SessionID == "" || invocationContext.AgentID == "" {
+		return toolcontracts.ToolResult{}, errors.New("tool invocation ownership is required")
 	}
 	security, err := s.loadModelContext(ctx, invocationContext)
 	if err != nil {
@@ -144,9 +147,6 @@ func (s *Service) loadModelContext(
 	ctx context.Context,
 	provided runtimecontract.ToolInvocationMetadata,
 ) (contracts.SecuritySnapshot, error) {
-	if provided.TurnID == "" || provided.SessionID == "" || provided.AgentID == "" {
-		return contracts.SecuritySnapshot{}, errors.New("tool invocation ownership is required")
-	}
 	turn, err := s.turns.Get(ctx, provided.TurnID)
 	if err != nil {
 		return contracts.SecuritySnapshot{}, err

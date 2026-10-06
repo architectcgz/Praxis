@@ -17,8 +17,8 @@ import (
 	applicationproject "praxis/internal/service/project"
 	applicationsession "praxis/internal/service/session"
 	turncontrol "praxis/internal/service/turn/control"
+	turnlifecycle "praxis/internal/service/turn/lifecycle"
 	turnqueue "praxis/internal/service/turn/queue"
-	turnsettlement "praxis/internal/service/turn/settlement"
 	turnstart "praxis/internal/service/turn/start"
 	toolinvocation "praxis/internal/service/turn/tool_invocation"
 
@@ -41,6 +41,7 @@ import (
 // praxis/internal/service 实现，这里只负责装配与释放。
 type Application struct {
 	frontend *appservices.Services
+	sessions *applicationsession.Service
 	store    *jsonl.Store
 	registry *agentruntime.Registry
 	logger   *logging.Logger
@@ -56,15 +57,16 @@ func (a *Application) Services() bindings.Services {
 	}
 	impl := a.frontend
 	return bindings.Services{
-		Projects:    impl,
-		Sessions:    impl,
-		Agents:      impl,
-		Commands:    impl,
-		Models:      impl,
-		ModelConfig: impl,
-		Events:      impl,
-		Timings:     a.timings,
-		Usages:      a.usages,
+		Projects:       impl,
+		Sessions:       impl,
+		Agents:         impl,
+		Commands:       impl,
+		Models:         impl,
+		ModelConfig:    impl,
+		Events:         impl,
+		Timings:        a.timings,
+		Usages:         a.usages,
+		SessionLogPath: a.store.SessionLogPath,
 	}
 }
 
@@ -215,7 +217,6 @@ func Open(
 		eventLogger: func(turn turnmodel.Turn, stage string) {
 			diagnostics.Infof("turn id=%s stage=%s", turn.ID, stage)
 		},
-		eventObserver: events.Publish,
 	}
 	agentService, err := applicationagent.NewService(applicationagent.Config{
 		Agents:   repos.Agents,
@@ -248,11 +249,13 @@ func Open(
 		Turns:           repos.Turns,
 		ToolInvocations: repos.ToolInvocations,
 		QueuedWork:      repos.QueuedWork,
+		Controls:        repos.Controls,
 		SessionMessages: repos.SessionMessages,
 		AgentMessages:   repos.AgentMessages,
 		Definitions:     agentRegistry.Definition,
 		PolicyFactory:   agentRegistry.SecurityPolicy,
 		Messages:        messages,
+		UsageRecords:    usages.ListSession,
 		RemoveSessionData: func(ctx context.Context, sessionID contracts.SessionID, documentRefs []string) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -278,18 +281,19 @@ func Open(
 		closeStore()
 		return nil, fmt.Errorf("recover stale turns: %w", err)
 	}
-	settlementService, err := turnsettlement.NewService(turnsettlement.Config{
-		Transactions: store,
-		Sessions:     repos.Sessions,
-		Agents:       repos.Agents,
-		Turns:        repos.Turns,
-		QueuedWork:   repos.QueuedWork,
-		Controls:     repos.Controls,
-		Messages:     messages,
-		Logger:       diagnostics,
+	lifecycleService, err := turnlifecycle.NewService(turnlifecycle.Config{
+		Transactions:  store,
+		Sessions:      repos.Sessions,
+		Agents:        repos.Agents,
+		Turns:         repos.Turns,
+		QueuedWork:    repos.QueuedWork,
+		Controls:      repos.Controls,
+		Messages:      messages,
+		Logger:        diagnostics,
+		EventObserver: events.Publish,
 	})
 	if err != nil {
-		diagnostics.Errorf("create turn settlement service failed: %v", err)
+		diagnostics.Errorf("create turn lifecycle service failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -304,7 +308,7 @@ func Open(
 		ToolPermissions: toolPermissions,
 		RegisteredTools: registeredToolNames,
 		PrimaryAgent:    sessionService, Activator: registry,
-		Lifecycle:           settlementService,
+		Lifecycle:           lifecycleService,
 		Definitions:         turnInputProvider{agents: agentRegistry, models: modelRegistry},
 		AgentDefinitionsDir: root.AgentDefinitions,
 		Models:              turnInputProvider{agents: agentRegistry, models: modelRegistry},
@@ -326,7 +330,7 @@ func Open(
 		AgentMessages:   repos.AgentMessages,
 		Inputs:          startService,
 		Activator:       registry,
-		Lifecycle:       settlementService,
+		Lifecycle:       lifecycleService,
 	})
 	if err != nil {
 		diagnostics.Errorf("create turn queue service failed: %v", err)
@@ -335,8 +339,8 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	if err := settlementService.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
-		diagnostics.Errorf("configure turn settlement queue starter failed: %v", err)
+	if err := lifecycleService.SetQueueStarter(queuedWorkStarter{queue: queueService}); err != nil {
+		diagnostics.Errorf("configure turn lifecycle queue starter failed: %v", err)
 		_ = diagnostics.Close()
 		_ = registry.Close(context.Background())
 		closeStore()
@@ -357,9 +361,10 @@ func Open(
 	controlService, err := turncontrol.NewService(turncontrol.Config{
 		Transactions: store,
 		Agents:       repos.Agents,
+		Turns:        repos.Turns,
 		Controls:     repos.Controls,
 		Canceller:    registry,
-		Settler:      settlementService,
+		Ender:        lifecycleService,
 	})
 	if err != nil {
 		diagnostics.Errorf("create control service failed: %v", err)
@@ -375,7 +380,6 @@ func Open(
 		Sessions:    sessionService,
 		Controls:    controlService,
 		Queues:      queueService,
-		Settlements: settlementService,
 		Starts:      startService,
 		Models:      modelConfig,
 		AgentConfig: agentRegistry,
@@ -424,6 +428,7 @@ func Open(
 	})
 	return &Application{
 		frontend: frontend,
+		sessions: sessionService,
 		store:    store,
 		registry: registry,
 		logger:   diagnostics,
@@ -441,7 +446,7 @@ func (a *Application) RuntimeLogger() *logging.Logger {
 	return factory.Ensure(a.logger)
 }
 
-// Close prevents new commands before stopping runtime actors and storage.
+// Close 停止 runtime，清理本次运行新建的空会话，再关闭存储和日志；返回汇总错误。
 func (a *Application) Close(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("application close context is required")
@@ -449,33 +454,19 @@ func (a *Application) Close(ctx context.Context) error {
 	logger := a.RuntimeLogger()
 	logger.Infof("composition close started")
 	runtimeErr := a.registry.Close(ctx)
+	sessionErr := a.sessions.CleanupEmptySessions(ctx)
 	storeErr := a.store.Close(ctx)
-	if runtimeErr != nil || storeErr != nil {
-		logger.Errorf("composition close encountered errors runtime=%v store=%v", runtimeErr, storeErr)
+	if runtimeErr != nil || sessionErr != nil || storeErr != nil {
+		logger.Errorf(
+			"composition close encountered errors runtime=%v sessions=%v store=%v",
+			runtimeErr, sessionErr, storeErr,
+		)
 	}
-	if runtimeErr == nil && storeErr == nil {
+	if runtimeErr == nil && sessionErr == nil && storeErr == nil {
 		logger.Infof("composition close completed")
 	}
 	logErr := logger.Close()
-	if runtimeErr != nil && storeErr != nil && logErr != nil {
-		return fmt.Errorf("close runtimes: %v; close store: %v; close runtime log: %w", runtimeErr, storeErr, logErr)
-	}
-	if runtimeErr != nil && storeErr != nil {
-		return fmt.Errorf("close runtimes: %v; close store: %w", runtimeErr, storeErr)
-	}
-	if runtimeErr != nil && logErr != nil {
-		return fmt.Errorf("close runtimes: %v; close runtime log: %w", runtimeErr, logErr)
-	}
-	if storeErr != nil && logErr != nil {
-		return fmt.Errorf("close store: %v; close runtime log: %w", storeErr, logErr)
-	}
-	if runtimeErr != nil {
-		return runtimeErr
-	}
-	if storeErr != nil {
-		return storeErr
-	}
-	return logErr
+	return errors.Join(runtimeErr, sessionErr, storeErr, logErr)
 }
 
 type turnInputProvider struct {

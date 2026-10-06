@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { ArrowRight, ChevronDown, Ellipsis, FolderPlus, MessageSquarePlus, Pencil, Search, Settings, Trash2, X } from 'lucide-react'
+import { ArrowRight, ChevronDown, Ellipsis, FolderOpen, FolderPlus, MessageSquarePlus, Pencil, Search, Settings, Trash2, X } from 'lucide-react'
 import { Overlay } from '../../components/ui'
 import { ProjectGroup, ProjectPanelProps } from './types'
 import { sessionMenuPlacement } from './sessionMenuPlacement'
@@ -25,6 +25,7 @@ export function ProjectsPanel({
     onDeleteSession,
     onRenameSession,
     onOpenSettings,
+    onRevealSessionFile,
     settingsOpen,
     onCloseNavigation,
 }: ProjectPanelProps) {
@@ -102,6 +103,7 @@ export function ProjectsPanel({
                             onOpenSession={onOpenSession}
                             onDeleteSession={onDeleteSession}
                             onRenameSession={onRenameSession}
+                            onRevealSessionFile={onRevealSessionFile}
                         />
                     ))}
                 </div>
@@ -137,6 +139,7 @@ type ProjectSectionProps = {
     onOpenSession: (project: ProjectGroup) => void
     onDeleteSession: (id: string) => Promise<boolean>
     onRenameSession: (id: string, title: string) => Promise<boolean>
+    onRevealSessionFile: (id: string) => Promise<boolean>
 }
 
 function ProjectSection({
@@ -152,6 +155,7 @@ function ProjectSection({
     onOpenSession,
     onDeleteSession,
     onRenameSession,
+    onRevealSessionFile,
 }: ProjectSectionProps) {
     const [openSessionMenuID, setOpenSessionMenuID] = useState('')
     const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null)
@@ -332,6 +336,20 @@ function ProjectSection({
                                     >
                                         <Pencil size={14} strokeWidth={1.8} aria-hidden="true" />
                                         <span>重命名会话</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="menuitem"
+                                        tabIndex={-1}
+                                        className="session-action"
+                                        onClick={() => {
+                                            restoreMenuTriggerFocus()
+                                            setOpenSessionMenuID('')
+                                            void onRevealSessionFile(item.id)
+                                        }}
+                                    >
+                                        <FolderOpen size={14} strokeWidth={1.8} aria-hidden="true" />
+                                        <span>打开所在位置</span>
                                     </button>
                                     <button
                                         type="button"

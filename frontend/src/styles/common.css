@@ -27,20 +27,38 @@
 }
 
 .error-banner {
+    position: fixed;
+    z-index: var(--z-popover);
+    top: 66px;
+    left: 50%;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 14px;
-    flex: 0 0 auto;
-    margin: 0 auto 20px;
+    width: max-content;
+    max-width: min(560px, calc(100dvw - 32px));
+    max-height: calc(100dvh - 82px);
+    overflow: auto;
     padding: 11px 14px;
     border: 1px solid #e0b9b4;
     font-size: var(--font-size-ui);
     overflow-wrap: anywhere;
-    border-radius: 6px;
+    border-radius: 8px;
     background: #fff6f4;
     color: var(--danger);
-    box-shadow: none;
+    box-shadow: var(--shadow-soft);
+    transform: translateX(-50%);
+}
+
+.error-banner-message {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.error-banner-message > svg {
+    flex: 0 0 auto;
 }
 
 .error-banner-action {

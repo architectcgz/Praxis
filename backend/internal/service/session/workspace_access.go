@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Service) workspaceForSession(ctx context.Context, sessionID contracts.SessionID) (workspacemodel.Workspace, error) {
-	if ctx == nil || sessionID == "" {
+	if ctx == nil {
 		return workspacemodel.Workspace{}, contracts.New(contracts.InvalidRequest, "需要有效会话。")
 	}
 	if err := ctx.Err(); err != nil {

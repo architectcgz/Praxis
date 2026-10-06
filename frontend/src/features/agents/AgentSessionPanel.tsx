@@ -28,7 +28,7 @@ type AgentSessionPanelProps = {
     reasoning: string
     busy: boolean
     onSend: () => void
-    onControl: (kind: 'pause' | 'close') => void
+    onControl: (kind: 'pause' | 'cancel') => void
     onModelChange: (providerId: string, modelId: string) => void
     onReasoningChange: (level: string) => void
     commands: readonly { name: string; description: string }[]

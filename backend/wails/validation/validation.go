@@ -7,7 +7,9 @@ package validation
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
+	workflowmodel "praxis/internal/core/workflow"
 	"praxis/wails/dto"
 	apperr "praxis/wails/error"
 )
@@ -68,6 +70,62 @@ func ValidateProjectID(value string) error { return requireID("projectId", value
 // ValidateProviderID 校验已规范化的 providerId 必填。
 func ValidateProviderID(value string) error {
 	return requireID("providerId", value)
+}
+
+// ValidateSendInput 校验 requestId、目标 ID 和输入内容必填，且已提供的 ID 必须规范化。
+func ValidateSendInput(request dto.SendInputRequest) error {
+	if err := requireID("requestId", request.RequestID); err != nil {
+		return err
+	}
+	if request.SessionID == "" && request.AgentID == "" {
+		return invalid("sessionId", "sessionId or agentId is required")
+	}
+	if request.SessionID != "" {
+		if err := requireID("sessionId", request.SessionID); err != nil {
+			return err
+		}
+	}
+	if request.AgentID != "" {
+		if err := requireID("agentId", request.AgentID); err != nil {
+			return err
+		}
+	}
+	if blank(request.Content) {
+		return invalid("content", "required")
+	}
+	return nil
+}
+
+// ValidateAgentControl 校验暂停或取消请求的 commandId、agentId、targetTurnId 必填且已规范化。
+func ValidateAgentControl(request dto.PauseAgentRequest) error {
+	if err := requireID("commandId", request.CommandID); err != nil {
+		return err
+	}
+	if err := requireID("agentId", request.AgentID); err != nil {
+		return err
+	}
+	return requireID("targetTurnId", request.TargetTurnID)
+}
+
+// ValidateQueueWork 校验队列请求的 ID 与 Prompt；大小限制按规范化后的 UTF-8 字节数计算。
+func ValidateQueueWork(request dto.QueueWorkRequest) error {
+	if err := requireID("id", request.ID); err != nil {
+		return err
+	}
+	if err := requireID("requestId", request.RequestID); err != nil {
+		return err
+	}
+	if err := requireID("agentId", request.AgentID); err != nil {
+		return err
+	}
+	prompt := strings.TrimSpace(request.Prompt)
+	if prompt == "" {
+		return invalid("prompt", "required")
+	}
+	if len(prompt) > workflowmodel.MaxQueuedWorkPromptBytes || !utf8.ValidString(prompt) {
+		return invalid("prompt", "must be valid UTF-8 within the size limit")
+	}
+	return nil
 }
 
 // ValidateResume 校验恢复请求的必填字段。

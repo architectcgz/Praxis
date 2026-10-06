@@ -170,7 +170,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return fmt.Errorf("%w: %s.%s 不可变", contracts.ErrRequestConflict, collection, field)
 		}
 	}
-	if collection == "turn" && string(left["Status"]) == `"settled"` && !bytes.Equal(before, after) {
+	if collection == "turn" && string(left["Status"]) == `"ended"` && !bytes.Equal(before, after) {
 		return contracts.ErrRequestConflict
 	}
 	if collection == "tool" {

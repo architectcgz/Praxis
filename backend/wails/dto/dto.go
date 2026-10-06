@@ -89,7 +89,7 @@ type TurnSnapshot struct {
 	FailureMessage string    `json:"failureMessage,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	StartedAt      time.Time `json:"startedAt,omitempty"`
-	SettledAt      time.Time `json:"settledAt,omitempty"`
+	EndedAt        time.Time `json:"endedAt,omitzero"`
 }
 
 type AgentMessage struct {
@@ -209,11 +209,12 @@ type ResumeRequest struct {
 }
 
 type PauseAgentRequest struct {
-	CommandID string `json:"commandId"`
-	AgentID   string `json:"agentId"`
+	CommandID    string `json:"commandId"`
+	AgentID      string `json:"agentId"`
+	TargetTurnID string `json:"targetTurnId"`
 }
 
-type CloseAgentRequest = PauseAgentRequest
+type CancelTurnRequest = PauseAgentRequest
 
 type AgentControlResponse struct {
 	CommandID         string `json:"commandId"`

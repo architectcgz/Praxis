@@ -14,8 +14,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"unicode/utf8"
 )
 
 // InputFactory 将当前上下文、策略和模型选择冻结为不可变的回合输入。
@@ -99,17 +97,10 @@ func NewService(config Config) (*Service, error) {
 	}, nil
 }
 
+// EnqueueWork 使用入口已校验的 ID 和规范化 Prompt 持久化队列项，重复请求返回已有结果。
 func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (EnqueueResult, error) {
 	if ctx == nil {
 		return EnqueueResult{}, errors.New("enqueue work context is required")
-	}
-	params.ID = contracts.WorkItemID(strings.TrimSpace(params.ID.String()))
-	params.RequestID = contracts.RequestID(strings.TrimSpace(params.RequestID.String()))
-	params.AgentID = contracts.AgentID(strings.TrimSpace(params.AgentID.String()))
-	prompt := strings.TrimSpace(params.Prompt)
-	if params.ID == "" || params.RequestID == "" || params.AgentID == "" ||
-		prompt == "" || len([]byte(prompt)) > workflowmodel.MaxQueuedWorkPromptBytes || !utf8.ValidString(prompt) {
-		return EnqueueResult{}, contracts.New(contracts.InvalidRequest, "")
 	}
 	result := EnqueueResult{}
 	startEligible := false
@@ -122,7 +113,7 @@ func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (Enqueu
 		inputMessage := sessionmodel.MessageData{
 			ID: "input:" + params.RequestID.String(), RequestID: params.RequestID.String(),
 			Role: sessionmodel.RoleUser, AuthorKind: sessionmodel.AuthorUser,
-			Blocks: []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: prompt}}, CreatedAt: at,
+			Blocks: []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: params.Prompt}}, CreatedAt: at,
 		}
 		if err := s.appendQueuedInput(txCtx, agent, inputMessage); err != nil {
 			return err
@@ -183,13 +174,10 @@ func (s *Service) EnqueueWork(ctx context.Context, params EnqueueParams) (Enqueu
 	return result, nil
 }
 
+// StartNextQueuedWork 按 FIFO 启动可执行任务；agentID 来自已校验请求或持久化的结算结果。
 func (s *Service) StartNextQueuedWork(ctx context.Context, agentID contracts.AgentID) (StartResult, error) {
 	if ctx == nil {
 		return StartResult{}, errors.New("start queued work context is required")
-	}
-	agentID = contracts.AgentID(strings.TrimSpace(agentID.String()))
-	if agentID == "" {
-		return StartResult{}, contracts.New(contracts.InvalidRequest, "")
 	}
 	result := StartResult{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {

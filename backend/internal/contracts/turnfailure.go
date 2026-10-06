@@ -17,8 +17,8 @@ const (
 	TurnFailureStorage             TurnFailureCode = "turn_storage_error"
 	TurnFailureContract            TurnFailureCode = "turn_contract_error"
 	TurnFailureBusy                TurnFailureCode = "turn_busy"
-	TurnFailureClosed              TurnFailureCode = "turn_closed"
 	TurnFailureInterrupted         TurnFailureCode = "turn_interrupted"
+	TurnFailureRequestCanceled     TurnFailureCode = "request_canceled"
 	TurnFailureRuntimeCancelled    TurnFailureCode = "runtime_cancelled"
 	TurnFailureRuntimeFailed       TurnFailureCode = "runtime_failed"
 	TurnFailureRuntimeInvalid      TurnFailureCode = "runtime_invalid_outcome"
@@ -49,7 +49,7 @@ func (c TurnFailureCode) Valid() bool {
 		TurnFailureTool, TurnFailurePolicyBlocked,
 		TurnFailureApprovalRequired, TurnFailureResourceLimit,
 		TurnFailureStorage, TurnFailureContract, TurnFailureBusy,
-		TurnFailureClosed, TurnFailureInterrupted,
+		TurnFailureInterrupted, TurnFailureRequestCanceled,
 		TurnFailureRuntimeCancelled, TurnFailureRuntimeFailed,
 		TurnFailureRuntimeInvalid:
 		return true

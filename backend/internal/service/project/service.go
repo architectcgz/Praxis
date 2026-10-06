@@ -5,12 +5,10 @@ import (
 	"praxis/internal/contracts"
 	projectmodel "praxis/internal/core/project"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/utils/pathutil"
 
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"praxis/internal/repository"
 	"praxis/internal/system"
@@ -71,12 +69,6 @@ func NewService(config Config) (*Service, error) {
 func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams) (CreateProjectResult, error) {
 	if ctx == nil {
 		return CreateProjectResult{}, errors.New("create project context is required")
-	}
-	if params.ProjectID == "" || params.WorkspaceID == "" {
-		return CreateProjectResult{}, contracts.New(contracts.InvalidRequest, "")
-	}
-	if params.Name == "" || strings.ContainsAny(params.Name, "\x00\r\n") || !pathutil.IsAbsoluteNormalized(params.Path) {
-		return CreateProjectResult{}, contracts.New(contracts.ProjectWorkspaceInvalid, "")
 	}
 	var result CreateProjectResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -145,9 +137,6 @@ func (s *Service) ListProjects(ctx context.Context, limit int) ([]projectmodel.P
 func (s *Service) ListWorkspaces(ctx context.Context, projectID contracts.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
 	if ctx == nil {
 		return nil, errors.New("workspace catalog context is required")
-	}
-	if projectID == "" {
-		return nil, contracts.New(contracts.InvalidRequest, "project id is required")
 	}
 	return s.workspaces.ListByProject(ctx, projectID, limit)
 }

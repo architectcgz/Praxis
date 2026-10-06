@@ -4,9 +4,9 @@ import { normalizeOperationTiming, type OperationTiming } from './timings'
 
 export const AGENT_EVENT_NAME = 'praxis:agent-event'
 
-export type AgentState = 'idle' | 'executing' | 'waiting' | 'pausing' | 'paused' | 'interrupted' | 'failed' | 'closed' | 'unknown'
+export type AgentState = 'idle' | 'executing' | 'waiting' | 'pausing' | 'paused' | 'interrupted' | 'failed' | 'unknown'
 export type TurnReason = 'user_input' | 'queued_work' | 'resume' | 'unknown'
-export type TurnStatus = 'starting' | 'running' | 'settling' | 'settled' | 'unknown'
+export type TurnStatus = 'starting' | 'running' | 'ending' | 'ended' | 'unknown'
 export type TurnOutcome = '' | 'completed' | 'yielded' | 'paused' | 'failed' | 'interrupted' | 'unknown'
 export type TurnFailureCode =
     | ''
@@ -19,15 +19,15 @@ export type TurnFailureCode =
     | 'turn_storage_error'
     | 'turn_contract_error'
     | 'turn_busy'
-    | 'turn_closed'
     | 'turn_interrupted'
+    | 'request_canceled'
     | 'runtime_cancelled'
     | 'runtime_failed'
     | 'runtime_invalid_outcome'
     | 'unknown'
 export type AgentMessageRole = 'user' | 'assistant' | 'tool' | 'unknown'
 export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'unknown'
-export type AgentHistoryKind = 'message' | 'turn' | 'unknown'
+export type AgentHistoryKind = 'message' | 'turn' | 'request_canceled' | 'unknown'
 
 export type AgentSnapshot = {
     id: string
@@ -54,7 +54,7 @@ export type TurnSnapshot = {
     failureMessage: string
     createdAt: string
     startedAt: string
-    settledAt: string
+    endedAt: string
 }
 
 export type AgentMessage = {
@@ -101,7 +101,10 @@ export type ModelUsageRecord = {
 }
 
 export type AgentEvent = {
-    kind: 'step_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_result' | 'step_completed' | 'model_usage' | 'settled' | 'error' | 'operation_timing'
+    kind: 'step_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_result' | 'step_completed' | 'model_usage' | 'request_canceled' | 'turn_ended' | 'error' | 'operation_timing'
+    outcome?: TurnOutcome
+    failureCode?: TurnFailureCode
+    failureMessage?: string
     timing?: OperationTiming
     usage?: ModelUsage
     sessionId?: string
@@ -128,6 +131,11 @@ export function listAgentHistory(agentID: string) {
 /** 查询会话全部请求的用量；缺失计数保留为未知，不推算 token。 */
 export async function listSessionUsage(sessionId: string): Promise<ModelUsageRecord[]> {
     const values: unknown = await getAgentBinding().ListSessionUsage(sessionId)
+    return normalizeModelUsageRecords(values, sessionId)
+}
+
+/** 校验持久化请求用量的会话归属和可选计数，供明细与汇总查询共用。 */
+export function normalizeModelUsageRecords(values: unknown, sessionId: string): ModelUsageRecord[] {
     return requiredArray(values).map((value) => {
         const record = requiredRecord(value)
         const usage = normalizeModelUsage(record.usage)
@@ -194,7 +202,7 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
     }
     if (value.kind !== 'step_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
         value.kind !== 'tool_call' && value.kind !== 'tool_result' && value.kind !== 'step_completed' &&
-        value.kind !== 'model_usage' && value.kind !== 'settled' && value.kind !== 'error' && value.kind !== 'operation_timing') {
+        value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'turn_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
         return null
     }
     if ((value.kind === 'text_delta' || value.kind === 'thinking_delta') && typeof value.text !== 'string') {
@@ -204,6 +212,12 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         (typeof value.callId !== 'string' || typeof value.name !== 'string')) {
         return null
     }
+    const terminal = value.kind === 'turn_ended' || value.kind === 'request_canceled'
+    const outcome = terminal ? enumValue(value.outcome, turnOutcomes, 'unknown') : undefined
+    const failureCode = terminal ? failureCodeValue(value.failureCode) : undefined
+    if (terminal && (outcome === '' || outcome === 'unknown' || failureCode === 'unknown' ||
+        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.turnId)) return null
+    if (value.kind === 'request_canceled' && (failureCode !== 'request_canceled' || outcome !== 'paused' && outcome !== 'interrupted')) return null
     const reportedUsage = value.kind === 'model_usage' ? normalizeModelUsage(value.usage) : undefined
     if (value.kind === 'model_usage' && (!reportedUsage || !Number.isSafeInteger(value.step) || Number(value.step) < 1 ||
         typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.turnId)) return null
@@ -218,6 +232,9 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
     }
     return {
         kind: value.kind,
+        outcome,
+        failureCode,
+        failureMessage: terminal && typeof value.failureMessage === 'string' ? value.failureMessage : undefined,
         timing,
         usage: reportedUsage ?? undefined,
         sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined,
@@ -255,9 +272,9 @@ function normalizeModelUsage(value: unknown): ModelUsage | null {
     }
 }
 
-const agentStates = ['idle', 'executing', 'waiting', 'pausing', 'paused', 'interrupted', 'failed', 'closed'] as const
+const agentStates = ['idle', 'executing', 'waiting', 'pausing', 'paused', 'interrupted', 'failed'] as const
 const turnReasons = ['user_input', 'queued_work', 'resume'] as const
-const turnStatuses = ['starting', 'running', 'settling', 'settled'] as const
+const turnStatuses = ['starting', 'running', 'ending', 'ended'] as const
 const turnOutcomes = ['', 'completed', 'yielded', 'paused', 'failed', 'interrupted'] as const
 const turnFailureCodes = [
     '',
@@ -270,15 +287,15 @@ const turnFailureCodes = [
     'turn_storage_error',
     'turn_contract_error',
     'turn_busy',
-    'turn_closed',
     'turn_interrupted',
+    'request_canceled',
     'runtime_cancelled',
     'runtime_failed',
     'runtime_invalid_outcome',
 ] as const
 const messageRoles = ['user', 'assistant', 'tool'] as const
 const blockKinds = ['text', 'thinking', 'tool_call', 'tool_result'] as const
-const historyKinds = ['message', 'turn'] as const
+const historyKinds = ['message', 'turn', 'request_canceled'] as const
 
 function normalizeTurnSnapshot(value: unknown): TurnSnapshot {
     const record = requiredRecord(value)
@@ -291,7 +308,7 @@ function normalizeTurnSnapshot(value: unknown): TurnSnapshot {
         failureMessage: optionalString(record.failureMessage),
         createdAt: requiredString(record.createdAt),
         startedAt: optionalString(record.startedAt),
-        settledAt: optionalString(record.settledAt),
+        endedAt: optionalString(record.endedAt),
     }
 }
 

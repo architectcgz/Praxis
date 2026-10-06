@@ -53,7 +53,7 @@ function readableApiError(code: string) {
             return '代理正在执行中，请等待当前任务完成。'
         case API_ERROR_CODES.agentUnavailable:
             return '代理当前不可用。'
-        case API_ERROR_CODES.alreadySettled:
+        case API_ERROR_CODES.alreadyEnded:
             return '此执行已经结束。'
         case API_ERROR_CODES.workQueueEmpty:
             return '当前没有可执行的工作。'
@@ -79,8 +79,6 @@ function readableApiError(code: string) {
             return '执行达到资源限制。'
         case API_ERROR_CODES.turnBusy:
             return '代理正忙，请稍后重试。'
-        case API_ERROR_CODES.turnClosed:
-            return '代理已关闭。'
         case API_ERROR_CODES.turnInterrupted:
             return '执行已中断。'
         case API_ERROR_CODES.bindingUnavailable:

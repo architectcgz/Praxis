@@ -4,7 +4,7 @@ import type { AgentsPanelProps } from './types'
 
 const stateLabels: Record<string, string> = {
     idle: '空闲', executing: '执行中', waiting: '等待中', pausing: '暂停中', paused: '已暂停',
-    interrupted: '已中断', failed: '失败', closed: '已关闭', unknown: '未知',
+    interrupted: '已中断', failed: '失败', unknown: '未知',
 }
 
 export function AgentsPanel({ loading, session, histories, selectedAgentID, onSelectAgent }: AgentsPanelProps) {
@@ -73,7 +73,7 @@ function agentStats(history: AgentHistoryItem[]) {
                 if (block.kind === 'tool_result' && block.isError) failures++
             }
         }
-        if (item.turn?.outcome === 'failed' || item.turn?.failureCode) failures++
+        if (item.turn?.outcome === 'failed') failures++
     }
     return { messages, tools, failures }
 }

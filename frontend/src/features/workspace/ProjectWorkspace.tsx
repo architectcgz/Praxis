@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react'
-import { LoaderCircle } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { CircleAlert, LoaderCircle } from 'lucide-react'
 import { Overlay, Toast } from '../../components/ui'
 import { AgentSessionPanel } from '../agents/AgentSessionPanel'
 import { AgentsPanel } from '../agents/AgentsPanel'
@@ -59,6 +60,15 @@ export function ProjectWorkspace() {
             media.removeEventListener('change', closeOnWideScreen)
         }
     }, [navigationOpen])
+
+    if (workspace.workspaceLoading) {
+        return (
+            <main className="workspace-loading" role="status" aria-busy="true">
+                <LoaderCircle size={20} className="is-spinning" aria-hidden="true" />
+                <span>正在加载 Praxis</span>
+            </main>
+        )
+    }
 
     const selectSession = (id: string) => {
         setNavigationOpen(false)
@@ -133,6 +143,7 @@ export function ProjectWorkspace() {
             onOpenSession={openSession}
             onDeleteSession={(id) => workspace.deleteSession(id)}
             onRenameSession={(id, title) => workspace.renameSession(id, title)}
+            onRevealSessionFile={workspace.revealSessionFile}
             onSelectProject={selectProject}
             onSelectSession={selectSession}
             onToggleProject={(id) => setCollapsedProjects((current) => ({
@@ -190,17 +201,21 @@ export function ProjectWorkspace() {
                         />
                     ) : (
                         <>
-                            {workspace.error && (
-                                <div className="error-banner" role="alert">
-                                    <span>{workspace.error}</span>
+                            {workspace.error && createPortal(
+                                <div className="error-banner" role="alert" aria-atomic="true" inert={navigationOpen || projectOpen}>
+                                    <span className="error-banner-message">
+                                        <CircleAlert size={18} strokeWidth={1.8} aria-hidden="true" />
+                                        <span>{workspace.error}</span>
+                                    </span>
                                     {workspace.errorCode === API_ERROR_CODES.modelNotConfigured && (
                                         <button className="error-banner-action" type="button" onClick={openSettings}>打开设置</button>
                                     )}
-                                </div>
+                                </div>,
+                                document.body,
                             )}
                             <SessionPanel
                                 key={`${workspace.selectedSessionID || 'session-empty'}-${workspace.session ? 'loaded' : 'loading'}`}
-                                loading={Boolean(workspace.selectedSessionID && !workspace.session)}
+                                loading={workspace.sessionLoading}
                                 hasSession={Boolean(workspace.session)}
                                 sessionsCount={workspace.sessions.length}
                             >
@@ -238,7 +253,7 @@ export function ProjectWorkspace() {
                 </main>
 
                 <AgentsPanel
-                    loading={page === 'session' && Boolean(workspace.selectedSessionID && !workspace.session)}
+                    loading={page === 'session' && workspace.sessionLoading}
                     session={page === 'session' && workspace.session ? {
                         title: workspace.session.title,
                         agents: workspace.agents,

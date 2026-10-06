@@ -73,11 +73,10 @@ func newModelStream(
 }
 
 type runtimeFactory struct {
-	runner        agentruntime.TurnRunner
-	messages      agentruntime.MessageStoreResolver
-	logger        agentruntime.TurnLogger
-	eventLogger   agentruntime.TurnEventLogger
-	eventObserver agentruntime.AgentEventObserver
+	runner      agentruntime.TurnRunner
+	messages    agentruntime.MessageStoreResolver
+	logger      agentruntime.TurnLogger
+	eventLogger agentruntime.TurnEventLogger
 }
 
 // New 为指定 Agent 创建独立执行槽，消息存储在每次执行时解析。
@@ -86,12 +85,11 @@ func (f runtimeFactory) New(
 	agentID contracts.AgentID,
 ) (agentruntime.ManagedRuntime, error) {
 	return agentruntime.NewRuntime(agentruntime.RuntimeConfig{
-		AgentID:           agentID,
-		Messages:          f.messages,
-		Runner:            f.runner,
-		Logger:            f.logger,
-		EventLogger:       f.eventLogger,
-		EventObserver:     f.eventObserver,
-		SettlementTimeout: 30 * time.Second,
+		AgentID:          agentID,
+		Messages:         f.messages,
+		Runner:           f.runner,
+		Logger:           f.logger,
+		EventLogger:      f.eventLogger,
+		LifecycleTimeout: 30 * time.Second,
 	})
 }

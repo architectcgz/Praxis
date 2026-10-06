@@ -114,6 +114,8 @@ func encodeRequest(request runtimecontract.ModelRequest) ([]byte, string, error)
 		Input:           input,
 		Stream:          true,
 		MaxOutputTokens: request.MaxOutputTokens,
+		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Turn ID 或上下文摘要。
+		PromptCacheKey: request.SessionReference,
 	}
 	if reasoning := request.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
 		payload.Reasoning = &reasoningConfig{Effort: reasoning, Summary: "auto"}
@@ -157,6 +159,7 @@ type responseRequest struct {
 	Reasoning       *reasoningConfig `json:"reasoning,omitempty"`
 	MaxOutputTokens int              `json:"max_output_tokens"`
 	Tools           []responseTool   `json:"tools,omitempty"`
+	PromptCacheKey  string           `json:"prompt_cache_key,omitempty"`
 }
 
 type reasoningConfig struct {

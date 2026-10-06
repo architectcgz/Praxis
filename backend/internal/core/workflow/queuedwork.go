@@ -90,7 +90,7 @@ func (w QueuedWork) Validate() error {
 	switch w.Status {
 	case QueuedWorkPending:
 		if w.TurnID != "" || !w.StartedAt.IsZero() || !w.FinishedAt.IsZero() || w.FailureCode != "" {
-			return contracts.InvalidValue("queuedWork.queued", "queued work cannot have turn or settlement fields")
+			return contracts.InvalidValue("queuedWork.queued", "queued work cannot have turn or end fields")
 		}
 	case QueuedWorkRunning:
 		if contracts.EmptyID(string(w.TurnID)) || w.StartedAt.IsZero() || !w.FinishedAt.IsZero() || w.FailureCode != "" {
@@ -98,7 +98,7 @@ func (w QueuedWork) Validate() error {
 		}
 	case QueuedWorkPaused, QueuedWorkInterrupted, QueuedWorkCompleted:
 		if contracts.EmptyID(string(w.TurnID)) || w.StartedAt.IsZero() || w.FinishedAt.IsZero() {
-			return contracts.InvalidValue("queuedWork.settled", "settled work must have turn and timestamps")
+			return contracts.InvalidValue("queuedWork.ended", "ended work must have turn and timestamps")
 		}
 	case QueuedWorkFailed:
 		if contracts.EmptyID(string(w.TurnID)) || w.StartedAt.IsZero() || w.FinishedAt.IsZero() || w.FailureCode == "" {
@@ -126,18 +126,18 @@ func (w *QueuedWork) Start(turnID contracts.TurnID, at time.Time) error {
 	return nil
 }
 
-// Settle 记录执行终态而不改变消息归属；中断输入只能按明确策略重试或重新提交。
-func (w *QueuedWork) Settle(
+// End 记录执行终态而不改变消息归属；中断输入只能按明确策略重试或重新提交。
+func (w *QueuedWork) End(
 	turnID contracts.TurnID,
 	outcome turn.TurnOutcome,
 	failureCode contracts.TurnFailureCode,
 	at time.Time,
 ) error {
 	if w.Status != QueuedWorkRunning || w.TurnID != turnID {
-		return contracts.InvalidTransition("queuedWork", string(w.Status), "settled")
+		return contracts.InvalidTransition("queuedWork", string(w.Status), "ended")
 	}
 	if !turn.ValidTurnOutcome(outcome) || at.Before(w.StartedAt) {
-		return contracts.InvalidValue("queuedWork.settlement", "outcome or settlement time is invalid")
+		return contracts.InvalidValue("queuedWork.ending", "outcome or end time is invalid")
 	}
 	if !failureCode.Valid() {
 		return contracts.InvalidValue("queuedWork.failureCode", "unknown failure code")

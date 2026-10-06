@@ -34,7 +34,7 @@ type TurnEngineConfig struct {
 }
 
 // TurnEngine 运行一个已持久化的 Turn，直到得到结算结果。
-// 它只负责 model/tool loop；执行状态仍由 Agent runtime 回调 settlement application service 更新。
+// 它只负责 model/tool loop；执行状态仍由 Agent runtime 回调 lifecycle application service 更新。
 type TurnEngine struct {
 	modelBuilder  TurnModelBuilder
 	tools         ToolCatalog
@@ -87,12 +87,12 @@ func (e *TurnEngine) run(
 	modelContext, err := initialContext(ctx, turn, messages)
 	if err != nil {
 		e.emitError(turn, 0, err)
-		return settle(err)
+		return turnResult(err)
 	}
 	turnModel, err := e.buildModel(turn.Input.Model)
 	if err != nil {
 		e.emitError(turn, 0, err)
-		return settle(err)
+		return turnResult(err)
 	}
 
 	budget := newTurnBudget(permissions.ResourceLimits)
@@ -106,13 +106,13 @@ func (e *TurnEngine) run(
 		assistant, calls, err := e.runStep(ctx, turn, turnModel, modelContext, budget, step)
 		if err != nil {
 			e.emitError(turn, step, err)
-			return settle(err)
+			return turnResult(err)
 		}
 		for _, call := range calls {
 			if call.ID == "" || !call.Name.Valid() || len(call.Arguments) > 0 && !json.Valid(call.Arguments) {
 				err := fail(contracts.TurnFailureContract, ErrorContract, "provider emitted an invalid tool call")
 				e.emitError(turn, step, err)
-				return settle(err)
+				return turnResult(err)
 			}
 		}
 		if len(assistant) > 0 {
@@ -145,12 +145,12 @@ func (e *TurnEngine) run(
 		modelContext, err = e.runToolCalls(ctx, messages, turn, permissions, modelContext, calls, budget, step)
 		if err != nil {
 			e.emitError(turn, step, err)
-			return settle(err)
+			return turnResult(err)
 		}
 	}
 	err = fail(contracts.TurnFailureResourceLimit, ErrorResourceLimit, "turn step limit exceeded")
 	e.emitError(turn, budget.maxSteps, err)
-	return settle(err)
+	return turnResult(err)
 }
 
 func (e *TurnEngine) buildModel(snapshot contracts.ModelSnapshot) (TurnModel, error) {
@@ -533,8 +533,8 @@ func (b *turnBudget) reserveToolCalls(count int) error {
 	return nil
 }
 
-// turnFailure 携带引擎错误对应的 durable settlement 结果。
-// settle 在统一的 run 边界把它转换为返回值。
+// turnFailure 携带引擎错误对应的持久化结束结果。
+// turnResult 在统一的 run 边界把它转换为返回值。
 type turnFailure struct {
 	outcome turnmodel.TurnOutcome
 	code    contracts.TurnFailureCode
@@ -562,7 +562,7 @@ func failCause(code contracts.TurnFailureCode, cause error) error {
 	return &turnFailure{outcome: turnmodel.TurnFailed, code: code, cause: cause}
 }
 
-func settle(err error) (turnmodel.TurnOutcome, contracts.TurnFailureCode, error) {
+func turnResult(err error) (turnmodel.TurnOutcome, contracts.TurnFailureCode, error) {
 	var failure *turnFailure
 	if errors.As(err, &failure) {
 		return failure.outcome, failure.code, failure.cause

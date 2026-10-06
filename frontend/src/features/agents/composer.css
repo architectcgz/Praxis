@@ -414,14 +414,18 @@
 }
 
 .composer-token-usage {
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-end;
-    width: 116px;
-    height: 28px;
+    gap: 2px 12px;
+    min-height: 28px;
+    padding: 4px 12px;
     color: var(--muted);
     font-size: var(--font-size-secondary);
     font-variant-numeric: tabular-nums;
+}
+
+.composer-token-usage > span {
     white-space: nowrap;
 }
 

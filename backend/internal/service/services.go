@@ -25,7 +25,6 @@ import (
 	applicationsession "praxis/internal/service/session"
 	turncontrol "praxis/internal/service/turn/control"
 	turnqueue "praxis/internal/service/turn/queue"
-	turnsettlement "praxis/internal/service/turn/settlement"
 	turnstart "praxis/internal/service/turn/start"
 )
 
@@ -36,7 +35,6 @@ type Config struct {
 	Sessions     *applicationsession.Service
 	Controls     *turncontrol.Service
 	Queues       *turnqueue.Service
-	Settlements  *turnsettlement.Service
 	Starts       *turnstart.Service
 	Models       appmodelconfig.Editor
 	AgentConfig  appmodelconfig.AgentDefinitions
@@ -52,7 +50,6 @@ type Services struct {
 	sessions     *applicationsession.Service
 	controls     *turncontrol.Service
 	queues       *turnqueue.Service
-	settlements  *turnsettlement.Service
 	starts       *turnstart.Service
 	models       appmodelconfig.Editor
 	agentConfig  appmodelconfig.AgentDefinitions
@@ -70,7 +67,6 @@ func New(config Config) *Services {
 		sessions:     config.Sessions,
 		controls:     config.Controls,
 		queues:       config.Queues,
-		settlements:  config.Settlements,
 		starts:       config.Starts,
 		models:       config.Models,
 		agentConfig:  config.AgentConfig,
@@ -106,6 +102,11 @@ func (s *Services) GetSessionView(
 	limit int,
 ) (applicationsession.SessionView, error) {
 	return s.sessions.GetSessionView(ctx, sessionID, limit)
+}
+
+// GetSessionUsageSummary 返回会话已持久化用量的加权缓存率与同一份明细快照。
+func (s *Services) GetSessionUsageSummary(ctx context.Context, sessionID contracts.SessionID) (applicationsession.SessionUsageSummary, error) {
+	return s.sessions.GetSessionUsageSummary(ctx, sessionID)
 }
 
 // DeleteSession 删除指定会话和关联文档。
@@ -177,6 +178,9 @@ func (s *Services) SendInput(ctx context.Context, params turnstart.SendInputPara
 	params.ProviderID = strings.TrimSpace(params.ProviderID)
 	params.ModelID = strings.TrimSpace(params.ModelID)
 	params.ReasoningLevel = strings.TrimSpace(params.ReasoningLevel)
+	if params.ProviderID == "" || params.ModelID == "" {
+		return turnstart.Result{}, contracts.New(contracts.ModelNotConfigured, "")
+	}
 	agent, built, err := s.sessions.BuildModelContext(
 		ctx, params.SessionID, params.AgentID, params.RequestID, params.Content,
 	)
@@ -210,14 +214,15 @@ func (s *Services) PauseAgent(
 	return s.controls.PauseAgent(ctx, params)
 }
 
-func (s *Services) CloseAgent(
+func (s *Services) CancelTurn(
 	ctx context.Context,
 	params turncontrol.Params,
 ) (turncontrol.Result, error) {
-	return s.controls.CloseAgent(ctx, params)
+	return s.controls.CancelTurn(ctx, params)
 }
 
 func (s *Services) EnqueueWork(ctx context.Context, params turnqueue.EnqueueParams) (turnqueue.EnqueueResult, error) {
+	params.Prompt = strings.TrimSpace(params.Prompt)
 	return s.queues.EnqueueWork(ctx, params)
 }
 
@@ -296,7 +301,7 @@ func (s *Services) DiscoverProviderModels(ctx context.Context, providerID string
 	return s.models.DiscoverProviderModels(ctx, providerID)
 }
 
-// SubscribeAgentEvents 注册瞬时 Agent runtime 事件的监听者。收到 settled 通知后，
+// SubscribeAgentEvents 注册瞬时 Agent runtime 事件的监听者。收到 turn_ended 或 request_canceled 后，
 // 消费方应重新查询持久化消息和执行状态。
 func (s *Services) SubscribeAgentEvents(observer runtimecontract.AgentEventObserver) func() {
 	if s == nil || s.events == nil {

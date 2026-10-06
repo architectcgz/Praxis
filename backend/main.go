@@ -4,7 +4,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"os"
 
 	"praxis/internal/compose"
 	"praxis/internal/infra/dataroot"
@@ -27,17 +26,19 @@ func main() {
 		a.Startup(ctx)
 		root, err := dataroot.Resolve("")
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "fatal: resolve data root: %v\n", err)
+			a.FailStartup(fmt.Errorf("初始化数据目录失败：%w", err))
 			return
 		}
 		application, err := compose.Open(ctx, root, nil)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "fatal: open application: %v\n", err)
+			a.FailStartup(fmt.Errorf("初始化应用服务失败：%w", err))
 			return
 		}
 		if err := a.Attach(application.Services(), application.RuntimeLogger(), application); err != nil {
-			_ = application.Close(context.Background())
-			_, _ = fmt.Fprintf(os.Stderr, "fatal: attach desktop dependencies: %v\n", err)
+			a.FailStartup(fmt.Errorf("接入桌面服务失败：%w", err))
+			if closeErr := application.Close(context.Background()); closeErr != nil {
+				a.LogError("close application after startup failed: %v", closeErr)
+			}
 		}
 	}
 

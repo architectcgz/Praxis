@@ -71,7 +71,7 @@ export function StreamingStepView({ agentProfile, events, turnId, step, active, 
             segments.push(<StreamingToolCallsView tools={tools} key={`tools-${index}`} />)
             tools = []
         }
-        if (event.kind === 'provider_waiting' && index === events.length - 1) {
+        if (event.kind === 'provider_waiting' && active && index === events.length - 1) {
             segments.push(<AgentActivityView providerWaiting key={`provider-waiting-${index}`} />)
         } else if (event.kind === 'thinking_delta' && event.text) {
             segments.push(<AgentActivityView thinking={event.text} key={`thinking-${index}`} />)

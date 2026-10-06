@@ -57,7 +57,7 @@ export function CollaborationViews({ agents, histories, historyErrors, streaming
 
 function taskView(agent: AgentSnapshot, history: AgentHistoryItem[], streaming?: StreamingOutput, historyError?: string) {
     const turn = agent.turns.find((item) => item.id === agent.currentTurnId) || [...agent.turns].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0]
-    const live = streaming && !agent.turns.some((item) => item.id === streaming.turnId && item.status === 'settled') ? streaming : undefined
+    const live = streaming && !agent.turns.some((item) => item.id === streaming.turnId && item.status === 'ended') ? streaming : undefined
     const turnId = live?.turnId || turn?.id || ''
     const messages = history.filter((item) => item.message && (!turnId || item.message.turnId === turnId)).sort((left, right) => (right.message?.sequence || 0) - (left.message?.sequence || 0))
     const input = messages.find((item) => item.message?.role === 'user')?.message
@@ -80,12 +80,9 @@ function taskView(agent: AgentSnapshot, history: AgentHistoryItem[], streaming?:
     } else if (agent.state === 'waiting' || turn?.outcome === 'yielded') {
         status = 'blocked'
         label = '等待输入'
-    } else if (turn?.status === 'settled' && turn.outcome === 'completed') {
+    } else if (turn?.status === 'ended' && turn.outcome === 'completed') {
         status = 'completed'
         label = '已完成'
-    } else if (agent.state === 'closed') {
-        status = 'cancelled'
-        label = '已关闭'
     }
     return { agent, turnId, task: input?.content || input?.blocks?.filter((block) => block.kind === 'text').map((block) => block.text || '').join('\n') || '', result, status, label, error: historyError ? `历史加载失败：${historyError}` : live?.error || turn?.failureCode || '' }
 }

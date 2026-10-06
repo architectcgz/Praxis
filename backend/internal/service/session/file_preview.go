@@ -25,7 +25,7 @@ type FilePreview struct {
 // PreviewFile 按会话定位 Workspace 并读取指定文件；拒绝越界、非普通文件、非 UTF-8 文本和超过 1 MiB 的文件。
 // 输入路径仅在此入口规范化，根目录由持久化的会话关系确定，不能由前端指定。
 func (s *Service) PreviewFile(ctx context.Context, sessionID contracts.SessionID, path string) (FilePreview, error) {
-	if ctx == nil || sessionID == "" {
+	if ctx == nil {
 		return FilePreview{}, contracts.New(contracts.InvalidRequest, "文件预览需要有效会话。")
 	}
 	if err := ctx.Err(); err != nil {

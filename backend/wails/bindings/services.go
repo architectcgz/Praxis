@@ -38,6 +38,7 @@ type SessionService interface {
 	ListSessionsByProject(context.Context, contracts.ProjectID, int) ([]sessionmodel.Session, error)
 	CreateSessionForProject(context.Context, contracts.SessionID, contracts.AgentID, contracts.RequestID, contracts.ProjectID, contracts.WorkspaceID, contracts.AgentDefinitionID) (applicationsession.CreateResult, error)
 	GetSessionView(context.Context, contracts.SessionID, int) (applicationsession.SessionView, error)
+	GetSessionUsageSummary(context.Context, contracts.SessionID) (applicationsession.SessionUsageSummary, error)
 	DeleteSession(context.Context, contracts.SessionID) error
 	RenameSession(context.Context, contracts.SessionID, string) error
 	PreviewFile(context.Context, contracts.SessionID, string) (applicationsession.FilePreview, error)
@@ -54,7 +55,7 @@ type AgentCommands interface {
 	SendInput(context.Context, turnstart.SendInputParams) (turnstart.Result, error)
 	Resume(context.Context, turnstart.ResumeParams) (turnstart.Result, error)
 	PauseAgent(context.Context, turncontrol.Params) (turncontrol.Result, error)
-	CloseAgent(context.Context, turncontrol.Params) (turncontrol.Result, error)
+	CancelTurn(context.Context, turncontrol.Params) (turncontrol.Result, error)
 	EnqueueWork(context.Context, turnqueue.EnqueueParams) (turnqueue.EnqueueResult, error)
 }
 
@@ -99,6 +100,8 @@ type Services struct {
 	Events      AgentEventSource
 	Timings     TimingService
 	Usages      UsageService
+	// SessionLogPath 由持久化实现解析日志路径，前端不能指定任意本地文件。
+	SessionLogPath func(context.Context, contracts.SessionID) (string, error)
 }
 
 // Validate 检查所有前端服务都已注入。
@@ -122,6 +125,8 @@ func (s Services) Validate() error {
 		return errors.New("frontend timing service is required")
 	case s.Usages == nil:
 		return errors.New("frontend token usage service is required")
+	case s.SessionLogPath == nil:
+		return errors.New("frontend session log path resolver is required")
 	default:
 		return nil
 	}

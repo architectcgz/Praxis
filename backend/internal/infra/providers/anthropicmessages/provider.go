@@ -80,7 +80,13 @@ func (p *Provider) Stream(
 	for _, entry := range request.Context.Entries {
 		messages = append(messages, anthropicContextEntry(entry))
 	}
-	body := map[string]any{"model": modelID, "messages": messages, "stream": true}
+	body := map[string]any{
+		"model":    modelID,
+		"messages": messages,
+		"stream":   true,
+		// 自动缓存随对话增长推进断点，复用包含工具定义和 system 的相同前缀。
+		"cache_control": map[string]string{"type": "ephemeral"},
+	}
 	if reasoning := request.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
 		body["output_config"] = map[string]string{"effort": reasoning}
 	}

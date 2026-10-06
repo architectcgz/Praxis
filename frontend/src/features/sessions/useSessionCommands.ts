@@ -3,6 +3,7 @@ import {
     createSession,
     deleteSession as deleteSessionAPI,
     renameSession as renameSessionAPI,
+    revealSessionFile as revealSessionFileAPI,
     type ApiErrorCode,
 } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
@@ -116,5 +117,25 @@ export function useSessionCommands({
         }
     }, [bridgeAvailable, busy, refreshCatalogRef, updateSessionTitle, viewRequestRef])
 
-    return { createNewSession, deleteSession, renameSession }
+    const revealSessionFile = useCallback(async (sessionID: string) => {
+        if (busy || !sessionID || !bridgeAvailable) return false
+        const viewRequestID = viewRequestRef.current
+        setBusy(true)
+        setError('')
+        setErrorCode(undefined)
+        try {
+            await revealSessionFileAPI(sessionID)
+            return true
+        } catch (err) {
+            if (viewRequestRef.current === viewRequestID) {
+                setError(readableError(err))
+                setErrorCode(apiErrorCode(err))
+            }
+            return false
+        } finally {
+            setBusy(false)
+        }
+    }, [bridgeAvailable, busy, setBusy, setError, setErrorCode, viewRequestRef])
+
+    return { createNewSession, deleteSession, renameSession, revealSessionFile }
 }

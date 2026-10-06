@@ -23,8 +23,8 @@ type TurnStatus string
 const (
 	TurnStarting TurnStatus = "starting"
 	TurnRunning  TurnStatus = "running"
-	TurnSettling TurnStatus = "settling"
-	TurnSettled  TurnStatus = "settled"
+	TurnEnding   TurnStatus = "ending"
+	TurnEnded    TurnStatus = "ended"
 )
 
 type TurnOutcome string
@@ -93,7 +93,7 @@ type Turn struct {
 	Input          InputSnapshot
 	CreatedAt      time.Time
 	StartedAt      time.Time
-	SettledAt      time.Time
+	EndedAt        time.Time
 	Outcome        TurnOutcome
 	FailureCode    contracts.TurnFailureCode
 	FailureMessage string
@@ -169,7 +169,7 @@ func (e Turn) Validate() error {
 		return contracts.InvalidValue("turn.createdAt", "creation time is required")
 	}
 	if (!e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt)) ||
-		(!e.SettledAt.IsZero() && e.SettledAt.Before(e.CreatedAt)) {
+		(!e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt)) {
 		return contracts.InvalidValue("turn.timestamps", "timestamps cannot precede creation")
 	}
 	if e.StartContent != strings.TrimSpace(e.StartContent) {
@@ -179,21 +179,21 @@ func (e Turn) Validate() error {
 		return contracts.InvalidValue("turn.startContent", "user input turn requires content or an input message reference")
 	}
 	if e.Status == TurnStarting {
-		if !e.StartedAt.IsZero() || !e.SettledAt.IsZero() || e.Outcome != "" {
+		if !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" {
 			return contracts.InvalidValue("turn", "starting turn has terminal fields")
 		}
 		if e.Reason == TurnUserInput && e.StartContent == "" {
 			return contracts.InvalidValue("turn.startContent", "user input turn requires content")
 		}
 	}
-	if e.Status == TurnRunning || e.Status == TurnSettling {
-		if e.StartedAt.IsZero() || !e.SettledAt.IsZero() || e.Outcome != "" {
+	if e.Status == TurnRunning || e.Status == TurnEnding {
+		if e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" {
 			return contracts.InvalidValue("turn", "active turn has invalid lifecycle fields")
 		}
 	}
-	if e.Status == TurnSettled {
-		if e.StartedAt.IsZero() || e.SettledAt.IsZero() || !validTurnOutcome(e.Outcome) {
-			return contracts.InvalidValue("turn", "settled turn has invalid terminal fields")
+	if e.Status == TurnEnded {
+		if e.StartedAt.IsZero() || e.EndedAt.IsZero() || !validTurnOutcome(e.Outcome) {
+			return contracts.InvalidValue("turn", "ended turn has invalid terminal fields")
 		}
 		if e.Outcome == TurnFailed && e.FailureCode == "" {
 			return contracts.InvalidValue("turn.failureCode", "failed turn requires a failure code")
@@ -202,21 +202,24 @@ func (e Turn) Validate() error {
 	if !e.FailureCode.Valid() {
 		return contracts.InvalidValue("turn.failureCode", "unknown failure code")
 	}
+	if e.FailureCode == contracts.TurnFailureRequestCanceled && e.Outcome != TurnPaused && e.Outcome != TurnInterrupted {
+		return contracts.InvalidValue("turn.failureCode", "request cancellation requires a paused or interrupted outcome")
+	}
 	if e.FailureMessage != strings.TrimSpace(e.FailureMessage) ||
 		len([]rune(e.FailureMessage)) > contracts.MaxTurnFailureMessageRunes {
 		return contracts.InvalidValue("turn.failureMessage", "failure message must be normalized and bounded")
 	}
-	if e.Status != TurnSettled && e.FailureMessage != "" {
+	if e.Status != TurnEnded && e.FailureMessage != "" {
 		return contracts.InvalidValue("turn.failureMessage", "active turn cannot have a failure message")
 	}
-	if e.Status == TurnSettled && e.Outcome != TurnFailed && e.FailureMessage != "" {
+	if e.Status == TurnEnded && e.Outcome != TurnFailed && e.FailureMessage != "" {
 		return contracts.InvalidValue("turn.failureMessage", "only failed turn may have a failure message")
 	}
 	return nil
 }
 
 func (e Turn) Active() bool {
-	return e.Status == TurnStarting || e.Status == TurnRunning || e.Status == TurnSettling
+	return e.Status == TurnStarting || e.Status == TurnRunning || e.Status == TurnEnding
 }
 
 func (e *Turn) MarkRunning(at time.Time) error {
@@ -228,38 +231,43 @@ func (e *Turn) MarkRunning(at time.Time) error {
 	return nil
 }
 
-func (e *Turn) BeginSettlement(at time.Time) error {
+// BeginEnding 标记执行已返回；结束时间不得早于启动时间，失败时不改变状态。
+func (e *Turn) BeginEnding(at time.Time) error {
 	if e.Status != TurnRunning {
-		return contracts.InvalidTransition("turn", string(e.Status), string(TurnSettling))
+		return contracts.InvalidTransition("turn", string(e.Status), string(TurnEnding))
 	}
-	e.Status = TurnSettling
 	if at.Before(e.StartedAt) {
-		return contracts.InvalidValue("turn.settlingAt", "settlement cannot precede start")
+		return contracts.InvalidValue("turn.endingAt", "ending cannot precede start")
 	}
+	e.Status = TurnEnding
 	return nil
 }
 
-func (e *Turn) Settle(
+// End 固定最终结果和结束时间；已结束的 Turn 不允许重新结束或改变结果。
+func (e *Turn) End(
 	outcome TurnOutcome,
 	failureCode contracts.TurnFailureCode,
 	at time.Time,
 ) error {
-	if e.Status != TurnRunning && e.Status != TurnSettling {
-		return contracts.InvalidTransition("turn", string(e.Status), string(TurnSettled))
+	if e.Status != TurnRunning && e.Status != TurnEnding {
+		return contracts.InvalidTransition("turn", string(e.Status), string(TurnEnded))
 	}
 	if !validTurnOutcome(outcome) {
 		return contracts.InvalidValue("turn.outcome", "unknown turn outcome")
 	}
 	if at.Before(e.StartedAt) {
-		return contracts.InvalidValue("turn.settledAt", "settlement cannot precede start")
+		return contracts.InvalidValue("turn.endedAt", "ending cannot precede start")
 	}
 	if !failureCode.Valid() || (outcome == TurnFailed && failureCode == "") {
 		return contracts.InvalidValue("turn.failureCode", "unknown or missing failure code")
 	}
-	e.Status = TurnSettled
+	if failureCode == contracts.TurnFailureRequestCanceled && outcome != TurnPaused && outcome != TurnInterrupted {
+		return contracts.InvalidValue("turn.failureCode", "request cancellation requires a paused or interrupted outcome")
+	}
+	e.Status = TurnEnded
 	e.Outcome = outcome
 	e.FailureCode = failureCode
-	e.SettledAt = at.UTC()
+	e.EndedAt = at.UTC()
 	return nil
 }
 
@@ -274,7 +282,7 @@ func validTurnReason(reason TurnReason) bool {
 
 func validTurnStatus(status TurnStatus) bool {
 	switch status {
-	case TurnStarting, TurnRunning, TurnSettling, TurnSettled:
+	case TurnStarting, TurnRunning, TurnEnding, TurnEnded:
 		return true
 	default:
 		return false

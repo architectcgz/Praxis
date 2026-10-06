@@ -69,9 +69,6 @@ func (s *Service) GetAgentView(ctx context.Context, agentID contracts.AgentID, l
 	if ctx == nil {
 		return AgentView{}, errors.New("agent query context is required")
 	}
-	if agentID == "" {
-		return AgentView{}, invalidAgentQuery("agent id is required")
-	}
 	if s.turns == nil || s.waits == nil || s.controls == nil {
 		return AgentView{}, errors.New("agent detail query is unavailable")
 	}
@@ -115,9 +112,6 @@ func (s *Service) ListAgentMessages(ctx context.Context, agentID contracts.Agent
 	if ctx == nil {
 		return nil, errors.New("agent message context is required")
 	}
-	if agentID == "" {
-		return nil, invalidAgentQuery("agent id is required")
-	}
 	if s.messages == nil {
 		return nil, errors.New("agent message query is unavailable")
 	}
@@ -126,9 +120,4 @@ func (s *Service) ListAgentMessages(ctx context.Context, agentID contracts.Agent
 		return nil, err
 	}
 	return s.messages(ctx, agent.SessionID, agent.ID, limit)
-}
-
-// invalidAgentQuery 将非法读取请求转换为对外稳定的业务错误。
-func invalidAgentQuery(message string) error {
-	return contracts.New(contracts.InvalidRequest, message)
 }

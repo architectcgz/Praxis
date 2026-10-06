@@ -1,7 +1,7 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import {
     API_ERROR_CODES,
-    closeAgent,
+    cancelTurn,
     pauseAgent,
     sendInput,
     type AgentSnapshot,
@@ -100,11 +100,12 @@ export function useAgentCommands({
         }
     }, [agent, busy, input, reasoning, sessionID, selectedModelID, selectedProviderID, refreshAgent, selectedAgentIDRef])
 
-    const control = useCallback(async (kind: 'pause' | 'close') => {
-        if (!agent || busy) {
+    const control = useCallback(async (kind: 'pause' | 'cancel') => {
+        if (!agent?.currentTurnId || busy) {
             return
         }
         const agentID = agent.id
+        const targetTurnId = agent.currentTurnId
         const selectedAgentID = selectedAgentIDRef.current
         const viewRequestID = viewRequestRef.current
         const isCurrentView = () => viewRequestRef.current === viewRequestID && selectedAgentIDRef.current === selectedAgentID
@@ -114,11 +115,9 @@ export function useAgentCommands({
         setErrorCode(undefined)
         try {
             const commandId = crypto.randomUUID()
-            if (kind === 'pause') {
-                await pauseAgent({ commandId, agentId: agentID })
-            } else {
-                await closeAgent({ commandId, agentId: agentID })
-            }
+            const apply = kind === 'pause' ? pauseAgent : cancelTurn
+            const response = await apply({ commandId, agentId: agentID, targetTurnId })
+            if (response.cancellationError) throw new Error('取消通知失败，请重试。')
             await refreshAgent(agentID)
         } catch (err) {
             if (isCurrentView()) {

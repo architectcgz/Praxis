@@ -94,6 +94,28 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 	return result, nil
 }
 
+// GetSessionUsageSummary 查询已保存用量，非法 Session ID 在 binding 边界拒绝。
+func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionUsageSummary, error) {
+	if err := validation.ValidateSessionID(sessionID); err != nil {
+		return dto.SessionUsageSummary{}, err
+	}
+	ctx, services, err := b.runtime.BindingContext()
+	if err != nil {
+		return dto.SessionUsageSummary{}, err
+	}
+	summary, err := services.Sessions.GetSessionUsageSummary(ctx, contracts.SessionID(sessionID))
+	if err != nil {
+		return dto.SessionUsageSummary{}, publicError(b.runtime, "SessionBindings.GetSessionUsageSummary", err)
+	}
+	return dto.SessionUsageSummary{
+		Records:              summary.Records,
+		InputTokens:          summary.InputTokens,
+		CacheReadInputTokens: summary.CacheReadInputTokens,
+		CacheReadRatio:       summary.CacheReadRatio,
+		CacheReadComplete:    summary.CacheReadComplete,
+	}, nil
+}
+
 // DeleteSession 删除指定会话，并将业务错误转换为前端可识别的错误码。
 func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err := validation.ValidateSessionID(sessionID); err != nil {

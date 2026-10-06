@@ -22,6 +22,17 @@
     font-size: var(--font-size-secondary);
 }
 
+.operation-token-usage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    max-width: 100%;
+}
+
+.operation-token-usage > span {
+    white-space: nowrap;
+}
+
 @media (max-width: 460px) {
     .output-tool-header,
     .output-handoff-task > summary,

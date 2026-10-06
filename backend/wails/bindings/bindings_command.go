@@ -17,6 +17,9 @@ type CommandBindings struct {
 }
 
 func (b *CommandBindings) SendInput(request dto.SendInputRequest) (dto.SendInputResponse, error) {
+	if err := validation.ValidateSendInput(request); err != nil {
+		return dto.SendInputResponse{}, err
+	}
 	ctx, service, err := b.runtime.BindingContext()
 	if err != nil {
 		return dto.SendInputResponse{}, err
@@ -61,24 +64,35 @@ func (b *CommandBindings) Resume(request dto.ResumeRequest) (dto.SendInputRespon
 }
 
 func (b *CommandBindings) PauseAgent(request dto.PauseAgentRequest) (dto.AgentControlResponse, error) {
+	if err := validation.ValidateAgentControl(request); err != nil {
+		return dto.AgentControlResponse{}, err
+	}
 	return b.controlAgent(func(ctx context.Context, service Services) (turncontrol.Result, error) {
 		return service.Commands.PauseAgent(ctx, turncontrol.Params{
-			CommandID: contracts.AgentControlCommandID(request.CommandID),
-			AgentID:   contracts.AgentID(request.AgentID),
+			CommandID:    contracts.AgentControlCommandID(request.CommandID),
+			AgentID:      contracts.AgentID(request.AgentID),
+			TargetTurnID: contracts.TurnID(request.TargetTurnID),
 		})
 	})
 }
 
-func (b *CommandBindings) CloseAgent(request dto.CloseAgentRequest) (dto.AgentControlResponse, error) {
+func (b *CommandBindings) CancelTurn(request dto.CancelTurnRequest) (dto.AgentControlResponse, error) {
+	if err := validation.ValidateAgentControl(request); err != nil {
+		return dto.AgentControlResponse{}, err
+	}
 	return b.controlAgent(func(ctx context.Context, service Services) (turncontrol.Result, error) {
-		return service.Commands.CloseAgent(ctx, turncontrol.Params{
-			CommandID: contracts.AgentControlCommandID(request.CommandID),
-			AgentID:   contracts.AgentID(request.AgentID),
+		return service.Commands.CancelTurn(ctx, turncontrol.Params{
+			CommandID:    contracts.AgentControlCommandID(request.CommandID),
+			AgentID:      contracts.AgentID(request.AgentID),
+			TargetTurnID: contracts.TurnID(request.TargetTurnID),
 		})
 	})
 }
 
 func (b *CommandBindings) QueueWork(request dto.QueueWorkRequest) (dto.QueueWorkResponse, error) {
+	if err := validation.ValidateQueueWork(request); err != nil {
+		return dto.QueueWorkResponse{}, err
+	}
 	ctx, service, err := b.runtime.BindingContext()
 	if err != nil {
 		return dto.QueueWorkResponse{}, err

@@ -100,16 +100,22 @@ func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem
 		})
 	}
 	for _, turn := range view.Turns {
-		if turn.Status != turnmodel.TurnSettled || turn.Outcome != turnmodel.TurnFailed {
+		if turn.Status != turnmodel.TurnEnded {
 			continue
 		}
-		at := turn.SettledAt
+		kind := "turn"
+		if turn.FailureCode == contracts.TurnFailureRequestCanceled {
+			kind = "request_canceled"
+		} else if turn.Outcome != turnmodel.TurnFailed {
+			continue
+		}
+		at := turn.EndedAt
 		if at.IsZero() {
 			at = turn.CreatedAt
 		}
 		value := turnSnapshot(turn)
 		result = append(result, dto.AgentHistoryItem{
-			Kind: "turn", At: at, Turn: &value,
+			Kind: kind, At: at, Turn: &value,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -157,6 +163,6 @@ func turnSnapshot(turn turnmodel.Turn) dto.TurnSnapshot {
 		ID: turn.ID.String(), Reason: string(turn.Reason), Status: string(turn.Status),
 		Outcome: string(turn.Outcome), FailureCode: string(turn.FailureCode),
 		FailureMessage: turn.FailureMessage,
-		CreatedAt:      turn.CreatedAt, StartedAt: turn.StartedAt, SettledAt: turn.SettledAt,
+		CreatedAt:      turn.CreatedAt, StartedAt: turn.StartedAt, EndedAt: turn.EndedAt,
 	}
 }

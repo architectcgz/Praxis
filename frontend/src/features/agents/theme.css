@@ -9,11 +9,6 @@
     background: var(--warn);
 }
 
-.round-notice {
-    color: var(--muted);
-    font-size: var(--font-size-ui);
-}
-
 .composer-shell {
     border: 1px solid var(--line-strong);
     border-radius: 10px;

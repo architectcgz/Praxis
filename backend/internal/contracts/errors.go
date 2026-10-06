@@ -75,7 +75,7 @@ const (
 const (
 	AgentExecuting   Code = "agent.executing"
 	AgentUnavailable Code = "agent.unavailable"
-	AlreadySettled   Code = "agent.already_settled"
+	AlreadyEnded     Code = "agent.already_ended"
 
 	WorkQueueEmpty  Code = "work.queue_empty"
 	WorkItemActive  Code = "work.item_active"
@@ -93,7 +93,6 @@ const (
 	TurnProvider      Code = "turn.provider_error"
 	TurnTool          Code = "turn.tool_error"
 	TurnResourceLimit Code = "turn.resource_limit"
-	TurnClosed        Code = "turn.closed"
 	TurnInterrupted   Code = "turn.interrupted"
 )
 
@@ -108,7 +107,7 @@ var (
 	ErrInvalidValue      = New(InvalidValueCode, "")
 	ErrInvalidTransition = New(InvalidTransitionCode, "")
 	ErrLeaseConflict     = New(LeaseConflict, "")
-	ErrAlreadySettled    = New(AlreadySettled, "")
+	ErrAlreadyEnded      = New(AlreadyEnded, "")
 	ErrWorkQueueEmpty    = New(WorkQueueEmpty, "")
 	ErrWorkItemActive    = New(WorkItemActive, "")
 	ErrAgentExecuting    = New(AgentExecuting, "")

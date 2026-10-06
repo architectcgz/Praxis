@@ -13,7 +13,7 @@ type SessionPanelProps = {
 export function SessionPanel({ loading, hasSession, sessionsCount, children }: SessionPanelProps) {
     if (!hasSession) {
         if (loading) {
-            return <section className="session-loading" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>加载会话中</span></section>
+            return <section className="session-loading" role="status" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>正在加载会话</span></section>
         }
         return (
             <div className="scroll-region">

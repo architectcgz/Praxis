@@ -175,12 +175,6 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 	if ctx == nil {
 		return Result{}, errors.New("send input context is required")
 	}
-	if params.RequestID == "" || params.Content == "" || (params.SessionID == "" && params.AgentID == "") {
-		return Result{}, contracts.New(contracts.InvalidRequest, "")
-	}
-	if params.ProviderID == "" || params.ModelID == "" {
-		return Result{}, contracts.New(contracts.ModelNotConfigured, "")
-	}
 	if params.AgentID == "" {
 		agent, err := s.primary.GetOrCreatePrimaryAgent(ctx, params.SessionID, params.RequestID)
 		if err != nil {
@@ -270,9 +264,6 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 func (s *Service) Resume(ctx context.Context, params ResumeParams) (Result, error) {
 	if ctx == nil {
 		return Result{}, errors.New("resume context is required")
-	}
-	if params.AgentID == "" || params.RequestID == "" {
-		return Result{}, contracts.New(contracts.InvalidRequest, "")
 	}
 	var result Result
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {

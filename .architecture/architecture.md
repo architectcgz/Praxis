@@ -101,8 +101,8 @@ internal/core 各业务包 ──→ core 内部依赖 / contracts / utils/pathu
 - `service/agent` 查询 Agent、turn 和 transcript 展示数据。
 - `service/turn/start` 创建用户输入或恢复 turn，冻结模型、上下文和安全输入快照。
 - `service/turn/queue` 创建独立排队任务，并按 Agent FIFO 启动任务。
-- `service/turn/control` 先记录 Pause/Close 控制命令，再通知进程内 runtime 取消。
-- `service/turn/settlement` 接收 runtime 的开始与结束回调，将 turn 推进到运行态，并以一个 JSONL 提交 结算 turn、Agent、QueuedWork 和控制命令。
+- `service/turn/control` 先记录 PauseAgent/CancelTurn 控制命令，再通知进程内 runtime 取消指定 Turn；取消不关闭 Agent。
+- `service/turn/lifecycle` 接收 runtime 的开始与结束回调，将 Turn 推进到运行态，并以一个 JSONL 提交 Turn、Agent、QueuedWork 和控制命令的最终状态。
 - `service/turn/tool_invocation` 负责工具调用的持久化准入、幂等检查、授权和结果结算；通过注入的工具目录执行已授权调用。
 - `core/tool_invocation` 定义工具调用状态模型，仅依赖共享 contracts。恢复时，未启动的调用结算为 `interrupted`，运行中但结果无法确认的调用结算为终态 `unknown`，不得自动重放。
 - `service/session.MessageStore` 按 Agent 的可见范围路由消息；一致读取接口由 `repository.MessageLoader` 定义，执行消息接口由 `agent_runtime.TurnMessageStore` 定义。
@@ -123,12 +123,13 @@ runtime 激活失败不会撤销已经提交的命令或 turn；结果通过持�
 
 ### 状态与并发
 
-- `Turn` 的状态为 `starting → running → settling → settled`。
+- `Turn` 的状态为 `starting → running → ending → ended`。
+- `ended` 固定最终 `Outcome`、`FailureCode` 和 `EndedAt`；`Outcome` 区分完成、失败、暂停和中断，Agent 中断后仍可接收新输入。
 - 一个 Agent 同时最多有一个 active turn；日志投影的唯一性校验和 Agent 状态共同约束这一点。
 - 同一个 `(AgentID, RequestID)` 只能对应一次用户输入 turn。重复请求返回已有记录，参数不一致则返回 request conflict。
 - `QueuedWork` 是独立任务，不是聊天邮箱。任务在真正启动时才冻结当前 Session context、模型和安全快照，并按 Agent sequence FIFO 运行。
 - `Agent runtime` 是单进程、单 Agent 的活动执行槽。它只接受属于自身且已经持久化的 turn；关闭时取消活动 turn，并在给定 deadline 内等待退出。
-- 应用启动时将持久化的未结算 turn 和 Agent 收敛为 `interrupted`。尚未运行的工具调用结算为 `interrupted`，已经运行但结果不明的调用结算为 `unknown`，不得自动重放。
+- 应用启动时将持久化的未结束 Turn 和 Agent 收敛为 `interrupted`；存在已提交的控制命令时保留暂停或取消结果。尚未运行的工具调用结算为 `interrupted`，已经运行但结果不明的调用结算为 `unknown`，不得自动重放。
 
 ### 执行链路
 
@@ -142,11 +143,15 @@ Wails CommandBinding
   → loop.TurnEngine
   → agent_runtime.ModelStream + service/turn/tool_invocation
   → 执行结果回调
-  → service/turn/settlement
+  → service/turn/lifecycle
   → JSONL 提交最终状态
 ```
 
-`loop.TurnEngine` 只拥有一次 turn 的 model/tool step loop，不拥有 Agent 状态或最终结算。每次工具调用都必须先写入可对账的 tool-result receipt，再构造下一轮模型上下文；模型或工具失败必须映射为稳定的 `TurnFailureCode`。
+`loop.TurnEngine` 只拥有一次 Turn 的 model/tool step loop，不拥有 Agent 状态或最终结束事务。每次工具调用都必须先写入可对账的 tool-result receipt，再构造下一轮模型上下文；模型或工具失败必须映射为稳定的 `TurnFailureCode`。
+
+控制命令使用 `CommandID` 保证幂等，使用 `AgentID + TargetTurnID` 固定取消目标；旧回合请求不会取消下一轮。结束事务优先应用此前已提交的控制命令，并保存 `FailureCode=request_canceled`，与系统中断区分。
+
+生命周期服务只在首次结束事务提交成功后发布一个终态事件：用户暂停或取消为 `request_canceled`，其他结果为 `turn_ended`。两者均携带 `SessionID`、`AgentID`、`TurnID`、`Outcome`、`FailureCode` 和安全的失败详情；runtime 不另行发布终态事件。
 
 模型 Provider 通过 `agent_runtime.ModelStream` 提供统一的流事件：文本增量、思考增量、工具调用、完成和错误。当前 Provider adapter 位于：
 
@@ -163,7 +168,7 @@ Provider credential 只在 `infra/model_registry` 内解析和使用，不进入
 - `context.ContextBuilder` 按决策、已接受结论、引用、普通消息的优先级，在 Session 和 transcript 字节预算内构造 provider-neutral `ModelContext`。
 - Turn 的 `InputSnapshot` 保存 `ModelContext`、消息边界、当前输入消息 ID、context digest、模型快照、安全快照和工作区；运行中不重新解释这些输入。
 - 主 Agent 读取 Session 消息，协作 Agent 读取自身私有消息；共享文件不扩大消息可见范围。
-- 前端收到的 Agent event 只用于即时渲染；`settled` 之后必须重新读取 durable transcript 和 Agent view，不能把瞬时事件当作事实来源。
+- 前端收到的 Agent event 只用于即时渲染；`turn_ended` 或 `request_canceled` 之后必须重新读取持久化 transcript、Agent view、计时和用量，不能把瞬时事件当作事实来源。
 
 ## 持久化边界
 
@@ -193,8 +198,6 @@ Provider credential 只在 `infra/model_registry` 内解析和使用，不进入
 - 没有换行的尾部提交先留存诊断副本，再截断到最后一个完整提交。完整损坏行与非法引用会阻止启动。
 - 删除 Session 追加删除标记并清除关联投影，物理日志清理由独立操作处理。
 - [`infra/document`](../backend/internal/infra/document) 提供独立内容寻址文件存储；凭据与模型配置各有独立 owner。
-
-具体格式、幂等、恢复与验证规则见 [Turn 与 JSONL 存储方案](plans/turn-jsonl-storage.md)。
 
 ## 配置与安全
 
@@ -232,7 +235,7 @@ frontend/src/
 └── styles/                 全局 token、公共样式与 Workspace 样式入口
 ```
 
-`frontend/src/api` 是 React feature 与 Wails generated binding 之间的唯一 API 适配边界。页面通过 API wrapper 发起命令和查询，通过 `praxis:agent-event` 接收即时事件，并在 turn 结算后重新查询 durable 数据。
+`frontend/src/api` 是 React feature 与 Wails generated binding 之间的唯一 API 适配边界。页面通过 API wrapper 发起命令和查询，通过 `praxis:agent-event` 接收即时事件，并在 Turn 结束后重新查询持久化数据。
 
 `agents/useAgentData.ts` 管理查询、缓存、选中状态及过期响应保护，组合 `useAgentTaskInput.ts` 管理草稿、模型和 reasoning 选择。`useAgentCommands.ts` 执行输入与控制命令；`streaming.ts` 以纯函数合并实时事件并在持久化回填后去重。乐观消息保留发送时的 Session / Agent 归属，视图切换不得把消息展示到其他对话。
 

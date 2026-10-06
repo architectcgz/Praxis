@@ -3,7 +3,7 @@ import type { PendingUserMessage, StreamingOutput, StreamingOutputs } from './ty
 
 /**
  * 按 Agent、turn 和 step 合并实时事件，不修改输入对象。
- * 仅相邻同类文本增量拼接；生命周期与计时事件不改变输出，由订阅方处理。
+ * 仅相邻同类文本增量拼接；终态清除等待标记但保留尚未落盘的输出。
  */
 export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent): StreamingOutputs {
     const previous = outputs[event.agentId]
@@ -48,8 +48,15 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
             }
             return { ...outputs, [event.agentId]: { ...output, steps } }
         }
+        case 'request_canceled':
+        case 'turn_ended':
         case 'error':
-            return { ...outputs, [event.agentId]: { ...output, error: event.error || '' } }
+            if (event.kind !== 'error' && previous?.turnId !== event.turnId) return outputs
+            return { ...outputs, [event.agentId]: {
+                ...output,
+                steps: output.steps.map((step) => ({ ...step, events: step.events.filter((item) => item.kind !== 'provider_waiting') })),
+                error: event.kind === 'error' ? event.error || '' : output.error,
+            } }
         default:
             return outputs
     }
@@ -61,7 +68,7 @@ export function clearDurableStreamingOutput(outputs: StreamingOutputs, agent: Ag
     if (!output) {
         return outputs
     }
-    const settled = agent.turns.some((turn) => turn.id === output.turnId && turn.status === 'settled')
+    const ended = agent.turns.some((turn) => turn.id === output.turnId && turn.status === 'ended')
     const persisted = history.some((item) => (
         item.message?.role === 'assistant' && item.message.turnId === output.turnId
     ) || item.turn?.id === output.turnId)
@@ -70,7 +77,7 @@ export function clearDurableStreamingOutput(outputs: StreamingOutputs, agent: Ag
         item.message?.turnId === output.turnId &&
         item.message.blocks?.some((block) => block.kind === 'tool_call' || block.kind === 'tool_result')
     ))
-    if (!settled || !persisted || hasToolOutput && !persistedToolOutput) {
+    if (!ended || !persisted || hasToolOutput && !persistedToolOutput) {
         return outputs
     }
     const remaining = { ...outputs }

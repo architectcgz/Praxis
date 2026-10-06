@@ -20,7 +20,7 @@ export type AgentConversationProps = {
     reasoning: string
     busy: boolean
     onSend: () => void
-    onControl: (kind: 'pause' | 'close') => void
+    onControl: (kind: 'pause' | 'cancel') => void
     onModelChange: (providerId: string, modelId: string) => void
     onReasoningChange: (level: string) => void
     commands: readonly { name: string; description: string }[]
@@ -34,7 +34,6 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
     const [showScrollButton, setShowScrollButton] = useState(false)
     const active = agent.state === 'executing' || agent.state === 'pausing'
     const waitingForOutput = awaitingOutput || (agent.state === 'executing' && !busy && !streamingOutput)
-    const closed = agent.state === 'closed'
 
     const orderedHistory = useMemo(() => {
         return [...history].sort((left, right) => {
@@ -211,7 +210,6 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
             <AgentTaskInput
                 sessionId={agent.sessionId}
                 active={active}
-                closed={closed}
                 input={input}
                 setInput={setInput}
                 models={models}

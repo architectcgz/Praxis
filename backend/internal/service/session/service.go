@@ -2,6 +2,7 @@
 package session
 
 import (
+	agentruntime "praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
@@ -10,13 +11,16 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	toolmodel "praxis/internal/core/tool_invocation"
 	turnmodel "praxis/internal/core/turn"
+	workflowmodel "praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"praxis/internal/repository"
@@ -41,11 +45,13 @@ type Config struct {
 	Turns             repository.TurnRepository
 	ToolInvocations   repository.ToolInvocationRepository
 	QueuedWork        repository.QueuedWorkRepository
+	Controls          repository.AgentControlCommandRepository
 	SessionMessages   repository.SessionMessageRepository
 	AgentMessages     repository.AgentMessageRepository
 	Definitions       AgentDefinitionFactory
 	PolicyFactory     AgentSecurityPolicyFactory
 	Messages          repository.MessageLoader
+	UsageRecords      func(context.Context, string) ([]agentruntime.ModelUsageRecord, error)
 	RemoveSessionData func(context.Context, contracts.SessionID, []string) error
 	Clock             system.Clock
 	IDs               system.IDGenerator
@@ -63,15 +69,21 @@ type Service struct {
 	turns             repository.TurnRepository
 	toolInvocations   repository.ToolInvocationRepository
 	queuedWork        repository.QueuedWorkRepository
+	controls          repository.AgentControlCommandRepository
 	sessionMessages   repository.SessionMessageRepository
 	agentMessages     repository.AgentMessageRepository
 	definitions       AgentDefinitionFactory
 	policyFactory     AgentSecurityPolicyFactory
 	messages          repository.MessageLoader
+	usageRecords      func(context.Context, string) ([]agentruntime.ModelUsageRecord, error)
 	removeSessionData func(context.Context, contracts.SessionID, []string) error
 	contextBuilder    contextmodel.ContextBuilder
 	clock             system.Clock
 	ids               system.IDGenerator
+
+	createdSessionsMu sync.Mutex
+	createdSessions   map[contracts.SessionID]struct{}
+	closing           bool
 }
 
 // CreateParams contains the durable identity and initial state for a Session.
@@ -93,6 +105,9 @@ type CreateResult struct {
 
 // NewService creates the Session application service.
 func NewService(config Config) (*Service, error) {
+	if config.UsageRecords == nil {
+		return nil, errors.New("session service usage reader is required")
+	}
 	for name, value := range map[string]any{
 		"transactions":      config.Transactions,
 		"projects":          config.Projects,
@@ -104,6 +119,7 @@ func NewService(config Config) (*Service, error) {
 		"turns":             config.Turns,
 		"tool invocations":  config.ToolInvocations,
 		"queued work":       config.QueuedWork,
+		"controls":          config.Controls,
 		"session messages":  config.SessionMessages,
 		"agent messages":    config.AgentMessages,
 		"agent definitions": config.Definitions,
@@ -125,15 +141,18 @@ func NewService(config Config) (*Service, error) {
 		turns:             config.Turns,
 		toolInvocations:   config.ToolInvocations,
 		queuedWork:        config.QueuedWork,
+		controls:          config.Controls,
 		sessionMessages:   config.SessionMessages,
 		agentMessages:     config.AgentMessages,
 		definitions:       config.Definitions,
 		policyFactory:     config.PolicyFactory,
 		messages:          config.Messages,
+		usageRecords:      config.UsageRecords,
 		removeSessionData: config.RemoveSessionData,
 		contextBuilder:    contextmodel.NewContextBuilder(0, 0),
 		clock:             system.ClockOrDefault(config.Clock),
 		ids:               system.IDsOrDefault(config.IDs),
+		createdSessions:   make(map[contracts.SessionID]struct{}),
 	}, nil
 }
 
@@ -147,9 +166,6 @@ type SessionView struct {
 func (s *Service) ListSessionsByProject(ctx context.Context, projectID contracts.ProjectID, limit int) ([]sessionmodel.Session, error) {
 	if ctx == nil {
 		return nil, errors.New("project session catalog context is required")
-	}
-	if projectID == "" {
-		return nil, invalidSessionQuery("project id is required")
 	}
 	lister, ok := s.sessions.(repository.ProjectSessionListRepository)
 	if !ok {
@@ -213,6 +229,32 @@ func (s *Service) recoverStaleTurn(ctx context.Context, turnID contracts.TurnID)
 			return err
 		}
 		at := s.clock.Now().UTC()
+		outcome := turnmodel.TurnInterrupted
+		failureCode := contracts.TurnFailureInterrupted
+		controls, err := s.controls.ListOpenByAgent(txCtx, agent.ID, 100)
+		if err != nil {
+			return err
+		}
+		// 恢复只收敛状态，不重放执行；已提交的用户控制命令仍保留其取消原因。
+		for index := range controls {
+			control := &controls[index]
+			if control.TargetTurnID != turn.ID {
+				continue
+			}
+			if failureCode != contracts.TurnFailureRequestCanceled {
+				outcome = turnmodel.TurnPaused
+			}
+			if control.Kind == workflowmodel.AgentControlCancel {
+				outcome = turnmodel.TurnInterrupted
+			}
+			failureCode = contracts.TurnFailureRequestCanceled
+			if err := control.MarkApplied(at); err != nil {
+				return err
+			}
+			if err := s.controls.Save(txCtx, *control); err != nil {
+				return err
+			}
+		}
 		for index := range invocations {
 			invocation := invocations[index]
 			result, err := recoverToolInvocation(&invocation, at)
@@ -232,14 +274,14 @@ func (s *Service) recoverStaleTurn(ctx context.Context, turnID contracts.TurnID)
 			}
 		}
 		if turn.Status == turnmodel.TurnRunning {
-			if err := turn.BeginSettlement(at); err != nil {
+			if err := turn.BeginEnding(at); err != nil {
 				return err
 			}
 		}
-		if err := turn.Settle(turnmodel.TurnInterrupted, contracts.TurnFailureInterrupted, at); err != nil {
+		if err := turn.End(outcome, failureCode, at); err != nil {
 			return err
 		}
-		if err := agent.Settle(turnmodel.TurnInterrupted, at); err != nil {
+		if err := agent.EndTurn(outcome, at); err != nil {
 			return err
 		}
 		if turn.WorkItemID != "" {
@@ -247,7 +289,7 @@ func (s *Service) recoverStaleTurn(ctx context.Context, turnID contracts.TurnID)
 			if err != nil {
 				return err
 			}
-			if err := work.Settle(turn.ID, turnmodel.TurnInterrupted, contracts.TurnFailureInterrupted, at); err != nil {
+			if err := work.End(turn.ID, outcome, failureCode, at); err != nil {
 				return err
 			}
 			if err := s.queuedWork.Save(txCtx, work); err != nil {
@@ -320,9 +362,6 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID contracts.Sessio
 	if ctx == nil {
 		return SessionView{}, errors.New("session query context is required")
 	}
-	if sessionID == "" {
-		return SessionView{}, invalidSessionQuery("session id is required")
-	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return SessionView{}, err
@@ -336,8 +375,8 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID contracts.Sessio
 
 // ListSessionContext 按稳定时间和 ID 游标读取 SessionContext 条目。
 func (s *Service) ListSessionContext(ctx context.Context, sessionID contracts.SessionID, afterID string, limit int) ([]contextmodel.SessionContextEntry, error) {
-	if ctx == nil || sessionID == "" {
-		return nil, invalidSessionQuery("session context query is invalid")
+	if ctx == nil {
+		return nil, contracts.New(contracts.InvalidRequest, "session context query is invalid")
 	}
 	if _, err := s.sessions.Get(ctx, sessionID); err != nil {
 		return nil, err
@@ -350,8 +389,11 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 	if ctx == nil {
 		return CreateResult{}, errors.New("create session context is required")
 	}
-	if params.SessionID == "" || params.AgentID == "" || params.ProjectID == "" || params.WorkspaceID == "" {
-		return CreateResult{}, contracts.New(contracts.InvalidRequest, "")
+	// 创建与退出清理串行，保证已提交的新会话不会漏过清理范围。
+	s.createdSessionsMu.Lock()
+	defer s.createdSessionsMu.Unlock()
+	if s.closing {
+		return CreateResult{}, errors.New("session service is closing")
 	}
 	if params.DefinitionID == "" {
 		params.DefinitionID = agentmodel.DefinitionPrimary
@@ -361,6 +403,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 		return CreateResult{}, contracts.New(contracts.InvalidRequest, "")
 	}
 	var result CreateResult
+	created := false
 	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.sessions.Get(txCtx, params.SessionID)
 		if err == nil {
@@ -423,8 +466,12 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 			return err
 		}
 		result = CreateResult{Session: session, Agent: agent}
+		created = true
 		return nil
 	})
+	if err == nil && created {
+		s.createdSessions[params.SessionID] = struct{}{}
+	}
 	return result, err
 }
 
@@ -442,9 +489,6 @@ func (s *Service) CreateSessionForProject(ctx context.Context, sessionID contrac
 func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contracts.SessionID, requestID contracts.RequestID) (agentmodel.Agent, error) {
 	if ctx == nil {
 		return agentmodel.Agent{}, errors.New("ensure primary agent context is required")
-	}
-	if requestID == "" || sessionID == "" {
-		return agentmodel.Agent{}, contracts.New(contracts.InvalidRequest, "")
 	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -519,9 +563,6 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	if ctx == nil {
 		return AppendContextResult{}, errors.New("append session context is required")
 	}
-	if params.EntryID == "" || params.SessionID == "" {
-		return AppendContextResult{}, contracts.New(contracts.InvalidRequest, "")
-	}
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		entry, err := contextmodel.NewSessionContextEntry(
@@ -556,28 +597,57 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	return result, err
 }
 
-// invalidSessionQuery 将非法读取请求转换为对外稳定的业务错误。
-func invalidSessionQuery(message string) error {
-	return contracts.New(contracts.InvalidRequest, message)
-}
-
 // DeleteSession 删除没有活动执行的 Session 和关联文档。
 func (s *Service) DeleteSession(ctx context.Context, sessionID contracts.SessionID) error {
 	if ctx == nil {
 		return errors.New("delete session context is required")
 	}
-	if sessionID == "" {
-		return contracts.New(contracts.InvalidRequest, "")
+	return s.deleteSession(ctx, sessionID, false)
+}
+
+// CleanupEmptySessions 清理本次运行新建且没有消息的会话，并拒绝后续创建。
+// 已删除的会话会被跳过；单个清理失败不影响其他会话，错误统一返回。
+func (s *Service) CleanupEmptySessions(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("empty session cleanup context is required")
 	}
+	s.createdSessionsMu.Lock()
+	defer s.createdSessionsMu.Unlock()
+	s.closing = true
+	var cleanupErr error
+	for sessionID := range s.createdSessions {
+		if err := s.deleteSession(ctx, sessionID, true); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup session %s: %w", sessionID, err))
+			continue
+		}
+		delete(s.createdSessions, sessionID)
+	}
+	return cleanupErr
+}
+
+func (s *Service) deleteSession(ctx context.Context, sessionID contracts.SessionID, onlyEmpty bool) error {
 	var documentRefs []string
+	deleted := false
 	if err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+		if onlyEmpty {
+			if _, err := s.sessions.Get(txCtx, sessionID); errors.Is(err, contracts.ErrNotFound) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			// 消息检查和删除共用事务，避免并发输入提交后被误删。
+			if hasMessages, err := s.hasSessionMessages(txCtx, sessionID); err != nil || hasMessages {
+				return err
+			}
+		}
 		var err error
 		documentRefs, err = s.sessions.Delete(txCtx, sessionID)
+		deleted = err == nil
 		return err
 	}); err != nil {
 		return err
 	}
-	if s.removeSessionData != nil {
+	if deleted && s.removeSessionData != nil {
 		if err := s.removeSessionData(context.WithoutCancel(ctx), sessionID, documentRefs); err != nil {
 			return fmt.Errorf("remove session data: %w", err)
 		}
@@ -585,13 +655,28 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID contracts.Session
 	return nil
 }
 
+func (s *Service) hasSessionMessages(ctx context.Context, sessionID contracts.SessionID) (bool, error) {
+	messages, err := s.sessionMessages.List(ctx, sessionID, 0, 1)
+	if err != nil || len(messages) > 0 {
+		return len(messages) > 0, err
+	}
+	agents, err := s.agents.ListBySession(ctx, sessionID, math.MaxInt)
+	if err != nil {
+		return false, err
+	}
+	for _, agent := range agents {
+		messages, err := s.agentMessages.List(ctx, agent.ID, 0, 1)
+		if err != nil || len(messages) > 0 {
+			return len(messages) > 0, err
+		}
+	}
+	return false, nil
+}
+
 // RenameSession 更新会话标题，并刷新会话目录排序所使用的更新时间。
 func (s *Service) RenameSession(ctx context.Context, sessionID contracts.SessionID, title string) error {
 	if ctx == nil {
 		return errors.New("rename session context is required")
-	}
-	if sessionID == "" {
-		return contracts.New(contracts.InvalidRequest, "")
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {

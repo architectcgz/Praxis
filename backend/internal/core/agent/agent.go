@@ -17,7 +17,6 @@ const (
 	AgentPaused      AgentState = "paused"
 	AgentInterrupted AgentState = "interrupted"
 	AgentFailed      AgentState = "failed"
-	AgentClosed      AgentState = "closed"
 )
 
 // Agent 表示绑定到一个 Session 和一个 AgentDefinition 的运行实例。
@@ -36,7 +35,7 @@ type Agent struct {
 // Startable 判断当前状态是否允许开始新的 Turn。
 func (s AgentState) Startable() bool {
 	switch s {
-	case AgentIdle, AgentWaiting, AgentFailed, AgentClosed:
+	case AgentIdle, AgentWaiting, AgentInterrupted, AgentFailed:
 		return true
 	default:
 		return false
@@ -92,7 +91,7 @@ func (a Agent) Validate() error {
 }
 
 func (a *Agent) Start(turnID contracts.TurnID, at time.Time) error {
-	if a.State != AgentIdle && a.State != AgentWaiting && a.State != AgentFailed && a.State != AgentClosed {
+	if !a.State.Startable() {
 		return contracts.InvalidTransition("agent", string(a.State), string(AgentExecuting))
 	}
 	if contracts.EmptyID(string(turnID)) {
@@ -121,9 +120,10 @@ func (a *Agent) RequestPause(at time.Time) error {
 	return nil
 }
 
-func (a *Agent) Settle(outcome turn.TurnOutcome, at time.Time) error {
+// EndTurn 根据本轮最终结果释放活动回合；中断后仍可开始新回合。
+func (a *Agent) EndTurn(outcome turn.TurnOutcome, at time.Time) error {
 	if a.State != AgentExecuting && a.State != AgentPausing {
-		return contracts.InvalidTransition("agent", string(a.State), "settled")
+		return contracts.InvalidTransition("agent", string(a.State), "ended")
 	}
 	if !turn.ValidTurnOutcome(outcome) {
 		return contracts.InvalidValue("agent.outcome", "unknown turn outcome")
@@ -147,17 +147,9 @@ func (a *Agent) Settle(outcome turn.TurnOutcome, at time.Time) error {
 	return nil
 }
 
-func (a *Agent) Close(at time.Time) error {
-	if a.State == AgentExecuting || a.State == AgentPausing {
-		return contracts.InvalidTransition("agent", string(a.State), string(AgentClosed))
-	}
-	a.State, a.CurrentTurnID, a.UpdatedAt = AgentClosed, "", at.UTC()
-	return nil
-}
-
 func validAgentState(state AgentState) bool {
 	switch state {
-	case AgentIdle, AgentExecuting, AgentWaiting, AgentPausing, AgentPaused, AgentInterrupted, AgentFailed, AgentClosed:
+	case AgentIdle, AgentExecuting, AgentWaiting, AgentPausing, AgentPaused, AgentInterrupted, AgentFailed:
 		return true
 	default:
 		return false

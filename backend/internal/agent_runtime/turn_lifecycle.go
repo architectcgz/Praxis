@@ -10,7 +10,7 @@ import (
 // TurnLifecycle 提供 runtime 所需的执行状态回调。
 type TurnLifecycle interface {
 	StartRuntimeTurn(context.Context, contracts.TurnID) error
-	SettleRuntimeTurn(
+	EndRuntimeTurn(
 		context.Context,
 		contracts.TurnID,
 		turnmodel.TurnOutcome,

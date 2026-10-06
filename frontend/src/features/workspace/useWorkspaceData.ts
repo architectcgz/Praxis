@@ -208,6 +208,8 @@ export function useWorkspaceData() {
         refreshCatalog,
         refreshCatalogRef,
         refreshing,
+        workspaceLoading: !catalogLoaded && (refreshing || !error),
+        sessionLoading: catalogLoaded && Boolean(selectedSessionID && !session && !error),
         selectedSessionID,
         selectSession,
         session,

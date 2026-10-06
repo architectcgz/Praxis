@@ -77,10 +77,6 @@
     background: var(--red);
 }
 
-.state-closed {
-    background: #8e8e93;
-}
-
 button,
 input,
 textarea {

@@ -15,7 +15,6 @@ const (
 	ErrorTool             = contracts.TurnTool
 	ErrorInterrupted      = contracts.TurnInterrupted
 	ErrorResourceLimit    = contracts.TurnResourceLimit
-	ErrorClosed           = contracts.TurnClosed
 )
 
 // RuntimeError 复用业务错误载体，低敏感、可安全分类。

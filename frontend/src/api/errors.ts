@@ -18,7 +18,7 @@ export const API_ERROR_CODES = {
     revisionConflict: 'project.revision_conflict',
     agentExecuting: 'agent.executing',
     agentUnavailable: 'agent.unavailable',
-    alreadySettled: 'agent.already_settled',
+    alreadyEnded: 'agent.already_ended',
     workQueueEmpty: 'work.queue_empty',
     workItemActive: 'work.item_active',
     requestNotFound: 'request.not_found',
@@ -32,7 +32,6 @@ export const API_ERROR_CODES = {
     turnTool: 'turn.tool_error',
     turnResourceLimit: 'turn.resource_limit',
     turnBusy: 'turn.busy',
-    turnClosed: 'turn.closed',
     turnInterrupted: 'turn.interrupted',
 } as const
 

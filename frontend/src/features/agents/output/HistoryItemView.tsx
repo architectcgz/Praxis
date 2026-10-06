@@ -3,7 +3,7 @@ import type { AgentHistoryItem, AgentMessageBlock } from '../../../api'
 import { CopyIconButton, MessageMarkdown } from './MarkdownViews'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock } from './ToolCallViews'
-import { MessageTiming } from '../../timing/OperationTimings'
+import { MessageTiming, useOperationTiming } from '../../timing/OperationTimings'
 
 const failureMessages: Record<string, string> = {
     provider_unavailable: '代理无法响应，因为没有配置模型提供者。',
@@ -13,6 +13,7 @@ const failureMessages: Record<string, string> = {
     turn_approval_required: '代理正在等待批准才能响应。',
     turn_storage_error: '代理无法响应，因为无法保存其持久状态。',
     runtime_cancelled: '执行在代理响应之前被取消。',
+    request_canceled: '请求已取消。',
     runtime_invalid_outcome: '代理返回了无效的执行结果。',
     runtime_failed: '代理运行时在响应之前失败。',
 }
@@ -25,6 +26,9 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
     hasContinuation?: boolean
     copyContent?: string
 }) {
+    if (item.kind === 'request_canceled' && item.turn) {
+        return <CanceledRequestView agentProfile={agentProfile} turnId={item.turn.id} at={item.at} />
+    }
     if (item.kind === 'turn' && item.turn) {
         const content = item.turn.failureMessage || failureMessage(item.turn.failureCode)
         return (
@@ -83,6 +87,19 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
         </article>
     )
 })
+
+/** 取消记录来自持久化 Turn；请求耗时单独查询，重启后保持相同状态。 */
+function CanceledRequestView({ agentProfile, turnId, at }: { agentProfile: string; turnId: string; at: string }) {
+    const timing = useOperationTiming(turnId, 'provider')
+    return <article className="message message-assistant" role="status">
+        <div className="message-meta">
+            <strong>{agentProfile}</strong>
+            <time dateTime={at} title={at}>{formatMessageTime(at)}</time>
+        </div>
+        <p>请求已取消</p>
+        {timing?.referenceId && <MessageTiming turnId={turnId} referenceId={timing.referenceId} />}
+    </article>
+}
 
 function MessageActions({ content, children }: { content: string; children?: ReactNode }) {
     return (

@@ -26,6 +26,7 @@ export type ProjectPanelProps = {
     onOpenSession: (project: ProjectGroup) => void
     onDeleteSession: (id: string) => Promise<boolean>
     onRenameSession: (id: string, title: string) => Promise<boolean>
+    onRevealSessionFile: (id: string) => Promise<boolean>
     onSelectProject: (project: ProjectGroup) => void
     onSelectSession: (id: string) => void
     onToggleProject: (key: string) => void

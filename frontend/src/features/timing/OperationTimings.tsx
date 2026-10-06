@@ -2,7 +2,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { subscribeAgentEvents } from '../../api/agents'
 import { listAgentTimings, type OperationTiming } from '../../api/timings'
 import { readableError } from '../../shared/errors'
-import { useSessionModelUsage } from '../agents/SessionTokenUsage'
+import { TokenUsageBreakdown, useSessionModelUsage } from '../agents/SessionTokenUsage'
+import { formatModelUsage, summarizeModelUsage } from '../agents/modelUsage'
 import { findTiming, formatDuration, mergeTimings } from './timing'
 import './styles.css'
 
@@ -33,7 +34,7 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
         const unsubscribe = subscribeAgentEvents((event) => {
             if (!ids.has(event.agentId)) return
             if (event.kind === 'operation_timing' && event.timing) setRecords((current) => mergeTimings(current, [event.timing!]))
-            if (event.kind === 'settled') void load(event.agentId)
+            if (event.kind === 'turn_ended' || event.kind === 'request_canceled') void load(event.agentId)
         })
         for (const id of ids) void load(id)
         return () => { active = false; unsubscribe() }
@@ -76,24 +77,24 @@ export function OperationDuration({ turnId, kind, referenceId, label }: { turnId
 const statusLabels: Record<OperationTiming['status'], string> = {
     running: '进行中', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断',
 }
-const tokenCount = new Intl.NumberFormat('zh-CN')
-
 /** 按消息引用展示每轮 Provider 状态、耗时与用量；缺失输出不补零，缓存不重复计入。 */
 export function MessageTiming({ turnId, referenceId }: { turnId: string; referenceId: string }) {
     const record = useOperationTiming(turnId, 'provider', referenceId)
     const { records, loading, error } = useSessionModelUsage()
     if (!record) return null
-    const usage = records.find((item) => item.sessionId === record.sessionId && item.agentId === record.agentId &&
-        item.turnId === turnId && referenceId === `assistant:${item.turnId}:${item.step}`)?.usage
-    const tokens = usage ? `${tokenCount.format(usage.inputTokens + (usage.outputTokens ?? 0))}${usage.outputTokens === undefined ? '+' : ''} tokens`
-        : loading ? '... tokens' : error ? '用量不可用' : '-- tokens'
-    const title = usage ? `本次模型请求\n输入：${tokenCount.format(usage.inputTokens)} tokens\n输出：${usage.outputTokens === undefined ? '未上报' : `${tokenCount.format(usage.outputTokens)} tokens`}`
+    const request = records.find((item) => item.sessionId === record.sessionId && item.agentId === record.agentId &&
+        item.turnId === turnId && referenceId === `assistant:${item.turnId}:${item.step}`)
+    const usage = request ? formatModelUsage(summarizeModelUsage([request])) : undefined
+    const tokens = loading ? '... tokens' : error ? '用量不可用' : '-- tokens'
+    const title = usage ? `本次模型请求\n${usage.details}`
         : loading ? '正在加载本次模型请求的 token 用量' : error ? `Token 用量加载失败：${error}` : '本次模型请求尚未上报 token 用量'
     return <span className="message-timing">
         <span>模型请求</span>
         <span>{statusLabels[record.status]}</span>
         <DurationLabel record={record} />
-        <span className="operation-duration operation-token-usage" title={title} aria-label={title}>· 消耗 {tokens}</span>
+        <span className="operation-duration operation-token-usage" title={title} aria-label={title}>
+            {usage ? <TokenUsageBreakdown labels={usage.labels} /> : tokens}
+        </span>
     </span>
 }
 

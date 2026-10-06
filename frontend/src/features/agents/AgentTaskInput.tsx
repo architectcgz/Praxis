@@ -7,7 +7,6 @@ import { SessionTokenUsage } from './SessionTokenUsage'
 type AgentTaskInputProps = {
     sessionId: string
     active: boolean
-    closed: boolean
     input: string
     setInput: (value: string) => void
     models: ModelOption[]
@@ -16,14 +15,14 @@ type AgentTaskInputProps = {
     reasoning: string
     busy: boolean
     onSend: () => void
-    onControl: (kind: 'pause' | 'close') => void
+    onControl: (kind: 'pause' | 'cancel') => void
     onModelChange: (providerId: string, modelId: string) => void
     onReasoningChange: (level: string) => void
     commands: readonly { name: string; description: string }[]
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ sessionId, active, closed, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+export function AgentTaskInput({ sessionId, active, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy || active)
     const providerPickerRef = useRef<HTMLDivElement>(null)
@@ -165,7 +164,7 @@ export function AgentTaskInput({ sessionId, active, closed, input, setInput, mod
 
     const submitOrStop = useCallback(() => {
         if (active) {
-            onControl('close')
+            onControl('cancel')
             return
         }
         onSend()
@@ -179,9 +178,6 @@ export function AgentTaskInput({ sessionId, active, closed, input, setInput, mod
 
     return (
         <div className="command-band">
-            {closed && (
-                <p className="round-notice">此代理已关闭。在此开始新一轮，或在目标更改时创建新会话。</p>
-            )}
             {slash.menu}
             <div className="composer-shell">
                 <button
@@ -207,10 +203,11 @@ export function AgentTaskInput({ sessionId, active, closed, input, setInput, mod
                     value={input}
                     onChange={(event) => slash.changeInput(event.target.value)}
                     onKeyDown={handleInputKeyDown}
-                    placeholder={active ? '代理处于活动状态时输入不可用。' : closed ? '为此代理编写下一轮任务' : '为此代理编写新任务'}
+                    placeholder={active ? '代理处于活动状态时输入不可用。' : '为此代理编写新任务'}
                     disabled={active || busy}
                     rows={1}
                 />
+                <SessionTokenUsage key={sessionId} />
                 <div className="composer-tools">
                     <div className={`composer-provider-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={providerPickerRef}>
                         <button
@@ -349,12 +346,11 @@ export function AgentTaskInput({ sessionId, active, closed, input, setInput, mod
                         )}
                     </div>
                     <div className="composer-send-controls">
-                        <SessionTokenUsage key={sessionId} />
                         <button
                             className={`composer-submit ${active ? 'composer-submit-danger' : ''}`}
                             type="button"
-                            title={active ? '停止执行' : closed ? '开始新一轮' : '发送输入'}
-                            aria-label={active ? '停止执行' : closed ? '开始新一轮' : '发送输入'}
+                            title={active ? '停止执行' : '发送输入'}
+                            aria-label={active ? '停止执行' : '发送输入'}
                             onClick={submitOrStop}
                             disabled={busy || (!active && !input.trim())}
                         >

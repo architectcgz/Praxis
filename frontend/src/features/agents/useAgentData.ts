@@ -271,7 +271,8 @@ export function useAgentData({ models, setError, setErrorCode, viewRequestRef }:
         if (!sessionAgentIDsRef.current.has(event.agentId)) {
             return
         }
-        if (event.kind === 'settled') {
+        if (event.kind === 'turn_ended' || event.kind === 'request_canceled') {
+            setStreamingOutputs((current) => mergeStreamingEvent(current, event))
             void refreshAgent(event.agentId)
             return
         }

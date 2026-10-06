@@ -110,8 +110,8 @@ func (w *WaitCondition) Cancel(at time.Time) error {
 type AgentControlKind string
 
 const (
-	AgentControlPause AgentControlKind = "pause"
-	AgentControlClose AgentControlKind = "close"
+	AgentControlPause  AgentControlKind = "pause"
+	AgentControlCancel AgentControlKind = "cancel"
 )
 
 type AgentControlStatus string
@@ -153,10 +153,10 @@ func NewAgentControlCommand(
 }
 
 func (r AgentControlCommand) Validate() error {
-	if contracts.EmptyID(string(r.ID)) || contracts.EmptyID(string(r.AgentID)) {
+	if contracts.EmptyID(string(r.ID)) || contracts.EmptyID(string(r.AgentID)) || contracts.EmptyID(string(r.TargetTurnID)) {
 		return contracts.InvalidValue("agentControlCommand", "required reference is missing")
 	}
-	if r.Kind != AgentControlPause && r.Kind != AgentControlClose {
+	if r.Kind != AgentControlPause && r.Kind != AgentControlCancel {
 		return contracts.InvalidValue("agentControlCommand.kind", "unknown control kind")
 	}
 	if r.Status != AgentControlPending && r.Status != AgentControlApplied {
