@@ -10,9 +10,16 @@ import (
 	"errors"
 	"fmt"
 
+	"praxis/internal/logging"
 	"praxis/internal/repository"
 	"praxis/internal/system"
 )
+
+// WorkspaceDirectory 是项目创建所需的最小目录 Port。
+type WorkspaceDirectory interface {
+	Ensure(context.Context, string) (created bool, err error)
+	RemoveEmpty(context.Context, string) error
+}
 
 // Config 包含创建 Project 持久化状态所需的依赖。
 type Config struct {
@@ -20,6 +27,8 @@ type Config struct {
 	Projects     repository.ProjectRepository
 	Workspaces   repository.WorkspaceRepository
 	Clock        system.Clock
+	Directory    WorkspaceDirectory
+	Logger       *logging.Logger
 }
 
 // Service owns Project mutations and their transaction boundaries.
@@ -28,6 +37,8 @@ type Service struct {
 	projects   repository.ProjectRepository
 	workspaces repository.WorkspaceRepository
 	clock      system.Clock
+	directory  WorkspaceDirectory
+	logger     *logging.Logger
 }
 
 // CreateProjectParams contains the durable identity and initial workspace
@@ -49,9 +60,10 @@ type CreateProjectResult struct {
 // NewService creates the Project application service.
 func NewService(config Config) (*Service, error) {
 	for name, value := range map[string]any{
-		"transactions": config.Transactions,
-		"projects":     config.Projects,
-		"workspaces":   config.Workspaces,
+		"transactions":        config.Transactions,
+		"projects":            config.Projects,
+		"workspaces":          config.Workspaces,
+		"workspace directory": config.Directory,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("project service %s is required", name)
@@ -62,6 +74,8 @@ func NewService(config Config) (*Service, error) {
 		projects:   config.Projects,
 		workspaces: config.Workspaces,
 		clock:      system.ClockOrDefault(config.Clock),
+		directory:  config.Directory,
+		logger:     logging.NewFactory().Ensure(config.Logger),
 	}, nil
 }
 
@@ -70,8 +84,12 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 	if ctx == nil {
 		return CreateProjectResult{}, errors.New("create project context is required")
 	}
+	createdDirectory, err := s.directory.Ensure(ctx, params.Path)
+	if err != nil {
+		return CreateProjectResult{}, err
+	}
 	var result CreateProjectResult
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.projects.Get(txCtx, params.ProjectID)
 		if err == nil {
 			workspace, workspaceErr := s.workspaces.Get(txCtx, params.WorkspaceID)
@@ -118,6 +136,11 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 		result = CreateProjectResult{Project: project, Workspace: workspace}
 		return nil
 	})
+	if err != nil && createdDirectory {
+		if removeErr := s.directory.RemoveEmpty(context.WithoutCancel(ctx), params.Path); removeErr != nil {
+			s.logger.Warnf("回收未落库的项目目录失败 path=%s err=%v", params.Path, removeErr)
+		}
+	}
 	return result, err
 }
 

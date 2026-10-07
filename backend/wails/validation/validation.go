@@ -1,15 +1,12 @@
-// Package validation 在 wails 边界做入参形状校验：必填、规范化、空值和请求内引用完整性。
+// Package validation 在 Wails 边界校验请求 ID 等 wire shape。
 //
-// 只校验请求本身的形状；依赖当前状态或持久化数据的规则属于用例/领域层。
+// 内容规范化、大小限制和业务引用规则由 internal/request 统一处理。
 // 校验失败返回 Error，携带稳定码 invalid_request 与具体字段/原因。
 package validation
 
 import (
-	"fmt"
 	"strings"
-	"unicode/utf8"
 
-	taskmodel "praxis/internal/core/task"
 	"praxis/wails/dto"
 	apperr "praxis/wails/error"
 )
@@ -43,10 +40,6 @@ func invalid(field, reason string) error {
 	return &Error{Field: field, Reason: reason}
 }
 
-func blank(value string) bool {
-	return strings.TrimSpace(value) == ""
-}
-
 func requireID(field, value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -72,7 +65,7 @@ func ValidateProviderID(value string) error {
 	return requireID("providerId", value)
 }
 
-// ValidateSendInput 校验 requestId、目标 ID 和输入内容必填，且已提供的 ID 必须规范化。
+// ValidateSendInput 校验 requestId 和目标 ID 的 wire shape。
 func ValidateSendInput(request dto.SendInputRequest) error {
 	if err := requireID("requestId", request.RequestID); err != nil {
 		return err
@@ -90,9 +83,6 @@ func ValidateSendInput(request dto.SendInputRequest) error {
 			return err
 		}
 	}
-	if blank(request.Content) {
-		return invalid("content", "required")
-	}
 	return nil
 }
 
@@ -107,7 +97,7 @@ func ValidateAgentControl(request dto.PauseAgentRequest) error {
 	return requireID("targetTaskId", request.TargetTaskID)
 }
 
-// ValidateQueueTask 校验预约 Task 的身份和输入，大小限制按规范化后的 UTF-8 字节数计算。
+// ValidateQueueTask 校验预约 Task 的身份字段。
 func ValidateQueueTask(request dto.QueueTaskRequest) error {
 	if err := requireID("taskId", request.TaskID); err != nil {
 		return err
@@ -115,17 +105,7 @@ func ValidateQueueTask(request dto.QueueTaskRequest) error {
 	if err := requireID("requestId", request.RequestID); err != nil {
 		return err
 	}
-	if err := requireID("agentId", request.AgentID); err != nil {
-		return err
-	}
-	prompt := strings.TrimSpace(request.Prompt)
-	if prompt == "" {
-		return invalid("prompt", "required")
-	}
-	if len(prompt) > taskmodel.MaxInputBytes || !utf8.ValidString(prompt) {
-		return invalid("prompt", "must be valid UTF-8 within the size limit")
-	}
-	return nil
+	return requireID("agentId", request.AgentID)
 }
 
 // ValidateCreateProject 校验建项目请求的必填字段。
@@ -157,26 +137,4 @@ func ValidateCreateSession(request dto.CreateSessionRequest) error {
 		return err
 	}
 	return requireID("requestId", request.RequestID)
-}
-
-// ValidateSaveModelConfig 校验模型配置文档内部的引用完整性。
-//
-// 必须在 DTO 转换前检查：输入层只把 model 挂到同请求内已声明的
-// provider 下，找不到 provider 的 model 会被静默丢弃，core 校验的是丢弃之后的
-// 配置，无法发现丢失。
-func ValidateSaveModelConfig(request dto.SaveModelConfigRequest) error {
-	providers := make(map[string]struct{}, len(request.Providers))
-	for _, provider := range request.Providers {
-		providers[provider.ID] = struct{}{}
-	}
-	for index, option := range request.Models {
-		providerID := option.ProviderID
-		if providerID == "" {
-			return invalid(fmt.Sprintf("models[%d].providerId", index), "required")
-		}
-		if _, ok := providers[providerID]; !ok {
-			return invalid(fmt.Sprintf("models[%d].providerId", index), "unknown provider "+providerID)
-		}
-	}
-	return nil
 }

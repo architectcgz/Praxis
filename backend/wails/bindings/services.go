@@ -5,20 +5,8 @@ import (
 	"errors"
 
 	"praxis/internal/contracts"
-	"praxis/internal/core/model"
-	modelconfig "praxis/internal/core/model/config"
-	projectmodel "praxis/internal/core/project"
-	sessionmodel "praxis/internal/core/session"
-	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/timing"
-
-	"praxis/internal/agent_runtime"
-	applicationagent "praxis/internal/service/agent"
-	applicationproject "praxis/internal/service/project"
-	applicationruntime "praxis/internal/service/runtime"
-	taskqueue "praxis/internal/service/runtime/queue"
-	taskstart "praxis/internal/service/runtime/task/start"
-	applicationsession "praxis/internal/service/session"
+	"praxis/internal/request"
+	"praxis/internal/service"
 )
 
 // 本文件定义 binding 层向应用服务请求的窄接口集。
@@ -28,46 +16,45 @@ import (
 
 // ProjectService 暴露 Project、Workspace 列表与 Project 创建。
 type ProjectService interface {
-	ListProjects(context.Context, int) ([]projectmodel.Project, error)
-	CreateProject(context.Context, contracts.ProjectID, contracts.WorkspaceID, string, string, contracts.RequestID) (applicationproject.CreateProjectResult, error)
-	ListWorkspaces(context.Context, contracts.ProjectID, int) ([]workspacemodel.Workspace, error)
+	ListProjects(context.Context, int) ([]service.ProjectSummary, error)
+	CreateProject(context.Context, request.CreateProject) (service.CreateProjectResult, error)
 }
 
 // SessionService 暴露 Session 列表、创建与详情视图。
 type SessionService interface {
-	ListSessions(context.Context, int) ([]sessionmodel.Session, error)
-	ListSessionsByProject(context.Context, contracts.ProjectID, int) ([]sessionmodel.Session, error)
-	CreateSessionForProject(context.Context, contracts.SessionID, contracts.AgentID, contracts.RequestID, contracts.ProjectID, contracts.WorkspaceID, contracts.AgentDefinitionID) (applicationsession.CreateResult, error)
-	GetSessionView(context.Context, contracts.SessionID, int) (applicationsession.SessionView, error)
-	GetSessionUsageSummary(context.Context, contracts.SessionID) (applicationsession.SessionUsageSummary, error)
+	ListSessionsByProject(context.Context, contracts.ProjectID, int) ([]service.SessionSummary, error)
+	CreateSession(context.Context, request.CreateSession) (service.CreateSessionResult, error)
+	GetSessionDetail(context.Context, contracts.SessionID, int) (service.SessionDetail, error)
+	GetSessionUsageSummary(context.Context, contracts.SessionID) (service.SessionUsageSummary, error)
 	DeleteSession(context.Context, contracts.SessionID) error
-	RenameSession(context.Context, contracts.SessionID, string) error
-	PreviewFile(context.Context, contracts.SessionID, string) (applicationsession.FilePreview, error)
+	RenameSession(context.Context, request.RenameSession) error
+	PreviewFile(context.Context, request.FilePreview) (service.FilePreview, error)
 }
 
 // AgentService 暴露 Agent 详情和专属消息流。
 type AgentService interface {
-	GetAgentView(context.Context, contracts.AgentID, int) (applicationagent.AgentView, error)
-	ListAgentMessages(context.Context, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
+	GetAgentDetail(context.Context, contracts.AgentID, int) (service.AgentDetail, error)
+	ListAgentMessages(context.Context, contracts.AgentID, int) ([]service.AgentMessage, error)
+	ListAgentHistory(context.Context, contracts.AgentID, int) ([]service.AgentHistoryItem, error)
 }
 
 // AgentCommands 接收持久化的 Agent 执行与控制命令。
 type AgentCommands interface {
-	SendInput(context.Context, taskstart.SendInputParams) (applicationruntime.StartResult, error)
-	PauseAgent(context.Context, applicationagent.ControlParams) (applicationagent.ControlResult, error)
-	CancelTask(context.Context, applicationagent.ControlParams) (applicationagent.ControlResult, error)
-	EnqueueTask(context.Context, taskqueue.EnqueueParams) (applicationruntime.EnqueueResult, error)
+	SendInput(context.Context, request.SendInput) (service.SendInputResult, error)
+	PauseAgent(context.Context, request.Control) (service.ControlResult, error)
+	CancelTask(context.Context, request.Control) (service.ControlResult, error)
+	EnqueueTask(context.Context, request.EnqueueTask) (service.EnqueueTaskResult, error)
 }
 
 // ModelCatalog 列出已确认的模型标签与能力。
 type ModelCatalog interface {
-	ListModels() []modelconfig.Option
+	ListModels() []service.ModelOption
 }
 
 // ModelConfigService 提供模型配置读写、凭据管理和模型发现用例。
 type ModelConfigService interface {
-	ModelConfig() modelconfig.Config
-	SaveModelConfig(modelconfig.ValidatedConfig) error
+	ModelConfig() service.ModelConfig
+	SaveModelConfig(request.SaveModelConfig) error
 	ReloadConfig(context.Context) error
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
@@ -76,17 +63,17 @@ type ModelConfigService interface {
 
 // AgentEventSource 流出单次 task 的瞬时 runtime 事件。
 type AgentEventSource interface {
-	SubscribeAgentEvents(agentruntime.AgentEventObserver) func()
+	SubscribeAgentEvents(func(service.AgentEvent)) func()
 }
 
 // TimingService 独立查询计时事实，不读取或改写消息正文。
 type TimingService interface {
-	ListAgent(context.Context, string, int) ([]timing.Record, error)
+	ListAgent(context.Context, string, int) ([]service.OperationTiming, error)
 }
 
 // UsageService 查询会话完整的请求用量，不受消息和计时分页影响。
 type UsageService interface {
-	ListSession(context.Context, string) ([]model.ModelUsageRecord, error)
+	ListSession(context.Context, string) ([]service.ModelUsageRecord, error)
 }
 
 // Services 是 binding 层所需的全部窄能力。

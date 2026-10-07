@@ -1,12 +1,10 @@
 package dto
 
-import "praxis/internal/core/model"
-
-// SessionUsageSummary 返回同一快照的用量明细和加权缓存率；未知比例明确编码为 null。
+// SessionUsageSummary 返回同一快照的用量明细和加权缓存率；未知比例编码为 null。
 type SessionUsageSummary struct {
-	Records              []model.ModelUsageRecord `json:"records"`
-	InputTokens          int64                    `json:"inputTokens"`
-	CacheReadInputTokens int64                    `json:"cacheReadInputTokens"`
-	CacheReadRatio       *float64                 `json:"cacheReadRatio"`
-	CacheReadComplete    bool                     `json:"cacheReadComplete"`
+	Records              []ModelUsageRecord `json:"records"`
+	InputTokens          int64              `json:"inputTokens"`
+	CacheReadInputTokens int64              `json:"cacheReadInputTokens"`
+	CacheReadRatio       *float64           `json:"cacheReadRatio"`
+	CacheReadComplete    bool               `json:"cacheReadComplete"`
 }

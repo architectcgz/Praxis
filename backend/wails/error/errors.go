@@ -27,8 +27,7 @@ func Encode(code, message string) string {
 	return string(encoded)
 }
 
-// PublicError 保留业务码和错误详情，供桌面端显示具体失败原因。
-// 仅有业务码或属于取消、超时的错误由前端提供文案；未知错误使用 internal_error。
+// PublicError 保留业务码和安全的校验详情；未知内部错误不向前端暴露原始信息。
 func PublicError(err error) error {
 	if err == nil {
 		return nil
@@ -51,7 +50,7 @@ func PublicError(err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return codedError{code: ErrorCodeRequestTimeout.String()}
 	}
-	return codedError{code: ErrorCodeInternal.String(), message: err.Error()}
+	return codedError{code: ErrorCodeInternal.String()}
 }
 
 // CodedError 构造 app 层自身的错误码错误，无附加信息。

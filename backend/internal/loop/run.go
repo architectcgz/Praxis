@@ -125,7 +125,7 @@ func (r *Runner) run(
 			request.Context = modelContext.Clone()
 		}
 		// 每次迭代必须先在日志中留下 running 迭代，恢复才能对账未结算的调用。
-		turn, err := r.Turns.RecordStart(ctx, TurnParams{
+		turn, err := r.Turns.RecordStart(ctx, contracts.TurnExecutionContext{
 			TaskID:    task.ID,
 			SessionID: task.SessionID,
 			AgentID:   task.AgentID,
@@ -172,7 +172,7 @@ func (r *Runner) run(
 			r.emitError(task.AgentID, task.ID, turn.ID, err)
 			return r.settleTurnErr(ctx, turn.ID, err)
 		}
-		metadata := ToolInvocationMetadata{
+		metadata := contracts.ToolInvocationContext{
 			TaskID:              task.ID,
 			TurnID:              turn.ID,
 			SessionID:           task.SessionID,
@@ -189,7 +189,7 @@ func (r *Runner) run(
 				AuthorKind: sessionmodel.AuthorAgent,
 				AuthorID:   task.AgentID.String(),
 			}, assistant)
-			if err := r.ToolCalls.RecordAssistant(ctx, messageRecorder, message, metadata); err != nil {
+			if err := r.ToolCalls.RecordAssistant(ctx, messageRecorder.Append, message, metadata); err != nil {
 				r.emitError(task.AgentID, task.ID, turn.ID, err)
 				return r.settleTurnErr(ctx, turn.ID, err)
 			}

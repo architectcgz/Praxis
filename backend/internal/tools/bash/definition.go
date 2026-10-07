@@ -3,6 +3,7 @@ package bash
 import (
 	"encoding/json"
 
+	"praxis/internal/contracts"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -31,8 +32,8 @@ var inputSchema = json.RawMessage(`{
 }`)
 
 // Definition 返回 bash 的模型可见工具契约。
-func Definition() toolcontracts.ToolDefinition {
-	return toolcontracts.ToolDefinition{
+func Definition() contracts.ToolDefinition {
+	return contracts.ToolDefinition{
 		Name: toolcontracts.ToolBash,
 		Description: "在已授权的工作区内执行 Bash 命令或多行脚本，返回合并后的 stdout 和 stderr。" +
 			"输入 command，可选 path 和 timeout（秒）；相对 path 按工作区解析。" +

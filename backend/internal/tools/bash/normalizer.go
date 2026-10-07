@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"praxis/internal/contracts"
 	toolcontracts "praxis/internal/tools/contracts"
 	toolshared "praxis/internal/tools/shared"
 )
@@ -32,7 +33,7 @@ type input struct {
 }
 
 // Normalize 校验 bash 参数，并将工作目录交给统一路径解析流程处理。
-func Normalize(call toolcontracts.ToolCall) (toolcontracts.NormalizedToolCall, error) {
+func Normalize(call contracts.ToolCall) (toolcontracts.NormalizedToolCall, error) {
 	invalidArguments := func(reason string) (toolcontracts.NormalizedToolCall, error) {
 		return toolcontracts.NormalizedToolCall{}, fmt.Errorf("bash arguments are invalid: %s", reason)
 	}

@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	sessionmodel "praxis/internal/core/session"
-	toolcontracts "praxis/internal/tools/contracts"
 )
 
 // RecordAssistant 在同一个 Session 事务内保存消息和整批 requested 调用。
@@ -16,11 +14,11 @@ import (
 // recorder 必须使用同一存储的事务 Context；任一保存失败会回滚整批，重试复用调用身份。
 func (s *Service) RecordAssistant(
 	ctx context.Context,
-	recorder agentruntime.MessageRecorder,
+	appendMessage func(context.Context, sessionmodel.MessageData) (sessionmodel.MessageData, error),
 	message sessionmodel.MessageData,
-	metadata agentruntime.ToolInvocationMetadata,
+	metadata contracts.ToolInvocationContext,
 ) error {
-	if ctx == nil || recorder == nil || message.Role != sessionmodel.RoleAssistant ||
+	if ctx == nil || appendMessage == nil || message.Role != sessionmodel.RoleAssistant ||
 		message.AuthorKind != sessionmodel.AuthorAgent || message.AuthorID != metadata.AgentID.String() ||
 		message.TaskID != metadata.TaskID.String() || metadata.TurnID == "" {
 		return errors.New("assistant tool call ownership is required")
@@ -36,7 +34,7 @@ func (s *Service) RecordAssistant(
 		if message.RequestID != task.RequestID.String() {
 			return contracts.ErrRequestConflict
 		}
-		if _, err := recorder.Append(txCtx, message); err != nil {
+		if _, err := appendMessage(txCtx, message); err != nil {
 			return err
 		}
 		seen := make(map[string]bool)
@@ -56,12 +54,12 @@ func (s *Service) RecordAssistant(
 	})
 }
 
-func toolCall(block sessionmodel.Block) toolcontracts.ToolCall {
+func toolCall(block sessionmodel.Block) contracts.ToolCall {
 	arguments := block.Input
 	if len(arguments) == 0 {
 		arguments = json.RawMessage(`{}`)
 	}
-	return toolcontracts.ToolCall{
+	return contracts.ToolCall{
 		ID:        block.CallID,
 		Name:      contracts.ToolName(block.Name),
 		Arguments: arguments,

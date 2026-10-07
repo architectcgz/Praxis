@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"praxis/internal/contracts"
 	toolcontracts "praxis/internal/tools/contracts"
 	toolshared "praxis/internal/tools/shared"
 )
@@ -18,7 +19,7 @@ type arguments struct {
 }
 
 // Normalize 校验补丁格式并规范化补丁工作区根目录。
-func Normalize(call toolcontracts.ToolCall) (toolcontracts.NormalizedToolCall, error) {
+func Normalize(call contracts.ToolCall) (toolcontracts.NormalizedToolCall, error) {
 	invalidArguments := func(reason string) (toolcontracts.NormalizedToolCall, error) {
 		return toolcontracts.NormalizedToolCall{}, fmt.Errorf("apply_patch arguments are invalid: %s", reason)
 	}

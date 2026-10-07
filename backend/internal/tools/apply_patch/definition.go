@@ -3,6 +3,7 @@ package applypatch
 import (
 	"encoding/json"
 
+	"praxis/internal/contracts"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -27,8 +28,8 @@ var inputSchema = json.RawMessage(`{
 }`)
 
 // Definition 返回 apply_patch 的模型可见工具契约。
-func Definition() toolcontracts.ToolDefinition {
-	return toolcontracts.ToolDefinition{
+func Definition() contracts.ToolDefinition {
+	return contracts.ToolDefinition{
 		Name: toolcontracts.ToolApplyPatch,
 		Description: "在已授权的工作区内应用一个或多个文件补丁。" +
 			"patch 必须使用 *** Begin Patch、*** Update File、*** Add File、*** Delete File 和 *** End Patch 格式；" +

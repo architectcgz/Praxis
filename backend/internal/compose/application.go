@@ -31,6 +31,7 @@ import (
 	"praxis/internal/infra/jsonl"
 	modelregistry "praxis/internal/infra/model_registry"
 	"praxis/internal/infra/toolconfig"
+	"praxis/internal/infra/workspacefs"
 	"praxis/internal/logging"
 	"praxis/internal/timing"
 	"praxis/internal/tools"
@@ -66,8 +67,8 @@ func (a *Application) Services() bindings.Services {
 		Models:         impl,
 		ModelConfig:    impl,
 		Events:         impl,
-		Timings:        a.timings,
-		Usages:         a.usages,
+		Timings:        impl,
+		Usages:         impl,
 		SessionLogPath: a.store.SessionLogPath,
 	}
 }
@@ -151,9 +152,8 @@ func Open(
 		return nil, fmt.Errorf("open document store: %w", err)
 	}
 	repos := store.Repositories()
-	messages := applicationsession.NewMessageStore(
-		store, repos.Agents, repos.SessionMessages, repos.AgentMessages,
-	)
+	workspaceFilesystem := workspacefs.Filesystem{}
+	messages := repos.Messages
 	events := appservices.NewEventPublisher()
 	usages := jsonl.ModelUsageStore{Store: store}
 	observe := func(event agentruntime.AgentEvent) {
@@ -172,7 +172,7 @@ func Open(
 				diagnostics.Errorf("token usage save failed task=%s turn=%s: %v", event.TaskID, event.TurnID, err)
 			}
 		}
-		events.Publish(event)
+		events.Publish(desktopAgentEvent(event))
 	}
 	timingStore := jsonl.TimingStore{Store: store}
 	if err := timingStore.RecoverInterrupted(ctx); err != nil {
@@ -181,11 +181,12 @@ func Open(
 		return nil, fmt.Errorf("recover operation timings: %w", err)
 	}
 	timings, err := timing.New(timingStore, func(record timing.Record) {
-		events.Publish(agentruntime.AgentEvent{
-			Kind:    agentruntime.AgentEventTiming,
+		value := desktopTiming(record)
+		events.Publish(appservices.AgentEvent{
+			Kind:    string(agentruntime.AgentEventTiming),
 			AgentID: contracts.AgentID(record.AgentID),
 			TaskID:  contracts.TaskID(record.TaskID),
-			Timing:  &record,
+			Timing:  &value,
 		})
 	}, diagnostics.Errorf)
 	if err != nil {
@@ -217,7 +218,7 @@ func Open(
 		Tasks:        repos.Tasks,
 		Controls:     repos.Controls,
 		Executions:   executions,
-		Messages:     messages.ListAgent,
+		Messages:     messages,
 	})
 	if err != nil {
 		diagnostics.Errorf("create agent service failed: %v", err)
@@ -237,12 +238,11 @@ func Open(
 		ToolInvocations: repos.ToolInvocations,
 		Controls:        repos.Controls,
 		Turns:           repos.Turns,
-		SessionMessages: repos.SessionMessages,
-		AgentMessages:   repos.AgentMessages,
 		Definitions:     agentRegistry.Definition,
 		PolicyFactory:   agentRegistry.SecurityPolicy,
 		Messages:        messages,
 		UsageRecords:    usages.ListSession,
+		TextReader:      workspaceFilesystem,
 		RemoveSessionData: func(ctx context.Context, sessionID contracts.SessionID, documentRefs []string) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -267,14 +267,16 @@ func Open(
 		return nil, fmt.Errorf("recover stale tasks: %w", err)
 	}
 	lifecycleService, err := tasklifecycle.NewService(tasklifecycle.Config{
-		Transactions:  store,
-		Sessions:      repos.Sessions,
-		Agents:        repos.Agents,
-		Tasks:         repos.Tasks,
-		Controls:      repos.Controls,
-		Messages:      messages,
-		Logger:        diagnostics,
-		EventObserver: events.Publish,
+		Transactions: store,
+		Sessions:     repos.Sessions,
+		Agents:       repos.Agents,
+		Tasks:        repos.Tasks,
+		Controls:     repos.Controls,
+		Messages:     messages,
+		Logger:       diagnostics,
+		EventObserver: func(event tasklifecycle.TerminalEvent) {
+			events.Publish(terminalAgentEvent(event))
+		},
 	})
 	if err != nil {
 		diagnostics.Errorf("create task lifecycle service failed: %v", err)
@@ -290,8 +292,7 @@ func Open(
 		Agents:              repos.Agents,
 		Tasks:               repos.Tasks,
 		Executions:          executions,
-		SessionMessages:     repos.SessionMessages,
-		AgentMessages:       repos.AgentMessages,
+		Messages:            repos.Messages,
 		ToolPermissions:     toolPermissions,
 		RegisteredTools:     registeredToolNames,
 		PrimaryAgent:        sessionService,
@@ -307,10 +308,10 @@ func Open(
 		return nil, err
 	}
 	queueService, err := runtimequeue.NewService(runtimequeue.Config{
-		Transactions:    store,
-		Agents:          repos.Agents,
-		Tasks:           repos.Tasks,
-		SessionMessages: repos.SessionMessages,
+		Transactions: store,
+		Agents:       repos.Agents,
+		Tasks:        repos.Tasks,
+		Messages:     repos.Messages,
 	})
 	if err != nil {
 		diagnostics.Errorf("create task queue service failed: %v", err)
@@ -322,6 +323,8 @@ func Open(
 		Transactions: store,
 		Projects:     repos.Projects,
 		Workspaces:   repos.Workspaces,
+		Directory:    workspaceFilesystem,
+		Logger:       diagnostics,
 	})
 	if err != nil {
 		diagnostics.Errorf("create project service failed: %v", err)
@@ -336,13 +339,15 @@ func Open(
 		return nil, err
 	}
 	factory := runtimeFactory{
-		executions:       executions,
-		runLoop:          timedLoop(runLoop, timings),
-		messageRecorders: messages.Resolve,
-		taskBuilder:      startService,
-		lifecycle:        taskService,
-		tasks:            repos.Tasks,
-		logger:           diagnostics,
+		executions: executions,
+		runLoop:    timedLoop(runLoop, timings),
+		messageRecorders: func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (agentruntime.MessageRecorder, error) {
+			return messages.Resolve(ctx, sessionID, agentID)
+		},
+		taskBuilder: startService,
+		lifecycle:   taskService,
+		tasks:       repos.Tasks,
+		logger:      diagnostics,
 	}
 	registry, err := agentruntime.NewRegistry(factory)
 	if err != nil {
@@ -352,9 +357,9 @@ func Open(
 		return nil, err
 	}
 	runtimeService, err := applicationruntime.NewService(applicationruntime.Config{
-		Tasks:    taskService,
-		Queue:    queueService,
-		Registry: registry,
+		Tasks:     taskService,
+		Queue:     queueService,
+		Activator: registry,
 	})
 	if err != nil {
 		_ = registry.Close(context.Background())
@@ -410,8 +415,10 @@ func Open(
 				return nil
 			})
 		},
-		Events: events,
-		Logger: diagnostics,
+		Events:           events,
+		Logger:           diagnostics,
+		ListAgentTimings: timings.ListAgent,
+		ListSessionUsage: usages.ListSession,
 	})
 	return &Application{
 		frontend: frontend,

@@ -28,7 +28,7 @@ func (r *Runner) runToolCalls(
 	ctx context.Context,
 	messageRecorder agentruntime.MessageRecorder,
 	calls []ToolCall,
-	metadata ToolInvocationMetadata,
+	metadata contracts.ToolInvocationContext,
 	requestID contracts.RequestID,
 	budget *taskBudget,
 ) ([]toolcontracts.ToolResult, error) {

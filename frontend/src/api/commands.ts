@@ -1,5 +1,4 @@
 import { getCommandBinding } from './bindings'
-import { API_ERROR_CODES } from './errors'
 
 export type SendInputRequest = {
     sessionId: string
@@ -33,9 +32,6 @@ export type AgentControlResponse = {
 }
 
 export function sendInput(request: SendInputRequest) {
-    if (!request.providerId.trim() || !request.modelId.trim()) {
-        return Promise.reject(new Error(API_ERROR_CODES.modelNotConfigured))
-    }
     return getCommandBinding().SendInput(request)
 }
 

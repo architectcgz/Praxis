@@ -12,24 +12,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"unicode/utf8"
 )
 
 type Config struct {
-	Transactions    repository.TxRunner
-	Agents          repository.SessionAgentRepository
-	Tasks           repository.TaskRepository
-	SessionMessages repository.SessionMessageRepository
-	Clock           system.Clock
+	Transactions repository.TxRunner
+	Agents       repository.SessionAgentRepository
+	Tasks        repository.TaskRepository
+	Messages     repository.MessageStreams
+	Clock        system.Clock
 }
 
 type Service struct {
-	tx              repository.TxRunner
-	agents          repository.SessionAgentRepository
-	tasks           repository.TaskRepository
-	sessionMessages repository.SessionMessageRepository
-	clock           system.Clock
+	tx       repository.TxRunner
+	agents   repository.SessionAgentRepository
+	tasks    repository.TaskRepository
+	messages repository.MessageStreams
+	clock    system.Clock
 }
 
 type EnqueueParams struct {
@@ -49,21 +47,21 @@ type EnqueueResult struct {
 
 func NewService(config Config) (*Service, error) {
 	for name, value := range map[string]any{
-		"transactions":     config.Transactions,
-		"agents":           config.Agents,
-		"tasks":            config.Tasks,
-		"session messages": config.SessionMessages,
+		"transactions": config.Transactions,
+		"agents":       config.Agents,
+		"tasks":        config.Tasks,
+		"messages":     config.Messages,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("task queue service %s is required", name)
 		}
 	}
 	return &Service{
-		tx:              config.Transactions,
-		agents:          config.Agents,
-		tasks:           config.Tasks,
-		sessionMessages: config.SessionMessages,
-		clock:           system.ClockOrDefault(config.Clock),
+		tx:       config.Transactions,
+		agents:   config.Agents,
+		tasks:    config.Tasks,
+		messages: config.Messages,
+		clock:    system.ClockOrDefault(config.Clock),
 	}, nil
 }
 
@@ -71,13 +69,6 @@ func NewService(config Config) (*Service, error) {
 func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (EnqueueResult, error) {
 	if ctx == nil {
 		return EnqueueResult{}, errors.New("enqueue task context is required")
-	}
-	params.Prompt = strings.TrimSpace(params.Prompt)
-	params.ProviderID = strings.TrimSpace(params.ProviderID)
-	params.ModelID = strings.TrimSpace(params.ModelID)
-	params.ReasoningLevel = strings.TrimSpace(params.ReasoningLevel)
-	if params.Prompt == "" || len(params.Prompt) > taskmodel.MaxInputBytes || !utf8.ValidString(params.Prompt) {
-		return EnqueueResult{}, contracts.InvalidValue("prompt", "输入必须是非空 UTF-8 文本且不超过大小限制")
 	}
 	result := EnqueueResult{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -94,7 +85,7 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 				existingRequest.ProviderID != params.ProviderID || existingRequest.ModelID != params.ModelID || existingRequest.ReasoningLevel != params.ReasoningLevel {
 				return contracts.ErrRequestConflict
 			}
-			storedContent, err := s.inputMessageContent(txCtx, agent.SessionID, existingRequest.RequestID)
+			storedContent, err := s.inputMessageContent(txCtx, agent, existingRequest.RequestID)
 			if err != nil {
 				return err
 			}
@@ -134,17 +125,14 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 		if err := s.tasks.Save(txCtx, task); err != nil {
 			return err
 		}
-		_, err = s.sessionMessages.Append(txCtx, sessionmodel.SessionMessage{
-			SessionID: agent.SessionID,
-			Data: sessionmodel.MessageData{
-				ID:         "input:" + params.RequestID.String(),
-				RequestID:  params.RequestID.String(),
-				TaskID:     task.ID.String(),
-				Role:       sessionmodel.RoleUser,
-				AuthorKind: sessionmodel.AuthorUser,
-				Blocks:     []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: params.Prompt}},
-				CreatedAt:  at,
-			},
+		_, err = s.messages.Append(txCtx, agent, sessionmodel.MessageData{
+			ID:         "input:" + params.RequestID.String(),
+			RequestID:  params.RequestID.String(),
+			TaskID:     task.ID.String(),
+			Role:       sessionmodel.RoleUser,
+			AuthorKind: sessionmodel.AuthorUser,
+			Blocks:     []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: params.Prompt}},
+			CreatedAt:  at,
 		})
 		if err != nil {
 			return err
@@ -155,15 +143,15 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 	return result, err
 }
 
-func (s *Service) inputMessageContent(ctx context.Context, sessionID contracts.SessionID, requestID contracts.RequestID) (string, error) {
+func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agent, requestID contracts.RequestID) (string, error) {
 	messageID := "input:" + requestID.String()
-	messages, err := s.sessionMessages.List(ctx, sessionID, 0, 0)
+	messages, err := s.messages.List(ctx, agent, 0, 0)
 	if err != nil {
 		return "", err
 	}
 	for _, message := range messages {
-		if message.Data.ID == messageID && message.Data.Role == sessionmodel.RoleUser {
-			return message.Data.TextContent(), nil
+		if message.ID == messageID && message.Role == sessionmodel.RoleUser {
+			return message.TextContent(), nil
 		}
 	}
 	return "", contracts.ErrNotFound

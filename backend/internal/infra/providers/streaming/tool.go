@@ -1,11 +1,9 @@
 package streaming
 
 import (
-	"praxis/internal/contracts"
-	toolcontracts "praxis/internal/tools/contracts"
-
 	"bytes"
 	"encoding/json"
+	"praxis/internal/contracts"
 
 	"praxis/internal/core/model"
 )
@@ -29,7 +27,7 @@ func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
 	}
 	return emit(model.ModelStreamEvent{
 		Kind: model.StreamToolCall,
-		ToolCall: toolcontracts.ToolCall{
+		ToolCall: contracts.ToolCall{
 			ID:        call.ID,
 			Name:      contracts.ToolName(call.Name),
 			Arguments: bytes.Clone(args),

@@ -2,7 +2,6 @@
 package lifecycle
 
 import (
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	taskmodel "praxis/internal/core/task"
@@ -18,6 +17,22 @@ import (
 	"praxis/internal/system"
 )
 
+const (
+	TerminalTaskEnded       = "task_ended"
+	TerminalRequestCanceled = "request_canceled"
+)
+
+// TerminalEvent 是事务提交后发布的最小终态事实。
+type TerminalEvent struct {
+	Kind           string
+	SessionID      contracts.SessionID
+	AgentID        contracts.AgentID
+	TaskID         contracts.TaskID
+	Outcome        string
+	FailureCode    contracts.TaskFailureCode
+	FailureMessage string
+}
+
 type Config struct {
 	Transactions  repository.TxRunner
 	Sessions      repository.SessionRepository
@@ -27,7 +42,7 @@ type Config struct {
 	Messages      repository.MessageLoader
 	Clock         system.Clock
 	Logger        *logging.Logger
-	EventObserver agentruntime.AgentEventObserver
+	EventObserver func(TerminalEvent)
 }
 
 type Service struct {
@@ -39,7 +54,7 @@ type Service struct {
 	messages      repository.MessageLoader
 	clock         system.Clock
 	logger        *logging.Logger
-	eventObserver agentruntime.AgentEventObserver
+	eventObserver func(TerminalEvent)
 }
 
 type Params struct {
@@ -218,16 +233,16 @@ func (s *Service) End(ctx context.Context, taskID contracts.TaskID, outcome task
 	)
 	// 每轮仅发布一个终态事件；取消原因来自持久化控制命令，不由 outcome 推断。
 	if s.eventObserver != nil {
-		kind := agentruntime.AgentEventTaskEnded
+		kind := TerminalTaskEnded
 		if endedTask.FailureCode == contracts.TaskFailureRequestCanceled {
-			kind = agentruntime.AgentEventRequestCanceled
+			kind = TerminalRequestCanceled
 		}
-		s.eventObserver(agentruntime.AgentEvent{
+		s.eventObserver(TerminalEvent{
 			Kind:           kind,
 			SessionID:      endedTask.SessionID,
 			AgentID:        endedTask.AgentID,
 			TaskID:         endedTask.ID,
-			Outcome:        endedTask.Outcome,
+			Outcome:        string(endedTask.Outcome),
 			FailureCode:    endedTask.FailureCode,
 			FailureMessage: endedTask.FailureMessage,
 		})

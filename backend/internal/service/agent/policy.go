@@ -21,7 +21,7 @@ type Config struct {
 	Tasks        repository.TaskRepository
 	Controls     repository.AgentControlCommandRepository
 	Executions   *agentmodel.Executions
-	Messages     func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
+	Messages     repository.MessageStreams
 	Clock        system.Clock
 }
 
@@ -31,7 +31,7 @@ type Service struct {
 	tasks      repository.TaskRepository
 	controls   repository.AgentControlCommandRepository
 	executions *agentmodel.Executions
-	messages   func(context.Context, contracts.SessionID, contracts.AgentID, int) ([]sessionmodel.MessageData, error)
+	messages   repository.MessageStreams
 	clock      system.Clock
 }
 
@@ -119,5 +119,9 @@ func (s *Service) ListAgentMessages(ctx context.Context, agentID contracts.Agent
 	if err != nil {
 		return nil, err
 	}
-	return s.messages(ctx, agent.SessionID, agent.ID, limit)
+	stream, err := s.messages.LoadMessages(ctx, agent.SessionID, agent.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return stream.Messages, nil
 }

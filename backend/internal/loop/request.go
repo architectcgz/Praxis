@@ -24,7 +24,7 @@ func (r *Runner) summarizeContext(
 	sequence uint64,
 	budget *taskBudget,
 ) (string, error) {
-	turn, err := r.Turns.RecordStart(ctx, TurnParams{
+	turn, err := r.Turns.RecordStart(ctx, contracts.TurnExecutionContext{
 		TaskID:    task.ID,
 		SessionID: task.SessionID,
 		AgentID:   task.AgentID,

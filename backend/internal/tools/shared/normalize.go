@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"praxis/internal/contracts"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -26,7 +27,7 @@ type pathInput struct {
 // NormalizePathArguments 校验并规范化使用 path、offset、limit 参数的工具调用。
 // name 指定工具名称，三个 limit 参数指定默认值和有效范围；参数无效时返回错误。
 func NormalizePathArguments(
-	call toolcontracts.ToolCall,
+	call contracts.ToolCall,
 	name toolcontracts.ToolName,
 	defaultLimit int,
 	minLimit int,

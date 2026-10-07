@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"praxis/internal/agent_runtime"
 	securitymodel "praxis/internal/core/security"
 	toolcontracts "praxis/internal/tools/contracts"
 )
@@ -29,8 +28,8 @@ type invocationIdentity struct {
 // Invoke 只执行已和 assistant 消息原子登记的调用，校验与授权后最多执行一次。
 func (s *Service) Invoke(
 	ctx context.Context,
-	call toolcontracts.ToolCall,
-	invocationContext agentruntime.ToolInvocationMetadata,
+	call contracts.ToolCall,
+	invocationContext contracts.ToolInvocationContext,
 ) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
 		return toolcontracts.ToolResult{}, errors.New("tool invocation metadata is required")
@@ -161,7 +160,7 @@ func (s *Service) Invoke(
 
 func (s *Service) loadModelContext(
 	ctx context.Context,
-	provided agentruntime.ToolInvocationMetadata,
+	provided contracts.ToolInvocationContext,
 ) (contracts.SecuritySnapshot, error) {
 	task, err := s.tasks.Get(ctx, provided.TaskID)
 	if err != nil {
@@ -199,8 +198,8 @@ func toolCallDigest(value invocationIdentity) string {
 // recordCall 只在 assistant 保存事务中登记调用，重复身份必须保持原始意图和归属一致。
 func (s *Service) recordCall(
 	ctx context.Context,
-	call toolcontracts.ToolCall,
-	provided agentruntime.ToolInvocationMetadata,
+	call contracts.ToolCall,
+	provided contracts.ToolInvocationContext,
 ) error {
 	digest := toolCallDigest(invocationIdentity{Name: call.Name, Arguments: call.Arguments})
 	if digest == "" {
@@ -410,5 +409,3 @@ func resolveNormalizedPath(
 	}
 	return call, nil
 }
-
-var _ agentruntime.ToolCallHandler = (*Service)(nil)

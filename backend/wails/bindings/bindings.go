@@ -1,10 +1,12 @@
 package bindings
 
 import (
+	"bytes"
 	"context"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"praxis/internal/agent_runtime"
+	"praxis/internal/service"
+	"praxis/wails/dto"
 )
 
 const agentEventName = "praxis:agent-event"
@@ -49,8 +51,8 @@ func (b *Bindings) All() []interface{} {
 	}
 }
 
-// EmitAgentEvent 把瞬时 Agent runtime 事件作为 Wails 事件推给前端。
-func (b *Bindings) EmitAgentEvent(event agentruntime.AgentEvent) {
+// EmitAgentEvent 把 application 事件转换成专用 DTO 后推给前端。
+func (b *Bindings) EmitAgentEvent(event service.AgentEvent) {
 	if event.AgentID == "" || event.TaskID == "" {
 		return
 	}
@@ -58,5 +60,34 @@ func (b *Bindings) EmitAgentEvent(event agentruntime.AgentEvent) {
 	if ctx == nil {
 		return
 	}
-	wailsruntime.EventsEmit(ctx, agentEventName, event)
+	value := dto.AgentEvent{
+		Kind:           event.Kind,
+		SessionID:      event.SessionID.String(),
+		AgentID:        event.AgentID.String(),
+		TaskID:         event.TaskID.String(),
+		Outcome:        event.Outcome,
+		FailureCode:    event.FailureCode,
+		FailureMessage: event.FailureMessage,
+		TurnID:         event.TurnID.String(),
+		Text:           event.Text,
+		CallID:         event.CallID,
+		Name:           event.Name,
+		Input:          bytes.Clone(event.Input),
+		Result:         event.Result,
+		IsError:        event.IsError,
+		Error:          event.Error,
+	}
+	if event.Timing != nil {
+		timing := operationTiming(*event.Timing)
+		value.Timing = &timing
+	}
+	if event.Usage != nil {
+		value.Usage = &dto.ModelUsage{
+			InputTokens:              event.Usage.InputTokens,
+			OutputTokens:             event.Usage.OutputTokens,
+			CacheReadInputTokens:     event.Usage.CacheReadInputTokens,
+			CacheCreationInputTokens: event.Usage.CacheCreationInputTokens,
+		}
+	}
+	wailsruntime.EventsEmit(ctx, agentEventName, value)
 }

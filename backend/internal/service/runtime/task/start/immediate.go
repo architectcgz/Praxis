@@ -3,8 +3,6 @@ package start
 import (
 	"context"
 	"errors"
-	"strings"
-	"unicode/utf8"
 
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
@@ -32,13 +30,6 @@ type Result struct {
 func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result, error) {
 	if ctx == nil {
 		return Result{}, errors.New("send input context is required")
-	}
-	params.Content = strings.TrimSpace(params.Content)
-	params.ProviderID = strings.TrimSpace(params.ProviderID)
-	params.ModelID = strings.TrimSpace(params.ModelID)
-	params.ReasoningLevel = strings.TrimSpace(params.ReasoningLevel)
-	if params.Content == "" || len(params.Content) > taskmodel.MaxInputBytes || !utf8.ValidString(params.Content) {
-		return Result{}, contracts.InvalidValue("content", "输入必须是非空 UTF-8 文本且不超过大小限制")
 	}
 	if params.AgentID == "" {
 		agent, err := s.primary.GetOrCreatePrimaryAgent(ctx, params.SessionID, params.RequestID)
@@ -137,12 +128,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			Blocks:     []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: params.Content}},
 			CreatedAt:  at,
 		}
-		if agent.CanReadSessionContext() {
-			_, err = s.sessionMessages.Append(txCtx, sessionmodel.SessionMessage{SessionID: agent.SessionID, Data: value})
-		} else {
-			_, err = s.agentMessages.Append(txCtx, agentmodel.AgentMessage{AgentID: agent.ID, Data: value})
-		}
-		if err != nil {
+		if _, err = s.messages.Append(txCtx, agent, value); err != nil {
 			return err
 		}
 		if err := s.agents.Save(txCtx, agent); err != nil {
@@ -159,25 +145,13 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 
 func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agent, requestID contracts.RequestID) (string, error) {
 	messageID := "input:" + requestID.String()
-	if agent.CanReadSessionContext() {
-		messages, err := s.sessionMessages.List(ctx, agent.SessionID, 0, 0)
-		if err != nil {
-			return "", err
-		}
-		for _, message := range messages {
-			if message.Data.ID == messageID && message.Data.Role == sessionmodel.RoleUser {
-				return message.Data.TextContent(), nil
-			}
-		}
-	} else {
-		messages, err := s.agentMessages.List(ctx, agent.ID, 0, 0)
-		if err != nil {
-			return "", err
-		}
-		for _, message := range messages {
-			if message.Data.ID == messageID && message.Data.Role == sessionmodel.RoleUser {
-				return message.Data.TextContent(), nil
-			}
+	messages, err := s.messages.List(ctx, agent, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	for _, message := range messages {
+		if message.ID == messageID && message.Role == sessionmodel.RoleUser {
+			return message.TextContent(), nil
 		}
 	}
 	return "", contracts.ErrNotFound

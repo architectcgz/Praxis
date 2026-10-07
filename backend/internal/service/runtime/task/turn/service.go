@@ -10,8 +10,6 @@ import (
 	turnmodel "praxis/internal/core/turn"
 	"praxis/internal/repository"
 	"praxis/internal/system"
-
-	"praxis/internal/agent_runtime"
 )
 
 type Config struct {
@@ -44,7 +42,7 @@ func NewService(config Config) (*Service, error) {
 }
 
 // RecordStart 幂等记录 running 迭代；同一 Task 的同一序号返回已存在记录，不覆盖历史事实。
-func (s *Service) RecordStart(ctx context.Context, params agentruntime.TurnParams) (turnmodel.Turn, error) {
+func (s *Service) RecordStart(ctx context.Context, params contracts.TurnExecutionContext) (turnmodel.Turn, error) {
 	if ctx == nil {
 		return turnmodel.Turn{}, errors.New("turn record start context is required")
 	}

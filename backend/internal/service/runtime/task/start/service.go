@@ -41,8 +41,7 @@ type Config struct {
 	Agents              repository.SessionAgentRepository
 	Tasks               repository.TaskRepository
 	Executions          *agentmodel.Executions
-	SessionMessages     repository.SessionMessageRepository
-	AgentMessages       repository.AgentMessageRepository
+	Messages            repository.MessageStreams
 	PrimaryAgent        PrimaryAgentProvider
 	ToolPermissions     securitymodel.ToolPermissionPolicy
 	RegisteredTools     []contracts.ToolName
@@ -63,8 +62,7 @@ type Service struct {
 	agents              repository.SessionAgentRepository
 	tasks               repository.TaskRepository
 	executions          *agentmodel.Executions
-	sessionMessages     repository.SessionMessageRepository
-	agentMessages       repository.AgentMessageRepository
+	messages            repository.MessageStreams
 	primary             PrimaryAgentProvider
 	security            SecurityResolver
 	securityMu          sync.RWMutex
@@ -85,18 +83,17 @@ func NewService(config Config) (*Service, error) {
 		return nil, errors.New("task agent definitions directory must be an absolute normalized path")
 	}
 	for name, value := range map[string]any{
-		"transactions":     config.Transactions,
-		"workspaces":       config.Workspaces,
-		"sessions":         config.Sessions,
-		"policies":         config.Policies,
-		"agents":           config.Agents,
-		"tasks":            config.Tasks,
-		"session messages": config.SessionMessages,
-		"agent messages":   config.AgentMessages,
-		"primary agent":    config.PrimaryAgent,
-		"definitions":      config.Definitions,
-		"models":           config.Models,
-		"context":          config.ContextProvider,
+		"transactions":  config.Transactions,
+		"workspaces":    config.Workspaces,
+		"sessions":      config.Sessions,
+		"policies":      config.Policies,
+		"agents":        config.Agents,
+		"tasks":         config.Tasks,
+		"messages":      config.Messages,
+		"primary agent": config.PrimaryAgent,
+		"definitions":   config.Definitions,
+		"models":        config.Models,
+		"context":       config.ContextProvider,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("task builder %s is required", name)
@@ -118,8 +115,7 @@ func NewService(config Config) (*Service, error) {
 		agents:              config.Agents,
 		tasks:               config.Tasks,
 		executions:          config.Executions,
-		sessionMessages:     config.SessionMessages,
-		agentMessages:       config.AgentMessages,
+		messages:            config.Messages,
 		primary:             config.PrimaryAgent,
 		security:            security,
 		models:              config.Models,

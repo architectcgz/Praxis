@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"praxis/internal/contracts"
 	applypatch "praxis/internal/tools/apply_patch"
 	bash "praxis/internal/tools/bash"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -13,15 +14,15 @@ import (
 )
 
 type builtinTool struct {
-	definition func() toolcontracts.ToolDefinition
-	normalize  func(toolcontracts.ToolCall) (toolcontracts.NormalizedToolCall, error)
+	definition func() contracts.ToolDefinition
+	normalize  func(contracts.ToolCall) (toolcontracts.NormalizedToolCall, error)
 	execute    func(context.Context, toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error)
 }
 
-func (t builtinTool) Definition() toolcontracts.ToolDefinition { return t.definition() }
+func (t builtinTool) Definition() contracts.ToolDefinition { return t.definition() }
 
 func (t builtinTool) Normalize(
-	call toolcontracts.ToolCall,
+	call contracts.ToolCall,
 ) (toolcontracts.NormalizedToolCall, error) {
 	return t.normalize(call)
 }
@@ -85,15 +86,15 @@ func (r *ToolRegistry) Get(name toolcontracts.ToolName) (toolcontracts.Tool, boo
 }
 
 // List 返回所有已注册工具的定义副本，按名称排序且不做权限筛选。
-func (r *ToolRegistry) List() []toolcontracts.ToolDefinition {
+func (r *ToolRegistry) List() []contracts.ToolDefinition {
 	if r == nil {
 		return nil
 	}
-	definitions := make([]toolcontracts.ToolDefinition, 0, len(r.tools))
+	definitions := make([]contracts.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
 		definitions = append(definitions, tool.Definition().Snapshot())
 	}
-	slices.SortFunc(definitions, func(left, right toolcontracts.ToolDefinition) int {
+	slices.SortFunc(definitions, func(left, right contracts.ToolDefinition) int {
 		if left.Name < right.Name {
 			return -1
 		}

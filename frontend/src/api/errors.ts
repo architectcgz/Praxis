@@ -45,9 +45,7 @@ export function isApiErrorCode(value: string): value is ApiErrorCode {
     return Object.values(API_ERROR_CODES).includes(value as ApiErrorCode)
 }
 
-// 解析绑定错误：
-//   - 后端 wire 为 JSON {"code","message"}；
-//   - 兼容前端合成的裸码字符串（如 commands.ts 抛出的 modelNotConfigured）。
+// 解析后端绑定错误信封 {"code","message"}。
 export function parseApiError(error: unknown): ApiErrorEnvelope | undefined {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined
     if (message === undefined) {
@@ -66,13 +64,8 @@ export function parseApiError(error: unknown): ApiErrorEnvelope | undefined {
                 }
             }
         } catch {
-            // 非法 JSON 时回退到裸码解析
+            return undefined
         }
-    }
-    const [rawCode, ...rest] = trimmed.split(':')
-    const code = rawCode.trim()
-    if (isApiErrorCode(code)) {
-        return { code, message: rest.join(':').trim() }
     }
     return undefined
 }

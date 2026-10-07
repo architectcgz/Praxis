@@ -9,6 +9,7 @@ import (
 	"praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/loop"
 	"praxis/internal/timing"
 	toolcontracts "praxis/internal/tools/contracts"
 )
@@ -124,12 +125,12 @@ func (s timedModelStream) Stream(ctx context.Context, request model.ModelRequest
 }
 
 type timedToolCalls struct {
-	next     agentruntime.ToolCallHandler
+	next     loop.ToolCallHandler
 	recorder *timing.Recorder
 }
 
 // Invoke 统计调用边界的校验、准入、执行和结果保存；业务失败与 Go 错误均记失败。
-func (t timedToolCalls) Invoke(ctx context.Context, call toolcontracts.ToolCall, metadata agentruntime.ToolInvocationMetadata) (result toolcontracts.ToolResult, err error) {
+func (t timedToolCalls) Invoke(ctx context.Context, call contracts.ToolCall, metadata contracts.ToolInvocationContext) (result toolcontracts.ToolResult, err error) {
 	ctx, span := t.recorder.Start(ctx, timing.Operation{
 		SessionID:   metadata.SessionID.String(),
 		AgentID:     metadata.AgentID.String(),
@@ -150,6 +151,11 @@ func (t timedToolCalls) Invoke(ctx context.Context, call toolcontracts.ToolCall,
 }
 
 // RecordAssistant 不启动工具计时，只转交原子保存消息与调用意图的事务。
-func (t timedToolCalls) RecordAssistant(ctx context.Context, recorder agentruntime.MessageRecorder, message sessionmodel.MessageData, metadata agentruntime.ToolInvocationMetadata) error {
-	return t.next.RecordAssistant(ctx, recorder, message, metadata)
+func (t timedToolCalls) RecordAssistant(
+	ctx context.Context,
+	appendMessage func(context.Context, sessionmodel.MessageData) (sessionmodel.MessageData, error),
+	message sessionmodel.MessageData,
+	metadata contracts.ToolInvocationContext,
+) error {
+	return t.next.RecordAssistant(ctx, appendMessage, message, metadata)
 }

@@ -2,6 +2,7 @@ package bindings
 
 import (
 	"praxis/internal/contracts"
+	"praxis/internal/request"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -15,7 +16,11 @@ func (b *SessionBindings) PreviewFile(sessionID, path string) (dto.FilePreview, 
 	if err != nil {
 		return dto.FilePreview{}, err
 	}
-	preview, err := service.Sessions.PreviewFile(ctx, contracts.SessionID(sessionID), path)
+	canonical, err := request.NewFilePreview(contracts.SessionID(sessionID), path)
+	if err != nil {
+		return dto.FilePreview{}, publicError(b.runtime, "SessionBindings.PreviewFile.request", err)
+	}
+	preview, err := service.Sessions.PreviewFile(ctx, canonical)
 	if err != nil {
 		return dto.FilePreview{}, publicError(b.runtime, "SessionBindings.PreviewFile", err)
 	}

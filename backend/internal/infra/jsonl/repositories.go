@@ -34,8 +34,7 @@ type Repositories struct {
 	ToolInvocations   ToolRepository
 	Controls          ControlRepository
 	Turns             TurnRepository
-	SessionMessages   SessionMessageRepository
-	AgentMessages     AgentMessageRepository
+	Messages          MessageStreams
 }
 
 // Repositories 返回共享提交边界与投影的仓储集合。
@@ -52,8 +51,7 @@ func (s *Store) Repositories() Repositories {
 		ToolInvocations:   ToolRepository{s},
 		Controls:          ControlRepository{s},
 		Turns:             TurnRepository{s},
-		SessionMessages:   SessionMessageRepository{s},
-		AgentMessages:     AgentMessageRepository{s},
+		Messages:          MessageStreams{s},
 	}
 }
 
@@ -158,6 +156,21 @@ func (r SessionRepository) find(ctx context.Context, project contracts.ProjectID
 	return capped(sorted(v, func(a, b sessionmodel.Session) int {
 		return cmp.Or(b.UpdatedAt.Compare(a.UpdatedAt), cmp.Compare(a.ID, b.ID))
 	}), limit), e
+}
+
+// HasMessages 判断会话下是否已有任何消息；会话流与各 Agent 私有流共用同一 scope，因此一次投影扫描即可判定。
+func (r SessionRepository) HasMessages(ctx context.Context, id contracts.SessionID) (bool, error) {
+	found := false
+	err := r.s.view(ctx, func(objects map[objectKey]object) error {
+		for key, value := range objects {
+			if key.collection == "message" && value.scope == id.String() {
+				found = true
+				return nil
+			}
+		}
+		return nil
+	})
+	return found, err
 }
 
 // Rename 更新规范化的非空标题，归属和创建时间保持不变。

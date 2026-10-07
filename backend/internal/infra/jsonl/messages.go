@@ -18,8 +18,114 @@ type messageRecord struct {
 	OwnerID string                   `json:"owner_id,omitempty"`
 	Data    sessionmodel.MessageData `json:"message"`
 }
-type SessionMessageRepository struct{ s *Store }
-type AgentMessageRepository struct{ s *Store }
+
+// MessageStreams 按 Agent 可见范围读写消息流；Session 流与私有流共用同一份日志键位。
+type MessageStreams struct{ s *Store }
+
+// appendOwner 返回 Agent 可见流在日志中的 owner 键；空值表示 Session 流。
+func appendOwner(owner agentmodel.Agent) string {
+	if owner.CanReadSessionContext() {
+		return ""
+	}
+	return owner.ID.String()
+}
+
+// Append 幂等追加消息到 Agent 可见流，归属缺失时拒绝写入。
+func (r MessageStreams) Append(
+	ctx context.Context,
+	owner agentmodel.Agent,
+	data sessionmodel.MessageData,
+) (sessionmodel.MessageData, error) {
+	if owner.SessionID == "" {
+		return data, errors.New("消息 Session 不能为空")
+	}
+	return r.s.appendMessage(ctx, owner.SessionID.String(), appendOwner(owner), data)
+}
+
+// List 返回 Agent 可见流中游标之后的记录副本；非正数 limit 表示不限制。
+func (r MessageStreams) List(
+	ctx context.Context,
+	owner agentmodel.Agent,
+	after uint64,
+	limit int,
+) ([]sessionmodel.MessageData, error) {
+	return r.s.messages(ctx, owner.SessionID.String(), appendOwner(owner), after, limit)
+}
+
+// LoadMessages 在一致性边界内读取 Agent 可见的消息流及其序号边界。
+func (r MessageStreams) LoadMessages(
+	ctx context.Context,
+	sessionID contracts.SessionID,
+	agentID contracts.AgentID,
+	limit int,
+) (repository.MessageStream, error) {
+	var stream repository.MessageStream
+	err := r.s.InTx(ctx, func(txCtx context.Context) error {
+		owner, err := r.owner(txCtx, sessionID, agentID)
+		if err != nil {
+			return err
+		}
+		values, err := r.List(txCtx, owner, 0, limit)
+		if err != nil {
+			return err
+		}
+		all, err := r.List(txCtx, owner, 0, 0)
+		if err != nil {
+			return err
+		}
+		if len(all) > 0 {
+			stream.SequenceBoundary = all[len(all)-1].Sequence
+		}
+		stream.Messages = values
+		return nil
+	})
+	return stream, err
+}
+
+// Resolve 为指定执行主体解析绑定到其可见流的写入器；归属不匹配时返回 ErrNotFound。
+func (r MessageStreams) Resolve(
+	ctx context.Context,
+	sessionID contracts.SessionID,
+	agentID contracts.AgentID,
+) (MessageWriter, error) {
+	owner, err := r.owner(ctx, sessionID, agentID)
+	if err != nil {
+		return MessageWriter{}, err
+	}
+	return MessageWriter{streams: r, owner: owner}, nil
+}
+
+func (r MessageStreams) owner(
+	ctx context.Context,
+	sessionID contracts.SessionID,
+	agentID contracts.AgentID,
+) (agentmodel.Agent, error) {
+	if ctx == nil {
+		return agentmodel.Agent{}, errors.New("消息流上下文不能为空")
+	}
+	owner, err := (AgentRepository{r.s}).Get(ctx, agentID)
+	if err != nil {
+		return agentmodel.Agent{}, err
+	}
+	if owner.SessionID != sessionID {
+		return agentmodel.Agent{}, contracts.ErrNotFound
+	}
+	return owner, nil
+}
+
+// MessageWriter 只写已解析归属的消息流；方法集满足 agent_runtime.MessageRecorder。
+type MessageWriter struct {
+	streams MessageStreams
+	owner   agentmodel.Agent
+}
+
+// Append 幂等写入已解析归属的可见流。
+func (w MessageWriter) Append(
+	ctx context.Context,
+	data sessionmodel.MessageData,
+) (sessionmodel.MessageData, error) {
+	return w.streams.Append(ctx, w.owner, data)
+}
 
 func messageKey(owner, id string) string { return fmt.Sprintf("%d:%s%s", len(owner), owner, id) }
 
@@ -87,67 +193,6 @@ func (s *Store) messages(ctx context.Context, scope, owner string, after uint64,
 	return result, err
 }
 
-// Append 幂等追加记录，身份相同但内容不一致时返回冲突。
-func (r SessionMessageRepository) Append(ctx context.Context, v sessionmodel.SessionMessage) (sessionmodel.SessionMessage, error) {
-	if v.SessionID == "" {
-		return v, errors.New("消息 Session 不能为空")
-	}
-	data, e := r.s.appendMessage(ctx, v.SessionID.String(), "", v.Data)
-	return sessionmodel.SessionMessage{SessionID: v.SessionID, Data: data}, e
-}
-
-// Append 幂等追加记录，身份相同但内容不一致时返回冲突。
-func (r AgentMessageRepository) Append(ctx context.Context, v agentmodel.AgentMessage) (agentmodel.AgentMessage, error) {
-	a, e := (AgentRepository{r.s}).Get(ctx, v.AgentID)
-	if e != nil {
-		return v, e
-	}
-	data, e := r.s.appendMessage(ctx, a.SessionID.String(), a.ID.String(), v.Data)
-	return agentmodel.AgentMessage{AgentID: v.AgentID, Data: data}, e
-}
-
-// List 返回指定归属及游标之后的记录副本，非正数 limit 表示不限制。
-func (r SessionMessageRepository) List(ctx context.Context, id contracts.SessionID, after uint64, limit int) ([]sessionmodel.SessionMessage, error) {
-	v, e := r.s.messages(ctx, id.String(), "", after, limit)
-	result := make([]sessionmodel.SessionMessage, len(v))
-	for i, data := range v {
-		result[i] = sessionmodel.SessionMessage{SessionID: id, Data: data}
-	}
-	return result, e
-}
-
-// List 返回指定归属及游标之后的记录副本，非正数 limit 表示不限制。
-func (r AgentMessageRepository) List(ctx context.Context, id contracts.AgentID, after uint64, limit int) ([]agentmodel.AgentMessage, error) {
-	a, e := (AgentRepository{r.s}).Get(ctx, id)
-	if e != nil {
-		return nil, e
-	}
-	v, e := r.s.messages(ctx, a.SessionID.String(), id.String(), after, limit)
-	result := make([]agentmodel.AgentMessage, len(v))
-	for i, data := range v {
-		result[i] = agentmodel.AgentMessage{AgentID: id, Data: data}
-	}
-	return result, e
-}
-
-// LatestSequence 返回当前消息流的最大序号，没有消息时返回零。
-func (r SessionMessageRepository) LatestSequence(ctx context.Context, id contracts.SessionID) (uint64, error) {
-	v, e := r.List(ctx, id, 0, 0)
-	if len(v) == 0 {
-		return 0, e
-	}
-	return v[len(v)-1].Data.Sequence, e
-}
-
-// LatestSequence 返回当前消息流的最大序号，没有消息时返回零。
-func (r AgentMessageRepository) LatestSequence(ctx context.Context, id contracts.AgentID) (uint64, error) {
-	v, e := r.List(ctx, id, 0, 0)
-	if len(v) == 0 {
-		return 0, e
-	}
-	return v[len(v)-1].Data.Sequence, e
-}
-
 // TimingStore 将计时更新放入所属 Session 日志，不影响主业务事务。
 type TimingStore struct{ Store *Store }
 
@@ -197,6 +242,5 @@ func (r TimingStore) RecoverInterrupted(ctx context.Context) error {
 	return nil
 }
 
-var _ repository.SessionMessageRepository = SessionMessageRepository{}
-var _ repository.AgentMessageRepository = AgentMessageRepository{}
+var _ repository.MessageStreams = MessageStreams{}
 var _ timing.Store = TimingStore{}

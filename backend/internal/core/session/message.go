@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"praxis/internal/contracts"
 )
 
 type Role string
@@ -116,11 +114,6 @@ func validateBlock(role Role, block Block) error {
 	return nil
 }
 
-type SessionMessage struct {
-	SessionID contracts.SessionID
-	Data      MessageData
-}
-
 // TextContent 返回消息中的文本块拼接结果；思考、工具调用和工具结果不属于正文。
 func (m MessageData) TextContent() string {
 	var content strings.Builder
@@ -130,12 +123,4 @@ func (m MessageData) TextContent() string {
 		}
 	}
 	return content.String()
-}
-
-// Validate 校验消息归属到 Session 且消息数据有效。
-func (m SessionMessage) Validate() error {
-	if strings.TrimSpace(m.SessionID.String()) == "" {
-		return errors.New("session message owner is required")
-	}
-	return m.Data.Validate()
 }

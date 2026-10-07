@@ -21,11 +21,11 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"praxis/internal/repository"
+	"praxis/internal/request"
 	"praxis/internal/system"
 )
 
@@ -34,6 +34,11 @@ type AgentDefinitionFactory func(contracts.AgentDefinitionID) (agentmodel.AgentD
 
 // AgentSecurityPolicyFactory 根据 Agent 定义生成初始安全策略。
 type AgentSecurityPolicyFactory func(workspacemodel.Workspace, contracts.AgentDefinitionID) (securitymodel.AgentSecurityPolicy, error)
+
+// WorkspaceTextReader 是文件预览所需的最小读取 Port。
+type WorkspaceTextReader interface {
+	ReadText(context.Context, string, string, int64) (string, error)
+}
 
 // Config 包含初始化 Session 与 Primary Agent 所需的依赖。
 type Config struct {
@@ -48,13 +53,12 @@ type Config struct {
 	ToolInvocations   repository.ToolInvocationRepository
 	Controls          repository.AgentControlCommandRepository
 	Turns             repository.TurnRepository
-	SessionMessages   repository.SessionMessageRepository
-	AgentMessages     repository.AgentMessageRepository
 	Definitions       AgentDefinitionFactory
 	PolicyFactory     AgentSecurityPolicyFactory
-	Messages          repository.MessageLoader
+	Messages          repository.MessageStreams
 	UsageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
 	RemoveSessionData func(context.Context, contracts.SessionID, []string) error
+	TextReader        WorkspaceTextReader
 	Clock             system.Clock
 	IDs               system.IDGenerator
 }
@@ -72,13 +76,12 @@ type Service struct {
 	toolInvocations   repository.ToolInvocationRepository
 	controls          repository.AgentControlCommandRepository
 	turns             repository.TurnRepository
-	sessionMessages   repository.SessionMessageRepository
-	agentMessages     repository.AgentMessageRepository
 	definitions       AgentDefinitionFactory
 	policyFactory     AgentSecurityPolicyFactory
-	messages          repository.MessageLoader
+	messages          repository.MessageStreams
 	usageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
 	removeSessionData func(context.Context, contracts.SessionID, []string) error
+	textReader        WorkspaceTextReader
 	contextBuilder    contextmodel.ContextBuilder
 	clock             system.Clock
 	ids               system.IDGenerator
@@ -111,22 +114,21 @@ func NewService(config Config) (*Service, error) {
 		return nil, errors.New("session service usage reader is required")
 	}
 	for name, value := range map[string]any{
-		"transactions":      config.Transactions,
-		"projects":          config.Projects,
-		"workspaces":        config.Workspaces,
-		"sessions":          config.Sessions,
-		"session contexts":  config.Contexts,
-		"security policies": config.Policies,
-		"agents":            config.Agents,
-		"tasks":             config.Tasks,
-		"tool invocations":  config.ToolInvocations,
-		"controls":          config.Controls,
-		"turns":             config.Turns,
-		"session messages":  config.SessionMessages,
-		"agent messages":    config.AgentMessages,
-		"agent definitions": config.Definitions,
-		"policy factory":    config.PolicyFactory,
-		"message loader":    config.Messages,
+		"transactions":          config.Transactions,
+		"projects":              config.Projects,
+		"workspaces":            config.Workspaces,
+		"sessions":              config.Sessions,
+		"session contexts":      config.Contexts,
+		"security policies":     config.Policies,
+		"agents":                config.Agents,
+		"tasks":                 config.Tasks,
+		"tool invocations":      config.ToolInvocations,
+		"controls":              config.Controls,
+		"turns":                 config.Turns,
+		"agent definitions":     config.Definitions,
+		"policy factory":        config.PolicyFactory,
+		"message loader":        config.Messages,
+		"workspace text reader": config.TextReader,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("session service %s is required", name)
@@ -144,13 +146,12 @@ func NewService(config Config) (*Service, error) {
 		toolInvocations:   config.ToolInvocations,
 		controls:          config.Controls,
 		turns:             config.Turns,
-		sessionMessages:   config.SessionMessages,
-		agentMessages:     config.AgentMessages,
 		definitions:       config.Definitions,
 		policyFactory:     config.PolicyFactory,
 		messages:          config.Messages,
 		usageRecords:      config.UsageRecords,
 		removeSessionData: config.RemoveSessionData,
+		textReader:        config.TextReader,
 		contextBuilder:    contextmodel.NewContextBuilder(),
 		clock:             system.ClockOrDefault(config.Clock),
 		ids:               system.IDsOrDefault(config.IDs),
@@ -449,11 +450,7 @@ func (s *Service) appendRecoveredToolResult(
 		}},
 		CreatedAt: at,
 	}
-	if agent.CanReadSessionContext() {
-		_, err := s.sessionMessages.Append(ctx, sessionmodel.SessionMessage{SessionID: agent.SessionID, Data: message})
-		return err
-	}
-	_, err := s.agentMessages.Append(ctx, agentmodel.AgentMessage{AgentID: agent.ID, Data: message})
+	_, err := s.messages.Append(ctx, agent, message)
 	return err
 }
 
@@ -756,33 +753,15 @@ func (s *Service) deleteSession(ctx context.Context, sessionID contracts.Session
 }
 
 func (s *Service) hasSessionMessages(ctx context.Context, sessionID contracts.SessionID) (bool, error) {
-	messages, err := s.sessionMessages.List(ctx, sessionID, 0, 1)
-	if err != nil || len(messages) > 0 {
-		return len(messages) > 0, err
-	}
-	agents, err := s.agents.ListBySession(ctx, sessionID, math.MaxInt)
-	if err != nil {
-		return false, err
-	}
-	for _, agent := range agents {
-		messages, err := s.agentMessages.List(ctx, agent.ID, 0, 1)
-		if err != nil || len(messages) > 0 {
-			return len(messages) > 0, err
-		}
-	}
-	return false, nil
+	return s.sessions.HasMessages(ctx, sessionID)
 }
 
 // RenameSession 更新会话标题，并刷新会话目录排序所使用的更新时间。
-func (s *Service) RenameSession(ctx context.Context, sessionID contracts.SessionID, title string) error {
+func (s *Service) RenameSession(ctx context.Context, canonical request.RenameSession) error {
 	if ctx == nil {
 		return errors.New("rename session context is required")
 	}
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return contracts.InvalidValue("title", "session title is required")
-	}
 	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		return s.sessions.Rename(txCtx, sessionID, title, s.clock.Now())
+		return s.sessions.Rename(txCtx, canonical.SessionID, canonical.Title, s.clock.Now())
 	})
 }

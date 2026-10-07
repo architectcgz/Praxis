@@ -3,6 +3,7 @@ package readfile
 import (
 	"encoding/json"
 
+	"praxis/internal/contracts"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -30,8 +31,8 @@ var inputSchema = json.RawMessage(`{
 }`)
 
 // Definition 返回 read_file 的模型可见工具契约。
-func Definition() toolcontracts.ToolDefinition {
-	return toolcontracts.ToolDefinition{
+func Definition() contracts.ToolDefinition {
+	return contracts.ToolDefinition{
 		Name: toolcontracts.ToolReadFile,
 		Description: "在需要读取工作区内已知 UTF-8 普通文件内容时调用；不要用它列目录。" +
 			"输入 path，可选 offset 和 limit；相对路径按工作区解析。" +

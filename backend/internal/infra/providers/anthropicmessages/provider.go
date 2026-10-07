@@ -19,7 +19,6 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
-	toolcontracts "praxis/internal/tools/contracts"
 )
 
 type Config struct {
@@ -302,7 +301,7 @@ func emitTool(emit streaming.EmitFunc, tool *toolAccumulator) error {
 	}
 	return emit(model.ModelStreamEvent{
 		Kind: model.StreamToolCall,
-		ToolCall: toolcontracts.ToolCall{
+		ToolCall: contracts.ToolCall{
 			ID: tool.id, Name: contracts.ToolName(tool.name), Arguments: args,
 		},
 	})
