@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	appmodelconfig "praxis/internal/modelconfig"
+	modelconfig "praxis/internal/core/model/config"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -19,8 +19,8 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 	if err := ctx.Err(); err != nil {
 		return dto.ModelConfigDocument{}, publicError(b.runtime, "ModelBindings.GetModelConfig.context", err)
 	}
-	editor := service.ModelConfig
-	config := editor.ModelConfig()
+	configService := service.ModelConfig
+	config := configService.ModelConfig()
 	document := dto.ModelConfigDocument{
 		Groups:            make([]dto.GroupConfigOption, 0, len(config.Groups)),
 		DefaultProviderID: config.DefaultProviderID,
@@ -37,7 +37,7 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 			ID: provider.ID, ProviderName: provider.DisplayName,
 			BaseURL: provider.BaseURL, ProxyURL: provider.ProxyURL,
 			DefaultModelID: provider.DefaultModelID,
-			HasAPIKey:      editor.HasProviderKey(provider.ID),
+			HasAPIKey:      configService.HasProviderKey(provider.ID),
 		})
 		for _, configured := range provider.Models {
 			document.Models = append(document.Models, dto.ModelConfigOption{
@@ -52,9 +52,14 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 	return document, nil
 }
 
-// SaveModelConfig replaces the whole configuration document.
+// SaveModelConfig 在 Wails 输入边界规范化并准备配置，再交给业务层保存。
 func (b *ModelBindings) SaveModelConfig(request dto.SaveModelConfigRequest) (dto.SaveModelConfigResponse, error) {
-	if err := validation.ValidateSaveModelConfig(request); err != nil {
+	prepared, err := validation.PrepareModelConfig(request)
+	if err != nil {
+		var validationError *modelconfig.ValidationError
+		if errors.As(err, &validationError) {
+			return dto.SaveModelConfigResponse{ValidationError: err.Error()}, nil
+		}
 		return dto.SaveModelConfigResponse{}, err
 	}
 	ctx, service, err := b.runtime.BindingContext()
@@ -64,42 +69,8 @@ func (b *ModelBindings) SaveModelConfig(request dto.SaveModelConfigRequest) (dto
 	if err := ctx.Err(); err != nil {
 		return dto.SaveModelConfigResponse{}, publicError(b.runtime, "ModelBindings.SaveModelConfig.context", err)
 	}
-	config := appmodelconfig.Config{
-		Groups:            make([]appmodelconfig.Group, 0, len(request.Groups)),
-		DefaultProviderID: request.DefaultProviderID,
-		Providers:         make([]appmodelconfig.Provider, 0, len(request.Providers)),
-	}
-	for _, group := range request.Groups {
-		config.Groups = append(config.Groups, appmodelconfig.Group{
-			ID: group.ID, DisplayName: group.DisplayName,
-		})
-	}
-	for _, provider := range request.Providers {
-		config.Providers = append(config.Providers, appmodelconfig.Provider{
-			ID: provider.ID, DisplayName: provider.ProviderName,
-			BaseURL: provider.BaseURL, ProxyURL: provider.ProxyURL,
-			DefaultModelID: provider.DefaultModelID,
-		})
-	}
-	for _, option := range request.Models {
-		providerID := option.ProviderID
-		configured := appmodelconfig.Model{
-			ID: option.ModelID, DisplayName: option.Label,
-			GroupID:       option.GroupID,
-			APIFormat:     appmodelconfig.APIFormat(option.APIFormat),
-			ContextWindow: option.ContextWindow, MaxOutputTokens: option.MaxOutputTokens,
-			ReasoningLevels:       append([]string(nil), option.ReasoningLevels...),
-			DefaultReasoningLevel: option.DefaultReasoningLevel,
-		}
-		for index := range config.Providers {
-			if config.Providers[index].ID == providerID {
-				config.Providers[index].Models = append(config.Providers[index].Models, configured)
-				break
-			}
-		}
-	}
-	if err := service.ModelConfig.SaveModelConfig(config); err != nil {
-		var validationError *appmodelconfig.ValidationError
+	if err := service.ModelConfig.SaveModelConfig(prepared); err != nil {
+		var validationError *modelconfig.ValidationError
 		if errors.As(err, &validationError) {
 			return dto.SaveModelConfigResponse{ValidationError: err.Error()}, nil
 		}

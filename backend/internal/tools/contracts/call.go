@@ -27,6 +27,14 @@ type Tool interface {
 	Execute(context.Context, AuthorizedToolCall) (ToolResult, error)
 }
 
+// ToolCatalog 提供完整的工具目录和按名称查找能力；权限筛选由调用方完成。
+type ToolCatalog interface {
+	// List 返回全部已注册工具的定义，不做权限筛选。
+	List() []ToolDefinition
+	// Get 按名称查找工具；未注册时返回 false。
+	Get(ToolName) (Tool, bool)
+}
+
 // ToolCall 表示与 provider 无关的工具请求。
 type ToolCall struct {
 	ID        string

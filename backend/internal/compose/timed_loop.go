@@ -6,8 +6,8 @@ import (
 
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
+	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
-	"praxis/internal/loop"
 	"praxis/internal/timing"
 	toolcontracts "praxis/internal/tools/contracts"
 )
@@ -40,26 +40,26 @@ func timedLoop(next agentruntime.LoopFunc, recorder *timing.Recorder) agentrunti
 }
 
 type timedModelBuilder struct {
-	next     loop.ModelBuilder
+	next     model.ModelBuilder
 	recorder *timing.Recorder
 }
 
-// BuildTaskModel 只装饰有效模型流，不修改模型配置或业务错误。
-func (b timedModelBuilder) BuildTaskModel(snapshot contracts.ModelSnapshot) (agentruntime.TaskModel, error) {
-	model, err := b.next.BuildTaskModel(snapshot)
-	if err == nil && model.Stream != nil {
-		model.Stream = timedModelStream{next: model.Stream, recorder: b.recorder}
+// BuildModel 只装饰有效模型流，不修改模型配置或业务错误。
+func (b timedModelBuilder) BuildModel(snapshot model.ModelSnapshot) (model.Model, error) {
+	built, err := b.next.BuildModel(snapshot)
+	if err == nil && built.Stream != nil {
+		built.Stream = timedModelStream{next: built.Stream, recorder: b.recorder}
 	}
-	return model, err
+	return built, err
 }
 
 type timedModelStream struct {
-	next     agentruntime.ModelStream
+	next     model.ModelStream
 	recorder *timing.Recorder
 }
 
 // Stream 覆盖请求建立到流结束，首响应仅统计有效内容事件；取消时停止转发。
-func (s timedModelStream) Stream(ctx context.Context, request agentruntime.ModelRequest) (<-chan agentruntime.ModelStreamEvent, error) {
+func (s timedModelStream) Stream(ctx context.Context, request model.ModelRequest) (<-chan model.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("provider context is required")
 	}
@@ -78,7 +78,7 @@ func (s timedModelStream) Stream(ctx context.Context, request agentruntime.Model
 		cancel()
 		return nil, err
 	}
-	output := make(chan agentruntime.ModelStreamEvent)
+	output := make(chan model.ModelStreamEvent)
 	go func() {
 		defer close(output)
 		defer cancel()
@@ -94,14 +94,14 @@ func (s timedModelStream) Stream(ctx context.Context, request agentruntime.Model
 					status = timing.ResultStatus(ctx, nil)
 					return
 				}
-				if (event.Kind == agentruntime.StreamTextDelta || event.Kind == agentruntime.StreamThinkingDelta) && event.Text != "" || event.Kind == agentruntime.StreamToolCall {
+				if (event.Kind == model.StreamTextDelta || event.Kind == model.StreamThinkingDelta) && event.Text != "" || event.Kind == model.StreamToolCall {
 					span.FirstResponse()
 				}
-				knownContent := event.Kind == agentruntime.StreamTextDelta || event.Kind == agentruntime.StreamThinkingDelta || event.Kind == agentruntime.StreamToolCall || event.Kind == agentruntime.StreamUsage
+				knownContent := event.Kind == model.StreamTextDelta || event.Kind == model.StreamThinkingDelta || event.Kind == model.StreamToolCall || event.Kind == model.StreamUsage
 				terminal := !knownContent
 				if terminal {
 					status = timing.ResultStatus(ctx, event.Err)
-					if event.Kind != agentruntime.StreamComplete && status == timing.Completed {
+					if event.Kind != model.StreamComplete && status == timing.Completed {
 						status = timing.Failed
 					}
 					// 先保存计时，再让业务层收到终态，避免刷新历史时丢失最后一次计时。

@@ -2,10 +2,10 @@
 package session
 
 import (
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
+	"praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	securitymodel "praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
@@ -53,7 +53,7 @@ type Config struct {
 	Definitions       AgentDefinitionFactory
 	PolicyFactory     AgentSecurityPolicyFactory
 	Messages          repository.MessageLoader
-	UsageRecords      func(context.Context, string) ([]agentruntime.ModelUsageRecord, error)
+	UsageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
 	RemoveSessionData func(context.Context, contracts.SessionID, []string) error
 	Clock             system.Clock
 	IDs               system.IDGenerator
@@ -77,7 +77,7 @@ type Service struct {
 	definitions       AgentDefinitionFactory
 	policyFactory     AgentSecurityPolicyFactory
 	messages          repository.MessageLoader
-	usageRecords      func(context.Context, string) ([]agentruntime.ModelUsageRecord, error)
+	usageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
 	removeSessionData func(context.Context, contracts.SessionID, []string) error
 	contextBuilder    contextmodel.ContextBuilder
 	clock             system.Clock

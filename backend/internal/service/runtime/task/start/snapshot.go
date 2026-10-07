@@ -3,6 +3,7 @@ package start
 import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 
 	"context"
@@ -42,7 +43,7 @@ func (s *Service) buildInputSnapshot(
 	if definition.Profile != agent.Profile {
 		return taskmodel.InputSnapshot{}, contracts.ErrRevisionConflict
 	}
-	var modelSnapshot contracts.ModelSnapshot
+	var modelSnapshot model.ModelSnapshot
 	switch {
 	case providerID == "" && modelID == "" && reasoningLevel == "":
 		modelSnapshot, err = s.models.FreezeDefaultTaskModel(agent.DefinitionID)

@@ -1,9 +1,9 @@
-// Package modelregistry loads the user-owned model configuration and auth
-// documents and materializes provider-neutral model interfaces.
+// Package modelregistry 加载用户模型配置和凭据，并提供统一的模型构建能力。
 package modelregistry
 
 import (
-	"praxis/internal/contracts"
+	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 
 	"bytes"
 	"context"
@@ -16,8 +16,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"praxis/internal/agent_runtime"
 )
 
 const maxProviderCatalogBytes = 1 << 20
@@ -25,12 +23,12 @@ const maxProviderCatalogBytes = 1 << 20
 // StreamFactory 根据已校验的配置创建一次执行使用的模型流。
 // API Key 只在注册表内部传入该工厂，不会进入配置返回值或 runtime contract。
 type StreamFactory func(
-	format ModelAPIFormat,
-	provider ProviderConfig,
-	model ModelConfig,
+	format modelconfig.APIFormat,
+	provider modelconfig.Provider,
+	configured modelconfig.Model,
 	apiKey string,
 	client *http.Client,
-) (agentruntime.ModelStream, error)
+) (model.ModelStream, error)
 
 // Registry is the single in-process owner of the model configuration. Saving
 // from the UI replaces the config and its indexes in place, so every read path
@@ -39,13 +37,13 @@ type Registry struct {
 	mu              sync.RWMutex
 	modelsPath      string
 	credentialsPath string
-	config          RegistryConfig
+	config          modelconfig.Config
 	credentials     ProviderCredentials
 	client          *http.Client
 	streamFactory   StreamFactory
 	providerClients map[string]*http.Client
-	modelsByKey     map[modelKey]ModelConfig
-	providersByID   map[string]ProviderConfig
+	modelsByKey     map[modelKey]modelconfig.Model
+	providersByID   map[string]modelconfig.Provider
 }
 
 func (r *Registry) providerClientLocked(providerID string) *http.Client {
@@ -55,11 +53,11 @@ func (r *Registry) providerClientLocked(providerID string) *http.Client {
 	return providerhttp.RequestClient(r.client)
 }
 
-// Config returns a deep copy of the current configuration for the settings UI.
-func (r *Registry) Config() RegistryConfig {
+// Config 返回当前配置的独立副本，读取方不能修改注册表内部状态。
+func (r *Registry) Config() modelconfig.Config {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return cloneRegistryConfig(r.config)
+	return r.config.Clone()
 }
 
 // ReplaceFrom 用已校验的磁盘快照替换运行时配置与凭据；运行中的 Task 保持原快照。
@@ -74,34 +72,30 @@ func (r *Registry) ReplaceFrom(candidate *Registry) {
 }
 
 // modelByKeyLocked 要求调用方已持有 r.mu，且 key 已完成规范化。
-func (r *Registry) modelByKeyLocked(key modelKey) (ModelConfig, error) {
+func (r *Registry) modelByKeyLocked(key modelKey) (modelconfig.Model, error) {
 	config, ok := r.modelsByKey[key]
 	if !ok {
-		return ModelConfig{}, fmt.Errorf("model %q for provider %q is not configured", key.ModelID, key.ProviderID)
+		return modelconfig.Model{}, fmt.Errorf("model %q for provider %q is not configured", key.ModelID, key.ProviderID)
 	}
 	return config, nil
 }
 
 // ListModels 返回可用于下一 Task 的模型及推理等级。
-func (r *Registry) ListModels() []ModelOption {
+func (r *Registry) ListModels() []modelconfig.Option {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	options := make([]ModelOption, 0)
+	options := make([]modelconfig.Option, 0)
 	for _, provider := range r.config.Providers {
 		for _, candidate := range provider.Models {
-			label := strings.TrimSpace(candidate.DisplayName)
-			if label == "" {
-				label = candidate.ID
-			}
-			providerName := strings.TrimSpace(provider.DisplayName)
-			if providerName == "" {
-				providerName = provider.BaseURL
-			}
-			options = append(options, ModelOption{
-				GroupID: candidate.GroupID, ProviderID: provider.ID, ModelID: candidate.ID,
-				DefaultProviderID: r.config.DefaultProviderID, DefaultModelID: provider.DefaultModelID,
-				Label: label, ProviderName: providerName,
-				ReasoningLevels:       append([]string(nil), candidate.ReasoningLevels...),
+			options = append(options, modelconfig.Option{
+				GroupID:               candidate.GroupID,
+				ProviderID:            provider.ID,
+				ModelID:               candidate.ID,
+				DefaultProviderID:     r.config.DefaultProviderID,
+				DefaultModelID:        provider.DefaultModelID,
+				Label:                 candidate.DisplayName,
+				ProviderName:          provider.DisplayName,
+				ReasoningLevels:       slices.Clone(candidate.ReasoningLevels),
 				DefaultReasoningLevel: candidate.DefaultReasoningLevel,
 			})
 		}
@@ -109,12 +103,12 @@ func (r *Registry) ListModels() []ModelOption {
 	return orderModelOptions(options, r.config.Groups)
 }
 
-func orderModelOptions(options []ModelOption, groups []GroupConfig) []ModelOption {
+func orderModelOptions(options []modelconfig.Option, groups []modelconfig.Group) []modelconfig.Option {
 	groupOrder := make(map[string]int, len(groups))
 	for index, group := range groups {
 		groupOrder[group.ID] = index
 	}
-	slices.SortStableFunc(options, func(left, right ModelOption) int {
+	slices.SortStableFunc(options, func(left, right modelconfig.Option) int {
 		leftGroup, leftOK := groupOrder[left.GroupID]
 		rightGroup, rightOK := groupOrder[right.GroupID]
 		if leftOK && rightOK && leftGroup != rightGroup {
@@ -158,14 +152,10 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	if !exists {
 		return nil, fmt.Errorf("provider %q is not configured", providerID)
 	}
-	baseURL, err := providerhttp.ValidateBaseURL(provider.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("provider %q: %w", providerID, err)
-	}
 	if key == "" {
 		return nil, fmt.Errorf("API key is not configured for provider %q", providerID)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/models", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.BaseURL+"/v1/models", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build provider model request: %w", err)
 	}
@@ -216,22 +206,22 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 }
 
 // FreezeTaskModel 校验当前配置并冻结非敏感模型参数，失败时不生成快照。
-func (r *Registry) FreezeTaskModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
+func (r *Registry) FreezeTaskModel(providerID, modelID, reasoningLevel string) (model.ModelSnapshot, error) {
 	selection, err := newModelSelection(providerID, modelID, reasoningLevel)
 	if err != nil {
-		return contracts.ModelSnapshot{}, err
+		return model.ModelSnapshot{}, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	configured, selected, err := r.selectModelLocked(selection)
 	if err != nil {
-		return contracts.ModelSnapshot{}, err
+		return model.ModelSnapshot{}, err
 	}
 	provider, ok := r.providersByID[selected.ProviderID]
 	if !ok {
-		return contracts.ModelSnapshot{}, fmt.Errorf("provider %q is not configured", selected.ProviderID)
+		return model.ModelSnapshot{}, fmt.Errorf("provider %q is not configured", selected.ProviderID)
 	}
-	snapshot := contracts.ModelSnapshot{
+	snapshot := model.ModelSnapshot{
 		ProviderID:      selected.ProviderID,
 		ModelID:         selected.ModelID,
 		ReasoningLevel:  selected.ReasoningLevel,
@@ -242,19 +232,19 @@ func (r *Registry) FreezeTaskModel(providerID, modelID, reasoningLevel string) (
 		ProxyURL:        provider.ProxyURL,
 	}
 	if err := snapshot.Validate(); err != nil {
-		return contracts.ModelSnapshot{}, err
+		return model.ModelSnapshot{}, err
 	}
 	return snapshot, nil
 }
 
-func (r *Registry) selectModelLocked(selection modelSelection) (ModelConfig, modelSelection, error) {
+func (r *Registry) selectModelLocked(selection modelSelection) (modelconfig.Model, modelSelection, error) {
 	config, err := r.modelByKeyLocked(modelKey{ProviderID: selection.ProviderID, ModelID: selection.ModelID})
 	if err != nil {
-		return ModelConfig{}, modelSelection{}, err
+		return modelconfig.Model{}, modelSelection{}, err
 	}
-	selected, err := config.selectReasoning(selection.ProviderID, selection.ReasoningLevel)
+	selected, err := selectReasoning(config, selection.ProviderID, selection.ReasoningLevel)
 	if err != nil {
-		return ModelConfig{}, modelSelection{}, err
+		return modelconfig.Model{}, modelSelection{}, err
 	}
 	return config, selected, nil
 }

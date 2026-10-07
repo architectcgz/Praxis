@@ -8,9 +8,9 @@ import (
 	"context"
 	"fmt"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/repository"
 	"praxis/internal/system"
+	toolcontracts "praxis/internal/tools/contracts"
 )
 
 type TaskRepository interface {
@@ -26,7 +26,7 @@ type Config struct {
 	Tasks             TaskRepository
 	SecuritySnapshots SecuritySnapshotRepository
 	Invocations       repository.ToolInvocationRepository
-	Catalog           agentruntime.ToolCatalog
+	Catalog           toolcontracts.ToolCatalog
 	Clock             system.Clock
 	IDs               system.IDGenerator
 }
@@ -36,7 +36,7 @@ type Service struct {
 	tasks       TaskRepository
 	security    SecuritySnapshotRepository
 	invocations repository.ToolInvocationRepository
-	toolCatalog agentruntime.ToolCatalog
+	toolCatalog toolcontracts.ToolCatalog
 	clock       system.Clock
 	ids         system.IDGenerator
 }

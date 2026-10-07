@@ -14,8 +14,9 @@ import (
 	"sort"
 	"strings"
 
-	"praxis/internal/agent_runtime"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -36,7 +37,7 @@ type Provider struct {
 }
 
 func New(config Config) (*Provider, error) {
-	baseURL, err := providers.ValidateBaseURL(config.BaseURL)
+	baseURL, err := modelconfig.ValidateBaseURL(config.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: %w", err)
 	}
@@ -57,12 +58,12 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
-var _ agentruntime.ModelStream = (*Provider)(nil)
+var _ model.ModelStream = (*Provider)(nil)
 
 func (p *Provider) Stream(
 	ctx context.Context,
-	request agentruntime.ModelRequest,
-) (<-chan agentruntime.ModelStreamEvent, error) {
+	request model.ModelRequest,
+) (<-chan model.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("anthropic stream context is required")
 	}
@@ -159,7 +160,7 @@ func (messagesDecoder) Decode(
 	emit streaming.EmitFunc,
 ) (string, error) {
 	tools := map[int]*toolAccumulator{}
-	var usage *agentruntime.ModelUsage
+	var usage *model.ModelUsage
 	var stopReason string
 	for {
 		if err := ctx.Err(); err != nil {
@@ -203,7 +204,7 @@ func (messagesDecoder) Decode(
 		case "message_start":
 			usage = normalizeMessageUsage(event.Message.Usage)
 			if usage != nil {
-				if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamUsage, Usage: usage}); err != nil {
+				if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
 					return "", err
 				}
 			}
@@ -215,13 +216,13 @@ func (messagesDecoder) Decode(
 			switch event.Delta.Type {
 			case "text_delta":
 				if event.Delta.Text != "" {
-					if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamTextDelta, Text: event.Delta.Text}); err != nil {
+					if err := emit(model.ModelStreamEvent{Kind: model.StreamTextDelta, Text: event.Delta.Text}); err != nil {
 						return "", err
 					}
 				}
 			case "thinking_delta":
 				if event.Delta.Thinking != "" {
-					if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamThinkingDelta, Text: event.Delta.Thinking}); err != nil {
+					if err := emit(model.ModelStreamEvent{Kind: model.StreamThinkingDelta, Text: event.Delta.Thinking}); err != nil {
 						return "", err
 					}
 				}
@@ -237,7 +238,7 @@ func (messagesDecoder) Decode(
 				next.OutputTokens = event.Usage.OutputTokens
 				if next.Valid() && (usage.OutputTokens == nil || *next.OutputTokens >= *usage.OutputTokens) {
 					usage = &next
-					if err := emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamUsage, Usage: usage}); err != nil {
+					if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
 						return "", err
 					}
 				}
@@ -263,7 +264,7 @@ type messageUsage struct {
 	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
 }
 
-func normalizeMessageUsage(reported *messageUsage) *agentruntime.ModelUsage {
+func normalizeMessageUsage(reported *messageUsage) *model.ModelUsage {
 	if reported == nil || reported.InputTokens == nil || *reported.InputTokens < 0 {
 		return nil
 	}
@@ -277,7 +278,7 @@ func normalizeMessageUsage(reported *messageUsage) *agentruntime.ModelUsage {
 			total += *count
 		}
 	}
-	usage := &agentruntime.ModelUsage{
+	usage := &model.ModelUsage{
 		InputTokens:              total,
 		OutputTokens:             reported.OutputTokens,
 		CacheReadInputTokens:     reported.CacheReadInputTokens,
@@ -299,8 +300,8 @@ func emitTool(emit streaming.EmitFunc, tool *toolAccumulator) error {
 	if len(bytes.TrimSpace(args)) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	return emit(agentruntime.ModelStreamEvent{
-		Kind: agentruntime.StreamToolCall,
+	return emit(model.ModelStreamEvent{
+		Kind: model.StreamToolCall,
 		ToolCall: toolcontracts.ToolCall{
 			ID: tool.id, Name: contracts.ToolName(tool.name), Arguments: args,
 		},

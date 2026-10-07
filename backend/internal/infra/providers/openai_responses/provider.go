@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"strings"
 
-	"praxis/internal/agent_runtime"
 	appcontext "praxis/internal/core/context"
-	"praxis/internal/infra/providers"
+	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -31,7 +31,7 @@ type Provider struct {
 
 // New 创建 OpenAI Responses 协议适配器。
 func New(config Config) (*Provider, error) {
-	baseURL, err := providers.ValidateBaseURL(config.BaseURL)
+	baseURL, err := modelconfig.ValidateBaseURL(config.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("openai responses: %w", err)
 	}
@@ -47,13 +47,13 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
-var _ agentruntime.ModelStream = (*Provider)(nil)
+var _ model.ModelStream = (*Provider)(nil)
 
 // Stream 将一次 provider-neutral 请求编码为 Responses 流并返回事件通道。
 func (p *Provider) Stream(
 	ctx context.Context,
-	request agentruntime.ModelRequest,
-) (<-chan agentruntime.ModelStreamEvent, error) {
+	request model.ModelRequest,
+) (<-chan model.ModelStreamEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("openai responses stream context is required")
 	}
@@ -84,11 +84,11 @@ func (p *Provider) Stream(
 	return streaming.Start(ctx, response, streamDecoder{}), nil
 }
 
-func (p *Provider) requestPayload(request agentruntime.ModelRequest) ([]byte, string, error) {
+func (p *Provider) requestPayload(request model.ModelRequest) ([]byte, string, error) {
 	return encodeRequest(request)
 }
 
-func encodeRequest(request agentruntime.ModelRequest) ([]byte, string, error) {
+func encodeRequest(request model.ModelRequest) ([]byte, string, error) {
 	if request.Model.ModelID == "" {
 		return nil, "", errors.New("openai responses model is required")
 	}

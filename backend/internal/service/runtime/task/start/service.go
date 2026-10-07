@@ -10,6 +10,7 @@ import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
+	"praxis/internal/core/model"
 	securitymodel "praxis/internal/core/security"
 	"praxis/internal/repository"
 	"praxis/internal/system"
@@ -28,8 +29,8 @@ type AgentDefinitionProvider interface {
 
 // ModelSnapshotFactory 在任务开始时冻结选定模型或 Agent 默认模型。
 type ModelSnapshotFactory interface {
-	FreezeTaskModel(string, string, string) (contracts.ModelSnapshot, error)
-	FreezeDefaultTaskModel(contracts.AgentDefinitionID) (contracts.ModelSnapshot, error)
+	FreezeTaskModel(string, string, string) (model.ModelSnapshot, error)
+	FreezeDefaultTaskModel(contracts.AgentDefinitionID) (model.ModelSnapshot, error)
 }
 
 type Config struct {

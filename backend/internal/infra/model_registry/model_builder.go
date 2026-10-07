@@ -1,30 +1,29 @@
 package modelregistry
 
 import (
-	"praxis/internal/contracts"
+	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 
 	"fmt"
 	providerhttp "praxis/internal/infra/providers"
-
-	"praxis/internal/agent_runtime"
 )
 
-// BuildTaskModel 根据 task 创建时冻结的快照构建运行时模型。
+// BuildModel 根据冻结快照构建运行时模型。
 // 这里不能重新读取当前模型配置，否则配置热更新会改变执行中的请求行为。
-func (r *Registry) BuildTaskModel(snapshot contracts.ModelSnapshot) (agentruntime.TaskModel, error) {
+func (r *Registry) BuildModel(snapshot model.ModelSnapshot) (model.Model, error) {
 	if r == nil {
-		return agentruntime.TaskModel{}, fmt.Errorf("model registry is not initialized")
+		return model.Model{}, fmt.Errorf("model registry is not initialized")
 	}
 	if err := snapshot.Validate(); err != nil {
-		return agentruntime.TaskModel{}, err
+		return model.Model{}, err
 	}
-	baseURL, err := providerhttp.ValidateBaseURL(snapshot.BaseURL)
+	baseURL, err := modelconfig.ValidateBaseURL(snapshot.BaseURL)
 	if err != nil {
-		return agentruntime.TaskModel{}, err
+		return model.Model{}, err
 	}
-	proxyURL, err := providerhttp.ValidateProxyURL(snapshot.ProxyURL)
+	proxyURL, err := modelconfig.ValidateProxyURL(snapshot.ProxyURL)
 	if err != nil {
-		return agentruntime.TaskModel{}, err
+		return model.Model{}, err
 	}
 	r.mu.RLock()
 	apiKey := r.credentialKeyLocked(snapshot.ProviderID)
@@ -32,28 +31,35 @@ func (r *Registry) BuildTaskModel(snapshot contracts.ModelSnapshot) (agentruntim
 	streamFactory := r.streamFactory
 	r.mu.RUnlock()
 	if apiKey == "" {
-		return agentruntime.TaskModel{}, fmt.Errorf("API key is not configured for provider %q", snapshot.ProviderID)
+		return model.Model{}, fmt.Errorf("API key is not configured for provider %q", snapshot.ProviderID)
 	}
 	if streamFactory == nil {
-		return agentruntime.TaskModel{}, fmt.Errorf("model stream factory is not configured")
+		return model.Model{}, fmt.Errorf("model stream factory is not configured")
 	}
 	client, err = providerhttp.NewProxyClient(client, proxyURL)
 	if err != nil {
-		return agentruntime.TaskModel{}, fmt.Errorf("create provider client: %w", err)
+		return model.Model{}, fmt.Errorf("create provider client: %w", err)
 	}
 	stream, err := streamFactory(
-		ModelAPIFormat(snapshot.APIFormat),
-		ProviderConfig{ID: snapshot.ProviderID, BaseURL: baseURL, ProxyURL: proxyURL},
-		ModelConfig{
-			ID: snapshot.ModelID, APIFormat: ModelAPIFormat(snapshot.APIFormat),
-			ContextWindow: snapshot.ContextWindow, MaxOutputTokens: snapshot.MaxOutputTokens,
+		modelconfig.APIFormat(snapshot.APIFormat),
+		modelconfig.Provider{
+			ID:       snapshot.ProviderID,
+			BaseURL:  baseURL,
+			ProxyURL: proxyURL,
+		},
+		modelconfig.Model{
+			ID:              snapshot.ModelID,
+			APIFormat:       modelconfig.APIFormat(snapshot.APIFormat),
+			ContextWindow:   snapshot.ContextWindow,
+			MaxOutputTokens: snapshot.MaxOutputTokens,
 		},
 		apiKey, client,
 	)
 	if err != nil {
-		return agentruntime.TaskModel{}, err
+		return model.Model{}, err
 	}
-	return agentruntime.TaskModel{
-		Stream: stream, MaxOutputTokens: snapshot.MaxOutputTokens,
+	return model.Model{
+		Stream:          stream,
+		MaxOutputTokens: snapshot.MaxOutputTokens,
 	}, nil
 }

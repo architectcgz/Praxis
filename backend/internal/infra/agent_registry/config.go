@@ -5,6 +5,7 @@ package agentregistry
 import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	modelconfig "praxis/internal/core/model/config"
 	securitymodel "praxis/internal/core/security"
 	workspacemodel "praxis/internal/core/workspace"
 
@@ -19,8 +20,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	appconfig "praxis/internal/modelconfig"
 )
 
 // ModelReference identifies one configured Provider and Model pair.
@@ -448,7 +447,7 @@ func defaultAgentInstructions() map[contracts.AgentDefinitionID]string {
 }
 
 // ValidateModelConfiguration 确保所有 Agent 默认模型仍存在于候选配置中。
-func (r *Registry) ValidateModelConfiguration(config appconfig.Config) error {
+func (r *Registry) ValidateModelConfiguration(config modelconfig.Config) error {
 	return r.ValidateModelReferences(func(providerID, modelID string) error {
 		for _, provider := range config.Providers {
 			if provider.ID != providerID {

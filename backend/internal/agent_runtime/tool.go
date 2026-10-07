@@ -17,12 +17,6 @@ type ToolInvocationMetadata struct {
 	SecurityFingerprint string
 }
 
-// ToolCatalog 提供完整的工具目录和按名称查找能力；权限筛选由上层完成。
-type ToolCatalog interface {
-	List() []toolcontracts.ToolDefinition
-	Get(toolcontracts.ToolName) (toolcontracts.Tool, bool)
-}
-
 // ToolCallHandler 接收 runtime 产生的工具调用，并负责完成持久化调用流程。
 type ToolCallHandler interface {
 	Invoke(context.Context, toolcontracts.ToolCall, ToolInvocationMetadata) (toolcontracts.ToolResult, error)

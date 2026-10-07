@@ -4,6 +4,7 @@ import (
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/model"
 
 	"context"
 	"errors"
@@ -103,7 +104,6 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	modelConfig := modelregistry.NewApplicationAdapter(modelRegistry)
 	toolConfig, err := toolconfig.Load(root.ToolConfig)
 	if err != nil {
 		_ = diagnostics.Close()
@@ -160,7 +160,7 @@ func Open(
 		if event.Kind == agentruntime.AgentEventModelUsage && event.Usage != nil {
 			// 用量写入不继承业务取消，保存失败只影响统计，不改变模型响应。
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			err := usages.Save(ctx, agentruntime.ModelUsageRecord{
+			err := usages.Save(ctx, model.ModelUsageRecord{
 				SessionID: event.SessionID.String(),
 				AgentID:   event.AgentID.String(),
 				TaskID:    event.TaskID.String(),
@@ -368,7 +368,7 @@ func Open(
 		Projects:    projectService,
 		Sessions:    sessionService,
 		Runtime:     runtimeService,
-		Models:      modelConfig,
+		Models:      modelRegistry,
 		AgentConfig: agentRegistry,
 		ReloadConfig: func(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {
@@ -465,14 +465,14 @@ func (r taskInputProvider) Definition(definitionID contracts.AgentDefinitionID) 
 	return r.agents.Definition(definitionID)
 }
 
-func (r taskInputProvider) FreezeTaskModel(providerID, modelID, reasoningLevel string) (contracts.ModelSnapshot, error) {
+func (r taskInputProvider) FreezeTaskModel(providerID, modelID, reasoningLevel string) (model.ModelSnapshot, error) {
 	return r.models.FreezeTaskModel(providerID, modelID, reasoningLevel)
 }
 
-func (r taskInputProvider) FreezeDefaultTaskModel(definitionID contracts.AgentDefinitionID) (contracts.ModelSnapshot, error) {
+func (r taskInputProvider) FreezeDefaultTaskModel(definitionID contracts.AgentDefinitionID) (model.ModelSnapshot, error) {
 	reference, err := r.agents.ResolveModelReference(definitionID)
 	if err != nil {
-		return contracts.ModelSnapshot{}, err
+		return model.ModelSnapshot{}, err
 	}
 	return r.models.FreezeTaskModel(reference.ProviderID, reference.ModelID, "")
 }

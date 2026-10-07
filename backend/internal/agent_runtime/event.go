@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"praxis/internal/contracts"
+	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/timing"
 
@@ -45,7 +46,7 @@ type AgentEvent struct {
 	IsError        bool                      `json:"isError,omitzero"`
 	Error          string                    `json:"error,omitempty"`
 	Timing         *timing.Record            `json:"timing,omitempty"`
-	Usage          *ModelUsage               `json:"usage,omitempty"`
+	Usage          *model.ModelUsage         `json:"usage,omitempty"`
 }
 
 // AgentEventObserver 接收实时事件；监听者不得把事件作为持久状态来源。

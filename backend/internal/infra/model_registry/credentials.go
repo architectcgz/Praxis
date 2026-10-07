@@ -3,8 +3,13 @@ package modelregistry
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+
+	modelconfig "praxis/internal/core/model/config"
 )
+
+var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // normalizeCredentials validates the persisted auth document and returns a
 // deep copy with normalized provider IDs, credential types, and keys.
@@ -107,7 +112,7 @@ func cloneCredentials(credentials ProviderCredentials) ProviderCredentials {
 // configured providers, so persisting the next model configuration also drops
 // the secret of any removed provider. Providers without a stored credential
 // stay absent instead of gaining an empty entry.
-func retainCredentialsForProviders(credentials ProviderCredentials, providers []ProviderConfig) ProviderCredentials {
+func retainCredentialsForProviders(credentials ProviderCredentials, providers []modelconfig.Provider) ProviderCredentials {
 	retained := make(ProviderCredentials, len(providers))
 	for _, provider := range providers {
 		if credential, exists := credentials[provider.ID]; exists {

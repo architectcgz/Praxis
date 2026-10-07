@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 
-	"praxis/internal/agent_runtime"
+	"praxis/internal/core/model"
 	"praxis/internal/infra/providers"
 )
 
-type EmitFunc func(agentruntime.ModelStreamEvent) error
+type EmitFunc func(model.ModelStreamEvent) error
 
 const eventBufferCapacity = 16
 
@@ -37,20 +37,19 @@ func Open(client *http.Client, request *http.Request) (*http.Response, error) {
 	return response, nil
 }
 
-// Start asynchronously decodes an SSE response into provider-neutral stream events.
-// It closes response.Body and the returned channel when decoding stops. Callers that
-// stop consuming before a terminal event must cancel ctx to unblock the decoder.
+// Start 异步将 SSE 响应解码为统一模型流事件；解码停止时关闭响应体和事件通道。
+// 调用方在终态前停止消费时必须取消 ctx，避免解码协程阻塞。
 func Start(
 	ctx context.Context,
 	response *http.Response,
 	decoder Decoder,
-) <-chan agentruntime.ModelStreamEvent {
-	events := make(chan agentruntime.ModelStreamEvent, eventBufferCapacity)
+) <-chan model.ModelStreamEvent {
+	events := make(chan model.ModelStreamEvent, eventBufferCapacity)
 	go func() {
 		defer close(events)
 		defer response.Body.Close()
-		// The decoder calls emit to forward each text, tool call, or other event to the consumer.
-		emit := func(event agentruntime.ModelStreamEvent) error {
+		// 解码器通过 emit 转发事件，取消 context 后不再等待消费方。
+		emit := func(event model.ModelStreamEvent) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -60,11 +59,11 @@ func Start(
 		}
 		stopReason, err := decoder.Decode(ctx, NewSSEReader(response.Body), emit)
 		if err != nil {
-			_ = emit(agentruntime.ModelStreamEvent{Kind: agentruntime.StreamError, Err: err})
+			_ = emit(model.ModelStreamEvent{Kind: model.StreamError, Err: err})
 			return
 		}
-		_ = emit(agentruntime.ModelStreamEvent{
-			Kind:       agentruntime.StreamComplete,
+		_ = emit(model.ModelStreamEvent{
+			Kind:       model.StreamComplete,
 			StopReason: stopReason,
 		})
 	}()

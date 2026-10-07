@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
+	"praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -451,7 +451,7 @@ func (s *Store) validate(objects map[objectKey]object) error {
 				err = claim(fmt.Sprintf("message-seq:%s:%d", value.scope, v.Data.Sequence))
 			}
 		case "usage":
-			v, e := decode[agentruntime.ModelUsageRecord](key.collection, value)
+			v, e := decode[model.ModelUsageRecord](key.collection, value)
 			err = e
 			item = v
 			identity = v.Key()

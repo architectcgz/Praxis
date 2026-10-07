@@ -49,32 +49,36 @@ internal/loop
 Go import 方向如下；`compose` 负责创建并连接具体对象，不参与业务执行链：
 
 ```text
-internal/compose ──→ service / agent_runtime / loop / infra / core
-internal/service ──→ repository / agent_runtime / core
+internal/compose ──→ service / agent_runtime / loop / infra / core / tools/contracts
+internal/service ──→ repository / agent_runtime / core / tools/contracts
 internal/repository ──→ core / contracts
 internal/loop ──→ agent_runtime / core / tools/contracts
-internal/infra ──→ repository / agent_runtime / core
+internal/infra ──→ repository / core / tools/contracts
 internal/agent_runtime ──→ core / tools/contracts
-internal/core 各业务包 ──→ core 内部依赖 / contracts / utils/pathutil
+internal/core/model ──→ core/context / contracts / tools/contracts
+internal/core 各业务包 ──→ core 内部依赖 / contracts / tools/contracts / utils/pathutil
 ```
 
 依赖规则：
 
-1. `internal/contracts` 提供跨包共享的 ID、错误、快照和协议值类型；不依赖业务实现。
-2. `internal/core` 统一组织业务核心，包含 `agent`、`project`、`session`、`workspace`、`turn`、`context`、`workflow`、`security` 和 `tool_invocation`。各子包保存业务对象及其校验、状态转换与不变量；不依赖 `service`、`infra`、`agent_runtime`、`loop` 或 `compose`。`core` 仅作为目录分组，各业务包保持独立的 Go package，不设统一入口或转发层。
-3. 接口与相关能力放在同一个包内：`internal/agent_runtime` 定义运行所需的模型、工具、消息、生命周期回调和事件类型；`internal/repository`、`internal/modelconfig` 和 `internal/tools/contracts` 定义各自能力的访问接口。接口不暴露存储引擎、文件格式、Provider 协议或 Wails 类型。
+1. `internal/contracts` 提供跨包共享的 ID、错误、安全快照和协议值类型；不依赖业务实现。
+2. `internal/core` 统一组织业务核心，包含 `agent`、`model`、`project`、`session`、`workspace`、`task`、`turn`、`context`、`workflow`、`security` 和 `tool_invocation`。各子包保存业务对象及其校验、状态转换与不变量；不依赖 `service`、`infra`、`agent_runtime`、`loop` 或 `compose`。`core` 仅作为目录分组，各业务包保持独立的 Go package，不设统一入口或转发层。
+3. 接口与相关能力放在同一个包内：`internal/core/model` 定义模型快照、模型构建、请求、流事件和用量记录；`internal/core/model/config` 定义共享模型配置类型、模型目录、配置编辑接口和校验错误，供注册表、应用服务、Agent 配置校验和 Wails binding 使用；`internal/core/task` 保存 runtime 从任务队列取出并执行的任务及其生命周期；`internal/tools/contracts` 定义工具目录和工具调用契约；`internal/agent_runtime` 定义执行协调、持久化工具调用、消息、生命周期回调和 Agent 事件类型；`internal/repository` 定义持久化访问接口。接口不暴露存储引擎、文件格式、Provider 协议或 Wails 类型。
 4. `internal/service` 实现产品用例，负责输入校验、幂等检查、事务内状态变更和事务提交后的 runtime 激活。
 5. `internal/infra` 实现本地存储、配置加载与模型 Provider，工具执行器由 `internal/tools` 提供；这些实现可以依赖领域模型与能力接口，但领域模型不依赖具体实现。
 6. `internal/compose` 是唯一的生产组合根，负责创建具体实现、注入依赖和释放进程级资源。`compose/agent_runtime.go` 集中连接 Runtime、模型 Provider、执行循环和工具调用服务。
 7. `backend/wails` 只负责桌面生命周期、DTO、错误映射、binding 和事件转发；它不直接访问 repository 或文件存储。
-8. `internal/agent_runtime` 管理执行协调，不 import `loop`、`service`、`infra` 或 `compose`。loop、Provider 和应用服务使用其接口与数据类型，具体对象由 `compose` 注入。
+8. `internal/agent_runtime` 管理执行协调，不 import `loop`、`service`、`infra` 或 `compose`。loop 和应用服务使用其执行接口与 Agent 事件；模型 Provider 使用 `internal/core/model`，具体对象由 `compose` 注入。
 
 ## 后端模块
 
 | 路径 | 职责 |
 |---|---|
-| [`backend/internal/contracts`](../backend/internal/contracts) | 跨领域 ID、错误码、模型快照、安全快照、权限和共享协议类型 |
+| [`backend/internal/contracts`](../backend/internal/contracts) | 跨领域 ID、错误码、安全快照、权限和共享协议类型 |
 | [`backend/internal/core/agent`](../backend/internal/core/agent) | Agent、AgentDefinition 及 Agent 状态转换 |
+| [`backend/internal/core/model`](../backend/internal/core/model) | 模型快照及校验、模型构建接口、Provider 请求与流事件、token 用量及持久化记录 |
+| [`backend/internal/core/model/config`](../backend/internal/core/model/config) | 共享模型配置、Provider 和 Group 类型、模型目录及配置编辑接口；不包含凭据 |
+| [`backend/internal/core/task`](../backend/internal/core/task) | runtime 任务队列中的任务、输入快照和执行生命周期 |
 | [`backend/internal/core/project`](../backend/internal/core/project) | Project 模型 |
 | [`backend/internal/core/workspace`](../backend/internal/core/workspace) | Workspace 模型与工作区边界 |
 | [`backend/internal/core/session`](../backend/internal/core/session) | Session 模型、标题和归档状态 |
@@ -86,7 +90,7 @@ internal/core 各业务包 ──→ core 内部依赖 / contracts / utils/pathu
 | [`backend/internal/repository`](../backend/internal/repository) | 持久化、事务与一致消息读取接口 |
 | [`backend/internal/service`](../backend/internal/service) | Project、Session、Agent 和 turn 的应用服务，以及 Wails 前端服务集 |
 | [`backend/internal/loop`](../backend/internal/loop) | 单次 turn 的 model/tool step loop、预算和 Provider 事件归一化 |
-| [`backend/internal/agent_runtime`](../backend/internal/agent_runtime) | Agent 执行协调、Runtime 注册与关闭，以及模型、工具、消息和事件接口 |
+| [`backend/internal/agent_runtime`](../backend/internal/agent_runtime) | Agent 执行协调、Runtime 注册与关闭，以及持久化工具调用、消息和 Agent 事件接口 |
 | [`backend/internal/tools`](../backend/internal/tools) | 工具注册、工具契约、输入规范化和 `bash`、`read_file` 工具 |
 | [`backend/internal/infra`](../backend/internal/infra) | 所有本地基础设施适配器和外部模型 Provider 适配器 |
 | [`backend/internal/compose`](../backend/internal/compose) | 生产组合根，打开数据根、注册依赖、创建服务和关闭资源 |
@@ -141,7 +145,7 @@ Wails CommandBinding
   → agent_runtime.Runtime
   → agent_runtime.TurnRunner
   → loop.TurnEngine
-  → agent_runtime.ModelStream + service/turn/tool_invocation
+  → core/model.ModelStream + service/turn/tool_invocation
   → 执行结果回调
   → service/turn/lifecycle
   → JSONL 提交最终状态
@@ -153,14 +157,16 @@ Wails CommandBinding
 
 生命周期服务只在首次结束事务提交成功后发布一个终态事件：用户暂停或取消为 `request_canceled`，其他结果为 `turn_ended`。两者均携带 `SessionID`、`AgentID`、`TurnID`、`Outcome`、`FailureCode` 和安全的失败详情；runtime 不另行发布终态事件。
 
-模型 Provider 通过 `agent_runtime.ModelStream` 提供统一的流事件：文本增量、思考增量、工具调用、完成和错误。当前 Provider adapter 位于：
+模型构建由 `core/model.ModelBuilder` 定义，`infra/model_registry.Registry` 通过 `BuildModel` 根据冻结的 `core/model.ModelSnapshot` 创建 `core/model.Model`。`loop` 和计时包装器直接使用该契约。`core/task` 描述 runtime 取出并执行的队列任务，不负责模型构建或用量统计。
+
+模型 Provider 通过 `core/model.ModelStream` 提供统一的流事件：文本增量、思考增量、工具调用、用量、完成和错误。当前 Provider adapter 位于：
 
 - `infra/providers/anthropicmessages`
 - `infra/providers/openai_chat`
 - `infra/providers/openai_responses`
 - `infra/providers/streaming`
 
-Provider credential 只在 `infra/model_registry` 内解析和使用，不进入 Wails DTO、turn snapshot 或 Agent runtime contract。
+Provider credential 由 `infra/model_registry` 私有解析并传入 Provider 工厂，不进入 Wails DTO、turn snapshot 或模型执行契约。`core/model.ModelUsage` 和 `ModelUsageRecord` 统一供 Provider、Agent 事件、用量存储及 Wails 用量查询使用。
 
 ### Context 与 transcript
 
@@ -201,7 +207,12 @@ Provider credential 只在 `infra/model_registry` 内解析和使用，不进入
 
 ## 配置与安全
 
-- `infra/model_registry` 是模型配置的进程内唯一所有者，负责加载、校验、编辑配置、管理 credential、发现 Provider 模型，并在 turn 创建时生成不可变的 `ModelSnapshot`。
+- 模型配置调用链为 `Wails binding → wails/validation.PrepareModelConfig → service.Services → core/model/config.ConfigManager → infra/model_registry.Registry`。Wails 接收前端配置请求，规范化后将 `ValidatedConfig` 交给 service；service 使用 canonical 配置校验 Agent 模型引用，再协调保存和记录日志。
+- `wails/validation.PrepareModelConfig` 是模型配置的唯一规范化 owner，负责复制请求、Trim 字段、补展示名称和 DTO 转换；规范化 Provider ID 后再检查请求内引用，防止模型在转换时丢失。Wails 输入层通过 `core/model/config.NewValidatedConfig` 构造不可外部修改的 `ValidatedConfig`。
+- `core/model/config.Config.Validate` 只读检查 canonical 值、结构、引用、能力预算和推理等级；业务层不执行 Trim 或补默认值。构造成功后不重复校验完整配置，后续加载、索引和模型构建直接使用 canonical 值。
+- 配置文件恢复通过 `core/model/config.NewValidatedConfig` 只读校验已持久化的 canonical 数据，非法或非 canonical 值直接报错，不清洗字段或静默修复。
+- 注册表的 `Save` 只接收已准备配置，负责原子持久化和更新内存索引；零值配置被拒绝，不重复规范化或业务校验。`Config` 返回独立副本。Wails 输入层将配置校验失败映射为共享的 `ValidationError`，持久化错误保留原始分类；URL 校验和代理解析只读验证 canonical 值。
+- `infra/model_registry` 是模型配置的进程内唯一所有者，负责加载、校验、编辑配置、管理 credential、发现 Provider 模型，并在 task 激活时生成不可变的 `core/model.ModelSnapshot`。凭据类型和持久化索引只存在于注册表内部。
 - `infra/agent_registry` 加载每个 AgentDefinition 的 `agent.json` 和 `AGENT.md`，校验默认模型引用，并生成初始 `AgentSecurityPolicy`。
 - `core/security` 保存 Agent 的权限上限；`service/turn/start` 把当前策略冻结为 turn security snapshot，runtime 和工具执行只使用该快照。
 - 工具必须先经过 registry 注册、配置校验和 turn 权限检查。工具 executor 不直接读取前端请求，也不绕过 sandbox、workspace scope 或 approval 规则。

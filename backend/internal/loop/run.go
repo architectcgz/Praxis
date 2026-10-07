@@ -14,6 +14,8 @@ import (
 
 	"praxis/internal/agent_runtime"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/model"
+	toolcontracts "praxis/internal/tools/contracts"
 )
 
 const (
@@ -21,15 +23,10 @@ const (
 	defaultMaxToolCalls = 128
 )
 
-// ModelBuilder 按已冻结的模型快照构建本次执行的 Provider 流。
-type ModelBuilder interface {
-	BuildTaskModel(contracts.ModelSnapshot) (TaskModel, error)
-}
-
 // Config 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Config struct {
-	ModelBuilder  ModelBuilder
-	Tools         ToolCatalog
+	ModelBuilder  model.ModelBuilder
+	Tools         toolcontracts.ToolCatalog
 	ToolCalls     ToolCallHandler
 	Turns         TurnRecorder
 	EventObserver agentruntime.AgentEventObserver
@@ -55,6 +52,9 @@ func NewRunner(config Config) (Runner, error) {
 	}
 	if config.Turns == nil {
 		return Runner{}, errors.New("loop turn recorder is required")
+	}
+	if config.EventObserver == nil {
+		return Runner{}, errors.New("loop event observer is required")
 	}
 	if config.Logf == nil {
 		config.Logf = func(string, ...any) {}
@@ -219,13 +219,13 @@ func turnSettlement(
 	return turnmodel.TurnFailed, code, contracts.TaskFailureMessage(code, err)
 }
 
-func (r *Runner) buildModel(snapshot contracts.ModelSnapshot) (TaskModel, error) {
-	built, err := r.ModelBuilder.BuildTaskModel(snapshot)
+func (r *Runner) buildModel(snapshot model.ModelSnapshot) (model.Model, error) {
+	built, err := r.ModelBuilder.BuildModel(snapshot)
 	if err != nil {
-		return TaskModel{}, failCause(contracts.TaskFailureProvider, err)
+		return model.Model{}, failCause(contracts.TaskFailureProvider, err)
 	}
 	if built.Stream == nil {
-		return TaskModel{}, fail(contracts.TaskFailureProviderUnavailable, ErrorProvider, "task model stream is unavailable")
+		return model.Model{}, fail(contracts.TaskFailureProviderUnavailable, ErrorProvider, "task model stream is unavailable")
 	}
 	return built, nil
 }
@@ -234,7 +234,7 @@ func (r *Runner) buildModel(snapshot contracts.ModelSnapshot) (TaskModel, error)
 func (r *Runner) runStep(
 	ctx context.Context,
 	task taskmodel.Task,
-	taskModel TaskModel,
+	taskModel model.Model,
 	modelContext appcontext.ModelContext,
 	budget *taskBudget,
 	turn turnmodel.Turn,
@@ -261,8 +261,8 @@ func (r *Runner) runStep(
 		return nil, nil, failCause(contracts.TaskFailureProvider, err)
 	}
 	var blocks []appcontext.ContextBlock
-	text, calls, err := collectStream(ctx, stream, func(event ModelStreamEvent) {
-		if event.Kind == StreamUsage {
+	text, calls, err := collectStream(ctx, stream, func(event model.ModelStreamEvent) {
+		if event.Kind == model.StreamUsage {
 			r.emit(agentruntime.AgentEvent{
 				Kind:      agentruntime.AgentEventModelUsage,
 				SessionID: task.SessionID,
@@ -273,7 +273,7 @@ func (r *Runner) runStep(
 			})
 			return
 		}
-		if event.Kind == StreamToolCall {
+		if event.Kind == model.StreamToolCall {
 			call := event.ToolCall.Snapshot()
 			blocks = append(blocks, appcontext.ContextBlock{
 				Kind: appcontext.ContextBlockToolCall, CallID: call.ID, Name: string(call.Name), Input: append([]byte(nil), call.Arguments...),
@@ -282,7 +282,7 @@ func (r *Runner) runStep(
 		}
 		kind := agentruntime.AgentEventTextDelta
 		blockKind := appcontext.ContextBlockText
-		if event.Kind == StreamThinkingDelta {
+		if event.Kind == model.StreamThinkingDelta {
 			kind = agentruntime.AgentEventThinkingDelta
 			blockKind = appcontext.ContextBlockThinking
 		}
@@ -380,11 +380,11 @@ func buildModelRequest(
 	task taskmodel.Task,
 	permissions contracts.TaskPermissions,
 	modelContext appcontext.ModelContext,
-	taskModel TaskModel,
-	catalog ToolCatalog,
+	taskModel model.Model,
+	catalog toolcontracts.ToolCatalog,
 	turnID contracts.TurnID,
-) ModelRequest {
-	return ModelRequest{
+) model.ModelRequest {
+	return model.ModelRequest{
 		TaskID: task.ID, SessionReference: task.SessionID.String(),
 		Context: modelContext.Clone(),
 		Model:   task.Input.Model, MaxOutputTokens: taskModel.MaxOutputTokens, Tools: toolDefinitions(permissions, catalog),
@@ -481,55 +481,6 @@ func appendTaskMessage(
 	return err
 }
 
-func (r *Runner) emit(event agentruntime.AgentEvent) {
-	if r.EventObserver != nil {
-		r.EventObserver(event)
-	}
-}
-
-func (r *Runner) emitToolResult(
-	task taskmodel.Task,
-	turnID contracts.TurnID,
-	call ToolCall,
-	block appcontext.ContextBlock,
-) {
-	r.emit(agentruntime.AgentEvent{
-		Kind:    agentruntime.AgentEventToolResult,
-		AgentID: task.AgentID,
-		TaskID:  task.ID,
-		TurnID:  turnID,
-		CallID:  call.ID,
-		Name:    string(call.Name),
-		Result:  block.Text,
-		IsError: block.IsError,
-	})
-}
-
-func (r *Runner) emitError(task taskmodel.Task, turnID contracts.TurnID, err error) {
-	if err == nil {
-		return
-	}
-	message := "task failed"
-	var runtimeErr *RuntimeError
-	if errors.As(err, &runtimeErr) && runtimeErr.Message != "" {
-		message = runtimeErr.Message
-	} else {
-		var failure *taskFailure
-		if errors.As(err, &failure) {
-			if detail := contracts.TaskFailureMessage(failure.code, failure.cause); detail != "" {
-				message = detail
-			}
-		}
-	}
-	r.emit(agentruntime.AgentEvent{
-		Kind:    agentruntime.AgentEventError,
-		AgentID: task.AgentID,
-		TaskID:  task.ID,
-		TurnID:  turnID,
-		Error:   message,
-	})
-}
-
 // taskBudget 执行单次 task 的资源限制。
 // 输出字节数跨迭代的模型输出和工具结果累计，工具计数仅在调用成功后递增。
 type taskBudget struct {
@@ -551,7 +502,7 @@ func newTaskBudget(limits contracts.ResourceLimits) *taskBudget {
 	return budget
 }
 
-func (b *taskBudget) reserveInput(request ModelRequest) error {
+func (b *taskBudget) reserveInput(request model.ModelRequest) error {
 	if b.limits.MaxInputBytes > 0 && stepInputBytes(request) > b.limits.MaxInputBytes {
 		return fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "task input limit exceeded")
 	}
@@ -610,7 +561,7 @@ func taskResult(err error) (taskmodel.TaskOutcome, contracts.TaskFailureCode, er
 	return failedTask(err)
 }
 
-func toolDefinitions(permissions contracts.TaskPermissions, catalog ToolCatalog) []ToolDefinition {
+func toolDefinitions(permissions contracts.TaskPermissions, catalog toolcontracts.ToolCatalog) []ToolDefinition {
 	definitions := make([]ToolDefinition, 0, len(permissions.AllowedTools))
 	for _, definition := range catalog.List() {
 		if permissions.AllowsTool(definition.Name) {
@@ -620,7 +571,7 @@ func toolDefinitions(permissions contracts.TaskPermissions, catalog ToolCatalog)
 	return definitions
 }
 
-func collectStream(ctx context.Context, stream <-chan ModelStreamEvent, onEvent func(ModelStreamEvent)) (string, []ToolCall, error) {
+func collectStream(ctx context.Context, stream <-chan model.ModelStreamEvent, onEvent func(model.ModelStreamEvent)) (string, []ToolCall, error) {
 	var text strings.Builder
 	calls := make([]ToolCall, 0)
 	for {
@@ -632,28 +583,28 @@ func collectStream(ctx context.Context, stream <-chan ModelStreamEvent, onEvent 
 				return text.String(), calls, nil
 			}
 			switch event.Kind {
-			case StreamTextDelta:
+			case model.StreamTextDelta:
 				text.WriteString(event.Text)
 				if onEvent != nil && event.Text != "" {
 					onEvent(event)
 				}
-			case StreamThinkingDelta:
+			case model.StreamThinkingDelta:
 				if onEvent != nil && event.Text != "" {
 					onEvent(event)
 				}
-			case StreamToolCall:
+			case model.StreamToolCall:
 				event.ToolCall = event.ToolCall.Snapshot()
 				calls = append(calls, event.ToolCall)
 				if onEvent != nil {
 					onEvent(event)
 				}
-			case StreamUsage:
+			case model.StreamUsage:
 				if event.Usage != nil && event.Usage.Valid() && onEvent != nil {
 					onEvent(event)
 				}
-			case StreamComplete:
+			case model.StreamComplete:
 				return text.String(), calls, nil
-			case StreamError:
+			case model.StreamError:
 				if event.Err != nil {
 					return text.String(), calls, event.Err
 				}
@@ -665,7 +616,7 @@ func collectStream(ctx context.Context, stream <-chan ModelStreamEvent, onEvent 
 	}
 }
 
-func stepInputBytes(request ModelRequest) int64 {
+func stepInputBytes(request model.ModelRequest) int64 {
 	var total int64
 	total += int64(len([]byte(request.Context.SystemPrompt)))
 	for _, entry := range request.Context.Entries {

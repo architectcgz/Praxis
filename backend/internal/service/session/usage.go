@@ -5,15 +5,15 @@ import (
 	"errors"
 	"math"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
+	"praxis/internal/core/model"
 )
 
 // SessionUsageSummary 是会话全部 Agent 已保存请求的用量快照；百分比不持久化。
 // CacheReadRatio 使用 0 到 1，零输入或存在未知缓存计数时为 nil。
 // CacheReadComplete 只表示 Records 内的缓存读取计数完整，不推算未上报的请求。
 type SessionUsageSummary struct {
-	Records              []agentruntime.ModelUsageRecord
+	Records              []model.ModelUsageRecord
 	InputTokens          int64
 	CacheReadInputTokens int64
 	CacheReadRatio       *float64
@@ -34,7 +34,7 @@ func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID contract
 		return SessionUsageSummary{}, err
 	}
 	if records == nil {
-		records = []agentruntime.ModelUsageRecord{}
+		records = []model.ModelUsageRecord{}
 	}
 	summary := SessionUsageSummary{
 		Records:           records,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/model"
 )
 
 const MaxInputBytes = 32 * 1024
@@ -41,7 +42,7 @@ type InputSnapshot struct {
 	MessageSequenceBoundary uint64 `json:"messageSequenceBoundary"`
 	CurrentInputMessageID   string `json:"currentInputMessageId"`
 	Context                 appcontext.ModelContext
-	Model                   contracts.ModelSnapshot
+	Model                   model.ModelSnapshot
 	WorkspacePath           string
 	Security                contracts.SecuritySnapshot
 }

@@ -1,12 +1,12 @@
 package bindings
 
 import (
-	"praxis/internal/agent_runtime"
+	"praxis/internal/core/model"
 	"praxis/wails/validation"
 )
 
 // ListSessionUsage 返回会话所有请求的已上报用量；未上报的计数不补零。
-func (b *AgentBindings) ListSessionUsage(sessionID string) ([]agentruntime.ModelUsageRecord, error) {
+func (b *AgentBindings) ListSessionUsage(sessionID string) ([]model.ModelUsageRecord, error) {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return nil, err
 	}

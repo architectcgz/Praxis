@@ -9,8 +9,9 @@ import (
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 	taskmodel "praxis/internal/core/task"
-	modelregistry "praxis/internal/infra/model_registry"
 	"praxis/internal/infra/providers/anthropicmessages"
 	openaichat "praxis/internal/infra/providers/openai_chat"
 	openairesponses "praxis/internal/infra/providers/openai_responses"
@@ -25,7 +26,7 @@ import (
 
 // newLoop 装配模型与持久化工具调用依赖，返回 runtime 调用的 loop.Run 执行函数。
 func newLoop(
-	modelBuilder loop.ModelBuilder,
+	modelBuilder model.ModelBuilder,
 	toolConfig toolinvocation.Config,
 	turnConfig taskturn.Config,
 	recorder *timing.Recorder,
@@ -57,33 +58,33 @@ func newLoop(
 }
 
 func newModelStream(
-	format modelregistry.ModelAPIFormat,
-	provider modelregistry.ProviderConfig,
-	modelConfig modelregistry.ModelConfig,
+	format modelconfig.APIFormat,
+	provider modelconfig.Provider,
+	configured modelconfig.Model,
 	apiKey string,
 	client *http.Client,
-) (agentruntime.ModelStream, error) {
+) (model.ModelStream, error) {
 	switch format {
-	case modelregistry.APIFormatAnthropicMessages:
+	case modelconfig.APIFormatAnthropicMessages:
 		return anthropicmessages.New(anthropicmessages.Config{
 			BaseURL:       provider.BaseURL,
 			APIKey:        apiKey,
 			HTTPClient:    client,
-			ContextWindow: modelConfig.ContextWindow,
+			ContextWindow: configured.ContextWindow,
 		})
-	case modelregistry.APIFormatOpenAIChatCompletions:
+	case modelconfig.APIFormatOpenAIChatCompletions:
 		return openaichat.New(openaichat.Config{
 			BaseURL:       provider.BaseURL,
 			APIKey:        apiKey,
 			HTTPClient:    client,
-			ContextWindow: modelConfig.ContextWindow,
+			ContextWindow: configured.ContextWindow,
 		})
-	case modelregistry.APIFormatOpenAIResponses:
+	case modelconfig.APIFormatOpenAIResponses:
 		return openairesponses.New(openairesponses.Config{
 			BaseURL:       provider.BaseURL,
 			APIKey:        apiKey,
 			HTTPClient:    client,
-			ContextWindow: modelConfig.ContextWindow,
+			ContextWindow: configured.ContextWindow,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported model API format %q", format)

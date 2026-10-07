@@ -5,13 +5,14 @@ import (
 	"errors"
 
 	"praxis/internal/contracts"
+	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/timing"
 
 	"praxis/internal/agent_runtime"
-	appmodelconfig "praxis/internal/modelconfig"
 	applicationagent "praxis/internal/service/agent"
 	applicationproject "praxis/internal/service/project"
 	applicationruntime "praxis/internal/service/runtime"
@@ -60,13 +61,13 @@ type AgentCommands interface {
 
 // ModelCatalog 列出已确认的模型标签与能力。
 type ModelCatalog interface {
-	ListModels() []appmodelconfig.Option
+	ListModels() []modelconfig.Option
 }
 
-// ModelConfigEditor 读写模型配置与凭据。
-type ModelConfigEditor interface {
-	ModelConfig() appmodelconfig.Config
-	SaveModelConfig(appmodelconfig.Config) error
+// ModelConfigService 提供模型配置读写、凭据管理和模型发现用例。
+type ModelConfigService interface {
+	ModelConfig() modelconfig.Config
+	SaveModelConfig(modelconfig.ValidatedConfig) error
 	ReloadConfig(context.Context) error
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
@@ -85,7 +86,7 @@ type TimingService interface {
 
 // UsageService 查询会话完整的请求用量，不受消息和计时分页影响。
 type UsageService interface {
-	ListSession(context.Context, string) ([]agentruntime.ModelUsageRecord, error)
+	ListSession(context.Context, string) ([]model.ModelUsageRecord, error)
 }
 
 // Services 是 binding 层所需的全部窄能力。
@@ -95,7 +96,7 @@ type Services struct {
 	Agents      AgentService
 	Commands    AgentCommands
 	Models      ModelCatalog
-	ModelConfig ModelConfigEditor
+	ModelConfig ModelConfigService
 	Events      AgentEventSource
 	Timings     TimingService
 	Usages      UsageService
@@ -117,7 +118,7 @@ func (s Services) Validate() error {
 	case s.Models == nil:
 		return errors.New("frontend model catalog is required")
 	case s.ModelConfig == nil:
-		return errors.New("frontend model configuration editor is required")
+		return errors.New("frontend model configuration service is required")
 	case s.Events == nil:
 		return errors.New("frontend agent event source is required")
 	case s.Timings == nil:

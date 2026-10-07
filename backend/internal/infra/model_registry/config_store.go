@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	modelconfig "praxis/internal/core/model/config"
 )
 
 // ConfigurationError identifies the configuration file that prevented the
@@ -30,35 +32,37 @@ func (e *ConfigurationError) Unwrap() error {
 	return e.Err
 }
 
-func readModelConfigFile(path string) (RegistryConfig, error) {
+// readModelConfigFile 解码并只读校验持久化的 canonical 配置，不清洗或静默修复字段。
+func readModelConfigFile(path string) (modelconfig.ValidatedConfig, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		config := RegistryConfig{
-			Groups: []GroupConfig{}, Providers: []ProviderConfig{},
+		config := modelconfig.Config{
+			Groups:    []modelconfig.Group{},
+			Providers: []modelconfig.Provider{},
 		}
 		payload, marshalErr := json.MarshalIndent(config, "", "  ")
 		if marshalErr != nil {
-			return RegistryConfig{}, fmt.Errorf("encode models config template: %w", marshalErr)
+			return modelconfig.ValidatedConfig{}, fmt.Errorf("encode models config template: %w", marshalErr)
 		}
 		if writeErr := os.WriteFile(path, append(payload, '\n'), 0o600); writeErr != nil {
-			return RegistryConfig{}, fmt.Errorf("create models config: %w", writeErr)
+			return modelconfig.ValidatedConfig{}, fmt.Errorf("create models config: %w", writeErr)
 		}
 		file, err = os.Open(path)
 	}
 	if err != nil {
-		return RegistryConfig{}, fmt.Errorf("open models config: %w", err)
+		return modelconfig.ValidatedConfig{}, fmt.Errorf("open models config: %w", err)
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
-	var config RegistryConfig
+	var config modelconfig.Config
 	if err := decoder.Decode(&config); err != nil {
-		return RegistryConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return modelconfig.ValidatedConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return RegistryConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return modelconfig.ValidatedConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
-	return config, nil
+	return modelconfig.NewValidatedConfig(config)
 }
 
 // readCredentialsFile reads the owner-only credential document. A missing

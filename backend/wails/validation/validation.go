@@ -161,7 +161,7 @@ func ValidateCreateSession(request dto.CreateSessionRequest) error {
 
 // ValidateSaveModelConfig 校验模型配置文档内部的引用完整性。
 //
-// 必须在这里拦：binding 组装 RegistryConfig 时只把 model 挂到同请求内已声明的
+// 必须在 DTO 转换前检查：输入层只把 model 挂到同请求内已声明的
 // provider 下，找不到 provider 的 model 会被静默丢弃，core 校验的是丢弃之后的
 // 配置，无法发现丢失。
 func ValidateSaveModelConfig(request dto.SaveModelConfigRequest) error {

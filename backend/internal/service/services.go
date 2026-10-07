@@ -6,6 +6,7 @@ package service
 
 import (
 	"praxis/internal/contracts"
+	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
@@ -20,7 +21,6 @@ import (
 
 	"praxis/internal/agent_runtime"
 	"praxis/internal/logging"
-	appmodelconfig "praxis/internal/modelconfig"
 	applicationagent "praxis/internal/service/agent"
 	applicationproject "praxis/internal/service/project"
 	applicationruntime "praxis/internal/service/runtime"
@@ -29,14 +29,14 @@ import (
 	applicationsession "praxis/internal/service/session"
 )
 
-// Config 收集实现前端端口所需的 service 与配置适配器。
+// Config 收集实现前端端口所需的用例服务与模型配置能力。
 type Config struct {
 	Agents       *applicationagent.Service
 	Projects     *applicationproject.Service
 	Sessions     *applicationsession.Service
 	Runtime      *applicationruntime.Service
-	Models       appmodelconfig.Editor
-	AgentConfig  appmodelconfig.AgentDefinitions
+	Models       modelconfig.ConfigManager
+	AgentConfig  modelconfig.AgentDefinitions
 	ReloadConfig func(context.Context) error
 	Events       *EventPublisher
 	Logger       *logging.Logger
@@ -48,8 +48,8 @@ type Services struct {
 	projects     *applicationproject.Service
 	sessions     *applicationsession.Service
 	runtime      *applicationruntime.Service
-	models       appmodelconfig.Editor
-	agentConfig  appmodelconfig.AgentDefinitions
+	models       modelconfig.ConfigManager
+	agentConfig  modelconfig.AgentDefinitions
 	reloadConfig func(context.Context) error
 	configMu     sync.RWMutex
 	events       *EventPublisher
@@ -209,11 +209,11 @@ func (s *Services) EnqueueTask(ctx context.Context, params taskqueue.EnqueuePara
 }
 
 // ListModels 返回已确认的模型能力，并补上引用该模型的所有 Agent。
-func (s *Services) ListModels() []appmodelconfig.Option {
+func (s *Services) ListModels() []modelconfig.Option {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
 	if s.models == nil {
-		return []appmodelconfig.Option{}
+		return []modelconfig.Option{}
 	}
 	models := s.models.ListModels()
 	if s.agentConfig == nil {
@@ -226,26 +226,31 @@ func (s *Services) ListModels() []appmodelconfig.Option {
 }
 
 // ModelConfig 返回完整模型配置的可编辑副本，供设置界面渲染。
-func (s *Services) ModelConfig() appmodelconfig.Config {
+func (s *Services) ModelConfig() modelconfig.Config {
 	if s.models == nil {
-		return appmodelconfig.Config{}
+		return modelconfig.Config{}
 	}
 	return s.models.Config()
 }
 
-// SaveModelConfig 校验并持久化整份模型配置。保存后立即对运行中的编排层生效。
-func (s *Services) SaveModelConfig(config appmodelconfig.Config) error {
+// SaveModelConfig 使用输入层已准备的配置检查 Agent 引用并协调持久化。
+// 零值配置返回 ValidationError；成功后立即对后续模型选择生效。
+func (s *Services) SaveModelConfig(prepared modelconfig.ValidatedConfig) error {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	if s.models == nil {
 		return errors.New("model registry is not available")
 	}
+	if !prepared.Prepared() {
+		return &modelconfig.ValidationError{Err: errors.New("model configuration has not been prepared")}
+	}
+	config := prepared.Config()
 	if s.agentConfig != nil {
 		if err := s.agentConfig.ValidateModelConfiguration(config); err != nil {
 			return err
 		}
 	}
-	if err := s.models.Save(config); err != nil {
+	if err := s.models.Save(prepared); err != nil {
 		return err
 	}
 	s.logger.Infof("model config saved providers=%d groups=%d", len(config.Providers), len(config.Groups))

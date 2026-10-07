@@ -1,8 +1,11 @@
 package modelregistry
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+
+	modelconfig "praxis/internal/core/model/config"
 	providerapi "praxis/internal/infra/providers"
 )
 
@@ -17,10 +20,6 @@ func Load(modelsPath, credentialsPath string, client *http.Client, factories ...
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
-	validated, err := Prepare(config)
-	if err != nil {
-		return nil, &ConfigurationError{Path: modelsPath, Err: err}
-	}
 	credentials, err := readCredentialsFile(credentialsPath)
 	if err != nil {
 		return nil, &ConfigurationError{Path: credentialsPath, Err: err}
@@ -29,7 +28,7 @@ func Load(modelsPath, credentialsPath string, client *http.Client, factories ...
 	if err != nil {
 		return nil, &ConfigurationError{Path: credentialsPath, Err: err}
 	}
-	registry, err := newRegistry(modelsPath, credentialsPath, validated, credentials, client, streamFactory)
+	registry, err := newRegistry(modelsPath, credentialsPath, config, credentials, client, streamFactory)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
@@ -39,12 +38,15 @@ func Load(modelsPath, credentialsPath string, client *http.Client, factories ...
 func newRegistry(
 	modelsPath string,
 	credentialsPath string,
-	validated ValidatedConfig,
+	validated modelconfig.ValidatedConfig,
 	credentials ProviderCredentials,
 	client *http.Client,
 	streamFactory StreamFactory,
 ) (*Registry, error) {
-	config := validated.config
+	if !validated.Prepared() {
+		return nil, errors.New("model configuration has not been prepared")
+	}
+	config := validated.Config()
 	providerClients, err := buildProviderClients(config.Providers, client)
 	if err != nil {
 		return nil, err
@@ -63,7 +65,7 @@ func newRegistry(
 	}, nil
 }
 
-func buildProviderClients(providers []ProviderConfig, base *http.Client) (map[string]*http.Client, error) {
+func buildProviderClients(providers []modelconfig.Provider, base *http.Client) (map[string]*http.Client, error) {
 	clients := make(map[string]*http.Client, len(providers))
 	for _, provider := range providers {
 		client, err := providerapi.NewProxyClient(base, provider.ProxyURL)
@@ -75,9 +77,9 @@ func buildProviderClients(providers []ProviderConfig, base *http.Client) (map[st
 	return clients, nil
 }
 
-func buildIndexes(providers []ProviderConfig) (map[modelKey]ModelConfig, map[string]ProviderConfig) {
-	modelsByKey := make(map[modelKey]ModelConfig)
-	providersByID := make(map[string]ProviderConfig, len(providers))
+func buildIndexes(providers []modelconfig.Provider) (map[modelKey]modelconfig.Model, map[string]modelconfig.Provider) {
+	modelsByKey := make(map[modelKey]modelconfig.Model)
+	providersByID := make(map[string]modelconfig.Provider, len(providers))
 	for _, provider := range providers {
 		providersByID[provider.ID] = provider
 		for _, model := range provider.Models {
