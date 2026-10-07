@@ -32,43 +32,80 @@ React frontend
     │ Wails bindings / events
     ▼
 backend/wails
-    │ 应用服务接口
+    │ 只做 wire 形状校验、DTO 转换和错误映射
+    ▼
+internal/request
+    │ canonical request（复制、Trim、引用校验）
     ▼
 internal/service
     │ 事务提交后激活
     ▼
 internal/agent_runtime
-    │ 注入的 TurnRunner
+    │ 注入的 LoopFunc
     ▼
 internal/loop
     │ 模型与工具调用接口
     ├── internal/infra/providers
-    └── internal/service/turn/tool_invocation
+    └── internal/service/runtime/task/tool_invocation
 ```
 
 Go import 方向如下；`compose` 负责创建并连接具体对象，不参与业务执行链：
 
 ```text
 internal/compose ──→ service / agent_runtime / loop / infra / core / tools/contracts
-internal/service ──→ repository / agent_runtime / core / tools/contracts
+backend/wails ──→ service / request / contracts / logging / wails 子包
+internal/request ──→ core/model/config / contracts
+internal/service ──→ repository / core / request / contracts / timing / tools/contracts / utils/pathutil
 internal/repository ──→ core / contracts
 internal/loop ──→ agent_runtime / core / tools/contracts
-internal/infra ──→ repository / core / tools/contracts
-internal/agent_runtime ──→ core / tools/contracts
+internal/infra ──→ repository / core / timing / contracts / utils/pathutil
+internal/agent_runtime ──→ core / contracts / logging
 internal/core/model ──→ core/context / contracts / tools/contracts
-internal/core 各业务包 ──→ core 内部依赖 / contracts / tools/contracts / utils/pathutil
+internal/core 各业务包 ──→ core 内部依赖 / contracts / utils/pathutil
 ```
 
 依赖规则：
 
 1. `internal/contracts` 提供跨包共享的 ID、错误、安全快照和协议值类型；不依赖业务实现。
 2. `internal/core` 统一组织业务核心，包含 `agent`、`model`、`project`、`session`、`workspace`、`task`、`turn`、`context`、`workflow`、`security` 和 `tool_invocation`。各子包保存业务对象及其校验、状态转换与不变量；不依赖 `service`、`infra`、`agent_runtime`、`loop` 或 `compose`。`core` 仅作为目录分组，各业务包保持独立的 Go package，不设统一入口或转发层。
-3. 接口与相关能力放在同一个包内：`internal/core/model` 定义模型快照、模型构建、请求、流事件和用量记录；`internal/core/model/config` 定义共享模型配置类型、模型目录、配置编辑接口和校验错误，供注册表、应用服务、Agent 配置校验和 Wails binding 使用；`internal/core/task` 保存 runtime 从任务队列取出并执行的任务及其生命周期；`internal/tools/contracts` 定义工具目录和工具调用契约；`internal/agent_runtime` 定义执行协调、持久化工具调用、消息、生命周期回调和 Agent 事件类型；`internal/repository` 定义持久化访问接口。接口不暴露存储引擎、文件格式、Provider 协议或 Wails 类型。
-4. `internal/service` 实现产品用例，负责输入校验、幂等检查、事务内状态变更和事务提交后的 runtime 激活。
+3. 接口与相关能力放在同一个包内，并且由消费方拥有：`internal/core/model` 定义模型快照、模型构建、请求、流事件和用量记录；`internal/core/model/config` 定义共享模型配置类型、模型目录、配置编辑接口和校验错误；`internal/core/task` 保存 runtime 从任务队列取出并执行的任务及其生命周期；`internal/tools/contracts` 定义工具目录和工具调用契约；`internal/loop` 声明自身需要的执行接口（`TurnRecorder`、`ToolCallHandler`）；`internal/agent_runtime` 定义执行协调、消息写入、生命周期回调和 Agent 事件类型；`internal/repository` 定义持久化访问接口。`internal/contracts` 承载跨边界同形的执行参数值类型（`TurnExecutionContext`、`ToolInvocationContext`）。接口不暴露存储引擎、文件格式、Provider 协议或 Wails 类型。
+4. `internal/service` 实现产品用例，负责输入校验、幂等检查、事务内状态变更、事务提交后的 runtime 激活，以及窄 Port 协调。service 的输入来自 `internal/request` 构造的 canonical request；本地文件访问只通过 `service/project.WorkspaceDirectory`、`service/session.WorkspaceTextReader` 这类窄 Port，具体实现位于 `internal/infra/workspacefs`。service 不 import `internal/agent_runtime`，也不直接使用 `os` 文件系统 API。
 5. `internal/infra` 实现本地存储、配置加载与模型 Provider，工具执行器由 `internal/tools` 提供；这些实现可以依赖领域模型与能力接口，但领域模型不依赖具体实现。
 6. `internal/compose` 是唯一的生产组合根，负责创建具体实现、注入依赖和释放进程级资源。`compose/agent_runtime.go` 集中连接 Runtime、模型 Provider、执行循环和工具调用服务。
 7. `backend/wails` 只负责桌面生命周期、DTO、错误映射、binding 和事件转发；它不直接访问 repository 或文件存储。
-8. `internal/agent_runtime` 管理执行协调，不 import `loop`、`service`、`infra` 或 `compose`。loop 和应用服务使用其执行接口与 Agent 事件；模型 Provider 使用 `internal/core/model`，具体对象由 `compose` 注入。
+8. `internal/agent_runtime` 管理执行协调，不 import `loop`、`service`、`infra` 或 `compose`。loop 和应用服务使用其执行接口与 Agent 事件；模型 Provider 使用 `internal/core/model`，具体对象由 `compose` 注入。只被 loop 使用的 `TurnRecorder`、`ToolCallHandler` 声明在 `internal/loop`，不放在 `agent_runtime`。
+9. `internal/request` 是 Wails 与 service 之间的 canonical request 边界：负责复制、Trim、补展示默认值和请求内引用校验，不访问 repository、不持锁、不编排用例。
+
+### Port owner
+
+| 能力 | 消费方接口位置 | 实现位置 |
+|---|---|---|
+| Workspace 目录创建/回收 | `service/project.WorkspaceDirectory` | `infra/workspacefs.Filesystem` |
+| Workspace 文本读取 | `service/session.WorkspaceTextReader` | `infra/workspacefs.Filesystem` |
+| 持久化、事务与一致读取 | `internal/repository` | `infra/jsonl`、`infra/document` |
+| 进程内执行激活 | `service/runtime.TaskActivator` | `agent_runtime.Registry`（由 `compose` 注入） |
+| Task 准入与收敛 | `service/runtime.TaskStarter` | `service/runtime/task.Service` |
+| loop 迭代与工具调用 | `internal/loop`（`TurnRecorder`、`ToolCallHandler`） | `service/runtime/task/turn`、`service/runtime/task/tool_invocation` |
+| Agent 可见消息流读写 | `repository.MessageStreams`（`Append`/`List`/`LoadMessages`） | `infra/jsonl.MessageStreams` |
+| 会话是否已有消息 | `repository.SessionRepository.HasMessages` | `infra/jsonl.SessionRepository` |
+
+### 验证规则
+
+依赖门禁与全量验收按以下顺序执行，任一步失败即停止；门禁通过时无输出且退出状态为 0：
+
+```text
+backend:  go vet ./... → go test -race ./... → 依赖门禁
+frontend: npm ci → npx tsc --noEmit → npm run build
+```
+
+依赖门禁使用 `go list` 检查生产包的直接 import，四项均为硬约束：
+
+1. `./wails/...` 不得 import `internal/core`、`internal/agent_runtime`、`internal/timing`、`internal/repository`、`internal/infra`。
+2. `./internal/core/model/...` 不得 import `internal/tools/contracts`。
+3. `./internal/service/...` 不得 import `internal/agent_runtime`。
+4. `./internal/service/...` 不得直接 import `os`。
+
+门禁自身必须有确定语义：`go list` 失败必须失败，`rg` 工具错误必须原样失败，不得当成“无匹配”而通过；合成输入（合法依赖、违规依赖、`go list` 失败、`rg` 工具错误）用于验证这一点。
 
 ## 后端模块
 
@@ -88,9 +125,10 @@ internal/core 各业务包 ──→ core 内部依赖 / contracts / tools/contr
 | [`backend/internal/core/security`](../backend/internal/core/security) | Agent 权限上限、Sandbox、Approval 和工具策略 |
 | [`backend/internal/core/tool_invocation`](../backend/internal/core/tool_invocation) | 工具调用持久化身份、状态转换、结果及恢复不变量 |
 | [`backend/internal/repository`](../backend/internal/repository) | 持久化、事务与一致消息读取接口 |
-| [`backend/internal/service`](../backend/internal/service) | Project、Session、Agent 和 turn 的应用服务，以及 Wails 前端服务集 |
-| [`backend/internal/loop`](../backend/internal/loop) | 单次 turn 的 model/tool step loop、预算和 Provider 事件归一化 |
-| [`backend/internal/agent_runtime`](../backend/internal/agent_runtime) | Agent 执行协调、Runtime 注册与关闭，以及持久化工具调用、消息和 Agent 事件接口 |
+| [`backend/internal/request`](../backend/internal/request) | Wails 与 service 之间的 canonical request 构造器：复制、规范化、请求内引用校验 |
+| [`backend/internal/service`](../backend/internal/service) | Project、Session、Agent 和 runtime 的应用服务，以及 Wails 前端服务集；只依赖窄 Port |
+| [`backend/internal/loop`](../backend/internal/loop) | 单次 Task 的 model/tool step loop、预算、Provider 事件归一化和自身的执行接口 |
+| [`backend/internal/agent_runtime`](../backend/internal/agent_runtime) | Agent 执行协调、Runtime 注册与关闭、消息写入与 Agent 事件定义 |
 | [`backend/internal/tools`](../backend/internal/tools) | 工具注册、工具契约、输入规范化和 `bash`、`read_file` 工具 |
 | [`backend/internal/infra`](../backend/internal/infra) | 所有本地基础设施适配器和外部模型 Provider 适配器 |
 | [`backend/internal/compose`](../backend/internal/compose) | 生产组合根，打开数据根、注册依赖、创建服务和关闭资源 |
@@ -102,14 +140,14 @@ internal/core 各业务包 ──→ core 内部依赖 / contracts / tools/contr
 
 - `service/project` 创建和查询 Project、Workspace。
 - `service/session` 创建和查询 Session，并构建发送给 turn 的上下文。
-- `service/agent` 查询 Agent、turn 和 transcript 展示数据。
-- `service/turn/start` 创建用户输入或恢复 turn，冻结模型、上下文和安全输入快照。
-- `service/turn/queue` 创建独立排队任务，并按 Agent FIFO 启动任务。
-- `service/turn/control` 先记录 PauseAgent/CancelTurn 控制命令，再通知进程内 runtime 取消指定 Turn；取消不关闭 Agent。
-- `service/turn/lifecycle` 接收 runtime 的开始与结束回调，将 Turn 推进到运行态，并以一个 JSONL 提交 Turn、Agent、QueuedWork 和控制命令的最终状态。
-- `service/turn/tool_invocation` 负责工具调用的持久化准入、幂等检查、授权和结果结算；通过注入的工具目录执行已授权调用。
+- `service/agent` 查询 Agent、turn 和 transcript 展示数据，并先记录 PauseAgent/CancelTurn 控制命令，再在提交后通知进程内 runtime 取消指定 Turn；取消不关闭 Agent。
+- `service/runtime/task/start` 创建用户输入或恢复 turn，冻结模型、上下文和安全输入快照。
+- `service/runtime/queue` 创建独立排队任务，并按 Agent FIFO 启动任务。
+- `service/runtime/task/lifecycle` 接收 runtime 的开始与结束回调，推进 Task 到运行态，并以一个 JSONL 提交 Task、Turn、Agent、控制命令的最终状态。
+- `service/runtime/task/tool_invocation` 负责工具调用的持久化准入、幂等检查、授权和结果结算；通过注入的工具目录执行已授权调用。
 - `core/tool_invocation` 定义工具调用状态模型，仅依赖共享 contracts。恢复时，未启动的调用结算为 `interrupted`，运行中但结果无法确认的调用结算为终态 `unknown`，不得自动重放。
-- `service/session.MessageStore` 按 Agent 的可见范围路由消息；一致读取接口由 `repository.MessageLoader` 定义，执行消息接口由 `agent_runtime.TurnMessageStore` 定义。
+- Agent 可见消息流由 `repository.MessageStreams` 单个 Port 读写：`LoadMessages` 供上下文构建和标题命名使用，`Append`/`List` 供输入、工具结果和查询使用。可见性规则来自 `core/agent.CanReadSessionContext()`，日志键位由 `infra/jsonl` 决定；service 不判断写哪条流，也不依赖 `agent_runtime`。
+- “会话是否已有任何消息”是会话聚合的属性，由 `repository.SessionRepository.HasMessages` 回答；service 不再持有任何按流划分的消息仓储。
 - `service/services.go` 实现 Wails 层需要的前端服务集，负责参数转换、结果投影和瞬时事件订阅。
 
 用例的通用顺序是：
@@ -139,19 +177,19 @@ runtime 激活失败不会撤销已经提交的命令或 turn；结果通过持�
 
 ```text
 Wails CommandBinding
-  → service/turn/start 或 queue
-  → repository transaction 创建 Turn
+  → service/runtime/task/start 或 service/runtime/queue
+  → repository transaction 创建 Task
   → agent_runtime.Registry.Activate
   → agent_runtime.Runtime
-  → agent_runtime.TurnRunner
-  → loop.TurnEngine
-  → core/model.ModelStream + service/turn/tool_invocation
+  → agent_runtime.LoopFunc（compose 注入的 loop.Run）
+  → loop.Runner
+  → core/model.ModelStream + service/runtime/task/tool_invocation
   → 执行结果回调
-  → service/turn/lifecycle
+  → service/runtime/task/lifecycle
   → JSONL 提交最终状态
 ```
 
-`loop.TurnEngine` 只拥有一次 Turn 的 model/tool step loop，不拥有 Agent 状态或最终结束事务。每次工具调用都必须先写入可对账的 tool-result receipt，再构造下一轮模型上下文；模型或工具失败必须映射为稳定的 `TurnFailureCode`。
+`loop.Runner` 只拥有一次 Task 的 model/tool step loop，不拥有 Agent 状态或最终结束事务。每次工具调用都必须先写入可对账的 tool-result receipt，再构造下一轮模型上下文；模型或工具失败必须映射为稳定的 `TurnFailureCode`。
 
 控制命令使用 `CommandID` 保证幂等，使用 `AgentID + TargetTurnID` 固定取消目标；旧回合请求不会取消下一轮。结束事务优先应用此前已提交的控制命令，并保存 `FailureCode=request_canceled`，与系统中断区分。
 
@@ -207,14 +245,14 @@ Provider credential 由 `infra/model_registry` 私有解析并传入 Provider �
 
 ## 配置与安全
 
-- 模型配置调用链为 `Wails binding → wails/validation.PrepareModelConfig → service.Services → core/model/config.ConfigManager → infra/model_registry.Registry`。Wails 接收前端配置请求，规范化后将 `ValidatedConfig` 交给 service；service 使用 canonical 配置校验 Agent 模型引用，再协调保存和记录日志。
-- `wails/validation.PrepareModelConfig` 是模型配置的唯一规范化 owner，负责复制请求、Trim 字段、补展示名称和 DTO 转换；规范化 Provider ID 后再检查请求内引用，防止模型在转换时丢失。Wails 输入层通过 `core/model/config.NewValidatedConfig` 构造不可外部修改的 `ValidatedConfig`。
+- 模型配置调用链为 `Wails binding → internal/request.NewSaveModelConfig → service.Services → core/model/config.ConfigManager → infra/model_registry.Registry`。Wails binding 只把 wire DTO 转成 `request.SaveModelConfig` 并调用构造器；构造成功后 service 使用 canonical 配置校验 Agent 模型引用，再协调保存和记录日志。
+- `internal/request.NewSaveModelConfig` 是模型配置的唯一规范化 owner，负责复制请求、Trim 字段、补展示名称、检查请求内 Provider 引用并构造不可外部修改的 `ValidatedConfig`；`wails/validation` 只保留请求形状校验，不拥有领域限制。
 - `core/model/config.Config.Validate` 只读检查 canonical 值、结构、引用、能力预算和推理等级；业务层不执行 Trim 或补默认值。构造成功后不重复校验完整配置，后续加载、索引和模型构建直接使用 canonical 值。
 - 配置文件恢复通过 `core/model/config.NewValidatedConfig` 只读校验已持久化的 canonical 数据，非法或非 canonical 值直接报错，不清洗字段或静默修复。
 - 注册表的 `Save` 只接收已准备配置，负责原子持久化和更新内存索引；零值配置被拒绝，不重复规范化或业务校验。`Config` 返回独立副本。Wails 输入层将配置校验失败映射为共享的 `ValidationError`，持久化错误保留原始分类；URL 校验和代理解析只读验证 canonical 值。
 - `infra/model_registry` 是模型配置的进程内唯一所有者，负责加载、校验、编辑配置、管理 credential、发现 Provider 模型，并在 task 激活时生成不可变的 `core/model.ModelSnapshot`。凭据类型和持久化索引只存在于注册表内部。
 - `infra/agent_registry` 加载每个 AgentDefinition 的 `agent.json` 和 `AGENT.md`，校验默认模型引用，并生成初始 `AgentSecurityPolicy`。
-- `core/security` 保存 Agent 的权限上限；`service/turn/start` 把当前策略冻结为 turn security snapshot，runtime 和工具执行只使用该快照。
+- `core/security` 保存 Agent 的权限上限；`service/runtime/task/start` 把当前策略冻结为 turn security snapshot，runtime 和工具执行只使用该快照。
 - 工具必须先经过 registry 注册、配置校验和 turn 权限检查。工具 executor 不直接读取前端请求，也不绕过 sandbox、workspace scope 或 approval 规则。
 - Provider payload、API key、原始错误和内部路径不进入 Wails 对外 DTO；binding 层只返回稳定结果、用户可处理的错误码和安全的展示投影。
 
@@ -266,8 +304,10 @@ frontend/src/
 
 ## 验证边界
 
-- 业务状态转换和不变量在 `core` 各业务包测试中验证。
-- Context digest、预算和 transcript 序号在 `core/context` 与 `loop` 测试中验证；执行状态回调和取消结算在 `agent_runtime` 与应用服务测试中验证。
-- JSONL 的验证范围包括事务回滚、序号、身份隔离、唯一性、工具幂等和重启恢复。
-- Provider 请求编码和流事件归一化在各 Provider adapter 测试中验证。
-- Wails binding 只验证 DTO、错误映射、binding 不可用和服务注入行为；React feature 测试不直接依赖 Go 内部实现。
+仓库不提交测试文件（`backend/` 中不存在 `*_test.go`）。验证靠以下组合，且不引入新的脚本框架：
+
+- 后端：`gofmt -l` 无输出、`go build ./...`、`go vet ./...`、`go test ./...`（仅编译检查）、四项 import 依赖门禁。
+- 前端：`wails generate module`（后端目录）→ `npx tsc --noEmit` → `npm run build`。
+- `wails generate module` 必须在 `frontend npm run build` 之前执行，验收依据是实际生成的绑定声明。
+- 需要断言行为时，在阶段内使用一次性 harness（临时测试或 `go run` 脚本），验证完成后删除，不提交。
+- 业务状态转换和不变量、Context digest 与预算、JSONL 事务与恢复语义、Provider 事件归一化、Wails DTO 与错误映射的验证范围保持不变，只是不再以仓库内测试文件的形式长期保留。
