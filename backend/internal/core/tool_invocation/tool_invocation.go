@@ -57,6 +57,7 @@ type ToolFailureCode string
 
 const (
 	ToolFailureNone            ToolFailureCode = ""
+	ToolFailureInvalidCall     ToolFailureCode = "invalid_tool_call"
 	ToolFailureNotAllowed      ToolFailureCode = "tool_not_allowed"
 	ToolFailureApprovalDenied  ToolFailureCode = "tool_approval_denied"
 	ToolFailureExecutionFailed ToolFailureCode = "tool_execution_failed"
@@ -67,7 +68,7 @@ const (
 // Valid 判断失败码是否受支持；空值表示没有失败。
 func (c ToolFailureCode) Valid() bool {
 	switch c {
-	case ToolFailureNone, ToolFailureNotAllowed, ToolFailureApprovalDenied,
+	case ToolFailureNone, ToolFailureInvalidCall, ToolFailureNotAllowed, ToolFailureApprovalDenied,
 		ToolFailureExecutionFailed, ToolFailureResultUnknown, ToolFailureInterrupted:
 		return true
 	default:
@@ -96,7 +97,7 @@ func (r ToolInvocationResult) Validate() error {
 
 // ToolInvocation 归属于一次 Task 的一次 loop 迭代（Turn），以 ProviderToolCallID
 // 和参数摘要识别重试。仓储负责保证 (TaskID, ProviderToolCallID) 唯一，
-// 身份及规范化参数不可变。
+// 原始调用身份不可变；规范化参数在准入时冻结，之后不可变。
 type ToolInvocation struct {
 	ID                  contracts.ToolInvocationID
 	TaskID              contracts.TaskID
@@ -105,7 +106,8 @@ type ToolInvocation struct {
 	AgentID             contracts.AgentID
 	ProviderToolCallID  string
 	Name                contracts.ToolName
-	NormalizedArguments json.RawMessage
+	Arguments           json.RawMessage `json:",omitempty"`
+	NormalizedArguments json.RawMessage `json:",omitempty"`
 	ArgumentsDigest     string
 	Status              ToolInvocationStatus
 	Approval            contracts.ApprovalRecord
@@ -118,7 +120,7 @@ type ToolInvocation struct {
 }
 
 // NewToolInvocation 创建 requested 调用，复制参数并将创建时间转换为 UTC。
-// 身份、Provider call ID、参数及摘要须由输入边界规范化；非法或空输入返回错误。
+// 参数只要求合法 JSON，具体工具参数在执行准入时校验；非法或空身份返回错误。
 func NewToolInvocation(
 	id contracts.ToolInvocationID,
 	taskID contracts.TaskID,
@@ -127,22 +129,22 @@ func NewToolInvocation(
 	agentID contracts.AgentID,
 	providerToolCallID string,
 	name contracts.ToolName,
-	normalizedArguments json.RawMessage,
+	arguments json.RawMessage,
 	argumentsDigest string,
 	at time.Time,
 ) (ToolInvocation, error) {
 	invocation := ToolInvocation{
-		ID:                  id,
-		TaskID:              taskID,
-		TurnID:              turnID,
-		SessionID:           sessionID,
-		AgentID:             agentID,
-		ProviderToolCallID:  providerToolCallID,
-		Name:                name,
-		NormalizedArguments: bytes.Clone(normalizedArguments),
-		ArgumentsDigest:     argumentsDigest,
-		Status:              ToolInvocationRequested,
-		CreatedAt:           at.UTC(),
+		ID:                 id,
+		TaskID:             taskID,
+		TurnID:             turnID,
+		SessionID:          sessionID,
+		AgentID:            agentID,
+		ProviderToolCallID: providerToolCallID,
+		Name:               name,
+		Arguments:          bytes.Clone(arguments),
+		ArgumentsDigest:    argumentsDigest,
+		Status:             ToolInvocationRequested,
+		CreatedAt:          at.UTC(),
 	}
 	if err := invocation.Validate(); err != nil {
 		return ToolInvocation{}, err
@@ -166,8 +168,13 @@ func (i ToolInvocation) Validate() error {
 			return contracts.InvalidValue("toolInvocation", "identity and digest must be non-empty canonical values")
 		}
 	}
-	if !i.Name.Valid() || len(i.NormalizedArguments) == 0 || !json.Valid(i.NormalizedArguments) {
-		return contracts.InvalidValue("toolInvocation", "tool name and normalized JSON arguments are required")
+	if !i.Name.Valid() || len(i.Arguments) == 0 && len(i.NormalizedArguments) == 0 ||
+		len(i.Arguments) > 0 && !json.Valid(i.Arguments) ||
+		len(i.NormalizedArguments) > 0 && !json.Valid(i.NormalizedArguments) {
+		return contracts.InvalidValue("toolInvocation", "tool name and valid JSON arguments are required")
+	}
+	if !i.ApprovedAt.IsZero() && len(i.NormalizedArguments) == 0 {
+		return contracts.InvalidValue("toolInvocation", "approved invocation requires normalized arguments")
 	}
 	if !i.Status.Valid() || !i.FailureCode.Valid() || i.CreatedAt.IsZero() {
 		return contracts.InvalidValue("toolInvocation", "status, failure code, or creation time is invalid")
@@ -231,7 +238,7 @@ func (i ToolInvocation) Validate() error {
 			return contracts.InvalidValue("toolInvocation.result", "failed invocation requires a failure code")
 		}
 	case ToolInvocationDenied:
-		if i.FailureCode != ToolFailureNotAllowed && i.FailureCode != ToolFailureApprovalDenied {
+		if i.FailureCode != ToolFailureNotAllowed && i.FailureCode != ToolFailureApprovalDenied && i.FailureCode != ToolFailureInvalidCall {
 			return contracts.InvalidValue("toolInvocation.result", "denial requires a denial failure code")
 		}
 	case ToolInvocationInterrupted:
@@ -280,7 +287,7 @@ func (i *ToolInvocation) Fail(result ToolInvocationResult, code ToolFailureCode,
 	return i.settle(ToolInvocationFailed, result, code, at)
 }
 
-// Deny 拒绝尚未审批的调用；结果只能使用权限或审批拒绝码，且不能产生副作用。
+// Deny 拒绝尚未审批的调用；参数无效或权限拒绝均不能产生副作用。
 func (i *ToolInvocation) Deny(result ToolInvocationResult, at time.Time) error {
 	return i.settle(ToolInvocationDenied, result, result.ErrorCode, at)
 }

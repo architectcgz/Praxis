@@ -4,6 +4,7 @@ import (
 	"praxis/internal/contracts"
 	toolmodel "praxis/internal/core/tool_invocation"
 
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,7 +26,7 @@ type invocationIdentity struct {
 	Arguments json.RawMessage
 }
 
-// Invoke 在工具输入边界校验调用和归属标识，持久化准入后最多执行一次。
+// Invoke 只执行已和 assistant 消息原子登记的调用，校验与授权后最多执行一次。
 func (s *Service) Invoke(
 	ctx context.Context,
 	call toolcontracts.ToolCall,
@@ -35,6 +36,9 @@ func (s *Service) Invoke(
 		return toolcontracts.ToolResult{}, errors.New("tool invocation metadata is required")
 	}
 	call = call.Snapshot()
+	if len(call.Arguments) == 0 {
+		call.Arguments = json.RawMessage(`{}`)
+	}
 	if call.ID == "" || !call.Name.Valid() || len(call.Arguments) == 0 || !json.Valid(call.Arguments) {
 		return toolcontracts.NewToolError("invalid_tool_call", "The tool call is invalid."), nil
 	}
@@ -46,9 +50,33 @@ func (s *Service) Invoke(
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
+	invocation, err := s.invocations.FindByTaskCall(ctx, invocationContext.TaskID, call.ID)
+	if err != nil {
+		return toolcontracts.ToolResult{}, err
+	}
+	if invocation.AgentID != invocationContext.AgentID || invocation.SessionID != invocationContext.SessionID ||
+		invocation.TurnID != invocationContext.TurnID || invocation.Name != call.Name {
+		return toolcontracts.ToolResult{}, contracts.ErrRequestConflict
+	}
+	if len(invocation.Arguments) > 0 && invocation.ArgumentsDigest != toolCallDigest(invocationIdentity{Name: call.Name, Arguments: call.Arguments}) {
+		return toolcontracts.NewToolError("tool_request_conflict", "The tool call identity was reused with different arguments."), nil
+	}
+	if result, done := settledResult(invocation); done {
+		return result, nil
+	}
+	invalid := func(message string) (toolcontracts.ToolResult, error) {
+		result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInvalidCall), message)
+		err := s.settle(ctx, invocation.ID, func(current *toolmodel.ToolInvocation) error {
+			return current.Deny(toolmodel.ToolInvocationResult{
+				InlineContent: result.Payload,
+				ErrorCode:     toolmodel.ToolFailureInvalidCall,
+			}, s.clock.Now())
+		})
+		return result, err
+	}
 	tool, ok := s.toolCatalog.Get(call.Name)
 	if !ok {
-		return toolcontracts.NewToolError("invalid_tool_call", "The requested tool is not available."), nil
+		return invalid("The requested tool is not available.")
 	}
 	normalized, err := tool.Normalize(call)
 	if err != nil {
@@ -56,7 +84,7 @@ func (s *Service) Invoke(
 		if message == "" {
 			message = "The tool arguments are invalid."
 		}
-		return toolcontracts.NewToolError("invalid_tool_call", message), nil
+		return invalid(message)
 	}
 	if normalized.Name != call.Name || len(normalized.NormalizedArguments) == 0 ||
 		!json.Valid(normalized.NormalizedArguments) {
@@ -64,26 +92,13 @@ func (s *Service) Invoke(
 	}
 	normalized, err = resolveNormalizedPath(normalized, invocationContext.WorkspacePath)
 	if err != nil {
-		return toolcontracts.NewToolError("invalid_tool_call", "The tool path is invalid."), nil
+		return invalid("The tool path is invalid.")
 	}
-	digest := toolCallDigest(invocationIdentity{
-		Name:      call.Name,
-		Arguments: normalized.NormalizedArguments,
-	})
-	if digest == "" {
-		return toolcontracts.ToolResult{}, errors.New("tool invocation arguments could not be fingerprinted")
+	if len(invocation.Arguments) == 0 && invocation.ArgumentsDigest != toolCallDigest(invocationIdentity{Name: call.Name, Arguments: normalized.NormalizedArguments}) {
+		return toolcontracts.NewToolError("tool_request_conflict", "The tool call identity was reused with different arguments."), nil
 	}
-	invocation, created, err := s.findOrCreate(ctx, call, invocationContext, normalized, digest)
-	if err != nil {
-		if errors.Is(err, contracts.ErrRequestConflict) {
-			return toolcontracts.NewToolError("tool_request_conflict", "The tool call identity was reused with different arguments."), nil
-		}
-		return toolcontracts.ToolResult{}, err
-	}
-	if !created {
-		if result, done := settledResult(invocation); done {
-			return result, nil
-		}
+	if len(invocation.NormalizedArguments) > 0 && !bytes.Equal(invocation.NormalizedArguments, normalized.NormalizedArguments) {
+		return toolcontracts.NewToolError("tool_request_conflict", "The normalized arguments differ from the approved tool call."), nil
 	}
 	if invocation.Status == toolmodel.ToolInvocationRequested {
 		invocation, err = s.admit(ctx, invocation, security, normalized)
@@ -171,7 +186,7 @@ func (s *Service) loadModelContext(
 	return security, nil
 }
 
-// toolCallDigest 生成同一 provider tool call 的规范化参数指纹。
+// toolCallDigest 生成原始调用参数的稳定指纹，重试不得替换已登记的意图。
 func toolCallDigest(value invocationIdentity) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -181,42 +196,36 @@ func toolCallDigest(value invocationIdentity) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func (s *Service) findOrCreate(
+// recordCall 只在 assistant 保存事务中登记调用，重复身份必须保持原始意图和归属一致。
+func (s *Service) recordCall(
 	ctx context.Context,
 	call toolcontracts.ToolCall,
 	provided agentruntime.ToolInvocationMetadata,
-	normalized toolcontracts.NormalizedToolCall,
-	digest string,
-) (toolmodel.ToolInvocation, bool, error) {
-	var invocation toolmodel.ToolInvocation
-	created := false
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		existing, err := s.invocations.FindByTaskCall(txCtx, provided.TaskID, call.ID)
-		if err == nil {
-			if existing.Name != call.Name || existing.ArgumentsDigest != digest {
-				return contracts.ErrRequestConflict
-			}
-			invocation = existing
-			return nil
+) error {
+	digest := toolCallDigest(invocationIdentity{Name: call.Name, Arguments: call.Arguments})
+	if digest == "" {
+		return errors.New("tool invocation arguments could not be fingerprinted")
+	}
+	existing, err := s.invocations.FindByTaskCall(ctx, provided.TaskID, call.ID)
+	if err == nil {
+		if existing.Name != call.Name || existing.ArgumentsDigest != digest || existing.TurnID != provided.TurnID ||
+			existing.AgentID != provided.AgentID || existing.SessionID != provided.SessionID {
+			return contracts.ErrRequestConflict
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
-			return err
-		}
-		invocation, err = toolmodel.NewToolInvocation(
-			contracts.ToolInvocationID(s.ids.New("toolinvocation")), provided.TaskID,
-			provided.TurnID, provided.SessionID, provided.AgentID, call.ID, call.Name,
-			normalized.NormalizedArguments, digest, s.clock.Now(),
-		)
-		if err != nil {
-			return err
-		}
-		if err := s.invocations.Save(txCtx, invocation); err != nil {
-			return err
-		}
-		created = true
 		return nil
-	})
-	return invocation, created, err
+	}
+	if !errors.Is(err, contracts.ErrNotFound) {
+		return err
+	}
+	invocation, err := toolmodel.NewToolInvocation(
+		contracts.ToolInvocationID(s.ids.New("toolinvocation")), provided.TaskID,
+		provided.TurnID, provided.SessionID, provided.AgentID, call.ID, call.Name,
+		call.Arguments, digest, s.clock.Now(),
+	)
+	if err != nil {
+		return err
+	}
+	return s.invocations.Save(ctx, invocation)
 }
 
 func (s *Service) admit(
@@ -248,6 +257,7 @@ func (s *Service) admit(
 				return err
 			}
 		} else {
+			current.NormalizedArguments = append(json.RawMessage(nil), call.NormalizedArguments...)
 			approval, err := contracts.NewPolicyApproval(security.Fingerprint, s.clock.Now())
 			if err != nil {
 				return err

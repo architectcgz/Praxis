@@ -151,7 +151,7 @@ func NewService(config Config) (*Service, error) {
 		messages:          config.Messages,
 		usageRecords:      config.UsageRecords,
 		removeSessionData: config.RemoveSessionData,
-		contextBuilder:    contextmodel.NewContextBuilder(0, 0),
+		contextBuilder:    contextmodel.NewContextBuilder(),
 		clock:             system.ClockOrDefault(config.Clock),
 		ids:               system.IDsOrDefault(config.IDs),
 		createdSessions:   make(map[contracts.SessionID]struct{}),
@@ -190,7 +190,7 @@ func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.S
 
 // RecoverStaleTasks 逐个 Session 收敛上一次进程异常退出留下的执行状态。
 // 恢复以 Session 为事务边界：一次事务只能写入一个日志文件，跨 Session 批量提交会掩盖部分失败。
-// 工具调用结果未知时只写入短错误结果，不自动重放可能已经产生副作用的调用。
+// 同时修复已结束 Task 的缺失工具回执；恢复不重放可能已经产生副作用的调用。
 func (s *Service) RecoverStaleTasks(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("stale task recovery context is required")
@@ -218,8 +218,15 @@ func (s *Service) RecoverStaleTasks(ctx context.Context) error {
 	for sessionID := range turnsBySession {
 		pending[sessionID] = struct{}{}
 	}
+	sessions, err := s.ListSessions(ctx, math.MaxInt)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		pending[session.ID] = struct{}{}
+	}
 	for _, sessionID := range slices.Sorted(maps.Keys(pending)) {
-		if err := s.recoverSession(ctx, bySession[sessionID], turnsBySession[sessionID]); err != nil {
+		if err := s.recoverSession(ctx, sessionID, bySession[sessionID], turnsBySession[sessionID]); err != nil {
 			return fmt.Errorf("recover session %s: %w", sessionID, err)
 		}
 	}
@@ -229,6 +236,7 @@ func (s *Service) RecoverStaleTasks(ctx context.Context) error {
 // recoverSession 在 Session 的单个事务中收敛活动 Task 与残留的未结算迭代。
 func (s *Service) recoverSession(
 	ctx context.Context,
+	sessionID contracts.SessionID,
 	taskIDs []contracts.TaskID,
 	turnIDs []contracts.TurnID,
 ) error {
@@ -257,7 +265,7 @@ func (s *Service) recoverSession(
 				return err
 			}
 		}
-		return nil
+		return s.recoverSessionToolResults(txCtx, sessionID, at)
 	})
 }
 
@@ -280,10 +288,6 @@ func (s *Service) recoverStaleTask(ctx context.Context, taskID contracts.TaskID)
 		if agent.CurrentTaskID != task.ID ||
 			(agent.State != agentmodel.AgentExecuting && agent.State != agentmodel.AgentPausing) {
 			return fmt.Errorf("active task does not match agent state")
-		}
-		invocations, err := s.toolInvocations.ListUnsettledByTask(txCtx, task.ID)
-		if err != nil {
-			return err
 		}
 		at := s.clock.Now().UTC()
 		outcome := taskmodel.TaskInterrupted
@@ -309,19 +313,6 @@ func (s *Service) recoverStaleTask(ctx context.Context, taskID contracts.TaskID)
 				return err
 			}
 			if err := s.controls.Save(txCtx, *control); err != nil {
-				return err
-			}
-		}
-		for index := range invocations {
-			invocation := invocations[index]
-			result, err := recoverToolInvocation(&invocation, at)
-			if err != nil {
-				return err
-			}
-			if err := s.toolInvocations.Save(txCtx, invocation); err != nil {
-				return err
-			}
-			if err := s.appendRecoveredToolResult(txCtx, agent, task, invocation, result, at); err != nil {
 				return err
 			}
 		}
@@ -359,7 +350,7 @@ func recoverToolInvocation(invocation *toolmodel.ToolInvocation, at time.Time) (
 		}, at)
 		return result, err
 	case toolmodel.ToolInvocationRunning:
-		result = toolcontracts.NewToolError(string(toolmodel.ToolFailureResultUnknown), "")
+		result = toolcontracts.NewToolError(string(toolmodel.ToolFailureResultUnknown), "The application was interrupted. The tool may have already produced side effects; do not automatically retry it.")
 		err := invocation.MarkResultUnknown(toolmodel.ToolInvocationResult{
 			InlineContent: result.Payload,
 			ErrorCode:     toolmodel.ToolFailureResultUnknown,
@@ -370,27 +361,91 @@ func recoverToolInvocation(invocation *toolmodel.ToolInvocation, at time.Time) (
 	}
 }
 
+// recoverSessionToolResults 以消息中的调用为准补齐回执，覆盖未执行、已结算和历史缺失记录。
+// 同一事务先结算全部残留 invocation，再补消息；已有回执与终态结果不覆盖。
+func (s *Service) recoverSessionToolResults(ctx context.Context, sessionID contracts.SessionID, at time.Time) error {
+	invocations, err := s.toolInvocations.ListUnsettledBySession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, invocation := range invocations {
+		if _, err := recoverToolInvocation(&invocation, at); err != nil {
+			return err
+		}
+		if err := s.toolInvocations.Save(ctx, invocation); err != nil {
+			return err
+		}
+	}
+	agents, err := s.agents.ListBySession(ctx, sessionID, math.MaxInt)
+	if err != nil {
+		return err
+	}
+	for _, agent := range agents {
+		stream, err := s.messages.LoadMessages(ctx, sessionID, agent.ID, 0)
+		if err != nil {
+			return err
+		}
+		type callKey struct{ taskID, callID string }
+		results := make(map[callKey]bool)
+		for _, message := range stream.Messages {
+			for _, block := range message.Blocks {
+				if block.Kind == sessionmodel.BlockToolResult {
+					results[callKey{message.TaskID, block.CallID}] = true
+				}
+			}
+		}
+		for _, message := range stream.Messages {
+			for index, call := range message.Blocks {
+				key := callKey{message.TaskID, call.CallID}
+				if call.Kind != sessionmodel.BlockToolCall || results[key] {
+					continue
+				}
+				result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The tool call was interrupted before execution.")
+				invocation, err := s.toolInvocations.FindByTaskCall(ctx, contracts.TaskID(message.TaskID), call.CallID)
+				if err != nil && !errors.Is(err, contracts.ErrNotFound) {
+					return err
+				}
+				if err == nil {
+					result = toolcontracts.ToolResult{
+						Payload:    invocation.Result.InlineContent,
+						ErrorClass: string(invocation.Result.ErrorCode),
+					}
+					if result.Payload == "" {
+						result.Payload = "(empty tool result)"
+					}
+				}
+				if err := s.appendRecoveredToolResult(ctx, agent, message, index, call, result, at); err != nil {
+					return err
+				}
+				results[key] = true
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) appendRecoveredToolResult(
 	ctx context.Context,
 	agent agentmodel.Agent,
-	task taskmodel.Task,
-	invocation toolmodel.ToolInvocation,
+	assistant sessionmodel.MessageData,
+	callIndex int,
+	call sessionmodel.Block,
 	result toolcontracts.ToolResult,
 	at time.Time,
 ) error {
 	message := sessionmodel.MessageData{
-		ID:         "tool-recovery:" + invocation.ID.String(),
-		RequestID:  task.RequestID.String(),
-		TaskID:     task.ID.String(),
+		ID:         fmt.Sprintf("tool-recovery:%s:%d", assistant.ID, callIndex),
+		RequestID:  assistant.RequestID,
+		TaskID:     assistant.TaskID,
 		Role:       sessionmodel.RoleTool,
 		AuthorKind: sessionmodel.AuthorTool,
-		AuthorID:   string(invocation.Name),
+		AuthorID:   call.Name,
 		Blocks: []sessionmodel.Block{{
 			Kind:    sessionmodel.BlockToolResult,
 			Text:    result.Payload,
-			CallID:  invocation.ProviderToolCallID,
-			Name:    string(invocation.Name),
-			IsError: true,
+			CallID:  call.CallID,
+			Name:    call.Name,
+			IsError: result.ErrorClass != "",
 		}},
 		CreatedAt: at,
 	}

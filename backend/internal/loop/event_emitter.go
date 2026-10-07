@@ -2,35 +2,66 @@ package loop
 
 import (
 	"errors"
+
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
-	taskmodel "praxis/internal/core/task"
+	"praxis/internal/core/model"
 )
 
 func (r *Runner) emit(event agentruntime.AgentEvent) {
 	r.EventObserver(event)
 }
 
-func (r *Runner) emitToolResult(
-	task taskmodel.Task,
+// emitModelEvent 为实时模型事件补齐任务归属；工具事件需在 assistant 回执落库后发布。
+func (r *Runner) emitModelEvent(
+	sessionID contracts.SessionID,
+	agentID contracts.AgentID,
+	taskID contracts.TaskID,
 	turnID contracts.TurnID,
-	call ToolCall,
+	event model.ModelStreamEvent,
+) {
+	output := agentruntime.AgentEvent{
+		AgentID: agentID,
+		TaskID:  taskID,
+		TurnID:  turnID,
+	}
+	switch event.Kind {
+	case model.StreamTextDelta:
+		output.Kind = agentruntime.AgentEventTextDelta
+		output.Text = event.Text
+	case model.StreamThinkingDelta:
+		output.Kind = agentruntime.AgentEventThinkingDelta
+		output.Text = event.Text
+	case model.StreamUsage:
+		output.Kind = agentruntime.AgentEventModelUsage
+		output.SessionID = sessionID
+		output.Usage = event.Usage
+	default:
+		return
+	}
+	r.emit(output)
+}
+
+func (r *Runner) emitToolResult(
+	agentID contracts.AgentID,
+	taskID contracts.TaskID,
+	turnID contracts.TurnID,
 	block appcontext.ContextBlock,
 ) {
 	r.emit(agentruntime.AgentEvent{
 		Kind:    agentruntime.AgentEventToolResult,
-		AgentID: task.AgentID,
-		TaskID:  task.ID,
+		AgentID: agentID,
+		TaskID:  taskID,
 		TurnID:  turnID,
-		CallID:  call.ID,
-		Name:    string(call.Name),
+		CallID:  block.CallID,
+		Name:    block.Name,
 		Result:  block.Text,
 		IsError: block.IsError,
 	})
 }
 
-func (r *Runner) emitError(task taskmodel.Task, turnID contracts.TurnID, err error) {
+func (r *Runner) emitError(agentID contracts.AgentID, taskID contracts.TaskID, turnID contracts.TurnID, err error) {
 	if err == nil {
 		return
 	}
@@ -48,8 +79,8 @@ func (r *Runner) emitError(task taskmodel.Task, turnID contracts.TurnID, err err
 	}
 	r.emit(agentruntime.AgentEvent{
 		Kind:    agentruntime.AgentEventError,
-		AgentID: task.AgentID,
-		TaskID:  task.ID,
+		AgentID: agentID,
+		TaskID:  taskID,
 		TurnID:  turnID,
 		Error:   message,
 	})

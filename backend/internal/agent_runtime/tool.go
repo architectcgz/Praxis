@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"praxis/internal/contracts"
+	sessionmodel "praxis/internal/core/session"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
@@ -19,5 +20,7 @@ type ToolInvocationMetadata struct {
 
 // ToolCallHandler 接收 runtime 产生的工具调用，并负责完成持久化调用流程。
 type ToolCallHandler interface {
+	// RecordAssistant 原子保存 assistant 消息及其全部 requested 调用；失败时不得执行工具。
+	RecordAssistant(context.Context, MessageRecorder, sessionmodel.MessageData, ToolInvocationMetadata) error
 	Invoke(context.Context, toolcontracts.ToolCall, ToolInvocationMetadata) (toolcontracts.ToolResult, error)
 }

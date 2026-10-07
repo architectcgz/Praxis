@@ -9,14 +9,13 @@ import (
 )
 
 type ResourceLimits struct {
-	MaxSteps       int
 	MaxToolCalls   int
 	MaxInputBytes  int64
 	MaxOutputBytes int64
 }
 
 func (r ResourceLimits) Validate() error {
-	if r.MaxSteps < 0 || r.MaxToolCalls < 0 || r.MaxInputBytes < 0 || r.MaxOutputBytes < 0 {
+	if r.MaxToolCalls < 0 || r.MaxInputBytes < 0 || r.MaxOutputBytes < 0 {
 		return InvalidValue("taskPermissions.resourceLimits", "resource limits cannot be negative")
 	}
 	return nil

@@ -1,9 +1,36 @@
 package context
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"unicode/utf8"
+)
+
+// EstimateTokens 估算文本 token 数，ASCII 按四字节一个 token，非 ASCII 按 UTF-8 字节保守计数。
+// ponytail: 未接入各模型 tokenizer；该估算用于压缩预警和本地保护，Provider 才是窗口校验的权威。
+func EstimateTokens(text string) int {
+	ascii, other := 0, 0
+	for _, value := range text {
+		if value < utf8.RuneSelf {
+			ascii++
+		} else {
+			other += utf8.RuneLen(value)
+		}
+	}
+	return (ascii+3)/4 + other
+}
+
+// EstimatedTokens 估算上下文正文和结构开销，工具定义需由请求边界另行预留。
+func (c ModelContext) EstimatedTokens() (int, error) {
+	payload, err := json.Marshal(c)
+	if err != nil {
+		return 0, err
+	}
+	return EstimateTokens(string(payload)), nil
+}
 
 // ContextWindowExceededError 表示一次请求连同输出预留会超出模型的上下文窗口。
-// provider adapter 在真正发送前返回它，task engine 据此产出稳定的资源上限失败。
+// 构建、压缩或 Provider 在无法容纳必要内容时返回它，loop 据此分类为资源上限失败。
 type ContextWindowExceededError struct {
 	EstimatedInputTokens int
 	MaxOutputTokens      int
@@ -23,14 +50,11 @@ func (e *ContextWindowExceededError) Error() string {
 //
 // 判定放在 provider adapter 而不是 task engine：只有 adapter 知道本协议最终序列
 // 化出的请求体（含工具 schema、system prompt、tool result），引擎侧的全局启发式必然漏项。
-//
-// ponytail: 字节数 / 4 仍是近似，非 ASCII（中文 3 字节/字）会低估。它只用于提前拒绝明显
-// 超窗的请求，provider 返回的 400 才是权威；接入真实 tokenizer 后替换此处。
 func ExceedsContextWindow(payload []byte, maxOutputTokens, contextWindow int) error {
 	if contextWindow <= 0 {
 		return nil
 	}
-	estimated := len(payload) / 4
+	estimated := EstimateTokens(string(payload))
 	if estimated+maxOutputTokens > contextWindow {
 		return &ContextWindowExceededError{
 			EstimatedInputTokens: estimated,

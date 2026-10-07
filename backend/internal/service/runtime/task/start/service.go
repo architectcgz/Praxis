@@ -19,7 +19,7 @@ import (
 
 // ContextProvider 根据任务开始时的一致性快照构建初始上下文。
 type ContextProvider interface {
-	BuildContext(context.Context, agentmodel.Agent, string, string, string) (contextmodel.BuildResult, error)
+	BuildContext(context.Context, agentmodel.Agent, string, string, string, int, int) (contextmodel.BuildResult, error)
 }
 
 // AgentDefinitionProvider 提供已校验的 Agent 定义。

@@ -7,6 +7,7 @@ import (
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	"praxis/internal/core/model"
+	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/timing"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -146,4 +147,9 @@ func (t timedToolCalls) Invoke(ctx context.Context, call toolcontracts.ToolCall,
 	}
 	status = timing.ResultStatus(ctx, resultErr)
 	return
+}
+
+// RecordAssistant 不启动工具计时，只转交原子保存消息与调用意图的事务。
+func (t timedToolCalls) RecordAssistant(ctx context.Context, recorder agentruntime.MessageRecorder, message sessionmodel.MessageData, metadata agentruntime.ToolInvocationMetadata) error {
+	return t.next.RecordAssistant(ctx, recorder, message, metadata)
 }

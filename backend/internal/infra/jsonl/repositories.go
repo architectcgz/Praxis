@@ -388,9 +388,9 @@ func (r ToolRepository) FindByTaskCall(ctx context.Context, id contracts.TaskID,
 	return v[0], nil
 }
 
-// ListUnsettledByTask 返回指定 Task 尚未结算的工具调用，供恢复使用。
-func (r ToolRepository) ListUnsettledByTask(ctx context.Context, id contracts.TaskID) ([]toolmodel.ToolInvocation, error) {
-	v, e := list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool { return v.TaskID == id && !v.Status.Terminal() })
+// ListUnsettledBySession 返回指定 Session 尚未结算的工具调用，供恢复使用。
+func (r ToolRepository) ListUnsettledBySession(ctx context.Context, id contracts.SessionID) ([]toolmodel.ToolInvocation, error) {
+	v, e := list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool { return v.SessionID == id && !v.Status.Terminal() })
 	return sorted(v, func(a, b toolmodel.ToolInvocation) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	}), e

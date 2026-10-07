@@ -39,6 +39,7 @@ type ContextEntryKind string
 
 const (
 	ContextEntrySession        ContextEntryKind = "session"
+	ContextEntrySummary        ContextEntryKind = "summary"
 	ContextEntryUserInput      ContextEntryKind = "user_input"
 	ContextEntryProviderOutput ContextEntryKind = "provider_output"
 	ContextEntryToolResult     ContextEntryKind = "tool_result"
@@ -147,7 +148,7 @@ func (c ModelContext) Validate() error {
 
 func validContextEntryKind(kind ContextEntryKind) bool {
 	switch kind {
-	case ContextEntrySession, ContextEntryUserInput, ContextEntryProviderOutput,
+	case ContextEntrySession, ContextEntrySummary, ContextEntryUserInput, ContextEntryProviderOutput,
 		ContextEntryToolResult, ContextEntryMCPCall, ContextEntryMCPResult:
 		return true
 	default:

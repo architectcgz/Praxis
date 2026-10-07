@@ -157,7 +157,13 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return contracts.ErrRequestConflict
 		}
 	case "tool":
-		fields = []string{"ID", "TaskID", "TurnID", "AgentID", "ProviderToolCallID", "Name", "NormalizedArguments", "ArgumentsDigest", "CreatedAt"}
+		fields = []string{"ID", "TaskID", "TurnID", "AgentID", "ProviderToolCallID", "Name", "Arguments", "ArgumentsDigest", "CreatedAt"}
+		// 原始调用先落库，规范化参数只允许随 requested -> approved 填充一次。
+		if !bytes.Equal(left["NormalizedArguments"], right["NormalizedArguments"]) &&
+			(string(left["Status"]) != `"requested"` || string(right["Status"]) != `"approved"` ||
+				len(left["NormalizedArguments"]) > 0 && string(left["NormalizedArguments"]) != "null") {
+			return contracts.ErrRequestConflict
+		}
 	case "turn":
 		fields = []string{"ID", "TaskID", "AgentID", "Sequence", "CreatedAt"}
 	case "agent":
