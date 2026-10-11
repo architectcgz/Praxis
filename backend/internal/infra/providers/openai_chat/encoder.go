@@ -1,8 +1,12 @@
 package openaichat
 
-import appcontext "praxis/internal/core/context"
+import (
+	"fmt"
 
-// encodeContext 只映射上下文协议，不读取模型配置。
+	appcontext "praxis/internal/core/context"
+)
+
+// encodeContext 只映射上下文协议；未支持的内容块返回错误，不读取模型配置。
 func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	messages := make([]chatMessage, 0, len(ctx.Entries)+1)
 	if ctx.SystemPrompt != "" {
@@ -11,15 +15,26 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 			Content: ctx.SystemPrompt,
 		})
 	}
-	for _, entry := range ctx.Entries {
-		messages = append(messages, chatMessageFromContext(entry))
+	for index, entry := range ctx.Entries {
+		encoded, err := chatMessagesFromContext(entry)
+		if err != nil {
+			return nil, fmt.Errorf("openai chat context entry %d: %w", index, err)
+		}
+		messages = append(messages, encoded...)
 	}
 	return messages, nil
 }
 
-func chatMessageFromContext(entry appcontext.ContextEntry) chatMessage {
+func chatMessagesFromContext(entry appcontext.ContextEntry) ([]chatMessage, error) {
+	messages := make([]chatMessage, 0, 1)
 	result := chatMessage{Role: string(entry.Role)}
-	for _, block := range entry.Content {
+	flushMessage := func() {
+		if result.Content != "" || len(result.ToolCalls) > 0 {
+			messages = append(messages, result)
+			result = chatMessage{Role: string(entry.Role)}
+		}
+	}
+	for index, block := range entry.Content {
 		switch block.Kind {
 		case appcontext.ContextBlockText:
 			result.Content += block.Text
@@ -33,12 +48,22 @@ func chatMessageFromContext(entry appcontext.ContextEntry) chatMessage {
 				},
 			})
 		case appcontext.ContextBlockToolResult:
-			result.Role = "tool"
-			result.ToolCallID = block.CallID
-			result.Content += block.Text
+			flushMessage()
+			// Chat 每条 tool 消息只能引用一个调用，不能合并结果或覆盖前一个 CallID。
+			messages = append(messages, chatMessage{
+				Role:       "tool",
+				ToolCallID: block.CallID,
+				Content:    block.Text,
+			})
+		default:
+			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
 		}
 	}
-	return result
+	flushMessage()
+	if len(messages) == 0 {
+		messages = append(messages, result)
+	}
+	return messages, nil
 }
 
 type chatMessage struct {

@@ -1,12 +1,13 @@
 package openairesponses
 
 import (
+	"fmt"
 	"strings"
 
 	appcontext "praxis/internal/core/context"
 )
 
-// encodeContext 只映射上下文协议，不读取模型配置。
+// encodeContext 只映射上下文协议；未支持的内容块返回错误，不读取模型配置。
 func encodeContext(ctx appcontext.ModelContext) ([]responseItem, error) {
 	input := make([]responseItem, 0, len(ctx.Entries)+1)
 	if ctx.SystemPrompt != "" {
@@ -19,13 +20,17 @@ func encodeContext(ctx appcontext.ModelContext) ([]responseItem, error) {
 			}},
 		})
 	}
-	for _, entry := range ctx.Entries {
-		input = append(input, responseItems(entry)...)
+	for index, entry := range ctx.Entries {
+		items, err := responseItems(entry)
+		if err != nil {
+			return nil, fmt.Errorf("openai responses context entry %d: %w", index, err)
+		}
+		input = append(input, items...)
 	}
 	return input, nil
 }
 
-func responseItems(entry appcontext.ContextEntry) []responseItem {
+func responseItems(entry appcontext.ContextEntry) ([]responseItem, error) {
 	items := make([]responseItem, 0, len(entry.Content))
 	var text strings.Builder
 	flushText := func() {
@@ -42,7 +47,7 @@ func responseItems(entry appcontext.ContextEntry) []responseItem {
 		})
 		text.Reset()
 	}
-	for _, block := range entry.Content {
+	for index, block := range entry.Content {
 		switch block.Kind {
 		case appcontext.ContextBlockText:
 			text.WriteString(block.Text)
@@ -61,10 +66,12 @@ func responseItems(entry appcontext.ContextEntry) []responseItem {
 				CallID: block.CallID,
 				Output: block.Text,
 			})
+		default:
+			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
 		}
 	}
 	flushText()
-	return items
+	return items, nil
 }
 
 func responseTextPartType(role appcontext.ContextRole) string {
