@@ -76,7 +76,7 @@ func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder a
 	return r.run(ctx, task, messageRecorder)
 }
 
-// run 是 task 的迭代 loop。每轮只发起一次模型请求；没有工具调用时结束，
+// run 是 task 的迭代 loop。每轮只发起一次模型请求；确认自然完成时结束，
 // 否则必须先持久化每个工具调用结果，再构造下一次模型请求。
 func (r *Runner) run(
 	ctx context.Context,
@@ -212,7 +212,7 @@ func (r *Runner) run(
 			TurnID:  turn.ID,
 		})
 		modelContext = modelContext.AppendProviderOutput(assistant)
-		if len(calls) == 0 {
+		if response.stopReason == model.StopCompleted {
 			return r.settleTurn(ctx, turn.ID, taskmodel.TaskCompleted, "", nil)
 		}
 		results, err := r.runToolCalls(ctx, messageRecorder, calls, metadata, task.RequestID, budget)

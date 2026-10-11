@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"errors"
+	"io"
 
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
@@ -93,7 +94,7 @@ func (s timedModelStream) Stream(ctx context.Context, request model.ModelRequest
 				return
 			case event, ok := <-input:
 				if !ok {
-					status = timing.ResultStatus(ctx, nil)
+					status = timing.ResultStatus(ctx, io.ErrUnexpectedEOF)
 					return
 				}
 				if (event.Kind == model.StreamTextDelta || event.Kind == model.StreamThinkingDelta) && event.Text != "" || event.Kind == model.StreamToolCall {
@@ -103,7 +104,9 @@ func (s timedModelStream) Stream(ctx context.Context, request model.ModelRequest
 				terminal := !knownContent
 				if terminal {
 					status = timing.ResultStatus(ctx, event.Err)
-					if event.Kind != model.StreamComplete && status == timing.Completed {
+					// 生成流结束不等于业务成功，截断、拒绝等终态不能记为 completed。
+					successReason := event.StopReason == model.StopCompleted || event.StopReason == model.StopToolCalls
+					if status == timing.Completed && (event.Kind != model.StreamComplete || !successReason) {
 						status = timing.Failed
 					}
 					// 先保存计时，再让业务层收到终态，避免刷新历史时丢失最后一次计时。

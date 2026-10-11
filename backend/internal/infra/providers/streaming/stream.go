@@ -13,16 +13,16 @@ type EmitFunc func(model.ModelStreamEvent) error
 const eventBufferCapacity = 16
 
 type Decoder interface {
-	Decode(context.Context, *SSEReader, EmitFunc) (string, error)
+	Decode(context.Context, *SSEReader, EmitFunc) (model.ModelStopReason, error)
 }
 
-type DecoderFunc func(context.Context, *SSEReader, EmitFunc) (string, error)
+type DecoderFunc func(context.Context, *SSEReader, EmitFunc) (model.ModelStopReason, error)
 
 func (f DecoderFunc) Decode(
 	ctx context.Context,
 	reader *SSEReader,
 	emit EmitFunc,
-) (string, error) {
+) (model.ModelStopReason, error) {
 	return f(ctx, reader, emit)
 }
 

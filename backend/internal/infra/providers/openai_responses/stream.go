@@ -1,16 +1,17 @@
 package openairesponses
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"praxis/internal/core/model"
+	"praxis/internal/infra/providers"
+	"praxis/internal/infra/providers/streaming"
 	"slices"
 	"strings"
-
-	"praxis/internal/core/model"
-	"praxis/internal/infra/providers/streaming"
 )
 
 type streamDecoder struct{}
@@ -40,8 +41,24 @@ func (streamDecoder) Decode(
 	ctx context.Context,
 	reader *streaming.SSEReader,
 	emit streaming.EmitFunc,
-) (string, error) {
+) (model.ModelStopReason, error) {
 	calls := map[string]*streaming.ToolAccumulator{}
+	refused := false
+	collectOutput := func(item responseOutputItem) {
+		for _, part := range item.Content {
+			if part.Type == "refusal" {
+				refused = true
+			}
+		}
+		if item.Type == "function_call" {
+			// 完整输出快照覆盖分片，item_id 与工具结果引用的 call_id 不混用。
+			calls[cmp.Or(item.ID, item.CallID)] = &streaming.ToolAccumulator{
+				ID:        cmp.Or(item.CallID, item.ID),
+				Name:      item.Name,
+				Arguments: item.Arguments,
+			}
+		}
+	}
 	reasoning := map[reasoningPartKey]string{}
 	emitThinking := func(key reasoningPartKey, text string, snapshot bool) error {
 		previous := reasoning[key]
@@ -126,13 +143,23 @@ func (streamDecoder) Decode(
 			ContentIndex int                   `json:"content_index"`
 			Part         responseReasoningPart `json:"part"`
 			Item         responseOutputItem    `json:"item"`
+			ItemID       string                `json:"item_id"`
 			CallID       string                `json:"call_id"`
 			Name         string                `json:"name"`
 			Arguments    string                `json:"arguments"`
+			Code         string                `json:"code"`
+			Message      string                `json:"message"`
 			Response     struct {
-				Status string               `json:"status"`
-				Output []responseOutputItem `json:"output"`
-				Usage  *struct {
+				Status            string               `json:"status"`
+				Output            []responseOutputItem `json:"output"`
+				IncompleteDetails *struct {
+					Reason string `json:"reason"`
+				} `json:"incomplete_details"`
+				Error *struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+				Usage *struct {
 					InputTokens        *int64 `json:"input_tokens"`
 					OutputTokens       *int64 `json:"output_tokens"`
 					InputTokensDetails *struct {
@@ -165,56 +192,46 @@ func (streamDecoder) Decode(
 		case "response.reasoning_summary_text.done", "response.reasoning_summary_part.done", "response.reasoning_text.done":
 			key := reasoningPartKey{eventPayload.OutputIndex, "summary", eventPayload.SummaryIndex}
 			text := eventPayload.Text
-			if eventPayload.Type == "response.reasoning_summary_part.done" {
+			switch eventPayload.Type {
+			case "response.reasoning_summary_part.done":
 				text = eventPayload.Part.Text
-			} else if eventPayload.Type == "response.reasoning_text.done" {
+			case "response.reasoning_text.done":
 				key.kind, key.partIndex = "content", eventPayload.ContentIndex
 			}
 			if err := emitThinking(key, text, true); err != nil {
 				return "", err
 			}
-		case "response.output_item.added":
-			if eventPayload.Item.Type == "function_call" {
-				callID := responseCallID(eventPayload.Item.CallID, eventPayload.Item.ID)
-				calls[callID] = &streaming.ToolAccumulator{
-					ID:   callID,
-					Name: eventPayload.Item.Name,
-				}
+		case "response.refusal.delta", "response.refusal.done":
+			refused = true
+		case "response.content_part.added", "response.content_part.done":
+			if eventPayload.Part.Type == "refusal" {
+				refused = true
 			}
+		case "response.output_item.added":
+			collectOutput(eventPayload.Item)
 		case "response.output_item.done":
 			if err := finishReasoning(eventPayload.OutputIndex, eventPayload.Item); err != nil {
 				return "", err
 			}
-			if eventPayload.Item.Type == "function_call" {
-				callID := responseCallID(eventPayload.Item.CallID, eventPayload.Item.ID)
-				call := calls[callID]
-				if call == nil {
-					call = &streaming.ToolAccumulator{ID: callID, Name: eventPayload.Item.Name}
-					calls[callID] = call
-				}
-				if eventPayload.Item.Arguments != "" {
-					call.Arguments = eventPayload.Item.Arguments
-				}
-			}
+			collectOutput(eventPayload.Item)
 		case "response.function_call_arguments.delta":
-			call := calls[eventPayload.CallID]
+			// 官方参数事件以 item_id 关联分片；call_id 留给最终工具结果引用。
+			key := cmp.Or(eventPayload.ItemID, eventPayload.CallID)
+			call := calls[key]
 			if call == nil {
 				call = &streaming.ToolAccumulator{ID: eventPayload.CallID, Name: eventPayload.Name}
-				calls[eventPayload.CallID] = call
+				calls[key] = call
 			}
 			call.Arguments += eventPayload.Delta
 		case "response.function_call_arguments.done":
-			if call := calls[eventPayload.CallID]; call != nil && eventPayload.Arguments != "" {
+			key := cmp.Or(eventPayload.ItemID, eventPayload.CallID)
+			if call := calls[key]; call != nil && eventPayload.Arguments != "" {
 				call.Arguments = eventPayload.Arguments
 			}
-		case "response.completed", "response.done":
-			for index, item := range eventPayload.Response.Output {
-				if err := finishReasoning(index, item); err != nil {
-					return "", err
-				}
-			}
-			if err := emitResponseTools(emit, calls); err != nil {
-				return "", err
+		case "response.completed", "response.incomplete", "response.failed", "response.done":
+			status := eventPayload.Response.Status
+			if eventPayload.Type != "response.done" && status != strings.TrimPrefix(eventPayload.Type, "response.") {
+				return "", fmt.Errorf("openai responses terminal event %s has inconsistent status %q", eventPayload.Type, status)
 			}
 			if reported := eventPayload.Response.Usage; reported != nil && reported.InputTokens != nil {
 				usage := &model.ModelUsage{
@@ -230,18 +247,36 @@ func (streamDecoder) Decode(
 					}
 				}
 			}
-			return eventPayload.Response.Status, nil
+			if status == "failed" {
+				if detail := eventPayload.Response.Error; detail != nil {
+					return "", fmt.Errorf("openai responses failed (%s): %s", detail.Code, detail.Message)
+				}
+				return "", errors.New("openai responses stream failed")
+			}
+			for index, item := range eventPayload.Response.Output {
+				if err := finishReasoning(index, item); err != nil {
+					return "", err
+				}
+				collectOutput(item)
+			}
+			incompleteReason := ""
+			if detail := eventPayload.Response.IncompleteDetails; detail != nil {
+				incompleteReason = detail.Reason
+			}
+			reason := providers.OpenAIResponsesStopReason(status, incompleteReason, len(calls) > 0, refused)
+			if reason == model.StopUnknown {
+				return "", fmt.Errorf("openai responses has unknown terminal status %q or incomplete reason %q", status, incompleteReason)
+			}
+			if reason == model.StopCompleted || reason == model.StopToolCalls {
+				if err := emitResponseTools(emit, calls); err != nil {
+					return "", err
+				}
+			}
+			return reason, nil
 		case "error":
-			return "", errors.New("openai responses stream returned an error")
+			return "", fmt.Errorf("openai responses stream error (%s): %s", eventPayload.Code, eventPayload.Message)
 		}
 	}
-}
-
-func responseCallID(callID, itemID string) string {
-	if callID != "" {
-		return callID
-	}
-	return itemID
 }
 
 func emitResponseTools(emit streaming.EmitFunc, calls map[string]*streaming.ToolAccumulator) error {

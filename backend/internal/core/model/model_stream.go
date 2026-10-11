@@ -18,13 +18,27 @@ const (
 	StreamError         ModelStreamEventKind = "error"
 )
 
+// ModelStopReason 是单次模型生成的统一结束语义，不代表整个 Task 已完成。
+type ModelStopReason string
+
+const (
+	StopCompleted ModelStopReason = "completed"
+	StopToolCalls ModelStopReason = "tool_calls"
+	StopTruncated ModelStopReason = "truncated"
+	StopFiltered  ModelStopReason = "filtered"
+	StopPaused    ModelStopReason = "paused"
+	StopRefused   ModelStopReason = "refused"
+	StopSequence  ModelStopReason = "stop_sequence"
+	StopUnknown   ModelStopReason = "unknown"
+)
+
 // ModelStreamEvent 是单次模型请求的 Provider 中立流事件。
 type ModelStreamEvent struct {
 	Kind       ModelStreamEventKind
 	Text       string
 	ToolCall   contracts.ToolCall
 	Usage      *ModelUsage
-	StopReason string
+	StopReason ModelStopReason
 	Err        error
 }
 

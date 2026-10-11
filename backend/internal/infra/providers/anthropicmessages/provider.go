@@ -157,7 +157,7 @@ func (messagesDecoder) Decode(
 	ctx context.Context,
 	reader *streaming.SSEReader,
 	emit streaming.EmitFunc,
-) (string, error) {
+) (model.ModelStopReason, error) {
 	tools := map[int]*toolAccumulator{}
 	var usage *model.ModelUsage
 	var stopReason string
@@ -166,11 +166,8 @@ func (messagesDecoder) Decode(
 			return "", err
 		}
 		sseEvent, err := reader.Next()
-		if err == io.EOF {
-			if err := emitTools(emit, tools); err != nil {
-				return "", err
-			}
-			return stopReason, nil
+		if errors.Is(err, io.EOF) {
+			return "", streaming.ErrUnexpectedEOF
 		}
 		if err != nil {
 			return "", err
@@ -246,10 +243,16 @@ func (messagesDecoder) Decode(
 				stopReason = event.Delta.StopReason
 			}
 		case "message_stop":
-			if err := emitTools(emit, tools); err != nil {
-				return "", err
+			if stopReason == "" {
+				return "", errors.New("anthropic stream ended without stop_reason")
 			}
-			return stopReason, nil
+			reason := providers.AnthropicStopReason(stopReason)
+			if reason == model.StopCompleted || reason == model.StopToolCalls {
+				if err := emitTools(emit, tools); err != nil {
+					return "", err
+				}
+			}
+			return reason, nil
 		case "error":
 			return "", errors.New("anthropic stream returned an error")
 		}
@@ -293,7 +296,7 @@ type toolAccumulator struct{ id, name, arguments string }
 
 func emitTool(emit streaming.EmitFunc, tool *toolAccumulator) error {
 	if tool == nil || tool.name == "" {
-		return nil
+		return errors.New("anthropic emitted an incomplete tool call")
 	}
 	args := json.RawMessage(tool.arguments)
 	if len(bytes.TrimSpace(args)) == 0 {

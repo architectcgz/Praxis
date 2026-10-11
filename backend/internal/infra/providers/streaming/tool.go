@@ -3,6 +3,7 @@ package streaming
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"praxis/internal/contracts"
 
 	"praxis/internal/core/model"
@@ -16,10 +17,10 @@ type ToolAccumulator struct {
 }
 
 // EmitTool 将累积完成的工具调用转换为统一的模型流事件并发送。
-// 缺少工具名时跳过，缺少或仅包含空白字符的参数时使用空 JSON 对象。
+// 缺少工具名时返回协议错误，避免丢弃未完成调用后将响应误判为自然完成；空参数使用空 JSON 对象。
 func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
 	if call == nil || call.Name == "" {
-		return nil
+		return errors.New("provider emitted an incomplete tool call")
 	}
 	args := json.RawMessage(call.Arguments)
 	if len(bytes.TrimSpace(args)) == 0 {

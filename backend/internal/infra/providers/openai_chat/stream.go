@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"praxis/internal/core/model"
+	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -19,15 +20,21 @@ func (streamDecoder) Decode(
 	ctx context.Context,
 	reader *streaming.SSEReader,
 	emit streaming.EmitFunc,
-) (string, error) {
+) (model.ModelStopReason, error) {
 	calls := map[int]*streaming.ToolAccumulator{}
 	var stopReason string
-	finished := false
-	finish := func() (string, error) {
-		if err := emitChatTools(emit, calls); err != nil {
-			return "", err
+	finish := func() (model.ModelStopReason, error) {
+		if stopReason == "" {
+			return "", errors.New("openai chat stream ended without finish_reason")
 		}
-		return stopReason, nil
+		reason := providers.OpenAIChatStopReason(stopReason)
+		// 非正常终态的工具参数可能尚未完整，不能交给调用方执行。
+		if reason == model.StopCompleted || reason == model.StopToolCalls {
+			if err := emitChatTools(emit, calls); err != nil {
+				return "", err
+			}
+		}
+		return reason, nil
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -35,7 +42,8 @@ func (streamDecoder) Decode(
 		}
 		event, err := reader.Next()
 		if errors.Is(err, io.EOF) {
-			if finished {
+			// finish_reason 本身是选择项终态；兼容终态后不发送 [DONE] 的服务。
+			if stopReason != "" {
 				return finish()
 			}
 			return "", streaming.ErrUnexpectedEOF
@@ -124,7 +132,6 @@ func (streamDecoder) Decode(
 		}
 		if choice.FinishReason != "" {
 			stopReason = choice.FinishReason
-			finished = true
 		}
 	}
 }
