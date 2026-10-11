@@ -2,7 +2,9 @@ package openairesponses
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -152,14 +154,12 @@ func TestResponseTypedSchemas(t *testing.T) {
 			"output_index",
 			"content_index",
 			"delta",
-			"logprobs",
 		}},
 		{"response.output_text.done", &responseOutputTextDoneEvent{}, []string{
 			"item_id",
 			"output_index",
 			"content_index",
 			"text",
-			"logprobs",
 		}},
 		{"response.refusal.delta", &responseRefusalDeltaEvent{}, []string{
 			"item_id",
@@ -278,14 +278,13 @@ func TestResponseTextAndProtocolErrors(t *testing.T) {
 			return f
 		}},
 		{"终态身份冲突", func(f []map[string]any) []map[string]any {
-			f[8]["response"].(map[string]any)["model"] = "other"
+			f[8]["response"].(map[string]any)["id"] = "other"
 			return f
 		}},
 		{"不支持的输出", func(f []map[string]any) []map[string]any {
 			f[2]["item"] = map[string]any{"type": "web_search_call", "id": "ws_1"}
 			return f
 		}},
-		{"未知关键事件", func(f []map[string]any) []map[string]any { f[4]["type"] = "response.future.delta"; return f }},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -501,6 +500,222 @@ func TestResponseTerminalAndUnknownEvents(t *testing.T) {
 	}
 }
 
+func TestResponseIgnoredMetadataAndOptionalUsage(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func([]map[string]any)
+	}{
+		{"缺失配置元数据", func(f []map[string]any) {
+			for _, frame := range f {
+				if snapshot, ok := frame["response"].(map[string]any); ok {
+					delete(snapshot, "parallel_tool_calls")
+					delete(snapshot, "tool_choice")
+					delete(snapshot, "tools")
+				}
+			}
+		}},
+		{"不消费配置联合类型", func(f []map[string]any) {
+			f[8]["response"].(map[string]any)["tool_choice"] = map[string]any{"future": true}
+			f[8]["response"].(map[string]any)["tools"] = []any{map[string]any{"future": true}}
+		}},
+		{"模型和时间不是关联主键", func(f []map[string]any) {
+			f[1]["response"].(map[string]any)["model"] = " gpt-5 "
+			f[8]["response"].(map[string]any)["model"] = "other"
+			f[8]["response"].(map[string]any)["created_at"] = -1
+		}},
+		{"引用日志概率及附加元数据", func(f []map[string]any) {
+			f[4]["logprobs"] = []any{map[string]any{"token": "你好", "top_logprobs": []any{map[string]any{}}}}
+			f[5]["logprobs"] = []any{map[string]any{"token": "你好"}}
+			f[7]["item"].(map[string]any)["future"] = map[string]any{"opaque": true}
+			part := responseFixtureText("你好")
+			part["annotations"] = []any{map[string]any{"type": "url_citation", "url": "https://example.com"}}
+			part["logprobs"] = []any{map[string]any{"token": "你好"}}
+			f[8]["response"] = responseFixtureSnapshot("completed", responseFixtureMessage("completed", part))
+		}},
+		{"Usage 无明细且无需数学一致", func(f []map[string]any) {
+			f[8]["response"].(map[string]any)["usage"] = map[string]any{"input_tokens": 10, "output_tokens": 5, "total_tokens": 1}
+		}},
+		{"Usage 不检查未消费明细", func(f []map[string]any) {
+			f[8]["response"].(map[string]any)["usage"] = map[string]any{
+				"input_tokens":          10,
+				"output_tokens":         5,
+				"input_tokens_details":  map[string]any{},
+				"output_tokens_details": map[string]any{"reasoning_tokens": -1},
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			frames := responseFixtureTextStream()
+			test.change(frames)
+			events, reason, err := decodeResponseFixture(t, frames)
+			if err != nil || reason != model.StopCompleted || len(events) == 0 || events[0].Text != "你好" {
+				t.Fatalf("未消费字段影响了文本解码：%v %s %v", events, reason, err)
+			}
+			if frames[8]["response"].(map[string]any)["usage"] != nil {
+				if len(events) != 2 || events[1].Kind != model.StreamUsage || events[1].Usage.InputTokens != 10 || *events[1].Usage.OutputTokens != 5 || events[1].Usage.CacheReadInputTokens != nil {
+					t.Fatalf("可选用量明细处理错误：%v", events)
+				}
+			} else if len(events) != 1 {
+				t.Fatalf("缺失 Usage 不应生成统计：%v", events)
+			}
+		})
+	}
+}
+
+func TestResponseInvalidUsageDoesNotFailContent(t *testing.T) {
+	for _, usage := range []any{
+		map[string]any{"input_tokens": -1, "output_tokens": 5},
+		map[string]any{"input_tokens": 10},
+	} {
+		frames := responseFixtureReasoningTools()
+		frames[len(frames)-1]["response"].(map[string]any)["usage"] = usage
+		events, reason, err := decodeResponseFixture(t, frames)
+		if err != nil || reason != model.StopToolCalls {
+			t.Fatalf("无效用量中断有效工具流：%s %v", reason, err)
+		}
+		calls := 0
+		for _, event := range events {
+			if event.Kind == model.StreamUsage {
+				t.Fatal("无效用量不应更新统计")
+			}
+			if event.Kind == model.StreamToolCall {
+				calls++
+			}
+		}
+		if calls != 2 {
+			t.Fatal("无效用量阻止完整工具释放")
+		}
+	}
+	failure := errors.New("统计消费者失败")
+	_, err := (decoder{}).Decode(t.Context(), streaming.NewSSEReader(strings.NewReader(responseFixtureSSE(t, responseFixtureReasoningTools()))), func(event model.ModelStreamEvent) error {
+		if event.Kind == model.StreamUsage {
+			return failure
+		}
+		return nil
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("消费端错误被误当成统计异常忽略：%v", err)
+	}
+}
+
+func TestResponseMetadataEventsAndDisplayOnlyReasoning(t *testing.T) {
+	for _, kind := range []string{"response.queued", "response.output_text.annotation.added", "response.future.delta"} {
+		frames := responseFixtureTextStream()
+		extra := responseFixtureEvent(kind, map[string]any{
+			"item_id":      "msg_1",
+			"output_index": 0,
+			"delta":        "不应输出",
+			"response":     map[string]any{},
+		})
+		frames = append([]map[string]any{extra}, frames...)
+		delete(frames[5], "logprobs")
+		delete(frames[6], "logprobs")
+		events, reason, err := decodeResponseFixture(t, frames)
+		if err != nil || reason != model.StopCompleted || len(events) != 1 || events[0].Text != "你好" {
+			t.Fatalf("元数据事件影响了正文：%s %v %v", kind, events, err)
+		}
+		extra["sequence_number"] = 1
+		if _, _, err := decodeResponseFixture(t, frames); err == nil {
+			t.Fatal("忽略的事件仍须遵守 sequence_number 单调递增")
+		}
+	}
+	for _, encrypted := range []any{nil, ""} {
+		frames := responseFixtureReasoningTools()
+		for _, frame := range frames {
+			if item, ok := frame["item"].(map[string]any); ok && item["type"] == "reasoning" {
+				item["encrypted_content"] = encrypted
+			}
+		}
+		events, reason, err := decodeResponseFixture(t, frames)
+		if err != nil || reason != model.StopToolCalls {
+			t.Fatalf("无加密内容的推理不应阻止工具调用：%s %v", reason, err)
+		}
+		calls, thinking := 0, ""
+		for _, event := range events {
+			switch event.Kind {
+			case model.StreamReasoningState:
+				t.Fatal("无加密内容的推理被保存为可重放状态")
+			case model.StreamThinkingDelta:
+				thinking += event.Text
+			case model.StreamToolCall:
+				calls++
+			}
+		}
+		if calls != 2 || thinking != "摘要思考" {
+			t.Fatal("展示推理或工具调用丢失")
+		}
+	}
+}
+
+func TestResponseFlexibleItemRegistration(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func([]map[string]any) []map[string]any
+	}{
+		{"非顺序注册", func(f []map[string]any) []map[string]any {
+			frames := append([]map[string]any{f[0]}, f[16:21]...)
+			frames = append(frames, f[1:16]...)
+			return append(frames, f[21])
+		}},
+		{"Function ID 在 Done 时补入", func(f []map[string]any) []map[string]any {
+			for _, frame := range f {
+				if item, ok := frame["item"].(map[string]any); ok && frame["type"] == "response.output_item.added" && item["type"] == "function_call" {
+					delete(item, "id")
+				}
+			}
+			return f
+		}},
+		{"流式 Function ID 可选", func(f []map[string]any) []map[string]any {
+			for _, frame := range f {
+				if item, ok := frame["item"].(map[string]any); ok && item["type"] == "function_call" {
+					delete(item, "id")
+				}
+			}
+			return f
+		}},
+		{"续传状态以 Item Done 为准", func(f []map[string]any) []map[string]any {
+			outputs := f[len(f)-1]["response"].(map[string]any)["output"].([]map[string]any)
+			outputs[0] = maps.Clone(outputs[0])
+			outputs[0]["encrypted_content"] = "snapshot_only"
+			outputs[0]["summary"] = []any{map[string]any{"type": "summary_text", "text": "终态元数据"}}
+			return f
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			events, reason, err := decodeResponseFixture(t, test.change(responseFixtureReasoningTools()))
+			if err != nil || reason != model.StopToolCalls {
+				t.Fatalf("合法注册或元数据被拒绝：%s %v", reason, err)
+			}
+			calls := 0
+			for _, event := range events {
+				if event.Kind == model.StreamToolCall {
+					calls++
+					if event.ToolCall.ID != fmt.Sprintf("call_%d", calls) {
+						t.Fatal("工具未按最终 output 顺序释放")
+					}
+				}
+				if event.Kind == model.StreamReasoningState && (!strings.Contains(string(event.ReasoningState.Payload), "final_secret") || strings.Contains(string(event.ReasoningState.Payload), "snapshot_only")) {
+					t.Fatal("推理续传未保留 Item Done 载荷")
+				}
+			}
+			if calls != 2 {
+				t.Fatalf("工具调用数量错误：%d", calls)
+			}
+		})
+	}
+	call := map[string]any{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{}"}
+	frames := []map[string]any{
+		responseFixtureEvent("response.created", map[string]any{"response": responseFixtureSnapshot("in_progress")}),
+		responseFixtureEvent("response.output_item.added", map[string]any{"output_index": 2, "item": call}),
+		responseFixtureEvent("response.output_item.done", map[string]any{"output_index": 2, "item": call}),
+		responseFixtureEvent("response.completed", map[string]any{"response": responseFixtureSnapshot("completed", call)}),
+	}
+	events, _, err := decodeResponseFixture(t, frames)
+	if err == nil || len(events) != 0 {
+		t.Fatalf("越界注册索引未被终态拒绝或提前释放了工具：%v %v", events, err)
+	}
+}
+
 func TestResponseItemsAndSnapshotOrdering(t *testing.T) {
 	for _, raw := range []string{
 		`{"type":"message","id":"msg_1","role":"assistant","status":"completed"}`,
@@ -509,12 +724,16 @@ func TestResponseItemsAndSnapshotOrdering(t *testing.T) {
 		`{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text"}]}`,
 		`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":12}`,
 		`{"type":"function_call","call_id":"call_1","name":"lookup"}`,
-		`{"type":"function_call","call_id":" call_1 ","name":"lookup","arguments":"{}"}`,
 	} {
 		var item responseOutput
 		if err := json.Unmarshal([]byte(raw), &item); err == nil {
 			t.Fatalf("非法 Item 被接受：%s", raw)
 		}
+	}
+	// DTO 只检查身份非空，工具执行前的 canonical 校验仍由工具边界负责。
+	var item responseOutput
+	if err := json.Unmarshal([]byte(`{"type":"function_call","call_id":" call_1 ","name":"lookup","arguments":"{}"}`), &item); err != nil {
+		t.Fatalf("DTO 不应拒绝标识符首尾空格：%v", err)
 	}
 	message := responseFixtureMessage("completed", nil)
 	message["content"] = []any{responseFixtureText("一"), responseFixtureText("二"), responseFixtureText("三")}

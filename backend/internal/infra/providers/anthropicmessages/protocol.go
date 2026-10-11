@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // 请求 DTO 独立于响应 Content Block；重放签名载荷时保留原始 JSON。
@@ -55,8 +54,6 @@ type requestToolResultBlock struct {
 	Content   string `json:"content"`
 	IsError   bool   `json:"is_error,omitzero"`
 }
-
-func canonical(value string) bool { return value != "" && value == strings.TrimSpace(value) }
 
 // decodeObject 保留未知附加字段的扩展空间，但不补齐缺失或 null 的必填字段。
 func decodeObject(data []byte, target any, required ...string) error {

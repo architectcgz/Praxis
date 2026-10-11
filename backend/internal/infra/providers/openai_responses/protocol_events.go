@@ -1,10 +1,6 @@
 package openairesponses
 
-import (
-	"encoding/json"
-	"errors"
-	"fmt"
-)
+import "errors"
 
 type responseEvent interface{ eventHeader() responseEventHeader }
 type responseEventHeader struct {
@@ -28,7 +24,7 @@ type responseSummaryReference struct {
 }
 
 func (r responseItemReference) validateReference() error {
-	if r.OutputIndex == nil || *r.OutputIndex < 0 || !canonical(r.ItemID) {
+	if r.OutputIndex == nil || *r.OutputIndex < 0 || r.ItemID == "" {
 		return errors.New("responses invalid item reference")
 	}
 	return nil
@@ -95,15 +91,13 @@ type responseContentPartDoneEvent struct {
 type responseOutputTextDeltaEvent struct {
 	responseEventHeader
 	responseContentReference
-	Delta       string                 `json:"delta"`
-	Logprobs    []responseEventLogprob `json:"logprobs"`
-	Obfuscation *string                `json:"obfuscation"`
+	Delta       string  `json:"delta"`
+	Obfuscation *string `json:"obfuscation"`
 }
 type responseOutputTextDoneEvent struct {
 	responseEventHeader
 	responseContentReference
-	Text     string                 `json:"text"`
-	Logprobs []responseEventLogprob `json:"logprobs"`
+	Text string `json:"text"`
 }
 type responseRefusalDeltaEvent struct {
 	responseEventHeader
@@ -165,31 +159,19 @@ type responseErrorEvent struct {
 	Message string  `json:"message"`
 	Param   *string `json:"param"`
 }
-type responseEventLogprob struct {
-	Token       string                    `json:"token"`
-	Logprob     float64                   `json:"logprob"`
-	TopLogprobs []responseEventTopLogprob `json:"top_logprobs"`
-}
-type responseEventTopLogprob struct {
-	Token   *string  `json:"token"`
-	Logprob *float64 `json:"logprob"`
-}
-
-// UnmarshalJSON 流事件的日志概率与正文日志概率不同，不要求 bytes 或 top_logprobs。
-func (p *responseEventLogprob) UnmarshalJSON(data []byte) error {
-	type wire responseEventLogprob
-	return decodeObject(data, (*wire)(p), "token", "logprob")
-}
 
 // decodeResponseEvent 先分派顶层类型，再验证该类型的必填字段；索引零值合法。
-// 未知事件仅在不携带输出、块或终态数据时跳过，绝不修改已注册输出。
+// 未知顶层事件不修改已注册输出；已知 Item 和 Part 的类型仍严格分派。
 func decodeResponseEvent(data []byte) (responseEvent, error) {
 	var header responseEventHeader
-	if err := decodeObject(data, &header, "type"); err != nil {
+	if err := decodeObject(data, &header, "type", "sequence_number"); err != nil {
 		return nil, err
 	}
-	if !canonical(header.Type) {
+	if header.Type == "" {
 		return nil, errors.New("responses invalid event type")
+	}
+	if *header.SequenceNumber < 0 {
+		return nil, errors.New("responses negative sequence_number")
 	}
 	var event responseEvent
 	var required []string
@@ -238,7 +220,6 @@ func decodeResponseEvent(data []byte) (responseEvent, error) {
 			"output_index",
 			"content_index",
 			"delta",
-			"logprobs",
 		}
 	case "response.output_text.done":
 		event = &responseOutputTextDoneEvent{}
@@ -247,7 +228,6 @@ func decodeResponseEvent(data []byte) (responseEvent, error) {
 			"output_index",
 			"content_index",
 			"text",
-			"logprobs",
 		}
 	case "response.refusal.delta":
 		event = &responseRefusalDeltaEvent{}
@@ -322,36 +302,15 @@ func decodeResponseEvent(data []byte) (responseEvent, error) {
 	case "error":
 		event = &responseErrorEvent{}
 		required = []string{"message"}
+	case "response.queued", "response.output_text.annotation.added":
+		// 排队通知与文本引用元数据不改变当前文本模式的输出或终态。
+		return &header, nil
 	default:
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(data, &fields); err != nil {
-			return nil, err
-		}
-		for _, name := range []string{
-			"item_id",
-			"output_index",
-			"content_index",
-			"summary_index",
-			"item",
-			"part",
-			"delta",
-			"response",
-			"arguments",
-			"text",
-			"refusal",
-		} {
-			if _, exists := fields[name]; exists {
-				return nil, fmt.Errorf("responses unsupported semantic event %q", header.Type)
-			}
-		}
 		return &header, nil
 	}
 	required = append(required, "type", "sequence_number")
 	if err := decodeObject(data, event, required...); err != nil {
 		return nil, err
-	}
-	if *event.eventHeader().SequenceNumber < 0 {
-		return nil, errors.New("responses negative sequence_number")
 	}
 	if reference, ok := event.(interface{ validateReference() error }); ok {
 		if err := reference.validateReference(); err != nil {

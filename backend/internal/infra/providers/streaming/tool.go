@@ -31,11 +31,9 @@ func ValidateToolCall(call *ToolAccumulator) error {
 	return nil
 }
 
-// EmitTool 发送已经完成的工具调用；只负责协议校验，Schema 和授权由工具执行边界负责。
+// EmitTool 复制并发送已完成的调用；调用方须先用 ValidateToolCall 校验整批工具。
+// 此处仅返回 emit 的错误；Schema 和授权由工具执行边界负责。
 func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
-	if err := ValidateToolCall(call); err != nil {
-		return err
-	}
 	args := json.RawMessage(call.Arguments)
 	return emit(model.ModelStreamEvent{
 		Kind: model.StreamToolCall,

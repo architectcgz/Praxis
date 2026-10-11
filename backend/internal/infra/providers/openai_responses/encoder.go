@@ -88,9 +88,6 @@ func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 			}
 		case appcontext.ContextBlockReasoningState:
 			state := block.ReasoningState
-			if err := state.Validate(); err != nil {
-				return nil, err
-			}
 			if state.Protocol != contracts.ProtocolOpenAIResponses {
 				return nil, errors.New("cannot replay another protocol's state in responses")
 			}

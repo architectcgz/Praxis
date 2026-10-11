@@ -208,7 +208,7 @@ func (r *Runner) run(
 			TurnID:  turn.ID,
 		})
 		modelContext = modelContext.AppendProviderOutput(assistant)
-		if response.stopReason == model.StopCompleted {
+		if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {
 			return r.settleTurn(ctx, turn.ID, taskmodel.TaskCompleted, "", nil)
 		}
 		results, err := r.runToolCalls(ctx, messageRecorder, calls, metadata, task.RequestID, budget)

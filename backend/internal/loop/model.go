@@ -140,7 +140,7 @@ func (r modelResponse) validateStopReason() error {
 		}
 	}
 	switch r.stopReason {
-	case model.StopCompleted:
+	case model.StopCompleted, model.StopSequence:
 		if toolCount != 0 {
 			return errors.New("provider completed with unexpected tool calls")
 		}
@@ -156,8 +156,6 @@ func (r modelResponse) validateStopReason() error {
 		return errors.New("model refused the request")
 	case model.StopPaused:
 		return errors.New("model paused the turn; continuation is not supported")
-	case model.StopSequence:
-		return errors.New("model stopped at a custom stop sequence")
 	default:
 		return fmt.Errorf("provider returned an unknown stop reason %q", r.stopReason)
 	}
@@ -189,8 +187,6 @@ func sameOutputIndex(a, b *int) bool {
 }
 
 func (r modelResponse) validateReasoningState(protocol string) error {
-	seen := map[string]bool{}
-	seenIndices := map[int]bool{}
 	for _, event := range r.events {
 		if event.Kind != model.StreamReasoningState {
 			continue
@@ -199,15 +195,6 @@ func (r modelResponse) validateReasoningState(protocol string) error {
 		if state.Protocol != protocol {
 			return errors.New("reasoning state does not match the frozen request protocol")
 		}
-		if event.OutputIndex == nil || seenIndices[*event.OutputIndex] {
-			return errors.New("reasoning state has missing or conflicting output identity")
-		}
-		seenIndices[*event.OutputIndex] = true
-		key := string(state.Payload)
-		if seen[key] {
-			return errors.New("provider emitted duplicate reasoning state")
-		}
-		seen[key] = true
 	}
 	return nil
 }

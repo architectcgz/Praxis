@@ -165,8 +165,6 @@ func TestChatInvalidStreams(t *testing.T) {
 	}{
 		{"错误对象", func(f []map[string]any) []map[string]any { f[1]["object"] = "chat.completion"; return f }},
 		{"身份改变", func(f []map[string]any) []map[string]any { f[1]["id"] = "other"; return f }},
-		{"模型改变", func(f []map[string]any) []map[string]any { f[1]["model"] = "other"; return f }},
-		{"创建时间改变", func(f []map[string]any) []map[string]any { f[1]["created"] = 1; return f }},
 		{"错误时间类型", func(f []map[string]any) []map[string]any { f[1]["created"] = "0"; return f }},
 		{"缺失delta", func(f []map[string]any) []map[string]any {
 			delete(f[1]["choices"].([]any)[0].(map[string]any), "delta")
@@ -196,18 +194,10 @@ func TestChatInvalidStreams(t *testing.T) {
 			f[1]["choices"].([]any)[0].(map[string]any)["delta"] = map[string]any{"content": 12}
 			return f
 		}},
+		{"缺失 Finish Reason", func(f []map[string]any) []map[string]any { return f[:2] }},
 		{"终态后增量", func(f []map[string]any) []map[string]any { return append(f[:3], f[1], f[3]) }},
 		{"提前Usage", func(f []map[string]any) []map[string]any { return append(f[:2], f[3], f[2]) }},
 		{"重复Usage", func(f []map[string]any) []map[string]any { return append(f, chatFixtureUsage()) }},
-		{"缺失Usage", func(f []map[string]any) []map[string]any { return f[:3] }},
-		{"不完整Usage", func(f []map[string]any) []map[string]any {
-			delete(f[3]["usage"].(map[string]any), "completion_tokens")
-			return f
-		}},
-		{"计数不一致", func(f []map[string]any) []map[string]any {
-			f[3]["usage"].(map[string]any)["total_tokens"] = 1
-			return f
-		}},
 		{"负工具索引", func(f []map[string]any) []map[string]any {
 			f[1]["choices"].([]any)[0].(map[string]any)["delta"] = map[string]any{"tool_calls": []any{map[string]any{"index": -1}}}
 			return f
@@ -264,10 +254,104 @@ func TestChatStopReasonsAndEncoder(t *testing.T) {
 	}
 }
 
+func TestChatOptionalUsageAndIgnoredMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func([]map[string]any) []map[string]any
+	}{
+		{"缺失最终 Usage", func(f []map[string]any) []map[string]any { return f[:3] }},
+		{"模型时间变化及可空 Role", func(f []map[string]any) []map[string]any {
+			f[1]["model"], f[1]["created"] = " other ", 1
+			f[0]["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)["role"] = nil
+			return f
+		}},
+		{"日志概率及附加元数据", func(f []map[string]any) []map[string]any {
+			f[1]["system_fingerprint"] = "fp_1"
+			f[1]["service_tier"] = "default"
+			f[1]["choices"].([]any)[0].(map[string]any)["logprobs"] = map[string]any{
+				"content": []any{map[string]any{"token": "你好", "top_logprobs": []any{map[string]any{}}}},
+			}
+			return f
+		}},
+		{"Usage 不校验数学关系及未消费计数", func(f []map[string]any) []map[string]any {
+			usage := f[3]["usage"].(map[string]any)
+			usage["total_tokens"] = 1
+			usage["prompt_tokens_details"].(map[string]any)["audio_tokens"] = -1
+			usage["completion_tokens_details"] = map[string]any{"reasoning_tokens": -1}
+			return f
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			frames := test.change(chatFixtureTextStream())
+			events, reason, err := decodeChatFixture(t, frames, true)
+			if err != nil || reason != model.StopCompleted || len(events) == 0 || events[0].Text != "你好" {
+				t.Fatalf("未消费字段影响了文本解码：%v %s %v", events, reason, err)
+			}
+			if len(frames) == 3 {
+				if len(events) != 1 {
+					t.Fatal("缺失 Usage 不应生成统计")
+				}
+			} else if len(events) != 2 || events[1].Kind != model.StreamUsage {
+				t.Fatal("Usage 未输出或重复输出")
+			}
+		})
+	}
+	frames := chatFixtureTools()[:3]
+	events, reason, err := decodeChatFixture(t, frames, true)
+	if err != nil || reason != model.StopToolCalls || len(events) != 2 {
+		t.Fatalf("缺失 Usage 阻止完整工具释放：%v %s %v", events, reason, err)
+	}
+}
+
+func TestChatInvalidUsageDoesNotFailContent(t *testing.T) {
+	for _, usage := range []any{
+		map[string]any{"prompt_tokens": 10},
+		map[string]any{"prompt_tokens": 10, "completion_tokens": -1},
+	} {
+		frames := chatFixtureTools()
+		frames[3]["usage"] = usage
+		events, reason, err := decodeChatFixture(t, frames, true)
+		if err != nil || reason != model.StopToolCalls || len(events) != 2 {
+			t.Fatalf("统计异常影响了完整工具调用：%v %s %v", events, reason, err)
+		}
+		for _, event := range events {
+			if event.Kind != model.StreamToolCall {
+				t.Fatal("无效统计仍生成了 Usage")
+			}
+		}
+		frames = append(frames, chatFixtureUsage())
+		if _, _, err := decodeChatFixture(t, frames, true); err == nil {
+			t.Fatal("统计异常不应绕过 Usage Chunk 顺序校验")
+		}
+	}
+}
+
+func TestChatOfficialRawSSE(t *testing.T) {
+	// 官方原始 SSE 示例未包含 Usage；不通过 Fixture 补入可选字段。
+	// 来源：https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
+	const sse = `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-6-astra", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-6-astra", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"content":"Hello"},"logprobs":null,"finish_reason":null}]}
+
+: Intermediate chat completion chunks omitted.
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-6-astra", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`
+	var events []model.ModelStreamEvent
+	reason, err := (decoder{}).Decode(t.Context(), streaming.NewSSEReader(strings.NewReader(sse)), func(event model.ModelStreamEvent) error { events = append(events, event); return nil })
+	if err != nil || reason != model.StopCompleted || len(events) != 1 || events[0].Kind != model.StreamTextDelta || events[0].Text != "Hello" {
+		t.Fatalf("官方无 Usage 示例解码失败：%v %s %v", events, reason, err)
+	}
+}
+
 func TestChatToolSchemaBoundaries(t *testing.T) {
 	for _, delta := range []string{
-		`{"role":null}`,
 		`{"tool_calls":null}`,
+		`{"tool_calls":[{"id":"call_1"}]}`,
+		`{"tool_calls":[{"index":null}]}`,
 		`{"tool_calls":[{"index":0,"id":null}]}`,
 		`{"tool_calls":[{"index":0,"type":null}]}`,
 		`{"tool_calls":[{"index":0,"function":null}]}`,

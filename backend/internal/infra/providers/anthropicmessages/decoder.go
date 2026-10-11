@@ -57,8 +57,9 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			if started || len(e.Message.Content) != 0 || e.Message.StopReason != nil || e.Message.StopSequence != nil {
 				return "", errors.New("anthropic invalid or duplicate message_start")
 			}
-			started, usage = true, &e.Message.Usage.tokenCounts
-			if err := emitMessageUsage(emit, usage); err != nil {
+			started = true
+			usage, err = updateMessageUsage(usage, e.Message.Usage, emit)
+			if err != nil {
 				return "", err
 			}
 		case *contentBlockStartEvent:
@@ -128,7 +129,10 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				}
 				state.Arguments += delta.PartialJSON
 			case *citationsDelta:
-				return "", errors.New("anthropic citations_delta is not supported")
+				if _, ok := state.Block.(*textBlock); !ok {
+					return "", errors.New("anthropic citation delta targets wrong block")
+				}
+				// 当前仅消费文本，引用元数据不改变正文与推理续传载荷。
 			default:
 				return "", errors.New("anthropic unsupported content delta")
 			}
@@ -185,11 +189,8 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			} else if e.Delta.StopSequence != nil {
 				return "", errors.New("anthropic stop_sequence without stop_reason")
 			}
-			usage, err = mergeMessageUsage(usage, &e.Usage.tokenCounts)
+			usage, err = updateMessageUsage(usage, e.Usage, emit)
 			if err != nil {
-				return "", err
-			}
-			if err := emitMessageUsage(emit, usage); err != nil {
 				return "", err
 			}
 		case *messageStopEvent:
@@ -205,7 +206,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					return "", errors.New("anthropic missing or unclosed content block")
 				}
 			}
-			if reason != model.StopCompleted && reason != model.StopToolCalls {
+			if reason != model.StopCompleted && reason != model.StopSequence && reason != model.StopToolCalls {
 				return reason, nil
 			}
 			seen, toolCount := map[string]bool{}, 0
@@ -227,10 +228,10 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					toolCount++
 				}
 			}
-			if reason == model.StopCompleted && toolCount != 0 || reason == model.StopToolCalls && toolCount == 0 {
+			if (reason == model.StopCompleted || reason == model.StopSequence) && toolCount != 0 || reason == model.StopToolCalls && toolCount == 0 {
 				return "", errors.New("anthropic tool blocks conflict with stop_reason")
 			}
-			// 所有块、用量、签名与终态都已验证后，再发送任何可执行工具。
+			// 所有块、签名与终态都已验证后，再发送任何可执行工具。
 			for index := range len(blocks) {
 				state := blocks[index]
 				if state.ReasoningState != nil {
@@ -255,16 +256,16 @@ func activeContentBlock(blocks map[int]*contentBlockState, index *int) (*content
 	}
 	return blocks[*index], *index, nil
 }
-func mergeMessageUsage(previous, delta *tokenCounts) (*tokenCounts, error) {
+
+// updateMessageUsage 仅在本次计数完整有效时更新累计值；异常统计不污染后续增量。
+func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit streaming.EmitFunc) (*tokenCounts, error) {
+	var delta tokenCounts
+	if !streaming.DecodeUsage(raw, &delta, contracts.ProtocolAnthropicMessages) {
+		return previous, nil
+	}
 	var next tokenCounts
 	if previous != nil {
 		next = *previous
-	}
-	before := []*int64{
-		next.InputTokens,
-		next.OutputTokens,
-		next.CacheReadInputTokens,
-		next.CacheCreationInputTokens,
 	}
 	after := []*int64{
 		delta.InputTokens,
@@ -279,23 +280,21 @@ func mergeMessageUsage(previous, delta *tokenCounts) (*tokenCounts, error) {
 		&next.CacheCreationInputTokens,
 	}
 	for index, value := range after {
-		if value == nil {
-			continue
+		if value != nil {
+			*targets[index] = value
 		}
-		if *value < 0 || before[index] != nil && *value < *before[index] {
-			return nil, errors.New("anthropic cumulative usage decreased")
-		}
-		copy := *value
-		*targets[index] = &copy
+	}
+	var usage *model.ModelUsage
+	if delta.OutputTokens != nil {
+		usage = normalizeMessageUsage(&next)
+	}
+	if !streaming.ValidUsage(contracts.ProtocolAnthropicMessages, usage) {
+		return previous, nil
+	}
+	if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
+		return previous, err
 	}
 	return &next, nil
-}
-func emitMessageUsage(emit streaming.EmitFunc, reported *tokenCounts) error {
-	usage := normalizeMessageUsage(reported)
-	if usage == nil {
-		return errors.New("anthropic invalid usage")
-	}
-	return emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage})
 }
 func normalizeMessageUsage(reported *tokenCounts) *model.ModelUsage {
 	if reported == nil || reported.InputTokens == nil || *reported.InputTokens < 0 {
@@ -323,9 +322,6 @@ func normalizeMessageUsage(reported *tokenCounts) *model.ModelUsage {
 		OutputTokens:             copyCount(reported.OutputTokens),
 		CacheReadInputTokens:     copyCount(reported.CacheReadInputTokens),
 		CacheCreationInputTokens: copyCount(reported.CacheCreationInputTokens),
-	}
-	if !usage.Valid() {
-		return nil
 	}
 	return usage
 }

@@ -91,9 +91,6 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 			}
 		case appcontext.ContextBlockReasoningState:
 			state := block.ReasoningState
-			if err := state.Validate(); err != nil {
-				return nil, err
-			}
 			if state.Protocol != contracts.ProtocolAnthropicMessages {
 				return nil, errors.New("cannot replay another protocol's state in anthropic")
 			}
@@ -134,7 +131,8 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 	return messages, nil
 }
 
-// validateThinkingContinuation 要求工具续传包含原始推理状态，不从展示文本伪造签名。
+// validateThinkingContinuation 仅用于 enabled 模式，要求工具续传保留原始推理状态。
+// adaptive 模式允许无 Thinking 块，实际提供的签名载荷由编码边界验证。
 func validateThinkingContinuation(messages []anthropicMessage) error {
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]

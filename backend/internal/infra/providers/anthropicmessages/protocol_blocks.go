@@ -15,7 +15,8 @@ func (b blockHeader) blockType() string { return b.Type }
 
 type textBlock struct {
 	blockHeader
-	Text      string            `json:"text"`
+	Text string `json:"text"`
+	// 文本模式保留引用元数据，但只输出正文，不生成独立引用事件。
 	Citations []json.RawMessage `json:"citations"`
 }
 type toolUseBlock struct {
@@ -66,13 +67,9 @@ func (b *contentBlockUnion) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch value := block.(type) {
-	case *textBlock:
-		if len(value.Citations) != 0 {
-			return errors.New("anthropic citations are not supported")
-		}
 	case *toolUseBlock:
 		var input map[string]json.RawMessage
-		if !canonical(value.ID) || !canonical(value.Name) || json.Unmarshal(value.Input, &input) != nil || input == nil {
+		if value.ID == "" || value.Name == "" || json.Unmarshal(value.Input, &input) != nil || input == nil {
 			return errors.New("anthropic invalid tool_use schema")
 		}
 	case *redactedThinkingBlock:
@@ -111,7 +108,7 @@ type inputJSONDelta struct {
 	PartialJSON string `json:"partial_json"`
 }
 
-// 引用属于官方协议，但内部模型没有引用结构，因此显式报不支持，不转换成文本。
+// 文本模式识别引用增量以校验块归属，但不把引用元数据转换成正文。
 type citationsDelta struct {
 	deltaHeader
 	Citation json.RawMessage `json:"citation"`

@@ -3,7 +3,6 @@ package anthropicmessages
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 )
 
 type messageEvent interface{ eventType() string }
@@ -33,8 +32,8 @@ type contentBlockStopEvent struct {
 }
 type messageDeltaEvent struct {
 	messageEventHeader
-	Delta *messageDelta      `json:"delta"`
-	Usage *messageDeltaUsage `json:"usage"`
+	Delta *messageDelta    `json:"delta"`
+	Usage *json.RawMessage `json:"usage"`
 }
 type messageStopEvent struct{ messageEventHeader }
 type pingEvent struct{ messageEventHeader }
@@ -54,42 +53,28 @@ type messageSnapshot struct {
 	Content      []contentBlockUnion `json:"content"`
 	StopReason   *string             `json:"stop_reason"`
 	StopSequence *string             `json:"stop_sequence"`
-	Usage        *messageUsage       `json:"usage"`
+	Usage        *json.RawMessage    `json:"usage"`
 }
 type messageError struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
 }
 
-// tokenCounts 只用于累计计数；两个 Usage DTO 分别验证各自的官方必填字段。
+// tokenCounts 只承载实际消费的累计计数，Decoder 独立处理统计异常。
 type tokenCounts struct {
 	InputTokens              *int64 `json:"input_tokens"`
 	OutputTokens             *int64 `json:"output_tokens"`
 	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
 }
-type messageUsage struct{ tokenCounts }
-type messageDeltaUsage struct{ tokenCounts }
-
-// UnmarshalJSON 首帧必须包含 input_tokens 和 output_tokens。
-func (u *messageUsage) UnmarshalJSON(data []byte) error {
-	type wire messageUsage
-	return decodeObject(data, (*wire)(u), "input_tokens", "output_tokens")
-}
-
-// UnmarshalJSON 后续 Usage 是累计值，input_tokens 等字段可以缺失或为 null。
-func (u *messageDeltaUsage) UnmarshalJSON(data []byte) error {
-	type wire messageDeltaUsage
-	return decodeObject(data, (*wire)(u), "output_tokens")
-}
 
 // UnmarshalJSON 验证完整 Message 身份，message_start 的生命周期由 Decoder 校验。
 func (m *messageSnapshot) UnmarshalJSON(data []byte) error {
 	type wire messageSnapshot
-	if err := decodeObject(data, (*wire)(m), "id", "type", "model", "role", "content", "usage"); err != nil {
+	if err := decodeObject(data, (*wire)(m), "id", "type", "model", "role", "content"); err != nil {
 		return err
 	}
-	if !canonical(m.ID) || !canonical(m.Model) || m.Type != "message" || m.Role != "assistant" {
+	if m.ID == "" || m.Model == "" || m.Type != "message" || m.Role != "assistant" {
 		return errors.New("anthropic invalid message identity")
 	}
 	return nil
@@ -112,7 +97,7 @@ func decodeMessageEvent(data []byte) (messageEvent, error) {
 	if err := decodeObject(data, &header, "type"); err != nil {
 		return nil, err
 	}
-	if !canonical(header.Type) {
+	if header.Type == "" {
 		return nil, errors.New("anthropic invalid event type")
 	}
 	var event messageEvent
@@ -132,7 +117,7 @@ func decodeMessageEvent(data []byte) (messageEvent, error) {
 		required = []string{"index"}
 	case "message_delta":
 		event = &messageDeltaEvent{}
-		required = []string{"delta", "usage"}
+		required = []string{"delta"}
 	case "message_stop":
 		event = &messageStopEvent{}
 	case "ping":
@@ -141,23 +126,7 @@ func decodeMessageEvent(data []byte) (messageEvent, error) {
 		event = &errorEvent{}
 		required = []string{"error"}
 	default:
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(data, &fields); err != nil {
-			return nil, err
-		}
-		for _, name := range []string{
-			"index",
-			"content_block",
-			"delta",
-			"message",
-			"usage",
-			"stop_reason",
-			"error",
-		} {
-			if _, exists := fields[name]; exists {
-				return nil, fmt.Errorf("anthropic unsupported semantic event %q", header.Type)
-			}
-		}
+		// 顶层新增事件按协议扩展忽略，不据字段名称推断其语义或修改现有块。
 		return &header, nil
 	}
 	if err := decodeObject(data, event, required...); err != nil {

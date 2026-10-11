@@ -2,6 +2,7 @@ package openaichat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,9 +37,6 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			return "", errors.New("openai chat unexpected SSE event type")
 		}
 		if data == "[DONE]" {
-			if !usageSeen {
-				return "", errors.New("openai chat missing final usage chunk")
-			}
 			reason := mapStopReason(stopReason)
 			if reason == model.StopUnknown {
 				return "", fmt.Errorf("openai chat invalid finish_reason %q", stopReason)
@@ -79,7 +77,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		}
 		if identity == nil {
 			identity = &chunk
-		} else if identity.ID != chunk.ID || identity.Model != chunk.Model || *identity.Created != *chunk.Created {
+		} else if identity.ID != chunk.ID {
 			return "", errors.New("openai chat conflicting chunk identity")
 		}
 		if usageSeen {
@@ -93,14 +91,8 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		} else if chunk.Usage != nil {
 			return "", errors.New("openai chat usage requires empty choices")
 		}
-		if chunk.Usage != nil {
-			usage := &model.ModelUsage{InputTokens: *chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}
-			if chunk.Usage.PromptTokensDetails != nil {
-				usage.CacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
-			}
-			if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
-				return "", err
-			}
+		if err := emitChatUsage(chunk.Usage, emit); err != nil {
+			return "", err
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -142,6 +134,27 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			stopReason = *choice.FinishReason
 		}
 	}
+}
+
+func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
+	var reported chatCompletionUsage
+	if !streaming.DecodeUsage(raw, &reported, "openai_chat") {
+		return nil
+	}
+	var usage *model.ModelUsage
+	if reported.PromptTokens != nil && reported.CompletionTokens != nil {
+		usage = &model.ModelUsage{
+			InputTokens:  *reported.PromptTokens,
+			OutputTokens: reported.CompletionTokens,
+		}
+		if reported.PromptTokensDetails != nil {
+			usage.CacheReadInputTokens = reported.PromptTokensDetails.CachedTokens
+		}
+	}
+	if !streaming.ValidUsage("openai_chat", usage) {
+		return nil
+	}
+	return emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage})
 }
 
 // mapStopReason 将 finish_reason 映射为统一结束语义；空值或未知值返回 StopUnknown。

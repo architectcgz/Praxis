@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
 	"strings"
 
 	"praxis/internal/contracts"
@@ -95,7 +94,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			}
 			state.InProgress = true
 		case *responseOutputItemAddedEvent:
-			_, err = state.addItem(*e.OutputIndex, e.Item, true)
+			_, err = state.addItem(*e.OutputIndex, e.Item)
 		case *responseOutputItemDoneEvent:
 			item := state.Items[*e.OutputIndex]
 			if item == nil || item.Completed {
@@ -156,20 +155,16 @@ func stringValue(value *string) string {
 	return *value
 }
 func (s *responseDecoderState) checkIdentity(response *responseSnapshot) error {
-	if response.ID != s.Identity.ID || response.Model != s.Identity.Model || response.CreatedAt != s.Identity.CreatedAt {
+	if response.ID != s.Identity.ID {
 		return errors.New("responses conflicting response identity")
 	}
 	return nil
 }
-func (s *responseDecoderState) addItem(index int, output responseOutput, requireID bool) (*responseItemState, error) {
-	if index != len(s.Items) || s.Items[index] != nil {
-		return nil, errors.New("responses duplicate or non-contiguous output index")
+func (s *responseDecoderState) addItem(index int, output responseOutput) (*responseItemState, error) {
+	if index < 0 || s.Items[index] != nil {
+		return nil, errors.New("responses duplicate or invalid output index")
 	}
 	id, _ := output.Value.outputIdentity()
-	// function_call.id 在 Schema 中可选，但流式注册必须具备可用于 item_id 校验的身份。
-	if requireID && !canonical(id) {
-		return nil, errors.New("responses streamed item requires canonical ID")
-	}
 	if id != "" {
 		if _, exists := s.IDs[id]; exists {
 			return nil, errors.New("responses duplicate item ID")
@@ -192,7 +187,8 @@ func (s *responseDecoderState) eventItem(ref responseItemReference) (*responseIt
 		return nil, 0, errors.New("responses event references missing or completed item")
 	}
 	id, _ := item.Item.outputIdentity()
-	if ref.ItemID != id {
+	// function_call.id 可选；未知时只通过已注册的 output_index 关联分片。
+	if id != "" && ref.ItemID != id {
 		return nil, 0, errors.New("responses conflicting item_id")
 	}
 	return item, index, nil
@@ -305,8 +301,14 @@ func (s *responseDecoderState) finishItem(index int, output responseOutput, emit
 	state := s.Items[index]
 	beforeID, beforeType := state.Item.outputIdentity()
 	id, itemType := output.Value.outputIdentity()
-	if id != beforeID || itemType != beforeType {
+	if itemType != beforeType || beforeID != "" && id != "" && id != beforeID {
 		return errors.New("responses conflicting item snapshot identity")
+	}
+	if id != "" {
+		if previous, exists := s.IDs[id]; exists && previous != index {
+			return errors.New("responses duplicate item ID")
+		}
+		s.IDs[id] = index
 	}
 	parts := map[responsePartKey]string{}
 	var orderedKeys []responsePartKey
@@ -371,6 +373,35 @@ func (s *responseDecoderState) finishItem(index int, output responseOutput, emit
 	return nil
 }
 
+// validateFinalItem 只比较已消费内容；推理续传始终保留 output_item.done 的原始载荷。
+func validateFinalItem(current, final responseOutputValue) error {
+	currentID, currentType := current.outputIdentity()
+	finalID, finalType := final.outputIdentity()
+	if currentType != finalType || currentID != "" && finalID != "" && currentID != finalID {
+		return errors.New("responses terminal snapshot conflicts with item identity")
+	}
+	switch item := current.(type) {
+	case *responseMessageOutput:
+		snapshot := final.(*responseMessageOutput)
+		if len(item.Content) != len(snapshot.Content) {
+			return errors.New("responses terminal snapshot conflicts with message content")
+		}
+		for index, part := range item.Content {
+			kind, text := part.Value.partText()
+			finalKind, finalText := snapshot.Content[index].Value.partText()
+			if kind != finalKind || text != finalText {
+				return errors.New("responses terminal snapshot conflicts with message content")
+			}
+		}
+	case *responseFunctionCallOutput:
+		snapshot := final.(*responseFunctionCallOutput)
+		if item.CallID != snapshot.CallID || item.Name != snapshot.Name || item.Arguments != snapshot.Arguments {
+			return errors.New("responses terminal snapshot conflicts with function call")
+		}
+	}
+	return nil
+}
+
 func (s *responseDecoderState) terminal(response *responseSnapshot, status string, emit streaming.EmitFunc) (model.ModelStopReason, error) {
 	if err := s.checkIdentity(response); err != nil {
 		return "", err
@@ -378,32 +409,30 @@ func (s *responseDecoderState) terminal(response *responseSnapshot, status strin
 	if response.Status == nil || *response.Status != status {
 		return "", errors.New("responses inconsistent terminal status")
 	}
-	if len(s.Items) > len(response.Output) {
-		return "", errors.New("responses terminal snapshot is missing an output item")
+	for index := range s.Items {
+		if index >= len(response.Output) {
+			return "", errors.New("responses terminal snapshot is missing an output item")
+		}
 	}
 	for index, output := range response.Output {
 		item := s.Items[index]
 		if item == nil {
 			var err error
-			item, err = s.addItem(index, output, false)
+			item, err = s.addItem(index, output)
 			if err != nil {
 				return "", err
 			}
 		}
 		if item.Completed {
-			// 附加字段不参与语义判断；已消费的官方字段必须与 done 完全一致。
-			if !reflect.DeepEqual(item.Item, output.Value) {
-				return "", errors.New("responses terminal snapshot conflicts with completed item")
+			if err := validateFinalItem(item.Item, output.Value); err != nil {
+				return "", err
 			}
 		} else if err := s.finishItem(index, output, emit); err != nil {
 			return "", err
 		}
 	}
-	if u := response.Usage; u != nil {
-		usage := &model.ModelUsage{InputTokens: *u.InputTokens, OutputTokens: u.OutputTokens, CacheReadInputTokens: u.InputTokensDetails.CachedTokens}
-		if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
-			return "", err
-		}
+	if err := emitResponseUsage(response.Usage, emit); err != nil {
+		return "", err
 	}
 	if status == "failed" {
 		if response.Error != nil {
@@ -457,6 +486,9 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if item.Status != nil && *item.Status != "completed" {
 				return "", errors.New("responses completed with incomplete reasoning")
 			}
+			if stringValue(item.EncryptedContent) == "" {
+				continue
+			}
 			if err := (&contracts.ReasoningState{Protocol: contracts.ProtocolOpenAIResponses, Version: contracts.ReasoningStateVersion, Payload: s.Items[index].Raw}).Validate(); err != nil {
 				return "", err
 			}
@@ -465,17 +497,14 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 	if s.Refused {
 		return model.StopRefused, nil
 	}
-	if toolCount > 0 {
-		for _, state := range s.Items {
-			if item, ok := state.Item.(*responseReasoningOutput); ok && stringValue(item.EncryptedContent) == "" {
-				return "", errors.New("responses tool continuation requires encrypted reasoning state")
-			}
-		}
-	}
 	// 全部校验成功后，按 output 顺序发送状态与完整工具，签名不进入展示文本。
 	for index := range response.Output {
 		switch item := s.Items[index].Item.(type) {
 		case *responseReasoningOutput:
+			// 摘要可正常展示；只有加密载荷才能作为无状态续传的 ReasoningState。
+			if stringValue(item.EncryptedContent) == "" {
+				continue
+			}
 			if err := emit(model.ModelStreamEvent{
 				Kind: model.StreamReasoningState,
 				ReasoningState: &contracts.ReasoningState{
@@ -494,6 +523,27 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 		}
 	}
 	return mapStopReason("completed", "", toolCount > 0, false), nil
+}
+
+func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
+	var reported responseUsage
+	if !streaming.DecodeUsage(raw, &reported, contracts.ProtocolOpenAIResponses) {
+		return nil
+	}
+	var usage *model.ModelUsage
+	if reported.InputTokens != nil && reported.OutputTokens != nil {
+		usage = &model.ModelUsage{
+			InputTokens:  *reported.InputTokens,
+			OutputTokens: reported.OutputTokens,
+		}
+		if reported.InputTokensDetails != nil {
+			usage.CacheReadInputTokens = reported.InputTokensDetails.CachedTokens
+		}
+	}
+	if !streaming.ValidUsage(contracts.ProtocolOpenAIResponses, usage) {
+		return nil
+	}
+	return emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage})
 }
 
 // mapStopReason 只将官方终态和明确的截断原因映射为内部结束语义。

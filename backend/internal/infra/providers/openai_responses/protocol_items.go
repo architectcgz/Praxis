@@ -62,7 +62,7 @@ func (i *responseOutput) UnmarshalJSON(data []byte) error {
 		if err := decodeObject(data, &item, "id", "role", "status", "content"); err != nil {
 			return err
 		}
-		if !canonical(item.ID) || item.Role != "assistant" {
+		if item.ID == "" || item.Role != "assistant" {
 			return errors.New("responses invalid output message identity")
 		}
 		for _, part := range item.Content {
@@ -77,7 +77,7 @@ func (i *responseOutput) UnmarshalJSON(data []byte) error {
 		if err := decodeObject(data, &item, "id", "summary"); err != nil {
 			return err
 		}
-		if !canonical(item.ID) {
+		if item.ID == "" {
 			return errors.New("responses invalid reasoning ID")
 		}
 		status, i.Value = item.Status, &item
@@ -86,7 +86,7 @@ func (i *responseOutput) UnmarshalJSON(data []byte) error {
 		if err := decodeObject(data, &item, "call_id", "name", "arguments"); err != nil {
 			return err
 		}
-		if !canonical(item.CallID) || !canonical(item.Name) || item.ID != nil && !canonical(*item.ID) {
+		if item.CallID == "" || item.Name == "" || item.ID != nil && *item.ID == "" {
 			return errors.New("responses invalid function identity")
 		}
 		status, i.Value = item.Status, &item
@@ -103,21 +103,9 @@ func (i *responseOutput) UnmarshalJSON(data []byte) error {
 type responsePartValue interface{ partText() (string, string) }
 type responsePart struct{ Value responsePartValue }
 type responseOutputText struct {
-	Type        string                `json:"type"`
-	Text        string                `json:"text"`
-	Annotations []json.RawMessage     `json:"annotations"`
-	Logprobs    []responseTextLogprob `json:"logprobs"`
-}
-type responseTextLogprob struct {
-	Token       string                   `json:"token"`
-	Bytes       []int                    `json:"bytes"`
-	Logprob     float64                  `json:"logprob"`
-	TopLogprobs []responseTextTopLogprob `json:"top_logprobs"`
-}
-type responseTextTopLogprob struct {
-	Token   string  `json:"token"`
-	Bytes   []int   `json:"bytes"`
-	Logprob float64 `json:"logprob"`
+	Type        string            `json:"type"`
+	Text        string            `json:"text"`
+	Annotations []json.RawMessage `json:"annotations"`
 }
 type responseRefusal struct {
 	Type    string `json:"type"`
@@ -137,30 +125,6 @@ func (p *responseRefusal) partText() (string, string)       { return p.Type, p.R
 func (p *responseSummaryText) partText() (string, string)   { return p.Type, p.Text }
 func (p *responseReasoningText) partText() (string, string) { return p.Type, p.Text }
 
-// UnmarshalJSON 引用没有内部表示，显式报不支持而不是丢弃引用语义。
-func (p *responseOutputText) UnmarshalJSON(data []byte) error {
-	type wire responseOutputText
-	if err := decodeObject(data, (*wire)(p), "type", "text", "annotations"); err != nil {
-		return err
-	}
-	if len(p.Annotations) != 0 {
-		return errors.New("responses output annotations are not supported")
-	}
-	return nil
-}
-
-// UnmarshalJSON 验证正文日志概率的完整字段，空候选数组是合法值。
-func (p *responseTextLogprob) UnmarshalJSON(data []byte) error {
-	type wire responseTextLogprob
-	return decodeObject(data, (*wire)(p), "token", "bytes", "logprob", "top_logprobs")
-}
-
-// UnmarshalJSON 验证正文候选 token，缺失概率不默认为零。
-func (p *responseTextTopLogprob) UnmarshalJSON(data []byte) error {
-	type wire responseTextTopLogprob
-	return decodeObject(data, (*wire)(p), "token", "bytes", "logprob")
-}
-
 // UnmarshalJSON 不把拒绝、摘要和原始推理文本混入同一个字段集合。
 func (p *responsePart) UnmarshalJSON(data []byte) error {
 	var header struct {
@@ -173,6 +137,7 @@ func (p *responsePart) UnmarshalJSON(data []byte) error {
 	required := []string{"type", "text"}
 	switch header.Type {
 	case "output_text":
+		// 文本模式只消费正文；引用不生成独立事件，日志概率不参与解码。
 		target = &responseOutputText{}
 		required = append(required, "annotations")
 	case "refusal":

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // 请求 DTO 与输出 DTO 分离，历史文本使用官方 EasyInputMessage。
@@ -64,7 +63,7 @@ type responseSnapshot struct {
 	Output            []responseOutput           `json:"output"`
 	IncompleteDetails *responseIncompleteDetails `json:"incomplete_details"`
 	Error             *responseError             `json:"error"`
-	Usage             *responseUsage             `json:"usage"`
+	Usage             *json.RawMessage           `json:"usage"`
 }
 type responseIncompleteDetails struct {
 	Reason *string `json:"reason"`
@@ -74,54 +73,22 @@ type responseError struct {
 	Message string `json:"message"`
 }
 type responseUsage struct {
-	InputTokens         *int64                       `json:"input_tokens"`
-	OutputTokens        *int64                       `json:"output_tokens"`
-	TotalTokens         *int64                       `json:"total_tokens"`
-	InputTokensDetails  *responseInputTokensDetails  `json:"input_tokens_details"`
-	OutputTokensDetails *responseOutputTokensDetails `json:"output_tokens_details"`
+	InputTokens        *int64                      `json:"input_tokens"`
+	OutputTokens       *int64                      `json:"output_tokens"`
+	InputTokensDetails *responseInputTokensDetails `json:"input_tokens_details"`
 }
 type responseInputTokensDetails struct {
 	CachedTokens *int64 `json:"cached_tokens"`
 }
-type responseOutputTokensDetails struct {
-	ReasoningTokens *int64 `json:"reasoning_tokens"`
-}
 
-// UnmarshalJSON 校验快照身份、核心必填字段和完整 Usage，不静默补默认值。
+// UnmarshalJSON 校验快照身份和终态；可选用量由 Decoder 独立处理。
 func (r *responseSnapshot) UnmarshalJSON(data []byte) error {
 	type wire responseSnapshot
-	if err := decodeObject(data, (*wire)(r), "id", "object", "created_at", "model", "output", "parallel_tool_calls", "tool_choice", "tools"); err != nil {
+	if err := decodeObject(data, (*wire)(r), "id", "object", "created_at", "model", "status", "output"); err != nil {
 		return err
 	}
-	if !canonical(r.ID) || !canonical(r.Model) || r.Object != "response" || r.CreatedAt < 0 {
+	if r.ID == "" || r.Model == "" || r.Object != "response" {
 		return errors.New("responses invalid snapshot identity")
-	}
-	var choice string
-	if json.Unmarshal(r.ToolChoice, &choice) == nil {
-		if choice != "auto" && choice != "none" && choice != "required" {
-			return errors.New("responses invalid tool_choice")
-		}
-	} else {
-		var header struct {
-			Type string `json:"type"`
-		}
-		if err := decodeObject(r.ToolChoice, &header, "type"); err != nil {
-			return err
-		}
-		if !canonical(header.Type) {
-			return errors.New("responses invalid tool_choice type")
-		}
-	}
-	for _, raw := range r.Tools {
-		var header struct {
-			Type string `json:"type"`
-		}
-		if err := decodeObject(raw, &header, "type"); err != nil {
-			return err
-		}
-		if !canonical(header.Type) {
-			return errors.New("responses invalid tool type")
-		}
 	}
 	if r.Status != nil {
 		switch *r.Status {
@@ -133,18 +100,8 @@ func (r *responseSnapshot) UnmarshalJSON(data []byte) error {
 	if r.Error != nil && (r.Error.Code == "" || r.Error.Message == "") {
 		return errors.New("responses invalid error details")
 	}
-	if u := r.Usage; u != nil {
-		if u.InputTokens == nil || u.OutputTokens == nil || u.TotalTokens == nil || u.InputTokensDetails == nil || u.InputTokensDetails.CachedTokens == nil || u.OutputTokensDetails == nil || u.OutputTokensDetails.ReasoningTokens == nil {
-			return errors.New("responses incomplete usage schema")
-		}
-		if *u.InputTokens < 0 || *u.OutputTokens < 0 || *u.TotalTokens < *u.InputTokens || *u.TotalTokens-*u.InputTokens != *u.OutputTokens || *u.InputTokensDetails.CachedTokens < 0 || *u.InputTokensDetails.CachedTokens > *u.InputTokens || *u.OutputTokensDetails.ReasoningTokens < 0 || *u.OutputTokensDetails.ReasoningTokens > *u.OutputTokens {
-			return errors.New("responses invalid usage")
-		}
-	}
 	return nil
 }
-
-func canonical(value string) bool { return value != "" && value == strings.TrimSpace(value) }
 
 // decodeObject 只验证明确的必填字段，允许官方增加附加字段；null 不代替必填零值。
 func decodeObject(data []byte, target any, required ...string) error {

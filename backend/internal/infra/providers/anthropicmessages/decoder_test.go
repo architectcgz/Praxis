@@ -92,6 +92,9 @@ func TestMessageTypedSchemas(t *testing.T) {
 				t.Fatalf("具体 Schema 错误：%T %v", event, err)
 			}
 			for name, value := range fields {
+				if name == "usage" {
+					continue
+				}
 				delete(fields, name)
 				data, _ = json.Marshal(fields)
 				if _, err := decodeMessageEvent(data); err == nil {
@@ -257,15 +260,19 @@ func TestMessageInvalidStreams(t *testing.T) {
 			f[0]["message"].(map[string]any)["type"] = "other"
 			return f
 		}},
-		{"不完整Usage", func(f []map[string]any) []map[string]any {
-			delete(f[0]["message"].(map[string]any)["usage"].(map[string]any), "output_tokens")
-			return f
-		}},
 		{"负索引", func(f []map[string]any) []map[string]any { f[2]["index"] = -1; return f }},
 		{"缺失索引", func(f []map[string]any) []map[string]any { delete(f[3], "index"); return f }},
 		{"重复块开始", func(f []map[string]any) []map[string]any { f[3] = f[2]; return f }},
 		{"错误Delta目标", func(f []map[string]any) []map[string]any {
 			f[3]["delta"] = map[string]any{"type": "thinking_delta", "thinking": "思考"}
+			return f
+		}},
+		{"工具 Delta 目标错误", func(f []map[string]any) []map[string]any {
+			f[3]["delta"] = map[string]any{"type": "input_json_delta", "partial_json": "{}"}
+			return f
+		}},
+		{"签名 Delta 目标错误", func(f []map[string]any) []map[string]any {
+			f[3]["delta"] = map[string]any{"type": "signature_delta", "signature": "sig_secret"}
 			return f
 		}},
 		{"缺失Delta字段", func(f []map[string]any) []map[string]any {
@@ -280,10 +287,6 @@ func TestMessageInvalidStreams(t *testing.T) {
 			f[3]["delta"] = map[string]any{"type": "future_delta", "text": "隐藏"}
 			return f
 		}},
-		{"不支持引用", func(f []map[string]any) []map[string]any {
-			f[3]["delta"] = map[string]any{"type": "citations_delta", "citation": map[string]any{"type": "char_location"}}
-			return f
-		}},
 		{"不支持块", func(f []map[string]any) []map[string]any {
 			f[2]["content_block"] = map[string]any{"type": "server_tool_use"}
 			return f
@@ -294,15 +297,6 @@ func TestMessageInvalidStreams(t *testing.T) {
 		{"重复终态", func(f []map[string]any) []map[string]any {
 			return append(f[:6], messageFixtureTerminal("end_turn"), f[6])
 		}},
-		{"Usage递减", func(f []map[string]any) []map[string]any {
-			f[5]["usage"] = map[string]any{"input_tokens": 9, "output_tokens": 5}
-			return f
-		}},
-		{"负Usage", func(f []map[string]any) []map[string]any {
-			f[5]["usage"] = map[string]any{"output_tokens": -1}
-			return f
-		}},
-		{"关键未知事件", func(f []map[string]any) []map[string]any { f[3]["type"] = "future_content"; return f }},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -344,6 +338,152 @@ func TestMessageStopReasonsAndUnknownEvents(t *testing.T) {
 	}
 }
 
+func TestMessageOptionalUsageAndCitations(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		change      func([]map[string]any)
+		usageEvents int
+	}{
+		{"首帧无 Usage", func(f []map[string]any) { delete(f[0]["message"].(map[string]any), "usage") }, 0},
+		{"终态无 Usage", func(f []map[string]any) { delete(f[5], "usage") }, 1},
+		{"两帧 Usage 均缺失", func(f []map[string]any) {
+			delete(f[0]["message"].(map[string]any), "usage")
+			delete(f[5], "usage")
+		}, 0},
+		{"可空 Usage", func(f []map[string]any) {
+			f[0]["message"].(map[string]any)["usage"], f[5]["usage"] = nil, nil
+		}, 0},
+		{"首帧 Usage 不完整", func(f []map[string]any) {
+			delete(f[0]["message"].(map[string]any)["usage"].(map[string]any), "output_tokens")
+		}, 0},
+		{"终态 Usage 无效", func(f []map[string]any) {
+			f[5]["usage"] = map[string]any{"output_tokens": -1}
+		}, 1},
+		{"后续提供完整计数", func(f []map[string]any) {
+			delete(f[0]["message"].(map[string]any), "usage")
+			f[5]["usage"].(map[string]any)["input_tokens"] = 10
+		}, 1},
+		{"文本引用与模型空格", func(f []map[string]any) {
+			f[0]["message"].(map[string]any)["model"] = " claude-sonnet-4-5 "
+			f[2]["content_block"].(map[string]any)["citations"] = []any{map[string]any{"type": "char_location", "cited_text": "引用"}}
+		}, 2},
+		{"Usage 允许累计计数修正", func(f []map[string]any) {
+			f[0]["message"].(map[string]any)["usage"].(map[string]any)["output_tokens"] = 6
+			f[5]["usage"] = map[string]any{"input_tokens": 9, "output_tokens": 5}
+		}, 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			frames := messageFixtureTextStream()
+			test.change(frames)
+			events, reason, err := decodeMessageFixture(t, frames)
+			if err != nil || reason != model.StopCompleted {
+				t.Fatalf("可选元数据影响了文本解码：%s %v", reason, err)
+			}
+			var text strings.Builder
+			usageCount := 0
+			for _, event := range events {
+				if event.Kind == model.StreamTextDelta {
+					text.WriteString(event.Text)
+				}
+				if event.Kind == model.StreamUsage {
+					usageCount++
+					if !event.Usage.Valid() {
+						t.Fatal("输出了无效用量")
+					}
+				}
+			}
+			if text.String() != "你好" || usageCount != test.usageEvents {
+				t.Fatalf("文本或用量错误：%s %d", text.String(), usageCount)
+			}
+		})
+	}
+}
+
+func TestMessageMetadataEventsAndUsageRecovery(t *testing.T) {
+	frames := messageFixtureTextStream()
+	// 引用及新增顶层事件可包含关联字段，但不能改变正文或生命周期。
+	extra := []map[string]any{
+		messageFixtureEvent("content_block_delta", map[string]any{
+			"index": 0, "delta": map[string]any{"type": "citations_delta", "citation": map[string]any{"type": "char_location"}},
+		}),
+		messageFixtureEvent("future_event", map[string]any{"index": 0, "delta": "不应输出", "message": map[string]any{}}),
+	}
+	frames = append(append(frames[:4:4], extra...), frames[4:]...)
+	// 无效的累计更新不能污染下一次有效 Usage，且不能修改已输出的计数。
+	frames[7]["usage"] = map[string]any{"input_tokens": -1, "output_tokens": 99}
+	frames = append(frames[:8:8], messageFixtureEvent("message_delta", map[string]any{
+		"delta": map[string]any{}, "usage": map[string]any{"output_tokens": 5},
+	}), frames[8])
+	events, reason, err := decodeMessageFixture(t, frames)
+	if err != nil || reason != model.StopCompleted || len(events) != 3 || events[1].Text != "你好" || events[0].Usage.InputTokens != 15 || *events[0].Usage.OutputTokens != 0 || events[2].Usage.InputTokens != 15 || *events[2].Usage.OutputTokens != 5 {
+		t.Fatalf("元数据或无效统计影响了有效响应：%v %s %v", events, reason, err)
+	}
+	frames = messageFixtureReasoningTools()
+	frames[2]["delta"] = map[string]any{"type": "citations_delta", "citation": map[string]any{"type": "char_location"}}
+	if _, _, err := decodeMessageFixture(t, frames); err == nil {
+		t.Fatal("引用增量不能关联 Thinking 块")
+	}
+	frames = messageFixtureTextStream()
+	frames = append(frames[:5:5], extra[0], frames[5], frames[6])
+	if _, _, err := decodeMessageFixture(t, frames); err == nil {
+		t.Fatal("引用增量不能更新已关闭的块")
+	}
+}
+
+func TestMessageOfficialThinkingRawSSE(t *testing.T) {
+	// 官方 Thinking 示例的 message_start 与 message_delta 均不带 Usage。
+	// 来源：https://platform.claude.com/docs/en/build-with-claude/streaming#streaming-request-with-thinking
+	const sse = `event: message_start
+data: {"type": "message_start", "message": {"id": "msg_01...", "type": "message", "role": "assistant", "content": [], "model": "claude-opus-5-5", "stop_reason": null, "stop_sequence": null}}
+
+event: content_block_start
+data: {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "I need to find the GCD of 1071 and 462 using the Euclidean algorithm.\n\n1071 = 2 × 462 + 147"}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "\n462 = 3 × 147 + 21"}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "\n147 = 7 × 21 + 0"}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "\nThe remainder is 0, so GCD(1071, 462) = 21."}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "EqQBCgIYAhIM1gbcDa9GJwZA2b3hGgxBdjrkzLoky3dl1pkiMOYds..."}}
+
+event: content_block_stop
+data: {"type": "content_block_stop", "index": 0}
+
+event: content_block_start
+data: {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "The greatest common divisor of 1071 and 462 is **21**."}}
+
+event: content_block_stop
+data: {"type": "content_block_stop", "index": 1}
+
+event: message_delta
+data: {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": null}}
+
+event: message_stop
+data: {"type": "message_stop"}
+
+`
+	var events []model.ModelStreamEvent
+	reason, err := (decoder{}).Decode(t.Context(), streaming.NewSSEReader(strings.NewReader(sse)), func(event model.ModelStreamEvent) error { events = append(events, event); return nil })
+	if err != nil || reason != model.StopCompleted || len(events) != 6 {
+		t.Fatalf("官方无 Usage Thinking 流解码失败：%v %s %v", events, reason, err)
+	}
+	state := events[len(events)-1].ReasoningState
+	if state == nil || !strings.Contains(string(state.Payload), "EqQBCgIYAhIM") || !strings.Contains(string(state.Payload), "GCD(1071, 462) = 21.") || events[len(events)-2].Text != "The greatest common divisor of 1071 and 462 is **21**." {
+		t.Fatal("正文或 Thinking 签名丢失")
+	}
+}
+
 func TestMessageBlockSchemaBoundaries(t *testing.T) {
 	for _, raw := range []string{
 		`{"type":"text"}`,
@@ -382,5 +522,60 @@ func TestMessageBlockSchemaBoundaries(t *testing.T) {
 		if event.Kind == model.StreamToolCall {
 			t.Fatal("重复工具 ID 仍释放了工具")
 		}
+	}
+}
+
+func TestMessageThinkingContinuationModes(t *testing.T) {
+	for _, test := range []struct {
+		name, mode, payload string
+		wantError           bool
+	}{
+		{"默认模式无 Thinking", "", "", false},
+		{"Adaptive 无 Thinking", "adaptive", "", false},
+		{"Enabled 缺失 Thinking", "enabled", "", true},
+		{"Enabled 签名原样续传", "enabled", `{"type":"thinking","thinking":"思考","signature":"sig_secret","future":true}`, false},
+		{"Enabled 加密 Thinking", "enabled", `{"type":"redacted_thinking","data":"opaque_secret"}`, false},
+		{"Adaptive 缺失签名", "adaptive", `{"type":"thinking","thinking":"思考","signature":""}`, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var content []appcontext.ContextBlock
+			if test.payload != "" {
+				content = append(content, appcontext.ContextBlock{
+					Kind: appcontext.ContextBlockReasoningState,
+					ReasoningState: &contracts.ReasoningState{
+						Protocol: contracts.ProtocolAnthropicMessages,
+						Version:  contracts.ReasoningStateVersion,
+						Payload:  json.RawMessage(test.payload),
+					},
+				})
+			}
+			content = append(content, appcontext.ContextBlock{
+				Kind:   appcontext.ContextBlockToolCall,
+				CallID: "call_1",
+				Name:   "lookup",
+				Input:  json.RawMessage(`{}`),
+			})
+			request := model.ModelRequest{
+				Model: model.ModelSnapshot{
+					ModelID:  "test-model",
+					Thinking: contracts.ModelThinking{Mode: test.mode},
+				},
+				MaxOutputTokens: 2048,
+				Context: appcontext.ModelContext{Entries: []appcontext.ContextEntry{{
+					Kind: appcontext.ContextEntryProviderOutput, Role: appcontext.ContextRoleAssistant, Content: content,
+				}}},
+			}
+			if test.mode == "enabled" {
+				request.Model.Thinking.BudgetTokens = 1024
+			}
+			request.Context = request.Context.AppendToolResult(appcontext.NewToolResultBlock("call_1", "lookup", "结果", false))
+			payload, err := buildPayload(request)
+			if (err != nil) != test.wantError {
+				t.Fatalf("Thinking 模式约束错误：%v", err)
+			}
+			if !test.wantError && test.payload != "" && !strings.Contains(string(payload), test.payload) {
+				t.Fatal("签名载荷未原样重放")
+			}
+		})
 	}
 }

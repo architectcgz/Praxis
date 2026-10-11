@@ -1,7 +1,9 @@
 package loop
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,20 +11,27 @@ import (
 	"strings"
 	"testing"
 
+	agentruntime "praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
+	taskmodel "praxis/internal/core/task"
+	turnmodel "praxis/internal/core/turn"
 	"praxis/internal/infra/providers/anthropicmessages"
 	openaichat "praxis/internal/infra/providers/openai_chat"
 	openairesponses "praxis/internal/infra/providers/openai_responses"
+	toolcontracts "praxis/internal/tools/contracts"
 )
 
 type protocolScenario struct {
-	name        string
-	tools       int
-	thinking    bool
-	terminal    string
-	invalidTool bool
+	name         string
+	tools        int
+	thinking     bool
+	terminal     string
+	invalidTool  bool
+	usageMode    string
+	summaryOnly  bool
+	thinkingMode string
 }
 
 // 离线联调真实 Provider 的 HTTP 编码、SSE 解码、Loop 收集与下一轮上下文续传。
@@ -37,8 +46,26 @@ func TestProviderProtocolsDriveLoop(t *testing.T) {
 			{name: "拒绝", terminal: "refused"},
 			{name: "无效并行工具", tools: 2, invalidTool: true},
 			{name: "Thinking续传", tools: 1, thinking: true},
+			{name: "无Usage工具流", tools: 1, usageMode: "missing"},
+			{name: "无效Usage工具流", tools: 1, usageMode: "invalid"},
+			{name: "仅推理摘要", thinking: true, summaryOnly: true},
+			{
+				name:        "推理摘要与工具",
+				tools:       1,
+				thinking:    true,
+				summaryOnly: true,
+			},
+			{name: "自定义停止序列", terminal: "sequence"},
+			{name: "停止序列保留Thinking", thinking: true, terminal: "sequence"},
+			{name: "Adaptive无Thinking工具续传", tools: 1, thinkingMode: "adaptive"},
+			{
+				name:         "Enabled工具续传",
+				tools:        1,
+				thinking:     true,
+				thinkingMode: "enabled",
+			},
 		} {
-			if protocol == "openai_chat" && scenario.thinking {
+			if protocol == "openai_chat" && scenario.thinking || scenario.summaryOnly && protocol != contracts.ProtocolOpenAIResponses || (scenario.terminal == "sequence" || scenario.thinkingMode != "") && protocol != contracts.ProtocolAnthropicMessages {
 				continue
 			}
 			t.Run(protocol+"/"+scenario.name, func(t *testing.T) {
@@ -79,17 +106,27 @@ func TestProviderProtocolsDriveLoop(t *testing.T) {
 						Content: []appcontext.ContextBlock{{Kind: appcontext.ContextBlockText, Text: "你好"}},
 					}}},
 				}
-				observedTools := 0
+				if scenario.thinkingMode != "" {
+					request.Model.Thinking.Mode = scenario.thinkingMode
+					if scenario.thinkingMode == "enabled" {
+						request.Model.Thinking.BudgetTokens = 1024
+						request.MaxOutputTokens = 2048
+					}
+				}
+				observedTools, observedUsage := 0, 0
 				response, err := requestModel(t.Context(), provider, request, func(event model.ModelStreamEvent) {
 					if event.Kind == model.StreamToolCall {
 						observedTools++
+					}
+					if event.Kind == model.StreamUsage {
+						observedUsage++
 					}
 					if event.ReasoningState != nil || strings.Contains(event.Text, "secret") {
 						t.Error("观察者收到了协议秘密")
 					}
 				})
 				<-bodies
-				if scenario.terminal != "" || scenario.invalidTool {
+				if scenario.terminal != "" && scenario.terminal != "sequence" || scenario.invalidTool {
 					if err == nil || observedTools != 0 || len(response.toolCalls()) != 0 {
 						t.Fatalf("非法终态释放了工具：%v %d", err, observedTools)
 					}
@@ -98,7 +135,13 @@ func TestProviderProtocolsDriveLoop(t *testing.T) {
 				if err != nil || len(response.toolCalls()) != scenario.tools || observedTools != scenario.tools {
 					t.Fatalf("Loop 语义错误：%v %d", err, observedTools)
 				}
+				if scenario.usageMode != "" && observedUsage != 0 {
+					t.Fatal("缺失或无效 Usage 不应进入统计")
+				}
 				expected := model.StopCompleted
+				if scenario.terminal == "sequence" {
+					expected = model.StopSequence
+				}
 				if scenario.tools > 0 {
 					expected = model.StopToolCalls
 				}
@@ -114,7 +157,13 @@ func TestProviderProtocolsDriveLoop(t *testing.T) {
 					t.Fatalf("下一轮请求失败：%v", err)
 				}
 				body := <-bodies
-				if scenario.thinking {
+				if scenario.summaryOnly {
+					for _, block := range request.Context.Entries[1].Content {
+						if block.Kind == appcontext.ContextBlockReasoningState {
+							t.Fatal("仅展示的推理被保存为可重放状态")
+						}
+					}
+				} else if scenario.thinking {
 					stateCount := 0
 					for _, block := range request.Context.Entries[1].Content {
 						if block.Kind != appcontext.ContextBlockReasoningState {
@@ -198,7 +247,11 @@ func loopProtocolFixture(t *testing.T, protocol string, scenario protocolScenari
 		}
 		appendFrame("", chunk([]any{map[string]any{"index": 0, "delta": delta, "finish_reason": nil}}, nil))
 		appendFrame("", chunk([]any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}}, nil))
-		appendFrame("", chunk([]any{}, map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}))
+		if scenario.usageMode == "invalid" {
+			appendFrame("", chunk([]any{}, map[string]any{"prompt_tokens": 1}))
+		} else if scenario.usageMode != "missing" {
+			appendFrame("", chunk([]any{}, map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}))
+		}
 		sse.WriteString("data: [DONE]\n\n")
 	case contracts.ProtocolOpenAIResponses:
 		snapshot := func(status string, output []any) map[string]any {
@@ -217,6 +270,10 @@ func loopProtocolFixture(t *testing.T, protocol string, scenario protocolScenari
 		appendFrame("response.created", map[string]any{"response": snapshot("in_progress", []any{})})
 		outputs := []any{}
 		appendItem := func(initial, final map[string]any) {
+			if scenario.summaryOnly && final["type"] == "reasoning" {
+				delete(initial, "encrypted_content")
+				delete(final, "encrypted_content")
+			}
 			index := len(outputs)
 			appendFrame("response.output_item.added", map[string]any{"output_index": index, "item": initial})
 			appendFrame("response.output_item.done", map[string]any{"output_index": index, "item": final})
@@ -266,6 +323,9 @@ func loopProtocolFixture(t *testing.T, protocol string, scenario protocolScenari
 			appendItem(call(""), call(arguments(index)))
 		}
 		terminal := snapshot(status, outputs)
+		if scenario.usageMode == "invalid" {
+			terminal["usage"] = map[string]any{"input_tokens": 1}
+		}
 		if status == "incomplete" {
 			terminal["incomplete_details"] = map[string]any{"reason": "max_output_tokens"}
 		}
@@ -279,7 +339,12 @@ func loopProtocolFixture(t *testing.T, protocol string, scenario protocolScenari
 			"content":       []any{},
 			"stop_reason":   nil,
 			"stop_sequence": nil,
-			"usage":         map[string]any{"input_tokens": 1, "output_tokens": 0},
+			"usage": func() any {
+				if scenario.usageMode != "" {
+					return nil
+				}
+				return map[string]any{"input_tokens": 1, "output_tokens": 0}
+			}(),
 		}})
 		blockIndex := 0
 		if scenario.thinking {
@@ -313,8 +378,112 @@ func loopProtocolFixture(t *testing.T, protocol string, scenario protocolScenari
 		if scenario.terminal == "refused" {
 			stop = "refusal"
 		}
-		appendFrame("message_delta", map[string]any{"delta": map[string]any{"stop_reason": stop, "stop_sequence": nil}, "usage": map[string]any{"output_tokens": 1}})
+		var stopSequence any
+		if scenario.terminal == "sequence" {
+			stop, stopSequence = "stop_sequence", "END"
+		}
+		var usage any = map[string]any{"output_tokens": 1}
+		if scenario.usageMode == "missing" {
+			usage = nil
+		} else if scenario.usageMode == "invalid" {
+			usage = map[string]any{}
+		}
+		appendFrame("message_delta", map[string]any{"delta": map[string]any{"stop_reason": stop, "stop_sequence": stopSequence}, "usage": usage})
 		appendFrame("message_stop", map[string]any{})
 	}
 	return sse.String()
+}
+
+func TestLoopReasoningStateContract(t *testing.T) {
+	state := &contracts.ReasoningState{
+		Protocol: contracts.ProtocolAnthropicMessages,
+		Version:  contracts.ReasoningStateVersion,
+		Payload:  json.RawMessage(`{"type":"redacted_thinking","data":"opaque"}`),
+	}
+	zero, one := 0, 1
+	for _, indices := range [][]*int{{nil, nil}, {&zero, &zero}, {&zero, &one}} {
+		stream := make(chan model.ModelStreamEvent, 3)
+		for _, index := range indices {
+			stream <- model.ModelStreamEvent{Kind: model.StreamReasoningState, ReasoningState: state, OutputIndex: index}
+		}
+		stream <- model.ModelStreamEvent{Kind: model.StreamComplete, StopReason: model.StopCompleted}
+		close(stream)
+		response, err := collectModelResponse(t.Context(), stream, func(event model.ModelStreamEvent) {
+			if event.Kind == model.StreamReasoningState {
+				t.Fatal("推理状态不应发送给观察者")
+			}
+		})
+		if err != nil || len(response.events) != 2 || response.validateReasoningState(state.Protocol) != nil {
+			t.Fatalf("Loop 不应根据载荷内容或索引去重：%v", err)
+		}
+		if response.validateReasoningState(contracts.ProtocolOpenAIResponses) == nil {
+			t.Fatal("跨协议推理状态未被拒绝")
+		}
+	}
+	invalid := state.Clone()
+	invalid.Version = 1
+	stream := make(chan model.ModelStreamEvent, 1)
+	stream <- model.ModelStreamEvent{Kind: model.StreamReasoningState, ReasoningState: invalid}
+	close(stream)
+	if _, err := collectModelResponse(t.Context(), stream, nil); err == nil {
+		t.Fatal("内部推理状态的版本校验被移除")
+	}
+}
+
+// stopSequenceFixture 只允许一次无工具请求；未实现的接口方法一旦被调用，测试立即失败。
+type stopSequenceFixture struct {
+	ToolCallHandler
+	toolcontracts.ToolCatalog
+	agentruntime.MessageRecorder
+	requests int
+	ends     int
+	outcome  turnmodel.TurnOutcome
+}
+
+func (f *stopSequenceFixture) BuildModel(model.ModelSnapshot) (model.Model, error) {
+	return model.Model{Stream: f, MaxOutputTokens: 100}, nil
+}
+func (f *stopSequenceFixture) Stream(context.Context, model.ModelRequest) (<-chan model.ModelStreamEvent, error) {
+	f.requests++
+	if f.requests > 1 {
+		return nil, errors.New("stop_sequence 后不应再次请求模型")
+	}
+	stream := make(chan model.ModelStreamEvent, 1)
+	stream <- model.ModelStreamEvent{Kind: model.StreamComplete, StopReason: model.StopSequence}
+	close(stream)
+	return stream, nil
+}
+func (f *stopSequenceFixture) List() []contracts.ToolDefinition { return nil }
+func (f *stopSequenceFixture) RecordStart(context.Context, contracts.TurnExecutionContext) (turnmodel.Turn, error) {
+	return turnmodel.Turn{ID: "turn_1"}, nil
+}
+func (f *stopSequenceFixture) RecordEnd(_ context.Context, _ contracts.TurnID, outcome turnmodel.TurnOutcome, _ contracts.TaskFailureCode, _ string) error {
+	f.ends++
+	f.outcome = outcome
+	return nil
+}
+
+func TestRunnerCompletesAtStopSequence(t *testing.T) {
+	fixture := &stopSequenceFixture{}
+	runner, err := NewRunner(Config{
+		ModelBuilder:  fixture,
+		Tools:         fixture,
+		ToolCalls:     fixture,
+		Turns:         fixture,
+		EventObserver: func(agentruntime.AgentEvent) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := taskmodel.Task{Input: taskmodel.InputSnapshot{
+		Model: model.ModelSnapshot{ContextWindow: 4096},
+		Context: appcontext.ModelContext{Entries: []appcontext.ContextEntry{{
+			Kind: appcontext.ContextEntryUserInput, Role: appcontext.ContextRoleUser,
+			Content: []appcontext.ContextBlock{{Kind: appcontext.ContextBlockText, Text: "你好"}},
+		}}},
+	}}
+	outcome, code, err := runner.Run(t.Context(), task, fixture)
+	if err != nil || code != "" || outcome != taskmodel.TaskCompleted || fixture.requests != 1 || fixture.ends != 1 || fixture.outcome != turnmodel.TurnCompleted {
+		t.Fatalf("停止序列未正常结算：%s %s %v %+v", outcome, code, err, fixture)
+	}
 }
