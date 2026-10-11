@@ -16,17 +16,18 @@ import (
 )
 
 type decoder struct{}
-
 type responsePartKey struct {
 	Kind  string
 	Index int
 }
 type responsePartState struct {
-	Text string
-	Done bool
+	Text       string
+	TextDone   bool
+	Closed     bool
+	Incomplete bool
 }
 type responseItemState struct {
-	Item          responseOutputItem
+	Item          responseOutputValue
 	Parts         map[responsePartKey]*responsePartState
 	Arguments     string
 	ArgumentsDone bool
@@ -36,12 +37,13 @@ type responseItemState struct {
 type responseDecoderState struct {
 	Items      map[int]*responseItemState
 	IDs        map[string]int
-	ResponseID string
+	Identity   *responseSnapshot
+	InProgress bool
 	Refused    bool
 }
 
-// Decode 使用 output_index 定位输出，item_id 校验身份；call_id 只用于工具结果关联。
-// 只有 response.completed 能释放工具调用，delta/done/最终快照之间必须保持前缀一致。
+// Decode 按官方具体事件分派，流式状态与最终快照一致后才释放任何工具。
+// output_item.added 的加密状态不能续传，原始推理载荷取自 output_item.done。
 func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (model.ModelStopReason, error) {
 	state := responseDecoderState{Items: map[int]*responseItemState{}, IDs: map[string]int{}}
 	lastSequence := int64(-1)
@@ -56,237 +58,221 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		if err != nil {
 			return "", err
 		}
-		var event responseStreamEvent
-		if err := json.Unmarshal([]byte(sse.Data), &event); err != nil {
+		event, err := decodeResponseEvent([]byte(sse.Data))
+		if err != nil {
 			return "", fmt.Errorf("decode responses event: %w", err)
 		}
-		if event.Type == "" || sse.Type != "" && sse.Type != event.Type {
+		header := event.eventHeader()
+		if sse.Type != "" && sse.Type != header.Type {
 			return "", errors.New("responses event type mismatch")
 		}
-		if event.SequenceNumber != nil {
-			if *event.SequenceNumber <= lastSequence {
+		if header.SequenceNumber != nil {
+			if *header.SequenceNumber <= lastSequence {
 				return "", errors.New("responses event sequence is not increasing")
 			}
-			lastSequence = *event.SequenceNumber
+			lastSequence = *header.SequenceNumber
 		}
-		if event.Type == "error" {
-			return "", fmt.Errorf("responses stream error (%s): %s", event.Code, event.Message)
+		if e, ok := event.(*responseErrorEvent); ok {
+			return "", fmt.Errorf("responses stream error (%v): %s", stringValue(e.Code), e.Message)
 		}
-		switch event.Type {
-		case "response.created", "response.in_progress":
-			if event.Response == nil || event.Response.ID == "" {
-				return "", errors.New("responses missing response identity")
+		if _, unknown := event.(*responseEventHeader); unknown {
+			continue
+		}
+		if e, ok := event.(*responseCreatedEvent); ok {
+			if state.Identity != nil || e.Response.Status == nil || *e.Response.Status != "in_progress" || len(e.Response.Output) != 0 {
+				return "", errors.New("responses invalid or duplicate response.created")
 			}
-			if state.ResponseID != "" && state.ResponseID != event.Response.ID {
-				return "", errors.New("responses conflicting response identity")
+			state.Identity = e.Response
+			continue
+		}
+		if state.Identity == nil {
+			return "", errors.New("responses event before response.created")
+		}
+		switch e := event.(type) {
+		case *responseInProgressEvent:
+			if state.InProgress || state.checkIdentity(e.Response) != nil || e.Response.Status == nil || *e.Response.Status != "in_progress" {
+				return "", errors.New("responses invalid response.in_progress")
 			}
-			state.ResponseID = event.Response.ID
-		case "response.output_item.added":
-			if event.OutputIndex == nil || *event.OutputIndex < 0 {
-				return "", errors.New("responses missing output_index")
-			}
-			if state.Items[*event.OutputIndex] != nil {
-				return "", errors.New("responses duplicate output item")
-			}
-			if _, err := state.addItem(*event.OutputIndex, event.Item); err != nil {
-				return "", err
-			}
-		case "response.output_item.done":
-			if event.OutputIndex == nil || *event.OutputIndex < 0 {
-				return "", errors.New("responses missing output_index")
-			}
-			item := state.Items[*event.OutputIndex]
+			state.InProgress = true
+		case *responseOutputItemAddedEvent:
+			_, err = state.addItem(*e.OutputIndex, e.Item, true)
+		case *responseOutputItemDoneEvent:
+			item := state.Items[*e.OutputIndex]
 			if item == nil || item.Completed {
 				return "", errors.New("responses done for missing or completed item")
 			}
-			if err := state.finishItem(*event.OutputIndex, event.Item, emit); err != nil {
-				return "", err
+			err = state.finishItem(*e.OutputIndex, e.Item, emit)
+		case *responseContentPartAddedEvent:
+			kind, text := e.Part.Value.partText()
+			err = state.addPart(e.responseItemReference, responsePartKey{kind, *e.ContentIndex}, text, emit)
+		case *responseContentPartDoneEvent:
+			kind, text := e.Part.Value.partText()
+			err = state.closePart(e.responseItemReference, responsePartKey{kind, *e.ContentIndex}, text, emit)
+		case *responseReasoningSummaryPartAddedEvent:
+			err = state.addPart(e.responseItemReference, responsePartKey{"summary_text", *e.SummaryIndex}, e.Part.Text, emit)
+		case *responseReasoningSummaryPartDoneEvent:
+			key := responsePartKey{"summary_text", *e.SummaryIndex}
+			err = state.closePart(e.responseItemReference, key, e.Part.Text, emit)
+			if err == nil && e.Status != nil {
+				state.Items[*e.OutputIndex].Parts[key].Incomplete = true
 			}
-		case "response.output_text.delta", "response.output_text.done", "response.refusal.delta", "response.refusal.done",
-			"response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_text.delta", "response.reasoning_text.done":
-			item, index, err := state.eventItem(event)
-			if err != nil {
-				return "", err
-			}
-			kind, partIndex, text := "output_text", event.ContentIndex, event.Delta
-			if strings.HasPrefix(event.Type, "response.reasoning_summary_text.") {
-				kind, partIndex = "summary_text", event.SummaryIndex
-			}
-			if strings.HasPrefix(event.Type, "response.reasoning_text.") {
-				kind = "reasoning_text"
-			}
-			if strings.HasPrefix(event.Type, "response.refusal.") {
-				kind = "refusal"
-				state.Refused = true
-			}
-			if partIndex == nil || *partIndex < 0 {
-				return "", errors.New("responses missing part index")
-			}
-			if kind == "output_text" || kind == "refusal" {
-				if item.Item.Type != "message" {
-					return "", errors.New("responses text delta targets non-message item")
-				}
-			} else if item.Item.Type != "reasoning" {
-				return "", errors.New("responses reasoning delta targets non-reasoning item")
-			}
-			snapshot := strings.HasSuffix(event.Type, ".done")
-			if snapshot {
-				text = event.Text
-				if kind == "refusal" {
-					text = event.Refusal
-				}
-			}
-			if err := state.part(index, responsePartKey{kind, *partIndex}, text, snapshot, emit); err != nil {
-				return "", err
-			}
-		case "response.content_part.added", "response.content_part.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
-			item, index, err := state.eventItem(event)
-			if err != nil {
-				return "", err
-			}
-			partIndex := event.ContentIndex
-			if strings.HasPrefix(event.Type, "response.reasoning_summary_part.") {
-				partIndex = event.SummaryIndex
-			}
-			if partIndex == nil || *partIndex < 0 {
-				return "", errors.New("responses missing part index")
-			}
-			if item.Item.Type != "message" && item.Item.Type != "reasoning" {
-				return "", errors.New("responses content part targets invalid item")
-			}
-			text := event.Part.Text
-			if event.Part.Type == "refusal" {
-				state.Refused = true
-				text = event.Part.Refusal
-			}
-			if err := state.part(index, responsePartKey{event.Part.Type, *partIndex}, text, strings.HasSuffix(event.Type, ".done"), emit); err != nil {
-				return "", err
-			}
-		case "response.function_call_arguments.delta", "response.function_call_arguments.done":
-			item, _, err := state.eventItem(event)
-			if err != nil {
-				return "", err
-			}
-			if item.Item.Type != "function_call" || item.ArgumentsDone {
-				return "", errors.New("responses invalid function argument event")
-			}
-			if strings.HasSuffix(event.Type, ".done") {
-				if !strings.HasPrefix(event.Arguments, item.Arguments) {
-					return "", errors.New("responses inconsistent arguments snapshot")
-				}
-				item.Arguments, item.ArgumentsDone = event.Arguments, true
-			} else {
-				item.Arguments += event.Delta
-			}
-		case "response.completed", "response.incomplete", "response.failed":
-			if event.SequenceNumber == nil {
-				return "", errors.New("responses terminal event is missing sequence_number")
-			}
-			response := event.Response
-			status := strings.TrimPrefix(event.Type, "response.")
-			if response == nil || response.ID == "" || response.Status != status || state.ResponseID != "" && state.ResponseID != response.ID {
-				return "", errors.New("responses inconsistent terminal response")
-			}
-			if response.Usage != nil && response.Usage.InputTokens != nil {
-				usage := &model.ModelUsage{InputTokens: *response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens}
-				if response.Usage.InputTokensDetails != nil {
-					usage.CacheReadInputTokens = response.Usage.InputTokensDetails.CachedTokens
-				}
-				if !usage.Valid() {
-					return "", errors.New("responses invalid usage")
-				}
-				if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
-					return "", err
-				}
-			}
-			if status == "failed" {
-				if response.Error != nil {
-					return "", fmt.Errorf("responses failed (%s): %s", response.Error.Code, response.Error.Message)
-				}
-				return "", errors.New("responses failed")
-			}
-			if status == "incomplete" {
-				detail := ""
-				if response.IncompleteDetails != nil {
-					detail = response.IncompleteDetails.Reason
-				}
-				reason := mapStopReason(status, detail, false, state.Refused)
-				if reason == model.StopUnknown {
-					return "", fmt.Errorf("responses unknown incomplete reason %q", detail)
-				}
-				return reason, nil
-			}
-			return state.complete(response, emit)
-		default:
-			// 未来事件不推断语义；非官方终态别名也不能结束 HTTP SSE。
-			continue
+		case *responseOutputTextDeltaEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"output_text", *e.ContentIndex}, e.Delta, false, emit)
+		case *responseOutputTextDoneEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"output_text", *e.ContentIndex}, e.Text, true, emit)
+		case *responseRefusalDeltaEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"refusal", *e.ContentIndex}, e.Delta, false, emit)
+		case *responseRefusalDoneEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"refusal", *e.ContentIndex}, e.Refusal, true, emit)
+		case *responseReasoningSummaryTextDeltaEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"summary_text", *e.SummaryIndex}, e.Delta, false, emit)
+		case *responseReasoningSummaryTextDoneEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"summary_text", *e.SummaryIndex}, e.Text, true, emit)
+		case *responseReasoningTextDeltaEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"reasoning_text", *e.ContentIndex}, e.Delta, false, emit)
+		case *responseReasoningTextDoneEvent:
+			err = state.textPart(e.responseItemReference, responsePartKey{"reasoning_text", *e.ContentIndex}, e.Text, true, emit)
+		case *responseFunctionCallArgumentsDeltaEvent:
+			err = state.arguments(e.responseItemReference, e.Delta, false)
+		case *responseFunctionCallArgumentsDoneEvent:
+			err = state.arguments(e.responseItemReference, e.Arguments, true)
+		case *responseCompletedEvent:
+			return state.terminal(e.Response, "completed", emit)
+		case *responseFailedEvent:
+			return state.terminal(e.Response, "failed", emit)
+		case *responseIncompleteEvent:
+			return state.terminal(e.Response, "incomplete", emit)
 		}
-		if event.SequenceNumber == nil {
-			return "", errors.New("responses known event is missing sequence_number")
+		if err != nil {
+			return "", err
 		}
 	}
 }
 
-func (s *responseDecoderState) addItem(index int, raw json.RawMessage) (*responseItemState, error) {
-	var item responseOutputItem
-	if err := json.Unmarshal(raw, &item); err != nil {
-		return nil, err
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
 	}
-	if item.ID == "" || item.ID != strings.TrimSpace(item.ID) {
-		return nil, errors.New("responses missing or non-canonical item ID")
+	return *value
+}
+func (s *responseDecoderState) checkIdentity(response *responseSnapshot) error {
+	if response.ID != s.Identity.ID || response.Model != s.Identity.Model || response.CreatedAt != s.Identity.CreatedAt {
+		return errors.New("responses conflicting response identity")
 	}
-	if _, exists := s.IDs[item.ID]; exists {
-		return nil, errors.New("responses duplicate item ID")
+	return nil
+}
+func (s *responseDecoderState) addItem(index int, output responseOutput, requireID bool) (*responseItemState, error) {
+	if index != len(s.Items) || s.Items[index] != nil {
+		return nil, errors.New("responses duplicate or non-contiguous output index")
 	}
-	switch item.Type {
-	case "message":
-		if item.Role != "assistant" {
-			return nil, errors.New("responses output message requires assistant role")
+	id, _ := output.Value.outputIdentity()
+	// function_call.id 在 Schema 中可选，但流式注册必须具备可用于 item_id 校验的身份。
+	if requireID && !canonical(id) {
+		return nil, errors.New("responses streamed item requires canonical ID")
+	}
+	if id != "" {
+		if _, exists := s.IDs[id]; exists {
+			return nil, errors.New("responses duplicate item ID")
 		}
-	case "reasoning", "function_call":
-	default:
-		return nil, fmt.Errorf("responses unsupported output item type %q", item.Type)
 	}
-	state := &responseItemState{Item: item, Parts: map[responsePartKey]*responsePartState{}, Arguments: item.Arguments}
-	s.Items[index], s.IDs[item.ID] = state, index
+	state := &responseItemState{Item: output.Value, Parts: map[responsePartKey]*responsePartState{}}
+	if item, ok := output.Value.(*responseFunctionCallOutput); ok {
+		state.Arguments = item.Arguments
+	}
+	s.Items[index] = state
+	if id != "" {
+		s.IDs[id] = index
+	}
 	return state, nil
 }
-
-func (s *responseDecoderState) eventItem(event responseStreamEvent) (*responseItemState, int, error) {
-	if event.OutputIndex == nil || *event.OutputIndex < 0 {
-		return nil, 0, errors.New("responses missing output_index")
-	}
-	index := *event.OutputIndex
+func (s *responseDecoderState) eventItem(ref responseItemReference) (*responseItemState, int, error) {
+	index := *ref.OutputIndex
 	item := s.Items[index]
-	if item == nil || item.Completed || event.ItemID == "" || event.ItemID != item.Item.ID {
-		return nil, 0, errors.New("responses delta references missing, completed or conflicting item")
+	if item == nil || item.Completed {
+		return nil, 0, errors.New("responses event references missing or completed item")
+	}
+	id, _ := item.Item.outputIdentity()
+	if ref.ItemID != id {
+		return nil, 0, errors.New("responses conflicting item_id")
 	}
 	return item, index, nil
 }
-
-func (s *responseDecoderState) part(index int, key responsePartKey, text string, snapshot bool, emit streaming.EmitFunc) error {
-	var kind model.ModelStreamEventKind
+func (s *responseDecoderState) partItem(ref responseItemReference, key responsePartKey) (*responseItemState, int, error) {
+	item, index, err := s.eventItem(ref)
+	if err != nil {
+		return nil, 0, err
+	}
+	_, itemType := item.Item.outputIdentity()
+	if (key.Kind == "output_text" || key.Kind == "refusal") && itemType != "message" || (key.Kind == "summary_text" || key.Kind == "reasoning_text") && itemType != "reasoning" {
+		return nil, 0, errors.New("responses content event targets wrong item type")
+	}
+	// 同一 content_index 不能先是正文再变成拒绝；summary_index 是独立索引空间。
+	for previous := range item.Parts {
+		if previous.Index == key.Index && previous.Kind != key.Kind && (previous.Kind == "summary_text") == (key.Kind == "summary_text") {
+			return nil, 0, errors.New("responses conflicting content part type")
+		}
+	}
+	return item, index, nil
+}
+func (s *responseDecoderState) addPart(ref responseItemReference, key responsePartKey, text string, emit streaming.EmitFunc) error {
+	item, index, err := s.partItem(ref, key)
+	if err != nil {
+		return err
+	}
+	if item.Parts[key] != nil {
+		return errors.New("responses duplicate content part start")
+	}
+	part := &responsePartState{}
+	item.Parts[key] = part
+	return s.updatePart(index, key, part, text, false, emit)
+}
+func (s *responseDecoderState) textPart(ref responseItemReference, key responsePartKey, text string, done bool, emit streaming.EmitFunc) error {
+	item, index, err := s.partItem(ref, key)
+	if err != nil {
+		return err
+	}
+	part := item.Parts[key]
+	if part == nil || part.Closed || part.TextDone {
+		return errors.New("responses text event before part start or after text completion")
+	}
+	if err := s.updatePart(index, key, part, text, done, emit); err != nil {
+		return err
+	}
+	part.TextDone = done
+	return nil
+}
+func (s *responseDecoderState) closePart(ref responseItemReference, key responsePartKey, text string, emit streaming.EmitFunc) error {
+	item, index, err := s.partItem(ref, key)
+	if err != nil {
+		return err
+	}
+	part := item.Parts[key]
+	if part == nil || part.Closed {
+		return errors.New("responses duplicate or missing content part stop")
+	}
+	if err := s.updatePart(index, key, part, text, true, emit); err != nil {
+		return err
+	}
+	part.TextDone, part.Closed = true, true
+	return nil
+}
+func (s *responseDecoderState) updatePart(index int, key responsePartKey, part *responsePartState, text string, snapshot bool, emit streaming.EmitFunc) error {
+	kind := model.StreamThinkingDelta
 	switch key.Kind {
-	case "output_text", "refusal":
+	case "output_text":
 		kind = model.StreamTextDelta
+	case "refusal":
+		kind = model.StreamTextDelta
+		s.Refused = true
 	case "summary_text", "reasoning_text":
-		kind = model.StreamThinkingDelta
 	default:
 		return fmt.Errorf("responses unsupported content part %q", key.Kind)
 	}
-	item := s.Items[index]
-	part := item.Parts[key]
-	if part == nil {
-		part = &responsePartState{}
-		item.Parts[key] = part
-	}
 	if snapshot {
-		if !strings.HasPrefix(text, part.Text) || part.Done && text != part.Text {
+		if !strings.HasPrefix(text, part.Text) || part.TextDone && text != part.Text {
 			return errors.New("responses inconsistent content snapshot")
 		}
 		text = text[len(part.Text):]
-	} else if part.Done {
-		return errors.New("responses delta after content part completion")
 	}
 	if text != "" {
 		if err := emit(model.ModelStreamEvent{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
@@ -294,87 +280,172 @@ func (s *responseDecoderState) part(index int, key responsePartKey, text string,
 		}
 		part.Text += text
 	}
-	part.Done = part.Done || snapshot
+	return nil
+}
+func (s *responseDecoderState) arguments(ref responseItemReference, text string, done bool) error {
+	item, _, err := s.eventItem(ref)
+	if err != nil {
+		return err
+	}
+	if _, ok := item.Item.(*responseFunctionCallOutput); !ok || item.ArgumentsDone {
+		return errors.New("responses invalid function argument event")
+	}
+	if done {
+		if !strings.HasPrefix(text, item.Arguments) {
+			return errors.New("responses inconsistent arguments snapshot")
+		}
+		item.Arguments, item.ArgumentsDone = text, true
+	} else {
+		item.Arguments += text
+	}
 	return nil
 }
 
-func (s *responseDecoderState) finishItem(index int, raw json.RawMessage, emit streaming.EmitFunc) error {
+func (s *responseDecoderState) finishItem(index int, output responseOutput, emit streaming.EmitFunc) error {
 	state := s.Items[index]
-	var item responseOutputItem
-	if err := json.Unmarshal(raw, &item); err != nil {
-		return err
-	}
-	if item.ID != state.Item.ID || item.Type != state.Item.Type || item.CallID != state.Item.CallID || item.Name != state.Item.Name || item.Role != state.Item.Role {
+	beforeID, beforeType := state.Item.outputIdentity()
+	id, itemType := output.Value.outputIdentity()
+	if id != beforeID || itemType != beforeType {
 		return errors.New("responses conflicting item snapshot identity")
 	}
-	if item.Status != "" && item.Status != "completed" {
-		return errors.New("responses item did not complete")
-	}
-	if item.Type == "function_call" {
+	parts := map[responsePartKey]string{}
+	var orderedKeys []responsePartKey
+	switch item := output.Value.(type) {
+	case *responseMessageOutput:
+		if item.Role != state.Item.(*responseMessageOutput).Role {
+			return errors.New("responses conflicting message role")
+		}
+		if item.Status == "in_progress" {
+			return errors.New("responses done item still in progress")
+		}
+		for partIndex, part := range item.Content {
+			kind, text := part.Value.partText()
+			key := responsePartKey{kind, partIndex}
+			parts[key] = text
+			orderedKeys = append(orderedKeys, key)
+		}
+	case *responseReasoningOutput:
+		if stringValue(item.Status) == "in_progress" {
+			return errors.New("responses done reasoning still in progress")
+		}
+		for partIndex, part := range item.Summary {
+			key := responsePartKey{part.Type, partIndex}
+			parts[key] = part.Text
+			orderedKeys = append(orderedKeys, key)
+		}
+		for partIndex, part := range item.Content {
+			key := responsePartKey{part.Type, partIndex}
+			parts[key] = part.Text
+			orderedKeys = append(orderedKeys, key)
+		}
+	case *responseFunctionCallOutput:
+		before := state.Item.(*responseFunctionCallOutput)
+		if item.CallID != before.CallID || item.Name != before.Name || stringValue(item.Status) == "in_progress" {
+			return errors.New("responses conflicting function identity or status")
+		}
 		if !strings.HasPrefix(item.Arguments, state.Arguments) || state.ArgumentsDone && item.Arguments != state.Arguments {
 			return errors.New("responses conflicting final arguments")
 		}
 		state.Arguments, state.ArgumentsDone = item.Arguments, true
 	}
-	keys := map[responsePartKey]bool{}
-	for _, parts := range [][]responseContentPart{item.Content, item.Summary} {
-		for partIndex, part := range parts {
-			key := responsePartKey{part.Type, partIndex}
-			keys[key] = true
-			text := part.Text
-			if part.Type == "refusal" {
-				s.Refused = true
-				text = part.Refusal
-			}
-			if err := s.part(index, key, text, true, emit); err != nil {
-				return err
-			}
+	for key, part := range state.Parts {
+		text, exists := parts[key]
+		if !exists || !strings.HasPrefix(text, part.Text) || part.TextDone && text != part.Text {
+			return errors.New("responses final item conflicts with streamed part")
 		}
 	}
-	for key := range state.Parts {
-		if !keys[key] {
-			return errors.New("responses final item is missing a streamed part")
+	// 快照可以补齐尚未输出的后缀，但不能重复输出已收到的 delta。
+	for _, key := range orderedKeys {
+		text := parts[key]
+		part := state.Parts[key]
+		if part == nil {
+			part = &responsePartState{}
+			state.Parts[key] = part
 		}
+		if err := s.updatePart(index, key, part, text, true, emit); err != nil {
+			return err
+		}
+		part.TextDone, part.Closed = true, true
 	}
-	state.Item, state.Completed, state.Raw = item, true, bytes.Clone(raw)
+	state.Item, state.Completed, state.Raw = output.Value, true, bytes.Clone(output.Raw)
 	return nil
 }
 
-func (s *responseDecoderState) complete(response *responseSnapshot, emit streaming.EmitFunc) (model.ModelStopReason, error) {
-	if response.Output == nil {
-		return "", errors.New("responses terminal snapshot is missing output")
+func (s *responseDecoderState) terminal(response *responseSnapshot, status string, emit streaming.EmitFunc) (model.ModelStopReason, error) {
+	if err := s.checkIdentity(response); err != nil {
+		return "", err
 	}
-	for index, raw := range response.Output {
-		state := s.Items[index]
-		if state == nil {
+	if response.Status == nil || *response.Status != status {
+		return "", errors.New("responses inconsistent terminal status")
+	}
+	if len(s.Items) > len(response.Output) {
+		return "", errors.New("responses terminal snapshot is missing an output item")
+	}
+	for index, output := range response.Output {
+		item := s.Items[index]
+		if item == nil {
 			var err error
-			state, err = s.addItem(index, raw)
+			item, err = s.addItem(index, output, false)
 			if err != nil {
 				return "", err
 			}
 		}
-		if state.Completed {
-			var before, after any
-			if json.Unmarshal(state.Raw, &before) != nil || json.Unmarshal(raw, &after) != nil || !reflect.DeepEqual(before, after) {
+		if item.Completed {
+			// 附加字段不参与语义判断；已消费的官方字段必须与 done 完全一致。
+			if !reflect.DeepEqual(item.Item, output.Value) {
 				return "", errors.New("responses terminal snapshot conflicts with completed item")
 			}
-		} else if err := s.finishItem(index, raw, emit); err != nil {
+		} else if err := s.finishItem(index, output, emit); err != nil {
 			return "", err
 		}
 	}
-	if len(s.Items) != len(response.Output) {
-		return "", errors.New("responses terminal snapshot is missing an output item")
+	if u := response.Usage; u != nil {
+		usage := &model.ModelUsage{InputTokens: *u.InputTokens, OutputTokens: u.OutputTokens, CacheReadInputTokens: u.InputTokensDetails.CachedTokens}
+		if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
+			return "", err
+		}
 	}
-	if s.Refused {
-		return model.StopRefused, nil
+	if status == "failed" {
+		if response.Error != nil {
+			return "", fmt.Errorf("responses failed (%s): %s", response.Error.Code, response.Error.Message)
+		}
+		return "", errors.New("responses failed")
 	}
-	seenCalls := map[string]bool{}
-	toolCount := 0
+	if status == "incomplete" {
+		detail := ""
+		if response.IncompleteDetails != nil {
+			detail = stringValue(response.IncompleteDetails.Reason)
+		}
+		reason := mapStopReason(status, detail, false, s.Refused)
+		if reason == model.StopUnknown {
+			return "", fmt.Errorf("responses unknown incomplete reason %q", detail)
+		}
+		return reason, nil
+	}
+	if response.Error != nil || response.IncompleteDetails != nil {
+		return "", errors.New("responses completed with error or incomplete details")
+	}
+	return s.complete(response, emit)
+}
+
+func (s *responseDecoderState) complete(response *responseSnapshot, emit streaming.EmitFunc) (model.ModelStopReason, error) {
+	seenCalls, toolCount := map[string]bool{}, 0
 	for index := range response.Output {
-		item := s.Items[index].Item
-		if item.Type == "function_call" {
-			call := &streaming.ToolAccumulator{ID: item.CallID, Name: item.Name, Arguments: item.Arguments}
-			if err := streaming.ValidateToolCall(call); err != nil {
+		for _, part := range s.Items[index].Parts {
+			if part.Incomplete {
+				return "", errors.New("responses completed with incomplete summary part")
+			}
+		}
+		switch item := s.Items[index].Item.(type) {
+		case *responseMessageOutput:
+			if item.Status != "completed" {
+				return "", errors.New("responses completed with incomplete message")
+			}
+		case *responseFunctionCallOutput:
+			if item.Status != nil && *item.Status != "completed" {
+				return "", errors.New("responses completed with incomplete function")
+			}
+			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: item.CallID, Name: item.Name, Arguments: item.Arguments}); err != nil {
 				return "", err
 			}
 			if seenCalls[item.CallID] {
@@ -382,30 +453,29 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			}
 			seenCalls[item.CallID] = true
 			toolCount++
-		}
-		if item.Type == "reasoning" {
-			state := &contracts.ReasoningState{
-				Protocol: contracts.ProtocolOpenAIResponses,
-				Version:  contracts.ReasoningStateVersion,
-				Payload:  s.Items[index].Raw,
+		case *responseReasoningOutput:
+			if item.Status != nil && *item.Status != "completed" {
+				return "", errors.New("responses completed with incomplete reasoning")
 			}
-			if err := state.Validate(); err != nil {
+			if err := (&contracts.ReasoningState{Protocol: contracts.ProtocolOpenAIResponses, Version: contracts.ReasoningStateVersion, Payload: s.Items[index].Raw}).Validate(); err != nil {
 				return "", err
 			}
 		}
 	}
+	if s.Refused {
+		return model.StopRefused, nil
+	}
 	if toolCount > 0 {
 		for _, state := range s.Items {
-			if state.Item.Type == "reasoning" && state.Item.EncryptedContent == "" {
+			if item, ok := state.Item.(*responseReasoningOutput); ok && stringValue(item.EncryptedContent) == "" {
 				return "", errors.New("responses tool continuation requires encrypted reasoning state")
 			}
 		}
 	}
-	// 先完成全部协议校验，再按 output 顺序发送可重放状态和完整工具。
+	// 全部校验成功后，按 output 顺序发送状态与完整工具，签名不进入展示文本。
 	for index := range response.Output {
-		item := s.Items[index].Item
-		switch item.Type {
-		case "reasoning":
+		switch item := s.Items[index].Item.(type) {
+		case *responseReasoningOutput:
 			if err := emit(model.ModelStreamEvent{
 				Kind: model.StreamReasoningState,
 				ReasoningState: &contracts.ReasoningState{
@@ -417,7 +487,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			}); err != nil {
 				return "", err
 			}
-		case "function_call":
+		case *responseFunctionCallOutput:
 			if err := streaming.EmitTool(func(event model.ModelStreamEvent) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: item.CallID, Name: item.Name, Arguments: item.Arguments}); err != nil {
 				return "", err
 			}
@@ -426,8 +496,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 	return mapStopReason("completed", "", toolCount > 0, false), nil
 }
 
-// mapStopReason 结合终态 status、incomplete_details.reason 和输出内容判断结束语义。
-// hasToolCalls 表示存在函数调用，refused 表示存在拒绝内容；非已知终态返回 StopUnknown。
+// mapStopReason 只将官方终态和明确的截断原因映射为内部结束语义。
 func mapStopReason(status, incompleteReason string, hasToolCalls, refused bool) model.ModelStopReason {
 	switch status {
 	case "completed":

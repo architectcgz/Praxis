@@ -43,7 +43,7 @@ func encodeContext(ctx appcontext.ModelContext) (anthropicContext, error) {
 		}
 		seenOther := false
 		for _, raw := range message.Content {
-			var block anthropicContentBlock
+			var block blockHeader
 			if err := json.Unmarshal(raw, &block); err != nil {
 				return anthropicContext{}, err
 			}
@@ -60,14 +60,14 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 	var messages []anthropicMessage
 	for index, block := range entry.Content {
 		role := string(entry.Role)
-		var content anthropicContentBlock
+		var content any
 		var raw json.RawMessage
 		switch block.Kind {
 		case appcontext.ContextBlockText:
 			if entry.Role == appcontext.ContextRoleTool {
 				return nil, errors.New("anthropic tool role requires tool results")
 			}
-			content = anthropicContentBlock{Type: "text", Text: block.Text}
+			content = requestTextBlock{Type: "text", Text: block.Text}
 		case appcontext.ContextBlockToolCall:
 			if entry.Role != appcontext.ContextRoleAssistant {
 				return nil, errors.New("anthropic tool_use requires assistant role")
@@ -75,7 +75,7 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
 				return nil, err
 			}
-			content = anthropicContentBlock{
+			content = requestToolUseBlock{
 				Type:  "tool_use",
 				ID:    block.CallID,
 				Name:  block.Name,
@@ -83,11 +83,10 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 			}
 		case appcontext.ContextBlockToolResult:
 			role = "user"
-			text := block.Text
-			content = anthropicContentBlock{
+			content = requestToolResultBlock{
 				Type:      "tool_result",
 				ToolUseID: block.CallID,
-				Content:   &text,
+				Content:   block.Text,
 				IsError:   block.IsError,
 			}
 		case appcontext.ContextBlockReasoningState:
@@ -98,14 +97,17 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 			if state.Protocol != contracts.ProtocolAnthropicMessages {
 				return nil, errors.New("cannot replay another protocol's state in anthropic")
 			}
-			if err := json.Unmarshal(state.Payload, &content); err != nil {
+			var saved contentBlockUnion
+			if err := json.Unmarshal(state.Payload, &saved); err != nil {
 				return nil, err
 			}
-			if content.Type == "thinking" {
-				if content.Signature == "" {
+			switch value := saved.Value.(type) {
+			case *thinkingBlock:
+				if value.Signature == "" {
 					return nil, errors.New("anthropic thinking state missing signature")
 				}
-			} else if content.Type != "redacted_thinking" || content.Data == "" {
+			case *redactedThinkingBlock:
+			default:
 				return nil, errors.New("invalid anthropic thinking state")
 			}
 			raw = bytes.Clone(state.Payload)
@@ -132,7 +134,7 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 	return messages, nil
 }
 
-// validateThinkingContinuation 拒绝缺失推理状态的 legacy 工具续传，不从展示文本伪造签名。
+// validateThinkingContinuation 要求工具续传包含原始推理状态，不从展示文本伪造签名。
 func validateThinkingContinuation(messages []anthropicMessage) error {
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
@@ -141,7 +143,7 @@ func validateThinkingContinuation(messages []anthropicMessage) error {
 		}
 		firstType, hasTools := "", false
 		for partIndex, raw := range message.Content {
-			var block anthropicContentBlock
+			var block blockHeader
 			if err := json.Unmarshal(raw, &block); err != nil {
 				return err
 			}
@@ -165,7 +167,10 @@ func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 			if block.ReasoningState == nil {
 				continue
 			}
-			var content anthropicContentBlock
+			var content struct {
+				Signature string `json:"signature"`
+				Data      string `json:"data"`
+			}
 			if json.Unmarshal(block.ReasoningState.Payload, &content) == nil {
 				values = append(values, content.Signature, content.Data)
 			}

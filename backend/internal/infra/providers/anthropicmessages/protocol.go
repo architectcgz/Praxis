@@ -1,8 +1,14 @@
 package anthropicmessages
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+)
 
-// 协议 DTO 仅描述官方 Messages API；不把未知 block 解释成普通文本。
+// 请求 DTO 独立于响应 Content Block；重放签名载荷时保留原始 JSON。
 type anthropicRequest struct {
 	Model        string                    `json:"model"`
 	Messages     []anthropicMessage        `json:"messages"`
@@ -33,49 +39,38 @@ type anthropicMessage struct {
 	Role    string            `json:"role"`
 	Content []json.RawMessage `json:"content"`
 }
-type anthropicContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   *string         `json:"content,omitempty"`
-	IsError   bool            `json:"is_error,omitzero"`
-	Thinking  string          `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	Data      string          `json:"data,omitempty"`
+type requestTextBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
-type anthropicStreamEvent struct {
-	Type         string                 `json:"type"`
-	Index        *int                   `json:"index"`
-	Usage        *anthropicMessageUsage `json:"usage"`
-	Delta        anthropicDelta         `json:"delta"`
-	ContentBlock json.RawMessage        `json:"content_block"`
-	Message      *anthropicMessageStart `json:"message"`
-	Error        *anthropicError        `json:"error"`
+type requestToolUseBlock struct {
+	Type  string          `json:"type"`
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
 }
-type anthropicDelta struct {
-	Type        string `json:"type"`
-	Text        string `json:"text"`
-	Thinking    string `json:"thinking"`
-	Signature   string `json:"signature"`
-	PartialJSON string `json:"partial_json"`
-	StopReason  string `json:"stop_reason"`
+type requestToolResultBlock struct {
+	Type      string `json:"type"`
+	ToolUseID string `json:"tool_use_id"`
+	Content   string `json:"content"`
+	IsError   bool   `json:"is_error,omitzero"`
 }
-type anthropicMessageStart struct {
-	ID      string                 `json:"id"`
-	Role    string                 `json:"role"`
-	Content []json.RawMessage      `json:"content"`
-	Usage   *anthropicMessageUsage `json:"usage"`
-}
-type anthropicError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-type anthropicMessageUsage struct {
-	InputTokens              *int64 `json:"input_tokens"`
-	OutputTokens             *int64 `json:"output_tokens"`
-	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+
+func canonical(value string) bool { return value != "" && value == strings.TrimSpace(value) }
+
+// decodeObject 保留未知附加字段的扩展空间，但不补齐缺失或 null 的必填字段。
+func decodeObject(data []byte, target any, required ...string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if fields == nil {
+		return errors.New("anthropic schema requires an object")
+	}
+	for _, name := range required {
+		if raw := fields[name]; len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("anthropic missing or null field %q", name)
+		}
+	}
+	return json.Unmarshal(data, target)
 }

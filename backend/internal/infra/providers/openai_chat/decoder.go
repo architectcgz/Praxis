@@ -2,7 +2,6 @@ package openaichat
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +18,8 @@ type decoder struct{}
 // Decode 只支持 choice 0；finish_reason 后继续读取 Usage，必须收到 [DONE] 才成功。
 func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (model.ModelStopReason, error) {
 	calls := map[int]*streaming.ToolAccumulator{}
-	stopReason, refused := "", false
+	stopReason, refused, usageSeen := "", false, false
+	var identity *chatCompletionChunk
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -32,7 +32,13 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			return "", err
 		}
 		data := strings.TrimSpace(event.Data)
+		if event.Type != "" && event.Type != "message" {
+			return "", errors.New("openai chat unexpected SSE event type")
+		}
 		if data == "[DONE]" {
+			if !usageSeen {
+				return "", errors.New("openai chat missing final usage chunk")
+			}
 			reason := mapStopReason(stopReason)
 			if reason == model.StopUnknown {
 				return "", fmt.Errorf("openai chat invalid finish_reason %q", stopReason)
@@ -67,20 +73,30 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			}
 			return reason, nil
 		}
-		var chunk chatCompletionChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		chunk, err := decodeChunk([]byte(data))
+		if err != nil {
 			return "", fmt.Errorf("decode openai chat stream event: %w", err)
 		}
-		if chunk.Error != nil {
-			return "", fmt.Errorf("openai chat stream error (%s): %s", chunk.Error.Type, chunk.Error.Message)
+		if identity == nil {
+			identity = &chunk
+		} else if identity.ID != chunk.ID || identity.Model != chunk.Model || *identity.Created != *chunk.Created {
+			return "", errors.New("openai chat conflicting chunk identity")
 		}
-		if chunk.Usage != nil && chunk.Usage.PromptTokens != nil {
+		if usageSeen {
+			return "", errors.New("openai chat chunk after final usage")
+		}
+		if len(chunk.Choices) == 0 {
+			if chunk.Usage == nil || stopReason == "" {
+				return "", errors.New("openai chat invalid usage chunk order")
+			}
+			usageSeen = true
+		} else if chunk.Usage != nil {
+			return "", errors.New("openai chat usage requires empty choices")
+		}
+		if chunk.Usage != nil {
 			usage := &model.ModelUsage{InputTokens: *chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}
 			if chunk.Usage.PromptTokensDetails != nil {
 				usage.CacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
-			}
-			if !usage.Valid() {
-				return "", errors.New("openai chat invalid usage")
 			}
 			if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
 				return "", err
@@ -89,49 +105,42 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		if len(chunk.Choices) == 0 {
 			continue
 		}
-		if len(chunk.Choices) != 1 || chunk.Choices[0].Index == nil || *chunk.Choices[0].Index != 0 {
-			return "", errors.New("openai chat only supports choice index 0")
-		}
 		choice := chunk.Choices[0]
 		if stopReason != "" {
 			return "", errors.New("openai chat received choice after finish_reason")
 		}
-		if len(choice.Delta.FunctionCall) > 0 && strings.TrimSpace(string(choice.Delta.FunctionCall)) != "null" || choice.FinishReason == "function_call" {
-			return "", errors.New("openai chat legacy function_call is unsupported")
-		}
-		if choice.Delta.Role != "" && choice.Delta.Role != "assistant" {
-			return "", errors.New("openai chat invalid delta role")
-		}
-		for _, text := range []string{choice.Delta.Content, choice.Delta.Refusal} {
-			if text != "" {
-				if err := emit(model.ModelStreamEvent{Kind: model.StreamTextDelta, Text: text}); err != nil {
+		for _, text := range []*string{choice.Delta.Content, choice.Delta.Refusal} {
+			if text != nil && *text != "" {
+				if err := emit(model.ModelStreamEvent{Kind: model.StreamTextDelta, Text: *text}); err != nil {
 					return "", err
 				}
 			}
 		}
-		refused = refused || choice.Delta.Refusal != ""
+		refused = refused || choice.Delta.Refusal != nil && *choice.Delta.Refusal != ""
 		for _, delta := range choice.Delta.ToolCalls {
-			if delta.Index == nil || *delta.Index < 0 || delta.Type != "" && delta.Type != "function" {
-				return "", errors.New("openai chat invalid tool delta")
-			}
 			call := calls[*delta.Index]
 			if call == nil {
-				if delta.Type != "function" {
-					return "", errors.New("openai chat missing function tool type")
-				}
 				call = &streaming.ToolAccumulator{}
 				calls[*delta.Index] = call
 			}
-			if delta.ID != "" {
-				if call.ID != "" && call.ID != delta.ID {
+			if delta.ID != nil {
+				if call.ID != "" && call.ID != *delta.ID {
 					return "", errors.New("openai chat conflicting tool ID")
 				}
-				call.ID = delta.ID
+				call.ID = *delta.ID
 			}
-			call.Name += delta.Function.Name
-			call.Arguments += delta.Function.Arguments
+			if delta.Function != nil {
+				if delta.Function.Name != nil {
+					call.Name += *delta.Function.Name
+				}
+				if delta.Function.Arguments != nil {
+					call.Arguments += *delta.Function.Arguments
+				}
+			}
 		}
-		stopReason = choice.FinishReason
+		if choice.FinishReason != nil {
+			stopReason = *choice.FinishReason
+		}
 	}
 }
 

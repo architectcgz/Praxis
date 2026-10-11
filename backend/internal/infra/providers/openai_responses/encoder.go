@@ -19,7 +19,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]json.RawMessage, error) {
 	}
 	var input []json.RawMessage
 	if ctx.SystemPrompt != "" {
-		item, err := json.Marshal(responseItem{Type: "message", Role: "system", Content: []responseContentPart{{Type: "input_text", Text: ctx.SystemPrompt}}})
+		item, err := json.Marshal(inputMessage{Type: "message", Role: "system", Content: []inputText{{Type: "input_text", Text: ctx.SystemPrompt}}})
 		if err != nil {
 			return nil, err
 		}
@@ -38,7 +38,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]json.RawMessage, error) {
 func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	var text strings.Builder
-	appendItem := func(item responseItem) error {
+	appendItem := func(item any) error {
 		encoded, err := json.Marshal(item)
 		if err != nil {
 			return err
@@ -51,7 +51,7 @@ func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 			return nil
 		}
 		// 官方 EasyInputMessage 的历史 assistant 文本同样使用 input_text。
-		err := appendItem(responseItem{Type: "message", Role: string(entry.Role), Content: []responseContentPart{{Type: "input_text", Text: text.String()}}})
+		err := appendItem(inputMessage{Type: "message", Role: string(entry.Role), Content: []inputText{{Type: "input_text", Text: text.String()}}})
 		text.Reset()
 		return err
 	}
@@ -74,7 +74,7 @@ func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
 				return nil, err
 			}
-			if err := appendItem(responseItem{
+			if err := appendItem(inputFunctionCall{
 				Type:      "function_call",
 				CallID:    block.CallID,
 				Name:      block.Name,
@@ -83,8 +83,7 @@ func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 				return nil, err
 			}
 		case appcontext.ContextBlockToolResult:
-			output := block.Text
-			if err := appendItem(responseItem{Type: "function_call_output", CallID: block.CallID, Output: &output}); err != nil {
+			if err := appendItem(inputFunctionOutput{Type: "function_call_output", CallID: block.CallID, Output: block.Text}); err != nil {
 				return nil, err
 			}
 		case appcontext.ContextBlockReasoningState:
@@ -95,15 +94,16 @@ func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 			if state.Protocol != contracts.ProtocolOpenAIResponses {
 				return nil, errors.New("cannot replay another protocol's state in responses")
 			}
-			var item responseOutputItem
-			if err := json.Unmarshal(state.Payload, &item); err != nil {
+			var output responseOutput
+			if err := json.Unmarshal(state.Payload, &output); err != nil {
 				return nil, err
 			}
-			if item.Type != "reasoning" || item.ID == "" {
+			item, ok := output.Value.(*responseReasoningOutput)
+			if !ok || item.Status != nil && *item.Status != "completed" {
 				return nil, errors.New("invalid responses reasoning state")
 			}
 			// 无状态续传不能用 summary 或仅有服务端 ID 的 item 伪造推理状态。
-			if item.EncryptedContent == "" {
+			if stringValue(item.EncryptedContent) == "" {
 				return nil, errors.New("responses stateless reasoning replay requires encrypted_content")
 			}
 			items = append(items, bytes.Clone(state.Payload))
@@ -124,7 +124,9 @@ func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 			if block.ReasoningState == nil {
 				continue
 			}
-			var item responseOutputItem
+			var item struct {
+				EncryptedContent string `json:"encrypted_content"`
+			}
 			if json.Unmarshal(block.ReasoningState.Payload, &item) == nil && item.EncryptedContent != "" {
 				values = append(values, item.EncryptedContent)
 			}

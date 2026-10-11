@@ -9,7 +9,7 @@ import (
 const (
 	ProtocolOpenAIResponses   = "openai_responses"
 	ProtocolAnthropicMessages = "anthropic_messages"
-	ReasoningStateVersion     = 1
+	ReasoningStateVersion     = 2
 	MaxReasoningStateBytes    = 1024 * 1024
 )
 
