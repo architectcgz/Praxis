@@ -7,7 +7,7 @@ func OpenAIChatStopReason(reason string) model.ModelStopReason {
 	switch reason {
 	case "stop":
 		return model.StopCompleted
-	case "tool_calls", "function_call":
+	case "tool_calls":
 		return model.StopToolCalls
 	case "length":
 		return model.StopTruncated

@@ -99,7 +99,8 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 		StreamOptions: chatStreamOptions{
 			IncludeUsage: true,
 		},
-		MaxTokens: request.MaxOutputTokens,
+		MaxCompletionTokens: request.MaxOutputTokens,
+		N:                   1,
 		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Task ID 或上下文摘要。
 		PromptCacheKey: request.SessionReference,
 	}
@@ -124,30 +125,4 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 		return nil, fmt.Errorf("encode openai chat request: %w", err)
 	}
 	return encoded, nil
-}
-
-type chatRequest struct {
-	Model           string            `json:"model"`
-	Messages        []chatMessage     `json:"messages"`
-	Stream          bool              `json:"stream"`
-	StreamOptions   chatStreamOptions `json:"stream_options"`
-	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
-	MaxTokens       int               `json:"max_tokens"`
-	Tools           []chatTool        `json:"tools,omitempty"`
-	PromptCacheKey  string            `json:"prompt_cache_key,omitempty"`
-}
-
-type chatStreamOptions struct {
-	IncludeUsage bool `json:"include_usage"`
-}
-
-type chatTool struct {
-	Type     string                 `json:"type"`
-	Function chatFunctionDefinition `json:"function"`
-}
-
-type chatFunctionDefinition struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
 }

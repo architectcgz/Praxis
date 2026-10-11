@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	appcontext "praxis/internal/core/context"
@@ -86,9 +87,9 @@ func (p *Provider) Stream(
 	httpRequest.Header.Set("accept", "text/event-stream")
 	response, err := streaming.Open(providers.RequestClient(p.client), httpRequest)
 	if err != nil {
-		return nil, fmt.Errorf("anthropic request: %w", err)
+		return nil, fmt.Errorf("anthropic request: %w", streaming.RedactError(err, sensitiveStateValues(request.Context)))
 	}
-	return streaming.Start(ctx, response, decoder{}), nil
+	return streaming.Start(ctx, response, decoder{}, sensitiveStateValues(request.Context)...), nil
 }
 
 func buildPayload(request model.ModelRequest) ([]byte, error) {
@@ -103,30 +104,48 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{
-		"model":    modelID,
-		"messages": encodedContext.Messages,
-		"stream":   true,
-		// 自动缓存随对话增长推进断点，复用包含工具定义和 system 的相同前缀。
-		"cache_control": map[string]string{"type": "ephemeral"},
+	if err := request.Model.Thinking.Validate(request.MaxOutputTokens); err != nil {
+		return nil, err
 	}
-	if reasoning := request.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
-		body["output_config"] = map[string]string{"effort": reasoning}
+	body := anthropicRequest{
+		Model:     modelID,
+		Messages:  encodedContext.Messages,
+		System:    encodedContext.System,
+		Stream:    true,
+		MaxTokens: request.MaxOutputTokens,
+		// 自动缓存随对话增长推进断点，复用工具定义和 system 前缀。
+		CacheControl: anthropicCacheControl{Type: "ephemeral"},
 	}
-	body["max_tokens"] = request.MaxOutputTokens
-	if encodedContext.System != "" {
-		body["system"] = encodedContext.System
+	if request.Model.Thinking.Mode != "" {
+		body.Thinking = &anthropicThinking{Type: request.Model.Thinking.Mode, BudgetTokens: request.Model.Thinking.BudgetTokens}
 	}
-	if len(request.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(request.Tools))
-		for _, tool := range request.Tools {
-			tools = append(tools, map[string]any{
-				"name":         tool.Name,
-				"description":  tool.Description,
-				"input_schema": json.RawMessage(tool.InputSchema),
-			})
+	if reasoning := request.Model.ReasoningLevel; reasoning != "" {
+		if !slices.Contains(request.Model.ReasoningLevels, reasoning) {
+			return nil, errors.New("anthropic effort is not supported by frozen model capabilities")
 		}
-		body["tools"] = tools
+		if reasoning == "off" {
+			if !request.Model.Thinking.SupportsDisabled {
+				return nil, errors.New("anthropic model does not support disabled thinking")
+			}
+			body.Thinking = &anthropicThinking{Type: "disabled"}
+		} else {
+			if !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, reasoning) {
+				return nil, errors.New("unsupported anthropic effort")
+			}
+			body.OutputConfig = &anthropicOutputConfig{Effort: reasoning}
+		}
+	}
+	if body.Thinking != nil && body.Thinking.Type == "enabled" {
+		if err := validateThinkingContinuation(body.Messages); err != nil {
+			return nil, err
+		}
+	}
+	for _, tool := range request.Tools {
+		body.Tools = append(body.Tools, anthropicToolDefinition{
+			Name:        string(tool.Name),
+			Description: tool.Description,
+			InputSchema: json.RawMessage(tool.InputSchema),
+		})
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

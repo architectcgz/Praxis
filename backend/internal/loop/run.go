@@ -168,10 +168,6 @@ func (r *Runner) run(
 		}
 		assistant := model.ContextBlocksFromEvents(response.events)
 		calls := response.toolCalls()
-		if err := validateToolCalls(calls); err != nil {
-			r.emitError(task.AgentID, task.ID, turn.ID, err)
-			return r.settleTurnErr(ctx, turn.ID, err)
-		}
 		metadata := contracts.ToolInvocationContext{
 			TaskID:              task.ID,
 			TurnID:              turn.ID,

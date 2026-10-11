@@ -250,6 +250,7 @@ type ConfiguredModel struct {
 	MaxOutputTokens       int
 	ReasoningLevels       []string
 	DefaultReasoningLevel string
+	Thinking              contracts.ModelThinking
 }
 
 // ModelConfig 是完整的可编辑模型配置，不包含凭据内容。

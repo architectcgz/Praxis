@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"praxis/internal/contracts"
 )
 
 type Role string
@@ -27,19 +29,21 @@ const (
 type BlockKind string
 
 const (
-	BlockText       BlockKind = "text"
-	BlockThinking   BlockKind = "thinking"
-	BlockToolCall   BlockKind = "tool_call"
-	BlockToolResult BlockKind = "tool_result"
+	BlockText        BlockKind = "text"
+	BlockThinking    BlockKind = "thinking"
+	BlockOpaqueState BlockKind = "opaque_state"
+	BlockToolCall    BlockKind = "tool_call"
+	BlockToolResult  BlockKind = "tool_result"
 )
 
 type Block struct {
-	Kind    BlockKind
-	Text    string
-	CallID  string
-	Name    string
-	Input   json.RawMessage `json:",omitempty"`
-	IsError bool
+	Kind          BlockKind
+	Text          string
+	CallID        string
+	Name          string
+	Input         json.RawMessage `json:",omitempty"`
+	IsError       bool
+	ProviderState *contracts.ProviderState `json:",omitempty"`
 }
 
 type MessageData struct {
@@ -90,7 +94,15 @@ func validAuthorKind(kind AuthorKind) bool {
 }
 
 func validateBlock(role Role, block Block) error {
+	if block.Kind != BlockOpaqueState && block.ProviderState != nil {
+		return errors.New("provider state requires an opaque message block")
+	}
 	switch block.Kind {
+	case BlockOpaqueState:
+		if role != RoleAssistant || block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
+			return errors.New("message contains an invalid opaque block")
+		}
+		return block.ProviderState.Validate()
 	case BlockText:
 		if strings.TrimSpace(block.Text) == "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
 			return errors.New("message contains an invalid text block")
@@ -100,12 +112,12 @@ func validateBlock(role Role, block Block) error {
 			return errors.New("message contains an invalid thinking block")
 		}
 	case BlockToolCall:
-		if role != RoleAssistant || strings.TrimSpace(block.CallID) == "" || strings.TrimSpace(block.Name) == "" || block.IsError ||
+		if role != RoleAssistant || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || block.IsError ||
 			(len(block.Input) > 0 && !json.Valid(block.Input)) {
 			return errors.New("message contains an invalid tool call block")
 		}
 	case BlockToolResult:
-		if role != RoleTool || strings.TrimSpace(block.CallID) == "" || strings.TrimSpace(block.Name) == "" || len(block.Input) > 0 {
+		if role != RoleTool || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || len(block.Input) > 0 {
 			return errors.New("message contains an invalid tool result block")
 		}
 	default:

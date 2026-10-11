@@ -78,10 +78,10 @@ func (p *Provider) Stream(
 	if err != nil {
 		return nil, fmt.Errorf(
 			"openai responses request (inputItems=%d payloadBytes=%d): %w",
-			inputItems, len(payload), err,
+			inputItems, len(payload), streaming.RedactError(err, sensitiveStateValues(request.Context)),
 		)
 	}
-	return streaming.Start(ctx, response, decoder{}), nil
+	return streaming.Start(ctx, response, decoder{}, sensitiveStateValues(request.Context)...), nil
 }
 
 func buildPayload(request model.ModelRequest) ([]byte, int, error) {
@@ -99,6 +99,8 @@ func buildPayload(request model.ModelRequest) ([]byte, int, error) {
 		Model:           request.Model.ModelID,
 		Input:           input,
 		Stream:          true,
+		Store:           false,
+		Include:         []string{"reasoning.encrypted_content"},
 		MaxOutputTokens: request.MaxOutputTokens,
 		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Task ID 或上下文摘要。
 		PromptCacheKey: request.SessionReference,
@@ -125,26 +127,4 @@ func buildPayload(request model.ModelRequest) ([]byte, int, error) {
 		return nil, 0, errors.New("openai responses input is required")
 	}
 	return encoded, len(input), nil
-}
-
-type requestPayload struct {
-	Model           string           `json:"model"`
-	Input           []responseItem   `json:"input"`
-	Stream          bool             `json:"stream"`
-	Reasoning       *reasoningConfig `json:"reasoning,omitempty"`
-	MaxOutputTokens int              `json:"max_output_tokens"`
-	Tools           []responseTool   `json:"tools,omitempty"`
-	PromptCacheKey  string           `json:"prompt_cache_key,omitempty"`
-}
-
-type reasoningConfig struct {
-	Effort  string `json:"effort"`
-	Summary string `json:"summary,omitempty"`
-}
-
-type responseTool struct {
-	Type        string          `json:"type"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
 }

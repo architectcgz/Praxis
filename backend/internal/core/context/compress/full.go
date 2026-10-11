@@ -8,13 +8,13 @@ import (
 	appcontext "praxis/internal/core/context"
 )
 
-// FullStrategy 把完整上下文发送给远程 Provider，历史全部替换为摘要。
-// 系统指令和最新用户输入保留原文，持久化消息不会被改写；策略可以跨 Task 复用。
+// FullStrategy 摘要可安全移除的完整历史前缀。
+// 系统指令、最新用户 turn 和未闭合工具链保留原文；不透明载荷不进入摘要。
 type FullStrategy struct{}
 
 var _ Strategy = FullStrategy{}
 
-// Compress 在达到可用输入预算的 90% 时执行完整远程摘要；超窗历史分批合并。
+// Compress 在达到可用输入预算的 90% 时执行安全前缀摘要；超窗历史分批合并。
 // summarize 负责使用冻结模型调用 Provider；失败时不返回残缺上下文、不修改 value。
 func (FullStrategy) Compress(ctx context.Context, value appcontext.ModelContext, options Options, summarize SummarizeFunc) (appcontext.ModelContext, bool, error) {
 	if ctx == nil {
@@ -43,13 +43,8 @@ func (FullStrategy) Compress(ctx context.Context, value appcontext.ModelContext,
 			ContextWindow:        options.ContextWindow,
 		}
 	}
-	userIndex := -1
-	for index, entry := range value.Entries {
-		if entry.Kind == appcontext.ContextEntryUserInput {
-			userIndex = index
-		}
-	}
-	if len(value.Entries) == 0 || len(value.Entries) == 1 && userIndex == 0 {
+	cut := protectedHistoryStart(value)
+	if cut == 0 || len(value.Entries) == 0 {
 		if estimated <= budget {
 			return value, false, nil
 		}
@@ -66,8 +61,8 @@ func (FullStrategy) Compress(ctx context.Context, value appcontext.ModelContext,
 			}},
 		}},
 	}
-	if userIndex >= 0 {
-		compressed.Entries = append(compressed.Entries, value.Entries[userIndex].Clone())
+	for _, entry := range value.Entries[cut:] {
+		compressed.Entries = append(compressed.Entries, entry.Clone())
 	}
 	retainedTokens, err := compressed.EstimatedTokens()
 	if err != nil {
@@ -84,8 +79,8 @@ func (FullStrategy) Compress(ctx context.Context, value appcontext.ModelContext,
 		return appcontext.ModelContext{}, false, errors.New("context summarizer is required")
 	}
 	summaryLimit := min(maxSummaryTokens, options.MaxOutputTokens, max(1, percent(budget, compressionTargetPercent)/4), availableSummary)
-	// 包括系统提示、共享事实和所有工具资料，但只作为 user 角色的 JSON 发送。
-	encoded, err := json.Marshal(value)
+	// 完整工具链作为 JSON 历史资料处理，签名和加密状态绝不能进入摘要输入。
+	encoded, err := json.Marshal(summaryHistory(value.Entries[:cut]))
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}

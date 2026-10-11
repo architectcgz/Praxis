@@ -16,7 +16,7 @@ var _ Strategy = PartialStrategy{}
 
 // Compress 在输入达到可用预算的 90% 时摘要较早历史，目标降至约 60%。
 // 系统提示、共享事实、最新用户输入、上一条最终回答和最新完整工具交互保留原文。
-// 历史过大时分批摘要；成功前不改写 value，无法安全压缩则返回错误。
+// 最新用户 turn 与未闭合工具链不可压缩；不透明载荷不进入摘要，无法安全压缩则返回错误。
 func (PartialStrategy) Compress(ctx context.Context, value appcontext.ModelContext, options Options, summarize SummarizeFunc) (appcontext.ModelContext, bool, error) {
 	if ctx == nil {
 		return appcontext.ModelContext{}, false, errors.New("context compression context is required")
@@ -69,9 +69,10 @@ func (PartialStrategy) Compress(ctx context.Context, value appcontext.ModelConte
 	}
 
 	summaryLimit := min(maxSummaryTokens, options.MaxOutputTokens, max(1, percent(budget, compressionTargetPercent)/4))
+	protectedStart := protectedHistoryStart(value)
 	cut, removedTokens := 0, 0
 	pending := map[string]bool{}
-	for end := 1; end < len(value.Entries); end++ {
+	for end := 1; end <= protectedStart && end < len(value.Entries); end++ {
 		entry := value.Entries[end-1]
 		if !pinned(end - 1) {
 			encoded, err := json.Marshal(entry)
@@ -126,7 +127,7 @@ func (PartialStrategy) Compress(ctx context.Context, value appcontext.ModelConte
 		return appcontext.ModelContext{}, false, windowError()
 	}
 	summaryLimit = min(summaryLimit, availableSummary)
-	encoded, err := json.Marshal(history)
+	encoded, err := json.Marshal(summaryHistory(history))
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}

@@ -225,6 +225,8 @@ func (r *Registry) FreezeTaskModel(providerID, modelID, reasoningLevel string) (
 		ProviderID:      selected.ProviderID,
 		ModelID:         selected.ModelID,
 		ReasoningLevel:  selected.ReasoningLevel,
+		ReasoningLevels: slices.Clone(configured.ReasoningLevels),
+		Thinking:        configured.Thinking,
 		APIFormat:       string(configured.APIFormat),
 		ContextWindow:   configured.ContextWindow,
 		MaxOutputTokens: configured.MaxOutputTokens,

@@ -54,6 +54,7 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 			MaxOutputTokens:       model.MaxOutputTokens,
 			ReasoningLevels:       model.ReasoningLevels,
 			DefaultReasoningLevel: model.DefaultReasoningLevel,
+			Thinking:              model.Thinking,
 		})
 	}
 	return document, nil
@@ -94,6 +95,7 @@ func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.Sa
 			MaxOutputTokens:       model.MaxOutputTokens,
 			ReasoningLevels:       model.ReasoningLevels,
 			DefaultReasoningLevel: model.DefaultReasoningLevel,
+			Thinking:              model.Thinking,
 		})
 	}
 	canonical, err := request.NewSaveModelConfig(candidate)

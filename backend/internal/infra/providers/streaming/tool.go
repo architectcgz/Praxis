@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
+
 	"praxis/internal/contracts"
 
 	"praxis/internal/core/model"
@@ -16,16 +18,25 @@ type ToolAccumulator struct {
 	Arguments string
 }
 
-// EmitTool 将累积完成的工具调用转换为统一的模型流事件并发送。
-// 缺少工具名时返回协议错误，避免丢弃未完成调用后将响应误判为自然完成；空参数使用空 JSON 对象。
+// ValidateToolCall 校验完整调用的 canonical 身份和 JSON 对象；不修补缺失参数。
+// 流式分片允许暂时无效，只有协议确认调用完整后才执行本校验。
+func ValidateToolCall(call *ToolAccumulator) error {
+	if call == nil || call.ID == "" || call.Name == "" || call.ID != strings.TrimSpace(call.ID) || call.Name != strings.TrimSpace(call.Name) {
+		return errors.New("provider emitted an incomplete or non-canonical tool identity")
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(call.Arguments), &object); err != nil || object == nil {
+		return errors.New("provider tool arguments must be a complete JSON object")
+	}
+	return nil
+}
+
+// EmitTool 发送已经完成的工具调用；只负责协议校验，Schema 和授权由工具执行边界负责。
 func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
-	if call == nil || call.Name == "" {
-		return errors.New("provider emitted an incomplete tool call")
+	if err := ValidateToolCall(call); err != nil {
+		return err
 	}
 	args := json.RawMessage(call.Arguments)
-	if len(bytes.TrimSpace(args)) == 0 {
-		args = json.RawMessage(`{}`)
-	}
 	return emit(model.ModelStreamEvent{
 		Kind: model.StreamToolCall,
 		ToolCall: contracts.ToolCall{

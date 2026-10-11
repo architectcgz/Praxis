@@ -29,12 +29,19 @@ export type GroupConfigOption = {
 
 export type ModelAPIFormat = 'anthropic_messages' | 'openai_responses' | 'openai_chat_completions'
 
+export type ModelThinking = {
+    mode?: string
+    budgetTokens?: number
+    supportsDisabled?: boolean
+}
+
 export type ModelConfigOption = {
     providerId: string
     modelId: string
     label: string
     groupId: string
     apiFormat: ModelAPIFormat
+    thinking?: ModelThinking
     contextWindow: number
     maxOutputTokens: number
     reasoningLevels: string[]
@@ -141,12 +148,28 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
                 label: stringValue(model.label),
                 groupId: stringValue(model.groupId),
                 apiFormat,
+                thinking: normalizeThinking(model.thinking),
                 contextWindow: model.contextWindow,
                 maxOutputTokens: model.maxOutputTokens,
                 reasoningLevels: model.reasoningLevels == null ? [] : stringArray(model.reasoningLevels),
                 defaultReasoningLevel: model.defaultReasoningLevel == null ? '' : stringValue(model.defaultReasoningLevel),
             }
         }),
+    }
+}
+
+// 保留冻结所需的 Thinking 能力，避免设置页保存时丢失磁盘配置。
+function normalizeThinking(value: unknown): ModelThinking | undefined {
+    if (value == null) return undefined
+    if (!isRecord(value) || (value.mode != null && typeof value.mode !== 'string') ||
+        (value.budgetTokens != null && (typeof value.budgetTokens !== 'number' || !Number.isSafeInteger(value.budgetTokens))) ||
+        (value.supportsDisabled != null && typeof value.supportsDisabled !== 'boolean')) {
+        throw new Error('Thinking 配置响应无效。')
+    }
+    return {
+        mode: value.mode as string | undefined,
+        budgetTokens: value.budgetTokens as number | undefined,
+        supportsDisabled: value.supportsDisabled as boolean | undefined,
     }
 }
 

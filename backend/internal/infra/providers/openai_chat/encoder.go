@@ -4,16 +4,17 @@ import (
 	"fmt"
 
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/infra/providers/streaming"
 )
 
-// encodeContext 只映射上下文协议；未支持的内容块返回错误，不读取模型配置。
+// encodeContext 仅编码官方文本与工具消息，未知内容和其他协议状态均显式拒绝。
 func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
+	if err := ctx.Validate(); err != nil {
+		return nil, err
+	}
 	messages := make([]chatMessage, 0, len(ctx.Entries)+1)
 	if ctx.SystemPrompt != "" {
-		messages = append(messages, chatMessage{
-			Role:    "system",
-			Content: ctx.SystemPrompt,
-		})
+		messages = append(messages, chatMessage{Role: "system", Content: &ctx.SystemPrompt})
 	}
 	for index, entry := range ctx.Entries {
 		encoded, err := chatMessagesFromContext(entry)
@@ -26,10 +27,10 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 }
 
 func chatMessagesFromContext(entry appcontext.ContextEntry) ([]chatMessage, error) {
-	messages := make([]chatMessage, 0, 1)
+	var messages []chatMessage
 	result := chatMessage{Role: string(entry.Role)}
-	flushMessage := func() {
-		if result.Content != "" || len(result.ToolCalls) > 0 {
+	flush := func() {
+		if result.Content != nil || len(result.ToolCalls) > 0 {
 			messages = append(messages, result)
 			result = chatMessage{Role: string(entry.Role)}
 		}
@@ -37,49 +38,35 @@ func chatMessagesFromContext(entry appcontext.ContextEntry) ([]chatMessage, erro
 	for index, block := range entry.Content {
 		switch block.Kind {
 		case appcontext.ContextBlockText:
-			result.Content += block.Text
+			if entry.Role == appcontext.ContextRoleTool {
+				return nil, fmt.Errorf("tool role requires tool results")
+			}
+			if result.Content == nil {
+				text := block.Text
+				result.Content = &text
+			} else {
+				*result.Content += block.Text
+			}
 		case appcontext.ContextBlockToolCall:
+			if entry.Role != appcontext.ContextRoleAssistant {
+				return nil, fmt.Errorf("tool call requires assistant role")
+			}
+			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
+				return nil, err
+			}
 			result.ToolCalls = append(result.ToolCalls, chatToolCall{
-				ID:   block.CallID,
-				Type: "function",
-				Function: chatFunctionCall{
-					Name:      block.Name,
-					Arguments: string(block.Input),
-				},
+				ID:       block.CallID,
+				Type:     "function",
+				Function: chatFunctionCall{Name: block.Name, Arguments: string(block.Input)},
 			})
 		case appcontext.ContextBlockToolResult:
-			flushMessage()
-			// Chat 每条 tool 消息只能引用一个调用，不能合并结果或覆盖前一个 CallID。
-			messages = append(messages, chatMessage{
-				Role:       "tool",
-				ToolCallID: block.CallID,
-				Content:    block.Text,
-			})
+			flush()
+			text := block.Text
+			messages = append(messages, chatMessage{Role: "tool", ToolCallID: block.CallID, Content: &text})
 		default:
 			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
 		}
 	}
-	flushMessage()
-	if len(messages) == 0 {
-		messages = append(messages, result)
-	}
+	flush()
 	return messages, nil
-}
-
-type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-}
-
-type chatToolCall struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function chatFunctionCall `json:"function"`
-}
-
-type chatFunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
 }

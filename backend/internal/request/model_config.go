@@ -37,6 +37,7 @@ type ConfiguredModel struct {
 	MaxOutputTokens       int
 	ReasoningLevels       []string
 	DefaultReasoningLevel string
+	Thinking              contracts.ModelThinking
 }
 
 // SaveModelConfig 是已准备好的模型配置请求。
@@ -96,6 +97,11 @@ func NewSaveModelConfig(value SaveModelConfig) (SaveModelConfig, error) {
 			MaxOutputTokens:       model.MaxOutputTokens,
 			ReasoningLevels:       levels,
 			DefaultReasoningLevel: strings.TrimSpace(model.DefaultReasoningLevel),
+			Thinking: contracts.ModelThinking{
+				Mode:             strings.TrimSpace(model.Thinking.Mode),
+				BudgetTokens:     model.Thinking.BudgetTokens,
+				SupportsDisabled: model.Thinking.SupportsDisabled,
+			},
 		}
 		for providerIndex := range config.Providers {
 			if config.Providers[providerIndex].ID == providerID {

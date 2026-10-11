@@ -3,6 +3,8 @@ package dto
 import (
 	"encoding/json"
 	"time"
+
+	"praxis/internal/contracts"
 )
 
 type SessionSnapshot struct {
@@ -150,15 +152,16 @@ type GroupConfigOption struct {
 
 // ModelConfigOption carries every field the settings UI needs to edit a model.
 type ModelConfigOption struct {
-	ProviderID            string   `json:"providerId"`
-	ModelID               string   `json:"modelId"`
-	Label                 string   `json:"label"`
-	GroupID               string   `json:"groupId"`
-	APIFormat             string   `json:"apiFormat"`
-	ContextWindow         int      `json:"contextWindow"`
-	MaxOutputTokens       int      `json:"maxOutputTokens"`
-	ReasoningLevels       []string `json:"reasoningLevels"`
-	DefaultReasoningLevel string   `json:"defaultReasoningLevel"`
+	ProviderID            string                  `json:"providerId"`
+	ModelID               string                  `json:"modelId"`
+	Label                 string                  `json:"label"`
+	GroupID               string                  `json:"groupId"`
+	APIFormat             string                  `json:"apiFormat"`
+	ContextWindow         int                     `json:"contextWindow"`
+	MaxOutputTokens       int                     `json:"maxOutputTokens"`
+	ReasoningLevels       []string                `json:"reasoningLevels"`
+	DefaultReasoningLevel string                  `json:"defaultReasoningLevel"`
+	Thinking              contracts.ModelThinking `json:"thinking,omitzero"`
 }
 
 // ModelConfigDocument is one editable model registry document.

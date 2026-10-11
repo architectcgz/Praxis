@@ -7,6 +7,8 @@ import (
 	"slices"
 	"unicode"
 	"unicode/utf8"
+
+	"praxis/internal/contracts"
 )
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -111,6 +113,22 @@ func validateModels(provider Provider, groupsSeen map[string]struct{}) error {
 }
 
 func validateCapabilities(configured Model) error {
+	if err := configured.Thinking.Validate(configured.MaxOutputTokens); err != nil {
+		return err
+	}
+	if configured.APIFormat != APIFormatAnthropicMessages && configured.Thinking != (contracts.ModelThinking{}) {
+		return errors.New("thinking configuration requires anthropic_messages")
+	}
+	if configured.APIFormat == APIFormatAnthropicMessages {
+		for _, level := range configured.ReasoningLevels {
+			if !slices.Contains([]string{"off", "low", "medium", "high", "xhigh", "max"}, level) {
+				return errors.New("unsupported Anthropic effort level")
+			}
+			if level == "off" && !configured.Thinking.SupportsDisabled {
+				return errors.New("off reasoning requires disabled thinking capability")
+			}
+		}
+	}
 	if err := validateReasoningLevels(configured.ReasoningLevels, configured.DefaultReasoningLevel); err != nil {
 		return err
 	}

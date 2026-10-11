@@ -86,6 +86,7 @@ func buildModelRequest(
 	catalog toolcontracts.ToolCatalog,
 ) model.ModelRequest {
 	request.Context = modelContext.Clone()
+	request.Model = request.Model.Clone()
 	request.Tools = allowedToolDefinitions(permissions, catalog)
 	return request
 }

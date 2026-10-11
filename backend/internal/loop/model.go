@@ -2,10 +2,12 @@ package loop
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"praxis/internal/core/model"
 )
@@ -27,11 +29,17 @@ func requestModel(
 	if stream == nil {
 		return modelResponse{}, errors.New("provider stream is required")
 	}
-	input, err := stream.Stream(ctx, request)
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	input, err := stream.Stream(streamCtx, request)
 	if err != nil {
 		return modelResponse{}, err
 	}
-	return collectModelResponse(ctx, input, onEvent)
+	response, err := collectModelResponse(streamCtx, input, onEvent)
+	if err == nil {
+		err = response.validateProtocolState(request.Model.APIFormat)
+	}
+	return response, err
 }
 
 // collectModelResponse 只消费模型事件流；预算、任务失败分类和实时事件映射由调用方负责。
@@ -62,23 +70,51 @@ func collectModelResponse(
 					response.textBytes += len(event.Text)
 				}
 				last := len(response.events) - 1
-				if last >= 0 && response.events[last].Kind == event.Kind {
+				if last >= 0 && response.events[last].Kind == event.Kind && sameOutputIndex(response.events[last].OutputIndex, event.OutputIndex) {
 					response.events[last].Text += event.Text
 				} else {
-					response.events = append(response.events, model.ModelStreamEvent{Kind: event.Kind, Text: event.Text})
+					response.events = append(response.events, model.ModelStreamEvent{Kind: event.Kind, Text: event.Text, OutputIndex: cloneOutputIndex(event.OutputIndex)})
 				}
 			case model.StreamToolCall:
-				call := event.ToolCall.Snapshot()
-				response.events = append(response.events, model.ModelStreamEvent{Kind: model.StreamToolCall, ToolCall: call})
+				call := event.ToolCall
+				call.Arguments = bytes.Clone(call.Arguments)
+				response.events = append(response.events, model.ModelStreamEvent{Kind: model.StreamToolCall, ToolCall: call, OutputIndex: cloneOutputIndex(event.OutputIndex)})
 				// 回调与已收集结果各自拥有参数副本，观察者不能改写待执行调用。
 				event.ToolCall = call
 				event.ToolCall.Arguments = bytes.Clone(call.Arguments)
+			case model.StreamProtocolState:
+				if err := event.ProtocolState.Validate(); err != nil {
+					return response, err
+				}
+				response.events = append(response.events, model.ModelStreamEvent{
+					Kind:          model.StreamProtocolState,
+					ProtocolState: event.ProtocolState.Clone(),
+					OutputIndex:   cloneOutputIndex(event.OutputIndex),
+				})
+				// 不透明状态仅保存在内部，观察者不接收签名或加密载荷。
+				continue
 			case model.StreamUsage:
 				if event.Usage == nil || !event.Usage.Valid() {
 					continue
 				}
 			case model.StreamComplete:
+				if err := ctx.Err(); err != nil {
+					return response, err
+				}
 				response.stopReason = event.StopReason
+				indexed := len(response.events) > 0 && response.events[0].OutputIndex != nil
+				for _, content := range response.events {
+					if (content.OutputIndex != nil) != indexed || content.OutputIndex != nil && *content.OutputIndex < 0 {
+						return response, errors.New("provider emitted inconsistent output ordering")
+					}
+				}
+				// 输出块按协议顺序重放；工具事件可在流终态才发送，不改变块的历史位置。
+				slices.SortStableFunc(response.events, func(a, b model.ModelStreamEvent) int {
+					if a.OutputIndex == nil || b.OutputIndex == nil {
+						return 0
+					}
+					return cmp.Compare(*a.OutputIndex, *b.OutputIndex)
+				})
 				return response, response.validateStopReason()
 			case model.StreamError:
 				if event.Err != nil {
@@ -125,7 +161,7 @@ func (r modelResponse) validateStopReason() error {
 	default:
 		return fmt.Errorf("provider returned an unknown stop reason %q", r.stopReason)
 	}
-	return nil
+	return validateToolCalls(r.toolCalls())
 }
 
 func (r modelResponse) toolCalls() []ToolCall {
@@ -138,4 +174,40 @@ func (r modelResponse) toolCalls() []ToolCall {
 		}
 	}
 	return calls
+}
+
+func cloneOutputIndex(index *int) *int {
+	if index == nil {
+		return nil
+	}
+	copy := *index
+	return &copy
+}
+
+func sameOutputIndex(a, b *int) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+func (r modelResponse) validateProtocolState(protocol string) error {
+	seen := map[string]bool{}
+	seenIndices := map[int]bool{}
+	for _, event := range r.events {
+		if event.Kind != model.StreamProtocolState {
+			continue
+		}
+		state := event.ProtocolState
+		if state.Protocol != protocol {
+			return errors.New("provider state does not match the frozen request protocol")
+		}
+		if event.OutputIndex == nil || seenIndices[*event.OutputIndex] {
+			return errors.New("provider state has missing or conflicting output identity")
+		}
+		seenIndices[*event.OutputIndex] = true
+		key := string(state.Payload)
+		if seen[key] {
+			return errors.New("provider emitted duplicate protocol state")
+		}
+		seen[key] = true
+	}
+	return nil
 }

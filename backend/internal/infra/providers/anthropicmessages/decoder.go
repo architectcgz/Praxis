@@ -1,16 +1,12 @@
 package anthropicmessages
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"math"
-	"slices"
-	"strings"
 
 	"praxis/internal/contracts"
 	"praxis/internal/core/model"
@@ -19,126 +15,295 @@ import (
 )
 
 type decoder struct{}
+type contentBlockState struct {
+	Block            anthropicContentBlock
+	Raw              map[string]json.RawMessage
+	Arguments        string
+	HasArgumentDelta bool
+	Closed           bool
+	State            *contracts.ProviderState
+}
 
-// Decode 将 SSE 转为有序模型事件并返回统一停止原因；协议错误或取消时返回错误。
-func (decoder) Decode(
-	ctx context.Context,
-	reader *streaming.SSEReader,
-	emit streaming.EmitFunc,
-) (model.ModelStopReason, error) {
-	tools := map[int]*toolAccumulator{}
-	var usage *model.ModelUsage
-	var stopReason string
+// Decode 跟踪每个 content block 的完整生命周期；签名和 redacted 状态仅内部保存。
+// 工具参数在块关闭时校验，但只有 message_stop 的正常工具终态才发送调用。
+func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (model.ModelStopReason, error) {
+	blocks := map[int]*contentBlockState{}
+	started, stopReason := false, ""
+	var usage *anthropicMessageUsage
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		sseEvent, err := reader.Next()
+		sse, err := reader.Next()
 		if errors.Is(err, io.EOF) {
 			return "", streaming.ErrUnexpectedEOF
 		}
 		if err != nil {
 			return "", err
 		}
-		data := strings.TrimSpace(sseEvent.Data)
-		var event struct {
-			Type  string        `json:"type"`
-			Index int           `json:"index"`
-			Usage *messageUsage `json:"usage"`
-			Delta struct {
-				Type        string `json:"type"`
-				Text        string `json:"text"`
-				Thinking    string `json:"thinking"`
-				PartialJSON string `json:"partial_json"`
-				StopReason  string `json:"stop_reason"`
-			} `json:"delta"`
-			ContentBlock struct {
-				Type string `json:"type"`
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"content_block"`
-			Message struct {
-				Usage *messageUsage `json:"usage"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		var event anthropicStreamEvent
+		if err := json.Unmarshal([]byte(sse.Data), &event); err != nil {
 			return "", fmt.Errorf("decode anthropic stream event: %w", err)
 		}
+		if event.Type == "" || sse.Type != "" && sse.Type != event.Type {
+			return "", errors.New("anthropic event type mismatch")
+		}
 		switch event.Type {
+		case "ping":
+			continue
+		case "error":
+			if event.Error == nil {
+				return "", errors.New("anthropic error event missing details")
+			}
+			return "", fmt.Errorf("anthropic stream error (%s): %s", event.Error.Type, event.Error.Message)
 		case "message_start":
-			usage = normalizeMessageUsage(event.Message.Usage)
-			if usage != nil {
-				if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
+			if started || event.Message == nil || event.Message.ID == "" || event.Message.Role != "assistant" || len(event.Message.Content) != 0 {
+				return "", errors.New("anthropic invalid message_start")
+			}
+			started, usage = true, event.Message.Usage
+			if err := emitMessageUsage(emit, usage); err != nil {
+				return "", err
+			}
+		case "content_block_start":
+			if !started || stopReason != "" || event.Index == nil || *event.Index < 0 || blocks[*event.Index] != nil {
+				return "", errors.New("anthropic invalid or duplicate block start")
+			}
+			var block anthropicContentBlock
+			if err := json.Unmarshal(event.ContentBlock, &block); err != nil {
+				return "", err
+			}
+			state := &contentBlockState{Block: block}
+			if err := json.Unmarshal(event.ContentBlock, &state.Raw); err != nil {
+				return "", err
+			}
+			index := *event.Index
+			switch block.Type {
+			case "text", "thinking":
+				text, kind := block.Text, model.StreamTextDelta
+				if block.Type == "thinking" {
+					text, kind = block.Thinking, model.StreamThinkingDelta
+				}
+				if text != "" {
+					if err := emit(model.ModelStreamEvent{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
+						return "", err
+					}
+				}
+			case "redacted_thinking":
+				if block.Data == "" {
+					return "", errors.New("anthropic redacted_thinking missing data")
+				}
+			case "tool_use":
+				state.Arguments = string(block.Input)
+			default:
+				return "", fmt.Errorf("anthropic unsupported content block %q", block.Type)
+			}
+			blocks[index] = state
+		case "content_block_delta":
+			state, index, err := activeContentBlock(blocks, event.Index)
+			if err != nil {
+				return "", err
+			}
+			delta := event.Delta
+			kind, text := model.ModelStreamEventKind(""), ""
+			switch delta.Type {
+			case "text_delta":
+				if state.Block.Type != "text" {
+					return "", errors.New("anthropic text delta targets wrong block")
+				}
+				state.Block.Text += delta.Text
+				kind, text = model.StreamTextDelta, delta.Text
+			case "thinking_delta":
+				if state.Block.Type != "thinking" {
+					return "", errors.New("anthropic thinking delta targets wrong block")
+				}
+				state.Block.Thinking += delta.Thinking
+				kind, text = model.StreamThinkingDelta, delta.Thinking
+			case "signature_delta":
+				if state.Block.Type != "thinking" {
+					return "", errors.New("anthropic signature delta targets wrong block")
+				}
+				state.Block.Signature += delta.Signature
+			case "input_json_delta":
+				if state.Block.Type != "tool_use" {
+					return "", errors.New("anthropic input delta targets wrong block")
+				}
+				if !state.HasArgumentDelta {
+					// 官方 start 的空对象是分片占位符；不能把它拼到后续 JSON 前面。
+					var initial map[string]json.RawMessage
+					if json.Unmarshal(state.Block.Input, &initial) != nil || initial == nil || len(initial) != 0 {
+						return "", errors.New("anthropic input delta has conflicting initial input")
+					}
+					state.Arguments, state.HasArgumentDelta = "", true
+				}
+				state.Arguments += delta.PartialJSON
+			default:
+				continue
+			}
+			if text != "" {
+				if err := emit(model.ModelStreamEvent{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
 					return "", err
 				}
 			}
-		case "content_block_start":
-			if event.ContentBlock.Type == "tool_use" {
-				tools[event.Index] = &toolAccumulator{id: event.ContentBlock.ID, name: event.ContentBlock.Name}
+		case "content_block_stop":
+			state, _, err := activeContentBlock(blocks, event.Index)
+			if err != nil {
+				return "", err
 			}
-		case "content_block_delta":
-			switch event.Delta.Type {
-			case "text_delta":
-				if event.Delta.Text != "" {
-					if err := emit(model.ModelStreamEvent{Kind: model.StreamTextDelta, Text: event.Delta.Text}); err != nil {
-						return "", err
-					}
-				}
-			case "thinking_delta":
-				if event.Delta.Thinking != "" {
-					if err := emit(model.ModelStreamEvent{Kind: model.StreamThinkingDelta, Text: event.Delta.Thinking}); err != nil {
-						return "", err
-					}
-				}
-			case "input_json_delta":
-				if tool := tools[event.Index]; tool != nil {
-					tool.arguments += event.Delta.PartialJSON
+			if state.Block.Type == "tool_use" {
+				if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: state.Block.ID, Name: state.Block.Name, Arguments: state.Arguments}); err != nil {
+					return "", err
 				}
 			}
+			if state.Block.Type == "thinking" || state.Block.Type == "redacted_thinking" {
+				if state.Block.Type == "thinking" {
+					state.Raw["thinking"], _ = json.Marshal(state.Block.Thinking)
+					state.Raw["signature"], _ = json.Marshal(state.Block.Signature)
+				}
+				payload, err := json.Marshal(state.Raw)
+				if err != nil {
+					return "", err
+				}
+				state.State = &contracts.ProviderState{Protocol: contracts.ProtocolAnthropicMessages, Version: contracts.ProviderStateVersion, Payload: payload}
+				if err := state.State.Validate(); err != nil {
+					return "", err
+				}
+			}
+			state.Closed = true
 		case "message_delta":
-			// message_delta 的输出计数是累计值，保留起始输入计数并替换输出。
-			if usage != nil && event.Usage != nil && event.Usage.OutputTokens != nil {
-				next := *usage
-				next.OutputTokens = event.Usage.OutputTokens
-				if next.Valid() && (usage.OutputTokens == nil || *next.OutputTokens >= *usage.OutputTokens) {
-					usage = &next
-					if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {
-						return "", err
-					}
+			if !started {
+				return "", errors.New("anthropic message_delta before message_start")
+			}
+			for _, block := range blocks {
+				if !block.Closed {
+					return "", errors.New("anthropic message_delta before block stop")
 				}
 			}
 			if event.Delta.StopReason != "" {
+				if stopReason != "" {
+					return "", errors.New("anthropic duplicate stop_reason")
+				}
 				stopReason = event.Delta.StopReason
 			}
-		case "message_stop":
-			if stopReason == "" {
-				return "", errors.New("anthropic stream ended without stop_reason")
-			}
-			reason := providers.AnthropicStopReason(stopReason)
-			if reason == model.StopCompleted || reason == model.StopToolCalls {
-				if err := emitTools(emit, tools); err != nil {
+			if event.Usage != nil {
+				usage, err = mergeMessageUsage(usage, event.Usage)
+				if err != nil {
+					return "", err
+				}
+				if err := emitMessageUsage(emit, usage); err != nil {
 					return "", err
 				}
 			}
+		case "message_stop":
+			if !started {
+				return "", errors.New("anthropic message_stop before message_start")
+			}
+			reason := providers.AnthropicStopReason(stopReason)
+			if reason == model.StopUnknown {
+				return "", fmt.Errorf("anthropic invalid stop_reason %q", stopReason)
+			}
+			for index := range len(blocks) {
+				if blocks[index] == nil || !blocks[index].Closed {
+					return "", errors.New("anthropic missing or unclosed content block")
+				}
+			}
+			if reason != model.StopCompleted && reason != model.StopToolCalls {
+				return reason, nil
+			}
+			seen, toolCount := map[string]bool{}, 0
+			for index := range len(blocks) {
+				block := blocks[index]
+				if block.Block.Type == "thinking" && block.Block.Signature == "" {
+					return "", errors.New("anthropic thinking block missing signature")
+				}
+				if block.Block.Type == "tool_use" {
+					if seen[block.Block.ID] {
+						return "", errors.New("anthropic duplicate tool_use ID")
+					}
+					seen[block.Block.ID] = true
+					toolCount++
+				}
+			}
+			if reason == model.StopCompleted && toolCount != 0 || reason == model.StopToolCalls && toolCount == 0 {
+				return "", errors.New("anthropic tool blocks conflict with stop_reason")
+			}
+			for index := range len(blocks) {
+				block := blocks[index]
+				if block.State != nil {
+					if err := emit(model.ModelStreamEvent{Kind: model.StreamProtocolState, ProtocolState: block.State.Clone(), OutputIndex: &index}); err != nil {
+						return "", err
+					}
+				}
+				if block.Block.Type == "tool_use" {
+					if err := streaming.EmitTool(func(event model.ModelStreamEvent) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: block.Block.ID, Name: block.Block.Name, Arguments: block.Arguments}); err != nil {
+						return "", err
+					}
+				}
+			}
 			return reason, nil
-		case "error":
-			return "", errors.New("anthropic stream returned an error")
+		default:
+			// 未知未来事件不修改现有状态，不用于推断终态或调用完整性。
 		}
 	}
 }
 
-type messageUsage struct {
-	InputTokens              *int64 `json:"input_tokens"`
-	OutputTokens             *int64 `json:"output_tokens"`
-	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+func activeContentBlock(blocks map[int]*contentBlockState, index *int) (*contentBlockState, int, error) {
+	if index == nil || *index < 0 || blocks[*index] == nil || blocks[*index].Closed {
+		return nil, 0, errors.New("anthropic event references missing or closed block")
+	}
+	return blocks[*index], *index, nil
 }
 
-func normalizeMessageUsage(reported *messageUsage) *model.ModelUsage {
+func mergeMessageUsage(previous, delta *anthropicMessageUsage) (*anthropicMessageUsage, error) {
+	var next anthropicMessageUsage
+	if previous != nil {
+		next = *previous
+	}
+	before := []*int64{
+		next.InputTokens,
+		next.OutputTokens,
+		next.CacheReadInputTokens,
+		next.CacheCreationInputTokens,
+	}
+	after := []*int64{
+		delta.InputTokens,
+		delta.OutputTokens,
+		delta.CacheReadInputTokens,
+		delta.CacheCreationInputTokens,
+	}
+	targets := []**int64{
+		&next.InputTokens,
+		&next.OutputTokens,
+		&next.CacheReadInputTokens,
+		&next.CacheCreationInputTokens,
+	}
+	for index, value := range after {
+		if value == nil {
+			continue
+		}
+		if *value < 0 || before[index] != nil && *value < *before[index] {
+			return nil, errors.New("anthropic cumulative usage decreased")
+		}
+		copy := *value
+		*targets[index] = &copy
+	}
+	return &next, nil
+}
+
+func emitMessageUsage(emit streaming.EmitFunc, reported *anthropicMessageUsage) error {
+	if reported == nil {
+		return nil
+	}
+	usage := normalizeMessageUsage(reported)
+	if usage == nil {
+		return errors.New("anthropic invalid usage")
+	}
+	return emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage})
+}
+
+func normalizeMessageUsage(reported *anthropicMessageUsage) *model.ModelUsage {
 	if reported == nil || reported.InputTokens == nil || *reported.InputTokens < 0 {
 		return nil
 	}
-	// Anthropic 的 input_tokens 不含缓存读取和写入，统一分母时需补上两者。
 	total := *reported.InputTokens
 	for _, count := range []*int64{reported.CacheReadInputTokens, reported.CacheCreationInputTokens} {
 		if count != nil {
@@ -148,43 +313,22 @@ func normalizeMessageUsage(reported *messageUsage) *model.ModelUsage {
 			total += *count
 		}
 	}
+	// 用量事件不可共享后续会修改的计数器；缓存计数计入统一输入分母。
+	copyCount := func(value *int64) *int64 {
+		if value == nil {
+			return nil
+		}
+		copy := *value
+		return &copy
+	}
 	usage := &model.ModelUsage{
 		InputTokens:              total,
-		OutputTokens:             reported.OutputTokens,
-		CacheReadInputTokens:     reported.CacheReadInputTokens,
-		CacheCreationInputTokens: reported.CacheCreationInputTokens,
+		OutputTokens:             copyCount(reported.OutputTokens),
+		CacheReadInputTokens:     copyCount(reported.CacheReadInputTokens),
+		CacheCreationInputTokens: copyCount(reported.CacheCreationInputTokens),
 	}
 	if !usage.Valid() {
 		return nil
 	}
 	return usage
-}
-
-type toolAccumulator struct{ id, name, arguments string }
-
-func emitTool(emit streaming.EmitFunc, tool *toolAccumulator) error {
-	if tool == nil || tool.name == "" {
-		return errors.New("anthropic emitted an incomplete tool call")
-	}
-	args := json.RawMessage(tool.arguments)
-	if len(bytes.TrimSpace(args)) == 0 {
-		args = json.RawMessage(`{}`)
-	}
-	return emit(model.ModelStreamEvent{
-		Kind: model.StreamToolCall,
-		ToolCall: contracts.ToolCall{
-			ID:        tool.id,
-			Name:      contracts.ToolName(tool.name),
-			Arguments: args,
-		},
-	})
-}
-
-func emitTools(emit streaming.EmitFunc, tools map[int]*toolAccumulator) error {
-	for _, index := range slices.Sorted(maps.Keys(tools)) {
-		if err := emitTool(emit, tools[index]); err != nil {
-			return err
-		}
-	}
-	return nil
 }

@@ -13,6 +13,7 @@ const (
 	StreamTextDelta     ModelStreamEventKind = "text_delta"
 	StreamThinkingDelta ModelStreamEventKind = "thinking_delta"
 	StreamToolCall      ModelStreamEventKind = "tool_call"
+	StreamProtocolState ModelStreamEventKind = "protocol_state"
 	StreamUsage         ModelStreamEventKind = "usage"
 	StreamComplete      ModelStreamEventKind = "complete"
 	StreamError         ModelStreamEventKind = "error"
@@ -34,12 +35,15 @@ const (
 
 // ModelStreamEvent 是单次模型请求的 Provider 中立流事件。
 type ModelStreamEvent struct {
-	Kind       ModelStreamEventKind
-	Text       string
-	ToolCall   contracts.ToolCall
-	Usage      *ModelUsage
-	StopReason ModelStopReason
-	Err        error
+	Kind          ModelStreamEventKind
+	Text          string
+	ToolCall      contracts.ToolCall
+	Usage         *ModelUsage
+	StopReason    ModelStopReason
+	Err           error
+	ProtocolState *contracts.ProviderState
+	// OutputIndex 保存协议输出块顺序，Loop 收集后按此顺序构造历史，不影响实时展示。
+	OutputIndex *int
 }
 
 // ModelStream 定义模型调用方消费的统一模型流接口。

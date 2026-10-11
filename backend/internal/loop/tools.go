@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
@@ -12,10 +13,12 @@ import (
 
 // validateToolCalls 检查模型输出契约；具体参数规范化和安全授权不在 loop 内重复执行。
 func validateToolCalls(calls []ToolCall) error {
+	seen := map[string]bool{}
 	for _, call := range calls {
-		if call.ID == "" || !call.Name.Valid() || len(call.Arguments) > 0 && !json.Valid(call.Arguments) {
+		if call.ID == "" || call.ID != strings.TrimSpace(call.ID) || seen[call.ID] || !call.Name.Valid() || !json.Valid(call.Arguments) {
 			return fail(contracts.TaskFailureContract, ErrorContract, "provider emitted an invalid tool call")
 		}
+		seen[call.ID] = true
 	}
 	return nil
 }

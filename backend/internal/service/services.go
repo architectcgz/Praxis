@@ -114,6 +114,7 @@ func (s *Services) ModelConfig() ModelConfig {
 				MaxOutputTokens:       configured.MaxOutputTokens,
 				ReasoningLevels:       slices.Clone(configured.ReasoningLevels),
 				DefaultReasoningLevel: configured.DefaultReasoningLevel,
+				Thinking:              configured.Thinking,
 			})
 		}
 	}

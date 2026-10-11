@@ -2,7 +2,10 @@ package model
 
 import (
 	"errors"
+	"slices"
 	"strings"
+
+	"praxis/internal/contracts"
 )
 
 // ModelSnapshot 保存一次 task 创建时冻结的模型运行参数。
@@ -13,6 +16,8 @@ type ModelSnapshot struct {
 	ProviderID      string
 	ModelID         string
 	ReasoningLevel  string
+	ReasoningLevels []string                `json:",omitempty"`
+	Thinking        contracts.ModelThinking `json:",omitzero"`
 	APIFormat       string
 	ContextWindow   int
 	MaxOutputTokens int
@@ -20,8 +25,30 @@ type ModelSnapshot struct {
 	ProxyURL        string
 }
 
+// Clone 返回快照的独立副本，推理能力列表不能被请求接收方修改。
+func (s ModelSnapshot) Clone() ModelSnapshot {
+	s.ReasoningLevels = slices.Clone(s.ReasoningLevels)
+	return s
+}
+
 // Validate 校验 task 使用的模型快照是否完整且已规范化。
 func (s ModelSnapshot) Validate() error {
+	seen := map[string]bool{}
+	for _, level := range s.ReasoningLevels {
+		if level == "" || level != strings.TrimSpace(level) || seen[level] {
+			return errors.New("task model reasoning capabilities must be canonical and unique")
+		}
+		seen[level] = true
+	}
+	if err := s.Thinking.Validate(s.MaxOutputTokens); err != nil {
+		return err
+	}
+	if s.APIFormat != contracts.ProtocolAnthropicMessages && s.Thinking != (contracts.ModelThinking{}) {
+		return errors.New("thinking configuration requires anthropic_messages")
+	}
+	if s.ReasoningLevel != "" && !slices.Contains(s.ReasoningLevels, s.ReasoningLevel) {
+		return errors.New("task reasoning level is not supported by frozen capabilities")
+	}
 	if s.ProviderID == "" {
 		return errors.New("task model provider ID is required")
 	}

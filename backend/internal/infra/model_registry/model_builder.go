@@ -52,6 +52,8 @@ func (r *Registry) BuildModel(snapshot model.ModelSnapshot) (model.Model, error)
 			APIFormat:       modelconfig.APIFormat(snapshot.APIFormat),
 			ContextWindow:   snapshot.ContextWindow,
 			MaxOutputTokens: snapshot.MaxOutputTokens,
+			ReasoningLevels: snapshot.Clone().ReasoningLevels,
+			Thinking:        snapshot.Thinking,
 		},
 		apiKey, client,
 	)
