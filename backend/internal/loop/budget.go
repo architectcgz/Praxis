@@ -56,8 +56,8 @@ func stepInputBytes(request model.ModelRequest) int64 {
 		for _, block := range entry.Content {
 			total += int64(len(block.Text))
 			total += int64(len(block.Input))
-			if block.ProviderState != nil {
-				total += int64(len(block.ProviderState.Payload))
+			if block.ReasoningState != nil {
+				total += int64(len(block.ReasoningState.Payload))
 			}
 		}
 	}

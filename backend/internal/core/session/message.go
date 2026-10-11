@@ -29,21 +29,21 @@ const (
 type BlockKind string
 
 const (
-	BlockText        BlockKind = "text"
-	BlockThinking    BlockKind = "thinking"
-	BlockOpaqueState BlockKind = "opaque_state"
-	BlockToolCall    BlockKind = "tool_call"
-	BlockToolResult  BlockKind = "tool_result"
+	BlockText           BlockKind = "text"
+	BlockThinking       BlockKind = "thinking"
+	BlockReasoningState BlockKind = "reasoning_state"
+	BlockToolCall       BlockKind = "tool_call"
+	BlockToolResult     BlockKind = "tool_result"
 )
 
 type Block struct {
-	Kind          BlockKind
-	Text          string
-	CallID        string
-	Name          string
-	Input         json.RawMessage `json:",omitempty"`
-	IsError       bool
-	ProviderState *contracts.ProviderState `json:",omitempty"`
+	Kind           BlockKind
+	Text           string
+	CallID         string
+	Name           string
+	Input          json.RawMessage `json:",omitempty"`
+	IsError        bool
+	ReasoningState *contracts.ReasoningState `json:",omitempty"`
 }
 
 type MessageData struct {
@@ -94,15 +94,15 @@ func validAuthorKind(kind AuthorKind) bool {
 }
 
 func validateBlock(role Role, block Block) error {
-	if block.Kind != BlockOpaqueState && block.ProviderState != nil {
-		return errors.New("provider state requires an opaque message block")
+	if block.Kind != BlockReasoningState && block.ReasoningState != nil {
+		return errors.New("reasoning state requires a reasoning state message block")
 	}
 	switch block.Kind {
-	case BlockOpaqueState:
+	case BlockReasoningState:
 		if role != RoleAssistant || block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
-			return errors.New("message contains an invalid opaque block")
+			return errors.New("message contains an invalid reasoning state block")
 		}
-		return block.ProviderState.Validate()
+		return block.ReasoningState.Validate()
 	case BlockText:
 		if strings.TrimSpace(block.Text) == "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
 			return errors.New("message contains an invalid text block")

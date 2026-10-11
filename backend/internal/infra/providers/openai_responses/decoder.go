@@ -12,7 +12,6 @@ import (
 
 	"praxis/internal/contracts"
 	"praxis/internal/core/model"
-	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -211,7 +210,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				if response.IncompleteDetails != nil {
 					detail = response.IncompleteDetails.Reason
 				}
-				reason := providers.OpenAIResponsesStopReason(status, detail, false, state.Refused)
+				reason := mapStopReason(status, detail, false, state.Refused)
 				if reason == model.StopUnknown {
 					return "", fmt.Errorf("responses unknown incomplete reason %q", detail)
 				}
@@ -385,7 +384,11 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			toolCount++
 		}
 		if item.Type == "reasoning" {
-			state := &contracts.ProviderState{Protocol: contracts.ProtocolOpenAIResponses, Version: contracts.ProviderStateVersion, Payload: s.Items[index].Raw}
+			state := &contracts.ReasoningState{
+				Protocol: contracts.ProtocolOpenAIResponses,
+				Version:  contracts.ReasoningStateVersion,
+				Payload:  s.Items[index].Raw,
+			}
 			if err := state.Validate(); err != nil {
 				return "", err
 			}
@@ -404,9 +407,13 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 		switch item.Type {
 		case "reasoning":
 			if err := emit(model.ModelStreamEvent{
-				Kind:          model.StreamProtocolState,
-				ProtocolState: &contracts.ProviderState{Protocol: contracts.ProtocolOpenAIResponses, Version: contracts.ProviderStateVersion, Payload: bytes.Clone(s.Items[index].Raw)},
-				OutputIndex:   &index,
+				Kind: model.StreamReasoningState,
+				ReasoningState: &contracts.ReasoningState{
+					Protocol: contracts.ProtocolOpenAIResponses,
+					Version:  contracts.ReasoningStateVersion,
+					Payload:  bytes.Clone(s.Items[index].Raw),
+				},
+				OutputIndex: &index,
 			}); err != nil {
 				return "", err
 			}
@@ -416,5 +423,28 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			}
 		}
 	}
-	return providers.OpenAIResponsesStopReason("completed", "", toolCount > 0, false), nil
+	return mapStopReason("completed", "", toolCount > 0, false), nil
+}
+
+// mapStopReason 结合终态 status、incomplete_details.reason 和输出内容判断结束语义。
+// hasToolCalls 表示存在函数调用，refused 表示存在拒绝内容；非已知终态返回 StopUnknown。
+func mapStopReason(status, incompleteReason string, hasToolCalls, refused bool) model.ModelStopReason {
+	switch status {
+	case "completed":
+		if refused {
+			return model.StopRefused
+		}
+		if hasToolCalls {
+			return model.StopToolCalls
+		}
+		return model.StopCompleted
+	case "incomplete":
+		switch incompleteReason {
+		case "max_output_tokens":
+			return model.StopTruncated
+		case "content_filter":
+			return model.StopFiltered
+		}
+	}
+	return model.StopUnknown
 }

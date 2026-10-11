@@ -37,7 +37,7 @@ func requestModel(
 	}
 	response, err := collectModelResponse(streamCtx, input, onEvent)
 	if err == nil {
-		err = response.validateProtocolState(request.Model.APIFormat)
+		err = response.validateReasoningState(request.Model.APIFormat)
 	}
 	return response, err
 }
@@ -82,16 +82,16 @@ func collectModelResponse(
 				// 回调与已收集结果各自拥有参数副本，观察者不能改写待执行调用。
 				event.ToolCall = call
 				event.ToolCall.Arguments = bytes.Clone(call.Arguments)
-			case model.StreamProtocolState:
-				if err := event.ProtocolState.Validate(); err != nil {
+			case model.StreamReasoningState:
+				if err := event.ReasoningState.Validate(); err != nil {
 					return response, err
 				}
 				response.events = append(response.events, model.ModelStreamEvent{
-					Kind:          model.StreamProtocolState,
-					ProtocolState: event.ProtocolState.Clone(),
-					OutputIndex:   cloneOutputIndex(event.OutputIndex),
+					Kind:           model.StreamReasoningState,
+					ReasoningState: event.ReasoningState.Clone(),
+					OutputIndex:    cloneOutputIndex(event.OutputIndex),
 				})
-				// 不透明状态仅保存在内部，观察者不接收签名或加密载荷。
+				// 推理状态仅保存在内部，观察者不接收签名或加密载荷。
 				continue
 			case model.StreamUsage:
 				if event.Usage == nil || !event.Usage.Valid() {
@@ -188,24 +188,24 @@ func sameOutputIndex(a, b *int) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
-func (r modelResponse) validateProtocolState(protocol string) error {
+func (r modelResponse) validateReasoningState(protocol string) error {
 	seen := map[string]bool{}
 	seenIndices := map[int]bool{}
 	for _, event := range r.events {
-		if event.Kind != model.StreamProtocolState {
+		if event.Kind != model.StreamReasoningState {
 			continue
 		}
-		state := event.ProtocolState
+		state := event.ReasoningState
 		if state.Protocol != protocol {
-			return errors.New("provider state does not match the frozen request protocol")
+			return errors.New("reasoning state does not match the frozen request protocol")
 		}
 		if event.OutputIndex == nil || seenIndices[*event.OutputIndex] {
-			return errors.New("provider state has missing or conflicting output identity")
+			return errors.New("reasoning state has missing or conflicting output identity")
 		}
 		seenIndices[*event.OutputIndex] = true
 		key := string(state.Payload)
 		if seen[key] {
-			return errors.New("provider emitted duplicate protocol state")
+			return errors.New("provider emitted duplicate reasoning state")
 		}
 		seen[key] = true
 	}

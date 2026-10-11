@@ -10,13 +10,15 @@ import (
 type ModelStreamEventKind string
 
 const (
-	StreamTextDelta     ModelStreamEventKind = "text_delta"
+	StreamTextDelta ModelStreamEventKind = "text_delta"
+	// StreamThinkingDelta 承载可供展示的推理文本增量，不用于续传推理状态。
 	StreamThinkingDelta ModelStreamEventKind = "thinking_delta"
 	StreamToolCall      ModelStreamEventKind = "tool_call"
-	StreamProtocolState ModelStreamEventKind = "protocol_state"
-	StreamUsage         ModelStreamEventKind = "usage"
-	StreamComplete      ModelStreamEventKind = "complete"
-	StreamError         ModelStreamEventKind = "error"
+	// StreamReasoningState 承载需要保存并按来源协议重放的推理状态，不向观察者展示。
+	StreamReasoningState ModelStreamEventKind = "reasoning_state"
+	StreamUsage          ModelStreamEventKind = "usage"
+	StreamComplete       ModelStreamEventKind = "complete"
+	StreamError          ModelStreamEventKind = "error"
 )
 
 // ModelStopReason 是单次模型生成的统一结束语义，不代表整个 Task 已完成。
@@ -35,13 +37,13 @@ const (
 
 // ModelStreamEvent 是单次模型请求的 Provider 中立流事件。
 type ModelStreamEvent struct {
-	Kind          ModelStreamEventKind
-	Text          string
-	ToolCall      contracts.ToolCall
-	Usage         *ModelUsage
-	StopReason    ModelStopReason
-	Err           error
-	ProtocolState *contracts.ProviderState
+	Kind           ModelStreamEventKind
+	Text           string
+	ToolCall       contracts.ToolCall
+	Usage          *ModelUsage
+	StopReason     ModelStopReason
+	Err            error
+	ReasoningState *contracts.ReasoningState
 	// OutputIndex 保存协议输出块顺序，Loop 收集后按此顺序构造历史，不影响实时展示。
 	OutputIndex *int
 }

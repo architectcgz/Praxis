@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"praxis/internal/core/model"
-	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -34,7 +33,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		}
 		data := strings.TrimSpace(event.Data)
 		if data == "[DONE]" {
-			reason := providers.OpenAIChatStopReason(stopReason)
+			reason := mapStopReason(stopReason)
 			if reason == model.StopUnknown {
 				return "", fmt.Errorf("openai chat invalid finish_reason %q", stopReason)
 			}
@@ -133,5 +132,21 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			call.Arguments += delta.Function.Arguments
 		}
 		stopReason = choice.FinishReason
+	}
+}
+
+// mapStopReason 将 finish_reason 映射为统一结束语义；空值或未知值返回 StopUnknown。
+func mapStopReason(reason string) model.ModelStopReason {
+	switch reason {
+	case "stop":
+		return model.StopCompleted
+	case "tool_calls":
+		return model.StopToolCalls
+	case "length":
+		return model.StopTruncated
+	case "content_filter":
+		return model.StopFiltered
+	default:
+		return model.StopUnknown
 	}
 }

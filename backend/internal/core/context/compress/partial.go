@@ -16,7 +16,7 @@ var _ Strategy = PartialStrategy{}
 
 // Compress 在输入达到可用预算的 90% 时摘要较早历史，目标降至约 60%。
 // 系统提示、共享事实、最新用户输入、上一条最终回答和最新完整工具交互保留原文。
-// 最新用户 turn 与未闭合工具链不可压缩；不透明载荷不进入摘要，无法安全压缩则返回错误。
+// 最新用户 turn 与未闭合工具链不可压缩；推理状态载荷不进入摘要，无法安全压缩则返回错误。
 func (PartialStrategy) Compress(ctx context.Context, value appcontext.ModelContext, options Options, summarize SummarizeFunc) (appcontext.ModelContext, bool, error) {
 	if ctx == nil {
 		return appcontext.ModelContext{}, false, errors.New("context compression context is required")

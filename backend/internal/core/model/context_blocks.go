@@ -8,15 +8,15 @@ import (
 )
 
 // ContextBlocksFromEvents 把模型流事件转换为有序上下文 block。
-// events 来自流消费阶段收集的有序内容和协议状态；参数与不透明载荷均深拷贝。
+// events 来自流消费阶段收集的有序内容和推理状态；参数与推理状态载荷均深拷贝。
 // 空白文本不进入上下文，但模型输出预算仍由流消费阶段按原始文本统计。
 func ContextBlocksFromEvents(events []ModelStreamEvent) []appcontext.ContextBlock {
 	blocks := make([]appcontext.ContextBlock, 0, len(events))
 	for _, event := range events {
-		if event.Kind == StreamProtocolState {
+		if event.Kind == StreamReasoningState {
 			blocks = append(blocks, appcontext.ContextBlock{
-				Kind:          appcontext.ContextBlockOpaqueState,
-				ProviderState: event.ProtocolState.Clone(),
+				Kind:           appcontext.ContextBlockReasoningState,
+				ReasoningState: event.ReasoningState.Clone(),
 			})
 			continue
 		}

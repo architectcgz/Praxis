@@ -87,8 +87,8 @@ func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 			if err := appendItem(responseItem{Type: "function_call_output", CallID: block.CallID, Output: &output}); err != nil {
 				return nil, err
 			}
-		case appcontext.ContextBlockOpaqueState:
-			state := block.ProviderState
+		case appcontext.ContextBlockReasoningState:
+			state := block.ReasoningState
 			if err := state.Validate(); err != nil {
 				return nil, err
 			}
@@ -121,11 +121,11 @@ func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 	var values []string
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.ProviderState == nil {
+			if block.ReasoningState == nil {
 				continue
 			}
 			var item responseOutputItem
-			if json.Unmarshal(block.ProviderState.Payload, &item) == nil && item.EncryptedContent != "" {
+			if json.Unmarshal(block.ReasoningState.Payload, &item) == nil && item.EncryptedContent != "" {
 				values = append(values, item.EncryptedContent)
 			}
 		}

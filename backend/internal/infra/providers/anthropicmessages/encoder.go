@@ -90,8 +90,8 @@ func anthropicContextEntry(entry appcontext.ContextEntry) ([]anthropicMessage, e
 				Content:   &text,
 				IsError:   block.IsError,
 			}
-		case appcontext.ContextBlockOpaqueState:
-			state := block.ProviderState
+		case appcontext.ContextBlockReasoningState:
+			state := block.ReasoningState
 			if err := state.Validate(); err != nil {
 				return nil, err
 			}
@@ -162,11 +162,11 @@ func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 	var values []string
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.ProviderState == nil {
+			if block.ReasoningState == nil {
 				continue
 			}
 			var content anthropicContentBlock
-			if json.Unmarshal(block.ProviderState.Payload, &content) == nil {
+			if json.Unmarshal(block.ReasoningState.Payload, &content) == nil {
 				values = append(values, content.Signature, content.Data)
 			}
 		}

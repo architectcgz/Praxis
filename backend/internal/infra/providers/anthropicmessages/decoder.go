@@ -10,7 +10,6 @@ import (
 
 	"praxis/internal/contracts"
 	"praxis/internal/core/model"
-	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -21,7 +20,7 @@ type contentBlockState struct {
 	Arguments        string
 	HasArgumentDelta bool
 	Closed           bool
-	State            *contracts.ProviderState
+	ReasoningState   *contracts.ReasoningState
 }
 
 // Decode 跟踪每个 content block 的完整生命周期；签名和 redacted 状态仅内部保存。
@@ -163,8 +162,12 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				if err != nil {
 					return "", err
 				}
-				state.State = &contracts.ProviderState{Protocol: contracts.ProtocolAnthropicMessages, Version: contracts.ProviderStateVersion, Payload: payload}
-				if err := state.State.Validate(); err != nil {
+				state.ReasoningState = &contracts.ReasoningState{
+					Protocol: contracts.ProtocolAnthropicMessages,
+					Version:  contracts.ReasoningStateVersion,
+					Payload:  payload,
+				}
+				if err := state.ReasoningState.Validate(); err != nil {
 					return "", err
 				}
 			}
@@ -197,7 +200,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			if !started {
 				return "", errors.New("anthropic message_stop before message_start")
 			}
-			reason := providers.AnthropicStopReason(stopReason)
+			reason := mapStopReason(stopReason)
 			if reason == model.StopUnknown {
 				return "", fmt.Errorf("anthropic invalid stop_reason %q", stopReason)
 			}
@@ -228,8 +231,12 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			}
 			for index := range len(blocks) {
 				block := blocks[index]
-				if block.State != nil {
-					if err := emit(model.ModelStreamEvent{Kind: model.StreamProtocolState, ProtocolState: block.State.Clone(), OutputIndex: &index}); err != nil {
+				if block.ReasoningState != nil {
+					if err := emit(model.ModelStreamEvent{
+						Kind:           model.StreamReasoningState,
+						ReasoningState: block.ReasoningState.Clone(),
+						OutputIndex:    &index,
+					}); err != nil {
 						return "", err
 					}
 				}
@@ -331,4 +338,24 @@ func normalizeMessageUsage(reported *anthropicMessageUsage) *model.ModelUsage {
 		return nil
 	}
 	return usage
+}
+
+// mapStopReason 将 stop_reason 映射为统一结束语义；拒绝和自定义停止序列不作为自然完成。
+func mapStopReason(reason string) model.ModelStopReason {
+	switch reason {
+	case "end_turn":
+		return model.StopCompleted
+	case "tool_use":
+		return model.StopToolCalls
+	case "max_tokens", "model_context_window_exceeded":
+		return model.StopTruncated
+	case "pause_turn":
+		return model.StopPaused
+	case "refusal":
+		return model.StopRefused
+	case "stop_sequence":
+		return model.StopSequence
+	default:
+		return model.StopUnknown
+	}
 }

@@ -61,24 +61,24 @@ const (
 type ContextBlockKind string
 
 const (
-	ContextBlockText        ContextBlockKind = "text"
-	ContextBlockThinking    ContextBlockKind = "thinking"
-	ContextBlockOpaqueState ContextBlockKind = "opaque_state"
-	ContextBlockToolCall    ContextBlockKind = "tool_call"
-	ContextBlockToolResult  ContextBlockKind = "tool_result"
-	ContextBlockMCPCall     ContextBlockKind = "mcp_call"
-	ContextBlockMCPResult   ContextBlockKind = "mcp_result"
+	ContextBlockText           ContextBlockKind = "text"
+	ContextBlockThinking       ContextBlockKind = "thinking"
+	ContextBlockReasoningState ContextBlockKind = "reasoning_state"
+	ContextBlockToolCall       ContextBlockKind = "tool_call"
+	ContextBlockToolResult     ContextBlockKind = "tool_result"
+	ContextBlockMCPCall        ContextBlockKind = "mcp_call"
+	ContextBlockMCPResult      ContextBlockKind = "mcp_result"
 )
 
 // ContextBlock 是 Provider 无关的上下文内容；协议 adapter 负责把它编码成具体格式。
 type ContextBlock struct {
-	Kind          ContextBlockKind
-	Text          string
-	CallID        string
-	Name          string
-	Input         json.RawMessage
-	IsError       bool
-	ProviderState *contracts.ProviderState `json:",omitempty"`
+	Kind           ContextBlockKind
+	Text           string
+	CallID         string
+	Name           string
+	Input          json.RawMessage
+	IsError        bool
+	ReasoningState *contracts.ReasoningState `json:",omitempty"`
 }
 
 // ContextEntry 是运行期上下文中的一个有序语义条目。
@@ -98,7 +98,7 @@ type ModelContext struct {
 // Clone 返回 ContextBlock 的独立副本，避免跨边界修改共享输入。
 func (b ContextBlock) Clone() ContextBlock {
 	b.Input = json.RawMessage(bytes.Clone(b.Input))
-	b.ProviderState = b.ProviderState.Clone()
+	b.ReasoningState = b.ReasoningState.Clone()
 	return b
 }
 
@@ -142,8 +142,8 @@ func (c ModelContext) Validate() error {
 			return errors.New("task context contains an invalid entry")
 		}
 		for _, block := range entry.Content {
-			if block.Kind == ContextBlockOpaqueState && entry.Role != ContextRoleAssistant {
-				return errors.New("provider state requires assistant role")
+			if block.Kind == ContextBlockReasoningState && entry.Role != ContextRoleAssistant {
+				return errors.New("reasoning state requires assistant role")
 			}
 			if err := validateContextBlock(block); err != nil {
 				return err
@@ -173,15 +173,16 @@ func validContextRole(role ContextRole) bool {
 }
 
 func validateContextBlock(block ContextBlock) error {
-	if block.Kind != ContextBlockOpaqueState && block.ProviderState != nil {
-		return errors.New("provider state requires an opaque block")
+	if block.Kind != ContextBlockReasoningState && block.ReasoningState != nil {
+		return errors.New("reasoning state requires a reasoning state block")
 	}
 	switch block.Kind {
-	case ContextBlockOpaqueState:
-		if block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
-			return errors.New("invalid opaque context block")
+	case ContextBlockReasoningState:
+		// 空 RawMessage 经 JSON 往返后成为 null，仍表示没有工具参数。
+		if block.Text != "" || block.CallID != "" || block.Name != "" || (len(block.Input) > 0 && !bytes.Equal(block.Input, []byte("null"))) || block.IsError {
+			return errors.New("invalid reasoning state context block")
 		}
-		return block.ProviderState.Validate()
+		return block.ReasoningState.Validate()
 	case ContextBlockText:
 		if strings.TrimSpace(block.Text) == "" {
 			return errors.New("task context contains an empty text block")
@@ -219,13 +220,13 @@ func EntryFromMessageData(value sessionmodel.MessageData) (ContextEntry, bool) {
 	for _, block := range value.Blocks {
 		if block.Kind != sessionmodel.BlockThinking {
 			content = append(content, ContextBlock{
-				Kind:          ContextBlockKind(block.Kind),
-				Text:          block.Text,
-				CallID:        block.CallID,
-				Name:          block.Name,
-				Input:         bytes.Clone(block.Input),
-				IsError:       block.IsError,
-				ProviderState: block.ProviderState.Clone(),
+				Kind:           ContextBlockKind(block.Kind),
+				Text:           block.Text,
+				CallID:         block.CallID,
+				Name:           block.Name,
+				Input:          bytes.Clone(block.Input),
+				IsError:        block.IsError,
+				ReasoningState: block.ReasoningState.Clone(),
 			})
 		}
 	}

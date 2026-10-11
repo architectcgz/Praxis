@@ -7,7 +7,7 @@ import (
 	"praxis/internal/infra/providers/streaming"
 )
 
-// encodeContext 仅编码官方文本与工具消息，未知内容和其他协议状态均显式拒绝。
+// encodeContext 仅编码官方文本与工具消息，未知内容和其他协议的推理状态均显式拒绝。
 func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	if err := ctx.Validate(); err != nil {
 		return nil, err

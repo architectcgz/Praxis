@@ -48,7 +48,7 @@ func summaryHistory(entries []appcontext.ContextEntry) []appcontext.ContextEntry
 		copy := entry.Clone()
 		copy.Content = nil
 		for _, block := range entry.Content {
-			if block.Kind != appcontext.ContextBlockOpaqueState && block.Kind != appcontext.ContextBlockThinking {
+			if block.Kind != appcontext.ContextBlockReasoningState && block.Kind != appcontext.ContextBlockThinking {
 				copy.Content = append(copy.Content, block.Clone())
 			}
 		}

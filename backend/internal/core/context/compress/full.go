@@ -9,7 +9,7 @@ import (
 )
 
 // FullStrategy 摘要可安全移除的完整历史前缀。
-// 系统指令、最新用户 turn 和未闭合工具链保留原文；不透明载荷不进入摘要。
+// 系统指令、最新用户 turn 和未闭合工具链保留原文；推理状态载荷不进入摘要。
 type FullStrategy struct{}
 
 var _ Strategy = FullStrategy{}

@@ -46,13 +46,13 @@ func taskMessage(value sessionmodel.MessageData, blocks []appcontext.ContextBloc
 	value.Blocks = make([]sessionmodel.Block, len(blocks))
 	for index, block := range blocks {
 		value.Blocks[index] = sessionmodel.Block{
-			Kind:          sessionmodel.BlockKind(block.Kind),
-			Text:          block.Text,
-			CallID:        block.CallID,
-			Name:          block.Name,
-			Input:         bytes.Clone(block.Input),
-			IsError:       block.IsError,
-			ProviderState: block.ProviderState.Clone(),
+			Kind:           sessionmodel.BlockKind(block.Kind),
+			Text:           block.Text,
+			CallID:         block.CallID,
+			Name:           block.Name,
+			Input:          bytes.Clone(block.Input),
+			IsError:        block.IsError,
+			ReasoningState: block.ReasoningState.Clone(),
 		}
 	}
 	return value

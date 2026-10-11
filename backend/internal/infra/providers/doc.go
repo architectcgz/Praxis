@@ -7,7 +7,7 @@
 //
 // Responses 使用 store:false 和 reasoning.encrypted_content，自行重放完整历史；
 // Messages 的 Thinking 模式、预算、Effort 能力来自 Task 冻结快照，不能按模型名字猜测。
-// Opaque State 只由来源协议重放，不进入摘要或前端；缺失或不一致时显式报错。
+// ReasoningState 只由来源协议重放，不进入摘要或前端；缺失或不一致时显式报错。
 //
 // 官方契约：
 // https://developers.openai.com/api/reference/resources/chat/subresources/completions
