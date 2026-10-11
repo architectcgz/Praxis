@@ -6,6 +6,25 @@ import (
 	appcontext "praxis/internal/core/context"
 )
 
+// encodeContext 只映射上下文协议，不读取模型配置。
+func encodeContext(ctx appcontext.ModelContext) ([]responseItem, error) {
+	input := make([]responseItem, 0, len(ctx.Entries)+1)
+	if ctx.SystemPrompt != "" {
+		input = append(input, responseItem{
+			Type: "message",
+			Role: "system",
+			Content: []responseContentPart{{
+				Type: "input_text",
+				Text: ctx.SystemPrompt,
+			}},
+		})
+	}
+	for _, entry := range ctx.Entries {
+		input = append(input, responseItems(entry)...)
+	}
+	return input, nil
+}
+
 func responseItems(entry appcontext.ContextEntry) []responseItem {
 	items := make([]responseItem, 0, len(entry.Content))
 	var text strings.Builder
@@ -53,4 +72,19 @@ func responseTextPartType(role appcontext.ContextRole) string {
 		return "output_text"
 	}
 	return "input_text"
+}
+
+type responseItem struct {
+	Type      string                `json:"type"`
+	Role      string                `json:"role,omitempty"`
+	Content   []responseContentPart `json:"content,omitempty"`
+	CallID    string                `json:"call_id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Arguments string                `json:"arguments,omitempty"`
+	Output    string                `json:"output,omitempty"`
+}
+
+type responseContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }

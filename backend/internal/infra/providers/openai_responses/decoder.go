@@ -7,14 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
+	"strings"
+
 	"praxis/internal/core/model"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
-	"slices"
-	"strings"
 )
 
-type streamDecoder struct{}
+type decoder struct{}
 
 type responseReasoningPart struct {
 	Type string `json:"type"`
@@ -37,7 +39,8 @@ type reasoningPartKey struct {
 	partIndex   int
 }
 
-func (streamDecoder) Decode(
+// Decode 将 SSE 转为有序模型事件并返回统一停止原因；协议错误或取消时返回错误。
+func (decoder) Decode(
 	ctx context.Context,
 	reader *streaming.SSEReader,
 	emit streaming.EmitFunc,
@@ -280,12 +283,7 @@ func (streamDecoder) Decode(
 }
 
 func emitResponseTools(emit streaming.EmitFunc, calls map[string]*streaming.ToolAccumulator) error {
-	keys := make([]string, 0, len(calls))
-	for key := range calls {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(calls)) {
 		if err := streaming.EmitTool(emit, calls[key]); err != nil {
 			return err
 		}

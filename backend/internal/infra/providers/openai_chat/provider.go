@@ -60,14 +60,14 @@ func (p *Provider) Stream(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	payload, path, err := p.requestPayload(request)
+	payload, err := buildPayload(request)
 	if err != nil {
 		return nil, err
 	}
 	if err := appcontext.ExceedsContextWindow(payload, request.MaxOutputTokens, p.contextWindow); err != nil {
 		return nil, err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+path, bytes.NewReader(payload))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v1/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("build openai chat request: %w", err)
 	}
@@ -78,29 +78,19 @@ func (p *Provider) Stream(
 	if err != nil {
 		return nil, fmt.Errorf("openai chat request: %w", err)
 	}
-	return streaming.Start(ctx, response, streamDecoder{}), nil
+	return streaming.Start(ctx, response, decoder{}), nil
 }
 
-func (p *Provider) requestPayload(request model.ModelRequest) ([]byte, string, error) {
-	return encodeRequest(request)
-}
-
-func encodeRequest(request model.ModelRequest) ([]byte, string, error) {
+func buildPayload(request model.ModelRequest) ([]byte, error) {
 	if request.Model.ModelID == "" {
-		return nil, "", errors.New("openai chat model is required")
+		return nil, errors.New("openai chat model is required")
 	}
 	if request.MaxOutputTokens <= 0 {
-		return nil, "", errors.New("openai chat max output tokens is required")
+		return nil, errors.New("openai chat max output tokens is required")
 	}
-	messages := make([]chatMessage, 0, len(request.Context.Entries)+1)
-	if request.Context.SystemPrompt != "" {
-		messages = append(messages, chatMessage{
-			Role:    "system",
-			Content: request.Context.SystemPrompt,
-		})
-	}
-	for _, entry := range request.Context.Entries {
-		messages = append(messages, chatMessageFromContext(entry))
+	messages, err := encodeContext(request.Context)
+	if err != nil {
+		return nil, err
 	}
 	payload := chatRequest{
 		Model:    request.Model.ModelID,
@@ -131,9 +121,9 @@ func encodeRequest(request model.ModelRequest) ([]byte, string, error) {
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return nil, "", fmt.Errorf("encode openai chat request: %w", err)
+		return nil, fmt.Errorf("encode openai chat request: %w", err)
 	}
-	return encoded, "/v1/chat/completions", nil
+	return encoded, nil
 }
 
 type chatRequest struct {
@@ -149,24 +139,6 @@ type chatRequest struct {
 
 type chatStreamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
-}
-
-type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-}
-
-type chatToolCall struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function chatFunctionCall `json:"function"`
-}
-
-type chatFunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
 }
 
 type chatTool struct {

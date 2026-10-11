@@ -60,14 +60,14 @@ func (p *Provider) Stream(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	payload, path, err := p.requestPayload(request)
+	payload, inputItems, err := buildPayload(request)
 	if err != nil {
 		return nil, err
 	}
 	if err := appcontext.ExceedsContextWindow(payload, request.MaxOutputTokens, p.contextWindow); err != nil {
 		return nil, err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+path, bytes.NewReader(payload))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v1/responses", bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("build openai responses request: %w", err)
 	}
@@ -78,38 +78,24 @@ func (p *Provider) Stream(
 	if err != nil {
 		return nil, fmt.Errorf(
 			"openai responses request (inputItems=%d payloadBytes=%d): %w",
-			requestInputItemCount(request.Context), len(payload), err,
+			inputItems, len(payload), err,
 		)
 	}
-	return streaming.Start(ctx, response, streamDecoder{}), nil
+	return streaming.Start(ctx, response, decoder{}), nil
 }
 
-func (p *Provider) requestPayload(request model.ModelRequest) ([]byte, string, error) {
-	return encodeRequest(request)
-}
-
-func encodeRequest(request model.ModelRequest) ([]byte, string, error) {
+func buildPayload(request model.ModelRequest) ([]byte, int, error) {
 	if request.Model.ModelID == "" {
-		return nil, "", errors.New("openai responses model is required")
+		return nil, 0, errors.New("openai responses model is required")
 	}
 	if request.MaxOutputTokens <= 0 {
-		return nil, "", errors.New("openai responses max output tokens is required")
+		return nil, 0, errors.New("openai responses max output tokens is required")
 	}
-	input := make([]responseItem, 0, len(request.Context.Entries)+1)
-	if request.Context.SystemPrompt != "" {
-		input = append(input, responseItem{
-			Type: "message",
-			Role: "system",
-			Content: []responseContentPart{{
-				Type: "input_text",
-				Text: request.Context.SystemPrompt,
-			}},
-		})
+	input, err := encodeContext(request.Context)
+	if err != nil {
+		return nil, 0, err
 	}
-	for _, entry := range request.Context.Entries {
-		input = append(input, responseItems(entry)...)
-	}
-	payload := responseRequest{
+	payload := requestPayload{
 		Model:           request.Model.ModelID,
 		Input:           input,
 		Stream:          true,
@@ -133,26 +119,15 @@ func encodeRequest(request model.ModelRequest) ([]byte, string, error) {
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return nil, "", fmt.Errorf("encode openai responses request: %w", err)
+		return nil, 0, fmt.Errorf("encode openai responses request: %w", err)
 	}
-	if requestInputItemCount(request.Context) == 0 {
-		return nil, "", errors.New("openai responses input is required")
+	if len(input) == 0 {
+		return nil, 0, errors.New("openai responses input is required")
 	}
-	return encoded, "/v1/responses", nil
+	return encoded, len(input), nil
 }
 
-func requestInputItemCount(modelContext appcontext.ModelContext) int {
-	count := 0
-	for _, entry := range modelContext.Entries {
-		count += len(responseItems(entry))
-	}
-	if modelContext.SystemPrompt != "" {
-		count++
-	}
-	return count
-}
-
-type responseRequest struct {
+type requestPayload struct {
 	Model           string           `json:"model"`
 	Input           []responseItem   `json:"input"`
 	Stream          bool             `json:"stream"`
@@ -165,21 +140,6 @@ type responseRequest struct {
 type reasoningConfig struct {
 	Effort  string `json:"effort"`
 	Summary string `json:"summary,omitempty"`
-}
-
-type responseItem struct {
-	Type      string                `json:"type"`
-	Role      string                `json:"role,omitempty"`
-	Content   []responseContentPart `json:"content,omitempty"`
-	CallID    string                `json:"call_id,omitempty"`
-	Name      string                `json:"name,omitempty"`
-	Arguments string                `json:"arguments,omitempty"`
-	Output    string                `json:"output,omitempty"`
-}
-
-type responseContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
 }
 
 type responseTool struct {

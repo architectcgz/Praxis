@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 
@@ -14,9 +15,36 @@ import (
 	"praxis/internal/infra/providers/streaming"
 )
 
-type streamDecoder struct{}
+type decoder struct{}
 
-func (streamDecoder) Decode(
+// chatChunk 表示单个 Chat Completions SSE 数据帧，仅包含解码所需字段。
+type chatChunk struct {
+	Usage *struct {
+		PromptTokens        *int64 `json:"prompt_tokens"`
+		CompletionTokens    *int64 `json:"completion_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens *int64 `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+	} `json:"usage"`
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+}
+
+// Decode 将 SSE 转为有序模型事件并返回统一停止原因；协议错误或取消时返回错误。
+func (decoder) Decode(
 	ctx context.Context,
 	reader *streaming.SSEReader,
 	emit streaming.EmitFunc,
@@ -55,30 +83,8 @@ func (streamDecoder) Decode(
 		if data == "[DONE]" {
 			return finish()
 		}
-		var chunk struct {
-			Usage *struct {
-				PromptTokens        *int64 `json:"prompt_tokens"`
-				CompletionTokens    *int64 `json:"completion_tokens"`
-				PromptTokensDetails *struct {
-					CachedTokens *int64 `json:"cached_tokens"`
-				} `json:"prompt_tokens_details"`
-			} `json:"usage"`
-			Choices []struct {
-				Delta struct {
-					Content          string `json:"content"`
-					ReasoningContent string `json:"reasoning_content"`
-					ToolCalls        []struct {
-						Index    int    `json:"index"`
-						ID       string `json:"id"`
-						Function struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
-						} `json:"function"`
-					} `json:"tool_calls"`
-				} `json:"delta"`
-				FinishReason string `json:"finish_reason"`
-			} `json:"choices"`
-		}
+		// 每帧使用独立零值，避免缺失字段沿用上一帧内容。
+		var chunk chatChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return "", fmt.Errorf("decode openai chat stream event: %w", err)
 		}
@@ -137,12 +143,7 @@ func (streamDecoder) Decode(
 }
 
 func emitChatTools(emit streaming.EmitFunc, calls map[int]*streaming.ToolAccumulator) error {
-	indices := make([]int, 0, len(calls))
-	for index := range calls {
-		indices = append(indices, index)
-	}
-	slices.Sort(indices)
-	for _, index := range indices {
+	for _, index := range slices.Sorted(maps.Keys(calls)) {
 		if err := streaming.EmitTool(emit, calls[index]); err != nil {
 			return err
 		}
