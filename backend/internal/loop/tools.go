@@ -86,7 +86,7 @@ func (r *Runner) runToolCalls(
 		}
 		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
 		results = append(results, result)
-		task, err := r.Tasks.Get(ctx, metadata.TaskID)
+		task, err := r.Progress.LoadTask(ctx, metadata.TaskID)
 		if err != nil {
 			return results, failCause(contracts.TaskFailureStorage, err)
 		}

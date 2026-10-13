@@ -26,7 +26,7 @@ func (r *Runner) summarizeContext(
 	sequence uint64,
 	budget *taskBudget,
 ) (string, error) {
-	if err := r.recordRequest(ctx, task.ID, sequence); err != nil {
+	if err := r.Progress.RecordModelRequest(ctx, task.ID, sequence); err != nil {
 		return "", err
 	}
 	turnID := contracts.NewTurnID(task.ID, sequence)
@@ -63,7 +63,7 @@ func (r *Runner) summarizeContext(
 	if err != nil {
 		return "", modelFailure(err)
 	}
-	if err := r.recordOutput(ctx, task.ID, response.textBytes); err != nil {
+	if err := r.Progress.RecordModelOutput(ctx, task.ID, response.textBytes); err != nil {
 		return "", failCause(contracts.TaskFailureStorage, err)
 	}
 	if err := budget.addOutput(response.textBytes); err != nil {

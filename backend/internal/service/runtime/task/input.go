@@ -1,4 +1,4 @@
-package start
+package task
 
 import (
 	"praxis/internal/contracts"
@@ -55,7 +55,7 @@ func (s *Service) buildInputSnapshot(
 	if err != nil {
 		return taskmodel.InputSnapshot{}, contracts.New(contracts.InvalidRequest, "")
 	}
-	built, err := s.contextProvider.BuildContext(
+	built, err := s.contextBuilder.BuildInitialContext(
 		ctx, agent, definition.Instructions, currentInput, currentInputMessageID,
 		modelSnapshot.ContextWindow, modelSnapshot.MaxOutputTokens,
 	)
@@ -66,7 +66,8 @@ func (s *Service) buildInputSnapshot(
 	resolver := s.security
 	s.securityMu.RUnlock()
 	security, err := resolver.Resolve(policy, contracts.TaskRestrictions{
-		AllowedTools: definition.AllowedTools, EnforceAllowedTools: true,
+		AllowedTools:        definition.AllowedTools,
+		EnforceAllowedTools: true,
 	}, workspace)
 	if err != nil {
 		return taskmodel.InputSnapshot{}, fmt.Errorf(

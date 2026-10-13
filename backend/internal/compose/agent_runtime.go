@@ -11,7 +11,6 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
-	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
 	"praxis/internal/infra/providers/anthropicmessages"
 	openaichat "praxis/internal/infra/providers/openai_chat"
@@ -20,39 +19,16 @@ import (
 	"praxis/internal/loop"
 	"praxis/internal/repository"
 	runtimequeue "praxis/internal/service/runtime/queue"
-	toolexecution "praxis/internal/tool_execution"
 )
 
-// newLoop 装配模型与持久化工具调用依赖，返回 runtime 调用的 loop.Run 执行函数。
-func newLoop(
-	modelBuilder model.ModelBuilder,
-	toolConfig toolexecution.Config,
-	builder loop.TaskContextBuilder,
-	dispatcher *hooks.Dispatcher,
-	observer agentruntime.AgentEventObserver,
-	logf func(string, ...any),
-) (agentruntime.LoopFunc, error) {
-	toolCalls, err := toolexecution.NewExecutor(toolConfig)
+// newLoop 校验已装配的模型、上下文、进度和工具 Port，返回 Runtime 的执行入口。
+// 缺少依赖时返回错误，不创建额外的任务服务或工具执行器。
+func newLoop(config loop.Config) (agentruntime.LoopFunc, error) {
+	runner, err := loop.NewRunner(config)
 	if err != nil {
 		return nil, err
 	}
-	runner, err := loop.NewRunner(loop.Config{
-		ModelBuilder:   modelBuilder,
-		Tasks:          toolConfig.Tasks,
-		Transactions:   toolConfig.Transactions,
-		ContextBuilder: builder,
-		HookDispatcher: dispatcher,
-		Tools:          toolConfig.Catalog,
-		ToolExecutor:   toolCalls,
-		EventObserver:  observer,
-		Logf:           logf,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return func(ctx context.Context, task taskmodel.Task, messageRecorder agentruntime.MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
-		return runner.Run(ctx, task, messageRecorder)
-	}, nil
+	return runner.Run, nil
 }
 
 func newModelStream(
@@ -93,8 +69,8 @@ type runtimeFactory struct {
 	executions       *agentmodel.Executions
 	runLoop          agentruntime.LoopFunc
 	messageRecorders agentruntime.MessageRecorderResolver
-	taskBuilder      agentruntime.TaskBuilder
-	lifecycle        agentruntime.TaskLifecycle
+	taskPreparer     agentruntime.TaskPreparer
+	transitions      agentruntime.TaskTransitions
 	tasks            repository.TaskRepository
 	logger           *logging.Logger
 	hooks            *hooks.Dispatcher
@@ -110,15 +86,15 @@ func (f runtimeFactory) New(
 		return nil, err
 	}
 	return agentruntime.NewRuntime(agentruntime.RuntimeConfig{
-		AgentID:          agentID,
-		HookDispatcher:   f.hooks,
-		Executions:       f.executions,
-		MessageRecorders: f.messageRecorders,
-		RunLoop:          f.runLoop,
-		TaskBuilder:      f.taskBuilder,
-		Lifecycle:        f.lifecycle,
-		Queue:            queue,
-		Logger:           f.logger,
-		LifecycleTimeout: 30 * time.Second,
+		AgentID:           agentID,
+		HookDispatcher:    f.hooks,
+		Executions:        f.executions,
+		MessageRecorders:  f.messageRecorders,
+		RunLoop:           f.runLoop,
+		TaskPreparer:      f.taskPreparer,
+		Transitions:       f.transitions,
+		Queue:             queue,
+		Logger:            f.logger,
+		TransitionTimeout: 30 * time.Second,
 	})
 }

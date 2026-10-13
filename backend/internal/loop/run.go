@@ -8,7 +8,6 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
-	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
@@ -21,8 +20,7 @@ import (
 // Config 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Config struct {
 	ContextBuilder TaskContextBuilder
-	Tasks          TaskRepository
-	Transactions   repository.TxRunner
+	Progress       TaskProgress
 	ModelBuilder   model.ModelBuilder
 	Tools          toolcontracts.ToolCatalog
 	ToolExecutor   ToolExecutor
@@ -41,8 +39,8 @@ type Runner struct {
 // NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
 // 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
 func NewRunner(config Config) (Runner, error) {
-	if config.ContextBuilder == nil || config.Tasks == nil || config.Transactions == nil {
-		return Runner{}, errors.New("loop context builder, tasks and transactions are required")
+	if config.ContextBuilder == nil || config.Progress == nil {
+		return Runner{}, errors.New("loop context builder and task progress are required")
 	}
 	if config.ModelBuilder == nil {
 		return Runner{}, errors.New("loop model builder is required")
@@ -67,6 +65,7 @@ func NewRunner(config Config) (Runner, error) {
 
 // Run 使用本次执行快照与消息记录器运行 provider/tool loop，返回结果及失败分类。
 // ContextBuilder 重建冻结可见范围的历史，消息记录器负责可靠提交输出；
+// TaskProgress 负责加载持久化预算、记录模型及摘要请求和模型输出消耗；
 // 每次执行的输入（context、消息记录器）为空时返回错误；
 // 持久化生命周期、取消和后续任务调度由 runtime 负责。
 func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder agentruntime.MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
@@ -86,7 +85,7 @@ func (r *Runner) run(
 	task taskmodel.Task,
 	messageRecorder agentruntime.MessageRecorder,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
-	task, err := r.Tasks.Get(ctx, task.ID)
+	task, err := r.Progress.LoadTask(ctx, task.ID)
 	if err != nil {
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
 	}
@@ -95,7 +94,7 @@ func (r *Runner) run(
 	if err != nil {
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
 	}
-	task, err = r.Tasks.Get(ctx, task.ID)
+	task, err = r.Progress.LoadTask(ctx, task.ID)
 	if err != nil {
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
 	}
@@ -152,7 +151,7 @@ func (r *Runner) run(
 			request.Context = modelContext.Clone()
 		}
 		turnSequence := sequence
-		if err := r.recordRequest(ctx, task.ID, turnSequence); err != nil {
+		if err := r.Progress.RecordModelRequest(ctx, task.ID, turnSequence); err != nil {
 			return taskResult(failCause(contracts.TaskFailureStorage, err))
 		}
 		sequence++
@@ -213,7 +212,7 @@ func (r *Runner) executeTurn(
 		return outcome, code, false, cause
 	}
 	outputErr := budget.addOutput(response.textBytes)
-	if err := r.recordOutput(ctx, task.ID, response.textBytes); err != nil {
+	if err := r.Progress.RecordModelOutput(ctx, task.ID, response.textBytes); err != nil {
 		outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
 		return outcome, code, false, cause
 	}

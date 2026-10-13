@@ -19,26 +19,26 @@ type RuntimeConfig struct {
 	Executions       *agentmodel.Executions
 	MessageRecorders MessageRecorderResolver
 	RunLoop          LoopFunc
-	TaskBuilder      TaskBuilder
-	Lifecycle        TaskLifecycle
+	TaskPreparer     TaskPreparer
+	Transitions      TaskTransitions
 	Queue            TaskQueue
 	// Logger 仅记录已脱敏的诊断信息，不得记录 Provider payload 或凭据；nil 时禁用日志。
-	Logger           *logging.Logger
-	LifecycleTimeout time.Duration
+	Logger            *logging.Logger
+	TransitionTimeout time.Duration
 }
 
 // Runtime 持有单个 Agent 的进程内执行槽，遗留 Task 通过重新领取继续执行。
 type Runtime struct {
-	hookDispatcher   *hooks.Dispatcher
-	agentID          contracts.AgentID
-	executions       *agentmodel.Executions
-	messageRecorders MessageRecorderResolver
-	runLoop          LoopFunc
-	taskBuilder      TaskBuilder
-	lifecycle        TaskLifecycle
-	queue            TaskQueue
-	logger           *logging.Logger
-	lifecycleTimeout time.Duration
+	hookDispatcher    *hooks.Dispatcher
+	agentID           contracts.AgentID
+	executions        *agentmodel.Executions
+	messageRecorders  MessageRecorderResolver
+	runLoop           LoopFunc
+	taskPreparer      TaskPreparer
+	transitions       TaskTransitions
+	queue             TaskQueue
+	logger            *logging.Logger
+	transitionTimeout time.Duration
 
 	mu      sync.Mutex
 	active  *runtimeTask
@@ -65,35 +65,35 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	if config.RunLoop == nil {
 		return nil, errors.New("target runtime loop function is required")
 	}
-	if config.TaskBuilder == nil {
-		return nil, errors.New("target runtime task builder is required")
+	if config.TaskPreparer == nil {
+		return nil, errors.New("target runtime task preparer is required")
 	}
-	if config.Lifecycle == nil {
-		return nil, errors.New("target runtime task lifecycle is required")
+	if config.Transitions == nil {
+		return nil, errors.New("target runtime task transitions are required")
 	}
 	if config.Queue == nil {
 		return nil, errors.New("target runtime task queue is required")
 	}
-	timeout := config.LifecycleTimeout
+	timeout := config.TransitionTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
 	return &Runtime{
-		agentID:          config.AgentID,
-		hookDispatcher:   config.HookDispatcher,
-		executions:       config.Executions,
-		messageRecorders: config.MessageRecorders,
-		runLoop:          config.RunLoop,
-		taskBuilder:      config.TaskBuilder,
-		lifecycle:        config.Lifecycle,
-		queue:            config.Queue,
-		logger:           logging.NewFactory().Ensure(config.Logger),
-		lifecycleTimeout: timeout,
+		agentID:           config.AgentID,
+		hookDispatcher:    config.HookDispatcher,
+		executions:        config.Executions,
+		messageRecorders:  config.MessageRecorders,
+		runLoop:           config.RunLoop,
+		taskPreparer:      config.TaskPreparer,
+		transitions:       config.Transitions,
+		queue:             config.Queue,
+		logger:            logging.NewFactory().Ensure(config.Logger),
+		transitionTimeout: timeout,
 	}, nil
 }
 
 // Activate 只接受属于当前 Agent 且已持久化的 task。
-// lifecycle 负责执行开始和结束的状态更新；重复激活幂等，仍在执行的另一个 task 会被拒绝。
+// TaskTransitions 负责执行开始和结束的状态更新；重复激活幂等，仍在执行的另一个 task 会被拒绝。
 func (r *Runtime) Activate(
 	ctx context.Context,
 	task taskmodel.Task,
@@ -114,7 +114,7 @@ func (r *Runtime) Activate(
 	}
 
 	if _, err := r.executions.Context(r.agentID, task.ID); errors.Is(err, contracts.ErrNotFound) {
-		reclaimed, err := r.taskBuilder.ReclaimTask(ctx, task)
+		reclaimed, err := r.taskPreparer.ReclaimTask(ctx, task)
 		if err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func (r *Runtime) StartNext(ctx context.Context) (bool, error) {
 	if err != nil || !found {
 		return false, err
 	}
-	task, prepared, err := r.taskBuilder.BuildTask(ctx, pending)
+	task, prepared, err := r.taskPreparer.PrepareQueuedTask(ctx, pending)
 	if err != nil || !prepared {
 		return false, err
 	}
@@ -269,9 +269,9 @@ func (r *Runtime) finishTask(active *runtimeTask) {
 }
 
 func (r *Runtime) startTask(task taskmodel.Task) error {
-	startContext, cancelStart := r.lifecycleContext()
+	startContext, cancelStart := r.transitionContext()
 	defer cancelStart()
-	if err := r.lifecycle.Start(startContext, task.ID); err != nil {
+	if err := r.transitions.ConfirmRunning(startContext, task.ID); err != nil {
 		r.logError(task, "start product task", err)
 		return err
 	}
@@ -341,9 +341,9 @@ func (r *Runtime) endTask(
 	active.ending = true
 	r.executions.BeginEnding(r.agentID, active.id)
 	r.mu.Unlock()
-	endContext, cancelEnd := r.lifecycleContext()
+	endContext, cancelEnd := r.transitionContext()
 	defer cancelEnd()
-	endedTask, err := r.lifecycle.End(
+	endedTask, err := r.transitions.Settle(
 		endContext,
 		task.ID,
 		outcome,
@@ -358,7 +358,7 @@ func (r *Runtime) endTask(
 	r.finishTask(active)
 	// 只有已提交的最终结果允许续跑；已提交的暂停或取消可以覆盖 loop 的正常完成。
 	if endedTask.Outcome == taskmodel.TaskCompleted || endedTask.Outcome == taskmodel.TaskYielded {
-		queueContext, cancelQueue := r.lifecycleContext()
+		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
 		if _, err := r.StartNext(queueContext); err != nil {
 			r.logError(task, "prepare next queued task", err)
@@ -396,8 +396,8 @@ func (r *Runtime) logEvent(taskID contracts.TaskID, stage string) {
 	r.logger.Infof("task id=%s stage=%s", taskID, stage)
 }
 
-func (r *Runtime) lifecycleContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), r.lifecycleTimeout)
+func (r *Runtime) transitionContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), r.transitionTimeout)
 }
 
 func knownOutcome(outcome taskmodel.TaskOutcome) bool {

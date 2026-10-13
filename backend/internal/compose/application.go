@@ -20,8 +20,6 @@ import (
 	applicationruntime "praxis/internal/service/runtime"
 	runtimequeue "praxis/internal/service/runtime/queue"
 	applicationtask "praxis/internal/service/runtime/task"
-	tasklifecycle "praxis/internal/service/runtime/task/lifecycle"
-	taskstart "praxis/internal/service/runtime/task/start"
 	applicationsession "praxis/internal/service/session"
 	toolexecution "praxis/internal/tool_execution"
 
@@ -34,6 +32,7 @@ import (
 	"praxis/internal/infra/toolconfig"
 	"praxis/internal/infra/workspacefs"
 	"praxis/internal/logging"
+	"praxis/internal/loop"
 	"praxis/internal/timing"
 	"praxis/internal/tools"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -244,28 +243,27 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	lifecycleService, err := tasklifecycle.NewService(tasklifecycle.Config{
-		Transactions:   store,
-		HookDispatcher: hookDispatcher,
-		Sessions:       repos.Sessions,
-		Agents:         repos.Agents,
-		Tasks:          repos.Tasks,
-		Controls:       repos.Controls,
-		Messages:       messages,
-		Logger:         diagnostics,
-		EventObserver: func(event tasklifecycle.TerminalEvent) {
-			events.Publish(terminalAgentEvent(event))
-		},
+	taskContextBuilder, err := applicationtask.NewTaskContextBuilder(applicationtask.ContextBuilderConfig{
+		Transactions: store,
+		Sessions:     repos.Sessions,
+		Tasks:        repos.Tasks,
+		Contexts:     repos.Contexts,
+		Messages:     messages,
 	})
 	if err != nil {
-		diagnostics.Errorf("create task lifecycle service failed: %v", err)
+		diagnostics.Errorf("create task context builder failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
-	startService, err := taskstart.NewService(taskstart.Config{
-		Controls:            repos.Controls,
-		Transactions:        store,
+	taskService, err := applicationtask.NewService(applicationtask.Config{
+		Controls:       repos.Controls,
+		Transactions:   store,
+		HookDispatcher: hookDispatcher,
+		Logger:         diagnostics,
+		EventObserver: func(event applicationtask.TerminalEvent) {
+			events.Publish(terminalAgentEvent(event))
+		},
 		Workspaces:          repos.Workspaces,
 		Sessions:            repos.Sessions,
 		Policies:            repos.Policies,
@@ -279,23 +277,38 @@ func Open(
 		Definitions:         taskInputProvider{agents: agentRegistry, models: modelRegistry},
 		AgentDefinitionsDir: root.AgentDefinitions,
 		Models:              taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		ContextProvider:     sessionService,
+		ContextBuilder:      taskContextBuilder,
 	})
 	if err != nil {
-		diagnostics.Errorf("create task start service failed: %v", err)
+		diagnostics.Errorf("create task service failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
 	if runLoop == nil {
-		runLoop, err = newLoop(modelRegistry, toolexecution.Config{
+		toolExecutor, err := toolexecution.NewExecutor(toolexecution.Config{
 			Transactions:    store,
 			HookDispatcher:  hookDispatcher,
-			CurrentSecurity: startService,
+			CurrentSecurity: taskService,
 			Tasks:           repos.Tasks,
 			Invocations:     repos.ToolInvocations,
 			Catalog:         toolRegistry,
-		}, sessionService, hookDispatcher, observe, diagnostics.Infof)
+		})
+		if err != nil {
+			_ = diagnostics.Close()
+			closeStore()
+			return nil, err
+		}
+		runLoop, err = newLoop(loop.Config{
+			ModelBuilder:   modelRegistry,
+			ContextBuilder: taskContextBuilder,
+			Progress:       taskService,
+			ToolExecutor:   toolExecutor,
+			Tools:          toolRegistry,
+			HookDispatcher: hookDispatcher,
+			EventObserver:  observe,
+			Logf:           diagnostics.Infof,
+		})
 		if err != nil {
 			_ = diagnostics.Close()
 			closeStore()
@@ -327,12 +340,6 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	taskService, err := applicationtask.NewService(startService, lifecycleService)
-	if err != nil {
-		_ = diagnostics.Close()
-		closeStore()
-		return nil, err
-	}
 	factory := runtimeFactory{
 		hooks:      hookDispatcher,
 		executions: executions,
@@ -340,10 +347,10 @@ func Open(
 		messageRecorders: func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (agentruntime.MessageRecorder, error) {
 			return messages.Resolve(ctx, sessionID, agentID)
 		},
-		taskBuilder: startService,
-		lifecycle:   taskService,
-		tasks:       repos.Tasks,
-		logger:      diagnostics,
+		taskPreparer: taskService,
+		transitions:  taskService,
+		tasks:        repos.Tasks,
+		logger:       diagnostics,
 	}
 	registry, err := agentruntime.NewRegistry(factory)
 	if err != nil {
@@ -455,7 +462,7 @@ func Open(
 			return store.InTx(ctx, func(context.Context) error {
 				modelRegistry.ReplaceFrom(candidateModels)
 				agentRegistry.ReplaceFrom(candidateAgents)
-				startService.UpdateToolPermissions(candidatePermissions)
+				taskService.UpdateToolPermissions(candidatePermissions)
 				return nil
 			})
 		},

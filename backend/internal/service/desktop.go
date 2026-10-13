@@ -17,7 +17,7 @@ import (
 	applicationagent "praxis/internal/service/agent"
 	applicationproject "praxis/internal/service/project"
 	taskqueue "praxis/internal/service/runtime/queue"
-	taskstart "praxis/internal/service/runtime/task/start"
+	applicationtask "praxis/internal/service/runtime/task"
 )
 
 // ListProjects 返回桌面项目目录，不向 binding 暴露领域实体。
@@ -318,7 +318,7 @@ func (s *Services) CreateSession(ctx context.Context, canonical request.CreateSe
 func (s *Services) SendInput(ctx context.Context, canonical request.SendInput) (SendInputResult, error) {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
-	params := taskstart.SendInputParams{
+	params := applicationtask.SendInputParams{
 		SessionID:      canonical.SessionID,
 		AgentID:        canonical.AgentID,
 		RequestID:      canonical.RequestID,

@@ -1,4 +1,4 @@
-package start
+package task
 
 import (
 	"context"
@@ -21,20 +21,21 @@ type SendInputParams struct {
 	ReasoningLevel string
 }
 
-type Result struct {
+// SendInputResult 返回持久化 Task 及请求是否已存在；重复请求不建立新的执行绑定。
+type SendInputResult struct {
 	Task            taskmodel.Task
 	ExistingRequest bool
 }
 
 // SendInput 在 Agent 没有活动 Task 时基于当前历史立即创建新的 Task。
-func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result, error) {
+func (s *Service) SendInput(ctx context.Context, params SendInputParams) (SendInputResult, error) {
 	if ctx == nil {
-		return Result{}, errors.New("send input context is required")
+		return SendInputResult{}, errors.New("send input context is required")
 	}
 	if params.AgentID == "" {
 		agent, err := s.primary.GetOrCreatePrimaryAgent(ctx, params.SessionID, params.RequestID)
 		if err != nil {
-			return Result{}, err
+			return SendInputResult{}, err
 		}
 		params.AgentID = agent.ID
 	}
@@ -42,11 +43,11 @@ func (s *Service) SendInput(ctx context.Context, params SendInputParams) (Result
 }
 
 // createImmediate 在一次事务内完成新 Task 的准入与执行绑定。
-func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (Result, error) {
+func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (SendInputResult, error) {
 	if ctx == nil {
-		return Result{}, errors.New("task creation context is required")
+		return SendInputResult{}, errors.New("task creation context is required")
 	}
-	var result Result
+	var result SendInputResult
 	var admittedAgent contracts.AgentID
 	var admittedTask contracts.TaskID
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -68,7 +69,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			if storedContent != params.Content {
 				return contracts.ErrRequestConflict
 			}
-			result = Result{Task: existing, ExistingRequest: true}
+			result = SendInputResult{Task: existing, ExistingRequest: true}
 			return nil
 		}
 		if !errors.Is(err, contracts.ErrNotFound) {

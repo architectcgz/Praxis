@@ -71,7 +71,6 @@ type Service struct {
 	usageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
 	removeSessionData func(context.Context, contracts.SessionID, []string) error
 	textReader        WorkspaceTextReader
-	contextBuilder    contextmodel.ContextBuilder
 	clock             system.Clock
 	ids               system.IDGenerator
 
@@ -135,7 +134,6 @@ func NewService(config Config) (*Service, error) {
 		usageRecords:      config.UsageRecords,
 		removeSessionData: config.RemoveSessionData,
 		textReader:        config.TextReader,
-		contextBuilder:    contextmodel.NewContextBuilder(),
 		clock:             system.ClockOrDefault(config.Clock),
 		ids:               system.IDsOrDefault(config.IDs),
 		createdSessions:   make(map[contracts.SessionID]struct{}),

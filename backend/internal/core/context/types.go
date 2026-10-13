@@ -89,7 +89,7 @@ type ContextEntry struct {
 }
 
 // ModelContext 是一次 Provider 请求使用的完整模型上下文。
-// Session 构建初始内容，runtime 在 loop 中追加 Provider output 和工具结果。
+// Task 上下文构建器生成初始与恢复内容，Loop 在执行中追加 Provider output 和工具结果。
 type ModelContext struct {
 	SystemPrompt string
 	Entries      []ContextEntry

@@ -5,7 +5,7 @@ import (
 
 	"praxis/internal/agent_runtime"
 	appservices "praxis/internal/service"
-	"praxis/internal/service/runtime/task/lifecycle"
+	"praxis/internal/service/runtime/task"
 	"praxis/internal/timing"
 )
 
@@ -43,7 +43,7 @@ func desktopAgentEvent(event agentruntime.AgentEvent) appservices.AgentEvent {
 	return result
 }
 
-func terminalAgentEvent(event lifecycle.TerminalEvent) appservices.AgentEvent {
+func terminalAgentEvent(event task.TerminalEvent) appservices.AgentEvent {
 	return appservices.AgentEvent{
 		Kind:           event.Kind,
 		SessionID:      event.SessionID,

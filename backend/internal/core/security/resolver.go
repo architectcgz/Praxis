@@ -1,8 +1,7 @@
-package start
+package security
 
 import (
 	"praxis/internal/contracts"
-	securitymodel "praxis/internal/core/security"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/utils/pathutil"
 
@@ -16,26 +15,27 @@ import (
 	"strings"
 )
 
-// freezeSecuritySnapshot 将策略和回合权限边界冻结为唯一安全快照。
+// SecurityResolver 将系统策略、Agent 策略和 Task 限制收敛为不可变安全快照。
 type SecurityResolver struct {
-	Baseline        securitymodel.AgentSecurityPolicy
-	ToolPermissions securitymodel.ToolPermissionPolicy
+	Baseline        AgentSecurityPolicy
+	ToolPermissions ToolPermissionPolicy
 }
 
+// NewSecurityResolver 复制已校验的系统权限上限；未指定工具策略时使用默认策略。
 func NewSecurityResolver(
-	baseline securitymodel.AgentSecurityPolicy,
-	toolPolicies ...securitymodel.ToolPermissionPolicy,
+	baseline AgentSecurityPolicy,
+	toolPolicies ...ToolPermissionPolicy,
 ) (SecurityResolver, error) {
 	if err := baseline.Validate(); err != nil {
 		return SecurityResolver{}, err
 	}
-	toolPolicy := securitymodel.ToolPermissionPolicy{}
+	toolPolicy := ToolPermissionPolicy{}
 	if len(toolPolicies) > 0 {
 		toolPolicy = toolPolicies[0]
 	}
 	if toolPolicy.Empty() {
 		var err error
-		toolPolicy, err = securitymodel.NewToolPermissionPolicy(nil)
+		toolPolicy, err = NewToolPermissionPolicy(nil)
 		if err != nil {
 			return SecurityResolver{}, err
 		}
@@ -43,8 +43,9 @@ func NewSecurityResolver(
 	return SecurityResolver{Baseline: baseline.Snapshot(), ToolPermissions: toolPolicy}, nil
 }
 
+// Resolve 只校验并收窄 canonical 权限，不清洗被授权路径；越权或无效输入返回错误。
 func (r SecurityResolver) Resolve(
-	policy securitymodel.AgentSecurityPolicy,
+	policy AgentSecurityPolicy,
 	restrictions contracts.TaskRestrictions,
 	workspace workspacemodel.Workspace,
 ) (contracts.SecuritySnapshot, error) {
@@ -92,22 +93,26 @@ func (r SecurityResolver) Resolve(
 		len(writeScopes) == 0 || !allowsBash(executables) {
 		tools = slices.DeleteFunc(tools, func(name contracts.ToolName) bool { return name == contracts.ToolBash })
 	}
-	permissions, err := contracts.NewTaskPermissions(contracts.TaskPermissionsSpec{
+	permissions := contracts.TaskPermissions{
 		WorkspaceID:        workspace.ID,
 		WorkspaceRevision:  workspace.Revision,
-		AllowedTools:       tools,
-		AllowedExecutables: executables,
-		ReadScopes:         readScopes,
-		WriteScopes:        writeScopes,
-	})
-	if err != nil {
-		return contracts.SecuritySnapshot{}, err
+		AllowedTools:       slices.Clone(tools),
+		AllowedExecutables: slices.Clone(executables),
+		// 空范围用空数组表示，保持快照序列化与指纹的确定性。
+		ReadScopes:  append([]string{}, readScopes...),
+		WriteScopes: append([]string{}, writeScopes...),
 	}
+	// 排序只稳定快照指纹，不替输入边界修正被授权路径或可执行文件。
+	slices.Sort(permissions.AllowedTools)
+	slices.Sort(permissions.AllowedExecutables)
+	slices.Sort(permissions.ReadScopes)
+	slices.Sort(permissions.WriteScopes)
 	snapshot := contracts.SecuritySnapshot{
-		AgentPolicyRevision: policy.Revision, Permissions: permissions,
-		ToolPermissions: r.ToolPermissions.SnapshotFor(tools),
-		Sandbox:         contracts.SandboxConstraints{Mode: sandbox},
-		ApprovalRules:   []contracts.ApprovalRule{{Mode: approval}},
+		AgentPolicyRevision: policy.Revision,
+		Permissions:         permissions,
+		ToolPermissions:     r.ToolPermissions.SnapshotFor(tools),
+		Sandbox:             contracts.SandboxConstraints{Mode: sandbox},
+		ApprovalRules:       []contracts.ApprovalRule{{Mode: approval}},
 		Fingerprint: securityFingerprint(struct {
 			Policy          uint64
 			Permissions     contracts.TaskPermissions
@@ -167,14 +172,16 @@ func restrictTools(policyTools, systemTools, requested []contracts.ToolName, enf
 
 func restrictScopes(allowed, requested []string, access string) ([]string, error) {
 	if len(requested) == 0 {
-		return append([]string(nil), allowed...), nil
+		return slices.Clone(allowed), nil
 	}
 	result := make([]string, 0, len(requested))
 	for _, scope := range requested {
-		clean := filepath.Clean(strings.TrimSpace(scope))
+		if !pathutil.IsAbsoluteNormalized(scope) {
+			return nil, contracts.InvalidValue("taskRestrictions.scopes", "scope must be an absolute normalized path")
+		}
 		matched := false
 		for _, root := range allowed {
-			if pathutil.IsWithin(root, clean) {
+			if pathutil.IsWithin(root, scope) {
 				matched = true
 				break
 			}
@@ -182,10 +189,10 @@ func restrictScopes(allowed, requested []string, access string) ([]string, error
 		if !matched {
 			return nil, contracts.New(contracts.TaskPolicyBlocked, fmt.Sprintf(
 				"无法开始执行：请求的%s路径 %q 超出当前授权范围 %v。请改用已授权目录内的路径；若需要操作其他目录，请将该目录作为项目打开并新建会话。",
-				access, clean, allowed,
+				access, scope, allowed,
 			))
 		}
-		result = append(result, clean)
+		result = append(result, scope)
 	}
 	return result, nil
 }
@@ -206,32 +213,14 @@ func intersectTools(left, right []contracts.ToolName) []contracts.ToolName {
 
 func intersectScopes(left, right []string) []string {
 	if len(right) == 0 {
-		return append([]string(nil), left...)
+		return slices.Clone(left)
 	}
-	result := make([]string, 0, len(left))
-	seen := make(map[string]struct{})
-	for _, value := range left {
-		for _, root := range right {
-			intersection := ""
-			if pathutil.IsWithin(value, root) {
-				intersection = filepath.Clean(root)
-			} else if pathutil.IsWithin(root, value) {
-				intersection = filepath.Clean(value)
-			}
-			if intersection != "" {
-				if _, exists := seen[intersection]; !exists {
-					seen[intersection] = struct{}{}
-					result = append(result, intersection)
-				}
-			}
-		}
-	}
-	return result
+	return intersectPaths(left, right)
 }
 
 func intersectStrings(left, right []string) []string {
 	if len(right) == 0 {
-		return append([]string(nil), left...)
+		return slices.Clone(left)
 	}
 	set := make(map[string]struct{}, len(right))
 	for _, value := range right {
@@ -244,12 +233,6 @@ func intersectStrings(left, right []string) []string {
 		}
 	}
 	return result
-}
-
-func systemSecurityBaseline(names []contracts.ToolName) (securitymodel.AgentSecurityPolicy, error) {
-	return securitymodel.NewAgentSecurityPolicy(1, securitymodel.CapabilityPolicy{
-		AllowedTools: names,
-	}, securitymodel.SandboxPolicy{Mode: contracts.SandboxWorkspaceNetwork}, securitymodel.ApprovalPolicy{Mode: contracts.ApprovalYolo})
 }
 
 func sandboxRank(mode contracts.SandboxMode) int {

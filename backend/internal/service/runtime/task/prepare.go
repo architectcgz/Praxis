@@ -1,4 +1,4 @@
-package start
+package task
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 	taskmodel "praxis/internal/core/task"
 )
 
-// BuildTask 为 runtime 选中的队首 Task 构建 Context，保留原有 Task ID。
+// PrepareQueuedTask 为 runtime 选中的队首 Task 冻结执行快照，保留原有 Task ID。
 // Agent 忙碌、已被领取或不是队首时返回 false；任何构建失败都回滚，不消费待处理输入。
-func (s *Service) BuildTask(ctx context.Context, selected taskmodel.Task) (taskmodel.Task, bool, error) {
+func (s *Service) PrepareQueuedTask(ctx context.Context, selected taskmodel.Task) (taskmodel.Task, bool, error) {
 	if ctx == nil {
 		return taskmodel.Task{}, false, errors.New("build task context is required")
 	}

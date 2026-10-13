@@ -1,5 +1,4 @@
-// Package lifecycle 负责 Task 开始确认和结束状态的持久化。
-package lifecycle
+package task
 
 import (
 	"praxis/internal/contracts"
@@ -8,14 +7,10 @@ import (
 
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"praxis/internal/hooks"
-	"praxis/internal/logging"
-	"praxis/internal/repository"
-	"praxis/internal/system"
 )
 
 const (
@@ -34,70 +29,17 @@ type TerminalEvent struct {
 	FailureMessage string
 }
 
-type Config struct {
-	Transactions   repository.TxRunner
-	HookDispatcher *hooks.Dispatcher
-	Sessions       repository.SessionRepository
-	Agents         repository.SessionAgentRepository
-	Tasks          repository.TaskRepository
-	Controls       repository.AgentControlCommandRepository
-	Messages       repository.MessageLoader
-	Clock          system.Clock
-	Logger         *logging.Logger
-	EventObserver  func(TerminalEvent)
-}
-
-type Service struct {
-	tx             repository.TxRunner
-	hookDispatcher *hooks.Dispatcher
-	sessions       repository.SessionRepository
-	agents         repository.SessionAgentRepository
-	tasks          repository.TaskRepository
-	controls       repository.AgentControlCommandRepository
-	messages       repository.MessageLoader
-	clock          system.Clock
-	logger         *logging.Logger
-	eventObserver  func(TerminalEvent)
-}
-
-type Params struct {
+type settleParams struct {
 	TaskID         contracts.TaskID
 	Outcome        taskmodel.TaskOutcome
 	FailureCode    contracts.TaskFailureCode
 	FailureMessage string
 }
 
-func NewService(config Config) (*Service, error) {
-	for name, value := range map[string]any{
-		"transactions": config.Transactions,
-		"sessions":     config.Sessions,
-		"agents":       config.Agents,
-		"tasks":        config.Tasks,
-		"controls":     config.Controls,
-		"messages":     config.Messages,
-	} {
-		if value == nil {
-			return nil, fmt.Errorf("task lifecycle service %s is required", name)
-		}
-	}
-	return &Service{
-		tx:             config.Transactions,
-		hookDispatcher: config.HookDispatcher,
-		sessions:       config.Sessions,
-		agents:         config.Agents,
-		tasks:          config.Tasks,
-		controls:       config.Controls,
-		messages:       config.Messages,
-		clock:          system.ClockOrDefault(config.Clock),
-		logger:         logging.NewFactory().Ensure(config.Logger),
-		eventObserver:  config.EventObserver,
-	}, nil
-}
-
-// Start 将指定执行推进到 Running；重复确认不会改变开始时间。
+// ConfirmRunning 将指定执行推进到 Running；重复确认不会改变开始时间。
 // 已结束的执行不能重新启动，用户消息正文保留用于重复请求校验。
 // taskID 来自 runtime 准入时已校验的持久化 Task。
-func (s *Service) Start(ctx context.Context, taskID contracts.TaskID) error {
+func (s *Service) ConfirmRunning(ctx context.Context, taskID contracts.TaskID) error {
 	if ctx == nil {
 		return errors.New("task start context is required")
 	}
@@ -119,11 +61,11 @@ func (s *Service) Start(ctx context.Context, taskID contracts.TaskID) error {
 	})
 }
 
-// End 接收 runtime 的执行结果，原子更新 Task、Agent 和控制命令。
+// Settle 接收 runtime 的执行结果，原子更新 Task、Agent 和控制命令。
 // 返回控制命令仲裁后的持久化回合；重复结束返回已有终态，不再次发布事件。
 // OperationHook 在事务外观察结算前后；回滚时只返回 Err，不把待提交 Outcome 当作最终结果。
-func (s *Service) End(ctx context.Context, taskID contracts.TaskID, outcome taskmodel.TaskOutcome, failureCode contracts.TaskFailureCode, failureMessage string) (result taskmodel.Task, err error) {
-	params := Params{
+func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome taskmodel.TaskOutcome, failureCode contracts.TaskFailureCode, failureMessage string) (result taskmodel.Task, err error) {
+	params := settleParams{
 		TaskID:         taskID,
 		Outcome:        outcome,
 		FailureCode:    contracts.TaskFailureCode(strings.TrimSpace(string(failureCode))),
@@ -132,7 +74,7 @@ func (s *Service) End(ctx context.Context, taskID contracts.TaskID, outcome task
 	if ctx == nil {
 		return taskmodel.Task{}, errors.New("task end context is required")
 	}
-	if !knownOutcome(params.Outcome) {
+	if !taskmodel.ValidTaskOutcome(params.Outcome) {
 		return taskmodel.Task{}, contracts.New(contracts.InvalidRequest, "")
 	}
 	// 只预读不可变归属，Hook 不能在持有仓储事务锁时启动；状态与控制命令仍在事务内重新仲裁。
@@ -269,15 +211,6 @@ func (s *Service) End(ctx context.Context, taskID contracts.TaskID, outcome task
 		})
 	}
 	return endedTask, nil
-}
-
-func knownOutcome(outcome taskmodel.TaskOutcome) bool {
-	switch outcome {
-	case taskmodel.TaskCompleted, taskmodel.TaskYielded, taskmodel.TaskPaused, taskmodel.TaskFailed, taskmodel.TaskInterrupted:
-		return true
-	default:
-		return false
-	}
 }
 
 func (s *Service) nameSessionAfterAnswer(

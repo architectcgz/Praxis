@@ -1,8 +1,9 @@
-package start
+package task
 
 import (
 	"context"
 	"praxis/internal/contracts"
+	securitymodel "praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
 )
 
@@ -31,5 +32,14 @@ func (s *Service) ResolveTaskSecurity(ctx context.Context, task taskmodel.Task) 
 	s.securityMu.RLock()
 	resolver := s.security
 	s.securityMu.RUnlock()
-	return resolver.Resolve(policy, contracts.TaskRestrictions{AllowedTools: definition.AllowedTools, EnforceAllowedTools: true}, workspace)
+	return resolver.Resolve(policy, contracts.TaskRestrictions{
+		AllowedTools:        definition.AllowedTools,
+		EnforceAllowedTools: true,
+	}, workspace)
+}
+
+func systemSecurityBaseline(names []contracts.ToolName) (securitymodel.AgentSecurityPolicy, error) {
+	return securitymodel.NewAgentSecurityPolicy(1, securitymodel.CapabilityPolicy{
+		AllowedTools: names,
+	}, securitymodel.SandboxPolicy{Mode: contracts.SandboxWorkspaceNetwork}, securitymodel.ApprovalPolicy{Mode: contracts.ApprovalYolo})
 }

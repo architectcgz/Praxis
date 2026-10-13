@@ -9,7 +9,7 @@ import (
 	"praxis/internal/contracts"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/service/runtime/queue"
-	"praxis/internal/service/runtime/task/start"
+	"praxis/internal/service/runtime/task"
 )
 
 // TaskActivator 把已提交的 Task 交给进程内执行协调器。
@@ -19,7 +19,7 @@ type TaskActivator interface {
 
 // TaskStarter 是 runtime 用例所需的 Task 准入与收敛能力。
 type TaskStarter interface {
-	SendInput(context.Context, start.SendInputParams) (start.Result, error)
+	SendInput(context.Context, task.SendInputParams) (task.SendInputResult, error)
 	// Abort 收敛激活失败后无人执行的 Task。
 	Abort(context.Context, contracts.TaskID) error
 }
@@ -42,7 +42,7 @@ type Service struct {
 
 // StartResult 区分回合创建结果与提交后的执行通知失败。
 type StartResult struct {
-	start.Result
+	task.SendInputResult
 	ActivationError string
 }
 
@@ -70,7 +70,7 @@ func NewService(config Config) (*Service, error) {
 }
 
 // SendInput 创建 Task 后开始执行；重复请求返回已有 Task，不重复激活。
-func (s *Service) SendInput(ctx context.Context, params start.SendInputParams) (StartResult, error) {
+func (s *Service) SendInput(ctx context.Context, params task.SendInputParams) (StartResult, error) {
 	result, err := s.tasks.SendInput(ctx, params)
 	if err != nil {
 		return StartResult{}, err
@@ -78,8 +78,8 @@ func (s *Service) SendInput(ctx context.Context, params start.SendInputParams) (
 	return s.activate(ctx, result), nil
 }
 
-func (s *Service) activate(ctx context.Context, result start.Result) StartResult {
-	response := StartResult{Result: result}
+func (s *Service) activate(ctx context.Context, result task.SendInputResult) StartResult {
+	response := StartResult{SendInputResult: result}
 	if result.ExistingRequest {
 		return response
 	}
