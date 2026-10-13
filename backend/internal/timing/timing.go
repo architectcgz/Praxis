@@ -1,4 +1,4 @@
-// Package timing 独立记录操作耗时，不依赖 Agent、Provider、Tool 或消息模型。
+// Package timing 独立记录操作耗时，并通过 Hook 接入业务执行边界。
 package timing
 
 import (

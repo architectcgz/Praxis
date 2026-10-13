@@ -8,6 +8,7 @@ import (
 
 	"praxis/internal/contracts"
 	turnmodel "praxis/internal/core/turn"
+	taskmodel "praxis/internal/core/task"
 	"praxis/internal/repository"
 	"praxis/internal/system"
 )
@@ -98,4 +99,55 @@ func (s *Service) RecordEnd(
 		}
 		return s.turns.Save(txCtx, value)
 	})
+}
+
+// Execute 负责一次 Turn 的开始、业务执行和终态结算；业务执行失败仍返回原始结果，结算失败优先返回存储错误。
+// 业务执行使用原始 Context，结算使用脱离取消的 Context，避免取消后遗留 running Turn。
+func (s *Service) Execute(
+	ctx context.Context,
+	params contracts.TurnExecutionContext,
+	execute func(context.Context, contracts.TurnID) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error),
+) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+	if ctx == nil {
+		return taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, errors.New("turn execution context is required")
+	}
+	if execute == nil {
+		return taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, errors.New("turn execution function is required")
+	}
+	turn, err := s.RecordStart(ctx, params)
+	if err != nil {
+		return taskmodel.TaskFailed, contracts.TaskFailureStorage, fmt.Errorf("record turn start: %w", err)
+	}
+	outcome, code, executeErr := execute(ctx, turn.ID)
+	turnOutcome, failureCode, message := settlement(ctx, outcome, code, executeErr)
+	if err := s.RecordEnd(context.WithoutCancel(ctx), turn.ID, turnOutcome, failureCode, message); err != nil {
+		storageErr := fmt.Errorf("record turn end: %w", err)
+		if executeErr == nil {
+			return taskmodel.TaskFailed, contracts.TaskFailureStorage, storageErr
+		}
+		return taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, errors.Join(executeErr, storageErr)
+	}
+	return outcome, code, executeErr
+}
+
+// settlement 将 loop 结果映射为 Turn 终态；取消优先于普通失败。
+func settlement(
+	ctx context.Context,
+	outcome taskmodel.TaskOutcome,
+	code contracts.TaskFailureCode,
+	err error,
+) (turnmodel.TurnOutcome, contracts.TaskFailureCode, string) {
+	if ctx.Err() != nil {
+		if code == "" {
+			code = contracts.TaskFailureRuntimeCancelled
+		}
+		return turnmodel.TurnInterrupted, code, ""
+	}
+	if outcome == taskmodel.TaskCompleted {
+		return turnmodel.TurnCompleted, "", ""
+	}
+	if code == "" {
+		code = contracts.TaskFailureRuntimeFailed
+	}
+	return turnmodel.TurnFailed, code, contracts.TaskFailureMessage(code, err)
 }

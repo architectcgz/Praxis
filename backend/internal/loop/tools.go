@@ -48,7 +48,7 @@ func (r *Runner) runToolCalls(
 				return results, failCause(contracts.TaskFailureStorage,
 					&RuntimeError{Code: ErrorStorage, Message: "tool result receipt failed", Cause: receiptErr})
 			}
-			r.emitToolResult(metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
+			r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
 			return results, failCause(contracts.TaskFailureTool,
 				&RuntimeError{Code: ErrorTool, Message: "tool execution failed", Cause: err})
 		}
@@ -63,7 +63,7 @@ func (r *Runner) runToolCalls(
 		if err := appendToolResult(ctx, messageRecorder, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); err != nil {
 			return results, err
 		}
-		r.emitToolResult(metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
+		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
 		results = append(results, result)
 	}
 	return results, nil

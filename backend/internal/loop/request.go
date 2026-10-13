@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
@@ -13,8 +14,8 @@ import (
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
-// summarizeContext 独立记录摘要调用的 Turn 和用量，不执行工具、不发布思考或回答文本。
-// 请求在 Task 创建事务之外运行；失败时结算摘要 Turn，原历史仍由调用方持有。
+// summarizeContext 通过 TurnExecutor 执行摘要请求，不执行工具、不发布思考或回答文本。
+// 请求在 Task 创建事务之外运行；原历史仍由调用方持有。
 func (r *Runner) summarizeContext(
 	ctx context.Context,
 	task taskmodel.Task,
@@ -24,56 +25,72 @@ func (r *Runner) summarizeContext(
 	sequence uint64,
 	budget *taskBudget,
 ) (string, error) {
-	turn, err := r.Turns.RecordStart(ctx, contracts.TurnExecutionContext{
+	var response modelResponse
+	var text strings.Builder
+	outcome, code, err := r.Turns.Execute(ctx, contracts.TurnExecutionContext{
 		TaskID:    task.ID,
 		SessionID: task.SessionID,
 		AgentID:   task.AgentID,
 		Sequence:  sequence,
-	})
-	if err != nil {
-		return "", failCause(contracts.TaskFailureStorage, err)
-	}
-	request := model.ModelRequest{
-		TaskID:           task.ID,
-		SessionReference: task.SessionID.String(),
-		Context:          history,
-		Model:            task.Input.Model,
-		MaxOutputTokens:  limit,
-		TurnID:           turn.ID,
-	}
-	var response modelResponse
-	if err = budget.reserveInput(request); err == nil {
-		summaryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	}, func(summaryCtx context.Context, turnID contracts.TurnID) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+		r.emit(agentruntime.AgentEvent{
+			Kind:      agentruntime.AgentEventTurnStarted,
+			SessionID: task.SessionID,
+			AgentID:   task.AgentID,
+			TaskID:    task.ID,
+			TurnID:    turnID,
+		})
+		request := model.ModelRequest{
+			TaskID:           task.ID,
+			SessionReference: task.SessionID.String(),
+			Context:          history,
+			Model:            task.Input.Model,
+			MaxOutputTokens:  limit,
+			TurnID:           turnID,
+		}
+		if err := budget.reserveInput(request); err != nil {
+			r.emitError(task.AgentID, task.ID, turnID, err)
+			return taskResult(err)
+		}
+		requestContext, cancel := context.WithTimeout(summaryCtx, 2*time.Minute)
 		defer cancel()
-		r.Logf("context summary requested task=%s turn=%s entries=%d", task.ID, turn.ID, len(history.Entries))
-		response, err = requestModel(summaryCtx, stream, request, func(event model.ModelStreamEvent) {
+		r.Logf("context summary requested task=%s turn=%s entries=%d", task.ID, turnID, len(history.Entries))
+		var requestErr error
+		response, requestErr = requestModel(requestContext, stream, request, func(event model.ModelStreamEvent) {
 			if event.Kind == model.StreamUsage {
-				r.emitModelEvent(task.SessionID, task.AgentID, task.ID, turn.ID, event)
+				r.emitModelEvent(task.SessionID, task.AgentID, task.ID, turnID, event)
 			}
 		})
-		if err == nil {
-			err = budget.addOutput(response.textBytes)
+		if requestErr == nil {
+			requestErr = budget.addOutput(response.textBytes)
 		}
-	}
-	var text strings.Builder
-	if err == nil {
+		if requestErr != nil {
+			requestErr = modelFailure(requestErr)
+			r.emitError(task.AgentID, task.ID, turnID, requestErr)
+			return taskResult(requestErr)
+		}
 		if len(response.toolCalls()) != 0 {
-			err = errors.New("context summary returned a tool call")
-		} else {
-			for _, event := range response.events {
-				if event.Kind == model.StreamTextDelta {
-					text.WriteString(event.Text)
-				}
+			err := errors.New("context summary returned a tool call")
+			r.emitError(task.AgentID, task.ID, turnID, err)
+			return taskResult(err)
+		}
+		for _, event := range response.events {
+			if event.Kind == model.StreamTextDelta {
+				text.WriteString(event.Text)
 			}
 		}
-	}
-	if err != nil {
-		_, code, settled := r.settleTurnErr(ctx, turn.ID, modelFailure(err))
-		return "", failCause(code, settled)
-	}
-	_, _, err = r.settleTurn(ctx, turn.ID, taskmodel.TaskCompleted, "", nil)
-	if err != nil {
-		return "", failCause(contracts.TaskFailureStorage, err)
+		r.emit(agentruntime.AgentEvent{
+			Kind:       agentruntime.AgentEventTurnCompleted,
+			SessionID:  task.SessionID,
+			AgentID:    task.AgentID,
+			TaskID:     task.ID,
+			TurnID:     turnID,
+			StopReason: response.stopReason,
+		})
+		return taskmodel.TaskCompleted, "", nil
+	})
+	if err != nil || outcome != taskmodel.TaskCompleted {
+		return "", failCause(code, err)
 	}
 	return text.String(), nil
 }
@@ -98,6 +115,14 @@ func allowedToolDefinitions(permissions contracts.TaskPermissions, catalog toolc
 		if permissions.AllowsTool(definition.Name) {
 			definitions = append(definitions, definition.Snapshot())
 		}
+		r.emit(agentruntime.AgentEvent{
+			Kind:      agentruntime.AgentEventProviderWaiting,
+			SessionID: task.SessionID,
+			AgentID:   task.AgentID,
+			TaskID:    task.ID,
+			TurnID:    turnID,
+			Name:      task.Input.Model.ProviderID + "/" + task.Input.Model.ModelID,
+		})
 	}
 	return definitions
 }

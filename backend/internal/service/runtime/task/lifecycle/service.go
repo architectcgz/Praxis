@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"praxis/internal/hooks"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
 	"praxis/internal/system"
@@ -34,27 +35,29 @@ type TerminalEvent struct {
 }
 
 type Config struct {
-	Transactions  repository.TxRunner
-	Sessions      repository.SessionRepository
-	Agents        repository.SessionAgentRepository
-	Tasks         repository.TaskRepository
-	Controls      repository.AgentControlCommandRepository
-	Messages      repository.MessageLoader
-	Clock         system.Clock
-	Logger        *logging.Logger
-	EventObserver func(TerminalEvent)
+	Transactions   repository.TxRunner
+	HookDispatcher *hooks.Dispatcher
+	Sessions       repository.SessionRepository
+	Agents         repository.SessionAgentRepository
+	Tasks          repository.TaskRepository
+	Controls       repository.AgentControlCommandRepository
+	Messages       repository.MessageLoader
+	Clock          system.Clock
+	Logger         *logging.Logger
+	EventObserver  func(TerminalEvent)
 }
 
 type Service struct {
-	tx            repository.TxRunner
-	sessions      repository.SessionRepository
-	agents        repository.SessionAgentRepository
-	tasks         repository.TaskRepository
-	controls      repository.AgentControlCommandRepository
-	messages      repository.MessageLoader
-	clock         system.Clock
-	logger        *logging.Logger
-	eventObserver func(TerminalEvent)
+	tx             repository.TxRunner
+	hookDispatcher *hooks.Dispatcher
+	sessions       repository.SessionRepository
+	agents         repository.SessionAgentRepository
+	tasks          repository.TaskRepository
+	controls       repository.AgentControlCommandRepository
+	messages       repository.MessageLoader
+	clock          system.Clock
+	logger         *logging.Logger
+	eventObserver  func(TerminalEvent)
 }
 
 type Params struct {
@@ -78,15 +81,16 @@ func NewService(config Config) (*Service, error) {
 		}
 	}
 	return &Service{
-		tx:            config.Transactions,
-		sessions:      config.Sessions,
-		agents:        config.Agents,
-		tasks:         config.Tasks,
-		controls:      config.Controls,
-		messages:      config.Messages,
-		clock:         system.ClockOrDefault(config.Clock),
-		logger:        logging.NewFactory().Ensure(config.Logger),
-		eventObserver: config.EventObserver,
+		tx:             config.Transactions,
+		hookDispatcher: config.HookDispatcher,
+		sessions:       config.Sessions,
+		agents:         config.Agents,
+		tasks:          config.Tasks,
+		controls:       config.Controls,
+		messages:       config.Messages,
+		clock:          system.ClockOrDefault(config.Clock),
+		logger:         logging.NewFactory().Ensure(config.Logger),
+		eventObserver:  config.EventObserver,
 	}, nil
 }
 
@@ -117,7 +121,8 @@ func (s *Service) Start(ctx context.Context, taskID contracts.TaskID) error {
 
 // End 接收 runtime 的执行结果，原子更新 Task、Agent 和控制命令。
 // 返回控制命令仲裁后的持久化回合；重复结束返回已有终态，不再次发布事件。
-func (s *Service) End(ctx context.Context, taskID contracts.TaskID, outcome taskmodel.TaskOutcome, failureCode contracts.TaskFailureCode, failureMessage string) (taskmodel.Task, error) {
+// OperationHook 在事务外观察结算前后；回滚时只返回 Err，不把待提交 Outcome 当作最终结果。
+func (s *Service) End(ctx context.Context, taskID contracts.TaskID, outcome taskmodel.TaskOutcome, failureCode contracts.TaskFailureCode, failureMessage string) (result taskmodel.Task, err error) {
 	params := Params{
 		TaskID:         taskID,
 		Outcome:        outcome,
@@ -130,9 +135,25 @@ func (s *Service) End(ctx context.Context, taskID contracts.TaskID, outcome task
 	if !knownOutcome(params.Outcome) {
 		return taskmodel.Task{}, contracts.New(contracts.InvalidRequest, "")
 	}
+	// 只预读不可变归属，Hook 不能在持有仓储事务锁时启动；状态与控制命令仍在事务内重新仲裁。
+	observedTask, err := s.tasks.Get(ctx, params.TaskID)
+	if err != nil {
+		s.logger.Errorf("operation=task_end task_id=%s status=failed outcome=%s error=%v", params.TaskID, params.Outcome, err)
+		return taskmodel.Task{}, err
+	}
+	ctx, scope := s.hookDispatcher.Start(ctx, hooks.Operation{
+		Identity: hooks.Identity{
+			SessionID: observedTask.SessionID,
+			AgentID:   observedTask.AgentID,
+			TaskID:    observedTask.ID,
+		},
+		Kind: hooks.OperationTaskSettle,
+		Name: "settle_task",
+	})
+	defer func() { scope.End(hooks.Result{Err: err, Outcome: result.Outcome}) }()
 	var endedTask taskmodel.Task
 	var firstEnd bool
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
 		task, err := s.tasks.Get(txCtx, params.TaskID)
 		if err != nil {
 			return err

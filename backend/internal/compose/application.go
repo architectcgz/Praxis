@@ -5,6 +5,7 @@ import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
+	"praxis/internal/hooks"
 
 	"context"
 	"errors"
@@ -156,7 +157,11 @@ func Open(
 	messages := repos.Messages
 	events := appservices.NewEventPublisher()
 	usages := jsonl.ModelUsageStore{Store: store}
+	var operationObserver *executionObserver
 	observe := func(event agentruntime.AgentEvent) {
+		if operationObserver != nil {
+			operationObserver.Observe(event)
+		}
 		if event.Kind == agentruntime.AgentEventModelUsage && event.Usage != nil {
 			// 用量写入不继承业务取消，保存失败只影响统计，不改变模型响应。
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -194,6 +199,8 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	hookDispatcher := hooks.NewDispatcher(timing.Hook{Recorder: timings})
+	operationObserver = newExecutionObserver(hookDispatcher)
 	if runLoop == nil {
 		runLoop, err = newLoop(modelRegistry, toolinvocation.Config{
 			Transactions:      store,
@@ -204,7 +211,7 @@ func Open(
 		}, taskturn.Config{
 			Transactions: store,
 			Turns:        repos.Turns,
-		}, timings, observe, diagnostics.Infof)
+		}, observe, diagnostics.Infof)
 		if err != nil {
 			_ = diagnostics.Close()
 			closeStore()
@@ -269,11 +276,11 @@ func Open(
 	lifecycleService, err := tasklifecycle.NewService(tasklifecycle.Config{
 		Transactions: store,
 		Sessions:     repos.Sessions,
-		Agents:       repos.Agents,
-		Tasks:        repos.Tasks,
-		Controls:     repos.Controls,
-		Messages:     messages,
-		Logger:       diagnostics,
+		Agents:         repos.Agents,
+		Tasks:          repos.Tasks,
+		Controls:       repos.Controls,
+		Messages:       messages,
+		Logger:         diagnostics,
 		EventObserver: func(event tasklifecycle.TerminalEvent) {
 			events.Publish(terminalAgentEvent(event))
 		},
@@ -339,8 +346,8 @@ func Open(
 		return nil, err
 	}
 	factory := runtimeFactory{
-		executions: executions,
-		runLoop:    timedLoop(runLoop, timings),
+		executions:     executions,
+		runLoop:        observedLoop(runLoop, operationObserver),
 		messageRecorders: func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (agentruntime.MessageRecorder, error) {
 			return messages.Resolve(ctx, sessionID, agentID)
 		},

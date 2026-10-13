@@ -252,11 +252,12 @@ func (r *Runtime) execute(
 	messageRecorder MessageRecorder,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, string) {
 	outcome, failureCode, err := r.runLoop(ctx, task, messageRecorder)
+	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
 	r.logEvent(task.ID, "provider completed")
 	if err != nil {
 		r.logError(task, "run provider", err)
 	}
-	return r.executionResult(ctx, outcome, failureCode, err)
+	return finalOutcome, finalCode, message
 }
 
 // executionResult 读取 Agent 提供的取消原因；持久化控制命令由结束事务最终仲裁。

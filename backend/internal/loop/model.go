@@ -25,7 +25,7 @@ func requestModel(
 	stream model.ModelStream,
 	request model.ModelRequest,
 	onEvent func(model.ModelStreamEvent),
-) (modelResponse, error) {
+) (response modelResponse, err error) {
 	if stream == nil {
 		return modelResponse{}, errors.New("provider stream is required")
 	}
@@ -35,7 +35,7 @@ func requestModel(
 	if err != nil {
 		return modelResponse{}, err
 	}
-	response, err := collectModelResponse(streamCtx, input, onEvent)
+	response, err = collectModelResponse(streamCtx, input, onEvent)
 	if err == nil {
 		err = response.validateReasoningState(request.Model.APIFormat)
 	}

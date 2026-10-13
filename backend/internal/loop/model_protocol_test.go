@@ -17,6 +17,7 @@ import (
 	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 	turnmodel "praxis/internal/core/turn"
+	"praxis/internal/hooks"
 	"praxis/internal/infra/providers/anthropicmessages"
 	openaichat "praxis/internal/infra/providers/openai_chat"
 	openairesponses "praxis/internal/infra/providers/openai_responses"
@@ -114,7 +115,7 @@ func TestProviderProtocolsDriveLoop(t *testing.T) {
 					}
 				}
 				observedTools, observedUsage := 0, 0
-				response, err := requestModel(t.Context(), provider, request, func(event model.ModelStreamEvent) {
+				response, err := requestModel(t.Context(), provider, request, hooks.Identity{}, nil, func(event model.ModelStreamEvent) {
 					if event.Kind == model.StreamToolCall {
 						observedTools++
 					}
@@ -153,7 +154,7 @@ func TestProviderProtocolsDriveLoop(t *testing.T) {
 				for _, call := range response.toolCalls() {
 					request.Context = request.Context.AppendToolResult(appcontext.NewToolResultBlock(call.ID, string(call.Name), "结果", false))
 				}
-				if _, err := requestModel(t.Context(), provider, request, nil); err != nil {
+				if _, err := requestModel(t.Context(), provider, request, hooks.Identity{}, nil, nil); err != nil {
 					t.Fatalf("下一轮请求失败：%v", err)
 				}
 				body := <-bodies

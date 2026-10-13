@@ -7,7 +7,6 @@ import (
 	"praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
-	turnmodel "praxis/internal/core/turn"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
@@ -23,7 +22,7 @@ type Config struct {
 	ModelBuilder model.ModelBuilder
 	Tools        toolcontracts.ToolCatalog
 	ToolCalls    ToolCallHandler
-	Turns        TurnRecorder
+	Turns        TurnExecutor
 	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
 	CompressionStrategy contextcompress.Strategy
 	EventObserver       agentruntime.AgentEventObserver
@@ -48,7 +47,7 @@ func NewRunner(config Config) (Runner, error) {
 		return Runner{}, errors.New("loop tool call handler is required")
 	}
 	if config.Turns == nil {
-		return Runner{}, errors.New("loop turn recorder is required")
+		return Runner{}, errors.New("loop turn executor is required")
 	}
 	if config.EventObserver == nil {
 		return Runner{}, errors.New("loop event observer is required")
@@ -124,164 +123,128 @@ func (r *Runner) run(
 			modelContext = compressed
 			request.Context = modelContext.Clone()
 		}
-		// 每次迭代必须先在日志中留下 running 迭代，恢复才能对账未结算的调用。
-		turn, err := r.Turns.RecordStart(ctx, contracts.TurnExecutionContext{
+		turnSequence := sequence
+		sequence++
+		outcome, failureCode, err := r.Turns.Execute(ctx, contracts.TurnExecutionContext{
 			TaskID:    task.ID,
 			SessionID: task.SessionID,
 			AgentID:   task.AgentID,
-			Sequence:  sequence,
+			Sequence:  turnSequence,
+		}, func(turnCtx context.Context, turnID contracts.TurnID) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+			request.TurnID = turnID
+			return r.executeTurn(turnCtx, task, taskModel, messageRecorder, request, &modelContext, budget, turnID)
 		})
-		if err != nil {
-			r.emitError(task.AgentID, task.ID, "", err)
-			return taskResult(failCause(contracts.TaskFailureStorage, fmt.Errorf("record turn start: %w", err)))
-		}
-		sequence++
-		r.emit(agentruntime.AgentEvent{
-			Kind:    agentruntime.AgentEventTurnStarted,
-			AgentID: task.AgentID,
-			TaskID:  task.ID,
-			TurnID:  turn.ID,
-		})
-		request.TurnID = turn.ID
-		if err := budget.reserveInput(request); err != nil {
-			r.emitError(task.AgentID, task.ID, turn.ID, err)
-			return r.settleTurnErr(ctx, turn.ID, err)
-		}
-		r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", task.ID, task.Input.Model.ModelID, len(modelContext.Entries), turn.ID)
-		r.emit(agentruntime.AgentEvent{
-			Kind:    agentruntime.AgentEventProviderWaiting,
-			AgentID: task.AgentID,
-			TaskID:  task.ID,
-			TurnID:  turn.ID,
-		})
-		response, err := requestModel(ctx, taskModel.Stream, request, func(event model.ModelStreamEvent) {
-			r.emitModelEvent(task.SessionID, task.AgentID, task.ID, turn.ID, event)
-		})
-		if err != nil {
-			err = modelFailure(err)
-			r.emitError(task.AgentID, task.ID, turn.ID, err)
-			return r.settleTurnErr(ctx, turn.ID, err)
-		}
-		if err := budget.addOutput(response.textBytes); err != nil {
-			r.emitError(task.AgentID, task.ID, turn.ID, err)
-			return r.settleTurnErr(ctx, turn.ID, err)
-		}
-		assistant := model.ContextBlocksFromEvents(response.events)
-		calls := response.toolCalls()
-		metadata := contracts.ToolInvocationContext{
-			TaskID:              task.ID,
-			TurnID:              turn.ID,
-			SessionID:           task.SessionID,
-			AgentID:             task.AgentID,
-			WorkspacePath:       task.Input.WorkspacePath,
-			SecurityFingerprint: task.Input.Security.Fingerprint,
-		}
-		if len(assistant) > 0 {
-			message := taskMessage(sessionmodel.MessageData{
-				ID:         "assistant:" + turn.ID.String(),
-				RequestID:  task.RequestID.String(),
-				TaskID:     task.ID.String(),
-				Role:       sessionmodel.RoleAssistant,
-				AuthorKind: sessionmodel.AuthorAgent,
-				AuthorID:   task.AgentID.String(),
-			}, assistant)
-			if err := r.ToolCalls.RecordAssistant(ctx, messageRecorder.Append, message, metadata); err != nil {
-				r.emitError(task.AgentID, task.ID, turn.ID, err)
-				return r.settleTurnErr(ctx, turn.ID, err)
-			}
-		}
-		for _, call := range calls {
-			r.emit(agentruntime.AgentEvent{
-				Kind:    agentruntime.AgentEventToolCall,
-				AgentID: task.AgentID,
-				TaskID:  task.ID,
-				TurnID:  turn.ID,
-				CallID:  call.ID,
-				Name:    string(call.Name),
-				Input:   append([]byte(nil), call.Arguments...),
-			})
-		}
-		r.emit(agentruntime.AgentEvent{
-			Kind:    agentruntime.AgentEventTurnCompleted,
-			AgentID: task.AgentID,
-			TaskID:  task.ID,
-			TurnID:  turn.ID,
-		})
-		modelContext = modelContext.AppendProviderOutput(assistant)
-		if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {
-			return r.settleTurn(ctx, turn.ID, taskmodel.TaskCompleted, "", nil)
-		}
-		results, err := r.runToolCalls(ctx, messageRecorder, calls, metadata, task.RequestID, budget)
-		if err != nil {
-			r.emitError(task.AgentID, task.ID, turn.ID, err)
-			return r.settleTurnErr(ctx, turn.ID, err)
-		}
-		for index, result := range results {
-			modelContext = modelContext.AppendToolResult(appcontext.NewToolResultBlock(
-				calls[index].ID,
-				string(calls[index].Name),
-				result.Payload,
-				result.ErrorClass != "",
-			))
-		}
-		// 本次迭代已完整执行（含工具调用）；先结算迭代再进入下一次模型请求。
-		if outcome, code, settleErr := r.settleTurn(ctx, turn.ID, taskmodel.TaskCompleted, "", nil); settleErr != nil {
-			r.emitError(task.AgentID, task.ID, turn.ID, settleErr)
-			return outcome, code, settleErr
+		if err != nil || outcome != taskmodel.TaskCompleted {
+			return outcome, failureCode, err
 		}
 	}
 }
 
-// settleTurnErr 按 loop 的失败分类结算当前迭代，再返回 loop 结果。
-func (r *Runner) settleTurnErr(
+// executeTurn 执行一轮模型、工具和回执业务；Turn 的开始与结算由 TurnExecutor 负责。
+func (r *Runner) executeTurn(
 	ctx context.Context,
+	task taskmodel.Task,
+	taskModel model.Model,
+	messageRecorder agentruntime.MessageRecorder,
+	request model.ModelRequest,
+	modelContext *appcontext.ModelContext,
+	budget *taskBudget,
 	turnID contracts.TurnID,
-	err error,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
-	outcome, code, cause := taskResult(err)
-	return r.settleTurn(ctx, turnID, outcome, code, cause)
-}
-
-// settleTurn 结算当前迭代后返回 loop 结果；迭代必须落库，否则恢复无法对账。
-// 结算脱离已取消的 Context，避免被中断的迭代永久停留在 running。
-func (r *Runner) settleTurn(
-	ctx context.Context,
-	turnID contracts.TurnID,
-	outcome taskmodel.TaskOutcome,
-	code contracts.TaskFailureCode,
-	err error,
-) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
-	turnOutcome, failureCode, message := turnSettlement(ctx, outcome, code, err)
-	if endErr := r.Turns.RecordEnd(context.WithoutCancel(ctx), turnID, turnOutcome, failureCode, message); endErr != nil {
-		storageErr := failCause(contracts.TaskFailureStorage, fmt.Errorf("record turn end: %w", endErr))
-		if err == nil {
-			return taskResult(storageErr)
+		r.emit(agentruntime.AgentEvent{
+			Kind:      agentruntime.AgentEventTurnStarted,
+			SessionID: task.SessionID,
+			AgentID:   task.AgentID,
+			TaskID:    task.ID,
+			TurnID:    turnID,
+		})
+	if err := budget.reserveInput(request); err != nil {
+		r.emitError(task.AgentID, task.ID, turnID, err)
+		return taskResult(err)
+	}
+	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", task.ID, task.Input.Model.ModelID, len(modelContext.Entries), turnID)
+	r.emit(agentruntime.AgentEvent{
+		Kind:      agentruntime.AgentEventProviderWaiting,
+		SessionID: task.SessionID,
+		AgentID:   task.AgentID,
+		TaskID:    task.ID,
+		TurnID:    turnID,
+		Name:      task.Input.Model.ProviderID + "/" + task.Input.Model.ModelID,
+	})
+	response, err := requestModel(ctx, taskModel.Stream, request, func(event model.ModelStreamEvent) {
+		r.emitModelEvent(task.SessionID, task.AgentID, task.ID, turnID, event)
+	})
+	if err != nil {
+		err = modelFailure(err)
+		r.emitError(task.AgentID, task.ID, turnID, err)
+		return taskResult(err)
+	}
+	if err := budget.addOutput(response.textBytes); err != nil {
+		r.emitError(task.AgentID, task.ID, turnID, err)
+		return taskResult(err)
+	}
+	assistant := model.ContextBlocksFromEvents(response.events)
+	calls := response.toolCalls()
+	metadata := contracts.ToolInvocationContext{
+		TaskID:              task.ID,
+		TurnID:              turnID,
+		SessionID:           task.SessionID,
+		AgentID:             task.AgentID,
+		WorkspacePath:       task.Input.WorkspacePath,
+		SecurityFingerprint: task.Input.Security.Fingerprint,
+	}
+	if len(assistant) > 0 {
+		message := taskMessage(sessionmodel.MessageData{
+			ID:         "assistant:" + turnID.String(),
+			RequestID:  task.RequestID.String(),
+			TaskID:     task.ID.String(),
+			Role:       sessionmodel.RoleAssistant,
+			AuthorKind: sessionmodel.AuthorAgent,
+			AuthorID:   task.AgentID.String(),
+		}, assistant)
+		if err := r.ToolCalls.RecordAssistant(ctx, messageRecorder.Append, message, metadata); err != nil {
+			r.emitError(task.AgentID, task.ID, turnID, err)
+			return taskResult(err)
 		}
-		return failedTask(errors.Join(err, storageErr))
 	}
-	return outcome, code, err
-}
-
-// turnSettlement 把 loop 结果映射为迭代结果；取消优先于普通失败。
-func turnSettlement(
-	ctx context.Context,
-	outcome taskmodel.TaskOutcome,
-	code contracts.TaskFailureCode,
-	err error,
-) (turnmodel.TurnOutcome, contracts.TaskFailureCode, string) {
-	if ctx.Err() != nil {
-		if code == "" {
-			code = contracts.TaskFailureRuntimeCancelled
-		}
-		return turnmodel.TurnInterrupted, code, ""
+	for _, call := range calls {
+		r.emit(agentruntime.AgentEvent{
+			Kind:      agentruntime.AgentEventToolCall,
+			SessionID: task.SessionID,
+			AgentID:   task.AgentID,
+			TaskID:    task.ID,
+			TurnID:    turnID,
+			CallID:    call.ID,
+			Name:      string(call.Name),
+			Input:     append([]byte(nil), call.Arguments...),
+		})
 	}
-	if outcome == taskmodel.TaskCompleted {
-		return turnmodel.TurnCompleted, "", ""
+	r.emit(agentruntime.AgentEvent{
+		Kind:       agentruntime.AgentEventTurnCompleted,
+		SessionID:  task.SessionID,
+		AgentID:    task.AgentID,
+		TaskID:     task.ID,
+		TurnID:     turnID,
+		StopReason: response.stopReason,
+	})
+	*modelContext = modelContext.AppendProviderOutput(assistant)
+	if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {
+		return taskmodel.TaskCompleted, "", nil
 	}
-	if code == "" {
-		code = contracts.TaskFailureRuntimeFailed
+	results, err := r.runToolCalls(ctx, messageRecorder, calls, metadata, task.RequestID, budget)
+	if err != nil {
+		r.emitError(task.AgentID, task.ID, turnID, err)
+		return taskResult(err)
 	}
-	return turnmodel.TurnFailed, code, contracts.TaskFailureMessage(code, err)
+	for index, result := range results {
+		*modelContext = modelContext.AppendToolResult(appcontext.NewToolResultBlock(
+			calls[index].ID,
+			string(calls[index].Name),
+			result.Payload,
+			result.ErrorClass != "",
+		))
+	}
+	return taskmodel.TaskCompleted, "", nil
 }
 
 func (r *Runner) buildModel(snapshot model.ModelSnapshot) (model.Model, error) {

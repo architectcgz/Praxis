@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"praxis/internal/hooks"
 	"praxis/internal/repository"
 	"praxis/internal/request"
 	"praxis/internal/system"
@@ -43,6 +44,7 @@ type WorkspaceTextReader interface {
 // Config 包含初始化 Session 与 Primary Agent 所需的依赖。
 type Config struct {
 	Transactions      repository.TxRunner
+	HookDispatcher    *hooks.Dispatcher
 	Projects          repository.ProjectRepository
 	Workspaces        repository.WorkspaceRepository
 	Sessions          repository.SessionRepository
@@ -66,6 +68,7 @@ type Config struct {
 // Service owns Session initialization and primary Agent lookup.
 type Service struct {
 	tx                repository.TxRunner
+	hookDispatcher    *hooks.Dispatcher
 	projects          repository.ProjectRepository
 	workspaces        repository.WorkspaceRepository
 	sessions          repository.SessionRepository
@@ -136,6 +139,7 @@ func NewService(config Config) (*Service, error) {
 	}
 	return &Service{
 		tx:                config.Transactions,
+		hookDispatcher:    config.HookDispatcher,
 		projects:          config.Projects,
 		workspaces:        config.Workspaces,
 		sessions:          config.Sessions,
@@ -482,13 +486,25 @@ func (s *Service) ListSessionContext(ctx context.Context, sessionID contracts.Se
 }
 
 // CreateSession 在一个事务中创建 Session、主 Agent 和初始策略。
-func (s *Service) CreateSession(ctx context.Context, params CreateParams) (CreateResult, error) {
+// OperationHook 覆盖本次创建尝试，Start/End 均在创建锁之外，End 观察提交结果或错误。
+func (s *Service) CreateSession(ctx context.Context, params CreateParams) (result CreateResult, err error) {
 	if ctx == nil {
 		return CreateResult{}, errors.New("create session context is required")
 	}
+	ctx, scope := s.hookDispatcher.Start(ctx, hooks.Operation{
+		Identity: hooks.Identity{
+			SessionID: params.SessionID,
+			AgentID:   params.AgentID,
+		},
+		Kind: hooks.OperationSessionCreate,
+		Name: "create_session",
+	})
+	defer func() { scope.End(hooks.Result{Err: err}) }()
 	// 创建与退出清理串行，保证已提交的新会话不会漏过清理范围。
 	s.createdSessionsMu.Lock()
+	// 先解锁再执行前面注册的 Scope.End，允许 Hook 回读仓储或重入 Service。
 	defer s.createdSessionsMu.Unlock()
+	created := false
 	if s.closing {
 		return CreateResult{}, errors.New("session service is closing")
 	}
@@ -499,8 +515,6 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (Creat
 	if err != nil {
 		return CreateResult{}, contracts.New(contracts.InvalidRequest, "")
 	}
-	var result CreateResult
-	created := false
 	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.sessions.Get(txCtx, params.SessionID)
 		if err == nil {

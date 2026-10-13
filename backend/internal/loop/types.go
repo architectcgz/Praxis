@@ -6,17 +6,20 @@ import (
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
-	turnmodel "praxis/internal/core/turn"
+	taskmodel "praxis/internal/core/task"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
-// TurnRecorder 持久化 loop 的迭代生命周期，实现方必须保证重复调用幂等。
-type TurnRecorder interface {
-	// RecordStart 按 Task 归属与序号持久化 running 记录；重复调用返回已有记录。
-	RecordStart(context.Context, contracts.TurnExecutionContext) (turnmodel.Turn, error)
-	// RecordEnd 按迭代 ID 持久化结果与失败信息；已结算时不重复写入。
-	RecordEnd(context.Context, contracts.TurnID, turnmodel.TurnOutcome, contracts.TaskFailureCode, string) error
+// TurnExecutor 负责单次 Turn 的持久化生命周期；loop 只提供该 Turn 的业务执行函数。
+// Execute 必须先记录 running，再执行 operation，最后记录经过取消规则映射的终态。
+type TurnExecutor interface {
+	Execute(
+		context.Context,
+		contracts.TurnExecutionContext,
+		func(context.Context, contracts.TurnID) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error),
+	) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error)
 }
+
 
 // ToolCallHandler 原子登记并执行 loop 产生的工具调用。
 type ToolCallHandler interface {

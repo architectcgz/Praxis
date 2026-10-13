@@ -21,7 +21,6 @@ import (
 	runtimequeue "praxis/internal/service/runtime/queue"
 	toolinvocation "praxis/internal/service/runtime/task/tool_invocation"
 	taskturn "praxis/internal/service/runtime/task/turn"
-	"praxis/internal/timing"
 )
 
 // newLoop 装配模型与持久化工具调用依赖，返回 runtime 调用的 loop.Run 执行函数。
@@ -29,7 +28,6 @@ func newLoop(
 	modelBuilder model.ModelBuilder,
 	toolConfig toolinvocation.Config,
 	turnConfig taskturn.Config,
-	recorder *timing.Recorder,
 	observer agentruntime.AgentEventObserver,
 	logf func(string, ...any),
 ) (agentruntime.LoopFunc, error) {
@@ -42,9 +40,9 @@ func newLoop(
 		return nil, err
 	}
 	runner, err := loop.NewRunner(loop.Config{
-		ModelBuilder:  timedModelBuilder{next: modelBuilder, recorder: recorder},
+		ModelBuilder:  modelBuilder,
 		Tools:         toolConfig.Catalog,
-		ToolCalls:     timedToolCalls{next: toolCalls, recorder: recorder},
+		ToolCalls:     toolCalls,
 		Turns:         turns,
 		EventObserver: observer,
 		Logf:          logf,

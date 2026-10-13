@@ -38,6 +38,7 @@ type AgentEvent struct {
 	FailureCode    contracts.TaskFailureCode `json:"failureCode,omitempty"`
 	FailureMessage string                    `json:"failureMessage,omitempty"`
 	TurnID         contracts.TurnID          `json:"turnId,omitempty"`
+	StopReason     model.ModelStopReason     `json:"stopReason,omitempty"`
 	Text           string                    `json:"text,omitempty"`
 	CallID         string                    `json:"callId,omitempty"`
 	Name           string                    `json:"name,omitempty"`

@@ -22,9 +22,10 @@ func (r *Runner) emitModelEvent(
 	event model.ModelStreamEvent,
 ) {
 	output := agentruntime.AgentEvent{
-		AgentID: agentID,
-		TaskID:  taskID,
-		TurnID:  turnID,
+		AgentID:   agentID,
+		TaskID:    taskID,
+		TurnID:    turnID,
+		SessionID: sessionID,
 	}
 	switch event.Kind {
 	case model.StreamTextDelta:
@@ -35,7 +36,6 @@ func (r *Runner) emitModelEvent(
 		output.Text = event.Text
 	case model.StreamUsage:
 		output.Kind = agentruntime.AgentEventModelUsage
-		output.SessionID = sessionID
 		output.Usage = event.Usage
 	default:
 		return
@@ -44,20 +44,22 @@ func (r *Runner) emitModelEvent(
 }
 
 func (r *Runner) emitToolResult(
+	sessionID contracts.SessionID,
 	agentID contracts.AgentID,
 	taskID contracts.TaskID,
 	turnID contracts.TurnID,
 	block appcontext.ContextBlock,
 ) {
 	r.emit(agentruntime.AgentEvent{
-		Kind:    agentruntime.AgentEventToolResult,
-		AgentID: agentID,
-		TaskID:  taskID,
-		TurnID:  turnID,
-		CallID:  block.CallID,
-		Name:    block.Name,
-		Result:  block.Text,
-		IsError: block.IsError,
+		Kind:      agentruntime.AgentEventToolResult,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		TaskID:    taskID,
+		TurnID:    turnID,
+		CallID:    block.CallID,
+		Name:      block.Name,
+		Result:    block.Text,
+		IsError:   block.IsError,
 	})
 }
 
