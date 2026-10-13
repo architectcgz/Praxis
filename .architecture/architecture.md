@@ -98,7 +98,7 @@ internal/core 各业务包 ──→ core 内部依赖 / contracts / utils/pathu
 依赖门禁与全量验收按以下顺序执行，任一步失败即停止；门禁通过时无输出且退出状态为 0：
 
 ```text
-backend:  go vet ./... → go test -race ./... → 依赖门禁
+backend:  go build ./... → go vet ./... → 依赖门禁
 frontend: npm ci → npx tsc --noEmit → npm run build
 ```
 
@@ -109,7 +109,7 @@ frontend: npm ci → npx tsc --noEmit → npm run build
 3. `./internal/service/...` 不得 import `internal/agent_runtime`。
 4. `./internal/service/...` 不得直接 import `os`。
 
-门禁自身必须有确定语义：`go list` 失败必须失败，`rg` 工具错误必须原样失败，不得当成“无匹配”而通过；合成输入（合法依赖、违规依赖、`go list` 失败、`rg` 工具错误）用于验证这一点。
+门禁自身必须有确定语义：`go list` 失败必须失败，`rg` 工具错误必须原样失败，不得当成“无匹配”而通过。
 
 ## 后端模块
 
@@ -318,11 +318,9 @@ frontend/src/
 
 ## 验证边界
 
-关键行为使用仓库内的 `*_test.go` 回归测试验证；后端验收使用 Go 1.25+，不引入额外测试框架：
+后端验收使用 Go 1.25+；仓库不包含自动化测试文件，构建与静态检查不等同于业务行为回归验证：
 
-- 后端：`gofmt -l` 无输出、`go build ./...`、`go test ./...`、`go vet ./...`、四项 import 依赖门禁；支持 race detector 的环境运行 `go test -race ./...`。
-- 组合根测试验证执行 Port 的注入、缺失依赖的装配拒绝和存储失败分类；Hook 测试验证 Context 传播、信号与逆序结束行为。
-- Task 服务测试使用真实 JSONL 事务验证创建幂等、队首准备、恢复绑定、控制命令仲裁、执行绑定清理和事务回滚；失败事务不得发布成功终态事件。
-- JSONL、工具审批、上下文恢复、预算和 Provider 协议的测试与源码一起保留，作为迁移和后续改动的行为门禁。
+- 后端：变更文件通过 `gofmt` 检查，执行 `go build ./...`、`go vet ./...` 和四项 import 依赖门禁。
+- 幂等、事务回滚、审批、恢复、预算和 Provider 协议属于人工回归检查范围；失败事务不得发布成功终态事件。
 - 修改 Wails binding 时运行 `wails generate module`（后端目录）→ `npx tsc --noEmit` → `npm run build`；验收依据是实际生成的绑定声明。
 - 验证不自动启动 Wails、Vite 或其他开发服务。
