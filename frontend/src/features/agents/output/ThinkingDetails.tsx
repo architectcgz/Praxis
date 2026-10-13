@@ -7,9 +7,8 @@ export function ThinkingDetails({ content, streaming = false }: { content: strin
     const formattedContent = content.replace(/(\S)\*{4}(?=\S)/g, '$1**\n\n**')
     return (
         <details className={`thinking-details${streaming ? ' thinking-details-streaming' : ''}`} open={streaming || undefined} aria-label="思考内容">
-            <summary className="thinking-toggle" title="展开或收起思考内容">
+            <summary className="thinking-toggle" aria-label="展开或收起思考内容" title="展开或收起思考内容">
                 <Brain className="thinking-mark" size={14} strokeWidth={1.8} aria-hidden="true" />
-                <span className="thinking-label">{streaming ? '思考中' : '思考过程'}</span>
                 <span className="thinking-preview" aria-hidden="true">{thinkingPreview(formattedContent)}</span>
                 <ChevronDown className="thinking-chevron" size={14} strokeWidth={1.8} aria-hidden="true" />
             </summary>

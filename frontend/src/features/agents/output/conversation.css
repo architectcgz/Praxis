@@ -416,14 +416,8 @@
 }
 
 .thinking-mark,
-.thinking-label,
 .thinking-chevron {
     flex: none;
-}
-
-.thinking-label {
-    font-size: var(--font-size-ui);
-    font-weight: 600;
 }
 
 .thinking-chevron {
@@ -441,7 +435,7 @@
     white-space: nowrap;
 }
 
-/* 展开后只保留标题，避免摘要与正文重复；仅旋转箭头，不旋转思考图标。 */
+/* 展开后隐藏摘要，避免与正文重复；仅旋转箭头，不旋转思考图标。 */
 .thinking-details[open] > .thinking-toggle .thinking-preview {
     display: none;
 }
