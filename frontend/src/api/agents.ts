@@ -25,7 +25,7 @@ export type TaskFailureCode =
     | 'runtime_invalid_outcome'
     | 'unknown'
 export type AgentMessageRole = 'user' | 'assistant' | 'tool' | 'unknown'
-export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'unknown'
+export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'unknown'
 export type AgentHistoryKind = 'message' | 'task' | 'request_canceled' | 'unknown'
 
 export type AgentSnapshot = {
@@ -97,7 +97,7 @@ export type ModelUsageRecord = {
 }
 
 export type AgentEvent = {
-    kind: 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'task_ended' | 'error' | 'operation_timing'
+    kind: 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'task_ended' | 'error' | 'operation_timing'
     outcome?: TaskOutcome
     failureCode?: TaskFailureCode
     failureMessage?: string
@@ -196,14 +196,14 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         return null
     }
     if (value.kind !== 'turn_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
-        value.kind !== 'tool_call' && value.kind !== 'tool_result' && value.kind !== 'turn_completed' &&
+        value.kind !== 'tool_call' && value.kind !== 'tool_approval_required' && value.kind !== 'tool_result' && value.kind !== 'turn_completed' &&
         value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'task_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
         return null
     }
     if ((value.kind === 'text_delta' || value.kind === 'thinking_delta') && typeof value.text !== 'string') {
         return null
     }
-    if ((value.kind === 'tool_call' || value.kind === 'tool_result') &&
+    if ((value.kind === 'tool_call' || value.kind === 'tool_approval_required' || value.kind === 'tool_result') &&
         (typeof value.callId !== 'string' || typeof value.name !== 'string')) {
         return null
     }

@@ -48,3 +48,11 @@ export function cancelTask(request: CancelTaskRequest) {
 export function queueTask(request: QueueTaskRequest) {
     return getCommandBinding().QueueTask(request)
 }
+
+export type ToolDecisionRequest = { sessionId: string; agentId: string; taskId: string; callId: string }
+export type ToolApproval = ToolDecisionRequest & { name: string; arguments: unknown }
+export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
+    return getCommandBinding().ListToolApprovals(agentId)
+}
+export function approveToolCall(request: ToolDecisionRequest) { return getCommandBinding().ApproveToolCall(request) }
+export function denyToolCall(request: ToolDecisionRequest) { return getCommandBinding().DenyToolCall(request) }

@@ -50,3 +50,7 @@
     background: #c4c4bc;
     background-clip: padding-box;
 }
+
+.tool-approvals { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border-color, #cbd5e1); border-radius: 0.75rem; }
+.tool-approvals pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-approvals button { margin-right: 0.5rem; }
