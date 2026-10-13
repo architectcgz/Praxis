@@ -52,6 +52,8 @@ type MessageData struct {
 	RequestID  string
 	HandoffID  string
 	TaskID     string
+	TurnID     string
+	StopReason string
 	Role       Role
 	AuthorKind AuthorKind
 	AuthorID   string
@@ -64,7 +66,7 @@ func (m MessageData) Validate() error {
 	if strings.TrimSpace(m.ID) == "" || m.Sequence == 0 || m.CreatedAt.IsZero() {
 		return errors.New("message identity, sequence and creation time are required")
 	}
-	if !validRole(m.Role) || !validAuthorKind(m.AuthorKind) || len(m.Blocks) == 0 {
+	if !validRole(m.Role) || !validAuthorKind(m.AuthorKind) || len(m.Blocks) == 0 && !(m.Role == RoleAssistant && (m.StopReason == "completed" || m.StopReason == "stop_sequence")) {
 		return errors.New("message role, author and blocks are required")
 	}
 	for _, block := range m.Blocks {

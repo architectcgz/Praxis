@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"praxis/internal/core/model"
+	"praxis/internal/hooks"
 )
 
 // modelResponse 保存有序模型内容与原始文本字节数，不包含消息或上下文类型。
@@ -24,8 +25,28 @@ func requestModel(
 	ctx context.Context,
 	stream model.ModelStream,
 	request model.ModelRequest,
+	identity hooks.Identity,
+	dispatcher *hooks.Dispatcher,
 	onEvent func(model.ModelStreamEvent),
 ) (response modelResponse, err error) {
+	ctx, scope := dispatcher.Start(ctx, hooks.Operation{
+		Identity:    identity,
+		Kind:        hooks.OperationProvider,
+		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
+		ReferenceID: "assistant:" + request.TurnID.String(),
+	})
+	defer func() { scope.End(hooks.Result{Err: err, StopReason: response.stopReason}) }()
+	firstResponse := false
+	callback := func(event model.ModelStreamEvent) {
+		if !firstResponse && (event.Kind == model.StreamTextDelta || event.Kind == model.StreamThinkingDelta || event.Kind == model.StreamToolCall) {
+			firstResponse = true
+			scope.OnSignal(hooks.SignalFirstResponse)
+		}
+		if onEvent != nil {
+			onEvent(event)
+		}
+	}
+
 	if stream == nil {
 		return modelResponse{}, errors.New("provider stream is required")
 	}
@@ -35,7 +56,7 @@ func requestModel(
 	if err != nil {
 		return modelResponse{}, err
 	}
-	response, err = collectModelResponse(streamCtx, input, onEvent)
+	response, err = collectModelResponse(streamCtx, input, callback)
 	if err == nil {
 		err = response.validateReasoningState(request.Model.APIFormat)
 	}

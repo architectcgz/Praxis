@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 )
 
-// buildInputSnapshot 冻结本次执行的 Context、模型与安全快照；任一步失败都不产生执行快照。
+// buildInputSnapshot 冻结本次执行的可见范围、模型与安全快照；任一步失败都不产生执行快照。
 func (s *Service) buildInputSnapshot(
 	ctx context.Context,
 	agent agentmodel.Agent,
@@ -74,13 +74,18 @@ func (s *Service) buildInputSnapshot(
 			definition.ID, filepath.Join(s.agentDefinitionsDir, definition.ID.String(), "agent.json"), err,
 		)
 	}
+	refs := make([]taskmodel.ContextReference, 0, len(built.SessionContextRefs))
+	for _, ref := range built.SessionContextRefs {
+		refs = append(refs, taskmodel.ContextReference{ID: ref.ID, Digest: ref.Digest})
+	}
 	return taskmodel.InputSnapshot{
 		AgentDefinitionID:       definition.ID,
 		AgentDefinitionRevision: definition.Revision,
-		ContextDigest:           built.Digest,
 		MessageSequenceBoundary: built.MessageSequenceBoundary,
 		CurrentInputMessageID:   built.CurrentInputMessageID,
-		Context:                 built.Context,
+		SystemPrompt:            definition.Instructions,
+		VisibleMessageIDs:       built.VisibleMessageIDs,
+		SessionContextRefs:      refs,
 		Model:                   modelSnapshot,
 		WorkspacePath:           workspace.Path,
 		Security:                security,

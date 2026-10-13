@@ -12,6 +12,7 @@ import (
 	"praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/hooks"
 	"praxis/internal/infra/providers/anthropicmessages"
 	openaichat "praxis/internal/infra/providers/openai_chat"
 	openairesponses "praxis/internal/infra/providers/openai_responses"
@@ -19,33 +20,32 @@ import (
 	"praxis/internal/loop"
 	"praxis/internal/repository"
 	runtimequeue "praxis/internal/service/runtime/queue"
-	toolinvocation "praxis/internal/service/runtime/task/tool_invocation"
-	taskturn "praxis/internal/service/runtime/task/turn"
+	toolexecution "praxis/internal/tool_execution"
 )
 
 // newLoop 装配模型与持久化工具调用依赖，返回 runtime 调用的 loop.Run 执行函数。
 func newLoop(
 	modelBuilder model.ModelBuilder,
-	toolConfig toolinvocation.Config,
-	turnConfig taskturn.Config,
+	toolConfig toolexecution.Config,
+	builder loop.TaskContextBuilder,
+	dispatcher *hooks.Dispatcher,
 	observer agentruntime.AgentEventObserver,
 	logf func(string, ...any),
 ) (agentruntime.LoopFunc, error) {
-	toolCalls, err := toolinvocation.NewService(toolConfig)
-	if err != nil {
-		return nil, err
-	}
-	turns, err := taskturn.NewService(turnConfig)
+	toolCalls, err := toolexecution.NewExecutor(toolConfig)
 	if err != nil {
 		return nil, err
 	}
 	runner, err := loop.NewRunner(loop.Config{
-		ModelBuilder:  modelBuilder,
-		Tools:         toolConfig.Catalog,
-		ToolCalls:     toolCalls,
-		Turns:         turns,
-		EventObserver: observer,
-		Logf:          logf,
+		ModelBuilder:   modelBuilder,
+		Tasks:          toolConfig.Tasks,
+		Transactions:   toolConfig.Transactions,
+		ContextBuilder: builder,
+		HookDispatcher: dispatcher,
+		Tools:          toolConfig.Catalog,
+		ToolExecutor:   toolCalls,
+		EventObserver:  observer,
+		Logf:           logf,
 	})
 	if err != nil {
 		return nil, err
@@ -97,6 +97,7 @@ type runtimeFactory struct {
 	lifecycle        agentruntime.TaskLifecycle
 	tasks            repository.TaskRepository
 	logger           *logging.Logger
+	hooks            *hooks.Dispatcher
 }
 
 // New 为指定 Agent 创建独立执行槽，消息记录器在每次执行时解析。
@@ -110,6 +111,7 @@ func (f runtimeFactory) New(
 	}
 	return agentruntime.NewRuntime(agentruntime.RuntimeConfig{
 		AgentID:          agentID,
+		HookDispatcher:   f.hooks,
 		Executions:       f.executions,
 		MessageRecorders: f.messageRecorders,
 		RunLoop:          f.runLoop,

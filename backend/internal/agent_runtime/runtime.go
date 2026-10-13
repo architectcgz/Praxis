@@ -4,6 +4,7 @@ import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/hooks"
 	"praxis/internal/logging"
 
 	"context"
@@ -13,6 +14,7 @@ import (
 )
 
 type RuntimeConfig struct {
+	HookDispatcher   *hooks.Dispatcher
 	AgentID          contracts.AgentID
 	Executions       *agentmodel.Executions
 	MessageRecorders MessageRecorderResolver
@@ -25,8 +27,9 @@ type RuntimeConfig struct {
 	LifecycleTimeout time.Duration
 }
 
-// Runtime 是单个 Agent 的进程内执行器，活动状态不会跨进程恢复。
+// Runtime 持有单个 Agent 的进程内执行槽，遗留 Task 通过重新领取继续执行。
 type Runtime struct {
+	hookDispatcher   *hooks.Dispatcher
 	agentID          contracts.AgentID
 	executions       *agentmodel.Executions
 	messageRecorders MessageRecorderResolver
@@ -46,6 +49,7 @@ type Runtime struct {
 type runtimeTask struct {
 	id     contracts.TaskID
 	ending bool
+	wake   chan struct{}
 }
 
 func NewRuntime(config RuntimeConfig) (*Runtime, error) {
@@ -76,6 +80,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	}
 	return &Runtime{
 		agentID:          config.AgentID,
+		hookDispatcher:   config.HookDispatcher,
 		executions:       config.Executions,
 		messageRecorders: config.MessageRecorders,
 		runLoop:          config.RunLoop,
@@ -104,6 +109,19 @@ func (r *Runtime) Activate(
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return errors.New("target runtime is closed")
+	}
+
+	if _, err := r.executions.Context(r.agentID, task.ID); errors.Is(err, contracts.ErrNotFound) {
+		reclaimed, err := r.taskBuilder.ReclaimTask(ctx, task)
+		if err != nil {
+			return err
+		}
+		task = reclaimed
+	} else if err != nil {
+		return err
+	}
 	return r.activateLocked(task)
 }
 
@@ -113,6 +131,10 @@ func (r *Runtime) activateLocked(task taskmodel.Task) error {
 	}
 	if r.active != nil {
 		if r.active.id == task.ID {
+			select {
+			case r.active.wake <- struct{}{}:
+			default:
+			}
 			return nil
 		}
 		if !r.active.ending {
@@ -123,7 +145,7 @@ func (r *Runtime) activateLocked(task taskmodel.Task) error {
 	if err != nil {
 		return err
 	}
-	active := &runtimeTask{id: task.ID}
+	active := &runtimeTask{id: task.ID, wake: make(chan struct{}, 1)}
 	r.active = active
 	r.running.Go(func() { r.run(taskCtx, task, active) })
 	r.logEvent(task.ID, "activation accepted")
@@ -217,11 +239,23 @@ func (r *Runtime) run(
 		return
 	}
 
-	outcome, failureCode, failureMessage := r.execute(ctx, task, messageRecorder)
-	if !r.endTask(task, active, outcome, failureCode, failureMessage) {
+	for {
+		outcome, failureCode, failureMessage := r.execute(ctx, task, messageRecorder)
+		if outcome == taskmodel.TaskAwaitingApproval && ctx.Err() == nil {
+			select {
+			case <-active.wake:
+				continue
+			case <-ctx.Done():
+				outcome, failureCode, failureMessage = r.executionResult(ctx, taskmodel.TaskInterrupted, contracts.TaskFailureRuntimeCancelled, ctx.Err())
+			}
+		}
+		if !r.endTask(task, active, outcome, failureCode, failureMessage) {
+			return
+		}
+		r.logEvent(task.ID, "task ended")
 		return
 	}
-	r.logEvent(task.ID, "task ended")
+
 }
 
 // finishTask 仅释放属于本轮的活动槽位，不清除队列交接已启动的下一轮。
@@ -251,8 +285,15 @@ func (r *Runtime) execute(
 	task taskmodel.Task,
 	messageRecorder MessageRecorder,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, string) {
+	ctx, scope := r.hookDispatcher.Start(ctx, hooks.Operation{
+		Identity: hooks.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID},
+		Kind:     hooks.OperationAgent,
+		Name:     task.Input.AgentDefinitionID.String(),
+	})
+
 	outcome, failureCode, err := r.runLoop(ctx, task, messageRecorder)
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
+	scope.End(hooks.Result{Outcome: finalOutcome, Err: err})
 	r.logEvent(task.ID, "provider completed")
 	if err != nil {
 		r.logError(task, "run provider", err)
@@ -361,7 +402,7 @@ func (r *Runtime) lifecycleContext() (context.Context, context.CancelFunc) {
 
 func knownOutcome(outcome taskmodel.TaskOutcome) bool {
 	switch outcome {
-	case taskmodel.TaskCompleted, taskmodel.TaskYielded, taskmodel.TaskPaused,
+	case taskmodel.TaskAwaitingApproval, taskmodel.TaskCompleted, taskmodel.TaskYielded, taskmodel.TaskPaused,
 		taskmodel.TaskFailed, taskmodel.TaskInterrupted:
 		return true
 	default:

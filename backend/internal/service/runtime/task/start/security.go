@@ -88,7 +88,7 @@ func (r SecurityResolver) Resolve(
 	}
 	tools = r.ToolPermissions.FilterTools(tools, sandbox, len(writeScopes) > 0)
 	executables := intersectStrings(policy.Capabilities.AllowedExecutables, r.Baseline.Capabilities.AllowedExecutables)
-	if approval != contracts.ApprovalYolo || !sandbox.AllowsWorkspaceWrite() ||
+	if !sandbox.AllowsWorkspaceWrite() ||
 		len(writeScopes) == 0 || !allowsBash(executables) {
 		tools = slices.DeleteFunc(tools, func(name contracts.ToolName) bool { return name == contracts.ToolBash })
 	}

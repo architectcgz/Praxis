@@ -8,6 +8,7 @@ import (
 // Dispatcher 持有初始化时注册的 Hook，所有回调均同步执行，不创建 goroutine。
 type Dispatcher struct {
 	operations []OperationHook
+	events     []CommittedHook
 }
 
 // NewDispatcher 复制注册列表；不传 Hook 时返回空分发器，Hook 实例应支持并发执行。

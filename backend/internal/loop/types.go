@@ -5,32 +5,13 @@ import (
 
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
-	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
-// TurnExecutor 负责单次 Turn 的持久化生命周期；loop 只提供该 Turn 的业务执行函数。
-// Execute 必须先记录 running，再执行 operation，最后记录经过取消规则映射的终态。
-type TurnExecutor interface {
-	Execute(
-		context.Context,
-		contracts.TurnExecutionContext,
-		func(context.Context, contracts.TurnID) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error),
-	) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error)
-}
-
-
-// ToolCallHandler 原子登记并执行 loop 产生的工具调用。
-type ToolCallHandler interface {
-	// RecordAssistant 原子保存 assistant 消息及其全部 requested 调用；失败时不得执行工具。
-	RecordAssistant(
-		context.Context,
-		func(context.Context, sessionmodel.MessageData) (sessionmodel.MessageData, error),
-		sessionmodel.MessageData,
-		contracts.ToolInvocationContext,
-	) error
-	Invoke(context.Context, contracts.ToolCall, contracts.ToolInvocationContext) (toolcontracts.ToolResult, error)
+// ToolExecutor 执行已经登记的调用；等待审批时不产生工具回执。
+type ToolExecutor interface {
+	Execute(context.Context, contracts.ToolCall, contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error)
 }
 
 type (
@@ -39,3 +20,12 @@ type (
 	ModelContext               = appcontext.ModelContext
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
+
+// TaskContextBuilder 为首次执行和恢复执行提供同一上下文构建入口。
+type TaskContextBuilder interface {
+	RebuildTaskContext(context.Context, taskmodel.Task) (appcontext.BuildResult, error)
+}
+type TaskRepository interface {
+	Get(context.Context, contracts.TaskID) (taskmodel.Task, error)
+	Save(context.Context, taskmodel.Task) error
+}

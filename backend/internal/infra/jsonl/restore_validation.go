@@ -30,7 +30,6 @@ func validateRestoredEvent(scope string, event Event) error {
 		{"task.reasoningLevel", task.ReasoningLevel},
 		{"task.failureMessage", task.FailureMessage},
 		{"task.input.agentDefinitionRevision", task.Input.AgentDefinitionRevision},
-		{"task.input.contextDigest", task.Input.ContextDigest},
 		{"task.input.currentInputMessageID", task.Input.CurrentInputMessageID},
 	} {
 		if field.value != strings.TrimSpace(field.value) {

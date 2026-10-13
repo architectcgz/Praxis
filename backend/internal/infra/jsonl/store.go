@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"praxis/internal/contracts"
+	toolmodel "praxis/internal/core/tool_invocation"
+	"praxis/internal/hooks"
 	"praxis/internal/utils/pathutil"
 )
 
@@ -47,18 +49,25 @@ type transaction struct {
 	sequences map[string]uint64
 	scope     string
 	events    []Event
+	pending   map[receiptKey]pendingReceipt
+	receipts  map[receiptKey]bool
 }
 type transactionKey struct{}
 
 // Store 串行提交本地变更，并保证读取到同一个已提交投影。
 type Store struct {
-	mu        sync.Mutex
-	root      string
-	objects   map[objectKey]object
-	sequences map[string]uint64
-	lock      *os.File
-	closed    bool
-	fault     error
+	hooks        *hooks.Dispatcher
+	hookError    func(string, ...any)
+	mu           sync.Mutex
+	root         string
+	objects      map[objectKey]object
+	sequences    map[string]uint64
+	lock         *os.File
+	closed       bool
+	fault        error
+	pending      map[receiptKey]pendingReceipt
+	receipts     map[receiptKey]bool
+	staleRunning map[string]bool
 }
 
 // Open 校验目录并恢复日志；损坏的完整记录会阻止启动，不完整尾行先留存再截断。
@@ -84,10 +93,13 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		return nil, fmt.Errorf("数据目录已被占用: %w", err)
 	}
 	s := &Store{
-		root:      root,
-		objects:   make(map[objectKey]object),
-		sequences: make(map[string]uint64),
-		lock:      lock,
+		root:         root,
+		objects:      make(map[objectKey]object),
+		sequences:    make(map[string]uint64),
+		lock:         lock,
+		pending:      make(map[receiptKey]pendingReceipt),
+		receipts:     make(map[receiptKey]bool),
+		staleRunning: make(map[string]bool),
 	}
 	paths := []string{filepath.Join(root, "projects.jsonl")}
 	entries, err := os.ReadDir(filepath.Join(root, "sessions"))
@@ -114,6 +126,18 @@ func Open(ctx context.Context, root string) (*Store, error) {
 	if err != nil {
 		s.Close(context.Background())
 		return nil, err
+	}
+	for key, value := range s.objects {
+		if key.collection == "tool" {
+			invocation, decodeErr := decode[toolmodel.ToolInvocation]("tool", value)
+			if decodeErr != nil {
+				_ = s.Close(context.Background())
+				return nil, decodeErr
+			}
+			if invocation.Status == toolmodel.ToolInvocationRunning {
+				s.staleRunning[invocation.ID.String()] = true
+			}
+		}
 	}
 	return s, nil
 }
@@ -151,15 +175,21 @@ func (s *Store) tx(ctx context.Context) *transaction {
 }
 
 // InTx 将同一 Session 的关联更新作为一行提交；跨 Session 写入被拒绝。
-func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error {
+func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) (err error) {
 	if ctx == nil || fn == nil {
 		return errors.New("事务 context 和回调不能为空")
 	}
 	if s.tx(ctx) != nil {
 		return fn(ctx)
 	}
+	var committed []Event
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() {
+		s.mu.Unlock()
+		if err == nil && len(committed) > 0 {
+			s.notifyCommitted(committed)
+		}
+	}()
 	if s.closed {
 		return errors.New("日志已关闭")
 	}
@@ -170,7 +200,13 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 		return err
 	}
 	// ponytail: 本地事务复制索引并校验全量引用；数据量增大后改为变更集校验。
-	tx := &transaction{store: s, objects: maps.Clone(s.objects), sequences: maps.Clone(s.sequences)}
+	tx := &transaction{
+		store:     s,
+		objects:   maps.Clone(s.objects),
+		sequences: maps.Clone(s.sequences),
+		pending:   maps.Clone(s.pending),
+		receipts:  maps.Clone(s.receipts),
+	}
 	if err := fn(context.WithValue(ctx, transactionKey{}, tx)); err != nil {
 		return err
 	}
@@ -195,6 +231,8 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 		return err
 	}
 	s.objects, s.sequences = tx.objects, tx.sequences
+	s.pending, s.receipts = tx.pending, tx.receipts
+	committed = tx.events
 	return nil
 }
 
@@ -267,6 +305,9 @@ func (s *Store) change(ctx context.Context, scope, collection, id, kind string, 
 	}
 	tx.scope = scope
 	tx.sequences[scope] = seq
+	if event.Type == "session.deleted" {
+		clearReceiptScope(tx.pending, tx.receipts, scope)
+	}
 	tx.events = append(tx.events, event)
 	return nil
 }
@@ -373,6 +414,16 @@ func (s *Store) replay(path string) error {
 				return err
 			}
 			s.sequences[scope] = event.Sequence
+			if event.Type == "session.deleted" {
+				clearReceiptScope(s.pending, s.receipts, scope)
+			}
+			if event.Collection == "message" {
+				record, err := decode[messageRecord]("message", object{scope: scope, data: event.Payload})
+				if err != nil {
+					return err
+				}
+				indexToolReceipts(s.pending, s.receipts, scope, record)
+			}
 		}
 		if err := s.validate(s.objects); err != nil {
 			return fmt.Errorf("%s 偏移 %d: %w", path, offset, err)

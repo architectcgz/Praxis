@@ -3,7 +3,6 @@ package loop
 import (
 	"bytes"
 	"context"
-	"fmt"
 
 	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
@@ -21,9 +20,10 @@ func appendToolResult(
 	block appcontext.ContextBlock,
 ) error {
 	return appendTaskMessage(ctx, messageRecorder, sessionmodel.MessageData{
-		ID:         fmt.Sprintf("tool-result:%s:%d:%s", turnID, callIndex, block.CallID),
+		ID:         "tool-result:" + taskID.String() + ":" + block.CallID,
 		RequestID:  requestID.String(),
 		TaskID:     taskID.String(),
+		TurnID:     turnID.String(),
 		Role:       sessionmodel.RoleTool,
 		AuthorKind: sessionmodel.AuthorTool,
 		AuthorID:   block.Name,
@@ -38,7 +38,7 @@ func appendTaskMessage(
 	blocks []appcontext.ContextBlock,
 ) error {
 	value = taskMessage(value, blocks)
-	_, err := messageRecorder.Append(ctx, value)
+	_, err := messageRecorder.Append(context.WithoutCancel(ctx), value)
 	return err
 }
 

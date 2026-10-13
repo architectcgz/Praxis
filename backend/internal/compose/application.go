@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"time"
 
@@ -21,9 +22,8 @@ import (
 	applicationtask "praxis/internal/service/runtime/task"
 	tasklifecycle "praxis/internal/service/runtime/task/lifecycle"
 	taskstart "praxis/internal/service/runtime/task/start"
-	toolinvocation "praxis/internal/service/runtime/task/tool_invocation"
-	taskturn "praxis/internal/service/runtime/task/turn"
 	applicationsession "praxis/internal/service/session"
+	toolexecution "praxis/internal/tool_execution"
 
 	securitymodel "praxis/internal/core/security"
 	agentregistry "praxis/internal/infra/agent_registry"
@@ -157,11 +157,7 @@ func Open(
 	messages := repos.Messages
 	events := appservices.NewEventPublisher()
 	usages := jsonl.ModelUsageStore{Store: store}
-	var operationObserver *executionObserver
 	observe := func(event agentruntime.AgentEvent) {
-		if operationObserver != nil {
-			operationObserver.Observe(event)
-		}
 		if event.Kind == agentruntime.AgentEventModelUsage && event.Usage != nil {
 			// 用量写入不继承业务取消，保存失败只影响统计，不改变模型响应。
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -200,24 +196,7 @@ func Open(
 		return nil, err
 	}
 	hookDispatcher := hooks.NewDispatcher(timing.Hook{Recorder: timings})
-	operationObserver = newExecutionObserver(hookDispatcher)
-	if runLoop == nil {
-		runLoop, err = newLoop(modelRegistry, toolinvocation.Config{
-			Transactions:      store,
-			Tasks:             repos.Tasks,
-			SecuritySnapshots: repos.SecuritySnapshots,
-			Invocations:       repos.ToolInvocations,
-			Catalog:           toolRegistry,
-		}, taskturn.Config{
-			Transactions: store,
-			Turns:        repos.Turns,
-		}, observe, diagnostics.Infof)
-		if err != nil {
-			_ = diagnostics.Close()
-			closeStore()
-			return nil, err
-		}
-	}
+	store.ObserveCommitted(hookDispatcher, diagnostics.Errorf)
 	executions := &agentmodel.Executions{}
 	agentService, err := applicationagent.NewService(applicationagent.Config{
 		Transactions: store,
@@ -234,22 +213,20 @@ func Open(
 		return nil, err
 	}
 	sessionService, err := applicationsession.NewService(applicationsession.Config{
-		Transactions:    store,
-		Projects:        repos.Projects,
-		Workspaces:      repos.Workspaces,
-		Sessions:        repos.Sessions,
-		Contexts:        repos.Contexts,
-		Policies:        repos.Policies,
-		Agents:          repos.Agents,
-		Tasks:           repos.Tasks,
-		ToolInvocations: repos.ToolInvocations,
-		Controls:        repos.Controls,
-		Turns:           repos.Turns,
-		Definitions:     agentRegistry.Definition,
-		PolicyFactory:   agentRegistry.SecurityPolicy,
-		Messages:        messages,
-		UsageRecords:    usages.ListSession,
-		TextReader:      workspaceFilesystem,
+		Transactions:   store,
+		HookDispatcher: hookDispatcher,
+		Projects:       repos.Projects,
+		Workspaces:     repos.Workspaces,
+		Sessions:       repos.Sessions,
+		Contexts:       repos.Contexts,
+		Policies:       repos.Policies,
+		Agents:         repos.Agents,
+		Tasks:          repos.Tasks,
+		Definitions:    agentRegistry.Definition,
+		PolicyFactory:  agentRegistry.SecurityPolicy,
+		Messages:       messages,
+		UsageRecords:   usages.ListSession,
+		TextReader:     workspaceFilesystem,
 		RemoveSessionData: func(ctx context.Context, sessionID contracts.SessionID, documentRefs []string) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -267,15 +244,10 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	if err := sessionService.RecoverStaleTasks(ctx); err != nil {
-		diagnostics.Errorf("recover stale tasks failed: %v", err)
-		_ = diagnostics.Close()
-		closeStore()
-		return nil, fmt.Errorf("recover stale tasks: %w", err)
-	}
 	lifecycleService, err := tasklifecycle.NewService(tasklifecycle.Config{
-		Transactions: store,
-		Sessions:     repos.Sessions,
+		Transactions:   store,
+		HookDispatcher: hookDispatcher,
+		Sessions:       repos.Sessions,
 		Agents:         repos.Agents,
 		Tasks:          repos.Tasks,
 		Controls:       repos.Controls,
@@ -292,6 +264,7 @@ func Open(
 		return nil, err
 	}
 	startService, err := taskstart.NewService(taskstart.Config{
+		Controls:            repos.Controls,
 		Transactions:        store,
 		Workspaces:          repos.Workspaces,
 		Sessions:            repos.Sessions,
@@ -313,6 +286,21 @@ func Open(
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
+	}
+	if runLoop == nil {
+		runLoop, err = newLoop(modelRegistry, toolexecution.Config{
+			Transactions:    store,
+			HookDispatcher:  hookDispatcher,
+			CurrentSecurity: startService,
+			Tasks:           repos.Tasks,
+			Invocations:     repos.ToolInvocations,
+			Catalog:         toolRegistry,
+		}, sessionService, hookDispatcher, observe, diagnostics.Infof)
+		if err != nil {
+			_ = diagnostics.Close()
+			closeStore()
+			return nil, err
+		}
 	}
 	queueService, err := runtimequeue.NewService(runtimequeue.Config{
 		Transactions: store,
@@ -346,8 +334,9 @@ func Open(
 		return nil, err
 	}
 	factory := runtimeFactory{
-		executions:     executions,
-		runLoop:        observedLoop(runLoop, operationObserver),
+		hooks:      hookDispatcher,
+		executions: executions,
+		runLoop:    runLoop,
 		messageRecorders: func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (agentruntime.MessageRecorder, error) {
 			return messages.Resolve(ctx, sessionID, agentID)
 		},
@@ -367,6 +356,12 @@ func Open(
 		Tasks:     taskService,
 		Queue:     queueService,
 		Activator: registry,
+		Approvals: applicationruntime.ToolApprovals{
+			Transactions: store,
+			Tasks:        repos.Tasks,
+			Invocations:  repos.ToolInvocations,
+			UserID:       "local-user",
+		},
 	})
 	if err != nil {
 		_ = registry.Close(context.Background())
@@ -374,6 +369,48 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	activeTasks, err := repos.Tasks.ListActive(ctx)
+	if err == nil {
+		for _, task := range activeTasks {
+			if err = registry.Activate(ctx, task); err != nil {
+				break
+			}
+		}
+	}
+	if err != nil {
+		_ = registry.Close(context.Background())
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, fmt.Errorf("resume active tasks: %w", err)
+	}
+	sessions, err := repos.Sessions.List(ctx, math.MaxInt)
+	if err == nil {
+		for _, session := range sessions {
+			agents, listErr := repos.Agents.ListBySession(ctx, session.ID, math.MaxInt)
+			if listErr != nil {
+				err = listErr
+				break
+			}
+			for _, agent := range agents {
+				if agent.State != agentmodel.AgentIdle && agent.State != agentmodel.AgentWaiting {
+					continue
+				}
+				if _, err = registry.StartNext(ctx, agent.ID); err != nil {
+					break
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	}
+	if err != nil {
+		_ = registry.Close(context.Background())
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, fmt.Errorf("resume pending tasks: %w", err)
+	}
+
 	diagnostics.Infof("composition open completed ready=true")
 	frontend := appservices.New(appservices.Config{
 		Agents:      agentService,

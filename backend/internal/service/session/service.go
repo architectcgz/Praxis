@@ -9,20 +9,12 @@ import (
 	projectmodel "praxis/internal/core/project"
 	securitymodel "praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
-	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
-	turnmodel "praxis/internal/core/turn"
 	workspacemodel "praxis/internal/core/workspace"
-	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"math"
-	"slices"
 	"sync"
-	"time"
 
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
@@ -52,9 +44,6 @@ type Config struct {
 	Policies          repository.AgentSecurityPolicyRepository
 	Agents            repository.SessionAgentRepository
 	Tasks             repository.TaskRepository
-	ToolInvocations   repository.ToolInvocationRepository
-	Controls          repository.AgentControlCommandRepository
-	Turns             repository.TurnRepository
 	Definitions       AgentDefinitionFactory
 	PolicyFactory     AgentSecurityPolicyFactory
 	Messages          repository.MessageStreams
@@ -76,9 +65,6 @@ type Service struct {
 	policies          repository.AgentSecurityPolicyRepository
 	agents            repository.SessionAgentRepository
 	tasks             repository.TaskRepository
-	toolInvocations   repository.ToolInvocationRepository
-	controls          repository.AgentControlCommandRepository
-	turns             repository.TurnRepository
 	definitions       AgentDefinitionFactory
 	policyFactory     AgentSecurityPolicyFactory
 	messages          repository.MessageStreams
@@ -105,7 +91,6 @@ type CreateParams struct {
 	Policy       securitymodel.AgentSecurityPolicy
 }
 
-// CreateResult returns the initialized Session and primary Agent.
 type CreateResult struct {
 	Session sessionmodel.Session
 	Agent   agentmodel.Agent
@@ -125,9 +110,6 @@ func NewService(config Config) (*Service, error) {
 		"security policies":     config.Policies,
 		"agents":                config.Agents,
 		"tasks":                 config.Tasks,
-		"tool invocations":      config.ToolInvocations,
-		"controls":              config.Controls,
-		"turns":                 config.Turns,
 		"agent definitions":     config.Definitions,
 		"policy factory":        config.PolicyFactory,
 		"message loader":        config.Messages,
@@ -147,9 +129,6 @@ func NewService(config Config) (*Service, error) {
 		policies:          config.Policies,
 		agents:            config.Agents,
 		tasks:             config.Tasks,
-		toolInvocations:   config.ToolInvocations,
-		controls:          config.Controls,
-		turns:             config.Turns,
 		definitions:       config.Definitions,
 		policyFactory:     config.PolicyFactory,
 		messages:          config.Messages,
@@ -191,271 +170,6 @@ func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.S
 		return nil, errors.New("session catalog is unavailable")
 	}
 	return lister.List(ctx, limit)
-}
-
-// RecoverStaleTasks 逐个 Session 收敛上一次进程异常退出留下的执行状态。
-// 恢复以 Session 为事务边界：一次事务只能写入一个日志文件，跨 Session 批量提交会掩盖部分失败。
-// 同时修复已结束 Task 的缺失工具回执；恢复不重放可能已经产生副作用的调用。
-func (s *Service) RecoverStaleTasks(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("stale task recovery context is required")
-	}
-	tasks, err := s.tasks.ListActive(ctx)
-	if err != nil {
-		return err
-	}
-	bySession := make(map[contracts.SessionID][]contracts.TaskID)
-	for _, task := range tasks {
-		bySession[task.SessionID] = append(bySession[task.SessionID], task.ID)
-	}
-	open, err := s.turns.ListOpen(ctx)
-	if err != nil {
-		return err
-	}
-	turnsBySession := make(map[contracts.SessionID][]contracts.TurnID)
-	for _, turn := range open {
-		turnsBySession[turn.SessionID] = append(turnsBySession[turn.SessionID], turn.ID)
-	}
-	pending := make(map[contracts.SessionID]struct{}, len(bySession)+len(turnsBySession))
-	for sessionID := range bySession {
-		pending[sessionID] = struct{}{}
-	}
-	for sessionID := range turnsBySession {
-		pending[sessionID] = struct{}{}
-	}
-	sessions, err := s.ListSessions(ctx, math.MaxInt)
-	if err != nil {
-		return err
-	}
-	for _, session := range sessions {
-		pending[session.ID] = struct{}{}
-	}
-	for _, sessionID := range slices.Sorted(maps.Keys(pending)) {
-		if err := s.recoverSession(ctx, sessionID, bySession[sessionID], turnsBySession[sessionID]); err != nil {
-			return fmt.Errorf("recover session %s: %w", sessionID, err)
-		}
-	}
-	return nil
-}
-
-// recoverSession 在 Session 的单个事务中收敛活动 Task 与残留的未结算迭代。
-func (s *Service) recoverSession(
-	ctx context.Context,
-	sessionID contracts.SessionID,
-	taskIDs []contracts.TaskID,
-	turnIDs []contracts.TurnID,
-) error {
-	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		for _, taskID := range taskIDs {
-			if err := s.recoverStaleTask(txCtx, taskID); err != nil {
-				return fmt.Errorf("recover stale task %s: %w", taskID, err)
-			}
-		}
-		at := s.clock.Now().UTC()
-		for _, turnID := range turnIDs {
-			turn, err := s.turns.Get(txCtx, turnID)
-			if errors.Is(err, contracts.ErrNotFound) {
-				continue
-			} else if err != nil {
-				return err
-			}
-			// 事务内重新确认状态：已被其他路径收敛的迭代不重复结算。
-			if turn.Status != turnmodel.TurnRunning {
-				continue
-			}
-			if err := turn.End(turnmodel.TurnInterrupted, contracts.TaskFailureInterrupted, "", at); err != nil {
-				return err
-			}
-			if err := s.turns.Save(txCtx, turn); err != nil {
-				return err
-			}
-		}
-		return s.recoverSessionToolResults(txCtx, sessionID, at)
-	})
-}
-
-func (s *Service) recoverStaleTask(ctx context.Context, taskID contracts.TaskID) error {
-	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		task, err := s.tasks.Get(txCtx, taskID)
-		if errors.Is(err, contracts.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if !task.Active() {
-			return nil
-		}
-		agent, err := s.agents.Get(txCtx, task.AgentID)
-		if err != nil {
-			return err
-		}
-		if agent.CurrentTaskID != task.ID ||
-			(agent.State != agentmodel.AgentExecuting && agent.State != agentmodel.AgentPausing) {
-			return fmt.Errorf("active task does not match agent state")
-		}
-		at := s.clock.Now().UTC()
-		outcome := taskmodel.TaskInterrupted
-		failureCode := contracts.TaskFailureInterrupted
-		controls, err := s.controls.ListOpenByAgent(txCtx, agent.ID, 100)
-		if err != nil {
-			return err
-		}
-		// 恢复只收敛状态，不重放执行；已提交的用户控制命令仍保留其取消原因。
-		for index := range controls {
-			control := &controls[index]
-			if control.TargetTaskID != task.ID {
-				continue
-			}
-			if failureCode != contracts.TaskFailureRequestCanceled {
-				outcome = taskmodel.TaskPaused
-			}
-			if control.Kind == agentmodel.AgentControlCancel {
-				outcome = taskmodel.TaskInterrupted
-			}
-			failureCode = contracts.TaskFailureRequestCanceled
-			if err := control.MarkApplied(at); err != nil {
-				return err
-			}
-			if err := s.controls.Save(txCtx, *control); err != nil {
-				return err
-			}
-		}
-		if task.Status == taskmodel.TaskStarting {
-			if err := task.MarkRunning(at); err != nil {
-				return err
-			}
-		}
-		if task.Status == taskmodel.TaskRunning {
-			if err := task.BeginEnding(at); err != nil {
-				return err
-			}
-		}
-		if err := task.End(outcome, failureCode, at); err != nil {
-			return err
-		}
-		if err := agent.EndTask(outcome, at); err != nil {
-			return err
-		}
-		if err := s.tasks.Save(txCtx, task); err != nil {
-			return err
-		}
-		return s.agents.Save(txCtx, agent)
-	})
-}
-
-func recoverToolInvocation(invocation *toolmodel.ToolInvocation, at time.Time) (toolcontracts.ToolResult, error) {
-	var result toolcontracts.ToolResult
-	switch invocation.Status {
-	case toolmodel.ToolInvocationRequested, toolmodel.ToolInvocationAwaitingApproval, toolmodel.ToolInvocationApproved:
-		result = toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "")
-		err := invocation.Interrupt(toolmodel.ToolInvocationResult{
-			InlineContent: result.Payload,
-			ErrorCode:     toolmodel.ToolFailureInterrupted,
-		}, at)
-		return result, err
-	case toolmodel.ToolInvocationRunning:
-		result = toolcontracts.NewToolError(string(toolmodel.ToolFailureResultUnknown), "The application was interrupted. The tool may have already produced side effects; do not automatically retry it.")
-		err := invocation.MarkResultUnknown(toolmodel.ToolInvocationResult{
-			InlineContent: result.Payload,
-			ErrorCode:     toolmodel.ToolFailureResultUnknown,
-		}, at)
-		return result, err
-	default:
-		return result, fmt.Errorf("tool invocation %s is not recoverable", invocation.ID)
-	}
-}
-
-// recoverSessionToolResults 以消息中的调用为准补齐回执，覆盖未执行、已结算和历史缺失记录。
-// 同一事务先结算全部残留 invocation，再补消息；已有回执与终态结果不覆盖。
-func (s *Service) recoverSessionToolResults(ctx context.Context, sessionID contracts.SessionID, at time.Time) error {
-	invocations, err := s.toolInvocations.ListUnsettledBySession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	for _, invocation := range invocations {
-		if _, err := recoverToolInvocation(&invocation, at); err != nil {
-			return err
-		}
-		if err := s.toolInvocations.Save(ctx, invocation); err != nil {
-			return err
-		}
-	}
-	agents, err := s.agents.ListBySession(ctx, sessionID, math.MaxInt)
-	if err != nil {
-		return err
-	}
-	for _, agent := range agents {
-		stream, err := s.messages.LoadMessages(ctx, sessionID, agent.ID, 0)
-		if err != nil {
-			return err
-		}
-		type callKey struct{ taskID, callID string }
-		results := make(map[callKey]bool)
-		for _, message := range stream.Messages {
-			for _, block := range message.Blocks {
-				if block.Kind == sessionmodel.BlockToolResult {
-					results[callKey{message.TaskID, block.CallID}] = true
-				}
-			}
-		}
-		for _, message := range stream.Messages {
-			for index, call := range message.Blocks {
-				key := callKey{message.TaskID, call.CallID}
-				if call.Kind != sessionmodel.BlockToolCall || results[key] {
-					continue
-				}
-				result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The tool call was interrupted before execution.")
-				invocation, err := s.toolInvocations.FindByTaskCall(ctx, contracts.TaskID(message.TaskID), call.CallID)
-				if err != nil && !errors.Is(err, contracts.ErrNotFound) {
-					return err
-				}
-				if err == nil {
-					result = toolcontracts.ToolResult{
-						Payload:    invocation.Result.InlineContent,
-						ErrorClass: string(invocation.Result.ErrorCode),
-					}
-					if result.Payload == "" {
-						result.Payload = "(empty tool result)"
-					}
-				}
-				if err := s.appendRecoveredToolResult(ctx, agent, message, index, call, result, at); err != nil {
-					return err
-				}
-				results[key] = true
-			}
-		}
-	}
-	return nil
-}
-
-func (s *Service) appendRecoveredToolResult(
-	ctx context.Context,
-	agent agentmodel.Agent,
-	assistant sessionmodel.MessageData,
-	callIndex int,
-	call sessionmodel.Block,
-	result toolcontracts.ToolResult,
-	at time.Time,
-) error {
-	message := sessionmodel.MessageData{
-		ID:         fmt.Sprintf("tool-recovery:%s:%d", assistant.ID, callIndex),
-		RequestID:  assistant.RequestID,
-		TaskID:     assistant.TaskID,
-		Role:       sessionmodel.RoleTool,
-		AuthorKind: sessionmodel.AuthorTool,
-		AuthorID:   call.Name,
-		Blocks: []sessionmodel.Block{{
-			Kind:    sessionmodel.BlockToolResult,
-			Text:    result.Payload,
-			CallID:  call.CallID,
-			Name:    call.Name,
-			IsError: result.ErrorClass != "",
-		}},
-		CreatedAt: at,
-	}
-	_, err := s.messages.Append(ctx, agent, message)
-	return err
 }
 
 // GetSessionView 返回 Session 及其按索引查询的 Agent 列表。
@@ -595,7 +309,6 @@ func (s *Service) CreateSessionForProject(ctx context.Context, sessionID contrac
 	})
 }
 
-// GetOrCreatePrimaryAgent returns an existing Session Agent or atomically
 // creates the missing primary Agent for an already-initialized Session.
 func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contracts.SessionID, requestID contracts.RequestID) (agentmodel.Agent, error) {
 	if ctx == nil {
@@ -663,7 +376,6 @@ type AppendContextParams struct {
 	Content      string
 }
 
-// AppendContextResult returns the durable entry and retry state.
 type AppendContextResult struct {
 	Entry         contextmodel.SessionContextEntry
 	ExistingEntry bool

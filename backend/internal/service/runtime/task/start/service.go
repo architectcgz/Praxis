@@ -34,6 +34,7 @@ type ModelSnapshotFactory interface {
 }
 
 type Config struct {
+	Controls            repository.AgentControlCommandRepository
 	Transactions        repository.TxRunner
 	Workspaces          repository.WorkspaceRepository
 	Sessions            repository.SessionRepository
@@ -55,6 +56,7 @@ type Config struct {
 
 // Service 为直接输入创建 Task，并在 runtime 空闲时准备预约 Task 的执行快照。
 type Service struct {
+	controls            repository.AgentControlCommandRepository
 	tx                  repository.TxRunner
 	workspaces          repository.WorkspaceRepository
 	sessions            repository.SessionRepository
@@ -84,6 +86,7 @@ func NewService(config Config) (*Service, error) {
 	}
 	for name, value := range map[string]any{
 		"transactions":  config.Transactions,
+		"controls":      config.Controls,
 		"workspaces":    config.Workspaces,
 		"sessions":      config.Sessions,
 		"policies":      config.Policies,
@@ -108,6 +111,7 @@ func NewService(config Config) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
+		controls:            config.Controls,
 		tx:                  config.Transactions,
 		workspaces:          config.Workspaces,
 		sessions:            config.Sessions,

@@ -3,7 +3,6 @@ package timing
 import (
 	"context"
 
-	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
 )
@@ -58,11 +57,6 @@ func (s hookScope) End(result hooks.Result) {
 		}
 		if s.ctx.Err() != nil {
 			status = Cancelled
-		}
-	case hooks.OperationProvider:
-		// 必须消费且校验成功，收到流终态本身不代表模型请求成功。
-		if status == Completed && result.StopReason != model.StopCompleted && result.StopReason != model.StopToolCalls {
-			status = Failed
 		}
 	case hooks.OperationTool:
 		if status == Completed && result.ToolErrorClass != "" {

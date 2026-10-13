@@ -10,6 +10,7 @@ import (
 // 没有可执行 Task 时返回 false；构建失败保持原有 Pending 状态。
 type TaskBuilder interface {
 	BuildTask(context.Context, taskmodel.Task) (taskmodel.Task, bool, error)
+	ReclaimTask(context.Context, taskmodel.Task) (taskmodel.Task, error)
 }
 
 // TaskQueue 保存等待 runtime 空闲后处理的输入；Next 只查询，不构建 Task 或 Context。

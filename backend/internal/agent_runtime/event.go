@@ -13,18 +13,19 @@ import (
 type AgentEventKind string
 
 const (
-	AgentEventTurnStarted     AgentEventKind = "turn_started"
-	AgentEventProviderWaiting AgentEventKind = "provider_waiting"
-	AgentEventTextDelta       AgentEventKind = "text_delta"
-	AgentEventThinkingDelta   AgentEventKind = "thinking_delta"
-	AgentEventToolCall        AgentEventKind = "tool_call"
-	AgentEventToolResult      AgentEventKind = "tool_result"
-	AgentEventTurnCompleted   AgentEventKind = "turn_completed"
-	AgentEventModelUsage      AgentEventKind = "model_usage"
-	AgentEventRequestCanceled AgentEventKind = "request_canceled"
-	AgentEventTaskEnded       AgentEventKind = "task_ended"
-	AgentEventError           AgentEventKind = "error"
-	AgentEventTiming          AgentEventKind = "operation_timing"
+	AgentEventTurnStarted          AgentEventKind = "turn_started"
+	AgentEventProviderWaiting      AgentEventKind = "provider_waiting"
+	AgentEventTextDelta            AgentEventKind = "text_delta"
+	AgentEventThinkingDelta        AgentEventKind = "thinking_delta"
+	AgentEventToolApprovalRequired AgentEventKind = "tool_approval_required"
+	AgentEventToolCall             AgentEventKind = "tool_call"
+	AgentEventToolResult           AgentEventKind = "tool_result"
+	AgentEventTurnCompleted        AgentEventKind = "turn_completed"
+	AgentEventModelUsage           AgentEventKind = "model_usage"
+	AgentEventRequestCanceled      AgentEventKind = "request_canceled"
+	AgentEventTaskEnded            AgentEventKind = "task_ended"
+	AgentEventError                AgentEventKind = "error"
+	AgentEventTiming               AgentEventKind = "operation_timing"
 )
 
 // AgentEvent 是单次 task 的瞬时 runtime 事件；持久化消息与执行状态是最终事实。

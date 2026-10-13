@@ -7,22 +7,26 @@ import (
 	"praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/hooks"
+	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"praxis/internal/agent_runtime"
 )
 
 // Config 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Config struct {
-	ModelBuilder model.ModelBuilder
-	Tools        toolcontracts.ToolCatalog
-	ToolCalls    ToolCallHandler
-	Turns        TurnExecutor
+	ContextBuilder TaskContextBuilder
+	Tasks          TaskRepository
+	Transactions   repository.TxRunner
+	ModelBuilder   model.ModelBuilder
+	Tools          toolcontracts.ToolCatalog
+	ToolExecutor   ToolExecutor
+	HookDispatcher *hooks.Dispatcher
 	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
 	CompressionStrategy contextcompress.Strategy
 	EventObserver       agentruntime.AgentEventObserver
@@ -37,17 +41,17 @@ type Runner struct {
 // NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
 // 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
 func NewRunner(config Config) (Runner, error) {
+	if config.ContextBuilder == nil || config.Tasks == nil || config.Transactions == nil {
+		return Runner{}, errors.New("loop context builder, tasks and transactions are required")
+	}
 	if config.ModelBuilder == nil {
 		return Runner{}, errors.New("loop model builder is required")
 	}
 	if config.Tools == nil {
 		return Runner{}, errors.New("loop tool catalog is required")
 	}
-	if config.ToolCalls == nil {
+	if config.ToolExecutor == nil {
 		return Runner{}, errors.New("loop tool call handler is required")
-	}
-	if config.Turns == nil {
-		return Runner{}, errors.New("loop turn executor is required")
 	}
 	if config.EventObserver == nil {
 		return Runner{}, errors.New("loop event observer is required")
@@ -62,7 +66,7 @@ func NewRunner(config Config) (Runner, error) {
 }
 
 // Run 使用本次执行快照与消息记录器运行 provider/tool loop，返回结果及失败分类。
-// 消息记录器只作为持久化回执的写入端（会话历史不会回读）；
+// ContextBuilder 重建冻结可见范围的历史，消息记录器负责可靠提交输出；
 // 每次执行的输入（context、消息记录器）为空时返回错误；
 // 持久化生命周期、取消和后续任务调度由 runtime 负责。
 func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder agentruntime.MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
@@ -82,18 +86,42 @@ func (r *Runner) run(
 	task taskmodel.Task,
 	messageRecorder agentruntime.MessageRecorder,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+	task, err := r.Tasks.Get(ctx, task.ID)
+	if err != nil {
+		return taskResult(failCause(contracts.TaskFailureStorage, err))
+	}
 	permissions := task.Input.Security.Permissions
-	// 会话历史已在任务创建时冻结进快照；本任务新增的上下文条目在循环内内存累加，
-	// 落库消息只作为回执写入，不回读，因此这里不需要读取会话历史。
-	modelContext := task.Input.Context.Clone()
+	built, err := r.ContextBuilder.RebuildTaskContext(ctx, task)
+	if err != nil {
+		return taskResult(failCause(contracts.TaskFailureStorage, err))
+	}
+	task, err = r.Tasks.Get(ctx, task.ID)
+	if err != nil {
+		return taskResult(failCause(contracts.TaskFailureStorage, err))
+	}
+	modelContext := built.Context
+	budget := newTaskBudget(permissions.ResourceLimits)
+	budget.outputBytes = task.Progress.OutputBytes
+	if permissions.ResourceLimits.MaxOutputBytes > 0 && budget.outputBytes > permissions.ResourceLimits.MaxOutputBytes {
+		return taskResult(fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "task output limit exceeded"))
+	}
+	if task.Progress.FinalStopReason != "" {
+		return taskmodel.TaskCompleted, "", nil
+	}
+	if err := r.resumeToolCalls(ctx, task, built.TaskMessages, messageRecorder, &modelContext, budget); err != nil {
+		if errors.Is(err, errAwaitingApproval) {
+			return taskmodel.TaskAwaitingApproval, "", nil
+		}
+		return taskResult(err)
+	}
+
 	taskModel, err := r.buildModel(task.Input.Model)
 	if err != nil {
 		r.emitError(task.AgentID, task.ID, "", err)
 		return taskResult(err)
 	}
 
-	budget := newTaskBudget(permissions.ResourceLimits)
-	for sequence := uint64(1); ; {
+	for sequence := max(uint64(1), task.Progress.NextSequence); ; {
 		request := buildModelRequest(model.ModelRequest{
 			TaskID:           task.ID,
 			SessionReference: task.SessionID.String(),
@@ -124,23 +152,21 @@ func (r *Runner) run(
 			request.Context = modelContext.Clone()
 		}
 		turnSequence := sequence
+		if err := r.recordRequest(ctx, task.ID, turnSequence); err != nil {
+			return taskResult(failCause(contracts.TaskFailureStorage, err))
+		}
 		sequence++
-		outcome, failureCode, err := r.Turns.Execute(ctx, contracts.TurnExecutionContext{
-			TaskID:    task.ID,
-			SessionID: task.SessionID,
-			AgentID:   task.AgentID,
-			Sequence:  turnSequence,
-		}, func(turnCtx context.Context, turnID contracts.TurnID) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
-			request.TurnID = turnID
-			return r.executeTurn(turnCtx, task, taskModel, messageRecorder, request, &modelContext, budget, turnID)
-		})
-		if err != nil || outcome != taskmodel.TaskCompleted {
+		turnID := contracts.NewTurnID(task.ID, turnSequence)
+		request.TurnID = turnID
+		outcome, failureCode, finished, err := r.executeTurn(ctx, task, taskModel, messageRecorder, request, &modelContext, budget, turnID)
+
+		if err != nil || outcome != taskmodel.TaskCompleted || finished {
 			return outcome, failureCode, err
 		}
 	}
 }
 
-// executeTurn 执行一轮模型、工具和回执业务；Turn 的开始与结算由 TurnExecutor 负责。
+// executeTurn 执行一轮模型、工具和回执业务，返回明确的继续/完成决策。
 func (r *Runner) executeTurn(
 	ctx context.Context,
 	task taskmodel.Task,
@@ -150,17 +176,18 @@ func (r *Runner) executeTurn(
 	modelContext *appcontext.ModelContext,
 	budget *taskBudget,
 	turnID contracts.TurnID,
-) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
-		r.emit(agentruntime.AgentEvent{
-			Kind:      agentruntime.AgentEventTurnStarted,
-			SessionID: task.SessionID,
-			AgentID:   task.AgentID,
-			TaskID:    task.ID,
-			TurnID:    turnID,
-		})
+) (taskmodel.TaskOutcome, contracts.TaskFailureCode, bool, error) {
+	r.emit(agentruntime.AgentEvent{
+		Kind:      agentruntime.AgentEventTurnStarted,
+		SessionID: task.SessionID,
+		AgentID:   task.AgentID,
+		TaskID:    task.ID,
+		TurnID:    turnID,
+	})
 	if err := budget.reserveInput(request); err != nil {
 		r.emitError(task.AgentID, task.ID, turnID, err)
-		return taskResult(err)
+		outcome, code, cause := taskResult(err)
+		return outcome, code, false, cause
 	}
 	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", task.ID, task.Input.Model.ModelID, len(modelContext.Entries), turnID)
 	r.emit(agentruntime.AgentEvent{
@@ -171,17 +198,24 @@ func (r *Runner) executeTurn(
 		TurnID:    turnID,
 		Name:      task.Input.Model.ProviderID + "/" + task.Input.Model.ModelID,
 	})
-	response, err := requestModel(ctx, taskModel.Stream, request, func(event model.ModelStreamEvent) {
+	response, err := requestModel(ctx, taskModel.Stream, request, hooks.Identity{
+		SessionID: task.SessionID,
+		AgentID:   task.AgentID,
+		TaskID:    task.ID,
+		TurnID:    turnID,
+	}, r.HookDispatcher, func(event model.ModelStreamEvent) {
 		r.emitModelEvent(task.SessionID, task.AgentID, task.ID, turnID, event)
 	})
 	if err != nil {
 		err = modelFailure(err)
 		r.emitError(task.AgentID, task.ID, turnID, err)
-		return taskResult(err)
+		outcome, code, cause := taskResult(err)
+		return outcome, code, false, cause
 	}
-	if err := budget.addOutput(response.textBytes); err != nil {
-		r.emitError(task.AgentID, task.ID, turnID, err)
-		return taskResult(err)
+	outputErr := budget.addOutput(response.textBytes)
+	if err := r.recordOutput(ctx, task.ID, response.textBytes); err != nil {
+		outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
+		return outcome, code, false, cause
 	}
 	assistant := model.ContextBlocksFromEvents(response.events)
 	calls := response.toolCalls()
@@ -193,19 +227,26 @@ func (r *Runner) executeTurn(
 		WorkspacePath:       task.Input.WorkspacePath,
 		SecurityFingerprint: task.Input.Security.Fingerprint,
 	}
-	if len(assistant) > 0 {
+	{
 		message := taskMessage(sessionmodel.MessageData{
 			ID:         "assistant:" + turnID.String(),
 			RequestID:  task.RequestID.String(),
 			TaskID:     task.ID.String(),
+			TurnID:     turnID.String(),
+			StopReason: string(response.stopReason),
 			Role:       sessionmodel.RoleAssistant,
 			AuthorKind: sessionmodel.AuthorAgent,
 			AuthorID:   task.AgentID.String(),
 		}, assistant)
-		if err := r.ToolCalls.RecordAssistant(ctx, messageRecorder.Append, message, metadata); err != nil {
+		if err := messageRecorder.AppendAssistant(ctx, message, metadata); err != nil {
 			r.emitError(task.AgentID, task.ID, turnID, err)
-			return taskResult(err)
+			outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
+			return outcome, code, false, cause
 		}
+	}
+	if outputErr != nil {
+		outcome, code, cause := taskResult(outputErr)
+		return outcome, code, false, cause
 	}
 	for _, call := range calls {
 		r.emit(agentruntime.AgentEvent{
@@ -219,22 +260,27 @@ func (r *Runner) executeTurn(
 			Input:     append([]byte(nil), call.Arguments...),
 		})
 	}
-	r.emit(agentruntime.AgentEvent{
-		Kind:       agentruntime.AgentEventTurnCompleted,
-		SessionID:  task.SessionID,
-		AgentID:    task.AgentID,
-		TaskID:     task.ID,
-		TurnID:     turnID,
-		StopReason: response.stopReason,
-	})
 	*modelContext = modelContext.AppendProviderOutput(assistant)
 	if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {
-		return taskmodel.TaskCompleted, "", nil
+
+		r.emit(agentruntime.AgentEvent{
+			Kind:       agentruntime.AgentEventTurnCompleted,
+			SessionID:  task.SessionID,
+			AgentID:    task.AgentID,
+			TaskID:     task.ID,
+			TurnID:     turnID,
+			StopReason: response.stopReason,
+		})
+		return taskmodel.TaskCompleted, "", true, nil
 	}
 	results, err := r.runToolCalls(ctx, messageRecorder, calls, metadata, task.RequestID, budget)
 	if err != nil {
+		if errors.Is(err, errAwaitingApproval) {
+			return taskmodel.TaskAwaitingApproval, "", false, nil
+		}
 		r.emitError(task.AgentID, task.ID, turnID, err)
-		return taskResult(err)
+		outcome, code, cause := taskResult(err)
+		return outcome, code, false, cause
 	}
 	for index, result := range results {
 		*modelContext = modelContext.AppendToolResult(appcontext.NewToolResultBlock(
@@ -244,7 +290,16 @@ func (r *Runner) executeTurn(
 			result.ErrorClass != "",
 		))
 	}
-	return taskmodel.TaskCompleted, "", nil
+
+	r.emit(agentruntime.AgentEvent{
+		Kind:       agentruntime.AgentEventTurnCompleted,
+		SessionID:  task.SessionID,
+		AgentID:    task.AgentID,
+		TaskID:     task.ID,
+		TurnID:     turnID,
+		StopReason: response.stopReason,
+	})
+	return taskmodel.TaskCompleted, "", false, nil
 }
 
 func (r *Runner) buildModel(snapshot model.ModelSnapshot) (model.Model, error) {

@@ -40,6 +40,9 @@ type AgentService interface {
 
 // AgentCommands 接收持久化的 Agent 执行与控制命令。
 type AgentCommands interface {
+	ListToolApprovals(context.Context, contracts.AgentID) ([]service.ToolApproval, error)
+	ApproveToolCall(context.Context, request.ToolDecision) error
+	DenyToolCall(context.Context, request.ToolDecision) error
 	SendInput(context.Context, request.SendInput) (service.SendInputResult, error)
 	PauseAgent(context.Context, request.Control) (service.ControlResult, error)
 	CancelTask(context.Context, request.Control) (service.ControlResult, error)

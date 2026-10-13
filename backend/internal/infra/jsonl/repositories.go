@@ -16,42 +16,37 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
-	turnmodel "praxis/internal/core/turn"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/repository"
 )
 
 // Repositories 将同一个日志事务入口提供给所有业务仓储。
 type Repositories struct {
-	Projects          ProjectRepository
-	Workspaces        WorkspaceRepository
-	Sessions          SessionRepository
-	Agents            AgentRepository
-	Tasks             TaskRepository
-	SecuritySnapshots SecuritySnapshotRepository
-	Policies          PolicyRepository
-	Contexts          ContextRepository
-	ToolInvocations   ToolRepository
-	Controls          ControlRepository
-	Turns             TurnRepository
-	Messages          MessageStreams
+	Projects        ProjectRepository
+	Workspaces      WorkspaceRepository
+	Sessions        SessionRepository
+	Agents          AgentRepository
+	Tasks           TaskRepository
+	Policies        PolicyRepository
+	Contexts        ContextRepository
+	ToolInvocations ToolRepository
+	Controls        ControlRepository
+	Messages        MessageStreams
 }
 
 // Repositories 返回共享提交边界与投影的仓储集合。
 func (s *Store) Repositories() Repositories {
 	return Repositories{
-		Projects:          ProjectRepository{s},
-		Workspaces:        WorkspaceRepository{s},
-		Sessions:          SessionRepository{s},
-		Agents:            AgentRepository{s},
-		Tasks:             TaskRepository{s},
-		SecuritySnapshots: SecuritySnapshotRepository{s},
-		Policies:          PolicyRepository{s},
-		Contexts:          ContextRepository{s},
-		ToolInvocations:   ToolRepository{s},
-		Controls:          ControlRepository{s},
-		Turns:             TurnRepository{s},
-		Messages:          MessageStreams{s},
+		Projects:        ProjectRepository{s},
+		Workspaces:      WorkspaceRepository{s},
+		Sessions:        SessionRepository{s},
+		Agents:          AgentRepository{s},
+		Tasks:           TaskRepository{s},
+		Policies:        PolicyRepository{s},
+		Contexts:        ContextRepository{s},
+		ToolInvocations: ToolRepository{s},
+		Controls:        ControlRepository{s},
+		Messages:        MessageStreams{s},
 	}
 }
 
@@ -60,38 +55,11 @@ type WorkspaceRepository struct{ s *Store }
 type SessionRepository struct{ s *Store }
 type AgentRepository struct{ s *Store }
 type TaskRepository struct{ s *Store }
-type SecuritySnapshotRepository struct{ s *Store }
 type PolicyRepository struct{ s *Store }
 type ContextRepository struct{ s *Store }
 type ToolRepository struct{ s *Store }
 type ControlRepository struct{ s *Store }
-type TurnRepository struct{ s *Store }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r TurnRepository) Get(ctx context.Context, id contracts.TurnID) (turnmodel.Turn, error) {
-	return get[turnmodel.Turn](ctx, r.s, "turn", id.String())
-}
-
-// Save 校验并保存对象，事务未提交时只更新工作区。
-func (r TurnRepository) Save(ctx context.Context, v turnmodel.Turn) error {
-	return save(ctx, r.s, v.SessionID.String(), "turn", v.ID.String(), "turn.saved", v)
-}
-
-// ListOpen 返回全部尚未结算的迭代，供启动恢复发现待收敛的 Session。
-func (r TurnRepository) ListOpen(ctx context.Context) ([]turnmodel.Turn, error) {
-	v, e := list[turnmodel.Turn](ctx, r.s, "turn", func(v turnmodel.Turn) bool {
-		return v.Status == turnmodel.TurnRunning
-	})
-	return sorted(v, func(a, b turnmodel.Turn) int {
-		return cmp.Or(
-			cmp.Compare(a.SessionID, b.SessionID),
-			cmp.Compare(a.TaskID, b.TaskID),
-			cmp.Compare(a.Sequence, b.Sequence),
-		)
-	}), e
-}
-
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
 func (r ProjectRepository) Get(ctx context.Context, id contracts.ProjectID) (projectmodel.Project, error) {
 	return get[projectmodel.Project](ctx, r.s, "project", id.String())
 }
@@ -288,11 +256,6 @@ func (r TaskRepository) CountActiveBySession(ctx context.Context, id contracts.S
 }
 
 // Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r SecuritySnapshotRepository) Get(ctx context.Context, id contracts.TaskID) (contracts.SecuritySnapshot, error) {
-	v, e := (TaskRepository{r.s}).Get(ctx, id)
-	return v.Input.Security, e
-}
-
 type policyRecord struct {
 	AgentID contracts.AgentID
 	Policy  securitymodel.AgentSecurityPolicy
@@ -469,5 +432,16 @@ var (
 	_ repository.AgentSecurityPolicyRepository = PolicyRepository{}
 	_ repository.SessionContextRepository      = ContextRepository{}
 	_ repository.AgentControlCommandRepository = ControlRepository{}
-	_ repository.TurnRepository                = TurnRepository{}
 )
+
+func (r ToolRepository) ListByTask(ctx context.Context, id contracts.TaskID) ([]toolmodel.ToolInvocation, error) {
+	return list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool { return v.TaskID == id })
+}
+func (r ToolRepository) ListAwaitingByAgent(ctx context.Context, id contracts.AgentID) ([]toolmodel.ToolInvocation, error) {
+	values, err := list[toolmodel.ToolInvocation](ctx, r.s, "tool", func(v toolmodel.ToolInvocation) bool {
+		return v.AgentID == id && v.Status == toolmodel.ToolInvocationAwaitingApproval
+	})
+	return sorted(values, func(a, b toolmodel.ToolInvocation) int {
+		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
+	}), err
+}

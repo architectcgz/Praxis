@@ -52,7 +52,7 @@ func (r *Registry) Activate(
 	if ctx == nil {
 		return errors.New("runtime activation context is required")
 	}
-	if task.Status != taskmodel.TaskStarting {
+	if !task.Active() {
 		return nil
 	}
 	runtime, err := r.getOrCreate(ctx, task.AgentID)

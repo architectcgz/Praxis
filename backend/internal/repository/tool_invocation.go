@@ -23,5 +23,7 @@ type ToolInvocationRepository interface {
 		sessionID contracts.SessionID,
 	) ([]toolmodel.ToolInvocation, error)
 
+	ListByTask(context.Context, contracts.TaskID) ([]toolmodel.ToolInvocation, error)
+	ListAwaitingByAgent(context.Context, contracts.AgentID) ([]toolmodel.ToolInvocation, error)
 	Save(ctx context.Context, invocation toolmodel.ToolInvocation) error
 }

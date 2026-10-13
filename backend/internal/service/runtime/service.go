@@ -26,6 +26,7 @@ type TaskStarter interface {
 
 // Config 提供回合、队列和进程内执行依赖；所有依赖均为必填。
 type Config struct {
+	Approvals ToolApprovals
 	Tasks     TaskStarter
 	Queue     *queue.Service
 	Activator TaskActivator
@@ -33,6 +34,7 @@ type Config struct {
 
 // Service 负责 Task 开始及队列调度，执行控制由 Agent 模块提供。
 type Service struct {
+	approvals ToolApprovals
 	tasks     TaskStarter
 	queue     *queue.Service
 	activator TaskActivator
@@ -50,9 +52,10 @@ type EnqueueResult = queue.EnqueueResult
 // NewService 创建 runtime 应用服务；缺少依赖时返回错误。
 func NewService(config Config) (*Service, error) {
 	for name, missing := range map[string]bool{
-		"tasks":     config.Tasks == nil,
-		"queue":     config.Queue == nil,
-		"activator": config.Activator == nil,
+		"tasks":          config.Tasks == nil,
+		"queue":          config.Queue == nil,
+		"activator":      config.Activator == nil,
+		"tool approvals": config.Approvals.Transactions == nil || config.Approvals.Tasks == nil || config.Approvals.Invocations == nil || config.Approvals.UserID == "",
 	} {
 		if missing {
 			return nil, fmt.Errorf("runtime service %s is required", name)
@@ -60,6 +63,7 @@ func NewService(config Config) (*Service, error) {
 	}
 	return &Service{
 		tasks:     config.Tasks,
+		approvals: config.Approvals,
 		queue:     config.Queue,
 		activator: config.Activator,
 	}, nil

@@ -18,7 +18,6 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
-	turnmodel "praxis/internal/core/turn"
 	workflowmodel "praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/timing"
@@ -51,7 +50,7 @@ func decode[T any](collection string, value object) (T, error) {
 	switch collection {
 	case "session":
 		fields["ID"], _ = json.Marshal(value.scope)
-	case "agent", "task", "tool", "turn", "context":
+	case "agent", "task", "tool", "context":
 		fields["SessionID"], _ = json.Marshal(value.scope)
 	case "timing", "usage":
 		fields["sessionId"], _ = json.Marshal(value.scope)
@@ -150,24 +149,62 @@ func immutable(collection string, before, after json.RawMessage) error {
 	var fields []string
 	switch collection {
 	case "task":
-		fields = []string{"ID", "AgentID", "RequestID", "Sequence", "ProviderID", "ModelID", "ReasoningLevel", "CreatedAt"}
+		var prior, next taskmodel.Task
+		if err := json.Unmarshal(before, &prior); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(after, &next); err != nil {
+			return err
+		}
+		if next.Progress.NextSequence < prior.Progress.NextSequence || next.Progress.ModelRequests < prior.Progress.ModelRequests || next.Progress.OutputBytes < prior.Progress.OutputBytes || next.Progress.ToolCalls < prior.Progress.ToolCalls {
+			return contracts.ErrRequestConflict
+		}
+		if prior.Progress.FinalAssistantID != "" && (prior.Progress.FinalAssistantID != next.Progress.FinalAssistantID || prior.Progress.FinalStopReason != next.Progress.FinalStopReason) {
+			return contracts.ErrRequestConflict
+		}
+		fields = []string{
+			"ID",
+			"AgentID",
+			"RequestID",
+			"Sequence",
+			"ProviderID",
+			"ModelID",
+			"ReasoningLevel",
+			"CreatedAt",
+		}
 		if string(left["Status"]) != `"pending"` {
 			fields = append(fields, "Input")
 		} else if string(right["Status"]) != `"pending"` && string(right["Status"]) != `"starting"` {
 			return contracts.ErrRequestConflict
 		}
 	case "tool":
-		fields = []string{"ID", "TaskID", "TurnID", "AgentID", "ProviderToolCallID", "Name", "Arguments", "ArgumentsDigest", "CreatedAt"}
+		if string(left["BudgetReserved"]) == "true" && string(right["BudgetReserved"]) != "true" {
+			return contracts.ErrRequestConflict
+		}
+		fields = []string{
+			"ID",
+			"TaskID",
+			"TurnID",
+			"AgentID",
+			"ProviderToolCallID",
+			"Name",
+			"Arguments",
+			"ArgumentsDigest",
+			"CreatedAt",
+		}
 		// 原始调用先落库，规范化参数只允许随 requested -> approved 填充一次。
-		if !bytes.Equal(left["NormalizedArguments"], right["NormalizedArguments"]) &&
-			(string(left["Status"]) != `"requested"` || string(right["Status"]) != `"approved"` ||
+		if (!bytes.Equal(left["NormalizedArguments"], right["NormalizedArguments"]) || !bytes.Equal(left["Path"], right["Path"])) &&
+			(string(left["Status"]) != `"requested"` || (string(right["Status"]) != `"approved"` && string(right["Status"]) != `"awaiting_approval"`) ||
 				len(left["NormalizedArguments"]) > 0 && string(left["NormalizedArguments"]) != "null") {
 			return contracts.ErrRequestConflict
 		}
-	case "turn":
-		fields = []string{"ID", "TaskID", "AgentID", "Sequence", "CreatedAt"}
 	case "agent":
-		fields = []string{"ID", "DefinitionID", "Profile", "CreatedAt"}
+		fields = []string{
+			"ID",
+			"DefinitionID",
+			"Profile",
+			"CreatedAt",
+		}
 	case "session":
 		fields = []string{"ProjectID", "WorkspaceID", "CreatedAt"}
 	case "usage":
@@ -194,15 +231,6 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return contracts.ErrRequestConflict
 		}
 	}
-	if collection == "turn" {
-		var status turnmodel.TurnStatus
-		if err := json.Unmarshal(left["Status"], &status); err != nil {
-			return err
-		}
-		if status == turnmodel.TurnEnded && !bytes.Equal(before, after) {
-			return contracts.ErrRequestConflict
-		}
-	}
 	return nil
 }
 func validateEvent(scope string, event Event) error {
@@ -222,7 +250,6 @@ func validateEvent(scope string, event Event) error {
 		"policy":    "policy.saved",
 		"wait":      "wait.saved",
 		"control":   "control.saved",
-		"turn":      "turn.saved",
 		"context":   "context.entry_appended",
 		"message":   "message.appended",
 		"timing":    "timing.saved",
@@ -247,7 +274,12 @@ func validateEvent(scope string, event Event) error {
 	if fields == nil {
 		return errors.New("payload 必须是对象")
 	}
-	for _, field := range []string{"SessionID", "sessionId", "session_id", "version"} {
+	for _, field := range []string{
+		"SessionID",
+		"sessionId",
+		"session_id",
+		"version",
+	} {
 		if _, ok := fields[field]; ok {
 			return errors.New("payload 重复保存 Session ID 或格式版本")
 		}
@@ -386,17 +418,6 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			}
 			if err == nil {
 				err = claim("call:" + v.TaskID.String() + ":" + v.ProviderToolCallID)
-			}
-		case "turn":
-			v, e := decode[turnmodel.Turn](key.collection, value)
-			err = e
-			item = v
-			identity = v.ID.String()
-			if err == nil {
-				err = taskOwner(objects, v.TaskID, v.AgentID, value.scope)
-			}
-			if err == nil {
-				err = claim(fmt.Sprintf("turn:%s:%d", v.TaskID, v.Sequence))
 			}
 		case "policy":
 			v, e := decode[policyRecord](key.collection, value)

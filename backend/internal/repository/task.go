@@ -25,8 +25,3 @@ type TaskRepository interface {
 	// FindNextPendingByAgent 读取队首 Task，不改变其状态；空队列返回 ErrNotFound。
 	FindNextPendingByAgent(ctx context.Context, agentID contracts.AgentID) (taskmodel.Task, error)
 }
-
-// SecuritySnapshotRepository 提供执行时不可变安全快照的查询。
-type SecuritySnapshotRepository interface {
-	Get(ctx context.Context, taskID contracts.TaskID) (contracts.SecuritySnapshot, error)
-}

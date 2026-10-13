@@ -49,7 +49,39 @@ func (r MessageStreams) List(
 	after uint64,
 	limit int,
 ) ([]sessionmodel.MessageData, error) {
-	return r.s.messages(ctx, owner.SessionID.String(), appendOwner(owner), after, limit)
+	// 已配对流直接读取现有投影，避免为普通历史查询复制事务索引。
+	if r.s.tx(ctx) == nil {
+		needsRepair := false
+		var values []sessionmodel.MessageData
+		err := r.s.view(ctx, func(objects map[objectKey]object) error {
+			for key := range r.s.pending {
+				if key.scope == owner.SessionID.String() && key.owner == appendOwner(owner) {
+					needsRepair = true
+					break
+				}
+			}
+			if needsRepair {
+				return nil
+			}
+			var err error
+			values, err = messageValues(objects, owner.SessionID.String(), appendOwner(owner), after, limit)
+			return err
+		})
+		if err != nil || !needsRepair {
+			return values, err
+		}
+	}
+
+	var values []sessionmodel.MessageData
+	err := r.s.InTx(ctx, func(txCtx context.Context) error {
+		if err := r.ensureToolReceipts(txCtx, owner); err != nil {
+			return err
+		}
+		var err error
+		values, err = r.s.messages(txCtx, owner.SessionID.String(), appendOwner(owner), after, limit)
+		return err
+	})
+	return values, err
 }
 
 // LoadMessages 在一致性边界内读取 Agent 可见的消息流及其序号边界。
@@ -59,27 +91,23 @@ func (r MessageStreams) LoadMessages(
 	agentID contracts.AgentID,
 	limit int,
 ) (repository.MessageStream, error) {
-	var stream repository.MessageStream
-	err := r.s.InTx(ctx, func(txCtx context.Context) error {
-		owner, err := r.owner(txCtx, sessionID, agentID)
-		if err != nil {
-			return err
-		}
-		values, err := r.List(txCtx, owner, 0, limit)
-		if err != nil {
-			return err
-		}
-		all, err := r.List(txCtx, owner, 0, 0)
-		if err != nil {
-			return err
-		}
-		if len(all) > 0 {
-			stream.SequenceBoundary = all[len(all)-1].Sequence
-		}
-		stream.Messages = values
-		return nil
-	})
-	return stream, err
+	owner, err := r.owner(ctx, sessionID, agentID)
+	if err != nil {
+		return repository.MessageStream{}, err
+	}
+	values, err := r.List(ctx, owner, 0, 0)
+	if err != nil {
+		return repository.MessageStream{}, err
+	}
+	stream := repository.MessageStream{Messages: values}
+	if len(values) > 0 {
+		stream.SequenceBoundary = values[len(values)-1].Sequence
+	}
+	if limit > 0 {
+		stream.Messages = values[:min(len(values), limit)]
+	}
+	return stream, nil
+
 }
 
 // Resolve 为指定执行主体解析绑定到其可见流的写入器；归属不匹配时返回 ErrNotFound。
@@ -164,33 +192,54 @@ func (s *Store) appendMessage(ctx context.Context, scope, owner string, data ses
 		if e := save(ctx, s, scope, "message", messageKey(owner, data.ID), "message.appended", messageRecord{owner, data}); e != nil {
 			return e
 		}
+		if data.Role == sessionmodel.RoleTool && data.TaskID != "" {
+			task, err := (TaskRepository{s}).Get(ctx, contracts.TaskID(data.TaskID))
+			if err != nil {
+				return err
+			}
+			if task.Active() {
+				for _, block := range data.Blocks {
+					task.Progress.OutputBytes += int64(len(block.Text))
+				}
+				if err := (TaskRepository{s}).Save(ctx, task); err != nil {
+					return err
+				}
+			}
+		}
+		indexToolReceipts(s.tx(ctx).pending, s.tx(ctx).receipts, scope, messageRecord{OwnerID: owner, Data: data})
 		result = data
 		return nil
 	})
 	return result, err
 }
 func (s *Store) messages(ctx context.Context, scope, owner string, after uint64, limit int) ([]sessionmodel.MessageData, error) {
-	result := make([]sessionmodel.MessageData, 0)
+	var result []sessionmodel.MessageData
 	err := s.view(ctx, func(objects map[objectKey]object) error {
-		for key, value := range objects {
-			if key.collection != "message" || value.scope != scope {
-				continue
-			}
-			record, e := decode[messageRecord]("message", value)
-			if e != nil {
-				return e
-			}
-			if record.OwnerID == owner && record.Data.Sequence > after {
-				result = append(result, record.Data)
-			}
-		}
-		return nil
+		var err error
+		result, err = messageValues(objects, scope, owner, after, limit)
+		return err
 	})
+	return result, err
+}
+func messageValues(objects map[objectKey]object, scope, owner string, after uint64, limit int) ([]sessionmodel.MessageData, error) {
+	result := make([]sessionmodel.MessageData, 0)
+	for key, value := range objects {
+		if key.collection != "message" || value.scope != scope {
+			continue
+		}
+		record, err := decode[messageRecord]("message", value)
+		if err != nil {
+			return nil, err
+		}
+		if record.OwnerID == owner && record.Data.Sequence > after {
+			result = append(result, record.Data)
+		}
+	}
 	sorted(result, func(a, b sessionmodel.MessageData) int { return cmp.Compare(a.Sequence, b.Sequence) })
 	if limit > 0 {
 		result = result[:min(len(result), limit)]
 	}
-	return result, err
+	return result, nil
 }
 
 // TimingStore 将计时更新放入所属 Session 日志，不影响主业务事务。

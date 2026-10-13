@@ -19,14 +19,23 @@ type BuildInput struct {
 	Messages                []sessionmodel.MessageData
 	CurrentInput            string
 	CurrentInputMessageID   string
+	ContinuationMessages    []sessionmodel.MessageData
 }
 
 // BuildResult 返回完整的初始 ModelContext 及其内容摘要。
+type ContextEntryReference struct {
+	ID     string
+	Digest string
+}
+
 type BuildResult struct {
 	Context                 ModelContext
 	Digest                  string
 	MessageSequenceBoundary uint64
 	CurrentInputMessageID   string
+	VisibleMessageIDs       []string
+	SessionContextRefs      []ContextEntryReference
+	TaskMessages            []sessionmodel.MessageData
 }
 
 // ContextBuilder 构建完整历史，窗口不足时由请求边界调用摘要压缩，不在事务内访问模型。
@@ -110,6 +119,7 @@ func (b ContextBuilder) Build(input BuildInput) (BuildResult, error) {
 		})
 	}
 
+	content = append(content, historyEntries(input.ContinuationMessages)...)
 	modelContext := ModelContext{
 		SystemPrompt: input.SystemPrompt,
 		Entries:      content,
@@ -140,7 +150,17 @@ func (b ContextBuilder) Build(input BuildInput) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
+	visibleIDs := make([]string, 0, len(input.Messages))
+	for _, message := range input.Messages {
+		visibleIDs = append(visibleIDs, message.ID)
+	}
+	refs := make([]ContextEntryReference, 0, len(entries))
+	for _, entry := range entries {
+		refs = append(refs, ContextEntryReference{ID: entry.ID, Digest: entry.ContentDigest})
+	}
 	return BuildResult{
+		VisibleMessageIDs:       visibleIDs,
+		SessionContextRefs:      refs,
 		Context:                 modelContext,
 		Digest:                  digest,
 		MessageSequenceBoundary: input.MessageSequenceBoundary,

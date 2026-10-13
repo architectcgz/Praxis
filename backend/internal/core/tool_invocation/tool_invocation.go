@@ -4,11 +4,14 @@ package toolinvocation
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"time"
 
 	"praxis/internal/contracts"
+	"praxis/internal/utils/pathutil"
 )
 
 // MaxInlineToolResultBytes 限制单次工具结果的内联字节数，执行器应在返回前完成截断。
@@ -108,8 +111,12 @@ type ToolInvocation struct {
 	Name                contracts.ToolName
 	Arguments           json.RawMessage `json:",omitempty"`
 	NormalizedArguments json.RawMessage `json:",omitempty"`
+	Path                string          `json:",omitempty"`
 	ArgumentsDigest     string
 	Status              ToolInvocationStatus
+	BudgetReserved      bool
+	DecisionBy          string
+	DecisionApproved    bool
 	Approval            contracts.ApprovalRecord
 	Result              ToolInvocationResult
 	FailureCode         ToolFailureCode
@@ -168,10 +175,12 @@ func (i ToolInvocation) Validate() error {
 			return contracts.InvalidValue("toolInvocation", "identity and digest must be non-empty canonical values")
 		}
 	}
-	if !i.Name.Valid() || len(i.Arguments) == 0 && len(i.NormalizedArguments) == 0 ||
-		len(i.Arguments) > 0 && !json.Valid(i.Arguments) ||
+	if !i.Name.Valid() || len(i.Arguments) == 0 || !json.Valid(i.Arguments) ||
 		len(i.NormalizedArguments) > 0 && !json.Valid(i.NormalizedArguments) {
 		return contracts.InvalidValue("toolInvocation", "tool name and valid JSON arguments are required")
+	}
+	if i.Path != "" && !pathutil.IsAbsoluteNormalized(i.Path) {
+		return contracts.InvalidValue("toolInvocation.path", "authorized path must be canonical")
 	}
 	if !i.ApprovedAt.IsZero() && len(i.NormalizedArguments) == 0 {
 		return contracts.InvalidValue("toolInvocation", "approved invocation requires normalized arguments")
@@ -253,6 +262,16 @@ func (i ToolInvocation) Validate() error {
 	return nil
 }
 
+// AwaitApproval 保存规范化意图，等待用户批准，不能启动执行。
+func (i *ToolInvocation) AwaitApproval() error {
+	if i.Status != ToolInvocationRequested {
+		return contracts.InvalidTransition("toolInvocation", string(i.Status), string(ToolInvocationAwaitingApproval))
+	}
+	next := *i
+	next.Status = ToolInvocationAwaitingApproval
+	return i.apply(next)
+}
+
 // Approve 接受 requested 或 awaiting_approval 调用的有效审批；失败不修改对象。
 func (i *ToolInvocation) Approve(approval contracts.ApprovalRecord) error {
 	if i.Status != ToolInvocationRequested && i.Status != ToolInvocationAwaitingApproval {
@@ -330,4 +349,17 @@ func (i *ToolInvocation) apply(next ToolInvocation) error {
 	}
 	*i = next
 	return nil
+}
+
+// ArgumentsDigest 固定原始请求身份；不同归一化顺序不改变调用意图。
+func ArgumentsDigest(name contracts.ToolName, arguments json.RawMessage) string {
+	encoded, err := json.Marshal(struct {
+		Name      contracts.ToolName
+		Arguments json.RawMessage
+	}{Name: name, Arguments: arguments})
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }

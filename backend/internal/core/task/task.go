@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
 )
 
@@ -27,21 +26,23 @@ const (
 type TaskOutcome string
 
 const (
-	TaskCompleted   TaskOutcome = "completed"
-	TaskYielded     TaskOutcome = "yielded"
-	TaskPaused      TaskOutcome = "paused"
-	TaskFailed      TaskOutcome = "failed"
-	TaskInterrupted TaskOutcome = "interrupted"
+	TaskCompleted        TaskOutcome = "completed"
+	TaskYielded          TaskOutcome = "yielded"
+	TaskPaused           TaskOutcome = "paused"
+	TaskFailed           TaskOutcome = "failed"
+	TaskInterrupted      TaskOutcome = "interrupted"
+	TaskAwaitingApproval TaskOutcome = "awaiting_approval"
 )
 
-// InputSnapshot 冻结一次 task 激活所需的全部持久化输入。
+// InputSnapshot 冻结执行配置与历史可见性标识，消息正文始终从日志读取。
 type InputSnapshot struct {
 	AgentDefinitionID       contracts.AgentDefinitionID
 	AgentDefinitionRevision string
-	ContextDigest           string
 	MessageSequenceBoundary uint64 `json:"messageSequenceBoundary"`
 	CurrentInputMessageID   string `json:"currentInputMessageId"`
-	Context                 appcontext.ModelContext
+	SystemPrompt            string
+	VisibleMessageIDs       []string
+	SessionContextRefs      []ContextReference
 	Model                   model.ModelSnapshot
 	WorkspacePath           string
 	Security                contracts.SecuritySnapshot
@@ -51,19 +52,10 @@ func (s InputSnapshot) Validate() error {
 	if !s.AgentDefinitionID.Valid() || s.AgentDefinitionRevision == "" {
 		return contracts.InvalidValue("taskInput.agentDefinition", "definition id and revision are required")
 	}
-	if s.ContextDigest == "" {
-		return contracts.InvalidValue("taskInput.context", "context digest is required")
+	if s.CurrentInputMessageID == "" {
+		return contracts.InvalidValue("taskInput.currentInputMessageID", "current input is required")
 	}
-	if err := s.Context.Validate(); err != nil {
-		return contracts.FieldError("taskInput.context", err)
-	}
-	digest, err := s.Context.Digest()
-	if err != nil {
-		return contracts.FieldError("taskInput.context", err)
-	}
-	if digest != s.ContextDigest {
-		return contracts.InvalidValue("taskInput.contextDigest", "context digest does not match context")
-	}
+
 	if err := s.Model.Validate(); err != nil {
 		return contracts.FieldError("taskInput.model", err)
 	}
@@ -76,7 +68,23 @@ func (s InputSnapshot) Validate() error {
 	return nil
 }
 
+type ContextReference struct {
+	ID     string
+	Digest string
+}
+
+// Progress 在模型请求及工具准入时提交，重启不能重置已消耗预算。
+type Progress struct {
+	NextSequence     uint64
+	ModelRequests    uint64
+	OutputBytes      int64
+	ToolCalls        int
+	FinalStopReason  string
+	FinalAssistantID string
+}
+
 type Task struct {
+	Progress       Progress
 	ID             contracts.TaskID
 	SessionID      contracts.SessionID
 	AgentID        contracts.AgentID
@@ -151,6 +159,12 @@ func (e *Task) Prepare(input InputSnapshot) error {
 
 // Validate 校验 Task 引用、输入快照和生命周期；字段规范性由输入及恢复边界保证。
 func (e Task) Validate() error {
+	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 {
+		return contracts.InvalidValue("task.progress", "usage counters cannot be negative")
+	}
+	if (e.Progress.FinalAssistantID == "") != (e.Progress.FinalStopReason == "") || e.Progress.FinalStopReason != "" && e.Progress.FinalStopReason != "completed" && e.Progress.FinalStopReason != "stop_sequence" {
+		return contracts.InvalidValue("task.progress", "final output evidence is inconsistent")
+	}
 	if e.ID == "" || e.SessionID == "" || e.AgentID == "" || e.RequestID == "" {
 		return contracts.InvalidValue("task", "required reference is missing")
 	}
@@ -167,7 +181,7 @@ func (e Task) Validate() error {
 	}
 	if e.Status == TaskPending {
 		if e.Sequence == 0 ||
-			!reflect.ValueOf(e.Input).IsZero() || !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" || e.FailureCode != "" {
+			!reflect.ValueOf(e.Input).IsZero() || e.Progress != (Progress{}) || !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" || e.FailureCode != "" {
 			return contracts.InvalidValue("task.pending", "pending task requires a sequence and cannot contain execution state")
 		}
 	} else if err := e.Input.Validate(); err != nil {

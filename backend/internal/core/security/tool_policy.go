@@ -86,8 +86,7 @@ func AllowsToolCall(
 		return false
 	}
 	if name == contracts.ToolBash &&
-		(len(snapshot.ApprovalRules) == 0 || snapshot.ApprovalRules[0].Mode != contracts.ApprovalYolo ||
-			!sandbox.AllowsWorkspaceWrite() || !permissions.HasWriteAccess() ||
+		(!sandbox.AllowsWorkspaceWrite() || !permissions.HasWriteAccess() ||
 			len(permissions.AllowedExecutables) == 0) {
 		return false
 	}
