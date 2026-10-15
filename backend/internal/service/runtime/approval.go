@@ -91,7 +91,7 @@ func (s *Service) decideToolCall(ctx context.Context, params request.ToolDecisio
 		return err
 	}
 	if task.Active() {
-		return s.activator.Activate(context.WithoutCancel(ctx), task)
+		return s.activator.ResumeApproved(context.WithoutCancel(ctx), task)
 	}
 	return nil
 }

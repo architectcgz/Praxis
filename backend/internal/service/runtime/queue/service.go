@@ -157,27 +157,12 @@ func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agen
 	return "", contracts.ErrNotFound
 }
 
-// TaskQueue 保存所属 runtime 的待执行内容；存储范围在装配时确定，读取时无需指定执行者。
-type TaskQueue struct {
-	tasks       repository.TaskRepository
-	mainAgentID contracts.AgentID
-}
-
-// NewTaskQueue 创建 runtime 持有的任务队列；mainAgentID 仅用于隔离持久化任务，不负责分配任务。
-func NewTaskQueue(tasks repository.TaskRepository, mainAgentID contracts.AgentID) (*TaskQueue, error) {
-	if tasks == nil || mainAgentID == "" {
-		return nil, errors.New("task queue repository and main agent id are required")
-	}
-	return &TaskQueue{tasks: tasks, mainAgentID: mainAgentID}, nil
-}
-
-// Next 返回最早的待执行任务；队列为空时返回 false。
-// 查询不消费 Task，runtime 构建 Context 成功后原子推进状态，失败保持 Pending。
-func (q *TaskQueue) Next(ctx context.Context) (taskmodel.Task, bool, error) {
+// Next 查询指定 Agent 的队首，不消费 Task；准备失败仍保持 Pending。
+func (s *Service) Next(ctx context.Context, agentID contracts.AgentID) (taskmodel.Task, bool, error) {
 	if ctx == nil {
 		return taskmodel.Task{}, false, errors.New("next queued task context is required")
 	}
-	task, err := q.tasks.FindNextPendingByAgent(ctx, q.mainAgentID)
+	task, err := s.tasks.FindNextPendingByAgent(ctx, agentID)
 	if errors.Is(err, contracts.ErrNotFound) {
 		return taskmodel.Task{}, false, nil
 	}

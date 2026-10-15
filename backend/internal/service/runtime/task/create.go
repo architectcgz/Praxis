@@ -109,7 +109,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			return err
 		}
 		// 执行必须脱离事务 Context，避免 loop 后续写入已提交的事务工作区。
-		_, created, err := s.executions.Start(ctx, agent.ID, task.ID)
+		_, created, err := s.executions.Reserve(ctx, agent.ID, task.ID)
 		if err != nil {
 			return err
 		}
@@ -139,7 +139,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 		return nil
 	})
 	if err != nil && admittedAgent != "" {
-		s.executions.End(admittedAgent, admittedTask)
+		s.executions.Release(admittedAgent, admittedTask)
 	}
 	return result, err
 }

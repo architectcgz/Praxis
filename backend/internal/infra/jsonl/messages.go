@@ -141,7 +141,7 @@ func (r MessageStreams) owner(
 	return owner, nil
 }
 
-// MessageWriter 只写已解析归属的消息流；方法集满足 agent_runtime.MessageRecorder。
+// MessageWriter 只写已解析归属的消息流；方法集满足 loop.MessageRecorder。
 type MessageWriter struct {
 	streams MessageStreams
 	owner   agentmodel.Agent

@@ -55,7 +55,7 @@ func (s *Service) PrepareQueuedTask(ctx context.Context, selected taskmodel.Task
 		if err := agent.Start(task.ID, at); err != nil {
 			return err
 		}
-		_, admitted, err = s.executions.Start(ctx, agent.ID, task.ID)
+		_, admitted, err = s.executions.Reserve(ctx, agent.ID, task.ID)
 		if err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ func (s *Service) PrepareQueuedTask(ctx context.Context, selected taskmodel.Task
 		return nil
 	})
 	if err != nil && admitted {
-		s.executions.End(selected.AgentID, selected.ID)
+		s.executions.Release(selected.AgentID, selected.ID)
 	}
 	if err != nil {
 		return taskmodel.Task{}, false, err

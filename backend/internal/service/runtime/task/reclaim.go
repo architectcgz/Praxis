@@ -27,7 +27,7 @@ func (s *Service) ReclaimTask(ctx context.Context, selected taskmodel.Task) (tas
 		if agent.CurrentTaskID != task.ID {
 			return contracts.ErrRequestConflict
 		}
-		_, created, err = s.executions.Start(ctx, task.AgentID, task.ID)
+		_, created, err = s.executions.Reserve(ctx, task.AgentID, task.ID)
 		if err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ func (s *Service) ReclaimTask(ctx context.Context, selected taskmodel.Task) (tas
 		return nil
 	})
 	if err != nil && created {
-		s.executions.End(selected.AgentID, selected.ID)
+		s.executions.Release(selected.AgentID, selected.ID)
 	}
 	return task, err
 }

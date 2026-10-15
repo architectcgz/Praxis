@@ -15,6 +15,7 @@ import (
 // TaskActivator 把已提交的 Task 交给进程内执行协调器。
 type TaskActivator interface {
 	Activate(context.Context, taskmodel.Task) error
+	ResumeApproved(context.Context, taskmodel.Task) error
 }
 
 // TaskStarter 是 runtime 用例所需的 Task 准入与收敛能力。

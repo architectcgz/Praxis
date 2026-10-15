@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -30,7 +29,7 @@ func validateToolCalls(calls []ToolCall) error {
 // 下一次模型请求读取结果前必须写入工具结果回执，避免崩溃后留下无法对账的副作用。
 func (r *Runner) runToolCalls(
 	ctx context.Context,
-	messageRecorder agentruntime.MessageRecorder,
+	messageRecorder MessageRecorder,
 	calls []ToolCall,
 	metadata contracts.ToolInvocationContext,
 	requestID contracts.RequestID,
@@ -40,8 +39,8 @@ func (r *Runner) runToolCalls(
 	for callIndex, call := range calls {
 		execution, err := r.ToolExecutor.Execute(ctx, call, metadata)
 		if execution.ApprovalPending {
-			r.emit(agentruntime.AgentEvent{
-				Kind:      agentruntime.AgentEventToolApprovalRequired,
+			r.emit(Event{
+				Kind:      EventToolApprovalRequired,
 				SessionID: metadata.SessionID,
 				AgentID:   metadata.AgentID,
 				TaskID:    metadata.TaskID,

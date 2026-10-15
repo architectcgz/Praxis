@@ -3,13 +3,12 @@ package loop
 import (
 	"errors"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
 )
 
-func (r *Runner) emit(event agentruntime.AgentEvent) {
+func (r *Runner) emit(event Event) {
 	r.EventObserver(event)
 }
 
@@ -21,7 +20,7 @@ func (r *Runner) emitModelEvent(
 	turnID contracts.TurnID,
 	event model.ModelStreamEvent,
 ) {
-	output := agentruntime.AgentEvent{
+	output := Event{
 		AgentID:   agentID,
 		TaskID:    taskID,
 		TurnID:    turnID,
@@ -29,13 +28,13 @@ func (r *Runner) emitModelEvent(
 	}
 	switch event.Kind {
 	case model.StreamTextDelta:
-		output.Kind = agentruntime.AgentEventTextDelta
+		output.Kind = EventTextDelta
 		output.Text = event.Text
 	case model.StreamThinkingDelta:
-		output.Kind = agentruntime.AgentEventThinkingDelta
+		output.Kind = EventThinkingDelta
 		output.Text = event.Text
 	case model.StreamUsage:
-		output.Kind = agentruntime.AgentEventModelUsage
+		output.Kind = EventModelUsage
 		output.Usage = event.Usage
 	default:
 		return
@@ -50,8 +49,8 @@ func (r *Runner) emitToolResult(
 	turnID contracts.TurnID,
 	block appcontext.ContextBlock,
 ) {
-	r.emit(agentruntime.AgentEvent{
-		Kind:      agentruntime.AgentEventToolResult,
+	r.emit(Event{
+		Kind:      EventToolResult,
 		SessionID: sessionID,
 		AgentID:   agentID,
 		TaskID:    taskID,
@@ -79,8 +78,8 @@ func (r *Runner) emitError(agentID contracts.AgentID, taskID contracts.TaskID, t
 			}
 		}
 	}
-	r.emit(agentruntime.AgentEvent{
-		Kind:    agentruntime.AgentEventError,
+	r.emit(Event{
+		Kind:    EventError,
 		AgentID: agentID,
 		TaskID:  taskID,
 		TurnID:  turnID,

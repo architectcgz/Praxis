@@ -15,12 +15,18 @@ import (
 	"praxis/internal/system"
 )
 
+// ExecutionControl 只在控制意图持久化成功后传递取消信号。
+type ExecutionControl interface {
+	Pause(contracts.AgentID, contracts.TaskID) bool
+	Stop(contracts.AgentID, contracts.TaskID) bool
+}
+
 type Config struct {
 	Transactions repository.TxRunner
 	Agents       repository.SessionAgentRepository
 	Tasks        repository.TaskRepository
 	Controls     repository.AgentControlCommandRepository
-	Executions   *agentmodel.Executions
+	Executions   ExecutionControl
 	Messages     repository.MessageStreams
 	Clock        system.Clock
 }
@@ -30,7 +36,7 @@ type Service struct {
 	agents     repository.SessionAgentRepository
 	tasks      repository.TaskRepository
 	controls   repository.AgentControlCommandRepository
-	executions *agentmodel.Executions
+	executions ExecutionControl
 	messages   repository.MessageStreams
 	clock      system.Clock
 }

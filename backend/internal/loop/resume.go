@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	agentruntime "praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
@@ -14,7 +13,7 @@ import (
 var errAwaitingApproval = errors.New("task is awaiting tool approval")
 
 // resumeToolCalls 先结算已经提交的工具轮，再发起新的模型请求。
-func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messages []sessionmodel.MessageData, recorder agentruntime.MessageRecorder, modelContext *appcontext.ModelContext, budget *taskBudget) error {
+func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messages []sessionmodel.MessageData, recorder MessageRecorder, modelContext *appcontext.ModelContext, budget *taskBudget) error {
 	receipts := make(map[string]bool)
 	for _, message := range messages {
 		for _, block := range message.Blocks {

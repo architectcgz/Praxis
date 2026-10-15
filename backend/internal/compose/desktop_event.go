@@ -3,34 +3,27 @@ package compose
 import (
 	"bytes"
 
-	"praxis/internal/agent_runtime"
+	"praxis/internal/loop"
 	appservices "praxis/internal/service"
 	"praxis/internal/service/runtime/task"
 	"praxis/internal/timing"
 )
 
-// desktopAgentEvent 是 runtime 事件进入 application 边界的唯一转换入口。
-func desktopAgentEvent(event agentruntime.AgentEvent) appservices.AgentEvent {
+// desktopAgentEvent 将 Loop 事件转换为稳定的前端通知。
+func desktopAgentEvent(event loop.Event) appservices.AgentEvent {
 	result := appservices.AgentEvent{
-		Kind:           string(event.Kind),
-		SessionID:      event.SessionID,
-		AgentID:        event.AgentID,
-		TaskID:         event.TaskID,
-		Outcome:        string(event.Outcome),
-		FailureCode:    string(event.FailureCode),
-		FailureMessage: event.FailureMessage,
-		TurnID:         event.TurnID,
-		Text:           event.Text,
-		CallID:         event.CallID,
-		Name:           event.Name,
-		Input:          bytes.Clone(event.Input),
-		Result:         event.Result,
-		IsError:        event.IsError,
-		Error:          event.Error,
-	}
-	if event.Timing != nil {
-		value := desktopTiming(*event.Timing)
-		result.Timing = &value
+		Kind:      string(event.Kind),
+		SessionID: event.SessionID,
+		AgentID:   event.AgentID,
+		TaskID:    event.TaskID,
+		TurnID:    event.TurnID,
+		Text:      event.Text,
+		CallID:    event.CallID,
+		Name:      event.Name,
+		Input:     bytes.Clone(event.Input),
+		Result:    event.Result,
+		IsError:   event.IsError,
+		Error:     event.Error,
 	}
 	if event.Usage != nil {
 		result.Usage = &appservices.ModelUsage{

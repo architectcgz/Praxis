@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
@@ -12,7 +11,7 @@ import (
 
 func appendToolResult(
 	ctx context.Context,
-	messageRecorder agentruntime.MessageRecorder,
+	messageRecorder MessageRecorder,
 	requestID contracts.RequestID,
 	taskID contracts.TaskID,
 	turnID contracts.TurnID,
@@ -33,7 +32,7 @@ func appendToolResult(
 // appendTaskMessage 只接收已构造的消息归属与内容，不读取任务快照。
 func appendTaskMessage(
 	ctx context.Context,
-	messageRecorder agentruntime.MessageRecorder,
+	messageRecorder MessageRecorder,
 	value sessionmodel.MessageData,
 	blocks []appcontext.ContextBlock,
 ) error {
@@ -56,4 +55,10 @@ func taskMessage(value sessionmodel.MessageData, blocks []appcontext.ContextBloc
 		}
 	}
 	return value
+}
+
+// MessageRecorder 只写当前 Agent 执行产生的持久化消息（会话历史不回读）。
+type MessageRecorder interface {
+	Append(context.Context, sessionmodel.MessageData) (sessionmodel.MessageData, error)
+	AppendAssistant(context.Context, sessionmodel.MessageData, contracts.ToolInvocationContext) error
 }

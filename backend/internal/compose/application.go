@@ -1,16 +1,15 @@
 package compose
 
 import (
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
+	"praxis/internal/execution"
 	"praxis/internal/hooks"
 
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"path/filepath"
 	"time"
 
@@ -39,16 +38,16 @@ import (
 )
 
 // Application 是目标架构的组合根：创建具体实现、注入 service 与
-// runtime，并持有进程级生命周期资源。前端端口由
+// execution，并持有进程级生命周期资源。前端端口由
 // praxis/internal/service 实现，这里只负责装配与释放。
 type Application struct {
-	frontend *appservices.Services
-	sessions *applicationsession.Service
-	store    *jsonl.Store
-	registry *agentruntime.Registry
-	logger   *logging.Logger
-	timings  *timing.Recorder
-	usages   jsonl.ModelUsageStore
+	frontend    *appservices.Services
+	sessions    *applicationsession.Service
+	store       *jsonl.Store
+	coordinator *execution.Coordinator
+	logger      *logging.Logger
+	timings     *timing.Recorder
+	usages      jsonl.ModelUsageStore
 }
 
 // Services 组装 wails 层注入所需的前端服务集。把 *appservices.Services 赋给
@@ -72,11 +71,11 @@ func (a *Application) Services() bindings.Services {
 	}
 }
 
-// Open 构建应用并返回就绪的服务集；runLoop 为空时装配默认的 loop.Run 执行函数。
+// Open 构建应用与进程级 Coordinator；runner 为空时装配默认 Loop。
 func Open(
 	ctx context.Context,
 	root dataroot.DataRoot,
-	runLoop agentruntime.LoopFunc,
+	runner *loop.Runner,
 	registeredTools ...toolcontracts.Tool,
 ) (*Application, error) {
 	if ctx == nil {
@@ -150,8 +149,8 @@ func Open(
 	messages := repos.Messages
 	events := appservices.NewEventPublisher()
 	usages := jsonl.ModelUsageStore{Store: store}
-	observe := func(event agentruntime.AgentEvent) {
-		if event.Kind == agentruntime.AgentEventModelUsage && event.Usage != nil {
+	observe := func(event loop.Event) {
+		if event.Kind == loop.EventModelUsage && event.Usage != nil {
 			// 用量写入不继承业务取消，保存失败只影响统计，不改变模型响应。
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			err := usages.Save(ctx, model.ModelUsageRecord{
@@ -177,7 +176,7 @@ func Open(
 	timings, err := timing.New(timingStore, func(record timing.Record) {
 		value := desktopTiming(record)
 		events.Publish(appservices.AgentEvent{
-			Kind:    string(agentruntime.AgentEventTiming),
+			Kind:    "operation_timing",
 			AgentID: contracts.AgentID(record.AgentID),
 			TaskID:  contracts.TaskID(record.TaskID),
 			Timing:  &value,
@@ -190,13 +189,13 @@ func Open(
 	}
 	hookDispatcher := hooks.NewDispatcher(timing.Hook{Recorder: timings})
 	store.ObserveCommitted(hookDispatcher, diagnostics.Errorf)
-	executions := &agentmodel.Executions{}
+	activeTasks := &execution.ActiveTasks{}
 	agentService, err := applicationagent.NewService(applicationagent.Config{
 		Transactions: store,
 		Agents:       repos.Agents,
 		Tasks:        repos.Tasks,
 		Controls:     repos.Controls,
-		Executions:   executions,
+		Executions:   activeTasks,
 		Messages:     messages,
 	})
 	if err != nil {
@@ -260,7 +259,7 @@ func Open(
 		Sessions:       repos.Sessions,
 		Agents:         repos.Agents,
 		Tasks:          repos.Tasks,
-		Executions:     executions,
+		Executions:     activeTasks,
 		Messages:       repos.Messages,
 		PrimaryAgent:   sessionService,
 		Definitions:    taskInputProvider{agents: agentRegistry, models: modelRegistry},
@@ -273,7 +272,7 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	if runLoop == nil {
+	if runner == nil {
 		toolExecutor, err := toolexecution.NewExecutor(toolexecution.Config{
 			Transactions:   store,
 			HookDispatcher: hookDispatcher,
@@ -287,7 +286,7 @@ func Open(
 			closeStore()
 			return nil, err
 		}
-		runLoop, err = newLoop(loop.Config{
+		builtRunner, buildErr := loop.NewRunner(loop.Config{
 			ModelBuilder:   modelRegistry,
 			ContextBuilder: taskContextBuilder,
 			Progress:       taskService,
@@ -297,11 +296,12 @@ func Open(
 			EventObserver:  observe,
 			Logf:           diagnostics.Infof,
 		})
-		if err != nil {
+		if buildErr != nil {
 			_ = diagnostics.Close()
 			closeStore()
-			return nil, err
+			return nil, buildErr
 		}
+		runner = &builtRunner
 	}
 	queueService, err := runtimequeue.NewService(runtimequeue.Config{
 		Transactions: store,
@@ -328,21 +328,18 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	factory := runtimeFactory{
-		hooks:      hookDispatcher,
-		executions: executions,
-		runLoop:    runLoop,
-		messageRecorders: func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (agentruntime.MessageRecorder, error) {
+	coordinator, err := execution.NewCoordinator(execution.Config{
+		Loop:           runner,
+		ActiveTasks:    activeTasks,
+		Tasks:          taskService,
+		Queue:          queueService,
+		HookDispatcher: hookDispatcher,
+		Logger:         diagnostics,
+		MessageRecorders: func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (loop.MessageRecorder, error) {
 			return messages.Resolve(ctx, sessionID, agentID)
 		},
-		taskPreparer: taskService,
-		transitions:  taskService,
-		tasks:        repos.Tasks,
-		logger:       diagnostics,
-	}
-	registry, err := agentruntime.NewRegistry(factory)
+	})
 	if err != nil {
-		diagnostics.Errorf("create runtime registry failed: %v", err)
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
@@ -350,7 +347,7 @@ func Open(
 	runtimeService, err := applicationruntime.NewService(applicationruntime.Config{
 		Tasks:     taskService,
 		Queue:     queueService,
-		Activator: registry,
+		Activator: coordinator,
 		Approvals: applicationruntime.ToolApprovals{
 			CommandPolicy: toolCatalog,
 			Transactions:  store,
@@ -359,51 +356,20 @@ func Open(
 		},
 	})
 	if err != nil {
-		_ = registry.Close(context.Background())
+		_ = coordinator.Close(context.Background())
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
-	activeTasks, err := repos.Tasks.ListActive(ctx)
-	if err == nil {
-		for _, task := range activeTasks {
-			if err = registry.Activate(ctx, task); err != nil {
-				break
-			}
-		}
-	}
-	if err != nil {
-		_ = registry.Close(context.Background())
+	if err := coordinator.Restore(ctx, recoverySource{
+		TaskRepository: repos.Tasks,
+		sessions:       repos.Sessions,
+		agents:         repos.Agents,
+	}); err != nil {
+		_ = coordinator.Close(context.Background())
 		_ = diagnostics.Close()
 		closeStore()
-		return nil, fmt.Errorf("resume active tasks: %w", err)
-	}
-	sessions, err := repos.Sessions.List(ctx, math.MaxInt)
-	if err == nil {
-		for _, session := range sessions {
-			agents, listErr := repos.Agents.ListBySession(ctx, session.ID, math.MaxInt)
-			if listErr != nil {
-				err = listErr
-				break
-			}
-			for _, agent := range agents {
-				if agent.State != agentmodel.AgentIdle && agent.State != agentmodel.AgentWaiting {
-					continue
-				}
-				if _, err = registry.StartNext(ctx, agent.ID); err != nil {
-					break
-				}
-			}
-			if err != nil {
-				break
-			}
-		}
-	}
-	if err != nil {
-		_ = registry.Close(context.Background())
-		_ = diagnostics.Close()
-		closeStore()
-		return nil, fmt.Errorf("resume pending tasks: %w", err)
+		return nil, fmt.Errorf("restore execution: %w", err)
 	}
 
 	diagnostics.Infof("composition open completed ready=true")
@@ -457,13 +423,13 @@ func Open(
 		ListSessionUsage: usages.ListSession,
 	})
 	return &Application{
-		frontend: frontend,
-		sessions: sessionService,
-		store:    store,
-		registry: registry,
-		logger:   diagnostics,
-		timings:  timings,
-		usages:   usages,
+		frontend:    frontend,
+		sessions:    sessionService,
+		store:       store,
+		coordinator: coordinator,
+		logger:      diagnostics,
+		timings:     timings,
+		usages:      usages,
 	}, nil
 }
 
@@ -483,7 +449,11 @@ func (a *Application) Close(ctx context.Context) error {
 	}
 	logger := a.RuntimeLogger()
 	logger.Infof("composition close started")
-	runtimeErr := a.registry.Close(ctx)
+	runtimeErr := a.coordinator.Close(ctx)
+	if runtimeErr != nil {
+		logger.Errorf("execution close incomplete: %v", runtimeErr)
+		return runtimeErr
+	}
 	sessionErr := a.sessions.CleanupEmptySessions(ctx)
 	storeErr := a.store.Close(ctx)
 	if runtimeErr != nil || sessionErr != nil || storeErr != nil {

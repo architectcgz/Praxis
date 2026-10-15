@@ -152,7 +152,7 @@ func TestSelectTaskMessagesBoundaryAndLateReceipts(t *testing.T) {
 type contextFixture struct {
 	store *jsonl.Store
 	repos jsonl.Repositories
-	root string
+	root  string
 	agent agentmodel.Agent
 	input taskmodel.Input
 }
@@ -206,7 +206,7 @@ func newContextFixture(t *testing.T) *contextFixture {
 		AgentDefinitionRevision: "revision",
 		CurrentInputMessageID:   "input-b",
 		WorkspacePath:           workspacePath,
-		Model:                   model.Config{
+		Model: model.Config{
 			ProviderID:      "provider",
 			ModelID:         "model",
 			APIFormat:       "openai_chat_completions",
@@ -284,7 +284,7 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 	}
 	var input taskmodel.Input
 	if err := f.store.InTx(t.Context(), func(ctx context.Context) error {
-		if err := f.repos.Contexts.Save(ctx, shared); err != nil {
+		if err := f.repos.Contexts.Append(ctx, shared); err != nil {
 			return err
 		}
 		var err error
@@ -324,7 +324,7 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 		if _, err := f.repos.Messages.Append(ctx, f.agent, textMessage("new-user", "", 0, sessionmodel.RoleUser)); err != nil {
 			return err
 		}
-		return f.repos.Contexts.Save(ctx, newShared)
+		return f.repos.Contexts.Append(ctx, newShared)
 	}); err != nil {
 		t.Fatal(err)
 	}

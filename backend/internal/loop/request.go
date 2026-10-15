@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"praxis/internal/agent_runtime"
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
@@ -30,8 +29,8 @@ func (r *Runner) summarizeContext(
 		return "", err
 	}
 	turnID := contracts.NewTurnID(task.ID, sequence)
-	r.emit(agentruntime.AgentEvent{
-		Kind:      agentruntime.AgentEventTurnStarted,
+	r.emit(Event{
+		Kind:      EventTurnStarted,
 		SessionID: task.SessionID,
 		AgentID:   task.AgentID,
 		TaskID:    task.ID,
@@ -78,8 +77,8 @@ func (r *Runner) summarizeContext(
 			text.WriteString(event.Text)
 		}
 	}
-	r.emit(agentruntime.AgentEvent{
-		Kind:       agentruntime.AgentEventTurnCompleted,
+	r.emit(Event{
+		Kind:       EventTurnCompleted,
 		SessionID:  task.SessionID,
 		AgentID:    task.AgentID,
 		TaskID:     task.ID,

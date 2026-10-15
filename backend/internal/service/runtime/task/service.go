@@ -27,6 +27,14 @@ type ModelConfigResolver interface {
 	ResolveDefaultTaskModel(contracts.AgentDefinitionID) (model.Config, error)
 }
 
+// ExecutionSlots 在准入事务中预留身份，并在回滚或结算提交后释放。
+type ExecutionSlots interface {
+	Reserve(context.Context, contracts.AgentID, contracts.TaskID) (context.Context, bool, error)
+	Release(contracts.AgentID, contracts.TaskID)
+	Pause(contracts.AgentID, contracts.TaskID) bool
+	Stop(contracts.AgentID, contracts.TaskID) bool
+}
+
 type Config struct {
 	Controls       repository.AgentControlCommandRepository
 	Transactions   repository.TxRunner
@@ -37,7 +45,7 @@ type Config struct {
 	Sessions       repository.SessionRepository
 	Agents         repository.SessionAgentRepository
 	Tasks          repository.TaskRepository
-	Executions     *agentmodel.Executions
+	Executions     ExecutionSlots
 	Messages       repository.MessageStreams
 	PrimaryAgent   PrimaryAgentProvider
 	Definitions    AgentDefinitionProvider
@@ -58,7 +66,7 @@ type Service struct {
 	sessions       repository.SessionRepository
 	agents         repository.SessionAgentRepository
 	tasks          repository.TaskRepository
-	executions     *agentmodel.Executions
+	executions     ExecutionSlots
 	messages       repository.MessageStreams
 	primary        PrimaryAgentProvider
 	models         ModelConfigResolver
@@ -116,7 +124,7 @@ func NewService(config Config) (*Service, error) {
 // ReleaseExecution 释放准入时建立的进程内执行绑定；只清理匹配的 Task，
 // 不会取消或删除同一 Agent 后续建立的绑定。
 func (s *Service) ReleaseExecution(agentID contracts.AgentID, taskID contracts.TaskID) {
-	s.executions.End(agentID, taskID)
+	s.executions.Release(agentID, taskID)
 }
 
 // Abort 结算未被 runtime 接管的 Task 并释放匹配的执行绑定；结算失败时保留绑定。

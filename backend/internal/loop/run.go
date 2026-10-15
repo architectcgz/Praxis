@@ -13,8 +13,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-
-	"praxis/internal/agent_runtime"
 )
 
 // Config 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
@@ -27,7 +25,7 @@ type Config struct {
 	HookDispatcher *hooks.Dispatcher
 	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
 	CompressionStrategy contextcompress.Strategy
-	EventObserver       agentruntime.AgentEventObserver
+	EventObserver       EventObserver
 	Logf                func(string, ...any)
 }
 
@@ -67,8 +65,8 @@ func NewRunner(config Config) (Runner, error) {
 // ContextBuilder 按 Task 保存的选择规则重建历史，消息记录器负责可靠提交输出；
 // TaskProgress 负责加载持久化预算、记录模型及摘要请求和模型输出消耗；
 // 每次执行的输入（context、消息记录器）为空时返回错误；
-// 持久化生命周期、取消和后续任务调度由 runtime 负责。
-func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder agentruntime.MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+// 持久化生命周期、取消和后续任务调度由执行协调器负责。
+func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
 	if ctx == nil {
 		return failedTask(errors.New("loop context is required"))
 	}
@@ -83,7 +81,7 @@ func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder a
 func (r *Runner) run(
 	ctx context.Context,
 	task taskmodel.Task,
-	messageRecorder agentruntime.MessageRecorder,
+	messageRecorder MessageRecorder,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
 	task, err := r.Progress.LoadTask(ctx, task.ID)
 	if err != nil {
@@ -170,14 +168,14 @@ func (r *Runner) executeTurn(
 	ctx context.Context,
 	task taskmodel.Task,
 	taskModel model.Model,
-	messageRecorder agentruntime.MessageRecorder,
+	messageRecorder MessageRecorder,
 	request model.ModelRequest,
 	modelContext *appcontext.ModelContext,
 	budget *taskBudget,
 	turnID contracts.TurnID,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, bool, error) {
-	r.emit(agentruntime.AgentEvent{
-		Kind:      agentruntime.AgentEventTurnStarted,
+	r.emit(Event{
+		Kind:      EventTurnStarted,
 		SessionID: task.SessionID,
 		AgentID:   task.AgentID,
 		TaskID:    task.ID,
@@ -189,8 +187,8 @@ func (r *Runner) executeTurn(
 		return outcome, code, false, cause
 	}
 	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", task.ID, task.Input.Model.ModelID, len(modelContext.Entries), turnID)
-	r.emit(agentruntime.AgentEvent{
-		Kind:      agentruntime.AgentEventProviderWaiting,
+	r.emit(Event{
+		Kind:      EventProviderWaiting,
 		SessionID: task.SessionID,
 		AgentID:   task.AgentID,
 		TaskID:    task.ID,
@@ -247,8 +245,8 @@ func (r *Runner) executeTurn(
 		return outcome, code, false, cause
 	}
 	for _, call := range calls {
-		r.emit(agentruntime.AgentEvent{
-			Kind:      agentruntime.AgentEventToolCall,
+		r.emit(Event{
+			Kind:      EventToolCall,
 			SessionID: task.SessionID,
 			AgentID:   task.AgentID,
 			TaskID:    task.ID,
@@ -261,8 +259,8 @@ func (r *Runner) executeTurn(
 	*modelContext = modelContext.AppendProviderOutput(assistant)
 	if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {
 
-		r.emit(agentruntime.AgentEvent{
-			Kind:       agentruntime.AgentEventTurnCompleted,
+		r.emit(Event{
+			Kind:       EventTurnCompleted,
 			SessionID:  task.SessionID,
 			AgentID:    task.AgentID,
 			TaskID:     task.ID,
@@ -289,8 +287,8 @@ func (r *Runner) executeTurn(
 		))
 	}
 
-	r.emit(agentruntime.AgentEvent{
-		Kind:       agentruntime.AgentEventTurnCompleted,
+	r.emit(Event{
+		Kind:       EventTurnCompleted,
 		SessionID:  task.SessionID,
 		AgentID:    task.AgentID,
 		TaskID:     task.ID,

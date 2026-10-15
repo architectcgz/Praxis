@@ -34,13 +34,13 @@ agent := AgentInfo{Profile: string(view.Agent.Profile), State: string(view.Agent
 ## 分层与依赖门禁
 
 - 请求链固定为 `backend/wails → internal/request → internal/service`；Wails 只做 wire 形状校验、DTO 转换和错误映射，不解释 core 枚举、不构造 core 配置。
-- `internal/service` 负责用例编排、事务边界和 Port 协调，可以依赖 `core`、`repository`、`contracts`、`request` 和窄 Port；不得直接 import `internal/agent_runtime`，也不得直接操作 `os` 文件系统。
+- `internal/service` 负责用例编排、事务边界和 Port 协调，可以依赖 `core`、`repository`、`contracts`、`request` 和窄 Port；不得直接 import `internal/execution`，也不得直接操作 `os` 文件系统。
 - Agent 可见消息流的读写由 `repository.MessageStreams` 一个窄 Port 定义（`Append`/`List`/`LoadMessages`），唯一实现是 `infra/jsonl`：主 Agent 写 Session 流、其他 Agent 写私有流，日志键位由存储层决定。service 只持有该 Port，不自己判断写哪条流。
 - 会话级消息存在性判断属于聚合仓储能力：用 `repository.SessionRepository.HasMessages`，不要在 service 里注入按流划分的消息仓储。
 - 跨边界同形的执行参数使用 `internal/contracts` 的共享值类型，不为逐字段复制新增 adapter；只存在协议差异（事件、DTO、错误）时才在 `compose` 或 `wails` 转换。
-- 消费方拥有窄接口：`internal/loop` 声明自身需要的执行接口，`internal/service/runtime` 声明 `TaskActivator`/`TaskStarter`；接口不放在无关的中间包。
+- 消费方拥有窄接口：`internal/loop` 声明自身需要的执行接口，`internal/service/runtime` 声明 `TaskActivator`/`TaskStarter`，Task 准入和 Agent 控制分别声明 `ExecutionSlots`/`ExecutionControl`；接口不放在无关的中间包。
 - 依赖门禁在 `go vet` 之后执行：用 `go list -f '{{.ImportPath}} {{join .Imports " "}}'` 枚举生产包的直接 import，再匹配禁止前缀；有匹配即失败，无匹配即成功，`go list` 失败和 `rg` 工具错误必须原样失败，不得当成“无匹配”放过。
-- 四项门禁前缀：`./wails/...` 禁 `internal/(core|agent_runtime|timing|repository|infra)`；`./internal/core/model/...` 禁 `internal/tools/contracts`；`./internal/service/...` 禁 `internal/agent_runtime` 和 `os`。
+- 门禁前缀：`./wails/...` 禁 `internal/(core|execution|loop|timing|repository|infra)`；`./internal/core/model/...` 禁 `internal/tools/contracts`；`./internal/service/...` 禁 `internal/execution` 和 `os`；`./internal/loop/...` 禁 `internal/(execution|service)`；`./internal/execution/...` 禁 `internal/service`。
 
 ## 输入规范化与 TrimSpace 约定
 
