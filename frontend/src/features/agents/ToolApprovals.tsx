@@ -42,8 +42,10 @@ export function ToolApprovals({ agentId }: { agentId: string }) {
     return <section className="tool-approvals" aria-label="待审批的工具调用">
         {error && <p role="alert">{error}</p>}
         {requests.map((request) => <article key={`${request.taskId}:${request.callId}`}>
-            <strong>工具调用需要确认：{request.name}</strong>
-            <pre>{JSON.stringify(request.arguments, null, 2)}</pre>
+            <strong>命令需要审核：{request.name}</strong>
+            <pre>{request.command}</pre>
+            <p>工作目录：{request.path}</p>
+            <p>超时：{request.timeout} 秒 · 审核规则：{request.ruleId === 'default' ? '默认审核' : request.ruleId}</p>
             <button type="button" disabled={busy !== ''} onClick={() => void decide(request, true)}>批准执行</button>
             <button type="button" disabled={busy !== ''} onClick={() => void decide(request, false)}>拒绝</button>
         </article>)}

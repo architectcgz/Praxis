@@ -1,13 +1,10 @@
-// Package agentregistry owns the user-managed Agent definitions and their
-// default model and security policy configuration.
+// Package agentregistry 加载用户管理的 Agent 定义、指令与默认模型。
 package agentregistry
 
 import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	modelconfig "praxis/internal/core/model/config"
-	securitymodel "praxis/internal/core/security"
-	workspacemodel "praxis/internal/core/workspace"
 
 	"bytes"
 	"crypto/sha256"
@@ -28,20 +25,10 @@ type ModelReference struct {
 	ModelID    string `json:"modelId"`
 }
 
-// PolicyConfig is the user-editable security policy for one Agent.
-type PolicyConfig struct {
-	ApprovalMode       contracts.ApprovalMode    `json:"approvalMode"`
-	SandboxMode        contracts.SandboxMode     `json:"sandboxMode"`
-	AllowedTools       []contracts.ToolName      `json:"allowedTools"`
-	AllowedExecutables []string                  `json:"allowedExecutables"`
-	WorkspaceAccess    contracts.WorkspaceAccess `json:"workspaceAccess"`
-}
-
-// AgentConfig 保存一个 Agent 定义的角色、默认模型和安全策略。
+// AgentConfig 保存一个 Agent 定义的角色和默认模型。
 type AgentConfig struct {
 	Profile contracts.AgentProfile `json:"profile,omitempty"`
 	Model   *ModelReference        `json:"model,omitempty"`
-	Policy  PolicyConfig           `json:"policy"`
 }
 
 // ModelValidator checks a model reference against the current model registry.
@@ -121,39 +108,6 @@ func (r *Registry) ResolveModelReference(id contracts.AgentDefinitionID) (ModelR
 	return *agent.Model, nil
 }
 
-// SecurityPolicy 为指定工作区生成 Agent 定义的初始安全策略。
-func (r *Registry) SecurityPolicy(
-	workspace workspacemodel.Workspace,
-	id contracts.AgentDefinitionID,
-) (securitymodel.AgentSecurityPolicy, error) {
-	if r == nil {
-		return securitymodel.AgentSecurityPolicy{}, errors.New("agent registry is not initialized")
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	agent, ok := r.configs[id]
-	if !ok {
-		return securitymodel.AgentSecurityPolicy{}, fmt.Errorf("agent definition %q is not configured", id)
-	}
-	capabilities := securitymodel.CapabilityPolicy{
-		AllowedTools:       slices.Clone(agent.Policy.AllowedTools),
-		AllowedExecutables: slices.Clone(agent.Policy.AllowedExecutables),
-	}
-	switch agent.Policy.WorkspaceAccess {
-	case contracts.WorkspaceAccessRead:
-		capabilities.ReadScopes = []string{workspace.Path}
-	case contracts.WorkspaceAccessReadWrite:
-		capabilities.ReadScopes = []string{workspace.Path}
-		capabilities.WriteScopes = []string{workspace.Path}
-	}
-	return securitymodel.NewAgentSecurityPolicy(
-		1,
-		capabilities,
-		securitymodel.SandboxPolicy{Mode: agent.Policy.SandboxMode},
-		securitymodel.ApprovalPolicy{Mode: agent.Policy.ApprovalMode},
-	)
-}
-
 // DefinitionsForModel 返回绑定指定模型的 Agent 定义 ID。
 func (r *Registry) DefinitionsForModel(providerID, modelID string) []string {
 	if r == nil {
@@ -193,21 +147,7 @@ func (r *Registry) ValidateModelReferences(validateModel ModelValidator) error {
 }
 
 func normalizeAgentConfig(config AgentConfig, fallback AgentConfig) (AgentConfig, error) {
-	policy := config.Policy
-	if policy.ApprovalMode == "" && policy.SandboxMode == "" && policy.WorkspaceAccess == "" &&
-		len(policy.AllowedTools) == 0 {
-		policy = fallback.Policy
-	}
-	result := AgentConfig{
-		Profile: config.Profile,
-		Policy: PolicyConfig{
-			ApprovalMode:       policy.ApprovalMode,
-			SandboxMode:        policy.SandboxMode,
-			AllowedTools:       slices.Clone(policy.AllowedTools),
-			AllowedExecutables: slices.Clone(policy.AllowedExecutables),
-			WorkspaceAccess:    policy.WorkspaceAccess,
-		},
-	}
+	result := AgentConfig{Profile: config.Profile}
 	if result.Profile == "" {
 		result.Profile = fallback.Profile
 	}
@@ -224,18 +164,6 @@ func normalizeAgentConfig(config AgentConfig, fallback AgentConfig) (AgentConfig
 		}
 		result.Model = &model
 	}
-	template, err := contracts.NewDefaultGrantTemplate(
-		result.Policy.AllowedTools,
-		result.Policy.WorkspaceAccess,
-	)
-	if err != nil {
-		return AgentConfig{}, fmt.Errorf("invalid policy: %w", err)
-	}
-	if !result.Policy.ApprovalMode.Valid() || !result.Policy.SandboxMode.Valid() {
-		return AgentConfig{}, errors.New("invalid policy approvalMode or sandboxMode")
-	}
-	result.Policy.AllowedTools = template.AllowedTools
-	result.Policy.WorkspaceAccess = template.WorkspaceAccess
 	return result, nil
 }
 
@@ -329,7 +257,6 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 			ID:           id,
 			Profile:      config.Profile,
 			Instructions: content,
-			AllowedTools: slices.Clone(config.Policy.AllowedTools),
 			Revision:     revision,
 		}
 		if err := definition.Validate(); err != nil {
@@ -387,53 +314,11 @@ func definitionRevision(config AgentConfig, instructions string) (string, error)
 }
 
 func defaultAgentConfigs() map[contracts.AgentDefinitionID]AgentConfig {
-	readTools := []contracts.ToolName{
-		contracts.ToolReadFile,
-	}
-	basePolicy := func(tools []contracts.ToolName, access contracts.WorkspaceAccess) PolicyConfig {
-		return PolicyConfig{
-			ApprovalMode:    contracts.ApprovalAlwaysAsk,
-			SandboxMode:     contracts.SandboxReadOnly,
-			AllowedTools:    slices.Clone(tools),
-			WorkspaceAccess: access,
-		}
-	}
 	return map[contracts.AgentDefinitionID]AgentConfig{
-		agentmodel.DefinitionPrimary: {
-			Profile: contracts.ProfilePrimary,
-			Policy: PolicyConfig{
-				ApprovalMode: contracts.ApprovalYolo,
-				SandboxMode:  contracts.SandboxWorkspaceWrite,
-				AllowedTools: []contracts.ToolName{
-					contracts.ToolReadFile,
-					contracts.ToolBash,
-					contracts.ToolApplyPatch,
-				},
-				AllowedExecutables: []string{"bash"},
-				WorkspaceAccess:    contracts.WorkspaceAccessReadWrite,
-			},
-		},
-		agentmodel.DefinitionDelegate: {
-			Profile: contracts.ProfileDelegate,
-			Policy: basePolicy(
-				readTools,
-				contracts.WorkspaceAccessRead,
-			),
-		},
-		agentmodel.DefinitionAdvisor: {
-			Profile: contracts.ProfileAdvisor,
-			Policy: basePolicy(
-				readTools,
-				contracts.WorkspaceAccessRead,
-			),
-		},
-		agentmodel.DefinitionCurator: {
-			Profile: contracts.ProfileCurator,
-			Policy: basePolicy(
-				[]contracts.ToolName{},
-				contracts.WorkspaceAccessNone,
-			),
-		},
+		agentmodel.DefinitionPrimary:  {Profile: contracts.ProfilePrimary},
+		agentmodel.DefinitionDelegate: {Profile: contracts.ProfileDelegate},
+		agentmodel.DefinitionAdvisor:  {Profile: contracts.ProfileAdvisor},
+		agentmodel.DefinitionCurator:  {Profile: contracts.ProfileCurator},
 	}
 }
 

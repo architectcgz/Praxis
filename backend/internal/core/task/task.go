@@ -45,7 +45,7 @@ type InputSnapshot struct {
 	SessionContextRefs      []ContextReference
 	Model                   model.ModelSnapshot
 	WorkspacePath           string
-	Security                contracts.SecuritySnapshot
+	ResourceLimits          contracts.ResourceLimits
 }
 
 func (s InputSnapshot) Validate() error {
@@ -62,8 +62,8 @@ func (s InputSnapshot) Validate() error {
 	if !pathutil.IsAbsoluteNormalized(s.WorkspacePath) {
 		return contracts.InvalidValue("taskInput.workspacePath", "workspace path must be an absolute normalized path")
 	}
-	if err := s.Security.Validate(); err != nil {
-		return contracts.FieldError("taskInput.security", err)
+	if err := s.ResourceLimits.Validate(); err != nil {
+		return contracts.FieldError("taskInput.resourceLimits", err)
 	}
 	return nil
 }

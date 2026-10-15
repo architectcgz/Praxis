@@ -17,12 +17,20 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 	}
 	result := make([]dto.ToolApproval, 0, len(values))
 	for _, value := range values {
-		result = append(result, dto.ToolApproval{ToolDecisionRequest: dto.ToolDecisionRequest{
-			SessionID: value.SessionID,
-			AgentID:   value.AgentID,
-			TaskID:    value.TaskID,
-			CallID:    value.CallID,
-		}, Name: value.Name, Arguments: value.Arguments})
+		result = append(result, dto.ToolApproval{
+			ToolDecisionRequest: dto.ToolDecisionRequest{
+				SessionID:       value.SessionID,
+				AgentID:         value.AgentID,
+				TaskID:          value.TaskID,
+				CallID:          value.CallID,
+				ArgumentsDigest: value.ArgumentsDigest,
+			},
+			Name:    value.Name,
+			Command: value.Command,
+			Path:    value.Path,
+			Timeout: value.Timeout,
+			RuleID:  value.RuleID,
+		})
 	}
 	return result, nil
 }
@@ -38,10 +46,11 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 		return err
 	}
 	canonical, err := request.NewToolDecision(request.ToolDecision{
-		SessionID: contracts.SessionID(wire.SessionID),
-		AgentID:   contracts.AgentID(wire.AgentID),
-		TaskID:    contracts.TaskID(wire.TaskID),
-		CallID:    wire.CallID,
+		SessionID:       contracts.SessionID(wire.SessionID),
+		AgentID:         contracts.AgentID(wire.AgentID),
+		TaskID:          contracts.TaskID(wire.TaskID),
+		CallID:          wire.CallID,
+		ArgumentsDigest: wire.ArgumentsDigest,
 	})
 	if err != nil {
 		return publicError(b.runtime, "CommandBindings.ToolDecision.request", err)

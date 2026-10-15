@@ -23,8 +23,8 @@ type output struct {
 	NextOffset *int   `json:"nextOffset,omitempty"`
 }
 
-// Execute reads an authorized UTF-8 regular file and returns one bounded page.
-func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
+// Execute 读取 Workspace 内的 UTF-8 普通文件并返回有界结果。
+func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
 		return toolcontracts.ToolResult{}, errors.New("tool task context is required")
 	}
@@ -40,8 +40,8 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 	}
 	if toolArguments.Path != call.Path || toolArguments.Offset < 0 ||
 		toolArguments.Limit < minLimit || toolArguments.Limit > maxLimit ||
-		!authorizedRealFile(toolArguments.Path, call.ReadScopes) {
-		return toolcontracts.ToolResult{}, errors.New("read_file path is outside an authorized regular file")
+		!workspaceFile(toolArguments.Path, call.WorkspacePath) {
+		return toolcontracts.ToolResult{}, errors.New("read_file path is outside a workspace regular file")
 	}
 	file, err := os.Open(toolArguments.Path)
 	if err != nil {
@@ -49,8 +49,8 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 	}
 	defer file.Close()
 	fileInfo, err := file.Stat()
-	if err != nil || !fileInfo.Mode().IsRegular() || !authorizedRealFile(toolArguments.Path, call.ReadScopes) {
-		return toolcontracts.ToolResult{}, errors.New("read_file path is outside an authorized regular file")
+	if err != nil || !fileInfo.Mode().IsRegular() || !workspaceFile(toolArguments.Path, call.WorkspacePath) {
+		return toolcontracts.ToolResult{}, errors.New("read_file path is outside a workspace regular file")
 	}
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err
@@ -165,25 +165,19 @@ func encodeOutput(toolArguments arguments, offset int, fileSize int64, content s
 	return json.Marshal(toolOutput)
 }
 
-func authorizedRealFile(path string, scopes []string) bool {
-	cleanPath := filepath.Clean(path)
-	realPath, err := filepath.EvalSymlinks(cleanPath)
-	if err != nil || !pathutil.SamePath(cleanPath, realPath) {
+// workspaceFile 保留普通文件和符号链接检查，读取范围由 Workspace 唯一确定。
+func workspaceFile(path, workspace string) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+		return false
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil || !pathutil.SamePath(path, realPath) {
 		return false
 	}
 	info, err := os.Stat(realPath)
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	for _, scope := range scopes {
-		cleanScope := filepath.Clean(scope)
-		if !pathutil.IsWithin(cleanScope, cleanPath) {
-			continue
-		}
-		realScope, err := filepath.EvalSymlinks(cleanScope)
-		if err == nil && pathutil.SamePath(cleanScope, realScope) && pathutil.IsWithin(realScope, realPath) {
-			return true
-		}
-	}
-	return false
+	realWorkspace, err := filepath.EvalSymlinks(workspace)
+	return err == nil && pathutil.SamePath(workspace, realWorkspace) && pathutil.IsWithin(realWorkspace, realPath)
 }

@@ -2,21 +2,29 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"praxis/internal/contracts"
+	"praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
 	"praxis/internal/repository"
 	"praxis/internal/request"
 )
 
-// ToolApprovals 只接受应用审批命令；实际工具执行由 Runtime 继续处理。
+// CommandPolicy 提供审批时的当前命令决策。
+type CommandPolicy interface {
+	DecideCommand(string) security.CommandDecision
+}
+
+// ToolApprovals 保存审批决定，实际工具执行由 Runtime 继续处理。
 type ToolApprovals struct {
-	Transactions repository.TxRunner
-	Tasks        repository.TaskRepository
-	Invocations  repository.ToolInvocationRepository
+	CommandPolicy CommandPolicy
+	Transactions  repository.TxRunner
+	Tasks         repository.TaskRepository
+	Invocations   repository.ToolInvocationRepository
 	// UserID 来自可信的桌面会话，不接受前端自行声明审批者身份。
 	UserID string
 }
@@ -39,16 +47,34 @@ func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, 
 		if err != nil {
 			return err
 		}
+		if params.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, invocation.NormalizedArguments) {
+			return contracts.ErrRequestConflict
+		}
 		if invocation.DecisionBy == a.UserID && invocation.DecisionApproved == approve {
 			return nil
 		}
 		if !task.Active() || invocation.Status != toolmodel.ToolInvocationAwaitingApproval {
 			return contracts.ErrRequestConflict
 		}
+		if approve && invocation.Name == contracts.ToolBash {
+			var arguments struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal(invocation.NormalizedArguments, &arguments); err != nil {
+				return err
+			}
+			if a.CommandPolicy.DecideCommand(arguments.Command).Action == security.CommandDeny {
+				err = invocation.Deny(toolmodel.ToolInvocationResult{InlineContent: "The command is prohibited by the current command policy.", ErrorCode: toolmodel.ToolFailureNotAllowed}, time.Now().UTC())
+				if err != nil {
+					return err
+				}
+				return a.Invocations.Save(txCtx, invocation)
+			}
+		}
 		invocation.DecisionBy = a.UserID
 		invocation.DecisionApproved = approve
 		if approve {
-			err = invocation.Approve(contracts.ApprovalRecord{Source: contracts.ApprovalSourceUser, PolicyFingerprint: task.Input.Security.Fingerprint, ApprovedAt: time.Now().UTC()})
+			err = invocation.Approve(contracts.ApprovalRecord{Source: contracts.ApprovalSourceUser, ArgumentsDigest: params.ArgumentsDigest, ApprovedAt: time.Now().UTC()})
 		} else {
 			err = invocation.Deny(toolmodel.ToolInvocationResult{InlineContent: "The user denied this tool call.", ErrorCode: toolmodel.ToolFailureApprovalDenied}, time.Now().UTC())
 		}

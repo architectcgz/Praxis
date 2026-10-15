@@ -67,17 +67,16 @@ type CreateSessionResponse struct {
 }
 
 type AgentSnapshot struct {
-	ID                     string         `json:"id"`
-	Name                   string         `json:"name"`
-	SessionID              string         `json:"sessionId"`
-	DefinitionID           string         `json:"definitionId"`
-	SecurityPolicyRevision uint64         `json:"securityPolicyRevision"`
-	Profile                string         `json:"profile"`
-	State                  string         `json:"state"`
-	CurrentTask            string         `json:"currentTaskId"`
-	TaskIDs                []string       `json:"taskIds"`
-	Tasks                  []TaskSnapshot `json:"tasks"`
-	ControlCommandIDs      []string       `json:"controlCommandIds"`
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	SessionID         string         `json:"sessionId"`
+	DefinitionID      string         `json:"definitionId"`
+	Profile           string         `json:"profile"`
+	State             string         `json:"state"`
+	CurrentTask       string         `json:"currentTaskId"`
+	TaskIDs           []string       `json:"taskIds"`
+	Tasks             []TaskSnapshot `json:"tasks"`
+	ControlCommandIDs []string       `json:"controlCommandIds"`
 }
 
 // TaskSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。

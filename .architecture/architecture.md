@@ -9,7 +9,7 @@ Praxis 是面向个人学习者的本地多 Agent 编排桌面应用：
 - 技术形态为 Go + Wails + React，所有核心能力在本机进程内运行，不依赖远程 Praxis 服务端。
 - `Project` 管理项目，项目可以包含多个 `Workspace`；`Session` 绑定一个项目工作区并承载一次持续协作。
 - `Agent` 是 Session 内的运行实例，绑定一个可复用的 `AgentDefinition`。默认定义包括 `primary`、`delegate`、`advisor` 和 `curator`。
-- `Agent` 通过持久化的 `Task` 执行用户输入、排队任务或恢复操作；`TurnID` 标识 Task 内一次模型迭代。执行期间可以调用受安全策略约束的工具。
+- `Agent` 通过持久化的 `Task` 执行用户输入、排队任务或恢复操作；`TurnID` 标识 Task 内一次模型迭代。执行期间可以调用已启用的工具；Bash 通过命令策略决定自动执行、审核或拒绝。
 - Session 共享上下文与每个 Agent 独立的 transcript 分开管理。共享上下文用于协作事实，transcript 用于保留单个 Agent 的完整对话和执行记录。
 
 核心关系如下：
@@ -66,7 +66,7 @@ internal/core 各业务包 ──→ core 内部依赖 / contracts / utils/pathu
 
 依赖规则：
 
-1. `internal/contracts` 提供跨包共享的 ID、错误、安全快照和协议值类型；不依赖业务实现。
+1. `internal/contracts` 提供跨包共享的 ID、错误、资源预算和协议值类型；不依赖业务实现。
 2. `internal/core` 统一组织业务核心，包含 `agent`、`model`、`project`、`session`、`workspace`、`task`、`context`、`workflow`、`security` 和 `tool_invocation`。各子包保存业务对象及其校验、状态转换与不变量；不依赖 `service`、`infra`、`agent_runtime`、`loop` 或 `compose`。`core` 仅作为目录分组，各业务包保持独立的 Go package，不设统一入口或转发层。
 3. 接口与相关能力放在同一个包内，并且由消费方拥有：`internal/core/model` 定义模型快照、模型构建、请求、流事件和用量记录；`internal/core/model/config` 定义共享模型配置类型、模型目录、配置编辑接口和校验错误；`internal/core/task` 保存 runtime 从任务队列取出并执行的任务及其生命周期；`internal/tools/contracts` 定义工具目录和工具调用契约；`internal/loop` 声明自身需要的执行接口（`TaskContextBuilder`、`TaskProgress`、`ToolExecutor`）；`internal/agent_runtime` 定义执行协调、消息写入、生命周期回调和 Agent 事件类型；`internal/repository` 定义持久化访问接口。`internal/contracts` 承载跨边界同形的执行参数值类型（如 `ToolInvocationContext`）。接口不暴露存储引擎、文件格式、Provider 协议或 Wails 类型。
 4. `internal/service` 实现产品用例，负责输入校验、幂等检查、事务内状态变更、事务提交后的 runtime 激活，以及窄 Port 协调。service 的输入来自 `internal/request` 构造的 canonical request；本地文件访问只通过 `service/project.WorkspaceDirectory`、`service/session.WorkspaceTextReader` 这类窄 Port，具体实现位于 `internal/infra/workspacefs`。service 不 import `internal/agent_runtime`，也不直接使用 `os` 文件系统 API。
@@ -115,7 +115,7 @@ frontend: npm ci → npx tsc --noEmit → npm run build
 
 | 路径 | 职责 |
 |---|---|
-| [`backend/internal/contracts`](../backend/internal/contracts) | 跨领域 ID、错误码、安全快照、权限和共享协议类型 |
+| [`backend/internal/contracts`](../backend/internal/contracts) | 跨领域 ID、错误码、执行预算、审批记录和共享协议类型 |
 | [`backend/internal/core/agent`](../backend/internal/core/agent) | Agent、AgentDefinition 及 Agent 状态转换 |
 | [`backend/internal/core/model`](../backend/internal/core/model) | 模型快照及校验、模型构建接口、Provider 请求与流事件、token 用量及持久化记录 |
 | [`backend/internal/core/model/config`](../backend/internal/core/model/config) | 共享模型配置、Provider 和 Group 类型、模型目录及配置编辑接口；不包含凭据 |
@@ -125,7 +125,7 @@ frontend: npm ci → npx tsc --noEmit → npm run build
 | [`backend/internal/core/session`](../backend/internal/core/session) | Session 模型、标题和归档状态 |
 | [`backend/internal/core/context`](../backend/internal/core/context) | Session 共享上下文、transcript 投影、上下文预算与 digest |
 | [`backend/internal/core/workflow`](../backend/internal/core/workflow) | WaitCondition 及其等待状态转换 |
-| [`backend/internal/core/security`](../backend/internal/core/security) | Agent 权限上限、Sandbox、Approval 和工具策略 |
+| [`backend/internal/core/security`](../backend/internal/core/security) | Bash CommandPolicy 的规则匹配与审核决策 |
 | [`backend/internal/core/tool_invocation`](../backend/internal/core/tool_invocation) | 工具调用持久化身份、状态转换、结果及恢复不变量 |
 | [`backend/internal/repository`](../backend/internal/repository) | 持久化、事务与一致消息读取接口 |
 | [`backend/internal/request`](../backend/internal/request) | Wails 与 service 之间的 canonical request 构造器：复制、规范化、请求内引用校验 |
@@ -148,7 +148,7 @@ frontend: npm ci → npx tsc --noEmit → npm run build
 - `service/session` 创建和查询 Session、管理 SessionContext 条目，并解析主 Agent；Task 的初始与恢复上下文由 `service/runtime/task.TaskContextBuilder` 负责。
 - `service/agent` 查询 Agent、Task 和 transcript 展示数据，并先记录 PauseAgent/StopAgent 控制命令，再在提交后取消指定 Task 的执行绑定；取消不关闭 Agent。
 - `service/runtime/approval.go` 在事务中保存可信用户的批准或拒绝决定，提交成功后通过 `TaskActivator` 唤醒 Runtime；审批命令和 UI 不直接执行工具。
-- `service/runtime/task` 通过一个 `Service` 负责即时输入创建、队首 Task 准备、遗留 Task 重新领取以及模型、可见性和安全快照冻结。
+- `service/runtime/task` 通过一个 `Service` 负责即时输入创建、队首 Task 准备、遗留 Task 重新领取以及模型、资源预算和可见性快照冻结。
 - `service/runtime/queue` 保存独立排队 Task，并按 Agent FIFO 提供队首；`TaskPreparer.PrepareQueuedTask` 在 runtime 空闲时原子领取。
 - `service/runtime/task/progress.go` 实现 `LoadTask`、`RecordModelRequest`、`RecordModelOutput`：模型及摘要请求前原子推进序号和次数，模型输出按文本字节累计，取消后仍提交已消耗额度；事务失败不保存进度。
 - 工具调用次数由 `tool_execution` 的准入事务保留，ToolResult 字节由 `infra/jsonl` 的幂等消息写入累计。Loop 通过 `TaskProgress.LoadTask` 读取已提交预算，不重新计算工具消耗；最终 Assistant 与完成证据仍由 JSONL 原子提交。
@@ -178,7 +178,7 @@ runtime 激活失败不会撤销已经提交的用户输入；Task 服务通过 
 - `ended` 固定最终 `Outcome`、`FailureCode` 和 `EndedAt`；`Outcome` 区分完成、失败、暂停和中断，Agent 中断后仍可接收新输入。
 - 一个 Agent 同时最多有一个 active Task；日志投影的唯一性校验和 Agent 状态共同约束这一点。
 - 同一个 `(AgentID, RequestID)` 只能对应一次用户输入 Task。重复请求返回已有记录，参数不一致则返回 request conflict。
-- 预约 Task 是独立任务，不是聊天邮箱。任务在真正启动时才冻结当前 Session context、模型和安全快照，并按 Agent sequence FIFO 运行。
+- 预约 Task 是独立任务，不是聊天邮箱。任务在真正启动时才冻结当前 Session context、模型和工作区，并按 Agent sequence FIFO 运行。
 - `Agent runtime` 是单进程、单 Agent 的活动执行槽。它只接受属于自身且已经持久化的 Task；关闭时取消活动 Task，并在给定 deadline 内等待退出。Runtime 不构造消息正文、不修改 Provider 协议或执行审批事务。
 - 应用启动时重新领取遗留 Task 的执行权，保留冻结输入、已消耗预算和此前已提交的暂停或取消命令。等待审批的 Task 保留等待与唤醒路径；只有结算后的持久化结果为完成或让出时才自动领取后续队列。
 - Loop 依据完成证据直接结束已有最终回复的 Task，否则先恢复未闭合工具轮；重启后已开始但结果不明的调用由 JSONL 读取修复为 `unknown`，不得自动重复副作用。
@@ -221,7 +221,7 @@ Provider credential 由 `infra/model_registry` 私有解析并传入 Provider �
 - `SessionContextEntry` 是按创建时间和 ID 排序的 append-only 共享事实，类型包括用户消息、结论、决策和引用。
 - `service/runtime/task.TaskContextBuilder` 在 Task 准入事务内选择初始历史并冻结共享条目引用；TaskService 和 Loop 共用组合根装配的同一个构建器。
 - `core/context.ContextBuilder` 只负责纯模型投影：按创建时间和 ID 排序共享条目、按 TaskID 和 CallID 配对工具交互、生成 provider-neutral `ModelContext` 及 digest，不访问仓储或模型。
-- Task 的 `InputSnapshot` 保存可见消息 ID、消息序号边界、当前输入消息 ID、共享条目 ID 与 digest、系统指令、模型快照、安全快照和工作区，不保存完整 `ModelContext`。
+- Task 的 `InputSnapshot` 保存可见消息 ID、消息序号边界、当前输入消息 ID、共享条目 ID 与 digest、系统指令、模型快照、资源预算和工作区，不保存完整 `ModelContext`。
 - 恢复构建在同一事务内读取冻结历史及当前 Task 的 Assistant、ToolResult 等续接消息，不混入其他排队请求；冻结共享条目缺失或 digest 不符时返回版本冲突。
 - 缺失工具回执的首次补写仍由 `infra/jsonl` 的消息读取入口负责；等待审批的调用不被上下文构建器执行或伪造回执。
 - 主 Agent 读取 Session 消息，协作 Agent 读取自身私有消息；共享文件不扩大消息可见范围。
@@ -237,7 +237,7 @@ Provider credential 由 `infra/model_registry` 私有解析并传入 Provider �
 |---|---|
 | `config/models.json` | Provider、Group、Model 和默认模型配置 |
 | `config/auth.json` | Provider credential，由 model registry 私有读取 |
-| `config/tools.json` | 工具权限配置 |
+| `config/tools.json` | 工具启用状态与 Bash 命令策略 |
 | `config/agents/<definition-id>/` | `agent.json` 与 `AGENT.md` |
 | `runtime/projects.jsonl` | Project 与 Workspace 的提交日志 |
 | `runtime/sessions/<session-id>.jsonl` | Session 内的全部运行事实，文件名提供 Session 身份 |
@@ -264,10 +264,35 @@ Provider credential 由 `infra/model_registry` 私有解析并传入 Provider �
 - 配置文件恢复通过 `core/model/config.NewValidatedConfig` 只读校验已持久化的 canonical 数据，非法或非 canonical 值直接报错，不清洗字段或静默修复。
 - 注册表的 `Save` 只接收已准备配置，负责原子持久化和更新内存索引；零值配置被拒绝，不重复规范化或业务校验。`Config` 返回独立副本。Wails 输入层将配置校验失败映射为共享的 `ValidationError`，持久化错误保留原始分类；URL 校验和代理解析只读验证 canonical 值。
 - `infra/model_registry` 是模型配置的进程内唯一所有者，负责加载、校验、编辑配置、管理 credential、发现 Provider 模型，并在 task 激活时生成不可变的 `core/model.ModelSnapshot`。凭据类型和持久化索引只存在于注册表内部。
-- `infra/agent_registry` 加载每个 AgentDefinition 的 `agent.json` 和 `AGENT.md`，校验默认模型引用，并生成初始 `AgentSecurityPolicy`。
-- `core/security.SecurityResolver` 负责权限交集和范围校验，不读取仓储或清洗被授权路径；`service/runtime/task` 加载当前策略并冻结 Task 安全快照。工具执行同时受冻结快照和当前强制限制约束，撤权影响后续准入。
-- 工具必须先经过 registry 注册、配置校验和 Task 权限检查。工具 executor 不直接读取前端请求，也不绕过 sandbox、workspace scope 或 approval 规则。
+- `infra/agent_registry` 加载每个 AgentDefinition 的 `agent.json` 和 `AGENT.md`，校验角色和默认模型引用；工具可用性由进程级 `config/tools.json` 管理。
+- `core/security.CommandPolicy` 按 `deny > ask > allow > default` 判断完整命令原文。Bash 默认 `ask`；`exact` 支持三种动作，`prefix` 只支持 `ask` 和 `deny`。配置加载时完整校验，重载失败保留当前配置。
+- 所有已注册工具默认启用。`infra/toolconfig.Catalog` 同时负责模型可见工具和执行准入；配置重载与工具启动共用 JSONL 事务边界。文件工具无需人工审核，仍检查 Workspace 路径、普通文件和符号链接。Bash 仅验证工作目录属于 Workspace，命令文本策略不提供进程隔离。
+- `ToolInvocation` 保存匹配规则、完整规范化参数和审批结果。用户批准绑定命令、绝对工作目录与超时的参数摘要；参数在首次准入后不可变。工具启动前重新读取规则，`deny` 阻止执行，自动批准变为 `ask` 时结算为 `interrupted`；待审批恢复后继续等待，结果 `unknown` 不自动重试。
 - Provider payload、API key、原始错误和内部路径不进入 Wails 对外 DTO；binding 层只返回稳定结果、用户可处理的错误码和安全的展示投影。
+
+### 工具配置
+
+`config/tools.json` 省略的工具默认启用；省略文件或 `bash.defaultAction` 时 Bash 默认 `ask`。命令匹配值保留原文，不裁剪空格或解释 Shell 语义。
+
+```json
+{
+  "tools": {
+    "read_file": {"enabled": true},
+    "apply_patch": {"enabled": true},
+    "bash": {"enabled": true}
+  },
+  "bash": {
+    "defaultAction": "ask",
+    "rules": [
+      {"id": "deny-force-push", "action": "deny", "match": {"type": "prefix", "value": "git push --force"}},
+      {"id": "ask-git-push", "action": "ask", "match": {"type": "prefix", "value": "git push "}},
+      {"id": "allow-git-status", "action": "allow", "match": {"type": "exact", "value": "git status"}}
+    ]
+  }
+}
+```
+
+命令策略是操作审核规则。它拒绝匹配到的 Bash 调用，无法阻止所有语义等价的 Shell 写法；自动放行的命令也可能通过项目脚本产生副作用。
 
 ## Wails 与前端
 
@@ -318,9 +343,9 @@ frontend/src/
 
 ## 验证边界
 
-后端验收使用 Go 1.25+；仓库不包含自动化测试文件，构建与静态检查不等同于业务行为回归验证：
+后端验收使用 Go 1.25+；命令策略、配置校验和工具审批使用自动化测试验证，构建与静态检查不代替行为验证：
 
-- 后端：变更文件通过 `gofmt` 检查，执行 `go build ./...`、`go vet ./...` 和四项 import 依赖门禁。
-- 幂等、事务回滚、审批、恢复、预算和 Provider 协议属于人工回归检查范围；失败事务不得发布成功终态事件。
+- 后端：变更文件通过 `gofmt` 检查，执行 `go build ./...`、`go vet ./...`、`go test -race ./...` 和四项 import 依赖门禁。
+- 命令策略测试覆盖优先级、精确匹配、无效配置和重载；JSONL 集成测试覆盖审批参数绑定、执行前配置变化、待审批重启、未知结果及文件工具 Workspace 校验。其余幂等、事务回滚、预算和 Provider 协议仍需人工回归；失败事务不得发布成功终态事件。
 - 修改 Wails binding 时运行 `wails generate module`（后端目录）→ `npx tsc --noEmit` → `npm run build`；验收依据是实际生成的绑定声明。
 - 验证不自动启动 Wails、Vite 或其他开发服务。

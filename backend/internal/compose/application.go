@@ -23,7 +23,6 @@ import (
 	applicationsession "praxis/internal/service/session"
 	toolexecution "praxis/internal/tool_execution"
 
-	securitymodel "praxis/internal/core/security"
 	agentregistry "praxis/internal/infra/agent_registry"
 	"praxis/internal/infra/dataroot"
 	"praxis/internal/infra/document"
@@ -111,12 +110,6 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	toolPermissions, err := securitymodel.NewToolPermissionPolicy(toolConfig.Tools)
-	if err != nil {
-		_ = diagnostics.Close()
-		closeStore()
-		return nil, err
-	}
 	toolRegistry := tools.NewToolRegistry()
 	for _, tool := range registeredTools {
 		if err := toolRegistry.Register(tool); err != nil {
@@ -130,11 +123,12 @@ func Open(
 	for _, definition := range definitions {
 		registeredToolNames = append(registeredToolNames, definition.Name)
 	}
-	if err := toolPermissions.ValidateRegistered(registeredToolNames); err != nil {
+	if err := toolConfig.ValidateRegistered(registeredToolNames); err != nil {
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
 	}
+	toolCatalog := toolconfig.NewCatalog(toolConfig, toolRegistry)
 	agentRegistry, err := agentregistry.Load(root.AgentDefinitions, func(providerID, modelID string) error {
 		if !modelregistry.ContainsModel(modelRegistry.Config(), providerID, modelID) {
 			return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
@@ -218,11 +212,9 @@ func Open(
 		Workspaces:     repos.Workspaces,
 		Sessions:       repos.Sessions,
 		Contexts:       repos.Contexts,
-		Policies:       repos.Policies,
 		Agents:         repos.Agents,
 		Tasks:          repos.Tasks,
 		Definitions:    agentRegistry.Definition,
-		PolicyFactory:  agentRegistry.SecurityPolicy,
 		Messages:       messages,
 		UsageRecords:   usages.ListSession,
 		TextReader:     workspaceFilesystem,
@@ -264,20 +256,16 @@ func Open(
 		EventObserver: func(event applicationtask.TerminalEvent) {
 			events.Publish(terminalAgentEvent(event))
 		},
-		Workspaces:          repos.Workspaces,
-		Sessions:            repos.Sessions,
-		Policies:            repos.Policies,
-		Agents:              repos.Agents,
-		Tasks:               repos.Tasks,
-		Executions:          executions,
-		Messages:            repos.Messages,
-		ToolPermissions:     toolPermissions,
-		RegisteredTools:     registeredToolNames,
-		PrimaryAgent:        sessionService,
-		Definitions:         taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		AgentDefinitionsDir: root.AgentDefinitions,
-		Models:              taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		ContextBuilder:      taskContextBuilder,
+		Workspaces:     repos.Workspaces,
+		Sessions:       repos.Sessions,
+		Agents:         repos.Agents,
+		Tasks:          repos.Tasks,
+		Executions:     executions,
+		Messages:       repos.Messages,
+		PrimaryAgent:   sessionService,
+		Definitions:    taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		Models:         taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		ContextBuilder: taskContextBuilder,
 	})
 	if err != nil {
 		diagnostics.Errorf("create task service failed: %v", err)
@@ -287,12 +275,12 @@ func Open(
 	}
 	if runLoop == nil {
 		toolExecutor, err := toolexecution.NewExecutor(toolexecution.Config{
-			Transactions:    store,
-			HookDispatcher:  hookDispatcher,
-			CurrentSecurity: taskService,
-			Tasks:           repos.Tasks,
-			Invocations:     repos.ToolInvocations,
-			Catalog:         toolRegistry,
+			Transactions:   store,
+			HookDispatcher: hookDispatcher,
+			CommandPolicy:  toolCatalog,
+			Tasks:          repos.Tasks,
+			Invocations:    repos.ToolInvocations,
+			Catalog:        toolCatalog,
 		})
 		if err != nil {
 			_ = diagnostics.Close()
@@ -304,7 +292,7 @@ func Open(
 			ContextBuilder: taskContextBuilder,
 			Progress:       taskService,
 			ToolExecutor:   toolExecutor,
-			Tools:          toolRegistry,
+			Tools:          toolCatalog,
 			HookDispatcher: hookDispatcher,
 			EventObserver:  observe,
 			Logf:           diagnostics.Infof,
@@ -364,10 +352,11 @@ func Open(
 		Queue:     queueService,
 		Activator: registry,
 		Approvals: applicationruntime.ToolApprovals{
-			Transactions: store,
-			Tasks:        repos.Tasks,
-			Invocations:  repos.ToolInvocations,
-			UserID:       "local-user",
+			CommandPolicy: toolCatalog,
+			Transactions:  store,
+			Tasks:         repos.Tasks,
+			Invocations:   repos.ToolInvocations,
+			UserID:        "local-user",
 		},
 	})
 	if err != nil {
@@ -448,13 +437,10 @@ func Open(
 			if err != nil {
 				return err
 			}
-			candidatePermissions, err := securitymodel.NewToolPermissionPolicy(candidateTools.Tools)
-			if err != nil {
+			if err := candidateTools.ValidateRegistered(registeredToolNames); err != nil {
 				return err
 			}
-			if err := candidatePermissions.ValidateRegistered(registeredToolNames); err != nil {
-				return err
-			}
+			candidateCatalog := toolconfig.NewCatalog(candidateTools, toolRegistry)
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -462,7 +448,7 @@ func Open(
 			return store.InTx(ctx, func(context.Context) error {
 				modelRegistry.ReplaceFrom(candidateModels)
 				agentRegistry.ReplaceFrom(candidateAgents)
-				taskService.UpdateToolPermissions(candidatePermissions)
+				toolCatalog.ReplaceFrom(candidateCatalog)
 				return nil
 			})
 		},

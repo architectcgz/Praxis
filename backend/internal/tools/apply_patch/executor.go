@@ -38,8 +38,8 @@ type output struct {
 	Files []fileResult `json:"files"`
 }
 
-// Execute 在授权写入范围内校验并应用完整补丁。
-func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
+// Execute 在 Workspace 内校验并应用完整补丁。
+func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
 		return toolcontracts.ToolResult{}, errors.New("tool task context is required")
 	}
@@ -58,10 +58,10 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
-	if !authorizedDirectory(call.Path, call.WriteScopes) {
-		return toolcontracts.ToolResult{}, errors.New("apply_patch root is outside an authorized directory")
+	if !workspaceDirectory(call.Path, call.WorkspacePath) {
+		return toolcontracts.ToolResult{}, errors.New("apply_patch root is outside the workspace")
 	}
-	changes, results, err := prepareChanges(ctx, call.Path, call.WriteScopes, operations)
+	changes, results, err := prepareChanges(ctx, call.Path, call.WorkspacePath, operations)
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
@@ -83,7 +83,7 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 func prepareChanges(
 	ctx context.Context,
 	root string,
-	scopes []string,
+	workspace string,
 	operations []operation,
 ) ([]*fileChange, []fileResult, error) {
 	changes := make([]*fileChange, 0, len(operations)+1)
@@ -99,8 +99,8 @@ func prepareChanges(
 		}
 		switch operation.kind {
 		case operationAdd:
-			if !authorizedWritePath(source, scopes, true) {
-				return nil, nil, fmt.Errorf("add target %q is outside an authorized write scope", operation.path)
+			if !workspaceWritePath(source, workspace, true) {
+				return nil, nil, fmt.Errorf("add target %q is outside the workspace", operation.path)
 			}
 			if _, err := os.Lstat(source); !errors.Is(err, os.ErrNotExist) {
 				return nil, nil, fmt.Errorf("add target %q already exists", operation.path)
@@ -110,14 +110,14 @@ func prepareChanges(
 			})
 			results = append(results, fileResult{Path: operation.path, Action: "added"})
 		case operationDelete:
-			mode, err := statAuthorizedFile(source, scopes)
+			mode, err := statWorkspaceFile(source, workspace)
 			if err != nil {
 				return nil, nil, fmt.Errorf("delete target %q: %w", operation.path, err)
 			}
 			changes = append(changes, &fileChange{path: source, mode: mode, delete: true, existed: true})
 			results = append(results, fileResult{Path: operation.path, Action: "deleted"})
 		case operationUpdate:
-			content, mode, err := readAuthorizedFile(source, scopes)
+			content, mode, err := readWorkspaceFile(source, workspace)
 			if err != nil {
 				return nil, nil, fmt.Errorf("update target %q: %w", operation.path, err)
 			}
@@ -131,8 +131,8 @@ func prepareChanges(
 				continue
 			}
 			destination, err := resolveTarget(root, operation.moveTo)
-			if err != nil || !rememberPath(seen, destination) || !authorizedWritePath(destination, scopes, true) {
-				return nil, nil, fmt.Errorf("move target %q is duplicated, invalid, or outside an authorized write scope", operation.moveTo)
+			if err != nil || !rememberPath(seen, destination) || !workspaceWritePath(destination, workspace, true) {
+				return nil, nil, fmt.Errorf("move target %q is duplicated, invalid, or outside the workspace", operation.moveTo)
 			}
 			if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
 				return nil, nil, fmt.Errorf("move target %q already exists", operation.moveTo)
@@ -175,8 +175,8 @@ func rememberPath(seen map[string]struct{}, path string) bool {
 	return true
 }
 
-func readAuthorizedFile(path string, scopes []string) ([]byte, fs.FileMode, error) {
-	mode, err := statAuthorizedFile(path, scopes)
+func readWorkspaceFile(path string, workspace string) ([]byte, fs.FileMode, error) {
+	mode, err := statWorkspaceFile(path, workspace)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -190,9 +190,9 @@ func readAuthorizedFile(path string, scopes []string) ([]byte, fs.FileMode, erro
 	return content, mode, nil
 }
 
-func statAuthorizedFile(path string, scopes []string) (fs.FileMode, error) {
-	if !authorizedWritePath(path, scopes, false) {
-		return 0, errors.New("file is outside an authorized write scope or is not a regular file")
+func statWorkspaceFile(path string, workspace string) (fs.FileMode, error) {
+	if !workspaceWritePath(path, workspace, false) {
+		return 0, errors.New("file is outside the workspace or is not a regular file")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -362,57 +362,43 @@ func commitChanges(changes []*fileChange) error {
 	return nil
 }
 
-func authorizedDirectory(path string, scopes []string) bool {
-	cleanPath := filepath.Clean(path)
-	info, err := os.Lstat(cleanPath)
+func workspaceDirectory(path, workspace string) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+		return false
+	}
+	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return false
 	}
-	realPath, err := filepath.EvalSymlinks(cleanPath)
-	if err != nil || !pathutil.SamePath(cleanPath, realPath) {
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil || !pathutil.SamePath(path, realPath) {
 		return false
 	}
-	for _, scope := range scopes {
-		cleanScope := filepath.Clean(scope)
-		if !pathutil.IsWithin(cleanScope, cleanPath) {
-			continue
-		}
-		realScope, err := filepath.EvalSymlinks(cleanScope)
-		if err == nil && pathutil.SamePath(cleanScope, realScope) && pathutil.IsWithin(realScope, realPath) {
-			return true
-		}
-	}
-	return false
+	realWorkspace, err := filepath.EvalSymlinks(workspace)
+	return err == nil && pathutil.SamePath(workspace, realWorkspace) && pathutil.IsWithin(realWorkspace, realPath)
 }
 
-func authorizedWritePath(path string, scopes []string, allowMissing bool) bool {
-	cleanPath := filepath.Clean(path)
-	for _, scope := range scopes {
-		cleanScope := filepath.Clean(scope)
-		if !pathutil.IsWithin(cleanScope, cleanPath) {
-			continue
-		}
-		realScope, err := filepath.EvalSymlinks(cleanScope)
-		if err != nil || !pathutil.SamePath(cleanScope, realScope) {
-			continue
-		}
-		info, err := os.Lstat(cleanPath)
-		if err == nil {
-			if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-				return false
-			}
-			realPath, err := filepath.EvalSymlinks(cleanPath)
-			return err == nil && pathutil.SamePath(cleanPath, realPath) && pathutil.IsWithin(realScope, realPath)
-		}
-		if !allowMissing || !errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		parent := filepath.Dir(cleanPath)
-		parentInfo, parentErr := os.Stat(parent)
-		realParent, evalErr := filepath.EvalSymlinks(parent)
-		if parentErr == nil && parentInfo.IsDir() && evalErr == nil && pathutil.SamePath(parent, realParent) && pathutil.IsWithin(realScope, realParent) {
-			return true
-		}
+func workspaceWritePath(path, workspace string, allowMissing bool) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+		return false
 	}
-	return false
+	realWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil || !pathutil.SamePath(workspace, realWorkspace) {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+		realPath, err := filepath.EvalSymlinks(path)
+		return err == nil && pathutil.SamePath(path, realPath) && pathutil.IsWithin(realWorkspace, realPath)
+	}
+	if !allowMissing || !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	parent := filepath.Dir(path)
+	parentInfo, parentErr := os.Stat(parent)
+	realParent, evalErr := filepath.EvalSymlinks(parent)
+	return parentErr == nil && parentInfo.IsDir() && evalErr == nil && pathutil.SamePath(parent, realParent) && pathutil.IsWithin(realWorkspace, realParent)
 }

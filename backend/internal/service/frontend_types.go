@@ -51,17 +51,16 @@ type CreateSessionResult struct {
 
 // AgentDetail 仅保留桌面端需要的 Agent 状态。
 type AgentDetail struct {
-	ID                     contracts.AgentID
-	Name                   string
-	SessionID              contracts.SessionID
-	DefinitionID           contracts.AgentDefinitionID
-	SecurityPolicyRevision uint64
-	Profile                string
-	State                  string
-	CurrentTaskID          contracts.TaskID
-	TaskIDs                []string
-	Tasks                  []TaskInfo
-	ControlCommandIDs      []string
+	ID                contracts.AgentID
+	Name              string
+	SessionID         contracts.SessionID
+	DefinitionID      contracts.AgentDefinitionID
+	Profile           string
+	State             string
+	CurrentTaskID     contracts.TaskID
+	TaskIDs           []string
+	Tasks             []TaskInfo
+	ControlCommandIDs []string
 }
 
 // TaskInfo 是已持久化任务的安全展示数据。

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"praxis/internal/contracts"
+	"praxis/internal/core/security"
 	"praxis/internal/utils/pathutil"
 )
 
@@ -115,6 +116,7 @@ type ToolInvocation struct {
 	ArgumentsDigest     string
 	Status              ToolInvocationStatus
 	BudgetReserved      bool
+	CommandDecision     security.CommandDecision
 	DecisionBy          string
 	DecisionApproved    bool
 	Approval            contracts.ApprovalRecord
@@ -200,8 +202,8 @@ func (i ToolInvocation) Validate() error {
 			return contracts.FieldError("toolInvocation.approval", err)
 		}
 		if !i.Approval.ApprovedAt.Equal(i.ApprovedAt) ||
-			i.Approval.PolicyFingerprint != strings.TrimSpace(i.Approval.PolicyFingerprint) {
-			return contracts.InvalidValue("toolInvocation.approval", "approval time or fingerprint is inconsistent")
+			i.Approval.ArgumentsDigest != ArgumentsDigest(i.Name, i.NormalizedArguments) {
+			return contracts.InvalidValue("toolInvocation.approval", "approval time or arguments digest is inconsistent")
 		}
 	}
 	previous := i.CreatedAt

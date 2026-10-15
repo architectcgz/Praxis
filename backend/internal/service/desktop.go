@@ -78,15 +78,14 @@ func (s *Services) GetSessionDetail(ctx context.Context, sessionID contracts.Ses
 	}
 	for _, agent := range view.Agents {
 		result.Agents = append(result.Agents, AgentDetail{
-			ID:                     agent.ID,
-			Name:                   agentmodel.DisplayName(agent.DefinitionID),
-			SessionID:              agent.SessionID,
-			DefinitionID:           agent.DefinitionID,
-			SecurityPolicyRevision: agent.SecurityPolicyRevision,
-			Profile:                string(agent.Profile),
-			State:                  string(agent.State),
-			CurrentTaskID:          agent.CurrentTaskID,
-			Tasks:                  []TaskInfo{},
+			ID:            agent.ID,
+			Name:          agentmodel.DisplayName(agent.DefinitionID),
+			SessionID:     agent.SessionID,
+			DefinitionID:  agent.DefinitionID,
+			Profile:       string(agent.Profile),
+			State:         string(agent.State),
+			CurrentTaskID: agent.CurrentTaskID,
+			Tasks:         []TaskInfo{},
 		})
 	}
 	return result, nil
@@ -133,17 +132,16 @@ func (s *Services) GetAgentDetail(ctx context.Context, agentID contracts.AgentID
 		return AgentDetail{}, err
 	}
 	result := AgentDetail{
-		ID:                     view.Agent.ID,
-		Name:                   agentmodel.DisplayName(view.Agent.DefinitionID),
-		SessionID:              view.Agent.SessionID,
-		DefinitionID:           view.Agent.DefinitionID,
-		SecurityPolicyRevision: view.Agent.SecurityPolicyRevision,
-		Profile:                string(view.Agent.Profile),
-		State:                  string(view.Agent.State),
-		CurrentTaskID:          view.Agent.CurrentTaskID,
-		TaskIDs:                make([]string, 0, len(view.Tasks)),
-		Tasks:                  make([]TaskInfo, 0, len(view.Tasks)),
-		ControlCommandIDs:      make([]string, 0, len(view.Controls)),
+		ID:                view.Agent.ID,
+		Name:              agentmodel.DisplayName(view.Agent.DefinitionID),
+		SessionID:         view.Agent.SessionID,
+		DefinitionID:      view.Agent.DefinitionID,
+		Profile:           string(view.Agent.Profile),
+		State:             string(view.Agent.State),
+		CurrentTaskID:     view.Agent.CurrentTaskID,
+		TaskIDs:           make([]string, 0, len(view.Tasks)),
+		Tasks:             make([]TaskInfo, 0, len(view.Tasks)),
+		ControlCommandIDs: make([]string, 0, len(view.Controls)),
 	}
 	for _, task := range view.Tasks {
 		result.TaskIDs = append(result.TaskIDs, task.ID.String())

@@ -5,18 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
-	securitymodel "praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
 	"praxis/internal/system"
-	"praxis/internal/utils/pathutil"
 )
 
 // AgentDefinitionProvider 提供已校验的 Agent 定义。
@@ -31,52 +28,44 @@ type ModelSnapshotFactory interface {
 }
 
 type Config struct {
-	Controls            repository.AgentControlCommandRepository
-	Transactions        repository.TxRunner
-	HookDispatcher      *hooks.Dispatcher
-	Logger              *logging.Logger
-	EventObserver       func(TerminalEvent)
-	Workspaces          repository.WorkspaceRepository
-	Sessions            repository.SessionRepository
-	Policies            repository.AgentSecurityPolicyRepository
-	Agents              repository.SessionAgentRepository
-	Tasks               repository.TaskRepository
-	Executions          *agentmodel.Executions
-	Messages            repository.MessageStreams
-	PrimaryAgent        PrimaryAgentProvider
-	ToolPermissions     securitymodel.ToolPermissionPolicy
-	RegisteredTools     []contracts.ToolName
-	Definitions         AgentDefinitionProvider
-	AgentDefinitionsDir string
-	Models              ModelSnapshotFactory
-	ContextBuilder      *TaskContextBuilder
-	Clock               system.Clock
-	IDs                 system.IDGenerator
+	Controls       repository.AgentControlCommandRepository
+	Transactions   repository.TxRunner
+	HookDispatcher *hooks.Dispatcher
+	Logger         *logging.Logger
+	EventObserver  func(TerminalEvent)
+	Workspaces     repository.WorkspaceRepository
+	Sessions       repository.SessionRepository
+	Agents         repository.SessionAgentRepository
+	Tasks          repository.TaskRepository
+	Executions     *agentmodel.Executions
+	Messages       repository.MessageStreams
+	PrimaryAgent   PrimaryAgentProvider
+	Definitions    AgentDefinitionProvider
+	Models         ModelSnapshotFactory
+	ContextBuilder *TaskContextBuilder
+	Clock          system.Clock
+	IDs            system.IDGenerator
 }
 
 // Service 统一负责 Task 准入、冻结执行快照、恢复绑定、进度持久化及原子结算。
 type Service struct {
-	controls            repository.AgentControlCommandRepository
-	tx                  repository.TxRunner
-	hookDispatcher      *hooks.Dispatcher
-	logger              *logging.Logger
-	eventObserver       func(TerminalEvent)
-	workspaces          repository.WorkspaceRepository
-	sessions            repository.SessionRepository
-	policies            repository.AgentSecurityPolicyRepository
-	agents              repository.SessionAgentRepository
-	tasks               repository.TaskRepository
-	executions          *agentmodel.Executions
-	messages            repository.MessageStreams
-	primary             PrimaryAgentProvider
-	security            securitymodel.SecurityResolver
-	securityMu          sync.RWMutex
-	models              ModelSnapshotFactory
-	definitions         AgentDefinitionProvider
-	agentDefinitionsDir string
-	contextBuilder      *TaskContextBuilder
-	clock               system.Clock
-	ids                 system.IDGenerator
+	controls       repository.AgentControlCommandRepository
+	tx             repository.TxRunner
+	hookDispatcher *hooks.Dispatcher
+	logger         *logging.Logger
+	eventObserver  func(TerminalEvent)
+	workspaces     repository.WorkspaceRepository
+	sessions       repository.SessionRepository
+	agents         repository.SessionAgentRepository
+	tasks          repository.TaskRepository
+	executions     *agentmodel.Executions
+	messages       repository.MessageStreams
+	primary        PrimaryAgentProvider
+	models         ModelSnapshotFactory
+	definitions    AgentDefinitionProvider
+	contextBuilder *TaskContextBuilder
+	clock          system.Clock
+	ids            system.IDGenerator
 }
 
 // NewService 创建统一 Task 服务；缺少依赖或配置目录不是规范化绝对路径时返回错误。
@@ -87,15 +76,11 @@ func NewService(config Config) (*Service, error) {
 	if config.ContextBuilder == nil {
 		return nil, errors.New("task service context builder is required")
 	}
-	if !pathutil.IsAbsoluteNormalized(config.AgentDefinitionsDir) {
-		return nil, errors.New("task agent definitions directory must be an absolute normalized path")
-	}
 	for name, value := range map[string]any{
 		"transactions":  config.Transactions,
 		"controls":      config.Controls,
 		"workspaces":    config.Workspaces,
 		"sessions":      config.Sessions,
-		"policies":      config.Policies,
 		"agents":        config.Agents,
 		"tasks":         config.Tasks,
 		"messages":      config.Messages,
@@ -107,43 +92,25 @@ func NewService(config Config) (*Service, error) {
 			return nil, fmt.Errorf("task service %s is required", name)
 		}
 	}
-	baseline, err := systemSecurityBaseline(config.RegisteredTools)
-	if err != nil {
-		return nil, err
-	}
-	security, err := securitymodel.NewSecurityResolver(baseline, config.ToolPermissions)
-	if err != nil {
-		return nil, err
-	}
 	return &Service{
-		controls:            config.Controls,
-		tx:                  config.Transactions,
-		hookDispatcher:      config.HookDispatcher,
-		logger:              logging.NewFactory().Ensure(config.Logger),
-		eventObserver:       config.EventObserver,
-		workspaces:          config.Workspaces,
-		sessions:            config.Sessions,
-		policies:            config.Policies,
-		agents:              config.Agents,
-		tasks:               config.Tasks,
-		executions:          config.Executions,
-		messages:            config.Messages,
-		primary:             config.PrimaryAgent,
-		security:            security,
-		models:              config.Models,
-		definitions:         config.Definitions,
-		agentDefinitionsDir: config.AgentDefinitionsDir,
-		contextBuilder:      config.ContextBuilder,
-		clock:               system.ClockOrDefault(config.Clock),
-		ids:                 system.IDsOrDefault(config.IDs),
+		controls:       config.Controls,
+		tx:             config.Transactions,
+		hookDispatcher: config.HookDispatcher,
+		logger:         logging.NewFactory().Ensure(config.Logger),
+		eventObserver:  config.EventObserver,
+		workspaces:     config.Workspaces,
+		sessions:       config.Sessions,
+		agents:         config.Agents,
+		tasks:          config.Tasks,
+		executions:     config.Executions,
+		messages:       config.Messages,
+		primary:        config.PrimaryAgent,
+		models:         config.Models,
+		definitions:    config.Definitions,
+		contextBuilder: config.ContextBuilder,
+		clock:          system.ClockOrDefault(config.Clock),
+		ids:            system.IDsOrDefault(config.IDs),
 	}, nil
-}
-
-// UpdateToolPermissions 更新当前工具策略；冻结快照不变，后续工具准入仍受当前限制约束。
-func (s *Service) UpdateToolPermissions(policy securitymodel.ToolPermissionPolicy) {
-	s.securityMu.Lock()
-	defer s.securityMu.Unlock()
-	s.security.ToolPermissions = policy
 }
 
 // ReleaseExecution 释放准入时建立的进程内执行绑定；只清理匹配的 Task，

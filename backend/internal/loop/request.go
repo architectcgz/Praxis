@@ -93,22 +93,10 @@ func (r *Runner) summarizeContext(
 func buildModelRequest(
 	request model.ModelRequest,
 	modelContext appcontext.ModelContext,
-	permissions contracts.TaskPermissions,
 	catalog toolcontracts.ToolCatalog,
 ) model.ModelRequest {
 	request.Context = modelContext.Clone()
 	request.Model = request.Model.Clone()
-	request.Tools = allowedToolDefinitions(permissions, catalog)
+	request.Tools = catalog.List()
 	return request
-}
-
-// allowedToolDefinitions 只筛选模型可见工具；具体调用的执行授权由工具调用服务负责。
-func allowedToolDefinitions(permissions contracts.TaskPermissions, catalog toolcontracts.ToolCatalog) []ToolDefinition {
-	definitions := make([]ToolDefinition, 0, len(permissions.AllowedTools))
-	for _, definition := range catalog.List() {
-		if permissions.AllowsTool(definition.Name) {
-			definitions = append(definitions, definition.Snapshot())
-		}
-	}
-	return definitions
 }

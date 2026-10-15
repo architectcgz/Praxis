@@ -29,7 +29,7 @@ func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messa
 		}
 		metadata := contracts.ToolInvocationContext{
 			TaskID: task.ID, TurnID: contracts.TurnID(message.TurnID), SessionID: task.SessionID,
-			AgentID: task.AgentID, WorkspacePath: task.Input.WorkspacePath, SecurityFingerprint: task.Input.Security.Fingerprint,
+			AgentID: task.AgentID, WorkspacePath: task.Input.WorkspacePath,
 		}
 		for _, block := range message.Blocks {
 			if block.Kind != sessionmodel.BlockToolCall || receipts[block.CallID] {

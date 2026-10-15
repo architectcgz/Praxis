@@ -79,17 +79,16 @@ func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem
 
 func agentSnapshot(value service.AgentDetail) dto.AgentSnapshot {
 	result := dto.AgentSnapshot{
-		ID:                     value.ID.String(),
-		Name:                   value.Name,
-		SessionID:              value.SessionID.String(),
-		DefinitionID:           value.DefinitionID.String(),
-		SecurityPolicyRevision: value.SecurityPolicyRevision,
-		Profile:                value.Profile,
-		State:                  value.State,
-		CurrentTask:            value.CurrentTaskID.String(),
-		TaskIDs:                value.TaskIDs,
-		Tasks:                  make([]dto.TaskSnapshot, 0, len(value.Tasks)),
-		ControlCommandIDs:      value.ControlCommandIDs,
+		ID:                value.ID.String(),
+		Name:              value.Name,
+		SessionID:         value.SessionID.String(),
+		DefinitionID:      value.DefinitionID.String(),
+		Profile:           value.Profile,
+		State:             value.State,
+		CurrentTask:       value.CurrentTaskID.String(),
+		TaskIDs:           value.TaskIDs,
+		Tasks:             make([]dto.TaskSnapshot, 0, len(value.Tasks)),
+		ControlCommandIDs: value.ControlCommandIDs,
 	}
 	for _, task := range value.Tasks {
 		result.Tasks = append(result.Tasks, taskSnapshot(task))

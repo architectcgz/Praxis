@@ -89,7 +89,7 @@ func (r *Runner) run(
 	if err != nil {
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
 	}
-	permissions := task.Input.Security.Permissions
+	limits := task.Input.ResourceLimits
 	built, err := r.ContextBuilder.RebuildTaskContext(ctx, task)
 	if err != nil {
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
@@ -99,9 +99,9 @@ func (r *Runner) run(
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
 	}
 	modelContext := built.Context
-	budget := newTaskBudget(permissions.ResourceLimits)
+	budget := newTaskBudget(limits)
 	budget.outputBytes = task.Progress.OutputBytes
-	if permissions.ResourceLimits.MaxOutputBytes > 0 && budget.outputBytes > permissions.ResourceLimits.MaxOutputBytes {
+	if limits.MaxOutputBytes > 0 && budget.outputBytes > limits.MaxOutputBytes {
 		return taskResult(fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "task output limit exceeded"))
 	}
 	if task.Progress.FinalStopReason != "" {
@@ -126,7 +126,7 @@ func (r *Runner) run(
 			SessionReference: task.SessionID.String(),
 			Model:            task.Input.Model,
 			MaxOutputTokens:  taskModel.MaxOutputTokens,
-		}, modelContext, permissions, r.Tools)
+		}, modelContext, r.Tools)
 		toolPayload, err := json.Marshal(request.Tools)
 		if err != nil {
 			return taskResult(failCause(contracts.TaskFailureContract, err))
@@ -219,12 +219,11 @@ func (r *Runner) executeTurn(
 	assistant := model.ContextBlocksFromEvents(response.events)
 	calls := response.toolCalls()
 	metadata := contracts.ToolInvocationContext{
-		TaskID:              task.ID,
-		TurnID:              turnID,
-		SessionID:           task.SessionID,
-		AgentID:             task.AgentID,
-		WorkspacePath:       task.Input.WorkspacePath,
-		SecurityFingerprint: task.Input.Security.Fingerprint,
+		TaskID:        task.ID,
+		TurnID:        turnID,
+		SessionID:     task.SessionID,
+		AgentID:       task.AgentID,
+		WorkspacePath: task.Input.WorkspacePath,
 	}
 	{
 		message := taskMessage(sessionmodel.MessageData{

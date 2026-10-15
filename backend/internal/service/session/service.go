@@ -7,7 +7,6 @@ import (
 	contextmodel "praxis/internal/core/context"
 	"praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
-	securitymodel "praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
 
@@ -25,9 +24,6 @@ import (
 // AgentDefinitionFactory 解析可复用的 Agent 定义。
 type AgentDefinitionFactory func(contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 
-// AgentSecurityPolicyFactory 根据 Agent 定义生成初始安全策略。
-type AgentSecurityPolicyFactory func(workspacemodel.Workspace, contracts.AgentDefinitionID) (securitymodel.AgentSecurityPolicy, error)
-
 // WorkspaceTextReader 是文件预览所需的最小读取 Port。
 type WorkspaceTextReader interface {
 	ReadText(context.Context, string, string, int64) (string, error)
@@ -41,11 +37,9 @@ type Config struct {
 	Workspaces        repository.WorkspaceRepository
 	Sessions          repository.SessionRepository
 	Contexts          repository.SessionContextRepository
-	Policies          repository.AgentSecurityPolicyRepository
 	Agents            repository.SessionAgentRepository
 	Tasks             repository.TaskRepository
 	Definitions       AgentDefinitionFactory
-	PolicyFactory     AgentSecurityPolicyFactory
 	Messages          repository.MessageStreams
 	UsageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
 	RemoveSessionData func(context.Context, contracts.SessionID, []string) error
@@ -62,11 +56,9 @@ type Service struct {
 	workspaces        repository.WorkspaceRepository
 	sessions          repository.SessionRepository
 	contexts          repository.SessionContextRepository
-	policies          repository.AgentSecurityPolicyRepository
 	agents            repository.SessionAgentRepository
 	tasks             repository.TaskRepository
 	definitions       AgentDefinitionFactory
-	policyFactory     AgentSecurityPolicyFactory
 	messages          repository.MessageStreams
 	usageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
 	removeSessionData func(context.Context, contracts.SessionID, []string) error
@@ -87,7 +79,6 @@ type CreateParams struct {
 	ProjectID    contracts.ProjectID
 	WorkspaceID  contracts.WorkspaceID
 	DefinitionID contracts.AgentDefinitionID
-	Policy       securitymodel.AgentSecurityPolicy
 }
 
 type CreateResult struct {
@@ -106,11 +97,9 @@ func NewService(config Config) (*Service, error) {
 		"workspaces":            config.Workspaces,
 		"sessions":              config.Sessions,
 		"session contexts":      config.Contexts,
-		"security policies":     config.Policies,
 		"agents":                config.Agents,
 		"tasks":                 config.Tasks,
 		"agent definitions":     config.Definitions,
-		"policy factory":        config.PolicyFactory,
 		"message loader":        config.Messages,
 		"workspace text reader": config.TextReader,
 	} {
@@ -125,11 +114,9 @@ func NewService(config Config) (*Service, error) {
 		workspaces:        config.Workspaces,
 		sessions:          config.Sessions,
 		contexts:          config.Contexts,
-		policies:          config.Policies,
 		agents:            config.Agents,
 		tasks:             config.Tasks,
 		definitions:       config.Definitions,
-		policyFactory:     config.PolicyFactory,
 		messages:          config.Messages,
 		usageRecords:      config.UsageRecords,
 		removeSessionData: config.RemoveSessionData,
@@ -197,7 +184,7 @@ func (s *Service) ListSessionContext(ctx context.Context, sessionID contracts.Se
 	return s.contexts.List(ctx, sessionID, afterID, limit)
 }
 
-// CreateSession 在一个事务中创建 Session、主 Agent 和初始策略。
+// CreateSession 在一个事务中创建 Session 和主 Agent。
 // OperationHook 覆盖本次创建尝试，Start/End 均在创建锁之外，End 观察提交结果或错误。
 func (s *Service) CreateSession(ctx context.Context, params CreateParams) (result CreateResult, err error) {
 	if ctx == nil {
@@ -268,14 +255,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (resul
 		if err != nil {
 			return err
 		}
-		policy := params.Policy
-		if policy.Revision == 0 {
-			policy, err = s.policyFactory(workspace, definition.ID)
-			if err != nil {
-				return err
-			}
-		}
-		agent, err := agentmodel.NewAgent(params.AgentID, session.ID, definition.ID, definition.Profile, policy.Revision, at)
+		agent, err := agentmodel.NewAgent(params.AgentID, session.ID, definition.ID, definition.Profile, at)
 		if err != nil {
 			return err
 		}
@@ -283,9 +263,6 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (resul
 			return err
 		}
 		if err := s.agents.Save(txCtx, agent); err != nil {
-			return err
-		}
-		if err := s.policies.Save(txCtx, agent.ID, policy); err != nil {
 			return err
 		}
 		result = CreateResult{Session: session, Agent: agent}
@@ -323,15 +300,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 	if !errors.Is(err, contracts.ErrNotFound) {
 		return agentmodel.Agent{}, err
 	}
-	workspace, err := s.workspaces.Get(ctx, session.WorkspaceID)
-	if err != nil {
-		return agentmodel.Agent{}, err
-	}
 	definition, err := s.definitions(agentmodel.DefinitionPrimary)
-	if err != nil {
-		return agentmodel.Agent{}, err
-	}
-	policy, err := s.policyFactory(workspace, definition.ID)
 	if err != nil {
 		return agentmodel.Agent{}, err
 	}
@@ -346,14 +315,11 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 			return err
 		}
 		at := s.clock.Now().UTC()
-		agent, err := agentmodel.NewAgent(contracts.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, policy.Revision, at)
+		agent, err := agentmodel.NewAgent(contracts.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, at)
 		if err != nil {
 			return err
 		}
 		if err := s.agents.Save(txCtx, agent); err != nil {
-			return err
-		}
-		if err := s.policies.Save(txCtx, agent.ID, policy); err != nil {
 			return err
 		}
 		created = agent

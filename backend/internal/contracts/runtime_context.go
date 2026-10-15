@@ -2,14 +2,13 @@ package contracts
 
 import "fmt"
 
-// ToolInvocationContext 固定工具调用的执行归属和安全快照身份。
+// ToolInvocationContext 固定工具调用的执行归属和工作区。
 type ToolInvocationContext struct {
-	TaskID              TaskID
-	TurnID              TurnID
-	SessionID           SessionID
-	AgentID             AgentID
-	WorkspacePath       string
-	SecurityFingerprint string
+	TaskID        TaskID
+	TurnID        TurnID
+	SessionID     SessionID
+	AgentID       AgentID
+	WorkspacePath string
 }
 
 // NewTurnID 根据持久化的任务请求序号生成关联标识，不创建独立执行状态。

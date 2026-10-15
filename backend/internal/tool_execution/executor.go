@@ -2,17 +2,17 @@
 package toolexecution
 
 import (
-	"praxis/internal/contracts"
-	taskmodel "praxis/internal/core/task"
-	"praxis/internal/hooks"
-
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	toolmodel "praxis/internal/core/tool_invocation"
 	"strings"
 
+	"praxis/internal/contracts"
+	securitymodel "praxis/internal/core/security"
+	taskmodel "praxis/internal/core/task"
+	toolmodel "praxis/internal/core/tool_invocation"
+	"praxis/internal/hooks"
 	"praxis/internal/repository"
 	"praxis/internal/system"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -23,49 +23,50 @@ type TaskRepository interface {
 	Save(context.Context, taskmodel.Task) error
 }
 
-type CurrentSecurityResolver interface {
-	ResolveTaskSecurity(context.Context, taskmodel.Task) (contracts.SecuritySnapshot, error)
+type CommandPolicy interface {
+	DecideCommand(string) securitymodel.CommandDecision
 }
 
 type Config struct {
-	CurrentSecurity CurrentSecurityResolver
-	HookDispatcher  *hooks.Dispatcher
-	Transactions    repository.TxRunner
-	Tasks           TaskRepository
-	Invocations     repository.ToolInvocationRepository
-	Catalog         toolcontracts.ToolCatalog
-	Clock           system.Clock
+	CommandPolicy  CommandPolicy
+	HookDispatcher *hooks.Dispatcher
+	Transactions   repository.TxRunner
+	Tasks          TaskRepository
+	Invocations    repository.ToolInvocationRepository
+	Catalog        toolcontracts.ToolCatalog
+	Clock          system.Clock
 }
 
 type Executor struct {
-	currentSecurity CurrentSecurityResolver
-	hookDispatcher  *hooks.Dispatcher
-	tx              repository.TxRunner
-	tasks           TaskRepository
-	invocations     repository.ToolInvocationRepository
-	toolCatalog     toolcontracts.ToolCatalog
-	clock           system.Clock
+	commandPolicy  CommandPolicy
+	hookDispatcher *hooks.Dispatcher
+	tx             repository.TxRunner
+	tasks          TaskRepository
+	invocations    repository.ToolInvocationRepository
+	toolCatalog    toolcontracts.ToolCatalog
+	clock          system.Clock
 }
 
 func NewExecutor(config Config) (*Executor, error) {
 	for name, value := range map[string]any{
-		"current security": config.CurrentSecurity,
-		"transactions":     config.Transactions,
-		"tasks":            config.Tasks,
-		"invocations":      config.Invocations,
-		"tool catalog":     config.Catalog,
+		"command policy": config.CommandPolicy,
+		"transactions":   config.Transactions,
+		"tasks":          config.Tasks,
+		"invocations":    config.Invocations,
+		"tool catalog":   config.Catalog,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("tool executor %s is required", name)
 		}
 	}
 	return &Executor{
-		hookDispatcher:  config.HookDispatcher,
-		currentSecurity: config.CurrentSecurity,
-		tx:              config.Transactions, tasks: config.Tasks,
-		invocations: config.Invocations,
-		toolCatalog: config.Catalog,
-		clock:       system.ClockOrDefault(config.Clock),
+		hookDispatcher: config.HookDispatcher,
+		commandPolicy:  config.CommandPolicy,
+		tx:             config.Transactions,
+		tasks:          config.Tasks,
+		invocations:    config.Invocations,
+		toolCatalog:    config.Catalog,
+		clock:          system.ClockOrDefault(config.Clock),
 	}, nil
 }
 
@@ -99,7 +100,7 @@ func (s *Executor) invoke(
 		invocationContext.SessionID == "" || invocationContext.AgentID == "" {
 		return toolcontracts.ToolResult{}, errors.New("tool invocation ownership is required")
 	}
-	security, err := s.loadSecurity(ctx, invocationContext)
+	err := s.checkTask(ctx, invocationContext)
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
@@ -122,18 +123,11 @@ func (s *Executor) invoke(
 		return toolcontracts.ToolResult{}, err
 	}
 	invalid := func(message string) (toolcontracts.ToolResult, error) {
-		result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInvalidCall), message)
-		err := s.settle(ctx, invocation.ID, func(current *toolmodel.ToolInvocation) error {
-			return current.Deny(toolmodel.ToolInvocationResult{
-				InlineContent: result.Payload,
-				ErrorCode:     toolmodel.ToolFailureInvalidCall,
-			}, s.clock.Now())
-		})
-		return result, err
+		return s.reject(ctx, invocation.ID, toolmodel.ToolFailureInvalidCall, message)
 	}
 	tool, ok := s.toolCatalog.Get(call.Name)
 	if !ok {
-		return invalid("The requested tool is not available.")
+		return s.reject(ctx, invocation.ID, toolmodel.ToolFailureNotAllowed, "The requested tool is disabled or unregistered.")
 	}
 	normalized := toolcontracts.NormalizedToolCall{Name: invocation.Name, NormalizedArguments: append(json.RawMessage(nil), invocation.NormalizedArguments...), Path: invocation.Path}
 	if invocation.Status == toolmodel.ToolInvocationRequested {
@@ -157,7 +151,7 @@ func (s *Executor) invoke(
 	}
 
 	if invocation.Status == toolmodel.ToolInvocationRequested {
-		invocation, err = s.admit(ctx, invocation, security, normalized)
+		invocation, err = s.admit(ctx, invocation, normalized)
 		if err != nil {
 			return toolcontracts.ToolResult{}, err
 		}
@@ -165,7 +159,7 @@ func (s *Executor) invoke(
 			return result, nil
 		}
 	}
-	invocation, execute, err := s.start(ctx, invocation.ID, normalized.Path, &security)
+	invocation, execute, err := s.start(ctx, invocation.ID)
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
@@ -178,13 +172,11 @@ func (s *Executor) invoke(
 		}
 		return toolcontracts.ToolResult{}, contracts.New(contracts.TaskBusy, "tool call is already running")
 	}
-	authorized := toolcontracts.AuthorizedToolCall{
-		Name:                normalized.Name,
-		NormalizedArguments: append(json.RawMessage(nil), normalized.NormalizedArguments...),
-		Path:                normalized.Path,
-		ReadScopes:          append([]string(nil), security.Permissions.ReadScopes...),
-		WriteScopes:         append([]string(nil), security.Permissions.WriteScopes...),
-		AllowedExecutables:  append([]string(nil), security.Permissions.AllowedExecutables...),
+	execution := toolcontracts.ExecutionCall{
+		Name:                invocation.Name,
+		NormalizedArguments: append(json.RawMessage(nil), invocation.NormalizedArguments...),
+		Path:                invocation.Path,
+		WorkspacePath:       invocationContext.WorkspacePath,
 	}
 	toolCtx, scope := s.hookDispatcher.Start(ctx, hooks.Operation{
 		Identity: hooks.Identity{
@@ -195,7 +187,7 @@ func (s *Executor) invoke(
 		},
 		Kind: hooks.OperationTool, Name: string(call.Name), ReferenceID: call.ID,
 	})
-	result, executeErr := tool.Execute(toolCtx, authorized)
+	result, executeErr := tool.Execute(toolCtx, execution)
 	scope.End(hooks.Result{Err: executeErr, ToolErrorClass: result.ErrorClass})
 	if executeErr != nil {
 		if ctx.Err() != nil {

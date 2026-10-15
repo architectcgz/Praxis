@@ -49,8 +49,8 @@ export function queueTask(request: QueueTaskRequest) {
     return getCommandBinding().QueueTask(request)
 }
 
-export type ToolDecisionRequest = { sessionId: string; agentId: string; taskId: string; callId: string }
-export type ToolApproval = ToolDecisionRequest & { name: string; arguments: unknown }
+export type ToolDecisionRequest = { sessionId: string; agentId: string; taskId: string; callId: string; argumentsDigest: string }
+export type ToolApproval = ToolDecisionRequest & { name: string; command: string; path: string; timeout: number; ruleId: string }
 export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
     return getCommandBinding().ListToolApprovals(agentId)
 }

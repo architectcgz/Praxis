@@ -7,11 +7,9 @@ import (
 	taskmodel "praxis/internal/core/task"
 
 	"context"
-	"fmt"
-	"path/filepath"
 )
 
-// buildInputSnapshot 冻结本次执行的可见范围、模型与安全快照；任一步失败都不产生执行快照。
+// buildInputSnapshot 冻结本次执行的可见范围与模型快照；任一步失败都不产生执行快照。
 func (s *Service) buildInputSnapshot(
 	ctx context.Context,
 	agent agentmodel.Agent,
@@ -28,13 +26,6 @@ func (s *Service) buildInputSnapshot(
 	workspace, err := s.workspaces.Get(ctx, session.WorkspaceID)
 	if err != nil {
 		return taskmodel.InputSnapshot{}, err
-	}
-	policy, err := s.policies.GetCurrent(ctx, agent.ID)
-	if err != nil {
-		return taskmodel.InputSnapshot{}, err
-	}
-	if policy.Revision != agent.SecurityPolicyRevision {
-		return taskmodel.InputSnapshot{}, contracts.ErrRevisionConflict
 	}
 	definition, err := s.definitions.Definition(agent.DefinitionID)
 	if err != nil {
@@ -62,19 +53,6 @@ func (s *Service) buildInputSnapshot(
 	if err != nil {
 		return taskmodel.InputSnapshot{}, err
 	}
-	s.securityMu.RLock()
-	resolver := s.security
-	s.securityMu.RUnlock()
-	security, err := resolver.Resolve(policy, contracts.TaskRestrictions{
-		AllowedTools:        definition.AllowedTools,
-		EnforceAllowedTools: true,
-	}, workspace)
-	if err != nil {
-		return taskmodel.InputSnapshot{}, fmt.Errorf(
-			"Agent %q 的权限校验失败。配置文件：%s。%w",
-			definition.ID, filepath.Join(s.agentDefinitionsDir, definition.ID.String(), "agent.json"), err,
-		)
-	}
 	refs := make([]taskmodel.ContextReference, 0, len(built.SessionContextRefs))
 	for _, ref := range built.SessionContextRefs {
 		refs = append(refs, taskmodel.ContextReference{ID: ref.ID, Digest: ref.Digest})
@@ -89,6 +67,5 @@ func (s *Service) buildInputSnapshot(
 		SessionContextRefs:      refs,
 		Model:                   modelSnapshot,
 		WorkspacePath:           workspace.Path,
-		Security:                security,
 	}, nil
 }

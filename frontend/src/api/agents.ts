@@ -33,7 +33,6 @@ export type AgentSnapshot = {
     name: string
     sessionId: string
     definitionId: string
-    securityPolicyRevision: number
     profile: string
     state: AgentState
     currentTaskId: string
@@ -154,7 +153,6 @@ export function normalizeAgentSnapshot(value: unknown): AgentSnapshot {
         name: requiredString(record.name),
         sessionId: requiredString(record.sessionId),
         definitionId: definitionID,
-        securityPolicyRevision: requiredNumber(record.securityPolicyRevision),
         profile: requiredString(record.profile),
         state: enumValue(record.state, agentStates, 'unknown'),
         currentTaskId: requiredString(record.currentTaskId),

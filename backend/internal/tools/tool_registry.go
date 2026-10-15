@@ -16,7 +16,7 @@ import (
 type builtinTool struct {
 	definition func() contracts.ToolDefinition
 	normalize  func(contracts.ToolCall) (toolcontracts.NormalizedToolCall, error)
-	execute    func(context.Context, toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error)
+	execute    func(context.Context, toolcontracts.ExecutionCall) (toolcontracts.ToolResult, error)
 }
 
 func (t builtinTool) Definition() contracts.ToolDefinition { return t.definition() }
@@ -29,7 +29,7 @@ func (t builtinTool) Normalize(
 
 func (t builtinTool) Execute(
 	ctx context.Context,
-	call toolcontracts.AuthorizedToolCall,
+	call toolcontracts.ExecutionCall,
 ) (toolcontracts.ToolResult, error) {
 	return t.execute(ctx, call)
 }

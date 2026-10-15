@@ -194,7 +194,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		}
 		// 原始调用先落库，规范化参数只允许随 requested -> approved 填充一次。
 		if (!bytes.Equal(left["NormalizedArguments"], right["NormalizedArguments"]) || !bytes.Equal(left["Path"], right["Path"])) &&
-			(string(left["Status"]) != `"requested"` || (string(right["Status"]) != `"approved"` && string(right["Status"]) != `"awaiting_approval"`) ||
+			(string(left["Status"]) != `"requested"` || (string(right["Status"]) != `"approved"` && string(right["Status"]) != `"awaiting_approval"` && string(right["Status"]) != `"denied"`) ||
 				len(left["NormalizedArguments"]) > 0 && string(left["NormalizedArguments"]) != "null") {
 			return contracts.ErrRequestConflict
 		}
@@ -209,7 +209,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		fields = []string{"ProjectID", "WorkspaceID", "CreatedAt"}
 	case "usage":
 		fields = []string{"agentId", "taskId", "turnId"}
-	case "policy", "context", "message":
+	case "context", "message":
 		if !bytes.Equal(before, after) {
 			return contracts.ErrRequestConflict
 		}
@@ -247,7 +247,6 @@ func validateEvent(scope string, event Event) error {
 		"agent":     "agent.saved",
 		"task":      "task.saved",
 		"tool":      "tool.saved",
-		"policy":    "policy.saved",
 		"wait":      "wait.saved",
 		"control":   "control.saved",
 		"context":   "context.entry_appended",
@@ -370,9 +369,6 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			if err == nil {
 				err = reference("session", value.scope, value.scope)
 			}
-			if err == nil {
-				err = reference("policy", policyKey(v.ID, v.SecurityPolicyRevision), value.scope)
-			}
 			if err == nil && v.DefinitionID == agentmodel.DefinitionPrimary {
 				err = claim("primary:" + value.scope)
 			}
@@ -418,14 +414,6 @@ func (s *Store) validate(objects map[objectKey]object) error {
 			}
 			if err == nil {
 				err = claim("call:" + v.TaskID.String() + ":" + v.ProviderToolCallID)
-			}
-		case "policy":
-			v, e := decode[policyRecord](key.collection, value)
-			err = e
-			item = v.Policy
-			identity = policyKey(v.AgentID, v.Policy.Revision)
-			if err == nil {
-				err = reference("agent", v.AgentID.String(), value.scope)
 			}
 		case "context":
 			v, e := decode[contextmodel.SessionContextEntry](key.collection, value)

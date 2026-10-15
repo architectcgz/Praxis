@@ -45,8 +45,8 @@ func (w *outputWriter) Write(value []byte) (int, error) {
 	return len(value), nil
 }
 
-// Execute 在授权工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
-func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolcontracts.ToolResult, error) {
+// Execute 在 Workspace 内的工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
+func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
 		return toolcontracts.ToolResult{}, errors.New("tool task context is required")
 	}
@@ -56,10 +56,10 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 	if call.Name != toolcontracts.ToolBash {
 		return toolcontracts.ToolResult{}, errors.New("bash executor does not support the call")
 	}
-	if strings.TrimSpace(call.Path) == "" || !authorizedDirectory(call.Path, call.WriteScopes) {
-		return toolcontracts.ToolResult{}, errors.New("bash working directory is outside an authorized write scope")
+	if !workspaceDirectory(call.Path, call.WorkspacePath) {
+		return toolcontracts.ToolResult{}, errors.New("bash working directory is outside the workspace")
 	}
-	shell, err := resolveShell(call.AllowedExecutables)
+	shell, err := resolveShell()
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
@@ -110,26 +110,19 @@ func Execute(ctx context.Context, call toolcontracts.AuthorizedToolCall) (toolco
 	return result, nil
 }
 
-func resolveShell(allowed []string) (string, error) {
-	for _, candidate := range allowed {
-		candidate = strings.TrimSpace(candidate)
-		base := strings.ToLower(filepath.Base(candidate))
-		if base != "bash" && base != "bash.exe" {
-			continue
-		}
-		if path, err := exec.LookPath(candidate); err == nil {
-			return path, nil
-		}
-		if runtime.GOOS == "windows" && strings.EqualFold(candidate, "bash") {
-			if programFiles := os.Getenv("ProgramFiles"); filepath.IsAbs(programFiles) {
-				gitBash := filepath.Join(programFiles, "Git", "bin", "bash.exe")
-				if path, err := exec.LookPath(gitBash); err == nil {
-					return path, nil
-				}
+func resolveShell() (string, error) {
+	if path, err := exec.LookPath("bash"); err == nil {
+		return path, nil
+	}
+	if runtime.GOOS == "windows" {
+		if programFiles := os.Getenv("ProgramFiles"); filepath.IsAbs(programFiles) {
+			gitBash := filepath.Join(programFiles, "Git", "bin", "bash.exe")
+			if path, err := exec.LookPath(gitBash); err == nil {
+				return path, nil
 			}
 		}
 	}
-	return "", errors.New("bash is not an allowed or available executable")
+	return "", errors.New("bash executable is not available")
 }
 
 func encodeOutput(toolOutput output) ([]byte, bool, error) {
@@ -166,25 +159,19 @@ func encodeOutput(toolOutput output) ([]byte, bool, error) {
 	return best, true, nil
 }
 
-func authorizedDirectory(path string, scopes []string) bool {
-	cleanPath := filepath.Clean(path)
-	realPath, err := filepath.EvalSymlinks(cleanPath)
-	if err != nil || !pathutil.SamePath(cleanPath, realPath) {
+// workspaceDirectory 拒绝工作区外目录和符号链接路径；这不是 Bash 进程隔离。
+func workspaceDirectory(path, workspace string) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+		return false
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil || !pathutil.SamePath(path, realPath) {
 		return false
 	}
 	info, err := os.Stat(realPath)
 	if err != nil || !info.IsDir() {
 		return false
 	}
-	for _, scope := range scopes {
-		cleanScope := filepath.Clean(scope)
-		if !pathutil.IsWithin(cleanScope, cleanPath) {
-			continue
-		}
-		realScope, err := filepath.EvalSymlinks(cleanScope)
-		if err == nil && pathutil.SamePath(cleanScope, realScope) && pathutil.IsWithin(realScope, realPath) {
-			return true
-		}
-	}
-	return false
+	realWorkspace, err := filepath.EvalSymlinks(workspace)
+	return err == nil && pathutil.SamePath(workspace, realWorkspace) && pathutil.IsWithin(realWorkspace, realPath)
 }

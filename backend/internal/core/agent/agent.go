@@ -21,15 +21,14 @@ const (
 
 // Agent 表示绑定到一个 Session 和一个 AgentDefinition 的运行实例。
 type Agent struct {
-	ID                     contracts.AgentID
-	SessionID              contracts.SessionID
-	DefinitionID           contracts.AgentDefinitionID
-	Profile                contracts.AgentProfile
-	SecurityPolicyRevision uint64
-	State                  AgentState
-	CurrentTaskID          contracts.TaskID
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID            contracts.AgentID
+	SessionID     contracts.SessionID
+	DefinitionID  contracts.AgentDefinitionID
+	Profile       contracts.AgentProfile
+	State         AgentState
+	CurrentTaskID contracts.TaskID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Startable 判断当前状态是否允许开始新的 Task。
@@ -47,16 +46,15 @@ func (a Agent) CanReadSessionContext() bool {
 	return a.DefinitionID == DefinitionPrimary
 }
 
-func NewAgent(id contracts.AgentID, sessionID contracts.SessionID, definitionID contracts.AgentDefinitionID, profile contracts.AgentProfile, securityPolicyRevision uint64, at time.Time) (Agent, error) {
+func NewAgent(id contracts.AgentID, sessionID contracts.SessionID, definitionID contracts.AgentDefinitionID, profile contracts.AgentProfile, at time.Time) (Agent, error) {
 	agent := Agent{
-		ID:                     id,
-		SessionID:              sessionID,
-		DefinitionID:           definitionID,
-		Profile:                profile,
-		SecurityPolicyRevision: securityPolicyRevision,
-		State:                  AgentIdle,
-		CreatedAt:              at.UTC(),
-		UpdatedAt:              at.UTC(),
+		ID:           id,
+		SessionID:    sessionID,
+		DefinitionID: definitionID,
+		Profile:      profile,
+		State:        AgentIdle,
+		CreatedAt:    at.UTC(),
+		UpdatedAt:    at.UTC(),
 	}
 	if err := agent.Validate(); err != nil {
 		return Agent{}, err
@@ -70,9 +68,6 @@ func (a Agent) Validate() error {
 	}
 	if !a.Profile.Valid() {
 		return contracts.InvalidValue("agent.profile", "unknown agent profile")
-	}
-	if a.SecurityPolicyRevision == 0 {
-		return contracts.InvalidValue("agent.securityPolicyRevision", "security policy revision must be positive")
 	}
 	if !validAgentState(a.State) {
 		return contracts.InvalidValue("agent.state", "unknown agent state")

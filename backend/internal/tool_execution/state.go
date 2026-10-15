@@ -3,11 +3,12 @@ package toolexecution
 import (
 	"bytes"
 	"context"
+	"time"
+
 	"praxis/internal/contracts"
 	securitymodel "praxis/internal/core/security"
 	toolmodel "praxis/internal/core/tool_invocation"
 	toolcontracts "praxis/internal/tools/contracts"
-	"time"
 )
 
 const settlementTimeout = 5 * time.Second
@@ -28,7 +29,7 @@ func (s *Executor) reserveCall(ctx context.Context, id contracts.ToolInvocationI
 		if err != nil {
 			return err
 		}
-		limit := task.Input.Security.Permissions.ResourceLimits.MaxToolCalls
+		limit := task.Input.ResourceLimits.MaxToolCalls
 		if limit <= 0 {
 			limit = 128
 		}
@@ -45,12 +46,9 @@ func (s *Executor) reserveCall(ctx context.Context, id contracts.ToolInvocationI
 	return invocation, err
 }
 
-func (s *Executor) start(
-	ctx context.Context,
-	id contracts.ToolInvocationID,
-	path string,
-	effective *contracts.SecuritySnapshot,
-) (toolmodel.ToolInvocation, bool, error) {
+// start 在同一事务中重新读取配置、核对审批参数并保存 running。
+// 配置重载与这里共享事务边界；已启动的进程不受后续配置变更影响。
+func (s *Executor) start(ctx context.Context, id contracts.ToolInvocationID) (toolmodel.ToolInvocation, bool, error) {
 	var invocation toolmodel.ToolInvocation
 	execute := false
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -58,59 +56,123 @@ func (s *Executor) start(
 		if err != nil {
 			return err
 		}
-		if current.Status == toolmodel.ToolInvocationApproved {
-			task, err := s.tasks.Get(txCtx, current.TaskID)
+		invocation = current
+		if current.Status != toolmodel.ToolInvocationApproved && current.Status != toolmodel.ToolInvocationAwaitingApproval {
+			return nil
+		}
+		task, err := s.tasks.Get(txCtx, current.TaskID)
+		if err != nil {
+			return err
+		}
+		if err := s.checkTask(txCtx, contracts.ToolInvocationContext{
+			TaskID:        current.TaskID,
+			TurnID:        current.TurnID,
+			SessionID:     current.SessionID,
+			AgentID:       current.AgentID,
+			WorkspacePath: task.Input.WorkspacePath,
+		}); err != nil {
+			return err
+		}
+		decision, err := s.commandDecision(current)
+		if err != nil {
+			return err
+		}
+		_, enabled := s.toolCatalog.Get(current.Name)
+		if !enabled || decision.Action == securitymodel.CommandDeny {
+			result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The current configuration prohibits execution. Rule: "+decision.RuleID)
+			if current.Status == toolmodel.ToolInvocationAwaitingApproval {
+				result = toolcontracts.NewToolError(string(toolmodel.ToolFailureNotAllowed), "The current configuration prohibits execution. Rule: "+decision.RuleID)
+				err = current.Deny(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureNotAllowed}, s.clock.Now())
+			} else {
+				err = current.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, s.clock.Now())
+			}
 			if err != nil {
 				return err
 			}
-			security, err := s.loadSecurity(txCtx, contracts.ToolInvocationContext{
-				TaskID:              current.TaskID,
-				TurnID:              current.TurnID,
-				SessionID:           current.SessionID,
-				AgentID:             current.AgentID,
-				WorkspacePath:       task.Input.WorkspacePath,
-				SecurityFingerprint: task.Input.Security.Fingerprint,
-			})
-			if err != nil {
+			invocation = current
+			return s.invocations.Save(txCtx, current)
+		}
+		// 待审批调用恢复时仍保留等待状态，即使规则已改为 allow。
+		if current.Status == toolmodel.ToolInvocationAwaitingApproval {
+			return nil
+		}
+		if decision.Action == securitymodel.CommandAsk && current.Approval.Source != contracts.ApprovalSourceUser {
+			result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The command policy changed from automatic execution to manual review. Submit a new call for approval.")
+			if err := current.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, s.clock.Now()); err != nil {
 				return err
 			}
-			*effective = security
-			if !securitymodel.AllowsToolCall(security, current.Name, path) || securitymodel.RequiresToolApproval(security, current.Name) && current.Approval.Source != contracts.ApprovalSourceUser {
-				denied := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The authorization was revoked before execution.")
-				if err := current.Interrupt(toolmodel.ToolInvocationResult{InlineContent: denied.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, s.clock.Now()); err != nil {
-					return err
-				}
-				invocation = current
-				return s.invocations.Save(txCtx, current)
-			}
+			invocation = current
+			return s.invocations.Save(txCtx, current)
+		}
+		if current.Approval.ArgumentsDigest != toolmodel.ArgumentsDigest(current.Name, current.NormalizedArguments) {
+			return contracts.ErrRequestConflict
+		}
+		if current.Name == contracts.ToolBash || current.Name == contracts.ToolApplyPatch {
 			prior, err := s.invocations.ListByTask(txCtx, task.ID)
 			if err != nil {
 				return err
 			}
-			if security.ToolPermissions[current.Name].RequiresWrite || current.Name == contracts.ToolBash || current.Name == contracts.ToolApplyPatch {
-				for _, previous := range prior {
-					if previous.Status == toolmodel.ToolInvocationUnknown && previous.Name == current.Name && (previous.ArgumentsDigest == current.ArgumentsDigest || bytes.Equal(previous.NormalizedArguments, current.NormalizedArguments)) {
-						result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "A previous identical call has unknown side effects. Confirm its outcome before retrying.")
-						if err := current.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, s.clock.Now()); err != nil {
-							return err
-						}
-						invocation = current
-						return s.invocations.Save(txCtx, current)
+			for _, previous := range prior {
+				if previous.Status == toolmodel.ToolInvocationUnknown && previous.Name == current.Name &&
+					(previous.ArgumentsDigest == current.ArgumentsDigest || bytes.Equal(previous.NormalizedArguments, current.NormalizedArguments)) {
+					result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "A previous identical call has unknown side effects. Confirm its outcome before retrying.")
+					if err := current.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, s.clock.Now()); err != nil {
+						return err
 					}
+					invocation = current
+					return s.invocations.Save(txCtx, current)
 				}
 			}
-			if err := current.Start(s.clock.Now()); err != nil {
-				return err
-			}
-			if err := s.invocations.Save(txCtx, current); err != nil {
-				return err
-			}
-			execute = true
+		}
+		if err := current.Start(s.clock.Now()); err != nil {
+			return err
+		}
+		if err := s.invocations.Save(txCtx, current); err != nil {
+			return err
+		}
+		invocation = current
+		execute = true
+		return nil
+	})
+	return invocation, execute, err
+}
+
+// reject 结算执行前的拒绝；已经批准的调用使用 interrupted，不改写运行中调用。
+func (s *Executor) reject(ctx context.Context, id contracts.ToolInvocationID, code toolmodel.ToolFailureCode, message string) (toolcontracts.ToolResult, error) {
+	var invocation toolmodel.ToolInvocation
+	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+		current, err := s.invocations.Get(txCtx, id)
+		if err != nil {
+			return err
+		}
+		if current.Status.Terminal() {
+			invocation = current
+			return nil
+		}
+		if current.Status == toolmodel.ToolInvocationRunning {
+			return contracts.New(contracts.TaskBusy, "tool call is already running")
+		}
+		if current.Status == toolmodel.ToolInvocationApproved {
+			code = toolmodel.ToolFailureInterrupted
+		}
+		result := toolcontracts.NewToolError(string(code), message)
+		domain := toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: code}
+		if current.Status == toolmodel.ToolInvocationApproved {
+			err = current.Interrupt(domain, s.clock.Now())
+		} else {
+			err = current.Deny(domain, s.clock.Now())
+		}
+		if err != nil {
+			return err
+		}
+		if err := s.invocations.Save(txCtx, current); err != nil {
+			return err
 		}
 		invocation = current
 		return nil
 	})
-	return invocation, execute, err
+	result, _ := settledResult(invocation)
+	return result, err
 }
 
 func (s *Executor) succeed(

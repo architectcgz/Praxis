@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
 	projectmodel "praxis/internal/core/project"
-	securitymodel "praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
@@ -27,7 +25,6 @@ type Repositories struct {
 	Sessions        SessionRepository
 	Agents          AgentRepository
 	Tasks           TaskRepository
-	Policies        PolicyRepository
 	Contexts        ContextRepository
 	ToolInvocations ToolRepository
 	Controls        ControlRepository
@@ -42,7 +39,6 @@ func (s *Store) Repositories() Repositories {
 		Sessions:        SessionRepository{s},
 		Agents:          AgentRepository{s},
 		Tasks:           TaskRepository{s},
-		Policies:        PolicyRepository{s},
 		Contexts:        ContextRepository{s},
 		ToolInvocations: ToolRepository{s},
 		Controls:        ControlRepository{s},
@@ -55,7 +51,6 @@ type WorkspaceRepository struct{ s *Store }
 type SessionRepository struct{ s *Store }
 type AgentRepository struct{ s *Store }
 type TaskRepository struct{ s *Store }
-type PolicyRepository struct{ s *Store }
 type ContextRepository struct{ s *Store }
 type ToolRepository struct{ s *Store }
 type ControlRepository struct{ s *Store }
@@ -255,50 +250,6 @@ func (r TaskRepository) CountActiveBySession(ctx context.Context, id contracts.S
 	return len(v), e
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-type policyRecord struct {
-	AgentID contracts.AgentID
-	Policy  securitymodel.AgentSecurityPolicy
-}
-
-func policyKey(id contracts.AgentID, revision uint64) string {
-	return fmt.Sprintf("%s:%d", id, revision)
-}
-
-// Save 校验并保存对象，事务未提交时只更新工作区。
-func (r PolicyRepository) Save(ctx context.Context, id contracts.AgentID, v securitymodel.AgentSecurityPolicy) error {
-	if e := v.Validate(); e != nil {
-		return e
-	}
-	agent, e := (AgentRepository{r.s}).Get(ctx, id)
-	if e != nil {
-		return e
-	}
-	return save(ctx, r.s, agent.SessionID.String(), "policy", policyKey(id, v.Revision), "policy.saved", policyRecord{id, v})
-}
-
-// GetCurrent 返回 Agent 的最新策略版本，未找到时返回 contracts.ErrNotFound。
-func (r PolicyRepository) GetCurrent(ctx context.Context, id contracts.AgentID) (securitymodel.AgentSecurityPolicy, error) {
-	values, e := list[policyRecord](ctx, r.s, "policy", func(v policyRecord) bool { return v.AgentID == id })
-	if e != nil {
-		return securitymodel.AgentSecurityPolicy{}, e
-	}
-	if len(values) == 0 {
-		return securitymodel.AgentSecurityPolicy{}, contracts.ErrNotFound
-	}
-	sorted(values, func(a, b policyRecord) int { return cmp.Compare(b.Policy.Revision, a.Policy.Revision) })
-	return values[0].Policy, nil
-}
-
-// GetByRevision 读取指定策略版本，第二个返回值表示是否存在。
-func (r PolicyRepository) GetByRevision(ctx context.Context, id contracts.AgentID, revision uint64) (securitymodel.AgentSecurityPolicy, bool, error) {
-	v, e := get[policyRecord](ctx, r.s, "policy", policyKey(id, revision))
-	if errors.Is(e, contracts.ErrNotFound) {
-		return v.Policy, false, nil
-	}
-	return v.Policy, e == nil, e
-}
-
 // Append 幂等追加记录，身份相同但内容不一致时返回冲突。
 func (r ContextRepository) Append(ctx context.Context, v contextmodel.SessionContextEntry) error {
 	existing, ok, e := r.GetByID(ctx, v.ID)
@@ -429,7 +380,6 @@ var (
 	_ repository.SessionAgentRepository        = AgentRepository{}
 	_ repository.TaskRepository                = TaskRepository{}
 	_ repository.ToolInvocationRepository      = ToolRepository{}
-	_ repository.AgentSecurityPolicyRepository = PolicyRepository{}
 	_ repository.SessionContextRepository      = ContextRepository{}
 	_ repository.AgentControlCommandRepository = ControlRepository{}
 )
