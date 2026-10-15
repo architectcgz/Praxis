@@ -1,4 +1,4 @@
-package context
+package session
 
 import (
 	"praxis/internal/contracts"

@@ -94,12 +94,12 @@ func TestSelectTaskMessagesBoundaryAndLateReceipts(t *testing.T) {
 		},
 		textMessage("answer-b", "b", 9, sessionmodel.RoleAssistant),
 	}
-	input := taskmodel.Input{
+	inputMessageID := "input-b"
+	selection := taskmodel.ContextSelection{
 		MessageSequenceBoundary: 4,
-		CurrentInputMessageID:   "input-b",
 		ExcludedMessageIDs:      []string{"input-c"},
 	}
-	history, continuation := selectTaskMessages(messages, input, "b")
+	history, continuation := selectTaskMessages(messages, selection, inputMessageID, "b")
 	var ids []string
 	for _, message := range history {
 		ids = append(ids, message.ID)
@@ -111,18 +111,16 @@ func TestSelectTaskMessagesBoundaryAndLateReceipts(t *testing.T) {
 	if len(history[3].Blocks) != 1 || len(messages[7].Blocks) != 2 {
 		t.Fatal("延迟回执必须只包含所选调用，且不能修改源消息")
 	}
-	built, err := contextmodel.NewContextBuilder().Build(contextmodel.BuildInput{
-		ContextWindow:         8192,
-		MaxOutputTokens:       1024,
-		Messages:              history,
-		CurrentInputMessageID: input.CurrentInputMessageID,
-		ContinuationMessages:  continuation,
-	})
+	content, err := contextContent("", inputMessageID, nil, history, continuation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	built, err := contextmodel.NewContextBuilder().Build(content, contextmodel.Limits{ContextWindow: 8192, MaxOutputTokens: 1024})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var texts []string
-	for _, entry := range built.Context.Entries {
+	for _, entry := range built.Entries {
 		for _, block := range entry.Content {
 			if block.Text != "" {
 				texts = append(texts, block.Text)
@@ -134,8 +132,8 @@ func TestSelectTaskMessagesBoundaryAndLateReceipts(t *testing.T) {
 	}
 	// 立即创建的 Task 输入在历史边界之后独立写入，零边界也不能纳入后续消息。
 	for _, boundary := range []uint64{0, 2} {
-		input.MessageSequenceBoundary = boundary
-		history, _ := selectTaskMessages(messages, input, "b")
+		selection.MessageSequenceBoundary = boundary
+		history, _ := selectTaskMessages(messages, selection, inputMessageID, "b")
 		found := false
 		for _, message := range history {
 			found = found || message.ID == "input-b"
@@ -150,11 +148,11 @@ func TestSelectTaskMessagesBoundaryAndLateReceipts(t *testing.T) {
 }
 
 type contextFixture struct {
-	store *jsonl.Store
-	repos jsonl.Repositories
-	root  string
-	agent agentmodel.Agent
-	input taskmodel.Input
+	store  *jsonl.Store
+	repos  jsonl.Repositories
+	root   string
+	agent  agentmodel.Agent
+	config taskmodel.Config
 }
 
 func newContextFixture(t *testing.T) *contextFixture {
@@ -201,11 +199,9 @@ func newContextFixture(t *testing.T) *contextFixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.input = taskmodel.Input{
-		AgentDefinitionID:       f.agent.DefinitionID,
-		AgentDefinitionRevision: "revision",
-		CurrentInputMessageID:   "input-b",
-		WorkspacePath:           workspacePath,
+	f.config = taskmodel.Config{
+		AgentDefinitionID: f.agent.DefinitionID,
+		WorkspacePath:     workspacePath,
 		Model: model.Config{
 			ProviderID:      "provider",
 			ModelID:         "model",
@@ -218,19 +214,8 @@ func newContextFixture(t *testing.T) *contextFixture {
 	return f
 }
 
-func (f *contextFixture) builder(t *testing.T) *TaskContextBuilder {
-	t.Helper()
-	builder, err := NewTaskContextBuilder(ContextBuilderConfig{
-		Transactions: f.store,
-		Sessions:     f.repos.Sessions,
-		Tasks:        f.repos.Tasks,
-		Contexts:     f.repos.Contexts,
-		Messages:     f.repos.Messages,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return builder
+func (f *contextFixture) service() *Service {
+	return &Service{tx: f.store, sessions: f.repos.Sessions, tasks: f.repos.Tasks, contexts: f.repos.Contexts, messages: f.repos.Messages}
 }
 
 func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
@@ -238,7 +223,7 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 	at := time.Unix(1, 0).UTC()
 	tasks := make(map[string]taskmodel.Task)
 	for index, id := range []string{"a", "b", "c"} {
-		task, err := taskmodel.NewPendingTask(contracts.TaskID(id), f.agent.SessionID, f.agent.ID, contracts.RequestID(id), uint64(index+1), at)
+		task, err := taskmodel.NewPendingTask(contracts.TaskID(id), f.agent.SessionID, f.agent.ID, contracts.RequestID(id), "input-"+id, uint64(index+1), at)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -257,9 +242,8 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 	finish := func(id string) {
 		t.Helper()
 		task := tasks[id]
-		input := f.input
-		input.CurrentInputMessageID = "input-" + id
-		if err := task.Prepare(input); err != nil {
+		config := f.config
+		if err := task.Prepare(config, taskmodel.ContextSelection{}); err != nil {
 			t.Fatal(err)
 		}
 		if err := f.store.InTx(t.Context(), func(ctx context.Context) error {
@@ -278,26 +262,26 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 		}
 	}
 	finish("a")
-	shared, err := contextmodel.NewSessionContextEntry("shared", f.agent.SessionID, contextmodel.SessionContextDecision, "", "启动前共享内容", at)
+	shared, err := sessionmodel.NewSessionContextEntry("shared", f.agent.SessionID, sessionmodel.SessionContextDecision, "", "启动前共享内容", at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var input taskmodel.Input
+	var selection taskmodel.ContextSelection
 	if err := f.store.InTx(t.Context(), func(ctx context.Context) error {
 		if err := f.repos.Contexts.Append(ctx, shared); err != nil {
 			return err
 		}
 		var err error
-		input, err = f.builder(t).BuildInitialContext(ctx, f.agent, f.input, "")
+		selection, err = f.service().selectContext(ctx, f.agent, f.config, "input-b")
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(input.ExcludedMessageIDs, []string{"input-c"}) || len(input.SessionContextRefs) != 1 || input.MessageSequenceBoundary == 0 {
-		t.Fatalf("初始选择错误: %+v", input)
+	if !reflect.DeepEqual(selection.ExcludedMessageIDs, []string{"input-c"}) || len(selection.SessionContextRefs) != 1 || selection.MessageSequenceBoundary == 0 {
+		t.Fatalf("初始选择错误: %+v", selection)
 	}
 	b := tasks["b"]
-	if err := b.Prepare(input); err != nil {
+	if err := b.Prepare(f.config, selection); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.agent.Start(b.ID, at); err != nil {
@@ -311,12 +295,12 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before, err := f.builder(t).RebuildTaskContext(t.Context(), b)
+	before, _, err := f.service().LoadContext(t.Context(), b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	finish("c")
-	newShared, err := contextmodel.NewSessionContextEntry("later", f.agent.SessionID, contextmodel.SessionContextDecision, "", "启动后共享内容", at.Add(time.Second))
+	newShared, err := sessionmodel.NewSessionContextEntry("later", f.agent.SessionID, sessionmodel.SessionContextDecision, "", "启动后共享内容", at.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,11 +324,11 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := f.builder(t).RebuildTaskContext(t.Context(), restored)
+	after, _, err := f.service().LoadContext(t.Context(), restored)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(input, restored.Input) || before.Digest != after.Digest {
+	if !reflect.DeepEqual(selection, restored.ContextSelection) || !reflect.DeepEqual(before, after) {
 		t.Fatal("Task 状态、后续消息或共享条目变化影响了恢复上下文")
 	}
 	call := textMessage("call-b", "b", 0, sessionmodel.RoleAssistant)
@@ -371,13 +355,13 @@ func TestQueuedContextRemainsStableAfterStateChangeAndReload(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := f.builder(t).RebuildTaskContext(t.Context(), restored)
-	if err != nil || len(continued.TaskMessages) != 2 || len(continued.Context.Entries) != len(before.Context.Entries)+2 {
+	continued, taskMessages, err := f.service().LoadContext(t.Context(), restored)
+	if err != nil || len(taskMessages) != 2 || len(continued.Entries) != len(before.Entries)+2 {
 		t.Fatalf("恢复遗漏当前 Task 已提交的工具交互: %+v, %v", continued, err)
 	}
 	// 恢复必须检查启动时引用的共享版本，不能悄悄使用其他条目。
-	restored.Input.SessionContextRefs[0].Digest = "wrong"
-	if _, err := f.builder(t).RebuildTaskContext(t.Context(), restored); !errors.Is(err, contracts.ErrRevisionConflict) {
+	restored.ContextSelection.SessionContextRefs[0].Digest = "wrong"
+	if _, _, err := f.service().LoadContext(t.Context(), restored); !errors.Is(err, contracts.ErrRevisionConflict) {
 		t.Fatalf("共享上下文版本不一致时应拒绝恢复: %v", err)
 	}
 
@@ -389,7 +373,7 @@ func TestContextUsesAgentOwnedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var input taskmodel.Input
+	var selection taskmodel.ContextSelection
 	if err := f.store.InTx(t.Context(), func(ctx context.Context) error {
 		if err := f.repos.Agents.Save(ctx, private); err != nil {
 			return err
@@ -400,25 +384,26 @@ func TestContextUsesAgentOwnedStream(t *testing.T) {
 		if _, err := f.repos.Messages.Append(ctx, private, textMessage("private-only", "", 0, sessionmodel.RoleUser)); err != nil {
 			return err
 		}
-		input = f.input
-		input.AgentDefinitionID = private.DefinitionID
-		input.CurrentInputMessageID = "private-only"
+		config := f.config
+		config.AgentDefinitionID = private.DefinitionID
 		var err error
-		input, err = f.builder(t).BuildInitialContext(ctx, private, input, "")
+		selection, err = f.service().selectContext(ctx, private, config, "private-only")
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	built, err := f.builder(t).RebuildTaskContext(t.Context(), taskmodel.Task{
-		ID:        "private-task",
-		SessionID: private.SessionID,
-		AgentID:   private.ID,
-		Input:     input,
+	built, _, err := f.service().LoadContext(t.Context(), taskmodel.Task{
+		ID:               "private-task",
+		SessionID:        private.SessionID,
+		AgentID:          private.ID,
+		InputMessageID:   "private-only",
+		Config:           f.config,
+		ContextSelection: selection,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(built.Context.Entries) != 1 || built.Context.Entries[0].Content[0].Text != "private-only" || len(input.SessionContextRefs) != 0 {
-		t.Fatalf("私有流混入其他 Agent 的内容: %+v", built.Context)
+	if len(built.Entries) != 1 || built.Entries[0].Content[0].Text != "private-only" || len(selection.SessionContextRefs) != 0 {
+		t.Fatalf("私有流混入其他 Agent 的内容: %+v", built)
 	}
 }

@@ -3,12 +3,15 @@ package execution
 import (
 	"context"
 	"praxis/internal/contracts"
+	appcontext "praxis/internal/core/context"
+	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/loop"
 )
 
 // TaskOperations 保留 Task 准备、恢复和结算的事务边界。
 type TaskOperations interface {
+	LoadContext(context.Context, taskmodel.Task) (appcontext.Content, []sessionmodel.MessageData, error)
 	PrepareQueuedTask(context.Context, taskmodel.Task) (taskmodel.Task, bool, error)
 	ReclaimTask(context.Context, taskmodel.Task) (taskmodel.Task, error)
 	ConfirmRunning(context.Context, contracts.TaskID) error

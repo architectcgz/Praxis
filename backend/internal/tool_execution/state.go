@@ -29,7 +29,7 @@ func (s *Executor) reserveCall(ctx context.Context, id contracts.ToolInvocationI
 		if err != nil {
 			return err
 		}
-		limit := task.Input.ResourceLimits.MaxToolCalls
+		limit := task.Config.ResourceLimits.MaxToolCalls
 		if limit <= 0 {
 			limit = 128
 		}
@@ -69,7 +69,7 @@ func (s *Executor) start(ctx context.Context, id contracts.ToolInvocationID) (to
 			TurnID:        current.TurnID,
 			SessionID:     current.SessionID,
 			AgentID:       current.AgentID,
-			WorkspacePath: task.Input.WorkspacePath,
+			WorkspacePath: task.Config.WorkspacePath,
 		}); err != nil {
 			return err
 		}

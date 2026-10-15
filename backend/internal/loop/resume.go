@@ -28,7 +28,7 @@ func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messa
 		}
 		metadata := contracts.ToolInvocationContext{
 			TaskID: task.ID, TurnID: contracts.TurnID(message.TurnID), SessionID: task.SessionID,
-			AgentID: task.AgentID, WorkspacePath: task.Input.WorkspacePath,
+			AgentID: task.AgentID, WorkspacePath: task.Config.WorkspacePath,
 		}
 		for _, block := range message.Blocks {
 			if block.Kind != sessionmodel.BlockToolCall || receipts[block.CallID] {
@@ -40,7 +40,7 @@ func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messa
 				return err
 			}
 			result := results[0]
-			*modelContext = modelContext.AppendToolResult(appcontext.NewToolResultBlock(call.ID, string(call.Name), result.Payload, result.ErrorClass != ""))
+			*modelContext = modelContext.RestoreToolResult(appcontext.NewToolResultBlock(call.ID, string(call.Name), result.Payload, result.ErrorClass != ""))
 		}
 	}
 	return nil

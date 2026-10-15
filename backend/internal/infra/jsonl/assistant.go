@@ -29,7 +29,7 @@ func (w MessageWriter) AppendAssistant(
 		if err != nil {
 			return err
 		}
-		if !task.Active() || task.SessionID != metadata.SessionID || task.AgentID != metadata.AgentID || task.Input.WorkspacePath != metadata.WorkspacePath || message.RequestID != task.RequestID.String() {
+		if !task.Active() || task.SessionID != metadata.SessionID || task.AgentID != metadata.AgentID || task.Config.WorkspacePath != metadata.WorkspacePath || message.RequestID != task.RequestID.String() {
 			return contracts.ErrRequestConflict
 		}
 		if _, err := w.Append(txCtx, message); err != nil {

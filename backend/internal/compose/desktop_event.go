@@ -5,7 +5,7 @@ import (
 
 	"praxis/internal/loop"
 	appservices "praxis/internal/service"
-	"praxis/internal/service/runtime/task"
+	"praxis/internal/service/task"
 	"praxis/internal/timing"
 )
 

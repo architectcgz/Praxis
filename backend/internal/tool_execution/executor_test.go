@@ -39,6 +39,10 @@ type executionFixture struct {
 }
 
 func newExecutionFixture(t *testing.T, name contracts.ToolName, arguments any, action security.CommandAction) *executionFixture {
+	return newExecutionFixtureWithLimits(t, name, arguments, action, contracts.ResourceLimits{})
+}
+
+func newExecutionFixtureWithLimits(t *testing.T, name contracts.ToolName, arguments any, action security.CommandAction, limits contracts.ResourceLimits) *executionFixture {
 	t.Helper()
 	f := &executionFixture{t: t, root: t.TempDir(), workspace: t.TempDir()}
 	config := toolconfig.Config{Bash: security.CommandPolicy{DefaultAction: action}}
@@ -74,9 +78,10 @@ func newExecutionFixture(t *testing.T, name contracts.ToolName, arguments any, a
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := taskmodel.NewTask("task", session.ID, agent.ID, "request", taskmodel.Input{
-		AgentDefinitionID: agent.DefinitionID, AgentDefinitionRevision: "revision", CurrentInputMessageID: "input",
-		WorkspacePath: f.workspace,
+	task, err := taskmodel.NewTask("task", session.ID, agent.ID, "request", "input", taskmodel.Config{
+		AgentDefinitionID: agent.DefinitionID,
+		ResourceLimits:    limits,
+		WorkspacePath:     f.workspace,
 		Model: model.Config{
 			ProviderID:      "provider",
 			ModelID:         "model",
@@ -85,7 +90,7 @@ func newExecutionFixture(t *testing.T, name contracts.ToolName, arguments any, a
 			MaxOutputTokens: 1024,
 			BaseURL:         "https://example.com",
 		},
-	}, at)
+	}, taskmodel.ContextSelection{}, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,5 +539,38 @@ func TestPolicyDecisionDoesNotCountAsUserDecision(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestToolBudgetSurvivesRestartAndDoesNotChargeDuplicateCall(t *testing.T) {
+	f := newExecutionFixtureWithLimits(t, contracts.ToolReadFile, map[string]any{"path": "hello.txt"}, security.CommandDeny, contracts.ResourceLimits{MaxToolCalls: 1})
+	if err := os.WriteFile(filepath.Join(f.workspace, "hello.txt"), []byte("hello"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.executor.Execute(t.Context(), f.call, f.metadata); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.open()
+	if _, err := f.executor.Execute(t.Context(), f.call, f.metadata); err != nil {
+		t.Fatal(err)
+	}
+	task, err := f.repos.Tasks.Get(t.Context(), f.metadata.TaskID)
+	if err != nil || task.Progress.ToolCalls != 1 {
+		t.Fatalf("重复调用重新计费: %+v %v", task.Progress, err)
+	}
+	call := f.call
+	call.ID = "second"
+	invocation, err := toolmodel.NewToolInvocation("second", task.ID, f.metadata.TurnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.InTx(t.Context(), func(ctx context.Context) error { return f.repos.ToolInvocations.Save(ctx, invocation) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.executor.Execute(t.Context(), call, f.metadata); !errors.Is(err, contracts.New(contracts.TaskResourceLimit, "")) {
+		t.Fatalf("重启后绕过工具次数限制: %v", err)
 	}
 }

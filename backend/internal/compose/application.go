@@ -18,8 +18,8 @@ import (
 	applicationproject "praxis/internal/service/project"
 	applicationruntime "praxis/internal/service/runtime"
 	runtimequeue "praxis/internal/service/runtime/queue"
-	applicationtask "praxis/internal/service/runtime/task"
 	applicationsession "praxis/internal/service/session"
+	applicationtask "praxis/internal/service/task"
 	toolexecution "praxis/internal/tool_execution"
 
 	agentregistry "praxis/internal/infra/agent_registry"
@@ -234,19 +234,6 @@ func Open(
 		closeStore()
 		return nil, err
 	}
-	taskContextBuilder, err := applicationtask.NewTaskContextBuilder(applicationtask.ContextBuilderConfig{
-		Transactions: store,
-		Sessions:     repos.Sessions,
-		Tasks:        repos.Tasks,
-		Contexts:     repos.Contexts,
-		Messages:     messages,
-	})
-	if err != nil {
-		diagnostics.Errorf("create task context builder failed: %v", err)
-		_ = diagnostics.Close()
-		closeStore()
-		return nil, err
-	}
 	taskService, err := applicationtask.NewService(applicationtask.Config{
 		Controls:       repos.Controls,
 		Transactions:   store,
@@ -255,16 +242,16 @@ func Open(
 		EventObserver: func(event applicationtask.TerminalEvent) {
 			events.Publish(terminalAgentEvent(event))
 		},
-		Workspaces:     repos.Workspaces,
-		Sessions:       repos.Sessions,
-		Agents:         repos.Agents,
-		Tasks:          repos.Tasks,
-		Executions:     activeTasks,
-		Messages:       repos.Messages,
-		PrimaryAgent:   sessionService,
-		Definitions:    taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		Models:         taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		ContextBuilder: taskContextBuilder,
+		Workspaces:   repos.Workspaces,
+		Sessions:     repos.Sessions,
+		Agents:       repos.Agents,
+		Tasks:        repos.Tasks,
+		Executions:   activeTasks,
+		Messages:     repos.Messages,
+		PrimaryAgent: sessionService,
+		Definitions:  taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		Models:       taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		Contexts:     repos.Contexts,
 	})
 	if err != nil {
 		diagnostics.Errorf("create task service failed: %v", err)
@@ -288,7 +275,6 @@ func Open(
 		}
 		builtRunner, buildErr := loop.NewRunner(loop.Config{
 			ModelBuilder:   modelRegistry,
-			ContextBuilder: taskContextBuilder,
 			Progress:       taskService,
 			ToolExecutor:   toolExecutor,
 			Tools:          toolCatalog,

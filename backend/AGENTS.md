@@ -5,14 +5,16 @@
 
 ## 数据命名与上下文职责
 
-- 类型名描述数据是什么，不强调生成方式；包名已表达的领域不在类型名中重复。Task 执行输入使用 `task.Input`，已选定并保存的模型配置使用 `model.Config`，模型目录配置使用 `modelconfig.Model`。
-- 模型目录解析使用 `ModelConfigResolver`、`ResolveTaskModel` 和 `ResolveDefaultTaskModel`；构建执行输入使用 `buildTaskInput`。
-- 历史消息选择属于 Task 层。启动时保存 `MessageSequenceBoundary`、`ExcludedMessageIDs` 和 `SessionContextRefs`；恢复时使用这些既定值，不根据其他 Task 的当前状态重新计算。
-- 消息流归属与历史消息选择分别命名：主 Agent 使用 Session 消息流，其他 Agent 使用各自的私有流；局部消息选择结果使用 `selectedMessages`，所选工具调用使用 `selectedToolCalls`。
-- `core/context.ContextBuilder` 只使用已选消息和共享条目构建 `ModelContext`，不查询 Task 状态或计算历史边界、排除项。
-- ToolResult 必须按 `(TaskID, CallID)` 关联 ToolCall，历史回执的配对排序复用 `core/context/history.go`。
-
-- JSONL 正常读写只支持当前持久化结构，不保留旧输入字段兼容逻辑。
+- 类型名描述数据是什么，不强调生成方式；包名已表达的领域不在类型名中重复。执行配置使用 `task.Config`，历史选择使用 `task.ContextSelection`，用户输入只保存 `Task.InputMessageID`；正文由 JSONL 保存。已选模型配置使用 `model.Config`，模型目录配置使用 `modelconfig.Model`。
+- 模型目录解析使用 `ModelConfigResolver`、`ResolveTaskModel` 和 `ResolveDefaultTaskModel`；构建执行配置使用 `buildConfig`。Pending Task 保留模型选择请求，领取时解析配置。
+- 历史消息选择与消息转换属于 `service/task`。启动时冻结 `MessageSequenceBoundary`、`ExcludedMessageIDs` 和 `SessionContextRefs`；恢复时使用既定值，不根据其他 Task 当前状态重新计算。
+- `core/context` 是通用模型上下文模块，不允许依赖 Task、Session、TaskRepository、消息日志、队列或业务 service；共享事实实体放在 `core/session`。
+- `ContextBuilder.Build` 只接收 `context.Content` 与 `context.Limits`，只负责通用结构校验、必要规范化、独立复制、顺序保持和必要原文的容量检查；可压缩历史在模型请求边界压缩，不能静默截断。
+- TaskService 加载和选择历史、当前输入、续接消息与共享事实，转换成有序的 `[]context.ContextEntry`。必须保留原文的内容标记 `Protected`；压缩模块不得从业务实体或来源 Kind 推导保护规则。
+- 消息流归属与历史选择分别命名：主 Agent 使用 Session 流，其他 Agent 使用各自的私有流；局部选择结果使用 `selectedMessages`，所选工具调用使用 `selectedToolCalls`。
+- ToolResult 必须按 `(TaskID, CallID)` 关联 ToolCall，业务消息转换与历史配对位于 `service/task/context_adapter.go`；排除项不得通过延迟回执补全重新纳入。恢复工具回执保持调用声明顺序。
+- 压缩保持 Protected 原文及其相对顺序；保护范围覆盖完整工具交互，未闭合工具链不可摘要。摘要输入必须移除展示思考和推理状态，保留区的状态原样续传。
+- JSONL 只支持当前 Task 持久化结构，不提供格式迁移或兼容层；恢复拒绝未知字段和非 canonical 值，不能静默修改或删除用户数据。`InputMessageID` 创建后不可变；`Config` 与 `ContextSelection` 只允许 Pending → Starting 时确定，之后不可变；`Progress` 预算不得回退。
 
 ## 执行编排与活动状态
 
@@ -23,4 +25,7 @@
 - 审批事务提交后调用 `ResumeApproved`；缓冲唤醒信号不得丢失，重复激活不得创建第二个 Loop。
 - Pause / Stop 必须先提交控制意图，再传递取消；最终 Outcome 由 `Settle` 事务仲裁。结算失败保留占用及待提交结果，再次激活只重试结算；只有成功提交的 completed / yielded 才自动领取队列。
 - Coordinator 的全局锁仅保护关闭和工作启动，不在锁下执行存储事务、Hook 或模型调用。关闭必须等待准备、恢复、Loop 和结算退出；等待超时不得关闭 JSONL Store 或日志，后续 Close 可以继续等待。
+- Coordinator 每次进入或恢复 Loop 前通过 TaskService 加载通用内容；Loop 自己调用通用 ContextBuilder，并在消息恢复后重新读取已提交 Progress。
 - 并发路径变更运行 `go test ./...`、`go test -race ./...` 和 `go vet ./...`；增加依赖门禁：`./internal/loop/...` 禁 `internal/(execution|service)`，`./internal/execution/...` 禁 `internal/service`。
+
+- 通用上下文依赖门禁：`./internal/core/context/...` 禁 `internal/(core/(task|session|agent)|repository|service|infra|execution|loop)`；与根 `AGENTS.md` 中的其余门禁一并执行。

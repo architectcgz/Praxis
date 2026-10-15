@@ -12,7 +12,6 @@ import (
 
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
-	contextmodel "praxis/internal/core/context"
 	"praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
@@ -171,9 +170,10 @@ func immutable(collection string, before, after json.RawMessage) error {
 			"ModelID",
 			"ReasoningLevel",
 			"CreatedAt",
+			"InputMessageID",
 		}
 		if string(left["Status"]) != `"pending"` {
-			fields = append(fields, "Input")
+			fields = append(fields, "Config", "ContextSelection")
 		} else if string(right["Status"]) != `"pending"` && string(right["Status"]) != `"starting"` {
 			return contracts.ErrRequestConflict
 		}
@@ -416,7 +416,7 @@ func (s *Store) validate(objects map[objectKey]object) error {
 				err = claim("call:" + v.TaskID.String() + ":" + v.ProviderToolCallID)
 			}
 		case "context":
-			v, e := decode[contextmodel.SessionContextEntry](key.collection, value)
+			v, e := decode[sessionmodel.SessionContextEntry](key.collection, value)
 			err = e
 			item = v
 			identity = v.ID.String()

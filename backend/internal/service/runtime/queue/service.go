@@ -114,7 +114,7 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 		}
 		at := s.clock.Now().UTC()
 		task, err := taskmodel.NewPendingTask(
-			params.ID, agent.SessionID, agent.ID, params.RequestID, sequence, at,
+			params.ID, agent.SessionID, agent.ID, params.RequestID, "input:"+params.RequestID.String(), sequence, at,
 		)
 		if err != nil {
 			return err

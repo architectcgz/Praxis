@@ -21,11 +21,6 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// TaskContextBuilder 为首次执行和恢复执行提供同一上下文构建入口。
-type TaskContextBuilder interface {
-	RebuildTaskContext(context.Context, taskmodel.Task) (appcontext.BuildResult, error)
-}
-
 // TaskProgress 提供已提交的 Task 快照及模型消耗记录；事务由实现方负责。
 // 工具调用次数和回执字节由工具准入、消息写入负责，Loop 只读取累计结果。
 type TaskProgress interface {

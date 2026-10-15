@@ -2,13 +2,11 @@ package task
 
 import (
 	"praxis/internal/contracts"
-	"praxis/internal/utils/pathutil"
 
 	"reflect"
+	"slices"
 	"strings"
 	"time"
-
-	"praxis/internal/core/model"
 )
 
 const MaxInputBytes = 32 * 1024
@@ -34,73 +32,26 @@ const (
 	TaskAwaitingApproval TaskOutcome = "awaiting_approval"
 )
 
-// Input 保存 Task 的执行配置和历史选择规则，消息正文始终从日志读取。
-type Input struct {
-	AgentDefinitionID       contracts.AgentDefinitionID
-	AgentDefinitionRevision string
-	MessageSequenceBoundary uint64 `json:"messageSequenceBoundary"`
-	CurrentInputMessageID   string `json:"currentInputMessageId"`
-	SystemPrompt            string
-	ExcludedMessageIDs      []string
-	SessionContextRefs      []ContextReference
-	Model                   model.Config
-	WorkspacePath           string
-	ResourceLimits          contracts.ResourceLimits
-}
-
-func (s Input) Validate() error {
-	if !s.AgentDefinitionID.Valid() || s.AgentDefinitionRevision == "" {
-		return contracts.InvalidValue("taskInput.agentDefinition", "definition id and revision are required")
-	}
-	if s.CurrentInputMessageID == "" {
-		return contracts.InvalidValue("taskInput.currentInputMessageID", "current input is required")
-	}
-
-	if err := s.Model.Validate(); err != nil {
-		return contracts.FieldError("taskInput.model", err)
-	}
-	if !pathutil.IsAbsoluteNormalized(s.WorkspacePath) {
-		return contracts.InvalidValue("taskInput.workspacePath", "workspace path must be an absolute normalized path")
-	}
-	if err := s.ResourceLimits.Validate(); err != nil {
-		return contracts.FieldError("taskInput.resourceLimits", err)
-	}
-	return nil
-}
-
-type ContextReference struct {
-	ID     string
-	Digest string
-}
-
-// Progress 在模型请求及工具准入时提交，重启不能重置已消耗预算。
-type Progress struct {
-	NextSequence     uint64
-	ModelRequests    uint64
-	OutputBytes      int64
-	ToolCalls        int
-	FinalStopReason  string
-	FinalAssistantID string
-}
-
 type Task struct {
-	Progress       Progress
-	ID             contracts.TaskID
-	SessionID      contracts.SessionID
-	AgentID        contracts.AgentID
-	RequestID      contracts.RequestID
-	Sequence       uint64
-	ProviderID     string
-	ModelID        string
-	ReasoningLevel string
-	Status         TaskStatus
-	Input          Input
-	CreatedAt      time.Time
-	StartedAt      time.Time
-	EndedAt        time.Time
-	Outcome        TaskOutcome
-	FailureCode    contracts.TaskFailureCode
-	FailureMessage string
+	Progress         Progress
+	ID               contracts.TaskID
+	SessionID        contracts.SessionID
+	AgentID          contracts.AgentID
+	RequestID        contracts.RequestID
+	Sequence         uint64
+	ProviderID       string
+	ModelID          string
+	ReasoningLevel   string
+	Status           TaskStatus
+	InputMessageID   string
+	Config           Config
+	ContextSelection ContextSelection
+	CreatedAt        time.Time
+	StartedAt        time.Time
+	EndedAt          time.Time
+	Outcome          TaskOutcome
+	FailureCode      contracts.TaskFailureCode
+	FailureMessage   string
 }
 
 // NewTask 创建空闲 runtime 可以立即启动的 Task；执行输入必须已构建完成。
@@ -109,17 +60,21 @@ func NewTask(
 	sessionID contracts.SessionID,
 	agentID contracts.AgentID,
 	requestID contracts.RequestID,
-	input Input,
+	inputMessageID string,
+	config Config,
+	selection ContextSelection,
 	at time.Time,
 ) (Task, error) {
 	task := Task{
-		ID:        id,
-		SessionID: sessionID,
-		AgentID:   agentID,
-		RequestID: requestID,
-		Status:    TaskStarting,
-		Input:     input,
-		CreatedAt: at.UTC(),
+		ID:               id,
+		SessionID:        sessionID,
+		AgentID:          agentID,
+		RequestID:        requestID,
+		Status:           TaskStarting,
+		InputMessageID:   inputMessageID,
+		Config:           config.Clone(),
+		ContextSelection: selection.Clone(),
+		CreatedAt:        at.UTC(),
 	}
 	if err := task.Validate(); err != nil {
 		return Task{}, err
@@ -128,15 +83,16 @@ func NewTask(
 }
 
 // NewPendingTask 创建预约 Task，只保存请求身份和 FIFO 序号；正文由用户消息保存。
-func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID contracts.AgentID, requestID contracts.RequestID, sequence uint64, at time.Time) (Task, error) {
+func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID contracts.AgentID, requestID contracts.RequestID, inputMessageID string, sequence uint64, at time.Time) (Task, error) {
 	task := Task{
-		ID:        id,
-		SessionID: sessionID,
-		AgentID:   agentID,
-		RequestID: requestID,
-		Sequence:  sequence,
-		Status:    TaskPending,
-		CreatedAt: at.UTC(),
+		ID:             id,
+		SessionID:      sessionID,
+		AgentID:        agentID,
+		RequestID:      requestID,
+		Sequence:       sequence,
+		InputMessageID: inputMessageID,
+		Status:         TaskPending,
+		CreatedAt:      at.UTC(),
 	}
 	if err := task.Validate(); err != nil {
 		return Task{}, err
@@ -145,14 +101,21 @@ func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID 
 }
 
 // Prepare 在 runtime 空闲时确定执行输入；校验失败不改变待执行 Task。
-func (e *Task) Prepare(input Input) error {
+func (e *Task) Prepare(config Config, selection ContextSelection) error {
 	if e.Status != TaskPending {
 		return contracts.InvalidTransition("task", string(e.Status), string(TaskStarting))
 	}
-	if err := input.Validate(); err != nil {
+	if err := config.Validate(); err != nil {
 		return err
 	}
-	e.Input = input
+	if slices.Contains(selection.ExcludedMessageIDs, e.InputMessageID) {
+		return contracts.InvalidValue("task.contextSelection", "current input cannot be excluded")
+	}
+	if err := selection.Validate(); err != nil {
+		return err
+	}
+	e.Config = config.Clone()
+	e.ContextSelection = selection.Clone()
 	e.Status = TaskStarting
 	return nil
 }
@@ -181,11 +144,20 @@ func (e Task) Validate() error {
 	}
 	if e.Status == TaskPending {
 		if e.Sequence == 0 ||
-			!reflect.ValueOf(e.Input).IsZero() || e.Progress != (Progress{}) || !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" || e.FailureCode != "" {
+			!reflect.ValueOf(e.Config).IsZero() || !reflect.ValueOf(e.ContextSelection).IsZero() || e.Progress != (Progress{}) || !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" || e.FailureCode != "" {
 			return contracts.InvalidValue("task.pending", "pending task requires a sequence and cannot contain execution state")
 		}
-	} else if err := e.Input.Validate(); err != nil {
-		return contracts.FieldError("task.input", err)
+	} else if err := e.Config.Validate(); err != nil {
+		return contracts.FieldError("task.config", err)
+	}
+	if e.InputMessageID == "" || e.InputMessageID != strings.TrimSpace(e.InputMessageID) {
+		return contracts.InvalidValue("task.inputMessageID", "input message reference must be canonical and nonempty")
+	}
+	if slices.Contains(e.ContextSelection.ExcludedMessageIDs, e.InputMessageID) {
+		return contracts.InvalidValue("task.contextSelection", "current input cannot be excluded")
+	}
+	if err := e.ContextSelection.Validate(); err != nil {
+		return err
 	}
 	if e.CreatedAt.IsZero() {
 		return contracts.InvalidValue("task.createdAt", "creation time is required")

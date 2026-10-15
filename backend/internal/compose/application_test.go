@@ -47,11 +47,9 @@ func TestApplicationCloseTimeoutKeepsStoreAvailableUntilExecutionExits(t *testin
 		settled: make(chan error, 1),
 	}
 	slots := &execution.ActiveTasks{}
-	task, err := taskmodel.NewTask("task", "session", "agent", "request", taskmodel.Input{
-		AgentDefinitionID:       "primary",
-		AgentDefinitionRevision: "revision",
-		CurrentInputMessageID:   "input",
-		WorkspacePath:           t.TempDir(),
+	task, err := taskmodel.NewTask("task", "session", "agent", "request", "input", taskmodel.Config{
+		AgentDefinitionID: "primary",
+		WorkspacePath:     t.TempDir(),
 		Model: model.Config{
 			ProviderID:      "provider",
 			ModelID:         "model",
@@ -60,7 +58,7 @@ func TestApplicationCloseTimeoutKeepsStoreAvailableUntilExecutionExits(t *testin
 			ContextWindow:   8192,
 			MaxOutputTokens: 1024,
 		},
-	}, time.Now().UTC())
+	}, taskmodel.ContextSelection{}, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

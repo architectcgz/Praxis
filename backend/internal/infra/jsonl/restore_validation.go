@@ -29,8 +29,7 @@ func validateRestoredEvent(scope string, event Event) error {
 		{"task.modelID", task.ModelID},
 		{"task.reasoningLevel", task.ReasoningLevel},
 		{"task.failureMessage", task.FailureMessage},
-		{"task.input.agentDefinitionRevision", task.Input.AgentDefinitionRevision},
-		{"task.input.currentInputMessageID", task.Input.CurrentInputMessageID},
+		{"task.inputMessageID", task.InputMessageID},
 	} {
 		if field.value != strings.TrimSpace(field.value) {
 			return contracts.InvalidValue(field.name, "恢复字段必须已规范化")

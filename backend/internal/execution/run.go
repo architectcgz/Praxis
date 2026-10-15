@@ -82,10 +82,14 @@ func (r *Coordinator) execute(
 	ctx, scope := r.hookDispatcher.Start(ctx, hooks.Operation{
 		Identity: hooks.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID},
 		Kind:     hooks.OperationAgent,
-		Name:     task.Input.AgentDefinitionID.String(),
+		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
-	outcome, failureCode, err := r.loop.Run(ctx, task, messageRecorder)
+	content, continuation, err := r.tasks.LoadContext(ctx, task)
+	outcome, failureCode := taskmodel.TaskFailed, contracts.TaskFailureStorage
+	if err == nil {
+		outcome, failureCode, err = r.loop.Run(ctx, task, content, continuation, messageRecorder)
+	}
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
 	scope.End(hooks.Result{Outcome: finalOutcome, Err: err})
 	r.logEvent(task.ID, "provider completed")

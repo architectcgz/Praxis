@@ -93,12 +93,29 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			return contracts.New(contracts.AgentExecuting, "")
 		}
 		inputMessageID := "input:" + params.RequestID.String()
-		input, err := s.buildTaskInput(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel, params.Content, inputMessageID)
+		config, err := s.buildConfig(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel)
 		if err != nil {
 			return err
 		}
 		at := s.clock.Now()
-		task, err := taskmodel.NewTask(contracts.TaskID(s.ids.New("task")), agent.SessionID, agent.ID, params.RequestID, input, at)
+		taskID := contracts.TaskID(s.ids.New("task"))
+		value := sessionmodel.MessageData{
+			ID:         inputMessageID,
+			RequestID:  params.RequestID.String(),
+			TaskID:     taskID.String(),
+			Role:       sessionmodel.RoleUser,
+			AuthorKind: sessionmodel.AuthorUser,
+			Blocks:     []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: params.Content}},
+			CreatedAt:  at,
+		}
+		if _, err = s.messages.Append(txCtx, agent, value); err != nil {
+			return err
+		}
+		selection, err := s.selectContext(txCtx, agent, config, inputMessageID)
+		if err != nil {
+			return err
+		}
+		task, err := taskmodel.NewTask(taskID, agent.SessionID, agent.ID, params.RequestID, inputMessageID, config, selection, at)
 		if err != nil {
 			return err
 		}
@@ -118,18 +135,6 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			admittedTask = task.ID
 		}
 		if err := s.tasks.Save(txCtx, task); err != nil {
-			return err
-		}
-		value := sessionmodel.MessageData{
-			ID:         inputMessageID,
-			RequestID:  params.RequestID.String(),
-			TaskID:     task.ID.String(),
-			Role:       sessionmodel.RoleUser,
-			AuthorKind: sessionmodel.AuthorUser,
-			Blocks:     []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: params.Content}},
-			CreatedAt:  at,
-		}
-		if _, err = s.messages.Append(txCtx, agent, value); err != nil {
 			return err
 		}
 		if err := s.agents.Save(txCtx, agent); err != nil {

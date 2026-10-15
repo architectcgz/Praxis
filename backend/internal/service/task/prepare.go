@@ -44,12 +44,16 @@ func (s *Service) PrepareQueuedTask(ctx context.Context, selected taskmodel.Task
 		if active != 0 {
 			return nil
 		}
-		input, err := s.buildTaskInput(txCtx, agent, task.ProviderID, task.ModelID, task.ReasoningLevel, "", "input:"+task.RequestID.String())
+		config, err := s.buildConfig(txCtx, agent, task.ProviderID, task.ModelID, task.ReasoningLevel)
 		if err != nil {
 			return err
 		}
 		at := s.clock.Now()
-		if err := task.Prepare(input); err != nil {
+		selection, err := s.selectContext(txCtx, agent, config, task.InputMessageID)
+		if err != nil {
+			return err
+		}
+		if err := task.Prepare(config, selection); err != nil {
 			return err
 		}
 		if err := agent.Start(task.ID, at); err != nil {

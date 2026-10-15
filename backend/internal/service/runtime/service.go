@@ -9,7 +9,7 @@ import (
 	"praxis/internal/contracts"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/service/runtime/queue"
-	"praxis/internal/service/runtime/task"
+	"praxis/internal/service/task"
 )
 
 // TaskActivator 把已提交的 Task 交给进程内执行协调器。

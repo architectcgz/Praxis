@@ -18,6 +18,13 @@ import (
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
+type preparedContext struct{ TaskMessages []sessionmodel.MessageData }
+
+func (f *fixture) LoadContext(ctx context.Context, task taskmodel.Task) (contextmodel.Content, []sessionmodel.MessageData, error) {
+	result, err := f.preparedContext(ctx, task)
+	return contextmodel.Content{Entries: []contextmodel.ContextEntry{{Kind: contextmodel.ContextEntryUserInput, Role: contextmodel.ContextRoleUser, Protected: true, Content: []contextmodel.ContextBlock{{Kind: contextmodel.ContextBlockText, Text: "input"}}}}}, result.TaskMessages, err
+}
+
 // fixture 使用真实 Loop；替身只控制存储、模型和工具边界的提交时机。
 type fixture struct {
 	mu          sync.Mutex
@@ -26,7 +33,7 @@ type fixture struct {
 	pending     map[contracts.AgentID]contracts.TaskID
 	builds      map[contracts.TaskID]int
 	settled     chan taskmodel.Task
-	build       func(context.Context, taskmodel.Task) (contextmodel.BuildResult, error)
+	build       func(context.Context, taskmodel.Task) (preparedContext, error)
 	settle      func(context.Context, taskmodel.Task) error
 	arbitrate   func(taskmodel.Task) taskmodel.Task
 	prepare     func(context.Context) error
@@ -44,12 +51,11 @@ func newFixture(t *testing.T) *fixture {
 		settled: make(chan taskmodel.Task, 20),
 	}
 	runner, err := loop.NewRunner(loop.Config{
-		ContextBuilder: f,
-		Progress:       f,
-		ModelBuilder:   completeModel{},
-		Tools:          tools.NewToolRegistry(),
-		ToolExecutor:   f,
-		EventObserver:  func(loop.Event) {},
+		Progress:      f,
+		ModelBuilder:  completeModel{},
+		Tools:         tools.NewToolRegistry(),
+		ToolExecutor:  f,
+		EventObserver: func(loop.Event) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -78,11 +84,9 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) add(t *testing.T, id contracts.TaskID, agentID contracts.AgentID, reserve bool) taskmodel.Task {
 	t.Helper()
-	task, err := taskmodel.NewTask(id, "session-"+contracts.SessionID(agentID), agentID, "request-"+contracts.RequestID(id), taskmodel.Input{
-		AgentDefinitionID:       "primary",
-		AgentDefinitionRevision: "revision",
-		CurrentInputMessageID:   "input",
-		WorkspacePath:           t.TempDir(),
+	task, err := taskmodel.NewTask(id, "session-"+contracts.SessionID(agentID), agentID, "request-"+contracts.RequestID(id), "input", taskmodel.Config{
+		AgentDefinitionID: "primary",
+		WorkspacePath:     t.TempDir(),
 		Model: model.Config{
 			ProviderID:      "provider",
 			ModelID:         "model",
@@ -91,7 +95,7 @@ func (f *fixture) add(t *testing.T, id contracts.TaskID, agentID contracts.Agent
 			ContextWindow:   8192,
 			MaxOutputTokens: 1024,
 		},
-	}, time.Now().UTC())
+	}, taskmodel.ContextSelection{}, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +166,7 @@ func (f *fixture) LoadTask(_ context.Context, id contracts.TaskID) (taskmodel.Ta
 }
 func (f *fixture) RecordModelRequest(context.Context, contracts.TaskID, uint64) error { return nil }
 func (f *fixture) RecordModelOutput(context.Context, contracts.TaskID, int) error     { return nil }
-func (f *fixture) RebuildTaskContext(ctx context.Context, task taskmodel.Task) (contextmodel.BuildResult, error) {
+func (f *fixture) preparedContext(ctx context.Context, task taskmodel.Task) (preparedContext, error) {
 	f.mu.Lock()
 	f.builds[task.ID]++
 	callback := f.build
@@ -170,7 +174,7 @@ func (f *fixture) RebuildTaskContext(ctx context.Context, task taskmodel.Task) (
 	if callback != nil {
 		return callback(ctx, task)
 	}
-	return contextmodel.BuildResult{}, nil
+	return preparedContext{}, nil
 }
 func (f *fixture) Execute(ctx context.Context, _ contracts.ToolCall, _ contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error) {
 	if f.tool != nil {
@@ -236,14 +240,14 @@ func TestDuplicateActivationAndParallelAgents(t *testing.T) {
 	second := f.add(t, "second", "b", true)
 	entered := make(chan contracts.TaskID, 2)
 	release := make(chan struct{})
-	f.build = func(ctx context.Context, task taskmodel.Task) (contextmodel.BuildResult, error) {
+	f.build = func(ctx context.Context, task taskmodel.Task) (preparedContext, error) {
 		entered <- task.ID
 		select {
 		case <-release:
 		case <-ctx.Done():
-			return contextmodel.BuildResult{}, ctx.Err()
+			return preparedContext{}, ctx.Err()
 		}
-		return contextmodel.BuildResult{}, nil
+		return preparedContext{}, nil
 	}
 	if err := f.coordinator.Activate(t.Context(), first); err != nil {
 		t.Fatal(err)
@@ -275,8 +279,8 @@ func TestDuplicateActivationAndParallelAgents(t *testing.T) {
 func TestApprovalBeforeWaitIsNotLost(t *testing.T) {
 	f := newFixture(t)
 	task := f.add(t, "task", "a", true)
-	f.build = func(context.Context, taskmodel.Task) (contextmodel.BuildResult, error) {
-		return contextmodel.BuildResult{TaskMessages: []sessionmodel.MessageData{{
+	f.build = func(context.Context, taskmodel.Task) (preparedContext, error) {
+		return preparedContext{TaskMessages: []sessionmodel.MessageData{{
 			Role:   sessionmodel.RoleAssistant,
 			TurnID: "turn",
 			Blocks: []sessionmodel.Block{{Kind: sessionmodel.BlockToolCall, CallID: "call", Name: "bash", Input: []byte(`{}`)}},

@@ -8,38 +8,15 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"praxis/internal/contracts"
-	sessionmodel "praxis/internal/core/session"
 )
-
-// EntryKind 表示共享 SessionContext 条目的业务类别。
-type EntryKind string
-
-const (
-	EntryUserMessage        EntryKind = "user_message"
-	EntryAcceptedConclusion EntryKind = "accepted_conclusion"
-	EntryDecision           EntryKind = "decision"
-	EntryReference          EntryKind = "reference"
-)
-
-// Entry 是 Context 模块自己的共享上下文条目，不暴露领域 model 类型。
-type Entry struct {
-	ID            string
-	SessionID     string
-	Kind          EntryKind
-	SourceTaskID  string
-	Content       string
-	ContentDigest string
-	CreatedAt     time.Time
-}
 
 // ContextEntryKind 表示运行期上下文条目的来源。
 type ContextEntryKind string
 
 const (
-	ContextEntrySession        ContextEntryKind = "session"
+	ContextEntryReference      ContextEntryKind = "reference"
 	ContextEntrySummary        ContextEntryKind = "summary"
 	ContextEntryUserInput      ContextEntryKind = "user_input"
 	ContextEntryProviderOutput ContextEntryKind = "provider_output"
@@ -83,13 +60,15 @@ type ContextBlock struct {
 
 // ContextEntry 是运行期上下文中的一个有序语义条目。
 type ContextEntry struct {
-	Kind    ContextEntryKind
-	Role    ContextRole
-	Content []ContextBlock
+	// Protected 要求压缩时保留原文；来源与保护策略由调用方决定。
+	Protected bool `json:",omitempty"`
+	Kind      ContextEntryKind
+	Role      ContextRole
+	Content   []ContextBlock
 }
 
 // ModelContext 是一次 Provider 请求使用的完整模型上下文。
-// Task 上下文构建器生成初始与恢复内容，Loop 在执行中追加 Provider output 和工具结果。
+// 调用方提供有序通用内容，执行中可追加模型输出和工具结果。
 type ModelContext struct {
 	SystemPrompt string
 	Entries      []ContextEntry
@@ -135,11 +114,11 @@ func (c ModelContext) Digest() (string, error) {
 // Validate 校验完整模型上下文的基本结构。
 func (c ModelContext) Validate() error {
 	if len(c.Entries) == 0 {
-		return errors.New("task context requires entries")
+		return errors.New("model context requires entries")
 	}
 	for _, entry := range c.Entries {
 		if !validContextEntryKind(entry.Kind) || !validContextRole(entry.Role) || len(entry.Content) == 0 {
-			return errors.New("task context contains an invalid entry")
+			return errors.New("model context contains an invalid entry")
 		}
 		for _, block := range entry.Content {
 			if block.Kind == ContextBlockReasoningState && entry.Role != ContextRoleAssistant {
@@ -155,7 +134,7 @@ func (c ModelContext) Validate() error {
 
 func validContextEntryKind(kind ContextEntryKind) bool {
 	switch kind {
-	case ContextEntrySession, ContextEntrySummary, ContextEntryUserInput, ContextEntryProviderOutput,
+	case ContextEntryReference, ContextEntrySummary, ContextEntryUserInput, ContextEntryProviderOutput,
 		ContextEntryToolResult, ContextEntryMCPCall, ContextEntryMCPResult:
 		return true
 	default:
@@ -185,66 +164,17 @@ func validateContextBlock(block ContextBlock) error {
 		return block.ReasoningState.Validate()
 	case ContextBlockText:
 		if strings.TrimSpace(block.Text) == "" {
-			return errors.New("task context contains an empty text block")
+			return errors.New("model context contains an empty text block")
 		}
 	case ContextBlockToolCall, ContextBlockMCPCall, ContextBlockToolResult, ContextBlockMCPResult:
 		if block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) {
-			return errors.New("task context contains an invalid or non-canonical call identity")
+			return errors.New("model context contains an invalid or non-canonical call identity")
 		}
 		if (block.Kind == ContextBlockToolCall || block.Kind == ContextBlockMCPCall) && len(block.Input) > 0 && !json.Valid(block.Input) {
-			return errors.New("task context contains invalid call input")
+			return errors.New("model context contains invalid call input")
 		}
 	default:
-		return errors.New("task context contains an unknown block kind")
-	}
-	return nil
-}
-
-// EntryFromMessageData 把消息投影为运行期 Context，思考内容只供展示，不能进入模型请求。
-func EntryFromMessageData(value sessionmodel.MessageData) (ContextEntry, bool) {
-	if len(value.Blocks) == 0 {
-		return ContextEntry{}, false
-	}
-	role := ContextRole(value.Role)
-	kind := ContextEntryProviderOutput
-	switch role {
-	case ContextRoleUser:
-		kind = ContextEntryUserInput
-	case ContextRoleTool:
-		kind = ContextEntryToolResult
-	case ContextRoleAssistant:
-	default:
-		return ContextEntry{}, false
-	}
-	content := make([]ContextBlock, 0, len(value.Blocks))
-	for _, block := range value.Blocks {
-		if block.Kind != sessionmodel.BlockThinking {
-			content = append(content, ContextBlock{
-				Kind:           ContextBlockKind(block.Kind),
-				Text:           block.Text,
-				CallID:         block.CallID,
-				Name:           block.Name,
-				Input:          bytes.Clone(block.Input),
-				IsError:        block.IsError,
-				ReasoningState: block.ReasoningState.Clone(),
-			})
-		}
-	}
-	if len(content) == 0 {
-		return ContextEntry{}, false
-	}
-	return ContextEntry{Kind: kind, Role: role, Content: content}, true
-}
-
-// ValidateEntry 校验共享 SessionContext 条目的稳定身份和正文。
-func ValidateEntry(entry Entry) error {
-	if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.SessionID) == "" || strings.TrimSpace(entry.Content) == "" || entry.CreatedAt.IsZero() {
-		return errors.New("context contains an invalid session entry")
-	}
-	switch entry.Kind {
-	case EntryUserMessage, EntryAcceptedConclusion, EntryDecision, EntryReference:
-	default:
-		return errors.New("context contains an unknown session entry kind")
+		return errors.New("model context contains an unknown block kind")
 	}
 	return nil
 }

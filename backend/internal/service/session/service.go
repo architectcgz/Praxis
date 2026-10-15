@@ -4,7 +4,6 @@ package session
 import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
-	contextmodel "praxis/internal/core/context"
 	"praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
@@ -174,7 +173,7 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID contracts.Sessio
 }
 
 // ListSessionContext 按稳定时间和 ID 游标读取 SessionContext 条目。
-func (s *Service) ListSessionContext(ctx context.Context, sessionID contracts.SessionID, afterID string, limit int) ([]contextmodel.SessionContextEntry, error) {
+func (s *Service) ListSessionContext(ctx context.Context, sessionID contracts.SessionID, afterID string, limit int) ([]sessionmodel.SessionContextEntry, error) {
 	if ctx == nil {
 		return nil, contracts.New(contracts.InvalidRequest, "session context query is invalid")
 	}
@@ -335,13 +334,13 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 type AppendContextParams struct {
 	EntryID      contracts.ContextEntryID
 	SessionID    contracts.SessionID
-	Kind         contextmodel.SessionContextKind
+	Kind         sessionmodel.SessionContextKind
 	SourceTaskID contracts.TaskID
 	Content      string
 }
 
 type AppendContextResult struct {
-	Entry         contextmodel.SessionContextEntry
+	Entry         sessionmodel.SessionContextEntry
 	ExistingEntry bool
 }
 
@@ -352,7 +351,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	}
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		entry, err := contextmodel.NewSessionContextEntry(
+		entry, err := sessionmodel.NewSessionContextEntry(
 			params.EntryID,
 			params.SessionID,
 			params.Kind,

@@ -50,7 +50,7 @@ type Config struct {
 	PrimaryAgent   PrimaryAgentProvider
 	Definitions    AgentDefinitionProvider
 	Models         ModelConfigResolver
-	ContextBuilder *TaskContextBuilder
+	Contexts       repository.SessionContextRepository
 	Clock          system.Clock
 	IDs            system.IDGenerator
 }
@@ -71,7 +71,7 @@ type Service struct {
 	primary        PrimaryAgentProvider
 	models         ModelConfigResolver
 	definitions    AgentDefinitionProvider
-	contextBuilder *TaskContextBuilder
+	contexts       repository.SessionContextRepository
 	clock          system.Clock
 	ids            system.IDGenerator
 }
@@ -81,8 +81,8 @@ func NewService(config Config) (*Service, error) {
 	if config.Executions == nil {
 		return nil, errors.New("task service executions are required")
 	}
-	if config.ContextBuilder == nil {
-		return nil, errors.New("task service context builder is required")
+	if config.Contexts == nil {
+		return nil, errors.New("task service contexts are required")
 	}
 	for name, value := range map[string]any{
 		"transactions":  config.Transactions,
@@ -115,7 +115,7 @@ func NewService(config Config) (*Service, error) {
 		primary:        config.PrimaryAgent,
 		models:         config.Models,
 		definitions:    config.Definitions,
-		contextBuilder: config.ContextBuilder,
+		contexts:       config.Contexts,
 		clock:          system.ClockOrDefault(config.Clock),
 		ids:            system.IDsOrDefault(config.IDs),
 	}, nil

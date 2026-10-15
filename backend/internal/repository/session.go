@@ -2,7 +2,6 @@ package repository
 
 import (
 	"praxis/internal/contracts"
-	contextmodel "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
 
 	"context"
@@ -34,7 +33,7 @@ type ProjectSessionListRepository interface {
 
 // SessionContextRepository 负责会话上下文条目的追加和查询。
 type SessionContextRepository interface {
-	Append(context.Context, contextmodel.SessionContextEntry) error
-	List(context.Context, contracts.SessionID, string, int) ([]contextmodel.SessionContextEntry, error)
-	GetByID(context.Context, contracts.ContextEntryID) (contextmodel.SessionContextEntry, bool, error)
+	Append(context.Context, sessionmodel.SessionContextEntry) error
+	List(context.Context, contracts.SessionID, string, int) ([]sessionmodel.SessionContextEntry, error)
+	GetByID(context.Context, contracts.ContextEntryID) (sessionmodel.SessionContextEntry, bool, error)
 }

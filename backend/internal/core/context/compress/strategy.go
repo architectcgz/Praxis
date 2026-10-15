@@ -14,7 +14,7 @@ type Strategy interface {
 	Compress(context.Context, appcontext.ModelContext, Options, SummarizeFunc) (appcontext.ModelContext, bool, error)
 }
 
-// Options 使用当前 Task 的冻结窗口，ReservedTokens 为工具定义等请求开销。
+// Options 使用调用方提供的模型窗口，ReservedTokens 为工具定义等请求开销。
 type Options struct {
 	ContextWindow   int
 	MaxOutputTokens int

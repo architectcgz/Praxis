@@ -9,7 +9,6 @@ import (
 
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
-	contextmodel "praxis/internal/core/context"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -255,7 +254,7 @@ func (r TaskRepository) CountActiveBySession(ctx context.Context, id contracts.S
 }
 
 // Append 幂等追加记录，身份相同但内容不一致时返回冲突。
-func (r ContextRepository) Append(ctx context.Context, v contextmodel.SessionContextEntry) error {
+func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SessionContextEntry) error {
 	existing, ok, e := r.GetByID(ctx, v.ID)
 	if e != nil {
 		return e
@@ -267,8 +266,8 @@ func (r ContextRepository) Append(ctx context.Context, v contextmodel.SessionCon
 }
 
 // GetByID 读取指定记录，第二个返回值表示是否存在。
-func (r ContextRepository) GetByID(ctx context.Context, id contracts.ContextEntryID) (contextmodel.SessionContextEntry, bool, error) {
-	v, e := get[contextmodel.SessionContextEntry](ctx, r.s, "context", id.String())
+func (r ContextRepository) GetByID(ctx context.Context, id contracts.ContextEntryID) (sessionmodel.SessionContextEntry, bool, error) {
+	v, e := get[sessionmodel.SessionContextEntry](ctx, r.s, "context", id.String())
 	if errors.Is(e, contracts.ErrNotFound) {
 		return v, false, nil
 	}
@@ -276,9 +275,9 @@ func (r ContextRepository) GetByID(ctx context.Context, id contracts.ContextEntr
 }
 
 // List 返回查询结果的独立副本，非正数 limit 默认 100 条。
-func (r ContextRepository) List(ctx context.Context, id contracts.SessionID, after string, limit int) ([]contextmodel.SessionContextEntry, error) {
-	v, e := list[contextmodel.SessionContextEntry](ctx, r.s, "context", func(v contextmodel.SessionContextEntry) bool { return v.SessionID == id })
-	sorted(v, func(a, b contextmodel.SessionContextEntry) int {
+func (r ContextRepository) List(ctx context.Context, id contracts.SessionID, after string, limit int) ([]sessionmodel.SessionContextEntry, error) {
+	v, e := list[sessionmodel.SessionContextEntry](ctx, r.s, "context", func(v sessionmodel.SessionContextEntry) bool { return v.SessionID == id })
+	sorted(v, func(a, b sessionmodel.SessionContextEntry) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	})
 	if after != "" {

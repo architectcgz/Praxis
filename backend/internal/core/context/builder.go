@@ -1,144 +1,42 @@
 package context
 
-import (
-	"errors"
-	"fmt"
-	"slices"
-	"strings"
-
-	sessionmodel "praxis/internal/core/session"
-)
-
-// BuildInput 是 ContextBuilder 的全部输入，调用方负责提供一致性边界内的数据。
-type BuildInput struct {
-	ContextWindow         int
-	MaxOutputTokens       int
-	SystemPrompt          string
-	Entries               []Entry
-	Messages              []sessionmodel.MessageData
-	CurrentInput          string
-	CurrentInputMessageID string
-	ContinuationMessages  []sessionmodel.MessageData
-}
-
-// BuildResult 返回模型上下文、内容摘要和用于中断续接的 Task 消息。
-type BuildResult struct {
-	Context      ModelContext
-	Digest       string
-	TaskMessages []sessionmodel.MessageData
-}
-
-// ContextBuilder 构建完整历史，窗口不足时由请求边界调用摘要压缩，不在事务内访问模型。
+// ContextBuilder 校验、复制并规范化通用内容，拒绝连必要原文都无法容纳的窗口。
+// 可压缩历史允许暂时超窗，由请求边界在调用模型前执行压缩。
 type ContextBuilder struct{}
 
-// NewContextBuilder 创建无可变预算的 Builder，窗口由每次 Build 的冻结配置提供。
-func NewContextBuilder() ContextBuilder {
-	return ContextBuilder{}
-}
+func NewContextBuilder() ContextBuilder { return ContextBuilder{} }
 
-// Build 根据共享条目、消息历史和当前输入生成完整模型上下文。
-func (b ContextBuilder) Build(input BuildInput) (BuildResult, error) {
-	currentInput := input.CurrentInput
-	if input.ContextWindow <= 0 || input.MaxOutputTokens < 0 || input.MaxOutputTokens >= input.ContextWindow {
-		return BuildResult{}, errors.New("context window and output reserve are invalid")
+func (ContextBuilder) Build(content Content, limits Limits) (ModelContext, error) {
+	if err := limits.Validate(); err != nil {
+		return ModelContext{}, err
 	}
-	entries := slices.Clone(input.Entries)
-	slices.SortFunc(entries, func(left, right Entry) int {
-		if !left.CreatedAt.Equal(right.CreatedAt) {
-			if left.CreatedAt.Before(right.CreatedAt) {
-				return -1
+	value := ModelContext{SystemPrompt: content.SystemPrompt}
+	minimum := ModelContext{SystemPrompt: content.SystemPrompt}
+	for _, entry := range content.Entries {
+		copy := entry
+		copy.Content = nil
+		for _, block := range entry.Content {
+			if block.Kind != ContextBlockThinking {
+				copy.Content = append(copy.Content, block.Clone())
 			}
-			return 1
 		}
-		return strings.Compare(left.ID, right.ID)
-	})
-	if len(entries) == 0 && len(input.Messages) == 0 && currentInput == "" {
-		return BuildResult{}, errors.New("context build selected no session entries")
-	}
-	var currentMessage sessionmodel.MessageData
-	history := make([]sessionmodel.MessageData, 0, len(input.Messages))
-	for _, value := range input.Messages {
-		if value.ID == input.CurrentInputMessageID {
-			currentMessage = value
+		if len(copy.Content) == 0 {
 			continue
 		}
-		history = append(history, value)
-	}
-	if input.CurrentInputMessageID != "" && currentMessage.ID == "" && currentInput == "" {
-		return BuildResult{}, errors.New("current input message is missing")
-	}
-	if currentMessage.ID != "" && currentMessage.Role != sessionmodel.RoleUser {
-		return BuildResult{}, errors.New("current input message must have user role")
-	}
-
-	content := make([]ContextEntry, 0, len(entries)+len(history)+1)
-	var sessionID string
-	for _, entry := range entries {
-		if err := ValidateEntry(entry); err != nil {
-			return BuildResult{}, err
-		}
-		if sessionID == "" {
-			sessionID = entry.SessionID
-		} else if sessionID != entry.SessionID {
-			return BuildResult{}, errors.New("context entries belong to different sessions")
-		}
-		content = append(content, ContextEntry{
-			Kind:    ContextEntrySession,
-			Role:    ContextRoleUser,
-			Content: []ContextBlock{{
-				Kind: ContextBlockText,
-				Text: fmt.Sprintf("[Session context: %s]\n%s", entry.Kind, entry.Content),
-			}},
-		})
-	}
-	content = append(content, historyEntries(history)...)
-	if currentMessage.ID != "" {
-		entry, ok := EntryFromMessageData(currentMessage)
-		if !ok {
-			return BuildResult{}, errors.New("current input message has no model-visible content")
-		}
-		content = append(content, entry)
-	} else if currentInput != "" {
-		content = append(content, ContextEntry{
-			Kind:    ContextEntryUserInput,
-			Role:    ContextRoleUser,
-			Content: []ContextBlock{{
-				Kind: ContextBlockText,
-				Text: currentInput,
-			}},
-		})
-	}
-
-	content = append(content, historyEntries(input.ContinuationMessages)...)
-	modelContext := ModelContext{
-		SystemPrompt: input.SystemPrompt,
-		Entries:      content,
-	}
-	if err := modelContext.Validate(); err != nil {
-		return BuildResult{}, err
-	}
-	// 当前输入不能通过摘要缩短；历史可以在 loop 中分批摘要，不能在这里静默丢弃。
-	last := modelContext.Entries[len(modelContext.Entries)-1]
-	if last.Kind == ContextEntryUserInput {
-		minimum := ModelContext{
-			SystemPrompt: input.SystemPrompt,
-			Entries:      []ContextEntry{last},
-		}
-		tokens, err := minimum.EstimatedTokens()
-		if err != nil {
-			return BuildResult{}, err
-		}
-		if tokens > input.ContextWindow-input.MaxOutputTokens {
-			return BuildResult{}, &ContextWindowExceededError{
-				EstimatedInputTokens: tokens,
-				MaxOutputTokens:      input.MaxOutputTokens,
-				ContextWindow:        input.ContextWindow,
-			}
+		value.Entries = append(value.Entries, copy)
+		if copy.Protected {
+			minimum.Entries = append(minimum.Entries, copy)
 		}
 	}
-	digest, err := modelContext.Digest()
+	if err := value.Validate(); err != nil {
+		return ModelContext{}, err
+	}
+	tokens, err := minimum.EstimatedTokens()
 	if err != nil {
-		return BuildResult{}, err
+		return ModelContext{}, err
 	}
-	return BuildResult{Context: modelContext, Digest: digest}, nil
+	if tokens > limits.ContextWindow-limits.MaxOutputTokens {
+		return ModelContext{}, &ContextWindowExceededError{EstimatedInputTokens: tokens, MaxOutputTokens: limits.MaxOutputTokens, ContextWindow: limits.ContextWindow}
+	}
+	return value, nil
 }

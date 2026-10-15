@@ -40,7 +40,7 @@ func (r *Runner) summarizeContext(
 		TaskID:           task.ID,
 		SessionReference: task.SessionID.String(),
 		Context:          history,
-		Model:            task.Input.Model,
+		Model:            task.Config.Model,
 		MaxOutputTokens:  limit,
 		TurnID:           turnID,
 	}

@@ -17,7 +17,7 @@ import (
 	applicationagent "praxis/internal/service/agent"
 	applicationproject "praxis/internal/service/project"
 	taskqueue "praxis/internal/service/runtime/queue"
-	applicationtask "praxis/internal/service/runtime/task"
+	applicationtask "praxis/internal/service/task"
 )
 
 // ListProjects 返回桌面项目目录，不向 binding 暴露领域实体。

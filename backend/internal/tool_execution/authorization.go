@@ -19,7 +19,7 @@ func (s *Executor) checkTask(ctx context.Context, provided contracts.ToolInvocat
 		return err
 	}
 	if !task.Active() || task.SessionID != provided.SessionID || task.AgentID != provided.AgentID ||
-		task.Input.WorkspacePath != provided.WorkspacePath {
+		task.Config.WorkspacePath != provided.WorkspacePath {
 		return contracts.ErrRequestConflict
 	}
 	return nil

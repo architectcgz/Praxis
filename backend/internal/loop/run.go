@@ -17,7 +17,6 @@ import (
 
 // Config 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Config struct {
-	ContextBuilder TaskContextBuilder
 	Progress       TaskProgress
 	ModelBuilder   model.ModelBuilder
 	Tools          toolcontracts.ToolCatalog
@@ -37,8 +36,8 @@ type Runner struct {
 // NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
 // 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
 func NewRunner(config Config) (Runner, error) {
-	if config.ContextBuilder == nil || config.Progress == nil {
-		return Runner{}, errors.New("loop context builder and task progress are required")
+	if config.Progress == nil {
+		return Runner{}, errors.New("loop task progress is required")
 	}
 	if config.ModelBuilder == nil {
 		return Runner{}, errors.New("loop model builder is required")
@@ -62,18 +61,18 @@ func NewRunner(config Config) (Runner, error) {
 }
 
 // Run 使用本次执行输入与消息记录器运行 provider/tool loop，返回结果及失败分类。
-// ContextBuilder 按 Task 保存的选择规则重建历史，消息记录器负责可靠提交输出；
+// 业务上层提供已选通用内容与续接消息，消息记录器负责可靠提交输出；
 // TaskProgress 负责加载持久化预算、记录模型及摘要请求和模型输出消耗；
 // 每次执行的输入（context、消息记录器）为空时返回错误；
 // 持久化生命周期、取消和后续任务调度由执行协调器负责。
-func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+func (r *Runner) Run(ctx context.Context, task taskmodel.Task, content appcontext.Content, continuation []sessionmodel.MessageData, messageRecorder MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
 	if ctx == nil {
 		return failedTask(errors.New("loop context is required"))
 	}
 	if messageRecorder == nil {
 		return failedTask(errors.New("loop message recorder is required"))
 	}
-	return r.run(ctx, task, messageRecorder)
+	return r.run(ctx, task, content, continuation, messageRecorder)
 }
 
 // run 是 task 的迭代 loop。每轮只发起一次模型请求；确认自然完成时结束，
@@ -81,22 +80,19 @@ func (r *Runner) Run(ctx context.Context, task taskmodel.Task, messageRecorder M
 func (r *Runner) run(
 	ctx context.Context,
 	task taskmodel.Task,
+	content appcontext.Content,
+	continuation []sessionmodel.MessageData,
 	messageRecorder MessageRecorder,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
 	task, err := r.Progress.LoadTask(ctx, task.ID)
 	if err != nil {
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
 	}
-	limits := task.Input.ResourceLimits
-	built, err := r.ContextBuilder.RebuildTaskContext(ctx, task)
+	limits := task.Config.ResourceLimits
+	modelContext, err := (appcontext.ContextBuilder{}).Build(content, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: task.Config.Model.MaxOutputTokens})
 	if err != nil {
-		return taskResult(failCause(contracts.TaskFailureStorage, err))
+		return taskResult(modelFailure(err))
 	}
-	task, err = r.Progress.LoadTask(ctx, task.ID)
-	if err != nil {
-		return taskResult(failCause(contracts.TaskFailureStorage, err))
-	}
-	modelContext := built.Context
 	budget := newTaskBudget(limits)
 	budget.outputBytes = task.Progress.OutputBytes
 	if limits.MaxOutputBytes > 0 && budget.outputBytes > limits.MaxOutputBytes {
@@ -105,14 +101,14 @@ func (r *Runner) run(
 	if task.Progress.FinalStopReason != "" {
 		return taskmodel.TaskCompleted, "", nil
 	}
-	if err := r.resumeToolCalls(ctx, task, built.TaskMessages, messageRecorder, &modelContext, budget); err != nil {
+	if err := r.resumeToolCalls(ctx, task, continuation, messageRecorder, &modelContext, budget); err != nil {
 		if errors.Is(err, errAwaitingApproval) {
 			return taskmodel.TaskAwaitingApproval, "", nil
 		}
 		return taskResult(err)
 	}
 
-	taskModel, err := r.buildModel(task.Input.Model)
+	taskModel, err := r.buildModel(task.Config.Model)
 	if err != nil {
 		r.emitError(task.AgentID, task.ID, "", err)
 		return taskResult(err)
@@ -122,7 +118,7 @@ func (r *Runner) run(
 		request := buildModelRequest(model.ModelRequest{
 			TaskID:           task.ID,
 			SessionReference: task.SessionID.String(),
-			Model:            task.Input.Model,
+			Model:            task.Config.Model,
 			MaxOutputTokens:  taskModel.MaxOutputTokens,
 		}, modelContext, r.Tools)
 		toolPayload, err := json.Marshal(request.Tools)
@@ -130,7 +126,7 @@ func (r *Runner) run(
 			return taskResult(failCause(contracts.TaskFailureContract, err))
 		}
 		compressed, changed, err := r.CompressionStrategy.Compress(ctx, modelContext, contextcompress.Options{
-			ContextWindow:   task.Input.Model.ContextWindow,
+			ContextWindow:   task.Config.Model.ContextWindow,
 			MaxOutputTokens: taskModel.MaxOutputTokens,
 			ReservedTokens:  appcontext.EstimateTokens(string(toolPayload)),
 		}, func(summaryCtx context.Context, history appcontext.ModelContext, limit int) (string, error) {
@@ -186,14 +182,14 @@ func (r *Runner) executeTurn(
 		outcome, code, cause := taskResult(err)
 		return outcome, code, false, cause
 	}
-	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", task.ID, task.Input.Model.ModelID, len(modelContext.Entries), turnID)
+	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", task.ID, task.Config.Model.ModelID, len(modelContext.Entries), turnID)
 	r.emit(Event{
 		Kind:      EventProviderWaiting,
 		SessionID: task.SessionID,
 		AgentID:   task.AgentID,
 		TaskID:    task.ID,
 		TurnID:    turnID,
-		Name:      task.Input.Model.ProviderID + "/" + task.Input.Model.ModelID,
+		Name:      task.Config.Model.ProviderID + "/" + task.Config.Model.ModelID,
 	})
 	response, err := requestModel(ctx, taskModel.Stream, request, hooks.Identity{
 		SessionID: task.SessionID,
@@ -221,7 +217,7 @@ func (r *Runner) executeTurn(
 		TurnID:        turnID,
 		SessionID:     task.SessionID,
 		AgentID:       task.AgentID,
-		WorkspacePath: task.Input.WorkspacePath,
+		WorkspacePath: task.Config.WorkspacePath,
 	}
 	{
 		message := taskMessage(sessionmodel.MessageData{
