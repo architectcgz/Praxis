@@ -93,7 +93,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			return contracts.New(contracts.AgentExecuting, "")
 		}
 		inputMessageID := "input:" + params.RequestID.String()
-		input, err := s.buildInputSnapshot(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel, params.Content, inputMessageID)
+		input, err := s.buildTaskInput(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel, params.Content, inputMessageID)
 		if err != nil {
 			return err
 		}

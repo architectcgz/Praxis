@@ -19,10 +19,10 @@ type messageRecord struct {
 	Data    sessionmodel.MessageData `json:"message"`
 }
 
-// MessageStreams 按 Agent 可见范围读写消息流；Session 流与私有流共用同一份日志键位。
+// MessageStreams 按 Agent 消息流归属读写消息流；Session 流与私有流共用同一份日志键位。
 type MessageStreams struct{ s *Store }
 
-// appendOwner 返回 Agent 可见流在日志中的 owner 键；空值表示 Session 流。
+// appendOwner 返回 Agent 所属消息流在日志中的 owner 键；空值表示 Session 流。
 func appendOwner(owner agentmodel.Agent) string {
 	if owner.CanReadSessionContext() {
 		return ""
@@ -30,7 +30,7 @@ func appendOwner(owner agentmodel.Agent) string {
 	return owner.ID.String()
 }
 
-// Append 幂等追加消息到 Agent 可见流，归属缺失时拒绝写入。
+// Append 幂等追加消息到 Agent 所属消息流，归属缺失时拒绝写入。
 func (r MessageStreams) Append(
 	ctx context.Context,
 	owner agentmodel.Agent,
@@ -42,7 +42,7 @@ func (r MessageStreams) Append(
 	return r.s.appendMessage(ctx, owner.SessionID.String(), appendOwner(owner), data)
 }
 
-// List 返回 Agent 可见流中游标之后的记录副本；非正数 limit 表示不限制。
+// List 返回 Agent 所属消息流中游标之后的记录副本；非正数 limit 表示不限制。
 func (r MessageStreams) List(
 	ctx context.Context,
 	owner agentmodel.Agent,
@@ -84,7 +84,7 @@ func (r MessageStreams) List(
 	return values, err
 }
 
-// LoadMessages 在一致性边界内读取 Agent 可见的消息流及其序号边界。
+// LoadMessages 在一致性边界内读取 Agent 所属消息流及其序号边界。
 func (r MessageStreams) LoadMessages(
 	ctx context.Context,
 	sessionID contracts.SessionID,
@@ -110,7 +110,7 @@ func (r MessageStreams) LoadMessages(
 
 }
 
-// Resolve 为指定执行主体解析绑定到其可见流的写入器；归属不匹配时返回 ErrNotFound。
+// Resolve 为指定执行主体解析绑定到其所属消息流的写入器；归属不匹配时返回 ErrNotFound。
 func (r MessageStreams) Resolve(
 	ctx context.Context,
 	sessionID contracts.SessionID,
@@ -147,7 +147,7 @@ type MessageWriter struct {
 	owner   agentmodel.Agent
 }
 
-// Append 幂等写入已解析归属的可见流。
+// Append 幂等写入已解析归属的消息流。
 func (w MessageWriter) Append(
 	ctx context.Context,
 	data sessionmodel.MessageData,

@@ -10,7 +10,7 @@ type ModelRequest struct {
 	TaskID           contracts.TaskID
 	SessionReference string
 	Context          appcontext.ModelContext
-	Model            ModelSnapshot
+	Model            Config
 	MaxOutputTokens  int
 	Tools            []contracts.ToolDefinition
 	TurnID           contracts.TurnID

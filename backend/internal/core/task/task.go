@@ -34,21 +34,21 @@ const (
 	TaskAwaitingApproval TaskOutcome = "awaiting_approval"
 )
 
-// InputSnapshot 冻结执行配置与历史可见性标识，消息正文始终从日志读取。
-type InputSnapshot struct {
+// Input 保存 Task 的执行配置和历史选择规则，消息正文始终从日志读取。
+type Input struct {
 	AgentDefinitionID       contracts.AgentDefinitionID
 	AgentDefinitionRevision string
 	MessageSequenceBoundary uint64 `json:"messageSequenceBoundary"`
 	CurrentInputMessageID   string `json:"currentInputMessageId"`
 	SystemPrompt            string
-	VisibleMessageIDs       []string
+	ExcludedMessageIDs      []string
 	SessionContextRefs      []ContextReference
-	Model                   model.ModelSnapshot
+	Model                   model.Config
 	WorkspacePath           string
 	ResourceLimits          contracts.ResourceLimits
 }
 
-func (s InputSnapshot) Validate() error {
+func (s Input) Validate() error {
 	if !s.AgentDefinitionID.Valid() || s.AgentDefinitionRevision == "" {
 		return contracts.InvalidValue("taskInput.agentDefinition", "definition id and revision are required")
 	}
@@ -94,7 +94,7 @@ type Task struct {
 	ModelID        string
 	ReasoningLevel string
 	Status         TaskStatus
-	Input          InputSnapshot
+	Input          Input
 	CreatedAt      time.Time
 	StartedAt      time.Time
 	EndedAt        time.Time
@@ -103,13 +103,13 @@ type Task struct {
 	FailureMessage string
 }
 
-// NewTask 创建空闲 runtime 可以立即启动的 Task；输入快照必须已构建完成。
+// NewTask 创建空闲 runtime 可以立即启动的 Task；执行输入必须已构建完成。
 func NewTask(
 	id contracts.TaskID,
 	sessionID contracts.SessionID,
 	agentID contracts.AgentID,
 	requestID contracts.RequestID,
-	input InputSnapshot,
+	input Input,
 	at time.Time,
 ) (Task, error) {
 	task := Task{
@@ -144,8 +144,8 @@ func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID 
 	return task, nil
 }
 
-// Prepare 在 runtime 空闲时冻结输入快照；校验失败不改变待执行 Task。
-func (e *Task) Prepare(input InputSnapshot) error {
+// Prepare 在 runtime 空闲时确定执行输入；校验失败不改变待执行 Task。
+func (e *Task) Prepare(input Input) error {
 	if e.Status != TaskPending {
 		return contracts.InvalidTransition("task", string(e.Status), string(TaskStarting))
 	}
@@ -157,7 +157,7 @@ func (e *Task) Prepare(input InputSnapshot) error {
 	return nil
 }
 
-// Validate 校验 Task 引用、输入快照和生命周期；字段规范性由输入及恢复边界保证。
+// Validate 校验 Task 引用、执行输入和生命周期；字段规范性由输入及恢复边界保证。
 func (e Task) Validate() error {
 	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 {
 		return contracts.InvalidValue("task.progress", "usage counters cannot be negative")

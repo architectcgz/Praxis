@@ -60,7 +60,7 @@ func (r *Registry) Config() modelconfig.Config {
 	return r.config.Clone()
 }
 
-// ReplaceFrom 用已校验的磁盘快照替换运行时配置与凭据；运行中的 Task 保持原快照。
+// ReplaceFrom 用已校验的磁盘配置替换运行时配置与凭据；运行中的 Task 保持已选配置。
 func (r *Registry) ReplaceFrom(candidate *Registry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -205,23 +205,23 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	return models, nil
 }
 
-// FreezeTaskModel 校验当前配置并冻结非敏感模型参数，失败时不生成快照。
-func (r *Registry) FreezeTaskModel(providerID, modelID, reasoningLevel string) (model.ModelSnapshot, error) {
+// ResolveTaskModel 从模型目录解析 Task 的非敏感模型配置；失败时返回错误。
+func (r *Registry) ResolveTaskModel(providerID, modelID, reasoningLevel string) (model.Config, error) {
 	selection, err := newModelSelection(providerID, modelID, reasoningLevel)
 	if err != nil {
-		return model.ModelSnapshot{}, err
+		return model.Config{}, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	configured, selected, err := r.selectModelLocked(selection)
 	if err != nil {
-		return model.ModelSnapshot{}, err
+		return model.Config{}, err
 	}
 	provider, ok := r.providersByID[selected.ProviderID]
 	if !ok {
-		return model.ModelSnapshot{}, fmt.Errorf("provider %q is not configured", selected.ProviderID)
+		return model.Config{}, fmt.Errorf("provider %q is not configured", selected.ProviderID)
 	}
-	snapshot := model.ModelSnapshot{
+	config := model.Config{
 		ProviderID:      selected.ProviderID,
 		ModelID:         selected.ModelID,
 		ReasoningLevel:  selected.ReasoningLevel,
@@ -233,10 +233,10 @@ func (r *Registry) FreezeTaskModel(providerID, modelID, reasoningLevel string) (
 		BaseURL:         provider.BaseURL,
 		ProxyURL:        provider.ProxyURL,
 	}
-	if err := snapshot.Validate(); err != nil {
-		return model.ModelSnapshot{}, err
+	if err := config.Validate(); err != nil {
+		return model.Config{}, err
 	}
-	return snapshot, nil
+	return config, nil
 }
 
 func (r *Registry) selectModelLocked(selection modelSelection) (modelconfig.Model, modelSelection, error) {

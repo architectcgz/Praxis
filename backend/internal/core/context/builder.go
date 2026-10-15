@@ -11,31 +11,21 @@ import (
 
 // BuildInput 是 ContextBuilder 的全部输入，调用方负责提供一致性边界内的数据。
 type BuildInput struct {
-	ContextWindow           int
-	MaxOutputTokens         int
-	SystemPrompt            string
-	Entries                 []Entry
-	MessageSequenceBoundary uint64
-	Messages                []sessionmodel.MessageData
-	CurrentInput            string
-	CurrentInputMessageID   string
-	ContinuationMessages    []sessionmodel.MessageData
+	ContextWindow         int
+	MaxOutputTokens       int
+	SystemPrompt          string
+	Entries               []Entry
+	Messages              []sessionmodel.MessageData
+	CurrentInput          string
+	CurrentInputMessageID string
+	ContinuationMessages  []sessionmodel.MessageData
 }
 
-// BuildResult 返回完整的初始 ModelContext 及其内容摘要。
-type ContextEntryReference struct {
-	ID     string
-	Digest string
-}
-
+// BuildResult 返回模型上下文、内容摘要和用于中断续接的 Task 消息。
 type BuildResult struct {
-	Context                 ModelContext
-	Digest                  string
-	MessageSequenceBoundary uint64
-	CurrentInputMessageID   string
-	VisibleMessageIDs       []string
-	SessionContextRefs      []ContextEntryReference
-	TaskMessages            []sessionmodel.MessageData
+	Context      ModelContext
+	Digest       string
+	TaskMessages []sessionmodel.MessageData
 }
 
 // ContextBuilder 构建完整历史，窗口不足时由请求边界调用摘要压缩，不在事务内访问模型。
@@ -93,8 +83,8 @@ func (b ContextBuilder) Build(input BuildInput) (BuildResult, error) {
 			return BuildResult{}, errors.New("context entries belong to different sessions")
 		}
 		content = append(content, ContextEntry{
-			Kind: ContextEntrySession,
-			Role: ContextRoleUser,
+			Kind:    ContextEntrySession,
+			Role:    ContextRoleUser,
 			Content: []ContextBlock{{
 				Kind: ContextBlockText,
 				Text: fmt.Sprintf("[Session context: %s]\n%s", entry.Kind, entry.Content),
@@ -110,8 +100,8 @@ func (b ContextBuilder) Build(input BuildInput) (BuildResult, error) {
 		content = append(content, entry)
 	} else if currentInput != "" {
 		content = append(content, ContextEntry{
-			Kind: ContextEntryUserInput,
-			Role: ContextRoleUser,
+			Kind:    ContextEntryUserInput,
+			Role:    ContextRoleUser,
 			Content: []ContextBlock{{
 				Kind: ContextBlockText,
 				Text: currentInput,
@@ -150,20 +140,5 @@ func (b ContextBuilder) Build(input BuildInput) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
-	visibleIDs := make([]string, 0, len(input.Messages))
-	for _, message := range input.Messages {
-		visibleIDs = append(visibleIDs, message.ID)
-	}
-	refs := make([]ContextEntryReference, 0, len(entries))
-	for _, entry := range entries {
-		refs = append(refs, ContextEntryReference{ID: entry.ID, Digest: entry.ContentDigest})
-	}
-	return BuildResult{
-		VisibleMessageIDs:       visibleIDs,
-		SessionContextRefs:      refs,
-		Context:                 modelContext,
-		Digest:                  digest,
-		MessageSequenceBoundary: input.MessageSequenceBoundary,
-		CurrentInputMessageID:   input.CurrentInputMessageID,
-	}, nil
+	return BuildResult{Context: modelContext, Digest: digest}, nil
 }

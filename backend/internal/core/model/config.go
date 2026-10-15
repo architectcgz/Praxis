@@ -8,11 +8,11 @@ import (
 	"praxis/internal/contracts"
 )
 
-// ModelSnapshot 保存一次 task 创建时冻结的模型运行参数。
+// Config 保存 Task 选定并持久化的模型配置。
 //
 // 这些字段不能在 task 运行期间从当前模型配置重新读取，否则修改配置
 // 会改变已经创建的 task 的请求协议和资源边界。
-type ModelSnapshot struct {
+type Config struct {
 	ProviderID      string
 	ModelID         string
 	ReasoningLevel  string
@@ -25,14 +25,14 @@ type ModelSnapshot struct {
 	ProxyURL        string
 }
 
-// Clone 返回快照的独立副本，推理能力列表不能被请求接收方修改。
-func (s ModelSnapshot) Clone() ModelSnapshot {
+// Clone 返回配置的独立副本，推理能力列表不能被请求接收方修改。
+func (s Config) Clone() Config {
 	s.ReasoningLevels = slices.Clone(s.ReasoningLevels)
 	return s
 }
 
-// Validate 校验 task 使用的模型快照是否完整且已规范化。
-func (s ModelSnapshot) Validate() error {
+// Validate 校验 task 使用的模型配置是否完整且已规范化。
+func (s Config) Validate() error {
 	seen := map[string]bool{}
 	for _, level := range s.ReasoningLevels {
 		if level == "" || level != strings.TrimSpace(level) || seen[level] {

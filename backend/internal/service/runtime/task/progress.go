@@ -7,7 +7,7 @@ import (
 	taskmodel "praxis/internal/core/task"
 )
 
-// LoadTask 读取已提交的 Task 快照供 Loop 恢复预算；不存在时返回 ErrNotFound。
+// LoadTask 读取已提交的 Task供 Loop 恢复预算；不存在时返回 ErrNotFound。
 func (s *Service) LoadTask(ctx context.Context, id contracts.TaskID) (taskmodel.Task, error) {
 	return s.tasks.Get(ctx, id)
 }

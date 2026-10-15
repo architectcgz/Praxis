@@ -13,7 +13,7 @@ import (
 	"fmt"
 )
 
-// ContextBuilderConfig 提供 Task 可见消息和共享条目的读取能力，以及恢复时的事务边界。
+// ContextBuilderConfig 提供 Agent 所属消息流和共享条目的读取能力，以及恢复时的事务边界。
 type ContextBuilderConfig struct {
 	Transactions repository.TxRunner
 	Sessions     repository.SessionRepository
@@ -55,62 +55,124 @@ func NewTaskContextBuilder(config ContextBuilderConfig) (*TaskContextBuilder, er
 	}, nil
 }
 
-// BuildInitialContext 在调用方 Task 准入事务内选择可见历史并冻结共享条目引用。
-// 后续排队输入不进入模型上下文；消息读取或纯转换失败时返回错误，不修改 Task。
+// BuildInitialContext 在调用方准入事务内确定历史边界、排除项和共享条目版本。
+// 构建成功后返回完整执行输入；失败不修改传入的 Input。
 func (b *TaskContextBuilder) BuildInitialContext(
 	ctx context.Context,
 	agent agentmodel.Agent,
-	systemPrompt string,
+	input taskmodel.Input,
 	currentInput string,
-	currentInputMessageID string,
-	contextWindow int,
-	maxOutputTokens int,
-) (contextmodel.BuildResult, error) {
+) (taskmodel.Input, error) {
 	if ctx == nil {
-		return contextmodel.BuildResult{}, errors.New("task context build context is required")
+		return taskmodel.Input{}, errors.New("task context build context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return contextmodel.BuildResult{}, err
+		return taskmodel.Input{}, err
 	}
 	if _, err := b.sessions.Get(ctx, agent.SessionID); err != nil {
-		return contextmodel.BuildResult{}, err
+		return taskmodel.Input{}, err
 	}
-	var err error
 	var entries []contextmodel.Entry
+	var err error
 	if agent.CanReadSessionContext() {
 		entries, err = b.loadContextEntries(ctx, agent.SessionID)
 		if err != nil {
-			return contextmodel.BuildResult{}, err
+			return taskmodel.Input{}, err
 		}
 	}
 	stream, err := b.messages.LoadMessages(ctx, agent.SessionID, agent.ID, 0)
 	if err != nil {
-		return contextmodel.BuildResult{}, err
+		return taskmodel.Input{}, err
 	}
-	// 预约输入可以显示在会话中，但只有当前待执行输入能进入模型上下文，不能提前执行后续指令。
-	visible := stream.Messages[:0]
+	// 排除结果在启动时确定，恢复时不再查询其他 Task 的状态。
+	excludedMessageIDs := make([]string, 0)
 	for _, message := range stream.Messages {
-		if message.Role == sessionmodel.RoleUser && message.TaskID != "" && message.ID != currentInputMessageID {
-			task, err := b.tasks.Get(ctx, contracts.TaskID(message.TaskID))
-			if err != nil {
-				return contextmodel.BuildResult{}, err
-			}
-			if task.Status == taskmodel.TaskPending {
-				continue
+		if message.Sequence > stream.SequenceBoundary || message.Role != sessionmodel.RoleUser ||
+			message.TaskID == "" || message.ID == input.CurrentInputMessageID {
+			continue
+		}
+		task, err := b.tasks.Get(ctx, contracts.TaskID(message.TaskID))
+		if err != nil {
+			return taskmodel.Input{}, err
+		}
+		if task.Status == taskmodel.TaskPending {
+			excludedMessageIDs = append(excludedMessageIDs, message.ID)
+		}
+	}
+	input.MessageSequenceBoundary = stream.SequenceBoundary
+	input.ExcludedMessageIDs = excludedMessageIDs
+	selectedMessages, _ := selectTaskMessages(stream.Messages, input, "")
+	if _, err = b.contextBuilder.Build(contextmodel.BuildInput{
+		ContextWindow:         input.Model.ContextWindow,
+		MaxOutputTokens:       input.Model.MaxOutputTokens,
+		SystemPrompt:          input.SystemPrompt,
+		Entries:               entries,
+		Messages:              selectedMessages,
+		CurrentInput:          currentInput,
+		CurrentInputMessageID: input.CurrentInputMessageID,
+	}); err != nil {
+		return taskmodel.Input{}, err
+	}
+	input.SessionContextRefs = make([]taskmodel.ContextReference, 0, len(entries))
+	for _, entry := range entries {
+		input.SessionContextRefs = append(input.SessionContextRefs, taskmodel.ContextReference{
+			ID:     entry.ID,
+			Digest: entry.ContentDigest,
+		})
+	}
+	return input, nil
+}
+
+// selectTaskMessages 选择边界内历史、当前输入和本 Task 的续接消息。
+// 边界之后补写的历史回执只按 (TaskID, CallID) 关联已选调用。
+func selectTaskMessages(messages []sessionmodel.MessageData, input taskmodel.Input, taskID string) (
+	[]sessionmodel.MessageData, []sessionmodel.MessageData,
+) {
+	excluded := make(map[string]bool, len(input.ExcludedMessageIDs))
+	for _, id := range input.ExcludedMessageIDs {
+		excluded[id] = true
+	}
+	selectedHistory := func(message sessionmodel.MessageData) bool {
+		return message.Sequence <= input.MessageSequenceBoundary && !excluded[message.ID]
+	}
+	type callKey struct{ taskID, callID string }
+	selectedToolCalls := make(map[callKey]bool)
+	for _, message := range messages {
+		if !selectedHistory(message) || message.Role != sessionmodel.RoleAssistant {
+			continue
+		}
+		for _, block := range message.Blocks {
+			if block.Kind == sessionmodel.BlockToolCall {
+				selectedToolCalls[callKey{message.TaskID, block.CallID}] = true
 			}
 		}
-		visible = append(visible, message)
 	}
-	return b.contextBuilder.Build(contextmodel.BuildInput{
-		ContextWindow:           contextWindow,
-		MaxOutputTokens:         maxOutputTokens,
-		SystemPrompt:            systemPrompt,
-		Entries:                 entries,
-		MessageSequenceBoundary: stream.SequenceBoundary,
-		Messages:                visible,
-		CurrentInput:            currentInput,
-		CurrentInputMessageID:   currentInputMessageID,
-	})
+	selectedMessages := make([]sessionmodel.MessageData, 0)
+	continuation := make([]sessionmodel.MessageData, 0)
+	for _, message := range messages {
+		if taskID != "" && message.TaskID == taskID && message.ID != input.CurrentInputMessageID {
+			if message.Role == sessionmodel.RoleAssistant || message.Role == sessionmodel.RoleTool {
+				continuation = append(continuation, message)
+			}
+			continue
+		}
+		include := selectedHistory(message) || message.ID == input.CurrentInputMessageID
+		if !include && message.Role == sessionmodel.RoleTool {
+			// 只纳入已选调用对应的回执块，避免一个消息内混入未选调用。
+			blocks := make([]sessionmodel.Block, 0, len(message.Blocks))
+			for _, block := range message.Blocks {
+				if block.Kind == sessionmodel.BlockToolResult && selectedToolCalls[callKey{message.TaskID, block.CallID}] {
+					blocks = append(blocks, block)
+				}
+			}
+			message.Blocks = blocks
+			include = len(blocks) > 0
+		}
+		if include {
+			selectedMessages = append(selectedMessages, message)
+		}
+	}
+	return selectedMessages, continuation
 }
 
 func (b *TaskContextBuilder) loadContextEntries(
@@ -141,7 +203,7 @@ func (b *TaskContextBuilder) loadContextEntries(
 	}
 }
 
-// RebuildTaskContext 在同一事务内重建冻结历史与本 Task 的已提交续接消息。
+// RebuildTaskContext 在同一事务内重建启动时选定的历史与本 Task 的已提交续接消息。
 // 冻结条目缺失或 digest 不符时返回 ErrRevisionConflict；缺失工具回执由消息读取 Port 修复。
 func (b *TaskContextBuilder) RebuildTaskContext(ctx context.Context, task taskmodel.Task) (contextmodel.BuildResult, error) {
 	var result contextmodel.BuildResult
@@ -150,39 +212,7 @@ func (b *TaskContextBuilder) RebuildTaskContext(ctx context.Context, task taskmo
 		if err != nil {
 			return err
 		}
-		visible := make(map[string]bool, len(task.Input.VisibleMessageIDs))
-		for _, id := range task.Input.VisibleMessageIDs {
-			visible[id] = true
-		}
-		type callKey struct{ task, call string }
-		visibleCalls := make(map[callKey]bool)
-		for _, message := range stream.Messages {
-			if !visible[message.ID] {
-				continue
-			}
-			for _, block := range message.Blocks {
-				if block.Kind == sessionmodel.BlockToolCall {
-					visibleCalls[callKey{message.TaskID, block.CallID}] = true
-				}
-			}
-		}
-		history := make([]sessionmodel.MessageData, 0)
-		continuation := make([]sessionmodel.MessageData, 0)
-		for _, message := range stream.Messages {
-			if message.TaskID == task.ID.String() && message.ID != task.Input.CurrentInputMessageID {
-				continuation = append(continuation, message)
-				continue
-			}
-			include := visible[message.ID] || message.ID == task.Input.CurrentInputMessageID
-			if message.Role == sessionmodel.RoleTool {
-				for _, block := range message.Blocks {
-					include = include || visibleCalls[callKey{message.TaskID, block.CallID}]
-				}
-			}
-			if include {
-				history = append(history, message)
-			}
-		}
+		selectedMessages, continuation := selectTaskMessages(stream.Messages, task.Input, task.ID.String())
 		allEntries, err := b.loadContextEntries(txCtx, task.SessionID)
 		if err != nil {
 			return err
@@ -200,14 +230,13 @@ func (b *TaskContextBuilder) RebuildTaskContext(ctx context.Context, task taskmo
 			entries = append(entries, entry)
 		}
 		result, err = b.contextBuilder.Build(contextmodel.BuildInput{
-			ContextWindow:           task.Input.Model.ContextWindow,
-			MaxOutputTokens:         task.Input.Model.MaxOutputTokens,
-			SystemPrompt:            task.Input.SystemPrompt,
-			Entries:                 entries,
-			Messages:                history,
-			MessageSequenceBoundary: task.Input.MessageSequenceBoundary,
-			CurrentInputMessageID:   task.Input.CurrentInputMessageID,
-			ContinuationMessages:    continuation,
+			ContextWindow:         task.Input.Model.ContextWindow,
+			MaxOutputTokens:       task.Input.Model.MaxOutputTokens,
+			SystemPrompt:          task.Input.SystemPrompt,
+			Entries:               entries,
+			Messages:              selectedMessages,
+			CurrentInputMessageID: task.Input.CurrentInputMessageID,
+			ContinuationMessages:  continuation,
 		})
 		result.TaskMessages = continuation
 		return err

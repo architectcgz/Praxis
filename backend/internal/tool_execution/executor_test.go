@@ -74,10 +74,10 @@ func newExecutionFixture(t *testing.T, name contracts.ToolName, arguments any, a
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := taskmodel.NewTask("task", session.ID, agent.ID, "request", taskmodel.InputSnapshot{
+	task, err := taskmodel.NewTask("task", session.ID, agent.ID, "request", taskmodel.Input{
 		AgentDefinitionID: agent.DefinitionID, AgentDefinitionRevision: "revision", CurrentInputMessageID: "input",
 		WorkspacePath: f.workspace,
-		Model: model.ModelSnapshot{
+		Model: model.Config{
 			ProviderID:      "provider",
 			ModelID:         "model",
 			APIFormat:       "openai_chat",

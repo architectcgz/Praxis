@@ -63,8 +63,8 @@ func NewRunner(config Config) (Runner, error) {
 	return Runner{Config: config}, nil
 }
 
-// Run 使用本次执行快照与消息记录器运行 provider/tool loop，返回结果及失败分类。
-// ContextBuilder 重建冻结可见范围的历史，消息记录器负责可靠提交输出；
+// Run 使用本次执行输入与消息记录器运行 provider/tool loop，返回结果及失败分类。
+// ContextBuilder 按 Task 保存的选择规则重建历史，消息记录器负责可靠提交输出；
 // TaskProgress 负责加载持久化预算、记录模型及摘要请求和模型输出消耗；
 // 每次执行的输入（context、消息记录器）为空时返回错误；
 // 持久化生命周期、取消和后续任务调度由 runtime 负责。
@@ -300,8 +300,8 @@ func (r *Runner) executeTurn(
 	return taskmodel.TaskCompleted, "", false, nil
 }
 
-func (r *Runner) buildModel(snapshot model.ModelSnapshot) (model.Model, error) {
-	built, err := r.ModelBuilder.BuildModel(snapshot)
+func (r *Runner) buildModel(config model.Config) (model.Model, error) {
+	built, err := r.ModelBuilder.BuildModel(config)
 	if err != nil {
 		return model.Model{}, failCause(contracts.TaskFailureProvider, err)
 	}

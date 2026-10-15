@@ -21,10 +21,10 @@ type AgentDefinitionProvider interface {
 	Definition(contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
-// ModelSnapshotFactory 在任务开始时冻结选定模型或 Agent 默认模型。
-type ModelSnapshotFactory interface {
-	FreezeTaskModel(string, string, string) (model.ModelSnapshot, error)
-	FreezeDefaultTaskModel(contracts.AgentDefinitionID) (model.ModelSnapshot, error)
+// ModelConfigResolver 从模型目录解析选定模型或 Agent 默认模型配置。
+type ModelConfigResolver interface {
+	ResolveTaskModel(string, string, string) (model.Config, error)
+	ResolveDefaultTaskModel(contracts.AgentDefinitionID) (model.Config, error)
 }
 
 type Config struct {
@@ -41,13 +41,13 @@ type Config struct {
 	Messages       repository.MessageStreams
 	PrimaryAgent   PrimaryAgentProvider
 	Definitions    AgentDefinitionProvider
-	Models         ModelSnapshotFactory
+	Models         ModelConfigResolver
 	ContextBuilder *TaskContextBuilder
 	Clock          system.Clock
 	IDs            system.IDGenerator
 }
 
-// Service 统一负责 Task 准入、冻结执行快照、恢复绑定、进度持久化及原子结算。
+// Service 统一负责 Task 准入、确定执行输入、恢复绑定、进度持久化及原子结算。
 type Service struct {
 	controls       repository.AgentControlCommandRepository
 	tx             repository.TxRunner
@@ -61,7 +61,7 @@ type Service struct {
 	executions     *agentmodel.Executions
 	messages       repository.MessageStreams
 	primary        PrimaryAgentProvider
-	models         ModelSnapshotFactory
+	models         ModelConfigResolver
 	definitions    AgentDefinitionProvider
 	contextBuilder *TaskContextBuilder
 	clock          system.Clock

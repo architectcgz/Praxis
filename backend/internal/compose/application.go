@@ -508,14 +508,14 @@ func (r taskInputProvider) Definition(definitionID contracts.AgentDefinitionID) 
 	return r.agents.Definition(definitionID)
 }
 
-func (r taskInputProvider) FreezeTaskModel(providerID, modelID, reasoningLevel string) (model.ModelSnapshot, error) {
-	return r.models.FreezeTaskModel(providerID, modelID, reasoningLevel)
+func (r taskInputProvider) ResolveTaskModel(providerID, modelID, reasoningLevel string) (model.Config, error) {
+	return r.models.ResolveTaskModel(providerID, modelID, reasoningLevel)
 }
 
-func (r taskInputProvider) FreezeDefaultTaskModel(definitionID contracts.AgentDefinitionID) (model.ModelSnapshot, error) {
+func (r taskInputProvider) ResolveDefaultTaskModel(definitionID contracts.AgentDefinitionID) (model.Config, error) {
 	reference, err := r.agents.ResolveModelReference(definitionID)
 	if err != nil {
-		return model.ModelSnapshot{}, err
+		return model.Config{}, err
 	}
-	return r.models.FreezeTaskModel(reference.ProviderID, reference.ModelID, "")
+	return r.models.ResolveTaskModel(reference.ProviderID, reference.ModelID, "")
 }
