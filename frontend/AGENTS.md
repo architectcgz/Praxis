@@ -3,7 +3,7 @@
 ## React 版本与写法
 
 - React 与 React DOM 使用 `~19.2.8`，lockfile 当前解析为 `19.2.8`；两者实际版本必须一致。`@types/react` 使用 `~19.2.18`，`@types/react-dom` 使用 `~19.2.4`，类型定义与运行时保持在 19.2 系列。
-- 使用当前版本的稳定 API；引入 API 前确认运行时与类型定义均支持，并同步维护 `package.json` 和 `package-lock.json`。使用 `npm ci` 按 lockfile 安装，验证使用 `npm run check`（Hooks lint、回归测试与生产构建）。
+- 使用当前版本的稳定 API；引入 API 前确认运行时与类型定义均支持，并同步维护 `package.json` 和 `package-lock.json`。使用 `npm ci` 按 lockfile 安装，验证使用 `npm run check`（Hooks lint 与生产构建）。
 - 使用函数组件、Hooks 和自动 JSX transform（`jsx: react-jsx`）；类型使用 `import type` 或具名导入中的 `type`。函数组件用参数默认值，表单提交事件使用 `SubmitEvent<HTMLFormElement>`。
 - Context Provider 使用 `<SomeContext value={value}>`；函数组件接收 ref 时直接声明 ref prop。渲染入口使用 `createRoot`，不引入 `ReactDOM.render`、`findDOMNode`、字符串 ref 或函数组件的 `defaultProps` / `propTypes`。
 - 错误边界可以使用包含 `getDerivedStateFromError` / `componentDidCatch` 的 class；`memo`、`useMemo`、`useCallback` 按实际需要使用，不因 React 版本升级机械移除，也不假定已启用 React Compiler。
@@ -166,9 +166,7 @@ src/
 - 设置和模型配置页在单一 Scroll 内组合 sticky 头部与 Page，短窗口取消 sticky；通用工作区断点集中于 `workspace/responsive.css`，在功能样式之后加载。
 - 所有 modal 使用 `components/ui/Overlay.tsx` 并挂载到 `#overlay-root`。锚定触发器的菜单保留在组件内并使用全局 z-index token。
 
-## 回归验证
+## 验证
 
-- 测试与业务代码就近放置，公共 fixture 和 DOM 测试初始化放在 `src/test/`。
-- 异步流程使用真实 React Hook 配合可控 API Promise 验证，覆盖切换视图、迟到响应、部分保存失败和分页归并；不使用自制 Hook 调度器替代 React。
-- `npm run lint` 检查 Rules of Hooks 和完整依赖；`npm test` 执行回归测试；`npm run check` 依次执行 lint、测试和生产构建。
+- `npm run lint` 检查 Rules of Hooks 和完整依赖；`npm run check` 依次执行 lint 和生产构建。
 - 修改 Wails binding 签名后，在 `backend/` 执行 `go run -tags bindings .` 重新生成绑定，再执行前端检查；不手工编辑生成的 `wailsjs/` 文件。
