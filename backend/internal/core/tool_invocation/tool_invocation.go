@@ -117,8 +117,6 @@ type ToolInvocation struct {
 	Status              ToolInvocationStatus
 	BudgetReserved      bool
 	CommandDecision     security.CommandDecision
-	DecisionBy          string
-	DecisionApproved    bool
 	Approval            contracts.ApprovalRecord
 	Result              ToolInvocationResult
 	FailureCode         ToolFailureCode

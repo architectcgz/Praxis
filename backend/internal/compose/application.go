@@ -356,7 +356,6 @@ func Open(
 			Transactions:  store,
 			Tasks:         repos.Tasks,
 			Invocations:   repos.ToolInvocations,
-			UserID:        "local-user",
 		},
 	})
 	if err != nil {

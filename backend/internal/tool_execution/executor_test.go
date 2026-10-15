@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -185,7 +186,6 @@ func (f *executionFixture) approvals() runtimesvc.ToolApprovals {
 		Transactions:  f.store,
 		Tasks:         f.repos.Tasks,
 		Invocations:   f.repos.ToolInvocations,
-		UserID:        "local-user",
 	}
 }
 
@@ -480,6 +480,58 @@ func TestExactAllowDoesNotAdmitShellComposition(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(f.workspace, "unwanted")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("未审核命令被执行")
+			}
+		})
+	}
+}
+
+func TestUserDecisionIsIdempotentWithoutApproverIdentity(t *testing.T) {
+	for _, approve := range []bool{true, false} {
+		name := "批准"
+		if !approve {
+			name = "拒绝"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newExecutionFixture(t, contracts.ToolBash, map[string]any{"command": "printf decided"}, security.CommandAsk)
+			f.admit()
+			params := f.decision()
+			if _, err := f.approvals().Decide(t.Context(), params, approve); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.executor.Execute(t.Context(), f.call, f.metadata); err != nil {
+				t.Fatal(err)
+			}
+			before := f.invocation()
+			if err := f.store.Close(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			f.open()
+			if _, err := f.approvals().Decide(t.Context(), params, approve); err != nil {
+				t.Fatal("重启后重复审批不应报错", err)
+			}
+			if !reflect.DeepEqual(before, f.invocation()) {
+				t.Fatal("重复审批改写了已保存的决定")
+			}
+			if _, err := f.approvals().Decide(t.Context(), params, !approve); !errors.Is(err, contracts.ErrRequestConflict) {
+				t.Fatalf("相反的审批决定未被拒绝：%v", err)
+			}
+			params.ArgumentsDigest = "wrong-digest"
+			if _, err := f.approvals().Decide(t.Context(), params, approve); !errors.Is(err, contracts.ErrRequestConflict) {
+				t.Fatalf("重复审批绕过了参数绑定：%v", err)
+			}
+		})
+	}
+}
+
+func TestPolicyDecisionDoesNotCountAsUserDecision(t *testing.T) {
+	for _, action := range []security.CommandAction{security.CommandAllow, security.CommandDeny} {
+		t.Run(string(action), func(t *testing.T) {
+			f := newExecutionFixture(t, contracts.ToolBash, map[string]any{"command": "printf policy"}, action)
+			f.admit()
+			for _, approve := range []bool{true, false} {
+				if _, err := f.approvals().Decide(t.Context(), f.decision(), approve); !errors.Is(err, contracts.ErrRequestConflict) {
+					t.Fatalf("策略决定被误当成人工重复审批：%v", err)
+				}
 			}
 		})
 	}

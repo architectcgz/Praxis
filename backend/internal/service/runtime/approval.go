@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"praxis/internal/contracts"
@@ -25,15 +24,10 @@ type ToolApprovals struct {
 	Transactions  repository.TxRunner
 	Tasks         repository.TaskRepository
 	Invocations   repository.ToolInvocationRepository
-	// UserID 来自可信的桌面会话，不接受前端自行声明审批者身份。
-	UserID string
 }
 
 func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, approve bool) (taskmodel.Task, error) {
 	var task taskmodel.Task
-	if a.UserID == "" {
-		return task, errors.New("trusted approver identity is required")
-	}
 	err := a.Transactions.InTx(ctx, func(txCtx context.Context) error {
 		var err error
 		task, err = a.Tasks.Get(txCtx, params.TaskID)
@@ -50,7 +44,8 @@ func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, 
 		if params.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, invocation.NormalizedArguments) {
 			return contracts.ErrRequestConflict
 		}
-		if invocation.DecisionBy == a.UserID && invocation.DecisionApproved == approve {
+		if approve && invocation.Approval.Source == contracts.ApprovalSourceUser ||
+			!approve && invocation.FailureCode == toolmodel.ToolFailureApprovalDenied {
 			return nil
 		}
 		if !task.Active() || invocation.Status != toolmodel.ToolInvocationAwaitingApproval {
@@ -71,8 +66,6 @@ func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, 
 				return a.Invocations.Save(txCtx, invocation)
 			}
 		}
-		invocation.DecisionBy = a.UserID
-		invocation.DecisionApproved = approve
 		if approve {
 			err = invocation.Approve(contracts.ApprovalRecord{Source: contracts.ApprovalSourceUser, ArgumentsDigest: params.ArgumentsDigest, ApprovedAt: time.Now().UTC()})
 		} else {

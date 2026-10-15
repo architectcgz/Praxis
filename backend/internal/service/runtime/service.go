@@ -55,7 +55,7 @@ func NewService(config Config) (*Service, error) {
 		"tasks":          config.Tasks == nil,
 		"queue":          config.Queue == nil,
 		"activator":      config.Activator == nil,
-		"tool approvals": config.Approvals.CommandPolicy == nil || config.Approvals.Transactions == nil || config.Approvals.Tasks == nil || config.Approvals.Invocations == nil || config.Approvals.UserID == "",
+		"tool approvals": config.Approvals.CommandPolicy == nil || config.Approvals.Transactions == nil || config.Approvals.Tasks == nil || config.Approvals.Invocations == nil,
 	} {
 		if missing {
 			return nil, fmt.Errorf("runtime service %s is required", name)
