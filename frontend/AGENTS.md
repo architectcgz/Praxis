@@ -1,5 +1,36 @@
 # Frontend Guidelines
 
+## React 版本与写法
+
+- React 与 React DOM 使用 `~19.2.8`，lockfile 当前解析为 `19.2.8`；两者实际版本必须一致。`@types/react` 使用 `~19.2.18`，`@types/react-dom` 使用 `~19.2.4`，类型定义与运行时保持在 19.2 系列。
+- 使用当前版本的稳定 API；引入 API 前确认运行时与类型定义均支持，并同步维护 `package.json` 和 `package-lock.json`。使用 `npm ci` 按 lockfile 安装，验证使用 `npm run build`。
+- 使用函数组件、Hooks 和自动 JSX transform（`jsx: react-jsx`）；类型使用 `import type` 或具名导入中的 `type`。函数组件用参数默认值，表单提交事件使用 `SubmitEvent<HTMLFormElement>`。
+- Context Provider 使用 `<SomeContext value={value}>`；函数组件接收 ref 时直接声明 ref prop。渲染入口使用 `createRoot`，不引入 `ReactDOM.render`、`findDOMNode`、字符串 ref 或函数组件的 `defaultProps` / `propTypes`。
+- 错误边界可以使用包含 `getDerivedStateFromError` / `componentDidCatch` 的 class；`memo`、`useMemo`、`useCallback` 按实际需要使用，不因 React 版本升级机械移除，也不假定已启用 React Compiler。
+
+## Hooks、ref 与异步回调
+
+- Hooks 只在组件或自定义 Hook 顶层调用；渲染和 state updater 保持纯函数。渲染期间不读写 `ref.current`，仅允许结果可预测且只执行一次的惰性初始化。
+- 影响展示或 Effect 重跑的值使用 state / props；Effect 与 callback 的依赖列出实际读取的响应式值，不把 `ref.current` 当作响应式依赖，也不通过隐藏依赖维持闭包。
+- 请求代次、即时选择和异步缓存可以保存在 ref；由对应操作入口同步更新，随后更新展示 state。保留过期响应检查，不能把这些即时更新统一延迟到 Effect，也不能在 state updater 内修改 ref。
+- 确实需要异步回调读取最新的已提交状态时，可在 Effect 中同步 ref；必须在浏览器绘制或事件处理前完成同步时使用 `useLayoutEffect`。不要在每次渲染时复制 state 到 ref。
+- Effect 注册的定时器、订阅和原生事件回调，需要读取最新值而无需重建连接时使用 `useEffectEvent`。Effect Event 仅由同组件的 Effect 及其注册回调调用，不放进依赖数组，不传给其他组件或 Hook，不用于普通 JSX 事件处理，也不用来跳过应当响应的依赖。
+- 普通点击、输入、提交等 JSX 事件直接使用当前渲染的 handler；跨 Hook 传递明确的 callback，并维护 `useCallback` 的依赖，不用 callback ref 间接转发。
+- Effect 创建的订阅、监听和定时器必须在 cleanup 中释放，支持 Strict Mode 的重复 setup / cleanup。定时器依赖触发计时的业务值，最新回调用 Effect Event 读取，避免仅因回调 identity 改变而重新计时。
+
+```tsx
+const dismiss = useEffectEvent(onDismiss)
+
+useEffect(() => {
+    if (!message) return
+    const timer = window.setTimeout(() => dismiss(), 3000)
+    return () => window.clearTimeout(timer)
+}, [message])
+
+// JSX 事件直接使用当前 handler。
+return <button onClick={onDismiss}>关闭</button>
+```
+
 ## Design Guides
 
 - [`STYLE.md`](STYLE.md) 定义视觉风格、设计令牌和组件外观。开始视觉或组件样式任务前必须先读取。

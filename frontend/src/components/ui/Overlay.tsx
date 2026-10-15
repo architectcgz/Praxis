@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 type OverlayProps = {
@@ -12,14 +12,10 @@ const openOverlays = new Set<HTMLElement>()
 let bodyOverflow = ''
 
 export function Overlay({ labelledBy, onClose, children, className = '' }: OverlayProps) {
-    const closeRef = useRef(onClose)
+    const closeOnEscape = useEffectEvent(onClose)
     const backdropRef = useRef<HTMLDivElement>(null)
     // 在子元素 autoFocus 执行前记录触发器，关闭后才能恢复到页面内的真实入口。
     const [previousActiveElement] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null)
-
-    useEffect(() => {
-        closeRef.current = onClose
-    }, [onClose])
 
     useEffect(() => {
         const backdrop = backdropRef.current
@@ -62,7 +58,7 @@ export function Overlay({ labelledBy, onClose, children, className = '' }: Overl
             if (event.key === 'Escape') {
                 event.preventDefault()
                 event.stopPropagation()
-                closeRef.current()
+                closeOnEscape()
                 return
             }
             if (event.key !== 'Tab') {
@@ -116,7 +112,7 @@ export function Overlay({ labelledBy, onClose, children, className = '' }: Overl
                 if (event.target === event.currentTarget) {
                     // 阻止卸载后的默认鼠标聚焦覆盖触发器焦点。
                     event.preventDefault()
-                    closeRef.current()
+                    onClose()
                 }
             }}
         >

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
     API_ERROR_CODES,
     getSession,
@@ -29,19 +29,21 @@ export function useWorkspaceData() {
     const [catalogLoaded, setCatalogLoaded] = useState(false)
     const viewRequestRef = useRef(0)
     const catalogRequestRef = useRef(0)
+    // 目录与选择由操作入口同步更新，渲染只消费对应 state。
     const sessionCatalogRef = useRef(sessions)
     const selectedSessionIDRef = useRef(selectedSessionID)
-    sessionCatalogRef.current = sessions
-    selectedSessionIDRef.current = selectedSessionID
     const errorCodeRef = useRef<ApiErrorCode | undefined>(undefined)
-    const refreshCatalogRef = useRef<(manual?: boolean) => Promise<void>>(async () => { })
     const {
         clearSessionData,
         loadForSession,
         resetForSessionChange,
         ...agents
     } = useAgentData({ models, setError, setErrorCode, viewRequestRef })
-    errorCodeRef.current = errorCode
+
+    // 后续请求只读取已提交的错误状态，不接触尚未提交的渲染值。
+    useLayoutEffect(() => {
+        errorCodeRef.current = errorCode
+    }, [errorCode])
 
     const loadSelectedSession = useCallback(async (id: string, requestID: number) => {
         const isCurrentRequest = () => viewRequestRef.current === requestID
@@ -151,8 +153,6 @@ export function useWorkspaceData() {
         await loadSelectedSession(selectedSessionIDRef.current, requestID)
     }, [loadSelectedSession, viewRequestRef])
 
-    refreshCatalogRef.current = refreshCatalog
-
     const refresh = useCallback(async (manual = false) => {
         const currentSessionID = selectedSessionIDRef.current
         await refreshCatalog(manual)
@@ -206,7 +206,6 @@ export function useWorkspaceData() {
         projects,
         refresh,
         refreshCatalog,
-        refreshCatalogRef,
         refreshing,
         workspaceLoading: !catalogLoaded && (refreshing || !error),
         sessionLoading: catalogLoaded && Boolean(selectedSessionID && !session && !error),

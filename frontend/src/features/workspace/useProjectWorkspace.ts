@@ -8,7 +8,6 @@ export function useProjectWorkspace() {
     const workspaceData = useWorkspaceData()
     const [busy, setBusy] = useState(false)
     const {
-        refreshCatalogRef,
         setAwaitingOutput,
         setError,
         setErrorCode,
@@ -20,7 +19,7 @@ export function useProjectWorkspace() {
     const sessionCommands = useSessionCommands({
         bridgeAvailable: workspace.bridgeAvailable,
         busy,
-        refreshCatalogRef,
+        refreshCatalog: workspace.refreshCatalog,
         selectedSessionID: workspace.selectedSessionID,
         selectSession: workspace.selectSession,
         setBusy,
@@ -55,6 +54,7 @@ export function useProjectWorkspace() {
         createNewSession: sessionCommands.createNewSession,
         refreshCatalog: workspace.refreshCatalog,
         viewRequestRef,
+        selectedAgentID: workspace.selectedAgentID,
         selectedAgentIDRef: workspace.selectedAgentIDRef,
         setBusy,
         setError,

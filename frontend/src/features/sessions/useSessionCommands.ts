@@ -11,7 +11,7 @@ import { apiErrorCode, readableError } from '../../shared/errors'
 type SessionCommandContext = {
     bridgeAvailable: boolean
     busy: boolean
-    refreshCatalogRef: RefObject<(manual?: boolean) => Promise<void>>
+    refreshCatalog: (manual?: boolean) => Promise<void>
     selectedSessionID: string
     selectSession: (id: string) => void
     setBusy: Dispatch<SetStateAction<boolean>>
@@ -25,7 +25,7 @@ type SessionCommandContext = {
 export function useSessionCommands({
     bridgeAvailable,
     busy,
-    refreshCatalogRef,
+    refreshCatalog,
     selectedSessionID,
     selectSession,
     setBusy,
@@ -51,7 +51,7 @@ export function useSessionCommands({
                 agentDefinitionId: 'primary',
                 requestId: crypto.randomUUID(),
             })
-            await refreshCatalogRef.current()
+            await refreshCatalog()
             if (viewRequestRef.current === viewRequestID) {
                 selectSession(created.sessionId)
             }
@@ -65,7 +65,7 @@ export function useSessionCommands({
         } finally {
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, refreshCatalogRef, selectSession])
+    }, [bridgeAvailable, busy, refreshCatalog, selectSession, setBusy, setError, setErrorCode, viewRequestRef])
 
     const deleteSession = useCallback(async (sessionID: string) => {
         if (busy || !sessionID || !bridgeAvailable) {
@@ -80,7 +80,7 @@ export function useSessionCommands({
             if (sessionID === selectedSessionID) {
                 selectSession('')
             }
-            await refreshCatalogRef.current()
+            await refreshCatalog()
             return true
         } catch (err) {
             if (viewRequestRef.current === viewRequestID) {
@@ -91,7 +91,7 @@ export function useSessionCommands({
         } finally {
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, refreshCatalogRef, selectedSessionID, selectSession])
+    }, [bridgeAvailable, busy, refreshCatalog, selectedSessionID, selectSession, setBusy, setError, setErrorCode, viewRequestRef])
 
     const renameSession = useCallback(async (sessionID: string, title: string) => {
         if (busy || !sessionID || !title.trim() || !bridgeAvailable) {
@@ -104,7 +104,7 @@ export function useSessionCommands({
         try {
             await renameSessionAPI(sessionID, title.trim())
             if (viewRequestRef.current === viewRequestID) updateSessionTitle(sessionID, title.trim())
-            await refreshCatalogRef.current()
+            await refreshCatalog()
             return true
         } catch (err) {
             if (viewRequestRef.current === viewRequestID) {
@@ -115,7 +115,7 @@ export function useSessionCommands({
         } finally {
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, refreshCatalogRef, updateSessionTitle, viewRequestRef])
+    }, [bridgeAvailable, busy, refreshCatalog, updateSessionTitle, setBusy, setError, setErrorCode, viewRequestRef])
 
     const revealSessionFile = useCallback(async (sessionID: string) => {
         if (busy || !sessionID || !bridgeAvailable) return false

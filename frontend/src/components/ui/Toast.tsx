@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useEffectEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { CircleCheck } from 'lucide-react'
 
@@ -9,11 +9,13 @@ type ToastProps = {
 
 /** 展示非阻塞的操作完成提示，3 秒后通知调用方清空消息；消息变化或卸载时清理计时器。 */
 export function Toast({ message, onDismiss }: ToastProps) {
+    const dismiss = useEffectEvent(onDismiss)
+
     useEffect(() => {
         if (!message) return
-        const timer = window.setTimeout(onDismiss, 3000)
+        const timer = window.setTimeout(() => dismiss(), 3000)
         return () => window.clearTimeout(timer)
-    }, [message, onDismiss])
+    }, [message])
 
     if (!message) return null
 

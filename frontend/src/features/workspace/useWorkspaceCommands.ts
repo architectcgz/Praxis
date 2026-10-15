@@ -14,6 +14,7 @@ type CommandContext = {
     createNewSession: (projectID: string, workspaceID: string) => Promise<boolean>
     refreshCatalog: (manual?: boolean, throwOnError?: boolean) => Promise<void>
     viewRequestRef: RefObject<number>
+    selectedAgentID: string
     selectedAgentIDRef: RefObject<string>
     setBusy: Dispatch<SetStateAction<boolean>>
     setError: Dispatch<SetStateAction<string>>
@@ -22,11 +23,11 @@ type CommandContext = {
 }
 
 /** 统一处理工作区命令；命令不进入 Agent 消息流。 */
-export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNewSession, refreshCatalog, viewRequestRef, selectedAgentIDRef, setBusy, setError, setErrorCode, setInput }: CommandContext) {
+export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNewSession, refreshCatalog, viewRequestRef, selectedAgentID, selectedAgentIDRef, setBusy, setError, setErrorCode, setInput }: CommandContext) {
     const running = useRef(false)
     const [commandNotice, setCommandNotice] = useState('')
     const clearCommandNotice = useCallback(() => setCommandNotice(''), [])
-    useEffect(() => setCommandNotice(''), [session?.id, selectedAgentIDRef.current])
+    useEffect(() => setCommandNotice(''), [session?.id, selectedAgentID])
 
     const runCommand = useCallback(async (name: string): Promise<boolean> => {
         if (busy || running.current) return false

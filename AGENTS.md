@@ -11,8 +11,7 @@
 
 ## 前端版本
 
-- React 使用 19.2.8（`frontend/package.json` 声明兼容范围为 `^19.1.0`，当前 lockfile 解析版本为 `19.2.8`）。
-- `react-dom` 与 React 保持同版本；`@types/react` 和 `@types/react-dom` 使用 19.x 类型定义。
+- React 版本、API 和 Hooks 写法遵守 [`frontend/AGENTS.md`](frontend/AGENTS.md)；版本变更必须同步 `frontend/package.json` 和 `frontend/package-lock.json`。
 
 ## Go 代码格式：复合字面量换行
 

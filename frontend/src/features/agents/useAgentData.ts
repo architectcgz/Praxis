@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import {
     getAgent,
     listAgentHistory,
@@ -26,17 +26,15 @@ type AgentDataOptions = {
 /** 管理当前会话中的 Agent、历史记录和实时输出。 */
 export function useAgentData({ models, setError, setErrorCode, viewRequestRef }: AgentDataOptions) {
     const [selectedAgentID, setSelectedAgentID] = useState('')
+    // 选择与缓存由操作入口同步更新，供同一轮事件中的异步请求判断归属。
     const selectedAgentIDRef = useRef(selectedAgentID)
-    selectedAgentIDRef.current = selectedAgentID
     const [agent, setAgent] = useState<AgentSnapshot | null>(null)
     const agentRef = useRef(agent)
-    agentRef.current = agent
     const [agentLoading, setAgentLoading] = useState(false)
     const [agents, setAgents] = useState<AgentSnapshot[]>([])
     const [history, setHistory] = useState<AgentHistoryItem[]>([])
     const [agentHistories, setAgentHistories] = useState<Record<string, AgentHistoryItem[]>>({})
     const agentHistoriesRef = useRef(agentHistories)
-    agentHistoriesRef.current = agentHistories
     const [agentHistoryErrors, setAgentHistoryErrors] = useState<Record<string, string>>({})
     const [streamingOutputs, setStreamingOutputs] = useState<StreamingOutputs>({})
     const [pendingUserMessages, setPendingUserMessages] = useState<PendingUserMessage[]>([])
@@ -49,6 +47,11 @@ export function useAgentData({ models, setError, setErrorCode, viewRequestRef }:
     const agentSelectionRequestRef = useRef(0)
     const agentDataRequestRef = useRef(new Map<string, number>())
     const streamingOutput = agent ? streamingOutputs[agent.id] || null : null
+
+    // 加载状态以已提交的展示快照为准，在事件触发前完成同步。
+    useLayoutEffect(() => {
+        agentRef.current = agent
+    }, [agent])
 
     const loadForSession = useCallback(async ({ agents: sessionAgents }: AgentSessionContext, requestID: number) => {
         const sessionRequestID = ++sessionDataRequestRef.current
@@ -265,7 +268,7 @@ export function useAgentData({ models, setError, setErrorCode, viewRequestRef }:
             setError(readableError(err))
             setErrorCode(apiErrorCode(err))
         }
-    }, [setError, setErrorCode, setInput])
+    }, [setError, setErrorCode, setInput, viewRequestRef])
 
     useEffect(() => subscribeAgentEvents((event: AgentEvent) => {
         if (!sessionAgentIDsRef.current.has(event.agentId)) {
