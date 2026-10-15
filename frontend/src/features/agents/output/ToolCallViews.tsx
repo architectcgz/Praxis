@@ -11,13 +11,13 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
     return <div className="agent-activity output-activity"><div className="output-tool-list">
         {groupToolEvents(tools).map((activity) => <ToolCard
             key={activity.key}
-            name={activity.call?.name || activity.result?.name || ''}
-            input={activity.call?.input}
+            name={activity.call?.name || activity.approval?.name || activity.result?.name || ''}
+            input={activity.call?.input ?? activity.approval?.input}
             result={activity.result?.result}
             isError={activity.result?.isError}
-            pendingStatus={pendingStatus}
-            taskId={activity.call?.taskId || activity.result?.taskId || ''}
-            callId={activity.call?.callId || activity.result?.callId}
+            pendingStatus={activity.approval ? 'awaiting_approval' : pendingStatus}
+            taskId={activity.call?.taskId || activity.approval?.taskId || activity.result?.taskId || ''}
+            callId={activity.call?.callId || activity.approval?.callId || activity.result?.callId}
         />)}
     </div></div>
 }
@@ -43,8 +43,8 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
         else if (record?.status === 'completed') tool.status = 'unknown'
         else if (pendingStatus === 'running') tool.status = 'queued'
     }
-    if (name === 'bash' || name === 'run_command') return <TerminalOutput tool={tool} duration={duration} />
-    if (name === 'apply_patch' || name === 'write_file') return <FileChanges tool={tool} duration={duration} />
+    if (name === 'bash') return <TerminalOutput tool={tool} duration={duration} />
+    if (name === 'apply_patch') return <FileChanges tool={tool} duration={duration} />
     return <details className="output-fold output-tool" data-status={tool.status} open={tool.status === 'running' || tool.status === 'failed' || tool.status === 'timeout' ? true : undefined}>
         <summary className="output-fold-button output-tool-header">
             <span className="output-tool-summary"><strong>{tool.name || tool.label || '工具'}</strong><code title={tool.summary}>{tool.summary}</code></span>
@@ -67,13 +67,13 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     </details>
 }
 
-type ToolActivity = { key: string; call?: AgentEvent; result?: AgentEvent }
+type ToolActivity = { key: string; call?: AgentEvent; approval?: AgentEvent; result?: AgentEvent }
 
 function groupToolEvents(events: AgentEvent[]): ToolActivity[] {
     const activities: ToolActivity[] = []
     const byCallID = new Map<string, ToolActivity>()
     events.forEach((event, index) => {
-        if (event.kind !== 'tool_call' && event.kind !== 'tool_result') return
+        if (event.kind !== 'tool_call' && event.kind !== 'tool_approval_required' && event.kind !== 'tool_result') return
         const key = `${event.taskId}:${event.turnId}:${event.callId || `tool-${index}`}`
         let activity = byCallID.get(key)
         if (!activity) {
@@ -82,6 +82,7 @@ function groupToolEvents(events: AgentEvent[]): ToolActivity[] {
             activities.push(activity)
         }
         if (event.kind === 'tool_call') activity.call = event
+        else if (event.kind === 'tool_approval_required') activity.approval = event
         else activity.result = event
     })
     return activities

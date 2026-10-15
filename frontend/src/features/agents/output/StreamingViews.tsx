@@ -61,14 +61,15 @@ export function StreamingTurnView({ agentProfile, events, taskId, turnId, active
     hasContinuation?: boolean
 }) {
     const segments: ReactNode[] = []
+    const pendingStatus = active ? 'running' : 'unknown'
     let tools: AgentEvent[] = []
     events.forEach((event, index) => {
-        if (event.kind === 'tool_call' || event.kind === 'tool_result') {
+        if (event.kind === 'tool_call' || event.kind === 'tool_approval_required' || event.kind === 'tool_result') {
             tools.push(event)
             return
         }
         if (tools.length > 0) {
-            segments.push(<StreamingToolCallsView tools={tools} key={`tools-${index}`} />)
+            segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${index}`} />)
             tools = []
         }
         if (event.kind === 'provider_waiting' && active && index === events.length - 1) {
@@ -79,7 +80,7 @@ export function StreamingTurnView({ agentProfile, events, taskId, turnId, active
             segments.push(<StreamingOutputView content={event.text} key={`text-${index}`} />)
         }
     })
-    if (tools.length > 0) segments.push(<StreamingToolCallsView tools={tools} key={`tools-${events.length}`} />)
+    if (tools.length > 0) segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${events.length}`} />)
     return <div className={`streaming-turn${hasContinuation ? ' streaming-turn-continued' : ''}`}>
         {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">

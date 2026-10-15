@@ -54,5 +54,15 @@ export type ToolApproval = ToolDecisionRequest & { name: string; command: string
 export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
     return getCommandBinding().ListToolApprovals(agentId)
 }
-export function approveToolCall(request: ToolDecisionRequest) { return getCommandBinding().ApproveToolCall(request) }
-export function denyToolCall(request: ToolDecisionRequest) { return getCommandBinding().DenyToolCall(request) }
+export function approveToolCall(request: ToolDecisionRequest) {
+    return getCommandBinding().ApproveToolCall(toolDecisionRequest(request))
+}
+
+export function denyToolCall(request: ToolDecisionRequest) {
+    return getCommandBinding().DenyToolCall(toolDecisionRequest(request))
+}
+
+/** 审批只提交调用身份与参数摘要，展示字段不参与决策请求。 */
+function toolDecisionRequest({ sessionId, agentId, taskId, callId, argumentsDigest }: ToolDecisionRequest): ToolDecisionRequest {
+    return { sessionId, agentId, taskId, callId, argumentsDigest }
+}

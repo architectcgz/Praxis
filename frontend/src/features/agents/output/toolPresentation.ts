@@ -1,4 +1,4 @@
-export type ToolStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'retrying' | 'blocked' | 'info' | 'unknown'
+export type ToolStatus = 'queued' | 'awaiting_approval' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'retrying' | 'blocked' | 'info' | 'unknown'
 
 export type ToolPresentation = {
     name: string
@@ -16,10 +16,7 @@ export type ToolPresentation = {
 
 const toolLabels: Record<string, string> = {
     bash: '运行',
-    run_command: '运行',
     read_file: '读取',
-    search_text: '搜索',
-    write_file: '写入',
     apply_patch: '补丁',
 }
 
@@ -77,8 +74,6 @@ export function presentTool(name: string, inputValue: unknown, resultText?: stri
         }
     } else if (status === 'completed' && !content.trim()) {
         notice = name === 'read_file' ? '文件为空 · 已读取的范围没有文本内容。' : ''
-    } else if (status === 'completed' && Array.isArray(result.entries) && result.entries.length === 0) {
-        notice = '目录为空 · 当前范围没有条目。'
     }
     return { name, label, summary, input, result, content, status, notice, truncated, exitCode, nextOffset }
 }

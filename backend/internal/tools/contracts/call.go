@@ -12,9 +12,6 @@ type ToolName = core.ToolName
 
 const (
 	ToolReadFile   = core.ToolReadFile
-	ToolSearchText = core.ToolSearchText
-	ToolWriteFile  = core.ToolWriteFile
-	ToolRunCommand = core.ToolRunCommand
 	ToolBash       = core.ToolBash
 	ToolApplyPatch = core.ToolApplyPatch
 )

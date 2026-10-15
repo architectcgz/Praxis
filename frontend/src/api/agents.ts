@@ -25,7 +25,7 @@ export type TaskFailureCode =
     | 'runtime_invalid_outcome'
     | 'unknown'
 export type AgentMessageRole = 'user' | 'assistant' | 'tool' | 'unknown'
-export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'unknown'
+export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'unknown'
 export type AgentHistoryKind = 'message' | 'task' | 'request_canceled' | 'unknown'
 
 export type AgentSnapshot = {

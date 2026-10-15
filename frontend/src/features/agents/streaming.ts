@@ -15,6 +15,7 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
         case 'thinking_delta':
         case 'provider_waiting':
         case 'tool_call':
+        case 'tool_approval_required':
         case 'tool_result': {
             const turnId = event.turnId || ''
             const turns = [...output.turns]
@@ -54,7 +55,9 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
             if (event.kind !== 'error' && previous?.taskId !== event.taskId) return outputs
             return { ...outputs, [event.agentId]: {
                 ...output,
-                turns: output.turns.map((turn) => ({ ...turn, events: turn.events.filter((item) => item.kind !== 'provider_waiting') })),
+                turns: output.turns.map((turn) => ({ ...turn, events: turn.events.filter((item) => (
+                    item.kind !== 'provider_waiting' && item.kind !== 'tool_approval_required'
+                )) })),
                 error: event.kind === 'error' ? event.error || '' : output.error,
             } }
         default:

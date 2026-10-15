@@ -8,9 +8,6 @@ type ToolName string
 
 const (
 	ToolReadFile   ToolName = "read_file"
-	ToolSearchText ToolName = "search_text"
-	ToolWriteFile  ToolName = "write_file"
-	ToolRunCommand ToolName = "run_command"
 	ToolBash       ToolName = "bash"
 	ToolApplyPatch ToolName = "apply_patch"
 )

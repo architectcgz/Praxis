@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { approveToolCall, denyToolCall, listToolApprovals, subscribeAgentEvents, type ToolApproval } from '../../api'
 import { readableError } from '../../shared/errors'
 
@@ -7,27 +7,26 @@ export function ToolApprovals({ agentId }: { agentId: string }) {
     const [requests, setRequests] = useState<ToolApproval[]>([])
     const [busy, setBusy] = useState('')
     const [error, setError] = useState('')
+    const requestGeneration = useRef(0)
     const reload = useCallback(async () => {
-        setRequests(await listToolApprovals(agentId))
+        const current = ++requestGeneration.current
+        try {
+            const values = await listToolApprovals(agentId)
+            if (current === requestGeneration.current) {
+                setRequests(values)
+                setError('')
+            }
+        } catch (err) {
+            if (current === requestGeneration.current) setError(readableError(err))
+        }
     }, [agentId])
     useEffect(() => {
-        let active = true
-        let generation = 0
-        const refresh = async () => {
-            const current = ++generation
-            try {
-                const values = await listToolApprovals(agentId)
-                if (active && current === generation) { setRequests(values); setError('') }
-            } catch (err) {
-                if (active && current === generation) setError(readableError(err))
-            }
-        }
-        void refresh()
         const unsubscribe = subscribeAgentEvents((event) => {
-            if (event.agentId === agentId && ['tool_approval_required', 'tool_result', 'task_ended', 'request_canceled'].includes(event.kind)) void refresh()
+            if (event.agentId === agentId && ['tool_approval_required', 'tool_result', 'task_ended', 'request_canceled'].includes(event.kind)) void reload()
         })
-        return () => { active = false; unsubscribe() }
-    }, [agentId])
+        void reload()
+        return () => { requestGeneration.current += 1; unsubscribe() }
+    }, [agentId, reload])
     const decide = async (request: ToolApproval, approve: boolean) => {
         setBusy(request.callId)
         setError('')
