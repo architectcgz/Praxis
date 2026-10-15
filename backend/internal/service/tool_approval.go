@@ -19,7 +19,6 @@ type ToolApproval struct {
 	RuleID          string
 	Command         string
 	Path            string
-	Timeout         float64
 }
 
 func (s *Services) ListToolApprovals(ctx context.Context, agentID contracts.AgentID) ([]ToolApproval, error) {
@@ -30,9 +29,8 @@ func (s *Services) ListToolApprovals(ctx context.Context, agentID contracts.Agen
 	result := make([]ToolApproval, 0, len(values))
 	for _, value := range values {
 		var arguments struct {
-			Command string  `json:"command"`
-			Path    string  `json:"path"`
-			Timeout float64 `json:"timeout"`
+			Command string `json:"command"`
+			Path    string `json:"path"`
 		}
 		if err := json.Unmarshal(value.NormalizedArguments, &arguments); err != nil {
 			return nil, err
@@ -47,7 +45,6 @@ func (s *Services) ListToolApprovals(ctx context.Context, agentID contracts.Agen
 			RuleID:          value.CommandDecision.RuleID,
 			Command:         arguments.Command,
 			Path:            arguments.Path,
-			Timeout:         arguments.Timeout,
 		})
 	}
 	return result, nil

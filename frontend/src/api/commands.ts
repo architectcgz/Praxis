@@ -50,7 +50,8 @@ export function queueTask(request: QueueTaskRequest) {
 }
 
 export type ToolDecisionRequest = { sessionId: string; agentId: string; taskId: string; callId: string; argumentsDigest: string }
-export type ToolApproval = ToolDecisionRequest & { name: string; command: string; path: string; timeout: number; ruleId: string }
+/** 待授权查询的响应记录；命令与目录供审核展示，不随授权决策提交。 */
+export type ToolApproval = ToolDecisionRequest & { name: string; command: string; path: string; ruleId: string }
 export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
     return getCommandBinding().ListToolApprovals(agentId)
 }

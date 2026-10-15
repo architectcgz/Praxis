@@ -22,6 +22,12 @@
     background: var(--paper);
 }
 
+.output-terminal-details,
+.output-tool-details {
+    border: 0;
+    border-radius: 0;
+}
+
 .output-tool .output-fold-button {
     padding: 0 10px;
     background: transparent;
@@ -417,6 +423,144 @@
 
 .output-terminal-path code {
     color: inherit;
+}
+
+.output-terminal[data-status='awaiting_approval'] .output-terminal-path code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.tool-approval {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 12px;
+    border-top: 1px solid var(--line);
+}
+
+.tool-approval-header,
+.tool-approval-footer,
+.tool-approval-actions,
+.tool-approval-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tool-approval-header {
+    flex-wrap: wrap;
+    color: var(--warn);
+    font-size: var(--font-size-secondary);
+}
+
+.tool-approval-header > span {
+    color: var(--muted);
+}
+
+.tool-approval-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin: 0;
+    font-size: var(--font-size-secondary);
+}
+
+.tool-approval-details > div {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.tool-approval-details dt {
+    flex-shrink: 0;
+    color: var(--muted);
+}
+
+.tool-approval-details dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.tool-approval-footer {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.tool-approval-hint {
+    color: var(--muted);
+    font-size: var(--font-size-secondary);
+}
+
+.tool-approval-actions {
+    margin-left: auto;
+}
+
+.tool-approval-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    font-size: var(--font-size-secondary);
+    font-weight: 600;
+    transition: background-color var(--motion-duration) ease, border-color var(--motion-duration) ease;
+}
+
+.tool-approval-deny:hover:not(:disabled) {
+    background: var(--fill);
+}
+
+.tool-approval-actions .tool-approval-approve {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+}
+
+.tool-approval-approve:hover:not(:disabled) {
+    border-color: var(--accent-ink);
+    background: var(--accent-ink);
+}
+
+.tool-approval-actions button:disabled {
+    opacity: 0.7;
+}
+
+.tool-approval-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid #e0b9b4;
+    border-radius: 6px;
+    background: #fef3f2;
+    color: var(--danger);
+    font-size: var(--font-size-secondary);
+    overflow-wrap: anywhere;
+}
+
+.tool-approval-error > svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+@media (max-width: 460px) {
+    .tool-approval-actions {
+        flex-basis: 100%;
+    }
+
+    .tool-approval-actions button {
+        flex: 1;
+        min-height: 36px;
+    }
 }
 
 .output-button {

@@ -6,13 +6,14 @@ import { TerminalOutput } from './TerminalOutput'
 import { ToolResultContent } from './ToolResultContent'
 import { formatToolInput, presentTool, type ToolStatus } from './toolPresentation'
 import { DurationLabel, useOperationTiming } from '../../timing/OperationTimings'
+import { ToolApprovalReview, useToolApproval } from '../ToolApprovals'
 
 export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { tools: AgentEvent[]; pendingStatus?: ToolStatus }) {
     return <div className="agent-activity output-activity"><div className="output-tool-list">
         {groupToolEvents(tools).map((activity) => <ToolCard
             key={activity.key}
             name={activity.call?.name || activity.approval?.name || activity.result?.name || ''}
-            input={activity.call?.input ?? activity.approval?.input}
+            input={activity.call?.input}
             result={activity.result?.result}
             isError={activity.result?.isError}
             pendingStatus={activity.approval ? 'awaiting_approval' : pendingStatus}
@@ -34,8 +35,12 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; taskId: string; callId?: string
 }) {
     const record = useOperationTiming(taskId, 'tool', callId)
+    const approval = useToolApproval(taskId, callId)
+    const pendingApproval = result === undefined ? approval?.pendingApproval : undefined
     const duration = <DurationLabel record={record} />
-    const tool = presentTool(name, input, result, isError, pendingStatus)
+    // 审核时展示后端返回的已持久化参数，确保用户看到的正是将被批准的命令。
+    const toolInput = pendingApproval ? { command: pendingApproval.command, path: pendingApproval.path } : input
+    const tool = presentTool(name, toolInput, result, isError, pendingStatus)
     if (result === undefined) {
         if (record?.status === 'failed') tool.status = 'failed'
         else if (record?.status === 'cancelled' || record?.status === 'interrupted') tool.status = 'cancelled'
@@ -43,28 +48,34 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
         else if (record?.status === 'completed') tool.status = 'unknown'
         else if (pendingStatus === 'running') tool.status = 'queued'
     }
-    if (name === 'bash') return <TerminalOutput tool={tool} duration={duration} />
+    if (pendingApproval) tool.status = 'awaiting_approval'
+    const review = result === undefined && approval && (pendingApproval || (pendingStatus === 'awaiting_approval' && approval.error))
+        ? <ToolApprovalReview approval={approval} /> : undefined
+    if (name === 'bash') return <TerminalOutput tool={tool} duration={duration} approval={review} />
     if (name === 'apply_patch') return <FileChanges tool={tool} duration={duration} />
-    return <details className="output-fold output-tool" data-status={tool.status} open={tool.status === 'running' || tool.status === 'failed' || tool.status === 'timeout' ? true : undefined}>
-        <summary className="output-fold-button output-tool-header">
-            <span className="output-tool-summary"><strong>{tool.name || tool.label || '工具'}</strong><code title={tool.summary}>{tool.summary}</code></span>
-            <OutputStatus status={tool.status} label={tool.notice.startsWith('搜索无结果') ? '无匹配' : undefined} />
-            {duration}
-            <ChevronDown className="output-chevron" size={14} aria-hidden="true" />
-        </summary>
-        <div className="output-tool-body">
-            {input !== undefined && <section className="output-section output-input">
-                <div className="output-section-label">调用参数</div>
-                <pre className="output-text">{formatToolInput(input)}</pre>
-            </section>}
-            <section className="output-section output-result">
-                <div className="output-section-label">执行输出</div>
-                {result === undefined ? <p className="output-muted">{tool.status === 'running' ? '正在执行，等待工具返回结果…' : '暂无输出'}</p>
-                    : tool.content ? <ToolResultContent content={tool.content} /> : <p className="output-muted">暂无输出</p>}
-                {typeof tool.result.size === 'number' && <div className="output-meta"><span>{tool.result.size} 字节</span></div>}
-            </section>
-        </div>
-    </details>
+    return <div className="output-fold output-tool" data-status={tool.status}>
+        <details className="output-fold output-tool-details" open={tool.status === 'running' || tool.status === 'failed' || tool.status === 'timeout' || tool.status === 'awaiting_approval' ? true : undefined}>
+            <summary className="output-fold-button output-tool-header">
+                <span className="output-tool-summary"><strong>{tool.name || tool.label || '工具'}</strong><code title={tool.summary}>{tool.summary}</code></span>
+                <OutputStatus status={tool.status} label={tool.notice.startsWith('搜索无结果') ? '无匹配' : undefined} />
+                {duration}
+                <ChevronDown className="output-chevron" size={14} aria-hidden="true" />
+            </summary>
+            <div className="output-tool-body">
+                {toolInput !== undefined && <section className="output-section output-input">
+                    <div className="output-section-label">调用参数</div>
+                    <pre className="output-text">{formatToolInput(toolInput)}</pre>
+                </section>}
+                {!review && <section className="output-section output-result">
+                    <div className="output-section-label">执行输出</div>
+                    {result === undefined ? <p className="output-muted">{tool.status === 'running' ? '正在执行，等待工具返回结果…' : '暂无输出'}</p>
+                        : tool.content ? <ToolResultContent content={tool.content} /> : <p className="output-muted">暂无输出</p>}
+                    {typeof tool.result.size === 'number' && <div className="output-meta"><span>{tool.result.size} 字节</span></div>}
+                </section>}
+            </div>
+        </details>
+        {review}
+    </div>
 }
 
 type ToolActivity = { key: string; call?: AgentEvent; approval?: AgentEvent; result?: AgentEvent }

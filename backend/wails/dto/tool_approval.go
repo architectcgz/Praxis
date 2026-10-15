@@ -9,9 +9,8 @@ type ToolDecisionRequest struct {
 }
 type ToolApproval struct {
 	ToolDecisionRequest
-	Name    string  `json:"name"`
-	RuleID  string  `json:"ruleId"`
-	Command string  `json:"command"`
-	Path    string  `json:"path"`
-	Timeout float64 `json:"timeout"`
+	Name    string `json:"name"`
+	RuleID  string `json:"ruleId"`
+	Command string `json:"command"`
+	Path    string `json:"path"`
 }

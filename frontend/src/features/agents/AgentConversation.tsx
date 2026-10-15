@@ -3,7 +3,7 @@ import { ArrowDown, MessageSquare } from 'lucide-react'
 import type { AgentHistoryItem, AgentMessageBlock, AgentSnapshot, ModelOption } from '../../api'
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
-import { ToolApprovals } from './ToolApprovals'
+import { ToolApprovalsProvider } from './ToolApprovals'
 import { projectStreamingOutput } from './streaming'
 import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
@@ -173,7 +173,7 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
         setShowScrollButton(false)
     }, [])
 
-    return (
+    return <ToolApprovalsProvider key={agent.id} agentId={agent.id}>
         <div className="agent-conversation">
             <div className="message-thread-container">
                 <div
@@ -218,7 +218,6 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                         })
                     )}
                     {collaboration}
-                    <ToolApprovals key={agent.id} agentId={agent.id} />
                     {visiblePendingMessages.map((message) => (
                         <PendingUserMessageView content={message.content} at={message.at} key={message.requestId} />
                     ))}
@@ -267,7 +266,7 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                 onCommand={onCommand}
             />
         </div>
-    )
+    </ToolApprovalsProvider>
 }
 
 /** 仅衔接同一次执行中相邻的助手消息；用户消息、错误和不同任务都保留独立边界。 */

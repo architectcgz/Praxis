@@ -28,7 +28,6 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 			Name:    value.Name,
 			Command: value.Command,
 			Path:    value.Path,
-			Timeout: value.Timeout,
 			RuleID:  value.RuleID,
 		})
 	}

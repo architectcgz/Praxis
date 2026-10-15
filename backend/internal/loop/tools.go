@@ -39,6 +39,7 @@ func (r *Runner) runToolCalls(
 	for callIndex, call := range calls {
 		execution, err := r.ToolExecutor.Execute(ctx, call, metadata)
 		if execution.ApprovalPending {
+			// 授权事件只通知调用状态；参数由工具调用事件和持久化查询提供。
 			r.emit(Event{
 				Kind:      EventToolApprovalRequired,
 				SessionID: metadata.SessionID,
@@ -47,7 +48,6 @@ func (r *Runner) runToolCalls(
 				TurnID:    metadata.TurnID,
 				CallID:    call.ID,
 				Name:      string(call.Name),
-				Input:     call.Arguments,
 			})
 			return results, errAwaitingApproval
 		}
