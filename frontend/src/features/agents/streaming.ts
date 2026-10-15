@@ -75,17 +75,41 @@ export function clearDurableStreamingOutput(outputs: StreamingOutputs, agent: Ag
     const persisted = history.some((item) => (
         item.message?.role === 'assistant' && item.message.taskId === output.taskId
     ) || item.task?.id === output.taskId)
-    const hasToolOutput = output.turns.some((turn) => turn.events.some((event) => event.kind === 'tool_call' || event.kind === 'tool_result'))
-    const persistedToolOutput = history.some((item) => (
-        item.message?.taskId === output.taskId &&
-        item.message.blocks?.some((block) => block.kind === 'tool_call' || block.kind === 'tool_result')
-    ))
-    if (!ended || !persisted || hasToolOutput && !persistedToolOutput) {
+    const fullyPersisted = output.turns.every((turn) => turn.events.every((event) => {
+        if (event.kind === 'text_delta' || event.kind === 'thinking_delta') return hasAssistantTurn(history, output.taskId, turn.turnId)
+        if (event.kind === 'tool_call' || event.kind === 'tool_result') return history.some((item) => (
+            item.message?.taskId === output.taskId && item.message.blocks?.some((block) => block.kind === event.kind && block.callId === event.callId)
+        ))
+        return true
+    }))
+    if (!ended || !persisted || !fullyPersisted) {
         return outputs
     }
     const remaining = { ...outputs }
     delete remaining[agent.id]
     return remaining
+}
+
+/** 持久化轮次拥有正文与调用卡片；未落盘的工具结果由调用卡片消费。 */
+export function projectStreamingOutput(output: StreamingOutput | null, history: AgentHistoryItem[]): StreamingOutput | null {
+    if (!output) return null
+    return {
+        ...output,
+        turns: output.turns.flatMap((turn) => {
+            if (!hasAssistantTurn(history, output.taskId, turn.turnId)) return [turn]
+            const events = turn.events.filter((event) => {
+                if (event.kind === 'text_delta' || event.kind === 'thinking_delta' || event.kind === 'provider_waiting') return false
+                return !history.some((item) => item.message?.taskId === output.taskId && item.message.blocks?.some((block) => (
+                    block.kind === 'tool_call' && block.callId === event.callId
+                )))
+            })
+            return events.length > 0 ? [{ ...turn, events }] : []
+        }),
+    }
+}
+
+function hasAssistantTurn(history: AgentHistoryItem[], taskId: string, turnId: string): boolean {
+    return history.some((item) => item.message?.taskId === taskId && item.message.role === 'assistant' && item.message.id === `assistant:${turnId}`)
 }
 
 /** 按落盘用户消息的 task ID 去重；尚未收到执行回执或其他执行的乐观消息继续保留。 */

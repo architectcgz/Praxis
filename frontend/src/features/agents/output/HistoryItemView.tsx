@@ -3,7 +3,8 @@ import type { AgentHistoryItem, AgentMessageBlock } from '../../../api'
 import { CopyIconButton, MessageMarkdown } from './MarkdownViews'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock } from './ToolCallViews'
-import { MessageTiming, useOperationTiming } from '../../timing/OperationTimings'
+import { useOperationTiming } from '../../timing/OperationTimings'
+import { MessageTiming } from './MessageTiming'
 
 const failureMessages: Record<string, string> = {
     provider_unavailable: '代理无法响应，因为没有配置模型提供者。',

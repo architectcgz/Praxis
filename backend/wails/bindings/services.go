@@ -35,7 +35,7 @@ type SessionService interface {
 type AgentService interface {
 	GetAgentDetail(context.Context, contracts.AgentID, int) (service.AgentDetail, error)
 	ListAgentMessages(context.Context, contracts.AgentID, int) ([]service.AgentMessage, error)
-	ListAgentHistory(context.Context, contracts.AgentID, int) ([]service.AgentHistoryItem, error)
+	ListAgentHistory(context.Context, contracts.AgentID, string, int) (service.AgentHistoryPage, error)
 }
 
 // AgentCommands 接收持久化的 Agent 执行与控制命令。

@@ -66,10 +66,11 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
             return
         }
         const providers = [...config.providers]
-        if (editor.index === null) {
+        const providerIndex = providers.findIndex((item) => item.id === provider.id)
+        if (providerIndex < 0) {
             providers.push(provider)
         } else {
-            providers[editor.index] = provider
+            providers[providerIndex] = provider
         }
         const defaultProviderId = config.defaultProviderId || (config.providers.length === 0 ? provider.id : '')
         setSaving(true)
@@ -77,6 +78,7 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         try {
             const savedConfig = await saveConfig({ ...config, defaultProviderId, providers })
             setConfig(savedConfig)
+            setEditor({ kind: 'provider', index: savedConfig.providers.findIndex((item) => item.id === provider.id) })
             if (key.trim()) {
                 await setProviderKey(provider.id, key.trim())
             }

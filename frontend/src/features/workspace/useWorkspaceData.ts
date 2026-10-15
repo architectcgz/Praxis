@@ -6,6 +6,7 @@ import {
     listModels,
     listProjects,
     listSessions,
+    subscribeAgentEvents,
     type ApiErrorCode,
     type ModelOption,
     type ProjectSummary,
@@ -29,6 +30,7 @@ export function useWorkspaceData() {
     const [catalogLoaded, setCatalogLoaded] = useState(false)
     const viewRequestRef = useRef(0)
     const catalogRequestRef = useRef(0)
+    const sessionMetadataRequests = useRef(new Map<string, number>())
     // 目录与选择由操作入口同步更新，渲染只消费对应 state。
     const sessionCatalogRef = useRef(sessions)
     const selectedSessionIDRef = useRef(selectedSessionID)
@@ -120,6 +122,10 @@ export function useWorkspaceData() {
             }
             setSessions(catalog)
             sessionCatalogRef.current = catalog
+            setSession((current) => {
+                const summary = catalog.find((item) => item.id === current?.id)
+                return current && summary ? { ...current, ...summary } : current
+            })
             setProjects(projectCatalog)
             const firstSessionID = catalog[0]?.id || ''
             const selectedID = selectedSessionIDRef.current
@@ -178,6 +184,15 @@ export function useWorkspaceData() {
     }, [selectedSessionID])
 
     const selectSession = useCallback((id: string) => {
+        if (id === selectedSessionIDRef.current) {
+            // 同一选择保留正在进行的加载；失败后的再次点击显式重试。
+            if (error) {
+                setError('')
+                setErrorCode(undefined)
+                void refreshSession()
+            }
+            return
+        }
         viewRequestRef.current += 1
         selectedSessionIDRef.current = id
         setError('')
@@ -185,7 +200,38 @@ export function useWorkspaceData() {
         setSelectedSessionID(id)
         setSession(null)
         resetForSessionChange()
-    }, [resetForSessionChange, setError, setErrorCode, viewRequestRef])
+    }, [error, refreshSession, resetForSessionChange])
+
+    const clearSelectedSession = useCallback((id: string) => {
+        if (selectedSessionIDRef.current === id) selectSession('')
+    }, [selectSession])
+
+    useEffect(() => {
+        let active = true
+        const unsubscribe = subscribeAgentEvents((event) => {
+            if ((event.kind !== 'task_ended' && event.kind !== 'request_canceled') || !event.sessionId) return
+            const id = event.sessionId
+            const request = (sessionMetadataRequests.current.get(id) || 0) + 1
+            sessionMetadataRequests.current.set(id, request)
+            const catalogRequest = catalogRequestRef.current
+            // 只回填发生变化的会话摘要，不重新加载全部模型、项目和 Agent 历史。
+            void getSession(id).then((summary) => {
+                if (!active || sessionMetadataRequests.current.get(id) !== request || catalogRequestRef.current !== catalogRequest || !sessionCatalogRef.current.some((item) => item.id === id)) return
+                const catalog = sessionCatalogRef.current.map((item) => item.id === id ? {
+                    ...item, title: summary.title, updatedAt: summary.updatedAt,
+                } : item).sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+                sessionCatalogRef.current = catalog
+                setSessions(catalog)
+                setSession((current) => current?.id === id ? { ...current, title: summary.title, updatedAt: summary.updatedAt } : current)
+            }, (error) => {
+                if (active && sessionMetadataRequests.current.get(id) === request && catalogRequestRef.current === catalogRequest && selectedSessionIDRef.current === id) {
+                    setError(readableError(error))
+                    setErrorCode(apiErrorCode(error))
+                }
+            })
+        })
+        return () => { active = false; unsubscribe() }
+    }, [])
 
     const clearError = useCallback(() => {
         setError('')
@@ -193,13 +239,18 @@ export function useWorkspaceData() {
     }, [])
 
     const updateSessionTitle = useCallback((id: string, title: string) => {
+        sessionMetadataRequests.current.set(id, (sessionMetadataRequests.current.get(id) || 0) + 1)
         setSession((current) => current?.id === id ? { ...current, title } : current)
+        const next = sessionCatalogRef.current.map((item) => item.id === id ? { ...item, title } : item)
+        sessionCatalogRef.current = next
+        setSessions(next)
     }, [])
 
     return {
         ...agents,
         bridgeAvailable: isBindingAvailable(),
         clearError,
+        clearSelectedSession,
         error,
         errorCode,
         models,

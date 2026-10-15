@@ -15,7 +15,7 @@ type CommandContext = {
     refreshCatalog: (manual?: boolean, throwOnError?: boolean) => Promise<void>
     viewRequestRef: RefObject<number>
     selectedAgentID: string
-    selectedAgentIDRef: RefObject<string>
+    getSelectedAgentID: () => string
     setBusy: Dispatch<SetStateAction<boolean>>
     setError: Dispatch<SetStateAction<string>>
     setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>
@@ -23,7 +23,7 @@ type CommandContext = {
 }
 
 /** 统一处理工作区命令；命令不进入 Agent 消息流。 */
-export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNewSession, refreshCatalog, viewRequestRef, selectedAgentID, selectedAgentIDRef, setBusy, setError, setErrorCode, setInput }: CommandContext) {
+export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNewSession, refreshCatalog, viewRequestRef, selectedAgentID, getSelectedAgentID, setBusy, setError, setErrorCode, setInput }: CommandContext) {
     const running = useRef(false)
     const [commandNotice, setCommandNotice] = useState('')
     const clearCommandNotice = useCallback(() => setCommandNotice(''), [])
@@ -43,8 +43,8 @@ export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNew
         }
         running.current = true
         const viewID = viewRequestRef.current
-        const agentID = selectedAgentIDRef.current
-        const isCurrentView = () => viewRequestRef.current === viewID && selectedAgentIDRef.current === agentID
+        const agentID = getSelectedAgentID()
+        const isCurrentView = () => viewRequestRef.current === viewID && getSelectedAgentID() === agentID
         setCommandNotice('')
         try {
             if (name === '/new') {
@@ -73,7 +73,7 @@ export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNew
         } finally {
             running.current = false
         }
-    }, [bridgeAvailable, busy, createNewSession, refreshCatalog, session, viewRequestRef, selectedAgentIDRef, setBusy, setError, setErrorCode, setInput])
+    }, [bridgeAvailable, busy, createNewSession, refreshCatalog, session, viewRequestRef, getSelectedAgentID, setBusy, setError, setErrorCode, setInput])
 
     return { runCommand, commandNotice, clearCommandNotice }
 }

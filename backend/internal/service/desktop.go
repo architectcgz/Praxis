@@ -169,14 +169,14 @@ func (s *Services) ListAgentMessages(ctx context.Context, agentID contracts.Agen
 }
 
 // ListAgentHistory 返回排序后的公开消息及失败、取消任务。
-func (s *Services) ListAgentHistory(ctx context.Context, agentID contracts.AgentID, limit int) ([]AgentHistoryItem, error) {
-	messages, err := s.ListAgentMessages(ctx, agentID, limit)
+func (s *Services) ListAgentHistory(ctx context.Context, agentID contracts.AgentID, before string, limit int) (AgentHistoryPage, error) {
+	messages, err := s.ListAgentMessages(ctx, agentID, 0)
 	if err != nil {
-		return nil, err
+		return AgentHistoryPage{}, err
 	}
-	view, err := s.agents.GetAgentView(ctx, agentID, limit)
+	view, err := s.agents.GetAgentView(ctx, agentID, 0)
 	if err != nil {
-		return nil, err
+		return AgentHistoryPage{}, err
 	}
 	result := make([]AgentHistoryItem, 0, len(messages)+len(view.Tasks))
 	for _, message := range messages {
@@ -208,9 +208,9 @@ func (s *Services) ListAgentHistory(ctx context.Context, agentID contracts.Agent
 		if order := a.At.Compare(b.At); order != 0 {
 			return order
 		}
-		return cmp.Compare(a.Sequence, b.Sequence)
+		return cmp.Or(cmp.Compare(a.Sequence, b.Sequence), cmp.Compare(historyItemCursor(a), historyItemCursor(b)))
 	})
-	return result, nil
+	return pageAgentHistory(result, before, limit)
 }
 
 func publicAgentMessage(value sessionmodel.MessageData) (AgentMessage, bool) {

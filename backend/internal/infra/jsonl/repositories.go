@@ -236,12 +236,16 @@ func (r TaskRepository) ListActive(ctx context.Context) ([]taskmodel.Task, error
 	}), e
 }
 
-// ListByAgent 返回指定 Agent 的对象副本。
+// ListByAgent 返回指定 Agent 的对象副本；非正数 limit 返回全部任务。
 func (r TaskRepository) ListByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]taskmodel.Task, error) {
 	v, e := list[taskmodel.Task](ctx, r.s, "task", func(v taskmodel.Task) bool { return v.AgentID == id })
-	return capped(sorted(v, func(a, b taskmodel.Task) int {
+	sorted(v, func(a, b taskmodel.Task) int {
 		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), cmp.Compare(b.ID, a.ID))
-	}), limit), e
+	})
+	if limit > 0 {
+		v = capped(v, limit)
+	}
+	return v, e
 }
 
 // CountActiveBySession 返回 Session 内活动 Task 的数量。

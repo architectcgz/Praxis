@@ -8,7 +8,7 @@ import {
     type ApiErrorCode,
 } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
-import type { PendingUserMessage } from './types'
+import type { AgentStore } from './agentStore'
 
 type AgentCommandContext = {
     agent: AgentSnapshot | null
@@ -18,14 +18,13 @@ type AgentCommandContext = {
     refreshAgent: (id: string) => Promise<void>
     selectedModelID: string
     selectedProviderID: string
-    selectedAgentIDRef: RefObject<string>
+    getSelectedAgentID: () => string
     sessionID: string
-    setAwaitingOutput: Dispatch<SetStateAction<boolean>>
+    inputActions: Pick<AgentStore, 'beginInput' | 'acceptInput' | 'rejectInput' | 'stopAwaiting'>
     setBusy: Dispatch<SetStateAction<boolean>>
     setError: Dispatch<SetStateAction<string>>
     setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>
     setInput: Dispatch<SetStateAction<string>>
-    setPendingUserMessages: Dispatch<SetStateAction<PendingUserMessage[]>>
     viewRequestRef: RefObject<number>
 }
 
@@ -38,14 +37,13 @@ export function useAgentCommands({
     refreshAgent,
     selectedModelID,
     selectedProviderID,
-    selectedAgentIDRef,
+    getSelectedAgentID,
     sessionID,
-    setAwaitingOutput,
+    inputActions,
     setBusy,
     setError,
     setErrorCode,
     setInput,
-    setPendingUserMessages,
     viewRequestRef,
 }: AgentCommandContext) {
     const submitInput = useCallback(async () => {
@@ -60,15 +58,11 @@ export function useAgentCommands({
         const requestID = crypto.randomUUID()
         const content = input
         const agentID = agent?.id || ''
-        const selectedAgentID = selectedAgentIDRef.current
+        const selectedAgentID = getSelectedAgentID()
         const viewRequestID = viewRequestRef.current
-        const isCurrentView = () => viewRequestRef.current === viewRequestID && selectedAgentIDRef.current === selectedAgentID
+        const isCurrentView = () => viewRequestRef.current === viewRequestID && getSelectedAgentID() === selectedAgentID
         setBusy(true)
-        setAwaitingOutput(true)
-        setPendingUserMessages((current) => [
-            ...current,
-            { requestId: requestID, taskId: '', sessionId: sessionID, agentId: agentID, content, at: new Date().toISOString() },
-        ])
+        inputActions.beginInput({ requestId: requestID, taskId: '', sessionId: sessionID, agentId: agentID, content, at: new Date().toISOString() })
         setError('')
         setErrorCode(undefined)
         try {
@@ -81,24 +75,21 @@ export function useAgentCommands({
                 modelId: selectedModelID,
                 reasoningLevel: reasoning,
             })
-            setPendingUserMessages((current) => current.map((message) => (
-                message.requestId === requestID ? { ...message, taskId: response.taskId } : message
-            )))
+            inputActions.acceptInput(requestID, response.taskId)
             if (isCurrentView()) {
                 setInput('')
             }
             await refreshAgent(agentID)
         } catch (err) {
-            setPendingUserMessages((current) => current.filter((message) => message.requestId !== requestID))
+            inputActions.rejectInput(requestID)
             if (isCurrentView()) {
-                setAwaitingOutput(false)
                 setError(readableError(err))
                 setErrorCode(apiErrorCode(err))
             }
         } finally {
             setBusy(false)
         }
-    }, [agent, busy, input, reasoning, sessionID, selectedModelID, selectedProviderID, refreshAgent, selectedAgentIDRef])
+    }, [agent, busy, input, reasoning, sessionID, selectedModelID, selectedProviderID, refreshAgent, getSelectedAgentID, inputActions, viewRequestRef, setBusy, setError, setErrorCode, setInput])
 
     const control = useCallback(async (kind: 'pause' | 'cancel') => {
         if (!agent?.currentTaskId || busy) {
@@ -106,11 +97,11 @@ export function useAgentCommands({
         }
         const agentID = agent.id
         const targetTaskId = agent.currentTaskId
-        const selectedAgentID = selectedAgentIDRef.current
+        const selectedAgentID = getSelectedAgentID()
         const viewRequestID = viewRequestRef.current
-        const isCurrentView = () => viewRequestRef.current === viewRequestID && selectedAgentIDRef.current === selectedAgentID
+        const isCurrentView = () => viewRequestRef.current === viewRequestID && getSelectedAgentID() === selectedAgentID
         setBusy(true)
-        setAwaitingOutput(false)
+        inputActions.stopAwaiting()
         setError('')
         setErrorCode(undefined)
         try {
@@ -127,7 +118,7 @@ export function useAgentCommands({
         } finally {
             setBusy(false)
         }
-    }, [agent, busy, refreshAgent, selectedAgentIDRef])
+    }, [agent, busy, refreshAgent, getSelectedAgentID, inputActions, viewRequestRef, setBusy, setError, setErrorCode])
 
     return { control, submitInput }
 }

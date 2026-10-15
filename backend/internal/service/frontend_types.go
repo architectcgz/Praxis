@@ -109,6 +109,11 @@ type MessageBlock struct {
 }
 
 // AgentHistoryItem 合并消息及需要展示的任务终态。
+type AgentHistoryPage struct {
+	Items      []AgentHistoryItem
+	NextCursor string
+}
+
 type AgentHistoryItem struct {
 	Kind     string
 	Sequence uint64

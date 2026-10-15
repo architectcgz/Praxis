@@ -122,6 +122,11 @@ type AgentHistoryItem struct {
 	Task     *TaskSnapshot `json:"task,omitempty"`
 }
 
+type AgentHistoryPage struct {
+	Items      []AgentHistoryItem `json:"items"`
+	NextCursor string             `json:"nextCursor"`
+}
+
 type ModelOption struct {
 	ProviderID               string   `json:"providerId"`
 	ModelID                  string   `json:"modelId"`

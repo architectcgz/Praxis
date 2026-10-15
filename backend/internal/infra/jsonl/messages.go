@@ -104,7 +104,7 @@ func (r MessageStreams) LoadMessages(
 		stream.SequenceBoundary = values[len(values)-1].Sequence
 	}
 	if limit > 0 {
-		stream.Messages = values[:min(len(values), limit)]
+		stream.Messages = values[max(0, len(values)-limit):]
 	}
 	return stream, nil
 

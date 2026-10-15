@@ -80,6 +80,8 @@ export type AgentHistoryItem = {
     task?: TaskSnapshot
 }
 
+export type AgentHistoryPage = { items: AgentHistoryItem[]; nextCursor: string }
+
 export type ModelUsage = {
     inputTokens: number
     outputTokens?: number
@@ -119,8 +121,11 @@ export function getAgent(agentID: string) {
     return getAgentBinding().GetAgent(agentID).then(normalizeAgentSnapshot)
 }
 
-export function listAgentHistory(agentID: string) {
-    return getAgentBinding().ListAgentHistory(agentID).then(normalizeAgentHistory)
+export function listAgentHistory(agentID: string, before = ''): Promise<AgentHistoryPage> {
+    return getAgentBinding().ListAgentHistory(agentID, before).then((value: unknown) => {
+        const record = requiredRecord(value)
+        return { items: normalizeAgentHistory(record.items), nextCursor: requiredString(record.nextCursor) }
+    })
 }
 
 /** 查询会话全部请求的用量；缺失计数保留为未知，不推算 token。 */

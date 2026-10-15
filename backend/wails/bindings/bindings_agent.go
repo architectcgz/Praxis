@@ -45,20 +45,20 @@ func (b *AgentBindings) ListAgentMessages(agentID string) ([]dto.AgentMessage, e
 	return result, nil
 }
 
-func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem, error) {
+func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHistoryPage, error) {
 	if err := validation.ValidateAgentID(agentID); err != nil {
-		return nil, err
+		return dto.AgentHistoryPage{}, err
 	}
 	ctx, services, err := b.runtime.BindingContext()
 	if err != nil {
-		return nil, err
+		return dto.AgentHistoryPage{}, err
 	}
-	items, err := services.Agents.ListAgentHistory(ctx, contracts.AgentID(agentID), 200)
+	page, err := services.Agents.ListAgentHistory(ctx, contracts.AgentID(agentID), before, 200)
 	if err != nil {
-		return nil, publicError(b.runtime, "AgentBindings.ListAgentHistory", err)
+		return dto.AgentHistoryPage{}, publicError(b.runtime, "AgentBindings.ListAgentHistory", err)
 	}
-	result := make([]dto.AgentHistoryItem, 0, len(items))
-	for _, item := range items {
+	result := make([]dto.AgentHistoryItem, 0, len(page.Items))
+	for _, item := range page.Items {
 		value := dto.AgentHistoryItem{
 			Kind:     item.Kind,
 			Sequence: item.Sequence,
@@ -74,7 +74,7 @@ func (b *AgentBindings) ListAgentHistory(agentID string) ([]dto.AgentHistoryItem
 		}
 		result = append(result, value)
 	}
-	return result, nil
+	return dto.AgentHistoryPage{Items: result, NextCursor: page.NextCursor}, nil
 }
 
 func agentSnapshot(value service.AgentDetail) dto.AgentSnapshot {

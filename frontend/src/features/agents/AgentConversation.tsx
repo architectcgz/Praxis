@@ -4,7 +4,8 @@ import type { AgentHistoryItem, AgentMessageBlock, AgentSnapshot, ModelOption } 
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
 import { ToolApprovals } from './ToolApprovals'
-import { HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
+import { projectStreamingOutput } from './streaming'
+import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
 export type AgentConversationProps = {
     agent: AgentSnapshot
@@ -13,6 +14,10 @@ export type AgentConversationProps = {
     streamingOutput: StreamingOutput | null
     pendingUserMessages: PendingUserMessageItem[]
     awaitingOutput: boolean
+    historyCursor: string
+    historyLoadingOlder: boolean
+    historyError: string
+    onLoadOlderHistory: () => void
     input: string
     setInput: (value: string) => void
     models: ModelOption[]
@@ -28,13 +33,15 @@ export type AgentConversationProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyCursor, historyLoadingOlder, historyError, onLoadOlderHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
+    const prependScrollRef = useRef<{ top: number; height: number } | null>(null)
     const [showScrollButton, setShowScrollButton] = useState(false)
     const active = agent.state === 'executing' || agent.state === 'pausing'
     const waitingForOutput = awaitingOutput || (agent.state === 'executing' && !busy && !streamingOutput)
+    const visibleStreamingOutput = useMemo(() => projectStreamingOutput(streamingOutput, history), [streamingOutput, history])
 
     const orderedHistory = useMemo(() => {
         return [...history].sort((left, right) => {
@@ -74,8 +81,19 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                 visibleHistory.push(item)
             }
         }
+        // 历史已有调用但工具结果仍在实时流中时，结果补到原调用卡片。
+        for (const turn of streamingOutput?.turns || []) {
+            for (const event of turn.events) {
+                const sequence = calls.get(`${event.taskId}:${event.callId}`)
+                if (event.kind !== 'tool_result' || sequence === undefined) continue
+                const results = toolResults.get(sequence) || []
+                if (!results.some((block) => block.callId === event.callId)) toolResults.set(sequence, [...results, {
+                    kind: 'tool_result', callId: event.callId, name: event.name, text: event.result, isError: event.isError,
+                }])
+            }
+        }
         return { visibleHistory, toolResults }
-    }, [orderedHistory])
+    }, [orderedHistory, streamingOutput])
 
     // Pending messages belong to the agent that was active when they were sent.
     const visiblePendingMessages = useMemo(() => pendingUserMessages.filter((message) => (
@@ -90,6 +108,14 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
             return
         }
         const switchingAgent = previousAgentIDRef.current !== agent.id
+        if (switchingAgent) prependScrollRef.current = null
+        if (prependScrollRef.current && historyLoadingOlder) return
+        if (prependScrollRef.current) {
+            const previous = prependScrollRef.current
+            messageThread.scrollTop = previous.top + messageThread.scrollHeight - previous.height
+            prependScrollRef.current = null
+            return
+        }
         if (!switchingAgent && !followingOutputRef.current) {
             return
         }
@@ -99,7 +125,7 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
         })
         followingOutputRef.current = true
         previousAgentIDRef.current = agent.id
-    }, [agent.id, orderedHistory, pendingMessagesKey, streamingOutput, waitingForOutput, collaboration])
+    }, [agent.id, orderedHistory, pendingMessagesKey, streamingOutput, waitingForOutput, collaboration, historyLoadingOlder])
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
@@ -125,6 +151,15 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
         setShowScrollButton(distanceFromBottom > 100)
     }, [])
 
+    const loadOlder = () => {
+        const thread = messageThreadRef.current
+        if (thread) {
+            prependScrollRef.current = { top: thread.scrollTop, height: thread.scrollHeight }
+            followingOutputRef.current = false
+        }
+        onLoadOlderHistory()
+    }
+
     const scrollToBottom = useCallback(() => {
         const messageThread = messageThreadRef.current
         if (!messageThread) {
@@ -146,6 +181,10 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                     ref={messageThreadRef}
                     onScroll={updateOutputFollowing}
                 >
+                    {historyCursor && <button className="quiet-button" type="button" disabled={historyLoadingOlder} onClick={loadOlder}>
+                        {historyLoadingOlder ? '正在加载更早消息…' : '加载更早消息'}
+                    </button>}
+                    {historyError && <p role="alert">{historyError}</p>}
                     {threadEmpty ? (
                         <div className="message-empty" role="status">
                             <div className="message-empty-content">
@@ -183,18 +222,19 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                     {visiblePendingMessages.map((message) => (
                         <PendingUserMessageView content={message.content} at={message.at} key={message.requestId} />
                     ))}
-                    {streamingOutput?.turns.map((turn, index) => (
+                    {visibleStreamingOutput?.turns.map((turn, index) => (
                         <StreamingTurnView
                             agentProfile={agent.name}
                             events={turn.events}
-                            taskId={streamingOutput.taskId}
+                            taskId={visibleStreamingOutput.taskId}
                             turnId={turn.turnId}
                             active={active}
                             continuation={index > 0}
-                            hasContinuation={index < streamingOutput.turns.length - 1}
-                            key={`${streamingOutput.taskId}-${turn.turnId}`}
+                            hasContinuation={index < visibleStreamingOutput.turns.length - 1}
+                            key={`${visibleStreamingOutput.taskId}-${turn.turnId}`}
                         />
                     ))}
+                    {visibleStreamingOutput?.error && <AgentActivityView error={visibleStreamingOutput.error} />}
                     {waitingForOutput && <PendingOutputView agentProfile={agent.name} taskId={agent.currentTaskId} />}
                 </div>
                 {showScrollButton && (

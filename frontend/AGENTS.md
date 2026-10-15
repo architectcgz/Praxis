@@ -3,7 +3,7 @@
 ## React 版本与写法
 
 - React 与 React DOM 使用 `~19.2.8`，lockfile 当前解析为 `19.2.8`；两者实际版本必须一致。`@types/react` 使用 `~19.2.18`，`@types/react-dom` 使用 `~19.2.4`，类型定义与运行时保持在 19.2 系列。
-- 使用当前版本的稳定 API；引入 API 前确认运行时与类型定义均支持，并同步维护 `package.json` 和 `package-lock.json`。使用 `npm ci` 按 lockfile 安装，验证使用 `npm run build`。
+- 使用当前版本的稳定 API；引入 API 前确认运行时与类型定义均支持，并同步维护 `package.json` 和 `package-lock.json`。使用 `npm ci` 按 lockfile 安装，验证使用 `npm run check`（Hooks lint、回归测试与生产构建）。
 - 使用函数组件、Hooks 和自动 JSX transform（`jsx: react-jsx`）；类型使用 `import type` 或具名导入中的 `type`。函数组件用参数默认值，表单提交事件使用 `SubmitEvent<HTMLFormElement>`。
 - Context Provider 使用 `<SomeContext value={value}>`；函数组件接收 ref 时直接声明 ref prop。渲染入口使用 `createRoot`，不引入 `ReactDOM.render`、`findDOMNode`、字符串 ref 或函数组件的 `defaultProps` / `propTypes`。
 - 错误边界可以使用包含 `getDerivedStateFromError` / `componentDidCatch` 的 class；`memo`、`useMemo`、`useCallback` 按实际需要使用，不因 React 版本升级机械移除，也不假定已启用 React Compiler。
@@ -84,7 +84,9 @@ src/
 │   │   ├── AgentTaskInput.tsx
 │   │   ├── PrimaryAgentTaskInput.tsx
 │   │   ├── useAgentCommands.ts
-│   │   ├── useAgentData.ts      # 查询、缓存、选择、事件订阅及过期请求保护
+│   │   ├── useAgentData.ts      # 查询、选择、分页、事件订阅及过期请求保护
+│   │   ├── agentStore.ts        # 按 Agent ID 保存唯一快照，分别通知查询和实时输出订阅
+│   │   ├── history.ts           # 历史记录身份与跨页回填
 │   │   ├── useAgentTaskInput.ts # 草稿、模型和 reasoning 选择
 │   │   ├── streaming.ts         # 流式归并与持久化去重纯函数
 │   │   ├── composer.css
@@ -149,7 +151,10 @@ src/
 - `app/` 可以组合 `features/workspace`，但 `features` 不应反向依赖 `app/`。
 - `features/workspace/` 负责组合各业务 feature，并维护跨领域的工作区状态；它不承载具体项目、Session、Agent 或设置页面的展示规则。
 - `agents/useAgentTaskInput.ts` 只管理任务草稿和执行选项；命令由 `useAgentCommands.ts` 执行。`streaming.ts` 只做不可变的事件归并与持久化去重，不订阅事件。
-- Agent 状态类型由 `agents/types.ts` 拥有，`agents/output/` 消费状态并展示内容；`timing/` 独立管理耗时数据。
+- Agent 查询快照由 `agentStore.ts` 按 ID 唯一保存，选中的 Agent 和历史从快照派生；请求代次留在查询 Hook。命令通过 `beginInput` / `acceptInput` / `rejectInput` 等业务动作更新乐观消息，不接收内部集合的 setter。
+- 高频输出只由 Agent 对话区域订阅；不得让文本 delta 触发整个工作区、项目导航和 Agent 侧栏的状态更新。
+- 历史从最新页向前加载，游标使用稳定记录身份；刷新最新页时保留已加载旧页并补齐中间跨度，不能用固定的最早 N 条代替完整历史。
+- Agent 状态类型由 `agents/types.ts` 拥有，`agents/output/` 消费状态并展示内容；`timing/` 独立管理耗时数据，不反向依赖 `agents/`；模型请求计时与 token 的组合展示由 `agents/output/MessageTiming.tsx` 拥有。
 - 每个业务 feature 内部就近放置组件、hooks、types 和专属样式；只有确实跨领域复用的内容才放入 `shared/`，Wails 调用统一放入 `api/`。
 - `projects/`、`sessions/`、`agents/` 和 `settings/` 之间不直接互相组合；跨领域流程由 `workspace/` 编排。
 - `api/` 是前端与 Go runtime 的唯一数据边界，按 Wails binding 和领域拆分；`index.ts` 是其公共导出入口。
@@ -160,3 +165,10 @@ src/
 - 工作区容器使用 `app-shell`（L0 Shell）、布局 Region（L1）、`scroll-region`（L2）和 `page`（L3）。L1 不滚动，L2 是区域内唯一滚动容器，L3 不设置 `height`、`overflow` 或 `transform`。
 - 设置和模型配置页在单一 Scroll 内组合 sticky 头部与 Page，短窗口取消 sticky；通用工作区断点集中于 `workspace/responsive.css`，在功能样式之后加载。
 - 所有 modal 使用 `components/ui/Overlay.tsx` 并挂载到 `#overlay-root`。锚定触发器的菜单保留在组件内并使用全局 z-index token。
+
+## 回归验证
+
+- 测试与业务代码就近放置，公共 fixture 和 DOM 测试初始化放在 `src/test/`。
+- 异步流程使用真实 React Hook 配合可控 API Promise 验证，覆盖切换视图、迟到响应、部分保存失败和分页归并；不使用自制 Hook 调度器替代 React。
+- `npm run lint` 检查 Rules of Hooks 和完整依赖；`npm test` 执行回归测试；`npm run check` 依次执行 lint、测试和生产构建。
+- 修改 Wails binding 签名后，在 `backend/` 执行 `go run -tags bindings .` 重新生成绑定，再执行前端检查；不手工编辑生成的 `wailsjs/` 文件。

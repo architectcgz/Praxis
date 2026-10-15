@@ -30,7 +30,9 @@ export function ProjectWorkspace() {
     const [selectedProjectID, setSelectedProjectID] = useState('')
     const settingsOpen = page === 'settings' || page === 'models'
     const projectGroups = useMemo(() => groupSessions(workspace.sessions, workspace.projects), [workspace.sessions, workspace.projects])
-    const activeProject = projectGroups.find((item) => item.id === selectedProjectID || item.sessions.some((session) => session.id === workspace.selectedSessionID))
+    const activeProject = page === 'project'
+        ? projectGroups.find((item) => item.id === selectedProjectID)
+        : projectGroups.find((item) => item.sessions.some((session) => session.id === workspace.selectedSessionID))
 
     useEffect(() => {
         setLookupID(workspace.selectedSessionID)
@@ -129,8 +131,8 @@ export function ProjectWorkspace() {
         <ProjectsPanel
             projectGroups={projectGroups}
             sessionsCount={workspace.sessions.length}
-            selectedSessionID={workspace.selectedSessionID}
-            selectedProjectID={selectedProjectID}
+            selectedSessionID={page === 'session' ? workspace.selectedSessionID : ''}
+            selectedProjectID={page === 'project' ? selectedProjectID : page === 'session' ? activeProject?.id || '' : ''}
             lookupID={lookupID}
             searchOpen={searchOpen}
             collapsedProjects={collapsedProjects}
@@ -227,11 +229,12 @@ export function ProjectWorkspace() {
                                         history={workspace.history}
                                         agentHistories={workspace.agentHistories}
                                         agentHistoryErrors={workspace.agentHistoryErrors}
-                                        streamingOutputs={workspace.streamingOutputs}
+                                        outputStore={workspace.outputStore}
                                         onSelectAgent={(id) => void workspace.selectAgent(id)}
-                                        streamingOutput={workspace.streamingOutput}
-                                        pendingUserMessages={workspace.pendingUserMessages}
-                                        awaitingOutput={workspace.awaitingOutput}
+                                        historyCursor={workspace.historyCursor}
+                                        historyLoadingOlder={workspace.historyLoadingOlder}
+                                        historyError={workspace.historyError}
+                                        onLoadOlderHistory={() => void workspace.loadOlderHistory()}
                                         input={workspace.input}
                                         setInput={workspace.setInput}
                                         models={workspace.models}

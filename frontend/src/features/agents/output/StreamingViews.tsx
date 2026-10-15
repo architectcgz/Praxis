@@ -4,7 +4,8 @@ import type { AgentEvent } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { StreamingToolCallsView } from './ToolCallViews'
 import { ThinkingDetails } from './ThinkingDetails'
-import { AgentRuntime, MessageTiming } from '../../timing/OperationTimings'
+import { AgentRuntime } from '../../timing/OperationTimings'
+import { MessageTiming } from './MessageTiming'
 
 export const StreamingOutputView = memo(function StreamingOutputView({ content }: { content: string }) {
     return (

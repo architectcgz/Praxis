@@ -12,7 +12,7 @@ type SessionCommandContext = {
     bridgeAvailable: boolean
     busy: boolean
     refreshCatalog: (manual?: boolean) => Promise<void>
-    selectedSessionID: string
+    clearSelectedSession: (id: string) => void
     selectSession: (id: string) => void
     setBusy: Dispatch<SetStateAction<boolean>>
     setError: Dispatch<SetStateAction<string>>
@@ -26,7 +26,7 @@ export function useSessionCommands({
     bridgeAvailable,
     busy,
     refreshCatalog,
-    selectedSessionID,
+    clearSelectedSession,
     selectSession,
     setBusy,
     setError,
@@ -77,9 +77,7 @@ export function useSessionCommands({
         setErrorCode(undefined)
         try {
             await deleteSessionAPI(sessionID)
-            if (sessionID === selectedSessionID) {
-                selectSession('')
-            }
+            clearSelectedSession(sessionID)
             await refreshCatalog()
             return true
         } catch (err) {
@@ -91,7 +89,7 @@ export function useSessionCommands({
         } finally {
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, refreshCatalog, selectedSessionID, selectSession, setBusy, setError, setErrorCode, viewRequestRef])
+    }, [bridgeAvailable, busy, refreshCatalog, clearSelectedSession, setBusy, setError, setErrorCode, viewRequestRef])
 
     const renameSession = useCallback(async (sessionID: string, title: string) => {
         if (busy || !sessionID || !title.trim() || !bridgeAvailable) {
