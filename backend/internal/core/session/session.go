@@ -14,7 +14,7 @@ const (
 	SessionArchived SessionState = "archived"
 )
 
-// Session is the durable collaboration container for a Project.
+// Session 是 Project 的持久化协作容器。
 type Session struct {
 	ID          contracts.SessionID
 	ProjectID   contracts.ProjectID

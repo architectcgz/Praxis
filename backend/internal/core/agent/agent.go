@@ -74,10 +74,10 @@ func (a Agent) Validate() error {
 	}
 	if a.State == AgentExecuting || a.State == AgentPausing {
 		if contracts.EmptyID(string(a.CurrentTaskID)) {
-			return contracts.InvalidValue("agent.currentTaskID", "active state requires an task")
+			return contracts.InvalidValue("agent.currentTaskID", "active state requires a task")
 		}
 	} else if a.CurrentTaskID != "" {
-		return contracts.InvalidValue("agent.currentTaskID", "inactive state cannot retain an task")
+		return contracts.InvalidValue("agent.currentTaskID", "inactive state cannot retain a task")
 	}
 	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return contracts.InvalidValue("agent.timestamps", "timestamps are invalid")

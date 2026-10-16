@@ -53,11 +53,11 @@ func (r ModelUsageRecord) Key() string {
 func (r ModelUsageRecord) Validate() error {
 	for _, id := range []string{r.SessionID, r.AgentID, r.TaskID, r.TurnID.String()} {
 		if id == "" || id != strings.TrimSpace(id) || strings.ContainsAny(id, "\x00\r\n") {
-			return errors.New("token 用量身份必须是规范化非空字符串")
+			return errors.New("token usage identity must be a non-empty canonical string")
 		}
 	}
 	if !r.Usage.Valid() {
-		return errors.New("token 用量的计数无效")
+		return errors.New("invalid token usage counts")
 	}
 	return nil
 }

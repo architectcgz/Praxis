@@ -17,7 +17,7 @@ func (r TimingStore) Save(ctx context.Context, v timing.Record) error {
 		old, e := get[timing.Record](ctx, r.Store, "timing", v.ID)
 		if e == nil {
 			if v.Revision < old.Revision {
-				return errors.New("拒绝过期计时版本")
+				return errors.New("stale timing version rejected")
 			}
 			if v.Revision == old.Revision {
 				if same(old, v) {

@@ -90,7 +90,7 @@ func RedactError(err error, sensitiveValues []string) error {
 	message := err.Error()
 	for _, value := range sensitiveValues {
 		if value != "" {
-			message = strings.ReplaceAll(message, value, "[协议状态已隐藏]")
+			message = strings.ReplaceAll(message, value, "[protocol state redacted]")
 		}
 	}
 	if message == err.Error() {

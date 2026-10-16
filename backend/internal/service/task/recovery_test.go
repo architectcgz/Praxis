@@ -191,7 +191,7 @@ func TestStartupToolRecoveryMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				if before.Size() != after.Size() {
-					t.Fatal("普通历史查询不得触发恢复")
+					t.Fatal("ordinary history queries must not trigger recovery")
 				}
 				for range 2 {
 					if err := f.svc.ReconcileToolResults(ctx); err != nil {
@@ -221,7 +221,7 @@ func TestStartupToolRecoveryMatrix(t *testing.T) {
 				}
 				if expected.Terminal() {
 					if len(missing) != 0 || len(stream.Messages) != 4 || stream.Messages[2].Blocks[0].CallID != "z-first" || stream.Messages[3].Blocks[0].CallID != "a-second" {
-						t.Fatalf("回执顺序或幂等错误: %+v", stream)
+						t.Fatalf("incorrect receipt order or idempotency: %+v", stream)
 					}
 					stored, err := f.repos.Tasks.Get(ctx, task.ID)
 					if err != nil {
@@ -234,10 +234,10 @@ func TestStartupToolRecoveryMatrix(t *testing.T) {
 						}
 					}
 					if stored.Progress.OutputBytes != bytes {
-						t.Fatalf("恢复计费不幂等: got=%d want=%d", stored.Progress.OutputBytes, bytes)
+						t.Fatalf("recovery accounting is not idempotent: got=%d want=%d", stored.Progress.OutputBytes, bytes)
 					}
 				} else if len(missing) != 2 || len(stream.Messages) != 2 {
-					t.Fatal("活动调用或审批等待被错误结算")
+					t.Fatal("active invocation or approval wait was incorrectly settled")
 				}
 			})
 		}
@@ -266,7 +266,7 @@ func TestRecoveryRollbackAndLiveRunningProtection(t *testing.T) {
 	}
 	inv, err = f.repos.ToolInvocations.FindByTaskCall(ctx, created.Task.ID, "z-first")
 	if err != nil || inv.Status != toolmodel.ToolInvocationRunning {
-		t.Fatal("恢复回滚未保留调用状态", inv, err)
+		t.Fatal("recovery rollback did not preserve invocation state", inv, err)
 	}
 	stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
 	if err != nil || len(stream.Messages) != 2 {

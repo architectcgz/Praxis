@@ -37,7 +37,7 @@ func TestMessageStreamsOrderingIdempotencyAndIsolation(t *testing.T) {
 	repeated, err := f.repos.Messages.Append(ctx, f.agent, userMessage("first"))
 	requireOK(t, err)
 	if repeated.Sequence != first.Sequence || f.store.sequences["session"] != seq {
-		t.Fatal("幂等消息不能再次追加")
+		t.Fatal("idempotent message must not be appended again")
 	}
 	conflict := userMessage("first")
 	conflict.Blocks[0].Text = "不同正文"
@@ -50,7 +50,7 @@ func TestMessageStreamsOrderingIdempotencyAndIsolation(t *testing.T) {
 	stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 1)
 	requireOK(t, err)
 	if len(stream.Messages) != 1 || stream.Messages[0].ID != "second" || stream.SequenceBoundary != second.Sequence || stream.SequenceBoundary == f.store.sequences["session"] {
-		t.Fatalf("边界必须来自消息流: %+v", stream)
+		t.Fatalf("boundary must come from the message stream: %+v", stream)
 	}
 	page, err := f.repos.Messages.List(ctx, f.agent, first.Sequence, 1)
 	requireOK(t, err)
@@ -66,7 +66,7 @@ func TestMessageStreamsOrderingIdempotencyAndIsolation(t *testing.T) {
 	stream, err = f.repos.Messages.LoadMessages(ctx, "session", "private", 0)
 	requireOK(t, err)
 	if stream.Messages[0].TextContent() != "private" {
-		t.Fatal("返回对象未隔离")
+		t.Fatal("returned objects are not isolated")
 	}
 	f.restart(t)
 	stream, err = f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
@@ -93,24 +93,24 @@ func TestMessageIndexCacheBoundAndReadOnly(t *testing.T) {
 		stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
 		requireOK(t, err)
 		if len(stream.Messages) != 5 || f.store.messages.entries > 2 || len(f.store.messages.sessions) != 0 {
-			t.Fatal("超长 Session 索引不得突破缓存上限")
+			t.Fatal("oversized session index must not exceed the cache limit")
 		}
 	}
 	after, err := os.Stat(path)
 	requireOK(t, err)
 	if after.Size() != before.Size() {
-		t.Fatal("普通消息读取不得写入日志")
+		t.Fatal("ordinary message reads must not write to the log")
 	}
 	f.store.messages = newMessageCache(10)
 	_, err = f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
 	requireOK(t, err)
 	if f.store.messages.entries != 5 {
-		t.Fatal("热 Session 应复用索引")
+		t.Fatal("hot session must reuse its index")
 	}
 	_, err = f.repos.Messages.Append(ctx, f.agent, userMessage("new"))
 	requireOK(t, err)
 	if f.store.messages.entries != 6 {
-		t.Fatal("已加载索引未随提交更新")
+		t.Fatal("loaded index was not updated after commit")
 	}
 }
 
@@ -136,15 +136,15 @@ func TestMessageCacheEvictsAcrossSessions(t *testing.T) {
 		_, err = f.repos.Messages.LoadMessages(ctx, session.ID, agent.ID, 0)
 		requireOK(t, err)
 		if f.store.messages.entries > 3 {
-			t.Fatal("缓存总条目数越界")
+			t.Fatal("total cached entry count exceeds the limit")
 		}
 	}
 	if f.store.messages.sessions["second"] != nil || f.store.messages.sessions["third"] == nil {
-		t.Fatal("缓存未按最近访问淘汰")
+		t.Fatal("cache did not evict the least recently accessed entry")
 	}
 	stream, err := f.repos.Messages.LoadMessages(ctx, "second", "second", 0)
 	requireOK(t, err)
 	if len(stream.Messages) != 2 || f.store.messages.entries > 3 {
-		t.Fatal("淘汰后重建错误")
+		t.Fatal("incorrect rebuild after eviction")
 	}
 }

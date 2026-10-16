@@ -37,7 +37,7 @@ func (s *Store) append(scope string, data []byte) error {
 		if err := writeNewFile(path, data); err != nil {
 			// 发布结果不明时不再基于旧索引写入，重启后以日志为准。
 			if _, statErr := os.Lstat(path); statErr == nil {
-				s.fault = fmt.Errorf("首次日志提交结果未知，需重启: %w", err)
+				s.fault = fmt.Errorf("initial log commit outcome is unknown; restart required: %w", err)
 			}
 			return err
 		}
@@ -47,7 +47,7 @@ func (s *Store) append(scope string, data []byte) error {
 		return err
 	}
 	if !info.Mode().IsRegular() || info.Size() != s.lengths[scope] {
-		s.fault = errors.New("日志文件类型或长度发生外部变更，需重启恢复")
+		s.fault = errors.New("log file type or length changed externally; restart required for recovery")
 		return s.fault
 	}
 	file, err := os.OpenFile(path, os.O_RDWR, 0600)
@@ -76,7 +76,7 @@ func (s *Store) appendTo(file logFile, offset int64, data []byte) error {
 	if err != nil {
 		rollback := errors.Join(file.Truncate(offset), file.Sync())
 		if rollback != nil {
-			s.fault = fmt.Errorf("日志写入结果未知，需重启: %w", errors.Join(err, rollback))
+			s.fault = fmt.Errorf("log write outcome is unknown; restart required: %w", errors.Join(err, rollback))
 		}
 		return errors.Join(err, rollback)
 	}

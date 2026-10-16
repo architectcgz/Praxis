@@ -20,7 +20,7 @@ func decodeJSON(data []byte, target any) error {
 		return err
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.New("存在多余 JSON 数据")
+		return errors.New("unexpected trailing JSON data")
 	}
 	return nil
 }
@@ -52,7 +52,7 @@ func (s *Store) readRecord(ref recordRef, reader recordReader) (batch, error) {
 		return batch{}, err
 	}
 	if !info.Mode().IsRegular() {
-		return batch{}, errors.New("日志必须是普通文件")
+		return batch{}, errors.New("log must be a regular file")
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -64,7 +64,7 @@ func (s *Store) readRecord(ref recordRef, reader recordReader) (batch, error) {
 		return batch{}, err
 	}
 	if len(data) == 0 || data[len(data)-1] != '\n' {
-		return batch{}, errors.New("索引指向未提交行")
+		return batch{}, errors.New("index points to an uncommitted line")
 	}
 	var result batch
 	if err := decodeJSON(data, &result); err != nil {
@@ -82,11 +82,11 @@ func (s *Store) readRef(key entityKey, ref recordRef, reader recordReader) (json
 		return nil, err
 	}
 	if ref.EventIndex < 0 || ref.EventIndex >= len(record.Events) {
-		return nil, errors.New("索引事件下标非法")
+		return nil, errors.New("invalid event index")
 	}
 	event := record.Events[ref.EventIndex]
 	if eventKey(ref.Scope, event) != key || event.Sequence != ref.Sequence || event.ID != fmt.Sprintf("event:%d", ref.Sequence) || event.CreatedAt.IsZero() {
-		return nil, errors.New("记录身份与位置索引不一致")
+		return nil, errors.New("record identity does not match position index")
 	}
 	if _, _, err := describe(ref.Scope, event); err != nil {
 		return nil, err

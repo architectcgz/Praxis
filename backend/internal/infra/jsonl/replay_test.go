@@ -18,7 +18,7 @@ func TestReplayPositionsAndCompleteIdentity(t *testing.T) {
 		t.Fatal(stored)
 	}
 	if len(f.store.messages.sessions) != 0 {
-		t.Fatal("启动不得预载所有消息索引")
+		t.Fatal("startup must not preload all message indexes")
 	}
 	ref := f.store.index.latest[entityKey{"task", task.ID.String()}].location
 	record, err := f.store.readRecord(ref, nil)
@@ -26,7 +26,7 @@ func TestReplayPositionsAndCompleteIdentity(t *testing.T) {
 	var payload map[string]json.RawMessage
 	requireOK(t, json.Unmarshal(record.Events[ref.EventIndex].Payload, &payload))
 	if len(payload["ID"]) == 0 || len(payload["SessionID"]) == 0 {
-		t.Fatal("日志必须保存完整身份")
+		t.Fatal("log must preserve complete identity")
 	}
 }
 
@@ -49,7 +49,7 @@ func TestReplayIncompleteTailAndCorruptCompleteLine(t *testing.T) {
 	backup, err := os.ReadFile(backups[0])
 	requireOK(t, err)
 	if string(backup) != string(tail) {
-		t.Fatal("不完整尾部必须完整留存")
+		t.Fatal("incomplete tail must be preserved in full")
 	}
 	stored, err := f.repos.Tasks.Get(context.Background(), task.ID)
 	requireOK(t, err)
@@ -61,12 +61,12 @@ func TestReplayIncompleteTailAndCorruptCompleteLine(t *testing.T) {
 	requireOK(t, os.WriteFile(path, corrupt, 0600))
 	if store, err := Open(context.Background(), f.root); err == nil {
 		_ = store.Close(context.Background())
-		t.Fatal("完整损坏行必须拒绝启动")
+		t.Fatal("a complete corrupt line must prevent startup")
 	}
 	after, err := os.ReadFile(path)
 	requireOK(t, err)
 	if string(after) != string(corrupt) {
-		t.Fatal("不得静默清除损坏的完整行")
+		t.Fatal("a complete corrupt line must not be silently removed")
 	}
 }
 
@@ -86,7 +86,7 @@ func TestFormatRejection(t *testing.T) {
 			}
 			if s, err := Open(context.Background(), root); err == nil {
 				_ = s.Close(context.Background())
-				t.Fatal("格式必须明确拒绝")
+				t.Fatal("format must be explicitly rejected")
 			}
 		})
 	}
@@ -119,7 +119,7 @@ func TestReplayRejectsSequenceAndPayloadMismatch(t *testing.T) {
 			requireOK(t, os.WriteFile(path, append(data, '\n'), 0600))
 			if s, err := Open(context.Background(), f.root); err == nil {
 				_ = s.Close(context.Background())
-				t.Fatal("损坏身份或协议应拒绝")
+				t.Fatal("corrupt identity or protocol must be rejected")
 			}
 		})
 	}

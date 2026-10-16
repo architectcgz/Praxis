@@ -147,7 +147,7 @@ func TestTransactionOverlayRollbackAndNested(t *testing.T) {
 			}
 			values, err := f.repos.Projects.List(nested, 0)
 			if err != nil || len(values) != 1 || values[0].Name != v.Name {
-				t.Fatalf("事务未读到最终写入: %+v, %v", values, err)
+				t.Fatalf("transaction did not read the final write: %+v, %v", values, err)
 			}
 			return sentinel
 		})
@@ -158,15 +158,15 @@ func TestTransactionOverlayRollbackAndNested(t *testing.T) {
 	v, err := f.repos.Projects.Get(ctx, "project")
 	requireOK(t, err)
 	if v.Name != "项目" {
-		t.Fatal("回滚污染已提交状态")
+		t.Fatal("rollback corrupted committed state")
 	}
 	if _, err := f.repos.Projects.Get(stale, "project"); err == nil {
-		t.Fatal("已结束的事务 Context 不可继续使用")
+		t.Fatal("ended transaction context must not be reused")
 	}
 	before := f.store.sequences[""]
 	requireOK(t, f.store.InTx(ctx, func(txCtx context.Context) error { return f.repos.Projects.Save(txCtx, v) }))
 	if f.store.sequences[""] != before {
-		t.Fatal("幂等写入消耗序号")
+		t.Fatal("idempotent write consumed a sequence number")
 	}
 }
 
@@ -190,7 +190,7 @@ func TestTransactionRejectsCrossScopeAndInvalidGraph(t *testing.T) {
 		return f.repos.Sessions.Save(txCtx, session)
 	})
 	if err == nil || f.store.sequences[""] != before {
-		t.Fatal("跨文件事务必须整体回滚")
+		t.Fatal("cross-file transaction must roll back entirely")
 	}
 	err = f.store.InTx(ctx, func(txCtx context.Context) error {
 		workspace, err := f.repos.Workspaces.Get(txCtx, "workspace")
@@ -201,7 +201,7 @@ func TestTransactionRejectsCrossScopeAndInvalidGraph(t *testing.T) {
 		return f.repos.Workspaces.Save(txCtx, workspace)
 	})
 	if err == nil {
-		t.Fatal("无效关联必须拒绝")
+		t.Fatal("invalid references must be rejected")
 	}
 }
 
@@ -216,7 +216,7 @@ func TestUniqueAndMonotonicConstraints(t *testing.T) {
 	} {
 		err := f.store.InTx(ctx, func(txCtx context.Context) error { next := task; mutate(&next); return f.repos.Tasks.Save(txCtx, next) })
 		if err == nil {
-			t.Fatal("唯一性或冻结配置约束未生效")
+			t.Fatal("uniqueness or frozen configuration constraint was not enforced")
 		}
 	}
 	requireOK(t, f.store.InTx(ctx, func(txCtx context.Context) error {
@@ -228,6 +228,6 @@ func TestUniqueAndMonotonicConstraints(t *testing.T) {
 		return f.repos.Tasks.Save(txCtx, task)
 	})
 	if err == nil {
-		t.Fatal("预算不能回退")
+		t.Fatal("budget must not regress")
 	}
 }

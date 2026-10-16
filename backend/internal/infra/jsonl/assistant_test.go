@@ -48,12 +48,12 @@ func (f *storeFixture) toolCall(t testing.TB, task taskmodel.Task) (repository.M
 	_, inserted, err := writer.AppendAssistant(ctx, message, metadata)
 	requireOK(t, err)
 	if !inserted {
-		t.Fatal("首次工具调用未保存")
+		t.Fatal("initial tool invocation was not saved")
 	}
 	_, inserted, err = writer.AppendAssistant(ctx, message, metadata)
 	requireOK(t, err)
 	if inserted {
-		t.Fatal("同一调用声明重复保存")
+		t.Fatal("same call declaration was saved twice")
 	}
 	return writer, metadata
 }
@@ -85,7 +85,7 @@ func TestToolReceiptAtomicityIdempotencyAndConcurrentBilling(t *testing.T) {
 		}},
 	}
 	if err := writer.AppendToolResult(ctx, receipt); err == nil {
-		t.Fatal("未结算调用不可记录回执")
+		t.Fatal("unsettled invocation must not have a receipt")
 	}
 	requireOK(t, f.store.InTx(ctx, func(txCtx context.Context) error {
 		inv, err := f.repos.ToolInvocations.FindByTaskCall(txCtx, task.ID, "call")
@@ -110,7 +110,7 @@ func TestToolReceiptAtomicityIdempotencyAndConcurrentBilling(t *testing.T) {
 	stored, err := f.repos.Tasks.Get(ctx, task.ID)
 	requireOK(t, err)
 	if stored.Progress.OutputBytes != 0 {
-		t.Fatal("回执回滚却计费")
+		t.Fatal("rolled-back receipt was charged")
 	}
 	var wg sync.WaitGroup
 	for range 8 {
@@ -135,13 +135,13 @@ func TestToolReceiptAtomicityIdempotencyAndConcurrentBilling(t *testing.T) {
 	missing, err = f.repos.Messages.ListMissingToolResults(ctx)
 	requireOK(t, err)
 	if len(missing) != 0 {
-		t.Fatal("重启后已配对调用重新出现")
+		t.Fatal("paired invocation reappeared after restart")
 	}
 	receipt.ID = "another-receipt"
 	writer, err = f.repos.Messages.Writer(ctx, "session", "agent")
 	requireOK(t, err)
 	if err := writer.AppendToolResult(ctx, receipt); err == nil {
-		t.Fatal("同一调用不可产生第二条回执")
+		t.Fatal("same invocation must not produce a second receipt")
 	}
 }
 
@@ -162,10 +162,10 @@ func TestWriteFailureLeavesNoPublishedIndex(t *testing.T) {
 		return os.Mkdir(path, 0700)
 	})
 	if err == nil {
-		t.Fatal("无法确认的外部文件变更必须封锁 Store")
+		t.Fatal("unverifiable external file changes must block the store")
 	}
 	if err := f.store.append("session", []byte("unwritten\n")); err == nil || f.store.fault == nil {
-		t.Fatal("外部文件变更后 append 必须封锁写入")
+		t.Fatal("append must block writes after an external file change")
 	}
 	requireOK(t, f.store.Close(ctx))
 	requireOK(t, os.Remove(path))
@@ -174,7 +174,7 @@ func TestWriteFailureLeavesNoPublishedIndex(t *testing.T) {
 	stored, err := f.repos.Tasks.Get(ctx, task.ID)
 	requireOK(t, err)
 	if stored.Progress.OutputBytes != 0 {
-		t.Fatal("失败事务污染重启结果")
+		t.Fatal("failed transaction corrupted restart results")
 	}
 }
 

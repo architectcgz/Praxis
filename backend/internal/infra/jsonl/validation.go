@@ -47,13 +47,13 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		"usage":     "usage.saved",
 	}
 	if kinds[event.Collection] == "" || kinds[event.Collection] != event.Type {
-		return key, entry, errors.New("未知事件类型")
+		return key, entry, errors.New("unknown event type")
 	}
 	if (scope == "") != (event.Collection == "project" || event.Collection == "workspace") {
-		return key, entry, errors.New("事件文件归属非法")
+		return key, entry, errors.New("invalid event file ownership")
 	}
 	if event.Key == "" || event.Key != strings.TrimSpace(event.Key) {
-		return key, entry, errors.New("对象键非法")
+		return key, entry, errors.New("invalid object key")
 	}
 	var object interface{ Validate() error }
 	var identity, sessionID string
@@ -166,7 +166,7 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		}
 		object, identity, sessionID = v.Data, messageKey(v.OwnerID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
-			return key, entry, errors.New("消息序号与事件序号不一致")
+			return key, entry, errors.New("message sequence does not match event sequence")
 		}
 		// 消息不进入全局 latest / groups，正文与位置列表均按 Session 懒加载。
 		entry.groups = nil
@@ -191,7 +191,7 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		link("task", v.TaskID)
 	}
 	if identity != event.Key || sessionID != scope {
-		return key, entry, errors.New("对象身份或 Session 归属与事件不一致")
+		return key, entry, errors.New("object identity or session ownership does not match event")
 	}
 	if err := object.Validate(); err != nil {
 		return key, entry, err
@@ -213,7 +213,7 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 	} {
 		v := value.FieldByName(field)
 		if v.IsValid() && v.Kind() == reflect.String && v.String() != strings.TrimSpace(v.String()) {
-			return key, entry, fmt.Errorf("%s 必须已规范化", field)
+			return key, entry, fmt.Errorf("%s must be canonical", field)
 		}
 	}
 	return key, entry, nil
@@ -280,7 +280,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		}
 		ref, ok := s.entry(ctx, entityKey{collection, id})
 		if !ok || ref.location.Scope != scope {
-			return errors.New("引用归属不符")
+			return errors.New("reference ownership mismatch")
 		}
 		return nil
 	}
@@ -290,7 +290,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			return err
 		}
 		if value.SessionID.String() != scope || value.AgentID != agent {
-			return errors.New("Task 与 Agent 归属不符")
+			return errors.New("task and agent ownership mismatch")
 		}
 		return nil
 	}
@@ -303,7 +303,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			return err
 		}
 		if workspace.ProjectID != v.ID {
-			return errors.New("Project 默认工作区归属不符")
+			return errors.New("project default workspace ownership mismatch")
 		}
 	case "workspace":
 		var v workspacemodel.Workspace
@@ -317,7 +317,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			return err
 		}
 		if workspace.ProjectID != v.ProjectID {
-			return errors.New("Session 工作区归属不符")
+			return errors.New("session workspace ownership mismatch")
 		}
 	case "agent":
 		var v agentmodel.Agent
@@ -330,7 +330,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			return err
 		}
 		if (err == nil && active.id != v.CurrentTaskID.String()) || (err != nil && v.CurrentTaskID != "") {
-			return errors.New("Agent 与活动 Task 不一致")
+			return errors.New("agent does not match active task")
 		}
 	case "task":
 		var v taskmodel.Task
@@ -340,7 +340,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			return err
 		}
 		if agent.SessionID != v.SessionID || v.Active() != (agent.CurrentTaskID == v.ID) {
-			return errors.New("Task 与 Agent 活动身份不一致")
+			return errors.New("task does not match agent active identity")
 		}
 	case "tool":
 		var v toolmodel.ToolInvocation
@@ -398,10 +398,10 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 				return err
 			}
 			if appendOwner(agent) != v.OwnerID || v.Data.RequestID != task.RequestID.String() {
-				return errors.New("消息流或请求归属不符")
+				return errors.New("message stream or request ownership mismatch")
 			}
 			if v.Data.Role == sessionmodel.RoleAssistant && v.Data.AuthorID != task.AgentID.String() {
-				return errors.New("Assistant 作者归属不符")
+				return errors.New("assistant author ownership mismatch")
 			}
 		}
 	}
@@ -551,7 +551,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 	}
 	for _, field := range fields {
 		if !bytes.Equal(left[field], right[field]) {
-			return fmt.Errorf("%w: %s.%s 不可变", contracts.ErrRequestConflict, collection, field)
+			return fmt.Errorf("%w: %s.%s is immutable", contracts.ErrRequestConflict, collection, field)
 		}
 	}
 	if collection == "task" && string(left["Status"]) == `"ended"` && !bytes.Equal(before, after) {

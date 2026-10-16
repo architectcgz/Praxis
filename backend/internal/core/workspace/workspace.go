@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// WorkspaceKind identifies how a workspace directory is provisioned.
+// WorkspaceKind 标识工作区目录的提供方式。
 type WorkspaceKind string
 
 const (
@@ -25,8 +25,8 @@ const (
 	WorkspaceArchived    WorkspaceState = "archived"
 )
 
-// Workspace is the shared filesystem resource used by one or more Sessions.
-// Path and Revision are mutable resource facts; ID is its stable identity.
+// Workspace 是供一个或多个 Session 使用的共享文件系统资源。
+// Path 和 Revision 是可变的资源事实，ID 是稳定身份。
 type Workspace struct {
 	ID        contracts.WorkspaceID
 	ProjectID contracts.ProjectID

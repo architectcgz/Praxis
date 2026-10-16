@@ -191,32 +191,32 @@ func TestInputCommittedHook(t *testing.T) {
 	f.svc.hookDispatcher = hooks.NewDispatcherWithEvents(nil, committedHookFunc(func(hookCtx context.Context, event hooks.CommittedEvent) error {
 		calls++
 		if hookCtx.Err() != nil || hookCtx.Value(contextKey{}) != "trace" {
-			t.Error("提交后 Hook 应保留上下文值并脱离取消")
+			t.Error("post-commit hook must preserve context values and detach cancellation")
 		}
 		// 使用独立 Context 查询实际提交状态，同时验证 Store 锁已释放。
 		task, err := f.repos.Tasks.Get(context.Background(), event.TaskID)
 		if err != nil || task.ID != event.TaskID || event.SessionID != "session" || event.AgentID != "agent" {
-			t.Fatalf("归属或提交状态错误: %+v, %v", event.Identity, err)
+			t.Fatalf("invalid ownership or commit state: %+v, %v", event.Identity, err)
 		}
 		stream, err := f.repos.Messages.LoadMessages(context.Background(), "session", "agent", 0)
 		if err != nil || len(stream.Messages) != 1 || !reflect.DeepEqual(stream.Messages[0], *event.Message) {
-			t.Fatalf("Hook 必须收到已保存的用户消息: %+v, %v", stream, err)
+			t.Fatalf("hook must receive the persisted user message: %+v, %v", stream, err)
 		}
 		return errors.New("hook failed")
 	}))
 	result, err := f.svc.SendInput(ctx, hookInput())
 	if err != nil || result.ExistingRequest || calls != 1 {
-		t.Fatalf("Hook 失败不能改变业务结果: %+v, %v, calls=%d", result, err, calls)
+		t.Fatalf("hook failure must not change the business result: %+v, %v, calls=%d", result, err, calls)
 	}
 	f.svc.tx = f.store
 	duplicate, err := f.svc.SendInput(context.Background(), hookInput())
 	if err != nil || !duplicate.ExistingRequest || calls != 1 {
-		t.Fatalf("重复输入不可重复通知: %+v, %v, calls=%d", duplicate, err, calls)
+		t.Fatalf("duplicate input must not trigger another notification: %+v, %v, calls=%d", duplicate, err, calls)
 	}
 	conflict := hookInput()
 	conflict.Content = "不同输入"
 	if _, err := f.svc.SendInput(context.Background(), conflict); !errors.Is(err, contracts.ErrRequestConflict) || calls != 1 {
-		t.Fatalf("冲突请求不可通知: %v, calls=%d", err, calls)
+		t.Fatalf("conflicting request must not trigger a notification: %v, calls=%d", err, calls)
 	}
 }
 
@@ -233,7 +233,7 @@ func TestInputRollbackDoesNotNotify(t *testing.T) {
 	}
 	stream, err := f.repos.Messages.LoadMessages(context.Background(), "session", "agent", 0)
 	if err != nil || len(stream.Messages) != 0 || calls != 0 || !f.slots.released {
-		t.Fatalf("回滚必须丢弃消息、释放预留且不通知: %+v, %v, calls=%d, released=%v", stream, err, calls, f.slots.released)
+		t.Fatalf("rollback must discard messages, release reservations, and skip notifications: %+v, %v, calls=%d, released=%v", stream, err, calls, f.slots.released)
 	}
 }
 
@@ -248,7 +248,7 @@ func TestQueueCommittedHook(t *testing.T) {
 		task, err := f.repos.Tasks.Get(context.Background(), event.TaskID)
 		if err != nil || task.Status != taskmodel.TaskPending || event.Message.Sequence == 0 || event.Message.TextContent() != "排队输入" ||
 			event.SessionID != task.SessionID || event.AgentID != task.AgentID {
-			t.Fatalf("排队消息必须在提交后带完整身份发布: %+v, %v", event, err)
+			t.Fatalf("queued message must be published after commit with complete identity: %+v, %v", event, err)
 		}
 		return errors.New("hook failed")
 	}))
@@ -270,7 +270,7 @@ func TestQueueCommittedHook(t *testing.T) {
 		Prompt:    "排队输入",
 	}
 	if _, err := queue.EnqueueTask(context.Background(), params); !errors.Is(err, errHookRollback) || calls != 0 {
-		t.Fatalf("队列回滚不可通知: %v, calls=%d", err, calls)
+		t.Fatalf("queue rollback must not trigger a notification: %v, calls=%d", err, calls)
 	}
 	config.Transactions = f.store
 	queue, err = runtimequeue.NewService(config)
@@ -280,7 +280,7 @@ func TestQueueCommittedHook(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		result, err := queue.EnqueueTask(context.Background(), params)
 		if err != nil || result.ExistingTask != (i == 1) || calls != 1 {
-			t.Fatalf("排队及幂等通知错误: %+v, %v, calls=%d", result, err, calls)
+			t.Fatalf("incorrect queue or idempotent notification result: %+v, %v, calls=%d", result, err, calls)
 		}
 	}
 }
@@ -305,14 +305,14 @@ func TestSettleCommittedHook(t *testing.T) {
 	f.svc.eventObserver = func(event TerminalEvent) {
 		uiCalls++
 		if event.Outcome != string(taskmodel.TaskInterrupted) {
-			t.Errorf("终态 UI 事件必须使用仲裁结果: %+v", event)
+			t.Errorf("terminal UI event must use the arbitrated outcome: %+v", event)
 		}
 	}
 	f.svc.hookDispatcher = hooks.NewDispatcherWithEvents(nil, committedHookFunc(func(ctx context.Context, event hooks.CommittedEvent) error {
 		calls++
 		stored, err := f.repos.Tasks.Get(context.Background(), event.TaskID)
 		if err != nil || !reflect.DeepEqual(stored, *event.Task) || stored.Outcome != taskmodel.TaskInterrupted {
-			t.Fatalf("Hook 必须收到实际仲裁后的终态: %+v, %v", event, err)
+			t.Fatalf("hook must receive the actual arbitrated terminal state: %+v, %v", event, err)
 		}
 		// 扩展不能通过通知参数改变返回结果或后续 UI 事件。
 		event.Task.Outcome = taskmodel.TaskCompleted
@@ -320,13 +320,13 @@ func TestSettleCommittedHook(t *testing.T) {
 	}))
 	f.svc.tx = hookRollbackTx{f.store}
 	if _, err := f.svc.Settle(ctx, created.Task.ID, taskmodel.TaskCompleted, "", ""); !errors.Is(err, errHookRollback) || calls != 0 || uiCalls != 0 {
-		t.Fatalf("结算回滚不可通知: %v, calls=%d, uiCalls=%d", err, calls, uiCalls)
+		t.Fatalf("settlement rollback must not trigger notifications: %v, calls=%d, uiCalls=%d", err, calls, uiCalls)
 	}
 	f.svc.tx = f.store
 	for range 2 {
 		ended, err := f.svc.Settle(ctx, created.Task.ID, taskmodel.TaskCompleted, "", "")
 		if err != nil || ended.Outcome != taskmodel.TaskInterrupted || calls != 1 || uiCalls != 1 {
-			t.Fatalf("结算结果或幂等错误: %+v, %v, calls=%d, uiCalls=%d", ended, err, calls, uiCalls)
+			t.Fatalf("incorrect settlement or idempotency result: %+v, %v, calls=%d, uiCalls=%d", ended, err, calls, uiCalls)
 		}
 	}
 }
@@ -351,7 +351,7 @@ func TestConcurrentInputNotifiesOnce(t *testing.T) {
 	}
 	wg.Wait()
 	if calls != 1 {
-		t.Fatalf("并发同请求通知 %d 次", calls)
+		t.Fatalf("concurrent identical requests triggered %d notifications", calls)
 	}
 }
 
@@ -392,25 +392,25 @@ func TestAssistantWriterReportsOnlyCommittedInsert(t *testing.T) {
 		{Kind: sessionmodel.BlockToolCall, CallID: "call", Name: "read_file"},
 	}
 	if _, inserted, err := writer.AppendAssistant(ctx, invalid, metadata); err == nil || inserted {
-		t.Fatalf("失败事务不能报告新增: inserted=%v, err=%v", inserted, err)
+		t.Fatalf("failed transaction must not report insertion: inserted=%v, err=%v", inserted, err)
 	}
 	stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
 	if err != nil || len(stream.Messages) != 1 {
-		t.Fatalf("失败事务留下消息: %+v, %v", stream, err)
+		t.Fatalf("failed transaction left a message: %+v, %v", stream, err)
 	}
 	for i := 0; i < 2; i++ {
 		saved, inserted, err := writer.AppendAssistant(ctx, message, metadata)
 		if err != nil || inserted != (i == 0) || saved.Sequence == 0 || saved.CreatedAt.IsZero() {
-			t.Fatalf("重复写入标记错误: inserted=%v, err=%v", inserted, err)
+			t.Fatalf("incorrect duplicate write flag: inserted=%v, err=%v", inserted, err)
 		}
 	}
 	stored, err := f.repos.Tasks.Get(ctx, result.Task.ID)
 	if err != nil || stored.Progress.FinalAssistantID != message.ID || stored.Progress.FinalStopReason != message.StopReason {
-		t.Fatalf("最终输出证据未原子保存: %+v, %v", stored.Progress, err)
+		t.Fatalf("final output evidence was not saved atomically: %+v, %v", stored.Progress, err)
 	}
 	conflict := message
 	conflict.Blocks = []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: "不同回答"}}
 	if _, inserted, err := writer.AppendAssistant(ctx, conflict, metadata); !errors.Is(err, contracts.ErrRequestConflict) || inserted {
-		t.Fatalf("冲突消息不能报告新增: inserted=%v, err=%v", inserted, err)
+		t.Fatalf("conflicting message must not report insertion: inserted=%v, err=%v", inserted, err)
 	}
 }

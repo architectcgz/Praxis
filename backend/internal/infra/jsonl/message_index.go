@@ -98,7 +98,7 @@ func (s *Store) scanMessages(ctx context.Context, scope string) (*sessionMessage
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("日志必须是普通文件")
+		return nil, errors.New("log must be a regular file")
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -134,7 +134,7 @@ func (s *Store) scanMessages(ctx context.Context, scope string) (*sessionMessage
 				return nil, err
 			}
 			if event.Key != messageKey(value.OwnerID, value.Data.ID) || value.Data.Sequence != event.Sequence {
-				return nil, errors.New("消息身份或序号损坏")
+				return nil, errors.New("corrupt message identity or sequence")
 			}
 			index.add(value, recordRef{
 				Scope:      scope,

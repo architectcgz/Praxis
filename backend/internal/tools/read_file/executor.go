@@ -64,7 +64,7 @@ func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontrac
 		return toolcontracts.ToolResult{}, errors.New("read_file could not seek to the requested offset")
 	}
 	available := fileSize - int64(offset)
-	// Read enough trailing bytes to identify a character crossing the byte limit.
+	// 额外读取足够的尾部字节，以识别跨越字节上限的字符。
 	readLimit := int64(toolArguments.Limit + utf8.UTFMax - 1)
 	if available < readLimit {
 		readLimit = available
@@ -91,7 +91,7 @@ func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontrac
 	), nil
 }
 
-// contentEndAtLimit returns a UTF-8 character boundary at or before limit.
+// contentEndAtLimit 返回不超过 limit 的 UTF-8 字符边界。
 func contentEndAtLimit(content []byte, limit int) (int, error) {
 	end := 0
 	for index := 0; index < len(content) && index < limit; {
@@ -108,8 +108,7 @@ func contentEndAtLimit(content []byte, limit int) (int, error) {
 	return end, nil
 }
 
-// encodeBoundedOutput retains the longest UTF-8 prefix whose JSON output fits
-// within the inline tool-result limit.
+// encodeBoundedOutput 保留 JSON 输出不超过内联工具结果上限的最长 UTF-8 前缀。
 func encodeBoundedOutput(
 	toolArguments arguments,
 	offset int,

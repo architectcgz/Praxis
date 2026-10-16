@@ -87,7 +87,7 @@ type MessageWriter struct {
 
 func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data sessionmodel.MessageData) (stored sessionmodel.MessageData, inserted bool, err error) {
 	if owner.SessionID == "" {
-		return stored, false, errors.New("消息 Session 不能为空")
+		return stored, false, errors.New("message session is required")
 	}
 	err = s.InTx(ctx, func(txCtx context.Context) error {
 		scope, ownerID := owner.SessionID.String(), appendOwner(owner)
@@ -132,7 +132,7 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 // AppendToolResult 原子追加回执并累计输出字节；普通 Append 不修改预算。
 func (w MessageWriter) AppendToolResult(ctx context.Context, data sessionmodel.MessageData) error {
 	if data.Role != sessionmodel.RoleTool || data.TaskID == "" {
-		return errors.New("工具回执必须包含 Task 身份")
+		return errors.New("tool receipt must include task identity")
 	}
 	return w.streams.s.InTx(ctx, func(txCtx context.Context) error {
 		stored, inserted, err := w.streams.s.appendMessage(txCtx, w.owner, data)

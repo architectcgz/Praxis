@@ -151,7 +151,7 @@ func (r SessionRepository) Rename(ctx context.Context, id contracts.SessionID, t
 		return e
 	}
 	if title == "" || title != strings.TrimSpace(title) {
-		return contracts.InvalidValue("title", "标题必须是规范化非空字符串")
+		return contracts.InvalidValue("title", "title must be a non-empty canonical string")
 	}
 	v.Title = title
 	v.UpdatedAt = at

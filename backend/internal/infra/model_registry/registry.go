@@ -30,9 +30,8 @@ type StreamFactory func(
 	client *http.Client,
 ) (model.ModelStream, error)
 
-// Registry is the single in-process owner of the model configuration. Saving
-// from the UI replaces the config and its indexes in place, so every read path
-// must hold mu; holders of this pointer never observe the swap.
+// Registry 在进程内统一管理模型配置。界面保存时原地替换配置及索引，
+// 因此所有读取路径必须持有 mu，持有此指针的调用方不会观察到切换中的状态。
 type Registry struct {
 	mu              sync.RWMutex
 	modelsPath      string
@@ -131,9 +130,8 @@ func orderModelOptions(options []modelconfig.Option, groups []modelconfig.Group)
 	return options
 }
 
-// DiscoverProviderModels retrieves the model IDs advertised by one configured
-// OpenAI-compatible provider. Credentials are resolved in-process and never
-// returned to the caller.
+// DiscoverProviderModels 获取已配置的 OpenAI 兼容 Provider 公布的模型 ID。
+// 凭据仅在进程内解析，不返回给调用方。
 func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string) ([]string, error) {
 	if r == nil {
 		return nil, errors.New("model registry is not initialized")

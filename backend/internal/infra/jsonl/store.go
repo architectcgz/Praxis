@@ -44,7 +44,7 @@ type Store struct {
 
 func Open(ctx context.Context, root string) (*Store, error) {
 	if ctx == nil || !pathutil.IsAbsoluteNormalized(root) {
-		return nil, errors.New("日志 Context 与规范化绝对目录不能为空")
+		return nil, errors.New("log context and canonical absolute directory are required")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func Open(ctx context.Context, root string) (*Store, error) {
 	}
 	if err = lockFile(lock); err != nil {
 		_ = lock.Close()
-		return nil, fmt.Errorf("数据目录已被占用: %w", err)
+		return nil, fmt.Errorf("data directory is already in use: %w", err)
 	}
 	s := &Store{
 		root:      root,
@@ -90,7 +90,7 @@ func Open(ctx context.Context, root string) (*Store, error) {
 			if strings.HasSuffix(entry.Name(), ".jsonl") {
 				scope := strings.TrimSuffix(entry.Name(), ".jsonl")
 				if !validScope(scope) {
-					err = fmt.Errorf("非法日志文件名: %s", entry.Name())
+					err = fmt.Errorf("invalid log file name: %s", entry.Name())
 					break
 				}
 				err = s.replay(ctx, scope)
@@ -113,10 +113,10 @@ func (s *Store) openFormat() error {
 			Version int    `json:"version"`
 		}
 		if err := decodeJSON(data, &marker); err != nil {
-			return fmt.Errorf("存储格式标识损坏: %w", err)
+			return fmt.Errorf("corrupt storage format marker: %w", err)
 		}
 		if marker.Format != "praxis-jsonl" || marker.Version != 2 {
-			return errors.New("不支持的 JSONL 存储格式")
+			return errors.New("unsupported JSONL storage format")
 		}
 		return nil
 	}
@@ -141,7 +141,7 @@ func (s *Store) openFormat() error {
 				continue
 			}
 		}
-		return errors.New("非空数据目录缺少 v2 存储标识；不支持旧格式或自动迁移")
+		return errors.New("non-empty data directory is missing the v2 storage marker; legacy formats and automatic migration are not supported")
 	}
 	return writeNewFile(path, []byte("{\"format\":\"praxis-jsonl\",\"version\":2}\n"))
 }
@@ -163,14 +163,14 @@ func (s *Store) path(scope string) (string, error) {
 		return filepath.Join(s.root, "projects.jsonl"), nil
 	}
 	if !validScope(scope) {
-		return "", errors.New("Session ID 不是合法文件名")
+		return "", errors.New("session ID is not a valid file name")
 	}
 	return filepath.Join(s.root, "sessions", scope+".jsonl"), nil
 }
 
 func (s *Store) Close(ctx context.Context) error {
 	if ctx == nil {
-		return errors.New("关闭 Context 不能为空")
+		return errors.New("close context is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

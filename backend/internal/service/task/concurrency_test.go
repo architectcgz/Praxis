@@ -28,7 +28,7 @@ func TestDistinctRequestsCompeteForOneAgent(t *testing.T) {
 	}
 	wg.Wait()
 	if created.Load() != 1 {
-		t.Fatalf("同一 Agent 启动了 %d 个 Task", created.Load())
+		t.Fatalf("same agent started %d tasks", created.Load())
 	}
 }
 
@@ -46,7 +46,7 @@ func TestSessionDeletionCompetesWithInput(t *testing.T) {
 	close(start)
 	wg.Wait()
 	if (inputErr == nil) == (deleteErr == nil) {
-		t.Fatalf("删除和启动必须由同一事务边界仲裁: input=%v delete=%v", inputErr, deleteErr)
+		t.Fatalf("deletion and startup must share a transaction boundary: input=%v delete=%v", inputErr, deleteErr)
 	}
 }
 
@@ -88,6 +88,6 @@ func TestCancelCompetesWithSettlement(t *testing.T) {
 		t.Fatal(settleErr)
 	}
 	if commandErr == nil && ended.Outcome != taskmodel.TaskInterrupted || commandErr != nil && ended.Outcome != taskmodel.TaskCompleted {
-		t.Fatalf("提交顺序未决定最终结果: command=%v outcome=%s", commandErr, ended.Outcome)
+		t.Fatalf("commit order did not determine the final outcome: command=%v outcome=%s", commandErr, ended.Outcome)
 	}
 }

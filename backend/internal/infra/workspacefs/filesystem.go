@@ -66,10 +66,10 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", fmt.Errorf("inspect workspace file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", contracts.New(contracts.InvalidRequest, "只能预览普通文本文件。")
+		return "", contracts.New(contracts.InvalidRequest, "only regular text files can be previewed")
 	}
 	if info.Size() > maxBytes {
-		return "", contracts.New(contracts.InvalidRequest, "文件超过 1 MiB，无法预览。")
+		return "", contracts.New(contracts.InvalidRequest, "file exceeds the 1 MiB preview limit")
 	}
 	file, err := root.Open(relativePath)
 	if err != nil {
@@ -81,7 +81,7 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", fmt.Errorf("inspect opened workspace file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", contracts.New(contracts.InvalidRequest, "只能预览普通文本文件。")
+		return "", contracts.New(contracts.InvalidRequest, "only regular text files can be previewed")
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
@@ -91,10 +91,10 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", err
 	}
 	if int64(len(data)) > maxBytes {
-		return "", contracts.New(contracts.InvalidRequest, "文件超过 1 MiB，无法预览。")
+		return "", contracts.New(contracts.InvalidRequest, "file exceeds the 1 MiB preview limit")
 	}
 	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
-		return "", contracts.New(contracts.InvalidRequest, "仅支持 UTF-8 文本预览，不支持二进制文件。")
+		return "", contracts.New(contracts.InvalidRequest, "only UTF-8 text can be previewed; binary files are not supported")
 	}
 	return string(bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))), nil
 }

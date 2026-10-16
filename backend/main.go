@@ -15,7 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
-// Embed the frontend build so the release binary does not depend on runtime files.
+// 嵌入前端构建产物，使发布的二进制不依赖运行时文件。
 //
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -26,16 +26,16 @@ func main() {
 		a.Startup(ctx)
 		root, err := dataroot.Resolve("")
 		if err != nil {
-			a.FailStartup(fmt.Errorf("初始化数据目录失败：%w", err))
+			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return
 		}
 		application, err := compose.Open(ctx, root, nil)
 		if err != nil {
-			a.FailStartup(fmt.Errorf("初始化应用服务失败：%w", err))
+			a.FailStartup(fmt.Errorf("initialize application services: %w", err))
 			return
 		}
 		if err := a.Attach(application.Services(), application.RuntimeLogger(), application); err != nil {
-			a.FailStartup(fmt.Errorf("接入桌面服务失败：%w", err))
+			a.FailStartup(fmt.Errorf("attach desktop services: %w", err))
 			if closeErr := application.Close(context.Background()); closeErr != nil {
 				a.LogError("close application after startup failed: %v", closeErr)
 			}

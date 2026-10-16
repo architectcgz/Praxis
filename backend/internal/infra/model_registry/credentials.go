@@ -11,12 +11,11 @@ import (
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// normalizeCredentials validates the persisted auth document and returns a
-// deep copy with normalized provider IDs, credential types, and keys.
+// normalizeCredentials 校验持久化凭据文档，返回 Provider ID、凭据类型
+// 和密钥均已规范化的深拷贝。
 //
-// Entries for providers that are not part of the current model configuration
-// are preserved: the two documents have separate lifecycles, and a credential
-// only becomes effective when a configured provider resolves it by ID.
+// 保留不在当前模型配置中的 Provider 条目：两个文档独立管理，
+// 凭据仅在已配置的 Provider 按 ID 解析时生效。
 func normalizeCredentials(document ProviderCredentials) (ProviderCredentials, error) {
 	normalized := make(ProviderCredentials, len(document))
 	for providerID, credential := range document {
@@ -37,9 +36,8 @@ func normalizeCredentials(document ProviderCredentials) (ProviderCredentials, er
 	return normalized, nil
 }
 
-// SetProviderKey stores or clears the API key associated with one configured
-// provider. Only the auth document is written; the model configuration
-// document never contains a secret.
+// SetProviderKey 保存或清除已配置 Provider 的 API 密钥。
+// 只写入凭据文档，模型配置文档不包含密钥。
 func (r *Registry) SetProviderKey(providerID, value string) error {
 	if r == nil {
 		return errors.New("registry is not initialized")
@@ -71,7 +69,7 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 	return nil
 }
 
-// ProviderKey returns the API key stored for a configured provider.
+// ProviderKey 返回已配置 Provider 保存的 API 密钥。
 func (r *Registry) ProviderKey(providerID string) string {
 	if r == nil || !idPattern.MatchString(providerID) {
 		return ""
@@ -84,14 +82,13 @@ func (r *Registry) ProviderKey(providerID string) string {
 	return r.credentialKeyLocked(providerID)
 }
 
-// HasProviderKey reports secret presence without exposing the secret value to
-// application or binding layers.
+// HasProviderKey 报告密钥是否存在，不向应用层或 binding 层暴露密钥值。
 func (r *Registry) HasProviderKey(providerID string) bool {
 	return r.ProviderKey(providerID) != ""
 }
 
-// credentialKeyLocked resolves the active API key for one provider. The caller
-// must hold r.mu; runtime resolution is the only path allowed to read the key.
+// credentialKeyLocked 解析 Provider 当前有效的 API 密钥。
+// 调用方必须持有 r.mu；仅允许运行时解析路径读取密钥。
 func (r *Registry) credentialKeyLocked(providerID string) string {
 	credential, exists := r.credentials[providerID]
 	if !exists || credential.Type != CredentialTypeAPIKey {
@@ -108,10 +105,9 @@ func cloneCredentials(credentials ProviderCredentials) ProviderCredentials {
 	return cloned
 }
 
-// retainCredentialsForProviders returns the credentials that belong to the
-// configured providers, so persisting the next model configuration also drops
-// the secret of any removed provider. Providers without a stored credential
-// stay absent instead of gaining an empty entry.
+// retainCredentialsForProviders 返回属于已配置 Provider 的凭据，
+// 因此保存下一份模型配置时也会删除已移除 Provider 的密钥。
+// 未保存凭据的 Provider 保持缺省，不创建空条目。
 func retainCredentialsForProviders(credentials ProviderCredentials, providers []modelconfig.Provider) ProviderCredentials {
 	retained := make(ProviderCredentials, len(providers))
 	for _, provider := range providers {

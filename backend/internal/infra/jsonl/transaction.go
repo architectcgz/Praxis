@@ -50,21 +50,21 @@ func (s *Store) newTransaction() *transaction {
 
 func (s *Store) view(ctx context.Context, fn func(context.Context) error) error {
 	if ctx == nil {
-		return errors.New("查询 Context 不能为空")
+		return errors.New("query context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if tx := s.tx(ctx); tx != nil {
 		if !tx.active {
-			return errors.New("事务已经结束")
+			return errors.New("transaction has ended")
 		}
 		return fn(ctx)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return errors.New("日志已关闭")
+		return errors.New("log is closed")
 	}
 	if s.fault != nil {
 		return s.fault
@@ -77,21 +77,21 @@ func (s *Store) view(ctx context.Context, fn func(context.Context) error) error 
 // InTx 只保留本次变更；嵌套调用共享事务，最终关联约束在整笔事务完成后验证。
 func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error {
 	if ctx == nil || fn == nil {
-		return errors.New("事务 Context 和回调不能为空")
+		return errors.New("transaction context and callback are required")
 	}
 	if tx := s.tx(ctx); tx != nil {
 		if !tx.active {
-			return errors.New("事务已经结束")
+			return errors.New("transaction has ended")
 		}
 		if tx.readOnly {
-			return errors.New("只读查询不能开启写事务")
+			return errors.New("a read-only query cannot start a write transaction")
 		}
 		return fn(ctx)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return errors.New("日志已关闭")
+		return errors.New("log is closed")
 	}
 	if s.fault != nil {
 		return s.fault
@@ -130,13 +130,13 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 func (s *Store) change(ctx context.Context, scope, collection, id, kind string, data json.RawMessage) error {
 	tx := s.tx(ctx)
 	if tx == nil || !tx.active || tx.readOnly {
-		return errors.New("变更必须位于活动事务内")
+		return errors.New("changes require an active transaction")
 	}
 	if len(tx.events) == 0 {
 		tx.scope, tx.nextSequence = scope, s.sequences[scope]
 	}
 	if tx.scope != scope {
-		return errors.New("一次事务不能写入多个日志文件")
+		return errors.New("a transaction cannot write to multiple log files")
 	}
 	event := Event{
 		Sequence:   tx.nextSequence + 1,
@@ -153,17 +153,17 @@ func (s *Store) change(ctx context.Context, scope, collection, id, kind string, 
 func (s *Store) stage(ctx context.Context, event Event) error {
 	tx := s.tx(ctx)
 	if tx.deletedScope || s.index.deleted[tx.scope] {
-		return errors.New("已删除的 Session 不允许继续写入")
+		return errors.New("cannot write to a deleted session")
 	}
 	if _, err := s.path(tx.scope); err != nil {
 		return err
 	}
 	if event.Sequence != tx.nextSequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
-		return errors.New("事件身份或序号非法")
+		return errors.New("invalid event identity or sequence")
 	}
 	if event.Type == "session.deleted" {
 		if tx.scope == "" || event.Collection != "session" || event.Key != tx.scope || len(event.Payload) > 0 {
-			return errors.New("非法删除事件")
+			return errors.New("invalid deletion event")
 		}
 		tx.deletedScope = true
 	} else {

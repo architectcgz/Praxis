@@ -24,7 +24,7 @@ type SessionUsageSummary struct {
 // 读取失败、记录归属不一致或累计值溢出时返回错误，未知计数不补零。
 func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID contracts.SessionID) (SessionUsageSummary, error) {
 	if ctx == nil {
-		return SessionUsageSummary{}, errors.New("会话用量查询 context 不能为空")
+		return SessionUsageSummary{}, errors.New("session usage query context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return SessionUsageSummary{}, err
@@ -42,13 +42,13 @@ func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID contract
 	}
 	for _, record := range records {
 		if record.SessionID != sessionID.String() {
-			return SessionUsageSummary{}, errors.New("会话用量记录归属不一致")
+			return SessionUsageSummary{}, errors.New("session usage record ownership mismatch")
 		}
 		if err := record.Validate(); err != nil {
 			return SessionUsageSummary{}, err
 		}
 		if record.Usage.InputTokens > math.MaxInt64-summary.InputTokens {
-			return SessionUsageSummary{}, errors.New("会话输入 token 累计值溢出")
+			return SessionUsageSummary{}, errors.New("session input token counter overflow")
 		}
 		summary.InputTokens += record.Usage.InputTokens
 		if record.Usage.CacheReadInputTokens == nil {

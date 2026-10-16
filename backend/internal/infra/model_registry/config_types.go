@@ -9,7 +9,7 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 )
 
-// ProviderCredential is one Provider credential in the auth document.
+// ProviderCredential 表示凭据文档中的一项 Provider 凭据。
 type ProviderCredential struct {
 	Type CredentialType `json:"type"`
 	Key  string         `json:"key"`
@@ -19,9 +19,8 @@ type CredentialType string
 
 const CredentialTypeAPIKey CredentialType = "api_key"
 
-// ProviderCredentials maps stable Provider IDs to their credentials. It is
-// persisted separately from the model configuration so provider metadata can
-// be read, edited, or shared without ever exposing a secret.
+// ProviderCredentials 将稳定的 Provider ID 映射到凭据。
+// 凭据与模型配置分开持久化，使 Provider 元数据的读取、编辑和共享不会暴露密钥。
 type ProviderCredentials map[string]ProviderCredential
 
 // selectReasoning 解析推理等级，生成 Task 绑定的冻结模型选择。

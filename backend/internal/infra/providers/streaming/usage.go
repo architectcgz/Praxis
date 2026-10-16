@@ -16,7 +16,7 @@ func DecodeUsage(data *json.RawMessage, target any, protocol string) bool {
 		return false
 	}
 	if err := json.Unmarshal(*data, target); err != nil {
-		usageLogger.Warnf("忽略无效模型用量 protocol=%s reason=invalid_schema", protocol)
+		usageLogger.Warnf("ignoring invalid model usage protocol=%s reason=invalid_schema", protocol)
 		return false
 	}
 	return true
@@ -25,7 +25,7 @@ func DecodeUsage(data *json.RawMessage, target any, protocol string) bool {
 // ValidUsage 校验转换后的实际统计字段；无效或不完整计数只记诊断，不应更新统计。
 func ValidUsage(protocol string, usage *model.ModelUsage) bool {
 	if usage == nil || !usage.Valid() {
-		usageLogger.Warnf("忽略无效模型用量 protocol=%s reason=invalid_counts", protocol)
+		usageLogger.Warnf("ignoring invalid model usage protocol=%s reason=invalid_counts", protocol)
 		return false
 	}
 	return true

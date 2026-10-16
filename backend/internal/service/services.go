@@ -130,7 +130,7 @@ func (s *Services) SaveModelConfig(canonical request.SaveModelConfig) error {
 	}
 	prepared := canonical.ValidatedConfig()
 	if !prepared.Prepared() {
-		return contracts.InvalidValue("modelConfig", "模型配置尚未准备")
+		return contracts.InvalidValue("modelConfig", "model configuration is not ready")
 	}
 	config := canonical.Config()
 	if s.agentConfig != nil {

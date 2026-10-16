@@ -20,7 +20,7 @@ type FilePreview struct {
 // PreviewFile 通过持久化会话解析 Workspace，并在授权后委托 Port 读取文本。
 func (s *Service) PreviewFile(ctx context.Context, canonical request.FilePreview) (FilePreview, error) {
 	if ctx == nil {
-		return FilePreview{}, contracts.New(contracts.InvalidRequest, "文件预览需要有效会话。")
+		return FilePreview{}, contracts.New(contracts.InvalidRequest, "a valid session is required to preview files")
 	}
 	if err := ctx.Err(); err != nil {
 		return FilePreview{}, err
@@ -33,12 +33,12 @@ func (s *Service) PreviewFile(ctx context.Context, canonical request.FilePreview
 	if filepath.IsAbs(path) {
 		path, err = filepath.Rel(workspace.Path, path)
 		if err != nil {
-			return FilePreview{}, contracts.New(contracts.InvalidRequest, "只能预览当前工作区内的文件。")
+			return FilePreview{}, contracts.New(contracts.InvalidRequest, "only files within the current workspace can be previewed")
 		}
 	}
 	// IsLocal 拦截词法越界；冒号额外拒绝 Windows 驱动器相对路径与 NTFS 数据流。
 	if !filepath.IsLocal(path) || path == "." || strings.ContainsRune(path, ':') {
-		return FilePreview{}, contracts.New(contracts.InvalidRequest, "只能预览当前工作区内的文件。")
+		return FilePreview{}, contracts.New(contracts.InvalidRequest, "only files within the current workspace can be previewed")
 	}
 	content, err := s.textReader.ReadText(ctx, workspace.Path, path, maxPreviewBytes)
 	if err != nil {

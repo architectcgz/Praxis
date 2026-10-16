@@ -139,7 +139,7 @@ type ModelOption struct {
 	AssignedAgentDefinitions []string `json:"assignedAgentDefinitions"`
 }
 
-// ProviderConfigOption carries editable provider metadata and secret status.
+// ProviderConfigOption 携带可编辑的 Provider 元数据和密钥状态。
 type ProviderConfigOption struct {
 	ID             string `json:"id"`
 	ProviderName   string `json:"providerName"`
@@ -154,7 +154,7 @@ type GroupConfigOption struct {
 	DisplayName string `json:"displayName"`
 }
 
-// ModelConfigOption carries every field the settings UI needs to edit a model.
+// ModelConfigOption 携带设置界面编辑模型所需的全部字段。
 type ModelConfigOption struct {
 	ProviderID            string                  `json:"providerId"`
 	ModelID               string                  `json:"modelId"`
@@ -168,7 +168,7 @@ type ModelConfigOption struct {
 	Thinking              contracts.ModelThinking `json:"thinking,omitzero"`
 }
 
-// ModelConfigDocument is one editable model registry document.
+// ModelConfigDocument 表示可编辑的模型注册表文档。
 type ModelConfigDocument struct {
 	Groups            []GroupConfigOption    `json:"groups"`
 	DefaultProviderID string                 `json:"defaultProviderId"`
@@ -183,9 +183,8 @@ type SaveModelConfigRequest struct {
 	Models            []ModelConfigOption    `json:"models"`
 }
 
-// SaveModelConfigResponse reports user-fixable configuration problems through
-// validationError. Those are not call failures, so they bypass the opaque
-// binding error codes and stay actionable in the UI.
+// SaveModelConfigResponse 通过 validationError 报告用户可修正的配置问题。
+// 这些问题不属于调用失败，不映射为 binding 错误码，以便界面展示具体修正信息。
 type SaveModelConfigResponse struct {
 	Saved           bool   `json:"saved"`
 	ValidationError string `json:"validationError,omitempty"`

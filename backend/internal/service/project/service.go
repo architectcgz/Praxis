@@ -31,7 +31,7 @@ type Config struct {
 	Logger       *logging.Logger
 }
 
-// Service owns Project mutations and their transaction boundaries.
+// Service 负责 Project 变更及其事务边界。
 type Service struct {
 	tx         repository.TxRunner
 	projects   repository.ProjectRepository
@@ -41,8 +41,7 @@ type Service struct {
 	logger     *logging.Logger
 }
 
-// CreateProjectParams contains the durable identity and initial workspace
-// data for a new Project.
+// CreateProjectParams 包含新 Project 的持久化身份和初始工作区数据。
 type CreateProjectParams struct {
 	RequestID   contracts.RequestID
 	ProjectID   contracts.ProjectID
@@ -51,13 +50,13 @@ type CreateProjectParams struct {
 	Path        string
 }
 
-// CreateProjectResult returns the Project and its initial Workspace.
+// CreateProjectResult 返回 Project 及其初始 Workspace。
 type CreateProjectResult struct {
 	Project   projectmodel.Project
 	Workspace workspacemodel.Workspace
 }
 
-// NewService creates the Project application service.
+// NewService 创建 Project 应用服务。
 func NewService(config Config) (*Service, error) {
 	for name, value := range map[string]any{
 		"transactions":        config.Transactions,
@@ -138,7 +137,7 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 	})
 	if err != nil && createdDirectory {
 		if removeErr := s.directory.RemoveEmpty(context.WithoutCancel(ctx), params.Path); removeErr != nil {
-			s.logger.Warnf("回收未落库的项目目录失败 path=%s err=%v", params.Path, removeErr)
+			s.logger.Warnf("failed to remove uncommitted project directory path=%s err=%v", params.Path, removeErr)
 		}
 	}
 	return result, err

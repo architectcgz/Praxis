@@ -1,4 +1,4 @@
-// Package shared provides reusable helpers for tool implementations.
+// Package shared 为工具实现提供可复用的辅助函数。
 package shared
 
 import (
@@ -8,9 +8,8 @@ import (
 	"io"
 )
 
-// DecodeOptionalInteger decodes an omitted or integer JSON field into target.
-// JSON null is rejected so callers can distinguish an omitted field from an
-// explicit invalid value before applying their default.
+// DecodeOptionalInteger 将省略的或整数类型的 JSON 字段解码到 target。
+// 拒绝 JSON null，使调用方在应用默认值前能区分省略字段与显式无效值。
 func DecodeOptionalInteger(encoded json.RawMessage, target *int) error {
 	if len(encoded) == 0 {
 		return nil
@@ -56,7 +55,7 @@ func RejectDuplicateFields(encoded json.RawMessage) error {
 	return RejectTrailingJSON(decoder)
 }
 
-// RejectTrailingJSON verifies that the decoder consumed exactly one JSON value.
+// RejectTrailingJSON 校验解码器恰好消费一个 JSON 值。
 func RejectTrailingJSON(decoder *json.Decoder) error {
 	var extra any
 	err := decoder.Decode(&extra)

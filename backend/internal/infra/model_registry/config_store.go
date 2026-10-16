@@ -11,8 +11,8 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 )
 
-// ConfigurationError identifies the configuration file that prevented the
-// registry from loading. Its cause never contains a resolved secret value.
+// ConfigurationError 标识阻止注册表加载的配置文件，
+// 其底层原因不包含已解析的密钥值。
 type ConfigurationError struct {
 	Path string
 	Err  error
@@ -65,9 +65,8 @@ func readModelConfigFile(path string) (modelconfig.ValidatedConfig, error) {
 	return modelconfig.NewValidatedConfig(config)
 }
 
-// readCredentialsFile reads the owner-only credential document. A missing
-// document is created as an empty template so a fresh data root always has an
-// editable auth file.
+// readCredentialsFile 读取仅所有者可访问的凭据文档。文档缺失时创建空模板，
+// 确保新数据根目录始终包含可编辑的凭据文件。
 func readCredentialsFile(path string) (ProviderCredentials, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create auth config directory: %w", err)
@@ -100,12 +99,10 @@ func readCredentialsFile(path string) (ProviderCredentials, error) {
 	return document, nil
 }
 
-// writeConfigAtomically persists a complete replacement configuration without ever
-// exposing a partially written file to startup or settings readers.
+// writeConfigAtomically 完整替换持久化配置，确保启动和设置读取方不会读到部分写入的文件。
 //
-// The temporary file and same-directory rename preserve the previous valid
-// document if writing fails. Mode stays 0600 because the auth document holds
-// provider credentials and the model document is still owner-only config.
+// 通过临时文件和同目录重命名，在写入失败时保留之前的有效文档。
+// 文件权限保持 0600，因为凭据文档包含 Provider 密钥，模型配置也仅允许所有者访问。
 func writeConfigAtomically(path string, payload any) error {
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

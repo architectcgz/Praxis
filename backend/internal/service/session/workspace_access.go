@@ -9,7 +9,7 @@ import (
 
 func (s *Service) workspaceForSession(ctx context.Context, sessionID contracts.SessionID) (workspacemodel.Workspace, error) {
 	if ctx == nil {
-		return workspacemodel.Workspace{}, contracts.New(contracts.InvalidRequest, "需要有效会话。")
+		return workspacemodel.Workspace{}, contracts.New(contracts.InvalidRequest, "a valid session is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return workspacemodel.Workspace{}, err
@@ -26,7 +26,7 @@ func (s *Service) workspaceForSession(ctx context.Context, sessionID contracts.S
 		return workspacemodel.Workspace{}, err
 	}
 	if workspace.ProjectID != session.ProjectID || workspace.State != workspacemodel.WorkspaceReady {
-		return workspacemodel.Workspace{}, contracts.New(contracts.ProjectWorkspaceInvalid, "当前会话的工作区不可用。")
+		return workspacemodel.Workspace{}, contracts.New(contracts.ProjectWorkspaceInvalid, "current session workspace is unavailable")
 	}
 	return workspace, nil
 }

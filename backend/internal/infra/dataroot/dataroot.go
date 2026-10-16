@@ -1,6 +1,5 @@
-// Package dataroot owns the local application-root path layout. It is the
-// shared base every other infrastructure adapter resolves its files against,
-// so it deliberately depends on nothing else in the infrastructure layer.
+// Package dataroot 定义本地应用根目录的路径布局。其他基础设施适配器
+// 均以此为基础解析文件路径，因此本包不依赖其他基础设施组件。
 package dataroot
 
 import (
@@ -14,10 +13,8 @@ import (
 
 const dataRootEnvironment = "PRAXIS_DATA_ROOT"
 
-// DataRoot contains every local product-data path. Configuration, projects,
-// and runtime state have separate ownership boundaries below Root. This type
-// only resolves paths; the provider registry is the sole component that reads
-// or writes the model and credential files they point at.
+// DataRoot 包含所有本地产品数据路径。配置、项目和运行状态在 Root 下分别管理。
+// 此类型只解析路径；模型和凭据文件只由 Provider 注册表读写。
 type DataRoot struct {
 	Root                 string
 	Config               string
@@ -32,8 +29,8 @@ type DataRoot struct {
 	AgentDefinitions     string
 }
 
-// Resolve chooses the explicit root, then PRAXIS_DATA_ROOT, then the current
-// user's .praxis directory. It deliberately does not create files.
+// Resolve 依次选择显式根目录、PRAXIS_DATA_ROOT 和当前用户的 .praxis 目录，
+// 不创建文件。
 func Resolve(root string) (DataRoot, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -71,7 +68,7 @@ func Resolve(root string) (DataRoot, error) {
 	}, nil
 }
 
-// Initialize creates the non-secret directory structure with owner-only access.
+// Initialize 创建不含密钥的目录结构，仅允许所有者访问。
 func (d DataRoot) Initialize(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("data root initialization context is required")

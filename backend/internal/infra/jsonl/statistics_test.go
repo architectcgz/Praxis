@@ -27,7 +27,7 @@ func TestUsageAndTimingIndexesSurviveRestart(t *testing.T) {
 	decreased := usage
 	decreased.Usage.OutputTokens = nil
 	if err := (ModelUsageStore{Store: f.store}).Save(ctx, decreased); err == nil {
-		t.Fatal("已知用量不能丢失")
+		t.Fatal("known usage must not be lost")
 	}
 	record := timing.Record{
 		ID: "timing",
@@ -57,7 +57,7 @@ func TestUsageAndTimingIndexesSurviveRestart(t *testing.T) {
 		t.Fatal(entries)
 	}
 	if err := timings.Save(ctx, record); err == nil {
-		t.Fatal("不能回退计时版本")
+		t.Fatal("timing version must not regress")
 	}
 	f.restart(t)
 	if _, err := f.repos.Tasks.FindByRequest(ctx, "agent", "missing"); !errors.Is(err, contracts.ErrNotFound) {

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// ProjectState is the lifecycle of a long-lived user project.
+// ProjectState 表示用户项目的生命周期状态。
 type ProjectState string
 
 const (
@@ -16,9 +16,8 @@ const (
 	ProjectArchived ProjectState = "archived"
 )
 
-// Project is the durable identity and catalog record for one user project.
-// Workspaces and Sessions are linked by identifiers and remain independent
-// aggregates.
+// Project 保存用户项目的持久化身份和目录记录。
+// Workspace 和 Session 通过标识符关联，各自保持为独立聚合。
 type Project struct {
 	ID                 contracts.ProjectID
 	Name               string

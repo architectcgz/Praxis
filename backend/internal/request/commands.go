@@ -64,7 +64,7 @@ func NewSendInput(value SendInput) (SendInput, error) {
 		return SendInput{}, contracts.New(contracts.ModelNotConfigured, "")
 	}
 	if value.Content == "" || len(value.Content) > taskmodel.MaxInputBytes || !utf8.ValidString(value.Content) {
-		return SendInput{}, contracts.InvalidValue("content", "输入必须是非空 UTF-8 文本且不超过大小限制")
+		return SendInput{}, contracts.InvalidValue("content", "content must be non-empty UTF-8 text within the size limit")
 	}
 	return value, nil
 }
@@ -97,7 +97,7 @@ func NewEnqueueTask(value EnqueueTask) (EnqueueTask, error) {
 		return EnqueueTask{}, contracts.New(contracts.ModelNotConfigured, "")
 	}
 	if value.Prompt == "" || len(value.Prompt) > taskmodel.MaxInputBytes || !utf8.ValidString(value.Prompt) {
-		return EnqueueTask{}, contracts.InvalidValue("prompt", "输入必须是非空 UTF-8 文本且不超过大小限制")
+		return EnqueueTask{}, contracts.InvalidValue("prompt", "prompt must be non-empty UTF-8 text within the size limit")
 	}
 	return value, nil
 }
@@ -127,7 +127,7 @@ type FilePreview struct {
 func NewFilePreview(sessionID contracts.SessionID, path string) (FilePreview, error) {
 	path = strings.TrimSpace(path)
 	if path == "" || strings.ContainsRune(path, '\x00') || strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//") {
-		return FilePreview{}, contracts.InvalidValue("path", "文件路径无效。")
+		return FilePreview{}, contracts.InvalidValue("path", "file path is invalid")
 	}
 	// Git Bash 会把 Windows 盘符路径表示为 /c/...。
 	if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == '/' &&

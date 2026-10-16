@@ -1,7 +1,7 @@
 package contracts
 
-// IDs are distinct types so a repository cannot accidentally swap identifiers
-// between aggregates while all persistence formats can still use strings.
+// ID 使用不同类型，防止仓储意外交换不同聚合的标识符，
+// 同时允许所有持久化格式继续使用字符串。
 type (
 	ProjectID             string
 	WorkspaceID           string

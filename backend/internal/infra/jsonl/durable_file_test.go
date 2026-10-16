@@ -53,7 +53,7 @@ func TestAppendRollbackAndFault(t *testing.T) {
 				t.Fatal(err, s.fault)
 			}
 			if !tc.rollback && string(file.data) != "committed\n" {
-				t.Fatal("写入失败必须截断并同步到原提交边界")
+				t.Fatal("failed write must truncate and sync to the original commit boundary")
 			}
 		})
 	}

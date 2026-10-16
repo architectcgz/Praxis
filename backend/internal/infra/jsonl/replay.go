@@ -22,7 +22,7 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("日志必须是普通文件: %s", path)
+		return fmt.Errorf("log must be a regular file: %s", path)
 	}
 	file, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if err != nil {
@@ -48,10 +48,10 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 		}
 		var record batch
 		if err := decodeJSON(line, &record); err != nil {
-			return fmt.Errorf("%s 偏移 %d: %w", path, offset, err)
+			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
 		if len(record.Events) == 0 {
-			return fmt.Errorf("%s 偏移 %d: 空提交", path, offset)
+			return fmt.Errorf("%s offset %d: empty commit", path, offset)
 		}
 		tx := s.newTransaction()
 		tx.scope, tx.nextSequence, tx.replayMessages = scope, s.sequences[scope], messages
@@ -62,10 +62,10 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 			}
 		}
 		if len(tx.events) != len(record.Events) {
-			return fmt.Errorf("%s 偏移 %d: 冗余或重复事件", path, offset)
+			return fmt.Errorf("%s offset %d: redundant or duplicate event", path, offset)
 		}
 		if err := s.validateTransaction(txCtx); err != nil {
-			return fmt.Errorf("%s 偏移 %d: %w", path, offset, err)
+			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
 		s.publish(tx, offset, int64(len(line)))
 		tx.active = false

@@ -152,14 +152,14 @@ func TestAssistantCommittedHook(t *testing.T) {
 			dispatcher := hooks.NewDispatcherWithEvents(nil, loopCommittedHook(func(hookCtx context.Context, event hooks.CommittedEvent) error {
 				notifications++
 				if err := event.Message.Validate(); err != nil {
-					t.Fatalf("Hook 应收到包含序号和时间的完整消息: %v", err)
+					t.Fatalf("hook must receive the complete message with sequence and timestamp: %v", err)
 				}
 				if writer.writes != 1 || hookCtx.Err() != nil || hookCtx.Value(traceKey{}) != "trace" {
-					t.Error("Hook 必须在保存后以脱离取消的 Context 调用")
+					t.Error("hook must run after persistence with a context detached from cancellation")
 				}
 				if event.SessionID != task.SessionID || event.AgentID != task.AgentID || event.TaskID != task.ID ||
 					event.TurnID != contracts.NewTurnID(task.ID, 1) || event.Message.StopReason != string(tc.stop) || event.Message.TextContent() != "回答" {
-					t.Fatalf("最终消息事件内容错误: %+v", event)
+					t.Fatalf("incorrect final message event content: %+v", event)
 				}
 				return errors.New("hook failed")
 			}))
@@ -188,10 +188,10 @@ func TestAssistantCommittedHook(t *testing.T) {
 			}
 			outcome, failure, err := runner.Run(ctx, task, content, nil, writer)
 			if outcome != tc.outcome || failure != tc.failure || (err != nil) != (tc.writeErr != nil) {
-				t.Fatalf("Hook 不可改变执行结果: outcome=%s failure=%s err=%v", outcome, failure, err)
+				t.Fatalf("hook must not change execution results: outcome=%s failure=%s err=%v", outcome, failure, err)
 			}
 			if notifications != tc.notifies || hookErrors != tc.notifies || provider.requests != 1 || writer.writes != 1 {
-				t.Fatalf("通知或重试次数错误: notifications=%d logs=%d requests=%d writes=%d", notifications, hookErrors, provider.requests, writer.writes)
+				t.Fatalf("incorrect notification or retry counts: notifications=%d logs=%d requests=%d writes=%d", notifications, hookErrors, provider.requests, writer.writes)
 			}
 		})
 	}

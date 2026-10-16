@@ -51,7 +51,7 @@ func TestFrozenSelectionAndContinuation(t *testing.T) {
 		t.Fatal(prepared, ok, err)
 	}
 	if !slices.Contains(prepared.ContextSelection.ExcludedMessageIDs, "input:queued-two") {
-		t.Fatal("冻结历史未排除其他 Pending 输入")
+		t.Fatal("frozen history did not exclude other pending inputs")
 	}
 	agent, err := f.repos.Agents.Get(ctx, "agent")
 	if err != nil {
@@ -103,7 +103,7 @@ func TestFrozenSelectionAndContinuation(t *testing.T) {
 	for _, entry := range content.Entries {
 		for _, block := range entry.Content {
 			if block.Text == "queued-two" || block.Text == "冻结之后的输入" {
-				t.Fatal("恢复突破冻结边界或重新纳入排除项")
+				t.Fatal("recovery crossed the frozen boundary or included excluded entries")
 			}
 		}
 	}
@@ -182,7 +182,7 @@ func TestContextKeepsReasoningStateAndFrozenSharedFacts(t *testing.T) {
 		{Kind: sessionmodel.BlockText, Text: "正文"},
 	}})
 	if !ok || len(entry.Content) != 2 || entry.Content[0].ReasoningState == state {
-		t.Fatal("推理状态未隔离或展示思考进入上下文")
+		t.Fatal("reasoning state was not isolated or display thinking entered context")
 	}
 	f := newHookFixture(t)
 	ctx := context.Background()
@@ -198,19 +198,19 @@ func TestContextKeepsReasoningStateAndFrozenSharedFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(created.Task.ContextSelection.SessionContextRefs) != 1 {
-		t.Fatal("共享事实未冻结")
+		t.Fatal("shared facts were not frozen")
 	}
 	content, _, err := f.svc.LoadContext(ctx, created.Task)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !content.Entries[0].Protected {
-		t.Fatal("共享事实必须保留原文")
+		t.Fatal("shared facts must preserve their original text")
 	}
 	corrupt := created.Task
 	corrupt.ContextSelection = created.Task.ContextSelection.Clone()
 	corrupt.ContextSelection.SessionContextRefs[0].Digest = "wrong"
 	if _, _, err := f.svc.LoadContext(ctx, corrupt); err == nil {
-		t.Fatal("恢复必须核对冻结的 Digest")
+		t.Fatal("recovery must verify the frozen digest")
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// SecureIDGenerator creates unpredictable opaque identifiers.
+// SecureIDGenerator 生成不可预测的标识符。
 type SecureIDGenerator struct{}
 
 func (SecureIDGenerator) New(prefix string) string {
@@ -17,7 +17,7 @@ func (SecureIDGenerator) New(prefix string) string {
 	return prefix + "_" + hex.EncodeToString(bytes[:])
 }
 
-// IDsOrDefault returns the production secure generator when none is injected.
+// IDsOrDefault 在未注入生成器时返回生产环境使用的安全生成器。
 func IDsOrDefault(ids IDGenerator) IDGenerator {
 	if ids == nil {
 		return SecureIDGenerator{}

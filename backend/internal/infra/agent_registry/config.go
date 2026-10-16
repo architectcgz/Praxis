@@ -19,7 +19,7 @@ import (
 	"sync"
 )
 
-// ModelReference identifies one configured Provider and Model pair.
+// ModelReference 标识已配置的 Provider 与 Model 组合。
 type ModelReference struct {
 	ProviderID string `json:"providerId"`
 	ModelID    string `json:"modelId"`
@@ -31,7 +31,7 @@ type AgentConfig struct {
 	Model   *ModelReference        `json:"model,omitempty"`
 }
 
-// ModelValidator checks a model reference against the current model registry.
+// ModelValidator 根据当前模型注册表校验模型引用。
 type ModelValidator func(providerID, modelID string) error
 
 // ConfigurationError 标识加载失败的 Agent 定义文件或目录。
@@ -125,7 +125,7 @@ func (r *Registry) DefinitionsForModel(providerID, modelID string) []string {
 	return agents
 }
 
-// ValidateModelReferences checks every configured Agent model reference.
+// ValidateModelReferences 校验所有已配置的 Agent 模型引用。
 func (r *Registry) ValidateModelReferences(validateModel ModelValidator) error {
 	if r == nil {
 		return errors.New("agent registry is not initialized")

@@ -97,7 +97,7 @@ type ValidationError struct {
 // Error 返回配置校验说明；没有具体原因时返回通用提示。
 func (e *ValidationError) Error() string {
 	if e == nil || e.Err == nil {
-		return "模型配置无效"
+		return "invalid model configuration"
 	}
 	return e.Err.Error()
 }

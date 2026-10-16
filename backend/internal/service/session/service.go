@@ -47,7 +47,7 @@ type Config struct {
 	IDs               system.IDGenerator
 }
 
-// Service owns Session initialization and primary Agent lookup.
+// Service 负责 Session 初始化和主 Agent 查询。
 type Service struct {
 	tx                repository.TxRunner
 	hookDispatcher    *hooks.Dispatcher
@@ -70,7 +70,7 @@ type Service struct {
 	closing           bool
 }
 
-// CreateParams contains the durable identity and initial state for a Session.
+// CreateParams 包含 Session 的持久化身份和初始状态。
 type CreateParams struct {
 	RequestID    contracts.RequestID
 	SessionID    contracts.SessionID
@@ -85,7 +85,7 @@ type CreateResult struct {
 	Agent   agentmodel.Agent
 }
 
-// NewService creates the Session application service.
+// NewService 创建 Session 应用服务。
 func NewService(config Config) (*Service, error) {
 	if config.UsageRecords == nil {
 		return nil, errors.New("session service usage reader is required")
@@ -274,7 +274,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (resul
 	return result, err
 }
 
-// CreateSessionForProject initializes a primary Session for one Project.
+// CreateSessionForProject 为 Project 初始化主 Session。
 func (s *Service) CreateSessionForProject(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID, requestID contracts.RequestID, projectID contracts.ProjectID, workspaceID contracts.WorkspaceID, definitionID contracts.AgentDefinitionID) (CreateResult, error) {
 	return s.CreateSession(ctx, CreateParams{
 		RequestID: requestID, SessionID: sessionID, AgentID: agentID,
@@ -283,7 +283,7 @@ func (s *Service) CreateSessionForProject(ctx context.Context, sessionID contrac
 	})
 }
 
-// creates the missing primary Agent for an already-initialized Session.
+// GetOrCreatePrimaryAgent 为已初始化的 Session 创建缺失的主 Agent。
 func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contracts.SessionID, requestID contracts.RequestID) (agentmodel.Agent, error) {
 	if ctx == nil {
 		return agentmodel.Agent{}, errors.New("ensure primary agent context is required")
@@ -330,7 +330,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 	return created, nil
 }
 
-// AppendContextParams describes one compare-and-append SessionContext write.
+// AppendContextParams 描述一次比较后追加的 SessionContext 写入。
 type AppendContextParams struct {
 	EntryID      contracts.ContextEntryID
 	SessionID    contracts.SessionID

@@ -130,16 +130,15 @@ func (e *ValidationError) Error() string {
 
 func (e *ValidationError) Unwrap() error { return ErrInvalidValue }
 
-// EmptyID reports whether an identifier is blank after trimming whitespace.
+// EmptyID 判断标识符去除首尾空白后是否为空。
 func EmptyID(value string) bool { return strings.TrimSpace(value) == "" }
 
-// InvalidValue builds a validation error for one domain field.
+// InvalidValue 为领域字段构造校验错误。
 func InvalidValue(field, message string) error {
 	return &ValidationError{Field: field, Message: message}
 }
 
-// FieldError prefixes an existing validation error with the outer field that
-// contains it, so nested validation reports the full path.
+// FieldError 为已有校验错误添加外层字段前缀，使嵌套校验报告完整路径。
 func FieldError(field string, err error) error {
 	if err == nil {
 		return nil
@@ -159,7 +158,7 @@ func (e *TransitionError) Error() string {
 
 func (e *TransitionError) Unwrap() error { return ErrInvalidTransition }
 
-// InvalidTransition builds a transition error for one domain state machine.
+// InvalidTransition 为领域状态机构造状态转换错误。
 func InvalidTransition(entity, from, to string) error {
 	return &TransitionError{Entity: entity, From: from, To: to}
 }

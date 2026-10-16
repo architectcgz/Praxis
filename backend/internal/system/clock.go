@@ -2,7 +2,7 @@ package system
 
 import "time"
 
-// ClockOrDefault returns the production UTC clock when no clock is injected.
+// ClockOrDefault 在未注入时钟时返回生产环境使用的 UTC 时钟。
 func ClockOrDefault(clock Clock) Clock {
 	if clock == nil {
 		return UTCClock{}
@@ -10,8 +10,7 @@ func ClockOrDefault(clock Clock) Clock {
 	return clock
 }
 
-// UTCClock is the production clock used by storage adapters that stamp
-// append-only records outside an orchestration transaction.
+// UTCClock 是生产环境时钟，供存储适配器在编排事务外为追加记录标记时间。
 type UTCClock struct{}
 
 func (UTCClock) Now() time.Time { return time.Now().UTC() }

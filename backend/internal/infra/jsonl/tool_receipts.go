@@ -59,7 +59,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 					return contracts.ErrRequestConflict
 				}
 				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
-					return errors.New("工具调用声明必须与新调用身份一起提交")
+					return errors.New("tool call declaration must be committed with a new invocation identity")
 				}
 				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, toolCall(block).Arguments) {
 					return contracts.ErrRequestConflict
@@ -80,10 +80,10 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 			case sessionmodel.BlockToolResult:
 				fact, exists := pending(key)
 				if !exists || fact.TurnID != invocation.TurnID || fact.Name != block.Name {
-					return errors.New("工具回执缺少先前提交的调用声明")
+					return errors.New("tool receipt has no previously committed call declaration")
 				}
 				if !invocation.Status.Terminal() {
-					return errors.New("工具回执必须对应已结算调用")
+					return errors.New("tool receipt must correspond to a settled invocation")
 				}
 				tx.receiptChanges[key] = nil
 			}
@@ -116,7 +116,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 			}
 		}
 		if !declared {
-			return errors.New("新工具调用身份缺少同事务提交的 Assistant 声明")
+			return errors.New("new tool invocation identity has no assistant declaration in the same transaction")
 		}
 	}
 	return nil

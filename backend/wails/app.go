@@ -121,7 +121,7 @@ func (a *App) FailStartup(err error) {
 		return
 	default:
 	}
-	a.startupErr = fmt.Errorf("Praxis 启动失败：%w", err)
+	a.startupErr = fmt.Errorf("Praxis startup failed: %w", err)
 	a.completeStartupLocked()
 	a.mu.Unlock()
 	a.logError("desktop startup failed: %v", err)
@@ -169,7 +169,7 @@ func (a *App) BindingContext() (context.Context, bindings.Services, error) {
 			return nil, bindings.Services{}, apperr.PublicError(ctx.Err())
 		case <-timer.C:
 			a.logError("binding startup wait timed out after 30s")
-			return nil, bindings.Services{}, apperr.PublicError(fmt.Errorf("等待 Praxis 启动超时：%w", context.DeadlineExceeded))
+			return nil, bindings.Services{}, apperr.PublicError(fmt.Errorf("timed out waiting for Praxis startup: %w", context.DeadlineExceeded))
 		}
 	}
 	a.mu.RLock()

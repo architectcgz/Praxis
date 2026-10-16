@@ -176,7 +176,7 @@ func waitRestore(t *testing.T, r *Coordinator) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("执行未退出")
+		t.Fatal("execution did not exit")
 	}
 }
 
@@ -189,7 +189,7 @@ func TestRestoreAndRepeatedActivationRunOnce(t *testing.T) {
 	select {
 	case <-ops.started:
 	case <-time.After(time.Second):
-		t.Fatal("恢复未启动")
+		t.Fatal("recovery did not start")
 	}
 	var wg sync.WaitGroup
 	for range 8 {
@@ -216,7 +216,7 @@ func TestRestoreDispatchesPendingQueue(t *testing.T) {
 	}
 	waitRestore(t, r)
 	if !ops.prepared || ops.starts != 1 || ops.settles != 1 {
-		t.Fatal("Pending 恢复未派发")
+		t.Fatal("pending recovery was not dispatched")
 	}
 }
 
@@ -230,13 +230,13 @@ func TestSettlementRetryDoesNotReenterLoop(t *testing.T) {
 	}
 	waitRestore(t, r)
 	if !ops.active.occupied(ops.task.AgentID) {
-		t.Fatal("结算失败必须保留占用")
+		t.Fatal("settlement failure must retain the reservation")
 	}
 	if err := r.Activate(ctx, ops.task); err != nil {
 		t.Fatal(err)
 	}
 	waitRestore(t, r)
 	if ops.starts != 1 || ops.loads != 1 || ops.settles != 2 || ops.active.occupied(ops.task.AgentID) {
-		t.Fatal("结算重试重新执行了 Loop 或未释放占用")
+		t.Fatal("settlement retry reran the loop or failed to release the reservation")
 	}
 }

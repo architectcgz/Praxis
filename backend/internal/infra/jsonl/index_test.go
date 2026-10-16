@@ -45,7 +45,7 @@ func TestPendingIndexSeesFinalTransactionState(t *testing.T) {
 			return err
 		}
 		if second.ID != "two" {
-			t.Fatal("事务仍将已领取 Task 当成 Pending")
+			t.Fatal("transaction still treats a claimed task as pending")
 		}
 		agent := f.agent
 		if err := agent.Start(first.ID, time.Now()); err != nil {
@@ -80,7 +80,7 @@ func TestSessionDeletionClearsIndexesAndCannotResurrect(t *testing.T) {
 	requireOK(t, err)
 	requireOK(t, f.store.InTx(ctx, func(txCtx context.Context) error { _, err := f.repos.Sessions.Delete(txCtx, "session"); return err }))
 	if len(f.store.index.groups[scopeKey("session")]) != 0 || f.store.index.hasMessages["session"] || len(f.store.messages.sessions) != 0 {
-		t.Fatal("删除后遗留所属索引")
+		t.Fatal("ownership index remains after deletion")
 	}
 	for range 2 {
 		if _, err := f.repos.Sessions.Get(ctx, "session"); !errors.Is(err, contracts.ErrNotFound) {
@@ -90,7 +90,7 @@ func TestSessionDeletionClearsIndexesAndCannotResurrect(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := f.repos.Messages.Append(ctx, f.agent, userMessage("late")); err == nil {
-			t.Fatal("删除后的消息写入必须拒绝")
+			t.Fatal("message writes after deletion must be rejected")
 		}
 		f.restart(t)
 	}
