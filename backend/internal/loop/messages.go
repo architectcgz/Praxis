@@ -7,18 +7,19 @@ import (
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
+	"praxis/internal/repository"
 )
 
 func appendToolResult(
 	ctx context.Context,
-	messageRecorder MessageRecorder,
+	messageWriter repository.MessageWriter,
 	requestID contracts.RequestID,
 	taskID contracts.TaskID,
 	turnID contracts.TurnID,
 	callIndex int,
 	block appcontext.ContextBlock,
 ) error {
-	return appendTaskMessage(ctx, messageRecorder, sessionmodel.MessageData{
+	return appendTaskMessage(ctx, messageWriter, sessionmodel.MessageData{
 		ID:         "tool-result:" + taskID.String() + ":" + block.CallID,
 		RequestID:  requestID.String(),
 		TaskID:     taskID.String(),
@@ -32,13 +33,12 @@ func appendToolResult(
 // appendTaskMessage 只接收已构造的消息归属与内容，不读取任务快照。
 func appendTaskMessage(
 	ctx context.Context,
-	messageRecorder MessageRecorder,
+	messageWriter repository.MessageWriter,
 	value sessionmodel.MessageData,
 	blocks []appcontext.ContextBlock,
 ) error {
 	value = taskMessage(value, blocks)
-	_, err := messageRecorder.Append(context.WithoutCancel(ctx), value)
-	return err
+	return messageWriter.AppendToolResult(context.WithoutCancel(ctx), value)
 }
 
 func taskMessage(value sessionmodel.MessageData, blocks []appcontext.ContextBlock) sessionmodel.MessageData {
@@ -55,11 +55,4 @@ func taskMessage(value sessionmodel.MessageData, blocks []appcontext.ContextBloc
 		}
 	}
 	return value
-}
-
-// MessageRecorder 只写当前 Agent 执行产生的持久化消息（会话历史不回读）。
-type MessageRecorder interface {
-	Append(context.Context, sessionmodel.MessageData) (sessionmodel.MessageData, error)
-	// 返回包含持久化序号和时间的消息；重复写入和失败时 inserted 为 false。
-	AppendAssistant(context.Context, sessionmodel.MessageData, contracts.ToolInvocationContext) (stored sessionmodel.MessageData, inserted bool, err error)
 }

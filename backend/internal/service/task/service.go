@@ -36,23 +36,24 @@ type ExecutionSlots interface {
 }
 
 type Config struct {
-	Controls       repository.AgentControlCommandRepository
-	Transactions   repository.TxRunner
-	HookDispatcher *hooks.Dispatcher
-	Logger         *logging.Logger
-	EventObserver  func(TerminalEvent)
-	Workspaces     repository.WorkspaceRepository
-	Sessions       repository.SessionRepository
-	Agents         repository.SessionAgentRepository
-	Tasks          repository.TaskRepository
-	Executions     ExecutionSlots
-	Messages       repository.MessageStreams
-	PrimaryAgent   PrimaryAgentProvider
-	Definitions    AgentDefinitionProvider
-	Models         ModelConfigResolver
-	Contexts       repository.SessionContextRepository
-	Clock          system.Clock
-	IDs            system.IDGenerator
+	Controls        repository.AgentControlCommandRepository
+	Transactions    repository.TxRunner
+	HookDispatcher  *hooks.Dispatcher
+	Logger          *logging.Logger
+	EventObserver   func(TerminalEvent)
+	Workspaces      repository.WorkspaceRepository
+	Sessions        repository.SessionRepository
+	Agents          repository.SessionAgentRepository
+	Tasks           repository.TaskRepository
+	ToolInvocations repository.ToolInvocationRepository
+	Executions      ExecutionSlots
+	Messages        repository.MessageStreams
+	PrimaryAgent    PrimaryAgentProvider
+	Definitions     AgentDefinitionProvider
+	Models          ModelConfigResolver
+	Contexts        repository.SessionContextRepository
+	Clock           system.Clock
+	IDs             system.IDGenerator
 }
 
 // Service 统一负责 Task 准入、确定执行输入、恢复绑定、进度持久化及原子结算。
@@ -66,6 +67,7 @@ type Service struct {
 	sessions       repository.SessionRepository
 	agents         repository.SessionAgentRepository
 	tasks          repository.TaskRepository
+	invocations    repository.ToolInvocationRepository
 	executions     ExecutionSlots
 	messages       repository.MessageStreams
 	primary        PrimaryAgentProvider
@@ -85,16 +87,17 @@ func NewService(config Config) (*Service, error) {
 		return nil, errors.New("task service contexts are required")
 	}
 	for name, value := range map[string]any{
-		"transactions":  config.Transactions,
-		"controls":      config.Controls,
-		"workspaces":    config.Workspaces,
-		"sessions":      config.Sessions,
-		"agents":        config.Agents,
-		"tasks":         config.Tasks,
-		"messages":      config.Messages,
-		"primary agent": config.PrimaryAgent,
-		"definitions":   config.Definitions,
-		"models":        config.Models,
+		"transactions":     config.Transactions,
+		"controls":         config.Controls,
+		"workspaces":       config.Workspaces,
+		"sessions":         config.Sessions,
+		"agents":           config.Agents,
+		"tasks":            config.Tasks,
+		"tool invocations": config.ToolInvocations,
+		"messages":         config.Messages,
+		"primary agent":    config.PrimaryAgent,
+		"definitions":      config.Definitions,
+		"models":           config.Models,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("task service %s is required", name)
@@ -110,6 +113,7 @@ func NewService(config Config) (*Service, error) {
 		sessions:       config.Sessions,
 		agents:         config.Agents,
 		tasks:          config.Tasks,
+		invocations:    config.ToolInvocations,
 		executions:     config.Executions,
 		messages:       config.Messages,
 		primary:        config.PrimaryAgent,

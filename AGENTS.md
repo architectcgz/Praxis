@@ -35,7 +35,7 @@ agent := AgentInfo{Profile: string(view.Agent.Profile), State: string(view.Agent
 
 - 请求链固定为 `backend/wails → internal/request → internal/service`；Wails 只做 wire 形状校验、DTO 转换和错误映射，不解释 core 枚举、不构造 core 配置。
 - `internal/service` 负责用例编排、事务边界和 Port 协调，可以依赖 `core`、`repository`、`contracts`、`request` 和窄 Port；不得直接 import `internal/execution`，也不得直接操作 `os` 文件系统。
-- Agent 可见消息流的读写由 `repository.MessageStreams` 一个窄 Port 定义（`Append`/`List`/`LoadMessages`），唯一实现是 `infra/jsonl`：主 Agent 写 Session 流、其他 Agent 写私有流，日志键位由存储层决定。service 只持有该 Port，不自己判断写哪条流。
+- Agent 可见消息流的读写由 `repository.MessageStreams` 一个窄 Port 定义（`Append`/`List`/`LoadMessages`/`Writer`/`ListMissingToolResults`），唯一实现是 `infra/jsonl`：主 Agent 写 Session 流、其他 Agent 写私有流，日志键位由存储层决定。service 只持有该 Port，不自己判断写哪条流。
 - 会话级消息存在性判断属于聚合仓储能力：用 `repository.SessionRepository.HasMessages`，不要在 service 里注入按流划分的消息仓储。
 - 跨边界同形的执行参数使用 `internal/contracts` 的共享值类型，不为逐字段复制新增 adapter；只存在协议差异（事件、DTO、错误）时才在 `compose` 或 `wails` 转换。
 - 消费方拥有窄接口：`internal/loop` 声明自身需要的执行接口，`internal/service/runtime` 声明 `TaskActivator`/`TaskStarter`，Task 准入和 Agent 控制分别声明 `ExecutionSlots`/`ExecutionControl`；接口不放在无关的中间包。
@@ -71,3 +71,11 @@ if value == "" {
 - 用户输入由 TaskService / QueueService 发布，最终 Assistant 由 Loop 发布，Task 终态由 Settle 发布；幂等重试与回滚不通知，Hook 返回错误只记录日志，不改变业务结果。OperationHook 的执行生命周期保持独立。
 - 提交后 Hook 在存储锁外使用非事务 Context，属于 best-effort 通知，不保证跨重启必达或并发提交的全局顺序；不得扩大现有通知范围。
 - 依赖门禁：`./internal/infra/jsonl/...` 禁 `internal/hooks`。
+
+## JSONL 存储与业务恢复
+
+- Store 只保存日志资源、序号和可重建的轻量查询索引；领域正文通过文件位置按需读取，不建立全局对象缓存。事务只暂存本次变更，最终关联约束在持久化前增量验证。
+- 消息位置索引按 Session 懒加载，以总条目数限制缓存；`LoadMessages` 和 `List` 保持只读，消息集合和序号边界必须来自同一次一致性读取。
+- `repository.MessageWriter` 定义 Assistant / ToolResult 的原子写入；Execution 直接注入 `repository.MessageStreams`，Loop 使用统一 Writer。工具回执和输出字节累计必须在同一事务中幂等提交。
+- 工具恢复决策属于 TaskService；启动时先协调上次进程的 running 调用，再恢复 Coordinator。普通业务恢复保留当前活跃调用和人工审批等待，未知副作用禁止自动重试。
+- JSONL 只接受带 v2 标识的新格式，不提供迁移或兼容读取。执行 `go vet ./...` 后运行 `backend/scripts/check-dependencies.sh` 验证分层。

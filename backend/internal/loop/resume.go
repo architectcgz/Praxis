@@ -8,12 +8,13 @@ import (
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/repository"
 )
 
 var errAwaitingApproval = errors.New("task is awaiting tool approval")
 
 // resumeToolCalls 先结算已经提交的工具轮，再发起新的模型请求。
-func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messages []sessionmodel.MessageData, recorder MessageRecorder, modelContext *appcontext.ModelContext, budget *taskBudget) error {
+func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messages []sessionmodel.MessageData, recorder repository.MessageWriter, modelContext *appcontext.ModelContext, budget *taskBudget) error {
 	receipts := make(map[string]bool)
 	for _, message := range messages {
 		for _, block := range message.Blocks {
@@ -27,8 +28,11 @@ func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messa
 			continue
 		}
 		metadata := contracts.ToolInvocationContext{
-			TaskID: task.ID, TurnID: contracts.TurnID(message.TurnID), SessionID: task.SessionID,
-			AgentID: task.AgentID, WorkspacePath: task.Config.WorkspacePath,
+			TaskID:        task.ID,
+			TurnID:        contracts.TurnID(message.TurnID),
+			SessionID:     task.SessionID,
+			AgentID:       task.AgentID,
+			WorkspacePath: task.Config.WorkspacePath,
 		}
 		for _, block := range message.Blocks {
 			if block.Kind != sessionmodel.BlockToolCall || receipts[block.CallID] {

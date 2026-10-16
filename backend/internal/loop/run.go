@@ -8,6 +8,7 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
+	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
@@ -60,19 +61,19 @@ func NewRunner(config Config) (Runner, error) {
 	return Runner{Config: config}, nil
 }
 
-// Run 使用本次执行输入与消息记录器运行 provider/tool loop，返回结果及失败分类。
-// 业务上层提供已选通用内容与续接消息，消息记录器负责可靠提交输出；
+// Run 使用本次执行输入与消息写入器运行 provider/tool loop，返回结果及失败分类。
+// 业务上层提供已选通用内容与续接消息，消息写入器负责可靠提交输出；
 // TaskProgress 负责加载持久化预算、记录模型及摘要请求和模型输出消耗；
-// 每次执行的输入（context、消息记录器）为空时返回错误；
+// 每次执行的输入（context、消息写入器）为空时返回错误；
 // 持久化生命周期、取消和后续任务调度由执行协调器负责。
-func (r *Runner) Run(ctx context.Context, task taskmodel.Task, content appcontext.Content, continuation []sessionmodel.MessageData, messageRecorder MessageRecorder) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+func (r *Runner) Run(ctx context.Context, task taskmodel.Task, content appcontext.Content, continuation []sessionmodel.MessageData, messageWriter repository.MessageWriter) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
 	if ctx == nil {
 		return failedTask(errors.New("loop context is required"))
 	}
-	if messageRecorder == nil {
+	if messageWriter == nil {
 		return failedTask(errors.New("loop message recorder is required"))
 	}
-	return r.run(ctx, task, content, continuation, messageRecorder)
+	return r.run(ctx, task, content, continuation, messageWriter)
 }
 
 // run 是 task 的迭代 loop。每轮只发起一次模型请求；确认自然完成时结束，
@@ -82,7 +83,7 @@ func (r *Runner) run(
 	task taskmodel.Task,
 	content appcontext.Content,
 	continuation []sessionmodel.MessageData,
-	messageRecorder MessageRecorder,
+	messageWriter repository.MessageWriter,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
 	task, err := r.Progress.LoadTask(ctx, task.ID)
 	if err != nil {
@@ -101,7 +102,7 @@ func (r *Runner) run(
 	if task.Progress.FinalStopReason != "" {
 		return taskmodel.TaskCompleted, "", nil
 	}
-	if err := r.resumeToolCalls(ctx, task, continuation, messageRecorder, &modelContext, budget); err != nil {
+	if err := r.resumeToolCalls(ctx, task, continuation, messageWriter, &modelContext, budget); err != nil {
 		if errors.Is(err, errAwaitingApproval) {
 			return taskmodel.TaskAwaitingApproval, "", nil
 		}
@@ -151,7 +152,7 @@ func (r *Runner) run(
 		sequence++
 		turnID := contracts.NewTurnID(task.ID, turnSequence)
 		request.TurnID = turnID
-		outcome, failureCode, finished, err := r.executeTurn(ctx, task, taskModel, messageRecorder, request, &modelContext, budget, turnID)
+		outcome, failureCode, finished, err := r.executeTurn(ctx, task, taskModel, messageWriter, request, &modelContext, budget, turnID)
 
 		if err != nil || outcome != taskmodel.TaskCompleted || finished {
 			return outcome, failureCode, err
@@ -164,7 +165,7 @@ func (r *Runner) executeTurn(
 	ctx context.Context,
 	task taskmodel.Task,
 	taskModel model.Model,
-	messageRecorder MessageRecorder,
+	messageWriter repository.MessageWriter,
 	request model.ModelRequest,
 	modelContext *appcontext.ModelContext,
 	budget *taskBudget,
@@ -230,7 +231,7 @@ func (r *Runner) executeTurn(
 			AuthorKind: sessionmodel.AuthorAgent,
 			AuthorID:   task.AgentID.String(),
 		}, assistant)
-		message, inserted, err := messageRecorder.AppendAssistant(ctx, message, metadata)
+		message, inserted, err := messageWriter.AppendAssistant(ctx, message, metadata)
 		if err != nil {
 			r.emitError(task.AgentID, task.ID, turnID, err)
 			outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
@@ -279,7 +280,7 @@ func (r *Runner) executeTurn(
 		})
 		return taskmodel.TaskCompleted, "", true, nil
 	}
-	results, err := r.runToolCalls(ctx, messageRecorder, calls, metadata, task.RequestID, budget)
+	results, err := r.runToolCalls(ctx, messageWriter, calls, metadata, task.RequestID, budget)
 	if err != nil {
 		if errors.Is(err, errAwaitingApproval) {
 			return taskmodel.TaskAwaitingApproval, "", false, nil

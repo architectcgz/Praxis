@@ -69,6 +69,7 @@ func (*hookSlots) Reserve(ctx context.Context, _ contracts.AgentID, _ contracts.
 func (s *hookSlots) Release(contracts.AgentID, contracts.TaskID) { s.released = true }
 
 type hookFixture struct {
+	root  string
 	store *jsonl.Store
 	repos jsonl.Repositories
 	svc   *Service
@@ -120,6 +121,7 @@ func newHookFixture(t *testing.T) *hookFixture {
 	}
 	slots := &hookSlots{}
 	return &hookFixture{
+		root:  filepath.Join(root, "runtime"),
 		store: store,
 		repos: repos,
 		slots: slots,
@@ -130,6 +132,7 @@ func newHookFixture(t *testing.T) *hookFixture {
 			sessions:    repos.Sessions,
 			agents:      repos.Agents,
 			tasks:       repos.Tasks,
+			invocations: repos.ToolInvocations,
 			messages:    repos.Messages,
 			contexts:    repos.Contexts,
 			executions:  slots,
@@ -359,7 +362,7 @@ func TestAssistantWriterReportsOnlyCommittedInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer, err := f.repos.Messages.Resolve(ctx, "session", "agent")
+	writer, err := f.repos.Messages.Writer(ctx, "session", "agent")
 	if err != nil {
 		t.Fatal(err)
 	}

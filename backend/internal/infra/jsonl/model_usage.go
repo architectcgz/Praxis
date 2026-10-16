@@ -40,7 +40,5 @@ func (r ModelUsageStore) ListSession(ctx context.Context, sessionID string) ([]m
 	if _, err := (SessionRepository{r.Store}).Get(ctx, contracts.SessionID(sessionID)); err != nil {
 		return nil, err
 	}
-	return list[model.ModelUsageRecord](ctx, r.Store, "usage", func(value model.ModelUsageRecord) bool {
-		return value.SessionID == sessionID
-	})
+	return listIndexed[model.ModelUsageRecord](ctx, r.Store, lookupKey{kind: "usage-session", owner: sessionID}, nil)
 }

@@ -84,17 +84,16 @@ func Open(
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
 	}
-	diagnostics, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
-	if err != nil {
-		return nil, fmt.Errorf("open runtime log: %w", err)
-	}
 	store, err := jsonl.Open(ctx, root.Runtime)
 	if err != nil {
-		diagnostics.Errorf("open JSONL failed: %v", err)
-		_ = diagnostics.Close()
-		return nil, err
+		return nil, fmt.Errorf("open JSONL: %w", err)
 	}
 	closeStore := func() { _ = store.Close(context.Background()) }
+	diagnostics, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
+	if err != nil {
+		closeStore()
+		return nil, fmt.Errorf("open runtime log: %w", err)
+	}
 	diagnostics.Infof("composition open started root=%s logs=%s", root.Root, root.Runtime)
 	modelRegistry, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil, newModelStream)
 	if err != nil {
@@ -241,16 +240,17 @@ func Open(
 		EventObserver: func(event applicationtask.TerminalEvent) {
 			events.Publish(terminalAgentEvent(event))
 		},
-		Workspaces:   repos.Workspaces,
-		Sessions:     repos.Sessions,
-		Agents:       repos.Agents,
-		Tasks:        repos.Tasks,
-		Executions:   activeTasks,
-		Messages:     repos.Messages,
-		PrimaryAgent: sessionService,
-		Definitions:  taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		Models:       taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		Contexts:     repos.Contexts,
+		Workspaces:      repos.Workspaces,
+		Sessions:        repos.Sessions,
+		Agents:          repos.Agents,
+		ToolInvocations: repos.ToolInvocations,
+		Tasks:           repos.Tasks,
+		Executions:      activeTasks,
+		Messages:        repos.Messages,
+		PrimaryAgent:    sessionService,
+		Definitions:     taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		Models:          taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		Contexts:        repos.Contexts,
 	})
 	if err != nil {
 		diagnostics.Errorf("create task service failed: %v", err)
@@ -322,9 +322,7 @@ func Open(
 		Queue:          queueService,
 		HookDispatcher: hookDispatcher,
 		Logger:         diagnostics,
-		MessageRecorders: func(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (loop.MessageRecorder, error) {
-			return messages.Resolve(ctx, sessionID, agentID)
-		},
+		Messages:       messages,
 	})
 	if err != nil {
 		_ = diagnostics.Close()
@@ -347,6 +345,12 @@ func Open(
 		_ = diagnostics.Close()
 		closeStore()
 		return nil, err
+	}
+	if err := taskService.ReconcileToolResults(ctx); err != nil {
+		_ = coordinator.Close(context.Background())
+		_ = diagnostics.Close()
+		closeStore()
+		return nil, fmt.Errorf("reconcile tool results: %w", err)
 	}
 	if err := coordinator.Restore(ctx, recoverySource{
 		TaskRepository: repos.Tasks,

@@ -6,7 +6,6 @@ import (
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
-	"praxis/internal/loop"
 )
 
 // TaskOperations 保留 Task 准备、恢复和结算的事务边界。
@@ -22,9 +21,6 @@ type TaskOperations interface {
 type TaskQueue interface {
 	Next(context.Context, contracts.AgentID) (taskmodel.Task, bool, error)
 }
-
-// MessageRecorderResolver 为一次执行解析其所属的消息流。
-type MessageRecorderResolver func(context.Context, contracts.SessionID, contracts.AgentID) (loop.MessageRecorder, error)
 
 // taskResult 暂存待提交的结算结果，提交失败后只重试结算，不重复执行 Loop。
 type taskResult struct {

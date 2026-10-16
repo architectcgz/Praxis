@@ -13,6 +13,7 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
+	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -73,7 +74,7 @@ func (committedTools) Execute(context.Context, contracts.ToolCall, contracts.Too
 }
 
 type committedWriter struct {
-	MessageRecorder
+	repository.MessageWriter
 	inserted bool
 	err      error
 	writes   int
@@ -98,11 +99,34 @@ func TestAssistantCommittedHook(t *testing.T) {
 		outcome  taskmodel.TaskOutcome
 		failure  contracts.TaskFailureCode
 	}{
-		{name: "completed", stop: model.StopCompleted, inserted: true, notifies: 1, outcome: taskmodel.TaskCompleted},
-		{name: "stop_sequence", stop: model.StopSequence, inserted: true, notifies: 1, outcome: taskmodel.TaskCompleted},
+		{
+			name:     "completed",
+			stop:     model.StopCompleted,
+			inserted: true,
+			notifies: 1,
+			outcome:  taskmodel.TaskCompleted,
+		},
+		{
+			name:     "stop_sequence",
+			stop:     model.StopSequence,
+			inserted: true,
+			notifies: 1,
+			outcome:  taskmodel.TaskCompleted,
+		},
 		{name: "duplicate", stop: model.StopCompleted, outcome: taskmodel.TaskCompleted},
-		{name: "storage_failure", stop: model.StopCompleted, writeErr: errors.New("write failed"), outcome: taskmodel.TaskFailed, failure: contracts.TaskFailureStorage},
-		{name: "intermediate", stop: model.StopToolCalls, inserted: true, outcome: taskmodel.TaskAwaitingApproval},
+		{
+			name:     "storage_failure",
+			stop:     model.StopCompleted,
+			writeErr: errors.New("write failed"),
+			outcome:  taskmodel.TaskFailed,
+			failure:  contracts.TaskFailureStorage,
+		},
+		{
+			name:     "intermediate",
+			stop:     model.StopToolCalls,
+			inserted: true,
+			outcome:  taskmodel.TaskAwaitingApproval,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			type traceKey struct{}

@@ -21,7 +21,7 @@
 - `compose` 只装配组件与管理应用资源；`service` 处理 Wails 用例和持久化事务；`execution.Coordinator` 是进程级执行协调器，直接调用共享的 `loop.Runner`。
 - 活动执行只保存在一份 `execution.ActiveTasks` 中。Task 准入事务通过窄接口预留身份，回滚只释放本次新建的预留；同一 Agent 在结算提交前不能预留另一项 Task。
 - `loop` 负责模型、工具和 ReAct 迭代，不 import `execution` 或 `service`，不负责最终 Task 结算或队列派发。`execution` 不 import `service`，通过消费者定义的接口调用 Task 持久化用例。
-- `loop.MessageRecorder` 和 `loop.Event` 属于 Loop；Task 终态由 `task.TerminalEvent` 表达，Timing 事件由组合根转换。前端事件 kind 和字段保持稳定。
+- `repository.MessageWriter` 统一定义执行消息持久化，`loop.Event` 属于 Loop；Task 终态由 `task.TerminalEvent` 表达，Timing 事件由组合根转换。前端事件 kind 和字段保持稳定。
 - 审批事务提交后调用 `ResumeApproved`；缓冲唤醒信号不得丢失，重复激活不得创建第二个 Loop。
 - Pause / Stop 必须先提交控制意图，再传递取消；最终 Outcome 由 `Settle` 事务仲裁。结算失败保留占用及待提交结果，再次激活只重试结算；只有成功提交的 completed / yielded 才自动领取队列。
 - Coordinator 的全局锁仅保护关闭和工作启动，不在锁下执行存储事务、Hook 或模型调用。关闭必须等待准备、恢复、Loop 和结算退出；等待超时不得关闭 JSONL Store 或日志，后续 Close 可以继续等待。
@@ -36,3 +36,11 @@
 - 用户输入由 TaskService / QueueService 发布，最终 Assistant 由 Loop 发布，Task 终态由 Settle 发布；幂等重试与回滚不通知，Hook 返回错误只记录日志，不改变业务结果。OperationHook 的执行生命周期保持独立。
 - 提交后 Hook 在存储锁外使用非事务 Context，属于 best-effort 通知，不保证跨重启必达或并发提交的全局顺序；不得扩大现有通知范围。
 - 依赖门禁：`./internal/infra/jsonl/...` 禁 `internal/hooks`。
+
+## JSONL 存储与恢复
+
+- `infra/jsonl` 只保存日志位置、查询元数据和缺失回执事实，不长期保存完整领域正文；消息索引按 Session 懒加载且缓存总条目数有界。事务使用变更集，不复制全局索引，不执行全图校验。
+- `MessageStreams.List` / `LoadMessages` 保持只读，消息边界是同次读取的最后一条可见消息序号。`repository.MessageWriter` 的 Assistant、调用身份和最终输出证据必须原子保存，ToolResult 与输出字节累计幂等提交。
+- TaskService 显式协调工具恢复；启动恢复先将遗留 running 调用收敛为 unknown，再启动 Coordinator。当前运行中的调用与审批等待不得被普通历史读取或正常业务恢复错误结束。
+- `storage.json` 的 v2 标识是唯一格式入口，拒绝未知格式和未标识的非空数据目录；不提供迁移、猜测解析或静默清理。
+- `go vet ./...` 后执行 `scripts/check-dependencies.sh`；并发修改仍执行 `go test -race ./...`。

@@ -3,140 +3,156 @@ package jsonl
 import (
 	"cmp"
 	"context"
-	"fmt"
-	"slices"
-	"time"
+	"errors"
 
 	"praxis/internal/contracts"
-	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	toolmodel "praxis/internal/core/tool_invocation"
-	toolcontracts "praxis/internal/tools/contracts"
+	"praxis/internal/repository"
 )
 
 type receiptKey struct{ scope, owner, task, call string }
-type pendingReceipt struct {
-	requestID string
-	name      string
-	sequence  uint64
-	index     int
-}
 
-// indexToolReceipts 随事务及日志重放更新缺口索引，普通读取无需扫描完整对话。
-func indexToolReceipts(pending map[receiptKey]pendingReceipt, receipts map[receiptKey]bool, scope string, record messageRecord) {
-	callIndex := 0
-	for _, block := range record.Data.Blocks {
-		key := receiptKey{
-			scope,
-			record.OwnerID,
-			record.Data.TaskID,
-			block.CallID,
-		}
-		switch block.Kind {
-		case sessionmodel.BlockToolCall:
-			if !receipts[key] {
-				pending[key] = pendingReceipt{
-					requestID: record.Data.RequestID,
-					name:      block.Name,
-					sequence:  record.Data.Sequence,
-					index:     callIndex,
-				}
+// prepareReceiptChanges 只校验调用声明和回执配对，不决定业务恢复或工具重试。
+func (s *Store) prepareReceiptChanges(ctx context.Context) error {
+	tx := s.tx(ctx)
+	tx.receiptChanges = make(map[receiptKey]*repository.MissingToolResult)
+	pending := func(key receiptKey) (repository.MissingToolResult, bool) {
+		if value, changed := tx.receiptChanges[key]; changed {
+			if value == nil {
+				return repository.MissingToolResult{}, false
 			}
-			callIndex++
-		case sessionmodel.BlockToolResult:
-			receipts[key] = true
-			delete(pending, key)
+			return *value, true
 		}
+		value, ok := s.index.missing[key]
+		return value, ok
 	}
-}
-
-// ensureToolReceipts 仅追加确认停止的调用事实；活跃调用和人工审批保持可恢复。
-func (r MessageStreams) ensureToolReceipts(ctx context.Context, owner agentmodel.Agent) error {
-	tx := r.s.tx(ctx)
-	keys := make([]receiptKey, 0)
-	for key := range tx.pending {
-		if key.scope == owner.SessionID.String() && key.owner == appendOwner(owner) {
-			keys = append(keys, key)
-		}
-	}
-	slices.SortFunc(keys, func(a, b receiptKey) int {
-		return cmp.Or(cmp.Compare(tx.pending[a].sequence, tx.pending[b].sequence), cmp.Compare(tx.pending[a].index, tx.pending[b].index))
-	})
-	for _, key := range keys {
-		missing := tx.pending[key]
-		invocation, err := (ToolRepository{r.s}).FindByTaskCall(ctx, contracts.TaskID(key.task), key.call)
-		if err != nil {
-			return fmt.Errorf("tool call %s has no valid invocation: %w", key.call, err)
-		}
-		task, err := (TaskRepository{r.s}).Get(ctx, invocation.TaskID)
-		if err != nil {
-			return err
-		}
-		at := time.Now().UTC()
-		switch invocation.Status {
-		case toolmodel.ToolInvocationAwaitingApproval:
-			if task.Active() {
-				continue
-			}
-			fallthrough
-		case toolmodel.ToolInvocationRequested, toolmodel.ToolInvocationApproved:
-			if task.Active() {
-				continue
-			}
-			result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The tool call was interrupted before execution.")
-			err = invocation.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, at)
-		case toolmodel.ToolInvocationRunning:
-			if task.Active() && !r.s.staleRunning[invocation.ID.String()] {
-				continue
-			}
-			result := toolcontracts.NewToolError(string(toolmodel.ToolFailureResultUnknown), "Execution stopped after the tool started. Its side effects are unknown; do not automatically retry.")
-			err = invocation.MarkResultUnknown(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureResultUnknown}, at)
-		}
-		if err != nil {
-			return err
-		}
-		if !invocation.Status.Terminal() {
+	for _, event := range tx.events {
+		if event.Collection != "message" {
 			continue
 		}
-		if err := (ToolRepository{r.s}).Save(ctx, invocation); err != nil {
+		var record messageRecord
+		if err := decodeJSON(event.Payload, &record); err != nil {
 			return err
 		}
-		payload := invocation.Result.InlineContent
-		if payload == "" {
-			payload = "(empty tool result)"
+		callIndex := 0
+		for _, block := range record.Data.Blocks {
+			if block.Kind != sessionmodel.BlockToolCall && block.Kind != sessionmodel.BlockToolResult {
+				continue
+			}
+			key := receiptKey{
+				tx.scope,
+				record.OwnerID,
+				record.Data.TaskID,
+				block.CallID,
+			}
+			invocation, err := getByClaim[toolmodel.ToolInvocation](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
+			if err != nil {
+				return err
+			}
+			if invocation.TurnID.String() != record.Data.TurnID || string(invocation.Name) != block.Name {
+				return contracts.ErrRequestConflict
+			}
+			switch block.Kind {
+			case sessionmodel.BlockToolCall:
+				if _, exists := pending(key); exists {
+					return contracts.ErrRequestConflict
+				}
+				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
+					return errors.New("工具调用声明必须与新调用身份一起提交")
+				}
+				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, toolCall(block).Arguments) {
+					return contracts.ErrRequestConflict
+				}
+				fact := repository.MissingToolResult{
+					SessionID: invocation.SessionID,
+					AgentID:   invocation.AgentID,
+					TaskID:    invocation.TaskID,
+					TurnID:    invocation.TurnID,
+					CallID:    block.CallID,
+					RequestID: record.Data.RequestID,
+					Name:      block.Name,
+					Sequence:  event.Sequence,
+					CallIndex: callIndex,
+				}
+				tx.receiptChanges[key] = &fact
+				callIndex++
+			case sessionmodel.BlockToolResult:
+				fact, exists := pending(key)
+				if !exists || fact.TurnID != invocation.TurnID || fact.Name != block.Name {
+					return errors.New("工具回执缺少先前提交的调用声明")
+				}
+				if !invocation.Status.Terminal() {
+					return errors.New("工具回执必须对应已结算调用")
+				}
+				tx.receiptChanges[key] = nil
+			}
 		}
-		_, err = r.Append(ctx, owner, sessionmodel.MessageData{
-			ID:         "tool-result:" + key.task + ":" + key.call,
-			RequestID:  missing.requestID,
-			TaskID:     key.task,
-			TurnID:     invocation.TurnID.String(),
-			Role:       sessionmodel.RoleTool,
-			AuthorKind: sessionmodel.AuthorTool,
-			AuthorID:   missing.name,
-			Blocks: []sessionmodel.Block{{
-				Kind:    sessionmodel.BlockToolResult,
-				Text:    payload,
-				CallID:  key.call,
-				Name:    missing.name,
-				IsError: invocation.Result.ErrorCode != "",
-			}},
-		})
-		if err != nil {
+	}
+	for key, change := range tx.changes {
+		if key.collection != "tool" {
+			continue
+		}
+		if _, exists := s.index.latest[key]; exists {
+			continue
+		}
+		var invocation toolmodel.ToolInvocation
+		if err := decodeJSON(change.event.Payload, &invocation); err != nil {
 			return err
+		}
+		declared := false
+		for _, event := range tx.events {
+			if event.Collection != "message" {
+				continue
+			}
+			var record messageRecord
+			if err := decodeJSON(event.Payload, &record); err != nil {
+				return err
+			}
+			for _, block := range record.Data.Blocks {
+				if block.Kind == sessionmodel.BlockToolCall && record.Data.TaskID == invocation.TaskID.String() && record.Data.TurnID == invocation.TurnID.String() && block.CallID == invocation.ProviderToolCallID {
+					declared = true
+				}
+			}
+		}
+		if !declared {
+			return errors.New("新工具调用身份缺少同事务提交的 Assistant 声明")
 		}
 	}
 	return nil
 }
 
-func clearReceiptScope(pending map[receiptKey]pendingReceipt, receipts map[receiptKey]bool, scope string) {
-	for key := range pending {
-		if key.scope == scope {
-			delete(pending, key)
+func (r MessageStreams) ListMissingToolResults(ctx context.Context) ([]repository.MissingToolResult, error) {
+	values := make([]repository.MissingToolResult, 0)
+	err := r.s.view(ctx, func(readCtx context.Context) error {
+		tx := r.s.tx(readCtx)
+		if tx.deletedScope {
+			for key, value := range r.s.index.missing {
+				if key.scope != tx.scope {
+					values = append(values, value)
+				}
+			}
+			return nil
 		}
-	}
-	for key := range receipts {
-		if key.scope == scope {
-			delete(receipts, key)
+		// 事务内恢复查询也要看到本事务新增的声明及已追加的回执。
+		if len(tx.events) > 0 {
+			if err := r.s.prepareReceiptChanges(readCtx); err != nil {
+				return err
+			}
 		}
-	}
+		for key, value := range r.s.index.missing {
+			if _, changed := tx.receiptChanges[key]; !changed {
+				values = append(values, value)
+			}
+		}
+		for _, value := range tx.receiptChanges {
+			if value != nil {
+				values = append(values, *value)
+			}
+		}
+		return nil
+	})
+	return sorted(values, func(a, b repository.MissingToolResult) int {
+		return cmp.Or(cmp.Compare(a.SessionID, b.SessionID), cmp.Compare(a.Sequence, b.Sequence), cmp.Compare(a.CallIndex, b.CallIndex))
+	}), err
 }

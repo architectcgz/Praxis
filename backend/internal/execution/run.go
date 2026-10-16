@@ -6,7 +6,7 @@ import (
 	"praxis/internal/contracts"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
-	"praxis/internal/loop"
+	"praxis/internal/repository"
 )
 
 func (r *Coordinator) run(
@@ -32,19 +32,19 @@ func (r *Coordinator) run(
 		return
 	}
 
-	messageRecorder, err := r.messageRecorders(ctx, task.SessionID, task.AgentID)
-	if err != nil || messageRecorder == nil {
+	messageWriter, err := r.messages.Writer(ctx, task.SessionID, task.AgentID)
+	if err != nil || messageWriter == nil {
 		if err == nil {
-			err = errors.New("message resolver returned a nil store")
+			err = errors.New("message streams returned a nil writer")
 		}
-		r.logError(task, "resolve message recorder", err)
+		r.logError(task, "resolve message writer", err)
 		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, err)
 		r.endTask(task, active, outcome, code, message)
 		return
 	}
 
 	for {
-		outcome, failureCode, failureMessage := r.execute(ctx, task, messageRecorder)
+		outcome, failureCode, failureMessage := r.execute(ctx, task, messageWriter)
 		if outcome == taskmodel.TaskAwaitingApproval && ctx.Err() == nil {
 			select {
 			case <-active.wake:
@@ -77,7 +77,7 @@ func (r *Coordinator) startTask(task taskmodel.Task) error {
 func (r *Coordinator) execute(
 	ctx context.Context,
 	task taskmodel.Task,
-	messageRecorder loop.MessageRecorder,
+	messageWriter repository.MessageWriter,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hooks.Operation{
 		Identity: hooks.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID},
@@ -88,7 +88,7 @@ func (r *Coordinator) execute(
 	content, continuation, err := r.tasks.LoadContext(ctx, task)
 	outcome, failureCode := taskmodel.TaskFailed, contracts.TaskFailureStorage
 	if err == nil {
-		outcome, failureCode, err = r.loop.Run(ctx, task, content, continuation, messageRecorder)
+		outcome, failureCode, err = r.loop.Run(ctx, task, content, continuation, messageWriter)
 	}
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
 	scope.End(hooks.Result{Outcome: finalOutcome, Err: err})

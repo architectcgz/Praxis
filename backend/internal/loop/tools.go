@@ -8,6 +8,7 @@ import (
 
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -29,7 +30,7 @@ func validateToolCalls(calls []ToolCall) error {
 // 下一次模型请求读取结果前必须写入工具结果回执，避免崩溃后留下无法对账的副作用。
 func (r *Runner) runToolCalls(
 	ctx context.Context,
-	messageRecorder MessageRecorder,
+	messageWriter repository.MessageWriter,
 	calls []ToolCall,
 	metadata contracts.ToolInvocationContext,
 	requestID contracts.RequestID,
@@ -68,7 +69,7 @@ func (r *Runner) runToolCalls(
 				return results, failCause(contracts.TaskFailureStorage, err)
 			}
 			block := appcontext.NewToolResultBlock(call.ID, string(call.Name), payload, true)
-			if receiptErr := appendToolResult(ctx, messageRecorder, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); receiptErr != nil {
+			if receiptErr := appendToolResult(ctx, messageWriter, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); receiptErr != nil {
 				return results, failCause(contracts.TaskFailureStorage,
 					&RuntimeError{Code: ErrorStorage, Message: "tool result receipt failed", Cause: receiptErr})
 			}
@@ -80,7 +81,7 @@ func (r *Runner) runToolCalls(
 			result.Payload = "(empty tool result)"
 		}
 		block := appcontext.NewToolResultBlock(call.ID, string(call.Name), result.Payload, result.ErrorClass != "")
-		if err := appendToolResult(ctx, messageRecorder, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); err != nil {
+		if err := appendToolResult(ctx, messageWriter, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); err != nil {
 			return results, err
 		}
 		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)

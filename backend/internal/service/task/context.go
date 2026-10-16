@@ -13,6 +13,9 @@ import (
 
 // selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并验证必要原文容量。
 func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, config taskmodel.Config, inputMessageID string) (taskmodel.ContextSelection, error) {
+	if err := s.reconcileToolResults(ctx, agent.SessionID, agent.ID, false); err != nil {
+		return taskmodel.ContextSelection{}, err
+	}
 	var selection taskmodel.ContextSelection
 	var shared []sessionmodel.SessionContextEntry
 	var err error
@@ -124,7 +127,7 @@ func (s *Service) loadContextEntries(ctx context.Context, sessionID contracts.Se
 }
 
 // LoadContext 读取冻结历史与本 Task 已提交的续接消息，只输出通用模型内容。
-// 消息读取可能补写恢复回执；调用方随后重新读取 Task Progress。
+// 业务恢复先协调已停止的工具调用；消息 Repository 读取保持只读。
 func (s *Service) LoadContext(ctx context.Context, task taskmodel.Task) (contextmodel.Content, []sessionmodel.MessageData, error) {
 	if ctx == nil {
 		return contextmodel.Content{}, nil, errors.New("task context is required")
@@ -132,6 +135,9 @@ func (s *Service) LoadContext(ctx context.Context, task taskmodel.Task) (context
 	var content contextmodel.Content
 	var continuation []sessionmodel.MessageData
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+		if err := s.reconcileToolResults(txCtx, task.SessionID, task.AgentID, false); err != nil {
+			return err
+		}
 		stream, err := s.messages.LoadMessages(txCtx, task.SessionID, task.AgentID, 0)
 		if err != nil {
 			return err

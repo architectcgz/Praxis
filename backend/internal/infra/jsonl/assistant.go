@@ -32,13 +32,10 @@ func (w MessageWriter) AppendAssistant(
 		if !task.Active() || task.SessionID != metadata.SessionID || task.AgentID != metadata.AgentID || task.Config.WorkspacePath != metadata.WorkspacePath || message.RequestID != task.RequestID.String() {
 			return contracts.ErrRequestConflict
 		}
-		key := projectionKey(metadata.SessionID.String(), "message", messageKey(appendOwner(w.owner), message.ID))
-		_, exists := w.streams.s.tx(txCtx).objects[key]
-		stored, err = w.Append(txCtx, message)
+		stored, inserted, err = w.streams.s.appendMessage(txCtx, w.owner, message)
 		if err != nil {
 			return err
 		}
-		inserted = !exists
 		seen := make(map[string]bool)
 		for _, block := range message.Blocks {
 			if block.Kind != sessionmodel.BlockToolCall {
