@@ -230,10 +230,24 @@ func (r *Runner) executeTurn(
 			AuthorKind: sessionmodel.AuthorAgent,
 			AuthorID:   task.AgentID.String(),
 		}, assistant)
-		if err := messageRecorder.AppendAssistant(ctx, message, metadata); err != nil {
+		message, inserted, err := messageRecorder.AppendAssistant(ctx, message, metadata)
+		if err != nil {
 			r.emitError(task.AgentID, task.ID, turnID, err)
 			outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
 			return outcome, code, false, cause
+		}
+		if inserted && (response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence) {
+			if hookErr := r.HookDispatcher.OnCommitted(context.WithoutCancel(ctx), hooks.CommittedEvent{
+				Identity: hooks.Identity{
+					SessionID: task.SessionID,
+					AgentID:   task.AgentID,
+					TaskID:    task.ID,
+					TurnID:    turnID,
+				},
+				Message: &message,
+			}); hookErr != nil {
+				r.Logf("assistant committed hook failed: %v", hookErr)
+			}
 		}
 	}
 	if outputErr != nil {

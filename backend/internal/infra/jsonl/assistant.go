@@ -13,18 +13,18 @@ import (
 
 // AppendAssistant 在同一个 Session 事务内保存消息和整批 requested 调用。
 // 只登记合法 JSON 的原始调用意图，不执行工具；参数语义和权限在 Executor 中校验。
-// 任一保存失败都回滚整批，重试复用同一调用身份。
+// 返回实际保存的消息及新增标记；任一保存失败都回滚整批并返回 inserted=false。
 func (w MessageWriter) AppendAssistant(
 	ctx context.Context,
 	message sessionmodel.MessageData,
 	metadata contracts.ToolInvocationContext,
-) error {
+) (stored sessionmodel.MessageData, inserted bool, err error) {
 	if ctx == nil || w.owner.ID != metadata.AgentID || w.owner.SessionID != metadata.SessionID || message.Role != sessionmodel.RoleAssistant ||
 		message.AuthorKind != sessionmodel.AuthorAgent || message.AuthorID != metadata.AgentID.String() ||
 		message.TaskID != metadata.TaskID.String() || message.TurnID != metadata.TurnID.String() || metadata.TurnID == "" {
-		return errors.New("assistant tool call ownership is required")
+		return sessionmodel.MessageData{}, false, errors.New("assistant tool call ownership is required")
 	}
-	return w.streams.s.InTx(ctx, func(txCtx context.Context) error {
+	err = w.streams.s.InTx(ctx, func(txCtx context.Context) error {
 		task, err := (TaskRepository{w.streams.s}).Get(txCtx, metadata.TaskID)
 		if err != nil {
 			return err
@@ -32,9 +32,13 @@ func (w MessageWriter) AppendAssistant(
 		if !task.Active() || task.SessionID != metadata.SessionID || task.AgentID != metadata.AgentID || task.Config.WorkspacePath != metadata.WorkspacePath || message.RequestID != task.RequestID.String() {
 			return contracts.ErrRequestConflict
 		}
-		if _, err := w.Append(txCtx, message); err != nil {
+		key := projectionKey(metadata.SessionID.String(), "message", messageKey(appendOwner(w.owner), message.ID))
+		_, exists := w.streams.s.tx(txCtx).objects[key]
+		stored, err = w.Append(txCtx, message)
+		if err != nil {
 			return err
 		}
+		inserted = !exists
 		seen := make(map[string]bool)
 		for _, block := range message.Blocks {
 			if block.Kind != sessionmodel.BlockToolCall {
@@ -55,6 +59,10 @@ func (w MessageWriter) AppendAssistant(
 		}
 		return nil
 	})
+	if err != nil {
+		return sessionmodel.MessageData{}, false, err
+	}
+	return stored, inserted, nil
 }
 
 func toolCall(block sessionmodel.Block) contracts.ToolCall {

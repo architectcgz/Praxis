@@ -29,3 +29,10 @@
 - 并发路径变更运行 `go test ./...`、`go test -race ./...` 和 `go vet ./...`；增加依赖门禁：`./internal/loop/...` 禁 `internal/(execution|service)`，`./internal/execution/...` 禁 `internal/service`。
 
 - 通用上下文依赖门禁：`./internal/core/context/...` 禁 `internal/(core/(task|session|agent)|repository|service|infra|execution|loop)`；与根 `AGENTS.md` 中的其余门禁一并执行。
+
+## 业务提交 Hook
+
+- `infra/jsonl` 的 Store 与 Repository 只负责持久化，不得 import `internal/hooks`、保存 Dispatcher 或注册事务提交回调；业务调用方在事务成功返回后显式发布 `CommittedHook`。
+- 用户输入由 TaskService / QueueService 发布，最终 Assistant 由 Loop 发布，Task 终态由 Settle 发布；幂等重试与回滚不通知，Hook 返回错误只记录日志，不改变业务结果。OperationHook 的执行生命周期保持独立。
+- 提交后 Hook 在存储锁外使用非事务 Context，属于 best-effort 通知，不保证跨重启必达或并发提交的全局顺序；不得扩大现有通知范围。
+- 依赖门禁：`./internal/infra/jsonl/...` 禁 `internal/hooks`。

@@ -194,6 +194,19 @@ func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome t
 		params.TaskID,
 		params.Outcome,
 	)
+	committedTask := endedTask
+	committedTask.Config = endedTask.Config.Clone()
+	committedTask.ContextSelection = endedTask.ContextSelection.Clone()
+	if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hooks.CommittedEvent{
+		Identity: hooks.Identity{
+			SessionID: endedTask.SessionID,
+			AgentID:   endedTask.AgentID,
+			TaskID:    endedTask.ID,
+		},
+		Task: &committedTask,
+	}); hookErr != nil {
+		s.logger.Errorf("task committed hook failed: %v", hookErr)
+	}
 	// 每轮仅发布一个终态事件；取消原因来自持久化控制命令，不由 outcome 推断。
 	if s.eventObserver != nil {
 		kind := TerminalTaskEnded

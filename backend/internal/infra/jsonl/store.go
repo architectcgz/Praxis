@@ -18,7 +18,6 @@ import (
 
 	"praxis/internal/contracts"
 	toolmodel "praxis/internal/core/tool_invocation"
-	"praxis/internal/hooks"
 	"praxis/internal/utils/pathutil"
 )
 
@@ -56,8 +55,6 @@ type transactionKey struct{}
 
 // Store 串行提交本地变更，并保证读取到同一个已提交投影。
 type Store struct {
-	hooks        *hooks.Dispatcher
-	hookError    func(string, ...any)
 	mu           sync.Mutex
 	root         string
 	objects      map[objectKey]object
@@ -175,21 +172,15 @@ func (s *Store) tx(ctx context.Context) *transaction {
 }
 
 // InTx 将同一 Session 的关联更新作为一行提交；跨 Session 写入被拒绝。
-func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) (err error) {
+func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error {
 	if ctx == nil || fn == nil {
 		return errors.New("事务 context 和回调不能为空")
 	}
 	if s.tx(ctx) != nil {
 		return fn(ctx)
 	}
-	var committed []Event
 	s.mu.Lock()
-	defer func() {
-		s.mu.Unlock()
-		if err == nil && len(committed) > 0 {
-			s.notifyCommitted(committed)
-		}
-	}()
+	defer s.mu.Unlock()
 	if s.closed {
 		return errors.New("日志已关闭")
 	}
@@ -232,7 +223,6 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) (err e
 	}
 	s.objects, s.sequences = tx.objects, tx.sequences
 	s.pending, s.receipts = tx.pending, tx.receipts
-	committed = tx.events
 	return nil
 }
 

@@ -188,7 +188,6 @@ func Open(
 		return nil, err
 	}
 	hookDispatcher := hooks.NewDispatcher(timing.Hook{Recorder: timings})
-	store.ObserveCommitted(hookDispatcher, diagnostics.Errorf)
 	activeTasks := &execution.ActiveTasks{}
 	agentService, err := applicationagent.NewService(applicationagent.Config{
 		Transactions: store,
@@ -290,10 +289,12 @@ func Open(
 		runner = &builtRunner
 	}
 	queueService, err := runtimequeue.NewService(runtimequeue.Config{
-		Transactions: store,
-		Agents:       repos.Agents,
-		Tasks:        repos.Tasks,
-		Messages:     repos.Messages,
+		HookDispatcher: hookDispatcher,
+		Logger:         diagnostics,
+		Transactions:   store,
+		Agents:         repos.Agents,
+		Tasks:          repos.Tasks,
+		Messages:       repos.Messages,
 	})
 	if err != nil {
 		diagnostics.Errorf("create task queue service failed: %v", err)

@@ -6,6 +6,8 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/hooks"
+	"praxis/internal/logging"
 	"praxis/internal/repository"
 	"praxis/internal/system"
 
@@ -15,19 +17,23 @@ import (
 )
 
 type Config struct {
-	Transactions repository.TxRunner
-	Agents       repository.SessionAgentRepository
-	Tasks        repository.TaskRepository
-	Messages     repository.MessageStreams
-	Clock        system.Clock
+	HookDispatcher *hooks.Dispatcher
+	Logger         *logging.Logger
+	Transactions   repository.TxRunner
+	Agents         repository.SessionAgentRepository
+	Tasks          repository.TaskRepository
+	Messages       repository.MessageStreams
+	Clock          system.Clock
 }
 
 type Service struct {
-	tx       repository.TxRunner
-	agents   repository.SessionAgentRepository
-	tasks    repository.TaskRepository
-	messages repository.MessageStreams
-	clock    system.Clock
+	hookDispatcher *hooks.Dispatcher
+	logger         *logging.Logger
+	tx             repository.TxRunner
+	agents         repository.SessionAgentRepository
+	tasks          repository.TaskRepository
+	messages       repository.MessageStreams
+	clock          system.Clock
 }
 
 type EnqueueParams struct {
@@ -57,11 +63,13 @@ func NewService(config Config) (*Service, error) {
 		}
 	}
 	return &Service{
-		tx:       config.Transactions,
-		agents:   config.Agents,
-		tasks:    config.Tasks,
-		messages: config.Messages,
-		clock:    system.ClockOrDefault(config.Clock),
+		hookDispatcher: config.HookDispatcher,
+		logger:         logging.NewFactory().Ensure(config.Logger),
+		tx:             config.Transactions,
+		agents:         config.Agents,
+		tasks:          config.Tasks,
+		messages:       config.Messages,
+		clock:          system.ClockOrDefault(config.Clock),
 	}, nil
 }
 
@@ -70,6 +78,7 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 	if ctx == nil {
 		return EnqueueResult{}, errors.New("enqueue task context is required")
 	}
+	var committedMessage *sessionmodel.MessageData
 	result := EnqueueResult{}
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		agent, err := s.agents.Get(txCtx, params.AgentID)
@@ -125,7 +134,7 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 		if err := s.tasks.Save(txCtx, task); err != nil {
 			return err
 		}
-		_, err = s.messages.Append(txCtx, agent, sessionmodel.MessageData{
+		stored, err := s.messages.Append(txCtx, agent, sessionmodel.MessageData{
 			ID:         "input:" + params.RequestID.String(),
 			RequestID:  params.RequestID.String(),
 			TaskID:     task.ID.String(),
@@ -137,9 +146,22 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 		if err != nil {
 			return err
 		}
+		committedMessage = &stored
 		result.Task = task
 		return nil
 	})
+	if err == nil && committedMessage != nil && !result.ExistingTask {
+		if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hooks.CommittedEvent{
+			Identity: hooks.Identity{
+				SessionID: result.Task.SessionID,
+				AgentID:   result.Task.AgentID,
+				TaskID:    result.Task.ID,
+			},
+			Message: committedMessage,
+		}); hookErr != nil {
+			s.logger.Errorf("queued user message committed hook failed: %v", hookErr)
+		}
+	}
 	return result, err
 }
 

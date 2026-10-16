@@ -8,6 +8,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/hooks"
 )
 
 // SendInputParams 是直接输入的身份、正文和模型选择，不接受调用方预构建的 Context。
@@ -47,6 +48,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 	if ctx == nil {
 		return SendInputResult{}, errors.New("task creation context is required")
 	}
+	var committedMessage *sessionmodel.MessageData
 	var result SendInputResult
 	var admittedAgent contracts.AgentID
 	var admittedTask contracts.TaskID
@@ -108,9 +110,11 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			Blocks:     []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: params.Content}},
 			CreatedAt:  at,
 		}
-		if _, err = s.messages.Append(txCtx, agent, value); err != nil {
+		stored, err := s.messages.Append(txCtx, agent, value)
+		if err != nil {
 			return err
 		}
+		committedMessage = &stored
 		selection, err := s.selectContext(txCtx, agent, config, inputMessageID)
 		if err != nil {
 			return err
@@ -145,6 +149,18 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 	})
 	if err != nil && admittedAgent != "" {
 		s.executions.Release(admittedAgent, admittedTask)
+	}
+	if err == nil && committedMessage != nil && !result.ExistingRequest {
+		if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hooks.CommittedEvent{
+			Identity: hooks.Identity{
+				SessionID: result.Task.SessionID,
+				AgentID:   result.Task.AgentID,
+				TaskID:    result.Task.ID,
+			},
+			Message: committedMessage,
+		}); hookErr != nil {
+			s.logger.Errorf("user message committed hook failed: %v", hookErr)
+		}
 	}
 	return result, err
 }

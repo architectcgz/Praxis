@@ -60,5 +60,6 @@ func taskMessage(value sessionmodel.MessageData, blocks []appcontext.ContextBloc
 // MessageRecorder 只写当前 Agent 执行产生的持久化消息（会话历史不回读）。
 type MessageRecorder interface {
 	Append(context.Context, sessionmodel.MessageData) (sessionmodel.MessageData, error)
-	AppendAssistant(context.Context, sessionmodel.MessageData, contracts.ToolInvocationContext) error
+	// 返回包含持久化序号和时间的消息；重复写入和失败时 inserted 为 false。
+	AppendAssistant(context.Context, sessionmodel.MessageData, contracts.ToolInvocationContext) (stored sessionmodel.MessageData, inserted bool, err error)
 }

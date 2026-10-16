@@ -8,6 +8,7 @@ import (
 )
 
 // CommittedEvent 只通知已经可靠提交的事实，供记忆或审计订阅。
+// 由业务调用方在事务成功返回后发布；通知为 best-effort，不保证跨重启必达或并发全局顺序。
 type CommittedEvent struct {
 	Identity
 	Message *sessionmodel.MessageData
