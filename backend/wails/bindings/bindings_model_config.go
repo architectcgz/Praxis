@@ -129,7 +129,8 @@ func validationResponse(err error) (dto.SaveModelConfigResponse, error) {
 
 // SetProviderKey 保存或清除一个 Provider 的 API key。
 func (b *ModelBindings) SetProviderKey(providerID, value string) error {
-	if err := validation.ValidateProviderID(providerID); err != nil {
+	canonical, err := request.NewSetProviderKey(providerID, value)
+	if err != nil {
 		return err
 	}
 	ctx, services, err := b.runtime.BindingContext()
@@ -139,7 +140,7 @@ func (b *ModelBindings) SetProviderKey(providerID, value string) error {
 	if err := ctx.Err(); err != nil {
 		return publicError(b.runtime, "ModelBindings.SetProviderKey.context", err)
 	}
-	if err := services.ModelConfig.SetProviderKey(providerID, value); err != nil {
+	if err := services.ModelConfig.SetProviderKey(canonical); err != nil {
 		return publicError(b.runtime, "ModelBindings.SetProviderKey", err)
 	}
 	return nil

@@ -64,7 +64,7 @@ func (r ProjectRepository) Save(ctx context.Context, v projectmodel.Project) err
 	return save(ctx, r.s, "", "project", v.ID.String(), "project.saved", v)
 }
 
-// List 返回查询结果的独立副本，非正数 limit 默认 100 条。
+// List 返回查询结果的独立副本，limit 为 0 时不限制。
 func (r ProjectRepository) List(ctx context.Context, limit int) ([]projectmodel.Project, error) {
 	v, e := listIndexed[projectmodel.Project](ctx, r.s, collectionKey("project"), nil)
 	return capped(sorted(v, func(a, b projectmodel.Project) int {
@@ -82,7 +82,7 @@ func (r WorkspaceRepository) Save(ctx context.Context, v workspacemodel.Workspac
 	return save(ctx, r.s, "", "workspace", v.ID.String(), "workspace.saved", v)
 }
 
-// ListByProject 返回指定 Project 的对象副本，非正数 limit 默认 100 条。
+// ListByProject 返回指定 Project 的对象副本，limit 为 0 时不限制。
 func (r WorkspaceRepository) ListByProject(ctx context.Context, id contracts.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
 	v, e := listIndexed[workspacemodel.Workspace](ctx, r.s, lookupKey{kind: "workspaces-project", owner: id.String()}, nil)
 	return capped(sorted(v, func(a, b workspacemodel.Workspace) int { return cmp.Compare(a.ID, b.ID) }), limit), e
@@ -98,19 +98,19 @@ func (r SessionRepository) Save(ctx context.Context, v sessionmodel.Session) err
 	return save(ctx, r.s, v.ID.String(), "session", v.ID.String(), "session.saved", v)
 }
 
-// List 返回查询结果的独立副本，非正数 limit 默认 100 条。
+// List 返回查询结果的独立副本，limit 为 0 时不限制。
 func (r SessionRepository) List(ctx context.Context, limit int) ([]sessionmodel.Session, error) {
 	return r.find(ctx, "", "", limit)
 }
 
-// ListByProject 返回指定 Project 的对象副本，非正数 limit 默认 100 条。
+// ListByProject 返回指定 Project 的对象副本，limit 为 0 时不限制。
 func (r SessionRepository) ListByProject(ctx context.Context, id contracts.ProjectID, limit int) ([]sessionmodel.Session, error) {
 	return r.find(ctx, id, "", limit)
 }
 
 // SearchTitle 按会话目录索引查询标题子串，空字符串返回完整目录。
 func (r SessionRepository) SearchTitle(ctx context.Context, title string, limit int) ([]sessionmodel.Session, error) {
-	return r.find(ctx, "", strings.ToLower(strings.TrimSpace(title)), limit)
+	return r.find(ctx, "", title, limit)
 }
 func (r SessionRepository) find(ctx context.Context, project contracts.ProjectID, title string, limit int) ([]sessionmodel.Session, error) {
 	group := collectionKey("session")
@@ -273,7 +273,7 @@ func (r ContextRepository) GetByID(ctx context.Context, id contracts.ContextEntr
 	return v, e == nil, e
 }
 
-// List 返回查询结果的独立副本，非正数 limit 默认 100 条。
+// List 返回查询结果的独立副本，limit 为 0 时不限制。
 func (r ContextRepository) List(ctx context.Context, id contracts.SessionID, after string, limit int) ([]sessionmodel.SessionContextEntry, error) {
 	v, e := listIndexed[sessionmodel.SessionContextEntry](ctx, r.s, lookupKey{kind: "contexts-session", owner: id.String()}, nil)
 	sorted(v, func(a, b sessionmodel.SessionContextEntry) int {

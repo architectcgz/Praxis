@@ -24,6 +24,7 @@ type arguments struct {
 // Normalize 校验 read_file 参数并提取待授权的资源路径。
 func Normalize(
 	call contracts.ToolCall,
+	workspacePath string,
 ) (toolcontracts.NormalizedToolCall, error) {
-	return toolshared.NormalizePathArguments(call, toolcontracts.ToolReadFile, defaultLimit, minLimit, maxLimit)
+	return toolshared.NormalizePathArguments(call, workspacePath, toolcontracts.ToolReadFile, defaultLimit, minLimit, maxLimit)
 }

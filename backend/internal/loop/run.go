@@ -7,8 +7,10 @@ import (
 	"praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	toolmodel "praxis/internal/core/tool_invocation"
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
+	"praxis/internal/system"
 	toolcontracts "praxis/internal/tools/contracts"
 
 	"context"
@@ -18,6 +20,9 @@ import (
 
 // Config 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Config struct {
+	IDs            system.IDGenerator
+	Clock          system.Clock
+	Invocations    ToolInvocationReader
 	Progress       TaskProgress
 	ModelBuilder   model.ModelBuilder
 	Tools          toolcontracts.ToolCatalog
@@ -25,6 +30,7 @@ type Config struct {
 	HookDispatcher *hooks.Dispatcher
 	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
 	CompressionStrategy contextcompress.Strategy
+	SummaryFormat       contextcompress.SummaryFormat
 	EventObserver       EventObserver
 	Logf                func(string, ...any)
 }
@@ -37,6 +43,9 @@ type Runner struct {
 // NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
 // 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
 func NewRunner(config Config) (Runner, error) {
+	if config.Invocations == nil {
+		return Runner{}, errors.New("loop tool invocation repository is required")
+	}
 	if config.Progress == nil {
 		return Runner{}, errors.New("loop task progress is required")
 	}
@@ -58,6 +67,8 @@ func NewRunner(config Config) (Runner, error) {
 	if config.CompressionStrategy == nil {
 		config.CompressionStrategy = contextcompress.FullStrategy{}
 	}
+	config.IDs = system.IDsOrDefault(config.IDs)
+	config.Clock = system.ClockOrDefault(config.Clock)
 	return Runner{Config: config}, nil
 }
 
@@ -89,20 +100,14 @@ func (r *Runner) run(
 	if err != nil {
 		return taskResult(failCause(contracts.TaskFailureStorage, err))
 	}
-	limits := task.Config.ResourceLimits
 	modelContext, err := (appcontext.ContextBuilder{}).Build(content, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: task.Config.Model.MaxOutputTokens})
 	if err != nil {
 		return taskResult(modelFailure(err))
 	}
-	budget := newTaskBudget(limits)
-	budget.outputBytes = task.Progress.OutputBytes
-	if limits.MaxOutputBytes > 0 && budget.outputBytes > limits.MaxOutputBytes {
-		return taskResult(fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "task output limit exceeded"))
-	}
 	if task.Progress.FinalStopReason != "" {
 		return taskmodel.TaskCompleted, "", nil
 	}
-	if err := r.resumeToolCalls(ctx, task, continuation, messageWriter, &modelContext, budget); err != nil {
+	if err := r.resumeToolCalls(ctx, task, continuation, messageWriter, &modelContext); err != nil {
 		if errors.Is(err, errAwaitingApproval) {
 			return taskmodel.TaskAwaitingApproval, "", nil
 		}
@@ -115,7 +120,11 @@ func (r *Runner) run(
 		return taskResult(err)
 	}
 
+	iterations := task.Progress.Iterations
 	for sequence := max(uint64(1), task.Progress.NextSequence); ; {
+		if iterations >= taskmodel.MaxIterations {
+			return taskResult(fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "model iteration limit exceeded"))
+		}
 		request := buildModelRequest(model.ModelRequest{
 			TaskID:           task.ID,
 			SessionReference: task.SessionID.String(),
@@ -127,13 +136,14 @@ func (r *Runner) run(
 			return taskResult(failCause(contracts.TaskFailureContract, err))
 		}
 		compressed, changed, err := r.CompressionStrategy.Compress(ctx, modelContext, contextcompress.Options{
+			SummaryFormat:   r.SummaryFormat,
 			ContextWindow:   task.Config.Model.ContextWindow,
 			MaxOutputTokens: taskModel.MaxOutputTokens,
 			ReservedTokens:  appcontext.EstimateTokens(string(toolPayload)),
 		}, func(summaryCtx context.Context, history appcontext.ModelContext, limit int) (string, error) {
 			current := sequence
 			sequence++
-			return r.summarizeContext(summaryCtx, task, taskModel.Stream, history, limit, current, budget)
+			return r.summarizeContext(summaryCtx, task, taskModel.Stream, history, limit, current)
 		})
 		if err != nil {
 			err = modelFailure(err)
@@ -146,13 +156,17 @@ func (r *Runner) run(
 			request.Context = modelContext.Clone()
 		}
 		turnSequence := sequence
-		if err := r.Progress.RecordModelRequest(ctx, task.ID, turnSequence); err != nil {
+		if err := r.Progress.RecordIteration(ctx, task.ID, turnSequence); err != nil {
+			if errors.Is(err, contracts.New(contracts.TaskResourceLimit, "")) {
+				return taskResult(failCause(contracts.TaskFailureResourceLimit, err))
+			}
 			return taskResult(failCause(contracts.TaskFailureStorage, err))
 		}
 		sequence++
+		iterations++
 		turnID := contracts.NewTurnID(task.ID, turnSequence)
 		request.TurnID = turnID
-		outcome, failureCode, finished, err := r.executeTurn(ctx, task, taskModel, messageWriter, request, &modelContext, budget, turnID)
+		outcome, failureCode, finished, err := r.executeTurn(ctx, task, taskModel, messageWriter, request, &modelContext, turnID)
 
 		if err != nil || outcome != taskmodel.TaskCompleted || finished {
 			return outcome, failureCode, err
@@ -168,7 +182,6 @@ func (r *Runner) executeTurn(
 	messageWriter repository.MessageWriter,
 	request model.ModelRequest,
 	modelContext *appcontext.ModelContext,
-	budget *taskBudget,
 	turnID contracts.TurnID,
 ) (taskmodel.TaskOutcome, contracts.TaskFailureCode, bool, error) {
 	r.emit(Event{
@@ -178,11 +191,6 @@ func (r *Runner) executeTurn(
 		TaskID:    task.ID,
 		TurnID:    turnID,
 	})
-	if err := budget.reserveInput(request); err != nil {
-		r.emitError(task.AgentID, task.ID, turnID, err)
-		outcome, code, cause := taskResult(err)
-		return outcome, code, false, cause
-	}
 	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", task.ID, task.Config.Model.ModelID, len(modelContext.Entries), turnID)
 	r.emit(Event{
 		Kind:      EventProviderWaiting,
@@ -206,7 +214,6 @@ func (r *Runner) executeTurn(
 		outcome, code, cause := taskResult(err)
 		return outcome, code, false, cause
 	}
-	outputErr := budget.addOutput(response.textBytes)
 	if err := r.Progress.RecordModelOutput(ctx, task.ID, response.textBytes); err != nil {
 		outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
 		return outcome, code, false, cause
@@ -231,13 +238,25 @@ func (r *Runner) executeTurn(
 			AuthorKind: sessionmodel.AuthorAgent,
 			AuthorID:   task.AgentID.String(),
 		}, assistant)
-		message, inserted, err := messageWriter.AppendAssistant(ctx, message, metadata)
+		value := repository.AssistantWrite{Message: message}
+		for _, call := range calls {
+			invocation, err := toolmodel.NewToolInvocation(contracts.ToolInvocationID(r.IDs.New("toolinvocation")), task.ID, turnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
+			if err != nil {
+				outcome, code, cause := taskResult(failCause(contracts.TaskFailureContract, err))
+				return outcome, code, false, cause
+			}
+			value.ToolCalls = append(value.ToolCalls, invocation)
+		}
+		if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {
+			value.FinalOutput = &taskmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
+		}
+		message, inserted, err := messageWriter.AppendAssistant(ctx, value)
 		if err != nil {
 			r.emitError(task.AgentID, task.ID, turnID, err)
 			outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
 			return outcome, code, false, cause
 		}
-		if inserted && (response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence) {
+		if inserted && value.FinalOutput != nil {
 			if hookErr := r.HookDispatcher.OnCommitted(context.WithoutCancel(ctx), hooks.CommittedEvent{
 				Identity: hooks.Identity{
 					SessionID: task.SessionID,
@@ -250,10 +269,6 @@ func (r *Runner) executeTurn(
 				r.Logf("assistant committed hook failed: %v", hookErr)
 			}
 		}
-	}
-	if outputErr != nil {
-		outcome, code, cause := taskResult(outputErr)
-		return outcome, code, false, cause
 	}
 	for _, call := range calls {
 		r.emit(Event{
@@ -280,7 +295,7 @@ func (r *Runner) executeTurn(
 		})
 		return taskmodel.TaskCompleted, "", true, nil
 	}
-	results, err := r.runToolCalls(ctx, messageWriter, calls, metadata, task.RequestID, budget)
+	results, err := r.runToolCalls(ctx, messageWriter, calls, metadata, task.RequestID)
 	if err != nil {
 		if errors.Is(err, errAwaitingApproval) {
 			return taskmodel.TaskAwaitingApproval, "", false, nil

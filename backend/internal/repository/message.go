@@ -6,6 +6,8 @@ import (
 	"praxis/internal/contracts"
 	"praxis/internal/core/agent"
 	"praxis/internal/core/session"
+	"praxis/internal/core/task"
+	toolinvocation "praxis/internal/core/tool_invocation"
 )
 
 // MessageStream 是单个 Session 或 Agent 消息流的一致读取结果。
@@ -19,10 +21,17 @@ type MessageLoader interface {
 	LoadMessages(context.Context, contracts.SessionID, contracts.AgentID, int) (MessageStream, error)
 }
 
+// AssistantWrite 显式携带本次提交的完整消息、调用身份与可选最终证据。
+type AssistantWrite struct {
+	Message     session.MessageData
+	ToolCalls   []toolinvocation.ToolInvocation
+	FinalOutput *task.FinalOutput
+}
+
 // MessageWriter 统一定义执行输出的原子持久化操作。
 type MessageWriter interface {
 	// 返回完整保存结果；只有本次新增且提交成功才返回 inserted=true。
-	AppendAssistant(context.Context, session.MessageData, contracts.ToolInvocationContext) (stored session.MessageData, inserted bool, err error)
+	AppendAssistant(context.Context, AssistantWrite) (stored session.MessageData, inserted bool, err error)
 	// 回执与 Task 输出字节在同一事务提交；幂等写入不重复计费。
 	AppendToolResult(context.Context, session.MessageData) error
 }

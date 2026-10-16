@@ -8,11 +8,12 @@ import (
 
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
+	toolmodel "praxis/internal/core/tool_invocation"
 	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
-// validateToolCalls 检查模型输出契约；具体参数规范化和安全授权不在 loop 内重复执行。
+// validateToolCalls 检查模型输出契约，工具参数随后由对应 Normalizer 准备。
 func validateToolCalls(calls []ToolCall) error {
 	seen := map[string]bool{}
 	for _, call := range calls {
@@ -24,7 +25,7 @@ func validateToolCalls(calls []ToolCall) error {
 	return nil
 }
 
-// runToolCalls 顺序派发工具，先提交回执，再根据持久化预算决定是否继续。
+// runToolCalls 顺序派发工具，逐个提交回执，额度不足时结算同批剩余调用。
 // 返回的结果与 calls 顺序一致；失败时只返回此前已写入回执的结果，不继续执行后续工具。
 // 授权和持久化准入由 ToolExecutor 负责。
 // 下一次模型请求读取结果前必须写入工具结果回执，避免崩溃后留下无法对账的副作用。
@@ -34,11 +35,22 @@ func (r *Runner) runToolCalls(
 	calls []ToolCall,
 	metadata contracts.ToolInvocationContext,
 	requestID contracts.RequestID,
-	budget *taskBudget,
 ) ([]toolcontracts.ToolResult, error) {
 	results := make([]toolcontracts.ToolResult, 0, len(calls))
+	limited := false
 	for callIndex, call := range calls {
-		execution, err := r.ToolExecutor.Execute(ctx, call, metadata)
+		prepared := toolcontracts.PreparedToolCall{Call: call}
+		invocation, err := r.Invocations.FindByTaskCall(ctx, metadata.TaskID, call.ID)
+		if err != nil {
+			return results, failCause(contracts.TaskFailureStorage, err)
+		}
+		if invocation.Status == toolmodel.ToolInvocationRequested {
+			tool, ok := r.Tools.Get(call.Name)
+			if ok {
+				prepared.Normalized, prepared.Err = tool.Normalize(call, metadata.WorkspacePath)
+			}
+		}
+		execution, err := r.ToolExecutor.Execute(ctx, prepared, metadata)
 		if execution.ApprovalPending {
 			// 授权事件只通知调用状态；参数由工具调用事件和持久化查询提供。
 			r.emit(Event{
@@ -86,15 +98,11 @@ func (r *Runner) runToolCalls(
 		}
 		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
 		results = append(results, result)
-		task, err := r.Progress.LoadTask(ctx, metadata.TaskID)
-		if err != nil {
-			return results, failCause(contracts.TaskFailureStorage, err)
-		}
-		budget.outputBytes = task.Progress.OutputBytes
-		if budget.limits.MaxOutputBytes > 0 && budget.outputBytes > budget.limits.MaxOutputBytes {
-			return results, fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "task output limit exceeded")
-		}
+		limited = limited || result.ErrorClass == string(toolmodel.ToolFailureResourceLimit)
 
+	}
+	if limited {
+		return results, fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "tool call limit exceeded")
 	}
 	return results, nil
 }

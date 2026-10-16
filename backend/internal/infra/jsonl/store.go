@@ -115,7 +115,7 @@ func (s *Store) openFormat() error {
 		if err := decodeJSON(data, &marker); err != nil {
 			return fmt.Errorf("corrupt storage format marker: %w", err)
 		}
-		if marker.Format != "praxis-jsonl" || marker.Version != 2 {
+		if marker.Format != "praxis-jsonl" || marker.Version != 3 {
 			return errors.New("unsupported JSONL storage format")
 		}
 		return nil
@@ -123,7 +123,7 @@ func (s *Store) openFormat() error {
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	// writer.lock 和空 sessions 目录不代表业务数据；有任何未标识内容都拒绝接管。
+	// 锁文件与空目录不含业务数据；有任何未标识内容都拒绝接管。
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
 		return err
@@ -132,8 +132,8 @@ func (s *Store) openFormat() error {
 		if entry.Name() == "writer.lock" {
 			continue
 		}
-		if entry.Name() == "sessions" && entry.IsDir() {
-			children, err := os.ReadDir(filepath.Join(s.root, "sessions"))
+		if entry.IsDir() {
+			children, err := os.ReadDir(filepath.Join(s.root, entry.Name()))
 			if err != nil {
 				return err
 			}
@@ -141,9 +141,9 @@ func (s *Store) openFormat() error {
 				continue
 			}
 		}
-		return errors.New("non-empty data directory is missing the v2 storage marker; legacy formats and automatic migration are not supported")
+		return errors.New("non-empty data directory is missing the v3 storage marker; legacy formats and automatic migration are not supported")
 	}
-	return writeNewFile(path, []byte("{\"format\":\"praxis-jsonl\",\"version\":2}\n"))
+	return writeNewFile(path, []byte("{\"format\":\"praxis-jsonl\",\"version\":3}\n"))
 }
 
 func validScope(scope string) bool {

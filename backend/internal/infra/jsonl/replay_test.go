@@ -1,6 +1,7 @@
 package jsonl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -73,6 +74,7 @@ func TestReplayIncompleteTailAndCorruptCompleteLine(t *testing.T) {
 func TestFormatRejection(t *testing.T) {
 	for _, tc := range []struct{ name, marker, data string }{
 		{name: "missing", data: "{}\n"},
+		{name: "previous_progress_format", marker: `{"format":"praxis-jsonl","version":2}`},
 		{name: "old_version", marker: `{"format":"praxis-jsonl","version":1}`},
 		{name: "unknown_field", marker: `{"format":"praxis-jsonl","version":2,"compat":true}`},
 	} {
@@ -122,5 +124,30 @@ func TestReplayRejectsSequenceAndPayloadMismatch(t *testing.T) {
 				t.Fatal("corrupt identity or protocol must be rejected")
 			}
 		})
+	}
+}
+
+func TestOldCounterFormatIsRejectedWithoutRewritingData(t *testing.T) {
+	f := newStoreFixture(t)
+	f.activeTask(t)
+	requireOK(t, f.store.Close(context.Background()))
+	markerPath := filepath.Join(f.root, "storage.json")
+	marker := []byte(`{"format":"praxis-jsonl","version":2}`)
+	requireOK(t, os.WriteFile(markerPath, marker, 0600))
+	logPath := filepath.Join(f.root, "sessions", "session.jsonl")
+	log, err := os.ReadFile(logPath)
+	requireOK(t, err)
+	log = bytes.ReplaceAll(log, []byte(`"Iterations":0,`), nil)
+	requireOK(t, os.WriteFile(logPath, log, 0600))
+	if store, err := Open(context.Background(), f.root); err == nil {
+		_ = store.Close(context.Background())
+		t.Fatal("old counter format was resumed")
+	}
+	actualMarker, err := os.ReadFile(markerPath)
+	requireOK(t, err)
+	actualLog, err := os.ReadFile(logPath)
+	requireOK(t, err)
+	if !bytes.Equal(marker, actualMarker) || !bytes.Equal(log, actualLog) {
+		t.Fatal("rejected old data was rewritten")
 	}
 }

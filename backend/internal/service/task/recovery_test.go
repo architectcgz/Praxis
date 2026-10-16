@@ -44,7 +44,7 @@ func addRecoveryCalls(t *testing.T, f *hookFixture, task taskmodel.Task) {
 		t.Fatal(err)
 	}
 	turn := contracts.NewTurnID(task.ID, 1)
-	_, _, err = writer.AppendAssistant(ctx, sessionmodel.MessageData{
+	_, _, err = writer.AppendAssistant(ctx, testAssistantWrite(t, sessionmodel.MessageData{
 		ID:         "assistant:" + turn.String(),
 		RequestID:  task.RequestID.String(),
 		TaskID:     task.ID.String(),
@@ -73,7 +73,7 @@ func addRecoveryCalls(t *testing.T, f *hookFixture, task taskmodel.Task) {
 		TaskID:        task.ID,
 		TurnID:        turn,
 		WorkspacePath: task.Config.WorkspacePath,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -59,7 +59,7 @@ type ModelConfigService interface {
 	ModelConfig() service.ModelConfig
 	SaveModelConfig(request.SaveModelConfig) error
 	ReloadConfig(context.Context) error
-	SetProviderKey(string, string) error
+	SetProviderKey(request.SetProviderKey) error
 	HasProviderKey(string) bool
 	DiscoverProviderModels(context.Context, string) ([]string, error)
 }

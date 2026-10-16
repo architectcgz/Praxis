@@ -61,7 +61,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
 					return errors.New("tool call declaration must be committed with a new invocation identity")
 				}
-				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, toolCall(block).Arguments) {
+				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, block.Input) {
 					return contracts.ErrRequestConflict
 				}
 				fact := repository.MissingToolResult{

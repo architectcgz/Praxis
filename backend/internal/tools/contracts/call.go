@@ -19,7 +19,7 @@ const (
 // Tool 是工具包对外暴露的行为契约；审核决策由工具执行层负责。
 type Tool interface {
 	Definition() core.ToolDefinition
-	Normalize(core.ToolCall) (NormalizedToolCall, error)
+	Normalize(core.ToolCall, string) (NormalizedToolCall, error)
 	Execute(context.Context, ExecutionCall) (ToolResult, error)
 }
 
@@ -29,6 +29,13 @@ type ToolCatalog interface {
 	List() []core.ToolDefinition
 	// Get 按名称查找工具；不存在或未启用时返回 false。
 	Get(ToolName) (Tool, bool)
+}
+
+// PreparedToolCall 携带一次参数准备的结果；失败也必须进入持久化结算。
+type PreparedToolCall struct {
+	Call       core.ToolCall
+	Normalized NormalizedToolCall
+	Err        error
 }
 
 // NormalizedToolCall 是经过工具参数校验后的调用，尚未经过执行准入。

@@ -102,7 +102,7 @@ func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID 
 
 // Prepare 在 runtime 空闲时确定执行输入；校验失败不改变待执行 Task。
 func (e *Task) Prepare(config Config, selection ContextSelection) error {
-	if e.Status != TaskPending {
+	if e.Status == TaskStarting || !canTransition(e.Status, TaskStarting) {
 		return contracts.InvalidTransition("task", string(e.Status), string(TaskStarting))
 	}
 	if err := config.Validate(); err != nil {
@@ -122,8 +122,8 @@ func (e *Task) Prepare(config Config, selection ContextSelection) error {
 
 // Validate 校验 Task 引用、执行输入和生命周期；字段规范性由输入及恢复边界保证。
 func (e Task) Validate() error {
-	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 {
-		return contracts.InvalidValue("task.progress", "usage counters cannot be negative")
+	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 || e.Progress.ToolCalls > MaxToolCalls || e.Progress.Iterations > MaxIterations || e.Progress.Iterations > e.Progress.ModelRequests || (e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1) {
+		return contracts.InvalidValue("task.progress", "usage counters or request sequence are invalid")
 	}
 	if (e.Progress.FinalAssistantID == "") != (e.Progress.FinalStopReason == "") || e.Progress.FinalStopReason != "" && e.Progress.FinalStopReason != "completed" && e.Progress.FinalStopReason != "stop_sequence" {
 		return contracts.InvalidValue("task.progress", "final output evidence is inconsistent")
@@ -207,7 +207,7 @@ func (e Task) Active() bool {
 }
 
 func (e *Task) MarkRunning(at time.Time) error {
-	if e.Status != TaskStarting {
+	if e.Status == TaskRunning || !canTransition(e.Status, TaskRunning) {
 		return contracts.InvalidTransition("task", string(e.Status), string(TaskRunning))
 	}
 	e.Status = TaskRunning
@@ -217,7 +217,7 @@ func (e *Task) MarkRunning(at time.Time) error {
 
 // BeginEnding 标记执行已返回；结束时间不得早于启动时间，失败时不改变状态。
 func (e *Task) BeginEnding(at time.Time) error {
-	if e.Status != TaskRunning {
+	if e.Status == TaskEnding || !canTransition(e.Status, TaskEnding) {
 		return contracts.InvalidTransition("task", string(e.Status), string(TaskEnding))
 	}
 	if at.Before(e.StartedAt) {
@@ -233,7 +233,7 @@ func (e *Task) End(
 	failureCode contracts.TaskFailureCode,
 	at time.Time,
 ) error {
-	if e.Status != TaskRunning && e.Status != TaskEnding {
+	if e.Status == TaskEnded || e.StartedAt.IsZero() || !canTransition(e.Status, TaskEnded) {
 		return contracts.InvalidTransition("task", string(e.Status), string(TaskEnded))
 	}
 	if !ValidTaskOutcome(outcome) {

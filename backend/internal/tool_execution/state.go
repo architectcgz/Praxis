@@ -7,6 +7,7 @@ import (
 
 	"praxis/internal/contracts"
 	securitymodel "praxis/internal/core/security"
+	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
 	toolcontracts "praxis/internal/tools/contracts"
 )
@@ -29,11 +30,7 @@ func (s *Executor) reserveCall(ctx context.Context, id contracts.ToolInvocationI
 		if err != nil {
 			return err
 		}
-		limit := task.Config.ResourceLimits.MaxToolCalls
-		if limit <= 0 {
-			limit = 128
-		}
-		if task.Progress.ToolCalls >= limit {
+		if task.Progress.ToolCalls >= taskmodel.MaxToolCalls {
 			return contracts.New(contracts.TaskResourceLimit, "tool call limit exceeded")
 		}
 		task.Progress.ToolCalls++

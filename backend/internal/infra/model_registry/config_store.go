@@ -35,20 +35,6 @@ func (e *ConfigurationError) Unwrap() error {
 // readModelConfigFile 解码并只读校验持久化的 canonical 配置，不清洗或静默修复字段。
 func readModelConfigFile(path string) (modelconfig.ValidatedConfig, error) {
 	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		config := modelconfig.Config{
-			Groups:    []modelconfig.Group{},
-			Providers: []modelconfig.Provider{},
-		}
-		payload, marshalErr := json.MarshalIndent(config, "", "  ")
-		if marshalErr != nil {
-			return modelconfig.ValidatedConfig{}, fmt.Errorf("encode models config template: %w", marshalErr)
-		}
-		if writeErr := os.WriteFile(path, append(payload, '\n'), 0o600); writeErr != nil {
-			return modelconfig.ValidatedConfig{}, fmt.Errorf("create models config: %w", writeErr)
-		}
-		file, err = os.Open(path)
-	}
 	if err != nil {
 		return modelconfig.ValidatedConfig{}, fmt.Errorf("open models config: %w", err)
 	}
@@ -65,24 +51,9 @@ func readModelConfigFile(path string) (modelconfig.ValidatedConfig, error) {
 	return modelconfig.NewValidatedConfig(config)
 }
 
-// readCredentialsFile 读取仅所有者可访问的凭据文档。文档缺失时创建空模板，
-// 确保新数据根目录始终包含可编辑的凭据文件。
+// readCredentialsFile 只读加载凭据文件，不创建目录或缺失文件。
 func readCredentialsFile(path string) (ProviderCredentials, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create auth config directory: %w", err)
-	}
 	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		document := ProviderCredentials{}
-		payload, marshalErr := json.MarshalIndent(document, "", "  ")
-		if marshalErr != nil {
-			return nil, fmt.Errorf("encode auth config template: %w", marshalErr)
-		}
-		if writeErr := os.WriteFile(path, append(payload, '\n'), 0o600); writeErr != nil {
-			return nil, fmt.Errorf("create auth config: %w", writeErr)
-		}
-		file, err = os.Open(path)
-	}
 	if err != nil {
 		return nil, fmt.Errorf("open auth config: %w", err)
 	}

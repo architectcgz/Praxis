@@ -24,7 +24,7 @@ func Load(modelsPath, credentialsPath string, client *http.Client, factories ...
 	if err != nil {
 		return nil, &ConfigurationError{Path: credentialsPath, Err: err}
 	}
-	credentials, err = normalizeCredentials(credentials)
+	credentials, err = validateCredentials(credentials)
 	if err != nil {
 		return nil, &ConfigurationError{Path: credentialsPath, Err: err}
 	}

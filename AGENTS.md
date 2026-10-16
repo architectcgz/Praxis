@@ -50,7 +50,7 @@ agent := AgentInfo{Profile: string(view.Agent.Profile), State: string(view.Agent
 - Constructor 成功后，同一调用链不得立即重复调用 `Validate`。对象发生状态变更后，或从持久化介质恢复后，才重新执行 `Validate`。
 - 持久化恢复属于不可信边界。恢复后的 `Validate` 必须拒绝空值、非法值和非 canonical 值，但不得把修正后的值静默写回对象。
 - 用户输入、Session 标题、队列 Prompt 由 application service 入口规范化；项目和 Workspace 路径由项目服务入口规范化，之后只接受 absolute normalized path。
-- 请求规范化与领域输入限制由 `internal/request` 统一负责：Wails binding 只构造 wire 形状的请求并做字段级形状检查，`request` 的 Constructor 负责复制、Trim、补展示默认值和引用校验，成功后返回 canonical request；service 只接收 canonical request，`core/model/config` 只定义类型、接口和只读校验，业务层不执行 Trim 或补默认值。配置文件恢复只读校验 canonical 数据，不清洗或静默修复。Agent 配置由配置加载器统一规范化；工具调用 ID 由 Provider stream 或工具调用入口统一规范化。
+- 请求规范化与领域输入限制由 `internal/request` 统一负责：Wails binding 只构造 wire 形状的请求并做字段级形状检查，`request` 的 Constructor 负责复制、Trim、补展示默认值和引用校验，成功后返回 canonical request；service 只接收 canonical request，`core/model/config` 只定义类型、接口和只读校验，业务层不执行 Trim 或补默认值。配置文件恢复只读校验 canonical 数据，不清洗或静默修复。Agent 配置文件只读校验 canonical 值；工具调用 ID 由 Provider stream 或工具调用入口统一规范化。
 - 工具参数的 JSON 结构、未知字段、重复字段、大小限制和路径约束由工具调用边界及对应 normalizer 负责；执行器不重复清洗已规范化参数。
 - 权限和安全检查不负责替业务输入清洗。授权函数只校验 canonical 路径和权限范围，不能通过隐式 trim 或 path clean 改变被授权对象。
 
@@ -78,4 +78,4 @@ if value == "" {
 - 消息位置索引按 Session 懒加载，以总条目数限制缓存；`LoadMessages` 和 `List` 保持只读，消息集合和序号边界必须来自同一次一致性读取。
 - `repository.MessageWriter` 定义 Assistant / ToolResult 的原子写入；Execution 直接注入 `repository.MessageStreams`，Loop 使用统一 Writer。工具回执和输出字节累计必须在同一事务中幂等提交。
 - 工具恢复决策属于 TaskService；启动时先协调上次进程的 running 调用，再恢复 Coordinator。普通业务恢复保留当前活跃调用和人工审批等待，未知副作用禁止自动重试。
-- JSONL 只接受带 v2 标识的新格式，不提供迁移或兼容读取。执行 `go vet ./...` 后运行 `backend/scripts/check-dependencies.sh` 验证分层。
+- JSONL 只接受带 v3 标识的新格式，不提供迁移或兼容读取。执行 `go vet ./...` 后运行 `backend/scripts/check-dependencies.sh` 验证分层。

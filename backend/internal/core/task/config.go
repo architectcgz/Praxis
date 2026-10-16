@@ -12,7 +12,6 @@ type Config struct {
 	SystemPrompt      string
 	Model             model.Config
 	WorkspacePath     string
-	ResourceLimits    contracts.ResourceLimits
 }
 
 func (s Config) Validate() error {
@@ -25,9 +24,6 @@ func (s Config) Validate() error {
 	}
 	if !pathutil.IsAbsoluteNormalized(s.WorkspacePath) {
 		return contracts.InvalidValue("task.config.workspacePath", "workspace path must be an absolute normalized path")
-	}
-	if err := s.ResourceLimits.Validate(); err != nil {
-		return contracts.FieldError("task.config.resourceLimits", err)
 	}
 	return nil
 }

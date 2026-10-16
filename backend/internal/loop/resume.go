@@ -14,7 +14,7 @@ import (
 var errAwaitingApproval = errors.New("task is awaiting tool approval")
 
 // resumeToolCalls 先结算已经提交的工具轮，再发起新的模型请求。
-func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messages []sessionmodel.MessageData, recorder repository.MessageWriter, modelContext *appcontext.ModelContext, budget *taskBudget) error {
+func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messages []sessionmodel.MessageData, recorder repository.MessageWriter, modelContext *appcontext.ModelContext) error {
 	receipts := make(map[string]bool)
 	for _, message := range messages {
 		for _, block := range message.Blocks {
@@ -34,16 +34,18 @@ func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messa
 			AgentID:       task.AgentID,
 			WorkspacePath: task.Config.WorkspacePath,
 		}
+		var calls []ToolCall
 		for _, block := range message.Blocks {
-			if block.Kind != sessionmodel.BlockToolCall || receipts[block.CallID] {
-				continue
+			if block.Kind == sessionmodel.BlockToolCall && !receipts[block.CallID] {
+				calls = append(calls, contracts.ToolCall{ID: block.CallID, Name: contracts.ToolName(block.Name), Arguments: block.Input})
 			}
-			call := contracts.ToolCall{ID: block.CallID, Name: contracts.ToolName(block.Name), Arguments: block.Input}
-			results, err := r.runToolCalls(ctx, recorder, []ToolCall{call}, metadata, task.RequestID, budget)
-			if err != nil {
-				return err
-			}
-			result := results[0]
+		}
+		results, err := r.runToolCalls(ctx, recorder, calls, metadata, task.RequestID)
+		if err != nil {
+			return err
+		}
+		for index, result := range results {
+			call := calls[index]
 			*modelContext = modelContext.RestoreToolResult(appcontext.NewToolResultBlock(call.ID, string(call.Name), result.Payload, result.ErrorClass != ""))
 		}
 	}

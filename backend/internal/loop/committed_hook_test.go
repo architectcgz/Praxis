@@ -12,6 +12,7 @@ import (
 	"praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	toolmodel "praxis/internal/core/tool_invocation"
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -28,7 +29,10 @@ type committedProgress struct{ task taskmodel.Task }
 func (p *committedProgress) LoadTask(context.Context, contracts.TaskID) (taskmodel.Task, error) {
 	return p.task, nil
 }
-func (*committedProgress) RecordModelRequest(context.Context, contracts.TaskID, uint64) error {
+func (*committedProgress) RecordIteration(context.Context, contracts.TaskID, uint64) error {
+	return nil
+}
+func (*committedProgress) RecordSummaryRequest(context.Context, contracts.TaskID, uint64) error {
 	return nil
 }
 func (*committedProgress) RecordModelOutput(context.Context, contracts.TaskID, int) error {
@@ -63,13 +67,21 @@ func (m *committedModel) Stream(context.Context, model.ModelRequest) (<-chan mod
 	return events, nil
 }
 
+type committedInvocations struct {
+	repository.ToolInvocationRepository
+}
+
+func (committedInvocations) FindByTaskCall(context.Context, contracts.TaskID, string) (toolmodel.ToolInvocation, error) {
+	return toolmodel.ToolInvocation{Status: toolmodel.ToolInvocationAwaitingApproval}, nil
+}
+
 type committedCatalog struct{ toolcontracts.ToolCatalog }
 
 func (committedCatalog) List() []ToolDefinition { return nil }
 
 type committedTools struct{}
 
-func (committedTools) Execute(context.Context, contracts.ToolCall, contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error) {
+func (committedTools) Execute(context.Context, toolcontracts.PreparedToolCall, contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error) {
 	return toolcontracts.ToolExecutionResult{ApprovalPending: true}, nil
 }
 
@@ -81,7 +93,8 @@ type committedWriter struct {
 	cancel   context.CancelFunc
 }
 
-func (w *committedWriter) AppendAssistant(_ context.Context, message sessionmodel.MessageData, _ contracts.ToolInvocationContext) (sessionmodel.MessageData, bool, error) {
+func (w *committedWriter) AppendAssistant(_ context.Context, value repository.AssistantWrite) (sessionmodel.MessageData, bool, error) {
+	message := value.Message
 	w.writes++
 	w.cancel()
 	message.Sequence = 10
@@ -164,6 +177,7 @@ func TestAssistantCommittedHook(t *testing.T) {
 				return errors.New("hook failed")
 			}))
 			runner, err := NewRunner(Config{
+				Invocations:    committedInvocations{},
 				Progress:       &committedProgress{task: task},
 				ModelBuilder:   provider,
 				Tools:          committedCatalog{},

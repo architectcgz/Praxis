@@ -14,8 +14,17 @@ type Strategy interface {
 	Compress(context.Context, appcontext.ModelContext, Options, SummarizeFunc) (appcontext.ModelContext, bool, error)
 }
 
+// SummaryFormat 由应用提供提示词和历史资料文本格式。
+type SummaryFormat struct {
+	SystemPrompt          string
+	PreviousSummaryHeader string
+	TranscriptHeader      string
+	ResultPrefix          string
+}
+
 // Options 使用调用方提供的模型窗口，ReservedTokens 为工具定义等请求开销。
 type Options struct {
+	SummaryFormat   SummaryFormat
 	ContextWindow   int
 	MaxOutputTokens int
 	ReservedTokens  int

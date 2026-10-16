@@ -72,7 +72,7 @@ func TestFrozenSelectionAndContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn := contracts.NewTurnID(prepared.ID, 1)
-	_, _, err = writer.AppendAssistant(ctx, sessionmodel.MessageData{
+	_, _, err = writer.AppendAssistant(ctx, testAssistantWrite(t, sessionmodel.MessageData{
 		ID:         "assistant:" + turn.String(),
 		TaskID:     prepared.ID.String(),
 		RequestID:  prepared.RequestID.String(),
@@ -88,7 +88,7 @@ func TestFrozenSelectionAndContinuation(t *testing.T) {
 		TaskID:        prepared.ID,
 		TurnID:        turn,
 		WorkspacePath: prepared.Config.WorkspacePath,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

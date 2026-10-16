@@ -7,7 +7,6 @@ import (
 
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"praxis/internal/hooks"
@@ -68,8 +67,8 @@ func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome t
 	params := settleParams{
 		TaskID:         taskID,
 		Outcome:        outcome,
-		FailureCode:    contracts.TaskFailureCode(strings.TrimSpace(string(failureCode))),
-		FailureMessage: strings.TrimSpace(failureMessage),
+		FailureCode:    failureCode,
+		FailureMessage: failureMessage,
 	}
 	if ctx == nil {
 		return taskmodel.Task{}, errors.New("task end context is required")

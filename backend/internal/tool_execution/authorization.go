@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 
 	"praxis/internal/contracts"
 	securitymodel "praxis/internal/core/security"
@@ -83,39 +82,4 @@ func (s *Executor) admit(ctx context.Context, invocation toolmodel.ToolInvocatio
 		return nil
 	})
 	return invocation, err
-}
-
-func resolveNormalizedPath(
-	call toolcontracts.NormalizedToolCall,
-	workspacePath string,
-) (toolcontracts.NormalizedToolCall, error) {
-	if call.Path == "" {
-		return call, nil
-	}
-	if workspacePath == "" {
-		return toolcontracts.NormalizedToolCall{}, errors.New("tool workspace path is required")
-	}
-	path := call.Path
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(workspacePath, path)
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil || filepath.Clean(absolute) == "." {
-		return toolcontracts.NormalizedToolCall{}, errors.New("tool path is invalid")
-	}
-	call.Path = filepath.Clean(absolute)
-	arguments := make(map[string]json.RawMessage)
-	if err := json.Unmarshal(call.NormalizedArguments, &arguments); err != nil {
-		return toolcontracts.NormalizedToolCall{}, errors.New("tool path arguments are invalid")
-	}
-	encodedPath, err := json.Marshal(call.Path)
-	if err != nil {
-		return toolcontracts.NormalizedToolCall{}, err
-	}
-	arguments["path"] = encodedPath
-	call.NormalizedArguments, err = json.Marshal(arguments)
-	if err != nil {
-		return toolcontracts.NormalizedToolCall{}, errors.New("tool path arguments could not be encoded")
-	}
-	return call, nil
 }

@@ -82,7 +82,10 @@ func (s *restoreOperations) Next(context.Context, contracts.AgentID) (taskmodel.
 func (s *restoreOperations) LoadTask(context.Context, contracts.TaskID) (taskmodel.Task, error) {
 	return s.task, nil
 }
-func (*restoreOperations) RecordModelRequest(context.Context, contracts.TaskID, uint64) error {
+func (*restoreOperations) RecordIteration(context.Context, contracts.TaskID, uint64) error {
+	return nil
+}
+func (*restoreOperations) RecordSummaryRequest(context.Context, contracts.TaskID, uint64) error {
 	return nil
 }
 func (*restoreOperations) RecordModelOutput(context.Context, contracts.TaskID, int) error { return nil }
@@ -141,7 +144,10 @@ func newRestoreCoordinator(t *testing.T) (*Coordinator, *restoreOperations) {
 		allow:   make(chan struct{}),
 	}
 	runner, err := loop.NewRunner(loop.Config{
-		Progress:      ops,
+		Progress: ops,
+		Invocations: struct {
+			repository.ToolInvocationRepository
+		}{},
 		ModelBuilder:  restoreBuilder{},
 		Tools:         restoreCatalog{},
 		ToolExecutor:  restoreTools{},

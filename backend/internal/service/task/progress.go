@@ -12,12 +12,30 @@ func (s *Service) LoadTask(ctx context.Context, id contracts.TaskID) (taskmodel.
 	return s.tasks.Get(ctx, id)
 }
 
-// RecordModelRequest 在请求模型前原子推进序号并累计次数；事务失败不消耗进度。
-func (s *Service) RecordModelRequest(ctx context.Context, id contracts.TaskID, sequence uint64) error {
+// RecordIteration 在真实 ReAct 请求前原子预留一次迭代。
+func (s *Service) RecordIteration(ctx context.Context, id contracts.TaskID, sequence uint64) error {
+	return s.recordRequest(ctx, id, sequence, true)
+}
+
+// RecordSummaryRequest 仅统计摘要请求，不消耗 ReAct 迭代。
+func (s *Service) RecordSummaryRequest(ctx context.Context, id contracts.TaskID, sequence uint64) error {
+	return s.recordRequest(ctx, id, sequence, false)
+}
+
+func (s *Service) recordRequest(ctx context.Context, id contracts.TaskID, sequence uint64, iteration bool) error {
 	return s.tx.InTx(ctx, func(txCtx context.Context) error {
 		task, err := s.tasks.Get(txCtx, id)
 		if err != nil {
 			return err
+		}
+		if !task.Active() || sequence != max(uint64(1), task.Progress.NextSequence) {
+			return contracts.ErrRequestConflict
+		}
+		if iteration {
+			if task.Progress.Iterations >= taskmodel.MaxIterations {
+				return contracts.New(contracts.TaskResourceLimit, "model iteration limit exceeded")
+			}
+			task.Progress.Iterations++
 		}
 		task.Progress.NextSequence = sequence + 1
 		task.Progress.ModelRequests++

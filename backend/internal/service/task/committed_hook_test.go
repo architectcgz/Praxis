@@ -3,7 +3,9 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	toolmodel "praxis/internal/core/tool_invocation"
 	"reflect"
 	"sync"
 	"testing"
@@ -391,7 +393,7 @@ func TestAssistantWriterReportsOnlyCommittedInsert(t *testing.T) {
 		{Kind: sessionmodel.BlockToolCall, CallID: "call", Name: "read_file"},
 		{Kind: sessionmodel.BlockToolCall, CallID: "call", Name: "read_file"},
 	}
-	if _, inserted, err := writer.AppendAssistant(ctx, invalid, metadata); err == nil || inserted {
+	if _, inserted, err := writer.AppendAssistant(ctx, testAssistantWrite(t, invalid, metadata)); err == nil || inserted {
 		t.Fatalf("failed transaction must not report insertion: inserted=%v, err=%v", inserted, err)
 	}
 	stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
@@ -399,7 +401,7 @@ func TestAssistantWriterReportsOnlyCommittedInsert(t *testing.T) {
 		t.Fatalf("failed transaction left a message: %+v, %v", stream, err)
 	}
 	for i := 0; i < 2; i++ {
-		saved, inserted, err := writer.AppendAssistant(ctx, message, metadata)
+		saved, inserted, err := writer.AppendAssistant(ctx, testAssistantWrite(t, message, metadata))
 		if err != nil || inserted != (i == 0) || saved.Sequence == 0 || saved.CreatedAt.IsZero() {
 			t.Fatalf("incorrect duplicate write flag: inserted=%v, err=%v", inserted, err)
 		}
@@ -410,7 +412,29 @@ func TestAssistantWriterReportsOnlyCommittedInsert(t *testing.T) {
 	}
 	conflict := message
 	conflict.Blocks = []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: "不同回答"}}
-	if _, inserted, err := writer.AppendAssistant(ctx, conflict, metadata); !errors.Is(err, contracts.ErrRequestConflict) || inserted {
+	if _, inserted, err := writer.AppendAssistant(ctx, testAssistantWrite(t, conflict, metadata)); !errors.Is(err, contracts.ErrRequestConflict) || inserted {
 		t.Fatalf("conflicting message must not report insertion: inserted=%v, err=%v", inserted, err)
 	}
+}
+
+func testAssistantWrite(t testing.TB, message sessionmodel.MessageData, metadata contracts.ToolInvocationContext) repository.AssistantWrite {
+	t.Helper()
+	value := repository.AssistantWrite{Message: message}
+	if message.StopReason == "completed" || message.StopReason == "stop_sequence" {
+		value.FinalOutput = &taskmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
+	}
+	for index, block := range message.Blocks {
+		if block.Kind != sessionmodel.BlockToolCall {
+			continue
+		}
+		if len(block.Input) == 0 {
+			continue
+		}
+		call, err := toolmodel.NewToolInvocation(contracts.ToolInvocationID(fmt.Sprintf("inv-%s-%d", message.ID, index)), metadata.TaskID, metadata.TurnID, metadata.SessionID, metadata.AgentID, block.CallID, contracts.ToolName(block.Name), block.Input, toolmodel.ArgumentsDigest(contracts.ToolName(block.Name), block.Input), time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		value.ToolCalls = append(value.ToolCalls, call)
+	}
+	return value
 }

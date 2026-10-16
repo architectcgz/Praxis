@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"praxis/internal/contracts"
@@ -19,7 +18,7 @@ type arguments struct {
 }
 
 // Normalize 校验补丁格式并规范化补丁工作区根目录。
-func Normalize(call contracts.ToolCall) (toolcontracts.NormalizedToolCall, error) {
+func Normalize(call contracts.ToolCall, workspacePath string) (toolcontracts.NormalizedToolCall, error) {
 	invalidArguments := func(reason string) (toolcontracts.NormalizedToolCall, error) {
 		return toolcontracts.NormalizedToolCall{}, fmt.Errorf("apply_patch arguments are invalid: %s", reason)
 	}
@@ -56,7 +55,12 @@ func Normalize(call contracts.ToolCall) (toolcontracts.NormalizedToolCall, error
 
 	normalized := arguments{Patch: raw.Patch, Path: "."}
 	if strings.TrimSpace(raw.Path) != "" {
-		normalized.Path = filepath.Clean(raw.Path)
+		normalized.Path = raw.Path
+	}
+	var err error
+	normalized.Path, err = toolshared.ResolvePath(normalized.Path, workspacePath)
+	if err != nil {
+		return invalidArguments(err.Error())
 	}
 	encoded, err := json.Marshal(normalized)
 	if err != nil {

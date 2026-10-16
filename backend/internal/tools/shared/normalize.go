@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"praxis/internal/contracts"
@@ -28,6 +27,7 @@ type pathInput struct {
 // name 指定工具名称，三个 limit 参数指定默认值和有效范围；参数无效时返回错误。
 func NormalizePathArguments(
 	call contracts.ToolCall,
+	workspacePath string,
 	name toolcontracts.ToolName,
 	defaultLimit int,
 	minLimit int,
@@ -74,7 +74,11 @@ func NormalizePathArguments(
 	if normalizedArguments.Limit < minLimit || normalizedArguments.Limit > maxLimit {
 		return invalidArguments(fmt.Sprintf("limit must be between %d and %d", minLimit, maxLimit))
 	}
-	normalizedArguments.Path = filepath.Clean(normalizedArguments.Path)
+	var err error
+	normalizedArguments.Path, err = ResolvePath(normalizedArguments.Path, workspacePath)
+	if err != nil {
+		return invalidArguments(err.Error())
+	}
 	normalized, err := json.Marshal(normalizedArguments)
 	if err != nil {
 		return toolcontracts.NormalizedToolCall{}, fmt.Errorf("encode %s arguments: %w", toolLabel, err)

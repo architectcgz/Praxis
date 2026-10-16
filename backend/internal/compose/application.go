@@ -84,6 +84,9 @@ func Open(
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
 	}
+	if err := initializeDefaultFiles(ctx, root); err != nil {
+		return nil, err
+	}
 	store, err := jsonl.Open(ctx, root.Runtime)
 	if err != nil {
 		return nil, fmt.Errorf("open JSONL: %w", err)
@@ -274,6 +277,8 @@ func Open(
 		}
 		builtRunner, buildErr := loop.NewRunner(loop.Config{
 			ModelBuilder:   modelRegistry,
+			Invocations:    repos.ToolInvocations,
+			SummaryFormat:  defaultSummaryFormat(),
 			Progress:       taskService,
 			ToolExecutor:   toolExecutor,
 			Tools:          toolCatalog,

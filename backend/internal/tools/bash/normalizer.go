@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"path/filepath"
 	"strings"
 
 	"praxis/internal/contracts"
@@ -33,7 +32,7 @@ type input struct {
 }
 
 // Normalize 校验 bash 参数，并将工作目录交给统一路径解析流程处理。
-func Normalize(call contracts.ToolCall) (toolcontracts.NormalizedToolCall, error) {
+func Normalize(call contracts.ToolCall, workspacePath string) (toolcontracts.NormalizedToolCall, error) {
 	invalidArguments := func(reason string) (toolcontracts.NormalizedToolCall, error) {
 		return toolcontracts.NormalizedToolCall{}, fmt.Errorf("bash arguments are invalid: %s", reason)
 	}
@@ -64,7 +63,7 @@ func Normalize(call contracts.ToolCall) (toolcontracts.NormalizedToolCall, error
 
 	normalized := arguments{Command: raw.Command, Path: ".", Timeout: defaultTimeout}
 	if strings.TrimSpace(raw.Path) != "" {
-		normalized.Path = filepath.Clean(raw.Path)
+		normalized.Path = raw.Path
 	}
 	if len(raw.Timeout) > 0 {
 		if bytes.Equal(bytes.TrimSpace(raw.Timeout), []byte("null")) {
@@ -75,6 +74,11 @@ func Normalize(call contracts.ToolCall) (toolcontracts.NormalizedToolCall, error
 			normalized.Timeout <= 0 || normalized.Timeout > maxTimeout {
 			return invalidArguments("timeout must be greater than 0 and within the supported range")
 		}
+	}
+	var err error
+	normalized.Path, err = toolshared.ResolvePath(normalized.Path, workspacePath)
+	if err != nil {
+		return invalidArguments(err.Error())
 	}
 	encoded, err := json.Marshal(normalized)
 	if err != nil {

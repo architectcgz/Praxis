@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 
@@ -41,6 +42,15 @@ func (s *Service) PreviewFile(ctx context.Context, canonical request.FilePreview
 		return FilePreview{}, contracts.New(contracts.InvalidRequest, "only files within the current workspace can be previewed")
 	}
 	content, err := s.textReader.ReadText(ctx, workspace.Path, path, maxPreviewBytes)
+	if errors.Is(err, contracts.ErrFileTooLarge) {
+		return FilePreview{}, contracts.New(contracts.InvalidRequest, "file exceeds the 1 MiB preview limit")
+	}
+	if errors.Is(err, contracts.ErrNotRegularFile) {
+		return FilePreview{}, contracts.New(contracts.InvalidRequest, "only regular text files can be previewed")
+	}
+	if errors.Is(err, contracts.ErrInvalidText) {
+		return FilePreview{}, contracts.New(contracts.InvalidRequest, "only UTF-8 text can be previewed; binary files are not supported")
+	}
 	if err != nil {
 		return FilePreview{}, err
 	}

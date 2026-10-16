@@ -36,7 +36,7 @@ func New(root string) (*Store, error) {
 //
 // collection 与 id 代表业务维度（聚合类型与聚合 ID，如 task/<id>），
 // 二者共同决定目录；文件名由内容哈希决定，因此重复写入同一内容会直接复用。
-// 写入前会拒绝含敏感字段或非法路径片段的文档。
+// 写入前拒绝非法路径片段。
 func (s *Store) Put(ctx context.Context, collection, id string, value any) (string, error) {
 	if ctx == nil {
 		return "", errors.New("document write context is required")
@@ -50,13 +50,6 @@ func (s *Store) Put(ctx context.Context, collection, id string, value any) (stri
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return "", fmt.Errorf("encode document: %w", err)
-	}
-	var checked any
-	if err := json.Unmarshal(encoded, &checked); err != nil {
-		return "", fmt.Errorf("inspect document: %w", err)
-	}
-	if containsSensitiveValue(checked) {
-		return "", errors.New("document contains a sensitive field")
 	}
 	digest := sha256.Sum256(encoded)
 	name := "sha256-" + hex.EncodeToString(digest[:])
@@ -165,26 +158,4 @@ func isValidDocumentRef(value string) bool {
 	parts := strings.Split(value, "/")
 	return len(parts) == 3 && isValidDocumentKeyPart(parts[0]) && isValidDocumentKeyPart(parts[1]) &&
 		strings.HasPrefix(parts[2], "sha256-") && strings.HasSuffix(parts[2], ".json")
-}
-
-func containsSensitiveValue(value any) bool {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, child := range typed {
-			switch strings.ToLower(key) {
-			case "apikey", "api_key", "authorization", "secret", "token", "providerpayload", "provider_payload", "hiddenprompt", "hidden_prompt":
-				return true
-			}
-			if containsSensitiveValue(child) {
-				return true
-			}
-		}
-	case []any:
-		for _, child := range typed {
-			if containsSensitiveValue(child) {
-				return true
-			}
-		}
-	}
-	return false
 }

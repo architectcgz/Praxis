@@ -2,56 +2,94 @@ package jsonl
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-
 	"praxis/internal/contracts"
 	sessionmodel "praxis/internal/core/session"
 	toolmodel "praxis/internal/core/tool_invocation"
-	"praxis/internal/system"
+	"praxis/internal/repository"
 )
 
-// AppendAssistant 在同一个 Session 事务内保存消息和整批 requested 调用。
-// 只登记合法 JSON 的原始调用意图，不执行工具；参数语义和权限在 Executor 中校验。
-// 返回实际保存的消息及新增标记；任一保存失败都回滚整批并返回 inserted=false。
-func (w MessageWriter) AppendAssistant(
-	ctx context.Context,
-	message sessionmodel.MessageData,
-	metadata contracts.ToolInvocationContext,
-) (stored sessionmodel.MessageData, inserted bool, err error) {
-	if ctx == nil || w.owner.ID != metadata.AgentID || w.owner.SessionID != metadata.SessionID || message.Role != sessionmodel.RoleAssistant ||
-		message.AuthorKind != sessionmodel.AuthorAgent || message.AuthorID != metadata.AgentID.String() ||
-		message.TaskID != metadata.TaskID.String() || message.TurnID != metadata.TurnID.String() || metadata.TurnID == "" {
-		return sessionmodel.MessageData{}, false, errors.New("assistant tool call ownership is required")
+// AppendAssistant 原子提交调用方已构建的消息、工具身份及最终输出证据。
+func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.AssistantWrite) (stored sessionmodel.MessageData, inserted bool, err error) {
+	message := value.Message
+	if ctx == nil || message.Role != sessionmodel.RoleAssistant || message.AuthorKind != sessionmodel.AuthorAgent || message.AuthorID != w.owner.ID.String() || message.TurnID == "" {
+		return stored, false, errors.New("assistant ownership is required")
 	}
 	err = w.streams.s.InTx(ctx, func(txCtx context.Context) error {
-		task, err := (TaskRepository{w.streams.s}).Get(txCtx, metadata.TaskID)
+		task, err := (TaskRepository{w.streams.s}).Get(txCtx, contracts.TaskID(message.TaskID))
 		if err != nil {
 			return err
 		}
-		if !task.Active() || task.SessionID != metadata.SessionID || task.AgentID != metadata.AgentID || task.Config.WorkspacePath != metadata.WorkspacePath || message.RequestID != task.RequestID.String() {
+		if !task.Active() || task.SessionID != w.owner.SessionID || task.AgentID != w.owner.ID || message.RequestID != task.RequestID.String() {
 			return contracts.ErrRequestConflict
+		}
+		calls := make(map[string]toolmodel.ToolInvocation, len(value.ToolCalls))
+		for _, call := range value.ToolCalls {
+			if err := call.Validate(); err != nil {
+				return err
+			}
+			if _, ok := calls[call.ProviderToolCallID]; ok {
+				return contracts.ErrRequestConflict
+			}
+			if call.TaskID != task.ID || call.SessionID != task.SessionID || call.AgentID != task.AgentID || call.TurnID.String() != message.TurnID || call.ArgumentsDigest != toolmodel.ArgumentsDigest(call.Name, call.Arguments) || call.Status != toolmodel.ToolInvocationRequested || call.BudgetReserved || len(call.NormalizedArguments) != 0 || call.Path != "" {
+				return contracts.ErrRequestConflict
+			}
+			calls[call.ProviderToolCallID] = call
+		}
+		for _, block := range message.Blocks {
+			if block.Kind != sessionmodel.BlockToolCall {
+				continue
+			}
+			call, ok := calls[block.CallID]
+			if !ok || string(call.Name) != block.Name || call.ArgumentsDigest != toolmodel.ArgumentsDigest(call.Name, block.Input) {
+				return contracts.ErrRequestConflict
+			}
+			delete(calls, block.CallID)
+		}
+		if len(calls) != 0 {
+			return contracts.ErrRequestConflict
+		}
+		if value.FinalOutput != nil {
+			if value.FinalOutput.AssistantID != message.ID || value.FinalOutput.StopReason != message.StopReason {
+				return contracts.ErrRequestConflict
+			}
+			if err := task.RecordFinalOutput(*value.FinalOutput); err != nil {
+				return err
+			}
 		}
 		stored, inserted, err = w.streams.s.appendMessage(txCtx, w.owner, message)
 		if err != nil {
 			return err
 		}
-		seen := make(map[string]bool)
-		for _, block := range message.Blocks {
-			if block.Kind != sessionmodel.BlockToolCall {
+		for _, call := range value.ToolCalls {
+			existing, err := (ToolRepository{w.streams.s}).FindByTaskCall(txCtx, task.ID, call.ProviderToolCallID)
+			if err == nil {
+				if existing.Name != call.Name || existing.ArgumentsDigest != call.ArgumentsDigest || existing.TurnID != call.TurnID || existing.SessionID != call.SessionID || existing.AgentID != call.AgentID {
+					return contracts.ErrRequestConflict
+				}
 				continue
 			}
-			if seen[block.CallID] {
+			if !errors.Is(err, contracts.ErrNotFound) {
+				return err
+			}
+			if !inserted {
 				return contracts.ErrRequestConflict
 			}
-			seen[block.CallID] = true
-			if err := w.recordCall(txCtx, toolCall(block), metadata); err != nil {
+			if err := (ToolRepository{w.streams.s}).Save(txCtx, call); err != nil {
 				return err
 			}
 		}
-		if message.StopReason == "completed" || message.StopReason == "stop_sequence" {
-			task.Progress.FinalStopReason = message.StopReason
-			task.Progress.FinalAssistantID = message.ID
+		if !inserted {
+			current, err := (TaskRepository{w.streams.s}).Get(txCtx, task.ID)
+			if err != nil {
+				return err
+			}
+			if current.Progress != task.Progress {
+				return contracts.ErrRequestConflict
+			}
+			return nil
+		}
+		if value.FinalOutput != nil {
 			return (TaskRepository{w.streams.s}).Save(txCtx, task)
 		}
 		return nil
@@ -60,48 +98,4 @@ func (w MessageWriter) AppendAssistant(
 		return sessionmodel.MessageData{}, false, err
 	}
 	return stored, inserted, nil
-}
-
-func toolCall(block sessionmodel.Block) contracts.ToolCall {
-	arguments := block.Input
-	if len(arguments) == 0 {
-		arguments = json.RawMessage(`{}`)
-	}
-	return contracts.ToolCall{
-		ID:        block.CallID,
-		Name:      contracts.ToolName(block.Name),
-		Arguments: arguments,
-	}
-}
-
-// recordCall 只在 assistant 保存事务中登记调用，重复身份必须保持原始意图和归属一致。
-func (w MessageWriter) recordCall(
-	ctx context.Context,
-	call contracts.ToolCall,
-	provided contracts.ToolInvocationContext,
-) error {
-	digest := toolmodel.ArgumentsDigest(call.Name, call.Arguments)
-	if digest == "" {
-		return errors.New("tool invocation arguments could not be fingerprinted")
-	}
-	existing, err := (ToolRepository{w.streams.s}).FindByTaskCall(ctx, provided.TaskID, call.ID)
-	if err == nil {
-		if existing.Name != call.Name || existing.ArgumentsDigest != digest || existing.TurnID != provided.TurnID ||
-			existing.AgentID != provided.AgentID || existing.SessionID != provided.SessionID {
-			return contracts.ErrRequestConflict
-		}
-		return nil
-	}
-	if !errors.Is(err, contracts.ErrNotFound) {
-		return err
-	}
-	invocation, err := toolmodel.NewToolInvocation(
-		contracts.ToolInvocationID(system.IDsOrDefault(nil).New("toolinvocation")), provided.TaskID,
-		provided.TurnID, provided.SessionID, provided.AgentID, call.ID, call.Name,
-		call.Arguments, digest, system.ClockOrDefault(nil).Now(),
-	)
-	if err != nil {
-		return err
-	}
-	return (ToolRepository{w.streams.s}).Save(ctx, invocation)
 }

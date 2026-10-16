@@ -61,6 +61,7 @@ type ToolFailureCode string
 
 const (
 	ToolFailureNone            ToolFailureCode = ""
+	ToolFailureResourceLimit   ToolFailureCode = "tool_call_limit"
 	ToolFailureInvalidCall     ToolFailureCode = "invalid_tool_call"
 	ToolFailureNotAllowed      ToolFailureCode = "tool_not_allowed"
 	ToolFailureApprovalDenied  ToolFailureCode = "tool_approval_denied"
@@ -72,7 +73,7 @@ const (
 // Valid 判断失败码是否受支持；空值表示没有失败。
 func (c ToolFailureCode) Valid() bool {
 	switch c {
-	case ToolFailureNone, ToolFailureInvalidCall, ToolFailureNotAllowed, ToolFailureApprovalDenied,
+	case ToolFailureResourceLimit, ToolFailureNone, ToolFailureInvalidCall, ToolFailureNotAllowed, ToolFailureApprovalDenied,
 		ToolFailureExecutionFailed, ToolFailureResultUnknown, ToolFailureInterrupted:
 		return true
 	default:
@@ -247,7 +248,7 @@ func (i ToolInvocation) Validate() error {
 			return contracts.InvalidValue("toolInvocation.result", "failed invocation requires a failure code")
 		}
 	case ToolInvocationDenied:
-		if i.FailureCode != ToolFailureNotAllowed && i.FailureCode != ToolFailureApprovalDenied && i.FailureCode != ToolFailureInvalidCall {
+		if i.FailureCode != ToolFailureResourceLimit && i.FailureCode != ToolFailureNotAllowed && i.FailureCode != ToolFailureApprovalDenied && i.FailureCode != ToolFailureInvalidCall {
 			return contracts.InvalidValue("toolInvocation.result", "denial requires a denial failure code")
 		}
 	case ToolInvocationInterrupted:
@@ -264,7 +265,7 @@ func (i ToolInvocation) Validate() error {
 
 // AwaitApproval 保存规范化意图，等待用户批准，不能启动执行。
 func (i *ToolInvocation) AwaitApproval() error {
-	if i.Status != ToolInvocationRequested {
+	if i.Status == ToolInvocationAwaitingApproval || !canTransition(i.Status, ToolInvocationAwaitingApproval) {
 		return contracts.InvalidTransition("toolInvocation", string(i.Status), string(ToolInvocationAwaitingApproval))
 	}
 	next := *i
@@ -274,7 +275,7 @@ func (i *ToolInvocation) AwaitApproval() error {
 
 // Approve 接受 requested 或 awaiting_approval 调用的有效审批；失败不修改对象。
 func (i *ToolInvocation) Approve(approval contracts.ApprovalRecord) error {
-	if i.Status != ToolInvocationRequested && i.Status != ToolInvocationAwaitingApproval {
+	if i.Status == ToolInvocationApproved || !canTransition(i.Status, ToolInvocationApproved) {
 		return contracts.InvalidTransition("toolInvocation", string(i.Status), string(ToolInvocationApproved))
 	}
 	next := *i
@@ -287,7 +288,7 @@ func (i *ToolInvocation) Approve(approval contracts.ApprovalRecord) error {
 
 // Start 将 approved 调用转为 running；开始时间不得早于审批，失败不修改对象。
 func (i *ToolInvocation) Start(at time.Time) error {
-	if i.Status != ToolInvocationApproved {
+	if i.Status == ToolInvocationRunning || !canTransition(i.Status, ToolInvocationRunning) {
 		return contracts.InvalidTransition("toolInvocation", string(i.Status), string(ToolInvocationRunning))
 	}
 	next := *i
@@ -322,15 +323,7 @@ func (i *ToolInvocation) MarkResultUnknown(result ToolInvocationResult, at time.
 }
 
 func (i *ToolInvocation) settle(status ToolInvocationStatus, result ToolInvocationResult, code ToolFailureCode, at time.Time) error {
-	allowed := false
-	switch status {
-	case ToolInvocationDenied:
-		allowed = i.Status == ToolInvocationRequested || i.Status == ToolInvocationAwaitingApproval
-	case ToolInvocationInterrupted:
-		allowed = i.Status.Valid() && !i.Status.Terminal()
-	default:
-		allowed = i.Status == ToolInvocationRunning
-	}
+	allowed := i.Status != status && canTransition(i.Status, status)
 	if !allowed {
 		return contracts.InvalidTransition("toolInvocation", string(i.Status), string(status))
 	}
@@ -344,7 +337,7 @@ func (i *ToolInvocation) settle(status ToolInvocationStatus, result ToolInvocati
 
 // apply 先验证完整候选状态，避免时间、审批或结果校验失败后留下半更新对象。
 func (i *ToolInvocation) apply(next ToolInvocation) error {
-	if err := next.Validate(); err != nil {
+	if err := ValidateUpdate(*i, next); err != nil {
 		return err
 	}
 	*i = next

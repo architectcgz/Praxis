@@ -4,36 +4,32 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 
 	modelconfig "praxis/internal/core/model/config"
 )
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// normalizeCredentials 校验持久化凭据文档，返回 Provider ID、凭据类型
-// 和密钥均已规范化的深拷贝。
+// validateCredentials 只读校验凭据身份，原样复制密钥，不裁剪内容。
 //
 // 保留不在当前模型配置中的 Provider 条目：两个文档独立管理，
 // 凭据仅在已配置的 Provider 按 ID 解析时生效。
-func normalizeCredentials(document ProviderCredentials) (ProviderCredentials, error) {
-	normalized := make(ProviderCredentials, len(document))
+func validateCredentials(document ProviderCredentials) (ProviderCredentials, error) {
+	validated := make(ProviderCredentials, len(document))
 	for providerID, credential := range document {
-		id := strings.TrimSpace(providerID)
+		id := providerID
 		if !idPattern.MatchString(id) {
 			return nil, fmt.Errorf("auth config: invalid provider id %q", id)
 		}
-		credential.Type = CredentialType(strings.TrimSpace(string(credential.Type)))
-		credential.Key = strings.TrimSpace(credential.Key)
 		if credential.Type != CredentialTypeAPIKey {
 			return nil, fmt.Errorf("auth config: provider %q: unsupported credential type %q", id, credential.Type)
 		}
 		if credential.Key == "" {
 			return nil, fmt.Errorf("auth config: provider %q: credential key is required", id)
 		}
-		normalized[id] = credential
+		validated[id] = credential
 	}
-	return normalized, nil
+	return validated, nil
 }
 
 // SetProviderKey 保存或清除已配置 Provider 的 API 密钥。
@@ -51,7 +47,6 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 		return fmt.Errorf("provider %q is not configured", providerID)
 	}
 	credentials := cloneCredentials(r.credentials)
-	value = strings.TrimSpace(value)
 	if value == "" {
 		delete(credentials, providerID)
 	} else {

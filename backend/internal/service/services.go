@@ -146,7 +146,8 @@ func (s *Services) SaveModelConfig(canonical request.SaveModelConfig) error {
 }
 
 // SetProviderKey 写入或清除一个已配置 Provider 的 API key。
-func (s *Services) SetProviderKey(providerID, value string) error {
+func (s *Services) SetProviderKey(canonical request.SetProviderKey) error {
+	providerID, value := canonical.ProviderID, canonical.Key
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	if s.models == nil {

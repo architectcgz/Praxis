@@ -3,6 +3,7 @@ package jsonl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -45,12 +46,12 @@ func (f *storeFixture) toolCall(t testing.TB, task taskmodel.Task) (repository.M
 			Input:  []byte(`{}`),
 		}},
 	}
-	_, inserted, err := writer.AppendAssistant(ctx, message, metadata)
+	_, inserted, err := writer.AppendAssistant(ctx, testAssistantWrite(t, message, metadata))
 	requireOK(t, err)
 	if !inserted {
 		t.Fatal("initial tool invocation was not saved")
 	}
-	_, inserted, err = writer.AppendAssistant(ctx, message, metadata)
+	_, inserted, err = writer.AppendAssistant(ctx, testAssistantWrite(t, message, metadata))
 	requireOK(t, err)
 	if inserted {
 		t.Fatal("same call declaration was saved twice")
@@ -217,5 +218,129 @@ func TestConcurrentToolApprovalIsIdempotent(t *testing.T) {
 	requireOK(t, err)
 	if inv.Status != toolmodel.ToolInvocationApproved {
 		t.Fatal(inv)
+	}
+}
+
+func testAssistantWrite(t testing.TB, message sessionmodel.MessageData, metadata contracts.ToolInvocationContext) repository.AssistantWrite {
+	t.Helper()
+	value := repository.AssistantWrite{Message: message}
+	if message.StopReason == "completed" || message.StopReason == "stop_sequence" {
+		value.FinalOutput = &taskmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
+	}
+	for index, block := range message.Blocks {
+		if block.Kind != sessionmodel.BlockToolCall {
+			continue
+		}
+		if len(block.Input) == 0 {
+			continue
+		}
+		call, err := toolmodel.NewToolInvocation(contracts.ToolInvocationID(fmt.Sprintf("inv-%s-%d", message.ID, index)), metadata.TaskID, metadata.TurnID, metadata.SessionID, metadata.AgentID, block.CallID, contracts.ToolName(block.Name), block.Input, toolmodel.ArgumentsDigest(contracts.ToolName(block.Name), block.Input), time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		value.ToolCalls = append(value.ToolCalls, call)
+	}
+	return value
+}
+
+func TestAssistantFinalEvidenceIsExplicitAndAtomic(t *testing.T) {
+	f := newStoreFixture(t)
+	value := f.activeTask(t)
+	ctx := context.Background()
+	writer, err := f.repos.Messages.Writer(ctx, "session", "agent")
+	requireOK(t, err)
+	turn := contracts.NewTurnID(value.ID, 1)
+	message := sessionmodel.MessageData{
+		ID:         "assistant:" + turn.String(),
+		RequestID:  value.RequestID.String(),
+		TaskID:     value.ID.String(),
+		TurnID:     turn.String(),
+		Role:       sessionmodel.RoleAssistant,
+		AuthorKind: sessionmodel.AuthorAgent,
+		AuthorID:   "agent",
+		StopReason: "completed",
+		Blocks:     []sessionmodel.Block{{Kind: sessionmodel.BlockText, Text: "done"}},
+	}
+	write := repository.AssistantWrite{Message: message, FinalOutput: &taskmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}}
+	sentinel := errors.New("rollback")
+	requireRollback := f.store.InTx(ctx, func(ctx context.Context) error {
+		if _, _, err := writer.AppendAssistant(ctx, write); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(requireRollback, sentinel) {
+		t.Fatal(requireRollback)
+	}
+	stored, err := f.repos.Tasks.Get(ctx, value.ID)
+	requireOK(t, err)
+	if stored.Progress.FinalAssistantID != "" {
+		t.Fatal("rolled-back final evidence persisted")
+	}
+	stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
+	requireOK(t, err)
+	if len(stream.Messages) != 1 {
+		t.Fatal("rolled-back assistant persisted")
+	}
+	write.FinalOutput = nil
+	_, inserted, err := writer.AppendAssistant(ctx, write)
+	requireOK(t, err)
+	if !inserted {
+		t.Fatal("assistant was not inserted")
+	}
+	stored, err = f.repos.Tasks.Get(ctx, value.ID)
+	requireOK(t, err)
+	if stored.Progress.FinalAssistantID != "" {
+		t.Fatal("repository inferred completion from StopReason")
+	}
+	write.FinalOutput = &taskmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
+	if _, inserted, err := writer.AppendAssistant(ctx, write); err == nil || inserted {
+		t.Fatal("replay changed final evidence")
+	}
+}
+
+func TestAssistantDuplicateKeepsInvocationIdentity(t *testing.T) {
+	f := newStoreFixture(t)
+	value := f.activeTask(t)
+	writer, metadata := f.toolCall(t, value)
+	ctx := context.Background()
+	initial, err := f.repos.ToolInvocations.FindByTaskCall(ctx, value.ID, "call")
+	requireOK(t, err)
+	stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
+	requireOK(t, err)
+	message := stream.Messages[len(stream.Messages)-1]
+	write := testAssistantWrite(t, message, metadata)
+	write.ToolCalls[0].ID = "replacement-id"
+	_, inserted, err := writer.AppendAssistant(ctx, write)
+	requireOK(t, err)
+	if inserted {
+		t.Fatal("duplicate inserted")
+	}
+	actual, err := f.repos.ToolInvocations.FindByTaskCall(ctx, value.ID, "call")
+	requireOK(t, err)
+	if initial.ID != actual.ID || !initial.CreatedAt.Equal(actual.CreatedAt) {
+		t.Fatal("duplicate replaced persisted identity")
+	}
+}
+
+func TestAssistantCallFailureRollsBackMessageAndEvidence(t *testing.T) {
+	f := newStoreFixture(t)
+	value := f.activeTask(t)
+	writer, metadata := f.toolCall(t, value)
+	ctx := context.Background()
+	stream, err := f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
+	requireOK(t, err)
+	message := stream.Messages[len(stream.Messages)-1]
+	message.ID = "conflicting-assistant"
+	message.TurnID = contracts.NewTurnID(value.ID, 2).String()
+	metadata.TurnID = contracts.TurnID(message.TurnID)
+	write := testAssistantWrite(t, message, metadata)
+	if _, inserted, err := writer.AppendAssistant(ctx, write); err == nil || inserted {
+		t.Fatal("reused call in a different turn accepted")
+	}
+	stream, err = f.repos.Messages.LoadMessages(ctx, "session", "agent", 0)
+	requireOK(t, err)
+	if len(stream.Messages) != 2 {
+		t.Fatal("failed call append left a message")
 	}
 }

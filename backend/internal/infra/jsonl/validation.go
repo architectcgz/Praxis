@@ -209,7 +209,6 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		"ProviderID",
 		"ModelID",
 		"ReasoningLevel",
-		"FailureMessage",
 	} {
 		v := value.FieldByName(field)
 		if v.IsValid() && v.Kind() == reflect.String && v.String() != strings.TrimSpace(v.String()) {
@@ -419,48 +418,16 @@ func immutable(collection string, before, after json.RawMessage) error {
 	switch collection {
 	case "task":
 		var prior, next taskmodel.Task
-		if err := json.Unmarshal(before, &prior); err != nil {
+		if err := decodeJSON(before, &prior); err != nil {
 			return err
 		}
-		if err := json.Unmarshal(after, &next); err != nil {
+		if err := decodeJSON(after, &next); err != nil {
 			return err
 		}
-		allowed := prior.Status == next.Status
-		switch prior.Status {
-		case taskmodel.TaskPending:
-			allowed = allowed || next.Status == taskmodel.TaskStarting
-		case taskmodel.TaskStarting:
-			allowed = allowed || next.Status == taskmodel.TaskRunning || next.Status == taskmodel.TaskEnded
-		case taskmodel.TaskRunning:
-			allowed = allowed || next.Status == taskmodel.TaskEnding || next.Status == taskmodel.TaskEnded
-		case taskmodel.TaskEnding:
-			allowed = allowed || next.Status == taskmodel.TaskEnded
+		if err := taskmodel.ValidateUpdate(prior, next); err != nil {
+			return fmt.Errorf("%w: %v", contracts.ErrRequestConflict, err)
 		}
-		if !allowed {
-			return contracts.ErrRequestConflict
-		}
-		if next.Progress.NextSequence < prior.Progress.NextSequence || next.Progress.ModelRequests < prior.Progress.ModelRequests || next.Progress.OutputBytes < prior.Progress.OutputBytes || next.Progress.ToolCalls < prior.Progress.ToolCalls {
-			return contracts.ErrRequestConflict
-		}
-		if prior.Progress.FinalAssistantID != "" && (prior.Progress.FinalAssistantID != next.Progress.FinalAssistantID || prior.Progress.FinalStopReason != next.Progress.FinalStopReason) {
-			return contracts.ErrRequestConflict
-		}
-		fields = []string{
-			"ID",
-			"AgentID",
-			"RequestID",
-			"Sequence",
-			"ProviderID",
-			"ModelID",
-			"ReasoningLevel",
-			"CreatedAt",
-			"InputMessageID",
-		}
-		if string(left["Status"]) != `"pending"` {
-			fields = append(fields, "Config", "ContextSelection")
-		} else if string(right["Status"]) != `"pending"` && string(right["Status"]) != `"starting"` {
-			return contracts.ErrRequestConflict
-		}
+		return nil
 	case "tool":
 		var prior, next toolmodel.ToolInvocation
 		if err := decodeJSON(before, &prior); err != nil {
@@ -469,40 +436,10 @@ func immutable(collection string, before, after json.RawMessage) error {
 		if err := decodeJSON(after, &next); err != nil {
 			return err
 		}
-		allowed := prior.Status == next.Status
-		switch prior.Status {
-		case toolmodel.ToolInvocationRequested:
-			allowed = allowed || next.Status == toolmodel.ToolInvocationAwaitingApproval || next.Status == toolmodel.ToolInvocationApproved || next.Status == toolmodel.ToolInvocationDenied || next.Status == toolmodel.ToolInvocationInterrupted
-		case toolmodel.ToolInvocationAwaitingApproval:
-			allowed = allowed || next.Status == toolmodel.ToolInvocationApproved || next.Status == toolmodel.ToolInvocationDenied || next.Status == toolmodel.ToolInvocationInterrupted
-		case toolmodel.ToolInvocationApproved:
-			allowed = allowed || next.Status == toolmodel.ToolInvocationRunning || next.Status == toolmodel.ToolInvocationInterrupted
-		case toolmodel.ToolInvocationRunning:
-			allowed = allowed || next.Status == toolmodel.ToolInvocationSucceeded || next.Status == toolmodel.ToolInvocationFailed || next.Status == toolmodel.ToolInvocationInterrupted || next.Status == toolmodel.ToolInvocationUnknown
+		if err := toolmodel.ValidateUpdate(prior, next); err != nil {
+			return fmt.Errorf("%w: %v", contracts.ErrRequestConflict, err)
 		}
-		if !allowed {
-			return contracts.ErrRequestConflict
-		}
-		if string(left["BudgetReserved"]) == "true" && string(right["BudgetReserved"]) != "true" {
-			return contracts.ErrRequestConflict
-		}
-		fields = []string{
-			"ID",
-			"TaskID",
-			"TurnID",
-			"AgentID",
-			"ProviderToolCallID",
-			"Name",
-			"Arguments",
-			"ArgumentsDigest",
-			"CreatedAt",
-		}
-		// 原始调用先落库，规范化参数只允许随 requested -> approved 填充一次。
-		if (!bytes.Equal(left["NormalizedArguments"], right["NormalizedArguments"]) || !bytes.Equal(left["Path"], right["Path"])) &&
-			(string(left["Status"]) != `"requested"` || (string(right["Status"]) != `"approved"` && string(right["Status"]) != `"awaiting_approval"` && string(right["Status"]) != `"denied"`) ||
-				len(left["NormalizedArguments"]) > 0 && string(left["NormalizedArguments"]) != "null") {
-			return contracts.ErrRequestConflict
-		}
+		return nil
 	case "agent":
 		fields = []string{
 			"ID",
@@ -554,24 +491,12 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return fmt.Errorf("%w: %s.%s is immutable", contracts.ErrRequestConflict, collection, field)
 		}
 	}
-	if collection == "task" && string(left["Status"]) == `"ended"` && !bytes.Equal(before, after) {
-		return contracts.ErrRequestConflict
-	}
-	if collection == "tool" {
-		var status toolmodel.ToolInvocationStatus
-		if err := json.Unmarshal(left["Status"], &status); err != nil {
-			return err
-		}
-		if status.Terminal() && !bytes.Equal(before, after) {
-			return contracts.ErrRequestConflict
-		}
-	}
 	return nil
 }
 
 func capped[T any](values []T, limit int) []T {
 	if limit <= 0 {
-		limit = 100
+		return values
 	}
 	return values[:min(len(values), limit)]
 }

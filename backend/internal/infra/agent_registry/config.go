@@ -146,20 +146,17 @@ func (r *Registry) ValidateModelReferences(validateModel ModelValidator) error {
 	return nil
 }
 
-func normalizeAgentConfig(config AgentConfig, fallback AgentConfig) (AgentConfig, error) {
+func validateAgentConfig(config AgentConfig) (AgentConfig, error) {
 	result := AgentConfig{Profile: config.Profile}
-	if result.Profile == "" {
-		result.Profile = fallback.Profile
-	}
 	if !result.Profile.Valid() {
 		return AgentConfig{}, errors.New("profile is required and must be valid")
 	}
 	if config.Model != nil {
 		model := ModelReference{
-			ProviderID: strings.TrimSpace(config.Model.ProviderID),
-			ModelID:    strings.TrimSpace(config.Model.ModelID),
+			ProviderID: config.Model.ProviderID,
+			ModelID:    config.Model.ModelID,
 		}
-		if model.ProviderID == "" || model.ModelID == "" {
+		if model.ProviderID == "" || model.ModelID == "" || model.ProviderID != strings.TrimSpace(model.ProviderID) || model.ModelID != strings.TrimSpace(model.ModelID) {
 			return AgentConfig{}, errors.New("model providerId and modelId are required together")
 		}
 		result.Model = &model
@@ -184,17 +181,6 @@ func readAgentConfig(path string) (AgentConfig, error) {
 	return config, nil
 }
 
-func writeAgentConfig(path string, config AgentConfig) error {
-	encoded, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode agent config: %w", err)
-	}
-	if err := os.WriteFile(path, append(encoded, '\n'), 0o600); err != nil {
-		return fmt.Errorf("create agent config %q: %w", path, err)
-	}
-	return nil
-}
-
 func rejectTrailingJSON(decoder *json.Decoder) error {
 	var extra any
 	err := decoder.Decode(&extra)
@@ -211,14 +197,10 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 	if strings.TrimSpace(root) == "" {
 		return nil, nil, errors.New("agent definitions directory is required")
 	}
-	if err := ensureDefaultDefinitions(root); err != nil {
-		return nil, nil, err
-	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read agent definitions directory: %w", err)
 	}
-	defaults := defaultAgentConfigs()
 	configs := make(map[contracts.AgentDefinitionID]AgentConfig, len(entries))
 	definitions := make(map[contracts.AgentDefinitionID]agentmodel.AgentDefinition, len(entries))
 	for _, entry := range entries {
@@ -237,7 +219,7 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 		if err != nil {
 			return nil, nil, err
 		}
-		config, err = normalizeAgentConfig(config, defaults[id])
+		config, err = validateAgentConfig(config)
 		if err != nil {
 			return nil, nil, fmt.Errorf("agent definition %q: %w", id, err)
 		}
@@ -245,7 +227,7 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 		if err != nil {
 			return nil, nil, fmt.Errorf("read agent definition %q AGENT.md: %w", id, err)
 		}
-		content := strings.TrimSpace(string(instructions))
+		content := string(instructions)
 		if content == "" {
 			return nil, nil, fmt.Errorf("agent definition %q has an empty AGENT.md", id)
 		}
@@ -268,36 +250,6 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 	return configs, definitions, nil
 }
 
-func ensureDefaultDefinitions(root string) error {
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return fmt.Errorf("create agent definitions directory: %w", err)
-	}
-	instructions := defaultAgentInstructions()
-	for id, config := range defaultAgentConfigs() {
-		directory := filepath.Join(root, id.String())
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			return fmt.Errorf("create agent definition %q directory: %w", id, err)
-		}
-		configPath := filepath.Join(directory, "agent.json")
-		if _, err := os.Stat(configPath); errors.Is(err, os.ErrNotExist) {
-			if err := writeAgentConfig(configPath, config); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return fmt.Errorf("inspect agent definition %q config: %w", id, err)
-		}
-		instructionsPath := filepath.Join(directory, "AGENT.md")
-		if _, err := os.Stat(instructionsPath); errors.Is(err, os.ErrNotExist) {
-			if err := os.WriteFile(instructionsPath, []byte(instructions[id]), 0o600); err != nil {
-				return fmt.Errorf("create agent definition %q AGENT.md: %w", id, err)
-			}
-		} else if err != nil {
-			return fmt.Errorf("inspect agent definition %q AGENT.md: %w", id, err)
-		}
-	}
-	return nil
-}
-
 func definitionRevision(config AgentConfig, instructions string) (string, error) {
 	encoded, err := json.Marshal(struct {
 		Config       AgentConfig `json:"config"`
@@ -311,24 +263,6 @@ func definitionRevision(config AgentConfig, instructions string) (string, error)
 	}
 	digest := sha256.Sum256(encoded)
 	return fmt.Sprintf("sha256-%x", digest), nil
-}
-
-func defaultAgentConfigs() map[contracts.AgentDefinitionID]AgentConfig {
-	return map[contracts.AgentDefinitionID]AgentConfig{
-		agentmodel.DefinitionPrimary:  {Profile: contracts.ProfilePrimary},
-		agentmodel.DefinitionDelegate: {Profile: contracts.ProfileDelegate},
-		agentmodel.DefinitionAdvisor:  {Profile: contracts.ProfileAdvisor},
-		agentmodel.DefinitionCurator:  {Profile: contracts.ProfileCurator},
-	}
-}
-
-func defaultAgentInstructions() map[contracts.AgentDefinitionID]string {
-	return map[contracts.AgentDefinitionID]string{
-		agentmodel.DefinitionPrimary:  "# Primary Agent\n\n你负责理解用户目标、推进任务，并在需要时委派独立工作。",
-		agentmodel.DefinitionDelegate: "# Delegate Agent\n\n你负责完成被委派的具体任务，并返回可验证的结果。",
-		agentmodel.DefinitionAdvisor:  "# Advisor Agent\n\n你负责分析问题、识别风险并给出明确建议，不直接改变工作区。",
-		agentmodel.DefinitionCurator:  "# Curator Agent\n\n你负责整理已有信息并提交结构化结果。",
-	}
 }
 
 // ValidateModelConfiguration 确保所有 Agent 默认模型仍存在于候选配置中。

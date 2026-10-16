@@ -42,7 +42,7 @@
 - `infra/jsonl` 只保存日志位置、查询元数据和缺失回执事实，不长期保存完整领域正文；消息索引按 Session 懒加载且缓存总条目数有界。事务使用变更集，不复制全局索引，不执行全图校验。
 - `MessageStreams.List` / `LoadMessages` 保持只读，消息边界是同次读取的最后一条可见消息序号。`repository.MessageWriter` 的 Assistant、调用身份和最终输出证据必须原子保存，ToolResult 与输出字节累计幂等提交。
 - TaskService 显式协调工具恢复；启动恢复先将遗留 running 调用收敛为 unknown，再启动 Coordinator。当前运行中的调用与审批等待不得被普通历史读取或正常业务恢复错误结束。
-- `storage.json` 的 v2 标识是唯一格式入口，拒绝未知格式和未标识的非空数据目录；不提供迁移、猜测解析或静默清理。
+- `storage.json` 的 v3 标识是唯一格式入口，拒绝未知格式和未标识的非空数据目录；不提供迁移、猜测解析或静默清理。
 - `go vet ./...` 后执行 `scripts/check-dependencies.sh`；并发修改仍执行 `go test -race ./...`。
 
 ## 注释与错误信息语言
@@ -54,3 +54,15 @@
 - 错误包装使用 %w 保留错误链，不因修改文案改变 errors.Is、errors.As、业务错误码或持久化语义。
 - 不翻译第三方 Provider、操作系统及外部工具返回的原始错误；只要求 Praxis 自己添加的错误上下文为英文。
 - 不因统一语言新增错误抽象、修改协议字段、重构业务逻辑或批量修改无关字符串。
+
+## 执行限制与职责边界
+
+- Task 固定使用 `core/task.MaxIterations = 30` 和 `MaxToolCalls = 100`。正常 ReAct 请求在事务内预留 Iterations；摘要只增加 ModelRequests。所有请求共用 NextSequence，拒绝重复和旧序号；审批恢复不得重扣工具额度。
+- Assistant 的最终完成判断属于 Loop。Loop 注入 IDGenerator / Clock 构建 ToolInvocation，并通过 `repository.AssistantWrite` 明确提交 Message、ToolCalls 和可选 FinalOutput；JSONL 不解释 StopReason，不生成调用身份或时间。
+- Task 与 ToolInvocation 的状态转换、不可变字段及预算单调性由 Core 的 ValidateUpdate 统一定义，领域命令复用同一转换规则；JSONL 仅委托校验并负责事务与跨对象一致性。
+- 启动层在 DataRoot.Initialize 后排他创建缺失的 models.json、auth.json、tools.json 与默认 Agent 文件，已有文件原样保留。Registry Load / ReloadConfig 只读校验；不得创建缺失配置、补角色、裁剪指令或修复凭据。Provider Key 由 request 规范化 ProviderID，密钥原样传递和保存。
+- Loop 在原始调用提交后调用工具 Normalizer，按 Workspace 一次准备路径和参数，并将准备结果或错误交给 Executor 结算。审批及执行恢复复用持久化 NormalizedArguments / Path；Executor 不重复规范化，但仍检查当前工具、权限、审批与未知副作用。
+- 通用上下文压缩只包含算法，SummaryFormat 的 Prompt、标题和结果前缀由 compose 注入；摘要文本只在 Loop 的 Provider 响应边界规范化。
+- Repository 的 limit=0 表示完整读取，不补默认值；桌面 service 入口把 0 转为 100 并拒绝负数。历史拼接先完整读取再分页；标题查询词由调用入口准备。
+- Workspace 文本读取只返回 contracts 的通用文件错误，Session 预览用例映射业务文案；Document Store 不按字段名推断敏感数据。Task 失败消息原样保存。
+- storage.json v3 是唯一格式入口。缺失 Iterations 的旧格式不得恢复执行；不提供迁移、不猜测预算、不修改旧数据。

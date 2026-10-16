@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"praxis/internal/contracts"
 	securitymodel "praxis/internal/core/security"
@@ -73,8 +72,8 @@ func NewExecutor(config Config) (*Executor, error) {
 var errApprovalPending = errors.New("tool approval pending")
 
 // Execute 返回可靠结算结果或审批等待标记。
-func (s *Executor) Execute(ctx context.Context, call contracts.ToolCall, metadata contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error) {
-	result, err := s.invoke(ctx, call, metadata)
+func (s *Executor) Execute(ctx context.Context, prepared toolcontracts.PreparedToolCall, metadata contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error) {
+	result, err := s.invoke(ctx, prepared, metadata)
 	if errors.Is(err, errApprovalPending) {
 		return toolcontracts.ToolExecutionResult{ApprovalPending: true}, nil
 	}
@@ -83,16 +82,13 @@ func (s *Executor) Execute(ctx context.Context, call contracts.ToolCall, metadat
 
 func (s *Executor) invoke(
 	ctx context.Context,
-	call contracts.ToolCall,
+	prepared toolcontracts.PreparedToolCall,
 	invocationContext contracts.ToolInvocationContext,
 ) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
 		return toolcontracts.ToolResult{}, errors.New("tool invocation metadata is required")
 	}
-	call = call.Snapshot()
-	if len(call.Arguments) == 0 {
-		call.Arguments = json.RawMessage(`{}`)
-	}
+	call := prepared.Call.Snapshot()
 	if call.ID == "" || !call.Name.Valid() || len(call.Arguments) == 0 || !json.Valid(call.Arguments) {
 		return toolcontracts.NewToolError("invalid_tool_call", "The tool call is invalid."), nil
 	}
@@ -120,6 +116,13 @@ func (s *Executor) invoke(
 	}
 	invocation, err = s.reserveCall(ctx, invocation.ID)
 	if err != nil {
+		if errors.Is(err, contracts.New(contracts.TaskResourceLimit, "")) {
+			result, settleErr := s.reject(ctx, invocation.ID, toolmodel.ToolFailureResourceLimit, "Tool call limit exceeded.")
+			if settleErr != nil {
+				return toolcontracts.ToolResult{}, settleErr
+			}
+			return result, nil
+		}
 		return toolcontracts.ToolResult{}, err
 	}
 	invalid := func(message string) (toolcontracts.ToolResult, error) {
@@ -131,22 +134,12 @@ func (s *Executor) invoke(
 	}
 	normalized := toolcontracts.NormalizedToolCall{Name: invocation.Name, NormalizedArguments: append(json.RawMessage(nil), invocation.NormalizedArguments...), Path: invocation.Path}
 	if invocation.Status == toolmodel.ToolInvocationRequested {
-
-		normalized, err = tool.Normalize(call)
-		if err != nil {
-			message := strings.TrimSpace(err.Error())
-			if message == "" {
-				message = "The tool arguments are invalid."
-			}
-			return invalid(message)
+		if prepared.Err != nil {
+			return invalid(prepared.Err.Error())
 		}
-		if normalized.Name != call.Name || len(normalized.NormalizedArguments) == 0 ||
-			!json.Valid(normalized.NormalizedArguments) {
-			return toolcontracts.ToolResult{}, errors.New("tool catalog returned invalid normalized arguments")
-		}
-		normalized, err = resolveNormalizedPath(normalized, invocationContext.WorkspacePath)
-		if err != nil {
-			return invalid("The tool path is invalid.")
+		normalized = prepared.Normalized
+		if normalized.Name != call.Name || len(normalized.NormalizedArguments) == 0 || !json.Valid(normalized.NormalizedArguments) {
+			return invalid("The tool arguments are invalid.")
 		}
 	}
 

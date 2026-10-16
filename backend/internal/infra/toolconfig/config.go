@@ -9,7 +9,6 @@ import (
 	"io"
 	"maps"
 	"os"
-	"strings"
 	"sync"
 
 	"praxis/internal/contracts"
@@ -26,16 +25,10 @@ type Config struct {
 	Bash  security.CommandPolicy            `json:"bash"`
 }
 
-// Load 在配置缺失时启用所有已注册工具，Bash 默认进入人工审核。
+// Load 只读加载工具配置，缺失或非法文件直接返回错误。
 func Load(path string) (Config, error) {
-	config := Config{Bash: security.CommandPolicy{DefaultAction: security.CommandAsk}}
-	if path == "" {
-		return config, nil
-	}
+	var config Config
 	encoded, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return config, nil
-	}
 	if err != nil {
 		return Config{}, fmt.Errorf("read tool config: %w", err)
 	}
@@ -50,9 +43,6 @@ func Load(path string) (Config, error) {
 			return Config{}, errors.New("tool config contains multiple JSON values")
 		}
 		return Config{}, fmt.Errorf("decode trailing tool config: %w", err)
-	}
-	for i := range config.Bash.Rules {
-		config.Bash.Rules[i].ID = strings.TrimSpace(config.Bash.Rules[i].ID)
 	}
 	if err := config.Bash.Validate(); err != nil {
 		return Config{}, err

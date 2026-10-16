@@ -22,6 +22,10 @@ import (
 
 // ListProjects 返回桌面项目目录，不向 binding 暴露领域实体。
 func (s *Services) ListProjects(ctx context.Context, limit int) ([]ProjectSummary, error) {
+	limit, limitErr := desktopLimit(limit)
+	if limitErr != nil {
+		return nil, limitErr
+	}
 	projects, err := s.projects.ListProjects(ctx, limit)
 	if err != nil {
 		return nil, err
@@ -41,6 +45,10 @@ func (s *Services) ListProjects(ctx context.Context, limit int) ([]ProjectSummar
 
 // ListSessionsByProject 返回指定项目的会话目录。
 func (s *Services) ListSessionsByProject(ctx context.Context, projectID contracts.ProjectID, limit int) ([]SessionSummary, error) {
+	limit, limitErr := desktopLimit(limit)
+	if limitErr != nil {
+		return nil, limitErr
+	}
 	sessions, err := s.sessions.ListSessionsByProject(ctx, projectID, limit)
 	if err != nil {
 		return nil, err
@@ -61,6 +69,10 @@ func (s *Services) ListSessionsByProject(ctx context.Context, projectID contract
 
 // GetSessionDetail 返回会话和 Agent 摘要。
 func (s *Services) GetSessionDetail(ctx context.Context, sessionID contracts.SessionID, limit int) (SessionDetail, error) {
+	limit, limitErr := desktopLimit(limit)
+	if limitErr != nil {
+		return SessionDetail{}, limitErr
+	}
 	view, err := s.sessions.GetSessionView(ctx, sessionID, limit)
 	if err != nil {
 		return SessionDetail{}, err
@@ -127,6 +139,10 @@ func (s *Services) PreviewFile(ctx context.Context, canonical request.FilePrevie
 
 // GetAgentDetail 返回 Agent、任务和控制命令的公开状态。
 func (s *Services) GetAgentDetail(ctx context.Context, agentID contracts.AgentID, limit int) (AgentDetail, error) {
+	limit, limitErr := desktopLimit(limit)
+	if limitErr != nil {
+		return AgentDetail{}, limitErr
+	}
 	view, err := s.agents.GetAgentView(ctx, agentID, limit)
 	if err != nil {
 		return AgentDetail{}, err
@@ -155,6 +171,14 @@ func (s *Services) GetAgentDetail(ctx context.Context, agentID contracts.AgentID
 
 // ListAgentMessages 返回可公开展示的 Agent 消息。
 func (s *Services) ListAgentMessages(ctx context.Context, agentID contracts.AgentID, limit int) ([]AgentMessage, error) {
+	limit, err := desktopLimit(limit)
+	if err != nil {
+		return nil, err
+	}
+	return s.listAgentMessages(ctx, agentID, limit)
+}
+
+func (s *Services) listAgentMessages(ctx context.Context, agentID contracts.AgentID, limit int) ([]AgentMessage, error) {
 	messages, err := s.agents.ListAgentMessages(ctx, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -170,7 +194,11 @@ func (s *Services) ListAgentMessages(ctx context.Context, agentID contracts.Agen
 
 // ListAgentHistory 返回排序后的公开消息及失败、取消任务。
 func (s *Services) ListAgentHistory(ctx context.Context, agentID contracts.AgentID, before string, limit int) (AgentHistoryPage, error) {
-	messages, err := s.ListAgentMessages(ctx, agentID, 0)
+	limit, limitErr := desktopLimit(limit)
+	if limitErr != nil {
+		return AgentHistoryPage{}, limitErr
+	}
+	messages, err := s.listAgentMessages(ctx, agentID, 0)
 	if err != nil {
 		return AgentHistoryPage{}, err
 	}
@@ -428,6 +456,10 @@ func (s *Services) ListModels() []ModelOption {
 
 // ListAgent 返回 Agent 最近的独立计时记录。
 func (s *Services) ListAgent(ctx context.Context, agentID string, limit int) ([]OperationTiming, error) {
+	limit, limitErr := desktopLimit(limit)
+	if limitErr != nil {
+		return nil, limitErr
+	}
 	if s.listAgentTimings == nil {
 		return nil, errors.New("timing query is unavailable")
 	}
@@ -497,4 +529,15 @@ func clonePointer[T any](value *T) *T {
 	}
 	copied := *value
 	return &copied
+}
+
+// desktopLimit 决定桌面用例的默认分页；内部仓储查询显式使用 0 完整读取。
+func desktopLimit(limit int) (int, error) {
+	if limit < 0 {
+		return 0, contracts.InvalidValue("limit", "limit cannot be negative")
+	}
+	if limit == 0 {
+		return 100, nil
+	}
+	return limit, nil
 }

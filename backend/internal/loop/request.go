@@ -23,9 +23,8 @@ func (r *Runner) summarizeContext(
 	history appcontext.ModelContext,
 	limit int,
 	sequence uint64,
-	budget *taskBudget,
 ) (string, error) {
-	if err := r.Progress.RecordModelRequest(ctx, task.ID, sequence); err != nil {
+	if err := r.Progress.RecordSummaryRequest(ctx, task.ID, sequence); err != nil {
 		return "", err
 	}
 	turnID := contracts.NewTurnID(task.ID, sequence)
@@ -43,9 +42,6 @@ func (r *Runner) summarizeContext(
 		Model:            task.Config.Model,
 		MaxOutputTokens:  limit,
 		TurnID:           turnID,
-	}
-	if err := budget.reserveInput(request); err != nil {
-		return "", err
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -65,9 +61,6 @@ func (r *Runner) summarizeContext(
 	if err := r.Progress.RecordModelOutput(ctx, task.ID, response.textBytes); err != nil {
 		return "", failCause(contracts.TaskFailureStorage, err)
 	}
-	if err := budget.addOutput(response.textBytes); err != nil {
-		return "", err
-	}
 	if len(response.toolCalls()) != 0 {
 		return "", errors.New("context summary returned a tool call")
 	}
@@ -85,7 +78,7 @@ func (r *Runner) summarizeContext(
 		TurnID:     turnID,
 		StopReason: response.stopReason,
 	})
-	return text.String(), nil
+	return strings.TrimSpace(text.String()), nil
 }
 
 // buildModelRequest 在编排边界将任务快照映射为请求，模型调用只接收构造后的请求。
