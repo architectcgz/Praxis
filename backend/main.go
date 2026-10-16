@@ -4,6 +4,9 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"praxis/internal/compose"
 	"praxis/internal/infra/dataroot"
@@ -20,11 +23,31 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+const dataRootEnvironment = "PRAXIS_DATA_ROOT"
+
+// startupDataRootPath 选择启动时使用的数据根目录。
+func startupDataRootPath() (string, error) {
+	root := os.Getenv(dataRootEnvironment)
+	if strings.TrimSpace(root) != "" {
+		return root, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home directory: %w", err)
+	}
+	return filepath.Join(home, ".praxis"), nil
+}
+
 func main() {
 	a := wails.New(logging.NewFactory().Console())
 	startup := func(ctx context.Context) {
 		a.Startup(ctx)
-		root, err := dataroot.Resolve("")
+		rootPath, err := startupDataRootPath()
+		if err != nil {
+			a.FailStartup(fmt.Errorf("resolve data root path: %w", err))
+			return
+		}
+		root, err := dataroot.Resolve(rootPath)
 		if err != nil {
 			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return
