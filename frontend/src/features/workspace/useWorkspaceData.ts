@@ -14,7 +14,7 @@ import {
     type SessionSummary,
 } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
-import { useAgentData } from '../agents/useAgentData'
+import { useAgentData } from '../agent/useAgentData'
 import { readRememberedSession, rememberSelectedSession } from './sessionPreference'
 
 /** 协调项目与会话加载，并将 Agent 详情交给对应 feature 管理。 */

@@ -5,18 +5,18 @@
 
 /* 公共控件与功能样式。 */
 @import './common.css';
-@import '../features/projects/styles.css';
-@import '../features/agents/styles.css';
-@import '../features/settings/styles.css';
+@import '../features/project/styles.css';
+@import '../features/agent/styles.css';
+@import '../features/setting/styles.css';
 @import '../features/workspace/styles.css';
 
 @import './workspace/dialogs.css';
 @import './praxis-theme.css';
-@import '../features/sessions/styles.css';
-@import '../features/agents/output/conversation.css';
-@import '../features/agents/theme.css';
-@import '../features/projects/theme.css';
+@import '../features/session/styles.css';
+@import '../features/agent/output/conversation.css';
+@import '../features/agent/theme.css';
+@import '../features/project/theme.css';
 @import './workspace/theme-dialogs.css';
 @import './workspace/theme-responsive.css';
-@import '../features/agents/output/styles.css';
+@import '../features/agent/output/styles.css';
 @import './workspace/responsive.css';

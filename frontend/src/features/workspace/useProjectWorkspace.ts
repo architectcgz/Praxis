@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useAgentCommands } from '../agents/useAgentCommands'
-import { useSessionCommands } from '../sessions/useSessionCommands'
+import { useAgentCommands } from '../agent/useAgentCommands'
+import { useSessionCommands } from '../session/useSessionCommands'
 import { useWorkspaceData } from './useWorkspaceData'
 import { useWorkspaceCommands } from './useWorkspaceCommands'
 

@@ -2,21 +2,21 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type SubmitEvent 
 import { createPortal } from 'react-dom'
 import { CircleAlert, LoaderCircle } from 'lucide-react'
 import { Overlay, Toast } from '../../components/ui'
-import { AgentSessionPanel } from '../agents/AgentSessionPanel'
-import { AgentsPanel } from '../agents/AgentsPanel'
-import { NewProjectDialog } from '../projects/NewProjectDialog'
-import { ProjectsPanel } from '../projects/ProjectsPanel'
-import { groupSessions } from '../projects/projectGroups'
-import { SessionPanel } from '../sessions/SessionPanel'
-import { SettingsPanel } from '../settings/SettingsPanel'
+import { AgentSessionPanel } from '../agent/AgentSessionPanel'
+import { AgentsPanel } from '../agent/AgentsPanel'
+import { NewProjectDialog } from '../project/NewProjectDialog'
+import { ProjectsPanel } from '../project/ProjectsPanel'
+import { groupSessions } from '../project/projectGroups'
+import { SessionPanel } from '../session/SessionPanel'
+import { SettingsPanel } from '../setting/SettingsPanel'
 import { useProjectWorkspace } from './useProjectWorkspace'
 import { WORKSPACE_COMMANDS } from './useWorkspaceCommands'
 import { WorkspaceHeader } from './WorkspaceHeader'
 import { API_ERROR_CODES } from '../../api'
-import { ProjectGroup } from '../projects/types'
-import { ProjectOverview } from '../projects/ProjectOverview'
+import { ProjectGroup } from '../project/types'
+import { ProjectOverview } from '../project/ProjectOverview'
 
-const ModelConfigPanel = lazy(() => import('../settings/model-config/ModelConfigPanel').then((module) => ({ default: module.ModelConfigPanel })))
+const ModelConfigPanel = lazy(() => import('../setting/model-config/ModelConfigPanel').then((module) => ({ default: module.ModelConfigPanel })))
 
 export function ProjectWorkspace() {
     const workspace = useProjectWorkspace()

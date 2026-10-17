@@ -271,7 +271,7 @@ Praxis 工作区是密集、高效、安静的工具型界面，优先保证长�
 
 #### 线程间距
 
-三级间距只在 `features/agents/conversation.css` 定义一次，历史渲染与流式渲染共用同一套 margin，两条路径不得各写一套。
+三级间距只在 `features/agent/conversation.css` 定义一次，历史渲染与流式渲染共用同一套 margin，两条路径不得各写一套。
 
 | 用途 | 令牌 | 值 |
 |---|---|---|
