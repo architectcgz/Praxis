@@ -27,7 +27,12 @@ type anthropicThinking struct {
 	BudgetTokens int    `json:"budget_tokens,omitzero"`
 }
 type anthropicOutputConfig struct {
-	Effort string `json:"effort"`
+	Effort string               `json:"effort,omitempty"`
+	Format *anthropicJSONSchema `json:"format,omitempty"`
+}
+type anthropicJSONSchema struct {
+	Type   string          `json:"type"`
+	Schema json.RawMessage `json:"schema"`
 }
 type anthropicToolDefinition struct {
 	Name        string          `json:"name"`

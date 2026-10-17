@@ -104,6 +104,19 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Task ID 或上下文摘要。
 		PromptCacheKey: request.PromptCacheKey,
 	}
+	if schema := request.OutputSchema; schema != nil {
+		if err := schema.Validate(); err != nil {
+			return nil, fmt.Errorf("openai chat output schema: %w", err)
+		}
+		payload.ResponseFormat = &chatResponseFormat{
+			Type: "json_schema",
+			JSONSchema: chatJSONSchema{
+				Name:   schema.Name,
+				Schema: schema.Schema,
+				Strict: true,
+			},
+		}
+	}
 	if reasoning := request.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
 		payload.ReasoningEffort = reasoning
 	}

@@ -9,15 +9,25 @@ import (
 
 // 请求 DTO 与输出 DTO 分离，历史文本使用官方 EasyInputMessage。
 type requestPayload struct {
-	Model           string            `json:"model"`
-	Input           []json.RawMessage `json:"input"`
-	Stream          bool              `json:"stream"`
-	Store           bool              `json:"store"`
-	Include         []string          `json:"include"`
-	Reasoning       *reasoningConfig  `json:"reasoning,omitempty"`
-	MaxOutputTokens int               `json:"max_output_tokens"`
-	Tools           []responseTool    `json:"tools,omitempty"`
-	PromptCacheKey  string            `json:"prompt_cache_key,omitempty"`
+	Model           string              `json:"model"`
+	Input           []json.RawMessage   `json:"input"`
+	Stream          bool                `json:"stream"`
+	Store           bool                `json:"store"`
+	Include         []string            `json:"include"`
+	Reasoning       *reasoningConfig    `json:"reasoning,omitempty"`
+	MaxOutputTokens int                 `json:"max_output_tokens"`
+	Tools           []responseTool      `json:"tools,omitempty"`
+	PromptCacheKey  string              `json:"prompt_cache_key,omitempty"`
+	Text            *responseTextConfig `json:"text,omitempty"`
+}
+type responseTextConfig struct {
+	Format responseJSONSchema `json:"format"`
+}
+type responseJSONSchema struct {
+	Type   string          `json:"type"`
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict bool            `json:"strict"`
 }
 type reasoningConfig struct {
 	Effort  string `json:"effort"`

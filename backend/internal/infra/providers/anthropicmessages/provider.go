@@ -135,6 +135,19 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 			body.OutputConfig = &anthropicOutputConfig{Effort: reasoning}
 		}
 	}
+	if schema := request.OutputSchema; schema != nil {
+		if err := schema.Validate(); err != nil {
+			return nil, fmt.Errorf("anthropic output schema: %w", err)
+		}
+		// 格式与 effort 共用 output_config，追加格式时保留已选的推理强度。
+		if body.OutputConfig == nil {
+			body.OutputConfig = &anthropicOutputConfig{}
+		}
+		body.OutputConfig.Format = &anthropicJSONSchema{
+			Type:   "json_schema",
+			Schema: schema.Schema,
+		}
+	}
 	if body.Thinking != nil && body.Thinking.Type == "enabled" {
 		if err := validateThinkingContinuation(body.Messages); err != nil {
 			return nil, err
