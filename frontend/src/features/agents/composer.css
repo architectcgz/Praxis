@@ -169,7 +169,7 @@
     color: var(--muted);
     font-size: var(--font-size-meta);
     font-weight: 650;
-    line-height: 1;
+    line-height: var(--line-height-meta);
     text-align: left;
     transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
