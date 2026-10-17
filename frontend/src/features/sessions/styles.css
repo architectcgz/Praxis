@@ -1,4 +1,4 @@
-/* Session 页面、空状态与响应式样式。 */
+/* Session 页面、空状态与阅读宽度。 */
 .session-loading {
     display: flex;
     align-items: center;
@@ -8,96 +8,133 @@
     min-width: 0;
     min-height: 0;
     padding: 24px;
-    color: var(--ink-secondary);
-    font-size: var(--font-size-secondary);
+    color: var(--muted);
+    font-size: var(--font-size-meta);
 }
 
+.session-panel {
+    /* 阅读列宽度由全局令牌 --session-content-width 提供：随主栏按比例伸缩，
+       并受上下限约束；这里只声明会话内的横向留白。 */
+    --session-content-padding: 24px;
+
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    margin: 0;
+    background: var(--paper);
+}
+
+/* 空状态不使用卡片容器，只有图标、标题、说明和快捷键提示。 */
 .session-empty-state {
     display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    flex: 1 1 auto;
-    min-height: 0;
     max-width: 580px;
     margin: 0 auto;
     padding: 32px 24px;
     text-align: center;
 }
 
-.session-empty-text {
-    margin: 0;
-    color: var(--ink-secondary);
-    font-size: var(--font-size-body);
-    line-height: 1.65;
-    max-width: 460px;
-}
-
 .session-empty-container {
     display: flex;
+    min-width: 0;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-width: 0;
+    gap: 28px;
     padding: 0;
-    gap: 32px;
-    animation: session-empty-fade-in var(--motion-duration-emphasized) ease-out;
+    animation: session-empty-fade-in var(--motion-duration-emphasized) var(--ease-enter);
 }
 
 .session-empty-hero {
     display: flex;
+    max-width: 520px;
     flex-direction: column;
     align-items: center;
-    gap: 20px;
-    max-width: 520px;
+    gap: 16px;
     text-align: center;
 }
 
-.session-empty-icon-wrapper {
-    position: relative;
-    width: 88px;
-    height: 88px;
-    margin-bottom: 8px;
-}
-
-.session-empty-icon-main {
-    position: absolute;
-    inset: 0;
+.session-empty-icon {
     display: grid;
+    width: 64px;
+    height: 64px;
     place-items: center;
-    color: var(--blue);
+    border-radius: var(--radius-card);
+    background: var(--selected);
+    color: var(--accent);
 }
 
 .session-empty-title {
     margin: 0;
     color: var(--ink);
-    font-size: var(--font-size-title);
-    font-weight: 700;
+    font-size: var(--font-size-display);
+    font-weight: 650;
     line-height: 1.2;
     letter-spacing: 0;
 }
 
 .session-empty-description {
-    margin: 0;
-    color: var(--ink-secondary);
-    font-size: var(--font-size-body);
-    line-height: 1.65;
     max-width: 480px;
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-body);
 }
 
 .session-empty-features {
     display: grid;
+    width: 100%;
+    max-width: 780px;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 24px;
-    max-width: 780px;
-    width: 100%;
+}
+
+.session-empty-feature {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 0;
+}
+
+.session-empty-feature-icon {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    flex: none;
+    place-items: center;
+    border-radius: var(--radius-chip);
+    background: transparent;
+    color: var(--accent);
 }
 
 .session-empty-feature-content {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: 4px;
-    flex: 1;
+}
+
+.session-empty-feature-title {
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+    line-height: 1.3;
+}
+
+.session-empty-feature-text {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+    line-height: 1.5;
 }
 
 .session-empty-action {
@@ -107,173 +144,51 @@
     gap: 16px;
 }
 
+.session-empty-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+    line-height: 1.4;
+}
+
+.session-empty-kbd {
+    display: inline-flex;
+    min-width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 7px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-chip);
+    background: var(--fill);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+    line-height: 1;
+}
+
 @keyframes session-empty-fade-in {
     from {
         opacity: 0;
         transform: translateY(12px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
     }
 }
 
-.session-panel {
-    --session-content-width: 920px;
-    --session-content-padding: 24px;
-    display: flex;
-    width: 100%;
-    min-height: 0;
-    min-width: 0;
-    flex: 1;
-    flex-direction: column;
-    margin: 0;
-    background: var(--paper);
-}
-
-.session-empty-icon {
-    display: grid;
-    place-items: center;
-    width: 72px;
-    height: 72px;
-    margin-bottom: 24px;
-    border-radius: 6px;
-    background: var(--selected);
-    color: var(--accent);
-    box-shadow: none;
-}
-
-.session-empty-icon-background {
-    position: absolute;
-    inset: 0;
-    border-radius: 6px;
-    background: var(--selected);
-    box-shadow: none;
-    animation: none;
-}
-
-.session-empty-icon-accent {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    display: grid;
-    width: 32px;
-    height: 32px;
-    place-items: center;
-    color: white;
-    border-radius: 4px;
-    background: var(--ink);
-    box-shadow: none;
-    animation: none;
-}
-
-.session-empty-feature:hover {
-    border-color: var(--line-strong);
-    background: #fff;
-    box-shadow: none;
-    transform: none;
-}
-
-.session-empty-feature:hover .session-empty-feature-icon {
-    background: var(--selected);
-}
-
-.session-empty-feature {
-    display: flex;
-    border: 1px solid var(--line);
-    transition: all var(--motion-duration-emphasized) ease;
-    border-radius: 6px;
-    background: #fff;
-    box-shadow: none;
-    gap: 10px;
-    padding: 12px;
-}
-
-.session-empty-feature-icon {
-    display: grid;
-    place-items: center;
-    border-radius: 5px;
-    background: var(--selected);
-    color: var(--accent);
-    box-shadow: none;
-    width: 30px;
-    height: 30px;
-    min-width: 30px;
-}
-
-.session-empty-feature-title {
-    margin: 0;
-    color: var(--ink);
-    font-weight: 650;
-    line-height: 1.3;
-    font-size: var(--font-size-ui);
-}
-
-.session-empty-feature-text {
-    margin: 0;
-    color: var(--ink-secondary);
-    line-height: 1.5;
-    font-size: var(--font-size-code);
-}
-
-.session-empty-hint {
-    display: flex;
-    align-items: center;
-    border: 1px solid var(--line);
-    color: var(--ink-secondary);
-    line-height: 1.4;
-    border-radius: 5px;
-    background: transparent;
-    gap: 6px;
-    padding: 8px 10px;
-    font-size: var(--font-size-secondary);
-}
-
-.session-empty-kbd {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 24px;
-    height: 24px;
-    padding: 0 8px;
-    border: 1px solid var(--line);
-    color: var(--ink);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: var(--font-size-code);
-    font-weight: 600;
-    line-height: 1;
-    border-radius: 4px;
-    background: var(--fill);
-    box-shadow: none;
-}
-
 @media (max-width: 768px) {
-    .session-empty-icon-wrapper {
-        width: 72px;
-        height: 72px;
-    }
-
-    .session-empty-icon-main svg {
-        width: 28px;
-        height: 28px;
-    }
-
-    .session-empty-icon-accent {
-        width: 28px;
-        height: 28px;
-    }
-
-    .session-empty-icon-accent svg {
-        width: 16px;
-        height: 16px;
-    }
-
-    .session-empty-title {
-        font-size: var(--font-size-title);
-    }
-
     .session-empty-features {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 16px;
     }
 
@@ -281,5 +196,9 @@
         flex-wrap: wrap;
         justify-content: center;
         text-align: center;
+    }
+
+    .session-empty-state {
+        padding: 24px 16px;
     }
 }

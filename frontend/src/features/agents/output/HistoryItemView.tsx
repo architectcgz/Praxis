@@ -44,50 +44,85 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
         )
     }
     if (!item.message) return null
-    const messageBlocks = item.message.blocks || []
+    const message = item.message
+    const messageBlocks = message.blocks || []
     const resultBlocks = messageBlocks.filter((block) => block.kind === 'tool_result')
-    if (item.message.role === 'tool') {
+    if (message.role === 'tool') {
         return (
             <article className="message message-tool">
                 <div className="message-meta">
                     <strong>工具输出</strong>
-                    <time dateTime={item.message.at} title={item.message.at}>{formatMessageTime(item.message.at)}</time>
+                    <time dateTime={message.at} title={message.at}>{formatMessageTime(message.at)}</time>
                 </div>
-                {resultBlocks.map((block, index) => <ToolResultBlock block={block} taskId={item.message!.taskId} key={`${block.callId}-${index}`} />)}
+                <div className="acts">
+                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} taskId={message.taskId} key={`${block.callId}-${index}`} />)}
+                </div>
             </article>
         )
     }
-    const messageRole = item.message.role
+    const messageRole = message.role
     const messageClass = messageRole === 'assistant' || messageRole === 'user' ? messageRole : 'unknown'
     const author = messageRole === 'assistant' ? agentProfile : messageRole === 'user' ? '你' : '未知来源'
-    const contentToCopy = copyContent ?? item.message.content
+    const contentToCopy = copyContent ?? message.content
+    const segments = messageRole === 'assistant' ? groupAssistantBlocks(messageBlocks) : []
     return (
         <article className={`message message-${messageClass}${hasContinuation ? ' message-continued' : ''}`}>
             {!continuation && <div className="message-meta">
                 <strong>{author}</strong>
-                <time dateTime={item.message.at} title={item.message.at}>{formatMessageTime(item.message.at)}</time>
+                <time dateTime={message.at} title={message.at}>{formatMessageTime(message.at)}</time>
             </div>}
             {messageRole === 'assistant' ? (
                 <>
-                    {item.message.thinking && !messageBlocks.some((block) => block.kind === 'thinking') && <ThinkingDetails content={item.message.thinking} />}
-                    {messageBlocks.length > 0 ? messageBlocks.map((block, index) => {
-                        if (block.kind === 'thinking') return <ThinkingDetails content={block.text || ''} key={index} />
-                        if (block.kind === 'text') return <MessageMarkdown content={block.text || ''} key={index} />
-                        if (block.kind === 'tool_call') return (
-                            <div className="message-tool-calls" key={index}>
-                                <ToolCallBlock block={block} taskId={item.message!.taskId} result={toolResults?.find((result) => result.callId === block.callId)} />
-                            </div>
-                        )
-                        return null
-                    }) : item.message.content && <MessageMarkdown content={item.message.content} />}
+                    {message.thinking && !messageBlocks.some((block) => block.kind === 'thinking') && <ThinkingDetails content={message.thinking} />}
+                    {segments.length > 0 ? segments.map((segment) => {
+                        if (segment.kind === 'thinking') return <ThinkingDetails content={segment.text} key={segment.key} />
+                        if (segment.kind === 'text') return <MessageMarkdown content={segment.text} key={segment.key} />
+                        // 一次运行里的连续工具调用合并成同一张活动账本。
+                        return <div className="acts" key={segment.key}>
+                            {segment.blocks.map((block, index) => <ToolCallBlock
+                                block={block}
+                                taskId={message.taskId}
+                                result={toolResults?.find((result) => result.callId === block.callId)}
+                                key={`${block.callId}-${index}`}
+                            />)}
+                        </div>
+                    }) : message.content && <MessageMarkdown content={message.content} />}
                 </>
-            ) : item.message.content && <p>{item.message.content}</p>}
+            ) : message.content && <p>{message.content}</p>}
             <MessageActions content={hasContinuation ? '' : contentToCopy}>
-                {messageRole === 'assistant' && item.message.id && <MessageTiming taskId={item.message.taskId} referenceId={item.message.id} />}
+                {messageRole === 'assistant' && message.id && <MessageTiming taskId={message.taskId} referenceId={message.id} />}
             </MessageActions>
         </article>
     )
 })
+
+type AssistantSegment =
+    | { key: string; kind: 'thinking'; text: string }
+    | { key: string; kind: 'text'; text: string }
+    | { key: string; kind: 'tools'; blocks: AgentMessageBlock[] }
+
+/** 相邻的工具调用归入同一张活动账本，正文与思考保持原有先后。 */
+function groupAssistantBlocks(blocks: AgentMessageBlock[]): AssistantSegment[] {
+    const segments: AssistantSegment[] = []
+    blocks.forEach((block, index) => {
+        if (block.kind === 'thinking') {
+            segments.push({ key: `thinking-${index}`, kind: 'thinking', text: block.text || '' })
+            return
+        }
+        if (block.kind === 'text') {
+            segments.push({ key: `text-${index}`, kind: 'text', text: block.text || '' })
+            return
+        }
+        if (block.kind !== 'tool_call') return
+        const last = segments[segments.length - 1]
+        if (last?.kind === 'tools') {
+            segments[segments.length - 1] = { ...last, blocks: [...last.blocks, block] }
+            return
+        }
+        segments.push({ key: `tools-${index}`, kind: 'tools', blocks: [block] })
+    })
+    return segments
+}
 
 /** 取消记录来自持久化 Task；请求耗时单独查询，重启后保持相同状态。 */
 function CanceledRequestView({ agentProfile, taskId, at }: { agentProfile: string; taskId: string; at: string }) {

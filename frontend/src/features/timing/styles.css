@@ -1,50 +1,24 @@
-/* 耗时是辅助信息，不与正文和操作状态争夺视觉层级。 */
-.operation-duration {
-    flex: 0 1 auto;
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
-    font-variant-numeric: tabular-nums;
-    overflow-wrap: anywhere;
-}
-
+/* 耗时属于辅助信息，不与正文和操作状态争夺视觉层级。
+   字号与颜色由所在行（回合脚注、活动账本或协作卡片）决定，
+   本文件只负责排列方式与数字对齐，避免与 conversation.css 争抢同一属性。 */
+.operation-duration,
 .message-timing {
     display: flex;
     min-width: 0;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 2px 8px;
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
+    gap: 2px 10px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
 }
 
 .operation-timing-error {
     color: var(--danger);
-    font-size: var(--font-size-secondary);
-}
-
-.operation-token-usage {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px 8px;
-    max-width: 100%;
-}
-
-.operation-token-usage > span {
-    white-space: nowrap;
+    font-size: var(--font-size-meta);
 }
 
 @media (max-width: 460px) {
-    .output-tool-header,
-    .output-handoff-task > summary,
-    .output-files > summary {
+    .output-handoff-task > summary {
         flex-wrap: wrap;
     }
-
-    .output-tool-header .output-tool-summary {
-        flex-basis: 100%;
-    }
-}
-
-.message-assistant .message-meta {
-    flex-wrap: wrap;
 }

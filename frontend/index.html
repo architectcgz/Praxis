@@ -1,9 +1,25 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>praxis</title>
+    <script>
+        // 首帧之前确定主题，避免启动时闪白或闪黑。
+        (function () {
+            try {
+                var stored = window.localStorage.getItem('praxis.color-theme');
+                if (stored === 'light' || stored === 'dark') {
+                    document.documentElement.dataset.theme = stored;
+                    return;
+                }
+            } catch (error) {
+                // localStorage 在浏览器预览和 Wails webview 中可能不可用。
+            }
+            document.documentElement.dataset.theme =
+                window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        })();
+    </script>
 </head>
 <body>
 <div id="root"></div>

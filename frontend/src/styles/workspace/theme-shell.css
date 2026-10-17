@@ -1,8 +1,10 @@
+/* Shell、顶部栏与通用控件的颜色、边框和材质。
+   所有取值来自 global.css / theme-dark.css 的令牌，本文件不写裸色值。 */
 button,
 input,
 textarea,
 select {
-    font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-family: inherit;
     color: var(--ink);
     font-size: var(--font-size-ui);
     letter-spacing: 0;
@@ -12,18 +14,13 @@ body {
     line-height: 1.5;
 }
 
-button {
-    cursor: pointer;
-}
-
 button:disabled {
-    cursor: not-allowed;
-    opacity: 0.48;
+    opacity: 0.55;
 }
 
 button:focus-visible,
 select:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: var(--focus-ring);
     outline-offset: 1px;
 }
 
@@ -35,22 +32,23 @@ select:focus-visible {
     background: var(--paper);
 }
 
+/* 顶栏与侧栏使用实色表面和细底边，不使用半透明或 backdrop-filter。 */
 .top,
 .topbar {
     border-bottom: 1px solid var(--line);
     background: var(--side);
-    box-shadow: none;
+    box-shadow: var(--shadow-top);
+    -webkit-backdrop-filter: none;
     backdrop-filter: none;
 }
 
+/* 品牌块是整屏唯一的实心主色块，负责第一眼定位。 */
 .mark,
 .brand-mark {
-    border: 1.5px solid var(--ink);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--ink);
-    font-size: var(--font-size-caption);
-    font-weight: 700;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-chip);
+    background: var(--accent);
+    color: var(--on-accent);
     box-shadow: none;
 }
 
@@ -58,57 +56,113 @@ select:focus-visible {
 .topbar > b,
 .topbar strong {
     color: var(--ink);
-    font-size: var(--font-size-ui);
-    font-weight: 650;
 }
 
 .crumb {
-    color: var(--muted);
-    font-size: var(--font-size-ui);
+    color: var(--faint);
 }
 
 .crumb span {
     color: var(--ink);
 }
 
-.status,
-.header-status {
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
+.status {
+    color: var(--faint);
+    font-size: var(--font-size-meta);
 }
 
-.dot,
-.header-status-dot {
+/* 状态圆点：已就绪为主色，正在发生用 live 信号色并轻微呼吸。 */
+.dot {
     border-radius: 50%;
     background: var(--accent);
 }
 
-.dot.warn,
-.header-status-dot.is-busy {
-    background: #c4841d;
+.dot.live {
+    background: var(--live);
+    box-shadow: 0 0 0 3px var(--live-halo);
+    animation: live-pulse 1.9s var(--ease-standard) infinite;
 }
 
-.ghost,
-.topbar .quiet-button {
-    border: 1px solid transparent;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--muted);
-    font-size: var(--font-size-ui);
-    line-height: 1.35;
-    font-weight: 400;
+.dot.warn {
+    background: var(--warn);
+}
+
+@keyframes live-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 3px var(--live-halo);
+    }
+
+    50% {
+        box-shadow: 0 0 0 5px transparent;
+    }
+}
+
+/* 次级按钮：灰底实体。 */
+.quiet-button {
+    background: var(--fill);
+    color: var(--ink);
     box-shadow: none;
 }
 
-.ghost:hover:not(:disabled),
+.quiet-button:hover:not(:disabled) {
+    background: var(--fill-strong);
+}
+
+.quiet-button:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+/* 顶栏内的次级按钮退成幽灵态，降低顶栏视觉噪音。 */
+.topbar .quiet-button {
+    background: transparent;
+    color: var(--muted);
+    font-weight: 400;
+    line-height: 1.35;
+}
+
 .topbar .quiet-button:hover:not(:disabled) {
     background: var(--fill);
     color: var(--ink);
 }
 
-@media (max-width: 460px) {
+/* 图标按钮：默认无形，悬停与激活才有底色。 */
+.icon-button {
+    background: transparent;
+    color: var(--muted);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
 
+.icon-button:hover:not(:disabled),
+.icon-button.active {
+    border-color: transparent;
+    background: var(--fill);
+    color: var(--ink);
+}
+
+/* 输入控件：聚焦只把边框加深一档中性色，不加外侧 outline、发光或主色边框。 */
+input,
+textarea {
+    background: var(--paper-strong);
+    color: var(--ink);
+    transition: border-color var(--motion-duration) var(--ease-standard);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--faint);
+}
+
+input:focus,
+textarea:focus,
+input:focus-visible,
+textarea:focus-visible {
+    border-color: var(--faint);
+    outline: none;
+}
+
+@media (max-width: 460px) {
     .status {
-        font-size: var(--font-size-secondary);
+        font-size: var(--font-size-meta);
     }
 }

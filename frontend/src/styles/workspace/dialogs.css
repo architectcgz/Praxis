@@ -1,4 +1,5 @@
-/* 模态框限制在视口内，长表单只由对话框本身滚动。 */
+/* 模态框的尺寸与滚动：限制在视口内，长表单只由对话框本身滚动。
+   颜色、边框与阴影由 theme-dialogs.css 拥有。 */
 .modal-backdrop {
     position: fixed;
     z-index: var(--z-modal);
@@ -6,9 +7,6 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgba(0, 0, 0, 0.32);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .project-dialog {
@@ -18,31 +16,27 @@
     max-height: calc(100dvh - 48px);
     overflow: auto;
     overscroll-behavior: contain;
-    padding: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.6);
-    border-radius: 18px;
-    background: rgba(255, 255, 255, 0.9);
-    box-shadow: var(--shadow-float);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
-    backdrop-filter: saturate(180%) blur(20px);
+    padding: 20px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-float);
 }
 
 .dialog-heading {
-    overflow-wrap: anywhere;
     display: flex;
+    overflow-wrap: anywhere;
     align-items: flex-start;
     justify-content: space-between;
     gap: 18px;
-    padding-bottom: 18px;
+    padding-bottom: 16px;
     border-bottom: 1px solid var(--line);
 }
 
 .dialog-heading h2 {
-    margin: 8px 0 0;
-    color: var(--ink);
-    font-size: var(--font-size-title);
-    font-weight: 700;
-    line-height: 1.2;
+    margin: 6px 0 0;
+    font-size: var(--font-size-heading);
+    font-weight: 650;
+    line-height: 1.35;
+    letter-spacing: 0;
 }
 
 .dialog-close {
@@ -53,48 +47,18 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    margin-top: 10px;
+    margin-top: 16px;
 }
 
 .modal-actions button {
-    min-height: 36px;
-    padding: 0 14px;
-    border: 1px solid var(--line-strong);
-    border-radius: 9px;
+    display: inline-flex;
+    min-height: var(--control-height);
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     font-size: var(--font-size-ui);
     font-weight: 650;
-}
-
-.modal-secondary {
-    background: rgba(118, 118, 128, 0.1);
-    color: var(--ink-secondary);
-}
-
-.modal-secondary:hover:not(:disabled) {
-    border-color: var(--line-strong);
-    background: rgba(118, 118, 128, 0.18);
-}
-
-.modal-actions .modal-primary {
-    border-color: var(--blue);
-    background: var(--blue);
-    color: #fff;
-}
-
-.modal-primary:hover:not(:disabled) {
-    background: var(--blue-strong);
-}
-
-.modal-actions .modal-danger {
-    border-color: var(--danger);
-    background: var(--danger);
-}
-
-.modal-actions .modal-danger:hover:not(:disabled) {
-    border-color: #8f1d14;
-    background: #8f1d14;
-}
-
-.modal-actions .modal-primary:hover {
-    transform: none;
 }

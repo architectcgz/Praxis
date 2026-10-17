@@ -1,4 +1,4 @@
-/* Agent 对话滚动容器与滚动条样式。 */
+/* Agent 对话滚动容器：滚动条宽度与 --scroll-gutter 一致，滑块走全局令牌。 */
 .message-thread-container {
     position: relative;
     display: flex;
@@ -14,39 +14,30 @@
     overflow-anchor: none;
 }
 
-.thread,.message-thread {
-    --message-content-gap: 12px;
+.thread,
+.message-thread {
+    /* 消息线程的三级间距只在这里定义一次：
+       --message-content-gap  轮内块之间（思考 / 正文 / 活动账本 / 仪器 / 脚注）
+       --message-head-gap     名称行到内容，以及正文段落之间
+       --turn-gap             回合之间，明显大于轮内间距，用来分开不同回合 */
+    --message-content-gap: 14px;
+    --message-head-gap: 10px;
+    --turn-gap: 24px;
+
     display: grid;
     align-content: start;
     grid-auto-rows: max-content;
     gap: 0;
-    min-height: 0;
     min-width: 0;
+    min-height: 0;
     flex: 1;
     margin-top: 0;
+    padding: 22px 0 16px;
     overflow: auto;
     overflow-x: hidden;
-    padding: 22px 0 16px;
-    scrollbar-color: #c4c4bc transparent;
     scrollbar-gutter: stable;
-    scrollbar-width: thin;
 }
 
 .message-thread.empty {
     align-content: stretch;
-}
-
-.thread::-webkit-scrollbar,.message-thread::-webkit-scrollbar {
-    width: 10px;
-}
-
-.message-thread::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.thread::-webkit-scrollbar-thumb,.message-thread::-webkit-scrollbar-thumb {
-    border: 2px solid transparent;
-    border-radius: 99px;
-    background: #c4c4bc;
-    background-clip: padding-box;
 }

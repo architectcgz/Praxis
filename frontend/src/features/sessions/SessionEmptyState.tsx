@@ -1,4 +1,4 @@
-import { FolderPlus, MessageSquare, Sparkles, Zap } from 'lucide-react'
+import { FolderPlus, MessageSquare, Zap } from 'lucide-react'
 
 type SessionEmptyStateProps = {
     sessionsCount: number
@@ -10,14 +10,8 @@ export function SessionEmptyState({ sessionsCount }: SessionEmptyStateProps) {
     return (
         <div className="session-empty-container">
             <div className="session-empty-hero">
-                <div className="session-empty-icon-wrapper">
-                    <div className="session-empty-icon-background" />
-                    <div className="session-empty-icon-main">
-                        <MessageSquare size={32} strokeWidth={1.6} />
-                    </div>
-                    <div className="session-empty-icon-accent">
-                        <Sparkles size={18} strokeWidth={2} />
-                    </div>
+                <div className="session-empty-icon" aria-hidden="true">
+                    <MessageSquare size={26} strokeWidth={1.6} />
                 </div>
 
                 <h2 className="session-empty-title">

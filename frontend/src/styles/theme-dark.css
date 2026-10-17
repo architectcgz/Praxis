@@ -1,0 +1,84 @@
+/* 夜间（dark）主题：只覆盖颜色类令牌，令牌名与白天完全一致。
+   组件样式不需要任何主题分支；切换主题只是换 <html data-theme> 的取值。
+
+   深色下的三条额外规则（不可省略，否则夜间会「糊」）：
+   1. 纵深靠 1px 内高光（inset shadow）而不是半透明玻璃，保持禁用 backdrop-filter；
+   2. 仪器域比阅读面更暗，维持「读的东西在纸上、机器输出在黑里」的域分离；
+   3. 禁用态不得只降 opacity —— 深色下透明度会迅速掉出 4.5:1，改用固定色。 */
+:root[data-theme='dark'] {
+    color-scheme: dark;
+
+    /* 表面：整体压暗，靠明度台阶分层 */
+    --canvas: #0c0e11;
+    --bg: #121419;
+    --side: #171a20;
+    --paper: #1a1e25;
+    --paper-2: #13161b;
+    --paper-strong: #232830;
+    --overlay: rgba(0, 0, 0, 0.6);
+
+    --ink: #e8ebef;
+    --muted: #a3acb8;
+    --faint: #858f9c;
+
+    --line: #2a2f37;
+    --line-strong: #3d4653;
+    --fill: #262c35;
+    --fill-soft: rgba(255, 255, 255, 0.05);
+    --fill-strong: #2f3641;
+    --selected: #2a313b;
+
+    /* 暗底上深绿不可读，主色升为信号绿：强调色与 live 在夜间合流 */
+    --accent: #3ecf8e;
+    --accent-ink: #6ee0a8;
+    --accent-line: #1f4c36;
+    --accent-soft: #12301f;
+    --on-accent: #0b0d10;
+
+    --live: #3ecf8e;
+    --live-ink: #6ee0a8;
+    --live-line: #1f4c36;
+    --live-soft: #12301f;
+    --live-halo: rgba(62, 207, 142, 0.22);
+
+    --ok: #3ecf8e;
+    --ok-ink: #6ee0a8;
+    --ok-line: #1f4c36;
+    --ok-soft: #12301f;
+
+    --warn: #f0a132;
+    --warn-ink: #f5b55c;
+    --warn-line: #4d3b1c;
+    --warn-soft: #2e2415;
+    --on-warn: #1a1205;
+
+    --danger: #ff6b6b;
+    --danger-ink: #ff8a8a;
+    --danger-line: #512b2e;
+    --danger-soft: #2e1a1c;
+    --on-danger: #1a0d0e;
+
+    /* 仪器域：比阅读面更暗一层，夜间同样是凹下去的台面 */
+    --inst-bg: #0e1013;
+    --inst-bg-2: #16191e;
+    --inst-ink: #dfe4ea;
+    --inst-dim: #8792a0;
+    --inst-line: #232830;
+    --inst-fill: rgba(255, 255, 255, 0.06);
+    --inst-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --inst-accent: #3ecf8e;
+
+    --inst-add-bg: rgba(62, 207, 142, 0.14);
+    --inst-add-ink: #8fe3b6;
+    --inst-del-bg: rgba(255, 107, 107, 0.14);
+    --inst-del-ink: #ffa3a3;
+
+    --scrollbar-thumb: #39414d;
+    --scrollbar-thumb-hover: #4a5460;
+
+    --select-chevron: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23858f9c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+    --shadow-top: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+    --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 14px 30px -16px rgba(0, 0, 0, 0.6);
+    --shadow-modal: 0 4px 14px rgba(0, 0, 0, 0.55), 0 28px 60px -22px rgba(0, 0, 0, 0.7);
+}

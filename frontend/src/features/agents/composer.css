@@ -1,4 +1,5 @@
-/* Session 输入区、模型选择器和思考强度控件。 */
+/* Session 输入区、模型/思考强度选择器的布局与材质。
+   同一属性只在本文件声明一次，theme.css 不再重复覆盖输入控件。 */
 .slash-command-menu {
     position: absolute;
     z-index: var(--z-popover);
@@ -9,8 +10,8 @@
     padding: 4px;
     overflow-y: auto;
     border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
+    border-radius: var(--radius-float);
+    background: var(--paper-strong);
     box-shadow: var(--shadow-float);
 }
 
@@ -19,10 +20,10 @@
     align-items: center;
     gap: 12px;
     width: 100%;
-    min-height: 36px;
+    min-height: 34px;
     padding: 6px 8px;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--radius-chip);
     background: transparent;
     color: var(--ink);
     text-align: left;
@@ -32,61 +33,106 @@
 .slash-command-option:hover,
 .slash-command-option.is-selected,
 .slash-command-option:focus-visible {
-    border-color: var(--line);
+    border-color: transparent;
     background: var(--selected);
 }
 
 .slash-command-name {
     flex: 0 0 54px;
     font-family: var(--mono);
-    font-size: var(--font-size-code);
-    font-weight: 600;
+    font-size: var(--font-size-meta);
+    font-weight: 650;
 }
 
 .slash-command-description {
     color: var(--muted);
-    font-size: var(--font-size-secondary);
+    font-size: var(--font-size-meta);
 }
 
+/* 输入区与消息阅读列同宽，随主栏按比例伸缩并居中；极窄窗口下由可用宽度兜底，
+   避免最小宽度撑开页面。 */
 .command-band {
     position: relative;
     z-index: var(--z-raised);
+    display: block;
+    width: min(var(--session-content-width, 744px), calc(100% - 32px));
+    min-width: min(320px, calc(100% - 32px));
+    flex: 0 0 auto;
+    margin: 0 auto;
+    padding-bottom: 14px;
 }
 
+/* 输入框聚焦只把边框加深一档中性色，不使用主色边框或外侧光晕。 */
 .composer-shell {
+    display: block;
+    width: 100%;
+    min-height: 50px;
+    margin-top: 0;
+    padding: 0;
     border: 1px solid var(--line-strong);
-    border-radius: 25px;
-    background: rgba(255, 255, 255, 0.92);
-    transition: background var(--motion-duration) ease;
+    border-radius: var(--radius-card);
+    background: var(--paper-strong);
+    transition: border-color var(--motion-duration) var(--ease-standard);
 }
 
 .composer-shell:focus-within {
-    background: #fff;
+    border-color: var(--faint);
+    background: var(--paper-strong);
+}
+
+.composer-shell > .composer-icon-button {
+    display: none;
 }
 
 .command-band textarea.composer-textarea {
+    display: block;
+    width: 100%;
     min-width: 0;
+    min-height: 44px;
+    max-height: min(160px, 30dvh);
+    padding: 10px 12px 4px;
     border: 0;
     border-radius: 0;
+    outline: none;
     background: transparent;
+    font-size: var(--font-size-body);
+    line-height: 1.6;
+    resize: none;
     overflow-y: auto;
 }
 
-.command-band textarea.composer-textarea:focus {
+.command-band textarea.composer-textarea:focus,
+.command-band textarea.composer-textarea:focus-visible {
     border: 0;
     background: transparent;
+    box-shadow: none;
+    outline: none;
+}
+
+.composer-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    padding: 4px 6px 6px;
 }
 
 .composer-icon-button {
+    display: grid;
+    width: var(--icon-button-size);
+    height: var(--icon-button-size);
+    padding: 0;
+    place-items: center;
     border: 0;
-    border-radius: 50%;
+    border-radius: var(--radius-control);
     background: transparent;
-    color: var(--ink-secondary);
-    transition: background var(--motion-duration) ease, color var(--motion-duration) ease, transform var(--motion-duration) ease;
+    color: var(--muted);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
 
 .composer-icon-button:hover:not(:disabled) {
-    background: rgba(118, 118, 128, 0.12);
+    background: var(--fill);
     color: var(--ink);
 }
 
@@ -97,7 +143,7 @@
 .composer-select-chevron {
     flex: 0 0 auto;
     pointer-events: none;
-    transition: transform var(--motion-duration) ease;
+    transition: transform var(--motion-duration) var(--ease-standard);
 }
 
 .composer-select-chevron.is-open {
@@ -115,16 +161,17 @@
     gap: 5px;
     align-items: center;
     width: 112px;
+    height: var(--control-height-compact);
     padding: 0 7px 0 8px;
     border: 1px solid transparent;
-    border-radius: 9px;
-    background: rgba(118, 118, 128, 0.08);
-    color: var(--ink-secondary);
-    font-size: var(--font-size-secondary);
-    font-weight: 600;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
     line-height: 1;
     text-align: left;
-    transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease, color var(--motion-duration) ease;
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
 
 .composer-model-trigger {
@@ -148,43 +195,44 @@
 
 .composer-select-trigger:hover:not(:disabled),
 .composer-select-trigger[aria-expanded='true'] {
-    border-color: var(--line);
-    background: rgba(118, 118, 128, 0.12);
+    background: var(--fill);
     color: var(--ink);
 }
 
 .composer-select-trigger:focus-visible {
     outline: 0;
-    border-color: var(--blue);
-    background: #fff;
-    color: var(--blue-strong);
+    border-color: transparent;
+    background: var(--fill);
+    color: var(--ink);
 }
 
 .composer-select-picker.is-disabled .composer-select-trigger {
-    background: rgba(118, 118, 128, 0.05);
-    color: var(--ink-tertiary);
+    background: transparent;
+    color: var(--faint);
 }
 
 .model-picker-menu,
 .thinking-intensity-picker {
+    position: absolute;
+    z-index: var(--z-popover);
+    bottom: calc(100% + 8px);
     max-width: calc(100dvw - 24px);
     max-height: 0;
     visibility: hidden;
     overflow: auto;
     overscroll-behavior: contain;
     border: 1px solid var(--line);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.96);
-    box-shadow: var(--shadow-soft);
-    -webkit-backdrop-filter: saturate(180%) blur(16px);
-    backdrop-filter: saturate(180%) blur(16px);
+    border-radius: var(--radius-float);
+    background: var(--paper-strong);
+    box-shadow: var(--shadow-float);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
 }
 
 .model-picker-menu {
     left: 0;
     width: 248px;
     padding: 4px;
-    overflow: auto;
 }
 
 .model-picker-option {
@@ -192,30 +240,30 @@
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
     width: 100%;
-    min-height: 38px;
-    padding: 7px 9px;
+    min-height: 34px;
     align-items: center;
+    padding: 6px 8px;
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: var(--radius-chip);
     background: transparent;
     color: var(--ink);
     font-size: var(--font-size-ui);
     line-height: 1.2;
     text-align: left;
-    transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease, color var(--motion-duration) ease;
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
 
 .model-picker-option:hover,
 .model-picker-option.is-selected {
-    border-color: rgba(0, 122, 255, 0.16);
-    background: var(--blue-soft);
-    color: var(--blue-strong);
+    border-color: transparent;
+    background: var(--selected);
+    color: var(--ink);
 }
 
 .model-picker-option:focus-visible {
     outline: 0;
-    border-color: var(--blue);
-    background: #fff;
+    border-color: transparent;
+    background: var(--selected);
 }
 
 .model-picker-option-label,
@@ -226,12 +274,17 @@
 }
 
 .model-picker-option-label {
-    font-weight: 600;
+    font-weight: 650;
 }
 
 .model-picker-option-provider {
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-caption);
+    max-width: 96px;
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+}
+
+.composer-provider-picker .model-picker-option-provider {
+    max-width: 72px;
 }
 
 .thinking-intensity-picker {
@@ -244,7 +297,7 @@
     display: block;
     margin-bottom: 9px;
     color: var(--ink);
-    font-size: var(--font-size-secondary);
+    font-size: var(--font-size-meta);
     font-weight: 650;
     line-height: 1;
 }
@@ -267,10 +320,10 @@
 .thinking-intensity-slider::-webkit-slider-runnable-track {
     width: 100%;
     height: 4px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: linear-gradient(
         to right,
-        var(--blue) 0 var(--thinking-intensity-progress),
+        var(--accent) 0 var(--thinking-intensity-progress),
         var(--line-strong) var(--thinking-intensity-progress) 100%
     );
 }
@@ -281,40 +334,40 @@
     margin-top: -6px;
     appearance: none;
     -webkit-appearance: none;
-    border: 2px solid #fff;
+    border: 2px solid var(--paper-strong);
     border-radius: 50%;
-    background: var(--blue);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    background: var(--accent);
+    box-shadow: var(--shadow-float);
 }
 
 .thinking-intensity-slider::-moz-range-track {
     height: 4px;
     border: 0;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--line-strong);
 }
 
 .thinking-intensity-slider::-moz-range-progress {
     height: 4px;
-    border-radius: 999px;
-    background: var(--blue);
+    border-radius: var(--radius-pill);
+    background: var(--accent);
 }
 
 .thinking-intensity-slider::-moz-range-thumb {
     width: 12px;
     height: 12px;
-    border: 2px solid #fff;
+    border: 2px solid var(--paper-strong);
     border-radius: 50%;
-    background: var(--blue);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    background: var(--accent);
+    box-shadow: var(--shadow-float);
 }
 
 .thinking-intensity-labels {
     display: grid;
     grid-template-columns: repeat(var(--thinking-level-count, 1), minmax(0, 1fr));
     margin-top: 3px;
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-caption);
+    color: var(--faint);
+    font-size: var(--font-size-meta);
     line-height: 1.2;
 }
 
@@ -325,98 +378,39 @@
     white-space: nowrap;
 }
 
+/* 发送键是输入区唯一的主操作。 */
 .composer-submit {
+    display: grid;
+    width: auto;
+    min-width: var(--control-height-compact);
+    height: var(--control-height-compact);
+    margin-left: auto;
+    padding: 0 10px;
+    place-items: center;
     border: 0;
-    border-radius: 50%;
-    background: var(--blue);
-    color: #fff;
-    transition: background var(--motion-duration) ease, transform var(--motion-duration) ease;
+    border-radius: var(--radius-control);
+    background: var(--accent);
+    color: var(--on-accent);
+    transition: background-color var(--motion-duration) var(--ease-standard), transform var(--motion-duration) var(--ease-standard);
 }
 
 .composer-submit:hover:not(:disabled) {
-    background: var(--blue-strong);
+    background: var(--accent-ink);
 }
 
 .composer-submit:active:not(:disabled) {
     transform: scale(0.95);
 }
 
+/* 停止键是危险语义，但保持低权重：软底 + 深色文字。 */
 .composer-submit-danger {
-    background: rgba(255, 59, 48, 0.12);
-    color: #c9342c;
+    background: var(--danger-soft);
+    color: var(--danger);
 }
 
 .composer-submit-danger:hover:not(:disabled) {
-    background: rgba(255, 59, 48, 0.18);
-}
-
-.command-band {
-    width: min(var(--session-content-width, 920px), calc(100% - 32px));
-    max-width: var(--session-content-width, 920px);
-    min-width: 0;
-    flex: 0 0 auto;
-    margin: 0 auto;
-    padding-bottom: 14px;
-}
-
-.composer-shell {
-    display: block;
-    width: 100%;
-    min-height: 50px;
-    margin-top: 0;
-    padding: 0;
-}
-
-.composer-shell > .composer-icon-button {
-    display: none;
-}
-
-.command-band textarea.composer-textarea {
-    display: block;
-    width: 100%;
-    min-height: 44px;
-    max-height: min(160px, 30dvh);
-    padding: 10px 12px 4px;
-    resize: none;
-}
-
-.composer-tools {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px;
-    min-width: 0;
-    padding: 4px 6px 6px;
-}
-
-.composer-select-trigger {
-    height: 28px;
-}
-
-.composer-approval-mode {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-    font-size: var(--font-size-secondary);
-}
-
-.composer-approval-status {
-    color: var(--muted);
-}
-
-.composer-approval-error {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--danger);
-    overflow-wrap: anywhere;
-}
-
-.composer-approval-error button {
-    min-height: 28px;
-    flex: 0 0 auto;
+    background: var(--danger-line);
+    color: var(--danger-ink);
 }
 
 .composer-send-controls {
@@ -432,10 +426,10 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 2px 12px;
-    min-height: 28px;
+    min-height: var(--icon-button-size);
     padding: 4px 12px;
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
+    color: var(--faint);
+    font-size: var(--font-size-meta);
     font-variant-numeric: tabular-nums;
 }
 
@@ -443,29 +437,30 @@
     white-space: nowrap;
 }
 
-.composer-icon-button {
-    display: grid;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    place-items: center;
+.composer-approval-mode {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    font-size: var(--font-size-meta);
 }
 
-.composer-submit {
-    display: grid;
-    width: auto;
-    min-width: 28px;
-    height: 28px;
-    margin-left: auto;
-    padding: 0 10px;
-    place-items: center;
+.composer-approval-status {
+    color: var(--faint);
 }
 
-.model-picker-menu,
-.thinking-intensity-picker {
-    position: absolute;
-    z-index: var(--z-popover);
-    bottom: calc(100% + 8px);
+.composer-approval-error {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--danger);
+    overflow-wrap: anywhere;
+}
+
+.composer-approval-error button {
+    min-height: var(--control-height-compact);
+    flex: 0 0 auto;
 }
 
 .composer-provider-picker .model-picker-menu {
@@ -474,13 +469,6 @@
 
 .composer-approval-mode .model-picker-menu {
     width: 168px;
-}
-
-.composer-provider-picker .model-picker-option-provider {
-    max-width: 72px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 @media (max-width: 720px) {
@@ -504,8 +492,4 @@
     .thinking-intensity-picker {
         width: 198px;
     }
-}
-
-.model-picker-option-provider {
-    max-width: 96px;
 }

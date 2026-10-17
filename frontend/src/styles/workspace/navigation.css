@@ -1,4 +1,4 @@
-/* 工作区分栏和侧栏模块布局。 */
+/* 工作区分栏、侧栏与导航行的布局。颜色与视觉状态由 theme-navigation.css 拥有。 */
 .workspace-grid {
     display: grid;
     grid-template-columns: 248px minmax(0, 1fr) 268px;
@@ -6,160 +6,41 @@
     min-height: 0;
 }
 
+.side,
 .sidebar {
     display: flex;
-    flex-direction: column;
-    min-height: 0;
     min-width: 0;
+    min-height: 0;
+    flex-direction: column;
     padding: 0;
     border-right: 1px solid var(--line);
-    background: rgba(250, 250, 252, 0.62);
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
 }
 
+.side.right,
 .agents-panel {
     border-right: 0;
     border-left: 1px solid var(--line);
 }
 
 .section-label {
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-caption);
-    font-weight: 700;
-    letter-spacing: 0;
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+    letter-spacing: var(--track-micro);
     text-transform: uppercase;
 }
 
 .sidebar-count {
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-caption);
-}
-.icon-button {
-    border: 1px solid transparent;
-    border-radius: 9px;
-    background: rgba(118, 118, 128, 0.1);
-    color: var(--ink-secondary);
-    transition: border-color var(--motion-duration) ease, background var(--motion-duration) ease, color var(--motion-duration) ease, transform var(--motion-duration) ease;
-}
-
-.icon-button:hover:not(:disabled),
-.icon-button.active {
-    border-color: rgba(0, 122, 255, 0.35);
-    background: var(--blue-soft);
-    color: var(--blue);
-}
-
-.icon-button:active:not(:disabled) {
-    transform: scale(0.96);
-}
-
-input,
-textarea {
-    box-sizing: border-box;
-    width: 100%;
-    border: 1px solid var(--line-strong);
-    border-radius: 10px;
-    outline: none;
-    background: rgba(255, 255, 255, 0.84);
-    color: var(--ink);
-    transition: border-color var(--motion-duration) ease, background var(--motion-duration) ease;
-}
-
-input {
-    height: 38px;
-    padding: 0 11px;
-    font-size: var(--font-size-ui);
-}
-
-textarea {
-    min-height: 132px;
-    padding: 12px;
-    resize: vertical;
-    line-height: 1.5;
-}
-
-input::placeholder,
-textarea::placeholder {
-    color: #a1a1a6;
-}
-
-input:focus,
-textarea:focus {
-    border-color: var(--blue);
-    background: #fff;
-}
-
-input:focus-visible,
-textarea:focus-visible {
-    outline: none;
-}
-
-.agent-label {
-    display: block;
-    margin: 22px 0 10px;
-}
-
-.agent-list {
-    margin-top: 20px;
-}
-
-.panel-placeholder {
-    margin: 80px 0 0;
-    color: var(--ink-tertiary);
-    text-align: center;
-}
-
-.panel-placeholder p {
-    font-size: var(--font-size-secondary);
-    line-height: 1.5;
-}
-
-.agent-row {
-    display: grid;
-    grid-template-columns: 9px minmax(0, 1fr) auto;
-    align-items: center;
-    width: 100%;
-    padding: 10px 9px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    background: transparent;
-    color: var(--ink-secondary);
-    text-align: left;
-    transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease, color var(--motion-duration) ease;
-}
-
-.agent-row:hover,
-.agent-row.selected {
-    border-color: rgba(0, 122, 255, 0.2);
-    background: var(--blue-soft);
-    color: var(--blue-strong);
-}
-
-.agent-row-copy strong {
-    color: inherit;
-    font-size: var(--font-size-ui);
-    font-weight: 600;
-}
-
-.agent-row-copy small {
-    margin-top: 3px;
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-caption);
-}
-
-.state-text {
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-caption);
+    font-size: var(--font-size-meta);
+    font-variant-numeric: tabular-nums;
 }
 
 .side-head,
 .sidebar-heading {
     display: flex;
+    height: 38px;
+    min-height: 38px;
     align-items: center;
     justify-content: space-between;
-    height: 36px;
-    min-height: 36px;
     padding: 0 10px 0 14px;
 }
 
@@ -170,46 +51,22 @@ textarea:focus-visible {
     gap: 2px;
 }
 
-.icon-btn,
-.icon-button {
-    display: grid;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    place-items: center;
-}
-
-.agents-panel > .scroll-region {
-    padding: 0 8px 12px;
-}
-
-.session-note {
-    margin: 4px 8px 10px;
-    padding-bottom: 10px;
-}
-
-.session-note b,
-.session-title {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .agent-list {
     display: grid;
     gap: 2px;
+    margin-top: 20px;
 }
 
 .agent-row {
+    display: grid;
+    grid-template-columns: 7px minmax(0, 1fr) auto;
     gap: 7px;
-}
-
-.astate,
-.state-marker {
-    width: 7px;
-    height: 7px;
-    flex: 0 0 7px;
+    align-items: center;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    text-align: left;
 }
 
 .agent-row-copy {
@@ -217,25 +74,12 @@ textarea:focus-visible {
     flex: 1;
 }
 
-.agent .nm,
-.agent-row-copy strong {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.agent .sub,
-.agent-row-copy small {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.st,
-.state-text {
-    white-space: nowrap;
+.astate,
+.state-marker {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    border-radius: 50%;
 }
 
 .agent-row-metrics {
@@ -250,14 +94,46 @@ textarea:focus-visible {
     gap: 3px;
 }
 
+.session-note {
+    margin: 4px 8px 10px;
+    padding-bottom: 10px;
+}
+
+.agent-label {
+    display: block;
+    margin: 22px 0 10px;
+}
+
+.agents-panel > .scroll-region {
+    padding: 0 8px 12px;
+}
+
 .panel-placeholder {
     display: grid;
     justify-items: center;
     gap: 8px;
     margin-top: 56px;
+    text-align: center;
 }
 
 .panel-placeholder p {
     max-width: 180px;
     margin: 0;
+    font-size: var(--font-size-meta);
+    line-height: 1.5;
+}
+
+/* 单行省略是所有侧栏文本行的共同要求。 */
+.agent .nm,
+.agent-row-copy strong,
+.agent .sub,
+.agent-row-copy small,
+.session-note b,
+.session-title,
+.st,
+.state-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

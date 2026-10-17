@@ -1,15 +1,14 @@
-import { ChevronDown } from 'lucide-react'
 import type { AgentEvent, AgentMessageBlock } from '../../../api'
 import { FileChanges } from './FileChanges'
-import { OutputStatus } from './OutputStatus'
 import { TerminalOutput } from './TerminalOutput'
 import { ToolResultContent } from './ToolResultContent'
+import { ActivityItem, activityTone, isOpenByDefault } from './ActivityLedger'
 import { formatToolInput, presentTool, type ToolStatus } from './toolPresentation'
 import { DurationLabel, useOperationTiming } from '../../timing/OperationTimings'
-import { ToolApprovalReview, useToolApproval } from '../ToolApprovals'
+import { useToolApproval } from '../ToolApprovals'
 
 export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { tools: AgentEvent[]; pendingStatus?: ToolStatus }) {
-    return <div className="agent-activity output-activity"><div className="output-tool-list">
+    return <div className="agent-activity output-activity"><div className="acts">
         {groupToolEvents(tools).map((activity) => <ToolCard
             key={activity.key}
             name={activity.call?.name || activity.approval?.name || activity.result?.name || ''}
@@ -37,7 +36,8 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     const record = useOperationTiming(taskId, 'tool', callId)
     const approval = useToolApproval(taskId, callId)
     const pendingApproval = result === undefined ? approval?.pendingApproval : undefined
-    const duration = <DurationLabel record={record} />
+    // 没有计时记录时不传元素，活动账本右列会回落到状态词而不是留空。
+    const duration = record ? <DurationLabel record={record} label="" /> : undefined
     // 所有工具都展示后端冻结参数，不能以原始模型请求替换将被批准的操作。
     const toolInput = pendingApproval ? pendingApproval.normalizedArguments : input
     const tool = presentTool(name, toolInput, result, isError, pendingStatus)
@@ -49,33 +49,30 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
         else if (pendingStatus === 'running') tool.status = 'queued'
     }
     if (pendingApproval) tool.status = 'awaiting_approval'
-    const review = result === undefined && approval && (pendingApproval || (pendingStatus === 'awaiting_approval' && approval.error))
-        ? <ToolApprovalReview approval={approval} /> : undefined
-    if (name === 'bash') return <TerminalOutput tool={tool} duration={duration} approval={review} />
-    if (name === 'apply_patch') return <FileChanges tool={tool} duration={duration} approval={review} />
-    return <div className="output-fold output-tool" data-status={tool.status}>
-        <details className="output-fold output-tool-details" open={tool.status === 'running' || tool.status === 'failed' || tool.status === 'timeout' || tool.status === 'awaiting_approval' ? true : undefined}>
-            <summary className="output-fold-button output-tool-header">
-                <span className="output-tool-summary"><strong>{tool.name || tool.label || '工具'}</strong><code title={tool.summary}>{tool.summary}</code></span>
-                <OutputStatus status={tool.status} label={tool.notice.startsWith('搜索无结果') ? '无匹配' : undefined} />
-                {duration}
-                <ChevronDown className="output-chevron" size={14} aria-hidden="true" />
-            </summary>
-            <div className="output-tool-body">
-                {toolInput !== undefined && <section className="output-section output-input">
-                    <div className="output-section-label">调用参数</div>
-                    <pre className="output-text">{formatToolInput(toolInput)}</pre>
-                </section>}
-                {!review && <section className="output-section output-result">
-                    <div className="output-section-label">执行输出</div>
-                    {result === undefined ? <p className="output-muted">{tool.status === 'running' ? '正在执行，等待工具返回结果…' : '暂无输出'}</p>
-                        : tool.content ? <ToolResultContent content={tool.content} /> : <p className="output-muted">暂无输出</p>}
-                    {typeof tool.result.size === 'number' && <div className="output-meta"><span>{tool.result.size} 字节</span></div>}
-                </section>}
-            </div>
-        </details>
-        {review}
-    </div>
+    // 待批准的决策统一在输入区上方的审批闸口完成，卡片内不再重复一组按钮。
+    const awaitingApproval = tool.status === 'awaiting_approval'
+    if (name === 'bash') return <TerminalOutput tool={tool} duration={duration} />
+    if (name === 'apply_patch') return <FileChanges tool={tool} duration={duration} />
+    return <ActivityItem
+        tone={activityTone(tool.status)}
+        name={tool.name || tool.label || '工具'}
+        argument={tool.summary}
+        status={tool.status}
+        statusLabel={tool.notice.startsWith('搜索无结果') ? '无匹配' : undefined}
+        duration={duration}
+        open={isOpenByDefault(tool.status)}
+    >
+        {toolInput !== undefined && <section className="output-section output-input">
+            <div className="output-section-label">参数</div>
+            <pre className="output-text">{formatToolInput(toolInput)}</pre>
+        </section>}
+        {!awaitingApproval && <section className="output-section output-result">
+            <div className="output-section-label">输出</div>
+            {result === undefined ? <p className="output-muted">{tool.status === 'running' ? '正在执行，等待工具返回结果…' : '暂无输出'}</p>
+                : tool.content ? <ToolResultContent content={tool.content} /> : <p className="output-muted">暂无输出</p>}
+            {typeof tool.result.size === 'number' && <div className="output-meta"><span>{tool.result.size} 字节</span></div>}
+        </section>}
+    </ActivityItem>
 }
 
 type ToolActivity = { key: string; call?: AgentEvent; approval?: AgentEvent; result?: AgentEvent }

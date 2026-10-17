@@ -48,8 +48,9 @@ export function useOperationTiming(taskId: string, kind: OperationTiming['kind']
     return findTiming(useContext(TimingContext), taskId, kind, referenceId)
 }
 
-/** 运行中显示估算值，结束后只显示后端单调时钟测量值；异常退出不持续计时。 */
-export function DurationLabel({ record, label = '耗时' }: { record?: OperationTiming; label?: string }) {
+/** 运行中显示估算值，结束后只显示后端单调时钟测量值；异常退出不持续计时。
+    compact 供脚注这类单值场景使用：可见文本只留耗时，首响应留在 title 里。 */
+export function DurationLabel({ record, label = '耗时', compact = false }: { record?: OperationTiming; label?: string; compact?: boolean }) {
     const [now, setNow] = useState(Date.now)
     const running = record?.status === 'running'
     useEffect(() => {
@@ -60,10 +61,12 @@ export function DurationLabel({ record, label = '耗时' }: { record?: Operation
     }, [record?.id, running])
     if (!record) return null
     const elapsed = running ? Math.max(0, now - Date.parse(record.startedAt)) : record.durationMs
-    const text = `${label} ${elapsed === undefined ? '未知（中断）' : `${running ? '约 ' : ''}${formatDuration(elapsed)}`}`
+    const value = elapsed === undefined ? '未知（中断）' : `${running ? '约 ' : ''}${formatDuration(elapsed)}`
+    // 传空 label 表示只显示数字，供活动账本这类需要紧凑单值的场景使用。
+    const text = label ? `${label} ${value}` : value
     const firstResponse = record.firstResponseMs === undefined ? '' : ` · 首响应 ${formatDuration(record.firstResponseMs)}`
     return <span className="operation-duration" title={`${text}${firstResponse}${running ? '；运行中为估算值，结束后使用后端实测耗时' : ''}`}>
-        {text}{firstResponse}
+        {text}{compact ? '' : firstResponse}
     </span>
 }
 

@@ -56,7 +56,8 @@ export function formatModelUsage(usage: ReturnType<typeof summarizeModelUsage>) 
             `总计 ${compact(usage.totalTokens, true, usage.missingOutput)} tokens`,
             `输入 ${compact(usage.inputTokens)}`,
             `输出 ${compact(usage.outputTokens, usage.hasOutput, usage.missingOutput)}`,
-            `缓存 ${compact(cacheTokens, hasCache, missingCache)}`,
+            `缓存读取 ${compact(usage.cacheReadInputTokens, usage.hasCacheRead, usage.missingCacheRead)}`,
+            `缓存写入 ${compact(usage.cacheCreationInputTokens, usage.hasCacheCreation, usage.missingCacheCreation)}`,
         ],
         details: [
             `总计：${exact(usage.totalTokens, true, usage.missingOutput)}`,

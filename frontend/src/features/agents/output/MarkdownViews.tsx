@@ -77,7 +77,7 @@ function MarkdownCodeBlock({ children, streaming }: ComponentPropsWithoutRef<'pr
     const changes = isDiff ? codeLineChanges(content, code.props.className) : null
 
     return (
-        <div className="markdown-code-block">
+        <div className="markdown-code-block instrument">
             <details open={streaming || undefined}>
                 <summary className="markdown-code-toolbar">
                     <span className="markdown-code-language">{language}</span>

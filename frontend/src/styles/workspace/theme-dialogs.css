@@ -1,43 +1,52 @@
+/* 模态框的颜色与材质：实色纸白 + 细描边 + 柔和浮层阴影，不使用背景模糊。 */
 .modal-backdrop {
-    background: rgba(27, 27, 25, 0.32);
+    background: var(--overlay);
+    -webkit-backdrop-filter: none;
     backdrop-filter: none;
 }
 
 .project-dialog {
     border: 1px solid var(--line-strong);
-    border-radius: 8px;
-    background: #fff;
-    box-shadow: var(--shadow-float);
+    background: var(--paper-strong);
+    box-shadow: var(--shadow-modal);
+    -webkit-backdrop-filter: none;
     backdrop-filter: none;
 }
 
-.modal-actions button {
-    border-radius: 6px;
-}
-
 .modal-secondary {
+    border-color: transparent;
     background: var(--fill);
-    color: var(--muted);
+    color: var(--ink);
 }
 
-.modal-actions .modal-primary {
-    border-color: var(--ink);
-    border-radius: 5px;
-    background: var(--ink);
+.modal-secondary:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--fill-strong);
+}
+
+/* 主操作统一深绿实心，与顶栏品牌块和输入区发送键同一语义。 */
+.modal-actions .modal-primary,
+.modal-primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
     box-shadow: none;
 }
 
-.modal-actions .modal-primary:hover {
-    background: #000;
-    box-shadow: none;
+.modal-primary:hover:not(:disabled) {
+    border-color: var(--accent-ink);
+    background: var(--accent-ink);
 }
 
-.modal-actions .modal-danger {
+/* 危险操作只有两档：实心确认，描边入口由各自组件定义。 */
+.modal-actions .modal-danger,
+.modal-danger {
     border-color: var(--danger);
     background: var(--danger);
+    color: var(--on-danger);
 }
 
-.modal-actions .modal-danger:hover:not(:disabled) {
-    border-color: #8f1d14;
-    background: #8f1d14;
+.modal-danger:hover:not(:disabled) {
+    border-color: var(--danger-ink);
+    background: var(--danger-ink);
 }

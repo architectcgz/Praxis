@@ -3,7 +3,7 @@ import { ArrowDown, MessageSquare } from 'lucide-react'
 import type { AgentHistoryItem, AgentMessageBlock, AgentSnapshot, ModelOption } from '../../api'
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
-import { ToolApprovalsProvider } from './ToolApprovals'
+import { ApprovalGate, ToolApprovalsProvider } from './ToolApprovals'
 import { projectStreamingOutput } from './streaming'
 import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
@@ -252,6 +252,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                     </button>
                 )}
             </div>
+            <ApprovalGate />
             <AgentTaskInput
                 projectId={projectId}
                 sessionId={agent.sessionId}

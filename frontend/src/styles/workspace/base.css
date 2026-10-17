@@ -1,22 +1,35 @@
-/* 工作区顶部栏、通用控件与状态布局。 */
+/* 工作区顶部栏与通用控件的布局、尺寸和状态结构。
+   颜色、边框与材质由 theme-shell.css 拥有，本文件不写颜色。 */
+.top,
+.topbar {
+    display: flex;
+    min-width: 0;
+    height: var(--topbar-height);
+    min-height: var(--topbar-height);
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+}
+
 .topbar {
     position: relative;
     z-index: var(--z-sticky);
-    border-bottom: 1px solid var(--line);
-    background: rgba(250, 250, 252, 0.78);
-    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.03);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
-    backdrop-filter: saturate(180%) blur(20px);
+}
+
+.mark,
+.brand-mark {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    place-items: center;
 }
 
 .brand-mark {
-    border-radius: 9px;
-    background: var(--ink);
-    color: #fff;
-    font-size: var(--font-size-ui);
+    font-size: var(--font-size-meta);
     font-weight: 700;
+    line-height: 1;
     letter-spacing: 0;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.16);
 }
 
 .topbar strong,
@@ -24,57 +37,34 @@
     display: block;
 }
 
-.topbar strong {
-    color: var(--ink);
+.topbar strong,
+.topbar > b {
     font-size: var(--font-size-ui);
     font-weight: 650;
     letter-spacing: 0;
 }
 
-.topbar > div:nth-child(2) span {
-    margin-top: 1px;
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-caption);
+.crumb {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.health {
+.spacer {
+    flex: 1;
+}
+
+.status {
     display: flex;
     align-items: center;
-    gap: 7px;
-    margin-left: auto;
-    color: var(--ink-secondary);
-    font-size: var(--font-size-secondary);
+    gap: 6px;
 }
 
-.health-dot {
-    display: inline-block;
-    flex: 0 0 auto;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #a1a1a6;
-}
-
-.health-ready .health-dot,
-.state-idle,
-.state-waiting {
-    background: var(--green);
-}
-
-.health-waiting .health-dot,
-.state-executing,
-.state-pausing {
-    background: var(--orange);
-}
-
-.health-error .health-dot {
-    background: var(--red);
-}
-
-.state-paused,
-.state-interrupted,
-.state-failed {
-    background: var(--red);
+.dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
 }
 
 button,
@@ -89,118 +79,70 @@ button {
 
 button:disabled {
     cursor: not-allowed;
-    opacity: 0.48;
-}
-
-button:focus-visible {
-    outline: 2px solid var(--blue);
-    outline-offset: 2px;
-}
-
-.quiet-button {
-    min-height: 36px;
-    padding: 0 15px;
-    border: 1px solid transparent;
-    border-radius: 9px;
-    background: var(--blue);
-    color: #fff;
-    font-size: var(--font-size-ui);
-    font-weight: 650;
-    transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease, transform var(--motion-duration) ease;
-}
-
-.quiet-button:hover:not(:disabled) {
-    background: var(--blue-strong);
-}
-
-.quiet-button:active:not(:disabled) {
-    transform: scale(0.98);
-}
-
-.quiet-button {
-    min-height: 32px;
-    padding-inline: 13px;
-    background: rgba(118, 118, 128, 0.12);
-    color: var(--blue-strong);
-}
-
-.quiet-button:hover:not(:disabled) {
-    background: rgba(118, 118, 128, 0.2);
 }
 
 svg {
     display: block;
 }
 
-.top,
-.topbar {
-    min-width: 0;
-    display: flex;
+/* 次级按钮：几何与图标按钮同一档，颜色在主题层。 */
+.quiet-button {
+    display: inline-flex;
+    min-height: var(--control-height-compact);
     align-items: center;
-    gap: 10px;
-    min-height: 42px;
-    height: 42px;
-    padding: 0 14px;
-}
-
-.mark,
-.brand-mark {
-    display: grid;
-    width: 18px;
-    height: 18px;
-    flex: 0 0 18px;
-    place-items: center;
-}
-
-.spacer {
-    flex: 1;
-}
-
-.status,
-.header-status {
-    display: flex;
-    align-items: center;
+    justify-content: center;
     gap: 6px;
-}
-
-.dot,
-.header-status-dot {
-    width: 7px;
-    height: 7px;
-    flex: 0 0 7px;
-}
-
-.ghost,
-.topbar .quiet-button {
-    height: 30px;
-    min-height: 30px;
-    margin-left: 0;
-    padding: 0 8px;
+    padding: 0 11px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
 }
 
 .quiet-button-label {
     white-space: nowrap;
 }
 
-.crumb {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+/* 图标按钮：28×28 方格，只用背景色表达状态，不改变几何。 */
+.icon-button {
+    display: grid;
+    width: var(--icon-button-size);
+    height: var(--icon-button-size);
+    flex: 0 0 auto;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-control);
+}
+
+.icon-button:active:not(:disabled) {
+    transform: scale(0.96);
 }
 
 .topbar > .status,
-.topbar > .quiet-button {
+.topbar > .quiet-button,
+.topbar > .icon-button {
     flex: 0 0 auto;
 }
 
-.topbar > .quiet-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
+/* 通用输入控件：与按钮同一档高度和圆角。 */
+input,
+textarea {
+    box-sizing: border-box;
+    width: 100%;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-control);
+    outline: none;
 }
 
-.topbar .crumb span {
-    display: inline;
+input {
+    height: var(--control-height);
+    padding: 0 12px;
+}
+
+textarea {
+    min-height: 132px;
+    padding: 12px;
+    resize: vertical;
+    line-height: 1.5;
 }

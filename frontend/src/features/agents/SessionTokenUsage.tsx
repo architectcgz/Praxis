@@ -57,14 +57,14 @@ export function useSessionModelUsage() {
     return useContext(ModelUsageContext)
 }
 
-/** 分项计数各自保留完整文本，窄窗口由所属用量容器换行。 */
+/** 分项计数各自保留完整文本，窄窗口只在分项之间换行。 */
 export function TokenUsageBreakdown({ labels }: { labels: string[] }) {
-    return labels.map((label, index) => <span key={index}>{label}{index < labels.length - 1 ? ' ' : ''}</span>)
+    return labels.map((label) => <span key={label}>{label} </span>)
 }
 
 const percent = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits: 1 })
 
-/** 同一后端快照展示会话总量与缓存率；实时明细仍独立合并，未知计数不补零。 */
+/** 同一后端快照展示会话总量、输入、输出、缓存读写与缓存率；未知计数不补零。 */
 export function SessionTokenUsage() {
     const { summary, loading, error } = useSessionModelUsage()
     const records = summary?.records ?? []
@@ -73,7 +73,7 @@ export function SessionTokenUsage() {
     const cacheLabel = `缓存率 ${ratio == null ? '--' : percent.format(ratio)}`
     const cacheDetails = ratio != null ? `缓存率：${percent.format(ratio)}`
         : summary?.cacheReadComplete === false ? '缓存率：未知（部分缓存读取计数未上报）' : '缓存率：未知（暂无输入 token）'
-    const text = loading ? '... tokens' : error ? '用量不可用' : records.length === 0 ? '-- tokens' : ''
+    const text = loading ? '… tokens' : error ? '用量不可用' : records.length === 0 ? '-- tokens' : ''
     const title = loading ? '正在加载会话 token 用量' : error ? `Token 用量加载失败：${error}` : records.length === 0 ? '暂无模型上报的 token 用量'
         : `会话累计（仅已保存的请求，包含所有 Agent）\n${usage.details}\n${cacheDetails}`
     return <span className="composer-token-usage" title={title} aria-label={title} aria-busy={loading}>

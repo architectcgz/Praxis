@@ -1,55 +1,123 @@
+/* 项目概览与项目表单的颜色、圆角与材质。 */
 .project-overview-icon {
-    border-radius: 6px;
+    border-radius: var(--radius-card);
     background: var(--selected);
     color: var(--accent);
 }
 
 .project-overview h1 {
-    font-size: var(--font-size-title);
+    font-size: var(--font-size-display);
     font-weight: 650;
 }
 
+/* 项目主操作是主色实心按钮，与全局主操作一致。 */
 .project-overview-action {
-    border-radius: 5px;
+    padding: 0 11px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-control);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+}
+
+.project-overview-action:hover:not(:disabled) {
+    border-color: var(--accent-ink);
+    background: var(--accent-ink);
 }
 
 .project-overview-path {
     color: var(--faint);
     font-family: var(--mono);
-    font-size: var(--font-size-secondary);
 }
 
 .project-overview-stats strong {
+    color: var(--ink);
     font-size: var(--font-size-body);
+    font-weight: 650;
+}
+
+.project-overview-stats span {
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+}
+
+.project-overview-section-heading > span {
+    color: var(--faint);
+    font-size: var(--font-size-meta);
 }
 
 .project-overview-session {
-    border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--muted);
 }
 
 .project-overview-session:hover,
 .project-overview-session.selected {
-    border-color: transparent;
     background: var(--fill);
     color: var(--ink);
 }
 
-.path-picker-button {
-    border-radius: 6px;
+.project-overview-session-copy strong {
+    color: inherit;
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+}
+
+.project-overview-session-copy small {
+    color: var(--faint);
+    font-size: var(--font-size-meta);
 }
 
 .dialog-error {
-    border-color: #e0b9b4;
-    border-radius: 6px;
-    background: #fff6f4;
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-control);
+    background: var(--danger-soft);
     color: var(--danger);
-    box-shadow: none;
+    font-size: var(--font-size-meta);
+    line-height: 1.45;
 }
 
 .dialog-error-action {
-    border-color: #e0b9b4;
-    border-radius: 5px;
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-chip);
     background: transparent;
     color: var(--danger);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+}
+
+.dialog-error-action:hover:not(:disabled) {
+    background: var(--fill-soft);
+}
+
+.project-form label {
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+}
+
+.project-form label span {
+    color: var(--faint);
+    font-weight: 400;
+}
+
+/* 路径选择器是描边角色，悬停只加深背景，不改主色。 */
+.path-picker-button {
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+}
+
+.path-picker-button:hover:not(:disabled) {
+    border-color: var(--line-strong);
+    background: var(--fill);
+    color: var(--ink);
+}
+
+.session-dialog-message {
+    color: var(--muted);
 }

@@ -25,10 +25,10 @@
     width: min(860px, calc(100vw - 32px));
     max-height: calc(100dvh - 48px);
     overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--paper);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-float);
+    background: var(--paper-strong);
+    box-shadow: var(--shadow-modal);
 }
 
 .file-preview-heading {
@@ -57,7 +57,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--font-size-secondary);
+    font-size: var(--font-size-meta);
 }
 
 .file-preview-body {
@@ -70,7 +70,7 @@
     margin: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font: var(--font-size-code)/1.65 var(--mono);
+    font: var(--font-size-meta)/var(--line-height-code) var(--mono);
 }
 
 .file-preview-loading {

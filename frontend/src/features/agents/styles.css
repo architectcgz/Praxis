@@ -1,4 +1,4 @@
-/* Agent 对话区、滚动控件和任务输入基础样式。 */
+/* Agent 对话区与滚动控件的布局。颜色由 theme.css 拥有。 */
 @import './composer.css';
 @import './conversation.css';
 
@@ -9,48 +9,39 @@
     gap: 8px;
     flex: 1 1 auto;
     min-height: 0;
-    color: var(--ink-secondary);
-    font-size: var(--font-size-secondary);
+    color: var(--muted);
+    font-size: var(--font-size-meta);
 }
 
 .agent-conversation {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
-    min-width: 0;
-    margin-top: 0;
+    /* 消息与输入区共用会话宽度，避免滚动条改变阅读列的对齐基准。 */
+    container-type: inline-size;
     position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
 }
 
 .scroll-to-bottom-button {
     position: absolute;
+    /* 与内容列右缘对齐：宽屏下跟随阅读列，不停靠在 Region 边缘。 */
+    right: max(24px, calc((100% - min(var(--session-content-width, 744px), 100% - 32px)) / 2));
     bottom: 16px;
-    right: max(24px, var(--session-content-padding));
     z-index: var(--z-raised);
     display: grid;
-    place-items: center;
+    width: var(--icon-button-size);
+    height: var(--icon-button-size);
     padding: 0;
-    border: 1px solid var(--line-strong);
+    place-items: center;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.95);
-    color: var(--ink-secondary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     cursor: pointer;
-    transition: all var(--motion-duration) ease;
-    animation: fade-slide-in 0.2s ease-out;
-}
-
-.scroll-to-bottom-button:hover {
-    background: #fff;
-    color: var(--blue-strong);
-    border-color: var(--blue-strong);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    animation: fade-slide-in var(--motion-duration-emphasized) var(--ease-enter);
 }
 
 .scroll-to-bottom-button:active {
-    transform: translateY(0);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    transform: none;
 }
 
 @keyframes fade-slide-in {
@@ -65,6 +56,10 @@
     }
 }
 
+.agent-activity .thinking-details-streaming {
+    padding-right: 0;
+}
+
 @media (max-width: 768px) {
     .scroll-to-bottom-button {
         right: 16px;
@@ -72,22 +67,165 @@
     }
 }
 
-.pulse {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    margin-right: 8px;
+/* =====================================================================
+   审批闸口：固定在输入区正上方，一次只显示一条，批准后自动露出下一条。
+   它对「不处理就没法继续」负责，所以放在你本来就要操作的位置。
+   ===================================================================== */
+.approval-gate {
+    width: min(var(--session-content-width, 744px), calc(100% - 32px));
+    flex: none;
+    margin: 0 auto;
+    padding: 0 0 4px;
 }
 
-.agent-activity .thinking-details-streaming {
-    padding-right: 0;
+.approval-gate-box {
+    display: grid;
+    gap: 8px;
+    max-width: var(--session-content-width, 744px);
+    margin: 0 auto;
+    padding: 10px 12px;
+    border: 1px solid var(--warn-line);
+    border-radius: var(--radius-card);
+    background: var(--warn-soft);
 }
 
-.scroll-to-bottom-button {
-    width: 28px;
-    height: 28px;
+.approval-gate-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--warn-ink);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
 }
 
-.scroll-to-bottom-button:hover {
-    transform: none;
+.approval-gate-head > svg {
+    flex: none;
+}
+
+.approval-gate-note {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.approval-gate-count {
+    margin-left: auto;
+    flex: none;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.approval-gate-details {
+    display: grid;
+    gap: 3px;
+    margin: 0;
+    font-size: var(--font-size-meta);
+}
+
+.approval-gate-details > div {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 8px;
+}
+
+.approval-gate-details dt {
+    color: var(--muted);
+}
+
+.approval-gate-details dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.approval-gate-details code {
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+}
+
+.approval-gate-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0;
+    color: var(--danger);
+    font-size: var(--font-size-meta);
+    overflow-wrap: anywhere;
+}
+
+.approval-gate-error > svg {
+    flex: none;
+    margin-top: 1px;
+}
+
+.approval-gate-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.approval-gate-hint {
+    display: inline-flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+}
+
+.approval-gate-deny,
+.approval-gate-approve {
+    display: inline-flex;
+    height: var(--control-height-compact);
+    flex: none;
+    align-items: center;
+    gap: 5px;
+    padding: 0 10px;
+    border-radius: var(--radius-control);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+}
+
+.approval-gate-deny {
+    border: 1px solid var(--line-strong);
+    background: var(--paper-strong);
+    color: var(--ink);
+}
+
+.approval-gate-deny:hover:not(:disabled) {
+    background: var(--fill);
+}
+
+/* 批准是整屏最该被看见的操作：唯一的实心暖色按钮。 */
+.approval-gate-approve {
+    border: 1px solid var(--warn);
+    background: var(--warn);
+    color: var(--on-warn);
+}
+
+.approval-gate-approve:hover:not(:disabled) {
+    border-color: var(--warn-ink);
+    background: var(--warn-ink);
+}
+
+@media (max-width: 460px) {
+    .approval-gate-foot {
+        flex-wrap: wrap;
+    }
+
+    .approval-gate-hint {
+        flex-basis: 100%;
+    }
+
+    .approval-gate-deny,
+    .approval-gate-approve {
+        min-height: 34px;
+        flex: 1;
+        justify-content: center;
+    }
 }

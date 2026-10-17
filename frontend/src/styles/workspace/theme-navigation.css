@@ -1,4 +1,4 @@
-/* 工作区导航壳层和 Agent 侧栏主题。 */
+/* 导航区域与 Agent 侧栏的颜色、状态和材质。不拥有几何布局。 */
 .workspace-grid {
     background: var(--bg);
 }
@@ -7,6 +7,7 @@
 .sidebar {
     border-right: 1px solid var(--line);
     background: var(--side);
+    -webkit-backdrop-filter: none;
     backdrop-filter: none;
 }
 
@@ -17,9 +18,10 @@
 }
 
 .side-head,
-.sidebar-heading {
+.sidebar-heading,
+.section-label,
+.sidebar-count {
     color: var(--faint);
-    font-size: var(--font-size-caption);
     font-weight: 650;
     line-height: 1.35;
 }
@@ -31,31 +33,85 @@
     text-transform: none;
 }
 
-.icon-btn,
-.icon-button {
-    border: 0;
-    border-radius: 4px;
+/* 导航行：悬停与选中只改变颜色和背景，不改变几何尺寸。 */
+.agent-row {
     background: transparent;
     color: var(--muted);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
 
-.icon-btn:hover,
-.icon-button:hover:not(:disabled),
-.icon-button.active {
-    border-color: transparent;
+.agent-row:hover {
     background: var(--fill);
     color: var(--ink);
 }
 
-.scroll-region {
-    scrollbar-color: #c4c4bc transparent;
+.agent-row.selected {
+    background: var(--selected);
+    color: var(--ink);
 }
 
-.scroll-region::-webkit-scrollbar-thumb {
-    border: 2px solid transparent;
-    border-radius: 99px;
-    background: #c4c4bc;
-    background-clip: padding-box;
+/* 代理状态圆点：默认空闲，执行中用 live 信号色，需要处理用提醒色。 */
+.astate,
+.state-marker {
+    background: var(--faint);
+}
+
+.astate.run,
+.state-executing,
+.state-pausing {
+    background: var(--live);
+}
+
+.astate.wait,
+.state-waiting {
+    background: var(--warn);
+}
+
+.state-idle {
+    background: var(--accent);
+}
+
+.state-paused,
+.state-interrupted,
+.state-failed {
+    background: var(--danger);
+}
+
+.agent .nm,
+.agent-row-copy strong {
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    font-weight: 400;
+    line-height: 1.35;
+}
+
+.agent-row.selected .agent-row-copy strong {
+    font-weight: 650;
+}
+
+.agent .sub,
+.agent-row-copy small {
+    margin-top: 3px;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+}
+
+.st,
+.state-text {
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+}
+
+.agent-row-metrics {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    line-height: 1;
+}
+
+.agent-metric-danger {
+    color: var(--danger);
 }
 
 .session-note {
@@ -72,64 +128,9 @@
 
 .session-note span:not(.session-title) {
     color: var(--faint);
-    font-size: var(--font-size-secondary);
-}
-
-.astate,
-.state-marker {
-    border-radius: 50%;
-    background: var(--faint);
-}
-
-.astate.run,
-.state-executing,
-.state-pausing {
-    background: #c4841d;
-}
-
-.astate.wait,
-.state-idle,
-.state-waiting {
-    background: var(--accent);
-}
-
-.agent .nm,
-.agent-row-copy strong {
-    color: var(--ink);
-    font-size: var(--font-size-ui);
-    font-weight: 400;
-    line-height: 1.35;
-}
-
-.agent .sub,
-.agent-row-copy small {
-    color: var(--faint);
-    font-family: var(--mono);
-    font-size: var(--font-size-code);
-}
-
-.st,
-.state-text {
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
-}
-
-.agent-row-metrics {
-    color: var(--faint);
-    font-family: var(--mono);
-    font-size: var(--font-size-secondary);
-    line-height: 1;
-}
-
-.agent-metric-danger {
-    color: var(--danger);
+    font-size: var(--font-size-meta);
 }
 
 .panel-placeholder {
     color: var(--faint);
-    text-align: center;
-}
-
-.panel-placeholder p {
-    font-size: var(--font-size-secondary);
 }

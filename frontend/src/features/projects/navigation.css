@@ -40,7 +40,7 @@
     width: 100%;
     min-height: 32px;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-control);
     background: transparent;
     line-height: 1.35;
     text-align: left;
@@ -125,7 +125,7 @@
 
 .project-count {
     color: var(--faint);
-    font-size: var(--font-size-caption);
+    font-size: var(--font-size-meta);
     font-variant-numeric: tabular-nums;
 }
 
@@ -141,7 +141,7 @@
     overflow: hidden;
     color: var(--faint);
     font-family: var(--mono);
-    font-size: var(--font-size-code);
+    font-size: var(--font-size-meta);
     line-height: 1.35;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -223,9 +223,9 @@
     visibility: hidden;
     padding: 4px;
     border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--paper);
-    box-shadow: var(--shadow-soft);
+    border-radius: var(--radius-float);
+    background: var(--paper-strong);
+    box-shadow: var(--shadow-float);
 }
 
 .session-actions-menu[data-placement='top'] {
@@ -242,7 +242,7 @@
     min-height: 30px;
     padding: 0 8px;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-chip);
     background: transparent;
     font-size: var(--font-size-ui);
     text-align: left;
@@ -261,7 +261,7 @@
 }
 
 .session-action-danger:hover {
-    background: rgba(180, 35, 24, 0.08);
+    background: var(--danger-soft);
 }
 
 .session-lookup {
@@ -275,7 +275,7 @@
 
 .session-lookup label {
     color: var(--muted);
-    font-size: var(--font-size-secondary);
+    font-size: var(--font-size-meta);
 }
 
 .lookup-row {
@@ -287,9 +287,9 @@
 .lookup-button {
     min-width: 32px;
     padding: 0;
-    border-radius: 5px;
-    background: var(--ink);
-    color: #fff;
+    border-radius: var(--radius-control);
+    background: var(--accent);
+    color: var(--on-accent);
 }
 
 #session-id:focus-visible {
@@ -298,8 +298,8 @@
 
 .muted-copy {
     margin: 20px 0;
-    color: var(--ink-tertiary);
-    font-size: var(--font-size-secondary);
+    color: var(--faint);
+    font-size: var(--font-size-meta);
     line-height: 1.5;
 }
 
@@ -318,7 +318,7 @@
     min-height: 34px;
     padding: 0 8px;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--muted);
     font-size: var(--font-size-ui);

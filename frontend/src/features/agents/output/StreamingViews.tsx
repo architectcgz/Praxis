@@ -90,7 +90,7 @@ export function StreamingTurnView({ agentProfile, events, taskId, turnId, active
             </div>
         </div>}
         {segments}
-        <div className="agent-activity">
+        <div className="agent-activity turn-foot">
             <MessageTiming taskId={taskId} referenceId={`assistant:${turnId}`} />
         </div>
     </div>

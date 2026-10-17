@@ -1,114 +1,13 @@
-/* Agent 对话主题与输入控件覆盖。 */
-.live {
-    color: var(--muted);
-    font-size: var(--font-size-ui);
-}
-
-.pulse {
-    border-radius: 50%;
-    background: var(--warn);
-}
-
-.composer-shell {
-    border: 1px solid var(--line-strong);
-    border-radius: 10px;
-    background: var(--paper);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-    transition: background var(--motion-duration) ease, border-color var(--motion-duration) ease;
-}
-
-.composer-shell:focus-within {
-    border-color: var(--accent);
-    background: var(--surface-solid);
-}
-
-.command-band textarea.composer-textarea {
-    border: 0;
-    border-radius: 10px 10px 0 0;
-    outline: none;
-    background: transparent;
-    font-size: var(--font-size-body);
-    line-height: 1.6;
-}
-
-.command-band textarea.composer-textarea:focus {
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-}
-
-.composer-select-trigger {
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
-}
-
-.composer-select-trigger:hover:not(:disabled),
-.composer-select-trigger[aria-expanded='true'] {
-    border-color: transparent;
-    background: var(--fill);
-    color: var(--ink);
-}
-
-.composer-icon-button {
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--muted);
-}
-
-.composer-icon-button:hover:not(:disabled) {
-    background: var(--fill);
-    color: var(--ink);
-}
-
-.composer-submit {
-    border: 0;
-    border-radius: 5px;
-    background: var(--accent);
-    color: #fff;
-}
-
-.composer-submit:hover:not(:disabled) {
-    background: var(--accent-ink);
-}
-
-.composer-submit-danger {
-    background: var(--danger);
-}
-
-.model-picker-menu,
-.thinking-intensity-picker {
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #fff;
-    box-shadow: var(--shadow-float);
-    backdrop-filter: none;
-}
-
-.model-picker-option {
-    border-radius: 4px;
-}
-
-.model-picker-option:hover,
-.model-picker-option.is-selected {
-    border-color: transparent;
-    background: var(--selected);
-    color: var(--ink);
-}
-
+/* Agent 对话区的颜色覆盖。几何布局由 styles.css 与 composer.css 拥有。 */
 .scroll-to-bottom-button {
-    border-radius: 5px;
-    background: #fff;
+    border: 1px solid var(--line-strong);
+    background: var(--paper-strong);
     color: var(--muted);
-    box-shadow: var(--shadow-soft);
+    box-shadow: var(--shadow-float);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
 
 .scroll-to-bottom-button:hover {
-    border-color: var(--line-strong);
     background: var(--fill);
     color: var(--ink);
-    box-shadow: var(--shadow-soft);
 }

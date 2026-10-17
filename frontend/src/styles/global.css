@@ -1,62 +1,183 @@
+/* 全局设计令牌、reset 与基础元素规则。
+   组件样式只读这里的令牌，不写裸值。
+   颜色令牌在 :root 定义为白天（light）取值，夜间由 theme-dark.css 覆盖同名令牌；
+   因此「写组件样式」只需关心语义名，不需要关心当前是哪个主题。 */
 :root {
     color-scheme: light;
     font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
-    --bg: #efefec;
-    --side: #e7e7e3;
-    --paper: #f7f7f5;
-    --ink: #1b1b19;
-    --muted: #6a6a64;
-    --faint: #8d8d86;
-    --line: #d8d8d2;
-    --line-strong: #c8c8c0;
-    --fill: #deded8;
-    --selected: #e1e1db;
-    --accent: #0e6b52;
-    --accent-ink: #085443;
-    --warn: #9a6700;
-    --danger: #b42318;
-    --ink-secondary: var(--muted);
-    --ink-tertiary: var(--faint);
-    --blue: var(--accent);
-    --blue-strong: var(--accent-ink);
-    --blue-soft: var(--selected);
-    --green: var(--accent);
-    --orange: var(--warn);
-    --red: var(--danger);
-    --surface: var(--paper);
-    --surface-solid: #fff;
-    --surface-muted: var(--side);
-    --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.08);
-    --shadow-float: 0 4px 16px rgba(0, 0, 0, 0.12);
-    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --font-size-base: 14px;
-    --font-size-body: 15px;
-    --font-size-ui: 14px;
-    --font-size-secondary: 12px;
-    --font-size-caption: 11px;
-    --font-size-code: 12px;
+
+    /* =====================================================================
+       排版
+
+       内容字号只有三档：12（小字）/ 13.5（界面）/ 15.5（正文），
+       步长约 1.13，是真正的层级。元信息与机器文字共用 12px 这一档，
+       靠字体族、字重和颜色区分；不再保留 11 / 12 / 12.5 这种彼此
+       只差 4% 的「字号」，它们看起来只是随机的偏差而不是设计。
+       ===================================================================== */
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Microsoft YaHei", monospace;
+    --font-size-base: 13.5px;
+    --font-size-ui: var(--font-size-base);
+    --font-size-body: 15.5px;
+    --font-size-meta: 12px;
+    --font-size-heading: 17px;
     --font-size-title: 22px;
+    /* 页面级标题与空状态主标题；不得用于密集列表或面板内标题。 */
+    --font-size-display: 30px;
+    --line-height-body: 1.72;
+    --line-height-meta: 1.5;
+    --line-height-code: 1.7;
+    /* 仅用于结构标签的字距，不用于任何强调。 */
+    --track-micro: 0.08em;
+
+    /* =====================================================================
+       圆角与阴影：只表达层次，不做装饰
+       ===================================================================== */
+    --radius-chip: 3px;
+    --radius-control: 7px;
+    --radius-card: 9px;
+    --radius-float: 12px;
+    --radius-pill: 999px;
+
+    /* =====================================================================
+       控件度量
+       ===================================================================== */
+    --control-height: 32px;
+    --control-height-compact: 26px;
+    --icon-button-size: 28px;
+    --topbar-height: 42px;
+
+    /* =====================================================================
+       内容列：主栏 Page 与 Agent 会话阅读列共用的宽度契约
+
+       两列都随主栏可用宽度按 80% 比例伸缩；下限保留原有阅读宽度，
+       避免中等窗口被压窄，上限约束正文行宽，避免宽屏下行长失控。
+       ===================================================================== */
+    --page-width: clamp(920px, 80%, 1100px);
+    --session-content-width: clamp(744px, 80cqi, 1040px);
+
+    /* =====================================================================
+       动效
+       ===================================================================== */
     --motion-duration: 140ms;
     --motion-duration-emphasized: 180ms;
     --motion-duration-spinner: 900ms;
+    /* 减少动效时由 responsive.css 覆写为 1，使所有旋转类动画停转。 */
     --motion-iteration-count: infinite;
-    /* 滚动槽宽度由通用 Scroll 容器使用。 */
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+    --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+    /* 焦点：按钮与可聚焦控件统一使用；输入框聚焦只改变边框颜色。 */
+    --focus-ring: 2px solid var(--accent);
+    --focus-ring-offset: 2px;
+
+    /* 滚动 */
     --scroll-gutter: 10px;
-    /* 所有组件使用此处的层级令牌。 */
+
+    /* 层级 */
     --z-base: 0;
     --z-raised: 1;
     --z-popover: 10;
     --z-sticky: 100;
     --z-modal: 1000;
+
+    /* =====================================================================
+       颜色 · 白天（light）
+       表面：窗口外沿 → 结构面 → 阅读面 → 内嵌块 → 浮层。
+       结构面与阅读面的明度差刻意收窄，大跨度留给仪器域。
+       ===================================================================== */
+    --canvas: #dcdddb;
+    --bg: #e9e9e7;
+    --side: #e4e5e4;
+    --paper: #f4f3f0;
+    --paper-2: #ebeae6;
+    --paper-strong: #fdfdfc;
+    --overlay: rgba(20, 22, 26, 0.32);
+
+    /* 文字：三级灰阶，最差常用表面仍达 WCAG AA。 */
+    --ink: #14161a;
+    --muted: #4b5158;
+    --faint: #5e646c;
+
+    /* 分隔、填充与选中 */
+    --line: #e0e1df;
+    --line-strong: #c8cac8;
+    --fill: #e5e6e5;
+    --fill-soft: rgba(20, 22, 26, 0.035);
+    --fill-strong: #dcdedd;
+    --selected: #d7d9d8;
+
+    /* 主色：深绿表示主操作与「已沉淀」。 */
+    --accent: #0d6a52;
+    --accent-ink: #08513e;
+    --accent-line: #b6d6c9;
+    --accent-soft: #e2f1ec;
+    --on-accent: #ffffff;
+
+    /* 活动信号：只在「正在发生」出现，不得作为装饰色。 */
+    --live: #0a8f66;
+    --live-ink: #0a6249;
+    --live-line: #a9dcc8;
+    --live-soft: #dcf6ec;
+    --live-halo: rgba(10, 143, 102, 0.2);
+
+    /* 成功 */
+    --ok: #1a7f4b;
+    --ok-ink: #14663c;
+    --ok-line: #b7dcc6;
+    --ok-soft: #e6f4ec;
+
+    /* 提醒：需要你决策 */
+    --warn: #96590a;
+    --warn-ink: #7a4708;
+    --warn-line: #e8d2a8;
+    --warn-soft: #fdf2e1;
+    --on-warn: #ffffff;
+
+    /* 危险 */
+    --danger: #b3261e;
+    --danger-ink: #8f1d16;
+    --danger-line: #e6bcb7;
+    --danger-soft: #fdeeec;
+    --on-danger: #ffffff;
+
+    /* 仪器域：终端、diff、代码与工具参数的独立材质。
+       规则是「仪器域永远比阅读面更暗一层」——白天是凹下去的冷调台面，
+       夜间是比阅读面更深的墨底。域分离靠明度方向、等宽字体和内阴影，
+       不靠颜色反转，因此白天展开工具不会在纸面上砸出黑块。 */
+    --inst-bg: #e2e5e4;
+    --inst-bg-2: #d8dcdb;
+    --inst-ink: #17191a;
+    --inst-dim: #555c5c;
+    --inst-line: #ccd1d0;
+    --inst-fill: rgba(20, 22, 26, 0.07);
+    --inst-inset: inset 0 1px 2px rgba(20, 22, 26, 0.06);
+    --inst-accent: #0b5f49;
+
+    /* diff 行只在仪器域内出现，配色因此也属于仪器域。 */
+    --inst-add-bg: #dcefe4;
+    --inst-add-ink: #14663c;
+    --inst-del-bg: #fbe5e3;
+    --inst-del-ink: #98201a;
+
+    --scrollbar-thumb: #c3c5c3;
+    --scrollbar-thumb-hover: #a8aaa8;
+
+    /* 下拉箭头用 data URI 内嵌，颜色随主题切换。 */
+    --select-chevron: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%235e646c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+    --shadow-top: 0 1px 2px rgba(20, 22, 26, 0.05);
+    --shadow-float: 0 2px 6px rgba(20, 22, 26, 0.07), 0 14px 30px -16px rgba(20, 22, 26, 0.18);
+    --shadow-modal: 0 4px 14px rgba(20, 22, 26, 0.1), 0 28px 60px -22px rgba(20, 22, 26, 0.28);
 }
 
 html {
     min-width: 320px;
     min-height: 100%;
-    background: #d9d9d4;
+    background: var(--canvas);
     color: var(--ink);
 }
 
@@ -82,8 +203,42 @@ body {
 h1 {
     margin: 12px 0 0;
     color: var(--ink);
-    font-size: var(--font-size-title);
-    font-weight: 700;
-    line-height: 1.05;
+    font-size: var(--font-size-display);
+    font-weight: 650;
+    line-height: 1.2;
     letter-spacing: 0;
+}
+
+/* 滚动条统一到单一滑块颜色，宽度与 --scroll-gutter 一致。 */
+::-webkit-scrollbar {
+    width: var(--scroll-gutter);
+    height: var(--scroll-gutter);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: var(--radius-pill);
+    background: var(--scrollbar-thumb);
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: content-box;
+}
+
+* {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 唯一的旋转动画定义，减少动效时由 responsive.css 统一停转。 */
+@keyframes praxis-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }

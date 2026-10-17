@@ -3,7 +3,7 @@
 /* Shell 独占视口，避免建立影响浮层定位的变换上下文。 */
 .app-shell {
     display: grid;
-    grid-template-rows: 42px minmax(0, 1fr);
+    grid-template-rows: var(--topbar-height) minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
     height: 100dvh;
@@ -19,7 +19,7 @@
     min-height: 0;
 }
 
-/* Scroll 是所在区域的主要滚动容器。 */
+/* Scroll 是所在区域的主要滚动容器，宽度与 --scroll-gutter 一致。 */
 .scroll-region {
     flex: 1 1 auto;
     min-width: 0;
@@ -27,7 +27,11 @@
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
-    scrollbar-color: rgba(60, 60, 67, 0.24) transparent;
+    scrollbar-gutter: stable;
+}
+
+.scroll-region::-webkit-scrollbar {
+    width: var(--scroll-gutter);
 }
 
 .scroll-region::-webkit-scrollbar-track {
@@ -36,12 +40,13 @@
 
 .scroll-region::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
-    border-radius: 999px;
-    background: rgba(60, 60, 67, 0.24);
+    border-radius: var(--radius-pill);
+    background: var(--scrollbar-thumb);
     background-clip: padding-box;
 }
 
-/* Page 只控制阅读宽度和排版，不创建裁剪或层叠上下文。 */
+/* Page 只控制阅读宽度和排版，不创建裁剪或层叠上下文。
+   宽度由 --page-width 提供：随主栏按比例伸缩，并受上下限约束。 */
 .page {
     width: min(100%, var(--page-width, 920px));
     min-width: 0;
@@ -51,13 +56,4 @@
 /* 固定头部与滚动内容为兄弟节点。 */
 .page-header {
     flex: 0 0 auto;
-}
-
-.scroll-region {
-    scrollbar-gutter: stable;
-    scrollbar-width: thin;
-}
-
-.scroll-region::-webkit-scrollbar {
-    width: 10px;
 }

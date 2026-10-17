@@ -1,55 +1,160 @@
-/* Agent 消息、Markdown 与思考内容样式。 */
+/* Agent 消息、Markdown、思考摘要与代码块样式。
+
+   一条阅读列：消息头、思考摘要、正文、活动账本、回合脚注全部左对齐，
+   不再为「名字沟槽」额外缩进内容。机器输出的代码块走仪器域材质。 */
+
+/* =====================================================================
+   消息容器
+   ===================================================================== */
+/* cqi 与起始边距都以会话容器为基准，不随消息滚动槽或流式包装层缩窄。 */
+.message,
+.agent-activity,
+.message-empty {
+    width: min(var(--session-content-width, 744px), calc(100cqi - 32px));
+    max-width: var(--session-content-width, 744px);
+    min-width: 0;
+    justify-self: start;
+    margin-inline: max(16px, calc((100cqi - var(--session-content-width, 744px)) / 2)) 0;
+}
+
+.message {
+    margin-block: 0 var(--turn-gap, 24px);
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+.message-assistant {
+    margin-bottom: var(--turn-gap, 24px);
+}
+
+/* 同一次执行的后续消息接在上一段下方，用轮内间距而不是回合间距。 */
+.message-continued,
+.streaming-turn-continued {
+    margin-bottom: var(--message-content-gap, 14px);
+}
+
+.message-meta {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: var(--message-head-gap, 10px);
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+}
+
 .message-meta strong {
-    color: var(--blue-strong);
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+}
+
+.message-meta time {
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+    font-variant-numeric: tabular-nums;
 }
 
 .message-error .message-meta strong {
-    color: #c9342c;
+    color: var(--danger);
 }
 
-.message-user .message-meta strong {
+.message > p {
+    margin: 0 0 var(--message-head-gap, 10px);
     color: var(--ink);
-}
-
-.message-tool .message-meta strong,.tool-result-label {
-    color: var(--ink-secondary);
-}
-
-.message-tool-calls,.agent-tool-list {
-    display: grid;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.tool-call summary,.agent-tool summary {
-    padding: 6px 10px;
-    color: var(--ink-secondary);
-    cursor: pointer;
-    font-size: var(--font-size-ui);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-body);
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
-.message-markdown h1,.message-markdown h2,.message-markdown h3,.message-markdown h4,.message-markdown h5,.message-markdown h6 {
-    margin: 18px 0 8px;
+.message > p:last-child {
+    margin-bottom: 0;
+}
+
+/* 用户消息是软绿气泡，右对齐并限制宽度。 */
+.message-user {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+}
+
+.message-user .message-meta {
+    justify-content: flex-end;
+}
+
+.message-user > p {
+    display: inline-block;
+    width: fit-content;
+    max-width: 74%;
+    margin: 0;
+    padding: 10px 14px;
+    border: 1px solid var(--accent-line);
+    border-radius: var(--radius-card);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: var(--font-size-body);
+    line-height: 1.62;
+    text-align: left;
+}
+
+/* =====================================================================
+   Markdown 正文
+   ===================================================================== */
+.message-markdown {
+    margin-top: 0;
     color: var(--ink);
-    font-weight: 700;
-    line-height: 1.3;
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-body);
+    overflow-wrap: anywhere;
+}
+
+.message-markdown p {
+    margin: 0 0 var(--message-head-gap, 10px);
+    white-space: pre-wrap;
+}
+
+.message-markdown > :first-child {
+    margin-top: 0;
+}
+
+.message-markdown > :last-child {
+    margin-bottom: 0;
+}
+
+.message-markdown a {
+    color: var(--accent-ink);
+    text-decoration-color: var(--accent-line);
+    text-underline-offset: 3px;
+}
+
+.message-markdown a:hover {
+    text-decoration-color: currentColor;
+}
+
+.message-markdown h1,
+.message-markdown h2,
+.message-markdown h3,
+.message-markdown h4,
+.message-markdown h5,
+.message-markdown h6 {
+    margin: var(--message-content-gap, 14px) 0 var(--message-head-gap, 10px);
+    color: var(--ink);
+    font-size: var(--font-size-heading);
+    font-weight: 650;
+    line-height: 1.35;
 }
 
 .message-markdown h1 {
     font-size: var(--font-size-title);
 }
 
-.message-markdown h2 {
-    font-size: var(--font-size-ui);
-}
-
-.message-markdown h3,.message-markdown h4,.message-markdown h5,.message-markdown h6 {
-    font-size: var(--font-size-ui);
-}
-
-.message-markdown ul,.message-markdown ol {
-    margin: 0 0 10px;
+.message-markdown ul,
+.message-markdown ol {
+    margin: 0 0 var(--message-head-gap, 10px);
     padding-left: 22px;
 }
 
@@ -58,55 +163,50 @@
 }
 
 .message-markdown blockquote {
-    margin: 0 0 10px;
+    margin: 0 0 var(--message-head-gap, 10px);
     padding-left: 12px;
     border-left: 2px solid var(--line-strong);
-    color: var(--ink-secondary);
+    color: var(--muted);
 }
 
-.markdown-code-block details:not([open]) .markdown-code-toolbar {
-    border-bottom: 0;
-}
-
-.markdown-code-changes {
-    display: flex;
-    gap: 8px;
-    margin-left: auto;
-    font-size: var(--font-size-secondary);
-    white-space: nowrap;
-}
-
-.markdown-code-changes span:first-child {
-    color: #217a37;
-}
-
-.markdown-code-changes span:last-child {
-    color: #bd3028;
-}
-
-.message-markdown pre code {
+.message-markdown :not(pre) > code {
+    padding: 1px 5px;
+    border-radius: var(--radius-chip);
+    background: var(--fill);
     color: var(--ink);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: var(--font-size-code);
-    line-height: 1.5;
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
 }
 
-.markdown-code-diff,.diff-code {
+.message-markdown .contains-task-list,
+.message-markdown .task-list-item {
+    padding-left: 0;
+    list-style: none;
+}
+
+.message-markdown .task-list-item > input[type="checkbox"] {
+    box-sizing: border-box;
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    margin: 0 8px 0 0;
     padding: 0;
+    border: 0;
+    border-radius: var(--radius-chip);
+    background: transparent;
+    accent-color: var(--accent);
+    cursor: default;
+    vertical-align: text-top;
 }
 
-.tool-result .diff-code {
-    white-space: normal;
-    overflow-wrap: normal;
-}
-
+/* 表格是阅读内容，留在纸上。 */
 .markdown-table {
     max-width: 100%;
-    margin: 0 0 10px;
+    margin: var(--message-content-gap, 14px) 0;
     overflow: hidden;
     border: 1px solid var(--line);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.6);
+    border-radius: var(--radius-control);
+    background: var(--paper);
 }
 
 .markdown-table-toolbar {
@@ -114,16 +214,19 @@
     min-height: 34px;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
     padding: 3px 6px 3px 12px;
     border-bottom: 1px solid var(--line);
-    background: rgba(255, 255, 255, 0.56);
+    background: transparent;
 }
 
 .markdown-table-label {
-    color: var(--ink-secondary);
-    font-size: var(--font-size-secondary);
+    color: var(--faint);
+    font-size: var(--font-size-meta);
     font-weight: 650;
     line-height: 1;
+    letter-spacing: var(--track-micro);
+    text-transform: uppercase;
 }
 
 .markdown-table-scroll {
@@ -139,19 +242,21 @@
     white-space: nowrap;
 }
 
-.message-markdown th,.message-markdown td {
+.message-markdown th,
+.message-markdown td {
     padding: 9px 12px;
     border-bottom: 1px solid var(--line);
 }
 
 .message-markdown th {
-    background: rgba(118, 118, 128, 0.07);
-    color: var(--ink-secondary);
-    font-size: var(--font-size-secondary);
+    background: var(--fill);
+    color: var(--muted);
+    font-size: var(--font-size-meta);
     font-weight: 650;
 }
 
-.message-markdown th + th,.message-markdown td + td {
+.message-markdown th + th,
+.message-markdown td + td {
     border-left: 1px solid var(--line);
 }
 
@@ -160,246 +265,208 @@
 }
 
 .message-markdown tbody tr:hover td {
-    background: rgba(118, 118, 128, 0.04);
+    background: var(--fill-soft);
 }
 
-.message-markdown .contains-task-list {
-    padding-left: 0;
+/* =====================================================================
+   代码块：机器输出，容器材质来自 common.css 的 .instrument
+   ===================================================================== */
+.markdown-code-block {
+    position: relative;
+    max-width: 100%;
+    margin: var(--message-content-gap, 14px) 0;
+}
+
+.markdown-code-toolbar {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    gap: 10px;
+    padding: 0 44px 0 12px;
+    border-bottom: 1px solid var(--inst-line);
+    background: var(--inst-bg-2);
+    cursor: pointer;
     list-style: none;
 }
 
-.message-markdown .task-list-item {
-    list-style: none;
+.markdown-code-toolbar::-webkit-details-marker {
+    display: none;
 }
 
-.message-markdown .task-list-item > input[type="checkbox"] {
-    box-sizing: border-box;
-    width: 16px;
-    height: 16px;
-    min-width: 16px;
-    margin: 0 8px 0 0;
-    padding: 0;
-    border: 0;
-    border-radius: 3px;
-    background: transparent;
-    accent-color: var(--blue);
-    cursor: default;
-    vertical-align: text-top;
+.markdown-code-toolbar:hover {
+    background: var(--inst-bg-2);
 }
 
-.message-pending-status svg {
-    animation: output-wait-spin var(--motion-duration-spinner) linear var(--motion-iteration-count);
+.markdown-code-block details:not([open]) .markdown-code-toolbar {
+    border-bottom: 0;
 }
 
-@keyframes output-wait-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-.message-user .message-copy-actions {
-    justify-content: flex-end;
-}
-
-.message-copy-button:active:not(:disabled),.markdown-code-copy-button:active:not(:disabled),.markdown-table-copy-button:active:not(:disabled) {
-    transform: scale(0.94);
-}
-
-.message-copy-button.copied,.markdown-code-copy-button.copied,.markdown-table-copy-button.copied {
-    color: var(--green);
-}
-
-.message-empty {
-    width: 100%;
-    max-width: var(--session-content-width);
-    justify-self: center;
-    display: flex;
-    min-height: 100%;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
-    padding: clamp(24px, 5vh, 48px) var(--session-content-padding);
-    text-align: center;
-}
-
-.message-empty-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    max-width: 440px;
-}
-
-.message-empty-title {
-    margin: 0;
-    color: var(--ink);
-    font-size: var(--font-size-title);
-    font-weight: 660;
-    line-height: 1.3;
-    letter-spacing: -0.015em;
-}
-
-.message-empty-text {
-    margin: 0;
-    color: var(--ink-secondary);
-    font-size: var(--font-size-body);
-    line-height: 1.6;
-}
-
-.agent-activity .thinking-details details {
-    padding: 0;
-}
-
-.message {
-    border: 0;
-    width: min(var(--session-content-width), calc(100% - 32px));
-    max-width: var(--session-content-width);
+.markdown-code-language {
     min-width: 0;
-    justify-self: center;
-    margin: 0 auto 18px;
-    padding: 0 8px;
+    flex: 1;
+    overflow: hidden;
+    color: var(--inst-dim);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.markdown-code-changes {
+    display: flex;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    white-space: nowrap;
+}
+
+.markdown-code-changes span:first-child {
+    color: var(--inst-add-ink);
+}
+
+.markdown-code-changes span:last-child {
+    color: var(--inst-del-ink);
+}
+
+.markdown-code-block details[open] summary svg {
+    transform: rotate(180deg);
+}
+
+.markdown-code-block pre {
+    max-width: none;
+    max-height: 400px;
+    margin: 0;
+    overflow: auto;
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--inst-ink);
+}
+
+.markdown-code-block pre code {
+    color: var(--inst-ink);
+    font: var(--font-size-meta)/var(--line-height-code) var(--mono);
+}
+
+.markdown-code-copy-button {
+    position: absolute;
+    top: 5px;
+    right: 8px;
+}
+
+/* diff 行（代码块与工具输出共用） */
+.markdown-code-diff,
+.diff-code {
+    padding: 0;
+}
+
+.diff-code-lines {
+    display: block;
+    min-width: max-content;
+}
+
+.markdown-code-line {
+    display: block;
+    min-height: 1.7em;
+    padding: 0 12px;
+    white-space: pre;
+}
+
+.markdown-code-line-added {
+    background: var(--inst-add-bg);
+    color: var(--inst-add-ink);
+}
+
+.markdown-code-line-removed {
+    background: var(--inst-del-bg);
+    color: var(--inst-del-ink);
+}
+
+/* 工具输出里的 Markdown（read_file 结果等）同样落在仪器域，
+   因此尺寸要压到机器输出的档位，配色也要整体翻到深色域，否则底色与文字同调。 */
+.instrument .message-markdown {
+    color: var(--inst-ink);
+    font-size: var(--font-size-ui);
+    line-height: 1.6;
+}
+
+.instrument .message-markdown :is(h1, h2, h3, h4, h5, h6) {
+    color: var(--inst-ink);
+}
+
+.instrument .message-markdown a,
+.instrument .message-file-link {
+    color: var(--inst-accent);
+    text-decoration-color: var(--inst-line);
+}
+
+.instrument .message-markdown :not(pre) > code {
+    background: var(--inst-fill);
+    color: var(--inst-ink);
+}
+
+.instrument .message-markdown blockquote {
+    border-color: var(--inst-line);
+    color: var(--inst-dim);
+}
+
+.instrument .markdown-table {
     background: transparent;
 }
 
-.message-meta {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin-bottom: 4px;
-    color: var(--faint);
-    font-size: var(--font-size-secondary);
+.instrument .markdown-table-label {
+    color: var(--inst-dim);
 }
 
-/* 名称保留在外层，内容与操作缩进到同一阅读列。 */
-.message-assistant,
-.streaming-turn {
-    --agent-output-indent: 20px;
+.instrument .message-markdown th,
+.instrument .message-markdown td,
+.instrument .markdown-table {
+    border-color: var(--inst-line);
 }
 
-.message-assistant {
-    margin-bottom: 24px;
+.instrument .message-markdown th {
+    background: var(--inst-fill);
+    color: var(--inst-dim);
 }
 
-.message-assistant > :not(.message-meta) {
-    margin-inline-start: var(--agent-output-indent);
+.instrument .message-markdown tbody tr:hover td {
+    background: var(--inst-fill);
 }
 
-.message-assistant > .message-meta {
-    margin-bottom: 8px;
+.instrument .markdown-table-copy-button {
+    color: var(--inst-dim);
 }
 
-.message-assistant > .message-pending-status {
-    margin-top: 0;
+.instrument .markdown-table-copy-button:hover:not(:disabled) {
+    background: var(--inst-fill);
+    color: var(--inst-ink);
 }
 
-.message-user .message-meta {
-    justify-content: flex-end;
-}
-
-.message-meta strong,.message-user .message-meta strong {
-    color: var(--muted);
-    font-size: var(--font-size-ui);
-    font-weight: 650;
-}
-
-.message-meta time {
-    color: var(--faint);
-    font-size: var(--font-size-secondary);
-}
-
-.message > p {
-    margin: 0 0 8px;
-    color: var(--ink);
-    font-size: var(--font-size-body);
-    line-height: 1.65;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.message > p:last-child {
-    margin-bottom: 0;
-}
-
-.message-tool {
-    padding-top: 0;
-    padding-left: 0;
-}
-
-.message-user {
-    text-align: right;
-}
-
-.message-user > p {
-    display: inline-block;
-    width: fit-content;
-    max-width: 78%;
-    padding: 8px 10px;
-    border: 0;
-    border-radius: 8px;
-    background: #e8f4ed;
-    color: var(--accent-ink);
-    font-size: var(--font-size-body);
-    line-height: 1.6;
-    text-align: left;
-}
-
-.message-markdown {
-    margin-top: 0;
-    color: var(--ink);
-    font-size: var(--font-size-body);
-    line-height: 1.65;
-    overflow-wrap: anywhere;
-}
-
-.message-markdown p {
-    white-space: pre-wrap;
-    margin: 0 0 8px;
-}
-
-.message-markdown > :first-child {
-    margin-top: 0;
-}
-
-.message-markdown > :last-child {
-    margin-bottom: 0;
-}
-
-.message-markdown a {
-    color: var(--accent-ink);
-}
-
-.message-markdown :not(pre) > code {
-    padding: 1px 4px;
-    border-radius: 4px;
-    background: var(--fill);
-    color: var(--ink);
-    font-family: var(--mono);
-    font-size: var(--font-size-code);
-}
-
-.tool-call,.agent-tool,.markdown-code-block,.markdown-table {
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #fbfbfa;
-}
-
+/* =====================================================================
+   思考摘要：一行，可展开，不占独立卡片
+   ===================================================================== */
 .thinking-details {
     min-width: 0;
     max-width: 100%;
-    margin: 0 0 var(--message-content-gap);
-    color: var(--muted);
+    margin: 0 0 var(--message-content-gap, 14px);
+    color: var(--faint);
 }
 
 .thinking-toggle {
     display: flex;
-    min-height: 32px;
+    min-height: 24px;
     align-items: center;
-    gap: 8px;
-    border-radius: 4px;
+    gap: 7px;
+    padding: 2px 6px;
+    margin-left: -6px;
+    border-radius: var(--radius-chip);
+    color: var(--faint);
+    font-size: var(--font-size-meta);
     cursor: pointer;
     list-style: none;
-    transition: color var(--motion-duration) cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
 
 .thinking-toggle::-webkit-details-marker {
@@ -407,11 +474,12 @@
 }
 
 .thinking-toggle:hover {
+    background: var(--fill);
     color: var(--ink);
 }
 
 .thinking-toggle:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: var(--focus-ring);
     outline-offset: 2px;
 }
 
@@ -421,21 +489,18 @@
 }
 
 .thinking-chevron {
-    margin-inline-start: auto;
-    transition: transform var(--motion-duration) cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--motion-duration) var(--ease-standard);
 }
 
 .thinking-preview {
-    flex: 1;
     min-width: 0;
+    flex: 1;
     overflow: hidden;
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-/* 展开后隐藏摘要，避免与正文重复；仅旋转箭头，不旋转思考图标。 */
+/* 展开后隐藏摘要，避免与正文重复；只旋转箭头。 */
 .thinking-details[open] > .thinking-toggle .thinking-preview {
     display: none;
 }
@@ -446,229 +511,31 @@
 
 .thinking-content {
     min-width: 0;
-    margin: 4px 0 4px 6px;
-    padding: 4px 0 6px 15px;
+    margin: 4px 0 4px 0;
+    padding: 4px 0 6px 13px;
     border-inline-start: 1px solid var(--line);
 }
 
 .thinking-content .message-markdown {
     color: var(--muted);
     font-size: var(--font-size-ui);
-    line-height: 1.65;
+    line-height: var(--line-height-body);
 }
 
 .thinking-content :is(strong, h1, h2, h3, h4, h5, h6) {
     color: var(--ink);
     font-size: inherit;
-    font-weight: 600;
+    font-weight: 650;
 }
 
 .thinking-content .message-markdown > :not(:last-child) {
     margin-bottom: 10px;
 }
 
-.markdown-code-block details[open] summary svg {
-    transform: rotate(180deg);
-}
-
-.tool-call,.agent-tool {
-    overflow: hidden;
-    border-left: 2px solid var(--line-strong);
-    margin: 12px 0 0;
-}
-
-.tool-call pre,.agent-tool > pre,.tool-result pre {
-    max-height: 220px;
-    margin: 0;
-    overflow: auto;
-    padding: 8px 10px;
-    background: #f8f8f6;
-    color: var(--ink);
-    font-family: var(--mono);
-    font-size: var(--font-size-secondary);
-    line-height: 1.5;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.tool-result {
-    margin: 8px 10px 10px;
-    border-top: 1px solid var(--line);
-}
-
-.tool-result-label {
-    padding: 7px 0 4px;
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
-}
-
-.tool-result-error .tool-result-label {
-    color: var(--danger);
-}
-
-.markdown-code-block,.markdown-table {
-    margin: 12px 0 0;
-}
-
-.markdown-code-toolbar,.markdown-table-toolbar {
-    background: transparent;
-}
-
-.markdown-code-language,.markdown-table-label {
-    color: var(--muted);
-    font-size: var(--font-size-secondary);
-}
-
-.markdown-code-block {
-    position: relative;
-    max-width: 100%;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    margin: var(--message-content-gap) 0;
-    border-color: #e6e1d8;
-    border-radius: 14px;
-    background: #fffefc;
-    box-shadow: 0 1px 2px #1e1c190a;
-}
-
-.markdown-code-toolbar {
-    display: flex;
-    align-items: center;
-    border-bottom: 1px solid var(--line);
-    cursor: pointer;
-    list-style: none;
-    min-height: 40px;
-    gap: 10px;
-    padding: 8px 44px 8px 16px;
-    border-color: #efebe4;
-    background: transparent;
-}
-
-.markdown-code-toolbar:hover {
-    background: #faf8f4;
-}
-
-.markdown-code-language {
-    min-width: 0;
-    overflow: hidden;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    line-height: 1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: #6c655a;
-    font-size: var(--font-size-code);
-}
-
-.markdown-code-copy-button {
-    position: absolute;
-    top: 8px;
-    right: 10px;
-}
-
-.markdown-code-block pre {
-    max-width: none;
-    margin: 0;
-    overflow: auto;
-    border: 0;
-    border-radius: 0;
-    max-height: 400px;
-    padding: 12px 16px;
-    background: #fcfbf8;
-}
-
-.markdown-code-block .markdown-code-diff {
-    padding-inline: 0;
-}
-
-.markdown-code-block pre code {
-    font: var(--font-size-code)/1.75 var(--mono);
-}
-
-.markdown-code-diff,.diff-code,.tool-result .diff-code {
-    padding: 0;
-    white-space: normal;
-    overflow-wrap: normal;
-}
-
-.diff-code-lines {
-    display: block;
-    min-width: max-content;
-}
-
-.markdown-code-line {
-    display: block;
-    min-height: 1.5em;
-    padding: 0 12px;
-    white-space: pre;
-}
-
-.markdown-code-line-added {
-    background: rgba(50, 128, 71, 0.12);
-    color: #216e39;
-}
-
-.markdown-code-line-removed {
-    background: rgba(180, 55, 47, 0.12);
-    color: #a52b25;
-}
-
-.message-pending-status {
-    margin-top: 8px;
-    line-height: 1.55;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--warn);
-    font-size: var(--font-size-ui);
-}
-
-.message-copy-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 8px;
-}
-
-.message-copy-actions:empty {
-    display: none;
-}
-
-.message-copy-actions .message-copy-button {
-    flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-}
-
-@media (max-width: 460px) {
-    .message-copy-actions .message-copy-button {
-        width: 32px;
-        height: 32px;
-    }
-}
-
-.message-copy-button,.markdown-code-copy-button,.markdown-table-copy-button {
-    transition: background var(--motion-duration) ease, color var(--motion-duration) ease, transform var(--motion-duration) ease;
-    display: grid;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    place-items: center;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--faint);
-}
-
-.message-copy-button:hover:not(:disabled),.markdown-code-copy-button:hover:not(:disabled),.markdown-table-copy-button:hover:not(:disabled) {
-    background: var(--fill);
-    color: var(--ink);
-}
-
+/* =====================================================================
+   回合与进行中状态
+   ===================================================================== */
 .agent-activity {
-    width: min(var(--session-content-width), calc(100% - 32px));
-    min-width: 0;
-    max-width: var(--session-content-width);
-    justify-self: center;
     color: var(--muted);
     font-size: var(--font-size-ui);
 }
@@ -677,56 +544,199 @@
     display: grid;
     width: 100%;
     min-width: 0;
-    gap: var(--message-content-gap);
+    gap: var(--message-content-gap, 14px);
     justify-items: center;
-    margin-bottom: 24px;
+    margin-bottom: var(--turn-gap, 24px);
 }
 
-/* 轮内间距仅由 gap 控制，避免消息、思考与工具各自的外边距叠加。 */
+/* 轮内间距只由 gap 控制，避免消息、思考与账本的外边距叠加。 */
 .streaming-turn > .message,
 .streaming-turn > .agent-activity,
 .streaming-turn > .agent-activity > .thinking-details,
-.streaming-turn > .agent-activity > .message-pending-status {
+.streaming-turn > .agent-activity > .message-pending-status,
+.streaming-turn > .agent-activity > .acts {
     margin-block: 0;
-}
-
-.streaming-turn > .agent-activity {
-    padding-inline: calc(8px + var(--agent-output-indent)) 8px;
 }
 
 .streaming-turn-header > .message-meta {
     margin-bottom: 0;
 }
 
-/* 同一任务的后续回答接在工具结果下方，不重复制造新消息的视觉起点。 */
-.message-continued,
-.streaming-turn-continued {
-    margin-bottom: var(--message-content-gap);
+/* 正在发生用 live 信号色，需要你决策用提醒色。 */
+.message-pending-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--live);
+    font-size: var(--font-size-meta);
+}
+
+.message-pending-status svg {
+    flex: none;
+    animation: praxis-spin var(--motion-duration-spinner) linear var(--motion-iteration-count);
+}
+
+/* 回合脚注保持辅助层级，token 分项在窄窗口内换行。 */
+.message-copy-actions,
+.turn-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: var(--message-content-gap, 14px);
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+}
+
+.message-copy-actions:empty {
+    display: none;
+}
+
+.message-timing,
+.operation-duration {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+    line-height: var(--line-height-meta);
+    font-variant-numeric: tabular-nums;
+}
+
+.operation-token-usage {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+}
+
+.operation-token-usage > span {
+    white-space: nowrap;
+}
+
+/* 状态词只在非正常结束时出现，用语义色而不是更大的字号表达。 */
+.message-timing-status {
+    color: var(--warn);
+}
+
+.message-timing-status[data-tone='bad'] {
+    color: var(--danger);
+}
+
+.message-user .message-copy-actions {
+    justify-content: flex-end;
+}
+
+.message-copy-button,
+.markdown-code-copy-button,
+.markdown-table-copy-button {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-chip);
+    background: transparent;
+    color: var(--faint);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard), transform var(--motion-duration) var(--ease-standard);
+}
+
+/* 仪器域内的复制按钮需要浅色前景。 */
+.markdown-code-copy-button {
+    width: 24px;
+    height: 24px;
+    color: var(--inst-dim);
+}
+
+.message-copy-button:hover:not(:disabled),
+.markdown-table-copy-button:hover:not(:disabled) {
+    background: var(--fill);
+    color: var(--ink);
+}
+
+.markdown-code-copy-button:hover:not(:disabled) {
+    background: var(--inst-fill);
+    color: var(--inst-ink);
+}
+
+.message-copy-button:active:not(:disabled),
+.markdown-code-copy-button:active:not(:disabled),
+.markdown-table-copy-button:active:not(:disabled) {
+    transform: scale(0.94);
+}
+
+.message-copy-button.copied,
+.markdown-table-copy-button.copied {
+    color: var(--accent);
+}
+
+.markdown-code-copy-button.copied {
+    color: var(--inst-accent);
+}
+
+/* =====================================================================
+   线程内空状态：无卡片容器
+   ===================================================================== */
+.message-empty {
+    display: flex;
+    min-height: 100%;
+    align-items: center;
+    justify-content: center;
+    margin-block: 0;
+    padding: 32px var(--session-content-padding, 24px);
+    text-align: center;
+}
+
+.message-empty-content {
+    display: flex;
+    max-width: 440px;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
 }
 
 .message-empty-icon {
     display: grid;
-    width: 64px;
-    height: 64px;
+    width: 56px;
+    height: 56px;
     place-items: center;
-    border-radius: 6px;
+    border-radius: var(--radius-card);
     background: var(--selected);
     color: var(--accent);
-    box-shadow: none;
+}
+
+.message-empty-title {
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--font-size-title);
+    font-weight: 650;
+    line-height: 1.3;
+}
+
+.message-empty-text {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-body);
 }
 
 @media (max-width: 720px) {
-
-    .message-assistant,
-    .streaming-turn {
-        --agent-output-indent: 12px;
-    }
-
-    .message,.agent-activity {
-        width: calc(100% - 24px);
-    }
-
     .message-user > p {
         max-width: 88%;
+    }
+}
+
+@media (max-width: 460px) {
+    .message-copy-button,
+    .markdown-table-copy-button {
+        width: 28px;
+        height: 28px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .message-pending-status svg {
+        animation: none;
     }
 }

@@ -1,13 +1,14 @@
-/* 应用错误边界的回退页面样式。 */
+/* 应用错误边界的回退页面样式。
+   错误回退可能发生在样式令牌可用之前，因此这里只使用令牌与少量结构值。 */
 .app-error-state {
     display: grid;
     grid-template-columns: 40px minmax(0, 1fr) 32px;
     gap: 14px;
     align-items: start;
     max-width: 720px;
-    min-height: 100vh;
+    min-height: 100dvh;
     margin: 0 auto;
-    padding: 18vh 24px 48px;
+    padding: 72px 24px 48px;
 }
 
 .app-error-icon {
@@ -15,9 +16,9 @@
     width: 40px;
     height: 40px;
     place-items: center;
-    border-radius: 9px;
-    background: rgba(255, 59, 48, 0.1);
-    color: #c9342c;
+    border-radius: var(--radius-card);
+    background: var(--danger-soft);
+    color: var(--danger);
 }
 
 .app-error-state h1 {
@@ -27,7 +28,7 @@
 
 .app-error-state p {
     margin: 8px 0 0;
-    color: var(--ink-secondary);
+    color: var(--muted);
 }
 
 .app-error-reload {
