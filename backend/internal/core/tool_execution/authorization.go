@@ -7,7 +7,7 @@ import (
 	"praxis/internal/core/security"
 )
 
-// validateAuthorization 校验授权与审核记录的不变量；不访问模型、仓储或当前配置。
+// validateAuthorization 检查当前授权与最近审核的关系，不回扫已冻结的历史文本和身份格式。
 func (i Execution) validateAuthorization() error {
 	if (i.Status == StatusPrepared || i.Status == StatusReviewing) && len(i.NormalizedArguments) == 0 {
 		return contracts.InvalidValue("toolExecution.arguments", "prepared operation requires frozen arguments")
@@ -15,18 +15,16 @@ func (i Execution) validateAuthorization() error {
 	if i.Decision != (security.ApprovalDecision{}) && (!i.Decision.Action.Valid() || i.Decision.RuleID == "") {
 		return contracts.InvalidValue("toolExecution.decision", "a valid action and rule identity are required")
 	}
-	for index, review := range i.Reviews {
-		if review.TurnID == "" || review.ArgumentsDigest != ArgumentsDigest(i.Name, i.NormalizedArguments) || review.ProviderID == "" || review.ModelID == "" || review.StartedAt.Before(i.CreatedAt) || review.StartedAt.IsZero() {
+	if review := i.LatestReview(); len(i.Reviews) > 0 {
+		if review.ArgumentsDigest != ArgumentsDigest(i.Name, i.NormalizedArguments) || review.StartedAt.Before(i.CreatedAt) || review.StartedAt.IsZero() {
 			return contracts.InvalidValue("toolExecution.review", "risk review must match the frozen operation and model identity")
 		}
 		if review.CompletedAt.IsZero() {
-			if index != len(i.Reviews)-1 || i.Status != StatusReviewing && i.Status != StatusInterrupted || review.Assessment != (security.RiskAssessment{}) {
+			if i.Status != StatusReviewing && i.Status != StatusInterrupted || review.Assessment != (security.RiskAssessment{}) {
 				return contracts.InvalidValue("toolExecution.review", "only an active or interrupted review may be incomplete")
 			}
 		} else if review.CompletedAt.Before(review.StartedAt) {
 			return contracts.InvalidValue("toolExecution.review", "risk review completion precedes its start")
-		} else if err := review.Assessment.Validate(); err != nil {
-			return err
 		}
 	}
 	if i.Status == StatusReviewing && (len(i.Reviews) == 0 || !i.LatestReview().CompletedAt.IsZero() || i.Decision.Action != security.ApprovalAuto) {
@@ -60,9 +58,10 @@ func (i *Execution) ApplyAuthorization(decision security.ApprovalDecision, at ti
 	case security.ApprovalAuto:
 		// 参数已冻结，必须取得独立模型审核结论后才可自动批准。
 	case security.ApprovalYolo:
-		approval, err := contracts.NewYoloApproval(ArgumentsDigest(i.Name, i.NormalizedArguments), at)
-		if err != nil {
-			return err
+		approval := contracts.ApprovalRecord{
+			Source:          contracts.ApprovalSourceYolo,
+			ArgumentsDigest: ArgumentsDigest(i.Name, i.NormalizedArguments),
+			ApprovedAt:      at.UTC(),
 		}
 		next.Status = StatusApproved
 		next.Approval = approval

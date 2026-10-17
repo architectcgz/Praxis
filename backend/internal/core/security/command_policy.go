@@ -2,7 +2,6 @@
 package security
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 )
@@ -31,24 +30,6 @@ type CommandRule struct {
 
 type CommandPolicy struct {
 	Rules []CommandRule `json:"rules"`
-}
-
-// Validate 只读校验完整配置；匹配值保留空格和换行，以最终命令原文进行比较。
-func (p CommandPolicy) Validate() error {
-	seen := make(map[string]bool, len(p.Rules))
-	for _, rule := range p.Rules {
-		if rule.ID == "" || rule.ID != strings.TrimSpace(rule.ID) || seen[rule.ID] {
-			return fmt.Errorf("bash rule id %q must be unique and canonical", rule.ID)
-		}
-		seen[rule.ID] = true
-		if !rule.Action.Valid() || strings.TrimSpace(rule.Match.Value) == "" {
-			return fmt.Errorf("bash rule %q needs a valid action and non-empty match", rule.ID)
-		}
-		if rule.Match.Type != "exact" && rule.Match.Type != "prefix" {
-			return fmt.Errorf("bash rule %q has an invalid match type", rule.ID)
-		}
-	}
-	return nil
 }
 
 func (p CommandPolicy) Clone() CommandPolicy {

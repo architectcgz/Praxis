@@ -1,9 +1,7 @@
 package model
 
 import (
-	"errors"
 	"slices"
-	"strings"
 
 	"praxis/internal/contracts"
 )
@@ -34,47 +32,4 @@ func (s Config) Clone() Config {
 // CanReplayReasoningState 判断完整状态的来源是否与目标 Provider、API 和模型完全一致；nil 状态不可重放。
 func (s Config) CanReplayReasoningState(state *contracts.ReasoningState) bool {
 	return state != nil && state.ProviderID == s.ProviderID && state.Protocol == s.APIFormat && state.ModelID == s.ModelID
-}
-
-// Validate 校验 task 使用的模型配置是否完整且已规范化。
-func (s Config) Validate() error {
-	seen := map[string]bool{}
-	for _, level := range s.ReasoningLevels {
-		if level == "" || level != strings.TrimSpace(level) || seen[level] {
-			return errors.New("task model reasoning capabilities must be canonical and unique")
-		}
-		seen[level] = true
-	}
-	if err := s.Thinking.Validate(s.MaxOutputTokens); err != nil {
-		return err
-	}
-	if s.APIFormat != contracts.ProtocolAnthropicMessages && s.Thinking != (contracts.ModelThinking{}) {
-		return errors.New("thinking configuration requires anthropic_messages")
-	}
-	if s.ReasoningLevel != "" && !slices.Contains(s.ReasoningLevels, s.ReasoningLevel) {
-		return errors.New("task reasoning level is not supported by frozen capabilities")
-	}
-	if s.ProviderID == "" {
-		return errors.New("task model provider ID is required")
-	}
-	if s.ModelID == "" {
-		return errors.New("task model ID is required")
-	}
-	if s.ProviderID != strings.TrimSpace(s.ProviderID) || s.ModelID != strings.TrimSpace(s.ModelID) ||
-		s.ReasoningLevel != strings.TrimSpace(s.ReasoningLevel) {
-		return errors.New("task model identity fields must be normalized")
-	}
-	if strings.TrimSpace(s.APIFormat) == "" || s.APIFormat != strings.TrimSpace(s.APIFormat) {
-		return errors.New("task model API format is required and must be normalized")
-	}
-	if s.ContextWindow <= 0 || s.MaxOutputTokens <= 0 || s.MaxOutputTokens >= s.ContextWindow {
-		return errors.New("task model capability limits are invalid")
-	}
-	if strings.TrimSpace(s.BaseURL) == "" || s.BaseURL != strings.TrimSpace(s.BaseURL) {
-		return errors.New("task model base URL is required and must be normalized")
-	}
-	if s.ProxyURL != strings.TrimSpace(s.ProxyURL) {
-		return errors.New("task model proxy URL must be normalized")
-	}
-	return nil
 }

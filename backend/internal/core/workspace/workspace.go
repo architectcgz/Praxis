@@ -2,8 +2,6 @@ package workspace
 
 import (
 	"praxis/internal/contracts"
-	"praxis/internal/utils/pathutil"
-
 	"time"
 )
 
@@ -38,14 +36,15 @@ type Workspace struct {
 	UpdatedAt time.Time
 }
 
+// NewWorkspace 使用入口已校验的身份、类型和路径创建 ready 工作区。
 func NewWorkspace(
 	id contracts.WorkspaceID,
 	projectID contracts.ProjectID,
 	kind WorkspaceKind,
 	path string,
 	at time.Time,
-) (Workspace, error) {
-	workspace := Workspace{
+) Workspace {
+	return Workspace{
 		ID:        id,
 		ProjectID: projectID,
 		Kind:      kind,
@@ -55,30 +54,4 @@ func NewWorkspace(
 		CreatedAt: at.UTC(),
 		UpdatedAt: at.UTC(),
 	}
-	if err := workspace.Validate(); err != nil {
-		return Workspace{}, err
-	}
-	return workspace, nil
-}
-
-func (w Workspace) Validate() error {
-	if contracts.EmptyID(string(w.ID)) || contracts.EmptyID(string(w.ProjectID)) {
-		return contracts.InvalidValue("workspace", "required reference is missing")
-	}
-	if w.Kind != WorkspaceProjectRoot && w.Kind != WorkspaceWorktree && w.Kind != WorkspaceTemporary {
-		return contracts.InvalidValue("workspace.kind", "unknown workspace kind")
-	}
-	if !pathutil.IsAbsoluteNormalized(w.Path) {
-		return contracts.InvalidValue("workspace.path", "path must be an absolute normalized path")
-	}
-	if w.State != WorkspaceReady && w.State != WorkspaceUnavailable && w.State != WorkspaceArchived {
-		return contracts.InvalidValue("workspace.state", "unknown workspace state")
-	}
-	if w.Revision == 0 {
-		return contracts.InvalidValue("workspace.revision", "revision must be positive")
-	}
-	if w.CreatedAt.IsZero() || w.UpdatedAt.IsZero() || w.UpdatedAt.Before(w.CreatedAt) {
-		return contracts.InvalidValue("workspace.timestamps", "timestamps are invalid")
-	}
-	return nil
 }

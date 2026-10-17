@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
-
-	modelconfig "praxis/internal/core/model/config"
 )
 
 const maxProviderErrorBodyBytes = 16 << 10
@@ -22,13 +21,13 @@ func RequestClient(client *http.Client) *http.Client {
 // NewProxyClient 根据 canonical 代理地址创建 HTTP client 副本，不再次清洗配置。
 // 空地址保留调用方 client 的现有代理行为。
 func NewProxyClient(client *http.Client, raw string) (*http.Client, error) {
-	proxyURL, err := modelconfig.ParseProxyURL(raw)
+	base := RequestClient(client)
+	if raw == "" {
+		return base, nil
+	}
+	proxyURL, err := url.Parse(raw)
 	if err != nil {
 		return nil, err
-	}
-	base := RequestClient(client)
-	if proxyURL == nil {
-		return base, nil
 	}
 	transport := http.DefaultTransport.(*http.Transport)
 	if base.Transport != nil {

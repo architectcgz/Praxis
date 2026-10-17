@@ -10,8 +10,11 @@ import (
 	bash "praxis/internal/tools/bash"
 	toolcontracts "praxis/internal/tools/contracts"
 	readfile "praxis/internal/tools/read_file"
+	"regexp"
 	"slices"
 )
+
+var toolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
 
 type builtinTool struct {
 	definition func() contracts.ToolDefinition
@@ -67,7 +70,7 @@ func (r *ToolRegistry) Register(tool toolcontracts.Tool) error {
 		return errors.New("tool registry and tool are required")
 	}
 	definition := tool.Definition()
-	if !definition.Name.Valid() || !json.Valid(definition.InputSchema) || definition.Description == "" {
+	if !toolNamePattern.MatchString(string(definition.Name)) || !json.Valid(definition.InputSchema) || definition.Description == "" {
 		return errors.New("tool definition is invalid")
 	}
 	if _, exists := r.tools[definition.Name]; exists {

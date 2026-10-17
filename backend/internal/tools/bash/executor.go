@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 )
 
@@ -64,9 +63,10 @@ func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontrac
 		return toolcontracts.ToolResult{}, err
 	}
 	var toolArguments arguments
-	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil ||
-		strings.TrimSpace(toolArguments.Command) == "" || len(toolArguments.Command) > maxCommandBytes ||
-		toolArguments.Path != call.Path || toolArguments.Timeout <= 0 || toolArguments.Timeout > maxTimeout {
+	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil {
+		return toolcontracts.ToolResult{}, fmt.Errorf("decode normalized bash arguments: %w", err)
+	}
+	if toolArguments.Path != call.Path {
 		return toolcontracts.ToolResult{}, errors.New("normalized bash arguments are invalid")
 	}
 

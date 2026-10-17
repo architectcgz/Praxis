@@ -24,7 +24,8 @@ type TaskRepository interface {
 }
 
 type Config struct {
-	Rules          ApprovalRules
+	Rules ApprovalRules
+	// Review 在模型响应边界完成规范化与校验，成功时只返回 canonical 结论。
 	Review         func(context.Context, taskmodel.Task, toolmodel.Execution, toolmodel.RiskReview) (securitymodel.RiskAssessment, error)
 	HookDispatcher *hooks.Dispatcher
 	Transactions   repository.TxRunner
@@ -92,9 +93,6 @@ func (s *Executor) invoke(
 		return toolcontracts.ToolResult{}, errors.New("tool invocation metadata is required")
 	}
 	call := prepared.Call.Snapshot()
-	if call.ID == "" || !call.Name.Valid() || len(call.Arguments) == 0 || !json.Valid(call.Arguments) {
-		return toolcontracts.NewToolError("invalid_tool_call", "The tool call is invalid."), nil
-	}
 	if metadata.TaskID == "" || metadata.TurnID == "" ||
 		metadata.SessionID == "" || metadata.AgentID == "" {
 		return toolcontracts.ToolResult{}, errors.New("tool invocation ownership is required")
@@ -141,7 +139,7 @@ func (s *Executor) invoke(
 			return invalid(prepared.Err.Error())
 		}
 		normalized = prepared.Normalized
-		if normalized.Name != call.Name || len(normalized.NormalizedArguments) == 0 || !json.Valid(normalized.NormalizedArguments) {
+		if normalized.Name != call.Name {
 			return invalid("The tool arguments are invalid.")
 		}
 	}

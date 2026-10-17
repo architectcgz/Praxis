@@ -174,7 +174,7 @@ func normalizeOutcome(
 	if outcome == taskmodel.TaskFailed && failureCode == "" {
 		failureCode = contracts.TaskFailureRuntimeFailed
 	}
-	if !failureCode.Valid() {
+	if !taskmodel.ValidFailureCode(failureCode) {
 		outcome = taskmodel.TaskFailed
 		failureCode = contracts.TaskFailureRuntimeFailed
 	}

@@ -14,10 +14,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 )
+
+var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // ModelReference 标识已配置的 Provider 与 Model 组合。
 type ModelReference struct {
@@ -96,9 +99,6 @@ func (r *Registry) ResolveModelReference(id contracts.AgentDefinitionID) (ModelR
 	if r == nil {
 		return ModelReference{}, errors.New("agent registry is not initialized")
 	}
-	if !id.Valid() {
-		return ModelReference{}, fmt.Errorf("invalid agent definition %q", id)
-	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	agent, ok := r.configs[id]
@@ -147,10 +147,12 @@ func (r *Registry) ValidateModelReferences(validateModel ModelValidator) error {
 }
 
 func validateAgentConfig(config AgentConfig) (AgentConfig, error) {
-	result := AgentConfig{Profile: config.Profile}
-	if !result.Profile.Valid() {
-		return AgentConfig{}, errors.New("profile is required and must be valid")
+	switch config.Profile {
+	case contracts.ProfilePrimary, contracts.ProfileDelegate, contracts.ProfileAdvisor, contracts.ProfileCurator:
+	default:
+		return AgentConfig{}, contracts.InvalidValue("agentDefinition.profile", "unknown agent profile")
 	}
+	result := AgentConfig{Profile: config.Profile}
 	if config.Model != nil {
 		model := ModelReference{
 			ProviderID: config.Model.ProviderID,
@@ -211,8 +213,8 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 			continue
 		}
 		id := contracts.AgentDefinitionID(entry.Name())
-		if !id.Valid() {
-			return nil, nil, fmt.Errorf("invalid agent definition directory %q", entry.Name())
+		if !definitionIDPattern.MatchString(id.String()) {
+			return nil, nil, contracts.InvalidValue("agentDefinition.id", "definition id is invalid")
 		}
 		directory := filepath.Join(root, entry.Name())
 		config, err := readAgentConfig(filepath.Join(directory, "agent.json"))
@@ -228,8 +230,8 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 			return nil, nil, fmt.Errorf("read agent definition %q AGENT.md: %w", id, err)
 		}
 		content := string(instructions)
-		if content == "" {
-			return nil, nil, fmt.Errorf("agent definition %q has an empty AGENT.md", id)
+		if content == "" || content != strings.TrimSpace(content) {
+			return nil, nil, fmt.Errorf("agent definition %q AGENT.md must be canonical and nonempty", id)
 		}
 		revision, err := definitionRevision(config, content)
 		if err != nil {
@@ -240,9 +242,6 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 			Profile:      config.Profile,
 			Instructions: content,
 			Revision:     revision,
-		}
-		if err := definition.Validate(); err != nil {
-			return nil, nil, err
 		}
 		configs[id] = config
 		definitions[id] = definition

@@ -3,9 +3,6 @@ package project
 import (
 	"praxis/internal/contracts"
 	"praxis/internal/core/security"
-	"praxis/internal/utils/pathutil"
-
-	"strings"
 	"time"
 )
 
@@ -30,14 +27,15 @@ type Project struct {
 	UpdatedAt          time.Time
 }
 
+// NewProject 使用入口已校验的身份、名称和路径创建项目，初始状态为 active。
 func NewProject(
 	id contracts.ProjectID,
 	name string,
 	path string,
 	defaultWorkspaceID contracts.WorkspaceID,
 	at time.Time,
-) (Project, error) {
-	project := Project{
+) Project {
+	return Project{
 		ID:                 id,
 		Name:               name,
 		Path:               path,
@@ -46,33 +44,4 @@ func NewProject(
 		CreatedAt:          at.UTC(),
 		UpdatedAt:          at.UTC(),
 	}
-	if err := project.Validate(); err != nil {
-		return Project{}, err
-	}
-	return project, nil
-}
-
-func (p Project) Validate() error {
-	if contracts.EmptyID(string(p.ID)) {
-		return contracts.InvalidValue("project.id", "id is required")
-	}
-	if p.Name == "" || strings.ContainsAny(p.Name, "\x00\r\n") {
-		return contracts.InvalidValue("project.name", "name is required and cannot contain control characters")
-	}
-	if !pathutil.IsAbsoluteNormalized(p.Path) {
-		return contracts.InvalidValue("project.path", "path must be an absolute normalized path")
-	}
-	if contracts.EmptyID(string(p.DefaultWorkspaceID)) {
-		return contracts.InvalidValue("project.defaultWorkspaceID", "default workspace id is required")
-	}
-	if p.State != ProjectActive && p.State != ProjectArchived {
-		return contracts.InvalidValue("project.state", "unknown project state")
-	}
-	if p.ApprovalMode != nil && !p.ApprovalMode.ValidDefault() {
-		return contracts.InvalidValue("project.approvalMode", "default approval mode must be ask, auto or yolo")
-	}
-	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
-		return contracts.InvalidValue("project.timestamps", "timestamps are invalid")
-	}
-	return nil
 }

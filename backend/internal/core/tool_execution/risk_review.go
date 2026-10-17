@@ -57,9 +57,6 @@ func (i *Execution) ApplyRiskAssessment(turnID contracts.TurnID, assessment secu
 	if i.Status != StatusReviewing || i.LatestReview().TurnID != turnID || !current.Action.Valid() || current.RuleID == "" {
 		return contracts.ErrRequestConflict
 	}
-	if err := assessment.Validate(); err != nil {
-		return err
-	}
 	next := *i
 	next.Reviews = slices.Clone(i.Reviews)
 	last := len(next.Reviews) - 1

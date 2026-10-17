@@ -14,17 +14,6 @@ func (r *Registry) BuildModel(config model.Config) (model.Model, error) {
 	if r == nil {
 		return model.Model{}, fmt.Errorf("model registry is not initialized")
 	}
-	if err := config.Validate(); err != nil {
-		return model.Model{}, err
-	}
-	baseURL, err := modelconfig.ValidateBaseURL(config.BaseURL)
-	if err != nil {
-		return model.Model{}, err
-	}
-	proxyURL, err := modelconfig.ValidateProxyURL(config.ProxyURL)
-	if err != nil {
-		return model.Model{}, err
-	}
 	r.mu.RLock()
 	apiKey := r.credentialKeyLocked(config.ProviderID)
 	client := r.client
@@ -36,7 +25,7 @@ func (r *Registry) BuildModel(config model.Config) (model.Model, error) {
 	if streamFactory == nil {
 		return model.Model{}, fmt.Errorf("model stream factory is not configured")
 	}
-	client, err = providerhttp.NewProxyClient(client, proxyURL)
+	client, err := providerhttp.NewProxyClient(client, config.ProxyURL)
 	if err != nil {
 		return model.Model{}, fmt.Errorf("create provider client: %w", err)
 	}
@@ -44,8 +33,8 @@ func (r *Registry) BuildModel(config model.Config) (model.Model, error) {
 		modelconfig.APIFormat(config.APIFormat),
 		modelconfig.Provider{
 			ID:       config.ProviderID,
-			BaseURL:  baseURL,
-			ProxyURL: proxyURL,
+			BaseURL:  config.BaseURL,
+			ProxyURL: config.ProxyURL,
 		},
 		modelconfig.Model{
 			ID:              config.ModelID,

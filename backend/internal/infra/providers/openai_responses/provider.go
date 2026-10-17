@@ -11,7 +11,6 @@ import (
 
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
-	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -29,18 +28,14 @@ type Provider struct {
 	contextWindow int
 }
 
-// New 创建 OpenAI Responses 协议适配器。
+// New 使用入口已校验的端点创建 OpenAI Responses 协议适配器，并检查凭据。
 func New(config Config) (*Provider, error) {
-	baseURL, err := modelconfig.ValidateBaseURL(config.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("openai responses: %w", err)
-	}
 	apiKey := strings.TrimSpace(config.APIKey)
 	if apiKey == "" {
 		return nil, errors.New("openai responses API key is required")
 	}
 	return &Provider{
-		baseURL:       baseURL,
+		baseURL:       config.BaseURL,
 		apiKey:        apiKey,
 		client:        config.HTTPClient,
 		contextWindow: config.ContextWindow,

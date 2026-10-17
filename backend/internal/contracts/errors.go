@@ -130,9 +130,6 @@ func (e *ValidationError) Error() string {
 
 func (e *ValidationError) Unwrap() error { return ErrInvalidValue }
 
-// EmptyID 判断标识符去除首尾空白后是否为空。
-func EmptyID(value string) bool { return strings.TrimSpace(value) == "" }
-
 // InvalidValue 为领域字段构造校验错误。
 func InvalidValue(field, message string) error {
 	return &ValidationError{Field: field, Message: message}

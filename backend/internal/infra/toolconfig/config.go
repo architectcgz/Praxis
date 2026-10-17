@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"strings"
 	"sync"
 
 	"praxis/internal/contracts"
@@ -44,10 +45,28 @@ func Load(path string) (Config, error) {
 		}
 		return Config{}, fmt.Errorf("decode trailing tool config: %w", err)
 	}
-	if err := config.Bash.Validate(); err != nil {
+	if err := validateCommandPolicy(config.Bash); err != nil {
 		return Config{}, err
 	}
 	return config, nil
+}
+
+// validateCommandPolicy 在配置文件输入边界检查规则，匹配值保留空格和换行。
+func validateCommandPolicy(policy security.CommandPolicy) error {
+	seen := make(map[string]bool, len(policy.Rules))
+	for _, rule := range policy.Rules {
+		if rule.ID == "" || rule.ID != strings.TrimSpace(rule.ID) || seen[rule.ID] {
+			return fmt.Errorf("bash rule id %q must be unique and canonical", rule.ID)
+		}
+		seen[rule.ID] = true
+		if !rule.Action.Valid() || strings.TrimSpace(rule.Match.Value) == "" {
+			return fmt.Errorf("bash rule %q needs a valid action and non-empty match", rule.ID)
+		}
+		if rule.Match.Type != "exact" && rule.Match.Type != "prefix" {
+			return fmt.Errorf("bash rule %q has an invalid match type", rule.ID)
+		}
+	}
+	return nil
 }
 
 func (c Config) ValidateRegistered(names []contracts.ToolName) error {

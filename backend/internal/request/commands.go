@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"praxis/internal/contracts"
+	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 )
 
@@ -27,7 +28,7 @@ func NewCreateProject(value CreateProject) (CreateProject, error) {
 	value.Name = strings.TrimSpace(value.Name)
 	value.Path = filepath.Clean(strings.TrimSpace(value.Path))
 	if value.Name == "" || strings.ContainsAny(value.Name, "\\/:*?\"<>|\x00\r\n") ||
-		value.Name == "." || value.Name == ".." || !filepath.IsAbs(value.Path) {
+		value.Name == "." || value.Name == ".." || !filepath.IsAbs(value.Path) || strings.ContainsAny(value.Path, "\x00\r\n") {
 		return CreateProject{}, contracts.New(contracts.ProjectWorkspaceInvalid, "")
 	}
 	return value, nil
@@ -138,4 +139,38 @@ func NewFilePreview(sessionID contracts.SessionID, path string) (FilePreview, er
 		SessionID: sessionID,
 		Path:      filepath.Clean(filepath.FromSlash(path)),
 	}, nil
+}
+
+// AppendSessionContext 携带已规范化的共享事实输入，SourceTaskID 可以为空。
+type AppendSessionContext struct {
+	EntryID      contracts.ContextEntryID
+	SessionID    contracts.SessionID
+	Kind         sessionmodel.SessionContextKind
+	SourceTaskID contracts.TaskID
+	Content      string
+}
+
+// NewAppendSessionContext 一次规范化并校验共享事实，拒绝空正文、非法 UTF-8 和超限内容。
+func NewAppendSessionContext(value AppendSessionContext) (AppendSessionContext, error) {
+	value.EntryID = contracts.ContextEntryID(strings.TrimSpace(value.EntryID.String()))
+	value.SessionID = contracts.SessionID(strings.TrimSpace(value.SessionID.String()))
+	value.SourceTaskID = contracts.TaskID(strings.TrimSpace(value.SourceTaskID.String()))
+	value.Content = strings.TrimSpace(value.Content)
+	if value.EntryID == "" || value.SessionID == "" {
+		return AppendSessionContext{}, contracts.InvalidValue("sessionContext", "entry id and session id are required")
+	}
+	for _, id := range []string{value.EntryID.String(), value.SessionID.String(), value.SourceTaskID.String()} {
+		if strings.ContainsAny(id, "\x00\r\n") {
+			return AppendSessionContext{}, contracts.InvalidValue("sessionContext", "identity contains control characters")
+		}
+	}
+	switch value.Kind {
+	case sessionmodel.SessionContextUserMessage, sessionmodel.SessionContextAcceptedConclusion, sessionmodel.SessionContextDecision, sessionmodel.SessionContextReference:
+	default:
+		return AppendSessionContext{}, contracts.InvalidValue("sessionContext.kind", "unknown context entry kind")
+	}
+	if value.Content == "" || !utf8.ValidString(value.Content) || len(value.Content) > sessionmodel.MaxSessionContextContentBytes {
+		return AppendSessionContext{}, contracts.InvalidValue("sessionContext.content", "content must be non-empty UTF-8 text within the size limit")
+	}
+	return value, nil
 }

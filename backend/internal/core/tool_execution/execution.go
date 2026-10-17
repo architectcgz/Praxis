@@ -7,12 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"praxis/internal/contracts"
 	"praxis/internal/core/security"
-	"praxis/internal/utils/pathutil"
 )
 
 // MaxInlineToolResultBytes 限制单次工具结果的内联字节数，执行器应在返回前完成截断。
@@ -92,17 +90,6 @@ type Result struct {
 	Truncated     bool
 }
 
-// Validate 只读校验结果大小和失败码，不截断正文或修正持久化数据。
-func (r Result) Validate() error {
-	if len(r.InlineContent) > MaxInlineToolResultBytes {
-		return contracts.InvalidValue("toolExecution.result.inlineContent", "inline result exceeds the size limit")
-	}
-	if !r.ErrorCode.Valid() {
-		return contracts.InvalidValue("toolExecution.result.errorCode", "unknown tool failure code")
-	}
-	return nil
-}
-
 // Execution 归属于一次 Task 的一次 loop 迭代（Turn），以 ProviderToolCallID
 // 和参数摘要识别重试。仓储负责保证 (TaskID, ProviderToolCallID) 唯一，
 // 原始调用身份不可变；规范化参数在准入时冻结，之后不可变。
@@ -132,7 +119,7 @@ type Execution struct {
 }
 
 // NewExecution 创建 requested 调用，复制参数并将创建时间转换为 UTC。
-// 参数只要求合法 JSON，具体工具参数在执行准入时校验；非法或空身份返回错误。
+// 身份和原始 JSON 已由输入边界校验，具体工具参数在执行准入时处理。
 func NewExecution(
 	id contracts.ToolExecutionID,
 	taskID contracts.TaskID,
@@ -144,8 +131,8 @@ func NewExecution(
 	arguments json.RawMessage,
 	argumentsDigest string,
 	at time.Time,
-) (Execution, error) {
-	invocation := Execution{
+) Execution {
+	return Execution{
 		ID:                 id,
 		TaskID:             taskID,
 		TurnID:             turnID,
@@ -158,37 +145,12 @@ func NewExecution(
 		Status:             StatusRequested,
 		CreatedAt:          at.UTC(),
 	}
-	if err := invocation.Validate(); err != nil {
-		return Execution{}, err
-	}
-	return invocation, nil
 }
 
-// Validate 只读校验身份、规范化输入、状态、结果和时间顺序；持久化恢复必须调用。
-// 非 canonical 字符串和互相矛盾的生命周期字段会被拒绝，不会被静默修正。
-func (i Execution) Validate() error {
-	for _, value := range []string{
-		string(i.ID),
-		string(i.TaskID),
-		string(i.TurnID),
-		string(i.SessionID),
-		string(i.AgentID),
-		i.ProviderToolCallID,
-		i.ArgumentsDigest,
-	} {
-		if value == "" || value != strings.TrimSpace(value) || strings.ContainsAny(value, "\x00\r\n") {
-			return contracts.InvalidValue("toolExecution", "identity and digest must be non-empty canonical values")
-		}
-	}
-	if !i.Name.Valid() || len(i.Arguments) == 0 || !json.Valid(i.Arguments) ||
-		len(i.NormalizedArguments) > 0 && !json.Valid(i.NormalizedArguments) {
-		return contracts.InvalidValue("toolExecution", "tool name and valid JSON arguments are required")
-	}
+// validateState 检查本次状态变更所需的生命周期和授权关系，不重查身份或参数格式。
+func (i Execution) validateState() error {
 	if err := i.validateAuthorization(); err != nil {
 		return err
-	}
-	if i.Path != "" && !pathutil.IsAbsoluteNormalized(i.Path) {
-		return contracts.InvalidValue("toolExecution.path", "authorized path must be canonical")
 	}
 	if !i.ApprovedAt.IsZero() && len(i.NormalizedArguments) == 0 {
 		return contracts.InvalidValue("toolExecution", "approved invocation requires normalized arguments")
@@ -196,16 +158,18 @@ func (i Execution) Validate() error {
 	if !i.Status.Valid() || !i.FailureCode.Valid() || i.CreatedAt.IsZero() {
 		return contracts.InvalidValue("toolExecution", "status, failure code, or creation time is invalid")
 	}
-	if err := i.Result.Validate(); err != nil {
-		return err
+	if !i.Result.ErrorCode.Valid() {
+		return contracts.InvalidValue("toolExecution.result.errorCode", "unknown tool failure code")
 	}
 	if i.ApprovedAt.IsZero() {
 		if i.Approval != (contracts.ApprovalRecord{}) || !i.StartedAt.IsZero() {
 			return contracts.InvalidValue("toolExecution.approval", "unapproved invocation has approval or start fields")
 		}
 	} else {
-		if err := i.Approval.Validate(); err != nil {
-			return contracts.FieldError("toolExecution.approval", err)
+		switch i.Approval.Source {
+		case contracts.ApprovalSourceUser, contracts.ApprovalSourceYolo, contracts.ApprovalSourceAuto:
+		default:
+			return contracts.InvalidValue("toolExecution.approval.source", "unknown approval source")
 		}
 		if !i.Approval.ApprovedAt.Equal(i.ApprovedAt) ||
 			i.Approval.ArgumentsDigest != ArgumentsDigest(i.Name, i.NormalizedArguments) {
@@ -344,8 +308,14 @@ func (i *Execution) settle(status Status, result Result, code FailureCode, at ti
 	return i.apply(next)
 }
 
-// apply 先验证完整候选状态，避免时间、审批或结果校验失败后留下半更新对象。
+// apply 先检查状态转换和本次产生的结果，失败时保留原对象；输入格式由入口负责。
 func (i *Execution) apply(next Execution) error {
+	if next.Result != i.Result && len(next.Result.InlineContent) > MaxInlineToolResultBytes {
+		return contracts.InvalidValue("toolExecution.result.inlineContent", "inline result exceeds the size limit")
+	}
+	if err := next.validateState(); err != nil {
+		return err
+	}
 	if err := ValidateUpdate(*i, next); err != nil {
 		return err
 	}

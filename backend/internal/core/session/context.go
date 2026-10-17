@@ -1,13 +1,11 @@
 package session
 
 import (
-	"praxis/internal/contracts"
-
 	"crypto/sha256"
 	"encoding/hex"
-	"strings"
 	"time"
-	"unicode/utf8"
+
+	"praxis/internal/contracts"
 )
 
 const MaxSessionContextContentBytes = 16 * 1024
@@ -33,55 +31,21 @@ type SessionContextEntry struct {
 	CreatedAt     time.Time
 }
 
-func NewSessionContextEntry(
-	id contracts.ContextEntryID,
-	sessionID contracts.SessionID,
-	kind SessionContextKind,
-	sourceTaskID contracts.TaskID,
-	content string,
-	at time.Time,
-) (SessionContextEntry, error) {
-	content = strings.TrimSpace(content)
-	entry := SessionContextEntry{
-		ID: id, SessionID: sessionID, Kind: kind,
-		SourceTaskID: sourceTaskID, Content: content,
-		ContentDigest: contentDigest(content), CreatedAt: at.UTC(),
+// NewSessionContextEntry 使用入口已规范化并校验的正文创建共享事实及其摘要。
+func NewSessionContextEntry(id contracts.ContextEntryID, sessionID contracts.SessionID, kind SessionContextKind, sourceTaskID contracts.TaskID, content string, at time.Time) SessionContextEntry {
+	return SessionContextEntry{
+		ID:            id,
+		SessionID:     sessionID,
+		Kind:          kind,
+		SourceTaskID:  sourceTaskID,
+		Content:       content,
+		ContentDigest: ContentDigest(content),
+		CreatedAt:     at.UTC(),
 	}
-	if err := entry.Validate(); err != nil {
-		return SessionContextEntry{}, err
-	}
-	return entry, nil
 }
 
-func (e SessionContextEntry) Validate() error {
-	if e.Content != strings.TrimSpace(e.Content) {
-		return contracts.InvalidValue("sessionContext.content", "content must be normalized")
-	}
-	return e.validate()
-}
-
-func (e SessionContextEntry) validate() error {
-	if contracts.EmptyID(string(e.ID)) || contracts.EmptyID(string(e.SessionID)) {
-		return contracts.InvalidValue("sessionContext", "entry id and session id are required")
-	}
-	switch e.Kind {
-	case SessionContextUserMessage, SessionContextAcceptedConclusion, SessionContextDecision, SessionContextReference:
-	default:
-		return contracts.InvalidValue("sessionContext.kind", "unknown context entry kind")
-	}
-	if e.Content == "" || !utf8.ValidString(e.Content) || len([]byte(e.Content)) > MaxSessionContextContentBytes {
-		return contracts.InvalidValue("sessionContext.content", "content is empty, invalid UTF-8, or exceeds the bounded limit")
-	}
-	if e.ContentDigest != contentDigest(e.Content) {
-		return contracts.InvalidValue("sessionContext.contentDigest", "content digest does not match content")
-	}
-	if e.CreatedAt.IsZero() {
-		return contracts.InvalidValue("sessionContext.createdAt", "createdAt is required")
-	}
-	return nil
-}
-
-func contentDigest(content string) string {
+// ContentDigest 返回原始正文的稳定摘要；调用方负责在输入边界完成正文规范化。
+func ContentDigest(content string) string {
 	digest := sha256.Sum256([]byte(content))
 	return "sha256-" + hex.EncodeToString(digest[:])
 }

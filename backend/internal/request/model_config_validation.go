@@ -1,4 +1,4 @@
-package config
+package request
 
 import (
 	"errors"
@@ -9,12 +9,13 @@ import (
 	"unicode/utf8"
 
 	"praxis/internal/contracts"
+	modelconfig "praxis/internal/core/model/config"
 )
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// Validate 只读校验完整配置；拒绝非 canonical 值，不清洗字段或补默认值。
-func (config Config) Validate() error {
+// ValidateModelConfig 在请求或配置文件输入边界只读校验完整配置，不清洗字段或补默认值。
+func ValidateModelConfig(config modelconfig.Config) error {
 	groupsSeen, err := validateGroups(config.Groups)
 	if err != nil {
 		return err
@@ -28,7 +29,7 @@ func (config Config) Validate() error {
 		}
 		return nil
 	}
-	if !slices.ContainsFunc(config.Providers, func(provider Provider) bool {
+	if !slices.ContainsFunc(config.Providers, func(provider modelconfig.Provider) bool {
 		return provider.ID == config.DefaultProviderID
 	}) {
 		return fmt.Errorf("models config: default provider %q is not configured", config.DefaultProviderID)
@@ -36,7 +37,7 @@ func (config Config) Validate() error {
 	return nil
 }
 
-func validateGroups(groups []Group) (map[string]struct{}, error) {
+func validateGroups(groups []modelconfig.Group) (map[string]struct{}, error) {
 	seen := make(map[string]struct{}, len(groups))
 	for _, group := range groups {
 		if !idPattern.MatchString(group.ID) {
@@ -53,7 +54,7 @@ func validateGroups(groups []Group) (map[string]struct{}, error) {
 	return seen, nil
 }
 
-func validateProviders(providers []Provider, groupsSeen map[string]struct{}) error {
+func validateProviders(providers []modelconfig.Provider, groupsSeen map[string]struct{}) error {
 	seen := make(map[string]struct{}, len(providers))
 	for _, provider := range providers {
 		if !idPattern.MatchString(provider.ID) {
@@ -66,16 +67,16 @@ func validateProviders(providers []Provider, groupsSeen map[string]struct{}) err
 		if provider.DisplayName == "" || !canonicalString(provider.DisplayName) {
 			return fmt.Errorf("models config: provider %q display name must be normalized and non-empty", provider.ID)
 		}
-		if _, err := ValidateBaseURL(provider.BaseURL); err != nil {
+		if _, err := ValidateModelBaseURL(provider.BaseURL); err != nil {
 			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
-		if _, err := ValidateProxyURL(provider.ProxyURL); err != nil {
+		if _, err := ValidateModelProxyURL(provider.ProxyURL); err != nil {
 			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
 		if err := validateModels(provider, groupsSeen); err != nil {
 			return err
 		}
-		if provider.DefaultModelID != "" && !slices.ContainsFunc(provider.Models, func(configured Model) bool {
+		if provider.DefaultModelID != "" && !slices.ContainsFunc(provider.Models, func(configured modelconfig.Model) bool {
 			return configured.ID == provider.DefaultModelID
 		}) {
 			return fmt.Errorf("models config: provider %q default model %q is not configured", provider.ID, provider.DefaultModelID)
@@ -84,7 +85,7 @@ func validateProviders(providers []Provider, groupsSeen map[string]struct{}) err
 	return nil
 }
 
-func validateModels(provider Provider, groupsSeen map[string]struct{}) error {
+func validateModels(provider modelconfig.Provider, groupsSeen map[string]struct{}) error {
 	seen := make(map[string]struct{}, len(provider.Models))
 	for _, configured := range provider.Models {
 		if configured.ID == "" || !canonicalString(configured.ID) {
@@ -101,7 +102,7 @@ func validateModels(provider Provider, groupsSeen map[string]struct{}) error {
 		}
 		seen[configured.ID] = struct{}{}
 		switch configured.APIFormat {
-		case APIFormatAnthropicMessages, APIFormatOpenAIResponses, APIFormatOpenAIChatCompletions:
+		case modelconfig.APIFormatAnthropicMessages, modelconfig.APIFormatOpenAIResponses, modelconfig.APIFormatOpenAIChatCompletions:
 		default:
 			return fmt.Errorf("models config: model %q has unsupported API format %q", configured.ID, configured.APIFormat)
 		}
@@ -112,16 +113,32 @@ func validateModels(provider Provider, groupsSeen map[string]struct{}) error {
 	return nil
 }
 
-func validateCapabilities(configured Model) error {
-	if err := configured.Thinking.Validate(configured.MaxOutputTokens); err != nil {
-		return err
+func validateCapabilities(configured modelconfig.Model) error {
+	switch configured.Thinking.Mode {
+	case "", "adaptive":
+		if configured.Thinking.BudgetTokens != 0 {
+			return errors.New("thinking budget is only supported in enabled mode")
+		}
+	case "enabled":
+		if configured.Thinking.BudgetTokens < 1024 || configured.Thinking.BudgetTokens >= configured.MaxOutputTokens {
+			return errors.New("thinking budget must be at least 1024 and less than max output tokens")
+		}
+	default:
+		return errors.New("unsupported or non-canonical thinking mode")
 	}
-	if configured.APIFormat != APIFormatAnthropicMessages && configured.Thinking != (contracts.ModelThinking{}) {
+	if configured.APIFormat != modelconfig.APIFormatAnthropicMessages && configured.Thinking != (contracts.ModelThinking{}) {
 		return errors.New("thinking configuration requires anthropic_messages")
 	}
-	if configured.APIFormat == APIFormatAnthropicMessages {
+	if configured.APIFormat == modelconfig.APIFormatAnthropicMessages {
 		for _, level := range configured.ReasoningLevels {
-			if !slices.Contains([]string{"off", "low", "medium", "high", "xhigh", "max"}, level) {
+			if !slices.Contains([]string{
+				"off",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			}, level) {
 				return errors.New("unsupported Anthropic effort level")
 			}
 			if level == "off" && !configured.Thinking.SupportsDisabled {

@@ -57,7 +57,14 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 		tx.scope, tx.nextSequence, tx.replayMessages = scope, s.sequences[scope], messages
 		txCtx := context.WithValue(ctx, transactionKey{}, tx)
 		for _, event := range record.Events {
-			if err := s.stage(txCtx, event); err != nil {
+			var entry indexEntry
+			if event.Type != "session.deleted" {
+				entry, err = restoreIndexEntry(scope, event)
+				if err != nil {
+					return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
+				}
+			}
+			if err := s.stage(txCtx, event, entry); err != nil {
 				return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
 			}
 		}

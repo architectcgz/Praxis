@@ -88,7 +88,7 @@ func (s *Store) readRef(key entityKey, ref recordRef, reader recordReader) (json
 	if eventKey(ref.Scope, event) != key || event.Sequence != ref.Sequence || event.ID != fmt.Sprintf("event:%d", ref.Sequence) || event.CreatedAt.IsZero() {
 		return nil, errors.New("record identity does not match position index")
 	}
-	if _, _, err := describe(ref.Scope, event); err != nil {
+	if _, err := restoreIndexEntry(ref.Scope, event); err != nil {
 		return nil, err
 	}
 	return event.Payload, nil
@@ -190,7 +190,7 @@ func save(ctx context.Context, s *Store, scope, collection, id, kind string, val
 	if err != nil {
 		return err
 	}
-	if err := s.change(ctx, scope, collection, id, kind, data); err != nil {
+	if err := s.change(ctx, scope, collection, id, kind, data, value); err != nil {
 		return fmt.Errorf("%s/%s: %w", collection, id, err)
 	}
 	return nil

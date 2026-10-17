@@ -46,8 +46,9 @@ func (a Agent) CanReadSessionContext() bool {
 	return a.DefinitionID == DefinitionPrimary
 }
 
-func NewAgent(id contracts.AgentID, sessionID contracts.SessionID, definitionID contracts.AgentDefinitionID, profile contracts.AgentProfile, at time.Time) (Agent, error) {
-	agent := Agent{
+// NewAgent 使用已校验的身份与 Agent 定义创建 idle 实例，不重复检查入口字段。
+func NewAgent(id contracts.AgentID, sessionID contracts.SessionID, definitionID contracts.AgentDefinitionID, profile contracts.AgentProfile, at time.Time) Agent {
+	return Agent{
 		ID:           id,
 		SessionID:    sessionID,
 		DefinitionID: definitionID,
@@ -56,40 +57,13 @@ func NewAgent(id contracts.AgentID, sessionID contracts.SessionID, definitionID 
 		CreatedAt:    at.UTC(),
 		UpdatedAt:    at.UTC(),
 	}
-	if err := agent.Validate(); err != nil {
-		return Agent{}, err
-	}
-	return agent, nil
-}
-
-func (a Agent) Validate() error {
-	if contracts.EmptyID(string(a.ID)) || contracts.EmptyID(string(a.SessionID)) || !a.DefinitionID.Valid() {
-		return contracts.InvalidValue("agent", "required reference is missing")
-	}
-	if !a.Profile.Valid() {
-		return contracts.InvalidValue("agent.profile", "unknown agent profile")
-	}
-	if !validAgentState(a.State) {
-		return contracts.InvalidValue("agent.state", "unknown agent state")
-	}
-	if a.State == AgentExecuting || a.State == AgentPausing {
-		if contracts.EmptyID(string(a.CurrentTaskID)) {
-			return contracts.InvalidValue("agent.currentTaskID", "active state requires a task")
-		}
-	} else if a.CurrentTaskID != "" {
-		return contracts.InvalidValue("agent.currentTaskID", "inactive state cannot retain a task")
-	}
-	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
-		return contracts.InvalidValue("agent.timestamps", "timestamps are invalid")
-	}
-	return nil
 }
 
 func (a *Agent) Start(taskID contracts.TaskID, at time.Time) error {
 	if !a.State.Startable() {
 		return contracts.InvalidTransition("agent", string(a.State), string(AgentExecuting))
 	}
-	if contracts.EmptyID(string(taskID)) {
+	if taskID == "" {
 		return contracts.InvalidValue("agent.currentTaskID", "task id is required")
 	}
 	a.State, a.CurrentTaskID, a.UpdatedAt = AgentExecuting, taskID, at.UTC()
@@ -129,13 +103,4 @@ func (a *Agent) EndTask(outcome task.TaskOutcome, at time.Time) error {
 	}
 	a.CurrentTaskID, a.UpdatedAt = "", at.UTC()
 	return nil
-}
-
-func validAgentState(state AgentState) bool {
-	switch state {
-	case AgentIdle, AgentExecuting, AgentWaiting, AgentPausing, AgentPaused, AgentInterrupted, AgentFailed:
-		return true
-	default:
-		return false
-	}
 }

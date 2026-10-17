@@ -22,7 +22,8 @@ import (
 	"praxis/internal/timing"
 )
 
-func describe(scope string, event Event) (entityKey, indexEntry, error) {
+// describe 直接从实体构建查询索引，不重新解析或校验业务输入。
+func describe(scope string, event Event, object any) (entityKey, indexEntry, error) {
 	key := eventKey(scope, event)
 	entry := indexEntry{location: recordRef{Scope: scope}, groups: []lookupKey{collectionKey(event.Collection), scopeKey(scope)}}
 	group := func(kind, owner, value string) { entry.groups = append(entry.groups, lookupKey{kind, owner, value}) }
@@ -32,63 +33,22 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 			entry.groups = append(entry.groups, referenceKey(entityKey{collection, id}))
 		}
 	}
-	kinds := map[string]string{
-		"project":   "project.saved",
-		"workspace": "workspace.saved",
-		"session":   "session.saved",
-		"agent":     "agent.saved",
-		"task":      "task.saved",
-		"tool":      "tool.saved",
-		"wait":      "wait.saved",
-		"control":   "control.saved",
-		"context":   "context.entry_appended",
-		"message":   "message.appended",
-		"timing":    "timing.saved",
-		"usage":     "usage.saved",
-	}
-	if kinds[event.Collection] == "" || kinds[event.Collection] != event.Type {
-		return key, entry, errors.New("unknown event type")
-	}
-	if (scope == "") != (event.Collection == "project" || event.Collection == "workspace") {
-		return key, entry, errors.New("invalid event file ownership")
-	}
-	if event.Key == "" || event.Key != strings.TrimSpace(event.Key) {
-		return key, entry, errors.New("invalid object key")
-	}
-	var object interface{ Validate() error }
 	var identity, sessionID string
-	decode := func(target any) error { return decodeJSON(event.Payload, target) }
-	switch event.Collection {
-	case "project":
-		var v projectmodel.Project
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity = v, v.ID.String()
+	switch v := object.(type) {
+	case projectmodel.Project:
+		identity = v.ID.String()
 		link("workspace", v.DefaultWorkspaceID.String())
-	case "workspace":
-		var v workspacemodel.Workspace
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity = v, v.ID.String()
+	case workspacemodel.Workspace:
+		identity = v.ID.String()
 		group("workspaces-project", v.ProjectID.String(), "")
 		claim("workspace-path", v.ProjectID.String(), v.Path)
 		link("project", v.ProjectID.String())
-	case "session":
-		var v sessionmodel.Session
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID.String(), v.ID.String()
+	case sessionmodel.Session:
+		identity, sessionID = v.ID.String(), v.ID.String()
 		group("sessions-project", v.ProjectID.String(), "")
 		link("workspace", v.WorkspaceID.String())
-	case "agent":
-		var v agentmodel.Agent
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID.String(), v.SessionID.String()
+	case agentmodel.Agent:
+		identity, sessionID = v.ID.String(), v.SessionID.String()
 		group("agents-session", sessionID, "")
 		group("agents-definition", sessionID, v.DefinitionID.String())
 		if v.DefinitionID == agentmodel.DefinitionPrimary {
@@ -96,12 +56,8 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		}
 		link("session", sessionID)
 		link("task", v.CurrentTaskID.String())
-	case "task":
-		var v taskmodel.Task
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID.String(), v.SessionID.String()
+	case taskmodel.Task:
+		identity, sessionID = v.ID.String(), v.SessionID.String()
 		entry.sequence = v.Sequence
 		group("tasks-agent", v.AgentID.String(), "")
 		claim("task-request", v.AgentID.String(), v.RequestID.String())
@@ -117,12 +73,8 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 			group("pending-agent", v.AgentID.String(), "")
 		}
 		link("agent", v.AgentID.String())
-	case "tool":
-		var v toolmodel.Execution
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID.String(), v.SessionID.String()
+	case toolmodel.Execution:
+		identity, sessionID = v.ID.String(), v.SessionID.String()
 		claim("tool-call", v.TaskID.String(), v.ProviderToolCallID)
 		group("tools-task", v.TaskID.String(), "")
 		if !v.Status.Terminal() {
@@ -132,111 +84,156 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 			group("awaiting-agent", v.AgentID.String(), "")
 		}
 		link("task", v.TaskID.String())
-	case "context":
-		var v sessionmodel.SessionContextEntry
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID.String(), v.SessionID.String()
+	case sessionmodel.SessionContextEntry:
+		identity, sessionID = v.ID.String(), v.SessionID.String()
 		group("contexts-session", sessionID, "")
 		link("session", sessionID)
 		link("task", v.SourceTaskID.String())
-	case "control":
-		var v agentmodel.AgentControlCommand
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID.String(), scope
+	case agentmodel.AgentControlCommand:
+		identity, sessionID = v.ID.String(), scope
 		if v.Status == agentmodel.AgentControlPending {
 			group("controls-agent", v.AgentID.String(), "")
 		}
 		link("agent", v.AgentID.String())
 		link("task", v.TargetTaskID.String())
-	case "wait":
-		var v workflowmodel.WaitCondition
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID.String(), scope
+	case workflowmodel.WaitCondition:
+		identity, sessionID = v.ID.String(), scope
 		link("task", v.TaskID.String())
-	case "message":
-		var v messageRecord
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		if v.AgentID == "" {
-			return key, entry, errors.New("message agent identity is required")
-		}
-		for _, value := range []string{v.AgentID.String(), v.Data.ID, v.Data.RequestID, v.Data.HandoffID, v.Data.TaskID, v.Data.TurnID, v.Data.AuthorID} {
-			if value != "" && (value != strings.TrimSpace(value) || strings.ContainsAny(value, "\x00\r\n")) {
-				return key, entry, errors.New("message identity fields must be canonical")
-			}
-		}
-		if v.Data.Role == sessionmodel.RoleAssistant && (v.Data.AuthorKind != sessionmodel.AuthorAgent || v.Data.AuthorID != v.AgentID.String()) {
-			return key, entry, errors.New("assistant author does not match the message agent")
-		}
-		for _, block := range v.Data.Blocks {
-			if block.Kind == sessionmodel.BlockReasoningState {
-				if err := validateReasoningState(block.ReasoningState); err != nil {
-					return key, entry, err
-				}
-			}
-		}
-		object, identity, sessionID = v.Data, messageKey(v.OwnerID, v.Data.ID), scope
+	case messageRecord:
+		identity, sessionID = messageKey(v.OwnerID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
 			return key, entry, errors.New("message sequence does not match event sequence")
 		}
 		// 消息不进入全局 latest / groups，正文与位置列表均按 Session 懒加载。
 		entry.groups = nil
-	case "usage":
-		var v model.ModelUsageRecord
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.Key(), v.SessionID
+	case model.ModelUsageRecord:
+		identity, sessionID = v.Key(), v.SessionID
 		group("usage-session", sessionID, "")
 		link("task", v.TaskID)
-	case "timing":
-		var v timing.Record
-		if err := decode(&v); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, v.ID, v.SessionID
+	case timing.Record:
+		identity, sessionID = v.ID, v.SessionID
 		group("timings-agent", v.AgentID, "")
 		if v.Status == timing.Running {
 			group("running-timings", "", "")
 		}
 		link("task", v.TaskID)
+	default:
+		return key, entry, fmt.Errorf("unsupported stored object %T", object)
 	}
 	if identity != event.Key || sessionID != scope {
 		return key, entry, errors.New("object identity or session ownership does not match event")
 	}
-	if err := object.Validate(); err != nil {
-		return key, entry, err
-	}
-	// 持久化只接受 canonical 身份；业务正文与提示词不在这里重复规范化。
-	value := reflect.ValueOf(object)
-	for _, field := range []string{
-		"ID",
-		"SessionID",
-		"AgentID",
-		"TaskID",
-		"RequestID",
-		"TurnID",
-		"InputMessageID",
-		"ProviderID",
-		"ModelID",
-		"ReasoningLevel",
-	} {
-		v := value.FieldByName(field)
-		if v.IsValid() && v.Kind() == reflect.String && v.String() != strings.TrimSpace(v.String()) {
-			return key, entry, fmt.Errorf("%s must be canonical", field)
-		}
-	}
 	return key, entry, nil
 }
 
-// validateReasoningState 在消息写入或从日志恢复时只读校验存储字段，不解释 Provider 的 opaque 内容。
+// restoreIndexEntry 在磁盘输入边界严格解码并校验实体，再恢复其查询索引。
+func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
+	kinds := map[string]string{
+		"project":   "project.saved",
+		"workspace": "workspace.saved",
+		"session":   "session.saved",
+		"agent":     "agent.saved",
+		"task":      "task.saved",
+		"tool":      "tool.saved",
+		"wait":      "wait.saved",
+		"control":   "control.saved",
+		"context":   "context.entry_appended",
+		"message":   "message.appended",
+		"timing":    "timing.saved",
+		"usage":     "usage.saved",
+	}
+	if kinds[event.Collection] == "" || kinds[event.Collection] != event.Type {
+		return indexEntry{}, errors.New("unknown event type")
+	}
+	if (scope == "") != (event.Collection == "project" || event.Collection == "workspace") {
+		return indexEntry{}, errors.New("invalid event file ownership")
+	}
+	if event.Key == "" || event.Key != strings.TrimSpace(event.Key) {
+		return indexEntry{}, errors.New("invalid object key")
+	}
+	var target any
+	switch event.Collection {
+	case "project":
+		target = new(projectmodel.Project)
+	case "workspace":
+		target = new(workspacemodel.Workspace)
+	case "session":
+		target = new(sessionmodel.Session)
+	case "agent":
+		target = new(agentmodel.Agent)
+	case "task":
+		target = new(taskmodel.Task)
+	case "tool":
+		target = new(toolmodel.Execution)
+	case "context":
+		target = new(sessionmodel.SessionContextEntry)
+	case "control":
+		target = new(agentmodel.AgentControlCommand)
+	case "wait":
+		target = new(workflowmodel.WaitCondition)
+	case "message":
+		target = new(messageRecord)
+	case "usage":
+		target = new(model.ModelUsageRecord)
+	case "timing":
+		target = new(timing.Record)
+	}
+	if err := decodeJSON(event.Payload, target); err != nil {
+		return indexEntry{}, err
+	}
+	var err error
+	switch value := target.(type) {
+	case *projectmodel.Project:
+		err = validateProject(*value)
+	case *workspacemodel.Workspace:
+		err = validateWorkspace(*value)
+	case *sessionmodel.Session:
+		err = validateSession(*value)
+	case *agentmodel.Agent:
+		err = validateAgent(*value)
+	case *taskmodel.Task:
+		err = validateTask(*value)
+	case *toolmodel.Execution:
+		err = validateToolExecution(*value)
+	case *sessionmodel.SessionContextEntry:
+		err = validateContextEntry(*value)
+	case *agentmodel.AgentControlCommand:
+		err = validateControlCommand(*value)
+	case *workflowmodel.WaitCondition:
+		err = validateWaitCondition(*value)
+	case *messageRecord:
+		err = value.Validate()
+	case *model.ModelUsageRecord:
+		err = validateUsageRecord(*value)
+	case *timing.Record:
+		err = value.Validate()
+	default:
+		return indexEntry{}, fmt.Errorf("unsupported stored object %T", target)
+	}
+	if err != nil {
+		return indexEntry{}, err
+	}
+	_, entry, err := describe(scope, event, reflect.ValueOf(target).Elem().Interface())
+	return entry, err
+}
+
+// validateSession 在磁盘输入边界拒绝非法会话，不修改持久化字段。
+func validateSession(value sessionmodel.Session) error {
+	for _, id := range []string{value.ID.String(), value.ProjectID.String(), value.WorkspaceID.String()} {
+		if id == "" || id != strings.TrimSpace(id) {
+			return contracts.InvalidValue("session", "required reference must be canonical and nonempty")
+		}
+	}
+	if value.State != sessionmodel.SessionActive && value.State != sessionmodel.SessionArchived {
+		return contracts.InvalidValue("session.state", "unknown session state")
+	}
+	if value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() || value.UpdatedAt.Before(value.CreatedAt) {
+		return contracts.InvalidValue("session.timestamps", "timestamps are invalid")
+	}
+	return nil
+}
+
+// validateReasoningState 在消息输入边界检查存储字段，不解释 Provider 的 opaque 内容。
 func validateReasoningState(state *contracts.ReasoningState) error {
 	if state == nil {
 		return errors.New("reasoning state is required")

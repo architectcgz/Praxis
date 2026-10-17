@@ -42,18 +42,3 @@ func TaskFailureMessage(code TaskFailureCode, err error) string {
 	}
 	return message
 }
-
-func (c TaskFailureCode) Valid() bool {
-	switch c {
-	case "", TaskFailureProviderUnavailable, TaskFailureProvider,
-		TaskFailureTool, TaskFailurePolicyBlocked,
-		TaskFailureApprovalRequired, TaskFailureResourceLimit,
-		TaskFailureStorage, TaskFailureContract, TaskFailureBusy,
-		TaskFailureInterrupted, TaskFailureRequestCanceled,
-		TaskFailureRuntimeCancelled, TaskFailureRuntimeFailed,
-		TaskFailureRuntimeInvalid:
-		return true
-	default:
-		return false
-	}
-}

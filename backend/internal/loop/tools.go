@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 
 	"praxis/internal/contracts"
@@ -13,11 +14,13 @@ import (
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
+var toolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
+
 // validateToolCalls 检查模型输出契约，工具参数随后由对应 Normalizer 准备。
 func validateToolCalls(calls []ToolCall) error {
 	seen := map[string]bool{}
 	for _, call := range calls {
-		if call.ID == "" || call.ID != strings.TrimSpace(call.ID) || seen[call.ID] || !call.Name.Valid() || !json.Valid(call.Arguments) {
+		if call.ID == "" || call.ID != strings.TrimSpace(call.ID) || seen[call.ID] || !toolNamePattern.MatchString(string(call.Name)) || !json.Valid(call.Arguments) {
 			return fail(contracts.TaskFailureContract, ErrorContract, "provider emitted an invalid tool call")
 		}
 		seen[call.ID] = true

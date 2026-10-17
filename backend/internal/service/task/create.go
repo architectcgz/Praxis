@@ -119,10 +119,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 		if err != nil {
 			return err
 		}
-		task, err := taskmodel.NewTask(taskID, agent.SessionID, agent.ID, params.RequestID, inputMessageID, config, selection, at)
-		if err != nil {
-			return err
-		}
+		task := taskmodel.NewTask(taskID, agent.SessionID, agent.ID, params.RequestID, inputMessageID, config, selection, at)
 		task.ProviderID = params.ProviderID
 		task.ModelID = params.ModelID
 		task.ReasoningLevel = params.ReasoningLevel

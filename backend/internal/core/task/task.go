@@ -3,9 +3,7 @@ package task
 import (
 	"praxis/internal/contracts"
 
-	"reflect"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -64,8 +62,8 @@ func NewTask(
 	config Config,
 	selection ContextSelection,
 	at time.Time,
-) (Task, error) {
-	task := Task{
+) Task {
+	return Task{
 		ID:               id,
 		SessionID:        sessionID,
 		AgentID:          agentID,
@@ -76,15 +74,11 @@ func NewTask(
 		ContextSelection: selection.Clone(),
 		CreatedAt:        at.UTC(),
 	}
-	if err := task.Validate(); err != nil {
-		return Task{}, err
-	}
-	return task, nil
 }
 
 // NewPendingTask 创建预约 Task，只保存请求身份和 FIFO 序号；正文由用户消息保存。
-func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID contracts.AgentID, requestID contracts.RequestID, inputMessageID string, sequence uint64, at time.Time) (Task, error) {
-	task := Task{
+func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID contracts.AgentID, requestID contracts.RequestID, inputMessageID string, sequence uint64, at time.Time) Task {
+	return Task{
 		ID:             id,
 		SessionID:      sessionID,
 		AgentID:        agentID,
@@ -94,111 +88,19 @@ func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID 
 		Status:         TaskPending,
 		CreatedAt:      at.UTC(),
 	}
-	if err := task.Validate(); err != nil {
-		return Task{}, err
-	}
-	return task, nil
 }
 
-// Prepare 在 runtime 空闲时确定执行输入；校验失败不改变待执行 Task。
+// Prepare 在 runtime 空闲时冻结已构建的执行输入；非法状态或排除当前输入时不修改 Task。
 func (e *Task) Prepare(config Config, selection ContextSelection) error {
 	if e.Status == TaskStarting || !canTransition(e.Status, TaskStarting) {
 		return contracts.InvalidTransition("task", string(e.Status), string(TaskStarting))
 	}
-	if err := config.Validate(); err != nil {
-		return err
-	}
 	if slices.Contains(selection.ExcludedMessageIDs, e.InputMessageID) {
 		return contracts.InvalidValue("task.contextSelection", "current input cannot be excluded")
-	}
-	if err := selection.Validate(); err != nil {
-		return err
 	}
 	e.Config = config.Clone()
 	e.ContextSelection = selection.Clone()
 	e.Status = TaskStarting
-	return nil
-}
-
-// Validate 校验 Task 引用、执行输入和生命周期；字段规范性由输入及恢复边界保证。
-func (e Task) Validate() error {
-	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 || e.Progress.ToolCalls > MaxToolCalls || e.Progress.Iterations > MaxIterations || e.Progress.Iterations > e.Progress.ModelRequests || (e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1) {
-		return contracts.InvalidValue("task.progress", "usage counters or request sequence are invalid")
-	}
-	if (e.Progress.FinalAssistantID == "") != (e.Progress.FinalStopReason == "") || e.Progress.FinalStopReason != "" && e.Progress.FinalStopReason != "completed" && e.Progress.FinalStopReason != "stop_sequence" {
-		return contracts.InvalidValue("task.progress", "final output evidence is inconsistent")
-	}
-	if e.ID == "" || e.SessionID == "" || e.AgentID == "" || e.RequestID == "" {
-		return contracts.InvalidValue("task", "required reference is missing")
-	}
-	if !validTaskStatus(e.Status) {
-		return contracts.InvalidValue("task", "unknown status")
-	}
-	if (e.ProviderID == "") != (e.ModelID == "") || e.ProviderID == "" && e.ReasoningLevel != "" {
-		return contracts.InvalidValue("task.model", "provider and model are required together")
-	}
-	for _, value := range []string{e.ProviderID, e.ModelID, e.ReasoningLevel} {
-		if value != strings.TrimSpace(value) {
-			return contracts.InvalidValue("task.model", "model selection must be canonical")
-		}
-	}
-	if e.Status == TaskPending {
-		if e.Sequence == 0 ||
-			!reflect.ValueOf(e.Config).IsZero() || !reflect.ValueOf(e.ContextSelection).IsZero() || e.Progress != (Progress{}) || !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" || e.FailureCode != "" {
-			return contracts.InvalidValue("task.pending", "pending task requires a sequence and cannot contain execution state")
-		}
-	} else if err := e.Config.Validate(); err != nil {
-		return contracts.FieldError("task.config", err)
-	}
-	if e.InputMessageID == "" || e.InputMessageID != strings.TrimSpace(e.InputMessageID) {
-		return contracts.InvalidValue("task.inputMessageID", "input message reference must be canonical and nonempty")
-	}
-	if slices.Contains(e.ContextSelection.ExcludedMessageIDs, e.InputMessageID) {
-		return contracts.InvalidValue("task.contextSelection", "current input cannot be excluded")
-	}
-	if err := e.ContextSelection.Validate(); err != nil {
-		return err
-	}
-	if e.CreatedAt.IsZero() {
-		return contracts.InvalidValue("task.createdAt", "creation time is required")
-	}
-	if (!e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt)) ||
-		(!e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt)) {
-		return contracts.InvalidValue("task.timestamps", "timestamps cannot precede creation")
-	}
-	if e.Status == TaskStarting {
-		if !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" {
-			return contracts.InvalidValue("task", "starting task has terminal fields")
-		}
-	}
-	if e.Status == TaskRunning || e.Status == TaskEnding {
-		if e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" {
-			return contracts.InvalidValue("task", "active task has invalid lifecycle fields")
-		}
-	}
-	if e.Status == TaskEnded {
-		if e.StartedAt.IsZero() || e.EndedAt.IsZero() || !ValidTaskOutcome(e.Outcome) {
-			return contracts.InvalidValue("task", "ended task has invalid terminal fields")
-		}
-		if e.Outcome == TaskFailed && e.FailureCode == "" {
-			return contracts.InvalidValue("task.failureCode", "failed task requires a failure code")
-		}
-	}
-	if !e.FailureCode.Valid() {
-		return contracts.InvalidValue("task.failureCode", "unknown failure code")
-	}
-	if e.FailureCode == contracts.TaskFailureRequestCanceled && e.Outcome != TaskPaused && e.Outcome != TaskInterrupted {
-		return contracts.InvalidValue("task.failureCode", "request cancellation requires a paused or interrupted outcome")
-	}
-	if len([]rune(e.FailureMessage)) > contracts.MaxTaskFailureMessageRunes {
-		return contracts.InvalidValue("task.failureMessage", "failure message exceeds length limit")
-	}
-	if e.Status != TaskEnded && e.FailureMessage != "" {
-		return contracts.InvalidValue("task.failureMessage", "active task cannot have a failure message")
-	}
-	if e.Status == TaskEnded && e.Outcome != TaskFailed && e.FailureMessage != "" {
-		return contracts.InvalidValue("task.failureMessage", "only failed task may have a failure message")
-	}
 	return nil
 }
 
@@ -242,7 +144,7 @@ func (e *Task) End(
 	if at.Before(e.StartedAt) {
 		return contracts.InvalidValue("task.endedAt", "ending cannot precede start")
 	}
-	if !failureCode.Valid() || (outcome == TaskFailed && failureCode == "") {
+	if !ValidFailureCode(failureCode) || (outcome == TaskFailed && failureCode == "") {
 		return contracts.InvalidValue("task.failureCode", "unknown or missing failure code")
 	}
 	if failureCode == contracts.TaskFailureRequestCanceled && outcome != TaskPaused && outcome != TaskInterrupted {
@@ -258,6 +160,22 @@ func (e *Task) End(
 func validTaskStatus(status TaskStatus) bool {
 	switch status {
 	case TaskPending, TaskStarting, TaskRunning, TaskEnding, TaskEnded:
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidFailureCode 检查执行结果或持久化记录中的失败码，空值表示没有失败。
+func ValidFailureCode(code contracts.TaskFailureCode) bool {
+	switch code {
+	case "", contracts.TaskFailureProviderUnavailable, contracts.TaskFailureProvider,
+		contracts.TaskFailureTool, contracts.TaskFailurePolicyBlocked,
+		contracts.TaskFailureApprovalRequired, contracts.TaskFailureResourceLimit,
+		contracts.TaskFailureStorage, contracts.TaskFailureContract, contracts.TaskFailureBusy,
+		contracts.TaskFailureInterrupted, contracts.TaskFailureRequestCanceled,
+		contracts.TaskFailureRuntimeCancelled, contracts.TaskFailureRuntimeFailed,
+		contracts.TaskFailureRuntimeInvalid:
 		return true
 	default:
 		return false

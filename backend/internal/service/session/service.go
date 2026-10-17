@@ -250,14 +250,8 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (resul
 			return contracts.New(contracts.ProjectWorkspaceInvalid, "")
 		}
 		at := s.clock.Now().UTC()
-		session, err := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, at)
-		if err != nil {
-			return err
-		}
-		agent, err := agentmodel.NewAgent(params.AgentID, session.ID, definition.ID, definition.Profile, at)
-		if err != nil {
-			return err
-		}
+		session := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, at)
+		agent := agentmodel.NewAgent(params.AgentID, session.ID, definition.ID, definition.Profile, at)
 		if err := s.sessions.Save(txCtx, session); err != nil {
 			return err
 		}
@@ -314,10 +308,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 			return err
 		}
 		at := s.clock.Now().UTC()
-		agent, err := agentmodel.NewAgent(contracts.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, at)
-		if err != nil {
-			return err
-		}
+		agent := agentmodel.NewAgent(contracts.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, at)
 		if err := s.agents.Save(txCtx, agent); err != nil {
 			return err
 		}
@@ -330,28 +321,19 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 	return created, nil
 }
 
-// AppendContextParams 描述一次比较后追加的 SessionContext 写入。
-type AppendContextParams struct {
-	EntryID      contracts.ContextEntryID
-	SessionID    contracts.SessionID
-	Kind         sessionmodel.SessionContextKind
-	SourceTaskID contracts.TaskID
-	Content      string
-}
-
 type AppendContextResult struct {
 	Entry         sessionmodel.SessionContextEntry
 	ExistingEntry bool
 }
 
 // AppendSessionContext 按稳定 ID 幂等追加不可变共享上下文。
-func (s *Service) AppendSessionContext(ctx context.Context, params AppendContextParams) (AppendContextResult, error) {
+func (s *Service) AppendSessionContext(ctx context.Context, params request.AppendSessionContext) (AppendContextResult, error) {
 	if ctx == nil {
 		return AppendContextResult{}, errors.New("append session context is required")
 	}
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		entry, err := sessionmodel.NewSessionContextEntry(
+		entry := sessionmodel.NewSessionContextEntry(
 			params.EntryID,
 			params.SessionID,
 			params.Kind,
@@ -359,9 +341,6 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 			params.Content,
 			s.clock.Now(),
 		)
-		if err != nil {
-			return err
-		}
 		existing, found, err := s.contexts.GetByID(txCtx, params.EntryID)
 		if err != nil {
 			return err

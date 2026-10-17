@@ -128,17 +128,13 @@ func (s *Services) SaveModelConfig(canonical request.SaveModelConfig) error {
 	if s.models == nil {
 		return errors.New("model registry is not available")
 	}
-	prepared := canonical.ValidatedConfig()
-	if !prepared.Prepared() {
-		return contracts.InvalidValue("modelConfig", "model configuration is not ready")
-	}
 	config := canonical.Config()
 	if s.agentConfig != nil {
 		if err := s.agentConfig.ValidateModelConfiguration(config); err != nil {
 			return contracts.InvalidValue("modelConfig", err.Error())
 		}
 	}
-	if err := s.models.Save(prepared); err != nil {
+	if err := s.models.Save(config); err != nil {
 		return err
 	}
 	s.logger.Infof("model config saved providers=%d groups=%d", len(config.Providers), len(config.Groups))

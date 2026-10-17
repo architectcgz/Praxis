@@ -3,8 +3,10 @@ package jsonl
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"praxis/internal/contracts"
@@ -118,11 +120,15 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 		if data.CreatedAt.IsZero() {
 			data.CreatedAt = time.Now().UTC()
 		}
-		if err := save(txCtx, s, scope, "message", messageKey(ownerID, data.ID), "message.appended", messageRecord{
+		record := messageRecord{
 			OwnerID: ownerID,
 			AgentID: owner.ID,
 			Data:    data,
-		}); err != nil {
+		}
+		if err := record.Validate(); err != nil {
+			return err
+		}
+		if err := save(txCtx, s, scope, "message", messageKey(ownerID, data.ID), "message.appended", record); err != nil {
 			return err
 		}
 		stored, inserted = data, true
@@ -224,6 +230,96 @@ func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, afte
 		result = append(result, record.Data)
 	}
 	return repository.MessageStream{Messages: result, SequenceBoundary: boundary}, nil
+}
+
+// Validate 在消息写入或磁盘读取入口检查消息结构和流身份。
+func (r messageRecord) Validate() error {
+	if r.AgentID == "" || r.AgentID.String() != strings.TrimSpace(r.AgentID.String()) || strings.ContainsAny(r.AgentID.String(), "\x00\r\n") {
+		return errors.New("message agent identity must be canonical and nonempty")
+	}
+	if r.Data.Role == sessionmodel.RoleAssistant && (r.Data.AuthorKind != sessionmodel.AuthorAgent || r.Data.AuthorID != r.AgentID.String()) {
+		return errors.New("assistant author does not match the message agent")
+	}
+	if err := validateMessageData(r.Data); err != nil {
+		return err
+	}
+	for _, block := range r.Data.Blocks {
+		if block.Kind == sessionmodel.BlockReasoningState {
+			if err := validateReasoningState(block.ReasoningState); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateMessageData 在消息写入和磁盘读取入口检查身份、角色及内容结构。
+func validateMessageData(m sessionmodel.MessageData) error {
+	if m.ID == "" || m.Sequence == 0 || m.CreatedAt.IsZero() {
+		return errors.New("message identity, sequence and creation time are required")
+	}
+	for _, value := range []string{
+		m.ID,
+		m.RequestID,
+		m.HandoffID,
+		m.TaskID,
+		m.TurnID,
+		m.AuthorID,
+	} {
+		if value != strings.TrimSpace(value) || strings.ContainsAny(value, "\x00\r\n") {
+			return errors.New("message identity fields must be canonical")
+		}
+	}
+	switch m.Role {
+	case sessionmodel.RoleUser, sessionmodel.RoleAssistant, sessionmodel.RoleTool:
+	default:
+		return errors.New("message role is invalid")
+	}
+	switch m.AuthorKind {
+	case sessionmodel.AuthorUser, sessionmodel.AuthorAgent, sessionmodel.AuthorTool, sessionmodel.AuthorSystem:
+	default:
+		return errors.New("message author is invalid")
+	}
+	if len(m.Blocks) == 0 && !(m.Role == sessionmodel.RoleAssistant && (m.StopReason == "completed" || m.StopReason == "stop_sequence")) {
+		return errors.New("message blocks are required")
+	}
+	for _, block := range m.Blocks {
+		if err := validateMessageBlock(m.Role, block); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateMessageBlock(role sessionmodel.Role, block sessionmodel.Block) error {
+	if block.Kind != sessionmodel.BlockReasoningState && block.ReasoningState != nil {
+		return errors.New("reasoning state requires a reasoning state message block")
+	}
+	switch block.Kind {
+	case sessionmodel.BlockReasoningState:
+		if role != sessionmodel.RoleAssistant || block.ReasoningState == nil || block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
+			return errors.New("message contains an invalid reasoning state block")
+		}
+	case sessionmodel.BlockText:
+		if strings.TrimSpace(block.Text) == "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
+			return errors.New("message contains an invalid text block")
+		}
+	case sessionmodel.BlockThinking:
+		if role != sessionmodel.RoleAssistant || strings.TrimSpace(block.Text) == "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
+			return errors.New("message contains an invalid thinking block")
+		}
+	case sessionmodel.BlockToolCall:
+		if role != sessionmodel.RoleAssistant || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || block.IsError || len(block.Input) > 0 && !json.Valid(block.Input) {
+			return errors.New("message contains an invalid tool call block")
+		}
+	case sessionmodel.BlockToolResult:
+		if role != sessionmodel.RoleTool || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || len(block.Input) > 0 {
+			return errors.New("message contains an invalid tool result block")
+		}
+	default:
+		return errors.New("message contains an unknown block kind")
+	}
+	return nil
 }
 
 var _ repository.MessageStreams = MessageStreams{}

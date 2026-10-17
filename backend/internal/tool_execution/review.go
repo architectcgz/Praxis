@@ -81,7 +81,7 @@ func (s *Executor) review(ctx context.Context, id contracts.ToolExecutionID) (to
 	if err := ctx.Err(); err != nil {
 		return toolmodel.Execution{}, err
 	}
-	if reviewErr != nil || assessment.Validate() != nil {
+	if reviewErr != nil {
 		assessment = security.RiskAssessment{Verdict: security.RiskUncertain, Reason: "Risk assessment failed or returned an invalid result; manual approval is required."}
 	}
 	err = s.tx.InTx(ctx, func(txCtx context.Context) error {

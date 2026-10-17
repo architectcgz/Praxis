@@ -127,7 +127,7 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 	return nil
 }
 
-func (s *Store) change(ctx context.Context, scope, collection, id, kind string, data json.RawMessage) error {
+func (s *Store) change(ctx context.Context, scope, collection, id, kind string, data json.RawMessage, object any) error {
 	tx := s.tx(ctx)
 	if tx == nil || !tx.active || tx.readOnly {
 		return errors.New("changes require an active transaction")
@@ -147,10 +147,18 @@ func (s *Store) change(ctx context.Context, scope, collection, id, kind string, 
 		CreatedAt:  time.Now().UTC(),
 		Payload:    bytes.Clone(data),
 	}
-	return s.stage(ctx, event)
+	var entry indexEntry
+	if event.Type != "session.deleted" {
+		var err error
+		_, entry, err = describe(scope, event, object)
+		if err != nil {
+			return err
+		}
+	}
+	return s.stage(ctx, event, entry)
 }
 
-func (s *Store) stage(ctx context.Context, event Event) error {
+func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error {
 	tx := s.tx(ctx)
 	if tx.deletedScope || s.index.deleted[tx.scope] {
 		return errors.New("cannot write to a deleted session")
@@ -167,10 +175,7 @@ func (s *Store) stage(ctx context.Context, event Event) error {
 		}
 		tx.deletedScope = true
 	} else {
-		key, entry, err := describe(tx.scope, event)
-		if err != nil {
-			return err
-		}
+		key := eventKey(tx.scope, event)
 		prior, err := s.payload(ctx, key)
 		if err == nil {
 			if key.collection != "message" {

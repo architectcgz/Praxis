@@ -246,11 +246,7 @@ func (r *Runner) executeTurn(
 		}, assistant)
 		value := repository.AssistantWrite{Message: message}
 		for _, call := range calls {
-			invocation, err := toolmodel.NewExecution(contracts.ToolExecutionID(r.IDs.New("toolexecution")), task.ID, turnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
-			if err != nil {
-				outcome, code, cause := taskResult(failCause(contracts.TaskFailureContract, err))
-				return outcome, code, false, cause
-			}
+			invocation := toolmodel.NewExecution(contracts.ToolExecutionID(r.IDs.New("toolexecution")), task.ID, turnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
 			value.ToolCalls = append(value.ToolCalls, invocation)
 		}
 		if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {

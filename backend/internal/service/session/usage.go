@@ -44,9 +44,6 @@ func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID contract
 		if record.SessionID != sessionID.String() {
 			return SessionUsageSummary{}, errors.New("session usage record ownership mismatch")
 		}
-		if err := record.Validate(); err != nil {
-			return SessionUsageSummary{}, err
-		}
 		if record.Usage.InputTokens > math.MaxInt64-summary.InputTokens {
 			return SessionUsageSummary{}, errors.New("session input token counter overflow")
 		}

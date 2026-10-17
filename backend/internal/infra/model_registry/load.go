@@ -1,7 +1,6 @@
 package modelregistry
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -38,15 +37,11 @@ func Load(modelsPath, credentialsPath string, client *http.Client, factories ...
 func newRegistry(
 	modelsPath string,
 	credentialsPath string,
-	validated modelconfig.ValidatedConfig,
+	config modelconfig.Config,
 	credentials ProviderCredentials,
 	client *http.Client,
 	streamFactory StreamFactory,
 ) (*Registry, error) {
-	if !validated.Prepared() {
-		return nil, errors.New("model configuration has not been prepared")
-	}
-	config := validated.Config()
 	providerClients, err := buildProviderClients(config.Providers, client)
 	if err != nil {
 		return nil, err

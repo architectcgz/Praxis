@@ -25,9 +25,6 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.Ass
 		}
 		calls := make(map[string]toolmodel.Execution, len(value.ToolCalls))
 		for _, call := range value.ToolCalls {
-			if err := call.Validate(); err != nil {
-				return err
-			}
 			if _, ok := calls[call.ProviderToolCallID]; ok {
 				return contracts.ErrRequestConflict
 			}
@@ -90,6 +87,9 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.Ass
 			return nil
 		}
 		if value.FinalOutput != nil {
+			if value.FinalOutput.StopReason != "completed" && value.FinalOutput.StopReason != "stop_sequence" {
+				return contracts.InvalidValue("task.finalOutput", "invalid final output evidence")
+			}
 			return (TaskRepository{w.streams.s}).Save(txCtx, task)
 		}
 		return nil

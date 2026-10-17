@@ -3,7 +3,6 @@ package task
 import (
 	"praxis/internal/contracts"
 	"reflect"
-	"strings"
 )
 
 // canTransition 是命令方法与持久化更新共同使用的状态转换规则。
@@ -24,11 +23,8 @@ func canTransition(from, to TaskStatus) bool {
 	return false
 }
 
-// ValidateUpdate 只读检查不可变身份、冻结配置、生命周期与预算单调性。
+// ValidateUpdate 检查不可变身份、冻结配置、生命周期与预算单调性，不递归校验对象。
 func ValidateUpdate(before, after Task) error {
-	if err := after.Validate(); err != nil {
-		return err
-	}
 	if !canTransition(before.Status, after.Status) {
 		return contracts.ErrRequestConflict
 	}
@@ -66,17 +62,7 @@ type FinalOutput struct {
 	StopReason  string
 }
 
-func (v FinalOutput) Validate() error {
-	if v.AssistantID == "" || v.AssistantID != strings.TrimSpace(v.AssistantID) || (v.StopReason != "completed" && v.StopReason != "stop_sequence") {
-		return contracts.InvalidValue("task.finalOutput", "invalid final output evidence")
-	}
-	return nil
-}
-
 func (e *Task) RecordFinalOutput(value FinalOutput) error {
-	if err := value.Validate(); err != nil {
-		return err
-	}
 	if !e.Active() || e.Progress.FinalAssistantID != "" && (e.Progress.FinalAssistantID != value.AssistantID || e.Progress.FinalStopReason != value.StopReason) {
 		return contracts.ErrRequestConflict
 	}

@@ -1,9 +1,7 @@
 package model
 
 import (
-	"errors"
 	"math"
-	"strings"
 
 	"praxis/internal/contracts"
 )
@@ -47,17 +45,4 @@ type ModelUsageRecord struct {
 // Key 返回请求的稳定身份，供持久化和实时更新去重。
 func (r ModelUsageRecord) Key() string {
 	return "usage:" + r.TurnID.String()
-}
-
-// Validate 拒绝非规范化身份和无效计数，不修正持久化数据。
-func (r ModelUsageRecord) Validate() error {
-	for _, id := range []string{r.SessionID, r.AgentID, r.TaskID, r.TurnID.String()} {
-		if id == "" || id != strings.TrimSpace(id) || strings.ContainsAny(id, "\x00\r\n") {
-			return errors.New("token usage identity must be a non-empty canonical string")
-		}
-	}
-	if !r.Usage.Valid() {
-		return errors.New("invalid token usage counts")
-	}
-	return nil
 }

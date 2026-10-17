@@ -22,9 +22,6 @@ func (s *Service) workspaceForSession(ctx context.Context, sessionID contracts.S
 	if err != nil {
 		return workspacemodel.Workspace{}, err
 	}
-	if err := workspace.Validate(); err != nil {
-		return workspacemodel.Workspace{}, err
-	}
 	if workspace.ProjectID != session.ProjectID || workspace.State != workspacemodel.WorkspaceReady {
 		return workspacemodel.Workspace{}, contracts.New(contracts.ProjectWorkspaceInvalid, "current session workspace is unavailable")
 	}

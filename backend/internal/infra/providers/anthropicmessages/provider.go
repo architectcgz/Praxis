@@ -12,7 +12,6 @@ import (
 
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
-	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 )
@@ -31,12 +30,8 @@ type Provider struct {
 	contextWindow            int
 }
 
-// New 创建 Anthropic Messages 协议适配器；校验连接配置并补齐默认协议版本。
+// New 使用入口已校验的端点创建协议适配器，检查凭据并补齐默认协议版本。
 func New(config Config) (*Provider, error) {
-	baseURL, err := modelconfig.ValidateBaseURL(config.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: %w", err)
-	}
 	apiKey := strings.TrimSpace(config.APIKey)
 	if apiKey == "" {
 		return nil, errors.New("anthropic API key is required")
@@ -46,7 +41,7 @@ func New(config Config) (*Provider, error) {
 		version = "2023-06-01"
 	}
 	return &Provider{
-		baseURL:       baseURL,
+		baseURL:       config.BaseURL,
 		apiKey:        apiKey,
 		version:       version,
 		client:        config.HTTPClient,
@@ -104,8 +99,9 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := request.Model.Thinking.Validate(request.MaxOutputTokens); err != nil {
-		return nil, err
+	// 摘要等请求会缩小输出上限，需检查本次请求是否仍能容纳冻结的 thinking 预算。
+	if request.Model.Thinking.Mode == "enabled" && request.Model.Thinking.BudgetTokens >= request.MaxOutputTokens {
+		return nil, errors.New("thinking budget must be less than request max output tokens")
 	}
 	body := anthropicRequest{
 		Model:     modelID,

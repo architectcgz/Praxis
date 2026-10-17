@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
@@ -172,5 +173,16 @@ func parseRiskAssessment(text string) (security.RiskAssessment, error) {
 		return security.RiskAssessment{}, errors.New("risk review requires exactly verdict and reason")
 	}
 	assessment := security.RiskAssessment{Verdict: security.RiskVerdict(fields["verdict"]), Reason: strings.TrimSpace(fields["reason"])}
-	return assessment, assessment.Validate()
+	return assessment, validateRiskAssessment(assessment)
+}
+
+// validateRiskAssessment 在模型响应输入边界拒绝非法结论和原因，不将异常当作安全。
+func validateRiskAssessment(a security.RiskAssessment) error {
+	if a.Verdict != security.RiskSafe && a.Verdict != security.RiskDangerous && a.Verdict != security.RiskUncertain {
+		return errors.New("risk assessment has an invalid verdict")
+	}
+	if a.Reason == "" || len(a.Reason) > 1000 || !utf8.ValidString(a.Reason) {
+		return errors.New("risk assessment requires a canonical reason within 1000 bytes")
+	}
+	return nil
 }

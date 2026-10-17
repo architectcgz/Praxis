@@ -28,11 +28,8 @@ func canTransition(from, to Status) bool {
 	return false
 }
 
-// ValidateUpdate 与领域命令共享转换规则，冻结原始调用、执行参数与已经完成的审核。
+// ValidateUpdate 检查前后状态的转换与不可变字段；对象本身由输入或状态变更入口检查。
 func ValidateUpdate(before, after Execution) error {
-	if err := after.Validate(); err != nil {
-		return err
-	}
 	if !canTransition(before.Status, after.Status) || before.Status.Terminal() && !reflect.DeepEqual(before, after) || before.BudgetReserved && !after.BudgetReserved {
 		return contracts.ErrRequestConflict
 	}

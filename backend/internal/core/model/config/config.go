@@ -77,7 +77,7 @@ type ConfigManager interface {
 	Catalog
 	Config() Config
 	// Save 保存输入边界已准备的配置，不再次规范化或修改配置内容。
-	Save(ValidatedConfig) error
+	Save(Config) error
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
 	DiscoverProviderModels(context.Context, string) ([]string, error)
@@ -122,30 +122,4 @@ func (c Config) Clone() Config {
 		}
 	}
 	return c
-}
-
-// ValidatedConfig 保存已校验的 canonical 配置，不暴露内部可变数据。
-type ValidatedConfig struct {
-	config   Config
-	prepared bool
-}
-
-// NewValidatedConfig 复制并只读校验 canonical 配置，失败不修改输入。
-// 输入层必须先完成规范化；本构造器不清洗字段或补默认值。
-func NewValidatedConfig(input Config) (ValidatedConfig, error) {
-	config := input.Clone()
-	if err := config.Validate(); err != nil {
-		return ValidatedConfig{}, err
-	}
-	return ValidatedConfig{config: config, prepared: true}, nil
-}
-
-// Config 返回已校验配置的独立副本。
-func (c ValidatedConfig) Config() Config {
-	return c.config.Clone()
-}
-
-// Prepared 判断配置是否成功构造，供存储层拒绝零值。
-func (c ValidatedConfig) Prepared() bool {
-	return c.prepared
 }

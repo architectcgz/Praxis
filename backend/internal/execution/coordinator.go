@@ -83,9 +83,6 @@ func (r *Coordinator) Activate(ctx context.Context, task taskmodel.Task) error {
 		return err
 	}
 	defer r.running.Done()
-	if err := task.Validate(); err != nil {
-		return err
-	}
 	if !task.Active() {
 		return nil
 	}

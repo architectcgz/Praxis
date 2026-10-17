@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ func (r ProjectRepository) Get(ctx context.Context, id contracts.ProjectID) (pro
 	return get[projectmodel.Project](ctx, r.s, "project", id.String())
 }
 
-// Save 校验并保存对象，事务未提交时只更新工作区。
+// Save 保存入口已处理的对象，事务未提交时只更新工作区。
 func (r ProjectRepository) Save(ctx context.Context, v projectmodel.Project) error {
 	return save(ctx, r.s, "", "project", v.ID.String(), "project.saved", v)
 }
@@ -77,7 +78,7 @@ func (r WorkspaceRepository) Get(ctx context.Context, id contracts.WorkspaceID) 
 	return get[workspacemodel.Workspace](ctx, r.s, "workspace", id.String())
 }
 
-// Save 校验并保存对象，事务未提交时只更新工作区。
+// Save 保存入口已处理的对象，事务未提交时只更新工作区。
 func (r WorkspaceRepository) Save(ctx context.Context, v workspacemodel.Workspace) error {
 	return save(ctx, r.s, "", "workspace", v.ID.String(), "workspace.saved", v)
 }
@@ -93,7 +94,7 @@ func (r SessionRepository) Get(ctx context.Context, id contracts.SessionID) (ses
 	return get[sessionmodel.Session](ctx, r.s, "session", id.String())
 }
 
-// Save 校验并保存对象，事务未提交时只更新工作区。
+// Save 保存入口已处理的对象，事务未提交时只更新工作区。
 func (r SessionRepository) Save(ctx context.Context, v sessionmodel.Session) error {
 	return save(ctx, r.s, v.ID.String(), "session", v.ID.String(), "session.saved", v)
 }
@@ -150,9 +151,6 @@ func (r SessionRepository) Rename(ctx context.Context, id contracts.SessionID, t
 	if e != nil {
 		return e
 	}
-	if title == "" || title != strings.TrimSpace(title) {
-		return contracts.InvalidValue("title", "title must be a non-empty canonical string")
-	}
 	v.Title = title
 	v.UpdatedAt = at
 	return r.Save(ctx, v)
@@ -170,7 +168,7 @@ func (r SessionRepository) Delete(ctx context.Context, id contracts.SessionID) (
 	if n > 0 {
 		return nil, contracts.ErrAgentExecuting
 	}
-	return nil, r.s.change(ctx, id.String(), "session", id.String(), "session.deleted", nil)
+	return nil, r.s.change(ctx, id.String(), "session", id.String(), "session.deleted", nil, nil)
 }
 
 // Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
@@ -178,7 +176,7 @@ func (r AgentRepository) Get(ctx context.Context, id contracts.AgentID) (agentmo
 	return get[agentmodel.Agent](ctx, r.s, "agent", id.String())
 }
 
-// Save 校验并保存对象，事务未提交时只更新工作区。
+// Save 保存入口已处理的对象，事务未提交时只更新工作区。
 func (r AgentRepository) Save(ctx context.Context, v agentmodel.Agent) error {
 	return save(ctx, r.s, v.SessionID.String(), "agent", v.ID.String(), "agent.saved", v)
 }
@@ -207,7 +205,7 @@ func (r TaskRepository) Get(ctx context.Context, id contracts.TaskID) (taskmodel
 	return get[taskmodel.Task](ctx, r.s, "task", id.String())
 }
 
-// Save 校验并保存对象，事务未提交时只更新工作区。
+// Save 保存入口已处理的对象，事务未提交时只更新工作区。
 func (r TaskRepository) Save(ctx context.Context, v taskmodel.Task) error {
 	return save(ctx, r.s, v.SessionID.String(), "task", v.ID.String(), "task.saved", v)
 }
@@ -300,7 +298,7 @@ func (r ToolExecutionRepository) Get(ctx context.Context, id contracts.ToolExecu
 	return get[toolmodel.Execution](ctx, r.s, "tool", id.String())
 }
 
-// Save 校验并保存对象，事务未提交时只更新工作区。
+// Save 保存入口已处理的对象，事务未提交时只更新工作区。
 func (r ToolExecutionRepository) Save(ctx context.Context, v toolmodel.Execution) error {
 	return save(ctx, r.s, v.SessionID.String(), "tool", v.ID.String(), "tool.saved", v)
 }
@@ -330,7 +328,14 @@ func (r TaskRepository) NextSequence(ctx context.Context, id contracts.AgentID) 
 		}
 		return nil
 	})
-	return sequence + 1, err
+	if err != nil {
+		return 0, err
+	}
+	if sequence == math.MaxUint64 {
+		// 拒绝回绕为零，避免后续任务破坏队列的单调顺序。
+		return 0, contracts.InvalidValue("task.sequence", "task sequence is exhausted")
+	}
+	return sequence + 1, nil
 }
 
 // FindNextPendingByAgent 仅访问该 Agent 的 Pending 索引，返回 FIFO 队首。
@@ -360,7 +365,7 @@ func (r ControlRepository) Get(ctx context.Context, id contracts.AgentControlCom
 	return get[agentmodel.AgentControlCommand](ctx, r.s, "control", id.String())
 }
 
-// Save 校验并保存对象，事务未提交时只更新工作区。
+// Save 保存入口已处理的对象，事务未提交时只更新工作区。
 func (r ControlRepository) Save(ctx context.Context, v agentmodel.AgentControlCommand) error {
 	a, e := (AgentRepository{r.s}).Get(ctx, v.AgentID)
 	if e != nil {

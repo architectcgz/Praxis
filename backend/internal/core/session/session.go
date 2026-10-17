@@ -25,29 +25,16 @@ type Session struct {
 	UpdatedAt   time.Time
 }
 
-func NewSession(id contracts.SessionID, projectID contracts.ProjectID, workspaceID contracts.WorkspaceID, at time.Time) (Session, error) {
-	session := Session{
-		ID: id, ProjectID: projectID, WorkspaceID: workspaceID,
-		State:     SessionActive,
-		CreatedAt: at.UTC(), UpdatedAt: at.UTC(),
+// NewSession 使用入口已校验的身份创建 active 会话，初始标题为空。
+func NewSession(id contracts.SessionID, projectID contracts.ProjectID, workspaceID contracts.WorkspaceID, at time.Time) Session {
+	return Session{
+		ID:          id,
+		ProjectID:   projectID,
+		WorkspaceID: workspaceID,
+		State:       SessionActive,
+		CreatedAt:   at.UTC(),
+		UpdatedAt:   at.UTC(),
 	}
-	if err := session.Validate(); err != nil {
-		return Session{}, err
-	}
-	return session, nil
-}
-
-func (s Session) Validate() error {
-	if contracts.EmptyID(string(s.ID)) || contracts.EmptyID(string(s.ProjectID)) || contracts.EmptyID(string(s.WorkspaceID)) {
-		return contracts.InvalidValue("session", "required reference is missing")
-	}
-	if s.State != SessionActive && s.State != SessionArchived {
-		return contracts.InvalidValue("session.state", "unknown session state")
-	}
-	if s.CreatedAt.IsZero() || s.UpdatedAt.IsZero() || s.UpdatedAt.Before(s.CreatedAt) {
-		return contracts.InvalidValue("session.timestamps", "timestamps are invalid")
-	}
-	return nil
 }
 
 // NameFromInput 从首次成功回答对应的用户输入提取短标题；已有标题不会被后续输入覆盖。

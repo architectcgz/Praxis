@@ -46,7 +46,7 @@ type SaveModelConfig struct {
 	DefaultProviderID string
 	Providers         []Provider
 	Models            []ConfiguredModel
-	validated         modelconfig.ValidatedConfig
+	config            modelconfig.Config
 }
 
 // NewSaveModelConfig 复制、规范化并校验完整模型配置，拒绝丢失 Provider 引用的模型。
@@ -78,6 +78,7 @@ func NewSaveModelConfig(value SaveModelConfig) (SaveModelConfig, error) {
 	}
 	for index, model := range value.Models {
 		providerID := strings.TrimSpace(model.ProviderID)
+		modelID := strings.TrimSpace(model.ModelID)
 		if providerID == "" {
 			return SaveModelConfig{}, contracts.InvalidValue(fmt.Sprintf("models[%d].providerId", index), "required")
 		}
@@ -89,8 +90,8 @@ func NewSaveModelConfig(value SaveModelConfig) (SaveModelConfig, error) {
 			levels[levelIndex] = strings.TrimSpace(levels[levelIndex])
 		}
 		configured := modelconfig.Model{
-			ID:                    strings.TrimSpace(model.ModelID),
-			DisplayName:           cmp.Or(strings.TrimSpace(model.DisplayName), strings.TrimSpace(model.ModelID)),
+			ID:                    modelID,
+			DisplayName:           cmp.Or(strings.TrimSpace(model.DisplayName), modelID),
 			GroupID:               strings.TrimSpace(model.GroupID),
 			APIFormat:             modelconfig.APIFormat(strings.TrimSpace(model.APIFormat)),
 			ContextWindow:         model.ContextWindow,
@@ -110,20 +111,14 @@ func NewSaveModelConfig(value SaveModelConfig) (SaveModelConfig, error) {
 			}
 		}
 	}
-	validated, err := modelconfig.NewValidatedConfig(config)
-	if err != nil {
+	if err := ValidateModelConfig(config); err != nil {
 		return SaveModelConfig{}, contracts.InvalidValue("modelConfig", err.Error())
 	}
-	value.validated = validated
+	value.config = config
 	return value, nil
-}
-
-// ValidatedConfig 返回不可变配置，供 service 交给 registry 保存。
-func (value SaveModelConfig) ValidatedConfig() modelconfig.ValidatedConfig {
-	return value.validated
 }
 
 // Config 返回 canonical 配置副本，供 service 校验 Agent 模型引用。
 func (value SaveModelConfig) Config() modelconfig.Config {
-	return value.validated.Config()
+	return value.config.Clone()
 }

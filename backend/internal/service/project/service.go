@@ -119,20 +119,14 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 			return err
 		}
 		at := s.clock.Now().UTC()
-		workspace, err := workspacemodel.NewWorkspace(
+		workspace := workspacemodel.NewWorkspace(
 			params.WorkspaceID,
 			params.ProjectID,
 			workspacemodel.WorkspaceProjectRoot,
 			params.Path,
 			at,
 		)
-		if err != nil {
-			return fmt.Errorf("create workspace: %w", err)
-		}
-		project, err := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, workspace.ID, at)
-		if err != nil {
-			return fmt.Errorf("create project: %w", err)
-		}
+		project := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, workspace.ID, at)
 		if err := s.projects.Save(txCtx, project); err != nil {
 			return err
 		}

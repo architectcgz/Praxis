@@ -231,9 +231,6 @@ func (r *Registry) ResolveTaskModel(providerID, modelID, reasoningLevel string) 
 		BaseURL:         provider.BaseURL,
 		ProxyURL:        provider.ProxyURL,
 	}
-	if err := config.Validate(); err != nil {
-		return model.Config{}, err
-	}
 	return config, nil
 }
 

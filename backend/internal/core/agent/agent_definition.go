@@ -2,7 +2,6 @@ package agent
 
 import (
 	"praxis/internal/contracts"
-	"strings"
 )
 
 const (
@@ -34,23 +33,6 @@ type AgentDefinition struct {
 	Profile      contracts.AgentProfile
 	Instructions string
 	Revision     string
-}
-
-// Validate 校验定义身份、AGENT.md 内容和版本摘要。
-func (d AgentDefinition) Validate() error {
-	if !d.ID.Valid() {
-		return contracts.InvalidValue("agentDefinition.id", "definition id is invalid")
-	}
-	if !d.Profile.Valid() {
-		return contracts.InvalidValue("agentDefinition.profile", "unknown agent profile")
-	}
-	if d.Instructions == "" || d.Instructions != strings.TrimSpace(d.Instructions) {
-		return contracts.InvalidValue("agentDefinition.instructions", "AGENT.md is required")
-	}
-	if d.Revision == "" || d.Revision != strings.TrimSpace(d.Revision) {
-		return contracts.InvalidValue("agentDefinition.revision", "revision is required")
-	}
-	return nil
 }
 
 // Snapshot 返回定义副本。

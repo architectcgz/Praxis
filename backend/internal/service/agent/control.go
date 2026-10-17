@@ -63,10 +63,7 @@ func (s *Service) applyControl(ctx context.Context, params ControlParams, kind a
 			return contracts.New(contracts.InvalidRequest, "")
 		}
 		at := s.clock.Now()
-		control, err := agentmodel.NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
-		if err != nil {
-			return err
-		}
+		control := agentmodel.NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
 		if task.Status == taskmodel.TaskEnded {
 			if err := control.MarkApplied(at); err != nil {
 				return err

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	modelconfig "praxis/internal/core/model/config"
+	"praxis/internal/request"
 )
 
 // ConfigurationError 标识阻止注册表加载的配置文件，
@@ -33,22 +34,25 @@ func (e *ConfigurationError) Unwrap() error {
 }
 
 // readModelConfigFile 解码并只读校验持久化的 canonical 配置，不清洗或静默修复字段。
-func readModelConfigFile(path string) (modelconfig.ValidatedConfig, error) {
+func readModelConfigFile(path string) (modelconfig.Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return modelconfig.ValidatedConfig{}, fmt.Errorf("open models config: %w", err)
+		return modelconfig.Config{}, fmt.Errorf("open models config: %w", err)
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
 	var config modelconfig.Config
 	if err := decoder.Decode(&config); err != nil {
-		return modelconfig.ValidatedConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return modelconfig.Config{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return modelconfig.ValidatedConfig{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return modelconfig.Config{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
-	return modelconfig.NewValidatedConfig(config)
+	if err := request.ValidateModelConfig(config); err != nil {
+		return modelconfig.Config{}, err
+	}
+	return config, nil
 }
 
 // readCredentialsFile 只读加载凭据文件，不创建目录或缺失文件。
