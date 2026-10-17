@@ -6,7 +6,7 @@ import (
 
 	"praxis/internal/contracts"
 	sessionmodel "praxis/internal/core/session"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -34,24 +34,24 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID contracts.
 			if err != nil {
 				return err
 			}
-			invocation, err := s.invocations.FindByTaskCall(txCtx, fact.TaskID, fact.CallID)
+			invocation, err := s.toolExecutions.FindByTaskCall(txCtx, fact.TaskID, fact.CallID)
 			if err != nil {
 				return err
 			}
 			at := s.clock.Now()
 			switch invocation.Status {
-			case toolmodel.ToolInvocationRequested, toolmodel.ToolInvocationPrepared, toolmodel.ToolInvocationReviewing, toolmodel.ToolInvocationApproved, toolmodel.ToolInvocationAwaitingApproval:
+			case toolmodel.StatusRequested, toolmodel.StatusPrepared, toolmodel.StatusReviewing, toolmodel.StatusApproved, toolmodel.StatusAwaitingApproval:
 				if task.Active() {
 					return nil
 				}
-				result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The tool call was interrupted before execution.")
-				err = invocation.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, at)
-			case toolmodel.ToolInvocationRunning:
+				result := toolcontracts.NewToolError(string(toolmodel.FailureInterrupted), "The tool call was interrupted before execution.")
+				err = invocation.Interrupt(toolmodel.Result{InlineContent: result.Payload, ErrorCode: toolmodel.FailureInterrupted}, at)
+			case toolmodel.StatusRunning:
 				if task.Active() && !startup {
 					return nil
 				}
-				result := toolcontracts.NewToolError(string(toolmodel.ToolFailureResultUnknown), "Execution stopped after the tool started. Its side effects are unknown; do not automatically retry.")
-				err = invocation.MarkResultUnknown(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureResultUnknown}, at)
+				result := toolcontracts.NewToolError(string(toolmodel.FailureResultUnknown), "Execution stopped after the tool started. Its side effects are unknown; do not automatically retry.")
+				err = invocation.MarkResultUnknown(toolmodel.Result{InlineContent: result.Payload, ErrorCode: toolmodel.FailureResultUnknown}, at)
 			}
 			if err != nil {
 				return err
@@ -59,7 +59,7 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID contracts.
 			if !invocation.Status.Terminal() {
 				return nil
 			}
-			if err := s.invocations.Save(txCtx, invocation); err != nil {
+			if err := s.toolExecutions.Save(txCtx, invocation); err != nil {
 				return err
 			}
 			writer, err := s.messages.Writer(txCtx, fact.SessionID, fact.AgentID)

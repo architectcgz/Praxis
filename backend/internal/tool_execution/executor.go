@@ -11,7 +11,7 @@ import (
 	"praxis/internal/contracts"
 	securitymodel "praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
 	"praxis/internal/system"
@@ -25,23 +25,23 @@ type TaskRepository interface {
 
 type Config struct {
 	Rules          ApprovalRules
-	Review         func(context.Context, taskmodel.Task, toolmodel.ToolInvocation, toolmodel.RiskReview) (securitymodel.RiskAssessment, error)
+	Review         func(context.Context, taskmodel.Task, toolmodel.Execution, toolmodel.RiskReview) (securitymodel.RiskAssessment, error)
 	HookDispatcher *hooks.Dispatcher
 	Transactions   repository.TxRunner
 	Tasks          TaskRepository
-	Invocations    repository.ToolInvocationRepository
+	Executions     repository.ToolExecutionRepository
 	Catalog        toolcontracts.ToolCatalog
 	Clock          system.Clock
 }
 
 type Executor struct {
 	rules           ApprovalRules
-	reviewOperation func(context.Context, taskmodel.Task, toolmodel.ToolInvocation, toolmodel.RiskReview) (securitymodel.RiskAssessment, error)
+	reviewOperation func(context.Context, taskmodel.Task, toolmodel.Execution, toolmodel.RiskReview) (securitymodel.RiskAssessment, error)
 	reviewInFlight  sync.Map
 	hookDispatcher  *hooks.Dispatcher
 	tx              repository.TxRunner
 	tasks           TaskRepository
-	invocations     repository.ToolInvocationRepository
+	executions      repository.ToolExecutionRepository
 	toolCatalog     toolcontracts.ToolCatalog
 	clock           system.Clock
 }
@@ -53,7 +53,7 @@ func NewExecutor(config Config) (*Executor, error) {
 	for name, value := range map[string]any{
 		"transactions": config.Transactions,
 		"tasks":        config.Tasks,
-		"invocations":  config.Invocations,
+		"executions":   config.Executions,
 		"tool catalog": config.Catalog,
 	} {
 		if value == nil {
@@ -66,7 +66,7 @@ func NewExecutor(config Config) (*Executor, error) {
 		reviewOperation: config.Review,
 		tx:              config.Transactions,
 		tasks:           config.Tasks,
-		invocations:     config.Invocations,
+		executions:      config.Executions,
 		toolCatalog:     config.Catalog,
 		clock:           system.ClockOrDefault(config.Clock),
 	}, nil
@@ -75,7 +75,7 @@ func NewExecutor(config Config) (*Executor, error) {
 var errApprovalPending = errors.New("tool approval pending")
 
 // Execute 返回可靠结算结果或审批等待标记。
-func (s *Executor) Execute(ctx context.Context, prepared toolcontracts.PreparedToolCall, metadata contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error) {
+func (s *Executor) Execute(ctx context.Context, prepared toolcontracts.PreparedToolCall, metadata contracts.ToolExecutionMetadata) (toolcontracts.ToolExecutionResult, error) {
 	result, err := s.invoke(ctx, prepared, metadata)
 	if errors.Is(err, errApprovalPending) {
 		return toolcontracts.ToolExecutionResult{ApprovalPending: true}, nil
@@ -86,7 +86,7 @@ func (s *Executor) Execute(ctx context.Context, prepared toolcontracts.PreparedT
 func (s *Executor) invoke(
 	ctx context.Context,
 	prepared toolcontracts.PreparedToolCall,
-	invocationContext contracts.ToolInvocationContext,
+	metadata contracts.ToolExecutionMetadata,
 ) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
 		return toolcontracts.ToolResult{}, errors.New("tool invocation metadata is required")
@@ -95,20 +95,20 @@ func (s *Executor) invoke(
 	if call.ID == "" || !call.Name.Valid() || len(call.Arguments) == 0 || !json.Valid(call.Arguments) {
 		return toolcontracts.NewToolError("invalid_tool_call", "The tool call is invalid."), nil
 	}
-	if invocationContext.TaskID == "" || invocationContext.TurnID == "" ||
-		invocationContext.SessionID == "" || invocationContext.AgentID == "" {
+	if metadata.TaskID == "" || metadata.TurnID == "" ||
+		metadata.SessionID == "" || metadata.AgentID == "" {
 		return toolcontracts.ToolResult{}, errors.New("tool invocation ownership is required")
 	}
-	err := s.checkTask(ctx, invocationContext)
+	err := s.checkTask(ctx, metadata)
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
-	invocation, err := s.invocations.FindByTaskCall(ctx, invocationContext.TaskID, call.ID)
+	invocation, err := s.executions.FindByTaskCall(ctx, metadata.TaskID, call.ID)
 	if err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
-	if invocation.AgentID != invocationContext.AgentID || invocation.SessionID != invocationContext.SessionID ||
-		invocation.TurnID != invocationContext.TurnID || invocation.Name != call.Name {
+	if invocation.AgentID != metadata.AgentID || invocation.SessionID != metadata.SessionID ||
+		invocation.TurnID != metadata.TurnID || invocation.Name != call.Name {
 		return toolcontracts.ToolResult{}, contracts.ErrRequestConflict
 	}
 	if invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(call.Name, call.Arguments) {
@@ -120,7 +120,7 @@ func (s *Executor) invoke(
 	invocation, err = s.reserveCall(ctx, invocation.ID)
 	if err != nil {
 		if errors.Is(err, contracts.New(contracts.TaskResourceLimit, "")) {
-			result, settleErr := s.reject(ctx, invocation.ID, toolmodel.ToolFailureResourceLimit, "Tool call limit exceeded.")
+			result, settleErr := s.reject(ctx, invocation.ID, toolmodel.FailureResourceLimit, "Tool call limit exceeded.")
 			if settleErr != nil {
 				return toolcontracts.ToolResult{}, settleErr
 			}
@@ -129,14 +129,14 @@ func (s *Executor) invoke(
 		return toolcontracts.ToolResult{}, err
 	}
 	invalid := func(message string) (toolcontracts.ToolResult, error) {
-		return s.reject(ctx, invocation.ID, toolmodel.ToolFailureInvalidCall, message)
+		return s.reject(ctx, invocation.ID, toolmodel.FailureInvalidCall, message)
 	}
 	tool, ok := s.toolCatalog.Get(call.Name)
 	if !ok {
-		return s.reject(ctx, invocation.ID, toolmodel.ToolFailureNotAllowed, "The requested tool is disabled or unregistered.")
+		return s.reject(ctx, invocation.ID, toolmodel.FailureNotAllowed, "The requested tool is disabled or unregistered.")
 	}
 	normalized := toolcontracts.NormalizedToolCall{Name: invocation.Name, NormalizedArguments: append(json.RawMessage(nil), invocation.NormalizedArguments...), Path: invocation.Path}
-	if invocation.Status == toolmodel.ToolInvocationRequested {
+	if invocation.Status == toolmodel.StatusRequested {
 		if prepared.Err != nil {
 			return invalid(prepared.Err.Error())
 		}
@@ -165,11 +165,11 @@ func (s *Executor) invoke(
 		if err != nil {
 			return toolcontracts.ToolResult{}, err
 		}
-		if invocation.Status == toolmodel.ToolInvocationAwaitingApproval {
+		if invocation.Status == toolmodel.StatusAwaitingApproval {
 			return toolcontracts.ToolResult{}, errApprovalPending
 		}
 		// 配置可能在批准与启动两个提交之间改变，由 Core 撤销旧授权后重新编排。
-		if invocation.Status == toolmodel.ToolInvocationPrepared {
+		if invocation.Status == toolmodel.StatusPrepared {
 			continue
 		}
 		if execute {
@@ -184,7 +184,7 @@ func (s *Executor) invoke(
 		Name:                invocation.Name,
 		NormalizedArguments: append(json.RawMessage(nil), invocation.NormalizedArguments...),
 		Path:                invocation.Path,
-		WorkspacePath:       invocationContext.WorkspacePath,
+		WorkspacePath:       metadata.WorkspacePath,
 	}
 	toolCtx, scope := s.hookDispatcher.Start(ctx, hooks.Operation{
 		Identity: hooks.Identity{
@@ -199,20 +199,20 @@ func (s *Executor) invoke(
 	scope.End(hooks.Result{Err: executeErr, ToolErrorClass: result.ErrorClass})
 	if executeErr != nil {
 		if ctx.Err() != nil {
-			interrupted := toolcontracts.NewToolError(string(toolmodel.ToolFailureResultUnknown), "The tool was interrupted after execution started. Its side effects are unknown; do not automatically retry.")
+			interrupted := toolcontracts.NewToolError(string(toolmodel.FailureResultUnknown), "The tool was interrupted after execution started. Its side effects are unknown; do not automatically retry.")
 			if err := s.interrupt(ctx, invocation.ID, interrupted); err != nil {
 				return toolcontracts.ToolResult{}, err
 			}
 			return interrupted, ctx.Err()
 		}
-		failed := toolcontracts.NewToolError(string(toolmodel.ToolFailureExecutionFailed), "The tool could not be executed.")
+		failed := toolcontracts.NewToolError(string(toolmodel.FailureExecutionFailed), "The tool could not be executed.")
 		if err := s.fail(ctx, invocation.ID, failed); err != nil {
 			return toolcontracts.ToolResult{}, err
 		}
 		return failed, nil
 	}
 	if result.ErrorClass != "" {
-		failed := toolcontracts.NewToolError(string(toolmodel.ToolFailureExecutionFailed), "The tool could not be executed.")
+		failed := toolcontracts.NewToolError(string(toolmodel.FailureExecutionFailed), "The tool could not be executed.")
 		if err := s.fail(ctx, invocation.ID, failed); err != nil {
 			return toolcontracts.ToolResult{}, err
 		}

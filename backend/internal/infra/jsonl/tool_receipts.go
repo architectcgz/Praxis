@@ -7,7 +7,7 @@ import (
 
 	"praxis/internal/contracts"
 	sessionmodel "praxis/internal/core/session"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
 )
 
@@ -46,30 +46,23 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				record.Data.TaskID,
 				block.CallID,
 			}
-			invocation, err := getByClaim[toolmodel.ToolInvocation](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
-			if err != nil && !errors.Is(err, contracts.ErrNotFound) {
+			invocation, err := getByClaim[toolmodel.Execution](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
+			if err != nil {
 				return err
 			}
-			usesInvocation := err == nil
-			if usesInvocation {
-				if invocation.TurnID.String() != record.Data.TurnID || string(invocation.Name) != block.Name || record.Outcome != nil {
-					return contracts.ErrRequestConflict
-				}
-			} else if len(s.keys(ctx, lookupKey{kind: "tools-task", owner: key.task})) != 0 {
-				return errors.New("task cannot mix invocation-backed and record-backed tool calls")
+			if invocation.TurnID.String() != record.Data.TurnID || string(invocation.Name) != block.Name {
+				return contracts.ErrRequestConflict
 			}
 			switch block.Kind {
 			case sessionmodel.BlockToolCall:
 				if _, exists := pending(key); exists {
 					return contracts.ErrRequestConflict
 				}
-				if usesInvocation {
-					if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
-						return errors.New("tool call declaration must be committed with a new invocation identity")
-					}
-					if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, block.Input) {
-						return contracts.ErrRequestConflict
-					}
+				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
+					return errors.New("tool call declaration must be committed with a new execution identity")
+				}
+				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, block.Input) {
+					return contracts.ErrRequestConflict
 				}
 				fact := repository.MissingToolResult{
 					SessionID: contracts.SessionID(tx.scope),
@@ -89,11 +82,8 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				if !exists || fact.TurnID.String() != record.Data.TurnID || fact.Name != block.Name || fact.AgentID != record.AgentID {
 					return errors.New("tool receipt has no previously committed call declaration")
 				}
-				if usesInvocation && !invocation.Status.Terminal() {
-					return errors.New("tool receipt must correspond to a settled invocation")
-				}
-				if !usesInvocation && record.Outcome == nil {
-					return errors.New("tool execution receipt requires a structured outcome")
+				if !invocation.Status.Terminal() {
+					return errors.New("tool receipt must correspond to a settled execution")
 				}
 				tx.receiptChanges[key] = nil
 			}
@@ -106,7 +96,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 		if _, exists := s.index.latest[key]; exists {
 			continue
 		}
-		var invocation toolmodel.ToolInvocation
+		var invocation toolmodel.Execution
 		if err := decodeJSON(change.event.Payload, &invocation); err != nil {
 			return err
 		}
@@ -126,7 +116,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 			}
 		}
 		if !declared {
-			return errors.New("new tool invocation identity has no assistant declaration in the same transaction")
+			return errors.New("new tool execution identity has no assistant declaration in the same transaction")
 		}
 	}
 	return nil

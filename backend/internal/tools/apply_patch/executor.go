@@ -1,7 +1,7 @@
 package applypatch
 
 import (
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 	"praxis/internal/utils/pathutil"
 

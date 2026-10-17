@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"praxis/internal/contracts"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/request"
 )
 

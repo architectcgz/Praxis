@@ -27,7 +27,7 @@ func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messa
 		if message.Role != sessionmodel.RoleAssistant {
 			continue
 		}
-		metadata := contracts.ToolInvocationContext{
+		metadata := contracts.ToolExecutionMetadata{
 			TaskID:        task.ID,
 			TurnID:        contracts.TurnID(message.TurnID),
 			SessionID:     task.SessionID,

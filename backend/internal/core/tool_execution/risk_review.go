@@ -1,4 +1,4 @@
-package toolinvocation
+package toolexecution
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ type RiskReview struct {
 }
 
 // LatestReview 返回最近一次审核的值副本，没有审核时返回零值。
-func (i ToolInvocation) LatestReview() RiskReview {
+func (i Execution) LatestReview() RiskReview {
 	if len(i.Reviews) == 0 {
 		return RiskReview{}
 	}
@@ -29,16 +29,16 @@ func (i ToolInvocation) LatestReview() RiskReview {
 }
 
 // Prepare 一次冻结执行参数，后续审批、审核及重启均不得重新规范化。
-func (i *ToolInvocation) Prepare(arguments []byte, path string) error {
+func (i *Execution) Prepare(arguments []byte, path string) error {
 	next := *i
-	next.Status = ToolInvocationPrepared
+	next.Status = StatusPrepared
 	next.NormalizedArguments = bytes.Clone(arguments)
 	next.Path = path
 	return i.apply(next)
 }
 
 // BeginReview 保存审核身份；重启遗留的未完成审核收敛为不确定，再开始新请求。
-func (i *ToolInvocation) BeginReview(review RiskReview) error {
+func (i *Execution) BeginReview(review RiskReview) error {
 	next := *i
 	next.Reviews = slices.Clone(i.Reviews)
 	if previous := i.LatestReview(); previous.TurnID != "" && previous.CompletedAt.IsZero() {
@@ -47,14 +47,14 @@ func (i *ToolInvocation) BeginReview(review RiskReview) error {
 		next.Reviews[len(next.Reviews)-1] = previous
 	}
 	next.Reviews = append(next.Reviews, review)
-	next.Status = ToolInvocationReviewing
+	next.Status = StatusReviewing
 	return i.apply(next)
 }
 
 // ApplyRiskAssessment 将模型结论转换为领域状态，只有当前审核身份可提交结果。
 // 危险直接拒绝，不确定进入人工等待；安全批准前还要确认当前规则没有变化。
-func (i *ToolInvocation) ApplyRiskAssessment(turnID contracts.TurnID, assessment security.RiskAssessment, current security.ApprovalDecision, at time.Time) error {
-	if i.Status != ToolInvocationReviewing || i.LatestReview().TurnID != turnID || !current.Action.Valid() || current.RuleID == "" {
+func (i *Execution) ApplyRiskAssessment(turnID contracts.TurnID, assessment security.RiskAssessment, current security.ApprovalDecision, at time.Time) error {
+	if i.Status != StatusReviewing || i.LatestReview().TurnID != turnID || !current.Action.Valid() || current.RuleID == "" {
 		return contracts.ErrRequestConflict
 	}
 	if err := assessment.Validate(); err != nil {
@@ -67,22 +67,22 @@ func (i *ToolInvocation) ApplyRiskAssessment(turnID contracts.TurnID, assessment
 	next.Reviews[last].CompletedAt = at.UTC()
 	switch {
 	case current.Action == security.ApprovalDeny:
-		next.Status = ToolInvocationDenied
-		next.FailureCode = ToolFailureNotAllowed
-		next.Result = ToolInvocationResult{InlineContent: "The operation is prohibited by rule: " + current.RuleID, ErrorCode: ToolFailureNotAllowed}
+		next.Status = StatusDenied
+		next.FailureCode = FailureNotAllowed
+		next.Result = Result{InlineContent: "The operation is prohibited by rule: " + current.RuleID, ErrorCode: FailureNotAllowed}
 		next.SettledAt = at.UTC()
 	case assessment.Verdict == security.RiskDangerous:
-		next.Status = ToolInvocationDenied
-		next.FailureCode = ToolFailureRiskDenied
-		next.Result = ToolInvocationResult{InlineContent: "Risk review denied this operation: " + assessment.Reason, ErrorCode: ToolFailureRiskDenied}
+		next.Status = StatusDenied
+		next.FailureCode = FailureRiskDenied
+		next.Result = Result{InlineContent: "Risk review denied this operation: " + assessment.Reason, ErrorCode: FailureRiskDenied}
 		next.SettledAt = at.UTC()
 	case assessment.Verdict == security.RiskUncertain:
-		next.Status = ToolInvocationAwaitingApproval
+		next.Status = StatusAwaitingApproval
 	case current != i.Decision:
 		// 审核期间规则已变化：保留结论，但不能把旧规则的批准带入新动作。
-		next.Status = ToolInvocationPrepared
+		next.Status = StatusPrepared
 	case assessment.Verdict == security.RiskSafe:
-		next.Status = ToolInvocationApproved
+		next.Status = StatusApproved
 		next.Approval = contracts.ApprovalRecord{Source: contracts.ApprovalSourceAuto, ArgumentsDigest: next.LatestReview().ArgumentsDigest, ApprovedAt: at.UTC()}
 		next.ApprovedAt = at.UTC()
 	}
@@ -90,8 +90,8 @@ func (i *ToolInvocation) ApplyRiskAssessment(turnID contracts.TurnID, assessment
 }
 
 // ResetReview 在规则变化时关闭尚未完成的旧审核，再按新规则授权，不能复用旧模型结论。
-func (i *ToolInvocation) ResetReview(decision security.ApprovalDecision, at time.Time) error {
-	if i.Status != ToolInvocationReviewing {
+func (i *Execution) ResetReview(decision security.ApprovalDecision, at time.Time) error {
+	if i.Status != StatusReviewing {
 		return contracts.ErrRequestConflict
 	}
 	next := *i
@@ -99,7 +99,7 @@ func (i *ToolInvocation) ResetReview(decision security.ApprovalDecision, at time
 	last := len(next.Reviews) - 1
 	next.Reviews[last].CompletedAt = at.UTC()
 	next.Reviews[last].Assessment = security.RiskAssessment{Verdict: security.RiskUncertain, Reason: "The authorization rule changed before the risk review completed."}
-	next.Status = ToolInvocationPrepared
+	next.Status = StatusPrepared
 	if err := next.ApplyAuthorization(decision, at); err != nil {
 		return err
 	}
@@ -107,12 +107,12 @@ func (i *ToolInvocation) ResetReview(decision security.ApprovalDecision, at time
 }
 
 // RevokeApproval 撤销尚未启动的旧授权，保留所有冻结参数及审核记录。
-func (i *ToolInvocation) RevokeApproval() error {
-	if i.Status != ToolInvocationApproved {
+func (i *Execution) RevokeApproval() error {
+	if i.Status != StatusApproved {
 		return contracts.ErrRequestConflict
 	}
 	next := *i
-	next.Status = ToolInvocationPrepared
+	next.Status = StatusPrepared
 	next.Approval = contracts.ApprovalRecord{}
 	next.ApprovedAt = time.Time{}
 	return i.apply(next)

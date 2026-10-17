@@ -16,7 +16,7 @@ import (
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	workflowmodel "praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/timing"
@@ -46,7 +46,7 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		"timing":    "timing.saved",
 		"usage":     "usage.saved",
 	}
-	if event.Collection != "tool_execution" && (kinds[event.Collection] == "" || kinds[event.Collection] != event.Type) {
+	if kinds[event.Collection] == "" || kinds[event.Collection] != event.Type {
 		return key, entry, errors.New("unknown event type")
 	}
 	if (scope == "") != (event.Collection == "project" || event.Collection == "workspace") {
@@ -118,7 +118,7 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		}
 		link("agent", v.AgentID.String())
 	case "tool":
-		var v toolmodel.ToolInvocation
+		var v toolmodel.Execution
 		if err := decode(&v); err != nil {
 			return key, entry, err
 		}
@@ -128,20 +128,9 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		if !v.Status.Terminal() {
 			group("unsettled-session", sessionID, "")
 		}
-		if v.Status == toolmodel.ToolInvocationAwaitingApproval {
+		if v.Status == toolmodel.StatusAwaitingApproval {
 			group("awaiting-agent", v.AgentID.String(), "")
 		}
-		link("task", v.TaskID.String())
-	case "tool_execution":
-		v, err := decodeToolRecord(scope, event)
-		if err != nil {
-			return key, entry, err
-		}
-		if err := v.Validate(); err != nil {
-			return key, entry, err
-		}
-		object, identity, sessionID = v, event.Key, scope
-		group("tool-records-task", v.TaskID.String(), "")
 		link("task", v.TaskID.String())
 	case "context":
 		var v sessionmodel.SessionContextEntry
@@ -178,14 +167,13 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		if v.AgentID == "" {
 			return key, entry, errors.New("message agent identity is required")
 		}
-		if v.Data.Role != sessionmodel.RoleTool || v.Outcome != nil {
-			record, err := decodeToolRecord(scope, event)
-			if err != nil {
-				return key, entry, err
+		for _, value := range []string{v.AgentID.String(), v.Data.ID, v.Data.RequestID, v.Data.HandoffID, v.Data.TaskID, v.Data.TurnID, v.Data.AuthorID} {
+			if value != "" && (value != strings.TrimSpace(value) || strings.ContainsAny(value, "\x00\r\n")) {
+				return key, entry, errors.New("message identity fields must be canonical")
 			}
-			if err := record.Validate(); err != nil {
-				return key, entry, err
-			}
+		}
+		if v.Data.Role == sessionmodel.RoleAssistant && (v.Data.AuthorKind != sessionmodel.AuthorAgent || v.Data.AuthorID != v.AgentID.String()) {
+			return key, entry, errors.New("assistant author does not match the message agent")
 		}
 		object, identity, sessionID = v.Data, messageKey(v.OwnerID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
@@ -283,10 +271,7 @@ func (s *Store) validateTransaction(ctx context.Context) error {
 			}
 		}
 	}
-	if err := s.prepareReceiptChanges(ctx); err != nil {
-		return err
-	}
-	return s.validateToolRecords(ctx)
+	return s.prepareReceiptChanges(ctx)
 }
 
 func (s *Store) validateRelations(ctx context.Context, key entityKey, entry indexEntry) error {
@@ -368,21 +353,9 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			return errors.New("task does not match agent active identity")
 		}
 	case "tool":
-		var v toolmodel.ToolInvocation
+		var v toolmodel.Execution
 		_ = decodeJSON(data, &v)
-		if len(s.keys(ctx, lookupKey{kind: "tool-records-task", owner: v.TaskID.String()})) != 0 {
-			return errors.New("task cannot mix invocation persistence and tool execution records")
-		}
-		for call := range s.index.toolRecords[scope] {
-			if call.TaskID == v.TaskID {
-				return errors.New("task tool calls are managed by the tool execution repository")
-			}
-		}
 		return taskOwner(v.TaskID, v.AgentID)
-	case "tool_execution":
-		var v toolExecutionRecord
-		_ = decodeJSON(data, &v)
-		return taskOwner(v.Call.TaskID, v.Call.AgentID)
 	case "context":
 		var v sessionmodel.SessionContextEntry
 		_ = decodeJSON(data, &v)
@@ -469,7 +442,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		}
 		return nil
 	case "tool":
-		var prior, next toolmodel.ToolInvocation
+		var prior, next toolmodel.Execution
 		if err := decodeJSON(before, &prior); err != nil {
 			return err
 		}
@@ -521,7 +494,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timing.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
 			return contracts.ErrRequestConflict
 		}
-	case "context", "message", "tool_execution":
+	case "context", "message":
 		if !bytes.Equal(before, after) {
 			return contracts.ErrRequestConflict
 		}

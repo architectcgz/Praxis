@@ -102,7 +102,7 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 		MaxCompletionTokens: request.MaxOutputTokens,
 		N:                   1,
 		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Task ID 或上下文摘要。
-		PromptCacheKey: request.SessionReference,
+		PromptCacheKey: request.PromptCacheKey,
 	}
 	if reasoning := request.Model.ReasoningLevel; reasoning != "" && reasoning != "off" {
 		payload.ReasoningEffort = reasoning

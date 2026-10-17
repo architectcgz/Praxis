@@ -249,17 +249,17 @@ func Open(
 		EventObserver: func(event applicationtask.TerminalEvent) {
 			events.Publish(terminalAgentEvent(event))
 		},
-		Workspaces:      repos.Workspaces,
-		Sessions:        repos.Sessions,
-		Agents:          repos.Agents,
-		ToolInvocations: repos.ToolInvocations,
-		Tasks:           repos.Tasks,
-		Executions:      activeTasks,
-		Messages:        repos.Messages,
-		PrimaryAgent:    sessionService,
-		Definitions:     taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		Models:          taskInputProvider{agents: agentRegistry, models: modelRegistry},
-		Contexts:        repos.Contexts,
+		Workspaces:     repos.Workspaces,
+		Sessions:       repos.Sessions,
+		Agents:         repos.Agents,
+		ToolExecutions: repos.ToolExecutions,
+		Tasks:          repos.Tasks,
+		Executions:     activeTasks,
+		Messages:       repos.Messages,
+		PrimaryAgent:   sessionService,
+		Definitions:    taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		Models:         taskInputProvider{agents: agentRegistry, models: modelRegistry},
+		Contexts:       repos.Contexts,
 	})
 	if err != nil {
 		diagnostics.Errorf("create task service failed: %v", err)
@@ -296,7 +296,7 @@ func Open(
 			Rules:          approvalRules,
 			Review:         reviewer.Review,
 			Tasks:          repos.Tasks,
-			Invocations:    repos.ToolInvocations,
+			Executions:     repos.ToolExecutions,
 			Catalog:        toolCatalog,
 		})
 		if err != nil {
@@ -306,7 +306,7 @@ func Open(
 		}
 		builtRunner, buildErr := loop.NewRunner(loop.Config{
 			ModelBuilder:   modelRegistry,
-			Invocations:    repos.ToolInvocations,
+			Executions:     repos.ToolExecutions,
 			SummaryFormat:  defaultSummaryFormat(),
 			Progress:       taskService,
 			ToolExecutor:   toolExecutor,
@@ -372,7 +372,7 @@ func Open(
 			DecideOperation: approvalRules.Decide,
 			Transactions:    store,
 			Tasks:           repos.Tasks,
-			Invocations:     repos.ToolInvocations,
+			Executions:      repos.ToolExecutions,
 		},
 	})
 	if err != nil {

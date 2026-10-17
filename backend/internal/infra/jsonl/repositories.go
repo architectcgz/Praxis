@@ -13,38 +13,36 @@ import (
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/repository"
 )
 
 // Repositories 将同一个日志事务入口提供给所有业务仓储。
 type Repositories struct {
-	Projects        ProjectRepository
-	Workspaces      WorkspaceRepository
-	Sessions        SessionRepository
-	Agents          AgentRepository
-	Tasks           TaskRepository
-	Contexts        ContextRepository
-	ToolInvocations ToolRepository
-	Controls        ControlRepository
-	Messages        MessageStreams
-	ToolExecutions  repository.ToolExecutionRepository
+	Projects       ProjectRepository
+	Workspaces     WorkspaceRepository
+	Sessions       SessionRepository
+	Agents         AgentRepository
+	Tasks          TaskRepository
+	Contexts       ContextRepository
+	ToolExecutions ToolExecutionRepository
+	Controls       ControlRepository
+	Messages       MessageStreams
 }
 
 // Repositories 返回共享提交边界与位置索引的仓储集合。
 func (s *Store) Repositories() Repositories {
 	return Repositories{
-		Projects:        ProjectRepository{s},
-		Workspaces:      WorkspaceRepository{s},
-		Sessions:        SessionRepository{s},
-		Agents:          AgentRepository{s},
-		Tasks:           TaskRepository{s},
-		Contexts:        ContextRepository{s},
-		ToolInvocations: ToolRepository{s},
-		Controls:        ControlRepository{s},
-		Messages:        MessageStreams{s},
-		ToolExecutions:  ToolExecutionRepository{s},
+		Projects:       ProjectRepository{s},
+		Workspaces:     WorkspaceRepository{s},
+		Sessions:       SessionRepository{s},
+		Agents:         AgentRepository{s},
+		Tasks:          TaskRepository{s},
+		Contexts:       ContextRepository{s},
+		ToolExecutions: ToolExecutionRepository{s},
+		Controls:       ControlRepository{s},
+		Messages:       MessageStreams{s},
 	}
 }
 
@@ -54,7 +52,7 @@ type SessionRepository struct{ s *Store }
 type AgentRepository struct{ s *Store }
 type TaskRepository struct{ s *Store }
 type ContextRepository struct{ s *Store }
-type ToolRepository struct{ s *Store }
+type ToolExecutionRepository struct{ s *Store }
 type ControlRepository struct{ s *Store }
 
 func (r ProjectRepository) Get(ctx context.Context, id contracts.ProjectID) (projectmodel.Project, error) {
@@ -298,24 +296,24 @@ func (r ContextRepository) List(ctx context.Context, id contracts.SessionID, aft
 }
 
 // Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r ToolRepository) Get(ctx context.Context, id contracts.ToolInvocationID) (toolmodel.ToolInvocation, error) {
-	return get[toolmodel.ToolInvocation](ctx, r.s, "tool", id.String())
+func (r ToolExecutionRepository) Get(ctx context.Context, id contracts.ToolExecutionID) (toolmodel.Execution, error) {
+	return get[toolmodel.Execution](ctx, r.s, "tool", id.String())
 }
 
 // Save 校验并保存对象，事务未提交时只更新工作区。
-func (r ToolRepository) Save(ctx context.Context, v toolmodel.ToolInvocation) error {
+func (r ToolExecutionRepository) Save(ctx context.Context, v toolmodel.Execution) error {
 	return save(ctx, r.s, v.SessionID.String(), "tool", v.ID.String(), "tool.saved", v)
 }
 
 // FindByTaskCall 按 Task 和 Provider 调用身份查询，第二个返回值表示是否存在。
-func (r ToolRepository) FindByTaskCall(ctx context.Context, id contracts.TaskID, call string) (toolmodel.ToolInvocation, error) {
-	return getByClaim[toolmodel.ToolInvocation](ctx, r.s, lookupKey{kind: "tool-call", owner: id.String(), value: call})
+func (r ToolExecutionRepository) FindByTaskCall(ctx context.Context, id contracts.TaskID, call string) (toolmodel.Execution, error) {
+	return getByClaim[toolmodel.Execution](ctx, r.s, lookupKey{kind: "tool-call", owner: id.String(), value: call})
 }
 
 // ListUnsettledBySession 返回指定 Session 尚未结算的工具调用，供恢复使用。
-func (r ToolRepository) ListUnsettledBySession(ctx context.Context, id contracts.SessionID) ([]toolmodel.ToolInvocation, error) {
-	v, e := listIndexed[toolmodel.ToolInvocation](ctx, r.s, lookupKey{kind: "unsettled-session", owner: id.String()}, nil)
-	return sorted(v, func(a, b toolmodel.ToolInvocation) int {
+func (r ToolExecutionRepository) ListUnsettledBySession(ctx context.Context, id contracts.SessionID) ([]toolmodel.Execution, error) {
+	v, e := listIndexed[toolmodel.Execution](ctx, r.s, lookupKey{kind: "unsettled-session", owner: id.String()}, nil)
+	return sorted(v, func(a, b toolmodel.Execution) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	}), e
 }
@@ -386,17 +384,17 @@ var (
 	_ repository.SessionRepository             = SessionRepository{}
 	_ repository.SessionAgentRepository        = AgentRepository{}
 	_ repository.TaskRepository                = TaskRepository{}
-	_ repository.ToolInvocationRepository      = ToolRepository{}
+	_ repository.ToolExecutionRepository       = ToolExecutionRepository{}
 	_ repository.SessionContextRepository      = ContextRepository{}
 	_ repository.AgentControlCommandRepository = ControlRepository{}
 )
 
-func (r ToolRepository) ListByTask(ctx context.Context, id contracts.TaskID) ([]toolmodel.ToolInvocation, error) {
-	return listIndexed[toolmodel.ToolInvocation](ctx, r.s, lookupKey{kind: "tools-task", owner: id.String()}, nil)
+func (r ToolExecutionRepository) ListByTask(ctx context.Context, id contracts.TaskID) ([]toolmodel.Execution, error) {
+	return listIndexed[toolmodel.Execution](ctx, r.s, lookupKey{kind: "tools-task", owner: id.String()}, nil)
 }
-func (r ToolRepository) ListAwaitingByAgent(ctx context.Context, id contracts.AgentID) ([]toolmodel.ToolInvocation, error) {
-	values, err := listIndexed[toolmodel.ToolInvocation](ctx, r.s, lookupKey{kind: "awaiting-agent", owner: id.String()}, nil)
-	return sorted(values, func(a, b toolmodel.ToolInvocation) int {
+func (r ToolExecutionRepository) ListAwaitingByAgent(ctx context.Context, id contracts.AgentID) ([]toolmodel.Execution, error) {
+	values, err := listIndexed[toolmodel.Execution](ctx, r.s, lookupKey{kind: "awaiting-agent", owner: id.String()}, nil)
+	return sorted(values, func(a, b toolmodel.Execution) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	}), err
 }

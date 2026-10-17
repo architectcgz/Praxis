@@ -5,7 +5,7 @@ import (
 	"errors"
 	"praxis/internal/contracts"
 	sessionmodel "praxis/internal/core/session"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
 )
 
@@ -23,7 +23,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.Ass
 		if !task.Active() || task.SessionID != w.owner.SessionID || task.AgentID != w.owner.ID || message.RequestID != task.RequestID.String() {
 			return contracts.ErrRequestConflict
 		}
-		calls := make(map[string]toolmodel.ToolInvocation, len(value.ToolCalls))
+		calls := make(map[string]toolmodel.Execution, len(value.ToolCalls))
 		for _, call := range value.ToolCalls {
 			if err := call.Validate(); err != nil {
 				return err
@@ -31,7 +31,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.Ass
 			if _, ok := calls[call.ProviderToolCallID]; ok {
 				return contracts.ErrRequestConflict
 			}
-			if call.TaskID != task.ID || call.SessionID != task.SessionID || call.AgentID != task.AgentID || call.TurnID.String() != message.TurnID || call.ArgumentsDigest != toolmodel.ArgumentsDigest(call.Name, call.Arguments) || call.Status != toolmodel.ToolInvocationRequested || call.BudgetReserved || len(call.NormalizedArguments) != 0 || call.Path != "" {
+			if call.TaskID != task.ID || call.SessionID != task.SessionID || call.AgentID != task.AgentID || call.TurnID.String() != message.TurnID || call.ArgumentsDigest != toolmodel.ArgumentsDigest(call.Name, call.Arguments) || call.Status != toolmodel.StatusRequested || call.BudgetReserved || len(call.NormalizedArguments) != 0 || call.Path != "" {
 				return contracts.ErrRequestConflict
 			}
 			calls[call.ProviderToolCallID] = call
@@ -57,12 +57,12 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.Ass
 				return err
 			}
 		}
-		stored, inserted, err = w.streams.s.appendMessage(txCtx, w.owner, message, nil)
+		stored, inserted, err = w.streams.s.appendMessage(txCtx, w.owner, message)
 		if err != nil {
 			return err
 		}
 		for _, call := range value.ToolCalls {
-			existing, err := (ToolRepository{w.streams.s}).FindByTaskCall(txCtx, task.ID, call.ProviderToolCallID)
+			existing, err := (ToolExecutionRepository{w.streams.s}).FindByTaskCall(txCtx, task.ID, call.ProviderToolCallID)
 			if err == nil {
 				if existing.Name != call.Name || existing.ArgumentsDigest != call.ArgumentsDigest || existing.TurnID != call.TurnID || existing.SessionID != call.SessionID || existing.AgentID != call.AgentID {
 					return contracts.ErrRequestConflict
@@ -75,7 +75,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.Ass
 			if !inserted {
 				return contracts.ErrRequestConflict
 			}
-			if err := (ToolRepository{w.streams.s}).Save(txCtx, call); err != nil {
+			if err := (ToolExecutionRepository{w.streams.s}).Save(txCtx, call); err != nil {
 				return err
 			}
 		}

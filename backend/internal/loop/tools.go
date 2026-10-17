@@ -8,7 +8,7 @@ import (
 
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
 )
@@ -33,18 +33,18 @@ func (r *Runner) runToolCalls(
 	ctx context.Context,
 	messageWriter repository.MessageWriter,
 	calls []ToolCall,
-	metadata contracts.ToolInvocationContext,
+	metadata contracts.ToolExecutionMetadata,
 	requestID contracts.RequestID,
 ) ([]toolcontracts.ToolResult, error) {
 	results := make([]toolcontracts.ToolResult, 0, len(calls))
 	limited := false
 	for callIndex, call := range calls {
 		prepared := toolcontracts.PreparedToolCall{Call: call}
-		invocation, err := r.Invocations.FindByTaskCall(ctx, metadata.TaskID, call.ID)
+		invocation, err := r.Executions.FindByTaskCall(ctx, metadata.TaskID, call.ID)
 		if err != nil {
 			return results, failCause(contracts.TaskFailureStorage, err)
 		}
-		if invocation.Status == toolmodel.ToolInvocationRequested {
+		if invocation.Status == toolmodel.StatusRequested {
 			tool, ok := r.Tools.Get(call.Name)
 			if ok {
 				prepared.Normalized, prepared.Err = tool.Normalize(call, metadata.WorkspacePath)
@@ -98,7 +98,7 @@ func (r *Runner) runToolCalls(
 		}
 		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
 		results = append(results, result)
-		limited = limited || result.ErrorClass == string(toolmodel.ToolFailureResourceLimit)
+		limited = limited || result.ErrorClass == string(toolmodel.FailureResourceLimit)
 
 	}
 	if limited {

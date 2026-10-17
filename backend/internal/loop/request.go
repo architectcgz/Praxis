@@ -36,12 +36,12 @@ func (r *Runner) summarizeContext(
 		TurnID:    turnID,
 	})
 	request := model.ModelRequest{
-		TaskID:           task.ID,
-		SessionReference: task.SessionID.String(),
-		Context:          history,
-		Model:            task.Config.Model,
-		MaxOutputTokens:  limit,
-		TurnID:           turnID,
+		TaskID:          task.ID,
+		PromptCacheKey:  task.SessionID.String(),
+		Context:         history,
+		Model:           task.Config.Model,
+		MaxOutputTokens: limit,
+		TurnID:          turnID,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()

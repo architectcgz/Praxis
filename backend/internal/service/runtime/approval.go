@@ -7,17 +7,17 @@ import (
 	"praxis/internal/contracts"
 	"praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
 	"praxis/internal/request"
 )
 
 // ToolApprovals 保存审批决定，实际工具执行由 Runtime 继续处理。
 type ToolApprovals struct {
-	DecideOperation func(context.Context, toolmodel.ToolInvocation) (security.ApprovalDecision, error)
+	DecideOperation func(context.Context, toolmodel.Execution) (security.ApprovalDecision, error)
 	Transactions    repository.TxRunner
 	Tasks           repository.TaskRepository
-	Invocations     repository.ToolInvocationRepository
+	Executions      repository.ToolExecutionRepository
 }
 
 func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, approve bool) (taskmodel.Task, error) {
@@ -31,7 +31,7 @@ func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, 
 		if task.SessionID != params.SessionID || task.AgentID != params.AgentID {
 			return contracts.ErrRequestConflict
 		}
-		invocation, err := a.Invocations.FindByTaskCall(txCtx, task.ID, params.CallID)
+		invocation, err := a.Executions.FindByTaskCall(txCtx, task.ID, params.CallID)
 		if err != nil {
 			return err
 		}
@@ -39,10 +39,10 @@ func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, 
 			return contracts.ErrRequestConflict
 		}
 		if approve && invocation.Approval.Source == contracts.ApprovalSourceUser ||
-			!approve && invocation.FailureCode == toolmodel.ToolFailureApprovalDenied {
+			!approve && invocation.FailureCode == toolmodel.FailureApprovalDenied {
 			return nil
 		}
-		if !task.Active() || invocation.Status != toolmodel.ToolInvocationAwaitingApproval {
+		if !task.Active() || invocation.Status != toolmodel.StatusAwaitingApproval {
 			return contracts.ErrRequestConflict
 		}
 		if approve {
@@ -53,19 +53,19 @@ func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, 
 			if err := invocation.RecheckAuthorization(decision, time.Now()); err != nil {
 				return err
 			}
-			if invocation.Status != toolmodel.ToolInvocationAwaitingApproval {
-				return a.Invocations.Save(txCtx, invocation)
+			if invocation.Status != toolmodel.StatusAwaitingApproval {
+				return a.Executions.Save(txCtx, invocation)
 			}
 		}
 		if approve {
 			err = invocation.Approve(contracts.ApprovalRecord{Source: contracts.ApprovalSourceUser, ArgumentsDigest: params.ArgumentsDigest, ApprovedAt: time.Now().UTC()})
 		} else {
-			err = invocation.Deny(toolmodel.ToolInvocationResult{InlineContent: "The user denied this tool call.", ErrorCode: toolmodel.ToolFailureApprovalDenied}, time.Now().UTC())
+			err = invocation.Deny(toolmodel.Result{InlineContent: "The user denied this tool call.", ErrorCode: toolmodel.FailureApprovalDenied}, time.Now().UTC())
 		}
 		if err != nil {
 			return err
 		}
-		return a.Invocations.Save(txCtx, invocation)
+		return a.Executions.Save(txCtx, invocation)
 	})
 	return task, err
 }
@@ -86,8 +86,8 @@ func (s *Service) decideToolCall(ctx context.Context, params request.ToolDecisio
 	}
 	return nil
 }
-func (s *Service) ListToolApprovals(ctx context.Context, agentID contracts.AgentID) ([]toolmodel.ToolInvocation, error) {
-	values, err := s.approvals.Invocations.ListAwaitingByAgent(ctx, agentID)
+func (s *Service) ListToolApprovals(ctx context.Context, agentID contracts.AgentID) ([]toolmodel.Execution, error) {
+	values, err := s.approvals.Executions.ListAwaitingByAgent(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,74 @@
+package toolexecution
+
+import (
+	"bytes"
+	"reflect"
+
+	"praxis/internal/contracts"
+)
+
+func canTransition(from, to Status) bool {
+	if from == to {
+		return from.Valid()
+	}
+	switch from {
+	case StatusRequested:
+		return to == StatusPrepared || to == StatusAwaitingApproval || to == StatusApproved || to == StatusDenied || to == StatusInterrupted
+	case StatusPrepared:
+		return to == StatusReviewing || to == StatusAwaitingApproval || to == StatusApproved || to == StatusDenied || to == StatusInterrupted
+	case StatusReviewing:
+		return to == StatusPrepared || to == StatusApproved || to == StatusAwaitingApproval || to == StatusDenied || to == StatusInterrupted
+	case StatusAwaitingApproval:
+		return to == StatusApproved || to == StatusDenied || to == StatusInterrupted
+	case StatusApproved:
+		return to == StatusPrepared || to == StatusRunning || to == StatusInterrupted || to == StatusAwaitingApproval
+	case StatusRunning:
+		return to == StatusSucceeded || to == StatusFailed || to == StatusInterrupted || to == StatusUnknown
+	}
+	return false
+}
+
+// ValidateUpdate 与领域命令共享转换规则，冻结原始调用、执行参数与已经完成的审核。
+func ValidateUpdate(before, after Execution) error {
+	if err := after.Validate(); err != nil {
+		return err
+	}
+	if !canTransition(before.Status, after.Status) || before.Status.Terminal() && !reflect.DeepEqual(before, after) || before.BudgetReserved && !after.BudgetReserved {
+		return contracts.ErrRequestConflict
+	}
+	if before.ID != after.ID || before.TaskID != after.TaskID || before.TurnID != after.TurnID || before.SessionID != after.SessionID || before.AgentID != after.AgentID || before.ProviderToolCallID != after.ProviderToolCallID || before.Name != after.Name || !bytes.Equal(before.Arguments, after.Arguments) || before.ArgumentsDigest != after.ArgumentsDigest || !before.CreatedAt.Equal(after.CreatedAt) {
+		return contracts.ErrRequestConflict
+	}
+	changed := !bytes.Equal(before.NormalizedArguments, after.NormalizedArguments) || before.Path != after.Path
+	if changed && (before.Status != StatusRequested || len(before.NormalizedArguments) != 0 || after.Status != StatusPrepared && after.Status != StatusApproved && after.Status != StatusAwaitingApproval && after.Status != StatusDenied) {
+		return contracts.ErrRequestConflict
+	}
+	approvalRevoked := before.Status == StatusApproved && (after.Status == StatusAwaitingApproval || after.Status == StatusPrepared) && after.Approval == (contracts.ApprovalRecord{}) && after.ApprovedAt.IsZero()
+	if !approvalRevoked && !before.ApprovedAt.IsZero() && (before.Approval != after.Approval || !before.ApprovedAt.Equal(after.ApprovedAt)) || !before.StartedAt.IsZero() && !before.StartedAt.Equal(after.StartedAt) {
+		return contracts.ErrRequestConflict
+	}
+	if before.Decision != after.Decision && before.Status != StatusRequested && before.Status != StatusPrepared && after.Status != StatusPrepared {
+		return contracts.ErrRequestConflict
+	}
+	if len(after.Reviews) < len(before.Reviews) || len(after.Reviews) > len(before.Reviews)+1 {
+		return contracts.ErrRequestConflict
+	}
+	for index, prior := range before.Reviews {
+		current := after.Reviews[index]
+		if prior == current {
+			continue
+		}
+		if index != len(before.Reviews)-1 || before.Status != StatusReviewing || !prior.CompletedAt.IsZero() || current.CompletedAt.IsZero() {
+			return contracts.ErrRequestConflict
+		}
+		current.CompletedAt = prior.CompletedAt
+		current.Assessment = prior.Assessment
+		if current != prior {
+			return contracts.ErrRequestConflict
+		}
+	}
+	if len(after.Reviews) > len(before.Reviews) && (after.Status != StatusReviewing || !after.LatestReview().CompletedAt.IsZero()) {
+		return contracts.ErrRequestConflict
+	}
+	return nil
+}

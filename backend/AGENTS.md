@@ -58,11 +58,11 @@
 ## 执行限制与职责边界
 
 - Task 固定使用 `core/task.MaxIterations = 30` 和 `MaxToolCalls = 100`。正常 ReAct 请求在事务内预留 Iterations；摘要只增加 ModelRequests。所有请求共用 NextSequence，拒绝重复和旧序号；审批恢复不得重扣工具额度。
-- Assistant 的最终完成判断属于 Loop。Loop 注入 IDGenerator / Clock 构建 ToolInvocation，并通过 `repository.AssistantWrite` 明确提交 Message、ToolCalls 和可选 FinalOutput；JSONL 不解释 StopReason，不生成调用身份或时间。
-- Task 与 ToolInvocation 的状态转换、不可变字段及预算单调性由 Core 的 ValidateUpdate 统一定义，领域命令复用同一转换规则；JSONL 仅委托校验并负责事务与跨对象一致性。
+- Assistant 的最终完成判断属于 Loop。Loop 注入 IDGenerator / Clock 构建工具 Execution，并通过 `repository.AssistantWrite` 明确提交 Message、ToolCalls 和可选 FinalOutput；JSONL 不解释 StopReason，不生成执行身份或时间。
+- Task 与工具 Execution 的状态转换、不可变字段及预算单调性由 Core 的 ValidateUpdate 统一定义，领域命令复用同一转换规则；JSONL 仅委托校验并负责事务与跨对象一致性。
 - 启动层在 DataRoot.Initialize 后排他创建缺失的 models.json、auth.json、tools.json、settings.json 与默认 Agent 文件，已有文件原样保留。Registry Load / ReloadConfig 只读校验；不得创建缺失配置、补角色、裁剪指令或修复凭据。Provider Key 由 request 规范化 ProviderID，密钥原样传递和保存。
 - Loop 在原始调用提交后调用工具 Normalizer，按 Workspace 一次准备路径和参数，并将准备结果或错误交给 Executor 结算。审批及执行恢复复用持久化 NormalizedArguments / Path；Executor 不重复规范化，但仍检查当前工具、权限、审批与未知副作用。
-- 单次操作统一使用 ask / auto / yolo / deny，不存在 allow。deny 优先于统一 yolo 和具体规则，未命中规则使用项目/全局默认动作。模型只返回 safe / dangerous / uncertain，危险直接拒绝、不确定才转人工。授权不变量与状态转换集中在 `core/tool_invocation/authorization.go` 和 `risk_review.go`；调用层仅编排事务、外部审核和持久化，不能直接修改授权状态。
+- 单次操作统一使用 ask / auto / yolo / deny，不存在 allow。deny 优先于统一 yolo 和具体规则，未命中规则使用项目/全局默认动作。模型只返回 safe / dangerous / uncertain，危险直接拒绝、不确定才转人工。授权不变量与状态转换集中在 `core/tool_execution/authorization.go` 和 `risk_review.go`；调用层仅编排事务、外部审核和持久化，不能直接修改授权状态。
 - 通用上下文压缩只包含算法，SummaryFormat 的 Prompt、标题和结果前缀由 compose 注入；摘要文本只在 Loop 的 Provider 响应边界规范化。
 - Repository 的 limit=0 表示完整读取，不补默认值；桌面 service 入口把 0 转为 100 并拒绝负数。历史拼接先完整读取再分页；标题查询词由调用入口准备。
 - Workspace 文本读取只返回 contracts 的通用文件错误，Session 预览用例映射业务文案；Document Store 不按字段名推断敏感数据。Task 失败消息原样保存。

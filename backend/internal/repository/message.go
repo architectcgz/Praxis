@@ -7,7 +7,7 @@ import (
 	"praxis/internal/core/agent"
 	"praxis/internal/core/session"
 	"praxis/internal/core/task"
-	toolinvocation "praxis/internal/core/tool_invocation"
+	toolexecution "praxis/internal/core/tool_execution"
 )
 
 // MessageStream 是单个 Session 或 Agent 消息流的一致读取结果。
@@ -24,7 +24,7 @@ type MessageLoader interface {
 // AssistantWrite 显式携带本次提交的完整消息、调用身份与可选最终证据。
 type AssistantWrite struct {
 	Message     session.MessageData
-	ToolCalls   []toolinvocation.ToolInvocation
+	ToolCalls   []toolexecution.Execution
 	FinalOutput *task.FinalOutput
 }
 

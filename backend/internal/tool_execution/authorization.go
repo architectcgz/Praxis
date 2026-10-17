@@ -4,12 +4,12 @@ import (
 	"context"
 
 	"praxis/internal/contracts"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
 // checkTask 固定执行归属与工作区，不能通过重新准备参数改变被批准的操作。
-func (s *Executor) checkTask(ctx context.Context, provided contracts.ToolInvocationContext) error {
+func (s *Executor) checkTask(ctx context.Context, provided contracts.ToolExecutionMetadata) error {
 	task, err := s.tasks.Get(ctx, provided.TaskID)
 	if err != nil {
 		return err
@@ -21,17 +21,17 @@ func (s *Executor) checkTask(ctx context.Context, provided contracts.ToolInvocat
 	return nil
 }
 
-func (s *Executor) admit(ctx context.Context, invocation toolmodel.ToolInvocation, call toolcontracts.NormalizedToolCall) (toolmodel.ToolInvocation, error) {
+func (s *Executor) admit(ctx context.Context, invocation toolmodel.Execution, call toolcontracts.NormalizedToolCall) (toolmodel.Execution, error) {
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		current, err := s.invocations.Get(txCtx, invocation.ID)
+		current, err := s.executions.Get(txCtx, invocation.ID)
 		if err != nil {
 			return err
 		}
-		if current.Status == toolmodel.ToolInvocationRequested {
+		if current.Status == toolmodel.StatusRequested {
 			if err := current.Prepare(call.NormalizedArguments, call.Path); err != nil {
 				return err
 			}
-			if err := s.invocations.Save(txCtx, current); err != nil {
+			if err := s.executions.Save(txCtx, current); err != nil {
 				return err
 			}
 		}
@@ -41,12 +41,12 @@ func (s *Executor) admit(ctx context.Context, invocation toolmodel.ToolInvocatio
 	return invocation, err
 }
 
-func (s *Executor) authorize(ctx context.Context, id contracts.ToolInvocationID) (toolmodel.ToolInvocation, error) {
-	var invocation toolmodel.ToolInvocation
+func (s *Executor) authorize(ctx context.Context, id contracts.ToolExecutionID) (toolmodel.Execution, error) {
+	var invocation toolmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error
-		invocation, err = s.invocations.Get(txCtx, id)
-		if err != nil || invocation.Status != toolmodel.ToolInvocationPrepared {
+		invocation, err = s.executions.Get(txCtx, id)
+		if err != nil || invocation.Status != toolmodel.StatusPrepared {
 			return err
 		}
 		decision, err := s.rules.Decide(txCtx, invocation)
@@ -56,7 +56,7 @@ func (s *Executor) authorize(ctx context.Context, id contracts.ToolInvocationID)
 		if err := invocation.ApplyAuthorization(decision, s.clock.Now()); err != nil {
 			return err
 		}
-		return s.invocations.Save(txCtx, invocation)
+		return s.executions.Save(txCtx, invocation)
 	})
 	if err == nil && invocation.NeedsRiskReview() {
 		return s.review(ctx, invocation.ID)

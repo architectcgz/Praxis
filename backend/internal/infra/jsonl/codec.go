@@ -26,7 +26,7 @@ func decodeJSON(data []byte, target any) error {
 }
 
 func eventKey(scope string, event Event) entityKey {
-	if event.Collection == "message" || event.Collection == "tool_execution" {
+	if event.Collection == "message" {
 		return entityKey{event.Collection, scope + "\x00" + event.Key}
 	}
 	return entityKey{event.Collection, event.Key}

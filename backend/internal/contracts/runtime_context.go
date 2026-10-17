@@ -2,8 +2,8 @@ package contracts
 
 import "fmt"
 
-// ToolInvocationContext 固定工具调用的执行归属和工作区。
-type ToolInvocationContext struct {
+// ToolExecutionMetadata 保存工具执行的归属标识和工作区路径。
+type ToolExecutionMetadata struct {
 	TaskID        TaskID
 	TurnID        TurnID
 	SessionID     SessionID

@@ -10,7 +10,7 @@ type (
 	AgentID               string
 	TaskID                string
 	TurnID                string
-	ToolInvocationID      string
+	ToolExecutionID       string
 	RequestID             string
 	WaitConditionID       string
 	AgentControlCommandID string
@@ -24,7 +24,7 @@ func (id AgentDefinitionID) String() string { return string(id) }
 func (id AgentID) String() string           { return string(id) }
 func (id TaskID) String() string            { return string(id) }
 func (id TurnID) String() string            { return string(id) }
-func (id ToolInvocationID) String() string  { return string(id) }
+func (id ToolExecutionID) String() string   { return string(id) }
 func (id RequestID) String() string         { return string(id) }
 func (id WaitConditionID) String() string   { return string(id) }
 func (id AgentControlCommandID) String() string {

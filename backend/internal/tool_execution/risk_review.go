@@ -10,7 +10,7 @@ import (
 	"praxis/internal/core/model"
 	"praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
 	"praxis/internal/tools/shared"
@@ -30,7 +30,7 @@ type RiskReviewer struct {
 }
 
 // Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
-func (r RiskReviewer) Review(ctx context.Context, task taskmodel.Task, invocation toolmodel.ToolInvocation, attempt toolmodel.RiskReview) (assessment security.RiskAssessment, err error) {
+func (r RiskReviewer) Review(ctx context.Context, task taskmodel.Task, invocation toolmodel.Execution, attempt toolmodel.RiskReview) (assessment security.RiskAssessment, err error) {
 	ctx, scope := r.Hooks.Start(ctx, hooks.Operation{
 		Identity:    hooks.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID, TurnID: attempt.TurnID},
 		Kind:        hooks.OperationProvider,
@@ -82,12 +82,12 @@ func (r RiskReviewer) Review(ctx context.Context, task taskmodel.Task, invocatio
 		return assessment, err
 	}
 	stream, err := built.Stream.Stream(ctx, model.ModelRequest{
-		TaskID:           task.ID,
-		SessionReference: task.SessionID.String(),
-		Context:          history,
-		Model:            task.Config.Model.Clone(),
-		MaxOutputTokens:  built.MaxOutputTokens,
-		TurnID:           attempt.TurnID,
+		TaskID:          task.ID,
+		PromptCacheKey:  task.SessionID.String(),
+		Context:         history,
+		Model:           task.Config.Model.Clone(),
+		MaxOutputTokens: built.MaxOutputTokens,
+		TurnID:          attempt.TurnID,
 		// Tools 保持为空，审核模型没有执行待审操作或调用其他工具的能力。
 	})
 	if err != nil {

@@ -7,7 +7,7 @@ import (
 	"praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
 	"praxis/internal/system"
@@ -22,7 +22,7 @@ import (
 type Config struct {
 	IDs            system.IDGenerator
 	Clock          system.Clock
-	Invocations    ToolInvocationReader
+	Executions     ToolExecutionReader
 	Progress       TaskProgress
 	ModelBuilder   model.ModelBuilder
 	Tools          toolcontracts.ToolCatalog
@@ -43,8 +43,8 @@ type Runner struct {
 // NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
 // 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
 func NewRunner(config Config) (Runner, error) {
-	if config.Invocations == nil {
-		return Runner{}, errors.New("loop tool invocation repository is required")
+	if config.Executions == nil {
+		return Runner{}, errors.New("loop tool execution repository is required")
 	}
 	if config.Progress == nil {
 		return Runner{}, errors.New("loop task progress is required")
@@ -126,10 +126,10 @@ func (r *Runner) run(
 			return taskResult(fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "model iteration limit exceeded"))
 		}
 		request := buildModelRequest(model.ModelRequest{
-			TaskID:           task.ID,
-			SessionReference: task.SessionID.String(),
-			Model:            task.Config.Model,
-			MaxOutputTokens:  taskModel.MaxOutputTokens,
+			TaskID:          task.ID,
+			PromptCacheKey:  task.SessionID.String(),
+			Model:           task.Config.Model,
+			MaxOutputTokens: taskModel.MaxOutputTokens,
 		}, modelContext, r.Tools)
 		toolPayload, err := json.Marshal(request.Tools)
 		if err != nil {
@@ -226,7 +226,7 @@ func (r *Runner) executeTurn(
 	}
 	assistant := model.ContextBlocksFromEvents(response.events)
 	calls := response.toolCalls()
-	metadata := contracts.ToolInvocationContext{
+	metadata := contracts.ToolExecutionMetadata{
 		TaskID:        task.ID,
 		TurnID:        turnID,
 		SessionID:     task.SessionID,
@@ -246,7 +246,7 @@ func (r *Runner) executeTurn(
 		}, assistant)
 		value := repository.AssistantWrite{Message: message}
 		for _, call := range calls {
-			invocation, err := toolmodel.NewToolInvocation(contracts.ToolInvocationID(r.IDs.New("toolinvocation")), task.ID, turnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
+			invocation, err := toolmodel.NewExecution(contracts.ToolExecutionID(r.IDs.New("toolexecution")), task.ID, turnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
 			if err != nil {
 				outcome, code, cause := taskResult(failCause(contracts.TaskFailureContract, err))
 				return outcome, code, false, cause

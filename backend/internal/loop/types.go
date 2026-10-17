@@ -6,18 +6,18 @@ import (
 	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	taskmodel "praxis/internal/core/task"
-	toolmodel "praxis/internal/core/tool_invocation"
+	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
-// ToolInvocationReader 只读取是否已有冻结的调用参数。
-type ToolInvocationReader interface {
-	FindByTaskCall(context.Context, contracts.TaskID, string) (toolmodel.ToolInvocation, error)
+// ToolExecutionReader 只读取是否已有冻结的调用参数。
+type ToolExecutionReader interface {
+	FindByTaskCall(context.Context, contracts.TaskID, string) (toolmodel.Execution, error)
 }
 
 // ToolExecutor 执行已经登记的调用；等待审批时不产生工具回执。
 type ToolExecutor interface {
-	Execute(context.Context, toolcontracts.PreparedToolCall, contracts.ToolInvocationContext) (toolcontracts.ToolExecutionResult, error)
+	Execute(context.Context, toolcontracts.PreparedToolCall, contracts.ToolExecutionMetadata) (toolcontracts.ToolExecutionResult, error)
 }
 
 type (
