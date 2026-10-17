@@ -58,7 +58,7 @@ func requestModel(
 	}
 	response, err = collectModelResponse(streamCtx, input, callback)
 	if err == nil {
-		err = response.validateReasoningState(request.Model.APIFormat)
+		err = response.bindReasoningState(request.Model)
 	}
 	return response, err
 }
@@ -104,8 +104,8 @@ func collectModelResponse(
 				event.ToolCall = call
 				event.ToolCall.Arguments = bytes.Clone(call.Arguments)
 			case model.StreamReasoningState:
-				if err := event.ReasoningState.Validate(); err != nil {
-					return response, err
+				if event.ReasoningState == nil {
+					return response, errors.New("provider emitted a nil reasoning state")
 				}
 				response.events = append(response.events, model.ModelStreamEvent{
 					Kind:           model.StreamReasoningState,
@@ -207,15 +207,18 @@ func sameOutputIndex(a, b *int) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
-func (r modelResponse) validateReasoningState(protocol string) error {
+// bindReasoningState 确认响应协议后绑定冻结的请求身份，不重复解析 Decoder 已处理的载荷。
+func (r *modelResponse) bindReasoningState(config model.Config) error {
 	for _, event := range r.events {
 		if event.Kind != model.StreamReasoningState {
 			continue
 		}
 		state := event.ReasoningState
-		if state.Protocol != protocol {
+		if state.Protocol != config.APIFormat {
 			return errors.New("reasoning state does not match the frozen request protocol")
 		}
+		state.ProviderID = config.ProviderID
+		state.ModelID = config.ModelID
 	}
 	return nil
 }

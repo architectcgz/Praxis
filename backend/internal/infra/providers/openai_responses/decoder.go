@@ -486,11 +486,8 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if item.Status != nil && *item.Status != "completed" {
 				return "", errors.New("responses completed with incomplete reasoning")
 			}
-			if stringValue(item.EncryptedContent) == "" {
-				continue
-			}
-			if err := (&contracts.ReasoningState{Protocol: contracts.ProtocolOpenAIResponses, Version: contracts.ReasoningStateVersion, Payload: s.Items[index].Raw}).Validate(); err != nil {
-				return "", err
+			if stringValue(item.EncryptedContent) != "" && len(s.Items[index].Raw) > contracts.MaxReasoningStateBytes {
+				return "", errors.New("responses reasoning state payload exceeds size limit")
 			}
 		}
 	}
@@ -509,7 +506,6 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 				Kind: model.StreamReasoningState,
 				ReasoningState: &contracts.ReasoningState{
 					Protocol: contracts.ProtocolOpenAIResponses,
-					Version:  contracts.ReasoningStateVersion,
 					Payload:  bytes.Clone(s.Items[index].Raw),
 				},
 				OutputIndex: &index,

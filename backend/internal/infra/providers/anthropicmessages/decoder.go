@@ -158,13 +158,12 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				if err != nil {
 					return "", err
 				}
+				if len(payload) > contracts.MaxReasoningStateBytes {
+					return "", errors.New("anthropic reasoning state payload exceeds size limit")
+				}
 				state.ReasoningState = &contracts.ReasoningState{
 					Protocol: contracts.ProtocolAnthropicMessages,
-					Version:  contracts.ReasoningStateVersion,
 					Payload:  payload,
-				}
-				if err := state.ReasoningState.Validate(); err != nil {
-					return "", err
 				}
 			}
 			state.Closed = true

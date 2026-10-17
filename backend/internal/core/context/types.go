@@ -158,10 +158,9 @@ func validateContextBlock(block ContextBlock) error {
 	switch block.Kind {
 	case ContextBlockReasoningState:
 		// 空 RawMessage 经 JSON 往返后成为 null，仍表示没有工具参数。
-		if block.Text != "" || block.CallID != "" || block.Name != "" || (len(block.Input) > 0 && !bytes.Equal(block.Input, []byte("null"))) || block.IsError {
+		if block.ReasoningState == nil || block.Text != "" || block.CallID != "" || block.Name != "" || (len(block.Input) > 0 && !bytes.Equal(block.Input, []byte("null"))) || block.IsError {
 			return errors.New("invalid reasoning state context block")
 		}
-		return block.ReasoningState.Validate()
 	case ContextBlockText:
 		if strings.TrimSpace(block.Text) == "" {
 			return errors.New("model context contains an empty text block")

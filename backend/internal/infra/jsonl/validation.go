@@ -175,6 +175,13 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		if v.Data.Role == sessionmodel.RoleAssistant && (v.Data.AuthorKind != sessionmodel.AuthorAgent || v.Data.AuthorID != v.AgentID.String()) {
 			return key, entry, errors.New("assistant author does not match the message agent")
 		}
+		for _, block := range v.Data.Blocks {
+			if block.Kind == sessionmodel.BlockReasoningState {
+				if err := validateReasoningState(block.ReasoningState); err != nil {
+					return key, entry, err
+				}
+			}
+		}
 		object, identity, sessionID = v.Data, messageKey(v.OwnerID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
 			return key, entry, errors.New("message sequence does not match event sequence")
@@ -227,6 +234,30 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		}
 	}
 	return key, entry, nil
+}
+
+// validateReasoningState 在消息写入或从日志恢复时只读校验存储字段，不解释 Provider 的 opaque 内容。
+func validateReasoningState(state *contracts.ReasoningState) error {
+	if state == nil {
+		return errors.New("reasoning state is required")
+	}
+	if state.ProviderID == "" || state.ProviderID != strings.TrimSpace(state.ProviderID) {
+		return errors.New("reasoning state provider ID is required and must be canonical")
+	}
+	if state.ModelID == "" || state.ModelID != strings.TrimSpace(state.ModelID) {
+		return errors.New("reasoning state model ID is required and must be canonical")
+	}
+	if state.Protocol != contracts.ProtocolOpenAIResponses && state.Protocol != contracts.ProtocolAnthropicMessages {
+		return errors.New("unsupported reasoning state protocol")
+	}
+	if len(state.Payload) == 0 || len(state.Payload) > contracts.MaxReasoningStateBytes {
+		return errors.New("invalid or oversized reasoning state payload")
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(state.Payload, &object); err != nil || object == nil {
+		return errors.New("reasoning state payload must be an object")
+	}
+	return nil
 }
 
 func (s *Store) validateTransaction(ctx context.Context) error {

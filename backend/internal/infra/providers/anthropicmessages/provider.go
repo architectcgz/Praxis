@@ -100,7 +100,7 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 	if request.MaxOutputTokens <= 0 {
 		return nil, errors.New("anthropic max output tokens is required")
 	}
-	encodedContext, err := encodeContext(request.Context)
+	encodedContext, err := encodeContext(request.Context, request.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -146,11 +146,6 @@ func buildPayload(request model.ModelRequest) ([]byte, error) {
 		body.OutputConfig.Format = &anthropicJSONSchema{
 			Type:   "json_schema",
 			Schema: schema.Schema,
-		}
-	}
-	if body.Thinking != nil && body.Thinking.Type == "enabled" {
-		if err := validateThinkingContinuation(body.Messages); err != nil {
-			return nil, err
 		}
 	}
 	for _, tool := range request.Tools {

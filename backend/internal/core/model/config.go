@@ -31,6 +31,11 @@ func (s Config) Clone() Config {
 	return s
 }
 
+// CanReplayReasoningState 判断完整状态的来源是否与目标 Provider、API 和模型完全一致；nil 状态不可重放。
+func (s Config) CanReplayReasoningState(state *contracts.ReasoningState) bool {
+	return state != nil && state.ProviderID == s.ProviderID && state.Protocol == s.APIFormat && state.ModelID == s.ModelID
+}
+
 // Validate 校验 task 使用的模型配置是否完整且已规范化。
 func (s Config) Validate() error {
 	seen := map[string]bool{}

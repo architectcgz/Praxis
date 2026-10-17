@@ -101,10 +101,9 @@ func validateBlock(role Role, block Block) error {
 	}
 	switch block.Kind {
 	case BlockReasoningState:
-		if role != RoleAssistant || block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
+		if role != RoleAssistant || block.ReasoningState == nil || block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
 			return errors.New("message contains an invalid reasoning state block")
 		}
-		return block.ReasoningState.Validate()
 	case BlockText:
 		if strings.TrimSpace(block.Text) == "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
 			return errors.New("message contains an invalid text block")

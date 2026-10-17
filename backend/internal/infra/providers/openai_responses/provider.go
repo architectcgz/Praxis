@@ -91,7 +91,7 @@ func buildPayload(request model.ModelRequest) ([]byte, int, error) {
 	if request.MaxOutputTokens <= 0 {
 		return nil, 0, errors.New("openai responses max output tokens is required")
 	}
-	input, err := encodeContext(request.Context)
+	input, err := encodeContext(request.Context, request.Model)
 	if err != nil {
 		return nil, 0, err
 	}

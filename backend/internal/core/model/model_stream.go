@@ -14,7 +14,7 @@ const (
 	// StreamThinkingDelta 承载可供展示的推理文本增量，不用于续传推理状态。
 	StreamThinkingDelta ModelStreamEventKind = "thinking_delta"
 	StreamToolCall      ModelStreamEventKind = "tool_call"
-	// StreamReasoningState 承载需要保存并按来源协议重放的推理状态，不向观察者展示。
+	// StreamReasoningState 承载推理状态，Decoder 只校验载荷，模型请求边界绑定来源身份；不向观察者展示。
 	StreamReasoningState ModelStreamEventKind = "reasoning_state"
 	StreamUsage          ModelStreamEventKind = "usage"
 	StreamComplete       ModelStreamEventKind = "complete"

@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 )
 
-// encodeContext 仅编码官方文本与工具消息，未知内容和其他协议的推理状态均显式拒绝。
+// encodeContext 编码官方文本与工具消息；不支持续传的推理状态只在本次请求中忽略。
 func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	if err := ctx.Validate(); err != nil {
 		return nil, err
@@ -16,8 +17,9 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	if ctx.SystemPrompt != "" {
 		messages = append(messages, chatMessage{Role: "system", Content: &ctx.SystemPrompt})
 	}
+	ids := providers.BuildToolCallIDMap(ctx)
 	for index, entry := range ctx.Entries {
-		encoded, err := chatMessagesFromContext(entry)
+		encoded, err := chatMessagesFromContext(entry, ids)
 		if err != nil {
 			return nil, fmt.Errorf("openai chat context entry %d: %w", index, err)
 		}
@@ -26,7 +28,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	return messages, nil
 }
 
-func chatMessagesFromContext(entry appcontext.ContextEntry) ([]chatMessage, error) {
+func chatMessagesFromContext(entry appcontext.ContextEntry, ids map[string]string) ([]chatMessage, error) {
 	var messages []chatMessage
 	result := chatMessage{Role: string(entry.Role)}
 	flush := func() {
@@ -55,14 +57,16 @@ func chatMessagesFromContext(entry appcontext.ContextEntry) ([]chatMessage, erro
 				return nil, err
 			}
 			result.ToolCalls = append(result.ToolCalls, chatToolCall{
-				ID:       block.CallID,
+				ID:       ids[block.CallID],
 				Type:     "function",
 				Function: chatFunctionCall{Name: block.Name, Arguments: string(block.Input)},
 			})
 		case appcontext.ContextBlockToolResult:
 			flush()
 			text := block.Text
-			messages = append(messages, chatMessage{Role: "tool", ToolCallID: block.CallID, Content: &text})
+			messages = append(messages, chatMessage{Role: "tool", ToolCallID: ids[block.CallID], Content: &text})
+		case appcontext.ContextBlockReasoningState:
+			continue
 		default:
 			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
 		}

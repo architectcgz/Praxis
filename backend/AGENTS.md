@@ -14,6 +14,9 @@
 - 消息流归属与历史选择分别命名：主 Agent 使用 Session 流，其他 Agent 使用各自的私有流；局部选择结果使用 `selectedMessages`，所选工具调用使用 `selectedToolCalls`。
 - ToolResult 必须按 `(TaskID, CallID)` 关联 ToolCall，业务消息转换与历史配对位于 `service/task/context_adapter.go`；排除项不得通过延迟回执补全重新纳入。恢复工具回执保持调用声明顺序。
 - 压缩保持 Protected 原文及其相对顺序；保护范围覆盖完整工具交互，未闭合工具链不可摘要。摘要输入必须移除展示思考和推理状态，保留区的状态原样续传。
+- ReasoningState 是可持久化但不可跨模型假定兼容的 Provider opaque state。`contracts.ReasoningState` 只定义数据与复制，不提供通用 Validate 方法；Decoder 负责协议解析、签名或加密字段和载荷上限，Loop 只检查响应协议并使用冻结配置绑定 ProviderID 和 ModelID。Message / Context 只校验块结构，不递归解析状态；JSONL 写入和恢复边界统一校验完整存储字段、canonical 来源身份与 JSON 对象载荷，不设置内部版本字段。Provider Encoder 不重新解析已接收或恢复的载荷，仅在 ProviderID、APIFormat 和 ModelID 与状态来源完全一致时原样重放，否则只在本次请求中静默忽略；OpenAI Chat 始终忽略该状态。历史 Text、ToolCall 和 ToolResult 保持跨 Provider 可移植，不得因状态不兼容请求失败、删除持久化状态、转换为文本或重新执行历史工具调用。
+- ToolCall ID 的协议兼容映射只发生在 Provider 请求编码边界，调用与回执共用同一请求级映射，合法 ID 原样保留，替换值不得与其他 ID 碰撞；不修改 Context、JSONL 或工具执行身份。
+- Messages Encoder 原样发送兼容的推理状态与工具历史，不因缺少前导 Thinking 块在本地拒绝请求；Thinking 续接的接受或降级由目标 Provider 决定，签名字段由 Decoder 在接收模型响应时检查。
 - JSONL 只支持当前 Task 持久化结构，不提供格式迁移或兼容层；恢复拒绝未知字段和非 canonical 值，不能静默修改或删除用户数据。`InputMessageID` 创建后不可变；`Config` 与 `ContextSelection` 只允许 Pending → Starting 时确定，之后不可变；`Progress` 预算不得回退。
 
 ## 执行编排与活动状态

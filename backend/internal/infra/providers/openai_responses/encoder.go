@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/model"
+	"praxis/internal/infra/providers"
 	"praxis/internal/infra/providers/streaming"
 )
 
-// encodeContext 按原始顺序编码 input items，状态只允许由来源协议原样续传。
-func encodeContext(ctx appcontext.ModelContext) ([]json.RawMessage, error) {
+// encodeContext 按原始顺序编码 input items，仅重放与目标模型身份完全一致的推理状态。
+func encodeContext(ctx appcontext.ModelContext, config model.Config) ([]json.RawMessage, error) {
 	if err := ctx.Validate(); err != nil {
 		return nil, err
 	}
@@ -25,8 +26,9 @@ func encodeContext(ctx appcontext.ModelContext) ([]json.RawMessage, error) {
 		}
 		input = append(input, item)
 	}
+	ids := providers.BuildToolCallIDMap(ctx)
 	for index, entry := range ctx.Entries {
-		items, err := responseItems(entry)
+		items, err := responseItems(entry, config, ids)
 		if err != nil {
 			return nil, fmt.Errorf("openai responses context entry %d: %w", index, err)
 		}
@@ -35,7 +37,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]json.RawMessage, error) {
 	return input, nil
 }
 
-func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
+func responseItems(entry appcontext.ContextEntry, config model.Config, ids map[string]string) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	var text strings.Builder
 	appendItem := func(item any) error {
@@ -76,32 +78,24 @@ func responseItems(entry appcontext.ContextEntry) ([]json.RawMessage, error) {
 			}
 			if err := appendItem(inputFunctionCall{
 				Type:      "function_call",
-				CallID:    block.CallID,
+				CallID:    ids[block.CallID],
 				Name:      block.Name,
 				Arguments: string(block.Input),
 			}); err != nil {
 				return nil, err
 			}
 		case appcontext.ContextBlockToolResult:
-			if err := appendItem(inputFunctionOutput{Type: "function_call_output", CallID: block.CallID, Output: block.Text}); err != nil {
+			if err := appendItem(inputFunctionOutput{
+				Type:   "function_call_output",
+				CallID: ids[block.CallID],
+				Output: block.Text,
+			}); err != nil {
 				return nil, err
 			}
 		case appcontext.ContextBlockReasoningState:
 			state := block.ReasoningState
-			if state.Protocol != contracts.ProtocolOpenAIResponses {
-				return nil, errors.New("cannot replay another protocol's state in responses")
-			}
-			var output responseOutput
-			if err := json.Unmarshal(state.Payload, &output); err != nil {
-				return nil, err
-			}
-			item, ok := output.Value.(*responseReasoningOutput)
-			if !ok || item.Status != nil && *item.Status != "completed" {
-				return nil, errors.New("invalid responses reasoning state")
-			}
-			// 无状态续传不能用 summary 或仅有服务端 ID 的 item 伪造推理状态。
-			if stringValue(item.EncryptedContent) == "" {
-				return nil, errors.New("responses stateless reasoning replay requires encrypted_content")
+			if !config.CanReplayReasoningState(state) {
+				continue
 			}
 			items = append(items, bytes.Clone(state.Payload))
 		default:
