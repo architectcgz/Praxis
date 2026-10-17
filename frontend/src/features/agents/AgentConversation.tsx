@@ -38,6 +38,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
+    const pendingRequestIDsRef = useRef<ReadonlySet<string>>(new Set())
     const prependScrollRef = useRef<{ top: number; height: number } | null>(null)
     const [showScrollButton, setShowScrollButton] = useState(false)
     const active = agent.state === 'executing' || agent.state === 'pausing'
@@ -100,7 +101,6 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
     const visiblePendingMessages = useMemo(() => pendingUserMessages.filter((message) => (
         message.agentId ? message.agentId === agent.id : message.sessionId === agent.sessionId
     )), [agent.id, agent.sessionId, pendingUserMessages])
-    const pendingMessagesKey = visiblePendingMessages.map((message) => `${message.requestId}:${message.content}`).join('|')
     const threadEmpty = orderedHistory.length === 0 && visiblePendingMessages.length === 0 && !streamingOutput && !waitingForOutput && !collaboration
 
     useLayoutEffect(() => {
@@ -117,7 +117,10 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
             prependScrollRef.current = null
             return
         }
-        if (!switchingAgent && !followingOutputRef.current) {
+        // 刚发出的用户消息是明确意图：即使此前正在浏览历史，也要回到最新输出并恢复跟随。
+        const justSent = visiblePendingMessages.some((message) => !pendingRequestIDsRef.current.has(message.requestId))
+        pendingRequestIDsRef.current = new Set(visiblePendingMessages.map((message) => message.requestId))
+        if (!switchingAgent && !justSent && !followingOutputRef.current) {
             return
         }
         messageThread.scrollTo({
@@ -126,7 +129,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
         })
         followingOutputRef.current = true
         previousAgentIDRef.current = agent.id
-    }, [agent.id, orderedHistory, pendingMessagesKey, streamingOutput, waitingForOutput, collaboration, historyLoadingOlder])
+    }, [agent.id, orderedHistory, visiblePendingMessages, streamingOutput, waitingForOutput, collaboration, historyLoadingOlder])
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
