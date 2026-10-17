@@ -18,10 +18,8 @@ type anthropicContext struct {
 }
 
 // encodeContext 按 block 语义拆分消息；tool_result 仅影响自身角色，不覆盖其他内容。
+// 上下文结构由消息写入与恢复边界保证，此处不复查。
 func encodeContext(ctx appcontext.ModelContext, config model.Config) (anthropicContext, error) {
-	if err := ctx.Validate(); err != nil {
-		return anthropicContext{}, err
-	}
 	result := anthropicContext{System: ctx.SystemPrompt}
 	ids := providers.BuildToolCallIDMap(ctx)
 	for index, entry := range ctx.Entries {

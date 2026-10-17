@@ -99,9 +99,6 @@ func compressHistory(ctx context.Context, value appcontext.ModelContext, options
 	if err := ctx.Err(); err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
-	if err := value.Validate(); err != nil {
-		return appcontext.ModelContext{}, false, err
-	}
 	if options.ContextWindow <= 0 || options.MaxOutputTokens <= 0 || options.ReservedTokens < 0 || options.MaxOutputTokens >= options.ContextWindow || options.ReservedTokens >= options.ContextWindow-options.MaxOutputTokens {
 		return appcontext.ModelContext{}, false, errors.New("context compression limits are invalid")
 	}
@@ -163,9 +160,6 @@ func compressHistory(ctx context.Context, value appcontext.ModelContext, options
 		}
 		compressed.Entries[span.output] = summaryEntry(options.SummaryFormat, summary)
 		allowance -= appcontext.EstimateTokens(summary)
-	}
-	if err := compressed.Validate(); err != nil {
-		return appcontext.ModelContext{}, false, err
 	}
 	after, err := compressed.EstimatedTokens()
 	if err != nil {

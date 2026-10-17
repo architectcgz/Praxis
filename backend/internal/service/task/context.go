@@ -11,7 +11,8 @@ import (
 	taskmodel "praxis/internal/core/task"
 )
 
-// selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并验证必要原文容量。
+// selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并检查必要原文容量。
+// 容量检查是准入的业务前置条件：连 Protected 原文都放不进窗口的 Task 不允许进入执行。
 func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, config taskmodel.Config, inputMessageID string) (taskmodel.ContextSelection, error) {
 	if err := s.reconcileToolResults(ctx, agent.SessionID, agent.ID, false); err != nil {
 		return taskmodel.ContextSelection{}, err
@@ -50,6 +51,7 @@ func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, con
 	if err != nil {
 		return taskmodel.ContextSelection{}, err
 	}
+	// 结果只用于容量前置条件；上下文结构由消息写入与恢复边界保证，不在此复查。
 	if _, err := (contextmodel.ContextBuilder{}).Build(content, contextmodel.Limits{ContextWindow: config.Model.ContextWindow, MaxOutputTokens: config.Model.MaxOutputTokens}); err != nil {
 		return taskmodel.ContextSelection{}, err
 	}

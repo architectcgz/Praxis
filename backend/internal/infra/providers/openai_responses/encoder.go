@@ -14,10 +14,8 @@ import (
 )
 
 // encodeContext 按原始顺序编码 input items，仅重放与目标模型身份完全一致的推理状态。
+// 上下文结构由消息写入与恢复边界保证，此处不复查。
 func encodeContext(ctx appcontext.ModelContext, config model.Config) ([]json.RawMessage, error) {
-	if err := ctx.Validate(); err != nil {
-		return nil, err
-	}
 	var input []json.RawMessage
 	if ctx.SystemPrompt != "" {
 		item, err := json.Marshal(inputMessage{Type: "message", Role: "system", Content: []inputText{{Type: "input_text", Text: ctx.SystemPrompt}}})

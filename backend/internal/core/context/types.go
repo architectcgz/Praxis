@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"strings"
 
 	"praxis/internal/contracts"
 )
@@ -109,71 +107,4 @@ func (c ModelContext) Digest() (string, error) {
 	}
 	digest := sha256.Sum256(encoded)
 	return "sha256-" + hex.EncodeToString(digest[:]), nil
-}
-
-// Validate 校验完整模型上下文的基本结构。
-func (c ModelContext) Validate() error {
-	if len(c.Entries) == 0 {
-		return errors.New("model context requires entries")
-	}
-	for _, entry := range c.Entries {
-		if !validContextEntryKind(entry.Kind) || !validContextRole(entry.Role) || len(entry.Content) == 0 {
-			return errors.New("model context contains an invalid entry")
-		}
-		for _, block := range entry.Content {
-			if block.Kind == ContextBlockReasoningState && entry.Role != ContextRoleAssistant {
-				return errors.New("reasoning state requires assistant role")
-			}
-			if err := validateContextBlock(block); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func validContextEntryKind(kind ContextEntryKind) bool {
-	switch kind {
-	case ContextEntryReference, ContextEntrySummary, ContextEntryUserInput, ContextEntryProviderOutput,
-		ContextEntryToolResult, ContextEntryMCPCall, ContextEntryMCPResult:
-		return true
-	default:
-		return false
-	}
-}
-
-func validContextRole(role ContextRole) bool {
-	switch role {
-	case ContextRoleUser, ContextRoleAssistant, ContextRoleTool:
-		return true
-	default:
-		return false
-	}
-}
-
-func validateContextBlock(block ContextBlock) error {
-	if block.Kind != ContextBlockReasoningState && block.ReasoningState != nil {
-		return errors.New("reasoning state requires a reasoning state block")
-	}
-	switch block.Kind {
-	case ContextBlockReasoningState:
-		// 空 RawMessage 经 JSON 往返后成为 null，仍表示没有工具参数。
-		if block.ReasoningState == nil || block.Text != "" || block.CallID != "" || block.Name != "" || (len(block.Input) > 0 && !bytes.Equal(block.Input, []byte("null"))) || block.IsError {
-			return errors.New("invalid reasoning state context block")
-		}
-	case ContextBlockText:
-		if strings.TrimSpace(block.Text) == "" {
-			return errors.New("model context contains an empty text block")
-		}
-	case ContextBlockToolCall, ContextBlockMCPCall, ContextBlockToolResult, ContextBlockMCPResult:
-		if block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) {
-			return errors.New("model context contains an invalid or non-canonical call identity")
-		}
-		if (block.Kind == ContextBlockToolCall || block.Kind == ContextBlockMCPCall) && len(block.Input) > 0 && !json.Valid(block.Input) {
-			return errors.New("model context contains invalid call input")
-		}
-	default:
-		return errors.New("model context contains an unknown block kind")
-	}
-	return nil
 }

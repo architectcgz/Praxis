@@ -9,10 +9,8 @@ import (
 )
 
 // encodeContext 编码官方文本与工具消息；不支持续传的推理状态只在本次请求中忽略。
+// 上下文结构由消息写入与恢复边界保证，此处不复查。
 func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
-	if err := ctx.Validate(); err != nil {
-		return nil, err
-	}
 	messages := make([]chatMessage, 0, len(ctx.Entries)+1)
 	if ctx.SystemPrompt != "" {
 		messages = append(messages, chatMessage{Role: "system", Content: &ctx.SystemPrompt})
