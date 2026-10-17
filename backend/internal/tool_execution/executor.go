@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"praxis/internal/contracts"
 	securitymodel "praxis/internal/core/security"
@@ -22,12 +23,9 @@ type TaskRepository interface {
 	Save(context.Context, taskmodel.Task) error
 }
 
-type CommandPolicy interface {
-	DecideCommand(string) securitymodel.CommandDecision
-}
-
 type Config struct {
-	CommandPolicy  CommandPolicy
+	Rules          ApprovalRules
+	Review         func(context.Context, taskmodel.Task, toolmodel.ToolInvocation, toolmodel.RiskReview) (securitymodel.RiskAssessment, error)
 	HookDispatcher *hooks.Dispatcher
 	Transactions   repository.TxRunner
 	Tasks          TaskRepository
@@ -37,35 +35,40 @@ type Config struct {
 }
 
 type Executor struct {
-	commandPolicy  CommandPolicy
-	hookDispatcher *hooks.Dispatcher
-	tx             repository.TxRunner
-	tasks          TaskRepository
-	invocations    repository.ToolInvocationRepository
-	toolCatalog    toolcontracts.ToolCatalog
-	clock          system.Clock
+	rules           ApprovalRules
+	reviewOperation func(context.Context, taskmodel.Task, toolmodel.ToolInvocation, toolmodel.RiskReview) (securitymodel.RiskAssessment, error)
+	reviewInFlight  sync.Map
+	hookDispatcher  *hooks.Dispatcher
+	tx              repository.TxRunner
+	tasks           TaskRepository
+	invocations     repository.ToolInvocationRepository
+	toolCatalog     toolcontracts.ToolCatalog
+	clock           system.Clock
 }
 
 func NewExecutor(config Config) (*Executor, error) {
+	if config.Rules.DefaultMode == nil || config.Rules.Catalog == nil || config.Review == nil {
+		return nil, errors.New("tool executor approval rules and risk reviewer are required")
+	}
 	for name, value := range map[string]any{
-		"command policy": config.CommandPolicy,
-		"transactions":   config.Transactions,
-		"tasks":          config.Tasks,
-		"invocations":    config.Invocations,
-		"tool catalog":   config.Catalog,
+		"transactions": config.Transactions,
+		"tasks":        config.Tasks,
+		"invocations":  config.Invocations,
+		"tool catalog": config.Catalog,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("tool executor %s is required", name)
 		}
 	}
 	return &Executor{
-		hookDispatcher: config.HookDispatcher,
-		commandPolicy:  config.CommandPolicy,
-		tx:             config.Transactions,
-		tasks:          config.Tasks,
-		invocations:    config.Invocations,
-		toolCatalog:    config.Catalog,
-		clock:          system.ClockOrDefault(config.Clock),
+		hookDispatcher:  config.HookDispatcher,
+		rules:           config.Rules,
+		reviewOperation: config.Review,
+		tx:              config.Transactions,
+		tasks:           config.Tasks,
+		invocations:     config.Invocations,
+		toolCatalog:     config.Catalog,
+		clock:           system.ClockOrDefault(config.Clock),
 	}, nil
 }
 
@@ -143,27 +146,39 @@ func (s *Executor) invoke(
 		}
 	}
 
-	if invocation.Status == toolmodel.ToolInvocationRequested {
+	for {
+		if err := ctx.Err(); err != nil {
+			return toolcontracts.ToolResult{}, err
+		}
 		invocation, err = s.admit(ctx, invocation, normalized)
+		if err == nil {
+			invocation, err = s.authorize(ctx, invocation.ID)
+		}
 		if err != nil {
 			return toolcontracts.ToolResult{}, err
 		}
 		if result, done := settledResult(invocation); done {
 			return result, nil
 		}
-	}
-	invocation, execute, err := s.start(ctx, invocation.ID)
-	if err != nil {
-		return toolcontracts.ToolResult{}, err
-	}
-	if invocation.Status == toolmodel.ToolInvocationAwaitingApproval {
-		return toolcontracts.ToolResult{}, errApprovalPending
-	}
-	if !execute {
+		var execute bool
+		invocation, execute, err = s.start(ctx, invocation.ID)
+		if err != nil {
+			return toolcontracts.ToolResult{}, err
+		}
+		if invocation.Status == toolmodel.ToolInvocationAwaitingApproval {
+			return toolcontracts.ToolResult{}, errApprovalPending
+		}
+		// 配置可能在批准与启动两个提交之间改变，由 Core 撤销旧授权后重新编排。
+		if invocation.Status == toolmodel.ToolInvocationPrepared {
+			continue
+		}
+		if execute {
+			break
+		}
 		if result, done := settledResult(invocation); done {
 			return result, nil
 		}
-		return toolcontracts.ToolResult{}, contracts.New(contracts.TaskBusy, "tool call is already running")
+		return toolcontracts.ToolResult{}, contracts.New(contracts.TaskBusy, "tool call is already running or being reviewed")
 	}
 	execution := toolcontracts.ExecutionCall{
 		Name:                invocation.Name,

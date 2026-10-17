@@ -46,7 +46,7 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		"timing":    "timing.saved",
 		"usage":     "usage.saved",
 	}
-	if kinds[event.Collection] == "" || kinds[event.Collection] != event.Type {
+	if event.Collection != "tool_execution" && (kinds[event.Collection] == "" || kinds[event.Collection] != event.Type) {
 		return key, entry, errors.New("unknown event type")
 	}
 	if (scope == "") != (event.Collection == "project" || event.Collection == "workspace") {
@@ -132,6 +132,17 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 			group("awaiting-agent", v.AgentID.String(), "")
 		}
 		link("task", v.TaskID.String())
+	case "tool_execution":
+		v, err := decodeToolRecord(scope, event)
+		if err != nil {
+			return key, entry, err
+		}
+		if err := v.Validate(); err != nil {
+			return key, entry, err
+		}
+		object, identity, sessionID = v, event.Key, scope
+		group("tool-records-task", v.TaskID.String(), "")
+		link("task", v.TaskID.String())
 	case "context":
 		var v sessionmodel.SessionContextEntry
 		if err := decode(&v); err != nil {
@@ -163,6 +174,18 @@ func describe(scope string, event Event) (entityKey, indexEntry, error) {
 		var v messageRecord
 		if err := decode(&v); err != nil {
 			return key, entry, err
+		}
+		if v.AgentID == "" {
+			return key, entry, errors.New("message agent identity is required")
+		}
+		if v.Data.Role != sessionmodel.RoleTool || v.Outcome != nil {
+			record, err := decodeToolRecord(scope, event)
+			if err != nil {
+				return key, entry, err
+			}
+			if err := record.Validate(); err != nil {
+				return key, entry, err
+			}
 		}
 		object, identity, sessionID = v.Data, messageKey(v.OwnerID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
@@ -260,7 +283,10 @@ func (s *Store) validateTransaction(ctx context.Context) error {
 			}
 		}
 	}
-	return s.prepareReceiptChanges(ctx)
+	if err := s.prepareReceiptChanges(ctx); err != nil {
+		return err
+	}
+	return s.validateToolRecords(ctx)
 }
 
 func (s *Store) validateRelations(ctx context.Context, key entityKey, entry indexEntry) error {
@@ -344,7 +370,19 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 	case "tool":
 		var v toolmodel.ToolInvocation
 		_ = decodeJSON(data, &v)
+		if len(s.keys(ctx, lookupKey{kind: "tool-records-task", owner: v.TaskID.String()})) != 0 {
+			return errors.New("task cannot mix invocation persistence and tool execution records")
+		}
+		for call := range s.index.toolRecords[scope] {
+			if call.TaskID == v.TaskID {
+				return errors.New("task tool calls are managed by the tool execution repository")
+			}
+		}
 		return taskOwner(v.TaskID, v.AgentID)
+	case "tool_execution":
+		var v toolExecutionRecord
+		_ = decodeJSON(data, &v)
+		return taskOwner(v.Call.TaskID, v.Call.AgentID)
 	case "context":
 		var v sessionmodel.SessionContextEntry
 		_ = decodeJSON(data, &v)
@@ -379,10 +417,12 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		if err := reference("session", scope); err != nil {
 			return err
 		}
-		if v.OwnerID != "" {
-			if err := reference("agent", v.OwnerID); err != nil {
-				return err
-			}
+		agent, err := get[agentmodel.Agent](ctx, s, "agent", v.AgentID.String())
+		if err != nil {
+			return err
+		}
+		if agent.SessionID.String() != scope || appendOwner(agent) != v.OwnerID {
+			return errors.New("message agent does not match the stream ownership")
 		}
 		if v.Data.TaskID != "" {
 			if err := reference("task", v.Data.TaskID); err != nil {
@@ -396,7 +436,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			if err != nil {
 				return err
 			}
-			if appendOwner(agent) != v.OwnerID || v.Data.RequestID != task.RequestID.String() {
+			if agent.ID != v.AgentID || appendOwner(agent) != v.OwnerID || v.Data.RequestID != task.RequestID.String() {
 				return errors.New("message stream or request ownership mismatch")
 			}
 			if v.Data.Role == sessionmodel.RoleAssistant && v.Data.AuthorID != task.AgentID.String() {
@@ -481,7 +521,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timing.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
 			return contracts.ErrRequestConflict
 		}
-	case "context", "message":
+	case "context", "message", "tool_execution":
 		if !bytes.Equal(before, after) {
 			return contracts.ErrRequestConflict
 		}

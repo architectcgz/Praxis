@@ -71,9 +71,7 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		index:     newIndex(),
 		messages:  newMessageCache(4096),
 	}
-	if err = s.openFormat(); err == nil {
-		err = os.MkdirAll(filepath.Join(root, "sessions"), 0700)
-	}
+	err = os.MkdirAll(filepath.Join(root, "sessions"), 0700)
 	if err == nil {
 		err = syncDirectory(root)
 	}
@@ -102,48 +100,6 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
-}
-
-func (s *Store) openFormat() error {
-	path := filepath.Join(s.root, "storage.json")
-	data, err := os.ReadFile(path)
-	if err == nil {
-		var marker struct {
-			Format  string `json:"format"`
-			Version int    `json:"version"`
-		}
-		if err := decodeJSON(data, &marker); err != nil {
-			return fmt.Errorf("corrupt storage format marker: %w", err)
-		}
-		if marker.Format != "praxis-jsonl" || marker.Version != 3 {
-			return errors.New("unsupported JSONL storage format")
-		}
-		return nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	// 锁文件与空目录不含业务数据；有任何未标识内容都拒绝接管。
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.Name() == "writer.lock" {
-			continue
-		}
-		if entry.IsDir() {
-			children, err := os.ReadDir(filepath.Join(s.root, entry.Name()))
-			if err != nil {
-				return err
-			}
-			if len(children) == 0 {
-				continue
-			}
-		}
-		return errors.New("non-empty data directory is missing the v3 storage marker; legacy formats and automatic migration are not supported")
-	}
-	return writeNewFile(path, []byte("{\"format\":\"praxis-jsonl\",\"version\":3}\n"))
 }
 
 func validScope(scope string) bool {

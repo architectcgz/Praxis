@@ -10,12 +10,15 @@ import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
+	toolexecution "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
 )
 
 type messageRecord struct {
 	OwnerID string                   `json:"owner_id,omitempty"`
+	AgentID contracts.AgentID        `json:"agent_id"`
 	Data    sessionmodel.MessageData `json:"message"`
+	Outcome *toolexecution.Outcome   `json:"outcome,omitempty"`
 }
 
 type MessageStreams struct{ s *Store }
@@ -32,7 +35,7 @@ func messageEntityKey(scope, owner, id string) entityKey {
 }
 
 func (r MessageStreams) Append(ctx context.Context, owner agentmodel.Agent, data sessionmodel.MessageData) (sessionmodel.MessageData, error) {
-	stored, _, err := r.s.appendMessage(ctx, owner, data)
+	stored, _, err := r.s.appendMessage(ctx, owner, data, nil)
 	return stored, err
 }
 
@@ -85,7 +88,7 @@ type MessageWriter struct {
 	owner   agentmodel.Agent
 }
 
-func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data sessionmodel.MessageData) (stored sessionmodel.MessageData, inserted bool, err error) {
+func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data sessionmodel.MessageData, outcome *toolexecution.Outcome) (stored sessionmodel.MessageData, inserted bool, err error) {
 	if owner.SessionID == "" {
 		return stored, false, errors.New("message session is required")
 	}
@@ -99,7 +102,7 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 			}
 			candidate := data
 			candidate.Sequence, candidate.CreatedAt = record.Data.Sequence, record.Data.CreatedAt
-			if !same(record.Data, candidate) {
+			if record.AgentID != owner.ID || !same(record.Data, candidate) || !same(record.Outcome, outcome) {
 				return contracts.ErrRequestConflict
 			}
 			stored = record.Data
@@ -117,7 +120,12 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 		if data.CreatedAt.IsZero() {
 			data.CreatedAt = time.Now().UTC()
 		}
-		if err := save(txCtx, s, scope, "message", messageKey(ownerID, data.ID), "message.appended", messageRecord{OwnerID: ownerID, Data: data}); err != nil {
+		if err := save(txCtx, s, scope, "message", messageKey(ownerID, data.ID), "message.appended", messageRecord{
+			OwnerID: ownerID,
+			AgentID: owner.ID,
+			Data:    data,
+			Outcome: outcome,
+		}); err != nil {
 			return err
 		}
 		stored, inserted = data, true
@@ -135,7 +143,7 @@ func (w MessageWriter) AppendToolResult(ctx context.Context, data sessionmodel.M
 		return errors.New("tool receipt must include task identity")
 	}
 	return w.streams.s.InTx(ctx, func(txCtx context.Context) error {
-		stored, inserted, err := w.streams.s.appendMessage(txCtx, w.owner, data)
+		stored, inserted, err := w.streams.s.appendMessage(txCtx, w.owner, data, nil)
 		if err != nil || !inserted {
 			return err
 		}

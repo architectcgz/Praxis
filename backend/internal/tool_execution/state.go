@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"praxis/internal/contracts"
-	securitymodel "praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_invocation"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -70,36 +69,20 @@ func (s *Executor) start(ctx context.Context, id contracts.ToolInvocationID) (to
 		}); err != nil {
 			return err
 		}
-		decision, err := s.commandDecision(current)
+		decision, err := s.rules.Decide(txCtx, current)
 		if err != nil {
 			return err
 		}
-		_, enabled := s.toolCatalog.Get(current.Name)
-		if !enabled || decision.Action == securitymodel.CommandDeny {
-			result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The current configuration prohibits execution. Rule: "+decision.RuleID)
-			if current.Status == toolmodel.ToolInvocationAwaitingApproval {
-				result = toolcontracts.NewToolError(string(toolmodel.ToolFailureNotAllowed), "The current configuration prohibits execution. Rule: "+decision.RuleID)
-				err = current.Deny(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureNotAllowed}, s.clock.Now())
-			} else {
-				err = current.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, s.clock.Now())
-			}
-			if err != nil {
-				return err
-			}
-			invocation = current
+		previousStatus := current.Status
+		if err := current.RecheckAuthorization(decision, s.clock.Now()); err != nil {
+			return err
+		}
+		invocation = current
+		if current.Status != previousStatus {
 			return s.invocations.Save(txCtx, current)
 		}
-		// 待审批调用恢复时仍保留等待状态，即使规则已改为 allow。
-		if current.Status == toolmodel.ToolInvocationAwaitingApproval {
+		if current.Status != toolmodel.ToolInvocationApproved {
 			return nil
-		}
-		if decision.Action == securitymodel.CommandAsk && current.Approval.Source != contracts.ApprovalSourceUser {
-			result := toolcontracts.NewToolError(string(toolmodel.ToolFailureInterrupted), "The command policy changed from automatic execution to manual review. Submit a new call for approval.")
-			if err := current.Interrupt(toolmodel.ToolInvocationResult{InlineContent: result.Payload, ErrorCode: toolmodel.ToolFailureInterrupted}, s.clock.Now()); err != nil {
-				return err
-			}
-			invocation = current
-			return s.invocations.Save(txCtx, current)
 		}
 		if current.Approval.ArgumentsDigest != toolmodel.ArgumentsDigest(current.Name, current.NormalizedArguments) {
 			return contracts.ErrRequestConflict

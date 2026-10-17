@@ -4,6 +4,7 @@ import (
 	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
+	"praxis/internal/core/security"
 	"praxis/internal/execution"
 	"praxis/internal/hooks"
 
@@ -27,6 +28,7 @@ import (
 	"praxis/internal/infra/document"
 	"praxis/internal/infra/jsonl"
 	modelregistry "praxis/internal/infra/model_registry"
+	"praxis/internal/infra/settings"
 	"praxis/internal/infra/toolconfig"
 	"praxis/internal/infra/workspacefs"
 	"praxis/internal/logging"
@@ -85,6 +87,10 @@ func Open(
 		return nil, err
 	}
 	if err := initializeDefaultFiles(ctx, root); err != nil {
+		return nil, err
+	}
+	settingsConfig, err := settings.Load(root.SettingsFile)
+	if err != nil {
 		return nil, err
 	}
 	store, err := jsonl.Open(ctx, root.Runtime)
@@ -261,11 +267,34 @@ func Open(
 		closeStore()
 		return nil, err
 	}
+	approvalRules := toolexecution.ApprovalRules{
+		Catalog: toolCatalog,
+		DefaultMode: func(txCtx context.Context, sessionID contracts.SessionID) (security.ApprovalMode, error) {
+			session, err := repos.Sessions.Get(txCtx, sessionID)
+			if err != nil {
+				return "", err
+			}
+			project, err := repos.Projects.Get(txCtx, session.ProjectID)
+			if err != nil {
+				return "", err
+			}
+			return security.EffectiveApprovalMode(settingsConfig.ApprovalMode, project.ApprovalMode), nil
+		},
+	}
 	if runner == nil {
+		reviewer := toolexecution.RiskReviewer{
+			Models:   modelRegistry,
+			Messages: messages,
+			Hooks:    hookDispatcher,
+			ObserveUsage: func(record model.ModelUsageRecord) {
+				observe(loop.Event{Kind: loop.EventModelUsage, SessionID: contracts.SessionID(record.SessionID), AgentID: contracts.AgentID(record.AgentID), TaskID: contracts.TaskID(record.TaskID), TurnID: record.TurnID, Usage: &record.Usage})
+			},
+		}
 		toolExecutor, err := toolexecution.NewExecutor(toolexecution.Config{
 			Transactions:   store,
 			HookDispatcher: hookDispatcher,
-			CommandPolicy:  toolCatalog,
+			Rules:          approvalRules,
+			Review:         reviewer.Review,
 			Tasks:          repos.Tasks,
 			Invocations:    repos.ToolInvocations,
 			Catalog:        toolCatalog,
@@ -308,11 +337,12 @@ func Open(
 		return nil, err
 	}
 	projectService, err := applicationproject.NewService(applicationproject.Config{
-		Transactions: store,
-		Projects:     repos.Projects,
-		Workspaces:   repos.Workspaces,
-		Directory:    workspaceFilesystem,
-		Logger:       diagnostics,
+		GlobalApprovalMode: func() security.ApprovalMode { return settingsConfig.ApprovalMode },
+		Transactions:       store,
+		Projects:           repos.Projects,
+		Workspaces:         repos.Workspaces,
+		Directory:          workspaceFilesystem,
+		Logger:             diagnostics,
 	})
 	if err != nil {
 		diagnostics.Errorf("create project service failed: %v", err)
@@ -339,10 +369,10 @@ func Open(
 		Queue:     queueService,
 		Activator: coordinator,
 		Approvals: applicationruntime.ToolApprovals{
-			CommandPolicy: toolCatalog,
-			Transactions:  store,
-			Tasks:         repos.Tasks,
-			Invocations:   repos.ToolInvocations,
+			DecideOperation: approvalRules.Decide,
+			Transactions:    store,
+			Tasks:           repos.Tasks,
+			Invocations:     repos.ToolInvocations,
 		},
 	})
 	if err != nil {
@@ -380,6 +410,10 @@ func Open(
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			candidateSettings, err := settings.Load(root.SettingsFile)
+			if err != nil {
+				return err
+			}
 			candidateModels, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil, newModelStream)
 			if err != nil {
 				return err
@@ -407,6 +441,8 @@ func Open(
 			}
 			// 与 Task 准入共用事务边界，避免后台队列读到混合版本的模型、定义和权限。
 			return store.InTx(ctx, func(context.Context) error {
+				// 授权模式只在此锁内替换；项目选择与工具启动也在相同事务锁内读取。
+				settingsConfig = candidateSettings
 				modelRegistry.ReplaceFrom(candidateModels)
 				agentRegistry.ReplaceFrom(candidateAgents)
 				toolCatalog.ReplaceFrom(candidateCatalog)

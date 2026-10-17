@@ -8,6 +8,7 @@ import { projectStreamingOutput } from './streaming'
 import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
 export type AgentConversationProps = {
+    projectId: string
     agent: AgentSnapshot
     history: AgentHistoryItem[]
     collaboration?: ReactNode
@@ -33,7 +34,7 @@ export type AgentConversationProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyCursor, historyLoadingOlder, historyError, onLoadOlderHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ projectId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyCursor, historyLoadingOlder, historyError, onLoadOlderHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -249,6 +250,7 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
                 )}
             </div>
             <AgentTaskInput
+                projectId={projectId}
                 sessionId={agent.sessionId}
                 active={active}
                 input={input}

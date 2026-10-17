@@ -50,10 +50,19 @@ export function queueTask(request: QueueTaskRequest) {
 }
 
 export type ToolDecisionRequest = { sessionId: string; agentId: string; taskId: string; callId: string; argumentsDigest: string }
-/** 待授权查询的响应记录；命令与目录供审核展示，不随授权决策提交。 */
-export type ToolApproval = ToolDecisionRequest & { name: string; command: string; path: string; ruleId: string }
+/** 待授权记录携带完整冻结参数与审核结论，展示字段不随授权决策提交。 */
+export type ToolApproval = ToolDecisionRequest & {
+    name: string
+    normalizedArguments: unknown
+    path: string
+    ruleId: string
+    action: string
+    riskVerdict: string
+    riskReason: string
+}
 export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
-    return getCommandBinding().ListToolApprovals(agentId)
+    const values = await getCommandBinding().ListToolApprovals(agentId)
+    return values.map((value) => ({ ...value, normalizedArguments: JSON.parse(value.normalizedArguments) as unknown }))
 }
 export function approveToolCall(request: ToolDecisionRequest) {
     return getCommandBinding().ApproveToolCall(toolDecisionRequest(request))

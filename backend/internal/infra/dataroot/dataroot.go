@@ -23,6 +23,7 @@ type DataRoot struct {
 	ModelProvidersConfig string
 	ModelCredentialsFile string
 	ToolConfig           string
+	SettingsFile         string
 	AgentDefinitions     string
 }
 
@@ -53,6 +54,7 @@ func Resolve(root string) (DataRoot, error) {
 		ModelProvidersConfig: filepath.Join(config, "models.json"),
 		ModelCredentialsFile: filepath.Join(config, "auth.json"),
 		ToolConfig:           filepath.Join(config, "tools.json"),
+		SettingsFile:         filepath.Join(config, "settings.json"),
 		AgentDefinitions:     filepath.Join(config, "agents"),
 	}, nil
 }

@@ -38,8 +38,8 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     const approval = useToolApproval(taskId, callId)
     const pendingApproval = result === undefined ? approval?.pendingApproval : undefined
     const duration = <DurationLabel record={record} />
-    // 审核时展示后端返回的已持久化参数，确保用户看到的正是将被批准的命令。
-    const toolInput = pendingApproval ? { command: pendingApproval.command, path: pendingApproval.path } : input
+    // 所有工具都展示后端冻结参数，不能以原始模型请求替换将被批准的操作。
+    const toolInput = pendingApproval ? pendingApproval.normalizedArguments : input
     const tool = presentTool(name, toolInput, result, isError, pendingStatus)
     if (result === undefined) {
         if (record?.status === 'failed') tool.status = 'failed'
@@ -52,7 +52,7 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     const review = result === undefined && approval && (pendingApproval || (pendingStatus === 'awaiting_approval' && approval.error))
         ? <ToolApprovalReview approval={approval} /> : undefined
     if (name === 'bash') return <TerminalOutput tool={tool} duration={duration} approval={review} />
-    if (name === 'apply_patch') return <FileChanges tool={tool} duration={duration} />
+    if (name === 'apply_patch') return <FileChanges tool={tool} duration={duration} approval={review} />
     return <div className="output-fold output-tool" data-status={tool.status}>
         <details className="output-fold output-tool-details" open={tool.status === 'running' || tool.status === 'failed' || tool.status === 'timeout' || tool.status === 'awaiting_approval' ? true : undefined}>
             <summary className="output-fold-button output-tool-header">

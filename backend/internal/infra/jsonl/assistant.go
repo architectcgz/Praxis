@@ -57,7 +57,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.Ass
 				return err
 			}
 		}
-		stored, inserted, err = w.streams.s.appendMessage(txCtx, w.owner, message)
+		stored, inserted, err = w.streams.s.appendMessage(txCtx, w.owner, message, nil)
 		if err != nil {
 			return err
 		}

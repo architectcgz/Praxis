@@ -25,10 +25,13 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 				CallID:          value.CallID,
 				ArgumentsDigest: value.ArgumentsDigest,
 			},
-			Name:    value.Name,
-			Command: value.Command,
-			Path:    value.Path,
-			RuleID:  value.RuleID,
+			Name:                value.Name,
+			NormalizedArguments: value.NormalizedArguments,
+			Path:                value.Path,
+			RuleID:              value.RuleID,
+			Action:              value.Action,
+			RiskVerdict:         value.RiskVerdict,
+			RiskReason:          value.RiskReason,
 		})
 	}
 	return result, nil

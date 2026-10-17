@@ -13,7 +13,7 @@ type ApprovalState = {
 
 const ToolApprovalsContext = createContext<ApprovalState | null>(null)
 
-/** 会话内只查询和订阅一次审批状态，由对应的命令卡片展示；重连后仍可审核同一个调用。 */
+/** 会话内只查询和订阅一次审批状态，由对应的操作卡片展示；重连后仍可审核同一个调用。 */
 export function ToolApprovalsProvider({ agentId, children }: { agentId: string; children: ReactNode }) {
     const [pendingApprovals, setPendingApprovals] = useState<ToolApproval[]>([])
     const [busy, setBusy] = useState('')
@@ -51,23 +51,26 @@ export function ToolApprovalsProvider({ agentId, children }: { agentId: string; 
     return <ToolApprovalsContext value={{ pendingApprovals, busy, error, reload, decide }}>{children}</ToolApprovalsContext>
 }
 
-/** 按任务与调用身份关联审核，避免把其他命令的批准操作挂到当前卡片。 */
+/** 按任务与调用身份关联审核，避免把其他操作的批准挂到当前卡片。 */
 export function useToolApproval(taskId: string, callId?: string) {
     const approvals = useContext(ToolApprovalsContext)
     return approvals ? { ...approvals, pendingApproval: approvals.pendingApprovals.find((pendingApproval) => pendingApproval.taskId === taskId && pendingApproval.callId === callId) } : null
 }
 
-/** 审核操作嵌入工具卡片，命令与工作目录由同一卡片的参数区完整展示。 */
+/** 审核操作嵌入工具卡片，完整冻结参数由同一卡片展示。 */
 export function ToolApprovalReview({ approval }: { approval: NonNullable<ReturnType<typeof useToolApproval>> }) {
     const { pendingApproval, busy, error, reload, decide } = approval
-    return <section className="tool-approval" aria-label="命令执行审核" aria-busy={!!pendingApproval && busy === pendingApproval.callId}>
+    return <section className="tool-approval" aria-label="单次操作审核" aria-busy={!!pendingApproval && busy === pendingApproval.callId}>
         <div className="tool-approval-header">
             <ShieldCheck size={16} aria-hidden="true" />
             <strong>执行前确认</strong>
             <span>批准后将立即执行</span>
         </div>
         {pendingApproval && <dl className="tool-approval-details">
-            <div><dt>审核规则</dt><dd>{pendingApproval.ruleId === 'default' ? '默认审核' : pendingApproval.ruleId}</dd></div>
+            <div><dt>处理动作</dt><dd>{pendingApproval.action === 'auto' ? 'auto · 模型不确定，转人工' : 'ask · 必须人工确认'}</dd></div>
+            <div><dt>命中规则</dt><dd>{pendingApproval.ruleId === 'default' ? '项目或全局默认' : pendingApproval.ruleId}</dd></div>
+            {pendingApproval.path && <div><dt>操作路径</dt><dd>{pendingApproval.path}</dd></div>}
+            {pendingApproval.riskVerdict && <div><dt>模型审核</dt><dd>{pendingApproval.riskReason}</dd></div>}
         </dl>}
         {error && <p className="tool-approval-error" role="alert">
             <AlertCircle size={16} aria-hidden="true" /><span>{error}</span>

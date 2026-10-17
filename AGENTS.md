@@ -6,7 +6,7 @@
 
 - 禁止自动启动开发服务，包括 `npm run dev`、Vite、`npm run preview` 和会启动前端服务的 `wails dev`。
 - 新会话、代码修改、调试、截图和测试均不构成启动服务的授权；只有用户明确要求时才允许启动。
-- 验证优先使用构建、静态检查、单元测试或已有服务；必须新启动服务才能验证时，先说明原因并征得用户同意。
+- 验证使用构建、静态检查、依赖门禁、人工回归或已有服务；不保留测试文件，不新增或运行自动化测试。必须新启动服务才能验证时，先说明原因并征得用户同意。
 - 用户授权启动后，先检查已有进程和端口，不重复启动；临时验证结束后关闭本次启动的服务，除非用户明确要求保留。
 
 ## 前端版本
@@ -78,4 +78,4 @@ if value == "" {
 - 消息位置索引按 Session 懒加载，以总条目数限制缓存；`LoadMessages` 和 `List` 保持只读，消息集合和序号边界必须来自同一次一致性读取。
 - `repository.MessageWriter` 定义 Assistant / ToolResult 的原子写入；Execution 直接注入 `repository.MessageStreams`，Loop 使用统一 Writer。工具回执和输出字节累计必须在同一事务中幂等提交。
 - 工具恢复决策属于 TaskService；启动时先协调上次进程的 running 调用，再恢复 Coordinator。普通业务恢复保留当前活跃调用和人工审批等待，未知副作用禁止自动重试。
-- JSONL 只接受带 v3 标识的新格式，不提供迁移或兼容读取。执行 `go vet ./...` 后运行 `backend/scripts/check-dependencies.sh` 验证分层。
+- JSONL 不设置或检查存储版本标记，只按当前数据结构严格恢复，不提供迁移或兼容读取。工具执行记录通过 `repository.ToolExecutionRepository` 提供，复用现有 Store 的事务、锁和可靠追加。执行 `go vet ./...` 后运行 `backend/scripts/check-dependencies.sh` 验证分层。

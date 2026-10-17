@@ -3,8 +3,10 @@ import { Brain, ChevronDown, Cpu, Plus, Send, Server, Square } from 'lucide-reac
 import type { ModelOption } from '../../api'
 import { useSlashCommandMenu } from './SlashCommandMenu'
 import { SessionTokenUsage } from './SessionTokenUsage'
+import { ApprovalModeSelect } from './ApprovalModeSelect'
 
 type AgentTaskInputProps = {
+    projectId: string
     sessionId: string
     active: boolean
     input: string
@@ -22,15 +24,17 @@ type AgentTaskInputProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ sessionId, active, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+export function AgentTaskInput({ projectId, sessionId, active, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy || active)
     const providerPickerRef = useRef<HTMLDivElement>(null)
     const modelPickerRef = useRef<HTMLDivElement>(null)
     const reasoningPickerRef = useRef<HTMLDivElement>(null)
+    const approvalPickerRef = useRef<HTMLDivElement>(null)
     const [providerPickerOpen, setProviderPickerOpen] = useState(false)
     const [modelPickerOpen, setModelPickerOpen] = useState(false)
     const [reasoningPickerOpen, setReasoningPickerOpen] = useState(false)
+    const [approvalPickerOpen, setApprovalPickerOpen] = useState(false)
     const providerOptions = Array.from(new Map(models.map((model) => [model.providerId, model])).values())
     const providerModels = models.filter((model) => model.providerId === selectedProviderID)
     const selectedProvider = providerOptions.find((provider) => provider.providerId === selectedProviderID)
@@ -46,6 +50,7 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
         setProviderPickerOpen(false)
         setModelPickerOpen(false)
         setReasoningPickerOpen(false)
+        setApprovalPickerOpen(false)
     }, [])
 
     useLayoutEffect(() => {
@@ -60,11 +65,12 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
     }, [input])
 
     useLayoutEffect(() => {
-        if (!providerPickerOpen && !modelPickerOpen && !reasoningPickerOpen) {
+        if (!providerPickerOpen && !modelPickerOpen && !reasoningPickerOpen && !approvalPickerOpen) {
             return
         }
 
-        const picker = providerPickerOpen ? providerPickerRef.current : modelPickerOpen ? modelPickerRef.current : reasoningPickerRef.current
+        const picker = providerPickerOpen ? providerPickerRef.current : modelPickerOpen ? modelPickerRef.current
+            : reasoningPickerOpen ? reasoningPickerRef.current : approvalPickerRef.current
         const popup = picker?.querySelector<HTMLElement>('.model-picker-menu, .thinking-intensity-picker')
         const trigger = picker?.querySelector<HTMLButtonElement>('button')
         const region = picker?.closest<HTMLElement>('.main-panel')
@@ -150,9 +156,10 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
             document.removeEventListener('focusin', closeOnFocusExit)
             document.removeEventListener('scroll', closeOnScroll, true)
         }
-    }, [closePickers, modelPickerOpen, providerPickerOpen, reasoningPickerOpen])
+    }, [approvalPickerOpen, closePickers, modelPickerOpen, providerPickerOpen, reasoningPickerOpen])
 
     useEffect(() => {
+        if (busy) setApprovalPickerOpen(false)
         if (busy || active || models.length === 0) {
             setProviderPickerOpen(false)
             setModelPickerOpen(false)
@@ -209,9 +216,9 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
                 />
                 <SessionTokenUsage key={sessionId} />
                 <div className="composer-tools">
-                    <div className={`composer-provider-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={providerPickerRef}>
+                    <div className={`composer-select-picker composer-provider-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={providerPickerRef}>
                         <button
-                            className="composer-provider-trigger"
+                            className="composer-select-trigger composer-provider-trigger"
                             type="button"
                             title={selectedProvider?.providerName || '没有配置的 Provider'}
                             aria-label={selectedProvider ? `Provider: ${selectedProvider.providerName}` : '没有配置的 Provider'}
@@ -219,9 +226,8 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
                             aria-haspopup="menu"
                             aria-controls="provider-picker-menu"
                             onClick={() => {
-                                setModelPickerOpen(false)
-                                setReasoningPickerOpen(false)
-                                setProviderPickerOpen((open) => !open)
+                                closePickers()
+                                setProviderPickerOpen(!providerPickerOpen)
                             }}
                             disabled={busy || active || models.length === 0}
                         >
@@ -256,9 +262,9 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
                             </div>
                         )}
                     </div>
-                    <div className={`composer-model-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={modelPickerRef}>
+                    <div className={`composer-select-picker composer-model-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={modelPickerRef}>
                         <button
-                            className="composer-model-trigger"
+                            className="composer-select-trigger composer-model-trigger"
                             type="button"
                             title={selectedModel ? `${selectedModel.label} 通过 ${selectedModel.providerName}` : '没有配置的模型'}
                             aria-label={selectedModel ? `模型: ${selectedModel.label}` : '没有配置的模型'}
@@ -266,9 +272,8 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
                             aria-haspopup="menu"
                             aria-controls="model-picker-menu"
                             onClick={() => {
-                                setReasoningPickerOpen(false)
-                                setProviderPickerOpen(false)
-                                setModelPickerOpen((open) => !open)
+                                closePickers()
+                                setModelPickerOpen(!modelPickerOpen)
                             }}
                             disabled={busy || active || models.length === 0}
                         >
@@ -301,18 +306,17 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
                             </div>
                         )}
                     </div>
-                    <div className={`composer-reasoning-picker ${reasoningAvailable ? '' : 'is-disabled'}`} ref={reasoningPickerRef}>
+                    <div className={`composer-select-picker composer-reasoning-picker ${reasoningAvailable ? '' : 'is-disabled'}`} ref={reasoningPickerRef}>
                         <button
-                            className="composer-reasoning-trigger"
+                            className="composer-select-trigger composer-reasoning-trigger"
                             type="button"
                             title={reasoningAvailable ? `思考强度: ${selectedReasoning}` : '此模型不支持思考强度'}
                             aria-label={reasoningAvailable ? `思考强度: ${selectedReasoning}` : '此模型不支持思考强度'}
                             aria-expanded={reasoningPickerOpen}
                             aria-controls="thinking-intensity-picker"
                             onClick={() => {
-                                setModelPickerOpen(false)
-                                setProviderPickerOpen(false)
-                                setReasoningPickerOpen((open) => !open)
+                                closePickers()
+                                setReasoningPickerOpen(!reasoningPickerOpen)
                             }}
                             disabled={busy || active || !reasoningAvailable}
                         >
@@ -345,6 +349,21 @@ export function AgentTaskInput({ sessionId, active, input, setInput, models, sel
                             </div>
                         )}
                     </div>
+                    <ApprovalModeSelect
+                        key={projectId}
+                        projectId={projectId}
+                        disabled={busy}
+                        pickerRef={approvalPickerRef}
+                        open={approvalPickerOpen}
+                        onToggle={() => {
+                            closePickers()
+                            setApprovalPickerOpen(!approvalPickerOpen)
+                        }}
+                        onClose={() => {
+                            setApprovalPickerOpen(false)
+                            approvalPickerRef.current?.querySelector('button')?.focus({ preventScroll: true })
+                        }}
+                    />
                     <div className="composer-send-controls">
                         <button
                             className={`composer-submit ${active ? 'composer-submit-danger' : ''}`}

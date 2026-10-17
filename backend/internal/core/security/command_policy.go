@@ -7,18 +7,6 @@ import (
 	"strings"
 )
 
-type CommandAction string
-
-const (
-	CommandAllow CommandAction = "allow"
-	CommandAsk   CommandAction = "ask"
-	CommandDeny  CommandAction = "deny"
-)
-
-func (a CommandAction) Valid() bool {
-	return a == CommandAllow || a == CommandAsk || a == CommandDeny
-}
-
 type CommandMatch struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
@@ -36,26 +24,17 @@ func (m CommandMatch) Matches(command string) bool {
 }
 
 type CommandRule struct {
-	ID     string        `json:"id"`
-	Action CommandAction `json:"action"`
-	Match  CommandMatch  `json:"match"`
+	ID     string       `json:"id"`
+	Action ApprovalMode `json:"action"`
+	Match  CommandMatch `json:"match"`
 }
 
 type CommandPolicy struct {
-	DefaultAction CommandAction `json:"defaultAction"`
-	Rules         []CommandRule `json:"rules"`
-}
-
-type CommandDecision struct {
-	Action CommandAction
-	RuleID string
+	Rules []CommandRule `json:"rules"`
 }
 
 // Validate 只读校验完整配置；匹配值保留空格和换行，以最终命令原文进行比较。
 func (p CommandPolicy) Validate() error {
-	if !p.DefaultAction.Valid() {
-		return fmt.Errorf("invalid bash defaultAction %q", p.DefaultAction)
-	}
 	seen := make(map[string]bool, len(p.Rules))
 	for _, rule := range p.Rules {
 		if rule.ID == "" || rule.ID != strings.TrimSpace(rule.ID) || seen[rule.ID] {
@@ -68,9 +47,6 @@ func (p CommandPolicy) Validate() error {
 		if rule.Match.Type != "exact" && rule.Match.Type != "prefix" {
 			return fmt.Errorf("bash rule %q has an invalid match type", rule.ID)
 		}
-		if rule.Action == CommandAllow && rule.Match.Type != "exact" {
-			return fmt.Errorf("bash allow rule %q requires an exact match", rule.ID)
-		}
 	}
 	return nil
 }
@@ -80,14 +56,17 @@ func (p CommandPolicy) Clone() CommandPolicy {
 	return p
 }
 
-// Decide 按 deny > ask > allow > default 决策，与配置排列顺序无关。
-func (p CommandPolicy) Decide(command string) CommandDecision {
-	for _, action := range []CommandAction{CommandDeny, CommandAsk, CommandAllow} {
-		for _, rule := range p.Rules {
-			if rule.Action == action && rule.Match.Matches(command) {
-				return CommandDecision{Action: action, RuleID: rule.ID}
-			}
+// Decide 优先匹配所有 deny，其余按配置顺序；未命中返回空决定，由统一入口解析默认动作。
+func (p CommandPolicy) Decide(command string) ApprovalDecision {
+	for _, rule := range p.Rules {
+		if rule.Action == ApprovalDeny && rule.Match.Matches(command) {
+			return ApprovalDecision{Action: rule.Action, RuleID: rule.ID}
 		}
 	}
-	return CommandDecision{Action: p.DefaultAction, RuleID: "default"}
+	for _, rule := range p.Rules {
+		if rule.Match.Matches(command) {
+			return ApprovalDecision{Action: rule.Action, RuleID: rule.ID}
+		}
+	}
+	return ApprovalDecision{}
 }

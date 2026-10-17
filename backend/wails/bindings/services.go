@@ -18,6 +18,8 @@ import (
 type ProjectService interface {
 	ListProjects(context.Context, int) ([]service.ProjectSummary, error)
 	CreateProject(context.Context, request.CreateProject) (service.CreateProjectResult, error)
+	GetProjectApprovalMode(context.Context, contracts.ProjectID) (service.ProjectApprovalMode, error)
+	SetProjectApprovalMode(context.Context, request.SetProjectApprovalMode) (service.ProjectApprovalMode, error)
 }
 
 // SessionService 暴露 Session 列表、创建与详情视图。

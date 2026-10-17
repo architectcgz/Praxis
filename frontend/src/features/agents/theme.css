@@ -37,9 +37,7 @@
     box-shadow: none;
 }
 
-.composer-provider-trigger,
-.composer-model-trigger,
-.composer-reasoning-trigger {
+.composer-select-trigger {
     border: 0;
     border-radius: 4px;
     background: transparent;
@@ -47,12 +45,8 @@
     font-size: var(--font-size-secondary);
 }
 
-.composer-provider-trigger:hover:not(:disabled),
-.composer-model-trigger:hover:not(:disabled),
-.composer-reasoning-trigger:hover:not(:disabled),
-.composer-provider-trigger[aria-expanded='true'],
-.composer-model-trigger[aria-expanded='true'],
-.composer-reasoning-trigger[aria-expanded='true'] {
+.composer-select-trigger:hover:not(:disabled),
+.composer-select-trigger[aria-expanded='true'] {
     border-color: transparent;
     background: var(--fill);
     color: var(--ink);

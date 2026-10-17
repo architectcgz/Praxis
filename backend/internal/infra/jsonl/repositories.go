@@ -29,6 +29,7 @@ type Repositories struct {
 	ToolInvocations ToolRepository
 	Controls        ControlRepository
 	Messages        MessageStreams
+	ToolExecutions  repository.ToolExecutionRepository
 }
 
 // Repositories 返回共享提交边界与位置索引的仓储集合。
@@ -43,6 +44,7 @@ func (s *Store) Repositories() Repositories {
 		ToolInvocations: ToolRepository{s},
 		Controls:        ControlRepository{s},
 		Messages:        MessageStreams{s},
+		ToolExecutions:  ToolExecutionRepository{s},
 	}
 }
 

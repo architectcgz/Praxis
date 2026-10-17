@@ -117,7 +117,7 @@ func (c *Catalog) List() []contracts.ToolDefinition {
 	return result
 }
 
-func (c *Catalog) DecideCommand(command string) security.CommandDecision {
+func (c *Catalog) DecideCommand(command string) security.ApprovalDecision {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.config.Bash.Decide(command)

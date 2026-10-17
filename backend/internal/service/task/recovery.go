@@ -40,7 +40,7 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID contracts.
 			}
 			at := s.clock.Now()
 			switch invocation.Status {
-			case toolmodel.ToolInvocationRequested, toolmodel.ToolInvocationApproved, toolmodel.ToolInvocationAwaitingApproval:
+			case toolmodel.ToolInvocationRequested, toolmodel.ToolInvocationPrepared, toolmodel.ToolInvocationReviewing, toolmodel.ToolInvocationApproved, toolmodel.ToolInvocationAwaitingApproval:
 				if task.Active() {
 					return nil
 				}

@@ -10,6 +10,7 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/core/security"
 	"praxis/internal/infra/dataroot"
+	"praxis/internal/infra/settings"
 	"praxis/internal/infra/toolconfig"
 )
 
@@ -18,7 +19,8 @@ func initializeDefaultFiles(ctx context.Context, root dataroot.DataRoot) error {
 	files := map[string]any{
 		root.ModelProvidersConfig: modelconfig.Config{Groups: []modelconfig.Group{}, Providers: []modelconfig.Provider{}},
 		root.ModelCredentialsFile: map[string]any{},
-		root.ToolConfig:           toolconfig.Config{Bash: security.CommandPolicy{DefaultAction: security.CommandAsk}},
+		root.ToolConfig:           toolconfig.Config{Bash: security.CommandPolicy{Rules: []security.CommandRule{}}},
+		root.SettingsFile:         settings.Config{ApprovalMode: security.ApprovalAsk},
 	}
 	for path, value := range files {
 		encoded, err := json.MarshalIndent(value, "", "  ")

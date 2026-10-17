@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"praxis/internal/contracts"
+	toolexecution "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
 )
 
@@ -35,6 +36,7 @@ type index struct {
 	hasMessages map[string]bool
 	deleted     map[string]bool
 	missing     map[receiptKey]repository.MissingToolResult
+	toolRecords map[string]map[toolexecution.CallKey][]recordRef
 }
 
 func newIndex() *index {
@@ -46,6 +48,7 @@ func newIndex() *index {
 		hasMessages: make(map[string]bool),
 		deleted:     make(map[string]bool),
 		missing:     make(map[receiptKey]repository.MissingToolResult),
+		toolRecords: make(map[string]map[toolexecution.CallKey][]recordRef),
 	}
 }
 
@@ -170,6 +173,7 @@ func (s *Store) publish(tx *transaction, offset, length int64) {
 			}
 		}
 		delete(s.index.hasMessages, tx.scope)
+		delete(s.index.toolRecords, tx.scope)
 		s.messages.remove(tx.scope)
 		s.index.deleted[tx.scope] = true
 	} else {
@@ -206,6 +210,7 @@ func (s *Store) publish(tx *transaction, offset, length int64) {
 			}
 			s.index.hasMessages[tx.scope] = true
 		}
+		s.indexToolRecords(tx, offset, length)
 		for key, value := range tx.receiptChanges {
 			if value == nil {
 				delete(s.index.missing, key)

@@ -7,12 +7,13 @@ import (
 type ApprovalSource string
 
 const (
-	ApprovalSourceUser          ApprovalSource = "user"
-	ApprovalSourcePolicyDefault ApprovalSource = "policy_default"
+	ApprovalSourceUser ApprovalSource = "user"
+	ApprovalSourceYolo ApprovalSource = "yolo"
+	ApprovalSourceAuto ApprovalSource = "auto"
 )
 
 func (s ApprovalSource) Valid() bool {
-	return s == ApprovalSourceUser || s == ApprovalSourcePolicyDefault
+	return s == ApprovalSourceUser || s == ApprovalSourceYolo || s == ApprovalSourceAuto
 }
 
 type ApprovalRecord struct {
@@ -34,12 +35,13 @@ func (a ApprovalRecord) Validate() error {
 	return nil
 }
 
-func NewPolicyApproval(digest string, at time.Time) (ApprovalRecord, error) {
+// NewYoloApproval 为本次冻结参数创建跳过风险审核的批准，不覆盖硬性禁止规则。
+func NewYoloApproval(digest string, at time.Time) (ApprovalRecord, error) {
 	if EmptyID(digest) {
 		return ApprovalRecord{}, InvalidValue("approval.argumentsDigest", "arguments digest is required")
 	}
 	return ApprovalRecord{
-		Source:          ApprovalSourcePolicyDefault,
+		Source:          ApprovalSourceYolo,
 		ArgumentsDigest: digest,
 		ApprovedAt:      at.UTC(),
 	}, nil

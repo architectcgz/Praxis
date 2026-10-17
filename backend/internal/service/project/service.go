@@ -4,6 +4,7 @@ package project
 import (
 	"praxis/internal/contracts"
 	projectmodel "praxis/internal/core/project"
+	"praxis/internal/core/security"
 	workspacemodel "praxis/internal/core/workspace"
 
 	"context"
@@ -23,22 +24,24 @@ type WorkspaceDirectory interface {
 
 // Config 包含创建 Project 持久化状态所需的依赖。
 type Config struct {
-	Transactions repository.TxRunner
-	Projects     repository.ProjectRepository
-	Workspaces   repository.WorkspaceRepository
-	Clock        system.Clock
-	Directory    WorkspaceDirectory
-	Logger       *logging.Logger
+	Transactions       repository.TxRunner
+	Projects           repository.ProjectRepository
+	Workspaces         repository.WorkspaceRepository
+	Clock              system.Clock
+	Directory          WorkspaceDirectory
+	Logger             *logging.Logger
+	GlobalApprovalMode func() security.ApprovalMode
 }
 
 // Service 负责 Project 变更及其事务边界。
 type Service struct {
-	tx         repository.TxRunner
-	projects   repository.ProjectRepository
-	workspaces repository.WorkspaceRepository
-	clock      system.Clock
-	directory  WorkspaceDirectory
-	logger     *logging.Logger
+	tx                 repository.TxRunner
+	projects           repository.ProjectRepository
+	workspaces         repository.WorkspaceRepository
+	clock              system.Clock
+	directory          WorkspaceDirectory
+	logger             *logging.Logger
+	globalApprovalMode func() security.ApprovalMode
 }
 
 // CreateProjectParams 包含新 Project 的持久化身份和初始工作区数据。
@@ -58,6 +61,9 @@ type CreateProjectResult struct {
 
 // NewService 创建 Project 应用服务。
 func NewService(config Config) (*Service, error) {
+	if config.GlobalApprovalMode == nil {
+		return nil, errors.New("project service global approval mode is required")
+	}
 	for name, value := range map[string]any{
 		"transactions":        config.Transactions,
 		"projects":            config.Projects,
@@ -69,12 +75,13 @@ func NewService(config Config) (*Service, error) {
 		}
 	}
 	return &Service{
-		tx:         config.Transactions,
-		projects:   config.Projects,
-		workspaces: config.Workspaces,
-		clock:      system.ClockOrDefault(config.Clock),
-		directory:  config.Directory,
-		logger:     logging.NewFactory().Ensure(config.Logger),
+		tx:                 config.Transactions,
+		projects:           config.Projects,
+		workspaces:         config.Workspaces,
+		clock:              system.ClockOrDefault(config.Clock),
+		directory:          config.Directory,
+		logger:             logging.NewFactory().Ensure(config.Logger),
+		globalApprovalMode: config.GlobalApprovalMode,
 	}, nil
 }
 

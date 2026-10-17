@@ -171,6 +171,12 @@ func (r *Runner) run(
 		if err != nil || outcome != taskmodel.TaskCompleted || finished {
 			return outcome, failureCode, err
 		}
+		// 工具的独立风险审核也会分配请求序号，下一轮不能复用本地旧序号。
+		stored, err := r.Progress.LoadTask(ctx, task.ID)
+		if err != nil {
+			return taskResult(failCause(contracts.TaskFailureStorage, err))
+		}
+		sequence = max(sequence, stored.Progress.NextSequence)
 	}
 }
 

@@ -47,28 +47,35 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				block.CallID,
 			}
 			invocation, err := getByClaim[toolmodel.ToolInvocation](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
-			if err != nil {
+			if err != nil && !errors.Is(err, contracts.ErrNotFound) {
 				return err
 			}
-			if invocation.TurnID.String() != record.Data.TurnID || string(invocation.Name) != block.Name {
-				return contracts.ErrRequestConflict
+			usesInvocation := err == nil
+			if usesInvocation {
+				if invocation.TurnID.String() != record.Data.TurnID || string(invocation.Name) != block.Name || record.Outcome != nil {
+					return contracts.ErrRequestConflict
+				}
+			} else if len(s.keys(ctx, lookupKey{kind: "tools-task", owner: key.task})) != 0 {
+				return errors.New("task cannot mix invocation-backed and record-backed tool calls")
 			}
 			switch block.Kind {
 			case sessionmodel.BlockToolCall:
 				if _, exists := pending(key); exists {
 					return contracts.ErrRequestConflict
 				}
-				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
-					return errors.New("tool call declaration must be committed with a new invocation identity")
-				}
-				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, block.Input) {
-					return contracts.ErrRequestConflict
+				if usesInvocation {
+					if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
+						return errors.New("tool call declaration must be committed with a new invocation identity")
+					}
+					if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, block.Input) {
+						return contracts.ErrRequestConflict
+					}
 				}
 				fact := repository.MissingToolResult{
-					SessionID: invocation.SessionID,
-					AgentID:   invocation.AgentID,
-					TaskID:    invocation.TaskID,
-					TurnID:    invocation.TurnID,
+					SessionID: contracts.SessionID(tx.scope),
+					AgentID:   record.AgentID,
+					TaskID:    contracts.TaskID(record.Data.TaskID),
+					TurnID:    contracts.TurnID(record.Data.TurnID),
 					CallID:    block.CallID,
 					RequestID: record.Data.RequestID,
 					Name:      block.Name,
@@ -79,11 +86,14 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				callIndex++
 			case sessionmodel.BlockToolResult:
 				fact, exists := pending(key)
-				if !exists || fact.TurnID != invocation.TurnID || fact.Name != block.Name {
+				if !exists || fact.TurnID.String() != record.Data.TurnID || fact.Name != block.Name || fact.AgentID != record.AgentID {
 					return errors.New("tool receipt has no previously committed call declaration")
 				}
-				if !invocation.Status.Terminal() {
+				if usesInvocation && !invocation.Status.Terminal() {
 					return errors.New("tool receipt must correspond to a settled invocation")
+				}
+				if !usesInvocation && record.Outcome == nil {
+					return errors.New("tool execution receipt requires a structured outcome")
 				}
 				tx.receiptChanges[key] = nil
 			}

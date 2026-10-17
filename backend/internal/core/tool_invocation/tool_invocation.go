@@ -23,6 +23,8 @@ type ToolInvocationStatus string
 
 const (
 	ToolInvocationRequested        ToolInvocationStatus = "requested"
+	ToolInvocationPrepared         ToolInvocationStatus = "prepared"
+	ToolInvocationReviewing        ToolInvocationStatus = "reviewing"
 	ToolInvocationAwaitingApproval ToolInvocationStatus = "awaiting_approval"
 	ToolInvocationApproved         ToolInvocationStatus = "approved"
 	ToolInvocationRunning          ToolInvocationStatus = "running"
@@ -36,7 +38,7 @@ const (
 // Valid 判断状态是否属于受支持的持久化状态集合。
 func (s ToolInvocationStatus) Valid() bool {
 	switch s {
-	case ToolInvocationRequested, ToolInvocationAwaitingApproval, ToolInvocationApproved,
+	case ToolInvocationRequested, ToolInvocationPrepared, ToolInvocationReviewing, ToolInvocationAwaitingApproval, ToolInvocationApproved,
 		ToolInvocationRunning, ToolInvocationSucceeded, ToolInvocationFailed,
 		ToolInvocationDenied, ToolInvocationInterrupted, ToolInvocationUnknown:
 		return true
@@ -65,6 +67,7 @@ const (
 	ToolFailureInvalidCall     ToolFailureCode = "invalid_tool_call"
 	ToolFailureNotAllowed      ToolFailureCode = "tool_not_allowed"
 	ToolFailureApprovalDenied  ToolFailureCode = "tool_approval_denied"
+	ToolFailureRiskDenied      ToolFailureCode = "tool_risk_denied"
 	ToolFailureExecutionFailed ToolFailureCode = "tool_execution_failed"
 	ToolFailureResultUnknown   ToolFailureCode = "tool_result_unknown"
 	ToolFailureInterrupted     ToolFailureCode = "tool_interrupted"
@@ -73,7 +76,7 @@ const (
 // Valid 判断失败码是否受支持；空值表示没有失败。
 func (c ToolFailureCode) Valid() bool {
 	switch c {
-	case ToolFailureResourceLimit, ToolFailureNone, ToolFailureInvalidCall, ToolFailureNotAllowed, ToolFailureApprovalDenied,
+	case ToolFailureResourceLimit, ToolFailureNone, ToolFailureInvalidCall, ToolFailureNotAllowed, ToolFailureApprovalDenied, ToolFailureRiskDenied,
 		ToolFailureExecutionFailed, ToolFailureResultUnknown, ToolFailureInterrupted:
 		return true
 	default:
@@ -117,7 +120,8 @@ type ToolInvocation struct {
 	ArgumentsDigest     string
 	Status              ToolInvocationStatus
 	BudgetReserved      bool
-	CommandDecision     security.CommandDecision
+	Decision            security.ApprovalDecision
+	Reviews             []RiskReview `json:",omitempty"`
 	Approval            contracts.ApprovalRecord
 	Result              ToolInvocationResult
 	FailureCode         ToolFailureCode
@@ -180,6 +184,9 @@ func (i ToolInvocation) Validate() error {
 		len(i.NormalizedArguments) > 0 && !json.Valid(i.NormalizedArguments) {
 		return contracts.InvalidValue("toolInvocation", "tool name and valid JSON arguments are required")
 	}
+	if err := i.validateAuthorization(); err != nil {
+		return err
+	}
 	if i.Path != "" && !pathutil.IsAbsoluteNormalized(i.Path) {
 		return contracts.InvalidValue("toolInvocation.path", "authorized path must be canonical")
 	}
@@ -225,7 +232,7 @@ func (i ToolInvocation) Validate() error {
 		return contracts.InvalidValue("toolInvocation.result", "unstarted invocation cannot report a side effect")
 	}
 	switch i.Status {
-	case ToolInvocationRequested, ToolInvocationAwaitingApproval, ToolInvocationDenied:
+	case ToolInvocationRequested, ToolInvocationPrepared, ToolInvocationReviewing, ToolInvocationAwaitingApproval, ToolInvocationDenied:
 		if !i.ApprovedAt.IsZero() {
 			return contracts.InvalidValue("toolInvocation.approvedAt", "unapproved invocation has an approval time")
 		}
@@ -248,7 +255,7 @@ func (i ToolInvocation) Validate() error {
 			return contracts.InvalidValue("toolInvocation.result", "failed invocation requires a failure code")
 		}
 	case ToolInvocationDenied:
-		if i.FailureCode != ToolFailureResourceLimit && i.FailureCode != ToolFailureNotAllowed && i.FailureCode != ToolFailureApprovalDenied && i.FailureCode != ToolFailureInvalidCall {
+		if i.FailureCode != ToolFailureResourceLimit && i.FailureCode != ToolFailureNotAllowed && i.FailureCode != ToolFailureApprovalDenied && i.FailureCode != ToolFailureRiskDenied && i.FailureCode != ToolFailureInvalidCall {
 			return contracts.InvalidValue("toolInvocation.result", "denial requires a denial failure code")
 		}
 	case ToolInvocationInterrupted:
@@ -263,13 +270,15 @@ func (i ToolInvocation) Validate() error {
 	return nil
 }
 
-// AwaitApproval 保存规范化意图，等待用户批准，不能启动执行。
+// AwaitApproval 保留冻结参数并等待用户批准；尚未启动的旧授权被撤销时清空审批字段。
 func (i *ToolInvocation) AwaitApproval() error {
 	if i.Status == ToolInvocationAwaitingApproval || !canTransition(i.Status, ToolInvocationAwaitingApproval) {
 		return contracts.InvalidTransition("toolInvocation", string(i.Status), string(ToolInvocationAwaitingApproval))
 	}
 	next := *i
 	next.Status = ToolInvocationAwaitingApproval
+	next.Approval = contracts.ApprovalRecord{}
+	next.ApprovedAt = time.Time{}
 	return i.apply(next)
 }
 

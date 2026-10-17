@@ -6,9 +6,9 @@ import { ToolResultContent } from './ToolResultContent'
 import { formatToolInput, patchFiles, type ToolPresentation } from './toolPresentation'
 
 /** 展示请求中的补丁和工具实际返回结果；请求差异不代表写入成功。 */
-export function FileChanges({ tool, duration }: { tool: ToolPresentation; duration?: ReactNode }) {
+export function FileChanges({ tool, duration, approval }: { tool: ToolPresentation; duration?: ReactNode; approval?: ReactNode }) {
     const files = patchFiles(tool.input, tool.result)
-    return <details className="output-fold output-files" data-status={tool.status} open={tool.status === 'running' || tool.status === 'failed' || tool.status === 'timeout' ? true : undefined}>
+    return <details className="output-fold output-files" data-status={tool.status} open={tool.status === 'running' || tool.status === 'failed' || tool.status === 'timeout' || tool.status === 'awaiting_approval' ? true : undefined}>
         <summary className="output-fold-button output-tool-header">
             <span className="output-tool-summary"><strong>{tool.name}</strong><code>{files.length ? `${files.length} 个文件` : tool.summary}</code></span>
             <OutputStatus status={tool.status} />
@@ -23,10 +23,11 @@ export function FileChanges({ tool, duration }: { tool: ToolPresentation; durati
                     {file.diff ? <PatchDiff content={file.diff} addedFile={file.action === 'added'} /> : <p className="output-muted">请求未提供差异内容</p>}
                 </details>) : <pre className="output-text">{formatToolInput(tool.input)}</pre>}
             </section>
-            <section className="output-section output-result">
+            {!approval && <section className="output-section output-result">
                 <div className="output-section-label">执行输出</div>
                 {tool.content ? <ToolResultContent content={tool.content} /> : <p className="output-muted">暂无输出</p>}
-            </section>
+            </section>}
         </div>
+        {approval}
     </details>
 }

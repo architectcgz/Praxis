@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"praxis/internal/contracts"
@@ -13,17 +12,12 @@ import (
 	"praxis/internal/request"
 )
 
-// CommandPolicy 提供审批时的当前命令决策。
-type CommandPolicy interface {
-	DecideCommand(string) security.CommandDecision
-}
-
 // ToolApprovals 保存审批决定，实际工具执行由 Runtime 继续处理。
 type ToolApprovals struct {
-	CommandPolicy CommandPolicy
-	Transactions  repository.TxRunner
-	Tasks         repository.TaskRepository
-	Invocations   repository.ToolInvocationRepository
+	DecideOperation func(context.Context, toolmodel.ToolInvocation) (security.ApprovalDecision, error)
+	Transactions    repository.TxRunner
+	Tasks           repository.TaskRepository
+	Invocations     repository.ToolInvocationRepository
 }
 
 func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, approve bool) (taskmodel.Task, error) {
@@ -51,18 +45,15 @@ func (a ToolApprovals) Decide(ctx context.Context, params request.ToolDecision, 
 		if !task.Active() || invocation.Status != toolmodel.ToolInvocationAwaitingApproval {
 			return contracts.ErrRequestConflict
 		}
-		if approve && invocation.Name == contracts.ToolBash {
-			var arguments struct {
-				Command string `json:"command"`
-			}
-			if err := json.Unmarshal(invocation.NormalizedArguments, &arguments); err != nil {
+		if approve {
+			decision, err := a.DecideOperation(txCtx, invocation)
+			if err != nil {
 				return err
 			}
-			if a.CommandPolicy.DecideCommand(arguments.Command).Action == security.CommandDeny {
-				err = invocation.Deny(toolmodel.ToolInvocationResult{InlineContent: "The command is prohibited by the current command policy.", ErrorCode: toolmodel.ToolFailureNotAllowed}, time.Now().UTC())
-				if err != nil {
-					return err
-				}
+			if err := invocation.RecheckAuthorization(decision, time.Now()); err != nil {
+				return err
+			}
+			if invocation.Status != toolmodel.ToolInvocationAwaitingApproval {
 				return a.Invocations.Save(txCtx, invocation)
 			}
 		}

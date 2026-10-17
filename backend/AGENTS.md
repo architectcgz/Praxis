@@ -26,7 +26,7 @@
 - Pause / Stop 必须先提交控制意图，再传递取消；最终 Outcome 由 `Settle` 事务仲裁。结算失败保留占用及待提交结果，再次激活只重试结算；只有成功提交的 completed / yielded 才自动领取队列。
 - Coordinator 的全局锁仅保护关闭和工作启动，不在锁下执行存储事务、Hook 或模型调用。关闭必须等待准备、恢复、Loop 和结算退出；等待超时不得关闭 JSONL Store 或日志，后续 Close 可以继续等待。
 - Coordinator 每次进入或恢复 Loop 前通过 TaskService 加载通用内容；Loop 自己调用通用 ContextBuilder，并在消息恢复后重新读取已提交 Progress。
-- 并发路径变更运行 `go test ./...`、`go test -race ./...` 和 `go vet ./...`；增加依赖门禁：`./internal/loop/...` 禁 `internal/(execution|service)`，`./internal/execution/...` 禁 `internal/service`。
+- 变更后运行 `go build ./...` 和 `go vet ./...`，并发行为通过人工回归验证；增加依赖门禁：`./internal/loop/...` 禁 `internal/(execution|service)`，`./internal/execution/...` 禁 `internal/service`。
 
 - 通用上下文依赖门禁：`./internal/core/context/...` 禁 `internal/(core/(task|session|agent)|repository|service|infra|execution|loop)`；与根 `AGENTS.md` 中的其余门禁一并执行。
 
@@ -42,8 +42,8 @@
 - `infra/jsonl` 只保存日志位置、查询元数据和缺失回执事实，不长期保存完整领域正文；消息索引按 Session 懒加载且缓存总条目数有界。事务使用变更集，不复制全局索引，不执行全图校验。
 - `MessageStreams.List` / `LoadMessages` 保持只读，消息边界是同次读取的最后一条可见消息序号。`repository.MessageWriter` 的 Assistant、调用身份和最终输出证据必须原子保存，ToolResult 与输出字节累计幂等提交。
 - TaskService 显式协调工具恢复；启动恢复先将遗留 running 调用收敛为 unknown，再启动 Coordinator。当前运行中的调用与审批等待不得被普通历史读取或正常业务恢复错误结束。
-- `storage.json` 的 v3 标识是唯一格式入口，拒绝未知格式和未标识的非空数据目录；不提供迁移、猜测解析或静默清理。
-- `go vet ./...` 后执行 `scripts/check-dependencies.sh`；并发修改仍执行 `go test -race ./...`。
+- JSONL 不创建或读取 `storage.json`，不设置存储版本字段；恢复只按当前数据结构严格校验，不提供迁移、兼容读取或静默清理。
+- `go build ./...`、`go vet ./...` 后执行 `scripts/check-dependencies.sh`；不保留测试文件，不新增或运行自动化测试。
 
 ## 注释与错误信息语言
 
@@ -60,9 +60,10 @@
 - Task 固定使用 `core/task.MaxIterations = 30` 和 `MaxToolCalls = 100`。正常 ReAct 请求在事务内预留 Iterations；摘要只增加 ModelRequests。所有请求共用 NextSequence，拒绝重复和旧序号；审批恢复不得重扣工具额度。
 - Assistant 的最终完成判断属于 Loop。Loop 注入 IDGenerator / Clock 构建 ToolInvocation，并通过 `repository.AssistantWrite` 明确提交 Message、ToolCalls 和可选 FinalOutput；JSONL 不解释 StopReason，不生成调用身份或时间。
 - Task 与 ToolInvocation 的状态转换、不可变字段及预算单调性由 Core 的 ValidateUpdate 统一定义，领域命令复用同一转换规则；JSONL 仅委托校验并负责事务与跨对象一致性。
-- 启动层在 DataRoot.Initialize 后排他创建缺失的 models.json、auth.json、tools.json 与默认 Agent 文件，已有文件原样保留。Registry Load / ReloadConfig 只读校验；不得创建缺失配置、补角色、裁剪指令或修复凭据。Provider Key 由 request 规范化 ProviderID，密钥原样传递和保存。
+- 启动层在 DataRoot.Initialize 后排他创建缺失的 models.json、auth.json、tools.json、settings.json 与默认 Agent 文件，已有文件原样保留。Registry Load / ReloadConfig 只读校验；不得创建缺失配置、补角色、裁剪指令或修复凭据。Provider Key 由 request 规范化 ProviderID，密钥原样传递和保存。
 - Loop 在原始调用提交后调用工具 Normalizer，按 Workspace 一次准备路径和参数，并将准备结果或错误交给 Executor 结算。审批及执行恢复复用持久化 NormalizedArguments / Path；Executor 不重复规范化，但仍检查当前工具、权限、审批与未知副作用。
+- 单次操作统一使用 ask / auto / yolo / deny，不存在 allow。deny 优先于统一 yolo 和具体规则，未命中规则使用项目/全局默认动作。模型只返回 safe / dangerous / uncertain，危险直接拒绝、不确定才转人工。授权不变量与状态转换集中在 `core/tool_invocation/authorization.go` 和 `risk_review.go`；调用层仅编排事务、外部审核和持久化，不能直接修改授权状态。
 - 通用上下文压缩只包含算法，SummaryFormat 的 Prompt、标题和结果前缀由 compose 注入；摘要文本只在 Loop 的 Provider 响应边界规范化。
 - Repository 的 limit=0 表示完整读取，不补默认值；桌面 service 入口把 0 转为 100 并拒绝负数。历史拼接先完整读取再分页；标题查询词由调用入口准备。
 - Workspace 文本读取只返回 contracts 的通用文件错误，Session 预览用例映射业务文案；Document Store 不按字段名推断敏感数据。Task 失败消息原样保存。
-- storage.json v3 是唯一格式入口。缺失 Iterations 的旧格式不得恢复执行；不提供迁移、不猜测预算、不修改旧数据。
+- Task 恢复按当前领域约束校验执行预算，不猜测或修补计数，不自动改写持久化数据。
