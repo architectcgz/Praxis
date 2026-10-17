@@ -64,19 +64,18 @@ export function TokenUsageBreakdown({ labels }: { labels: string[] }) {
 
 const percent = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits: 1 })
 
-/** 同一后端快照展示会话总量、输入、输出、缓存读写与缓存率；未知计数不补零。 */
+/** 同一后端快照展示会话已上报的用量与缓存率；未上报项隐藏，零值保留。 */
 export function SessionTokenUsage() {
     const { summary, loading, error } = useSessionModelUsage()
     const records = summary?.records ?? []
     const usage = formatModelUsage(summarizeModelUsage(records))
     const ratio = summary?.cacheReadRatio
-    const cacheLabel = `缓存率 ${ratio == null ? '--' : percent.format(ratio)}`
-    const cacheDetails = ratio != null ? `缓存率：${percent.format(ratio)}`
-        : summary?.cacheReadComplete === false ? '缓存率：未知（部分缓存读取计数未上报）' : '缓存率：未知（暂无输入 token）'
-    const text = loading ? '… tokens' : error ? '用量不可用' : records.length === 0 ? '-- tokens' : ''
-    const title = loading ? '正在加载会话 token 用量' : error ? `Token 用量加载失败：${error}` : records.length === 0 ? '暂无模型上报的 token 用量'
-        : `会话累计（仅已保存的请求，包含所有 Agent）\n${usage.details}\n${cacheDetails}`
+    const cacheLabels = ratio == null ? [] : [`缓存率 ${percent.format(ratio)}`]
+    const cacheDetails = ratio == null ? [] : [`缓存率：${percent.format(ratio)}`]
+    if (records.length === 0 && !error) return null
+    const title = error ? `Token 用量加载失败：${error}`
+        : ['会话累计（仅已保存的请求，包含所有 Agent）', usage.details, ...cacheDetails].join('\n')
     return <span className="composer-token-usage" title={title} aria-label={title} aria-busy={loading}>
-        {text || <TokenUsageBreakdown labels={[...usage.labels, cacheLabel]} />}
+        {error ? '用量不可用' : <TokenUsageBreakdown labels={[...usage.labels, ...cacheLabels]} />}
     </span>
 }

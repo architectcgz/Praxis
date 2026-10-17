@@ -44,28 +44,28 @@ export function summarizeModelUsage(records: ModelUsageRecord[]) {
 const compactCount = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 const exactCount = new Intl.NumberFormat('zh-CN')
 
-/** 统一会话与单次请求的分项展示；不完整计数标为下限，缓存不重复计入总量。 */
+/** 统一展示已上报分项，保留零值；不完整计数标为下限，缓存不重复计入总量。 */
 export function formatModelUsage(usage: ReturnType<typeof summarizeModelUsage>) {
     const cacheTokens = usage.cacheReadInputTokens + usage.cacheCreationInputTokens
     const hasCache = usage.hasCacheRead || usage.hasCacheCreation
     const missingCache = usage.missingCacheRead || usage.missingCacheCreation
-    const compact = (value: number, reported = true, missing = false) => reported ? `${compactCount.format(value)}${missing ? '+' : ''}` : '未上报'
-    const exact = (value: number, reported = true, missing = false) => reported ? `${exactCount.format(value)} tokens${missing ? '（部分计数未上报）' : ''}` : '未上报'
+    const compact = (value: number, missing = false) => `${compactCount.format(value)}${missing ? '+' : ''}`
+    const exact = (value: number, missing = false) => `${exactCount.format(value)} tokens${missing ? '（部分计数未上报）' : ''}`
     return {
         labels: [
-            `总计 ${compact(usage.totalTokens, true, usage.missingOutput)} tokens`,
+            `总计 ${compact(usage.totalTokens, usage.missingOutput)} tokens`,
             `输入 ${compact(usage.inputTokens)}`,
-            `输出 ${compact(usage.outputTokens, usage.hasOutput, usage.missingOutput)}`,
-            `缓存读取 ${compact(usage.cacheReadInputTokens, usage.hasCacheRead, usage.missingCacheRead)}`,
-            `缓存写入 ${compact(usage.cacheCreationInputTokens, usage.hasCacheCreation, usage.missingCacheCreation)}`,
-        ],
+            usage.hasOutput ? `输出 ${compact(usage.outputTokens, usage.missingOutput)}` : undefined,
+            usage.hasCacheRead ? `缓存读取 ${compact(usage.cacheReadInputTokens, usage.missingCacheRead)}` : undefined,
+            usage.hasCacheCreation ? `缓存写入 ${compact(usage.cacheCreationInputTokens, usage.missingCacheCreation)}` : undefined,
+        ].filter((label) => label !== undefined),
         details: [
-            `总计：${exact(usage.totalTokens, true, usage.missingOutput)}`,
+            `总计：${exact(usage.totalTokens, usage.missingOutput)}`,
             `输入：${exact(usage.inputTokens)}（含缓存）`,
-            `输出：${exact(usage.outputTokens, usage.hasOutput, usage.missingOutput)}`,
-            `缓存：${exact(cacheTokens, hasCache, missingCache)}`,
-            `缓存读取：${exact(usage.cacheReadInputTokens, usage.hasCacheRead, usage.missingCacheRead)}`,
-            `缓存写入：${exact(usage.cacheCreationInputTokens, usage.hasCacheCreation, usage.missingCacheCreation)}`,
-        ].join('\n'),
+            usage.hasOutput ? `输出：${exact(usage.outputTokens, usage.missingOutput)}` : undefined,
+            hasCache ? `缓存：${exact(cacheTokens, missingCache)}` : undefined,
+            usage.hasCacheRead ? `缓存读取：${exact(usage.cacheReadInputTokens, usage.missingCacheRead)}` : undefined,
+            usage.hasCacheCreation ? `缓存写入：${exact(usage.cacheCreationInputTokens, usage.missingCacheCreation)}` : undefined,
+        ].filter(Boolean).join('\n'),
     }
 }
