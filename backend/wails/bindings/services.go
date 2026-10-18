@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"praxis/internal/agent"
+	taskservice "praxis/internal/agent/input"
 	"praxis/internal/execution"
 	"praxis/internal/identity"
 	"praxis/internal/message"
@@ -13,7 +14,7 @@ import (
 	"praxis/internal/project"
 	"praxis/internal/security"
 	"praxis/internal/session"
-	taskservice "praxis/internal/task/service"
+	queueservice "praxis/internal/task/service"
 	"praxis/internal/timing"
 	"praxis/internal/toolcall"
 )
@@ -47,7 +48,7 @@ type AgentCommands interface {
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
 	SendInput(context.Context, taskservice.SendInput) (execution.StartResult, error)
-	EnqueueTask(context.Context, taskservice.EnqueueInput) (taskservice.EnqueueResult, error)
+	EnqueueTask(context.Context, queueservice.EnqueueInput) (queueservice.EnqueueResult, error)
 }
 
 type ModelCatalog interface {

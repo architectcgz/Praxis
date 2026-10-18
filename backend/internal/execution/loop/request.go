@@ -3,10 +3,10 @@ package loop
 import (
 	"context"
 	"errors"
+	taskmodel "praxis/internal/agent"
 	appcontext "praxis/internal/context"
 	"praxis/internal/hook"
 	modelapi "praxis/internal/model"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/tool"
 	"strings"
 	"time"
@@ -16,7 +16,7 @@ import (
 // 请求在 Task 创建事务之外运行；原历史仍由调用方持有。
 func (r *Runner) summarizeContext(
 	ctx context.Context,
-	task taskmodel.Task,
+	task taskmodel.Execution,
 	stream modelapi.ModelStream,
 	history appcontext.ModelContext,
 	limit int,
@@ -27,14 +27,14 @@ func (r *Runner) summarizeContext(
 	}
 	turnID := taskmodel.NewTurnID(task.ID, sequence)
 	r.emit(Event{
-		Kind:      EventTurnStarted,
-		SessionID: task.SessionID,
-		AgentID:   task.AgentID,
-		TaskID:    task.ID,
-		TurnID:    turnID,
+		Kind:        EventTurnStarted,
+		SessionID:   task.SessionID,
+		AgentID:     task.AgentID,
+		ExecutionID: task.ID,
+		TurnID:      turnID,
 	})
 	request := modelapi.ModelRequest{
-		TaskID:          task.ID,
+		ExecutionID:     task.ID,
 		PromptCacheKey:  task.SessionID.String(),
 		Context:         history,
 		Model:           task.Config.Model,
@@ -44,10 +44,10 @@ func (r *Runner) summarizeContext(
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	response, err := requestModel(requestCtx, stream, request, hook.Identity{
-		SessionID: task.SessionID,
-		AgentID:   task.AgentID,
-		TaskID:    task.ID,
-		TurnID:    turnID,
+		SessionID:   task.SessionID,
+		AgentID:     task.AgentID,
+		ExecutionID: task.ID,
+		TurnID:      turnID,
 	}, r.HookDispatcher, func(event modelapi.ModelStreamEvent) {
 		if event.Kind == modelapi.StreamUsage {
 			r.emitModelEvent(task.SessionID, task.AgentID, task.ID, turnID, event)
@@ -57,7 +57,7 @@ func (r *Runner) summarizeContext(
 		return "", modelFailure(err)
 	}
 	if err := r.Progress.RecordModelOutput(ctx, task.ID, response.textBytes); err != nil {
-		return "", failCause(taskmodel.TaskFailureStorage, err)
+		return "", failCause(taskmodel.ExecutionFailureStorage, err)
 	}
 	if len(response.toolCalls()) != 0 {
 		return "", errors.New("context summary returned a tool call")
@@ -69,12 +69,12 @@ func (r *Runner) summarizeContext(
 		}
 	}
 	r.emit(Event{
-		Kind:       EventTurnCompleted,
-		SessionID:  task.SessionID,
-		AgentID:    task.AgentID,
-		TaskID:     task.ID,
-		TurnID:     turnID,
-		StopReason: response.stopReason,
+		Kind:        EventTurnCompleted,
+		SessionID:   task.SessionID,
+		AgentID:     task.AgentID,
+		ExecutionID: task.ID,
+		TurnID:      turnID,
+		StopReason:  response.stopReason,
 	})
 	return strings.TrimSpace(text.String()), nil
 }

@@ -22,7 +22,7 @@ var storedToolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
 func validateToolExecution(i toolcall.Execution) error {
 	for _, value := range []string{
 		i.ID.String(),
-		i.TaskID.String(),
+		i.ExecutionID.String(),
 		i.TurnID.String(),
 		i.SessionID.String(),
 		i.AgentID.String(),

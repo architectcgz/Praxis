@@ -21,25 +21,25 @@ const (
 
 // SessionContextEntry 是只追加的 Session 共享事实，不保存消息副本。
 type SessionContextEntry struct {
-	ID            identity.ContextEntryID
-	SessionID     identity.SessionID
-	Kind          SessionContextKind
-	SourceTaskID  identity.TaskID
-	Content       string
-	ContentDigest string
-	CreatedAt     time.Time
+	ID                identity.ContextEntryID
+	SessionID         identity.SessionID
+	Kind              SessionContextKind
+	SourceExecutionID identity.AgentExecutionID
+	Content           string
+	ContentDigest     string
+	CreatedAt         time.Time
 }
 
 // NewSessionContextEntry 使用入口已规范化并校验的正文创建共享事实及其摘要。
-func NewSessionContextEntry(id identity.ContextEntryID, sessionID identity.SessionID, kind SessionContextKind, sourceTaskID identity.TaskID, content string, at time.Time) SessionContextEntry {
+func NewSessionContextEntry(id identity.ContextEntryID, sessionID identity.SessionID, kind SessionContextKind, sourceExecutionID identity.AgentExecutionID, content string, at time.Time) SessionContextEntry {
 	return SessionContextEntry{
-		ID:            id,
-		SessionID:     sessionID,
-		Kind:          kind,
-		SourceTaskID:  sourceTaskID,
-		Content:       content,
-		ContentDigest: ContentDigest(content),
-		CreatedAt:     at.UTC(),
+		ID:                id,
+		SessionID:         sessionID,
+		Kind:              kind,
+		SourceExecutionID: sourceExecutionID,
+		Content:           content,
+		ContentDigest:     ContentDigest(content),
+		CreatedAt:         at.UTC(),
 	}
 }
 

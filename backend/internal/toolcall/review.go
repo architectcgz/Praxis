@@ -2,10 +2,10 @@ package toolcall
 
 import (
 	"context"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/security"
-	taskmodel "praxis/internal/task"
 	"time"
 )
 
@@ -14,11 +14,11 @@ const riskReviewTimeout = time.Minute
 // review 仅编排审核身份、外部模型调用和结果提交；所有状态决策由 Core 完成。
 func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (Execution, error) {
 	if _, loaded := s.reviewInFlight.LoadOrStore(id, struct{}{}); loaded {
-		return Execution{}, fault.New(taskmodel.TaskBusy, "this operation is already being reviewed")
+		return Execution{}, fault.New(taskmodel.ExecutionBusy, "this operation is already being reviewed")
 	}
 	defer s.reviewInFlight.Delete(id)
 	var invocation Execution
-	var task taskmodel.Task
+	var task taskmodel.Execution
 	var attempt RiskReview
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error
@@ -26,7 +26,7 @@ func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (Exe
 		if err != nil || !invocation.NeedsRiskReview() {
 			return err
 		}
-		task, err = s.tasks.Get(txCtx, invocation.TaskID)
+		task, err = s.tasks.Get(txCtx, invocation.ExecutionID)
 		if err != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (Exe
 		if err != nil {
 			return err
 		}
-		currentTask, err := s.tasks.Get(txCtx, current.TaskID)
+		currentTask, err := s.tasks.Get(txCtx, current.ExecutionID)
 		if err != nil {
 			return err
 		}

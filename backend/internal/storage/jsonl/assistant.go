@@ -16,7 +16,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.Assis
 		return stored, false, errors.New("assistant ownership is required")
 	}
 	err = w.streams.s.InTx(ctx, func(txCtx context.Context) error {
-		task, err := (TaskRepository{w.streams.s}).Get(txCtx, identity.TaskID(message.TaskID))
+		task, err := (AgentExecutionRepository{w.streams.s}).Get(txCtx, identity.AgentExecutionID(message.ExecutionID))
 		if err != nil {
 			return err
 		}
@@ -28,7 +28,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.Assis
 			if _, ok := calls[call.ProviderToolCallID]; ok {
 				return fault.ErrRequestConflict
 			}
-			if call.TaskID != task.ID || call.SessionID != task.SessionID || call.AgentID != task.AgentID || call.TurnID.String() != message.TurnID || call.ArgumentsDigest != toolcall.ArgumentsDigest(call.Name, call.Arguments) || call.Status != toolcall.StatusRequested || call.BudgetReserved || len(call.NormalizedArguments) != 0 || call.Path != "" {
+			if call.ExecutionID != task.ID || call.SessionID != task.SessionID || call.AgentID != task.AgentID || call.TurnID.String() != message.TurnID || call.ArgumentsDigest != toolcall.ArgumentsDigest(call.Name, call.Arguments) || call.Status != toolcall.StatusRequested || call.BudgetReserved || len(call.NormalizedArguments) != 0 || call.Path != "" {
 				return fault.ErrRequestConflict
 			}
 			calls[call.ProviderToolCallID] = call
@@ -59,7 +59,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.Assis
 			return err
 		}
 		for _, call := range value.ToolCalls {
-			existing, err := (ToolExecutionRepository{w.streams.s}).FindByTaskCall(txCtx, task.ID, call.ProviderToolCallID)
+			existing, err := (ToolExecutionRepository{w.streams.s}).FindByExecutionCall(txCtx, task.ID, call.ProviderToolCallID)
 			if err == nil {
 				if existing.Name != call.Name || existing.ArgumentsDigest != call.ArgumentsDigest || existing.TurnID != call.TurnID || existing.SessionID != call.SessionID || existing.AgentID != call.AgentID {
 					return fault.ErrRequestConflict
@@ -77,7 +77,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.Assis
 			}
 		}
 		if !inserted {
-			current, err := (TaskRepository{w.streams.s}).Get(txCtx, task.ID)
+			current, err := (AgentExecutionRepository{w.streams.s}).Get(txCtx, task.ID)
 			if err != nil {
 				return err
 			}
@@ -90,7 +90,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.Assis
 			if value.FinalOutput.StopReason != "completed" && value.FinalOutput.StopReason != "stop_sequence" {
 				return fault.InvalidValue("task.finalOutput", "invalid final output evidence")
 			}
-			return (TaskRepository{w.streams.s}).Save(txCtx, task)
+			return (AgentExecutionRepository{w.streams.s}).Save(txCtx, task)
 		}
 		return nil
 	})

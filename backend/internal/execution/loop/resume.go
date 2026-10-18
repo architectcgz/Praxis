@@ -3,10 +3,10 @@ package loop
 import (
 	"context"
 	"errors"
+	taskmodel "praxis/internal/agent"
 	appcontext "praxis/internal/context"
 	"praxis/internal/identity"
 	messagemodel "praxis/internal/message"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/tool"
 	"praxis/internal/toolcall"
 )
@@ -14,7 +14,7 @@ import (
 var errAwaitingApproval = errors.New("task is awaiting tool approval")
 
 // resumeToolCalls 先结算已经提交的工具轮，再发起新的模型请求。
-func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messages []messagemodel.Message, recorder messagemodel.Writer, modelContext *appcontext.ModelContext) error {
+func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Execution, messages []messagemodel.Message, recorder messagemodel.Writer, modelContext *appcontext.ModelContext) error {
 	receipts := make(map[string]bool)
 	for _, message := range messages {
 		for _, block := range message.Blocks {
@@ -28,7 +28,7 @@ func (r *Runner) resumeToolCalls(ctx context.Context, task taskmodel.Task, messa
 			continue
 		}
 		metadata := toolcall.ToolExecutionMetadata{
-			TaskID:        task.ID,
+			ExecutionID:   task.ID,
 			TurnID:        identity.TurnID(message.TurnID),
 			SessionID:     task.SessionID,
 			AgentID:       task.AgentID,

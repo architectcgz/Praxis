@@ -5,14 +5,13 @@ import (
 	"errors"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	taskmodel "praxis/internal/task"
 )
 
 // ControlParams 标识控制目标；必须使用观察到的 Task ID，延迟命令不能影响下一项执行。
 type ControlInput struct {
-	CommandID    identity.AgentControlCommandID
-	AgentID      identity.AgentID
-	TargetTaskID identity.TaskID
+	CommandID         identity.AgentControlCommandID
+	AgentID           identity.AgentID
+	TargetExecutionID identity.AgentExecutionID
 }
 
 // ControlResult 返回持久化控制命令；信号送达不代表 runtime 已完成结算。
@@ -41,7 +40,7 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind Ag
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.controls.Get(txCtx, params.CommandID)
 		if err == nil {
-			if existing.AgentID != params.AgentID || existing.TargetTaskID != params.TargetTaskID || existing.Kind != kind {
+			if existing.AgentID != params.AgentID || existing.TargetExecutionID != params.TargetExecutionID || existing.Kind != kind {
 				return fault.New(fault.InvalidRequest, "")
 			}
 			result = ControlResult{Command: existing, ExistingCommand: true}
@@ -54,7 +53,7 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind Ag
 		if err != nil {
 			return err
 		}
-		task, err := s.tasks.Get(txCtx, params.TargetTaskID)
+		task, err := s.tasks.Get(txCtx, params.TargetExecutionID)
 		if err != nil {
 			return err
 		}
@@ -63,11 +62,11 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind Ag
 		}
 		at := s.clock.Now()
 		control := NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
-		if task.Status == taskmodel.TaskEnded {
+		if task.Status == ExecutionEnded {
 			if err := control.MarkApplied(at); err != nil {
 				return err
 			}
-		} else if agent.CurrentTaskID != task.ID {
+		} else if agent.CurrentExecutionID != task.ID {
 			return fault.New(UnavailableCode, "")
 		} else if agent.State == AgentExecuting {
 			if err := agent.RequestPause(at); err != nil {
@@ -99,9 +98,9 @@ func (s *Service) signalControl(result ControlResult) ControlResult {
 	}
 	command := result.Command
 	if command.Kind == AgentControlPause {
-		s.executions.Pause(command.AgentID, command.TargetTaskID)
+		s.executions.Pause(command.AgentID, command.TargetExecutionID)
 	} else {
-		s.executions.Stop(command.AgentID, command.TargetTaskID)
+		s.executions.Stop(command.AgentID, command.TargetExecutionID)
 	}
 	// loop 已返回时无需再发信号，结束事务负责应用已提交的控制命令。
 	return result

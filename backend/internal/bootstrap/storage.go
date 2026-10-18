@@ -49,10 +49,10 @@ func buildTimings(ctx context.Context, store *jsonl.Store, events *execution.Eve
 	}
 	return timing.New(timings, func(record timing.Record) {
 		events.Publish(execution.Event{
-			Kind:    "operation_timing",
-			AgentID: identity.AgentID(record.AgentID),
-			TaskID:  identity.TaskID(record.TaskID),
-			Timing:  &record,
+			Kind:        "operation_timing",
+			AgentID:     identity.AgentID(record.AgentID),
+			ExecutionID: identity.AgentExecutionID(record.ExecutionID),
+			Timing:      &record,
 		})
 	}, logger.Errorf)
 }
@@ -64,7 +64,7 @@ func usageObserver(store *jsonl.Store, logger *logging.Logger) func(model.ModelU
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := usages.Save(ctx, record); err != nil {
-			logger.Errorf("token usage save failed task=%s turn=%s: %v", record.TaskID, record.TurnID, err)
+			logger.Errorf("token usage save failed task=%s turn=%s: %v", record.ExecutionID, record.TurnID, err)
 		}
 	}
 }

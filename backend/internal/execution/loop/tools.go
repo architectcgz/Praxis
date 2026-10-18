@@ -3,11 +3,11 @@ package loop
 import (
 	"context"
 	"errors"
+	taskmodel "praxis/internal/agent"
 	appcontext "praxis/internal/context"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	messagemodel "praxis/internal/message"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/tool"
 	"praxis/internal/toolcall"
 	"regexp"
@@ -21,7 +21,7 @@ func validateToolCalls(calls []ToolCall) error {
 	seen := map[string]bool{}
 	for _, call := range calls {
 		if seen[call.ID] || !toolNamePattern.MatchString(string(call.Name)) {
-			return fail(taskmodel.TaskFailureContract, ErrorContract, "provider emitted an invalid tool call")
+			return fail(taskmodel.ExecutionFailureContract, ErrorContract, "provider emitted an invalid tool call")
 		}
 		seen[call.ID] = true
 	}
@@ -43,9 +43,9 @@ func (r *Runner) runToolCalls(
 	limited := false
 	for callIndex, call := range calls {
 		prepared := tool.PreparedToolCall{Call: call}
-		invocation, err := r.Executions.FindByTaskCall(ctx, metadata.TaskID, call.ID)
+		invocation, err := r.Executions.FindByExecutionCall(ctx, metadata.ExecutionID, call.ID)
 		if err != nil {
-			return results, failCause(taskmodel.TaskFailureStorage, err)
+			return results, failCause(taskmodel.ExecutionFailureStorage, err)
 		}
 		if invocation.Status == toolcall.StatusRequested {
 			tool, ok := r.Tools.Get(call.Name)
@@ -57,13 +57,13 @@ func (r *Runner) runToolCalls(
 		if execution.ApprovalPending {
 			// 授权事件只通知调用状态；参数由工具调用事件和持久化查询提供。
 			r.emit(Event{
-				Kind:      EventToolApprovalRequired,
-				SessionID: metadata.SessionID,
-				AgentID:   metadata.AgentID,
-				TaskID:    metadata.TaskID,
-				TurnID:    metadata.TurnID,
-				CallID:    call.ID,
-				Name:      string(call.Name),
+				Kind:        EventToolApprovalRequired,
+				SessionID:   metadata.SessionID,
+				AgentID:     metadata.AgentID,
+				ExecutionID: metadata.ExecutionID,
+				TurnID:      metadata.TurnID,
+				CallID:      call.ID,
+				Name:        string(call.Name),
 			})
 			return results, errAwaitingApproval
 		}
@@ -72,40 +72,40 @@ func (r *Runner) runToolCalls(
 			// 在结算失败前写入受限回执，确保人工检查时能看到已尝试的副作用。
 			payload := result.Payload
 			if payload == "" {
-				if errors.Is(err, fault.New(taskmodel.TaskBusy, "")) {
-					return results, failCause(taskmodel.TaskFailureBusy, err)
+				if errors.Is(err, fault.New(taskmodel.ExecutionBusy, "")) {
+					return results, failCause(taskmodel.ExecutionFailureBusy, err)
 				}
-				if errors.Is(err, fault.New(taskmodel.TaskPolicyBlocked, "")) {
-					return results, failCause(taskmodel.TaskFailurePolicyBlocked, err)
+				if errors.Is(err, fault.New(taskmodel.ExecutionPolicyBlocked, "")) {
+					return results, failCause(taskmodel.ExecutionFailurePolicyBlocked, err)
 				}
-				if errors.Is(err, fault.New(taskmodel.TaskResourceLimit, "")) {
-					return results, failCause(taskmodel.TaskFailureResourceLimit, err)
+				if errors.Is(err, fault.New(taskmodel.ExecutionResourceLimit, "")) {
+					return results, failCause(taskmodel.ExecutionFailureResourceLimit, err)
 				}
-				return results, failCause(taskmodel.TaskFailureStorage, err)
+				return results, failCause(taskmodel.ExecutionFailureStorage, err)
 			}
 			block := appcontext.NewToolResultBlock(call.ID, string(call.Name), payload, true)
-			if receiptErr := appendToolResult(ctx, messageWriter, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); receiptErr != nil {
-				return results, failCause(taskmodel.TaskFailureStorage,
+			if receiptErr := appendToolResult(ctx, messageWriter, requestID, metadata.ExecutionID, metadata.TurnID, callIndex, block); receiptErr != nil {
+				return results, failCause(taskmodel.ExecutionFailureStorage,
 					&RuntimeError{Code: ErrorStorage, Message: "tool result receipt failed", Cause: receiptErr})
 			}
-			r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
-			return results, failCause(taskmodel.TaskFailureTool,
+			r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.ExecutionID, metadata.TurnID, block)
+			return results, failCause(taskmodel.ExecutionFailureTool,
 				&RuntimeError{Code: ErrorTool, Message: "tool execution failed", Cause: err})
 		}
 		if result.Payload == "" {
 			result.Payload = "(empty tool result)"
 		}
 		block := appcontext.NewToolResultBlock(call.ID, string(call.Name), result.Payload, result.ErrorClass != "")
-		if err := appendToolResult(ctx, messageWriter, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); err != nil {
+		if err := appendToolResult(ctx, messageWriter, requestID, metadata.ExecutionID, metadata.TurnID, callIndex, block); err != nil {
 			return results, err
 		}
-		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
+		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.ExecutionID, metadata.TurnID, block)
 		results = append(results, result)
 		limited = limited || result.ErrorClass == string(toolcall.FailureResourceLimit)
 
 	}
 	if limited {
-		return results, fail(taskmodel.TaskFailureResourceLimit, ErrorResourceLimit, "tool call limit exceeded")
+		return results, fail(taskmodel.ExecutionFailureResourceLimit, ErrorResourceLimit, "tool call limit exceeded")
 	}
 	return results, nil
 }

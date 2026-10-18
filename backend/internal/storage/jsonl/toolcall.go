@@ -19,8 +19,8 @@ func (r ToolExecutionRepository) Save(ctx context.Context, v toolcall.Execution)
 	return save(ctx, r.s, v.SessionID.String(), "tool", v.ID.String(), "tool.saved", v)
 }
 
-// FindByTaskCall 按 Task 和 Provider 调用身份查询，第二个返回值表示是否存在。
-func (r ToolExecutionRepository) FindByTaskCall(ctx context.Context, id identity.TaskID, call string) (toolcall.Execution, error) {
+// FindByExecutionCall 按 Task 和 Provider 调用身份查询，第二个返回值表示是否存在。
+func (r ToolExecutionRepository) FindByExecutionCall(ctx context.Context, id identity.AgentExecutionID, call string) (toolcall.Execution, error) {
 	return getByClaim[toolcall.Execution](ctx, r.s, lookupKey{kind: "tool-call", owner: id.String(), value: call})
 }
 
@@ -32,7 +32,7 @@ func (r ToolExecutionRepository) ListUnsettledBySession(ctx context.Context, id 
 	}), e
 }
 
-func (r ToolExecutionRepository) ListByTask(ctx context.Context, id identity.TaskID) ([]toolcall.Execution, error) {
+func (r ToolExecutionRepository) ListByExecution(ctx context.Context, id identity.AgentExecutionID) ([]toolcall.Execution, error) {
 	return listIndexed[toolcall.Execution](ctx, r.s, lookupKey{kind: "tools-task", owner: id.String()}, nil)
 }
 

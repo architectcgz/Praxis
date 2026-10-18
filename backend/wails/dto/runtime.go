@@ -15,18 +15,18 @@ type ModelUsage struct {
 
 // ModelUsageRecord 是一次模型请求的持久化用量。
 type ModelUsageRecord struct {
-	SessionID string     `json:"sessionId"`
-	AgentID   string     `json:"agentId"`
-	TaskID    string     `json:"taskId"`
-	TurnID    string     `json:"turnId"`
-	Usage     ModelUsage `json:"usage"`
+	SessionID   string     `json:"sessionId"`
+	AgentID     string     `json:"agentId"`
+	ExecutionID string     `json:"executionId"`
+	TurnID      string     `json:"turnId"`
+	Usage       ModelUsage `json:"usage"`
 }
 
 // OperationTiming 是独立的操作计时事实；可选耗时为 nil 时保持未知。
 type OperationTiming struct {
 	SessionID       string    `json:"sessionId"`
 	AgentID         string    `json:"agentId"`
-	TaskID          string    `json:"taskId"`
+	ExecutionID     string    `json:"executionId"`
 	Kind            string    `json:"kind"`
 	Name            string    `json:"name"`
 	ReferenceID     string    `json:"referenceId,omitempty"`
@@ -45,7 +45,7 @@ type AgentEvent struct {
 	Kind           string           `json:"kind"`
 	SessionID      string           `json:"sessionId,omitempty"`
 	AgentID        string           `json:"agentId"`
-	TaskID         string           `json:"taskId"`
+	ExecutionID    string           `json:"executionId"`
 	Outcome        string           `json:"outcome,omitempty"`
 	FailureCode    string           `json:"failureCode,omitempty"`
 	FailureMessage string           `json:"failureMessage,omitempty"`

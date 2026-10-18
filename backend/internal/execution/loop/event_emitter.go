@@ -2,10 +2,10 @@ package loop
 
 import (
 	"errors"
+	taskmodel "praxis/internal/agent"
 	appcontext "praxis/internal/context"
 	"praxis/internal/identity"
 	modelapi "praxis/internal/model"
-	taskmodel "praxis/internal/task"
 )
 
 func (r *Runner) emit(event Event) {
@@ -16,15 +16,15 @@ func (r *Runner) emit(event Event) {
 func (r *Runner) emitModelEvent(
 	sessionID identity.SessionID,
 	agentID identity.AgentID,
-	taskID identity.TaskID,
+	executionID identity.AgentExecutionID,
 	turnID identity.TurnID,
 	event modelapi.ModelStreamEvent,
 ) {
 	output := Event{
-		AgentID:   agentID,
-		TaskID:    taskID,
-		TurnID:    turnID,
-		SessionID: sessionID,
+		AgentID:     agentID,
+		ExecutionID: executionID,
+		TurnID:      turnID,
+		SessionID:   sessionID,
 	}
 	switch event.Kind {
 	case modelapi.StreamTextDelta:
@@ -45,24 +45,24 @@ func (r *Runner) emitModelEvent(
 func (r *Runner) emitToolResult(
 	sessionID identity.SessionID,
 	agentID identity.AgentID,
-	taskID identity.TaskID,
+	executionID identity.AgentExecutionID,
 	turnID identity.TurnID,
 	block appcontext.ContextBlock,
 ) {
 	r.emit(Event{
-		Kind:      EventToolResult,
-		SessionID: sessionID,
-		AgentID:   agentID,
-		TaskID:    taskID,
-		TurnID:    turnID,
-		CallID:    block.CallID,
-		Name:      block.Name,
-		Result:    block.Text,
-		IsError:   block.IsError,
+		Kind:        EventToolResult,
+		SessionID:   sessionID,
+		AgentID:     agentID,
+		ExecutionID: executionID,
+		TurnID:      turnID,
+		CallID:      block.CallID,
+		Name:        block.Name,
+		Result:      block.Text,
+		IsError:     block.IsError,
 	})
 }
 
-func (r *Runner) emitError(agentID identity.AgentID, taskID identity.TaskID, turnID identity.TurnID, err error) {
+func (r *Runner) emitError(agentID identity.AgentID, executionID identity.AgentExecutionID, turnID identity.TurnID, err error) {
 	if err == nil {
 		return
 	}
@@ -73,16 +73,16 @@ func (r *Runner) emitError(agentID identity.AgentID, taskID identity.TaskID, tur
 	} else {
 		var failure *taskFailure
 		if errors.As(err, &failure) {
-			if detail := taskmodel.TaskFailureMessage(failure.code, failure.cause); detail != "" {
+			if detail := taskmodel.ExecutionFailureMessage(failure.code, failure.cause); detail != "" {
 				message = detail
 			}
 		}
 	}
 	r.emit(Event{
-		Kind:    EventError,
-		AgentID: agentID,
-		TaskID:  taskID,
-		TurnID:  turnID,
-		Error:   message,
+		Kind:        EventError,
+		AgentID:     agentID,
+		ExecutionID: executionID,
+		TurnID:      turnID,
+		Error:       message,
 	})
 }

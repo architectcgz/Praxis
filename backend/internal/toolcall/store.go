@@ -2,17 +2,17 @@ package toolcall
 
 import (
 	"context"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/identity"
 	messagemodel "praxis/internal/message"
-	taskmodel "praxis/internal/task"
 )
 
 // Store 提供工具调用生命周期所需的最小持久化能力。
 type Store interface {
 	Get(context.Context, identity.ToolExecutionID) (Execution, error)
-	FindByTaskCall(context.Context, identity.TaskID, string) (Execution, error)
+	FindByExecutionCall(context.Context, identity.AgentExecutionID, string) (Execution, error)
 	ListUnsettledBySession(context.Context, identity.SessionID) ([]Execution, error)
-	ListByTask(context.Context, identity.TaskID) ([]Execution, error)
+	ListByExecution(context.Context, identity.AgentExecutionID) ([]Execution, error)
 	ListAwaitingByAgent(context.Context, identity.AgentID) ([]Execution, error)
 	Save(context.Context, Execution) error
 }

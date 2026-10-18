@@ -27,14 +27,14 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID identity.S
 			continue
 		}
 		if err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-			task, err := s.tasks.Get(txCtx, fact.TaskID)
+			task, err := s.tasks.Get(txCtx, fact.ExecutionID)
 			if errors.Is(err, fault.ErrNotFound) {
 				return nil
 			} // 快照之后 Session 可能已删除。
 			if err != nil {
 				return err
 			}
-			invocation, err := s.toolExecutions.FindByTaskCall(txCtx, fact.TaskID, fact.CallID)
+			invocation, err := s.toolExecutions.FindByExecutionCall(txCtx, fact.ExecutionID, fact.CallID)
 			if err != nil {
 				return err
 			}
@@ -71,13 +71,13 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID identity.S
 				payload = "(empty tool result)"
 			}
 			return writer.AppendToolResult(txCtx, messagemodel.Message{
-				ID:         "tool-result:" + fact.TaskID.String() + ":" + fact.CallID,
-				RequestID:  fact.RequestID,
-				TaskID:     fact.TaskID.String(),
-				TurnID:     fact.TurnID.String(),
-				Role:       messagemodel.RoleTool,
-				AuthorKind: messagemodel.AuthorTool,
-				AuthorID:   fact.Name,
+				ID:          "tool-result:" + fact.ExecutionID.String() + ":" + fact.CallID,
+				RequestID:   fact.RequestID,
+				ExecutionID: fact.ExecutionID.String(),
+				TurnID:      fact.TurnID.String(),
+				Role:        messagemodel.RoleTool,
+				AuthorKind:  messagemodel.AuthorTool,
+				AuthorID:    fact.Name,
 				Blocks: []messagemodel.Block{{
 					Kind:    messagemodel.BlockToolResult,
 					Text:    payload,

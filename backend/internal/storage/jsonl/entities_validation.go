@@ -8,11 +8,10 @@ import (
 	modelconfig "praxis/internal/model/config"
 	projectmodel "praxis/internal/project"
 	sessionmodel "praxis/internal/session"
-	taskmodel "praxis/internal/task"
+
 	"praxis/internal/utils/pathutil"
 	"praxis/internal/workflow"
 	workspacemodel "praxis/internal/workspace"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -91,11 +90,11 @@ func validateAgent(a agentmodel.Agent) error {
 		return fault.InvalidValue("agent.state", "unknown agent state")
 	}
 	if a.State == agentmodel.AgentExecuting || a.State == agentmodel.AgentPausing {
-		if a.CurrentTaskID == "" || a.CurrentTaskID.String() != strings.TrimSpace(a.CurrentTaskID.String()) {
-			return fault.InvalidValue("agent.currentTaskID", "active state requires a task")
+		if a.CurrentExecutionID == "" || a.CurrentExecutionID.String() != strings.TrimSpace(a.CurrentExecutionID.String()) {
+			return fault.InvalidValue("agent.currentExecutionID", "active state requires a task")
 		}
-	} else if a.CurrentTaskID != "" {
-		return fault.InvalidValue("agent.currentTaskID", "inactive state cannot retain a task")
+	} else if a.CurrentExecutionID != "" {
+		return fault.InvalidValue("agent.currentExecutionID", "inactive state cannot retain a task")
 	}
 	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return fault.InvalidValue("agent.timestamps", "timestamps are invalid")
@@ -104,7 +103,7 @@ func validateAgent(a agentmodel.Agent) error {
 }
 
 func validateWaitCondition(w workflow.WaitCondition) error {
-	for _, id := range []string{w.ID.String(), w.AgentID.String(), w.TaskID.String()} {
+	for _, id := range []string{w.ID.String(), w.AgentID.String(), w.ExecutionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
 			return fault.InvalidValue("waitCondition", "required reference must be canonical and nonempty")
 		}
@@ -147,7 +146,7 @@ func validateUsageRecord(r modelapi.ModelUsageRecord) error {
 	for _, id := range []string{
 		r.SessionID,
 		r.AgentID,
-		r.TaskID,
+		r.ExecutionID,
 		r.TurnID.String(),
 	} {
 		if id == "" || id != strings.TrimSpace(id) || strings.ContainsAny(id, "\x00\r\n") {
@@ -161,7 +160,7 @@ func validateUsageRecord(r modelapi.ModelUsageRecord) error {
 }
 
 func validateControlCommand(r agentmodel.AgentControlCommand) error {
-	for _, id := range []string{r.ID.String(), r.AgentID.String(), r.TargetTaskID.String()} {
+	for _, id := range []string{r.ID.String(), r.AgentID.String(), r.TargetExecutionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
 			return fault.InvalidValue("agentControlCommand", "required reference must be canonical and nonempty")
 		}
@@ -181,8 +180,8 @@ func validateControlCommand(r agentmodel.AgentControlCommand) error {
 	return nil
 }
 
-func validateTask(e taskmodel.Task) error {
-	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 || e.Progress.ToolCalls > taskmodel.MaxToolCalls || e.Progress.Iterations > taskmodel.MaxIterations || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
+func validateTask(e agentmodel.Execution) error {
+	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 || e.Progress.ToolCalls > agentmodel.MaxToolCalls || e.Progress.Iterations > agentmodel.MaxIterations || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
 		return fault.InvalidValue("task.progress", "usage counters or request sequence are invalid")
 	}
 	if (e.Progress.FinalAssistantID == "") != (e.Progress.FinalStopReason == "") || e.Progress.FinalStopReason != "" && e.Progress.FinalStopReason != "completed" && e.Progress.FinalStopReason != "stop_sequence" {
@@ -196,13 +195,13 @@ func validateTask(e taskmodel.Task) error {
 		e.InputMessageID,
 	} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("task", "required reference must be canonical and nonempty")
+			return fault.InvalidValue("agent_execution", "required reference must be canonical and nonempty")
 		}
 	}
 	switch e.Status {
-	case taskmodel.TaskPending, taskmodel.TaskStarting, taskmodel.TaskRunning, taskmodel.TaskEnding, taskmodel.TaskEnded:
+	case agentmodel.ExecutionStarting, agentmodel.ExecutionRunning, agentmodel.ExecutionEnding, agentmodel.ExecutionEnded:
 	default:
-		return fault.InvalidValue("task", "unknown status")
+		return fault.InvalidValue("agent_execution", "unknown status")
 	}
 	if (e.ProviderID == "") != (e.ModelID == "") || e.ProviderID == "" && e.ReasoningLevel != "" {
 		return fault.InvalidValue("task.model", "provider and model are required together")
@@ -212,13 +211,10 @@ func validateTask(e taskmodel.Task) error {
 			return fault.InvalidValue("task.model", "model selection must be canonical")
 		}
 	}
-	if e.Status == taskmodel.TaskPending {
-		if e.Sequence == 0 || !reflect.ValueOf(e.Config).IsZero() || !reflect.ValueOf(e.ContextSelection).IsZero() || e.Progress != (taskmodel.Progress{}) || !e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "" || e.FailureCode != "" {
-			return fault.InvalidValue("task.pending", "pending task requires a sequence and cannot contain execution state")
-		}
-	} else if err := validateTaskConfig(e.Config); err != nil {
-		return fault.FieldError("task.config", err)
+	if err := validateTaskConfig(e.Config); err != nil {
+		return fault.FieldError("execution.config", err)
 	}
+
 	if slices.Contains(e.ContextSelection.ExcludedMessageIDs, e.InputMessageID) {
 		return fault.InvalidValue("task.contextSelection", "current input cannot be excluded")
 	}
@@ -235,25 +231,25 @@ func validateTask(e taskmodel.Task) error {
 	if e.CreatedAt.IsZero() || !e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt) || !e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt) {
 		return fault.InvalidValue("task.timestamps", "timestamps are invalid")
 	}
-	if e.Status == taskmodel.TaskStarting && (!e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
-		return fault.InvalidValue("task", "starting task has terminal fields")
+	if e.Status == agentmodel.ExecutionStarting && (!e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
+		return fault.InvalidValue("agent_execution", "starting task has terminal fields")
 	}
-	if (e.Status == taskmodel.TaskRunning || e.Status == taskmodel.TaskEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
-		return fault.InvalidValue("task", "active task has invalid lifecycle fields")
+	if (e.Status == agentmodel.ExecutionRunning || e.Status == agentmodel.ExecutionEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
+		return fault.InvalidValue("agent_execution", "active task has invalid lifecycle fields")
 	}
-	if e.Status == taskmodel.TaskEnded && (e.StartedAt.IsZero() || e.EndedAt.IsZero() || !taskmodel.ValidTaskOutcome(e.Outcome) || e.Outcome == taskmodel.TaskFailed && e.FailureCode == "") {
-		return fault.InvalidValue("task", "ended task has invalid terminal fields")
+	if e.Status == agentmodel.ExecutionEnded && (e.StartedAt.IsZero() || e.EndedAt.IsZero() || !agentmodel.ValidExecutionOutcome(e.Outcome) || e.Outcome == agentmodel.ExecutionFailed && e.FailureCode == "") {
+		return fault.InvalidValue("agent_execution", "ended task has invalid terminal fields")
 	}
-	if !taskmodel.ValidFailureCode(e.FailureCode) || e.FailureCode == taskmodel.TaskFailureRequestCanceled && e.Outcome != taskmodel.TaskPaused && e.Outcome != taskmodel.TaskInterrupted {
+	if !agentmodel.ValidFailureCode(e.FailureCode) || e.FailureCode == agentmodel.ExecutionFailureRequestCanceled && e.Outcome != agentmodel.ExecutionPaused && e.Outcome != agentmodel.ExecutionInterrupted {
 		return fault.InvalidValue("task.failureCode", "failure code does not match outcome")
 	}
-	if len([]rune(e.FailureMessage)) > taskmodel.MaxTaskFailureMessageRunes || e.FailureMessage != "" && (e.Status != taskmodel.TaskEnded || e.Outcome != taskmodel.TaskFailed) {
+	if len([]rune(e.FailureMessage)) > agentmodel.MaxExecutionFailureMessageRunes || e.FailureMessage != "" && (e.Status != agentmodel.ExecutionEnded || e.Outcome != agentmodel.ExecutionFailed) {
 		return fault.InvalidValue("task.failureMessage", "failure message is invalid")
 	}
 	return nil
 }
 
-func validateTaskConfig(s taskmodel.Config) error {
+func validateTaskConfig(s agentmodel.ExecutionConfig) error {
 	if !definitionIDPattern.MatchString(s.AgentDefinitionID.String()) {
 		return fault.InvalidValue("task.config.agentDefinition", "definition id is required")
 	}
@@ -321,8 +317,8 @@ func validateTaskModel(s modelapi.Config) error {
 }
 
 func validateContextEntry(e sessionmodel.SessionContextEntry) error {
-	if e.SourceTaskID.String() != strings.TrimSpace(e.SourceTaskID.String()) {
-		return fault.InvalidValue("sessionContext.sourceTaskID", "source task id must be canonical")
+	if e.SourceExecutionID.String() != strings.TrimSpace(e.SourceExecutionID.String()) {
+		return fault.InvalidValue("sessionContext.sourceExecutionID", "source task id must be canonical")
 	}
 	for _, id := range []string{e.ID.String(), e.SessionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {

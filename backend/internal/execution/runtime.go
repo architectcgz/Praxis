@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	taskservice "praxis/internal/agent/input"
 	"praxis/internal/clock"
 	contextcompress "praxis/internal/context/compress"
 	"praxis/internal/execution/loop"
@@ -14,7 +15,7 @@ import (
 	"praxis/internal/logging"
 	messagemodel "praxis/internal/message"
 	"praxis/internal/model"
-	taskservice "praxis/internal/task/service"
+	queueservice "praxis/internal/task/service"
 	"praxis/internal/tool"
 	"praxis/internal/toolcall"
 	"praxis/internal/transaction"
@@ -100,11 +101,11 @@ func NewRuntime(deps Dependencies) (*Runtime, error) {
 		observe := func(event loop.Event) {
 			if deps.ObserveUsage != nil && event.Kind == loop.EventModelUsage && event.Usage != nil {
 				deps.ObserveUsage(model.ModelUsageRecord{
-					SessionID: event.SessionID.String(),
-					AgentID:   event.AgentID.String(),
-					TaskID:    event.TaskID.String(),
-					TurnID:    event.TurnID,
-					Usage:     *event.Usage,
+					SessionID:   event.SessionID.String(),
+					AgentID:     event.AgentID.String(),
+					ExecutionID: event.ExecutionID.String(),
+					TurnID:      event.TurnID,
+					Usage:       *event.Usage,
 				})
 			}
 			deps.Events.Publish(loopEvent(event))
@@ -115,12 +116,12 @@ func NewRuntime(deps Dependencies) (*Runtime, error) {
 			Hooks:    deps.HookDispatcher,
 			ObserveUsage: func(record model.ModelUsageRecord) {
 				observe(loop.Event{
-					Kind:      loop.EventModelUsage,
-					SessionID: identity.SessionID(record.SessionID),
-					AgentID:   identity.AgentID(record.AgentID),
-					TaskID:    identity.TaskID(record.TaskID),
-					TurnID:    record.TurnID,
-					Usage:     &record.Usage,
+					Kind:        loop.EventModelUsage,
+					SessionID:   identity.SessionID(record.SessionID),
+					AgentID:     identity.AgentID(record.AgentID),
+					ExecutionID: identity.AgentExecutionID(record.ExecutionID),
+					TurnID:      record.TurnID,
+					Usage:       &record.Usage,
 				})
 			},
 		}
@@ -204,7 +205,7 @@ func (s *Runtime) SendInput(ctx context.Context, input taskservice.SendInput) (S
 	return response, nil
 }
 
-func (s *Runtime) EnqueueTask(ctx context.Context, input taskservice.EnqueueInput) (taskservice.EnqueueResult, error) {
+func (s *Runtime) EnqueueTask(ctx context.Context, input queueservice.EnqueueInput) (queueservice.EnqueueResult, error) {
 	return s.queue.EnqueueTask(ctx, input)
 }
 
@@ -219,12 +220,12 @@ func (s *Runtime) Restore(ctx context.Context) error {
 	return nil
 }
 
-func (s *Runtime) Pause(agentID identity.AgentID, taskID identity.TaskID) bool {
-	return s.active.Pause(agentID, taskID)
+func (s *Runtime) Pause(agentID identity.AgentID, executionID identity.AgentExecutionID) bool {
+	return s.active.Pause(agentID, executionID)
 }
 
-func (s *Runtime) Stop(agentID identity.AgentID, taskID identity.TaskID) bool {
-	return s.active.Stop(agentID, taskID)
+func (s *Runtime) Stop(agentID identity.AgentID, executionID identity.AgentExecutionID) bool {
+	return s.active.Stop(agentID, executionID)
 }
 
 // Close 等待全部执行与结算退出；超时后调用方必须保留存储资源。

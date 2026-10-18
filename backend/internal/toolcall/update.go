@@ -32,7 +32,7 @@ func ValidateUpdate(before, after Execution) error {
 	if !canTransition(before.Status, after.Status) || before.Status.Terminal() && !reflect.DeepEqual(before, after) || before.BudgetReserved && !after.BudgetReserved {
 		return fault.ErrRequestConflict
 	}
-	if before.ID != after.ID || before.TaskID != after.TaskID || before.TurnID != after.TurnID || before.SessionID != after.SessionID || before.AgentID != after.AgentID || before.ProviderToolCallID != after.ProviderToolCallID || before.Name != after.Name || !bytes.Equal(before.Arguments, after.Arguments) || before.ArgumentsDigest != after.ArgumentsDigest || !before.CreatedAt.Equal(after.CreatedAt) {
+	if before.ID != after.ID || before.ExecutionID != after.ExecutionID || before.TurnID != after.TurnID || before.SessionID != after.SessionID || before.AgentID != after.AgentID || before.ProviderToolCallID != after.ProviderToolCallID || before.Name != after.Name || !bytes.Equal(before.Arguments, after.Arguments) || before.ArgumentsDigest != after.ArgumentsDigest || !before.CreatedAt.Equal(after.CreatedAt) {
 		return fault.ErrRequestConflict
 	}
 	changed := !bytes.Equal(before.NormalizedArguments, after.NormalizedArguments) || before.Path != after.Path

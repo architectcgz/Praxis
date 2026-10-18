@@ -32,7 +32,7 @@ const (
 type WaitCondition struct {
 	ID                identity.WaitConditionID
 	AgentID           identity.AgentID
-	TaskID            identity.TaskID
+	ExecutionID       identity.AgentExecutionID
 	Kind              WaitConditionKind
 	Mode              WaitConditionMode
 	TargetIDs         []string

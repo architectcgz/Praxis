@@ -3,12 +3,11 @@ package bootstrap
 import (
 	"context"
 	"math"
-
 	"praxis/internal/agent"
+
+	taskservice "praxis/internal/agent/input"
 	"praxis/internal/identity"
 	"praxis/internal/session"
-	"praxis/internal/task"
-	taskservice "praxis/internal/task/service"
 )
 
 // recoverySource 把启动恢复所需的持久化事实装配给 execution，不参与执行决策。
@@ -18,7 +17,7 @@ type recoverySource struct {
 	agents   agent.Store
 }
 
-func (s recoverySource) ListActive(ctx context.Context) ([]task.Task, error) {
+func (s recoverySource) ListActive(ctx context.Context) ([]agent.Execution, error) {
 	return s.tasks.ListActive(ctx)
 }
 

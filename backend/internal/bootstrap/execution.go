@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	taskservice "praxis/internal/agent/input"
 	"praxis/internal/execution"
 	"praxis/internal/execution/loop"
 	"praxis/internal/hook"
@@ -11,7 +12,7 @@ import (
 	"praxis/internal/security"
 	"praxis/internal/session"
 	"praxis/internal/storage/jsonl"
-	taskservice "praxis/internal/task/service"
+	queueservice "praxis/internal/task/service"
 	"praxis/internal/toolcall"
 )
 
@@ -27,7 +28,7 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 				Kind:           value.Kind,
 				SessionID:      value.SessionID,
 				AgentID:        value.AgentID,
-				TaskID:         value.TaskID,
+				ExecutionID:    value.ExecutionID,
 				Outcome:        value.Outcome,
 				FailureCode:    string(value.FailureCode),
 				FailureMessage: value.FailureMessage,
@@ -36,7 +37,8 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 		Workspaces:     repos.Workspaces,
 		Sessions:       repos.Sessions,
 		Agents:         repos.Agents,
-		Tasks:          repos.Tasks,
+		Tasks:          repos.Executions,
+		Queue:          repos.Tasks,
 		ToolExecutions: repos.ToolExecutions,
 		Executions:     active,
 		Messages:       repos.Messages,
@@ -49,13 +51,24 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 		return nil, err
 	}
 
+	queue, err := queueservice.NewService(queueservice.Dependencies{
+		Transactions:   resources.store,
+		Tasks:          repos.Tasks,
+		Agents:         repos.Agents,
+		Messages:       repos.Messages,
+		HookDispatcher: hooks,
+		Logger:         resources.logger,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return execution.NewRuntime(execution.Dependencies{
 		Transactions: resources.store,
 		Tasks:        tasks,
-		Queue:        tasks,
+		Queue:        queue,
 		Progress:     tasks,
 		Recovery: recoverySource{
-			tasks:    repos.Tasks,
+			tasks:    repos.Executions,
 			sessions: repos.Sessions,
 			agents:   repos.Agents,
 		},

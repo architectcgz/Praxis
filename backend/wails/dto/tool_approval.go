@@ -3,7 +3,7 @@ package dto
 type ToolDecisionRequest struct {
 	SessionID       string `json:"sessionId"`
 	AgentID         string `json:"agentId"`
-	TaskID          string `json:"taskId"`
+	ExecutionID     string `json:"executionId"`
 	CallID          string `json:"callId"`
 	ArgumentsDigest string `json:"argumentsDigest"`
 }

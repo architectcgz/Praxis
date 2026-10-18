@@ -42,7 +42,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 			key := receiptKey{
 				tx.scope,
 				record.OwnerID,
-				record.Data.TaskID,
+				record.Data.ExecutionID,
 				block.CallID,
 			}
 			invocation, err := getByClaim[toolcall.Execution](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
@@ -64,15 +64,15 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 					return fault.ErrRequestConflict
 				}
 				fact := messagemodel.MissingToolResult{
-					SessionID: identity.SessionID(tx.scope),
-					AgentID:   record.AgentID,
-					TaskID:    identity.TaskID(record.Data.TaskID),
-					TurnID:    identity.TurnID(record.Data.TurnID),
-					CallID:    block.CallID,
-					RequestID: record.Data.RequestID,
-					Name:      block.Name,
-					Sequence:  event.Sequence,
-					CallIndex: callIndex,
+					SessionID:   identity.SessionID(tx.scope),
+					AgentID:     record.AgentID,
+					ExecutionID: identity.AgentExecutionID(record.Data.ExecutionID),
+					TurnID:      identity.TurnID(record.Data.TurnID),
+					CallID:      block.CallID,
+					RequestID:   record.Data.RequestID,
+					Name:        block.Name,
+					Sequence:    event.Sequence,
+					CallIndex:   callIndex,
 				}
 				tx.receiptChanges[key] = &fact
 				callIndex++
@@ -109,7 +109,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				return err
 			}
 			for _, block := range record.Data.Blocks {
-				if block.Kind == messagemodel.BlockToolCall && record.Data.TaskID == invocation.TaskID.String() && record.Data.TurnID == invocation.TurnID.String() && block.CallID == invocation.ProviderToolCallID {
+				if block.Kind == messagemodel.BlockToolCall && record.Data.ExecutionID == invocation.ExecutionID.String() && record.Data.TurnID == invocation.TurnID.String() && block.CallID == invocation.ProviderToolCallID {
 					declared = true
 				}
 			}

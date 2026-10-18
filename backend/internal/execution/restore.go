@@ -2,13 +2,13 @@ package execution
 
 import (
 	"context"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/identity"
-	taskmodel "praxis/internal/task"
 )
 
 // RecoverySource 从当前持久化状态读取活动 Task 和允许派发的 Agent。
 type RecoverySource interface {
-	ListActive(context.Context) ([]taskmodel.Task, error)
+	ListActive(context.Context) ([]taskmodel.Execution, error)
 	ListDispatchableAgents(context.Context) ([]identity.AgentID, error)
 }
 

@@ -44,7 +44,7 @@ func (b *Bindings) All() []any {
 
 // EmitAgentEvent 在协议出口复制可变字段，不向前端暴露业务对象。
 func (b *Bindings) EmitAgentEvent(event execution.Event) {
-	if event.AgentID == "" || event.TaskID == "" {
+	if event.AgentID == "" || event.ExecutionID == "" {
 		return
 	}
 	ctx := b.runtime.EventContext()
@@ -55,7 +55,7 @@ func (b *Bindings) EmitAgentEvent(event execution.Event) {
 		Kind:           event.Kind,
 		SessionID:      event.SessionID.String(),
 		AgentID:        event.AgentID.String(),
-		TaskID:         event.TaskID.String(),
+		ExecutionID:    event.ExecutionID.String(),
 		Outcome:        event.Outcome,
 		FailureCode:    event.FailureCode,
 		FailureMessage: event.FailureMessage,

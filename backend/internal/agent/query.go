@@ -9,21 +9,20 @@ import (
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	messagemodel "praxis/internal/message"
-	taskmodel "praxis/internal/task"
 	txrunner "praxis/internal/transaction"
 )
 
 // ExecutionControl 只在控制意图持久化成功后传递取消信号。
 type ExecutionControl interface {
-	Pause(identity.AgentID, identity.TaskID) bool
-	Stop(identity.AgentID, identity.TaskID) bool
+	Pause(identity.AgentID, identity.AgentExecutionID) bool
+	Stop(identity.AgentID, identity.AgentExecutionID) bool
 }
 
 // TaskReader 只查询 Agent 展示和固定目标控制所需的 Task 事实。
 type TaskReader interface {
-	Get(context.Context, identity.TaskID) (taskmodel.Task, error)
-	GetActiveByAgent(context.Context, identity.AgentID) (taskmodel.Task, error)
-	ListByAgent(context.Context, identity.AgentID, int) ([]taskmodel.Task, error)
+	Get(context.Context, identity.AgentExecutionID) (Execution, error)
+	GetActiveByAgent(context.Context, identity.AgentID) (Execution, error)
+	ListByAgent(context.Context, identity.AgentID, int) ([]Execution, error)
 }
 
 type Dependencies struct {
@@ -49,8 +48,8 @@ type Service struct {
 // AgentView 是单个 Agent 的持久化详情视图。
 type AgentView struct {
 	Agent      Agent
-	ActiveTask *taskmodel.Task
-	Tasks      []taskmodel.Task
+	ActiveTask *Execution
+	Tasks      []Execution
 	Controls   []AgentControlCommand
 }
 
@@ -94,7 +93,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID, li
 	}
 	active, err := s.tasks.GetActiveByAgent(ctx, agentID)
 	if errors.Is(err, fault.ErrNotFound) {
-		active = taskmodel.Task{}
+		active = Execution{}
 	} else if err != nil {
 		return AgentView{}, fmt.Errorf("load active agent task: %w", err)
 	}

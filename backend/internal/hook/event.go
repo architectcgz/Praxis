@@ -3,8 +3,8 @@ package hook
 import (
 	"context"
 	"errors"
+	taskmodel "praxis/internal/agent"
 	messagemodel "praxis/internal/message"
-	taskmodel "praxis/internal/task"
 )
 
 // CommittedEvent 只通知已经可靠提交的事实，供记忆或审计订阅。
@@ -12,7 +12,7 @@ import (
 type CommittedEvent struct {
 	Identity
 	Message *messagemodel.Message
-	Task    *taskmodel.Task
+	Task    *taskmodel.Execution
 }
 type CommittedHook interface {
 	OnCommitted(context.Context, CommittedEvent) error

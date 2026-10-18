@@ -93,12 +93,12 @@ func ValidateAgentControl(request dto.PauseAgentRequest) error {
 	if err := requireID("agentId", request.AgentID); err != nil {
 		return err
 	}
-	return requireID("targetTaskId", request.TargetTaskID)
+	return requireID("targetTaskId", request.TargetExecutionID)
 }
 
 // ValidateQueueTask 校验预约 Task 的身份字段。
 func ValidateQueueTask(request dto.QueueTaskRequest) error {
-	if err := requireID("taskId", request.TaskID); err != nil {
+	if err := requireID("executionId", request.TaskID); err != nil {
 		return err
 	}
 	if err := requireID("requestId", request.RequestID); err != nil {

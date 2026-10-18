@@ -8,7 +8,6 @@ import (
 	"praxis/internal/hook"
 	"praxis/internal/identity"
 	messagemodel "praxis/internal/message"
-	taskmodel "praxis/internal/task"
 )
 
 // SendInput 是直接输入的身份、正文和模型选择，不接受调用方预构建的 Context。
@@ -24,7 +23,7 @@ type SendInput struct {
 
 // SendInputResult 返回持久化 Task 及请求是否已存在；重复请求不建立新的执行绑定。
 type SendInputResult struct {
-	Task            taskmodel.Task
+	Task            agentmodel.Execution
 	ExistingRequest bool
 }
 
@@ -51,11 +50,11 @@ func (s *Service) createImmediate(ctx context.Context, params SendInput) (SendIn
 	var committedMessage *messagemodel.Message
 	var result SendInputResult
 	var admittedAgent identity.AgentID
-	var admittedTask identity.TaskID
+	var admittedTask identity.AgentExecutionID
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.tasks.FindByRequest(txCtx, params.AgentID, params.RequestID)
 		if err == nil {
-			if existing.Sequence != 0 ||
+			if existing.SourceTaskID != "" ||
 				existing.ProviderID != params.ProviderID || existing.ModelID != params.ModelID || existing.ReasoningLevel != params.ReasoningLevel ||
 				params.SessionID != "" && existing.SessionID != params.SessionID {
 				return fault.ErrRequestConflict
@@ -100,15 +99,15 @@ func (s *Service) createImmediate(ctx context.Context, params SendInput) (SendIn
 			return err
 		}
 		at := s.clock.Now()
-		taskID := identity.TaskID(s.ids.New("task"))
+		executionID := identity.AgentExecutionID(s.ids.New("execution"))
 		value := messagemodel.Message{
-			ID:         inputMessageID,
-			RequestID:  params.RequestID.String(),
-			TaskID:     taskID.String(),
-			Role:       messagemodel.RoleUser,
-			AuthorKind: messagemodel.AuthorUser,
-			Blocks:     []messagemodel.Block{{Kind: messagemodel.BlockText, Text: params.Content}},
-			CreatedAt:  at,
+			ID:          inputMessageID,
+			RequestID:   params.RequestID.String(),
+			ExecutionID: executionID.String(),
+			Role:        messagemodel.RoleUser,
+			AuthorKind:  messagemodel.AuthorUser,
+			Blocks:      []messagemodel.Block{{Kind: messagemodel.BlockText, Text: params.Content}},
+			CreatedAt:   at,
 		}
 		stored, err := s.messages.Append(txCtx, agent.SessionID, agent.ID, value)
 		if err != nil {
@@ -119,11 +118,11 @@ func (s *Service) createImmediate(ctx context.Context, params SendInput) (SendIn
 		if err != nil {
 			return err
 		}
-		task := taskmodel.NewTask(taskID, agent.SessionID, agent.ID, params.RequestID, inputMessageID, config, selection, at)
+		task := agentmodel.NewExecution(executionID, agent.SessionID, agent.ID, params.RequestID, inputMessageID, config, selection, at)
 		task.ProviderID = params.ProviderID
 		task.ModelID = params.ModelID
 		task.ReasoningLevel = params.ReasoningLevel
-		if err := agent.Start(task.ID, at); err != nil {
+		if err := agent.StartExecution(task.ID, at); err != nil {
 			return err
 		}
 		// 执行必须脱离事务 Context，避免 loop 后续写入已提交的事务工作区。
@@ -150,9 +149,9 @@ func (s *Service) createImmediate(ctx context.Context, params SendInput) (SendIn
 	if err == nil && committedMessage != nil && !result.ExistingRequest {
 		if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
 			Identity: hook.Identity{
-				SessionID: result.Task.SessionID,
-				AgentID:   result.Task.AgentID,
-				TaskID:    result.Task.ID,
+				SessionID:   result.Task.SessionID,
+				AgentID:     result.Task.AgentID,
+				ExecutionID: result.Task.ID,
 			},
 			Message: committedMessage,
 		}); hookErr != nil {

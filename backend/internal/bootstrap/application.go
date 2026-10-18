@@ -85,7 +85,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	agents, err := agent.NewService(agent.Dependencies{
 		Transactions: a.store,
 		Agents:       repos.Agents,
-		Tasks:        repos.Tasks,
+		Tasks:        repos.Executions,
 		Controls:     repos.Controls,
 		Executions:   a.runtime,
 		Messages:     repos.Messages,

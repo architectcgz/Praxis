@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/clock"
 	"praxis/internal/fault"
 	"praxis/internal/hook"
 	"praxis/internal/security"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/tool"
 	txrunner "praxis/internal/transaction"
 	"sync"
@@ -19,10 +19,10 @@ import (
 type Dependencies struct {
 	Rules ApprovalRules
 	// Review 在模型响应边界完成规范化与校验，成功时只返回 canonical 结论。
-	Review         func(context.Context, taskmodel.Task, Execution, RiskReview) (security.RiskAssessment, error)
+	Review         func(context.Context, taskmodel.Execution, Execution, RiskReview) (security.RiskAssessment, error)
 	HookDispatcher *hook.Dispatcher
 	Transactions   txrunner.Runner
-	Tasks          taskmodel.Store
+	Tasks          taskmodel.ExecutionStore
 	Executions     Store
 	Catalog        tool.ToolCatalog
 	Clock          clock.Clock
@@ -30,11 +30,11 @@ type Dependencies struct {
 
 type Executor struct {
 	rules           ApprovalRules
-	reviewOperation func(context.Context, taskmodel.Task, Execution, RiskReview) (security.RiskAssessment, error)
+	reviewOperation func(context.Context, taskmodel.Execution, Execution, RiskReview) (security.RiskAssessment, error)
 	reviewInFlight  sync.Map
 	hookDispatcher  *hook.Dispatcher
 	tx              txrunner.Runner
-	tasks           taskmodel.Store
+	tasks           taskmodel.ExecutionStore
 	executions      Store
 	toolCatalog     tool.ToolCatalog
 	clock           clock.Clock
@@ -86,7 +86,7 @@ func (s *Executor) invoke(
 		return tool.ToolResult{}, errors.New("tool invocation metadata is required")
 	}
 	call := prepared.Call.Snapshot()
-	if metadata.TaskID == "" || metadata.TurnID == "" ||
+	if metadata.ExecutionID == "" || metadata.TurnID == "" ||
 		metadata.SessionID == "" || metadata.AgentID == "" {
 		return tool.ToolResult{}, errors.New("tool invocation ownership is required")
 	}
@@ -94,7 +94,7 @@ func (s *Executor) invoke(
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
-	invocation, err := s.executions.FindByTaskCall(ctx, metadata.TaskID, call.ID)
+	invocation, err := s.executions.FindByExecutionCall(ctx, metadata.ExecutionID, call.ID)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -110,7 +110,7 @@ func (s *Executor) invoke(
 	}
 	invocation, err = s.reserveCall(ctx, invocation.ID)
 	if err != nil {
-		if errors.Is(err, fault.New(taskmodel.TaskResourceLimit, "")) {
+		if errors.Is(err, fault.New(taskmodel.ExecutionResourceLimit, "")) {
 			result, settleErr := s.reject(ctx, invocation.ID, FailureResourceLimit, "Tool call limit exceeded.")
 			if settleErr != nil {
 				return tool.ToolResult{}, settleErr
@@ -169,7 +169,7 @@ func (s *Executor) invoke(
 		if result, done := settledResult(invocation); done {
 			return result, nil
 		}
-		return tool.ToolResult{}, fault.New(taskmodel.TaskBusy, "tool call is already running or being reviewed")
+		return tool.ToolResult{}, fault.New(taskmodel.ExecutionBusy, "tool call is already running or being reviewed")
 	}
 	execution := tool.ExecutionCall{
 		Name:                invocation.Name,
@@ -179,10 +179,10 @@ func (s *Executor) invoke(
 	}
 	toolCtx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
-			SessionID: invocation.SessionID,
-			AgentID:   invocation.AgentID,
-			TaskID:    invocation.TaskID,
-			TurnID:    invocation.TurnID,
+			SessionID:   invocation.SessionID,
+			AgentID:     invocation.AgentID,
+			ExecutionID: invocation.ExecutionID,
+			TurnID:      invocation.TurnID,
 		},
 		Kind: hook.OperationTool, Name: string(call.Name), ReferenceID: call.ID,
 	})

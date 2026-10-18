@@ -10,16 +10,17 @@ import (
 	"praxis/internal/identity"
 	messagemodel "praxis/internal/message"
 	sessionmodel "praxis/internal/session"
-	taskmodel "praxis/internal/task"
+
+	queued "praxis/internal/task"
 )
 
 // selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并检查必要原文容量。
 // 容量检查是准入的业务前置条件：连 Protected 原文都放不进窗口的 Task 不允许进入执行。
-func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, config taskmodel.Config, inputMessageID string) (taskmodel.ContextSelection, error) {
+func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, config agentmodel.ExecutionConfig, inputMessageID string) (agentmodel.ContextSelection, error) {
 	if err := s.reconcileToolResults(ctx, agent.SessionID, agent.ID, false); err != nil {
-		return taskmodel.ContextSelection{}, err
+		return agentmodel.ContextSelection{}, err
 	}
-	var selection taskmodel.ContextSelection
+	var selection agentmodel.ContextSelection
 	var shared []sessionmodel.SessionContextEntry
 	var err error
 	if agent.CanReadSessionContext() {
@@ -34,35 +35,35 @@ func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, con
 	}
 	selection.MessageSequenceBoundary = stream.SequenceBoundary
 	for _, message := range stream.Messages {
-		if message.Sequence > stream.SequenceBoundary || message.Role != messagemodel.RoleUser || message.TaskID == "" || message.ID == inputMessageID {
+		if message.Sequence > stream.SequenceBoundary || message.Role != messagemodel.RoleUser || message.SourceTaskID == "" || message.ID == inputMessageID {
 			continue
 		}
-		task, err := s.tasks.Get(ctx, identity.TaskID(message.TaskID))
+		task, err := s.queue.Get(ctx, identity.TaskID(message.SourceTaskID))
 		if err != nil {
-			return taskmodel.ContextSelection{}, err
+			return agentmodel.ContextSelection{}, err
 		}
-		if task.Status == taskmodel.TaskPending {
+		if task.Status == queued.Pending {
 			selection.ExcludedMessageIDs = append(selection.ExcludedMessageIDs, message.ID)
 		}
 	}
 	for _, entry := range shared {
-		selection.SessionContextRefs = append(selection.SessionContextRefs, taskmodel.ContextReference{ID: entry.ID.String(), Digest: entry.ContentDigest})
+		selection.SessionContextRefs = append(selection.SessionContextRefs, agentmodel.ContextReference{ID: entry.ID.String(), Digest: entry.ContentDigest})
 	}
 	messages, _ := selectTaskMessages(stream.Messages, selection, inputMessageID, "")
 	content, err := contextContent(config.SystemPrompt, inputMessageID, shared, messages, nil)
 	if err != nil {
-		return taskmodel.ContextSelection{}, err
+		return agentmodel.ContextSelection{}, err
 	}
 	// 结果只用于容量前置条件；上下文结构由消息写入与恢复边界保证，不在此复查。
 	if _, err := (appcontext.ContextBuilder{}).Build(content, appcontext.Limits{ContextWindow: config.Model.ContextWindow, MaxOutputTokens: config.Model.MaxOutputTokens}); err != nil {
-		return taskmodel.ContextSelection{}, err
+		return agentmodel.ContextSelection{}, err
 	}
 	return selection, nil
 }
 
 // selectTaskMessages 选择边界内历史、当前输入和本 Task 的续接消息。
-// 边界之后补写的历史回执只按 (TaskID, CallID) 关联已选调用。
-func selectTaskMessages(messages []messagemodel.Message, selection taskmodel.ContextSelection, inputMessageID string, taskID string) (
+// 边界之后补写的历史回执只按 (ExecutionID, CallID) 关联已选调用。
+func selectTaskMessages(messages []messagemodel.Message, selection agentmodel.ContextSelection, inputMessageID string, executionID string) (
 	[]messagemodel.Message, []messagemodel.Message,
 ) {
 	excluded := make(map[string]bool, len(selection.ExcludedMessageIDs))
@@ -72,7 +73,7 @@ func selectTaskMessages(messages []messagemodel.Message, selection taskmodel.Con
 	selectedHistory := func(message messagemodel.Message) bool {
 		return message.Sequence <= selection.MessageSequenceBoundary && !excluded[message.ID]
 	}
-	type callKey struct{ taskID, callID string }
+	type callKey struct{ executionID, callID string }
 	selectedToolCalls := make(map[callKey]bool)
 	for _, message := range messages {
 		if !selectedHistory(message) || message.Role != messagemodel.RoleAssistant {
@@ -80,7 +81,7 @@ func selectTaskMessages(messages []messagemodel.Message, selection taskmodel.Con
 		}
 		for _, block := range message.Blocks {
 			if block.Kind == messagemodel.BlockToolCall {
-				selectedToolCalls[callKey{message.TaskID, block.CallID}] = true
+				selectedToolCalls[callKey{message.ExecutionID, block.CallID}] = true
 			}
 		}
 	}
@@ -90,7 +91,7 @@ func selectTaskMessages(messages []messagemodel.Message, selection taskmodel.Con
 		if excluded[message.ID] {
 			continue
 		}
-		if taskID != "" && message.TaskID == taskID && message.ID != inputMessageID {
+		if executionID != "" && message.ExecutionID == executionID && message.ID != inputMessageID {
 			if message.Role == messagemodel.RoleAssistant || message.Role == messagemodel.RoleTool {
 				continuation = append(continuation, message)
 			}
@@ -101,7 +102,7 @@ func selectTaskMessages(messages []messagemodel.Message, selection taskmodel.Con
 			// 只纳入已选调用对应的回执块，避免一个消息内混入未选调用。
 			blocks := make([]messagemodel.Block, 0, len(message.Blocks))
 			for _, block := range message.Blocks {
-				if block.Kind == messagemodel.BlockToolResult && selectedToolCalls[callKey{message.TaskID, block.CallID}] {
+				if block.Kind == messagemodel.BlockToolResult && selectedToolCalls[callKey{message.ExecutionID, block.CallID}] {
 					blocks = append(blocks, block)
 				}
 			}
@@ -132,7 +133,7 @@ func (s *Service) loadContextEntries(ctx context.Context, sessionID identity.Ses
 
 // LoadContext 读取冻结历史与本 Task 已提交的续接消息，只输出通用模型内容。
 // 业务恢复先协调已停止的工具调用；消息 Repository 读取保持只读。
-func (s *Service) LoadContext(ctx context.Context, task taskmodel.Task) (appcontext.Content, []messagemodel.Message, error) {
+func (s *Service) LoadContext(ctx context.Context, task agentmodel.Execution) (appcontext.Content, []messagemodel.Message, error) {
 	if ctx == nil {
 		return appcontext.Content{}, nil, errors.New("task context is required")
 	}

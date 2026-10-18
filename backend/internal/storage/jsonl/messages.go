@@ -150,7 +150,7 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 
 // AppendToolResult 原子追加回执并累计输出字节；普通 Append 不修改预算。
 func (w MessageWriter) AppendToolResult(ctx context.Context, data messagemodel.Message) error {
-	if data.Role != messagemodel.RoleTool || data.TaskID == "" {
+	if data.Role != messagemodel.RoleTool || data.ExecutionID == "" {
 		return errors.New("tool receipt must include task identity")
 	}
 	return w.streams.s.InTx(ctx, func(txCtx context.Context) error {
@@ -158,7 +158,7 @@ func (w MessageWriter) AppendToolResult(ctx context.Context, data messagemodel.M
 		if err != nil || !inserted {
 			return err
 		}
-		task, err := (TaskRepository{w.streams.s}).Get(txCtx, identity.TaskID(stored.TaskID))
+		task, err := (AgentExecutionRepository{w.streams.s}).Get(txCtx, identity.AgentExecutionID(stored.ExecutionID))
 		if err != nil {
 			return err
 		}
@@ -169,7 +169,7 @@ func (w MessageWriter) AppendToolResult(ctx context.Context, data messagemodel.M
 			for _, block := range stored.Blocks {
 				task.Progress.OutputBytes += int64(len(block.Text))
 			}
-			return (TaskRepository{w.streams.s}).Save(txCtx, task)
+			return (AgentExecutionRepository{w.streams.s}).Save(txCtx, task)
 		}
 		return nil
 	})
@@ -270,7 +270,7 @@ func validateMessageData(m messagemodel.Message) error {
 		m.ID,
 		m.RequestID,
 		m.HandoffID,
-		m.TaskID,
+		m.ExecutionID,
 		m.TurnID,
 		m.AuthorID,
 	} {

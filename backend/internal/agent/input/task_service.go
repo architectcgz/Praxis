@@ -11,7 +11,8 @@ import (
 	"praxis/internal/logging"
 	modelapi "praxis/internal/model"
 	sessionmodel "praxis/internal/session"
-	taskmodel "praxis/internal/task"
+
+	queued "praxis/internal/task"
 	"praxis/internal/toolcall"
 	txrunner "praxis/internal/transaction"
 	workspacemodel "praxis/internal/workspace"
@@ -38,8 +39,9 @@ type Dependencies struct {
 	Sessions       SessionStore
 	Agents         agentmodel.Store
 	Tasks          TaskStore
+	Queue          queued.Store
 	ToolExecutions toolcall.Store
-	Executions     ExecutionSlots
+	Executions     ActiveTasks
 	Messages       MessageStreams
 	PrimaryAgent   PrimaryAgentProvider
 	Definitions    AgentDefinitionProvider
@@ -60,8 +62,9 @@ type Service struct {
 	sessions       SessionStore
 	agents         agentmodel.Store
 	tasks          TaskStore
+	queue          queued.Store
 	toolExecutions toolcall.Store
-	executions     ExecutionSlots
+	executions     ActiveTasks
 	messages       MessageStreams
 	primary        PrimaryAgentProvider
 	models         ModelConfigResolver
@@ -106,6 +109,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		sessions:       deps.Sessions,
 		agents:         deps.Agents,
 		tasks:          deps.Tasks,
+		queue:          deps.Queue,
 		toolExecutions: deps.ToolExecutions,
 		executions:     deps.Executions,
 		messages:       deps.Messages,
@@ -119,31 +123,31 @@ func NewService(deps Dependencies) (*Service, error) {
 }
 
 // Get 读取 Task 持久化事实，供工具调用和执行恢复复用。
-func (s *Service) Get(ctx context.Context, id identity.TaskID) (taskmodel.Task, error) {
+func (s *Service) Get(ctx context.Context, id identity.AgentExecutionID) (agentmodel.Execution, error) {
 	return s.tasks.Get(ctx, id)
 }
 
 // Save 保存已完成状态转换的 Task。
-func (s *Service) Save(ctx context.Context, value taskmodel.Task) error {
+func (s *Service) Save(ctx context.Context, value agentmodel.Execution) error {
 	return s.tasks.Save(ctx, value)
 }
 
 // ReleaseExecution 释放准入时建立的进程内执行绑定；只清理匹配的 Task，
 // 不会取消或删除同一 Agent 后续建立的绑定。
-func (s *Service) ReleaseExecution(agentID identity.AgentID, taskID identity.TaskID) {
-	s.executions.Release(agentID, taskID)
+func (s *Service) ReleaseExecution(agentID identity.AgentID, executionID identity.AgentExecutionID) {
+	s.executions.Release(agentID, executionID)
 }
 
 // Abort 结算未被 runtime 接管的 Task 并释放匹配的执行绑定；结算失败时保留绑定。
-func (s *Service) Abort(ctx context.Context, taskID identity.TaskID) error {
+func (s *Service) Abort(ctx context.Context, executionID identity.AgentExecutionID) error {
 	if ctx == nil {
 		return errors.New("task abort context is required")
 	}
-	ended, err := s.Settle(ctx, taskID, taskmodel.TaskInterrupted, taskmodel.TaskFailureInterrupted, "")
+	ended, err := s.Settle(ctx, executionID, agentmodel.ExecutionInterrupted, agentmodel.ExecutionFailureInterrupted, "")
 	if err != nil {
 		return err
 	}
-	s.ReleaseExecution(ended.AgentID, taskID)
+	s.ReleaseExecution(ended.AgentID, executionID)
 	return nil
 }
 

@@ -22,24 +22,24 @@ const (
 
 // AgentControlCommand 是针对单个 Agent 当前 Task 的持久化控制意图。
 type AgentControlCommand struct {
-	ID           identity.AgentControlCommandID
-	AgentID      identity.AgentID
-	TargetTaskID identity.TaskID
-	Kind         AgentControlKind
-	Status       AgentControlStatus
-	CreatedAt    time.Time
-	AppliedAt    time.Time
+	ID                identity.AgentControlCommandID
+	AgentID           identity.AgentID
+	TargetExecutionID identity.AgentExecutionID
+	Kind              AgentControlKind
+	Status            AgentControlStatus
+	CreatedAt         time.Time
+	AppliedAt         time.Time
 }
 
 // NewAgentControlCommand 使用入口已校验的身份和控制类型创建待应用命令。
-func NewAgentControlCommand(id identity.AgentControlCommandID, agentID identity.AgentID, targetTaskID identity.TaskID, kind AgentControlKind, at time.Time) AgentControlCommand {
+func NewAgentControlCommand(id identity.AgentControlCommandID, agentID identity.AgentID, targetExecutionID identity.AgentExecutionID, kind AgentControlKind, at time.Time) AgentControlCommand {
 	return AgentControlCommand{
-		ID:           id,
-		AgentID:      agentID,
-		TargetTaskID: targetTaskID,
-		Kind:         kind,
-		Status:       AgentControlPending,
-		CreatedAt:    at.UTC(),
+		ID:                id,
+		AgentID:           agentID,
+		TargetExecutionID: targetExecutionID,
+		Kind:              kind,
+		Status:            AgentControlPending,
+		CreatedAt:         at.UTC(),
 	}
 }
 

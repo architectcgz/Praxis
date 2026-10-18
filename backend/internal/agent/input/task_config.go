@@ -5,7 +5,6 @@ import (
 	agentmodel "praxis/internal/agent"
 	"praxis/internal/fault"
 	modelapi "praxis/internal/model"
-	taskmodel "praxis/internal/task"
 )
 
 // buildConfig 解析模型配置并确定本次执行输入；任一步失败都不产生执行输入。
@@ -15,39 +14,39 @@ func (s *Service) buildConfig(
 	providerID string,
 	modelID string,
 	reasoningLevel string,
-) (taskmodel.Config, error) {
+) (agentmodel.ExecutionConfig, error) {
 	session, err := s.sessions.Get(ctx, agent.SessionID)
 	if err != nil {
-		return taskmodel.Config{}, err
+		return agentmodel.ExecutionConfig{}, err
 	}
 	workspace, err := s.workspaces.Get(ctx, session.WorkspaceID)
 	if err != nil {
-		return taskmodel.Config{}, err
+		return agentmodel.ExecutionConfig{}, err
 	}
 	definition, err := s.definitions.Definition(agent.DefinitionID)
 	if err != nil {
-		return taskmodel.Config{}, err
+		return agentmodel.ExecutionConfig{}, err
 	}
 	if definition.Profile != agent.Profile {
-		return taskmodel.Config{}, fault.ErrRevisionConflict
+		return agentmodel.ExecutionConfig{}, fault.ErrRevisionConflict
 	}
 	var modelConfig modelapi.Config
 	switch {
 	case providerID == "" && modelID == "" && reasoningLevel == "":
 		reference, resolveErr := s.definitions.ResolveModelReference(agent.DefinitionID)
 		if resolveErr != nil {
-			return taskmodel.Config{}, fault.New(fault.InvalidRequest, "")
+			return agentmodel.ExecutionConfig{}, fault.New(fault.InvalidRequest, "")
 		}
 		modelConfig, err = s.models.ResolveTaskModel(reference.ProviderID, reference.ModelID, "")
 	case providerID == "" || modelID == "":
-		return taskmodel.Config{}, fault.New(fault.InvalidRequest, "")
+		return agentmodel.ExecutionConfig{}, fault.New(fault.InvalidRequest, "")
 	default:
 		modelConfig, err = s.models.ResolveTaskModel(providerID, modelID, reasoningLevel)
 	}
 	if err != nil {
-		return taskmodel.Config{}, fault.New(fault.InvalidRequest, "")
+		return agentmodel.ExecutionConfig{}, fault.New(fault.InvalidRequest, "")
 	}
-	config := taskmodel.Config{
+	config := agentmodel.ExecutionConfig{
 		AgentDefinitionID: definition.ID,
 		SystemPrompt:      definition.Instructions,
 		Model:             modelConfig,

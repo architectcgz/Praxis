@@ -3,17 +3,18 @@ package hook
 
 import (
 	"context"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/identity"
 	modelapi "praxis/internal/model"
-	taskmodel "praxis/internal/task"
 )
 
 // Identity 显式关联本次执行的持久化归属；没有迭代边界时 TurnID 为空。
 type Identity struct {
-	SessionID identity.SessionID
-	AgentID   identity.AgentID
-	TaskID    identity.TaskID
-	TurnID    identity.TurnID
+	SourceTaskID identity.TaskID
+	SessionID    identity.SessionID
+	AgentID      identity.AgentID
+	ExecutionID  identity.AgentExecutionID
+	TurnID       identity.TurnID
 }
 
 type OperationKind string
@@ -37,7 +38,7 @@ type Operation struct {
 // Result 是执行边界已确定的结果，Hook 不得修改业务结果。
 type Result struct {
 	Err            error
-	Outcome        taskmodel.TaskOutcome
+	Outcome        taskmodel.ExecutionOutcome
 	StopReason     modelapi.ModelStopReason
 	ToolErrorClass string
 }

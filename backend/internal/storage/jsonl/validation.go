@@ -15,7 +15,8 @@ import (
 	modelconfig "praxis/internal/model/config"
 	projectmodel "praxis/internal/project"
 	sessionmodel "praxis/internal/session"
-	taskmodel "praxis/internal/task"
+	queued "praxis/internal/task"
+
 	"praxis/internal/timing"
 	"praxis/internal/toolcall"
 	"praxis/internal/workflow"
@@ -58,50 +59,55 @@ func describe(scope string, event Event, object any) (entityKey, indexEntry, err
 			claim("primary-agent", sessionID, "")
 		}
 		link("session", sessionID)
-		link("task", v.CurrentTaskID.String())
-	case taskmodel.Task:
+		link("agent_execution", v.CurrentExecutionID.String())
+	case agentmodel.Execution:
+		identity, sessionID = v.ID.String(), v.SessionID.String()
+
+		group("executions-agent", v.AgentID.String(), "")
+		claim("execution-request", v.AgentID.String(), v.RequestID.String())
+		if v.Active() {
+			claim("active-agent", v.AgentID.String(), "")
+			group("active-session", sessionID, "")
+			group("active-executions", "", "")
+		}
+		link("agent", v.AgentID.String())
+	case queued.Task:
 		identity, sessionID = v.ID.String(), v.SessionID.String()
 		entry.sequence = v.Sequence
 		group("tasks-agent", v.AgentID.String(), "")
 		claim("task-request", v.AgentID.String(), v.RequestID.String())
-		if v.Sequence != 0 {
-			claim("task-sequence", v.AgentID.String(), fmt.Sprint(v.Sequence))
-		}
-		if v.Active() {
-			claim("active-agent", v.AgentID.String(), "")
-			group("active-session", sessionID, "")
-			group("active-tasks", "", "")
-		}
-		if v.Status == taskmodel.TaskPending {
+		claim("task-sequence", v.AgentID.String(), fmt.Sprint(v.Sequence))
+		if v.Status == queued.Pending {
 			group("pending-agent", v.AgentID.String(), "")
 		}
 		link("agent", v.AgentID.String())
+		link("agent_execution", v.ExecutionID.String())
 	case toolcall.Execution:
 		identity, sessionID = v.ID.String(), v.SessionID.String()
-		claim("tool-call", v.TaskID.String(), v.ProviderToolCallID)
-		group("tools-task", v.TaskID.String(), "")
+		claim("tool-call", v.ExecutionID.String(), v.ProviderToolCallID)
+		group("tools-task", v.ExecutionID.String(), "")
 		if !v.Status.Terminal() {
 			group("unsettled-session", sessionID, "")
 		}
 		if v.Status == toolcall.StatusAwaitingApproval {
 			group("awaiting-agent", v.AgentID.String(), "")
 		}
-		link("task", v.TaskID.String())
+		link("agent_execution", v.ExecutionID.String())
 	case sessionmodel.SessionContextEntry:
 		identity, sessionID = v.ID.String(), v.SessionID.String()
 		group("contexts-session", sessionID, "")
 		link("session", sessionID)
-		link("task", v.SourceTaskID.String())
+		link("agent_execution", v.SourceExecutionID.String())
 	case agentmodel.AgentControlCommand:
 		identity, sessionID = v.ID.String(), scope
 		if v.Status == agentmodel.AgentControlPending {
 			group("controls-agent", v.AgentID.String(), "")
 		}
 		link("agent", v.AgentID.String())
-		link("task", v.TargetTaskID.String())
+		link("agent_execution", v.TargetExecutionID.String())
 	case workflow.WaitCondition:
 		identity, sessionID = v.ID.String(), scope
-		link("task", v.TaskID.String())
+		link("agent_execution", v.ExecutionID.String())
 	case messageRecord:
 		identity, sessionID = messageKey(v.OwnerID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
@@ -112,14 +118,14 @@ func describe(scope string, event Event, object any) (entityKey, indexEntry, err
 	case modelapi.ModelUsageRecord:
 		identity, sessionID = v.Key(), v.SessionID
 		group("usage-session", sessionID, "")
-		link("task", v.TaskID)
+		link("agent_execution", v.ExecutionID)
 	case timing.Record:
 		identity, sessionID = v.ID, v.SessionID
 		group("timings-agent", v.AgentID, "")
 		if v.Status == timing.Running {
 			group("running-timings", "", "")
 		}
-		link("task", v.TaskID)
+		link("agent_execution", v.ExecutionID)
 	default:
 		return key, entry, fmt.Errorf("unsupported stored object %T", object)
 	}
@@ -132,18 +138,19 @@ func describe(scope string, event Event, object any) (entityKey, indexEntry, err
 // restoreIndexEntry 在磁盘输入边界严格解码并校验实体，再恢复其查询索引。
 func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 	kinds := map[string]string{
-		"project":   "project.saved",
-		"workspace": "workspace.saved",
-		"session":   "session.saved",
-		"agent":     "agent.saved",
-		"task":      "task.saved",
-		"tool":      "tool.saved",
-		"wait":      "wait.saved",
-		"control":   "control.saved",
-		"context":   "context.entry_appended",
-		"message":   "message.appended",
-		"timing":    "timing.saved",
-		"usage":     "usage.saved",
+		"project":         "project.saved",
+		"workspace":       "workspace.saved",
+		"session":         "session.saved",
+		"agent":           "agent.saved",
+		"agent_execution": "agent_execution.saved",
+		"task":            "task.saved",
+		"tool":            "tool.saved",
+		"wait":            "wait.saved",
+		"control":         "control.saved",
+		"context":         "context.entry_appended",
+		"message":         "message.appended",
+		"timing":          "timing.saved",
+		"usage":           "usage.saved",
 	}
 	if kinds[event.Collection] == "" || kinds[event.Collection] != event.Type {
 		return indexEntry{}, errors.New("unknown event type")
@@ -165,7 +172,9 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 	case "agent":
 		target = new(agentmodel.Agent)
 	case "task":
-		target = new(taskmodel.Task)
+		target = new(queued.Task)
+	case "agent_execution":
+		target = new(agentmodel.Execution)
 	case "tool":
 		target = new(toolcall.Execution)
 	case "context":
@@ -194,8 +203,10 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 		err = validateSession(*value)
 	case *agentmodel.Agent:
 		err = validateAgent(*value)
-	case *taskmodel.Task:
+	case *agentmodel.Execution:
 		err = validateTask(*value)
+	case *queued.Task:
+		err = validateQueuedTask(*value)
 	case *toolcall.Execution:
 		err = validateToolExecution(*value)
 	case *sessionmodel.SessionContextEntry:
@@ -325,8 +336,8 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		}
 		return nil
 	}
-	taskOwner := func(id identity.TaskID, agent identity.AgentID) error {
-		value, err := get[taskmodel.Task](ctx, s, "task", id.String())
+	taskOwner := func(id identity.AgentExecutionID, agent identity.AgentID) error {
+		value, err := get[agentmodel.Execution](ctx, s, "agent_execution", id.String())
 		if err != nil {
 			return err
 		}
@@ -370,31 +381,59 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		if err != nil && !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
-		if (err == nil && active.id != v.CurrentTaskID.String()) || (err != nil && v.CurrentTaskID != "") {
+		if (err == nil && active.id != v.CurrentExecutionID.String()) || (err != nil && v.CurrentExecutionID != "") {
 			return errors.New("agent does not match active task")
 		}
-	case "task":
-		var v taskmodel.Task
+	case "agent_execution":
+		var v agentmodel.Execution
 		_ = decodeJSON(data, &v)
 		agent, err := get[agentmodel.Agent](ctx, s, "agent", v.AgentID.String())
 		if err != nil {
 			return err
 		}
-		if agent.SessionID != v.SessionID || v.Active() != (agent.CurrentTaskID == v.ID) {
-			return errors.New("task does not match agent active identity")
+		if agent.SessionID != v.SessionID || v.Active() != (agent.CurrentExecutionID == v.ID) {
+			return errors.New("execution does not match agent active identity")
+		}
+		if v.SourceTaskID != "" {
+			pending, err := get[queued.Task](ctx, s, "task", v.SourceTaskID.String())
+			if err != nil {
+				return err
+			}
+			if pending.Status != queued.Dispatched || pending.ExecutionID != v.ID || pending.AgentID != v.AgentID || pending.RequestID != v.RequestID {
+				return errors.New("execution source task mismatch")
+			}
+		}
+	case "task":
+		var v queued.Task
+		_ = decodeJSON(data, &v)
+		owner, err := get[agentmodel.Agent](ctx, s, "agent", v.AgentID.String())
+		if err != nil {
+			return err
+		}
+		if owner.SessionID != v.SessionID {
+			return errors.New("queued task ownership mismatch")
+		}
+		if v.Status == queued.Dispatched {
+			execution, err := get[agentmodel.Execution](ctx, s, "agent_execution", v.ExecutionID.String())
+			if err != nil {
+				return err
+			}
+			if execution.SourceTaskID != v.ID || execution.AgentID != v.AgentID || execution.RequestID != v.RequestID || execution.InputMessageID != v.InputMessageID {
+				return errors.New("queued task execution mismatch")
+			}
 		}
 	case "tool":
 		var v toolcall.Execution
 		_ = decodeJSON(data, &v)
-		return taskOwner(v.TaskID, v.AgentID)
+		return taskOwner(v.ExecutionID, v.AgentID)
 	case "context":
 		var v sessionmodel.SessionContextEntry
 		_ = decodeJSON(data, &v)
 		if err := reference("session", scope); err != nil {
 			return err
 		}
-		if v.SourceTaskID != "" {
-			return reference("task", v.SourceTaskID.String())
+		if v.SourceExecutionID != "" {
+			return reference("agent_execution", v.SourceExecutionID.String())
 		}
 	case "control":
 		var v agentmodel.AgentControlCommand
@@ -402,19 +441,19 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		if err := reference("agent", v.AgentID.String()); err != nil {
 			return err
 		}
-		return taskOwner(v.TargetTaskID, v.AgentID)
+		return taskOwner(v.TargetExecutionID, v.AgentID)
 	case "wait":
 		var v workflow.WaitCondition
 		_ = decodeJSON(data, &v)
-		return taskOwner(v.TaskID, v.AgentID)
+		return taskOwner(v.ExecutionID, v.AgentID)
 	case "usage":
 		var v modelapi.ModelUsageRecord
 		_ = decodeJSON(data, &v)
-		return taskOwner(identity.TaskID(v.TaskID), identity.AgentID(v.AgentID))
+		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
 	case "timing":
 		var v timing.Record
 		_ = decodeJSON(data, &v)
-		return taskOwner(identity.TaskID(v.TaskID), identity.AgentID(v.AgentID))
+		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
 	case "message":
 		var v messageRecord
 		_ = decodeJSON(data, &v)
@@ -428,11 +467,20 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		if agent.SessionID.String() != scope || appendOwner(agent) != v.OwnerID {
 			return errors.New("message agent does not match the stream ownership")
 		}
-		if v.Data.TaskID != "" {
-			if err := reference("task", v.Data.TaskID); err != nil {
+		if v.Data.SourceTaskID != "" {
+			pending, err := get[queued.Task](ctx, s, "task", v.Data.SourceTaskID)
+			if err != nil {
 				return err
 			}
-			task, err := get[taskmodel.Task](ctx, s, "task", v.Data.TaskID)
+			if pending.AgentID != v.AgentID || pending.SessionID.String() != scope || pending.RequestID.String() != v.Data.RequestID || pending.InputMessageID != v.Data.ID || v.Data.Role != messagemodel.RoleUser || v.Data.ExecutionID != "" {
+				return errors.New("queued message ownership mismatch")
+			}
+		}
+		if v.Data.ExecutionID != "" {
+			if err := reference("agent_execution", v.Data.ExecutionID); err != nil {
+				return err
+			}
+			task, err := get[agentmodel.Execution](ctx, s, "agent_execution", v.Data.ExecutionID)
 			if err != nil {
 				return err
 			}
@@ -460,18 +508,27 @@ func immutable(collection string, before, after json.RawMessage) error {
 	}
 	var fields []string
 	switch collection {
-	case "task":
-		var prior, next taskmodel.Task
+	case "agent_execution":
+		var prior, next agentmodel.Execution
 		if err := decodeJSON(before, &prior); err != nil {
 			return err
 		}
 		if err := decodeJSON(after, &next); err != nil {
 			return err
 		}
-		if err := taskmodel.ValidateUpdate(prior, next); err != nil {
+		if err := agentmodel.ValidateExecutionUpdate(prior, next); err != nil {
 			return fmt.Errorf("%w: %v", fault.ErrRequestConflict, err)
 		}
 		return nil
+	case "task":
+		var prior, next queued.Task
+		if err := decodeJSON(before, &prior); err != nil {
+			return err
+		}
+		if err := decodeJSON(after, &next); err != nil {
+			return err
+		}
+		return queued.ValidateUpdate(prior, next)
 	case "tool":
 		var prior, next toolcall.Execution
 		if err := decodeJSON(before, &prior); err != nil {
@@ -513,7 +570,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 				return fault.ErrRequestConflict
 			}
 		}
-		fields = []string{"agentId", "taskId", "turnId"}
+		fields = []string{"agentId", "executionId", "turnId"}
 	case "timing":
 		var prior, next timing.Record
 		if err := decodeJSON(before, &prior); err != nil {

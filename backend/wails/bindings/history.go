@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strconv"
 
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/task"
 	"praxis/wails/dto"
 )
 
@@ -32,13 +32,13 @@ func listAgentHistory(ctx context.Context, agents AgentService, agentID identity
 		})
 	}
 	for _, value := range view.Tasks {
-		if value.Status != task.TaskEnded {
+		if value.Status != taskmodel.ExecutionEnded {
 			continue
 		}
 		kind := "task"
-		if value.FailureCode == task.TaskFailureRequestCanceled {
+		if value.FailureCode == taskmodel.ExecutionFailureRequestCanceled {
 			kind = "request_canceled"
-		} else if value.Outcome != task.TaskFailed {
+		} else if value.Outcome != taskmodel.ExecutionFailed {
 			continue
 		}
 		at := value.EndedAt

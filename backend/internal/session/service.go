@@ -326,11 +326,11 @@ type AppendContextResult struct {
 
 // AppendContextParams 是已由输入边界规范化的共享事实数据。
 type AppendContextParams struct {
-	EntryID      identity.ContextEntryID
-	SessionID    identity.SessionID
-	Kind         SessionContextKind
-	SourceTaskID identity.TaskID
-	Content      string
+	EntryID           identity.ContextEntryID
+	SessionID         identity.SessionID
+	Kind              SessionContextKind
+	SourceExecutionID identity.AgentExecutionID
+	Content           string
 }
 
 // AppendSessionContext 按稳定 ID 幂等追加不可变共享上下文。
@@ -344,7 +344,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 			params.EntryID,
 			params.SessionID,
 			params.Kind,
-			params.SourceTaskID,
+			params.SourceExecutionID,
 			params.Content,
 			s.clock.Now(),
 		)
@@ -354,7 +354,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 		}
 		if found {
 			if existing.SessionID != params.SessionID || existing.Kind != params.Kind ||
-				existing.SourceTaskID != params.SourceTaskID || existing.Content != entry.Content {
+				existing.SourceExecutionID != params.SourceExecutionID || existing.Content != entry.Content {
 				return fault.ErrRequestConflict
 			}
 			result = AppendContextResult{Entry: existing, ExistingEntry: true}

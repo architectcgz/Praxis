@@ -30,7 +30,7 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 			ToolDecisionRequest: dto.ToolDecisionRequest{
 				SessionID:       value.SessionID.String(),
 				AgentID:         value.AgentID.String(),
-				TaskID:          value.TaskID.String(),
+				ExecutionID:     value.ExecutionID.String(),
 				CallID:          value.ProviderToolCallID,
 				ArgumentsDigest: toolcall.ArgumentsDigest(value.Name, value.NormalizedArguments),
 			},
@@ -61,11 +61,11 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 	params := execution.ToolDecision{
 		SessionID:       identity.SessionID(wire.SessionID),
 		AgentID:         identity.AgentID(wire.AgentID),
-		TaskID:          identity.TaskID(wire.TaskID),
+		ExecutionID:     identity.AgentExecutionID(wire.ExecutionID),
 		CallID:          strings.TrimSpace(wire.CallID),
 		ArgumentsDigest: strings.TrimSpace(wire.ArgumentsDigest),
 	}
-	if params.SessionID == "" || params.AgentID == "" || params.TaskID == "" || params.CallID == "" || params.ArgumentsDigest == "" {
+	if params.SessionID == "" || params.AgentID == "" || params.ExecutionID == "" || params.CallID == "" || params.ArgumentsDigest == "" {
 		err := fault.New(fault.InvalidRequest, "tool approval identity is required")
 		return publicError(b.runtime, "CommandBindings.ToolDecision.request", err)
 	}

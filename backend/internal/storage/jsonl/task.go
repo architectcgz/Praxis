@@ -27,19 +27,6 @@ func (r TaskRepository) FindByRequest(ctx context.Context, id identity.AgentID, 
 	return getByClaim[taskmodel.Task](ctx, r.s, lookupKey{kind: "task-request", owner: id.String(), value: request.String()})
 }
 
-// GetActiveByAgent 通过唯一索引读取 Agent 的活动 Task。
-func (r TaskRepository) GetActiveByAgent(ctx context.Context, id identity.AgentID) (taskmodel.Task, error) {
-	return getByClaim[taskmodel.Task](ctx, r.s, lookupKey{kind: "active-agent", owner: id.String()})
-}
-
-// ListActive 按创建时间返回所有活动 Task，供启动恢复使用。
-func (r TaskRepository) ListActive(ctx context.Context) ([]taskmodel.Task, error) {
-	v, e := listIndexed[taskmodel.Task](ctx, r.s, lookupKey{kind: "active-tasks"}, nil)
-	return sorted(v, func(a, b taskmodel.Task) int {
-		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
-	}), e
-}
-
 // ListByAgent 返回指定 Agent 的对象副本；非正数 limit 返回全部任务。
 func (r TaskRepository) ListByAgent(ctx context.Context, id identity.AgentID, limit int) ([]taskmodel.Task, error) {
 	v, e := listIndexed[taskmodel.Task](ctx, r.s, lookupKey{kind: "tasks-agent", owner: id.String()}, nil)
@@ -50,16 +37,6 @@ func (r TaskRepository) ListByAgent(ctx context.Context, id identity.AgentID, li
 		v = capped(v, limit)
 	}
 	return v, e
-}
-
-// CountActiveBySession 返回 Session 内活动 Task 的数量。
-func (r TaskRepository) CountActiveBySession(ctx context.Context, id identity.SessionID) (int, error) {
-	count := 0
-	err := r.s.view(ctx, func(readCtx context.Context) error {
-		count = len(r.s.keys(readCtx, lookupKey{kind: "active-session", owner: id.String()}))
-		return nil
-	})
-	return count, err
 }
 
 // NextSequence 返回指定 Agent 的下一队列序号，必须在入队事务中调用。

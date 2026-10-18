@@ -91,17 +91,17 @@ func entryFromMessageData(value messagemodel.Message) (appcontext.ContextEntry, 
 // historyEntries 把回执关联到对应调用后，恢复补写和执行期间入队的用户消息不打断工具交互。
 // 只调整模型投影，不改写日志顺序；使用 Task 和 call ID 避免跨任务误配同名调用。
 func historyEntries(messages []messagemodel.Message) []appcontext.ContextEntry {
-	type callKey struct{ taskID, callID string }
+	type callKey struct{ executionID, callID string }
 	results := make(map[callKey]appcontext.ContextBlock)
 	calls := make(map[callKey]bool)
 	for _, message := range messages {
 		if entry, ok := entryFromMessageData(message); ok {
 			for _, block := range entry.Content {
 				if block.Kind == appcontext.ContextBlockToolCall {
-					calls[callKey{message.TaskID, block.CallID}] = true
+					calls[callKey{message.ExecutionID, block.CallID}] = true
 				}
 				if block.Kind == appcontext.ContextBlockToolResult {
-					results[callKey{message.TaskID, block.CallID}] = block
+					results[callKey{message.ExecutionID, block.CallID}] = block
 				}
 			}
 		}
@@ -115,7 +115,7 @@ func historyEntries(messages []messagemodel.Message) []appcontext.ContextEntry {
 		if message.Role == messagemodel.RoleTool {
 			content := make([]appcontext.ContextBlock, 0, len(entry.Content))
 			for _, block := range entry.Content {
-				if block.Kind != appcontext.ContextBlockToolResult || !calls[callKey{message.TaskID, block.CallID}] {
+				if block.Kind != appcontext.ContextBlockToolResult || !calls[callKey{message.ExecutionID, block.CallID}] {
 					content = append(content, block)
 				}
 			}
@@ -129,7 +129,7 @@ func historyEntries(messages []messagemodel.Message) []appcontext.ContextEntry {
 			if block.Kind != appcontext.ContextBlockToolCall {
 				continue
 			}
-			if result, ok := results[callKey{message.TaskID, block.CallID}]; ok {
+			if result, ok := results[callKey{message.ExecutionID, block.CallID}]; ok {
 				entries = append(entries, appcontext.ContextEntry{
 					Kind:    appcontext.ContextEntryToolResult,
 					Role:    appcontext.ContextRoleTool,

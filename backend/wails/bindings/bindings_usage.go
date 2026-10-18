@@ -30,11 +30,11 @@ func usageRecords(records []model.ModelUsageRecord) []dto.ModelUsageRecord {
 	result := make([]dto.ModelUsageRecord, 0, len(records))
 	for _, value := range records {
 		result = append(result, dto.ModelUsageRecord{
-			SessionID: value.SessionID,
-			AgentID:   value.AgentID,
-			TaskID:    value.TaskID,
-			TurnID:    value.TurnID.String(),
-			Usage:     publicUsage(value.Usage),
+			SessionID:   value.SessionID,
+			AgentID:     value.AgentID,
+			ExecutionID: value.ExecutionID,
+			TurnID:      value.TurnID.String(),
+			Usage:       publicUsage(value.Usage),
 		})
 	}
 	return result

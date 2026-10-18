@@ -3,15 +3,15 @@ package execution
 import (
 	"context"
 	"errors"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/hook"
 	"praxis/internal/identity"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/toolcall"
 )
 
 func (r *Coordinator) run(
 	ctx context.Context,
-	task taskmodel.Task,
+	task taskmodel.Execution,
 	active *activeTask,
 ) {
 	r.logEvent(task.ID, "task started")
@@ -22,12 +22,12 @@ func (r *Coordinator) run(
 	}
 
 	if err := r.startTask(task); err != nil {
-		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, taskmodel.TaskFailureRuntimeFailed, err)
+		outcome, code, message := r.executionResult(ctx, taskmodel.ExecutionFailed, taskmodel.ExecutionFailureRuntimeFailed, err)
 		r.endTask(task, active, outcome, code, message)
 		return
 	}
 	if ctx.Err() != nil {
-		outcome, code, message := r.executionResult(ctx, taskmodel.TaskInterrupted, taskmodel.TaskFailureRuntimeCancelled, ctx.Err())
+		outcome, code, message := r.executionResult(ctx, taskmodel.ExecutionInterrupted, taskmodel.ExecutionFailureRuntimeCancelled, ctx.Err())
 		r.endTask(task, active, outcome, code, message)
 		return
 	}
@@ -38,19 +38,19 @@ func (r *Coordinator) run(
 			err = errors.New("message streams returned a nil writer")
 		}
 		r.logError(task, "resolve message writer", err)
-		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, taskmodel.TaskFailureRuntimeFailed, err)
+		outcome, code, message := r.executionResult(ctx, taskmodel.ExecutionFailed, taskmodel.ExecutionFailureRuntimeFailed, err)
 		r.endTask(task, active, outcome, code, message)
 		return
 	}
 
 	for {
 		outcome, failureCode, failureMessage := r.execute(ctx, task, messageWriter)
-		if outcome == taskmodel.TaskAwaitingApproval && ctx.Err() == nil {
+		if outcome == taskmodel.ExecutionAwaitingApproval && ctx.Err() == nil {
 			select {
 			case <-active.wake:
 				continue
 			case <-ctx.Done():
-				outcome, failureCode, failureMessage = r.executionResult(ctx, taskmodel.TaskInterrupted, taskmodel.TaskFailureRuntimeCancelled, ctx.Err())
+				outcome, failureCode, failureMessage = r.executionResult(ctx, taskmodel.ExecutionInterrupted, taskmodel.ExecutionFailureRuntimeCancelled, ctx.Err())
 			}
 		}
 		if !r.endTask(task, active, outcome, failureCode, failureMessage) {
@@ -62,7 +62,7 @@ func (r *Coordinator) run(
 
 }
 
-func (r *Coordinator) startTask(task taskmodel.Task) error {
+func (r *Coordinator) startTask(task taskmodel.Execution) error {
 	startContext, cancelStart := r.transitionContext()
 	defer cancelStart()
 	if err := r.tasks.ConfirmRunning(startContext, task.ID); err != nil {
@@ -76,17 +76,17 @@ func (r *Coordinator) startTask(task taskmodel.Task) error {
 // loop 不拥有持久化生命周期，因此 context 取消后仍会交由业务服务保存结束状态。
 func (r *Coordinator) execute(
 	ctx context.Context,
-	task taskmodel.Task,
+	task taskmodel.Execution,
 	messageWriter toolcall.Writer,
-) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, string) {
+) (taskmodel.ExecutionOutcome, taskmodel.ExecutionFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
-		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID},
+		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
 		Kind:     hook.OperationAgent,
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
 	content, continuation, err := r.tasks.LoadContext(ctx, task)
-	outcome, failureCode := taskmodel.TaskFailed, taskmodel.TaskFailureStorage
+	outcome, failureCode := taskmodel.ExecutionFailed, taskmodel.ExecutionFailureStorage
 	if err == nil {
 		outcome, failureCode, err = r.loop.Run(ctx, task, content, continuation, messageWriter)
 	}
@@ -102,41 +102,41 @@ func (r *Coordinator) execute(
 // executionResult 读取 Agent 提供的取消原因；持久化控制命令由结束事务最终仲裁。
 func (r *Coordinator) executionResult(
 	ctx context.Context,
-	outcome taskmodel.TaskOutcome,
-	failureCode taskmodel.TaskFailureCode,
+	outcome taskmodel.ExecutionOutcome,
+	failureCode taskmodel.ExecutionFailureCode,
 	err error,
-) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, string) {
-	failureMessage := taskmodel.TaskFailureMessage(failureCode, err)
+) (taskmodel.ExecutionOutcome, taskmodel.ExecutionFailureCode, string) {
+	failureMessage := taskmodel.ExecutionFailureMessage(failureCode, err)
 	if ctx.Err() != nil {
-		outcome = taskmodel.TaskInterrupted
+		outcome = taskmodel.ExecutionInterrupted
 		if errors.Is(context.Cause(ctx), ErrExecutionPaused) {
-			outcome = taskmodel.TaskPaused
+			outcome = taskmodel.ExecutionPaused
 		}
-		failureCode = taskmodel.TaskFailureRuntimeCancelled
+		failureCode = taskmodel.ExecutionFailureRuntimeCancelled
 		failureMessage = ""
 	} else if err != nil {
-		outcome = taskmodel.TaskFailed
+		outcome = taskmodel.ExecutionFailed
 		if failureCode == "" {
-			failureCode = taskmodel.TaskFailureRuntimeFailed
+			failureCode = taskmodel.ExecutionFailureRuntimeFailed
 		}
 	}
 	outcome, failureCode = normalizeOutcome(outcome, failureCode)
-	if failureCode != taskmodel.TaskFailureProvider {
+	if failureCode != taskmodel.ExecutionFailureProvider {
 		failureMessage = ""
 	}
 	return outcome, failureCode, failureMessage
 }
 
 func (r *Coordinator) endTask(
-	task taskmodel.Task,
+	task taskmodel.Execution,
 	active *activeTask,
-	outcome taskmodel.TaskOutcome,
-	failureCode taskmodel.TaskFailureCode,
+	outcome taskmodel.ExecutionOutcome,
+	failureCode taskmodel.ExecutionFailureCode,
 	failureMessage string,
 ) bool {
 	// 先保留结算结果与占用，失败后只重试结算。
 	active.result = &taskResult{outcome: outcome, code: failureCode, message: failureMessage}
-	r.activeTasks.BeginEnding(task.AgentID, active.taskID)
+	r.activeTasks.BeginEnding(task.AgentID, active.executionID)
 	endContext, cancelEnd := r.transitionContext()
 	defer cancelEnd()
 	endedTask, err := r.tasks.Settle(
@@ -151,9 +151,9 @@ func (r *Coordinator) endTask(
 		return false
 	}
 	// 结算提交后才释放执行槽；入队唤醒不能在暂停或取消结算途中抢先续跑。
-	r.activeTasks.Release(task.AgentID, active.taskID)
+	r.activeTasks.Release(task.AgentID, active.executionID)
 	// 只有已提交的最终结果允许续跑；已提交的暂停或取消可以覆盖 loop 的正常完成。
-	if endedTask.Outcome == taskmodel.TaskCompleted || endedTask.Outcome == taskmodel.TaskYielded {
+	if endedTask.Outcome == taskmodel.ExecutionCompleted || endedTask.Outcome == taskmodel.ExecutionYielded {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
 		if _, err := r.StartNext(queueContext, task.AgentID); err != nil {
@@ -164,38 +164,38 @@ func (r *Coordinator) endTask(
 }
 
 func normalizeOutcome(
-	outcome taskmodel.TaskOutcome,
-	failureCode taskmodel.TaskFailureCode,
-) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode) {
+	outcome taskmodel.ExecutionOutcome,
+	failureCode taskmodel.ExecutionFailureCode,
+) (taskmodel.ExecutionOutcome, taskmodel.ExecutionFailureCode) {
 	if !knownOutcome(outcome) {
-		outcome = taskmodel.TaskFailed
-		failureCode = taskmodel.TaskFailureRuntimeInvalid
+		outcome = taskmodel.ExecutionFailed
+		failureCode = taskmodel.ExecutionFailureRuntimeInvalid
 	}
-	if outcome == taskmodel.TaskFailed && failureCode == "" {
-		failureCode = taskmodel.TaskFailureRuntimeFailed
+	if outcome == taskmodel.ExecutionFailed && failureCode == "" {
+		failureCode = taskmodel.ExecutionFailureRuntimeFailed
 	}
 	if !taskmodel.ValidFailureCode(failureCode) {
-		outcome = taskmodel.TaskFailed
-		failureCode = taskmodel.TaskFailureRuntimeFailed
+		outcome = taskmodel.ExecutionFailed
+		failureCode = taskmodel.ExecutionFailureRuntimeFailed
 	}
 	return outcome, failureCode
 }
 
-func (r *Coordinator) logError(task taskmodel.Task, stage string, err error) {
+func (r *Coordinator) logError(task taskmodel.Execution, stage string, err error) {
 	if err == nil {
 		return
 	}
 	r.logger.Errorf("task id=%s stage=%s failed: %v", task.ID, stage, err)
 }
 
-func (r *Coordinator) logEvent(taskID identity.TaskID, stage string) {
-	r.logger.Infof("task id=%s stage=%s", taskID, stage)
+func (r *Coordinator) logEvent(executionID identity.AgentExecutionID, stage string) {
+	r.logger.Infof("task id=%s stage=%s", executionID, stage)
 }
 
-func knownOutcome(outcome taskmodel.TaskOutcome) bool {
+func knownOutcome(outcome taskmodel.ExecutionOutcome) bool {
 	switch outcome {
-	case taskmodel.TaskAwaitingApproval, taskmodel.TaskCompleted, taskmodel.TaskYielded, taskmodel.TaskPaused,
-		taskmodel.TaskFailed, taskmodel.TaskInterrupted:
+	case taskmodel.ExecutionAwaitingApproval, taskmodel.ExecutionCompleted, taskmodel.ExecutionYielded, taskmodel.ExecutionPaused,
+		taskmodel.ExecutionFailed, taskmodel.ExecutionInterrupted:
 		return true
 	default:
 		return false

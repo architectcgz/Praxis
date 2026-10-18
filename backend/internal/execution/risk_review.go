@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	taskmodel "praxis/internal/agent"
 	appcontext "praxis/internal/context"
 	"praxis/internal/hook"
 	messagemodel "praxis/internal/message"
 	modelapi "praxis/internal/model"
 	"praxis/internal/security"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/tool/arguments"
 	"praxis/internal/toolcall"
 	"strings"
@@ -47,9 +47,9 @@ type RiskReviewer struct {
 }
 
 // Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
-func (r RiskReviewer) Review(ctx context.Context, task taskmodel.Task, invocation toolcall.Execution, attempt toolcall.RiskReview) (assessment security.RiskAssessment, err error) {
+func (r RiskReviewer) Review(ctx context.Context, task taskmodel.Execution, invocation toolcall.Execution, attempt toolcall.RiskReview) (assessment security.RiskAssessment, err error) {
 	ctx, scope := r.Hooks.Start(ctx, hook.Operation{
-		Identity:    hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID, TurnID: attempt.TurnID},
+		Identity:    hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID, TurnID: attempt.TurnID},
 		Kind:        hook.OperationProvider,
 		Name:        task.Config.Model.ProviderID + "/" + task.Config.Model.ModelID,
 		ReferenceID: "risk-review:" + attempt.TurnID.String(),
@@ -99,7 +99,7 @@ func (r RiskReviewer) Review(ctx context.Context, task taskmodel.Task, invocatio
 		return assessment, err
 	}
 	stream, err := built.Stream.Stream(ctx, modelapi.ModelRequest{
-		TaskID:          task.ID,
+		ExecutionID:     task.ID,
 		PromptCacheKey:  task.SessionID.String(),
 		Context:         history,
 		Model:           task.Config.Model.Clone(),
@@ -134,7 +134,7 @@ func (r RiskReviewer) Review(ctx context.Context, task taskmodel.Task, invocatio
 				text.WriteString(event.Text)
 			case modelapi.StreamUsage:
 				if event.Usage != nil && event.Usage.Valid() && r.ObserveUsage != nil {
-					r.ObserveUsage(modelapi.ModelUsageRecord{SessionID: task.SessionID.String(), AgentID: task.AgentID.String(), TaskID: task.ID.String(), TurnID: attempt.TurnID, Usage: *event.Usage})
+					r.ObserveUsage(modelapi.ModelUsageRecord{SessionID: task.SessionID.String(), AgentID: task.AgentID.String(), ExecutionID: task.ID.String(), TurnID: attempt.TurnID, Usage: *event.Usage})
 				}
 			case modelapi.StreamThinkingDelta, modelapi.StreamReasoningState:
 				// 审核推理内容不进入用户会话或审计正文。

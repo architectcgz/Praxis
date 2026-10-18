@@ -2,15 +2,15 @@ package bindings
 
 import (
 	"context"
+	"praxis/internal/agent"
 	"strings"
 	"unicode/utf8"
 
-	"praxis/internal/agent"
+	taskservice "praxis/internal/agent/input"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	modelconfig "praxis/internal/model/config"
-	"praxis/internal/task"
-	taskservice "praxis/internal/task/service"
+	queueservice "praxis/internal/task/service"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -38,7 +38,7 @@ func (b *CommandBindings) SendInput(wire dto.SendInputRequest) (dto.SendInputRes
 		err := fault.New(modelconfig.ModelNotConfigured, "")
 		return dto.SendInputResponse{}, publicError(b.runtime, "CommandBindings.SendInput.request", err)
 	}
-	if params.Content == "" || len(params.Content) > task.MaxInputBytes || !utf8.ValidString(params.Content) {
+	if params.Content == "" || len(params.Content) > agent.MaxInputBytes || !utf8.ValidString(params.Content) {
 		err := fault.InvalidValue("content", "content must be non-empty UTF-8 text within the size limit")
 		return dto.SendInputResponse{}, publicError(b.runtime, "CommandBindings.SendInput.request", err)
 	}
@@ -47,7 +47,7 @@ func (b *CommandBindings) SendInput(wire dto.SendInputRequest) (dto.SendInputRes
 		return dto.SendInputResponse{}, publicError(b.runtime, "CommandBindings.SendInput", err)
 	}
 	return dto.SendInputResponse{
-		TaskID:          result.Task.ID.String(),
+		ExecutionID:     result.Task.ID.String(),
 		ExistingRequest: result.ExistingRequest,
 		ActivationError: result.ActivationError,
 	}, nil
@@ -80,7 +80,7 @@ func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskRes
 	if err != nil {
 		return dto.QueueTaskResponse{}, err
 	}
-	params := taskservice.EnqueueInput{
+	params := queueservice.EnqueueInput{
 		ID:             identity.TaskID(wire.TaskID),
 		RequestID:      identity.RequestID(wire.RequestID),
 		AgentID:        identity.AgentID(wire.AgentID),
@@ -93,7 +93,7 @@ func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskRes
 		err := fault.New(modelconfig.ModelNotConfigured, "")
 		return dto.QueueTaskResponse{}, publicError(b.runtime, "CommandBindings.QueueTask.request", err)
 	}
-	if params.Prompt == "" || len(params.Prompt) > task.MaxInputBytes || !utf8.ValidString(params.Prompt) {
+	if params.Prompt == "" || len(params.Prompt) > agent.MaxInputBytes || !utf8.ValidString(params.Prompt) {
 		err := fault.InvalidValue("prompt", "prompt must be non-empty UTF-8 text within the size limit")
 		return dto.QueueTaskResponse{}, publicError(b.runtime, "CommandBindings.QueueTask.request", err)
 	}
@@ -106,9 +106,9 @@ func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskRes
 
 func controlInput(wire dto.PauseAgentRequest) agent.ControlInput {
 	return agent.ControlInput{
-		CommandID:    identity.AgentControlCommandID(wire.CommandID),
-		AgentID:      identity.AgentID(wire.AgentID),
-		TargetTaskID: identity.TaskID(wire.TargetTaskID),
+		CommandID:         identity.AgentControlCommandID(wire.CommandID),
+		AgentID:           identity.AgentID(wire.AgentID),
+		TargetExecutionID: identity.AgentExecutionID(wire.TargetExecutionID),
 	}
 }
 
@@ -124,7 +124,7 @@ func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (ag
 	return dto.AgentControlResponse{
 		CommandID:         result.Command.ID.String(),
 		AgentID:           result.Command.AgentID.String(),
-		TargetTaskID:      result.Command.TargetTaskID.String(),
+		TargetExecutionID: result.Command.TargetExecutionID.String(),
 		Kind:              string(result.Command.Kind),
 		Status:            string(result.Command.Status),
 		ExistingCommand:   result.ExistingCommand,

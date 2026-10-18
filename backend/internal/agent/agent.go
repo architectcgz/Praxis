@@ -3,7 +3,6 @@ package agent
 import (
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	taskmodel "praxis/internal/task"
 	"time"
 )
 
@@ -21,14 +20,14 @@ const (
 
 // Agent 表示绑定到一个 Session 和一个 AgentDefinition 的运行实例。
 type Agent struct {
-	ID            identity.AgentID
-	SessionID     identity.SessionID
-	DefinitionID  identity.AgentDefinitionID
-	Profile       AgentProfile
-	State         AgentState
-	CurrentTaskID identity.TaskID
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                 identity.AgentID
+	SessionID          identity.SessionID
+	DefinitionID       identity.AgentDefinitionID
+	Profile            AgentProfile
+	State              AgentState
+	CurrentExecutionID identity.AgentExecutionID
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // Startable 判断当前状态是否允许开始新的 Task。
@@ -59,14 +58,14 @@ func NewAgent(id identity.AgentID, sessionID identity.SessionID, definitionID id
 	}
 }
 
-func (a *Agent) Start(taskID identity.TaskID, at time.Time) error {
+func (a *Agent) StartExecution(executionID identity.AgentExecutionID, at time.Time) error {
 	if !a.State.Startable() {
 		return fault.InvalidTransition("agent", string(a.State), string(AgentExecuting))
 	}
-	if taskID == "" {
-		return fault.InvalidValue("agent.currentTaskID", "task id is required")
+	if executionID == "" {
+		return fault.InvalidValue("agent.currentExecutionID", "task id is required")
 	}
-	a.State, a.CurrentTaskID, a.UpdatedAt = AgentExecuting, taskID, at.UTC()
+	a.State, a.CurrentExecutionID, a.UpdatedAt = AgentExecuting, executionID, at.UTC()
 	return nil
 }
 
@@ -79,28 +78,28 @@ func (a *Agent) RequestPause(at time.Time) error {
 }
 
 // EndTask 根据本轮最终结果释放活动回合；中断后仍可开始新回合。
-func (a *Agent) EndTask(outcome taskmodel.TaskOutcome, at time.Time) error {
+func (a *Agent) EndExecution(outcome ExecutionOutcome, at time.Time) error {
 	if a.State != AgentExecuting && a.State != AgentPausing {
 		return fault.InvalidTransition("agent", string(a.State), "ended")
 	}
-	if !taskmodel.ValidTaskOutcome(outcome) {
+	if !ValidExecutionOutcome(outcome) {
 		return fault.InvalidValue("agent.outcome", "unknown task outcome")
 	}
-	if outcome == taskmodel.TaskPaused && a.State != AgentPausing {
+	if outcome == ExecutionPaused && a.State != AgentPausing {
 		return fault.InvalidTransition("agent", string(a.State), string(AgentPaused))
 	}
 	switch outcome {
-	case taskmodel.TaskCompleted:
+	case ExecutionCompleted:
 		a.State = AgentIdle
-	case taskmodel.TaskYielded:
+	case ExecutionYielded:
 		a.State = AgentWaiting
-	case taskmodel.TaskPaused:
+	case ExecutionPaused:
 		a.State = AgentPaused
-	case taskmodel.TaskInterrupted:
+	case ExecutionInterrupted:
 		a.State = AgentInterrupted
-	case taskmodel.TaskFailed:
+	case ExecutionFailed:
 		a.State = AgentFailed
 	}
-	a.CurrentTaskID, a.UpdatedAt = "", at.UTC()
+	a.CurrentExecutionID, a.UpdatedAt = "", at.UTC()
 	return nil
 }

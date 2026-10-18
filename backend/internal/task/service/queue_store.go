@@ -67,15 +67,15 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueInput) (Enqueue
 		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
-		if agent.State != agentmodel.AgentExecuting || agent.CurrentTaskID == "" {
-			return fault.New(agentmodel.UnavailableCode, "queue input requires an executing runtime")
+		if agent.State != agentmodel.AgentExecuting || agent.CurrentExecutionID == "" {
+			return fault.New(agentmodel.UnavailableCode, "queue input requires an executing agent")
 		}
 		sequence, err := s.tasks.NextSequence(txCtx, agent.ID)
 		if err != nil {
 			return err
 		}
 		at := s.clock.Now().UTC()
-		task := taskmodel.NewPendingTask(
+		task := taskmodel.NewTask(
 			params.ID, agent.SessionID, agent.ID, params.RequestID, "input:"+params.RequestID.String(), sequence, at,
 		)
 		task.ProviderID = params.ProviderID
@@ -85,13 +85,13 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueInput) (Enqueue
 			return err
 		}
 		stored, err := s.messages.Append(txCtx, agent.SessionID, agent.ID, messagemodel.Message{
-			ID:         "input:" + params.RequestID.String(),
-			RequestID:  params.RequestID.String(),
-			TaskID:     task.ID.String(),
-			Role:       messagemodel.RoleUser,
-			AuthorKind: messagemodel.AuthorUser,
-			Blocks:     []messagemodel.Block{{Kind: messagemodel.BlockText, Text: params.Prompt}},
-			CreatedAt:  at,
+			ID:           "input:" + params.RequestID.String(),
+			RequestID:    params.RequestID.String(),
+			SourceTaskID: task.ID.String(),
+			Role:         messagemodel.RoleUser,
+			AuthorKind:   messagemodel.AuthorUser,
+			Blocks:       []messagemodel.Block{{Kind: messagemodel.BlockText, Text: params.Prompt}},
+			CreatedAt:    at,
 		})
 		if err != nil {
 			return err
@@ -103,9 +103,9 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueInput) (Enqueue
 	if err == nil && committedMessage != nil && !result.ExistingTask {
 		if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
 			Identity: hook.Identity{
-				SessionID: result.Task.SessionID,
-				AgentID:   result.Task.AgentID,
-				TaskID:    result.Task.ID,
+				SessionID:    result.Task.SessionID,
+				AgentID:      result.Task.AgentID,
+				SourceTaskID: result.Task.ID,
 			},
 			Message: committedMessage,
 		}); hookErr != nil {

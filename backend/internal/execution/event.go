@@ -14,7 +14,7 @@ type Event struct {
 	Kind           string
 	SessionID      identity.SessionID
 	AgentID        identity.AgentID
-	TaskID         identity.TaskID
+	ExecutionID    identity.AgentExecutionID
 	Outcome        string
 	FailureCode    string
 	FailureMessage string
@@ -59,7 +59,7 @@ func (p *EventPublisher) SubscribeAgentEvents(observer func(Event)) func() {
 
 // Publish 在锁外同步通知当前订阅者，观察者不得修改事件中的切片与指针。
 func (p *EventPublisher) Publish(event Event) {
-	if p == nil || event.AgentID == "" || event.TaskID == "" {
+	if p == nil || event.AgentID == "" || event.ExecutionID == "" {
 		return
 	}
 	p.mu.RLock()

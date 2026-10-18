@@ -71,8 +71,8 @@ type AgentSnapshot struct {
 	DefinitionID      string         `json:"definitionId"`
 	Profile           string         `json:"profile"`
 	State             string         `json:"state"`
-	CurrentTask       string         `json:"currentTaskId"`
-	TaskIDs           []string       `json:"taskIds"`
+	CurrentExecution  string         `json:"currentTaskId"`
+	ExecutionIDs      []string       `json:"executionIds"`
 	Tasks             []TaskSnapshot `json:"tasks"`
 	ControlCommandIDs []string       `json:"controlCommandIds"`
 }
@@ -90,16 +90,16 @@ type TaskSnapshot struct {
 }
 
 type AgentMessage struct {
-	ID         string              `json:"id"`
-	Sequence   uint64              `json:"sequence"`
-	At         time.Time           `json:"at"`
-	TaskID     string              `json:"taskId"`
-	Role       string              `json:"role"`
-	AuthorKind string              `json:"authorKind"`
-	AuthorID   string              `json:"authorId,omitempty"`
-	Content    string              `json:"content"`
-	Thinking   string              `json:"thinking,omitempty"`
-	Blocks     []AgentMessageBlock `json:"blocks,omitempty"`
+	ID          string              `json:"id"`
+	Sequence    uint64              `json:"sequence"`
+	At          time.Time           `json:"at"`
+	ExecutionID string              `json:"executionId"`
+	Role        string              `json:"role"`
+	AuthorKind  string              `json:"authorKind"`
+	AuthorID    string              `json:"authorId,omitempty"`
+	Content     string              `json:"content"`
+	Thinking    string              `json:"thinking,omitempty"`
+	Blocks      []AgentMessageBlock `json:"blocks,omitempty"`
 }
 
 // AgentMessageBlock 是消息中可安全展示的结构化内容块。
@@ -199,15 +199,15 @@ type SendInputRequest struct {
 }
 
 type SendInputResponse struct {
-	TaskID          string `json:"taskId"`
+	ExecutionID     string `json:"executionId"`
 	ExistingRequest bool   `json:"existingRequest"`
 	ActivationError string `json:"activationError,omitempty"`
 }
 
 type PauseAgentRequest struct {
-	CommandID    string `json:"commandId"`
-	AgentID      string `json:"agentId"`
-	TargetTaskID string `json:"targetTaskId"`
+	CommandID         string `json:"commandId"`
+	AgentID           string `json:"agentId"`
+	TargetExecutionID string `json:"targetTaskId"`
 }
 
 type CancelTaskRequest = PauseAgentRequest
@@ -215,7 +215,7 @@ type CancelTaskRequest = PauseAgentRequest
 type AgentControlResponse struct {
 	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
-	TargetTaskID      string `json:"targetTaskId,omitempty"`
+	TargetExecutionID string `json:"targetTaskId,omitempty"`
 	Kind              string `json:"kind"`
 	Status            string `json:"status"`
 	ExistingCommand   bool   `json:"existingCommand"`
@@ -223,7 +223,7 @@ type AgentControlResponse struct {
 }
 
 type QueueTaskRequest struct {
-	TaskID         string `json:"taskId"`
+	TaskID         string `json:"executionId"`
 	RequestID      string `json:"requestId"`
 	AgentID        string `json:"agentId"`
 	Prompt         string `json:"prompt"`
@@ -233,7 +233,7 @@ type QueueTaskRequest struct {
 }
 
 type QueueTaskResponse struct {
-	TaskID       string `json:"taskId"`
+	TaskID       string `json:"executionId"`
 	Status       string `json:"status"`
 	ExistingTask bool   `json:"existingTask"`
 }

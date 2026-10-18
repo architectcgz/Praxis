@@ -45,18 +45,19 @@ type Block struct {
 }
 
 type Message struct {
-	ID         string
-	Sequence   uint64
-	RequestID  string
-	HandoffID  string
-	TaskID     string
-	TurnID     string
-	StopReason string
-	Role       Role
-	AuthorKind AuthorKind
-	AuthorID   string
-	Blocks     []Block
-	CreatedAt  time.Time
+	ID           string
+	Sequence     uint64
+	RequestID    string
+	HandoffID    string
+	ExecutionID  string
+	SourceTaskID string `json:"sourceTaskId,omitempty"`
+	TurnID       string
+	StopReason   string
+	Role         Role
+	AuthorKind   AuthorKind
+	AuthorID     string
+	Blocks       []Block
+	CreatedAt    time.Time
 }
 
 // TextContent 返回消息中的文本块拼接结果；思考、工具调用和工具结果不属于正文。

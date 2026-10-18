@@ -2,12 +2,11 @@ package bindings
 
 import (
 	"bytes"
+	"praxis/internal/agent"
 	"strings"
 
-	"praxis/internal/agent"
 	"praxis/internal/identity"
 	"praxis/internal/message"
-	"praxis/internal/task"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -27,10 +26,10 @@ func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 		return dto.AgentSnapshot{}, publicError(b.runtime, "AgentBindings.GetAgent", err)
 	}
 	result := agentSnapshot(view.Agent)
-	result.TaskIDs = make([]string, 0, len(view.Tasks))
+	result.ExecutionIDs = make([]string, 0, len(view.Tasks))
 	result.ControlCommandIDs = make([]string, 0, len(view.Controls))
 	for _, value := range view.Tasks {
-		result.TaskIDs = append(result.TaskIDs, value.ID.String())
+		result.ExecutionIDs = append(result.ExecutionIDs, value.ID.String())
 		result.Tasks = append(result.Tasks, taskSnapshot(value))
 	}
 	for _, value := range view.Controls {
@@ -71,14 +70,14 @@ func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHisto
 
 func agentSnapshot(value agent.Agent) dto.AgentSnapshot {
 	return dto.AgentSnapshot{
-		ID:           value.ID.String(),
-		Name:         agent.DisplayName(value.DefinitionID),
-		SessionID:    value.SessionID.String(),
-		DefinitionID: value.DefinitionID.String(),
-		Profile:      string(value.Profile),
-		State:        string(value.State),
-		CurrentTask:  value.CurrentTaskID.String(),
-		Tasks:        []dto.TaskSnapshot{},
+		ID:               value.ID.String(),
+		Name:             agent.DisplayName(value.DefinitionID),
+		SessionID:        value.SessionID.String(),
+		DefinitionID:     value.DefinitionID.String(),
+		Profile:          string(value.Profile),
+		State:            string(value.State),
+		CurrentExecution: value.CurrentExecutionID.String(),
+		Tasks:            []dto.TaskSnapshot{},
 	}
 }
 
@@ -111,22 +110,22 @@ func publicAgentMessages(values []message.Message) []dto.AgentMessage {
 			continue
 		}
 		result = append(result, dto.AgentMessage{
-			ID:         value.ID,
-			Sequence:   value.Sequence,
-			At:         value.CreatedAt,
-			TaskID:     value.TaskID,
-			Role:       string(value.Role),
-			AuthorKind: string(value.AuthorKind),
-			AuthorID:   value.AuthorID,
-			Content:    content.String(),
-			Thinking:   thinking.String(),
-			Blocks:     blocks,
+			ID:          value.ID,
+			Sequence:    value.Sequence,
+			At:          value.CreatedAt,
+			ExecutionID: value.ExecutionID,
+			Role:        string(value.Role),
+			AuthorKind:  string(value.AuthorKind),
+			AuthorID:    value.AuthorID,
+			Content:     content.String(),
+			Thinking:    thinking.String(),
+			Blocks:      blocks,
 		})
 	}
 	return result
 }
 
-func taskSnapshot(value task.Task) dto.TaskSnapshot {
+func taskSnapshot(value agent.Execution) dto.TaskSnapshot {
 	return dto.TaskSnapshot{
 		ID:             value.ID.String(),
 		Status:         string(value.Status),

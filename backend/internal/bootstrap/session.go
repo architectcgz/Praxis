@@ -24,7 +24,7 @@ func buildSessions(resources storageResources, repos jsonl.Repositories, agents 
 		Sessions:       repos.Sessions,
 		Contexts:       repos.Contexts,
 		Agents:         repos.Agents,
-		Tasks:          repos.Tasks,
+		Tasks:          repos.Executions,
 		Definitions:    agents.Definition,
 		UsageRecords:   usages.ListSession,
 		TextReader:     fs.Filesystem{},

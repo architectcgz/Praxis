@@ -12,19 +12,19 @@ func appendToolResult(
 	ctx context.Context,
 	messageWriter messagemodel.Writer,
 	requestID identity.RequestID,
-	taskID identity.TaskID,
+	executionID identity.AgentExecutionID,
 	turnID identity.TurnID,
 	callIndex int,
 	block appcontext.ContextBlock,
 ) error {
 	return appendTaskMessage(ctx, messageWriter, messagemodel.Message{
-		ID:         "tool-result:" + taskID.String() + ":" + block.CallID,
-		RequestID:  requestID.String(),
-		TaskID:     taskID.String(),
-		TurnID:     turnID.String(),
-		Role:       messagemodel.RoleTool,
-		AuthorKind: messagemodel.AuthorTool,
-		AuthorID:   block.Name,
+		ID:          "tool-result:" + executionID.String() + ":" + block.CallID,
+		RequestID:   requestID.String(),
+		ExecutionID: executionID.String(),
+		TurnID:      turnID.String(),
+		Role:        messagemodel.RoleTool,
+		AuthorKind:  messagemodel.AuthorTool,
+		AuthorID:    block.Name,
 	}, []appcontext.ContextBlock{block})
 }
 

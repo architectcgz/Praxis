@@ -29,7 +29,7 @@ func operationTiming(value timing.Record) dto.OperationTiming {
 	return dto.OperationTiming{
 		SessionID:       value.SessionID,
 		AgentID:         value.AgentID,
-		TaskID:          value.TaskID,
+		ExecutionID:     value.ExecutionID,
 		Kind:            string(value.Kind),
 		Name:            value.Name,
 		ReferenceID:     value.ReferenceID,

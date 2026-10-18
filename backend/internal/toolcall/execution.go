@@ -89,11 +89,11 @@ type Result struct {
 }
 
 // Execution 归属于一次 Task 的一次 loop 迭代（Turn），以 ProviderToolCallID
-// 和参数摘要识别重试。仓储负责保证 (TaskID, ProviderToolCallID) 唯一，
+// 和参数摘要识别重试。仓储负责保证 (ExecutionID, ProviderToolCallID) 唯一，
 // 原始调用身份不可变；规范化参数在准入时冻结，之后不可变。
 type Execution struct {
 	ID                  identity.ToolExecutionID
-	TaskID              identity.TaskID
+	ExecutionID         identity.AgentExecutionID
 	TurnID              identity.TurnID
 	SessionID           identity.SessionID
 	AgentID             identity.AgentID
@@ -120,7 +120,7 @@ type Execution struct {
 // 身份和原始 JSON 已由输入边界校验，具体工具参数在执行准入时处理。
 func NewExecution(
 	id identity.ToolExecutionID,
-	taskID identity.TaskID,
+	executionID identity.AgentExecutionID,
 	turnID identity.TurnID,
 	sessionID identity.SessionID,
 	agentID identity.AgentID,
@@ -132,7 +132,7 @@ func NewExecution(
 ) Execution {
 	return Execution{
 		ID:                 id,
-		TaskID:             taskID,
+		ExecutionID:        executionID,
 		TurnID:             turnID,
 		SessionID:          sessionID,
 		AgentID:            agentID,

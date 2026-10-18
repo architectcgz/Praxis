@@ -16,11 +16,7 @@ func (r *Coordinator) StartNext(ctx context.Context, agentID identity.AgentID) (
 	if r.activeTasks.occupied(agentID) {
 		return false, nil
 	}
-	pending, found, err := r.queue.Next(ctx, agentID)
-	if err != nil || !found {
-		return false, err
-	}
-	task, prepared, err := r.queue.PrepareQueuedTask(ctx, pending)
+	task, prepared, err := r.tasks.PrepareNext(ctx, agentID)
 	if err != nil || !prepared {
 		return false, err
 	}

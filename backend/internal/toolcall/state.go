@@ -3,9 +3,9 @@ package toolcall
 import (
 	"bytes"
 	"context"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/tool"
 	"time"
 )
@@ -24,12 +24,12 @@ func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID)
 		if invocation.BudgetReserved || invocation.Status.Terminal() {
 			return nil
 		}
-		task, err := s.tasks.Get(txCtx, invocation.TaskID)
+		task, err := s.tasks.Get(txCtx, invocation.ExecutionID)
 		if err != nil {
 			return err
 		}
 		if task.Progress.ToolCalls >= taskmodel.MaxToolCalls {
-			return fault.New(taskmodel.TaskResourceLimit, "tool call limit exceeded")
+			return fault.New(taskmodel.ExecutionResourceLimit, "tool call limit exceeded")
 		}
 		task.Progress.ToolCalls++
 		invocation.BudgetReserved = true
@@ -55,12 +55,12 @@ func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (Exec
 		if current.Status != StatusApproved && current.Status != StatusAwaitingApproval {
 			return nil
 		}
-		task, err := s.tasks.Get(txCtx, current.TaskID)
+		task, err := s.tasks.Get(txCtx, current.ExecutionID)
 		if err != nil {
 			return err
 		}
 		if err := s.checkTask(txCtx, ToolExecutionMetadata{
-			TaskID:        current.TaskID,
+			ExecutionID:   current.ExecutionID,
 			TurnID:        current.TurnID,
 			SessionID:     current.SessionID,
 			AgentID:       current.AgentID,
@@ -87,7 +87,7 @@ func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (Exec
 			return fault.ErrRequestConflict
 		}
 		if current.Name == tool.ToolBash || current.Name == tool.ToolApplyPatch {
-			prior, err := s.executions.ListByTask(txCtx, task.ID)
+			prior, err := s.executions.ListByExecution(txCtx, task.ID)
 			if err != nil {
 				return err
 			}
@@ -129,7 +129,7 @@ func (s *Executor) reject(ctx context.Context, id identity.ToolExecutionID, code
 			return nil
 		}
 		if current.Status == StatusRunning {
-			return fault.New(taskmodel.TaskBusy, "tool call is already running")
+			return fault.New(taskmodel.ExecutionBusy, "tool call is already running")
 		}
 		if current.Status == StatusApproved {
 			code = FailureInterrupted

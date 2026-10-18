@@ -2,10 +2,10 @@ package execution
 
 import (
 	"context"
+	taskmodel "praxis/internal/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/security"
-	taskmodel "praxis/internal/task"
 	"praxis/internal/toolcall"
 	txrunner "praxis/internal/transaction"
 	"time"
@@ -15,7 +15,7 @@ import (
 type ToolApprovals struct {
 	DecideOperation func(context.Context, toolcall.Execution) (security.ApprovalDecision, error)
 	Transactions    txrunner.Runner
-	Tasks           taskmodel.Store
+	Tasks           taskmodel.ExecutionStore
 	Executions      toolcall.Store
 }
 
@@ -23,24 +23,24 @@ type ToolApprovals struct {
 type ToolDecision struct {
 	SessionID       identity.SessionID
 	AgentID         identity.AgentID
-	TaskID          identity.TaskID
+	ExecutionID     identity.AgentExecutionID
 	CallID          string
 	ArgumentsDigest string
 }
 
 // Decide 在事务中检查调用归属和当前授权规则，幂等保存用户决定。
-func (a ToolApprovals) Decide(ctx context.Context, params ToolDecision, approve bool) (taskmodel.Task, error) {
-	var task taskmodel.Task
+func (a ToolApprovals) Decide(ctx context.Context, params ToolDecision, approve bool) (taskmodel.Execution, error) {
+	var task taskmodel.Execution
 	err := a.Transactions.InTx(ctx, func(txCtx context.Context) error {
 		var err error
-		task, err = a.Tasks.Get(txCtx, params.TaskID)
+		task, err = a.Tasks.Get(txCtx, params.ExecutionID)
 		if err != nil {
 			return err
 		}
 		if task.SessionID != params.SessionID || task.AgentID != params.AgentID {
 			return fault.ErrRequestConflict
 		}
-		invocation, err := a.Executions.FindByTaskCall(txCtx, task.ID, params.CallID)
+		invocation, err := a.Executions.FindByExecutionCall(txCtx, task.ID, params.CallID)
 		if err != nil {
 			return err
 		}
@@ -105,7 +105,7 @@ func (s *Runtime) ListToolApprovals(ctx context.Context, agentID identity.AgentI
 	}
 	pending := values[:0]
 	for _, invocation := range values {
-		task, err := s.approvals.Tasks.Get(ctx, invocation.TaskID)
+		task, err := s.approvals.Tasks.Get(ctx, invocation.ExecutionID)
 		if err != nil {
 			return nil, err
 		}

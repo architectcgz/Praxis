@@ -9,7 +9,7 @@ import (
 
 // checkTask 固定执行归属与工作区，不能通过重新准备参数改变被批准的操作。
 func (s *Executor) checkTask(ctx context.Context, provided ToolExecutionMetadata) error {
-	task, err := s.tasks.Get(ctx, provided.TaskID)
+	task, err := s.tasks.Get(ctx, provided.ExecutionID)
 	if err != nil {
 		return err
 	}
