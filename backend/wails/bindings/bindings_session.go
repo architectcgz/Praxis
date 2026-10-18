@@ -1,7 +1,6 @@
 package bindings
 
 import (
-	"praxis/internal/contracts"
 	"praxis/internal/request"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -20,16 +19,16 @@ func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, 
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := services.Sessions.ListSessionsByProject(ctx, contracts.ProjectID(projectID), 100)
+	sessions, err := services.Sessions.ListSessionsByProject(ctx, projectID, 100)
 	if err != nil {
 		return nil, publicError(b.runtime, "SessionBindings.ListSessions", err)
 	}
 	result := make([]dto.SessionSummary, 0, len(sessions))
 	for _, session := range sessions {
 		result = append(result, dto.SessionSummary{
-			ID:          session.ID.String(),
-			ProjectID:   session.ProjectID.String(),
-			WorkspaceID: session.WorkspaceID.String(),
+			ID:          session.ID,
+			ProjectID:   session.ProjectID,
+			WorkspaceID: session.WorkspaceID,
 			Title:       session.Title,
 			CreatedAt:   session.CreatedAt,
 			UpdatedAt:   session.UpdatedAt,
@@ -47,22 +46,22 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 		return dto.CreateSessionResponse{}, err
 	}
 	result, err := services.Sessions.CreateSession(ctx, request.CreateSession{
-		SessionID:    contracts.SessionID(wire.SessionID),
-		AgentID:      contracts.AgentID(wire.AgentID),
-		RequestID:    contracts.RequestID(wire.RequestID),
-		ProjectID:    contracts.ProjectID(wire.ProjectID),
-		WorkspaceID:  contracts.WorkspaceID(wire.WorkspaceID),
-		DefinitionID: contracts.AgentDefinitionID(wire.AgentDefinitionID),
+		SessionID:    wire.SessionID,
+		AgentID:      wire.AgentID,
+		RequestID:    wire.RequestID,
+		ProjectID:    wire.ProjectID,
+		WorkspaceID:  wire.WorkspaceID,
+		DefinitionID: wire.AgentDefinitionID,
 	})
 	if err != nil {
 		return dto.CreateSessionResponse{}, publicError(b.runtime, "SessionBindings.CreateSession", err)
 	}
 	return dto.CreateSessionResponse{
-		SessionID:         result.SessionID.String(),
-		ProjectID:         result.ProjectID.String(),
-		WorkspaceID:       result.WorkspaceID.String(),
-		AgentID:           result.AgentID.String(),
-		AgentDefinitionID: result.DefinitionID.String(),
+		SessionID:         result.SessionID,
+		ProjectID:         result.ProjectID,
+		WorkspaceID:       result.WorkspaceID,
+		AgentID:           result.AgentID,
+		AgentDefinitionID: result.DefinitionID,
 	}, nil
 }
 
@@ -74,14 +73,14 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 	if err != nil {
 		return dto.SessionSnapshot{}, err
 	}
-	detail, err := services.Sessions.GetSessionDetail(ctx, contracts.SessionID(sessionID), 100)
+	detail, err := services.Sessions.GetSessionDetail(ctx, sessionID, 100)
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.runtime, "SessionBindings.GetSession", err)
 	}
 	result := dto.SessionSnapshot{
-		ID:          detail.Session.ID.String(),
-		ProjectID:   detail.Session.ProjectID.String(),
-		WorkspaceID: detail.Session.WorkspaceID.String(),
+		ID:          detail.Session.ID,
+		ProjectID:   detail.Session.ProjectID,
+		WorkspaceID: detail.Session.WorkspaceID,
 		Title:       detail.Session.Title,
 		CreatedAt:   detail.Session.CreatedAt,
 		UpdatedAt:   detail.Session.UpdatedAt,
@@ -102,7 +101,7 @@ func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionU
 	if err != nil {
 		return dto.SessionUsageSummary{}, err
 	}
-	summary, err := services.Sessions.GetSessionUsageSummary(ctx, contracts.SessionID(sessionID))
+	summary, err := services.Usages.GetSessionUsageSummary(ctx, sessionID)
 	if err != nil {
 		return dto.SessionUsageSummary{}, publicError(b.runtime, "SessionBindings.GetSessionUsageSummary", err)
 	}
@@ -124,7 +123,7 @@ func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := services.Sessions.DeleteSession(ctx, contracts.SessionID(sessionID)); err != nil {
+	if err := services.Sessions.DeleteSession(ctx, sessionID); err != nil {
 		return publicError(b.runtime, "SessionBindings.DeleteSession", err)
 	}
 	return nil
@@ -139,7 +138,7 @@ func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	if err != nil {
 		return err
 	}
-	canonical, err := request.NewRenameSession(contracts.SessionID(sessionID), title)
+	canonical, err := request.NewRenameSession(sessionID, title)
 	if err != nil {
 		return publicError(b.runtime, "SessionBindings.RenameSession.request", err)
 	}

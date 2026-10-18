@@ -2,12 +2,13 @@ package execution
 
 import (
 	"context"
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 )
 
 // StartNext 按 Agent 查询队首；活动任务（包括等待结算）占用期间不领取。
 // 并发准备由 TaskOperations 的准入事务仲裁，不持有进程级调度锁。
-func (r *Coordinator) StartNext(ctx context.Context, agentID contracts.AgentID) (bool, error) {
+func (r *Coordinator) StartNext(ctx context.Context, agentID identity.AgentID) (bool, error) {
 	if err := r.enter(ctx); err != nil {
 		return false, err
 	}
@@ -24,7 +25,7 @@ func (r *Coordinator) StartNext(ctx context.Context, agentID contracts.AgentID) 
 		return false, err
 	}
 	if task.AgentID != agentID {
-		return false, contracts.ErrRequestConflict
+		return false, fault.ErrRequestConflict
 	}
 	if err := r.activate(ctx, task); err != nil {
 		return false, err

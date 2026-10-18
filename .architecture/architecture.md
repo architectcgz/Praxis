@@ -1,351 +1,110 @@
-# Praxis 架构
-
-本文档描述 Praxis 当前目标状态下的产品边界、运行时分层、核心数据关系、持久化边界和前后端通信边界。架构文档只描述可被代码直接验证的目标状态；具体实现以 `backend/` 和 `frontend/` 为准。
-
-## 产品边界
-
-Praxis 是面向个人学习者的本地多 Agent 编排桌面应用：
-
-- 技术形态为 Go + Wails + React，所有核心能力在本机进程内运行，不依赖远程 Praxis 服务端。
-- `Project` 管理项目，项目可以包含多个 `Workspace`；`Session` 绑定一个项目工作区并承载一次持续协作。
-- `Agent` 是 Session 内的运行实例，绑定一个可复用的 `AgentDefinition`。默认定义包括 `primary`、`delegate`、`advisor` 和 `curator`。
-- `Agent` 通过持久化的 `Task` 执行用户输入、排队任务或恢复操作；`TurnID` 标识 Task 内一次模型迭代。执行期间可以调用已启用的工具；Bash 通过命令策略决定自动执行、审核或拒绝。
-- Session 共享上下文与每个 Agent 独立的 transcript 分开管理。共享上下文用于协作事实，transcript 用于保留单个 Agent 的完整对话和执行记录。
-
-核心关系如下：
-
-```text
-Project
-└── Workspace
-    └── Session
-        ├── Agent ── AgentDefinition
-        ├── SessionContextEntry
-        └── Task ── InputSnapshot / Progress / ToolInvocation / WaitCondition
-```
-
-## 运行时分层
-
-运行调用与对象装配分别组织。前端调用链如下：
-
-```text
-React frontend
-    │ Wails bindings / events
-    ▼
-backend/wails
-    │ 只做 wire 形状校验、DTO 转换和错误映射
-    ▼
-internal/request
-    │ canonical request（复制、Trim、引用校验）
-    ▼
-internal/service
-    │ 事务提交后激活
-    ▼
-internal/agent_runtime
-    │ 注入的 LoopFunc
-    ▼
-internal/loop
-    │ 模型与工具调用接口
-    ├── internal/infra/providers
-    └── internal/tool_execution
-```
-
-Go import 方向如下；`compose` 负责创建并连接具体对象，不参与业务执行链：
-
-```text
-internal/compose ──→ service / agent_runtime / loop / infra / core / tools/contracts
-backend/wails ──→ service / request / contracts / logging / wails 子包
-internal/request ──→ core/model/config / contracts
-internal/service ──→ repository / core / request / contracts / timing / tools/contracts / utils/pathutil
-internal/repository ──→ core / contracts
-internal/loop ──→ agent_runtime / core / tools/contracts
-internal/infra ──→ repository / core / timing / contracts / utils/pathutil
-internal/agent_runtime ──→ core / contracts / logging
-internal/core/model ──→ core/context / contracts
-internal/core 各业务包 ──→ core 内部依赖 / contracts / utils/pathutil
-```
-
-依赖规则：
-
-1. `internal/contracts` 提供跨包共享的 ID、错误、资源预算和协议值类型；不依赖业务实现。
-2. `internal/core` 统一组织业务核心，包含 `agent`、`model`、`project`、`session`、`workspace`、`task`、`context`、`workflow`、`security` 和 `tool_invocation`。各子包保存业务对象及其校验、状态转换与不变量；不依赖 `service`、`infra`、`agent_runtime`、`loop` 或 `compose`。`core` 仅作为目录分组，各业务包保持独立的 Go package，不设统一入口或转发层。
-3. 接口与相关能力放在同一个包内，并且由消费方拥有：`internal/core/model` 定义模型快照、模型构建、请求、流事件和用量记录；`internal/core/model/config` 定义共享模型配置类型、模型目录、配置编辑接口和校验错误；`internal/core/task` 保存 runtime 从任务队列取出并执行的任务及其生命周期；`internal/tools/contracts` 定义工具目录和工具调用契约；`internal/loop` 声明自身需要的执行接口（`TaskContextBuilder`、`TaskProgress`、`ToolExecutor`）；`internal/agent_runtime` 定义执行协调、消息写入、生命周期回调和 Agent 事件类型；`internal/repository` 定义持久化访问接口。`internal/contracts` 承载跨边界同形的执行参数值类型（如 `ToolInvocationContext`）。接口不暴露存储引擎、文件格式、Provider 协议或 Wails 类型。
-4. `internal/service` 实现产品用例，负责输入校验、幂等检查、事务内状态变更、事务提交后的 runtime 激活，以及窄 Port 协调。service 的输入来自 `internal/request` 构造的 canonical request；本地文件访问只通过 `service/project.WorkspaceDirectory`、`service/session.WorkspaceTextReader` 这类窄 Port，具体实现位于 `internal/infra/workspacefs`。service 不 import `internal/agent_runtime`，也不直接使用 `os` 文件系统 API。
-5. `internal/infra` 实现本地存储、配置加载与模型 Provider，工具执行器由 `internal/tools` 提供；这些实现可以依赖领域模型与能力接口，但领域模型不依赖具体实现。
-6. `internal/compose` 是唯一的生产组合根，负责创建具体实现、注入依赖和释放进程级资源。`compose/application.go` 创建唯一的 TaskService、TaskContextBuilder 和默认 ToolExecutor；`compose/agent_runtime.go` 的 `newLoop(loop.Config)` 只接收已装配的 Port，连接执行循环、模型 Provider 和 Runtime factory。
-7. `backend/wails` 只负责桌面生命周期、DTO、错误映射、binding 和事件转发；它不直接访问 repository 或文件存储。
-8. `internal/agent_runtime` 管理执行协调，不 import `loop`、`service`、`infra` 或 `compose`。loop 和应用服务使用其执行接口与 Agent 事件；模型 Provider 使用 `internal/core/model`，具体对象由 `compose` 注入。只被 loop 使用的 `TaskContextBuilder`、`TaskProgress`、`ToolExecutor` 声明在 `internal/loop`，不放在 `agent_runtime`。Loop 不直接 import `repository`，不自行开启 Task 事务或保存 Task 进度。
-9. `internal/request` 是 Wails 与 service 之间的 canonical request 边界：负责复制、Trim、补展示默认值和请求内引用校验，不访问 repository、不持锁、不编排用例。
-
-### Port owner
-
-| 能力 | 消费方接口位置 | 实现位置 |
-|---|---|---|
-| Workspace 目录创建/回收 | `service/project.WorkspaceDirectory` | `infra/workspacefs.Filesystem` |
-| Workspace 文本读取 | `service/session.WorkspaceTextReader` | `infra/workspacefs.Filesystem` |
-| 持久化、事务与一致读取 | `internal/repository` | `infra/jsonl`、`infra/document` |
-| 进程内执行激活 | `service/runtime.TaskActivator` | `agent_runtime.Registry`（由 `compose` 注入） |
-| Task 准入与收敛 | `service/runtime.TaskStarter` | `service/runtime/task.Service` |
-| Task 准备与恢复绑定 | `agent_runtime.TaskPreparer` | `service/runtime/task.Service` |
-| Task 开始确认与终态结算 | `agent_runtime.TaskTransitions` | `service/runtime/task.Service` |
-| Task 上下文重建 | `loop.TaskContextBuilder` | `service/runtime/task.TaskContextBuilder` |
-| Task 快照读取与模型进度提交 | `loop.TaskProgress` | `service/runtime/task.Service` |
-| 工具执行与授权 | `loop.ToolExecutor` | `tool_execution.Executor` |
-| Agent 可见消息流读写 | `repository.MessageStreams`（`Append`/`List`/`LoadMessages`） | `infra/jsonl.MessageStreams` |
-| 会话是否已有消息 | `repository.SessionRepository.HasMessages` | `infra/jsonl.SessionRepository` |
-
-### 验证规则
-
-依赖门禁与全量验收按以下顺序执行，任一步失败即停止；门禁通过时无输出且退出状态为 0：
-
-```text
-backend:  go build ./... → go vet ./... → 依赖门禁
-frontend: npm ci → npx tsc --noEmit → npm run build
-```
-
-依赖门禁使用 `go list` 检查生产包的直接 import，四项均为硬约束：
-
-1. `./wails/...` 不得 import `internal/core`、`internal/agent_runtime`、`internal/timing`、`internal/repository`、`internal/infra`。
-2. `./internal/core/model/...` 不得 import `internal/tools/contracts`。
-3. `./internal/service/...` 不得 import `internal/agent_runtime`。
-4. `./internal/service/...` 不得直接 import `os`。
-
-门禁自身必须有确定语义：`go list` 失败必须失败，`rg` 工具错误必须原样失败，不得当成“无匹配”而通过。
-
-## 后端模块
-
-| 路径 | 职责 |
-|---|---|
-| [`backend/internal/contracts`](../backend/internal/contracts) | 跨领域 ID、错误码、执行预算、审批记录和共享协议类型 |
-| [`backend/internal/core/agent`](../backend/internal/core/agent) | Agent、AgentDefinition 及 Agent 状态转换 |
-| [`backend/internal/core/model`](../backend/internal/core/model) | 模型快照及校验、模型构建接口、Provider 请求与流事件、token 用量及持久化记录 |
-| [`backend/internal/core/model/config`](../backend/internal/core/model/config) | 共享模型配置、Provider 和 Group 类型、模型目录及配置编辑接口；不包含凭据 |
-| [`backend/internal/core/task`](../backend/internal/core/task) | runtime 任务队列中的任务、输入快照和执行生命周期 |
-| [`backend/internal/core/project`](../backend/internal/core/project) | Project 模型 |
-| [`backend/internal/core/workspace`](../backend/internal/core/workspace) | Workspace 模型与工作区边界 |
-| [`backend/internal/core/session`](../backend/internal/core/session) | Session 模型、标题和归档状态 |
-| [`backend/internal/core/context`](../backend/internal/core/context) | Session 共享上下文、transcript 投影、上下文预算与 digest |
-| [`backend/internal/core/workflow`](../backend/internal/core/workflow) | WaitCondition 及其等待状态转换 |
-| [`backend/internal/core/security`](../backend/internal/core/security) | Bash CommandPolicy 的规则匹配与审核决策 |
-| [`backend/internal/core/tool_invocation`](../backend/internal/core/tool_invocation) | 工具调用持久化身份、状态转换、结果及恢复不变量 |
-| [`backend/internal/repository`](../backend/internal/repository) | 持久化、事务与一致消息读取接口 |
-| [`backend/internal/request`](../backend/internal/request) | Wails 与 service 之间的 canonical request 构造器：复制、规范化、请求内引用校验 |
-| [`backend/internal/service`](../backend/internal/service) | Project、Session、Agent 和 runtime 的应用服务，以及 Wails 前端服务集；只依赖窄 Port |
-| [`backend/internal/loop`](../backend/internal/loop) | 单次 Task 的 model/tool step loop、预算、Provider 事件归一化和自身的执行接口 |
-| [`backend/internal/agent_runtime`](../backend/internal/agent_runtime) | Agent 执行协调、Runtime 注册与关闭、消息写入与 Agent 事件定义 |
-| [`backend/internal/tools`](../backend/internal/tools) | 工具注册、工具契约、输入规范化和 `bash`、`read_file` 工具 |
-| [`backend/internal/tool_execution`](../backend/internal/tool_execution) | 工具授权、审批等待、执行及持久化结算，不保存 Assistant 消息 |
-| [`backend/internal/hooks`](../backend/internal/hooks) | `operation.go` 定义 Operation、Scope、Result 协议；Dispatcher 分发操作与已提交事实 |
-| [`backend/internal/timing`](../backend/internal/timing) | 通过 Hook 记录真实操作耗时 |
-| [`backend/internal/infra`](../backend/internal/infra) | 所有本地基础设施适配器和外部模型 Provider 适配器 |
-| [`backend/internal/compose`](../backend/internal/compose) | 生产组合根，打开数据根、注册依赖、创建服务和关闭资源 |
-| [`backend/wails`](../backend/wails) | Wails 生命周期、binding、DTO、错误映射和桌面事件出口 |
-
-### 应用服务边界
-
-[`internal/service`](../backend/internal/service) 通过窄接口组合用例：
-
-- `service/project` 创建和查询 Project、Workspace。
-- `service/session` 创建和查询 Session、管理 SessionContext 条目，并解析主 Agent；Task 的初始与恢复上下文由 `service/runtime/task.TaskContextBuilder` 负责。
-- `service/agent` 查询 Agent、Task 和 transcript 展示数据，并先记录 PauseAgent/StopAgent 控制命令，再在提交后取消指定 Task 的执行绑定；取消不关闭 Agent。
-- `service/runtime/approval.go` 在事务中保存可信用户的批准或拒绝决定，提交成功后通过 `TaskActivator` 唤醒 Runtime；审批命令和 UI 不直接执行工具。
-- `service/runtime/task` 通过一个 `Service` 负责即时输入创建、队首 Task 准备、遗留 Task 重新领取以及模型、资源预算和可见性快照冻结。
-- `service/runtime/queue` 保存独立排队 Task，并按 Agent FIFO 提供队首；`TaskPreparer.PrepareQueuedTask` 在 runtime 空闲时原子领取。
-- `service/runtime/task/progress.go` 实现 `LoadTask`、`RecordModelRequest`、`RecordModelOutput`：模型及摘要请求前原子推进序号和次数，模型输出按文本字节累计，取消后仍提交已消耗额度；事务失败不保存进度。
-- 工具调用次数由 `tool_execution` 的准入事务保留，ToolResult 字节由 `infra/jsonl` 的幂等消息写入累计。Loop 通过 `TaskProgress.LoadTask` 读取已提交预算，不重新计算工具消耗；最终 Assistant 与完成证据仍由 JSONL 原子提交。
-- `service/runtime/task` 通过 `ConfirmRunning` 确认开始，通过 `Settle` 在一个 JSONL 事务内提交 Task、Agent、控制命令的最终状态，并在提交后发布终态事件；`Abort` 复用结算规则后释放匹配的执行绑定。
-- `tool_execution` 负责工具调用的授权、等待审批、执行和结果结算；Assistant 消息及 Invocation 的原子登记由 Loop 委托给 `infra/jsonl`。
-- `core/tool_invocation` 定义工具调用状态模型，仅依赖共享 contracts。恢复时，未启动的调用结算为 `interrupted`，运行中但结果无法确认的调用结算为终态 `unknown`，不得自动重放。
-- Agent 可见消息流由 `repository.MessageStreams` 单个 Port 读写：`LoadMessages` 供上下文构建和标题命名使用，`Append`/`List` 供输入、工具结果和查询使用。可见性规则来自 `core/agent.CanReadSessionContext()`，日志键位由 `infra/jsonl` 决定；service 不判断写哪条流，也不依赖 `agent_runtime`。
-- “会话是否已有任何消息”是会话聚合的属性，由 `repository.SessionRepository.HasMessages` 回答；service 不再持有任何按流划分的消息仓储。
-- `service/services.go` 实现 Wails 层需要的前端服务集，负责参数转换、结果投影和瞬时事件订阅。
-
-用例的通用顺序是：
-
-```text
-校验请求
-  → JSONL 事务工作区内检查幂等性并更新持久化状态
-  → transaction commit
-  → 调度当前进程内 runtime
-```
-
-runtime 激活失败不会撤销已经提交的用户输入；Task 服务通过 `Abort` 结算并释放匹配执行绑定，失败时保留持久化事实供重试。
-
-## Agent Task
-
-### 状态与并发
-
-- Task 准入后的状态为 `starting → running → ending → ended`；预约 Task 在领取前处于 `pending`。
-- `ended` 固定最终 `Outcome`、`FailureCode` 和 `EndedAt`；`Outcome` 区分完成、失败、暂停和中断，Agent 中断后仍可接收新输入。
-- 一个 Agent 同时最多有一个 active Task；日志投影的唯一性校验和 Agent 状态共同约束这一点。
-- 同一个 `(AgentID, RequestID)` 只能对应一次用户输入 Task。重复请求返回已有记录，参数不一致则返回 request conflict。
-- 预约 Task 是独立任务，不是聊天邮箱。任务在真正启动时才冻结当前 Session context、模型和工作区，并按 Agent sequence FIFO 运行。
-- `Agent runtime` 是单进程、单 Agent 的活动执行槽。它只接受属于自身且已经持久化的 Task；关闭时取消活动 Task，并在给定 deadline 内等待退出。Runtime 不构造消息正文、不修改 Provider 协议或执行审批事务。
-- 应用启动时重新领取遗留 Task 的执行权，保留冻结输入、已消耗预算和此前已提交的暂停或取消命令。等待审批的 Task 保留等待与唤醒路径；只有结算后的持久化结果为完成或让出时才自动领取后续队列。
-- Loop 依据完成证据直接结束已有最终回复的 Task，否则先恢复未闭合工具轮；重启后已开始但结果不明的调用由 JSONL 读取修复为 `unknown`，不得自动重复副作用。
-
-### 执行链路
-
-```text
-Wails CommandBinding
-  → service/runtime/task.SendInput 或 service/runtime/queue.EnqueueTask
-  → repository transaction 创建 Task
-  → agent_runtime.Registry.Activate
-  → agent_runtime.Runtime
-  → agent_runtime.LoopFunc（compose 注入的 loop.Run）
-  → loop.Runner
-  → core/model.ModelStream + tool_execution.Executor
-  → 执行结果回调
-  → service/runtime/task.Settle
-  → JSONL 提交最终状态
-```
-
-`loop.Runner` 只拥有一次 Task 的 model/tool step loop，不拥有 Agent 状态或最终结束事务。每次工具调用都必须先写入可对账的 tool-result receipt，再构造下一轮模型上下文；模型或工具失败必须映射为稳定的 `TaskFailureCode`。
-
-控制命令使用 `CommandID` 保证幂等，使用 `AgentID + TargetTaskID` 固定取消目标；延迟到达的请求不会取消下一项 Task。结束事务优先应用此前已提交的控制命令，并保存 `FailureCode=request_canceled`，与系统中断区分。
-
-Task 服务只在首次结算事务提交成功后发布一个终态事件：用户暂停或取消为 `request_canceled`，其他结果为 `task_ended`。两者均携带 `SessionID`、`AgentID`、`TaskID`、`Outcome`、`FailureCode` 和安全的失败详情；runtime 不另行发布终态事件。
-
-模型构建由 `core/model.ModelBuilder` 定义，`infra/model_registry.Registry` 通过 `BuildModel` 根据冻结的 `core/model.ModelSnapshot` 创建 `core/model.Model`。`loop` 和计时包装器直接使用该契约。`core/task` 描述 runtime 取出并执行的队列任务，不负责模型构建或用量统计。
-
-模型 Provider 通过 `core/model.ModelStream` 提供统一的流事件：文本增量、思考增量、工具调用、用量、完成和错误。当前 Provider adapter 位于：
-
-- `infra/providers/anthropicmessages`
-- `infra/providers/openai_chat`
-- `infra/providers/openai_responses`
-- `infra/providers/streaming`
-
-Provider credential 由 `infra/model_registry` 私有解析并传入 Provider 工厂，不进入 Wails DTO、Task 快照或模型执行契约。`core/model.ModelUsage` 和 `ModelUsageRecord` 统一供 Provider、Agent 事件、用量存储及 Wails 用量查询使用。
-
-### Context 与 transcript
-
-- `SessionContextEntry` 是按创建时间和 ID 排序的 append-only 共享事实，类型包括用户消息、结论、决策和引用。
-- `service/runtime/task.TaskContextBuilder` 在 Task 准入事务内选择初始历史并冻结共享条目引用；TaskService 和 Loop 共用组合根装配的同一个构建器。
-- `core/context.ContextBuilder` 只负责纯模型投影：按创建时间和 ID 排序共享条目、按 TaskID 和 CallID 配对工具交互、生成 provider-neutral `ModelContext` 及 digest，不访问仓储或模型。
-- Task 的 `InputSnapshot` 保存可见消息 ID、消息序号边界、当前输入消息 ID、共享条目 ID 与 digest、系统指令、模型快照、资源预算和工作区，不保存完整 `ModelContext`。
-- 恢复构建在同一事务内读取冻结历史及当前 Task 的 Assistant、ToolResult 等续接消息，不混入其他排队请求；冻结共享条目缺失或 digest 不符时返回版本冲突。
-- 缺失工具回执的首次补写仍由 `infra/jsonl` 的消息读取入口负责；等待审批的调用不被上下文构建器执行或伪造回执。
-- 主 Agent 读取 Session 消息，协作 Agent 读取自身私有消息；共享文件不扩大消息可见范围。
-- 前端收到的 Agent event 只用于即时渲染；`task_ended` 或 `request_canceled` 之后必须重新读取持久化 transcript、Agent view、计时和用量，不能把瞬时事件当作事实来源。
-
-## 持久化边界
-
-### 数据根
-
-[`internal/infra/dataroot`](../backend/internal/infra/dataroot) 统一解析 `PRAXIS_DATA_ROOT`，默认使用用户目录下的 `.praxis`。目录职责如下：
-
-| 路径 | 内容 |
-|---|---|
-| `config/models.json` | Provider、Group、Model 和默认模型配置 |
-| `config/auth.json` | Provider credential，由 model registry 私有读取 |
-| `config/tools.json` | 工具启用状态与 Bash 命令策略 |
-| `config/agents/<definition-id>/` | `agent.json` 与 `AGENT.md` |
-| `runtime/projects.jsonl` | Project 与 Workspace 的提交日志 |
-| `runtime/sessions/<session-id>.jsonl` | Session 内的全部运行事实，文件名提供 Session 身份 |
-| `runtime/writer.lock` | 数据根单写入进程锁 |
-| `runtime/documents/` | 独立的内容寻址文档 |
-| `runtime/attachments/` | 本地附件存储边界 |
-| `runtime/tmp/` | 原子写入和临时文件 |
-
-### JSONL 与内存投影
-
-- [`infra/jsonl`](../backend/internal/infra/jsonl) 实现全部业务仓储与 `TxRunner`。每行包含一个事务的有序事件，同一事务只写入一个日志文件，持久化成功后才发布内存投影。
-- Session ID 只从文件名解析，事件和 payload 不重复保存。事件不带格式版本字段。
-- Store 校验引用、唯一性、冻结输入和终态不变量；操作系统文件锁保证单进程写入，进程内锁串行提交。
-- 启动 replay 重建 Session 目录、消息、Task、工具调用和队列；标题查询使用内存目录，不扫描消息正文。
-- 没有换行的尾部提交先留存诊断副本，再截断到最后一个完整提交。完整损坏行与非法引用会阻止启动。
-- 删除 Session 追加删除标记并清除关联投影，物理日志清理由独立操作处理。
-- [`infra/document`](../backend/internal/infra/document) 提供独立内容寻址文件存储；凭据与模型配置各有独立 owner。
-
-## 配置与安全
-
-- 模型配置调用链为 `Wails binding → internal/request.NewSaveModelConfig → service.Services → core/model/config.ConfigManager → infra/model_registry.Registry`。Wails binding 只把 wire DTO 转成 `request.SaveModelConfig` 并调用构造器；构造成功后 service 使用 canonical 配置校验 Agent 模型引用，再协调保存和记录日志。
-- `internal/request.NewSaveModelConfig` 是模型配置的唯一规范化 owner，负责复制请求、Trim 字段、补展示名称、检查请求内 Provider 引用并构造不可外部修改的 `ValidatedConfig`；`wails/validation` 只保留请求形状校验，不拥有领域限制。
-- `core/model/config.Config.Validate` 只读检查 canonical 值、结构、引用、能力预算和推理等级；业务层不执行 Trim 或补默认值。构造成功后不重复校验完整配置，后续加载、索引和模型构建直接使用 canonical 值。
-- 配置文件恢复通过 `core/model/config.NewValidatedConfig` 只读校验已持久化的 canonical 数据，非法或非 canonical 值直接报错，不清洗字段或静默修复。
-- 注册表的 `Save` 只接收已准备配置，负责原子持久化和更新内存索引；零值配置被拒绝，不重复规范化或业务校验。`Config` 返回独立副本。Wails 输入层将配置校验失败映射为共享的 `ValidationError`，持久化错误保留原始分类；URL 校验和代理解析只读验证 canonical 值。
-- `infra/model_registry` 是模型配置的进程内唯一所有者，负责加载、校验、编辑配置、管理 credential、发现 Provider 模型，并在 task 激活时生成不可变的 `core/model.ModelSnapshot`。凭据类型和持久化索引只存在于注册表内部。
-- `infra/agent_registry` 加载每个 AgentDefinition 的 `agent.json` 和 `AGENT.md`，校验角色和默认模型引用；工具可用性由进程级 `config/tools.json` 管理。
-- `core/security.CommandPolicy` 按 `deny > ask > allow > default` 判断完整命令原文。Bash 默认 `ask`；`exact` 支持三种动作，`prefix` 只支持 `ask` 和 `deny`。配置加载时完整校验，重载失败保留当前配置。
-- 所有已注册工具默认启用。`infra/toolconfig.Catalog` 同时负责模型可见工具和执行准入；配置重载与工具启动共用 JSONL 事务边界。文件工具无需人工审核，仍检查 Workspace 路径、普通文件和符号链接。Bash 仅验证工作目录属于 Workspace，命令文本策略不提供进程隔离。
-- `ToolInvocation` 保存匹配规则、完整规范化参数和审批结果。用户批准绑定命令、绝对工作目录与超时的参数摘要；参数在首次准入后不可变。工具启动前重新读取规则，`deny` 阻止执行，自动批准变为 `ask` 时结算为 `interrupted`；待审批恢复后继续等待，结果 `unknown` 不自动重试。
-- Provider payload、API key、原始错误和内部路径不进入 Wails 对外 DTO；binding 层只返回稳定结果、用户可处理的错误码和安全的展示投影。
-
-### 工具配置
-
-`config/tools.json` 省略的工具默认启用；省略文件或 `bash.defaultAction` 时 Bash 默认 `ask`。命令匹配值保留原文，不裁剪空格或解释 Shell 语义。
-
-```json
-{
-  "tools": {
-    "read_file": {"enabled": true},
-    "apply_patch": {"enabled": true},
-    "bash": {"enabled": true}
-  },
-  "bash": {
-    "defaultAction": "ask",
-    "rules": [
-      {"id": "deny-force-push", "action": "deny", "match": {"type": "prefix", "value": "git push --force"}},
-      {"id": "ask-git-push", "action": "ask", "match": {"type": "prefix", "value": "git push "}},
-      {"id": "allow-git-status", "action": "allow", "match": {"type": "exact", "value": "git status"}}
-    ]
-  }
-}
-```
-
-命令策略是操作审核规则。它拒绝匹配到的 Bash 调用，无法阻止所有语义等价的 Shell 写法；自动放行的命令也可能通过项目脚本产生副作用。
-
-## Wails 与前端
-
-### 后端出口
-
-[`backend/wails/bindings`](../backend/wails/bindings) 定义消费方窄接口和五组绑定对象：Project、Session、Agent、Command、Model。每个 binding 只取得 `BindingContext`，调用注入的 `internal/service.Services`，再将领域结果转换为 [`wails/dto`](../backend/wails/dto) 类型。
-
-[`backend/wails/app.go`](../backend/wails/app.go) 保存 Wails context、注入服务集、转发 Agent event，并在关闭时按 runtime、store、日志的生命周期顺序释放资源。Wails 层不得成为业务状态或持久化状态的 owner。
-
-### 前端结构
-
-```text
-frontend/src/
-├── api/                    Wails binding wrapper、类型、错误和事件订阅
-├── app/                    应用入口与错误边界
-├── components/ui/          可复用的基础 UI 组件
-├── features/
-│   ├── projects/           Project 与 Session 列表、创建和概览
-│   ├── sessions/           Session 页面外壳、空状态和会话管理命令
-│   ├── agents/             Agent 查询、对话、任务输入和控制命令
-│   │   └── output/         消息、Markdown、工具结果与协作结果呈现
-│   ├── settings/           设置总览
-│   │   └── model-config/   Provider、Model 和配置编辑
-│   ├── timing/             操作耗时查询、事件合并与展示
-│   └── workspace/          页面组合、导航和选中状态
-├── shared/                 跨功能的非页面逻辑
-└── styles/                 全局 token、公共样式与 Workspace 样式入口
-```
-
-`frontend/src/api` 是 React feature 与 Wails generated binding 之间的唯一 API 适配边界。页面通过 API wrapper 发起命令和查询，通过 `praxis:agent-event` 接收即时事件，并在 Task 结束后重新查询持久化数据。
-
-`agents/useAgentData.ts` 管理查询、缓存、选中状态及过期响应保护，组合 `useAgentTaskInput.ts` 管理草稿、模型和 reasoning 选择。`useAgentCommands.ts` 执行输入与控制命令；`streaming.ts` 以纯函数合并实时事件并在持久化回填后去重。乐观消息保留发送时的 Session / Agent 归属，视图切换不得把消息展示到其他对话。
-
-全局 token 与基础样式由 `styles/` 拥有，功能样式就近归属。Agent 对话容器与输出内容的样式分别由 `agents/conversation.css`、`agents/output/conversation.css` 管理；`styles/workspace.css` 是 Workspace 样式的唯一加载入口。
-
-## 组合与生命周期
-
-[`internal/compose/application.go`](../backend/internal/compose/application.go) 按以下顺序创建生产应用：
-
-1. 解析并初始化 `DataRoot`。
-2. 打开 runtime logger 和 JSONL Store，获取写入锁并 replay 日志。
-3. 加载 model registry、tool config、tool registry、Agent registry 和 document store。
-4. 创建 repository 和应用服务，以及唯一的 TaskService、TaskContextBuilder；默认执行路径创建一个 ToolExecutor，并通过 `newLoop(loop.Config)` 注入模型、上下文、进度、工具和 Hook。TaskService 与 Loop 共用 TaskContextBuilder，进度、准备及结算 Port 由同一个 TaskService 提供；自定义 LoopFunc 不额外创建默认 ToolExecutor。
-5. 由 [`compose/agent_runtime.go`](../backend/internal/compose/agent_runtime.go) 连接 Provider 与 Runtime factory，将 Registry 注入运行时命令服务，再组装前端服务集。
-6. 由 [`backend/main.go`](../backend/main.go) 将服务集注入 Wails，并注册前端 assets 和 binding。
-
-关闭时先停止 Agent runtime，随后关闭 JSONL Store 和 runtime logger。所有后台 goroutine 都必须由 runtime 或其持有的 context 管理，不能由 Wails binding 临时创建无法回收的执行线程。
-
-## 验证边界
-
-后端验收使用 Go 1.25+；不保留测试文件，不新增或运行自动化测试。构建与静态检查不代替行为验证：
-
-- 后端：变更文件通过 `gofmt` 检查，执行 `go build ./...`、`go vet ./...` 和 import 依赖门禁。
-- 人工回归覆盖命令策略优先级、精确匹配、无效配置和重载，以及审批参数绑定、执行前配置变化、待审批重启、未知结果、文件工具 Workspace 校验、幂等、事务回滚、预算和 Provider 协议；失败事务不得发布成功终态事件。
-- 修改 Wails binding 时运行 `wails generate module`（后端目录）→ `npx tsc --noEmit` → `npm run build`；验收依据是实际生成的绑定声明。
-- 验证不自动启动 Wails、Vite 或其他开发服务。
+# Praxis 架构规则
+
+本文档只规定架构规则：分层与依赖方向、Port 归属、契约包边界、内核内部顺序，以及这些规则的执行方式。产品结构、数据布局、协议细节和验证流程不在本文档范围内，以 `backend/`、`frontend/` 和 `backend/scripts/check-dependencies.sh` 为准。
+
+## 一、分层与依赖方向
+
+依赖只能指向更内层（表中更靠上）。同层不新增依赖；允许的同层连接只有三类：父包与子包之间的值类型复用、调用方声明的 Port，以及本节表中明确列出的方向。
+
+| 层 | 包 | 允许依赖 |
+| --- | --- | --- |
+| 基元 | `core/identity`、`core/fault`、`core/tool`、`core/security`、`system`、`utils/*`、`logging` | 无，仅标准库 |
+| 内核值 | `core/context`、`core/context/compress`、`core/project`、`core/workspace`、`core/workflow` | 基元；同层只允许 `core/context/compress → core/context` |
+| 内核模型 | `core/model/config`、`core/model`、`core/session` | 基元、内核值；同层只允许 `core/model → core/model/config` |
+| 内核业务 | `core/task`、`core/agent`、`core/tool_execution` | 基元、内核值、内核模型 |
+| 内核能力 | `repository`、`hooks` | 内核各层 |
+| 基础设施 | `infra/*` | 内核各层、`repository`、`infra/*` 内部、第一节白名单 |
+| 工具 | `tools/contracts`、`tools/shared`、`tools/{bash,read_file,apply_patch}`、`tools` | 基元、内核业务、`tools/*` 内部 |
+| 执行 | `timing`、`tool_execution`、`loop`、`execution` | 基元、内核各层、内核能力、工具；同层只允许 `execution → loop` |
+| 业务基础 | `service/{project,session,agent,model,task,runtime/queue}` | 基元、内核各层、内核能力、工具、执行 |
+| 业务编排 | `service/runtime` | 业务基础及其允许项 |
+| 输入 | `request` | 内核各层、`app/model/contracts`（见白名单） |
+| 应用 | `app/*`、`app/*/contracts` | 内核各层、执行、业务、输入、自身和其他 `app/*/contracts`；契约只依赖标准库和其他契约 |
+| 组合与传输 | `compose`、`wails/*`、`main` | 全部 |
+
+包路径省略前缀 `internal/`。两条分层顺序无法表达、必须单独成立的约束：
+
+- 除 `compose`、第一节白名单和 `main → infra/dataroot` 外，任何包不得 import `infra/*`。`repository` 与 `tools/contracts` 是内层实现对外暴露的唯一接口。
+- `service/...` 不得 import `app`、`request`、`execution`、`loop`、`compose`、`wails`；`app/...` 不得 import `infra`、`repository`、`compose`、`wails`。`main` 只负责桌面生命周期和数据根解析，不参与业务装配。
+
+允许的反向引用只有四处。新增反向引用必须先修改本节，并在门禁中列入白名单：
+
+| 反向引用 | 理由 |
+| --- | --- |
+| `infra/workspacefs → service/session` | 实现 `WorkspaceTextReader`，需要该 Port 的哨兵错误 |
+| `infra/jsonl → timing` | 实现 `timing.Store`，需要 `timing.Record` |
+| `infra/toolconfig → tools/contracts` | 实现 `ToolCatalog`，需要契约值类型 |
+| `request → app/model/contracts` | 输入层复用公开值类型；不得引用应用入口 |
+
+## 二、Port 归属
+
+- Port 由调用方声明、被调用方实现。声明方是发起调用的一侧，与包所在层无关：内层可以声明由外层实现的 Port，外层也可以声明由内层实现的 Port。
+- 不为单一实现机械增加接口，不新增中间包；窄接口只声明消费方真正使用的能力，同一能力被多处消费时各自声明自己需要的部分。
+- 实现方不得反向 import 声明方。需要引用 Port 的类型或哨兵错误时，只能按第一节白名单执行。
+- 组合根负责把实现注入声明方。现成实现不匹配时由组合根定义适配器，不在业务包里做转换。
+
+| 声明方 | Port | 实现方 |
+| --- | --- | --- |
+| `loop` | `ToolExecutor` | `tool_execution.Executor` |
+| `loop` | `TaskProgress` | `service/task.Service` |
+| `loop` | `ToolExecutionReader` | `infra/jsonl` |
+| `execution` | `TaskOperations` | `service/task.Service` |
+| `execution` | `TaskQueue` | `service/runtime/queue.Service` |
+| `execution` | `RecoverySource` | `compose` |
+| `service/task` | `ExecutionSlots` | `execution.ActiveTasks` |
+| `service/task` | `PrimaryAgentProvider` | `service/session.Service` |
+| `service/task` | `AgentDefinitionProvider`、`ModelConfigResolver` | `compose` 的注册表适配器 |
+| `service/runtime` | `TaskActivator` | `execution.Coordinator` |
+| `service/runtime` | `TaskStarter` | `service/task.Service` |
+| `service/agent` | `ExecutionControl` | `execution.ActiveTasks` |
+| `service/session` | `WorkspaceTextReader` | `infra/workspacefs.Filesystem` |
+| `service/project` | `WorkspaceDirectory` | `infra/workspacefs.Filesystem` |
+| `timing` | `Store` | `infra/jsonl.TimingStore` |
+| `repository` | 各聚合仓储、`MessageStreams`、`MessageWriter`、`TxRunner` | `infra/jsonl` |
+| `tools/contracts` | `Tool`、`ToolCatalog` | `tools/{bash,read_file,apply_patch}`、`infra/toolconfig.Catalog` |
+| `tool_execution` | `ApprovalCatalog`、本地窄接口 `TaskRepository` | `infra/toolconfig.Catalog`、`infra/jsonl` |
+
+## 三、契约包边界
+
+新增 `contracts` 包必须同时满足三条，缺任意一条就直接使用所有者包的类型：
+
+1. 两侧由不同所有者维护、需要独立演进（例如前端协议与内核实体）。
+2. 契约形状必须与内核形状不同：要裁剪字段、重命名，或不暴露内核枚举和执行配置。
+3. 契约只依赖标准库和其他契约包，不含行为。
+
+- 满足三条的只有 `app/<业务>/contracts`：它面向 Wails/前端协议，必须过滤内核字段（opaque 推理状态不进入公开消息、摘要和前端通知），并由门禁强制只依赖标准库。
+- 内核内部共享同形值类型时，直接使用所有者包的类型：`core` 各包之间、`core` 与 `infra`/`loop` 之间不做包装、不做逐字段复制。`core` 及其子包内不得出现 `contracts` 包。
+- 契约包之间可以互相依赖，但不得成环；owner 按数据所属业务线确定，不按页面需要确定。
+- 契约只包含公开数据：身份用字符串，状态用稳定值，不暴露内核实体、枚举和执行配置；可变切片和计数指针在契约边界复制。
+
+## 四、内核内部顺序
+
+`core` 只是目录分组，不设统一入口或转发层。包内固定四档，依赖只能从后档指向前档：
+
+| 档 | 包 | 同档内允许 | 禁止依赖 |
+| --- | --- | --- | --- |
+| 基元 | `identity`、`fault`、`tool`、`security` | 无 | 其他任何 `core` 包 |
+| 值/规则 | `context`、`context/compress`、`project`、`workspace`、`workflow` | `context/compress → context` | `model`、`session`、`task`、`agent`、`tool_execution` |
+| 模型与会话 | `model/config`、`model`、`session` | `model → model/config` | `task`、`agent`、`tool_execution` |
+| 任务与执行 | `task`、`agent`、`tool_execution` | `agent → task` | 无额外限制 |
+
+推论：`session` 引用 `context` 的 opaque 推理状态、`model` 引用 `context` 的通用上下文类型、`task` 引用 `model` 的冻结配置都落在规则内。
+
+## 五、规则的执行方式
+
+规则由 `backend/scripts/check-dependencies.sh` 在执行 `go vet ./...` 之后强制：用 `go list -f '{{.ImportPath}} {{join .Imports " "}}'` 枚举生产包的直接 import，匹配到禁止前缀即失败；`go list` 失败和 `rg` 工具错误必须原样失败，不得当成"无匹配"放过。
+
+门禁必须覆盖以下边界：
+
+- `wails/...` 不依赖 `service`、`core`、`execution`、`loop`、`timing`、`repository`、`infra`。
+- `app/...` 不依赖 `infra`、`execution`、`loop`、`repository`、`compose`、`wails` 或直接文件系统操作；`app/*/contracts` 只依赖标准库和其他契约。
+- `request/...` 不依赖 `service`、`repository`、`infra`、`execution`、`loop`、`compose`、`wails` 或应用入口包，只允许 `app/*/contracts`。
+- `service/...` 不依赖 `app`、`request`、`infra`、`execution`、`loop`、`compose`、`wails` 或 `os`。
+- `loop/...` 不依赖 `app`、`service`、`execution`；`execution/...` 不依赖 `app`、`service`。
+- `infra/...` 不依赖 `app`、`request`、`execution`、`loop`、`compose`、`wails`，且除第一节白名单外不依赖 `service`。
+- `repository/...`、`hooks/...`、`utils/...`、`system/...`、`tools/...` 只向内依赖，不依赖 `service`、`app`、`request`、`infra`、`execution`、`loop`、`compose`、`wails`。
+- `core/...` 不依赖 `app`、`service`、`request`、`repository`、`infra`、`execution`、`loop`、`compose`、`hooks`、`tools`，并按第四节逐档禁止内核内部反向依赖。
+- `core/context` 不得依赖 `core/task`、`core/session`、`core/agent`；`core/model` 不得依赖 `tools/contracts`；`infra/jsonl` 不得依赖 `hooks`。
+- 全仓不得依赖集中契约入口。
+
+规则变更必须同步本节和 `check-dependencies.sh`。

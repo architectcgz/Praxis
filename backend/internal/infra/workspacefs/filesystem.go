@@ -8,9 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	applicationsession "praxis/internal/service/session"
 	"unicode/utf8"
-
-	"praxis/internal/contracts"
 )
 
 // Filesystem 使用操作系统文件系统实现受限的 Workspace 操作。
@@ -66,10 +65,10 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", fmt.Errorf("inspect workspace file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", contracts.ErrNotRegularFile
+		return "", applicationsession.ErrNotRegularFile
 	}
 	if info.Size() > maxBytes {
-		return "", contracts.ErrFileTooLarge
+		return "", applicationsession.ErrFileTooLarge
 	}
 	file, err := root.Open(relativePath)
 	if err != nil {
@@ -81,7 +80,7 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", fmt.Errorf("inspect opened workspace file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", contracts.ErrNotRegularFile
+		return "", applicationsession.ErrNotRegularFile
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
@@ -91,10 +90,10 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", err
 	}
 	if int64(len(data)) > maxBytes {
-		return "", contracts.ErrFileTooLarge
+		return "", applicationsession.ErrFileTooLarge
 	}
 	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
-		return "", contracts.ErrInvalidText
+		return "", applicationsession.ErrInvalidText
 	}
 	return string(bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))), nil
 }

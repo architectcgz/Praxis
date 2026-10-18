@@ -1,9 +1,8 @@
 package bindings
 
 import (
-	"praxis/internal/contracts"
+	projectcontracts "praxis/internal/app/project/contracts"
 	"praxis/internal/request"
-	"praxis/internal/service"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -17,7 +16,7 @@ func (b *ProjectBindings) GetProjectApprovalMode(projectID string) (dto.ProjectA
 	if err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
-	value, err := services.Projects.GetProjectApprovalMode(ctx, contracts.ProjectID(projectID))
+	value, err := services.Projects.GetProjectApprovalMode(ctx, projectID)
 	if err != nil {
 		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.GetProjectApprovalMode", err)
 	}
@@ -33,7 +32,7 @@ func (b *ProjectBindings) SetProjectApprovalMode(wire dto.SetProjectApprovalMode
 	if err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
-	canonical, err := request.NewSetProjectApprovalMode(contracts.ProjectID(wire.ProjectID), wire.Mode)
+	canonical, err := request.NewSetProjectApprovalMode(wire.ProjectID, wire.Mode)
 	if err != nil {
 		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.SetProjectApprovalMode.request", err)
 	}
@@ -44,9 +43,9 @@ func (b *ProjectBindings) SetProjectApprovalMode(wire dto.SetProjectApprovalMode
 	return approvalModeDTO(value), nil
 }
 
-func approvalModeDTO(value service.ProjectApprovalMode) dto.ProjectApprovalMode {
+func approvalModeDTO(value projectcontracts.ProjectApprovalMode) dto.ProjectApprovalMode {
 	return dto.ProjectApprovalMode{
-		ProjectID:     value.ProjectID.String(),
+		ProjectID:     value.ProjectID,
 		GlobalMode:    value.GlobalMode,
 		ProjectMode:   value.ProjectMode,
 		EffectiveMode: value.EffectiveMode,

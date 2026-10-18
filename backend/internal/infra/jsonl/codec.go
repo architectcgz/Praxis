@@ -8,9 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"praxis/internal/core/fault"
 	"strings"
-
-	"praxis/internal/contracts"
 )
 
 func decodeJSON(data []byte, target any) error {
@@ -102,7 +101,7 @@ func (s *Store) payloadWithReader(ctx context.Context, key entityKey, reader rec
 	if tx := s.tx(ctx); tx != nil {
 		if change, ok := tx.changes[key]; ok {
 			if tx.deletedScope {
-				return nil, contracts.ErrNotFound
+				return nil, fault.ErrNotFound
 			}
 			return change.event.Payload, nil
 		}
@@ -110,13 +109,13 @@ func (s *Store) payloadWithReader(ctx context.Context, key entityKey, reader rec
 	if key.collection == "message" {
 		scope, id, ok := strings.Cut(key.id, "\x00")
 		if !ok {
-			return nil, contracts.ErrNotFound
+			return nil, fault.ErrNotFound
 		}
 		if tx := s.tx(ctx); tx != nil && tx.deletedScope && tx.scope == scope {
-			return nil, contracts.ErrNotFound
+			return nil, fault.ErrNotFound
 		}
 		if !s.index.hasMessages[scope] {
-			return nil, contracts.ErrNotFound
+			return nil, fault.ErrNotFound
 		}
 		index, err := s.messageIndex(ctx, scope)
 		if err != nil {
@@ -124,13 +123,13 @@ func (s *Store) payloadWithReader(ctx context.Context, key entityKey, reader rec
 		}
 		ref, ok := index.byID[id]
 		if !ok {
-			return nil, contracts.ErrNotFound
+			return nil, fault.ErrNotFound
 		}
 		return s.readRef(key, ref.location, reader)
 	}
 	entry, ok := s.entry(ctx, key)
 	if !ok {
-		return nil, contracts.ErrNotFound
+		return nil, fault.ErrNotFound
 	}
 	return s.readRef(key, entry.location, reader)
 }

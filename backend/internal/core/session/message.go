@@ -2,10 +2,9 @@ package session
 
 import (
 	"encoding/json"
+	appcontext "praxis/internal/core/context"
 	"strings"
 	"time"
-
-	"praxis/internal/contracts"
 )
 
 type Role string
@@ -42,7 +41,7 @@ type Block struct {
 	Name           string
 	Input          json.RawMessage `json:",omitempty"`
 	IsError        bool
-	ReasoningState *contracts.ReasoningState `json:",omitempty"`
+	ReasoningState *appcontext.ReasoningState `json:",omitempty"`
 }
 
 type MessageData struct {

@@ -5,11 +5,16 @@ import (
 	"errors"
 	"time"
 
-	"praxis/internal/contracts"
 	"praxis/internal/request"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
+
+// fieldValidationError 由消费方识别可反馈的字段错误，不依赖具体内核错误类型。
+type fieldValidationError interface {
+	error
+	ValidationField() string
+}
 
 // GetModelConfig 返回可编辑模型元数据和密钥存在状态，不返回密钥内容。
 func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
@@ -110,7 +115,7 @@ func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.Sa
 		return dto.SaveModelConfigResponse{}, publicError(b.runtime, "ModelBindings.SaveModelConfig.context", err)
 	}
 	if err := services.ModelConfig.SaveModelConfig(canonical); err != nil {
-		var validationError *contracts.ValidationError
+		var validationError fieldValidationError
 		if errors.As(err, &validationError) {
 			return dto.SaveModelConfigResponse{ValidationError: validationError.Error()}, nil
 		}
@@ -120,7 +125,7 @@ func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.Sa
 }
 
 func validationResponse(err error) (dto.SaveModelConfigResponse, error) {
-	var validationError *contracts.ValidationError
+	var validationError fieldValidationError
 	if errors.As(err, &validationError) {
 		return dto.SaveModelConfigResponse{ValidationError: validationError.Error()}, nil
 	}

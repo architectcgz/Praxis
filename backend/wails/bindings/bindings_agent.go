@@ -1,8 +1,7 @@
 package bindings
 
 import (
-	"praxis/internal/contracts"
-	"praxis/internal/service"
+	agentcontracts "praxis/internal/app/agent/contracts"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -19,7 +18,7 @@ func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 	if err != nil {
 		return dto.AgentSnapshot{}, err
 	}
-	value, err := services.Agents.GetAgentDetail(ctx, contracts.AgentID(agentID), 100)
+	value, err := services.Agents.GetAgentDetail(ctx, agentID, 100)
 	if err != nil {
 		return dto.AgentSnapshot{}, publicError(b.runtime, "AgentBindings.GetAgent", err)
 	}
@@ -34,7 +33,7 @@ func (b *AgentBindings) ListAgentMessages(agentID string) ([]dto.AgentMessage, e
 	if err != nil {
 		return nil, err
 	}
-	messages, err := services.Agents.ListAgentMessages(ctx, contracts.AgentID(agentID), 200)
+	messages, err := services.Agents.ListAgentMessages(ctx, agentID, 200)
 	if err != nil {
 		return nil, publicError(b.runtime, "AgentBindings.ListAgentMessages", err)
 	}
@@ -53,7 +52,7 @@ func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHisto
 	if err != nil {
 		return dto.AgentHistoryPage{}, err
 	}
-	page, err := services.Agents.ListAgentHistory(ctx, contracts.AgentID(agentID), before, 200)
+	page, err := services.Agents.ListAgentHistory(ctx, agentID, before, 200)
 	if err != nil {
 		return dto.AgentHistoryPage{}, publicError(b.runtime, "AgentBindings.ListAgentHistory", err)
 	}
@@ -77,15 +76,15 @@ func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHisto
 	return dto.AgentHistoryPage{Items: result, NextCursor: page.NextCursor}, nil
 }
 
-func agentSnapshot(value service.AgentDetail) dto.AgentSnapshot {
+func agentSnapshot(value agentcontracts.AgentDetail) dto.AgentSnapshot {
 	result := dto.AgentSnapshot{
-		ID:                value.ID.String(),
+		ID:                value.ID,
 		Name:              value.Name,
-		SessionID:         value.SessionID.String(),
-		DefinitionID:      value.DefinitionID.String(),
+		SessionID:         value.SessionID,
+		DefinitionID:      value.DefinitionID,
 		Profile:           value.Profile,
 		State:             value.State,
-		CurrentTask:       value.CurrentTaskID.String(),
+		CurrentTask:       value.CurrentTaskID,
 		TaskIDs:           value.TaskIDs,
 		Tasks:             make([]dto.TaskSnapshot, 0, len(value.Tasks)),
 		ControlCommandIDs: value.ControlCommandIDs,
@@ -96,7 +95,7 @@ func agentSnapshot(value service.AgentDetail) dto.AgentSnapshot {
 	return result
 }
 
-func agentMessage(value service.AgentMessage) dto.AgentMessage {
+func agentMessage(value agentcontracts.AgentMessage) dto.AgentMessage {
 	result := dto.AgentMessage{
 		ID:         value.ID,
 		Sequence:   value.Sequence,
@@ -122,9 +121,9 @@ func agentMessage(value service.AgentMessage) dto.AgentMessage {
 	return result
 }
 
-func taskSnapshot(value service.TaskInfo) dto.TaskSnapshot {
+func taskSnapshot(value agentcontracts.TaskInfo) dto.TaskSnapshot {
 	return dto.TaskSnapshot{
-		ID:             value.ID.String(),
+		ID:             value.ID,
 		Status:         value.Status,
 		Outcome:        value.Outcome,
 		FailureCode:    value.FailureCode,

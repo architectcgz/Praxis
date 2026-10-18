@@ -8,8 +8,9 @@ import (
 	"io"
 	"math"
 
-	"praxis/internal/contracts"
+	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -21,7 +22,7 @@ type contentBlockState struct {
 	HasArgumentDelta bool
 	Signed           bool
 	Closed           bool
-	ReasoningState   *contracts.ReasoningState
+	ReasoningState   *appcontext.ReasoningState
 }
 
 // Decode 按事件、Content Block 和 Delta 三层类型分派；工具只在 message_stop 后释放。
@@ -158,11 +159,11 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				if err != nil {
 					return "", err
 				}
-				if len(payload) > contracts.MaxReasoningStateBytes {
+				if len(payload) > appcontext.MaxReasoningStateBytes {
 					return "", errors.New("anthropic reasoning state payload exceeds size limit")
 				}
-				state.ReasoningState = &contracts.ReasoningState{
-					Protocol: contracts.ProtocolAnthropicMessages,
+				state.ReasoningState = &appcontext.ReasoningState{
+					Protocol: string(modelconfig.APIFormatAnthropicMessages),
 					Payload:  payload,
 				}
 			}
@@ -259,7 +260,7 @@ func activeContentBlock(blocks map[int]*contentBlockState, index *int) (*content
 // updateMessageUsage 仅在本次计数完整有效时更新累计值；异常统计不污染后续增量。
 func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit streaming.EmitFunc) (*tokenCounts, error) {
 	var delta tokenCounts
-	if !streaming.DecodeUsage(raw, &delta, contracts.ProtocolAnthropicMessages) {
+	if !streaming.DecodeUsage(raw, &delta, string(modelconfig.APIFormatAnthropicMessages)) {
 		return previous, nil
 	}
 	var next tokenCounts
@@ -287,7 +288,7 @@ func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit stream
 	if delta.OutputTokens != nil {
 		usage = normalizeMessageUsage(&next)
 	}
-	if !streaming.ValidUsage(contracts.ProtocolAnthropicMessages, usage) {
+	if !streaming.ValidUsage(string(modelconfig.APIFormatAnthropicMessages), usage) {
 		return previous, nil
 	}
 	if err := emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage}); err != nil {

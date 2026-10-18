@@ -4,33 +4,33 @@ import (
 	"errors"
 	"fmt"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
 	taskmodel "praxis/internal/core/task"
 )
 
 // ErrorCode 是运行时失败的稳定业务分类，供编排与 app 层映射使用。
-type ErrorCode = contracts.Code
+type ErrorCode = fault.Code
 
 const (
-	ErrorBusy             = contracts.TaskBusy
-	ErrorContract         = contracts.TaskContract
-	ErrorPolicyBlocked    = contracts.TaskPolicyBlocked
-	ErrorApprovalRequired = contracts.TaskApproval
-	ErrorStorage          = contracts.TaskStorage
-	ErrorProvider         = contracts.TaskProvider
-	ErrorTool             = contracts.TaskTool
-	ErrorInterrupted      = contracts.TaskInterrupted
-	ErrorResourceLimit    = contracts.TaskResourceLimit
+	ErrorBusy             = taskmodel.TaskBusy
+	ErrorContract         = taskmodel.TaskContract
+	ErrorPolicyBlocked    = taskmodel.TaskPolicyBlocked
+	ErrorApprovalRequired = taskmodel.TaskApproval
+	ErrorStorage          = taskmodel.TaskStorage
+	ErrorProvider         = taskmodel.TaskProvider
+	ErrorTool             = taskmodel.TaskTool
+	ErrorInterrupted      = taskmodel.TaskInterrupted
+	ErrorResourceLimit    = taskmodel.TaskResourceLimit
 )
 
 // RuntimeError 复用业务错误载体，低敏感、可安全分类。
-type RuntimeError = contracts.Error
+type RuntimeError = fault.Error
 
 // taskFailure 携带引擎错误对应的持久化结束结果。
 // taskResult 在统一的 run 边界把它转换为返回值。
 type taskFailure struct {
 	outcome taskmodel.TaskOutcome
-	code    contracts.TaskFailureCode
+	code    taskmodel.TaskFailureCode
 	cause   error
 }
 
@@ -43,7 +43,7 @@ func (f *taskFailure) Error() string {
 
 func (f *taskFailure) Unwrap() error { return f.cause }
 
-func fail(code contracts.TaskFailureCode, runtimeCode ErrorCode, message string) error {
+func fail(code taskmodel.TaskFailureCode, runtimeCode ErrorCode, message string) error {
 	return &taskFailure{
 		outcome: taskmodel.TaskFailed,
 		code:    code,
@@ -51,7 +51,7 @@ func fail(code contracts.TaskFailureCode, runtimeCode ErrorCode, message string)
 	}
 }
 
-func failCause(code contracts.TaskFailureCode, cause error) error {
+func failCause(code taskmodel.TaskFailureCode, cause error) error {
 	return &taskFailure{outcome: taskmodel.TaskFailed, code: code, cause: cause}
 }
 
@@ -63,12 +63,12 @@ func modelFailure(err error) error {
 	}
 	var windowErr *ContextWindowExceededError
 	if errors.As(err, &windowErr) {
-		return fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "model context window exceeded")
+		return fail(taskmodel.TaskFailureResourceLimit, ErrorResourceLimit, "model context window exceeded")
 	}
-	return failCause(contracts.TaskFailureProvider, err)
+	return failCause(taskmodel.TaskFailureProvider, err)
 }
 
-func taskResult(err error) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+func taskResult(err error) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, error) {
 	var failure *taskFailure
 	if errors.As(err, &failure) {
 		return failure.outcome, failure.code, failure.cause
@@ -76,9 +76,9 @@ func taskResult(err error) (taskmodel.TaskOutcome, contracts.TaskFailureCode, er
 	return failedTask(err)
 }
 
-func failedTask(err error) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+func failedTask(err error) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, error) {
 	if err == nil {
 		err = errors.New("loop failed")
 	}
-	return taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, fmt.Errorf("loop: %w", err)
+	return taskmodel.TaskFailed, taskmodel.TaskFailureRuntimeFailed, fmt.Errorf("loop: %w", err)
 }

@@ -9,15 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/repository"
 )
 
 type messageRecord struct {
 	OwnerID string                   `json:"owner_id,omitempty"`
-	AgentID contracts.AgentID        `json:"agent_id"`
+	AgentID identity.AgentID         `json:"agent_id"`
 	Data    sessionmodel.MessageData `json:"message"`
 }
 
@@ -52,7 +53,7 @@ func (r MessageStreams) List(ctx context.Context, owner agentmodel.Agent, after 
 	return result, err
 }
 
-func (r MessageStreams) LoadMessages(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID, limit int) (repository.MessageStream, error) {
+func (r MessageStreams) LoadMessages(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, limit int) (repository.MessageStream, error) {
 	var result repository.MessageStream
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		owner, err := r.owner(readCtx, sessionID, agentID)
@@ -65,20 +66,20 @@ func (r MessageStreams) LoadMessages(ctx context.Context, sessionID contracts.Se
 	return result, err
 }
 
-func (r MessageStreams) Writer(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (repository.MessageWriter, error) {
+func (r MessageStreams) Writer(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) (repository.MessageWriter, error) {
 	owner, err := r.owner(ctx, sessionID, agentID)
 	if err != nil {
 		return nil, err
 	}
 	return MessageWriter{streams: r, owner: owner}, nil
 }
-func (r MessageStreams) owner(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID) (agentmodel.Agent, error) {
+func (r MessageStreams) owner(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) (agentmodel.Agent, error) {
 	owner, err := (AgentRepository{r.s}).Get(ctx, agentID)
 	if err != nil {
 		return agentmodel.Agent{}, err
 	}
 	if owner.SessionID != sessionID {
-		return agentmodel.Agent{}, contracts.ErrNotFound
+		return agentmodel.Agent{}, fault.ErrNotFound
 	}
 	return owner, nil
 }
@@ -103,12 +104,12 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 			candidate := data
 			candidate.Sequence, candidate.CreatedAt = record.Data.Sequence, record.Data.CreatedAt
 			if record.AgentID != owner.ID || !same(record.Data, candidate) {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			stored = record.Data
 			return nil
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		tx := s.tx(txCtx)
@@ -150,12 +151,12 @@ func (w MessageWriter) AppendToolResult(ctx context.Context, data sessionmodel.M
 		if err != nil || !inserted {
 			return err
 		}
-		task, err := (TaskRepository{w.streams.s}).Get(txCtx, contracts.TaskID(stored.TaskID))
+		task, err := (TaskRepository{w.streams.s}).Get(txCtx, identity.TaskID(stored.TaskID))
 		if err != nil {
 			return err
 		}
 		if task.AgentID != w.owner.ID || task.SessionID != w.owner.SessionID {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 		if task.Active() {
 			for _, block := range stored.Blocks {
@@ -170,7 +171,7 @@ func (w MessageWriter) AppendToolResult(ctx context.Context, data sessionmodel.M
 func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, after uint64, limit int, tail bool) (repository.MessageStream, error) {
 	scope, ownerID := owner.SessionID.String(), appendOwner(owner)
 	if tx := r.s.tx(ctx); tx != nil && tx.deletedScope && tx.scope == scope {
-		return repository.MessageStream{}, contracts.ErrNotFound
+		return repository.MessageStream{}, fault.ErrNotFound
 	}
 	index, err := r.s.messageIndex(ctx, scope)
 	if err != nil {

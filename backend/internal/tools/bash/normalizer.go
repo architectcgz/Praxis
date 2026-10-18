@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	"praxis/internal/contracts"
+	coretool "praxis/internal/core/tool"
 	toolcontracts "praxis/internal/tools/contracts"
 	toolshared "praxis/internal/tools/shared"
 )
@@ -32,11 +32,11 @@ type input struct {
 }
 
 // Normalize 校验 bash 参数，并将工作目录交给统一路径解析流程处理。
-func Normalize(call contracts.ToolCall, workspacePath string) (toolcontracts.NormalizedToolCall, error) {
+func Normalize(call coretool.ToolCall, workspacePath string) (toolcontracts.NormalizedToolCall, error) {
 	invalidArguments := func(reason string) (toolcontracts.NormalizedToolCall, error) {
 		return toolcontracts.NormalizedToolCall{}, fmt.Errorf("bash arguments are invalid: %s", reason)
 	}
-	if call.Name != toolcontracts.ToolBash {
+	if call.Name != coretool.ToolBash {
 		return toolcontracts.NormalizedToolCall{}, errors.New("tool is not registered")
 	}
 	if err := toolshared.RejectDuplicateFields(call.Arguments); err != nil {

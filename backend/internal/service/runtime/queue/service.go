@@ -2,7 +2,6 @@
 package queue
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -14,6 +13,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 )
 
 type Config struct {
@@ -37,9 +38,9 @@ type Service struct {
 }
 
 type EnqueueParams struct {
-	ID             contracts.TaskID
-	RequestID      contracts.RequestID
-	AgentID        contracts.AgentID
+	ID             identity.TaskID
+	RequestID      identity.RequestID
+	AgentID        identity.AgentID
 	Prompt         string
 	ProviderID     string
 	ModelID        string
@@ -86,36 +87,36 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 			return err
 		}
 		if !agent.CanReadSessionContext() {
-			return contracts.New(contracts.InvalidRequest, "queued input requires the session main agent")
+			return fault.New(fault.InvalidRequest, "queued input requires the session main agent")
 		}
 		existingRequest, err := s.tasks.FindByRequest(txCtx, agent.ID, params.RequestID)
 		if err == nil {
 			if existingRequest.ID != params.ID || existingRequest.Sequence == 0 ||
 				existingRequest.ProviderID != params.ProviderID || existingRequest.ModelID != params.ModelID || existingRequest.ReasoningLevel != params.ReasoningLevel {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			storedContent, err := s.inputMessageContent(txCtx, agent, existingRequest.RequestID)
 			if err != nil {
 				return err
 			}
 			if storedContent != params.Prompt {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			result.Task, result.ExistingTask = existingRequest, true
 			return nil
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		_, err = s.tasks.Get(txCtx, params.ID)
 		if err == nil {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		if agent.State != agentmodel.AgentExecuting || agent.CurrentTaskID == "" {
-			return contracts.New(contracts.AgentUnavailable, "queue input requires an executing runtime")
+			return fault.New(agentmodel.UnavailableCode, "queue input requires an executing runtime")
 		}
 		sequence, err := s.tasks.NextSequence(txCtx, agent.ID)
 		if err != nil {
@@ -162,7 +163,7 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueParams) (Enqueu
 	return result, err
 }
 
-func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agent, requestID contracts.RequestID) (string, error) {
+func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agent, requestID identity.RequestID) (string, error) {
 	messageID := "input:" + requestID.String()
 	messages, err := s.messages.List(ctx, agent, 0, 0)
 	if err != nil {
@@ -173,16 +174,16 @@ func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agen
 			return message.TextContent(), nil
 		}
 	}
-	return "", contracts.ErrNotFound
+	return "", fault.ErrNotFound
 }
 
 // Next 查询指定 Agent 的队首，不消费 Task；准备失败仍保持 Pending。
-func (s *Service) Next(ctx context.Context, agentID contracts.AgentID) (taskmodel.Task, bool, error) {
+func (s *Service) Next(ctx context.Context, agentID identity.AgentID) (taskmodel.Task, bool, error) {
 	if ctx == nil {
 		return taskmodel.Task{}, false, errors.New("next queued task context is required")
 	}
 	task, err := s.tasks.FindNextPendingByAgent(ctx, agentID)
-	if errors.Is(err, contracts.ErrNotFound) {
+	if errors.Is(err, fault.ErrNotFound) {
 		return taskmodel.Task{}, false, nil
 	}
 	return task, err == nil, err

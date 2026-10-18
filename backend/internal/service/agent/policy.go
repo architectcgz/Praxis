@@ -2,7 +2,6 @@
 package agent
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -11,14 +10,16 @@ import (
 	"errors"
 	"fmt"
 
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/repository"
 	"praxis/internal/system"
 )
 
 // ExecutionControl 只在控制意图持久化成功后传递取消信号。
 type ExecutionControl interface {
-	Pause(contracts.AgentID, contracts.TaskID) bool
-	Stop(contracts.AgentID, contracts.TaskID) bool
+	Pause(identity.AgentID, identity.TaskID) bool
+	Stop(identity.AgentID, identity.TaskID) bool
 }
 
 type Config struct {
@@ -76,7 +77,7 @@ func NewService(config Config) (*Service, error) {
 }
 
 // GetAgentView 返回 Agent、Task 和控制状态，不包含 workflow 编排状态。
-func (s *Service) GetAgentView(ctx context.Context, agentID contracts.AgentID, limit int) (AgentView, error) {
+func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID, limit int) (AgentView, error) {
 	if ctx == nil {
 		return AgentView{}, errors.New("agent query context is required")
 	}
@@ -88,7 +89,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID contracts.AgentID, l
 		return AgentView{}, err
 	}
 	active, err := s.tasks.GetActiveByAgent(ctx, agentID)
-	if errors.Is(err, contracts.ErrNotFound) {
+	if errors.Is(err, fault.ErrNotFound) {
 		active = taskmodel.Task{}
 	} else if err != nil {
 		return AgentView{}, fmt.Errorf("load active agent task: %w", err)
@@ -114,7 +115,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID contracts.AgentID, l
 }
 
 // ListAgentMessages 读取 Agent 自有消息流。
-func (s *Service) ListAgentMessages(ctx context.Context, agentID contracts.AgentID, limit int) ([]sessionmodel.MessageData, error) {
+func (s *Service) ListAgentMessages(ctx context.Context, agentID identity.AgentID, limit int) ([]sessionmodel.MessageData, error) {
 	if ctx == nil {
 		return nil, errors.New("agent message context is required")
 	}

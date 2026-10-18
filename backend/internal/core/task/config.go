@@ -1,13 +1,13 @@
 package task
 
 import (
-	"praxis/internal/contracts"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/model"
 )
 
 // Config 是已冻结的执行配置。
 type Config struct {
-	AgentDefinitionID contracts.AgentDefinitionID
+	AgentDefinitionID identity.AgentDefinitionID
 	SystemPrompt      string
 	Model             model.Config
 	WorkspacePath     string

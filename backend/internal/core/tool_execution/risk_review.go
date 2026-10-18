@@ -5,13 +5,14 @@ import (
 	"slices"
 	"time"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/security"
 )
 
 // RiskReview 绑定一次独立模型审核及冻结参数；未完成的审核不是工具已启动的证据。
 type RiskReview struct {
-	TurnID          contracts.TurnID
+	TurnID          identity.TurnID
 	ArgumentsDigest string
 	ProviderID      string
 	ModelID         string
@@ -53,9 +54,9 @@ func (i *Execution) BeginReview(review RiskReview) error {
 
 // ApplyRiskAssessment 将模型结论转换为领域状态，只有当前审核身份可提交结果。
 // 危险直接拒绝，不确定进入人工等待；安全批准前还要确认当前规则没有变化。
-func (i *Execution) ApplyRiskAssessment(turnID contracts.TurnID, assessment security.RiskAssessment, current security.ApprovalDecision, at time.Time) error {
+func (i *Execution) ApplyRiskAssessment(turnID identity.TurnID, assessment security.RiskAssessment, current security.ApprovalDecision, at time.Time) error {
 	if i.Status != StatusReviewing || i.LatestReview().TurnID != turnID || !current.Action.Valid() || current.RuleID == "" {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	next := *i
 	next.Reviews = slices.Clone(i.Reviews)
@@ -80,7 +81,7 @@ func (i *Execution) ApplyRiskAssessment(turnID contracts.TurnID, assessment secu
 		next.Status = StatusPrepared
 	case assessment.Verdict == security.RiskSafe:
 		next.Status = StatusApproved
-		next.Approval = contracts.ApprovalRecord{Source: contracts.ApprovalSourceAuto, ArgumentsDigest: next.LatestReview().ArgumentsDigest, ApprovedAt: at.UTC()}
+		next.Approval = ApprovalRecord{Source: ApprovalSourceAuto, ArgumentsDigest: next.LatestReview().ArgumentsDigest, ApprovedAt: at.UTC()}
 		next.ApprovedAt = at.UTC()
 	}
 	return i.apply(next)
@@ -89,7 +90,7 @@ func (i *Execution) ApplyRiskAssessment(turnID contracts.TurnID, assessment secu
 // ResetReview 在规则变化时关闭尚未完成的旧审核，再按新规则授权，不能复用旧模型结论。
 func (i *Execution) ResetReview(decision security.ApprovalDecision, at time.Time) error {
 	if i.Status != StatusReviewing {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	next := *i
 	next.Reviews = slices.Clone(i.Reviews)
@@ -106,11 +107,11 @@ func (i *Execution) ResetReview(decision security.ApprovalDecision, at time.Time
 // RevokeApproval 撤销尚未启动的旧授权，保留所有冻结参数及审核记录。
 func (i *Execution) RevokeApproval() error {
 	if i.Status != StatusApproved {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	next := *i
 	next.Status = StatusPrepared
-	next.Approval = contracts.ApprovalRecord{}
+	next.Approval = ApprovalRecord{}
 	next.ApprovedAt = time.Time{}
 	return i.apply(next)
 }

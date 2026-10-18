@@ -3,8 +3,8 @@ package repository
 import (
 	"context"
 
-	"praxis/internal/contracts"
 	"praxis/internal/core/agent"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/session"
 	"praxis/internal/core/task"
 	toolexecution "praxis/internal/core/tool_execution"
@@ -18,7 +18,7 @@ type MessageStream struct {
 
 // MessageLoader 按 Agent 消息流归属读取消息及其序号边界；读取失败时返回错误。
 type MessageLoader interface {
-	LoadMessages(context.Context, contracts.SessionID, contracts.AgentID, int) (MessageStream, error)
+	LoadMessages(context.Context, identity.SessionID, identity.AgentID, int) (MessageStream, error)
 }
 
 // AssistantWrite 显式携带本次提交的完整消息、调用身份与可选最终证据。
@@ -38,12 +38,12 @@ type MessageWriter interface {
 
 // MissingToolResult 是已声明但尚无回执的工具调用事实，不包含恢复决策。
 type MissingToolResult struct {
-	SessionID contracts.SessionID
-	AgentID   contracts.AgentID
-	TaskID    contracts.TaskID
+	SessionID identity.SessionID
+	AgentID   identity.AgentID
+	TaskID    identity.TaskID
 	CallID    string
 	RequestID string
-	TurnID    contracts.TurnID
+	TurnID    identity.TurnID
 	Name      string
 	Sequence  uint64
 	CallIndex int
@@ -53,7 +53,7 @@ type MissingToolResult struct {
 // 消息流归属由 core/agent 决定，具体日志键位由存储实现决定，调用方不解释存储布局。
 type MessageStreams interface {
 	MessageLoader
-	Writer(context.Context, contracts.SessionID, contracts.AgentID) (MessageWriter, error)
+	Writer(context.Context, identity.SessionID, identity.AgentID) (MessageWriter, error)
 	ListMissingToolResults(context.Context) ([]MissingToolResult, error)
 	// Append 幂等追加消息到该 Agent 所属的消息流；身份相同但内容不一致时返回冲突。
 	Append(context.Context, agent.Agent, session.MessageData) (session.MessageData, error)

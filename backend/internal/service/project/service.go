@@ -2,7 +2,6 @@
 package project
 
 import (
-	"praxis/internal/contracts"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	workspacemodel "praxis/internal/core/workspace"
@@ -11,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
 	"praxis/internal/system"
@@ -46,9 +47,9 @@ type Service struct {
 
 // CreateProjectParams 包含新 Project 的持久化身份和初始工作区数据。
 type CreateProjectParams struct {
-	RequestID   contracts.RequestID
-	ProjectID   contracts.ProjectID
-	WorkspaceID contracts.WorkspaceID
+	RequestID   identity.RequestID
+	ProjectID   identity.ProjectID
+	WorkspaceID identity.WorkspaceID
 	Name        string
 	Path        string
 }
@@ -59,7 +60,7 @@ type CreateProjectResult struct {
 	Workspace workspacemodel.Workspace
 }
 
-// NewService 创建 Project 应用服务。
+// NewService 创建 Project 业务服务。
 func NewService(config Config) (*Service, error) {
 	if config.GlobalApprovalMode == nil {
 		return nil, errors.New("project service global approval mode is required")
@@ -105,17 +106,17 @@ func (s *Service) CreateProject(ctx context.Context, params CreateProjectParams)
 			if existing.Name != params.Name || existing.Path != params.Path ||
 				existing.DefaultWorkspaceID != params.WorkspaceID ||
 				workspace.ProjectID != params.ProjectID || workspace.Path != params.Path {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			result = CreateProjectResult{Project: existing, Workspace: workspace}
 			return nil
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		if _, err := s.workspaces.Get(txCtx, params.WorkspaceID); err == nil {
-			return contracts.ErrRequestConflict
-		} else if !errors.Is(err, contracts.ErrNotFound) {
+			return fault.ErrRequestConflict
+		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		at := s.clock.Now().UTC()
@@ -157,7 +158,7 @@ func (s *Service) ListProjects(ctx context.Context, limit int) ([]projectmodel.P
 }
 
 // ListWorkspaces 返回指定 Project 下按索引查询的 Workspace 列表。
-func (s *Service) ListWorkspaces(ctx context.Context, projectID contracts.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
+func (s *Service) ListWorkspaces(ctx context.Context, projectID identity.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
 	if ctx == nil {
 		return nil, errors.New("workspace catalog context is required")
 	}

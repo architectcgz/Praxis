@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"praxis/internal/contracts"
+
+	coretool "praxis/internal/core/tool"
 	applypatch "praxis/internal/tools/apply_patch"
 	bash "praxis/internal/tools/bash"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -17,15 +18,15 @@ import (
 var toolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
 
 type builtinTool struct {
-	definition func() contracts.ToolDefinition
-	normalize  func(contracts.ToolCall, string) (toolcontracts.NormalizedToolCall, error)
+	definition func() coretool.ToolDefinition
+	normalize  func(coretool.ToolCall, string) (toolcontracts.NormalizedToolCall, error)
 	execute    func(context.Context, toolcontracts.ExecutionCall) (toolcontracts.ToolResult, error)
 }
 
-func (t builtinTool) Definition() contracts.ToolDefinition { return t.definition() }
+func (t builtinTool) Definition() coretool.ToolDefinition { return t.definition() }
 
 func (t builtinTool) Normalize(
-	call contracts.ToolCall,
+	call coretool.ToolCall,
 	workspacePath string,
 ) (toolcontracts.NormalizedToolCall, error) {
 	return t.normalize(call, workspacePath)
@@ -40,23 +41,23 @@ func (t builtinTool) Execute(
 
 // ToolRegistry 保存工具实现，并对外提供完整的已注册工具目录。
 type ToolRegistry struct {
-	tools map[toolcontracts.ToolName]toolcontracts.Tool
+	tools map[coretool.ToolName]toolcontracts.Tool
 }
 
 // NewToolRegistry 注册内置工具；可通过 Register 添加扩展工具。
 func NewToolRegistry() *ToolRegistry {
-	return &ToolRegistry{tools: map[toolcontracts.ToolName]toolcontracts.Tool{
-		toolcontracts.ToolReadFile: builtinTool{
+	return &ToolRegistry{tools: map[coretool.ToolName]toolcontracts.Tool{
+		coretool.ToolReadFile: builtinTool{
 			definition: readfile.Definition,
 			normalize:  readfile.Normalize,
 			execute:    readfile.Execute,
 		},
-		toolcontracts.ToolBash: builtinTool{
+		coretool.ToolBash: builtinTool{
 			definition: bash.Definition,
 			normalize:  bash.Normalize,
 			execute:    bash.Execute,
 		},
-		toolcontracts.ToolApplyPatch: builtinTool{
+		coretool.ToolApplyPatch: builtinTool{
 			definition: applypatch.Definition,
 			normalize:  applypatch.Normalize,
 			execute:    applypatch.Execute,
@@ -81,7 +82,7 @@ func (r *ToolRegistry) Register(tool toolcontracts.Tool) error {
 }
 
 // Get 根据名称查找工具；注册表不负责决定工具是否可用。
-func (r *ToolRegistry) Get(name toolcontracts.ToolName) (toolcontracts.Tool, bool) {
+func (r *ToolRegistry) Get(name coretool.ToolName) (toolcontracts.Tool, bool) {
 	if r == nil {
 		return nil, false
 	}
@@ -90,15 +91,15 @@ func (r *ToolRegistry) Get(name toolcontracts.ToolName) (toolcontracts.Tool, boo
 }
 
 // List 返回所有已注册工具的定义副本，按名称排序且不做权限筛选。
-func (r *ToolRegistry) List() []contracts.ToolDefinition {
+func (r *ToolRegistry) List() []coretool.ToolDefinition {
 	if r == nil {
 		return nil
 	}
-	definitions := make([]contracts.ToolDefinition, 0, len(r.tools))
+	definitions := make([]coretool.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
 		definitions = append(definitions, tool.Definition().Snapshot())
 	}
-	slices.SortFunc(definitions, func(left, right contracts.ToolDefinition) int {
+	slices.SortFunc(definitions, func(left, right coretool.ToolDefinition) int {
 		if left.Name < right.Name {
 			return -1
 		}

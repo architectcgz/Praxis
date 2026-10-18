@@ -1,7 +1,7 @@
 package bindings
 
 import (
-	"praxis/internal/service"
+	usagecontracts "praxis/internal/app/usage/contracts"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -22,7 +22,7 @@ func (b *AgentBindings) ListSessionUsage(sessionID string) ([]dto.ModelUsageReco
 	return usageRecords(records), nil
 }
 
-func usageRecords(records []service.ModelUsageRecord) []dto.ModelUsageRecord {
+func usageRecords(records []usagecontracts.ModelUsageRecord) []dto.ModelUsageRecord {
 	if records == nil {
 		return nil
 	}
@@ -32,7 +32,7 @@ func usageRecords(records []service.ModelUsageRecord) []dto.ModelUsageRecord {
 			SessionID: record.SessionID,
 			AgentID:   record.AgentID,
 			TaskID:    record.TaskID,
-			TurnID:    record.TurnID.String(),
+			TurnID:    record.TurnID,
 			Usage: dto.ModelUsage{
 				InputTokens:              record.Usage.InputTokens,
 				OutputTokens:             record.Usage.OutputTokens,

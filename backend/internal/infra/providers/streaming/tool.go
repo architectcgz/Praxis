@@ -6,9 +6,8 @@ import (
 	"errors"
 	"strings"
 
-	"praxis/internal/contracts"
-
 	"praxis/internal/core/model"
+	coretool "praxis/internal/core/tool"
 )
 
 // ToolAccumulator 用于累积流式响应中的工具调用分片。
@@ -37,9 +36,9 @@ func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
 	args := json.RawMessage(call.Arguments)
 	return emit(model.ModelStreamEvent{
 		Kind: model.StreamToolCall,
-		ToolCall: contracts.ToolCall{
+		ToolCall: coretool.ToolCall{
 			ID:        call.ID,
-			Name:      contracts.ToolName(call.Name),
+			Name:      coretool.ToolName(call.Name),
 			Arguments: bytes.Clone(args),
 		},
 	})

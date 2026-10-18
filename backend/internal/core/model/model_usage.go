@@ -2,8 +2,7 @@ package model
 
 import (
 	"math"
-
-	"praxis/internal/contracts"
+	"praxis/internal/core/identity"
 )
 
 // ModelUsage 记录一次模型请求的累计 token 用量；InputTokens 包含缓存读取和写入部分。
@@ -35,11 +34,11 @@ func (u ModelUsage) Valid() bool {
 
 // ModelUsageRecord 按 Turn 保存请求用量，同一请求的累计更新不重复计费。
 type ModelUsageRecord struct {
-	SessionID string           `json:"sessionId"`
-	AgentID   string           `json:"agentId"`
-	TaskID    string           `json:"taskId"`
-	TurnID    contracts.TurnID `json:"turnId"`
-	Usage     ModelUsage       `json:"usage"`
+	SessionID string          `json:"sessionId"`
+	AgentID   string          `json:"agentId"`
+	TaskID    string          `json:"taskId"`
+	TurnID    identity.TurnID `json:"turnId"`
+	Usage     ModelUsage      `json:"usage"`
 }
 
 // Key 返回请求的稳定身份，供持久化和实时更新去重。

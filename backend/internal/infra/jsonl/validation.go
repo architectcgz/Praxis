@@ -10,9 +10,12 @@ import (
 	"slices"
 	"strings"
 
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -221,20 +224,20 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 func validateSession(value sessionmodel.Session) error {
 	for _, id := range []string{value.ID.String(), value.ProjectID.String(), value.WorkspaceID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return contracts.InvalidValue("session", "required reference must be canonical and nonempty")
+			return fault.InvalidValue("session", "required reference must be canonical and nonempty")
 		}
 	}
 	if value.State != sessionmodel.SessionActive && value.State != sessionmodel.SessionArchived {
-		return contracts.InvalidValue("session.state", "unknown session state")
+		return fault.InvalidValue("session.state", "unknown session state")
 	}
 	if value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() || value.UpdatedAt.Before(value.CreatedAt) {
-		return contracts.InvalidValue("session.timestamps", "timestamps are invalid")
+		return fault.InvalidValue("session.timestamps", "timestamps are invalid")
 	}
 	return nil
 }
 
 // validateReasoningState 在消息输入边界检查存储字段，不解释 Provider 的 opaque 内容。
-func validateReasoningState(state *contracts.ReasoningState) error {
+func validateReasoningState(state *appcontext.ReasoningState) error {
 	if state == nil {
 		return errors.New("reasoning state is required")
 	}
@@ -244,10 +247,10 @@ func validateReasoningState(state *contracts.ReasoningState) error {
 	if state.ModelID == "" || state.ModelID != strings.TrimSpace(state.ModelID) {
 		return errors.New("reasoning state model ID is required and must be canonical")
 	}
-	if state.Protocol != contracts.ProtocolOpenAIResponses && state.Protocol != contracts.ProtocolAnthropicMessages {
+	if state.Protocol != string(modelconfig.APIFormatOpenAIResponses) && state.Protocol != string(modelconfig.APIFormatAnthropicMessages) {
 		return errors.New("unsupported reasoning state protocol")
 	}
-	if len(state.Payload) == 0 || len(state.Payload) > contracts.MaxReasoningStateBytes {
+	if len(state.Payload) == 0 || len(state.Payload) > appcontext.MaxReasoningStateBytes {
 		return errors.New("invalid or oversized reasoning state payload")
 	}
 	var object map[string]json.RawMessage
@@ -269,7 +272,7 @@ func (s *Store) validateTransaction(ctx context.Context) error {
 			return err
 		}
 		if active != 0 {
-			return contracts.ErrAgentExecuting
+			return agentmodel.ErrAgentExecuting
 		}
 		return nil
 	}
@@ -277,12 +280,12 @@ func (s *Store) validateTransaction(ctx context.Context) error {
 		for _, claim := range change.entry.claims {
 			if old, ok := s.index.unique[claim]; ok && old != key {
 				if next, changed := tx.changes[old]; !changed || slices.Contains(next.entry.claims, claim) {
-					return contracts.ErrRequestConflict
+					return fault.ErrRequestConflict
 				}
 			}
 			for other, next := range tx.changes {
 				if other != key && slices.Contains(next.entry.claims, claim) {
-					return contracts.ErrRequestConflict
+					return fault.ErrRequestConflict
 				}
 			}
 		}
@@ -322,7 +325,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		}
 		return nil
 	}
-	taskOwner := func(id contracts.TaskID, agent contracts.AgentID) error {
+	taskOwner := func(id identity.TaskID, agent identity.AgentID) error {
 		value, err := get[taskmodel.Task](ctx, s, "task", id.String())
 		if err != nil {
 			return err
@@ -364,7 +367,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			return err
 		}
 		active, err := s.lookup(ctx, lookupKey{kind: "active-agent", owner: v.ID.String()})
-		if err != nil && !errors.Is(err, contracts.ErrNotFound) {
+		if err != nil && !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		if (err == nil && active.id != v.CurrentTaskID.String()) || (err != nil && v.CurrentTaskID != "") {
@@ -407,11 +410,11 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 	case "usage":
 		var v model.ModelUsageRecord
 		_ = decodeJSON(data, &v)
-		return taskOwner(contracts.TaskID(v.TaskID), contracts.AgentID(v.AgentID))
+		return taskOwner(identity.TaskID(v.TaskID), identity.AgentID(v.AgentID))
 	case "timing":
 		var v timing.Record
 		_ = decodeJSON(data, &v)
-		return taskOwner(contracts.TaskID(v.TaskID), contracts.AgentID(v.AgentID))
+		return taskOwner(identity.TaskID(v.TaskID), identity.AgentID(v.AgentID))
 	case "message":
 		var v messageRecord
 		_ = decodeJSON(data, &v)
@@ -466,7 +469,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return err
 		}
 		if err := taskmodel.ValidateUpdate(prior, next); err != nil {
-			return fmt.Errorf("%w: %v", contracts.ErrRequestConflict, err)
+			return fmt.Errorf("%w: %v", fault.ErrRequestConflict, err)
 		}
 		return nil
 	case "tool":
@@ -478,7 +481,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return err
 		}
 		if err := toolmodel.ValidateUpdate(prior, next); err != nil {
-			return fmt.Errorf("%w: %v", contracts.ErrRequestConflict, err)
+			return fmt.Errorf("%w: %v", fault.ErrRequestConflict, err)
 		}
 		return nil
 	case "agent":
@@ -499,7 +502,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return err
 		}
 		if next.Usage.InputTokens < prior.Usage.InputTokens {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 		for _, counts := range [][2]*int64{
 			{prior.Usage.OutputTokens, next.Usage.OutputTokens},
@@ -507,7 +510,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			{prior.Usage.CacheCreationInputTokens, next.Usage.CacheCreationInputTokens},
 		} {
 			if counts[0] != nil && (counts[1] == nil || *counts[1] < *counts[0]) {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 		}
 		fields = []string{"agentId", "taskId", "turnId"}
@@ -520,16 +523,16 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return err
 		}
 		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timing.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 	case "context", "message":
 		if !bytes.Equal(before, after) {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 	}
 	for _, field := range fields {
 		if !bytes.Equal(left[field], right[field]) {
-			return fmt.Errorf("%w: %s.%s is immutable", contracts.ErrRequestConflict, collection, field)
+			return fmt.Errorf("%w: %s.%s is immutable", fault.ErrRequestConflict, collection, field)
 		}
 	}
 	return nil

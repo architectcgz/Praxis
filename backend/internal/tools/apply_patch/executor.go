@@ -1,6 +1,7 @@
 package applypatch
 
 import (
+	coretool "praxis/internal/core/tool"
 	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 	"praxis/internal/utils/pathutil"
@@ -46,7 +47,7 @@ func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontrac
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
-	if call.Name != toolcontracts.ToolApplyPatch {
+	if call.Name != coretool.ToolApplyPatch {
 		return toolcontracts.ToolResult{}, errors.New("apply_patch executor does not support the call")
 	}
 	var toolArguments arguments

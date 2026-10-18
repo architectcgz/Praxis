@@ -3,9 +3,8 @@ package session
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"praxis/internal/core/identity"
 	"time"
-
-	"praxis/internal/contracts"
 )
 
 const MaxSessionContextContentBytes = 16 * 1024
@@ -22,17 +21,17 @@ const (
 
 // SessionContextEntry 是只追加的 Session 共享事实，不保存消息副本。
 type SessionContextEntry struct {
-	ID            contracts.ContextEntryID
-	SessionID     contracts.SessionID
+	ID            identity.ContextEntryID
+	SessionID     identity.SessionID
 	Kind          SessionContextKind
-	SourceTaskID  contracts.TaskID
+	SourceTaskID  identity.TaskID
 	Content       string
 	ContentDigest string
 	CreatedAt     time.Time
 }
 
 // NewSessionContextEntry 使用入口已规范化并校验的正文创建共享事实及其摘要。
-func NewSessionContextEntry(id contracts.ContextEntryID, sessionID contracts.SessionID, kind SessionContextKind, sourceTaskID contracts.TaskID, content string, at time.Time) SessionContextEntry {
+func NewSessionContextEntry(id identity.ContextEntryID, sessionID identity.SessionID, kind SessionContextKind, sourceTaskID identity.TaskID, content string, at time.Time) SessionContextEntry {
 	return SessionContextEntry{
 		ID:            id,
 		SessionID:     sessionID,

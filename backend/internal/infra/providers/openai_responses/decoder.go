@@ -9,8 +9,9 @@ import (
 	"io"
 	"strings"
 
-	"praxis/internal/contracts"
+	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -486,7 +487,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if item.Status != nil && *item.Status != "completed" {
 				return "", errors.New("responses completed with incomplete reasoning")
 			}
-			if stringValue(item.EncryptedContent) != "" && len(s.Items[index].Raw) > contracts.MaxReasoningStateBytes {
+			if stringValue(item.EncryptedContent) != "" && len(s.Items[index].Raw) > appcontext.MaxReasoningStateBytes {
 				return "", errors.New("responses reasoning state payload exceeds size limit")
 			}
 		}
@@ -504,8 +505,8 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			}
 			if err := emit(model.ModelStreamEvent{
 				Kind: model.StreamReasoningState,
-				ReasoningState: &contracts.ReasoningState{
-					Protocol: contracts.ProtocolOpenAIResponses,
+				ReasoningState: &appcontext.ReasoningState{
+					Protocol: string(modelconfig.APIFormatOpenAIResponses),
 					Payload:  bytes.Clone(s.Items[index].Raw),
 				},
 				OutputIndex: &index,
@@ -523,7 +524,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 
 func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	var reported responseUsage
-	if !streaming.DecodeUsage(raw, &reported, contracts.ProtocolOpenAIResponses) {
+	if !streaming.DecodeUsage(raw, &reported, string(modelconfig.APIFormatOpenAIResponses)) {
 		return nil
 	}
 	var usage *model.ModelUsage
@@ -536,7 +537,7 @@ func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 			usage.CacheReadInputTokens = reported.InputTokensDetails.CachedTokens
 		}
 	}
-	if !streaming.ValidUsage(contracts.ProtocolOpenAIResponses, usage) {
+	if !streaming.ValidUsage(string(modelconfig.APIFormatOpenAIResponses), usage) {
 		return nil
 	}
 	return emit(model.ModelStreamEvent{Kind: model.StreamUsage, Usage: usage})

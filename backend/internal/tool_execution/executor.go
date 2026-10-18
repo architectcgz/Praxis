@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"sync"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	securitymodel "praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_execution"
@@ -19,7 +20,7 @@ import (
 )
 
 type TaskRepository interface {
-	Get(context.Context, contracts.TaskID) (taskmodel.Task, error)
+	Get(context.Context, identity.TaskID) (taskmodel.Task, error)
 	Save(context.Context, taskmodel.Task) error
 }
 
@@ -76,7 +77,7 @@ func NewExecutor(config Config) (*Executor, error) {
 var errApprovalPending = errors.New("tool approval pending")
 
 // Execute 返回可靠结算结果或审批等待标记。
-func (s *Executor) Execute(ctx context.Context, prepared toolcontracts.PreparedToolCall, metadata contracts.ToolExecutionMetadata) (toolcontracts.ToolExecutionResult, error) {
+func (s *Executor) Execute(ctx context.Context, prepared toolcontracts.PreparedToolCall, metadata toolmodel.ToolExecutionMetadata) (toolcontracts.ToolExecutionResult, error) {
 	result, err := s.invoke(ctx, prepared, metadata)
 	if errors.Is(err, errApprovalPending) {
 		return toolcontracts.ToolExecutionResult{ApprovalPending: true}, nil
@@ -87,7 +88,7 @@ func (s *Executor) Execute(ctx context.Context, prepared toolcontracts.PreparedT
 func (s *Executor) invoke(
 	ctx context.Context,
 	prepared toolcontracts.PreparedToolCall,
-	metadata contracts.ToolExecutionMetadata,
+	metadata toolmodel.ToolExecutionMetadata,
 ) (toolcontracts.ToolResult, error) {
 	if ctx == nil {
 		return toolcontracts.ToolResult{}, errors.New("tool invocation metadata is required")
@@ -107,7 +108,7 @@ func (s *Executor) invoke(
 	}
 	if invocation.AgentID != metadata.AgentID || invocation.SessionID != metadata.SessionID ||
 		invocation.TurnID != metadata.TurnID || invocation.Name != call.Name {
-		return toolcontracts.ToolResult{}, contracts.ErrRequestConflict
+		return toolcontracts.ToolResult{}, fault.ErrRequestConflict
 	}
 	if invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(call.Name, call.Arguments) {
 		return toolcontracts.NewToolError("tool_request_conflict", "The tool call identity was reused with different arguments."), nil
@@ -117,7 +118,7 @@ func (s *Executor) invoke(
 	}
 	invocation, err = s.reserveCall(ctx, invocation.ID)
 	if err != nil {
-		if errors.Is(err, contracts.New(contracts.TaskResourceLimit, "")) {
+		if errors.Is(err, fault.New(taskmodel.TaskResourceLimit, "")) {
 			result, settleErr := s.reject(ctx, invocation.ID, toolmodel.FailureResourceLimit, "Tool call limit exceeded.")
 			if settleErr != nil {
 				return toolcontracts.ToolResult{}, settleErr
@@ -176,7 +177,7 @@ func (s *Executor) invoke(
 		if result, done := settledResult(invocation); done {
 			return result, nil
 		}
-		return toolcontracts.ToolResult{}, contracts.New(contracts.TaskBusy, "tool call is already running or being reviewed")
+		return toolcontracts.ToolResult{}, fault.New(taskmodel.TaskBusy, "tool call is already running or being reviewed")
 	}
 	execution := toolcontracts.ExecutionCall{
 		Name:                invocation.Name,

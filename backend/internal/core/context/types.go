@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-
-	"praxis/internal/contracts"
 )
 
 // ContextEntryKind 表示运行期上下文条目的来源。
@@ -53,7 +51,7 @@ type ContextBlock struct {
 	Name           string
 	Input          json.RawMessage
 	IsError        bool
-	ReasoningState *contracts.ReasoningState `json:",omitempty"`
+	ReasoningState *ReasoningState `json:",omitempty"`
 }
 
 // ContextEntry 是运行期上下文中的一个有序语义条目。

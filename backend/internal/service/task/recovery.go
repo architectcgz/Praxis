@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	sessionmodel "praxis/internal/core/session"
 	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -17,7 +18,7 @@ func (s *Service) ReconcileToolResults(ctx context.Context) error {
 }
 
 // 普通业务恢复不触碰当前仍在执行或等待审批的调用；Repository 查询本身不执行恢复。
-func (s *Service) reconcileToolResults(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID, startup bool) error {
+func (s *Service) reconcileToolResults(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, startup bool) error {
 	missing, err := s.messages.ListMissingToolResults(ctx)
 	if err != nil {
 		return err
@@ -28,7 +29,7 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID contracts.
 		}
 		if err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 			task, err := s.tasks.Get(txCtx, fact.TaskID)
-			if errors.Is(err, contracts.ErrNotFound) {
+			if errors.Is(err, fault.ErrNotFound) {
 				return nil
 			} // 快照之后 Session 可能已删除。
 			if err != nil {

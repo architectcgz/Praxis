@@ -3,20 +3,21 @@ package toolexecution
 import (
 	"context"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
 // checkTask 固定执行归属与工作区，不能通过重新准备参数改变被批准的操作。
-func (s *Executor) checkTask(ctx context.Context, provided contracts.ToolExecutionMetadata) error {
+func (s *Executor) checkTask(ctx context.Context, provided toolmodel.ToolExecutionMetadata) error {
 	task, err := s.tasks.Get(ctx, provided.TaskID)
 	if err != nil {
 		return err
 	}
 	if !task.Active() || task.SessionID != provided.SessionID || task.AgentID != provided.AgentID ||
 		task.Config.WorkspacePath != provided.WorkspacePath {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	return nil
 }
@@ -41,7 +42,7 @@ func (s *Executor) admit(ctx context.Context, invocation toolmodel.Execution, ca
 	return invocation, err
 }
 
-func (s *Executor) authorize(ctx context.Context, id contracts.ToolExecutionID) (toolmodel.Execution, error) {
+func (s *Executor) authorize(ctx context.Context, id identity.ToolExecutionID) (toolmodel.Execution, error) {
 	var invocation toolmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error

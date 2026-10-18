@@ -2,7 +2,6 @@
 package agentregistry
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	modelconfig "praxis/internal/core/model/config"
 
@@ -14,6 +13,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"regexp"
 	"slices"
 	"strings"
@@ -30,8 +31,8 @@ type ModelReference struct {
 
 // AgentConfig 保存一个 Agent 定义的角色和默认模型。
 type AgentConfig struct {
-	Profile contracts.AgentProfile `json:"profile,omitempty"`
-	Model   *ModelReference        `json:"model,omitempty"`
+	Profile agentmodel.AgentProfile `json:"profile,omitempty"`
+	Model   *ModelReference         `json:"model,omitempty"`
 }
 
 // ModelValidator 根据当前模型注册表校验模型引用。
@@ -60,8 +61,8 @@ func (e *ConfigurationError) Unwrap() error {
 // Registry 保存进程启动时加载并校验的 Agent 定义。
 type Registry struct {
 	mu          sync.RWMutex
-	configs     map[contracts.AgentDefinitionID]AgentConfig
-	definitions map[contracts.AgentDefinitionID]agentmodel.AgentDefinition
+	configs     map[identity.AgentDefinitionID]AgentConfig
+	definitions map[identity.AgentDefinitionID]agentmodel.AgentDefinition
 }
 
 // Load 扫描根目录；一级目录名就是 definition_id。
@@ -81,7 +82,7 @@ func Load(root string, validateModel ModelValidator) (*Registry, error) {
 }
 
 // Definition 返回一个经过校验的 Agent 定义快照。
-func (r *Registry) Definition(id contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
+func (r *Registry) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
 	if r == nil {
 		return agentmodel.AgentDefinition{}, errors.New("agent registry is not initialized")
 	}
@@ -95,7 +96,7 @@ func (r *Registry) Definition(id contracts.AgentDefinitionID) (agentmodel.AgentD
 }
 
 // ResolveModelReference 返回 Agent 定义绑定的默认模型引用。
-func (r *Registry) ResolveModelReference(id contracts.AgentDefinitionID) (ModelReference, error) {
+func (r *Registry) ResolveModelReference(id identity.AgentDefinitionID) (ModelReference, error) {
 	if r == nil {
 		return ModelReference{}, errors.New("agent registry is not initialized")
 	}
@@ -148,9 +149,9 @@ func (r *Registry) ValidateModelReferences(validateModel ModelValidator) error {
 
 func validateAgentConfig(config AgentConfig) (AgentConfig, error) {
 	switch config.Profile {
-	case contracts.ProfilePrimary, contracts.ProfileDelegate, contracts.ProfileAdvisor, contracts.ProfileCurator:
+	case agentmodel.ProfilePrimary, agentmodel.ProfileDelegate, agentmodel.ProfileAdvisor, agentmodel.ProfileCurator:
 	default:
-		return AgentConfig{}, contracts.InvalidValue("agentDefinition.profile", "unknown agent profile")
+		return AgentConfig{}, fault.InvalidValue("agentDefinition.profile", "unknown agent profile")
 	}
 	result := AgentConfig{Profile: config.Profile}
 	if config.Model != nil {
@@ -195,7 +196,7 @@ func rejectTrailingJSON(decoder *json.Decoder) error {
 	return err
 }
 
-func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, map[contracts.AgentDefinitionID]agentmodel.AgentDefinition, error) {
+func loadDefinitions(root string) (map[identity.AgentDefinitionID]AgentConfig, map[identity.AgentDefinitionID]agentmodel.AgentDefinition, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, nil, errors.New("agent definitions directory is required")
 	}
@@ -203,8 +204,8 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("read agent definitions directory: %w", err)
 	}
-	configs := make(map[contracts.AgentDefinitionID]AgentConfig, len(entries))
-	definitions := make(map[contracts.AgentDefinitionID]agentmodel.AgentDefinition, len(entries))
+	configs := make(map[identity.AgentDefinitionID]AgentConfig, len(entries))
+	definitions := make(map[identity.AgentDefinitionID]agentmodel.AgentDefinition, len(entries))
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 {
 			return nil, nil, fmt.Errorf("agent definition %q cannot be a symbolic link", entry.Name())
@@ -212,9 +213,9 @@ func loadDefinitions(root string) (map[contracts.AgentDefinitionID]AgentConfig, 
 		if !entry.IsDir() {
 			continue
 		}
-		id := contracts.AgentDefinitionID(entry.Name())
+		id := identity.AgentDefinitionID(entry.Name())
 		if !definitionIDPattern.MatchString(id.String()) {
-			return nil, nil, contracts.InvalidValue("agentDefinition.id", "definition id is invalid")
+			return nil, nil, fault.InvalidValue("agentDefinition.id", "definition id is invalid")
 		}
 		directory := filepath.Join(root, entry.Name())
 		config, err := readAgentConfig(filepath.Join(directory, "agent.json"))

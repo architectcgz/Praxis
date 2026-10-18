@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
@@ -18,21 +18,21 @@ import (
 
 // AgentDefinitionProvider 提供已校验的 Agent 定义。
 type AgentDefinitionProvider interface {
-	Definition(contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error)
+	Definition(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
 // ModelConfigResolver 从模型目录解析选定模型或 Agent 默认模型配置。
 type ModelConfigResolver interface {
 	ResolveTaskModel(string, string, string) (model.Config, error)
-	ResolveDefaultTaskModel(contracts.AgentDefinitionID) (model.Config, error)
+	ResolveDefaultTaskModel(identity.AgentDefinitionID) (model.Config, error)
 }
 
 // ExecutionSlots 在准入事务中预留身份，并在回滚或结算提交后释放。
 type ExecutionSlots interface {
-	Reserve(context.Context, contracts.AgentID, contracts.TaskID) (context.Context, bool, error)
-	Release(contracts.AgentID, contracts.TaskID)
-	Pause(contracts.AgentID, contracts.TaskID) bool
-	Stop(contracts.AgentID, contracts.TaskID) bool
+	Reserve(context.Context, identity.AgentID, identity.TaskID) (context.Context, bool, error)
+	Release(identity.AgentID, identity.TaskID)
+	Pause(identity.AgentID, identity.TaskID) bool
+	Stop(identity.AgentID, identity.TaskID) bool
 }
 
 type Config struct {
@@ -127,16 +127,16 @@ func NewService(config Config) (*Service, error) {
 
 // ReleaseExecution 释放准入时建立的进程内执行绑定；只清理匹配的 Task，
 // 不会取消或删除同一 Agent 后续建立的绑定。
-func (s *Service) ReleaseExecution(agentID contracts.AgentID, taskID contracts.TaskID) {
+func (s *Service) ReleaseExecution(agentID identity.AgentID, taskID identity.TaskID) {
 	s.executions.Release(agentID, taskID)
 }
 
 // Abort 结算未被 runtime 接管的 Task 并释放匹配的执行绑定；结算失败时保留绑定。
-func (s *Service) Abort(ctx context.Context, taskID contracts.TaskID) error {
+func (s *Service) Abort(ctx context.Context, taskID identity.TaskID) error {
 	if ctx == nil {
 		return errors.New("task abort context is required")
 	}
-	ended, err := s.Settle(ctx, taskID, taskmodel.TaskInterrupted, contracts.TaskFailureInterrupted, "")
+	ended, err := s.Settle(ctx, taskID, taskmodel.TaskInterrupted, taskmodel.TaskFailureInterrupted, "")
 	if err != nil {
 		return err
 	}
@@ -146,5 +146,5 @@ func (s *Service) Abort(ctx context.Context, taskID contracts.TaskID) error {
 
 // PrimaryAgentProvider 解析直接输入所属会话的 main agent。
 type PrimaryAgentProvider interface {
-	GetOrCreatePrimaryAgent(context.Context, contracts.SessionID, contracts.RequestID) (agentmodel.Agent, error)
+	GetOrCreatePrimaryAgent(context.Context, identity.SessionID, identity.RequestID) (agentmodel.Agent, error)
 }

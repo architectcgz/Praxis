@@ -8,7 +8,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"praxis/internal/contracts"
 	modelconfig "praxis/internal/core/model/config"
 )
 
@@ -126,7 +125,7 @@ func validateCapabilities(configured modelconfig.Model) error {
 	default:
 		return errors.New("unsupported or non-canonical thinking mode")
 	}
-	if configured.APIFormat != modelconfig.APIFormatAnthropicMessages && configured.Thinking != (contracts.ModelThinking{}) {
+	if configured.APIFormat != modelconfig.APIFormatAnthropicMessages && configured.Thinking != (modelconfig.ModelThinking{}) {
 		return errors.New("thinking configuration requires anthropic_messages")
 	}
 	if configured.APIFormat == modelconfig.APIFormatAnthropicMessages {

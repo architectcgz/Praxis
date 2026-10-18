@@ -1,7 +1,7 @@
 package workspace
 
 import (
-	"praxis/internal/contracts"
+	"praxis/internal/core/identity"
 	"time"
 )
 
@@ -26,8 +26,8 @@ const (
 // Workspace 是供一个或多个 Session 使用的共享文件系统资源。
 // Path 和 Revision 是可变的资源事实，ID 是稳定身份。
 type Workspace struct {
-	ID        contracts.WorkspaceID
-	ProjectID contracts.ProjectID
+	ID        identity.WorkspaceID
+	ProjectID identity.ProjectID
 	Kind      WorkspaceKind
 	Path      string
 	State     WorkspaceState
@@ -38,8 +38,8 @@ type Workspace struct {
 
 // NewWorkspace 使用入口已校验的身份、类型和路径创建 ready 工作区。
 func NewWorkspace(
-	id contracts.WorkspaceID,
-	projectID contracts.ProjectID,
+	id identity.WorkspaceID,
+	projectID identity.ProjectID,
 	kind WorkspaceKind,
 	path string,
 	at time.Time,

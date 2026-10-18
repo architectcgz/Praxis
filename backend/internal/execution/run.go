@@ -3,7 +3,8 @@ package execution
 import (
 	"context"
 	"errors"
-	"praxis/internal/contracts"
+
+	"praxis/internal/core/identity"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
@@ -22,12 +23,12 @@ func (r *Coordinator) run(
 	}
 
 	if err := r.startTask(task); err != nil {
-		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, err)
+		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, taskmodel.TaskFailureRuntimeFailed, err)
 		r.endTask(task, active, outcome, code, message)
 		return
 	}
 	if ctx.Err() != nil {
-		outcome, code, message := r.executionResult(ctx, taskmodel.TaskInterrupted, contracts.TaskFailureRuntimeCancelled, ctx.Err())
+		outcome, code, message := r.executionResult(ctx, taskmodel.TaskInterrupted, taskmodel.TaskFailureRuntimeCancelled, ctx.Err())
 		r.endTask(task, active, outcome, code, message)
 		return
 	}
@@ -38,7 +39,7 @@ func (r *Coordinator) run(
 			err = errors.New("message streams returned a nil writer")
 		}
 		r.logError(task, "resolve message writer", err)
-		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, contracts.TaskFailureRuntimeFailed, err)
+		outcome, code, message := r.executionResult(ctx, taskmodel.TaskFailed, taskmodel.TaskFailureRuntimeFailed, err)
 		r.endTask(task, active, outcome, code, message)
 		return
 	}
@@ -50,7 +51,7 @@ func (r *Coordinator) run(
 			case <-active.wake:
 				continue
 			case <-ctx.Done():
-				outcome, failureCode, failureMessage = r.executionResult(ctx, taskmodel.TaskInterrupted, contracts.TaskFailureRuntimeCancelled, ctx.Err())
+				outcome, failureCode, failureMessage = r.executionResult(ctx, taskmodel.TaskInterrupted, taskmodel.TaskFailureRuntimeCancelled, ctx.Err())
 			}
 		}
 		if !r.endTask(task, active, outcome, failureCode, failureMessage) {
@@ -78,7 +79,7 @@ func (r *Coordinator) execute(
 	ctx context.Context,
 	task taskmodel.Task,
 	messageWriter repository.MessageWriter,
-) (taskmodel.TaskOutcome, contracts.TaskFailureCode, string) {
+) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hooks.Operation{
 		Identity: hooks.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID},
 		Kind:     hooks.OperationAgent,
@@ -86,7 +87,7 @@ func (r *Coordinator) execute(
 	})
 
 	content, continuation, err := r.tasks.LoadContext(ctx, task)
-	outcome, failureCode := taskmodel.TaskFailed, contracts.TaskFailureStorage
+	outcome, failureCode := taskmodel.TaskFailed, taskmodel.TaskFailureStorage
 	if err == nil {
 		outcome, failureCode, err = r.loop.Run(ctx, task, content, continuation, messageWriter)
 	}
@@ -103,25 +104,25 @@ func (r *Coordinator) execute(
 func (r *Coordinator) executionResult(
 	ctx context.Context,
 	outcome taskmodel.TaskOutcome,
-	failureCode contracts.TaskFailureCode,
+	failureCode taskmodel.TaskFailureCode,
 	err error,
-) (taskmodel.TaskOutcome, contracts.TaskFailureCode, string) {
-	failureMessage := contracts.TaskFailureMessage(failureCode, err)
+) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, string) {
+	failureMessage := taskmodel.TaskFailureMessage(failureCode, err)
 	if ctx.Err() != nil {
 		outcome = taskmodel.TaskInterrupted
 		if errors.Is(context.Cause(ctx), ErrExecutionPaused) {
 			outcome = taskmodel.TaskPaused
 		}
-		failureCode = contracts.TaskFailureRuntimeCancelled
+		failureCode = taskmodel.TaskFailureRuntimeCancelled
 		failureMessage = ""
 	} else if err != nil {
 		outcome = taskmodel.TaskFailed
 		if failureCode == "" {
-			failureCode = contracts.TaskFailureRuntimeFailed
+			failureCode = taskmodel.TaskFailureRuntimeFailed
 		}
 	}
 	outcome, failureCode = normalizeOutcome(outcome, failureCode)
-	if failureCode != contracts.TaskFailureProvider {
+	if failureCode != taskmodel.TaskFailureProvider {
 		failureMessage = ""
 	}
 	return outcome, failureCode, failureMessage
@@ -131,7 +132,7 @@ func (r *Coordinator) endTask(
 	task taskmodel.Task,
 	active *activeTask,
 	outcome taskmodel.TaskOutcome,
-	failureCode contracts.TaskFailureCode,
+	failureCode taskmodel.TaskFailureCode,
 	failureMessage string,
 ) bool {
 	// 先保留结算结果与占用，失败后只重试结算。
@@ -165,18 +166,18 @@ func (r *Coordinator) endTask(
 
 func normalizeOutcome(
 	outcome taskmodel.TaskOutcome,
-	failureCode contracts.TaskFailureCode,
-) (taskmodel.TaskOutcome, contracts.TaskFailureCode) {
+	failureCode taskmodel.TaskFailureCode,
+) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode) {
 	if !knownOutcome(outcome) {
 		outcome = taskmodel.TaskFailed
-		failureCode = contracts.TaskFailureRuntimeInvalid
+		failureCode = taskmodel.TaskFailureRuntimeInvalid
 	}
 	if outcome == taskmodel.TaskFailed && failureCode == "" {
-		failureCode = contracts.TaskFailureRuntimeFailed
+		failureCode = taskmodel.TaskFailureRuntimeFailed
 	}
 	if !taskmodel.ValidFailureCode(failureCode) {
 		outcome = taskmodel.TaskFailed
-		failureCode = contracts.TaskFailureRuntimeFailed
+		failureCode = taskmodel.TaskFailureRuntimeFailed
 	}
 	return outcome, failureCode
 }
@@ -188,7 +189,7 @@ func (r *Coordinator) logError(task taskmodel.Task, stage string, err error) {
 	r.logger.Errorf("task id=%s stage=%s failed: %v", task.ID, stage, err)
 }
 
-func (r *Coordinator) logEvent(taskID contracts.TaskID, stage string) {
+func (r *Coordinator) logEvent(taskID identity.TaskID, stage string) {
 	r.logger.Infof("task id=%s stage=%s", taskID, stage)
 }
 

@@ -2,14 +2,15 @@ package execution
 
 import (
 	"context"
-	"praxis/internal/contracts"
+
+	"praxis/internal/core/identity"
 	taskmodel "praxis/internal/core/task"
 )
 
 // RecoverySource 从当前持久化状态读取活动 Task 和允许派发的 Agent。
 type RecoverySource interface {
 	ListActive(context.Context) ([]taskmodel.Task, error)
-	ListDispatchableAgents(context.Context) ([]contracts.AgentID, error)
+	ListDispatchableAgents(context.Context) ([]identity.AgentID, error)
 }
 
 // Restore 先恢复已有 Task，再检查空闲 Agent 的 Pending 队列；不改写历史数据。

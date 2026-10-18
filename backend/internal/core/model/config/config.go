@@ -4,8 +4,6 @@ package config
 import (
 	"context"
 	"slices"
-
-	"praxis/internal/contracts"
 )
 
 // APIFormat 标识 Provider 使用的模型 API 协议。
@@ -25,15 +23,15 @@ type Group struct {
 
 // Model 保存可编辑的模型能力与推理等级，不包含运行时凭据。
 type Model struct {
-	ID                    string                  `json:"id"`
-	DisplayName           string                  `json:"displayName"`
-	GroupID               string                  `json:"groupId"`
-	APIFormat             APIFormat               `json:"apiFormat"`
-	ContextWindow         int                     `json:"contextWindow"`
-	MaxOutputTokens       int                     `json:"maxOutputTokens"`
-	ReasoningLevels       []string                `json:"reasoningLevels,omitempty"`
-	DefaultReasoningLevel string                  `json:"defaultReasoningLevel,omitempty"`
-	Thinking              contracts.ModelThinking `json:"thinking,omitzero"`
+	ID                    string        `json:"id"`
+	DisplayName           string        `json:"displayName"`
+	GroupID               string        `json:"groupId"`
+	APIFormat             APIFormat     `json:"apiFormat"`
+	ContextWindow         int           `json:"contextWindow"`
+	MaxOutputTokens       int           `json:"maxOutputTokens"`
+	ReasoningLevels       []string      `json:"reasoningLevels,omitempty"`
+	DefaultReasoningLevel string        `json:"defaultReasoningLevel,omitempty"`
+	Thinking              ModelThinking `json:"thinking,omitzero"`
 }
 
 // Provider 保存模型端点和模型目录；密钥由注册表独立管理。

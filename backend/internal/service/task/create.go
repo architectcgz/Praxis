@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
@@ -13,9 +14,9 @@ import (
 
 // SendInputParams 是直接输入的身份、正文和模型选择，不接受调用方预构建的 Context。
 type SendInputParams struct {
-	SessionID      contracts.SessionID
-	AgentID        contracts.AgentID
-	RequestID      contracts.RequestID
+	SessionID      identity.SessionID
+	AgentID        identity.AgentID
+	RequestID      identity.RequestID
 	Content        string
 	ProviderID     string
 	ModelID        string
@@ -50,15 +51,15 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 	}
 	var committedMessage *sessionmodel.MessageData
 	var result SendInputResult
-	var admittedAgent contracts.AgentID
-	var admittedTask contracts.TaskID
+	var admittedAgent identity.AgentID
+	var admittedTask identity.TaskID
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.tasks.FindByRequest(txCtx, params.AgentID, params.RequestID)
 		if err == nil {
 			if existing.Sequence != 0 ||
 				existing.ProviderID != params.ProviderID || existing.ModelID != params.ModelID || existing.ReasoningLevel != params.ReasoningLevel ||
 				params.SessionID != "" && existing.SessionID != params.SessionID {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			agent, err := s.agents.Get(txCtx, existing.AgentID)
 			if err != nil {
@@ -69,12 +70,12 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 				return err
 			}
 			if storedContent != params.Content {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			result = SendInputResult{Task: existing, ExistingRequest: true}
 			return nil
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		agent, err := s.agents.Get(txCtx, params.AgentID)
@@ -82,17 +83,17 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			return err
 		}
 		if params.SessionID != "" && agent.SessionID != params.SessionID {
-			return contracts.New(contracts.InvalidRequest, "")
+			return fault.New(fault.InvalidRequest, "")
 		}
 		if !agent.State.Startable() {
-			return contracts.New(contracts.AgentExecuting, "")
+			return fault.New(agentmodel.ExecutingCode, "")
 		}
 		active, err := s.tasks.CountActiveBySession(txCtx, agent.SessionID)
 		if err != nil {
 			return err
 		}
 		if active != 0 {
-			return contracts.New(contracts.AgentExecuting, "")
+			return fault.New(agentmodel.ExecutingCode, "")
 		}
 		inputMessageID := "input:" + params.RequestID.String()
 		config, err := s.buildConfig(txCtx, agent, params.ProviderID, params.ModelID, params.ReasoningLevel)
@@ -100,7 +101,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 			return err
 		}
 		at := s.clock.Now()
-		taskID := contracts.TaskID(s.ids.New("task"))
+		taskID := identity.TaskID(s.ids.New("task"))
 		value := sessionmodel.MessageData{
 			ID:         inputMessageID,
 			RequestID:  params.RequestID.String(),
@@ -162,7 +163,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInputParams) (
 	return result, err
 }
 
-func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agent, requestID contracts.RequestID) (string, error) {
+func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agent, requestID identity.RequestID) (string, error) {
 	messageID := "input:" + requestID.String()
 	messages, err := s.messages.List(ctx, agent, 0, 0)
 	if err != nil {
@@ -173,5 +174,5 @@ func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agen
 			return message.TextContent(), nil
 		}
 	}
-	return "", contracts.ErrNotFound
+	return "", fault.ErrNotFound
 }

@@ -1,6 +1,7 @@
 package readfile
 
 import (
+	coretool "praxis/internal/core/tool"
 	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 	"praxis/internal/utils/pathutil"
@@ -31,7 +32,7 @@ func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontrac
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
-	if call.Name != toolcontracts.ToolReadFile {
+	if call.Name != coretool.ToolReadFile {
 		return toolcontracts.ToolResult{}, errors.New("read_file executor does not support the call")
 	}
 	var toolArguments arguments

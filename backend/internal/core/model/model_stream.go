@@ -2,8 +2,8 @@ package model
 
 import (
 	"context"
-
-	"praxis/internal/contracts"
+	appcontext "praxis/internal/core/context"
+	coretool "praxis/internal/core/tool"
 )
 
 // ModelStreamEventKind 标识模型 Provider 适配器产生的流事件类型。
@@ -39,11 +39,11 @@ const (
 type ModelStreamEvent struct {
 	Kind           ModelStreamEventKind
 	Text           string
-	ToolCall       contracts.ToolCall
+	ToolCall       coretool.ToolCall
 	Usage          *ModelUsage
 	StopReason     ModelStopReason
 	Err            error
-	ReasoningState *contracts.ReasoningState
+	ReasoningState *appcontext.ReasoningState
 	// OutputIndex 保存协议输出块顺序，Loop 收集后按此顺序构造历史，不影响实时展示。
 	OutputIndex *int
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
 	taskmodel "praxis/internal/core/task"
 )
 
@@ -22,10 +22,10 @@ func (s *Service) PrepareQueuedTask(ctx context.Context, selected taskmodel.Task
 			return err
 		}
 		if !agent.CanReadSessionContext() {
-			return contracts.New(contracts.InvalidRequest, "queue requires the session main agent")
+			return fault.New(fault.InvalidRequest, "queue requires the session main agent")
 		}
 		task, err := s.tasks.FindNextPendingByAgent(txCtx, agent.ID)
-		if errors.Is(err, contracts.ErrNotFound) {
+		if errors.Is(err, fault.ErrNotFound) {
 			return nil
 		}
 		if err != nil {

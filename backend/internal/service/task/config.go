@@ -1,12 +1,12 @@
 package task
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 
 	"context"
+	"praxis/internal/core/fault"
 )
 
 // buildConfig 解析模型配置并确定本次执行输入；任一步失败都不产生执行输入。
@@ -30,19 +30,19 @@ func (s *Service) buildConfig(
 		return taskmodel.Config{}, err
 	}
 	if definition.Profile != agent.Profile {
-		return taskmodel.Config{}, contracts.ErrRevisionConflict
+		return taskmodel.Config{}, fault.ErrRevisionConflict
 	}
 	var modelConfig model.Config
 	switch {
 	case providerID == "" && modelID == "" && reasoningLevel == "":
 		modelConfig, err = s.models.ResolveDefaultTaskModel(agent.DefinitionID)
 	case providerID == "" || modelID == "":
-		return taskmodel.Config{}, contracts.New(contracts.InvalidRequest, "")
+		return taskmodel.Config{}, fault.New(fault.InvalidRequest, "")
 	default:
 		modelConfig, err = s.models.ResolveTaskModel(providerID, modelID, reasoningLevel)
 	}
 	if err != nil {
-		return taskmodel.Config{}, contracts.New(contracts.InvalidRequest, "")
+		return taskmodel.Config{}, fault.New(fault.InvalidRequest, "")
 	}
 	config := taskmodel.Config{
 		AgentDefinitionID: definition.ID,

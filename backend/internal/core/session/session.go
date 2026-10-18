@@ -1,8 +1,7 @@
 package session
 
 import (
-	"praxis/internal/contracts"
-
+	"praxis/internal/core/identity"
 	"strings"
 	"time"
 )
@@ -16,9 +15,9 @@ const (
 
 // Session 是 Project 的持久化协作容器。
 type Session struct {
-	ID          contracts.SessionID
-	ProjectID   contracts.ProjectID
-	WorkspaceID contracts.WorkspaceID
+	ID          identity.SessionID
+	ProjectID   identity.ProjectID
+	WorkspaceID identity.WorkspaceID
 	Title       string
 	State       SessionState
 	CreatedAt   time.Time
@@ -26,7 +25,7 @@ type Session struct {
 }
 
 // NewSession 使用入口已校验的身份创建 active 会话，初始标题为空。
-func NewSession(id contracts.SessionID, projectID contracts.ProjectID, workspaceID contracts.WorkspaceID, at time.Time) Session {
+func NewSession(id identity.SessionID, projectID identity.ProjectID, workspaceID identity.WorkspaceID, at time.Time) Session {
 	return Session{
 		ID:          id,
 		ProjectID:   projectID,

@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"time"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/security"
+	coretool "praxis/internal/core/tool"
 )
 
 // MaxInlineToolResultBytes 限制单次工具结果的内联字节数，执行器应在返回前完成截断。
@@ -94,13 +96,13 @@ type Result struct {
 // 和参数摘要识别重试。仓储负责保证 (TaskID, ProviderToolCallID) 唯一，
 // 原始调用身份不可变；规范化参数在准入时冻结，之后不可变。
 type Execution struct {
-	ID                  contracts.ToolExecutionID
-	TaskID              contracts.TaskID
-	TurnID              contracts.TurnID
-	SessionID           contracts.SessionID
-	AgentID             contracts.AgentID
+	ID                  identity.ToolExecutionID
+	TaskID              identity.TaskID
+	TurnID              identity.TurnID
+	SessionID           identity.SessionID
+	AgentID             identity.AgentID
 	ProviderToolCallID  string
-	Name                contracts.ToolName
+	Name                coretool.ToolName
 	Arguments           json.RawMessage `json:",omitempty"`
 	NormalizedArguments json.RawMessage `json:",omitempty"`
 	Path                string          `json:",omitempty"`
@@ -109,7 +111,7 @@ type Execution struct {
 	BudgetReserved      bool
 	Decision            security.ApprovalDecision
 	Reviews             []RiskReview `json:",omitempty"`
-	Approval            contracts.ApprovalRecord
+	Approval            ApprovalRecord
 	Result              Result
 	FailureCode         FailureCode
 	CreatedAt           time.Time
@@ -121,13 +123,13 @@ type Execution struct {
 // NewExecution 创建 requested 调用，复制参数并将创建时间转换为 UTC。
 // 身份和原始 JSON 已由输入边界校验，具体工具参数在执行准入时处理。
 func NewExecution(
-	id contracts.ToolExecutionID,
-	taskID contracts.TaskID,
-	turnID contracts.TurnID,
-	sessionID contracts.SessionID,
-	agentID contracts.AgentID,
+	id identity.ToolExecutionID,
+	taskID identity.TaskID,
+	turnID identity.TurnID,
+	sessionID identity.SessionID,
+	agentID identity.AgentID,
 	providerToolCallID string,
-	name contracts.ToolName,
+	name coretool.ToolName,
 	arguments json.RawMessage,
 	argumentsDigest string,
 	at time.Time,
@@ -153,82 +155,82 @@ func (i Execution) validateState() error {
 		return err
 	}
 	if !i.ApprovedAt.IsZero() && len(i.NormalizedArguments) == 0 {
-		return contracts.InvalidValue("toolExecution", "approved invocation requires normalized arguments")
+		return fault.InvalidValue("toolExecution", "approved invocation requires normalized arguments")
 	}
 	if !i.Status.Valid() || !i.FailureCode.Valid() || i.CreatedAt.IsZero() {
-		return contracts.InvalidValue("toolExecution", "status, failure code, or creation time is invalid")
+		return fault.InvalidValue("toolExecution", "status, failure code, or creation time is invalid")
 	}
 	if !i.Result.ErrorCode.Valid() {
-		return contracts.InvalidValue("toolExecution.result.errorCode", "unknown tool failure code")
+		return fault.InvalidValue("toolExecution.result.errorCode", "unknown tool failure code")
 	}
 	if i.ApprovedAt.IsZero() {
-		if i.Approval != (contracts.ApprovalRecord{}) || !i.StartedAt.IsZero() {
-			return contracts.InvalidValue("toolExecution.approval", "unapproved invocation has approval or start fields")
+		if i.Approval != (ApprovalRecord{}) || !i.StartedAt.IsZero() {
+			return fault.InvalidValue("toolExecution.approval", "unapproved invocation has approval or start fields")
 		}
 	} else {
 		switch i.Approval.Source {
-		case contracts.ApprovalSourceUser, contracts.ApprovalSourceYolo, contracts.ApprovalSourceAuto:
+		case ApprovalSourceUser, ApprovalSourceYolo, ApprovalSourceAuto:
 		default:
-			return contracts.InvalidValue("toolExecution.approval.source", "unknown approval source")
+			return fault.InvalidValue("toolExecution.approval.source", "unknown approval source")
 		}
 		if !i.Approval.ApprovedAt.Equal(i.ApprovedAt) ||
 			i.Approval.ArgumentsDigest != ArgumentsDigest(i.Name, i.NormalizedArguments) {
-			return contracts.InvalidValue("toolExecution.approval", "approval time or arguments digest is inconsistent")
+			return fault.InvalidValue("toolExecution.approval", "approval time or arguments digest is inconsistent")
 		}
 	}
 	previous := i.CreatedAt
 	for _, at := range []time.Time{i.ApprovedAt, i.StartedAt, i.SettledAt} {
 		if !at.IsZero() {
 			if at.Before(previous) {
-				return contracts.InvalidValue("toolExecution.timestamps", "lifecycle timestamps are out of order")
+				return fault.InvalidValue("toolExecution.timestamps", "lifecycle timestamps are out of order")
 			}
 			previous = at
 		}
 	}
 	if i.Status.Terminal() {
 		if i.SettledAt.IsZero() || i.Result.ErrorCode != i.FailureCode {
-			return contracts.InvalidValue("toolExecution", "terminal invocation requires a settlement time and matching result code")
+			return fault.InvalidValue("toolExecution", "terminal invocation requires a settlement time and matching result code")
 		}
 	} else if !i.SettledAt.IsZero() || i.FailureCode != FailureNone || i.Result != (Result{}) {
-		return contracts.InvalidValue("toolExecution", "active invocation contains terminal fields")
+		return fault.InvalidValue("toolExecution", "active invocation contains terminal fields")
 	}
 	if i.StartedAt.IsZero() && i.Result.SideEffect {
-		return contracts.InvalidValue("toolExecution.result", "unstarted invocation cannot report a side effect")
+		return fault.InvalidValue("toolExecution.result", "unstarted invocation cannot report a side effect")
 	}
 	switch i.Status {
 	case StatusRequested, StatusPrepared, StatusReviewing, StatusAwaitingApproval, StatusDenied:
 		if !i.ApprovedAt.IsZero() {
-			return contracts.InvalidValue("toolExecution.approvedAt", "unapproved invocation has an approval time")
+			return fault.InvalidValue("toolExecution.approvedAt", "unapproved invocation has an approval time")
 		}
 	case StatusApproved:
 		if i.ApprovedAt.IsZero() || !i.StartedAt.IsZero() {
-			return contracts.InvalidValue("toolExecution", "approved invocation has invalid lifecycle fields")
+			return fault.InvalidValue("toolExecution", "approved invocation has invalid lifecycle fields")
 		}
 	case StatusRunning, StatusSucceeded, StatusFailed, StatusUnknown:
 		if i.StartedAt.IsZero() {
-			return contracts.InvalidValue("toolExecution.startedAt", "executed invocation requires a start time")
+			return fault.InvalidValue("toolExecution.startedAt", "executed invocation requires a start time")
 		}
 	}
 	switch i.Status {
 	case StatusSucceeded:
 		if i.FailureCode != FailureNone {
-			return contracts.InvalidValue("toolExecution.result", "successful invocation cannot contain a failure")
+			return fault.InvalidValue("toolExecution.result", "successful invocation cannot contain a failure")
 		}
 	case StatusFailed:
 		if i.FailureCode == FailureNone {
-			return contracts.InvalidValue("toolExecution.result", "failed invocation requires a failure code")
+			return fault.InvalidValue("toolExecution.result", "failed invocation requires a failure code")
 		}
 	case StatusDenied:
 		if i.FailureCode != FailureResourceLimit && i.FailureCode != FailureNotAllowed && i.FailureCode != FailureApprovalDenied && i.FailureCode != FailureRiskDenied && i.FailureCode != FailureInvalidCall {
-			return contracts.InvalidValue("toolExecution.result", "denial requires a denial failure code")
+			return fault.InvalidValue("toolExecution.result", "denial requires a denial failure code")
 		}
 	case StatusInterrupted:
 		if i.FailureCode != FailureInterrupted {
-			return contracts.InvalidValue("toolExecution.result", "interruption requires its stable failure code")
+			return fault.InvalidValue("toolExecution.result", "interruption requires its stable failure code")
 		}
 	case StatusUnknown:
 		if i.FailureCode != FailureResultUnknown {
-			return contracts.InvalidValue("toolExecution.result", "unknown result requires its stable failure code")
+			return fault.InvalidValue("toolExecution.result", "unknown result requires its stable failure code")
 		}
 	}
 	return nil
@@ -237,19 +239,19 @@ func (i Execution) validateState() error {
 // AwaitApproval 保留冻结参数并等待用户批准；尚未启动的旧授权被撤销时清空审批字段。
 func (i *Execution) AwaitApproval() error {
 	if i.Status == StatusAwaitingApproval || !canTransition(i.Status, StatusAwaitingApproval) {
-		return contracts.InvalidTransition("toolExecution", string(i.Status), string(StatusAwaitingApproval))
+		return fault.InvalidTransition("toolExecution", string(i.Status), string(StatusAwaitingApproval))
 	}
 	next := *i
 	next.Status = StatusAwaitingApproval
-	next.Approval = contracts.ApprovalRecord{}
+	next.Approval = ApprovalRecord{}
 	next.ApprovedAt = time.Time{}
 	return i.apply(next)
 }
 
 // Approve 接受 requested 或 awaiting_approval 调用的有效审批；失败不修改对象。
-func (i *Execution) Approve(approval contracts.ApprovalRecord) error {
+func (i *Execution) Approve(approval ApprovalRecord) error {
 	if i.Status == StatusApproved || !canTransition(i.Status, StatusApproved) {
-		return contracts.InvalidTransition("toolExecution", string(i.Status), string(StatusApproved))
+		return fault.InvalidTransition("toolExecution", string(i.Status), string(StatusApproved))
 	}
 	next := *i
 	approval.ApprovedAt = approval.ApprovedAt.UTC()
@@ -262,7 +264,7 @@ func (i *Execution) Approve(approval contracts.ApprovalRecord) error {
 // Start 将 approved 调用转为 running；开始时间不得早于审批，失败不修改对象。
 func (i *Execution) Start(at time.Time) error {
 	if i.Status == StatusRunning || !canTransition(i.Status, StatusRunning) {
-		return contracts.InvalidTransition("toolExecution", string(i.Status), string(StatusRunning))
+		return fault.InvalidTransition("toolExecution", string(i.Status), string(StatusRunning))
 	}
 	next := *i
 	next.Status = StatusRunning
@@ -298,7 +300,7 @@ func (i *Execution) MarkResultUnknown(result Result, at time.Time) error {
 func (i *Execution) settle(status Status, result Result, code FailureCode, at time.Time) error {
 	allowed := i.Status != status && canTransition(i.Status, status)
 	if !allowed {
-		return contracts.InvalidTransition("toolExecution", string(i.Status), string(status))
+		return fault.InvalidTransition("toolExecution", string(i.Status), string(status))
 	}
 	next := *i
 	next.Status = status
@@ -311,7 +313,7 @@ func (i *Execution) settle(status Status, result Result, code FailureCode, at ti
 // apply 先检查状态转换和本次产生的结果，失败时保留原对象；输入格式由入口负责。
 func (i *Execution) apply(next Execution) error {
 	if next.Result != i.Result && len(next.Result.InlineContent) > MaxInlineToolResultBytes {
-		return contracts.InvalidValue("toolExecution.result.inlineContent", "inline result exceeds the size limit")
+		return fault.InvalidValue("toolExecution.result.inlineContent", "inline result exceeds the size limit")
 	}
 	if err := next.validateState(); err != nil {
 		return err
@@ -324,9 +326,9 @@ func (i *Execution) apply(next Execution) error {
 }
 
 // ArgumentsDigest 固定原始请求身份；不同归一化顺序不改变调用意图。
-func ArgumentsDigest(name contracts.ToolName, arguments json.RawMessage) string {
+func ArgumentsDigest(name coretool.ToolName, arguments json.RawMessage) string {
 	encoded, err := json.Marshal(struct {
-		Name      contracts.ToolName
+		Name      coretool.ToolName
 		Arguments json.RawMessage
 	}{Name: name, Arguments: arguments})
 	if err != nil {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
 	"praxis/internal/repository"
 )
 
@@ -129,16 +129,16 @@ func (s *Store) lookup(ctx context.Context, claim lookupKey) (entityKey, error) 
 		}
 		if key, ok := s.index.unique[claim]; ok {
 			if _, changed := tx.changes[key]; changed {
-				return entityKey{}, contracts.ErrNotFound
+				return entityKey{}, fault.ErrNotFound
 			}
 			if tx.deletedScope && s.index.latest[key].location.Scope == tx.scope {
-				return entityKey{}, contracts.ErrNotFound
+				return entityKey{}, fault.ErrNotFound
 			}
 		}
 	}
 	key, ok := s.index.unique[claim]
 	if !ok {
-		return entityKey{}, contracts.ErrNotFound
+		return entityKey{}, fault.ErrNotFound
 	}
 	return key, nil
 }

@@ -4,17 +4,17 @@ package hooks
 import (
 	"context"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 )
 
 // Identity 显式关联本次执行的持久化归属；没有迭代边界时 TurnID 为空。
 type Identity struct {
-	SessionID contracts.SessionID
-	AgentID   contracts.AgentID
-	TaskID    contracts.TaskID
-	TurnID    contracts.TurnID
+	SessionID identity.SessionID
+	AgentID   identity.AgentID
+	TaskID    identity.TaskID
+	TurnID    identity.TurnID
 }
 
 type OperationKind string

@@ -3,7 +3,6 @@ package bindings
 import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"praxis/internal/contracts"
 	"praxis/internal/request"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -38,9 +37,9 @@ func (b *ProjectBindings) ListProjects() ([]dto.ProjectSummary, error) {
 	result := make([]dto.ProjectSummary, 0, len(projects))
 	for _, project := range projects {
 		result = append(result, dto.ProjectSummary{
-			ID:                 project.ID.String(),
+			ID:                 project.ID,
 			Name:               project.Name,
-			DefaultWorkspaceID: project.DefaultWorkspaceID.String(),
+			DefaultWorkspaceID: project.DefaultWorkspaceID,
 			Path:               project.Path,
 			State:              project.State,
 		})
@@ -57,11 +56,11 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 		return dto.CreateProjectResponse{}, err
 	}
 	canonical, err := request.NewCreateProject(request.CreateProject{
-		ProjectID:   contracts.ProjectID(wire.ProjectID),
-		WorkspaceID: contracts.WorkspaceID(wire.WorkspaceID),
+		ProjectID:   wire.ProjectID,
+		WorkspaceID: wire.WorkspaceID,
 		Name:        wire.ProjectName,
 		Path:        wire.Path,
-		RequestID:   contracts.RequestID(wire.RequestID),
+		RequestID:   wire.RequestID,
 	})
 	if err != nil {
 		return dto.CreateProjectResponse{}, publicError(b.runtime, "ProjectBindings.CreateProject.request", err)
@@ -71,9 +70,9 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 		return dto.CreateProjectResponse{}, publicError(b.runtime, "ProjectBindings.CreateProject", err)
 	}
 	return dto.CreateProjectResponse{
-		ProjectID:   result.ProjectID.String(),
+		ProjectID:   result.ProjectID,
 		Name:        result.Name,
-		WorkspaceID: result.WorkspaceID.String(),
+		WorkspaceID: result.WorkspaceID,
 		Path:        result.Path,
 	}, nil
 }

@@ -1,19 +1,20 @@
 package agent
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	taskmodel "praxis/internal/core/task"
 
 	"context"
 	"errors"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 )
 
 // ControlParams 标识控制目标；必须使用观察到的 Task ID，延迟命令不能影响下一项执行。
 type ControlParams struct {
-	CommandID    contracts.AgentControlCommandID
-	AgentID      contracts.AgentID
-	TargetTaskID contracts.TaskID
+	CommandID    identity.AgentControlCommandID
+	AgentID      identity.AgentID
+	TargetTaskID identity.TaskID
 }
 
 // ControlResult 返回持久化控制命令；信号送达不代表 runtime 已完成结算。
@@ -43,12 +44,12 @@ func (s *Service) applyControl(ctx context.Context, params ControlParams, kind a
 		existing, err := s.controls.Get(txCtx, params.CommandID)
 		if err == nil {
 			if existing.AgentID != params.AgentID || existing.TargetTaskID != params.TargetTaskID || existing.Kind != kind {
-				return contracts.New(contracts.InvalidRequest, "")
+				return fault.New(fault.InvalidRequest, "")
 			}
 			result = ControlResult{Command: existing, ExistingCommand: true}
 			return nil
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		agent, err := s.agents.Get(txCtx, params.AgentID)
@@ -60,7 +61,7 @@ func (s *Service) applyControl(ctx context.Context, params ControlParams, kind a
 			return err
 		}
 		if task.AgentID != agent.ID {
-			return contracts.New(contracts.InvalidRequest, "")
+			return fault.New(fault.InvalidRequest, "")
 		}
 		at := s.clock.Now()
 		control := agentmodel.NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
@@ -69,7 +70,7 @@ func (s *Service) applyControl(ctx context.Context, params ControlParams, kind a
 				return err
 			}
 		} else if agent.CurrentTaskID != task.ID {
-			return contracts.New(contracts.AgentUnavailable, "")
+			return fault.New(agentmodel.UnavailableCode, "")
 		} else if agent.State == agentmodel.AgentExecuting {
 			if err := agent.RequestPause(at); err != nil {
 				return err
@@ -77,7 +78,7 @@ func (s *Service) applyControl(ctx context.Context, params ControlParams, kind a
 		} else if agent.State == agentmodel.AgentPausing {
 			// 人工重试可以接管上一次未完成的进程内取消。
 		} else {
-			return contracts.New(contracts.AgentUnavailable, "")
+			return fault.New(agentmodel.UnavailableCode, "")
 		}
 		if err := s.controls.Save(txCtx, control); err != nil {
 			return err

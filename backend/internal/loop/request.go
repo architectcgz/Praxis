@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
@@ -27,7 +26,7 @@ func (r *Runner) summarizeContext(
 	if err := r.Progress.RecordSummaryRequest(ctx, task.ID, sequence); err != nil {
 		return "", err
 	}
-	turnID := contracts.NewTurnID(task.ID, sequence)
+	turnID := taskmodel.NewTurnID(task.ID, sequence)
 	r.emit(Event{
 		Kind:      EventTurnStarted,
 		SessionID: task.SessionID,
@@ -59,7 +58,7 @@ func (r *Runner) summarizeContext(
 		return "", modelFailure(err)
 	}
 	if err := r.Progress.RecordModelOutput(ctx, task.ID, response.textBytes); err != nil {
-		return "", failCause(contracts.TaskFailureStorage, err)
+		return "", failCause(taskmodel.TaskFailureStorage, err)
 	}
 	if len(response.toolCalls()) != 0 {
 		return "", errors.New("context summary returned a tool call")

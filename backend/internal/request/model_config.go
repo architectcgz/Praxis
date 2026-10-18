@@ -6,7 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"praxis/internal/contracts"
+	modelcontracts "praxis/internal/app/model/contracts"
+	"praxis/internal/core/fault"
 	modelconfig "praxis/internal/core/model/config"
 )
 
@@ -37,7 +38,7 @@ type ConfiguredModel struct {
 	MaxOutputTokens       int
 	ReasoningLevels       []string
 	DefaultReasoningLevel string
-	Thinking              contracts.ModelThinking
+	Thinking              modelcontracts.ModelThinking
 }
 
 // SaveModelConfig 是已准备好的模型配置请求。
@@ -80,10 +81,10 @@ func NewSaveModelConfig(value SaveModelConfig) (SaveModelConfig, error) {
 		providerID := strings.TrimSpace(model.ProviderID)
 		modelID := strings.TrimSpace(model.ModelID)
 		if providerID == "" {
-			return SaveModelConfig{}, contracts.InvalidValue(fmt.Sprintf("models[%d].providerId", index), "required")
+			return SaveModelConfig{}, fault.InvalidValue(fmt.Sprintf("models[%d].providerId", index), "required")
 		}
 		if _, ok := providerIDs[providerID]; !ok {
-			return SaveModelConfig{}, contracts.InvalidValue(fmt.Sprintf("models[%d].providerId", index), "unknown provider")
+			return SaveModelConfig{}, fault.InvalidValue(fmt.Sprintf("models[%d].providerId", index), "unknown provider")
 		}
 		levels := slices.Clone(model.ReasoningLevels)
 		for levelIndex := range levels {
@@ -98,7 +99,7 @@ func NewSaveModelConfig(value SaveModelConfig) (SaveModelConfig, error) {
 			MaxOutputTokens:       model.MaxOutputTokens,
 			ReasoningLevels:       levels,
 			DefaultReasoningLevel: strings.TrimSpace(model.DefaultReasoningLevel),
-			Thinking: contracts.ModelThinking{
+			Thinking: modelconfig.ModelThinking{
 				Mode:             strings.TrimSpace(model.Thinking.Mode),
 				BudgetTokens:     model.Thinking.BudgetTokens,
 				SupportsDisabled: model.Thinking.SupportsDisabled,
@@ -112,7 +113,7 @@ func NewSaveModelConfig(value SaveModelConfig) (SaveModelConfig, error) {
 		}
 	}
 	if err := ValidateModelConfig(config); err != nil {
-		return SaveModelConfig{}, contracts.InvalidValue("modelConfig", err.Error())
+		return SaveModelConfig{}, fault.InvalidValue("modelConfig", err.Error())
 	}
 	value.config = config
 	return value, nil

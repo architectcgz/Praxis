@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/hooks"
 	"praxis/internal/logging"
@@ -90,7 +90,7 @@ func (r *Coordinator) Activate(ctx context.Context, task taskmodel.Task) error {
 }
 
 func (r *Coordinator) activate(ctx context.Context, task taskmodel.Task) error {
-	if _, err := r.activeTasks.Context(task.AgentID, task.ID); errors.Is(err, contracts.ErrNotFound) {
+	if _, err := r.activeTasks.Context(task.AgentID, task.ID); errors.Is(err, fault.ErrNotFound) {
 		reclaimed, err := r.tasks.ReclaimTask(ctx, task)
 		if err != nil {
 			return err

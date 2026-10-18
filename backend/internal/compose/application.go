@@ -1,7 +1,6 @@
 package compose
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
 	"praxis/internal/core/security"
@@ -12,10 +11,19 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
-	appservices "praxis/internal/service"
+	appagent "praxis/internal/app/agent"
+	agentcontracts "praxis/internal/app/agent/contracts"
+	appmodel "praxis/internal/app/model"
+	appproject "praxis/internal/app/project"
+	appruntime "praxis/internal/app/runtime"
+	appsession "praxis/internal/app/session"
+	apptiming "praxis/internal/app/timing"
+	appusage "praxis/internal/app/usage"
 	applicationagent "praxis/internal/service/agent"
+	applicationmodel "praxis/internal/service/model"
 	applicationproject "praxis/internal/service/project"
 	applicationruntime "praxis/internal/service/runtime"
 	runtimequeue "praxis/internal/service/runtime/queue"
@@ -23,6 +31,8 @@ import (
 	applicationtask "praxis/internal/service/task"
 	toolexecution "praxis/internal/tool_execution"
 
+	"praxis/internal/core/identity"
+	coretool "praxis/internal/core/tool"
 	agentregistry "praxis/internal/infra/agent_registry"
 	"praxis/internal/infra/dataroot"
 	"praxis/internal/infra/document"
@@ -39,11 +49,10 @@ import (
 	"praxis/wails/bindings"
 )
 
-// Application 是目标架构的组合根：创建具体实现、注入 service 与
-// execution，并持有进程级生命周期资源。前端端口由
-// praxis/internal/service 实现，这里只负责装配与释放。
+// Application 是唯一生产组合根，装配业务、应用入口和执行能力，并持有进程级资源。
+// Wails 端口由各业务 app 分别实现，组合根只连接依赖和管理资源释放。
 type Application struct {
-	frontend    *appservices.Services
+	frontend    bindings.Services
 	sessions    *applicationsession.Service
 	store       *jsonl.Store
 	coordinator *execution.Coordinator
@@ -52,25 +61,12 @@ type Application struct {
 	usages      jsonl.ModelUsageStore
 }
 
-// Services 组装 wails 层注入所需的前端服务集。把 *appservices.Services 赋给
-// bindings 的接口字段，编译期即可确认它满足全部端口。
+// Services 返回已装配的应用端口集，具体 app 在赋值时通过编译期接口检查。
 func (a *Application) Services() bindings.Services {
-	if a == nil || a.frontend == nil {
+	if a == nil {
 		return bindings.Services{}
 	}
-	impl := a.frontend
-	return bindings.Services{
-		Projects:       impl,
-		Sessions:       impl,
-		Agents:         impl,
-		Commands:       impl,
-		Models:         impl,
-		ModelConfig:    impl,
-		Events:         impl,
-		Timings:        impl,
-		Usages:         impl,
-		SessionLogPath: a.store.SessionLogPath,
-	}
+	return a.frontend
 }
 
 // Open 构建应用与进程级 Coordinator；runner 为空时装配默认 Loop。
@@ -126,7 +122,7 @@ func Open(
 		}
 	}
 	definitions := toolRegistry.List()
-	registeredToolNames := make([]contracts.ToolName, 0, len(definitions))
+	registeredToolNames := make([]coretool.ToolName, 0, len(definitions))
 	for _, definition := range definitions {
 		registeredToolNames = append(registeredToolNames, definition.Name)
 	}
@@ -155,7 +151,7 @@ func Open(
 	repos := store.Repositories()
 	workspaceFilesystem := workspacefs.Filesystem{}
 	messages := repos.Messages
-	events := appservices.NewEventPublisher()
+	events := appagent.NewEventPublisher()
 	usages := jsonl.ModelUsageStore{Store: store}
 	observe := func(event loop.Event) {
 		if event.Kind == loop.EventModelUsage && event.Usage != nil {
@@ -182,11 +178,11 @@ func Open(
 		return nil, fmt.Errorf("recover operation timings: %w", err)
 	}
 	timings, err := timing.New(timingStore, func(record timing.Record) {
-		value := desktopTiming(record)
-		events.Publish(appservices.AgentEvent{
+		value := apptiming.PublicTiming(record)
+		events.Publish(agentcontracts.AgentEvent{
 			Kind:    "operation_timing",
-			AgentID: contracts.AgentID(record.AgentID),
-			TaskID:  contracts.TaskID(record.TaskID),
+			AgentID: record.AgentID,
+			TaskID:  record.TaskID,
 			Timing:  &value,
 		})
 	}, diagnostics.Errorf)
@@ -224,7 +220,7 @@ func Open(
 		Messages:       messages,
 		UsageRecords:   usages.ListSession,
 		TextReader:     workspaceFilesystem,
-		RemoveSessionData: func(ctx context.Context, sessionID contracts.SessionID, documentRefs []string) error {
+		RemoveSessionData: func(ctx context.Context, sessionID identity.SessionID, documentRefs []string) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -269,7 +265,7 @@ func Open(
 	}
 	approvalRules := toolexecution.ApprovalRules{
 		Catalog: toolCatalog,
-		DefaultMode: func(txCtx context.Context, sessionID contracts.SessionID) (security.ApprovalMode, error) {
+		DefaultMode: func(txCtx context.Context, sessionID identity.SessionID) (security.ApprovalMode, error) {
 			session, err := repos.Sessions.Get(txCtx, sessionID)
 			if err != nil {
 				return "", err
@@ -287,7 +283,7 @@ func Open(
 			Messages: messages,
 			Hooks:    hookDispatcher,
 			ObserveUsage: func(record model.ModelUsageRecord) {
-				observe(loop.Event{Kind: loop.EventModelUsage, SessionID: contracts.SessionID(record.SessionID), AgentID: contracts.AgentID(record.AgentID), TaskID: contracts.TaskID(record.TaskID), TurnID: record.TurnID, Usage: &record.Usage})
+				observe(loop.Event{Kind: loop.EventModelUsage, SessionID: identity.SessionID(record.SessionID), AgentID: identity.AgentID(record.AgentID), TaskID: identity.TaskID(record.TaskID), TurnID: record.TurnID, Usage: &record.Usage})
 			},
 		}
 		toolExecutor, err := toolexecution.NewExecutor(toolexecution.Config{
@@ -399,13 +395,9 @@ func Open(
 	}
 
 	diagnostics.Infof("composition open completed ready=true")
-	frontend := appservices.New(appservices.Config{
-		Agents:      agentService,
-		Projects:    projectService,
-		Sessions:    sessionService,
-		Runtime:     runtimeService,
-		Models:      modelRegistry,
-		AgentConfig: agentRegistry,
+	modelService := applicationmodel.NewService(applicationmodel.Config{
+		Models: modelRegistry,
+		Agents: agentRegistry,
 		ReloadConfig: func(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -449,11 +441,23 @@ func Open(
 				return nil
 			})
 		},
-		Events:           events,
-		Logger:           diagnostics,
-		ListAgentTimings: timings.ListAgent,
-		ListSessionUsage: usages.ListSession,
+		Logger: diagnostics,
 	})
+	// 这些入口必须共享同一把配置锁；锁顺序保持为配置锁在外、存储事务在内。
+	configMu := &sync.RWMutex{}
+	agentApp := appagent.New(agentService, events)
+	modelApp := appmodel.New(modelService, configMu)
+	frontend := bindings.Services{
+		Projects:    appproject.New(projectService),
+		Sessions:    appsession.New(sessionService, configMu, store.SessionLogPath),
+		Agents:      agentApp,
+		Commands:    appruntime.New(runtimeService, configMu),
+		Models:      modelApp,
+		ModelConfig: modelApp,
+		Events:      agentApp,
+		Timings:     apptiming.New(timings.ListAgent),
+		Usages:      appusage.New(sessionService, usages.ListSession),
+	}
 	return &Application{
 		frontend:    frontend,
 		sessions:    sessionService,
@@ -506,7 +510,7 @@ type taskInputProvider struct {
 	models *modelregistry.Registry
 }
 
-func (r taskInputProvider) Definition(definitionID contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
+func (r taskInputProvider) Definition(definitionID identity.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
 	return r.agents.Definition(definitionID)
 }
 
@@ -514,7 +518,7 @@ func (r taskInputProvider) ResolveTaskModel(providerID, modelID, reasoningLevel 
 	return r.models.ResolveTaskModel(providerID, modelID, reasoningLevel)
 }
 
-func (r taskInputProvider) ResolveDefaultTaskModel(definitionID contracts.AgentDefinitionID) (model.Config, error) {
+func (r taskInputProvider) ResolveDefaultTaskModel(definitionID identity.AgentDefinitionID) (model.Config, error) {
 	reference, err := r.agents.ResolveModelReference(definitionID)
 	if err != nil {
 		return model.Config{}, err

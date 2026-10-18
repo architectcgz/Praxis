@@ -1,10 +1,10 @@
 package loop
 
 import (
-	"praxis/internal/contracts"
 	"praxis/internal/core/model"
 
 	"encoding/json"
+	"praxis/internal/core/identity"
 )
 
 // EventKind 标识可推送给观察者的瞬时 Loop 事件。
@@ -27,10 +27,10 @@ const (
 // 前端断线后应重新读取对应消息流和执行状态恢复视图。
 type Event struct {
 	Kind       EventKind             `json:"kind"`
-	SessionID  contracts.SessionID   `json:"sessionId,omitempty"`
-	AgentID    contracts.AgentID     `json:"agentId"`
-	TaskID     contracts.TaskID      `json:"taskId"`
-	TurnID     contracts.TurnID      `json:"turnId,omitempty"`
+	SessionID  identity.SessionID    `json:"sessionId,omitempty"`
+	AgentID    identity.AgentID      `json:"agentId"`
+	TaskID     identity.TaskID       `json:"taskId"`
+	TurnID     identity.TurnID       `json:"turnId,omitempty"`
 	StopReason model.ModelStopReason `json:"stopReason,omitempty"`
 	Text       string                `json:"text,omitempty"`
 	CallID     string                `json:"callId,omitempty"`

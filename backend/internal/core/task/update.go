@@ -1,7 +1,7 @@
 package task
 
 import (
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
 	"reflect"
 )
 
@@ -26,10 +26,10 @@ func canTransition(from, to TaskStatus) bool {
 // ValidateUpdate 检查不可变身份、冻结配置、生命周期与预算单调性，不递归校验对象。
 func ValidateUpdate(before, after Task) error {
 	if !canTransition(before.Status, after.Status) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	if before.Status == TaskEnded && !reflect.DeepEqual(before, after) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	left, right := before, after
 	left.Status, right.Status = "", ""
@@ -44,14 +44,14 @@ func ValidateUpdate(before, after Task) error {
 		left.ContextSelection, right.ContextSelection = ContextSelection{}, ContextSelection{}
 	}
 	if !reflect.DeepEqual(left, right) || !before.StartedAt.IsZero() && !before.StartedAt.Equal(after.StartedAt) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	p, n := before.Progress, after.Progress
 	if n.NextSequence < p.NextSequence || n.Iterations < p.Iterations || n.ModelRequests < p.ModelRequests || n.OutputBytes < p.OutputBytes || n.ToolCalls < p.ToolCalls {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	if p.FinalAssistantID != "" && (p.FinalAssistantID != n.FinalAssistantID || p.FinalStopReason != n.FinalStopReason) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	return nil
 }
@@ -64,7 +64,7 @@ type FinalOutput struct {
 
 func (e *Task) RecordFinalOutput(value FinalOutput) error {
 	if !e.Active() || e.Progress.FinalAssistantID != "" && (e.Progress.FinalAssistantID != value.AssistantID || e.Progress.FinalStopReason != value.StopReason) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	e.Progress.FinalAssistantID, e.Progress.FinalStopReason = value.AssistantID, value.StopReason
 	return nil

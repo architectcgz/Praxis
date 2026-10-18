@@ -5,8 +5,10 @@ import (
 	"context"
 	"time"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	taskmodel "praxis/internal/core/task"
+	coretool "praxis/internal/core/tool"
 	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 )
@@ -14,7 +16,7 @@ import (
 const settlementTimeout = 5 * time.Second
 
 // reserveCall 对一次调用只扣减一次额度，审批、拒绝和重启都复用同一保留记录。
-func (s *Executor) reserveCall(ctx context.Context, id contracts.ToolExecutionID) (toolmodel.Execution, error) {
+func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID) (toolmodel.Execution, error) {
 	var invocation toolmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error
@@ -30,7 +32,7 @@ func (s *Executor) reserveCall(ctx context.Context, id contracts.ToolExecutionID
 			return err
 		}
 		if task.Progress.ToolCalls >= taskmodel.MaxToolCalls {
-			return contracts.New(contracts.TaskResourceLimit, "tool call limit exceeded")
+			return fault.New(taskmodel.TaskResourceLimit, "tool call limit exceeded")
 		}
 		task.Progress.ToolCalls++
 		invocation.BudgetReserved = true
@@ -44,7 +46,7 @@ func (s *Executor) reserveCall(ctx context.Context, id contracts.ToolExecutionID
 
 // start 在同一事务中重新读取配置、核对审批参数并保存 running。
 // 配置重载与这里共享事务边界；已启动的进程不受后续配置变更影响。
-func (s *Executor) start(ctx context.Context, id contracts.ToolExecutionID) (toolmodel.Execution, bool, error) {
+func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (toolmodel.Execution, bool, error) {
 	var invocation toolmodel.Execution
 	execute := false
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -60,7 +62,7 @@ func (s *Executor) start(ctx context.Context, id contracts.ToolExecutionID) (too
 		if err != nil {
 			return err
 		}
-		if err := s.checkTask(txCtx, contracts.ToolExecutionMetadata{
+		if err := s.checkTask(txCtx, toolmodel.ToolExecutionMetadata{
 			TaskID:        current.TaskID,
 			TurnID:        current.TurnID,
 			SessionID:     current.SessionID,
@@ -85,9 +87,9 @@ func (s *Executor) start(ctx context.Context, id contracts.ToolExecutionID) (too
 			return nil
 		}
 		if current.Approval.ArgumentsDigest != toolmodel.ArgumentsDigest(current.Name, current.NormalizedArguments) {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
-		if current.Name == contracts.ToolBash || current.Name == contracts.ToolApplyPatch {
+		if current.Name == coretool.ToolBash || current.Name == coretool.ToolApplyPatch {
 			prior, err := s.executions.ListByTask(txCtx, task.ID)
 			if err != nil {
 				return err
@@ -118,7 +120,7 @@ func (s *Executor) start(ctx context.Context, id contracts.ToolExecutionID) (too
 }
 
 // reject 结算执行前的拒绝；已经批准的调用使用 interrupted，不改写运行中调用。
-func (s *Executor) reject(ctx context.Context, id contracts.ToolExecutionID, code toolmodel.FailureCode, message string) (toolcontracts.ToolResult, error) {
+func (s *Executor) reject(ctx context.Context, id identity.ToolExecutionID, code toolmodel.FailureCode, message string) (toolcontracts.ToolResult, error) {
 	var invocation toolmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		current, err := s.executions.Get(txCtx, id)
@@ -130,7 +132,7 @@ func (s *Executor) reject(ctx context.Context, id contracts.ToolExecutionID, cod
 			return nil
 		}
 		if current.Status == toolmodel.StatusRunning {
-			return contracts.New(contracts.TaskBusy, "tool call is already running")
+			return fault.New(taskmodel.TaskBusy, "tool call is already running")
 		}
 		if current.Status == toolmodel.StatusApproved {
 			code = toolmodel.FailureInterrupted
@@ -157,7 +159,7 @@ func (s *Executor) reject(ctx context.Context, id contracts.ToolExecutionID, cod
 
 func (s *Executor) succeed(
 	ctx context.Context,
-	id contracts.ToolExecutionID,
+	id identity.ToolExecutionID,
 	result toolcontracts.ToolResult,
 ) error {
 	domainResult := toolmodel.Result{
@@ -170,7 +172,7 @@ func (s *Executor) succeed(
 
 func (s *Executor) fail(
 	ctx context.Context,
-	id contracts.ToolExecutionID,
+	id identity.ToolExecutionID,
 	result toolcontracts.ToolResult,
 ) error {
 	domainResult := toolmodel.Result{
@@ -183,7 +185,7 @@ func (s *Executor) fail(
 
 func (s *Executor) interrupt(
 	ctx context.Context,
-	id contracts.ToolExecutionID,
+	id identity.ToolExecutionID,
 	result toolcontracts.ToolResult,
 ) error {
 	domainResult := toolmodel.Result{
@@ -196,7 +198,7 @@ func (s *Executor) interrupt(
 
 func (s *Executor) settle(
 	ctx context.Context,
-	id contracts.ToolExecutionID,
+	id identity.ToolExecutionID,
 	transition func(*toolmodel.Execution) error,
 ) error {
 	settlementContext := ctx

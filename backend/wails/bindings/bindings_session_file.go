@@ -1,7 +1,6 @@
 package bindings
 
 import (
-	"praxis/internal/contracts"
 	"praxis/wails/validation"
 )
 
@@ -14,7 +13,7 @@ func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	path, err := services.SessionLogPath(ctx, contracts.SessionID(sessionID))
+	path, err := services.Sessions.SessionLogPath(ctx, sessionID)
 	if err != nil {
 		return publicError(b.runtime, "SessionBindings.RevealSessionFile", err)
 	}

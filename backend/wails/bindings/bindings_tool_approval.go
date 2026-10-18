@@ -1,7 +1,6 @@
 package bindings
 
 import (
-	"praxis/internal/contracts"
 	"praxis/internal/request"
 	"praxis/wails/dto"
 )
@@ -11,7 +10,7 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 	if err != nil {
 		return nil, err
 	}
-	values, err := services.Commands.ListToolApprovals(ctx, contracts.AgentID(agentID))
+	values, err := services.Commands.ListToolApprovals(ctx, agentID)
 	if err != nil {
 		return nil, publicError(b.runtime, "CommandBindings.ListToolApprovals", err)
 	}
@@ -48,9 +47,9 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 		return err
 	}
 	canonical, err := request.NewToolDecision(request.ToolDecision{
-		SessionID:       contracts.SessionID(wire.SessionID),
-		AgentID:         contracts.AgentID(wire.AgentID),
-		TaskID:          contracts.TaskID(wire.TaskID),
+		SessionID:       wire.SessionID,
+		AgentID:         wire.AgentID,
+		TaskID:          wire.TaskID,
 		CallID:          wire.CallID,
 		ArgumentsDigest: wire.ArgumentsDigest,
 	})

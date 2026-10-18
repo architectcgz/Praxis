@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -56,7 +57,7 @@ type ContextRepository struct{ s *Store }
 type ToolExecutionRepository struct{ s *Store }
 type ControlRepository struct{ s *Store }
 
-func (r ProjectRepository) Get(ctx context.Context, id contracts.ProjectID) (projectmodel.Project, error) {
+func (r ProjectRepository) Get(ctx context.Context, id identity.ProjectID) (projectmodel.Project, error) {
 	return get[projectmodel.Project](ctx, r.s, "project", id.String())
 }
 
@@ -73,8 +74,8 @@ func (r ProjectRepository) List(ctx context.Context, limit int) ([]projectmodel.
 	}), limit), e
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r WorkspaceRepository) Get(ctx context.Context, id contracts.WorkspaceID) (workspacemodel.Workspace, error) {
+// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+func (r WorkspaceRepository) Get(ctx context.Context, id identity.WorkspaceID) (workspacemodel.Workspace, error) {
 	return get[workspacemodel.Workspace](ctx, r.s, "workspace", id.String())
 }
 
@@ -84,13 +85,13 @@ func (r WorkspaceRepository) Save(ctx context.Context, v workspacemodel.Workspac
 }
 
 // ListByProject 返回指定 Project 的对象副本，limit 为 0 时不限制。
-func (r WorkspaceRepository) ListByProject(ctx context.Context, id contracts.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
+func (r WorkspaceRepository) ListByProject(ctx context.Context, id identity.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
 	v, e := listIndexed[workspacemodel.Workspace](ctx, r.s, lookupKey{kind: "workspaces-project", owner: id.String()}, nil)
 	return capped(sorted(v, func(a, b workspacemodel.Workspace) int { return cmp.Compare(a.ID, b.ID) }), limit), e
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r SessionRepository) Get(ctx context.Context, id contracts.SessionID) (sessionmodel.Session, error) {
+// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sessionmodel.Session, error) {
 	return get[sessionmodel.Session](ctx, r.s, "session", id.String())
 }
 
@@ -105,7 +106,7 @@ func (r SessionRepository) List(ctx context.Context, limit int) ([]sessionmodel.
 }
 
 // ListByProject 返回指定 Project 的对象副本，limit 为 0 时不限制。
-func (r SessionRepository) ListByProject(ctx context.Context, id contracts.ProjectID, limit int) ([]sessionmodel.Session, error) {
+func (r SessionRepository) ListByProject(ctx context.Context, id identity.ProjectID, limit int) ([]sessionmodel.Session, error) {
 	return r.find(ctx, id, "", limit)
 }
 
@@ -113,7 +114,7 @@ func (r SessionRepository) ListByProject(ctx context.Context, id contracts.Proje
 func (r SessionRepository) SearchTitle(ctx context.Context, title string, limit int) ([]sessionmodel.Session, error) {
 	return r.find(ctx, "", title, limit)
 }
-func (r SessionRepository) find(ctx context.Context, project contracts.ProjectID, title string, limit int) ([]sessionmodel.Session, error) {
+func (r SessionRepository) find(ctx context.Context, project identity.ProjectID, title string, limit int) ([]sessionmodel.Session, error) {
 	group := collectionKey("session")
 	if project != "" {
 		group = lookupKey{kind: "sessions-project", owner: project.String()}
@@ -127,7 +128,7 @@ func (r SessionRepository) find(ctx context.Context, project contracts.ProjectID
 }
 
 // HasMessages 读取消息存在性元数据，不加载消息正文或位置列表。
-func (r SessionRepository) HasMessages(ctx context.Context, id contracts.SessionID) (bool, error) {
+func (r SessionRepository) HasMessages(ctx context.Context, id identity.SessionID) (bool, error) {
 	found := false
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		if _, err := r.Get(readCtx, id); err != nil {
@@ -146,7 +147,7 @@ func (r SessionRepository) HasMessages(ctx context.Context, id contracts.Session
 }
 
 // Rename 更新规范化的非空标题，归属和创建时间保持不变。
-func (r SessionRepository) Rename(ctx context.Context, id contracts.SessionID, title string, at time.Time) error {
+func (r SessionRepository) Rename(ctx context.Context, id identity.SessionID, title string, at time.Time) error {
 	v, e := r.Get(ctx, id)
 	if e != nil {
 		return e
@@ -157,7 +158,7 @@ func (r SessionRepository) Rename(ctx context.Context, id contracts.SessionID, t
 }
 
 // Delete 追加删除标记并清理所属 Session 的查询索引；仍有活动 Task 时拒绝删除。
-func (r SessionRepository) Delete(ctx context.Context, id contracts.SessionID) ([]string, error) {
+func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) ([]string, error) {
 	if _, e := r.Get(ctx, id); e != nil {
 		return nil, e
 	}
@@ -166,13 +167,13 @@ func (r SessionRepository) Delete(ctx context.Context, id contracts.SessionID) (
 		return nil, e
 	}
 	if n > 0 {
-		return nil, contracts.ErrAgentExecuting
+		return nil, agentmodel.ErrAgentExecuting
 	}
 	return nil, r.s.change(ctx, id.String(), "session", id.String(), "session.deleted", nil, nil)
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r AgentRepository) Get(ctx context.Context, id contracts.AgentID) (agentmodel.Agent, error) {
+// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+func (r AgentRepository) Get(ctx context.Context, id identity.AgentID) (agentmodel.Agent, error) {
 	return get[agentmodel.Agent](ctx, r.s, "agent", id.String())
 }
 
@@ -182,26 +183,26 @@ func (r AgentRepository) Save(ctx context.Context, v agentmodel.Agent) error {
 }
 
 // ListBySession 返回指定 Session 的对象副本。
-func (r AgentRepository) ListBySession(ctx context.Context, id contracts.SessionID, limit int) ([]agentmodel.Agent, error) {
+func (r AgentRepository) ListBySession(ctx context.Context, id identity.SessionID, limit int) ([]agentmodel.Agent, error) {
 	v, e := listIndexed[agentmodel.Agent](ctx, r.s, lookupKey{kind: "agents-session", owner: id.String()}, nil)
 	return capped(sorted(v, func(a, b agentmodel.Agent) int { return cmp.Compare(a.ID, b.ID) }), limit), e
 }
 
-// GetBySessionAndDefinition 按 Session 与 Agent 定义查找，未找到时返回 contracts.ErrNotFound。
-func (r AgentRepository) GetBySessionAndDefinition(ctx context.Context, id contracts.SessionID, definition contracts.AgentDefinitionID) (agentmodel.Agent, error) {
+// GetBySessionAndDefinition 按 Session 与 Agent 定义查找，未找到时返回 fault.ErrNotFound。
+func (r AgentRepository) GetBySessionAndDefinition(ctx context.Context, id identity.SessionID, definition identity.AgentDefinitionID) (agentmodel.Agent, error) {
 	v, e := listIndexed[agentmodel.Agent](ctx, r.s, lookupKey{kind: "agents-definition", owner: id.String(), value: definition.String()}, nil)
 	if e != nil {
 		return agentmodel.Agent{}, e
 	}
 	if len(v) == 0 {
-		return agentmodel.Agent{}, contracts.ErrNotFound
+		return agentmodel.Agent{}, fault.ErrNotFound
 	}
 	sorted(v, func(a, b agentmodel.Agent) int { return cmp.Compare(a.ID, b.ID) })
 	return v[0], nil
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r TaskRepository) Get(ctx context.Context, id contracts.TaskID) (taskmodel.Task, error) {
+// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+func (r TaskRepository) Get(ctx context.Context, id identity.TaskID) (taskmodel.Task, error) {
 	return get[taskmodel.Task](ctx, r.s, "task", id.String())
 }
 
@@ -210,13 +211,13 @@ func (r TaskRepository) Save(ctx context.Context, v taskmodel.Task) error {
 	return save(ctx, r.s, v.SessionID.String(), "task", v.ID.String(), "task.saved", v)
 }
 
-// FindByRequest 按 Agent 与请求身份查找，未找到时返回 contracts.ErrNotFound。
-func (r TaskRepository) FindByRequest(ctx context.Context, id contracts.AgentID, request contracts.RequestID) (taskmodel.Task, error) {
+// FindByRequest 按 Agent 与请求身份查找，未找到时返回 fault.ErrNotFound。
+func (r TaskRepository) FindByRequest(ctx context.Context, id identity.AgentID, request identity.RequestID) (taskmodel.Task, error) {
 	return getByClaim[taskmodel.Task](ctx, r.s, lookupKey{kind: "task-request", owner: id.String(), value: request.String()})
 }
 
 // GetActiveByAgent 通过唯一索引读取 Agent 的活动 Task。
-func (r TaskRepository) GetActiveByAgent(ctx context.Context, id contracts.AgentID) (taskmodel.Task, error) {
+func (r TaskRepository) GetActiveByAgent(ctx context.Context, id identity.AgentID) (taskmodel.Task, error) {
 	return getByClaim[taskmodel.Task](ctx, r.s, lookupKey{kind: "active-agent", owner: id.String()})
 }
 
@@ -229,7 +230,7 @@ func (r TaskRepository) ListActive(ctx context.Context) ([]taskmodel.Task, error
 }
 
 // ListByAgent 返回指定 Agent 的对象副本；非正数 limit 返回全部任务。
-func (r TaskRepository) ListByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]taskmodel.Task, error) {
+func (r TaskRepository) ListByAgent(ctx context.Context, id identity.AgentID, limit int) ([]taskmodel.Task, error) {
 	v, e := listIndexed[taskmodel.Task](ctx, r.s, lookupKey{kind: "tasks-agent", owner: id.String()}, nil)
 	sorted(v, func(a, b taskmodel.Task) int {
 		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), cmp.Compare(b.ID, a.ID))
@@ -241,7 +242,7 @@ func (r TaskRepository) ListByAgent(ctx context.Context, id contracts.AgentID, l
 }
 
 // CountActiveBySession 返回 Session 内活动 Task 的数量。
-func (r TaskRepository) CountActiveBySession(ctx context.Context, id contracts.SessionID) (int, error) {
+func (r TaskRepository) CountActiveBySession(ctx context.Context, id identity.SessionID) (int, error) {
 	count := 0
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		count = len(r.s.keys(readCtx, lookupKey{kind: "active-session", owner: id.String()}))
@@ -263,16 +264,16 @@ func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SessionCon
 }
 
 // GetByID 读取指定记录，第二个返回值表示是否存在。
-func (r ContextRepository) GetByID(ctx context.Context, id contracts.ContextEntryID) (sessionmodel.SessionContextEntry, bool, error) {
+func (r ContextRepository) GetByID(ctx context.Context, id identity.ContextEntryID) (sessionmodel.SessionContextEntry, bool, error) {
 	v, e := get[sessionmodel.SessionContextEntry](ctx, r.s, "context", id.String())
-	if errors.Is(e, contracts.ErrNotFound) {
+	if errors.Is(e, fault.ErrNotFound) {
 		return v, false, nil
 	}
 	return v, e == nil, e
 }
 
 // List 返回查询结果的独立副本，limit 为 0 时不限制。
-func (r ContextRepository) List(ctx context.Context, id contracts.SessionID, after string, limit int) ([]sessionmodel.SessionContextEntry, error) {
+func (r ContextRepository) List(ctx context.Context, id identity.SessionID, after string, limit int) ([]sessionmodel.SessionContextEntry, error) {
 	v, e := listIndexed[sessionmodel.SessionContextEntry](ctx, r.s, lookupKey{kind: "contexts-session", owner: id.String()}, nil)
 	sorted(v, func(a, b sessionmodel.SessionContextEntry) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
@@ -293,8 +294,8 @@ func (r ContextRepository) List(ctx context.Context, id contracts.SessionID, aft
 	return capped(v, limit), e
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r ToolExecutionRepository) Get(ctx context.Context, id contracts.ToolExecutionID) (toolmodel.Execution, error) {
+// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+func (r ToolExecutionRepository) Get(ctx context.Context, id identity.ToolExecutionID) (toolmodel.Execution, error) {
 	return get[toolmodel.Execution](ctx, r.s, "tool", id.String())
 }
 
@@ -304,12 +305,12 @@ func (r ToolExecutionRepository) Save(ctx context.Context, v toolmodel.Execution
 }
 
 // FindByTaskCall 按 Task 和 Provider 调用身份查询，第二个返回值表示是否存在。
-func (r ToolExecutionRepository) FindByTaskCall(ctx context.Context, id contracts.TaskID, call string) (toolmodel.Execution, error) {
+func (r ToolExecutionRepository) FindByTaskCall(ctx context.Context, id identity.TaskID, call string) (toolmodel.Execution, error) {
 	return getByClaim[toolmodel.Execution](ctx, r.s, lookupKey{kind: "tool-call", owner: id.String(), value: call})
 }
 
 // ListUnsettledBySession 返回指定 Session 尚未结算的工具调用，供恢复使用。
-func (r ToolExecutionRepository) ListUnsettledBySession(ctx context.Context, id contracts.SessionID) ([]toolmodel.Execution, error) {
+func (r ToolExecutionRepository) ListUnsettledBySession(ctx context.Context, id identity.SessionID) ([]toolmodel.Execution, error) {
 	v, e := listIndexed[toolmodel.Execution](ctx, r.s, lookupKey{kind: "unsettled-session", owner: id.String()}, nil)
 	return sorted(v, func(a, b toolmodel.Execution) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
@@ -317,7 +318,7 @@ func (r ToolExecutionRepository) ListUnsettledBySession(ctx context.Context, id 
 }
 
 // NextSequence 返回指定 Agent 的下一队列序号，必须在入队事务中调用。
-func (r TaskRepository) NextSequence(ctx context.Context, id contracts.AgentID) (uint64, error) {
+func (r TaskRepository) NextSequence(ctx context.Context, id identity.AgentID) (uint64, error) {
 	var sequence uint64
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		sequence = r.s.index.maxQueue[id.String()]
@@ -333,13 +334,13 @@ func (r TaskRepository) NextSequence(ctx context.Context, id contracts.AgentID) 
 	}
 	if sequence == math.MaxUint64 {
 		// 拒绝回绕为零，避免后续任务破坏队列的单调顺序。
-		return 0, contracts.InvalidValue("task.sequence", "task sequence is exhausted")
+		return 0, fault.InvalidValue("task.sequence", "task sequence is exhausted")
 	}
 	return sequence + 1, nil
 }
 
 // FindNextPendingByAgent 仅访问该 Agent 的 Pending 索引，返回 FIFO 队首。
-func (r TaskRepository) FindNextPendingByAgent(ctx context.Context, id contracts.AgentID) (taskmodel.Task, error) {
+func (r TaskRepository) FindNextPendingByAgent(ctx context.Context, id identity.AgentID) (taskmodel.Task, error) {
 	var result taskmodel.Task
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		var next entityKey
@@ -351,17 +352,17 @@ func (r TaskRepository) FindNextPendingByAgent(ctx context.Context, id contracts
 			}
 		}
 		if next.id == "" {
-			return contracts.ErrNotFound
+			return fault.ErrNotFound
 		}
 		var err error
-		result, err = r.Get(readCtx, contracts.TaskID(next.id))
+		result, err = r.Get(readCtx, identity.TaskID(next.id))
 		return err
 	})
 	return result, err
 }
 
-// Get 读取指定对象，不存在时返回 contracts.ErrNotFound。
-func (r ControlRepository) Get(ctx context.Context, id contracts.AgentControlCommandID) (agentmodel.AgentControlCommand, error) {
+// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+func (r ControlRepository) Get(ctx context.Context, id identity.AgentControlCommandID) (agentmodel.AgentControlCommand, error) {
 	return get[agentmodel.AgentControlCommand](ctx, r.s, "control", id.String())
 }
 
@@ -375,7 +376,7 @@ func (r ControlRepository) Save(ctx context.Context, v agentmodel.AgentControlCo
 }
 
 // ListOpenByAgent 返回 Agent 尚未应用的控制命令。
-func (r ControlRepository) ListOpenByAgent(ctx context.Context, id contracts.AgentID, limit int) ([]agentmodel.AgentControlCommand, error) {
+func (r ControlRepository) ListOpenByAgent(ctx context.Context, id identity.AgentID, limit int) ([]agentmodel.AgentControlCommand, error) {
 	v, e := listIndexed[agentmodel.AgentControlCommand](ctx, r.s, lookupKey{kind: "controls-agent", owner: id.String()}, nil)
 	return capped(sorted(v, func(a, b agentmodel.AgentControlCommand) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
@@ -394,10 +395,10 @@ var (
 	_ repository.AgentControlCommandRepository = ControlRepository{}
 )
 
-func (r ToolExecutionRepository) ListByTask(ctx context.Context, id contracts.TaskID) ([]toolmodel.Execution, error) {
+func (r ToolExecutionRepository) ListByTask(ctx context.Context, id identity.TaskID) ([]toolmodel.Execution, error) {
 	return listIndexed[toolmodel.Execution](ctx, r.s, lookupKey{kind: "tools-task", owner: id.String()}, nil)
 }
-func (r ToolExecutionRepository) ListAwaitingByAgent(ctx context.Context, id contracts.AgentID) ([]toolmodel.Execution, error) {
+func (r ToolExecutionRepository) ListAwaitingByAgent(ctx context.Context, id identity.AgentID) ([]toolmodel.Execution, error) {
 	values, err := listIndexed[toolmodel.Execution](ctx, r.s, lookupKey{kind: "awaiting-agent", owner: id.String()}, nil)
 	return sorted(values, func(a, b toolmodel.Execution) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))

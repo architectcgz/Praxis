@@ -1,7 +1,6 @@
 package task
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	taskmodel "praxis/internal/core/task"
 
@@ -9,6 +8,8 @@ import (
 	"errors"
 	"time"
 
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/hooks"
 )
 
@@ -20,25 +21,25 @@ const (
 // TerminalEvent 是事务提交后发布的最小终态事实。
 type TerminalEvent struct {
 	Kind           string
-	SessionID      contracts.SessionID
-	AgentID        contracts.AgentID
-	TaskID         contracts.TaskID
+	SessionID      identity.SessionID
+	AgentID        identity.AgentID
+	TaskID         identity.TaskID
 	Outcome        string
-	FailureCode    contracts.TaskFailureCode
+	FailureCode    taskmodel.TaskFailureCode
 	FailureMessage string
 }
 
 type settleParams struct {
-	TaskID         contracts.TaskID
+	TaskID         identity.TaskID
 	Outcome        taskmodel.TaskOutcome
-	FailureCode    contracts.TaskFailureCode
+	FailureCode    taskmodel.TaskFailureCode
 	FailureMessage string
 }
 
 // ConfirmRunning 将指定执行推进到 Running；重复确认不会改变开始时间。
 // 已结束的执行不能重新启动，用户消息正文保留用于重复请求校验。
 // taskID 来自 runtime 准入时已校验的持久化 Task。
-func (s *Service) ConfirmRunning(ctx context.Context, taskID contracts.TaskID) error {
+func (s *Service) ConfirmRunning(ctx context.Context, taskID identity.TaskID) error {
 	if ctx == nil {
 		return errors.New("task start context is required")
 	}
@@ -51,7 +52,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, taskID contracts.TaskID) e
 			return nil
 		}
 		if task.Status != taskmodel.TaskStarting {
-			return contracts.New(contracts.AgentUnavailable, "")
+			return fault.New(agentmodel.UnavailableCode, "")
 		}
 		if err := task.MarkRunning(s.clock.Now()); err != nil {
 			return err
@@ -63,7 +64,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, taskID contracts.TaskID) e
 // Settle 接收 runtime 的执行结果，原子更新 Task、Agent 和控制命令。
 // 返回控制命令仲裁后的持久化回合；重复结束返回已有终态，不再次发布事件。
 // OperationHook 在事务外观察结算前后；回滚时只返回 Err，不把待提交 Outcome 当作最终结果。
-func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome taskmodel.TaskOutcome, failureCode contracts.TaskFailureCode, failureMessage string) (result taskmodel.Task, err error) {
+func (s *Service) Settle(ctx context.Context, taskID identity.TaskID, outcome taskmodel.TaskOutcome, failureCode taskmodel.TaskFailureCode, failureMessage string) (result taskmodel.Task, err error) {
 	params := settleParams{
 		TaskID:         taskID,
 		Outcome:        outcome,
@@ -74,7 +75,7 @@ func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome t
 		return taskmodel.Task{}, errors.New("task end context is required")
 	}
 	if !taskmodel.ValidTaskOutcome(params.Outcome) {
-		return taskmodel.Task{}, contracts.New(contracts.InvalidRequest, "")
+		return taskmodel.Task{}, fault.New(fault.InvalidRequest, "")
 	}
 	// 只预读不可变归属，Hook 不能在持有仓储事务锁时启动；状态与控制命令仍在事务内重新仲裁。
 	observedTask, err := s.tasks.Get(ctx, params.TaskID)
@@ -112,13 +113,13 @@ func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome t
 			if control.TargetTaskID != task.ID {
 				continue
 			}
-			if params.FailureCode != contracts.TaskFailureRequestCanceled {
+			if params.FailureCode != taskmodel.TaskFailureRequestCanceled {
 				params.Outcome = taskmodel.TaskPaused
 			}
 			if control.Kind == agentmodel.AgentControlCancel {
 				params.Outcome = taskmodel.TaskInterrupted
 			}
-			params.FailureCode = contracts.TaskFailureRequestCanceled
+			params.FailureCode = taskmodel.TaskFailureRequestCanceled
 			params.FailureMessage = ""
 		}
 		at := s.clock.Now()
@@ -143,7 +144,7 @@ func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome t
 			return err
 		}
 		if agent.CurrentTaskID != task.ID {
-			return contracts.New(contracts.AgentUnavailable, "")
+			return fault.New(agentmodel.UnavailableCode, "")
 		}
 		if err := agent.EndTask(params.Outcome, at); err != nil {
 			return err
@@ -212,7 +213,7 @@ func (s *Service) Settle(ctx context.Context, taskID contracts.TaskID, outcome t
 	// 每轮仅发布一个终态事件；取消原因来自持久化控制命令，不由 outcome 推断。
 	if s.eventObserver != nil {
 		kind := TerminalTaskEnded
-		if endedTask.FailureCode == contracts.TaskFailureRequestCanceled {
+		if endedTask.FailureCode == taskmodel.TaskFailureRequestCanceled {
 			kind = TerminalRequestCanceled
 		}
 		s.eventObserver(TerminalEvent{

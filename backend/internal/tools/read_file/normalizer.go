@@ -1,10 +1,10 @@
 package readfile
 
 import (
-	"praxis/internal/contracts"
 	toolmodel "praxis/internal/core/tool_execution"
 	"unicode/utf8"
 
+	coretool "praxis/internal/core/tool"
 	toolcontracts "praxis/internal/tools/contracts"
 	toolshared "praxis/internal/tools/shared"
 )
@@ -23,8 +23,8 @@ type arguments struct {
 
 // Normalize 校验 read_file 参数并提取待授权的资源路径。
 func Normalize(
-	call contracts.ToolCall,
+	call coretool.ToolCall,
 	workspacePath string,
 ) (toolcontracts.NormalizedToolCall, error) {
-	return toolshared.NormalizePathArguments(call, workspacePath, toolcontracts.ToolReadFile, defaultLimit, minLimit, maxLimit)
+	return toolshared.NormalizePathArguments(call, workspacePath, coretool.ToolReadFile, defaultLimit, minLimit, maxLimit)
 }

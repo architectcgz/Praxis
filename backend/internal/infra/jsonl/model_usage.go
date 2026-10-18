@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/model"
 )
 
@@ -17,7 +18,7 @@ func (r ModelUsageStore) Save(ctx context.Context, value model.ModelUsageRecord)
 		previous, err := get[model.ModelUsageRecord](ctx, r.Store, "usage", value.Key())
 		if err == nil {
 			if previous.SessionID != value.SessionID || previous.AgentID != value.AgentID || previous.Usage.InputTokens > value.Usage.InputTokens {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			for _, counts := range [][2]*int64{
 				{previous.Usage.OutputTokens, value.Usage.OutputTokens},
@@ -25,10 +26,10 @@ func (r ModelUsageStore) Save(ctx context.Context, value model.ModelUsageRecord)
 				{previous.Usage.CacheCreationInputTokens, value.Usage.CacheCreationInputTokens},
 			} {
 				if counts[0] != nil && (counts[1] == nil || *counts[1] < *counts[0]) {
-					return contracts.ErrRequestConflict
+					return fault.ErrRequestConflict
 				}
 			}
-		} else if !errors.Is(err, contracts.ErrNotFound) {
+		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		return save(ctx, r.Store, value.SessionID, "usage", value.Key(), "usage.saved", value)
@@ -37,7 +38,7 @@ func (r ModelUsageStore) Save(ctx context.Context, value model.ModelUsageRecord)
 
 // ListSession 返回整个会话所有 Agent 的请求用量，不受消息历史分页限制。
 func (r ModelUsageStore) ListSession(ctx context.Context, sessionID string) ([]model.ModelUsageRecord, error) {
-	if _, err := (SessionRepository{r.Store}).Get(ctx, contracts.SessionID(sessionID)); err != nil {
+	if _, err := (SessionRepository{r.Store}).Get(ctx, identity.SessionID(sessionID)); err != nil {
 		return nil, err
 	}
 	return listIndexed[model.ModelUsageRecord](ctx, r.Store, lookupKey{kind: "usage-session", owner: sessionID}, nil)

@@ -1,7 +1,7 @@
 package project
 
 import (
-	"praxis/internal/contracts"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/security"
 	"time"
 )
@@ -17,10 +17,10 @@ const (
 // Project 保存用户项目的持久化身份和目录记录。
 // Workspace 和 Session 通过标识符关联，各自保持为独立聚合。
 type Project struct {
-	ID                 contracts.ProjectID
+	ID                 identity.ProjectID
 	Name               string
 	Path               string
-	DefaultWorkspaceID contracts.WorkspaceID
+	DefaultWorkspaceID identity.WorkspaceID
 	State              ProjectState
 	ApprovalMode       *security.ApprovalMode `json:",omitempty"`
 	CreatedAt          time.Time
@@ -29,10 +29,10 @@ type Project struct {
 
 // NewProject 使用入口已校验的身份、名称和路径创建项目，初始状态为 active。
 func NewProject(
-	id contracts.ProjectID,
+	id identity.ProjectID,
 	name string,
 	path string,
-	defaultWorkspaceID contracts.WorkspaceID,
+	defaultWorkspaceID identity.WorkspaceID,
 	at time.Time,
 ) Project {
 	return Project{

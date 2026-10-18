@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/security"
+	coretool "praxis/internal/core/tool"
 	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
 // ApprovalCatalog 提供当前工具可用性及命令匹配，不授予整个工具的永久执行权限。
 type ApprovalCatalog interface {
-	Get(contracts.ToolName) (toolcontracts.Tool, bool)
+	Get(coretool.ToolName) (toolcontracts.Tool, bool)
 	DecideCommand(string) security.ApprovalDecision
 }
 
@@ -21,7 +22,7 @@ type ApprovalCatalog interface {
 // Decide 必须在与配置重载及项目设置相同的事务锁内调用。
 type ApprovalRules struct {
 	Catalog     ApprovalCatalog
-	DefaultMode func(context.Context, contracts.SessionID) (security.ApprovalMode, error)
+	DefaultMode func(context.Context, identity.SessionID) (security.ApprovalMode, error)
 }
 
 // Decide 优先拒绝禁用工具和 deny 命令，其他操作没有隐含的 allow 豁免。
@@ -30,7 +31,7 @@ func (r ApprovalRules) Decide(ctx context.Context, invocation toolmodel.Executio
 		return security.ApprovalDecision{Action: security.ApprovalDeny, RuleID: "tool-disabled"}, nil
 	}
 	var matched security.ApprovalDecision
-	if invocation.Name == contracts.ToolBash {
+	if invocation.Name == coretool.ToolBash {
 		var arguments struct {
 			Command string `json:"command"`
 		}

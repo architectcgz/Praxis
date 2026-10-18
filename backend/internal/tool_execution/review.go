@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_execution"
@@ -13,9 +14,9 @@ import (
 const riskReviewTimeout = time.Minute
 
 // review 仅编排审核身份、外部模型调用和结果提交；所有状态决策由 Core 完成。
-func (s *Executor) review(ctx context.Context, id contracts.ToolExecutionID) (toolmodel.Execution, error) {
+func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (toolmodel.Execution, error) {
 	if _, loaded := s.reviewInFlight.LoadOrStore(id, struct{}{}); loaded {
-		return toolmodel.Execution{}, contracts.New(contracts.TaskBusy, "this operation is already being reviewed")
+		return toolmodel.Execution{}, fault.New(taskmodel.TaskBusy, "this operation is already being reviewed")
 	}
 	defer s.reviewInFlight.Delete(id)
 	var invocation toolmodel.Execution
@@ -32,7 +33,7 @@ func (s *Executor) review(ctx context.Context, id contracts.ToolExecutionID) (to
 			return err
 		}
 		if !task.Active() {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 		decision, err := s.rules.Decide(txCtx, invocation)
 		if err != nil {
@@ -54,7 +55,7 @@ func (s *Executor) review(ctx context.Context, id contracts.ToolExecutionID) (to
 		task.Progress.NextSequence = sequence + 1
 		task.Progress.ModelRequests++
 		attempt = toolmodel.RiskReview{
-			TurnID:          contracts.NewTurnID(task.ID, sequence),
+			TurnID:          taskmodel.NewTurnID(task.ID, sequence),
 			ArgumentsDigest: toolmodel.ArgumentsDigest(invocation.Name, invocation.NormalizedArguments),
 			ProviderID:      task.Config.Model.ProviderID,
 			ModelID:         task.Config.Model.ModelID,
@@ -94,7 +95,7 @@ func (s *Executor) review(ctx context.Context, id contracts.ToolExecutionID) (to
 			return err
 		}
 		if !currentTask.Active() {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 		decision, err := s.rules.Decide(txCtx, current)
 		if err != nil {

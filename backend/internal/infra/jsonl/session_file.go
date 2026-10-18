@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"os"
-
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 )
 
 // SessionLogPath 返回现存会话的 JSONL 绝对路径；非法 ID、已删除会话和缺失文件均返回错误。
-func (s *Store) SessionLogPath(ctx context.Context, sessionID contracts.SessionID) (string, error) {
+func (s *Store) SessionLogPath(ctx context.Context, sessionID identity.SessionID) (string, error) {
 	if !validScope(sessionID.String()) {
-		return "", contracts.InvalidValue("sessionId", "session ID is not a valid file name")
+		return "", fault.InvalidValue("sessionId", "session ID is not a valid file name")
 	}
 	if _, err := (SessionRepository{s}).Get(ctx, sessionID); err != nil {
 		return "", err
@@ -22,7 +22,7 @@ func (s *Store) SessionLogPath(ctx context.Context, sessionID contracts.SessionI
 	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", contracts.ErrNotFound
+		return "", fault.ErrNotFound
 	}
 	if err != nil {
 		return "", err

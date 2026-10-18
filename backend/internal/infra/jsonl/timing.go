@@ -4,7 +4,8 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"praxis/internal/contracts"
+
+	"praxis/internal/core/fault"
 	"praxis/internal/timing"
 )
 
@@ -23,12 +24,12 @@ func (r TimingStore) Save(ctx context.Context, v timing.Record) error {
 				if same(old, v) {
 					return nil
 				}
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			if old.Status != timing.Running || old.Operation != v.Operation || old.ParentID != v.ParentID || !old.StartedAt.Equal(v.StartedAt) {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
-		} else if !errors.Is(e, contracts.ErrNotFound) {
+		} else if !errors.Is(e, fault.ErrNotFound) {
 			return e
 		}
 		return save(ctx, r.Store, v.SessionID, "timing", v.ID, "timing.saved", v)

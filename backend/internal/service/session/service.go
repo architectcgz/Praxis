@@ -2,7 +2,6 @@
 package session
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
@@ -14,19 +13,15 @@ import (
 	"fmt"
 	"sync"
 
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"praxis/internal/hooks"
 	"praxis/internal/repository"
-	"praxis/internal/request"
 	"praxis/internal/system"
 )
 
 // AgentDefinitionFactory 解析可复用的 Agent 定义。
-type AgentDefinitionFactory func(contracts.AgentDefinitionID) (agentmodel.AgentDefinition, error)
-
-// WorkspaceTextReader 是文件预览所需的最小读取 Port。
-type WorkspaceTextReader interface {
-	ReadText(context.Context, string, string, int64) (string, error)
-}
+type AgentDefinitionFactory func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 
 // Config 包含初始化 Session 与 Primary Agent 所需的依赖。
 type Config struct {
@@ -41,7 +36,7 @@ type Config struct {
 	Definitions       AgentDefinitionFactory
 	Messages          repository.MessageStreams
 	UsageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
-	RemoveSessionData func(context.Context, contracts.SessionID, []string) error
+	RemoveSessionData func(context.Context, identity.SessionID, []string) error
 	TextReader        WorkspaceTextReader
 	Clock             system.Clock
 	IDs               system.IDGenerator
@@ -60,24 +55,24 @@ type Service struct {
 	definitions       AgentDefinitionFactory
 	messages          repository.MessageStreams
 	usageRecords      func(context.Context, string) ([]model.ModelUsageRecord, error)
-	removeSessionData func(context.Context, contracts.SessionID, []string) error
+	removeSessionData func(context.Context, identity.SessionID, []string) error
 	textReader        WorkspaceTextReader
 	clock             system.Clock
 	ids               system.IDGenerator
 
 	createdSessionsMu sync.Mutex
-	createdSessions   map[contracts.SessionID]struct{}
+	createdSessions   map[identity.SessionID]struct{}
 	closing           bool
 }
 
 // CreateParams 包含 Session 的持久化身份和初始状态。
 type CreateParams struct {
-	RequestID    contracts.RequestID
-	SessionID    contracts.SessionID
-	AgentID      contracts.AgentID
-	ProjectID    contracts.ProjectID
-	WorkspaceID  contracts.WorkspaceID
-	DefinitionID contracts.AgentDefinitionID
+	RequestID    identity.RequestID
+	SessionID    identity.SessionID
+	AgentID      identity.AgentID
+	ProjectID    identity.ProjectID
+	WorkspaceID  identity.WorkspaceID
+	DefinitionID identity.AgentDefinitionID
 }
 
 type CreateResult struct {
@@ -85,7 +80,7 @@ type CreateResult struct {
 	Agent   agentmodel.Agent
 }
 
-// NewService 创建 Session 应用服务。
+// NewService 创建 Session 业务服务。
 func NewService(config Config) (*Service, error) {
 	if config.UsageRecords == nil {
 		return nil, errors.New("session service usage reader is required")
@@ -122,18 +117,18 @@ func NewService(config Config) (*Service, error) {
 		textReader:        config.TextReader,
 		clock:             system.ClockOrDefault(config.Clock),
 		ids:               system.IDsOrDefault(config.IDs),
-		createdSessions:   make(map[contracts.SessionID]struct{}),
+		createdSessions:   make(map[identity.SessionID]struct{}),
 	}, nil
 }
 
-// SessionView 是渲染 Session 工作区所需的持久化详情视图。
+// SessionView 聚合会话及其 Agent 持久化状态，不包含应用展示数据。
 type SessionView struct {
 	Session sessionmodel.Session
 	Agents  []agentmodel.Agent
 }
 
 // ListSessionsByProject 返回指定 Project 下按索引查询的 Session 列表。
-func (s *Service) ListSessionsByProject(ctx context.Context, projectID contracts.ProjectID, limit int) ([]sessionmodel.Session, error) {
+func (s *Service) ListSessionsByProject(ctx context.Context, projectID identity.ProjectID, limit int) ([]sessionmodel.Session, error) {
 	if ctx == nil {
 		return nil, errors.New("project session catalog context is required")
 	}
@@ -144,7 +139,7 @@ func (s *Service) ListSessionsByProject(ctx context.Context, projectID contracts
 	return lister.ListByProject(ctx, projectID, limit)
 }
 
-// ListSessions 返回桌面发现使用的持久化 Session 列表。
+// ListSessions 返回持久化 Session 目录。
 func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.Session, error) {
 	if ctx == nil {
 		return nil, errors.New("session catalog context is required")
@@ -157,7 +152,7 @@ func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.S
 }
 
 // GetSessionView 返回 Session 及其按索引查询的 Agent 列表。
-func (s *Service) GetSessionView(ctx context.Context, sessionID contracts.SessionID, limit int) (SessionView, error) {
+func (s *Service) GetSessionView(ctx context.Context, sessionID identity.SessionID, limit int) (SessionView, error) {
 	if ctx == nil {
 		return SessionView{}, errors.New("session query context is required")
 	}
@@ -173,9 +168,9 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID contracts.Sessio
 }
 
 // ListSessionContext 按稳定时间和 ID 游标读取 SessionContext 条目。
-func (s *Service) ListSessionContext(ctx context.Context, sessionID contracts.SessionID, afterID string, limit int) ([]sessionmodel.SessionContextEntry, error) {
+func (s *Service) ListSessionContext(ctx context.Context, sessionID identity.SessionID, afterID string, limit int) ([]sessionmodel.SessionContextEntry, error) {
 	if ctx == nil {
-		return nil, contracts.New(contracts.InvalidRequest, "session context query is invalid")
+		return nil, fault.New(fault.InvalidRequest, "session context query is invalid")
 	}
 	if _, err := s.sessions.Get(ctx, sessionID); err != nil {
 		return nil, err
@@ -211,28 +206,28 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (resul
 	}
 	definition, err := s.definitions(params.DefinitionID)
 	if err != nil {
-		return CreateResult{}, contracts.New(contracts.InvalidRequest, "")
+		return CreateResult{}, fault.New(fault.InvalidRequest, "")
 	}
 	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.sessions.Get(txCtx, params.SessionID)
 		if err == nil {
 			agent, agentErr := s.agents.Get(txCtx, params.AgentID)
 			if agentErr != nil {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			if existing.ProjectID != params.ProjectID || existing.WorkspaceID != params.WorkspaceID ||
 				agent.SessionID != params.SessionID || agent.DefinitionID != definition.ID || agent.Profile != definition.Profile {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			result = CreateResult{Session: existing, Agent: agent}
 			return nil
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		if _, err := s.agents.Get(txCtx, params.AgentID); err == nil {
-			return contracts.ErrRequestConflict
-		} else if !errors.Is(err, contracts.ErrNotFound) {
+			return fault.ErrRequestConflict
+		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		project, err := s.projects.Get(txCtx, params.ProjectID)
@@ -240,14 +235,14 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (resul
 			if err != nil {
 				return err
 			}
-			return contracts.New(contracts.ProjectWorkspaceInvalid, "")
+			return fault.New(projectmodel.ProjectWorkspaceInvalid, "")
 		}
 		workspace, err := s.workspaces.Get(txCtx, params.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		if workspace.ProjectID != project.ID || workspace.State != workspacemodel.WorkspaceReady {
-			return contracts.New(contracts.ProjectWorkspaceInvalid, "")
+			return fault.New(projectmodel.ProjectWorkspaceInvalid, "")
 		}
 		at := s.clock.Now().UTC()
 		session := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, at)
@@ -269,7 +264,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateParams) (resul
 }
 
 // CreateSessionForProject 为 Project 初始化主 Session。
-func (s *Service) CreateSessionForProject(ctx context.Context, sessionID contracts.SessionID, agentID contracts.AgentID, requestID contracts.RequestID, projectID contracts.ProjectID, workspaceID contracts.WorkspaceID, definitionID contracts.AgentDefinitionID) (CreateResult, error) {
+func (s *Service) CreateSessionForProject(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, requestID identity.RequestID, projectID identity.ProjectID, workspaceID identity.WorkspaceID, definitionID identity.AgentDefinitionID) (CreateResult, error) {
 	return s.CreateSession(ctx, CreateParams{
 		RequestID: requestID, SessionID: sessionID, AgentID: agentID,
 		ProjectID: projectID, WorkspaceID: workspaceID,
@@ -278,7 +273,7 @@ func (s *Service) CreateSessionForProject(ctx context.Context, sessionID contrac
 }
 
 // GetOrCreatePrimaryAgent 为已初始化的 Session 创建缺失的主 Agent。
-func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contracts.SessionID, requestID contracts.RequestID) (agentmodel.Agent, error) {
+func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identity.SessionID, requestID identity.RequestID) (agentmodel.Agent, error) {
 	if ctx == nil {
 		return agentmodel.Agent{}, errors.New("ensure primary agent context is required")
 	}
@@ -290,7 +285,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 	if err == nil {
 		return agent, nil
 	}
-	if !errors.Is(err, contracts.ErrNotFound) {
+	if !errors.Is(err, fault.ErrNotFound) {
 		return agentmodel.Agent{}, err
 	}
 	definition, err := s.definitions(agentmodel.DefinitionPrimary)
@@ -304,11 +299,11 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID contrac
 			created = existing
 			return nil
 		}
-		if !errors.Is(err, contracts.ErrNotFound) {
+		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		at := s.clock.Now().UTC()
-		agent := agentmodel.NewAgent(contracts.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, at)
+		agent := agentmodel.NewAgent(identity.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, at)
 		if err := s.agents.Save(txCtx, agent); err != nil {
 			return err
 		}
@@ -326,8 +321,17 @@ type AppendContextResult struct {
 	ExistingEntry bool
 }
 
+// AppendContextParams 是已由输入边界规范化的共享事实数据。
+type AppendContextParams struct {
+	EntryID      identity.ContextEntryID
+	SessionID    identity.SessionID
+	Kind         sessionmodel.SessionContextKind
+	SourceTaskID identity.TaskID
+	Content      string
+}
+
 // AppendSessionContext 按稳定 ID 幂等追加不可变共享上下文。
-func (s *Service) AppendSessionContext(ctx context.Context, params request.AppendSessionContext) (AppendContextResult, error) {
+func (s *Service) AppendSessionContext(ctx context.Context, params AppendContextParams) (AppendContextResult, error) {
 	if ctx == nil {
 		return AppendContextResult{}, errors.New("append session context is required")
 	}
@@ -348,7 +352,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params request.Appen
 		if found {
 			if existing.SessionID != params.SessionID || existing.Kind != params.Kind ||
 				existing.SourceTaskID != params.SourceTaskID || existing.Content != entry.Content {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			result = AppendContextResult{Entry: existing, ExistingEntry: true}
 			return nil
@@ -363,7 +367,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params request.Appen
 }
 
 // DeleteSession 删除没有活动执行的 Session 和关联文档。
-func (s *Service) DeleteSession(ctx context.Context, sessionID contracts.SessionID) error {
+func (s *Service) DeleteSession(ctx context.Context, sessionID identity.SessionID) error {
 	if ctx == nil {
 		return errors.New("delete session context is required")
 	}
@@ -390,12 +394,12 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 	return cleanupErr
 }
 
-func (s *Service) deleteSession(ctx context.Context, sessionID contracts.SessionID, onlyEmpty bool) error {
+func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
 	var documentRefs []string
 	deleted := false
 	if err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		if onlyEmpty {
-			if _, err := s.sessions.Get(txCtx, sessionID); errors.Is(err, contracts.ErrNotFound) {
+			if _, err := s.sessions.Get(txCtx, sessionID); errors.Is(err, fault.ErrNotFound) {
 				return nil
 			} else if err != nil {
 				return err
@@ -420,16 +424,16 @@ func (s *Service) deleteSession(ctx context.Context, sessionID contracts.Session
 	return nil
 }
 
-func (s *Service) hasSessionMessages(ctx context.Context, sessionID contracts.SessionID) (bool, error) {
+func (s *Service) hasSessionMessages(ctx context.Context, sessionID identity.SessionID) (bool, error) {
 	return s.sessions.HasMessages(ctx, sessionID)
 }
 
-// RenameSession 更新会话标题，并刷新会话目录排序所使用的更新时间。
-func (s *Service) RenameSession(ctx context.Context, canonical request.RenameSession) error {
+// RenameSession 接收已规范化标题，并刷新会话目录排序使用的更新时间。
+func (s *Service) RenameSession(ctx context.Context, sessionID identity.SessionID, title string) error {
 	if ctx == nil {
 		return errors.New("rename session context is required")
 	}
 	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		return s.sessions.Rename(txCtx, canonical.SessionID, canonical.Title, s.clock.Now())
+		return s.sessions.Rename(txCtx, sessionID, title, s.clock.Now())
 	})
 }

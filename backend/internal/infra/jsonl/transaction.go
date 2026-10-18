@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
 	"praxis/internal/repository"
 )
 
@@ -181,7 +181,7 @@ func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error 
 			if key.collection != "message" {
 				old, _ := s.entry(ctx, key)
 				if old.location.Scope != tx.scope {
-					return contracts.ErrRequestConflict
+					return fault.ErrRequestConflict
 				}
 			}
 			if err := immutable(event.Collection, prior, event.Payload); err != nil {
@@ -190,7 +190,7 @@ func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error 
 			if bytes.Equal(prior, event.Payload) {
 				return nil
 			}
-		} else if !errors.Is(err, contracts.ErrNotFound) {
+		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
 		entry.location = recordRef{Scope: tx.scope, EventIndex: len(tx.events), Sequence: event.Sequence}

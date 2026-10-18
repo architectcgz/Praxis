@@ -2,8 +2,9 @@ package task
 
 import (
 	"context"
-	"praxis/internal/contracts"
+
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/fault"
 	taskmodel "praxis/internal/core/task"
 )
 
@@ -18,14 +19,14 @@ func (s *Service) ReclaimTask(ctx context.Context, selected taskmodel.Task) (tas
 			return err
 		}
 		if !task.Active() || task.AgentID != selected.AgentID {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 		agent, err := s.agents.Get(txCtx, task.AgentID)
 		if err != nil {
 			return err
 		}
 		if agent.CurrentTaskID != task.ID {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 		_, created, err = s.executions.Reserve(ctx, task.AgentID, task.ID)
 		if err != nil {

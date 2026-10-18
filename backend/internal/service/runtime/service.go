@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/identity"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/service/runtime/queue"
 	"praxis/internal/service/task"
@@ -22,7 +22,7 @@ type TaskActivator interface {
 type TaskStarter interface {
 	SendInput(context.Context, task.SendInputParams) (task.SendInputResult, error)
 	// Abort 收敛激活失败后无人执行的 Task。
-	Abort(context.Context, contracts.TaskID) error
+	Abort(context.Context, identity.TaskID) error
 }
 
 // Config 提供回合、队列和进程内执行依赖；所有依赖均为必填。
@@ -50,7 +50,7 @@ type StartResult struct {
 // EnqueueResult 返回预约的 Task 及重复请求状态，入队不触发执行。
 type EnqueueResult = queue.EnqueueResult
 
-// NewService 创建 runtime 应用服务；缺少依赖时返回错误。
+// NewService 创建 runtime 业务服务；缺少依赖时返回错误。
 func NewService(config Config) (*Service, error) {
 	for name, missing := range map[string]bool{
 		"tasks":          config.Tasks == nil,

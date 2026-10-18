@@ -1,7 +1,6 @@
 package loop
 
 import (
-	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/model"
@@ -16,6 +15,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 )
 
 // Config 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
@@ -77,7 +78,7 @@ func NewRunner(config Config) (Runner, error) {
 // TaskProgress 负责加载持久化预算、记录模型及摘要请求和模型输出消耗；
 // 每次执行的输入（context、消息写入器）为空时返回错误；
 // 持久化生命周期、取消和后续任务调度由执行协调器负责。
-func (r *Runner) Run(ctx context.Context, task taskmodel.Task, content appcontext.Content, continuation []sessionmodel.MessageData, messageWriter repository.MessageWriter) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+func (r *Runner) Run(ctx context.Context, task taskmodel.Task, content appcontext.Content, continuation []sessionmodel.MessageData, messageWriter repository.MessageWriter) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, error) {
 	if ctx == nil {
 		return failedTask(errors.New("loop context is required"))
 	}
@@ -95,10 +96,10 @@ func (r *Runner) run(
 	content appcontext.Content,
 	continuation []sessionmodel.MessageData,
 	messageWriter repository.MessageWriter,
-) (taskmodel.TaskOutcome, contracts.TaskFailureCode, error) {
+) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, error) {
 	task, err := r.Progress.LoadTask(ctx, task.ID)
 	if err != nil {
-		return taskResult(failCause(contracts.TaskFailureStorage, err))
+		return taskResult(failCause(taskmodel.TaskFailureStorage, err))
 	}
 	modelContext, err := (appcontext.ContextBuilder{}).Build(content, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: task.Config.Model.MaxOutputTokens})
 	if err != nil {
@@ -123,7 +124,7 @@ func (r *Runner) run(
 	iterations := task.Progress.Iterations
 	for sequence := max(uint64(1), task.Progress.NextSequence); ; {
 		if iterations >= taskmodel.MaxIterations {
-			return taskResult(fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "model iteration limit exceeded"))
+			return taskResult(fail(taskmodel.TaskFailureResourceLimit, ErrorResourceLimit, "model iteration limit exceeded"))
 		}
 		request := buildModelRequest(model.ModelRequest{
 			TaskID:          task.ID,
@@ -133,7 +134,7 @@ func (r *Runner) run(
 		}, modelContext, r.Tools)
 		toolPayload, err := json.Marshal(request.Tools)
 		if err != nil {
-			return taskResult(failCause(contracts.TaskFailureContract, err))
+			return taskResult(failCause(taskmodel.TaskFailureContract, err))
 		}
 		compressed, changed, err := r.CompressionStrategy.Compress(ctx, modelContext, contextcompress.Options{
 			SummaryFormat:   r.SummaryFormat,
@@ -157,14 +158,14 @@ func (r *Runner) run(
 		}
 		turnSequence := sequence
 		if err := r.Progress.RecordIteration(ctx, task.ID, turnSequence); err != nil {
-			if errors.Is(err, contracts.New(contracts.TaskResourceLimit, "")) {
-				return taskResult(failCause(contracts.TaskFailureResourceLimit, err))
+			if errors.Is(err, fault.New(taskmodel.TaskResourceLimit, "")) {
+				return taskResult(failCause(taskmodel.TaskFailureResourceLimit, err))
 			}
-			return taskResult(failCause(contracts.TaskFailureStorage, err))
+			return taskResult(failCause(taskmodel.TaskFailureStorage, err))
 		}
 		sequence++
 		iterations++
-		turnID := contracts.NewTurnID(task.ID, turnSequence)
+		turnID := taskmodel.NewTurnID(task.ID, turnSequence)
 		request.TurnID = turnID
 		outcome, failureCode, finished, err := r.executeTurn(ctx, task, taskModel, messageWriter, request, &modelContext, turnID)
 
@@ -174,7 +175,7 @@ func (r *Runner) run(
 		// 工具的独立风险审核也会分配请求序号，下一轮不能复用本地旧序号。
 		stored, err := r.Progress.LoadTask(ctx, task.ID)
 		if err != nil {
-			return taskResult(failCause(contracts.TaskFailureStorage, err))
+			return taskResult(failCause(taskmodel.TaskFailureStorage, err))
 		}
 		sequence = max(sequence, stored.Progress.NextSequence)
 	}
@@ -188,8 +189,8 @@ func (r *Runner) executeTurn(
 	messageWriter repository.MessageWriter,
 	request model.ModelRequest,
 	modelContext *appcontext.ModelContext,
-	turnID contracts.TurnID,
-) (taskmodel.TaskOutcome, contracts.TaskFailureCode, bool, error) {
+	turnID identity.TurnID,
+) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, bool, error) {
 	r.emit(Event{
 		Kind:      EventTurnStarted,
 		SessionID: task.SessionID,
@@ -221,12 +222,12 @@ func (r *Runner) executeTurn(
 		return outcome, code, false, cause
 	}
 	if err := r.Progress.RecordModelOutput(ctx, task.ID, response.textBytes); err != nil {
-		outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
+		outcome, code, cause := taskResult(failCause(taskmodel.TaskFailureStorage, err))
 		return outcome, code, false, cause
 	}
 	assistant := model.ContextBlocksFromEvents(response.events)
 	calls := response.toolCalls()
-	metadata := contracts.ToolExecutionMetadata{
+	metadata := toolmodel.ToolExecutionMetadata{
 		TaskID:        task.ID,
 		TurnID:        turnID,
 		SessionID:     task.SessionID,
@@ -246,7 +247,7 @@ func (r *Runner) executeTurn(
 		}, assistant)
 		value := repository.AssistantWrite{Message: message}
 		for _, call := range calls {
-			invocation := toolmodel.NewExecution(contracts.ToolExecutionID(r.IDs.New("toolexecution")), task.ID, turnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
+			invocation := toolmodel.NewExecution(identity.ToolExecutionID(r.IDs.New("toolexecution")), task.ID, turnID, task.SessionID, task.AgentID, call.ID, call.Name, call.Arguments, toolmodel.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
 			value.ToolCalls = append(value.ToolCalls, invocation)
 		}
 		if response.stopReason == model.StopCompleted || response.stopReason == model.StopSequence {
@@ -255,7 +256,7 @@ func (r *Runner) executeTurn(
 		message, inserted, err := messageWriter.AppendAssistant(ctx, value)
 		if err != nil {
 			r.emitError(task.AgentID, task.ID, turnID, err)
-			outcome, code, cause := taskResult(failCause(contracts.TaskFailureStorage, err))
+			outcome, code, cause := taskResult(failCause(taskmodel.TaskFailureStorage, err))
 			return outcome, code, false, cause
 		}
 		if inserted && value.FinalOutput != nil {
@@ -329,10 +330,10 @@ func (r *Runner) executeTurn(
 func (r *Runner) buildModel(config model.Config) (model.Model, error) {
 	built, err := r.ModelBuilder.BuildModel(config)
 	if err != nil {
-		return model.Model{}, failCause(contracts.TaskFailureProvider, err)
+		return model.Model{}, failCause(taskmodel.TaskFailureProvider, err)
 	}
 	if built.Stream == nil {
-		return model.Model{}, fail(contracts.TaskFailureProviderUnavailable, ErrorProvider, "model stream is unavailable")
+		return model.Model{}, fail(taskmodel.TaskFailureProviderUnavailable, ErrorProvider, "model stream is unavailable")
 	}
 	return built, nil
 }

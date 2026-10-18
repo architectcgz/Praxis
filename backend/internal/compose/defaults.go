@@ -1,23 +1,23 @@
 package compose
 
 import (
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
 	contextcompress "praxis/internal/core/context/compress"
+	"praxis/internal/core/identity"
 	agentregistry "praxis/internal/infra/agent_registry"
 )
 
-func defaultAgentConfigs() map[contracts.AgentDefinitionID]agentregistry.AgentConfig {
-	return map[contracts.AgentDefinitionID]agentregistry.AgentConfig{
-		agentmodel.DefinitionPrimary:  {Profile: contracts.ProfilePrimary},
-		agentmodel.DefinitionDelegate: {Profile: contracts.ProfileDelegate},
-		agentmodel.DefinitionAdvisor:  {Profile: contracts.ProfileAdvisor},
-		agentmodel.DefinitionCurator:  {Profile: contracts.ProfileCurator},
+func defaultAgentConfigs() map[identity.AgentDefinitionID]agentregistry.AgentConfig {
+	return map[identity.AgentDefinitionID]agentregistry.AgentConfig{
+		agentmodel.DefinitionPrimary:  {Profile: agentmodel.ProfilePrimary},
+		agentmodel.DefinitionDelegate: {Profile: agentmodel.ProfileDelegate},
+		agentmodel.DefinitionAdvisor:  {Profile: agentmodel.ProfileAdvisor},
+		agentmodel.DefinitionCurator:  {Profile: agentmodel.ProfileCurator},
 	}
 }
 
-func defaultAgentInstructions() map[contracts.AgentDefinitionID]string {
-	return map[contracts.AgentDefinitionID]string{
+func defaultAgentInstructions() map[identity.AgentDefinitionID]string {
+	return map[identity.AgentDefinitionID]string{
 		agentmodel.DefinitionPrimary:  "# Primary Agent\n\n你负责理解用户目标、推进任务，并在需要时委派独立工作。",
 		agentmodel.DefinitionDelegate: "# Delegate Agent\n\n你负责完成被委派的具体任务，并返回可验证的结果。",
 		agentmodel.DefinitionAdvisor:  "# Advisor Agent\n\n你负责分析问题、识别风险并给出明确建议，不直接改变工作区。",

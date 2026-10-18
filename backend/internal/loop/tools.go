@@ -5,8 +5,10 @@ import (
 	"errors"
 	"regexp"
 
-	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
+	taskmodel "praxis/internal/core/task"
 	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
 	toolcontracts "praxis/internal/tools/contracts"
@@ -20,7 +22,7 @@ func validateToolCalls(calls []ToolCall) error {
 	seen := map[string]bool{}
 	for _, call := range calls {
 		if seen[call.ID] || !toolNamePattern.MatchString(string(call.Name)) {
-			return fail(contracts.TaskFailureContract, ErrorContract, "provider emitted an invalid tool call")
+			return fail(taskmodel.TaskFailureContract, ErrorContract, "provider emitted an invalid tool call")
 		}
 		seen[call.ID] = true
 	}
@@ -35,8 +37,8 @@ func (r *Runner) runToolCalls(
 	ctx context.Context,
 	messageWriter repository.MessageWriter,
 	calls []ToolCall,
-	metadata contracts.ToolExecutionMetadata,
-	requestID contracts.RequestID,
+	metadata toolmodel.ToolExecutionMetadata,
+	requestID identity.RequestID,
 ) ([]toolcontracts.ToolResult, error) {
 	results := make([]toolcontracts.ToolResult, 0, len(calls))
 	limited := false
@@ -44,7 +46,7 @@ func (r *Runner) runToolCalls(
 		prepared := toolcontracts.PreparedToolCall{Call: call}
 		invocation, err := r.Executions.FindByTaskCall(ctx, metadata.TaskID, call.ID)
 		if err != nil {
-			return results, failCause(contracts.TaskFailureStorage, err)
+			return results, failCause(taskmodel.TaskFailureStorage, err)
 		}
 		if invocation.Status == toolmodel.StatusRequested {
 			tool, ok := r.Tools.Get(call.Name)
@@ -71,24 +73,24 @@ func (r *Runner) runToolCalls(
 			// 在结算失败前写入受限回执，确保人工检查时能看到已尝试的副作用。
 			payload := result.Payload
 			if payload == "" {
-				if errors.Is(err, contracts.New(contracts.TaskBusy, "")) {
-					return results, failCause(contracts.TaskFailureBusy, err)
+				if errors.Is(err, fault.New(taskmodel.TaskBusy, "")) {
+					return results, failCause(taskmodel.TaskFailureBusy, err)
 				}
-				if errors.Is(err, contracts.New(contracts.TaskPolicyBlocked, "")) {
-					return results, failCause(contracts.TaskFailurePolicyBlocked, err)
+				if errors.Is(err, fault.New(taskmodel.TaskPolicyBlocked, "")) {
+					return results, failCause(taskmodel.TaskFailurePolicyBlocked, err)
 				}
-				if errors.Is(err, contracts.New(contracts.TaskResourceLimit, "")) {
-					return results, failCause(contracts.TaskFailureResourceLimit, err)
+				if errors.Is(err, fault.New(taskmodel.TaskResourceLimit, "")) {
+					return results, failCause(taskmodel.TaskFailureResourceLimit, err)
 				}
-				return results, failCause(contracts.TaskFailureStorage, err)
+				return results, failCause(taskmodel.TaskFailureStorage, err)
 			}
 			block := appcontext.NewToolResultBlock(call.ID, string(call.Name), payload, true)
 			if receiptErr := appendToolResult(ctx, messageWriter, requestID, metadata.TaskID, metadata.TurnID, callIndex, block); receiptErr != nil {
-				return results, failCause(contracts.TaskFailureStorage,
+				return results, failCause(taskmodel.TaskFailureStorage,
 					&RuntimeError{Code: ErrorStorage, Message: "tool result receipt failed", Cause: receiptErr})
 			}
 			r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.TaskID, metadata.TurnID, block)
-			return results, failCause(contracts.TaskFailureTool,
+			return results, failCause(taskmodel.TaskFailureTool,
 				&RuntimeError{Code: ErrorTool, Message: "tool execution failed", Cause: err})
 		}
 		if result.Payload == "" {
@@ -104,7 +106,7 @@ func (r *Runner) runToolCalls(
 
 	}
 	if limited {
-		return results, fail(contracts.TaskFailureResourceLimit, ErrorResourceLimit, "tool call limit exceeded")
+		return results, fail(taskmodel.TaskFailureResourceLimit, ErrorResourceLimit, "tool call limit exceeded")
 	}
 	return results, nil
 }

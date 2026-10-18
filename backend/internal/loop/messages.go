@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 
-	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/identity"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/repository"
 )
@@ -13,9 +13,9 @@ import (
 func appendToolResult(
 	ctx context.Context,
 	messageWriter repository.MessageWriter,
-	requestID contracts.RequestID,
-	taskID contracts.TaskID,
-	turnID contracts.TurnID,
+	requestID identity.RequestID,
+	taskID identity.TaskID,
+	turnID identity.TurnID,
 	callIndex int,
 	block appcontext.ContextBlock,
 ) error {

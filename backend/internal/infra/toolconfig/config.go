@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"praxis/internal/contracts"
 	"praxis/internal/core/security"
+	coretool "praxis/internal/core/tool"
 	toolcontracts "praxis/internal/tools/contracts"
 )
 
@@ -22,8 +22,8 @@ type ToolConfig struct {
 }
 
 type Config struct {
-	Tools map[contracts.ToolName]ToolConfig `json:"tools"`
-	Bash  security.CommandPolicy            `json:"bash"`
+	Tools map[coretool.ToolName]ToolConfig `json:"tools"`
+	Bash  security.CommandPolicy           `json:"bash"`
 }
 
 // Load 只读加载工具配置，缺失或非法文件直接返回错误。
@@ -69,8 +69,8 @@ func validateCommandPolicy(policy security.CommandPolicy) error {
 	return nil
 }
 
-func (c Config) ValidateRegistered(names []contracts.ToolName) error {
-	registered := make(map[contracts.ToolName]bool, len(names))
+func (c Config) ValidateRegistered(names []coretool.ToolName) error {
+	registered := make(map[coretool.ToolName]bool, len(names))
 	for _, name := range names {
 		registered[name] = true
 	}
@@ -109,12 +109,12 @@ func (c *Catalog) ReplaceFrom(candidate *Catalog) {
 	c.config = config
 }
 
-func (c *Catalog) enabled(name contracts.ToolName) bool {
+func (c *Catalog) enabled(name coretool.ToolName) bool {
 	tool, specified := c.config.Tools[name]
 	return !specified || tool.Enabled
 }
 
-func (c *Catalog) Get(name contracts.ToolName) (toolcontracts.Tool, bool) {
+func (c *Catalog) Get(name coretool.ToolName) (toolcontracts.Tool, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if !c.enabled(name) {
@@ -123,11 +123,11 @@ func (c *Catalog) Get(name contracts.ToolName) (toolcontracts.Tool, bool) {
 	return c.registry.Get(name)
 }
 
-func (c *Catalog) List() []contracts.ToolDefinition {
+func (c *Catalog) List() []coretool.ToolDefinition {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	definitions := c.registry.List()
-	result := make([]contracts.ToolDefinition, 0, len(definitions))
+	result := make([]coretool.ToolDefinition, 0, len(definitions))
 	for _, definition := range definitions {
 		if c.enabled(definition.Name) {
 			result = append(result, definition)

@@ -5,7 +5,7 @@ import (
 	"context"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"praxis/internal/service"
+	agentcontracts "praxis/internal/app/agent/contracts"
 	"praxis/wails/dto"
 )
 
@@ -52,7 +52,7 @@ func (b *Bindings) All() []interface{} {
 }
 
 // EmitAgentEvent 把 application 事件转换成专用 DTO 后推给前端。
-func (b *Bindings) EmitAgentEvent(event service.AgentEvent) {
+func (b *Bindings) EmitAgentEvent(event agentcontracts.AgentEvent) {
 	if event.AgentID == "" || event.TaskID == "" {
 		return
 	}
@@ -62,13 +62,13 @@ func (b *Bindings) EmitAgentEvent(event service.AgentEvent) {
 	}
 	value := dto.AgentEvent{
 		Kind:           event.Kind,
-		SessionID:      event.SessionID.String(),
-		AgentID:        event.AgentID.String(),
-		TaskID:         event.TaskID.String(),
+		SessionID:      event.SessionID,
+		AgentID:        event.AgentID,
+		TaskID:         event.TaskID,
 		Outcome:        event.Outcome,
 		FailureCode:    event.FailureCode,
 		FailureMessage: event.FailureMessage,
-		TurnID:         event.TurnID.String(),
+		TurnID:         event.TurnID,
 		Text:           event.Text,
 		CallID:         event.CallID,
 		Name:           event.Name,

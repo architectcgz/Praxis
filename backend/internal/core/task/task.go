@@ -1,8 +1,8 @@
 package task
 
 import (
-	"praxis/internal/contracts"
-
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"slices"
 	"time"
 )
@@ -32,10 +32,10 @@ const (
 
 type Task struct {
 	Progress         Progress
-	ID               contracts.TaskID
-	SessionID        contracts.SessionID
-	AgentID          contracts.AgentID
-	RequestID        contracts.RequestID
+	ID               identity.TaskID
+	SessionID        identity.SessionID
+	AgentID          identity.AgentID
+	RequestID        identity.RequestID
 	Sequence         uint64
 	ProviderID       string
 	ModelID          string
@@ -48,16 +48,16 @@ type Task struct {
 	StartedAt        time.Time
 	EndedAt          time.Time
 	Outcome          TaskOutcome
-	FailureCode      contracts.TaskFailureCode
+	FailureCode      TaskFailureCode
 	FailureMessage   string
 }
 
 // NewTask 创建空闲 runtime 可以立即启动的 Task；执行输入必须已构建完成。
 func NewTask(
-	id contracts.TaskID,
-	sessionID contracts.SessionID,
-	agentID contracts.AgentID,
-	requestID contracts.RequestID,
+	id identity.TaskID,
+	sessionID identity.SessionID,
+	agentID identity.AgentID,
+	requestID identity.RequestID,
 	inputMessageID string,
 	config Config,
 	selection ContextSelection,
@@ -77,7 +77,7 @@ func NewTask(
 }
 
 // NewPendingTask 创建预约 Task，只保存请求身份和 FIFO 序号；正文由用户消息保存。
-func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID contracts.AgentID, requestID contracts.RequestID, inputMessageID string, sequence uint64, at time.Time) Task {
+func NewPendingTask(id identity.TaskID, sessionID identity.SessionID, agentID identity.AgentID, requestID identity.RequestID, inputMessageID string, sequence uint64, at time.Time) Task {
 	return Task{
 		ID:             id,
 		SessionID:      sessionID,
@@ -93,10 +93,10 @@ func NewPendingTask(id contracts.TaskID, sessionID contracts.SessionID, agentID 
 // Prepare 在 runtime 空闲时冻结已构建的执行输入；非法状态或排除当前输入时不修改 Task。
 func (e *Task) Prepare(config Config, selection ContextSelection) error {
 	if e.Status == TaskStarting || !canTransition(e.Status, TaskStarting) {
-		return contracts.InvalidTransition("task", string(e.Status), string(TaskStarting))
+		return fault.InvalidTransition("task", string(e.Status), string(TaskStarting))
 	}
 	if slices.Contains(selection.ExcludedMessageIDs, e.InputMessageID) {
-		return contracts.InvalidValue("task.contextSelection", "current input cannot be excluded")
+		return fault.InvalidValue("task.contextSelection", "current input cannot be excluded")
 	}
 	e.Config = config.Clone()
 	e.ContextSelection = selection.Clone()
@@ -110,7 +110,7 @@ func (e Task) Active() bool {
 
 func (e *Task) MarkRunning(at time.Time) error {
 	if e.Status == TaskRunning || !canTransition(e.Status, TaskRunning) {
-		return contracts.InvalidTransition("task", string(e.Status), string(TaskRunning))
+		return fault.InvalidTransition("task", string(e.Status), string(TaskRunning))
 	}
 	e.Status = TaskRunning
 	e.StartedAt = at.UTC()
@@ -120,10 +120,10 @@ func (e *Task) MarkRunning(at time.Time) error {
 // BeginEnding 标记执行已返回；结束时间不得早于启动时间，失败时不改变状态。
 func (e *Task) BeginEnding(at time.Time) error {
 	if e.Status == TaskEnding || !canTransition(e.Status, TaskEnding) {
-		return contracts.InvalidTransition("task", string(e.Status), string(TaskEnding))
+		return fault.InvalidTransition("task", string(e.Status), string(TaskEnding))
 	}
 	if at.Before(e.StartedAt) {
-		return contracts.InvalidValue("task.endingAt", "ending cannot precede start")
+		return fault.InvalidValue("task.endingAt", "ending cannot precede start")
 	}
 	e.Status = TaskEnding
 	return nil
@@ -132,23 +132,23 @@ func (e *Task) BeginEnding(at time.Time) error {
 // End 固定最终结果和结束时间；已结束的 Task 不允许重新结束或改变结果。
 func (e *Task) End(
 	outcome TaskOutcome,
-	failureCode contracts.TaskFailureCode,
+	failureCode TaskFailureCode,
 	at time.Time,
 ) error {
 	if e.Status == TaskEnded || e.StartedAt.IsZero() || !canTransition(e.Status, TaskEnded) {
-		return contracts.InvalidTransition("task", string(e.Status), string(TaskEnded))
+		return fault.InvalidTransition("task", string(e.Status), string(TaskEnded))
 	}
 	if !ValidTaskOutcome(outcome) {
-		return contracts.InvalidValue("task.outcome", "unknown task outcome")
+		return fault.InvalidValue("task.outcome", "unknown task outcome")
 	}
 	if at.Before(e.StartedAt) {
-		return contracts.InvalidValue("task.endedAt", "ending cannot precede start")
+		return fault.InvalidValue("task.endedAt", "ending cannot precede start")
 	}
 	if !ValidFailureCode(failureCode) || (outcome == TaskFailed && failureCode == "") {
-		return contracts.InvalidValue("task.failureCode", "unknown or missing failure code")
+		return fault.InvalidValue("task.failureCode", "unknown or missing failure code")
 	}
-	if failureCode == contracts.TaskFailureRequestCanceled && outcome != TaskPaused && outcome != TaskInterrupted {
-		return contracts.InvalidValue("task.failureCode", "request cancellation requires a paused or interrupted outcome")
+	if failureCode == TaskFailureRequestCanceled && outcome != TaskPaused && outcome != TaskInterrupted {
+		return fault.InvalidValue("task.failureCode", "request cancellation requires a paused or interrupted outcome")
 	}
 	e.Status = TaskEnded
 	e.Outcome = outcome
@@ -167,15 +167,15 @@ func validTaskStatus(status TaskStatus) bool {
 }
 
 // ValidFailureCode 检查执行结果或持久化记录中的失败码，空值表示没有失败。
-func ValidFailureCode(code contracts.TaskFailureCode) bool {
+func ValidFailureCode(code TaskFailureCode) bool {
 	switch code {
-	case "", contracts.TaskFailureProviderUnavailable, contracts.TaskFailureProvider,
-		contracts.TaskFailureTool, contracts.TaskFailurePolicyBlocked,
-		contracts.TaskFailureApprovalRequired, contracts.TaskFailureResourceLimit,
-		contracts.TaskFailureStorage, contracts.TaskFailureContract, contracts.TaskFailureBusy,
-		contracts.TaskFailureInterrupted, contracts.TaskFailureRequestCanceled,
-		contracts.TaskFailureRuntimeCancelled, contracts.TaskFailureRuntimeFailed,
-		contracts.TaskFailureRuntimeInvalid:
+	case "", TaskFailureProviderUnavailable, TaskFailureProvider,
+		TaskFailureTool, TaskFailurePolicyBlocked,
+		TaskFailureApprovalRequired, TaskFailureResourceLimit,
+		TaskFailureStorage, TaskFailureContract, TaskFailureBusy,
+		TaskFailureInterrupted, TaskFailureRequestCanceled,
+		TaskFailureRuntimeCancelled, TaskFailureRuntimeFailed,
+		TaskFailureRuntimeInvalid:
 		return true
 	default:
 		return false

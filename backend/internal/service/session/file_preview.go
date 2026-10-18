@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"praxis/internal/contracts"
-	"praxis/internal/request"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 )
 
 const maxPreviewBytes int64 = 1 << 20
@@ -18,38 +18,37 @@ type FilePreview struct {
 	Content string
 }
 
-// PreviewFile 通过持久化会话解析 Workspace，并在授权后委托 Port 读取文本。
-func (s *Service) PreviewFile(ctx context.Context, canonical request.FilePreview) (FilePreview, error) {
+// PreviewFile 接收 canonical 会话身份和路径，在工作区授权后委托 Port 读取文本。
+func (s *Service) PreviewFile(ctx context.Context, sessionID identity.SessionID, path string) (FilePreview, error) {
 	if ctx == nil {
-		return FilePreview{}, contracts.New(contracts.InvalidRequest, "a valid session is required to preview files")
+		return FilePreview{}, fault.New(fault.InvalidRequest, "a valid session is required to preview files")
 	}
 	if err := ctx.Err(); err != nil {
 		return FilePreview{}, err
 	}
-	workspace, err := s.workspaceForSession(ctx, canonical.SessionID)
+	workspace, err := s.workspaceForSession(ctx, sessionID)
 	if err != nil {
 		return FilePreview{}, err
 	}
-	path := canonical.Path
 	if filepath.IsAbs(path) {
 		path, err = filepath.Rel(workspace.Path, path)
 		if err != nil {
-			return FilePreview{}, contracts.New(contracts.InvalidRequest, "only files within the current workspace can be previewed")
+			return FilePreview{}, fault.New(fault.InvalidRequest, "only files within the current workspace can be previewed")
 		}
 	}
 	// IsLocal 拦截词法越界；冒号额外拒绝 Windows 驱动器相对路径与 NTFS 数据流。
 	if !filepath.IsLocal(path) || path == "." || strings.ContainsRune(path, ':') {
-		return FilePreview{}, contracts.New(contracts.InvalidRequest, "only files within the current workspace can be previewed")
+		return FilePreview{}, fault.New(fault.InvalidRequest, "only files within the current workspace can be previewed")
 	}
 	content, err := s.textReader.ReadText(ctx, workspace.Path, path, maxPreviewBytes)
-	if errors.Is(err, contracts.ErrFileTooLarge) {
-		return FilePreview{}, contracts.New(contracts.InvalidRequest, "file exceeds the 1 MiB preview limit")
+	if errors.Is(err, ErrFileTooLarge) {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "file exceeds the 1 MiB preview limit")
 	}
-	if errors.Is(err, contracts.ErrNotRegularFile) {
-		return FilePreview{}, contracts.New(contracts.InvalidRequest, "only regular text files can be previewed")
+	if errors.Is(err, ErrNotRegularFile) {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "only regular text files can be previewed")
 	}
-	if errors.Is(err, contracts.ErrInvalidText) {
-		return FilePreview{}, contracts.New(contracts.InvalidRequest, "only UTF-8 text can be previewed; binary files are not supported")
+	if errors.Is(err, ErrInvalidText) {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "only UTF-8 text can be previewed; binary files are not supported")
 	}
 	if err != nil {
 		return FilePreview{}, err

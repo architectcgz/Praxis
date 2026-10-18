@@ -2,9 +2,8 @@ package toolexecution
 
 import (
 	"bytes"
+	"praxis/internal/core/fault"
 	"reflect"
-
-	"praxis/internal/contracts"
 )
 
 func canTransition(from, to Status) bool {
@@ -31,24 +30,24 @@ func canTransition(from, to Status) bool {
 // ValidateUpdate 检查前后状态的转换与不可变字段；对象本身由输入或状态变更入口检查。
 func ValidateUpdate(before, after Execution) error {
 	if !canTransition(before.Status, after.Status) || before.Status.Terminal() && !reflect.DeepEqual(before, after) || before.BudgetReserved && !after.BudgetReserved {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	if before.ID != after.ID || before.TaskID != after.TaskID || before.TurnID != after.TurnID || before.SessionID != after.SessionID || before.AgentID != after.AgentID || before.ProviderToolCallID != after.ProviderToolCallID || before.Name != after.Name || !bytes.Equal(before.Arguments, after.Arguments) || before.ArgumentsDigest != after.ArgumentsDigest || !before.CreatedAt.Equal(after.CreatedAt) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	changed := !bytes.Equal(before.NormalizedArguments, after.NormalizedArguments) || before.Path != after.Path
 	if changed && (before.Status != StatusRequested || len(before.NormalizedArguments) != 0 || after.Status != StatusPrepared && after.Status != StatusApproved && after.Status != StatusAwaitingApproval && after.Status != StatusDenied) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
-	approvalRevoked := before.Status == StatusApproved && (after.Status == StatusAwaitingApproval || after.Status == StatusPrepared) && after.Approval == (contracts.ApprovalRecord{}) && after.ApprovedAt.IsZero()
+	approvalRevoked := before.Status == StatusApproved && (after.Status == StatusAwaitingApproval || after.Status == StatusPrepared) && after.Approval == (ApprovalRecord{}) && after.ApprovedAt.IsZero()
 	if !approvalRevoked && !before.ApprovedAt.IsZero() && (before.Approval != after.Approval || !before.ApprovedAt.Equal(after.ApprovedAt)) || !before.StartedAt.IsZero() && !before.StartedAt.Equal(after.StartedAt) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	if before.Decision != after.Decision && before.Status != StatusRequested && before.Status != StatusPrepared && after.Status != StatusPrepared {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	if len(after.Reviews) < len(before.Reviews) || len(after.Reviews) > len(before.Reviews)+1 {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	for index, prior := range before.Reviews {
 		current := after.Reviews[index]
@@ -56,16 +55,16 @@ func ValidateUpdate(before, after Execution) error {
 			continue
 		}
 		if index != len(before.Reviews)-1 || before.Status != StatusReviewing || !prior.CompletedAt.IsZero() || current.CompletedAt.IsZero() {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 		current.CompletedAt = prior.CompletedAt
 		current.Assessment = prior.Assessment
 		if current != prior {
-			return contracts.ErrRequestConflict
+			return fault.ErrRequestConflict
 		}
 	}
 	if len(after.Reviews) > len(before.Reviews) && (after.Status != StatusReviewing || !after.LatestReview().CompletedAt.IsZero()) {
-		return contracts.ErrRequestConflict
+		return fault.ErrRequestConflict
 	}
 	return nil
 }

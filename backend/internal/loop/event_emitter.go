@@ -3,9 +3,10 @@ package loop
 import (
 	"errors"
 
-	"praxis/internal/contracts"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/identity"
 	"praxis/internal/core/model"
+	taskmodel "praxis/internal/core/task"
 )
 
 func (r *Runner) emit(event Event) {
@@ -14,10 +15,10 @@ func (r *Runner) emit(event Event) {
 
 // emitModelEvent 为实时模型事件补齐任务归属；工具事件需在 assistant 回执落库后发布。
 func (r *Runner) emitModelEvent(
-	sessionID contracts.SessionID,
-	agentID contracts.AgentID,
-	taskID contracts.TaskID,
-	turnID contracts.TurnID,
+	sessionID identity.SessionID,
+	agentID identity.AgentID,
+	taskID identity.TaskID,
+	turnID identity.TurnID,
 	event model.ModelStreamEvent,
 ) {
 	output := Event{
@@ -43,10 +44,10 @@ func (r *Runner) emitModelEvent(
 }
 
 func (r *Runner) emitToolResult(
-	sessionID contracts.SessionID,
-	agentID contracts.AgentID,
-	taskID contracts.TaskID,
-	turnID contracts.TurnID,
+	sessionID identity.SessionID,
+	agentID identity.AgentID,
+	taskID identity.TaskID,
+	turnID identity.TurnID,
 	block appcontext.ContextBlock,
 ) {
 	r.emit(Event{
@@ -62,7 +63,7 @@ func (r *Runner) emitToolResult(
 	})
 }
 
-func (r *Runner) emitError(agentID contracts.AgentID, taskID contracts.TaskID, turnID contracts.TurnID, err error) {
+func (r *Runner) emitError(agentID identity.AgentID, taskID identity.TaskID, turnID identity.TurnID, err error) {
 	if err == nil {
 		return
 	}
@@ -73,7 +74,7 @@ func (r *Runner) emitError(agentID contracts.AgentID, taskID contracts.TaskID, t
 	} else {
 		var failure *taskFailure
 		if errors.As(err, &failure) {
-			if detail := contracts.TaskFailureMessage(failure.code, failure.cause); detail != "" {
+			if detail := taskmodel.TaskFailureMessage(failure.code, failure.cause); detail != "" {
 				message = detail
 			}
 		}

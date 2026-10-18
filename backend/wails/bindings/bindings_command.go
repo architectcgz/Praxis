@@ -3,9 +3,8 @@ package bindings
 import (
 	"context"
 
-	"praxis/internal/contracts"
+	agentcontracts "praxis/internal/app/agent/contracts"
 	"praxis/internal/request"
-	"praxis/internal/service"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -23,9 +22,9 @@ func (b *CommandBindings) SendInput(wire dto.SendInputRequest) (dto.SendInputRes
 		return dto.SendInputResponse{}, err
 	}
 	canonical, err := request.NewSendInput(request.SendInput{
-		SessionID:      contracts.SessionID(wire.SessionID),
-		AgentID:        contracts.AgentID(wire.AgentID),
-		RequestID:      contracts.RequestID(wire.RequestID),
+		SessionID:      wire.SessionID,
+		AgentID:        wire.AgentID,
+		RequestID:      wire.RequestID,
 		Content:        wire.Content,
 		ProviderID:     wire.ProviderID,
 		ModelID:        wire.ModelID,
@@ -39,7 +38,7 @@ func (b *CommandBindings) SendInput(wire dto.SendInputRequest) (dto.SendInputRes
 		return dto.SendInputResponse{}, publicError(b.runtime, "CommandBindings.SendInput", err)
 	}
 	return dto.SendInputResponse{
-		TaskID:          result.TaskID.String(),
+		TaskID:          result.TaskID,
 		ExistingRequest: result.ExistingRequest,
 		ActivationError: result.ActivationError,
 	}, nil
@@ -49,11 +48,11 @@ func (b *CommandBindings) PauseAgent(wire dto.PauseAgentRequest) (dto.AgentContr
 	if err := validation.ValidateAgentControl(wire); err != nil {
 		return dto.AgentControlResponse{}, err
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (service.ControlResult, error) {
-		return services.Commands.PauseAgent(ctx, request.Control{
-			CommandID:    contracts.AgentControlCommandID(wire.CommandID),
-			AgentID:      contracts.AgentID(wire.AgentID),
-			TargetTaskID: contracts.TaskID(wire.TargetTaskID),
+	return b.controlAgent(func(ctx context.Context, services Services) (agentcontracts.ControlResult, error) {
+		return services.Agents.PauseAgent(ctx, request.Control{
+			CommandID:    wire.CommandID,
+			AgentID:      wire.AgentID,
+			TargetTaskID: wire.TargetTaskID,
 		})
 	})
 }
@@ -62,11 +61,11 @@ func (b *CommandBindings) CancelTask(wire dto.CancelTaskRequest) (dto.AgentContr
 	if err := validation.ValidateAgentControl(wire); err != nil {
 		return dto.AgentControlResponse{}, err
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (service.ControlResult, error) {
-		return services.Commands.CancelTask(ctx, request.Control{
-			CommandID:    contracts.AgentControlCommandID(wire.CommandID),
-			AgentID:      contracts.AgentID(wire.AgentID),
-			TargetTaskID: contracts.TaskID(wire.TargetTaskID),
+	return b.controlAgent(func(ctx context.Context, services Services) (agentcontracts.ControlResult, error) {
+		return services.Agents.CancelTask(ctx, request.Control{
+			CommandID:    wire.CommandID,
+			AgentID:      wire.AgentID,
+			TargetTaskID: wire.TargetTaskID,
 		})
 	})
 }
@@ -81,9 +80,9 @@ func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskRes
 		return dto.QueueTaskResponse{}, err
 	}
 	canonical, err := request.NewEnqueueTask(request.EnqueueTask{
-		ID:             contracts.TaskID(wire.TaskID),
-		RequestID:      contracts.RequestID(wire.RequestID),
-		AgentID:        contracts.AgentID(wire.AgentID),
+		ID:             wire.TaskID,
+		RequestID:      wire.RequestID,
+		AgentID:        wire.AgentID,
 		Prompt:         wire.Prompt,
 		ProviderID:     wire.ProviderID,
 		ModelID:        wire.ModelID,
@@ -97,13 +96,13 @@ func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskRes
 		return dto.QueueTaskResponse{}, publicError(b.runtime, "CommandBindings.QueueTask", err)
 	}
 	return dto.QueueTaskResponse{
-		TaskID:       result.TaskID.String(),
+		TaskID:       result.TaskID,
 		Status:       result.Status,
 		ExistingTask: result.ExistingTask,
 	}, nil
 }
 
-func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (service.ControlResult, error)) (dto.AgentControlResponse, error) {
+func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (agentcontracts.ControlResult, error)) (dto.AgentControlResponse, error) {
 	ctx, services, err := b.runtime.BindingContext()
 	if err != nil {
 		return dto.AgentControlResponse{}, err
@@ -113,9 +112,9 @@ func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (se
 		return dto.AgentControlResponse{}, publicError(b.runtime, "CommandBindings.controlAgent", err)
 	}
 	return dto.AgentControlResponse{
-		CommandID:         result.Command.ID.String(),
-		AgentID:           result.Command.AgentID.String(),
-		TargetTaskID:      result.Command.TargetTaskID.String(),
+		CommandID:         result.Command.ID,
+		AgentID:           result.Command.AgentID,
+		TargetTaskID:      result.Command.TargetTaskID,
 		Kind:              result.Command.Kind,
 		Status:            result.Command.Status,
 		ExistingCommand:   result.ExistingCommand,

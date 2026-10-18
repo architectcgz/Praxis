@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"praxis/internal/contracts"
+	coretool "praxis/internal/core/tool"
 	toolcontracts "praxis/internal/tools/contracts"
 	toolshared "praxis/internal/tools/shared"
 )
@@ -18,11 +18,11 @@ type arguments struct {
 }
 
 // Normalize 校验补丁格式并规范化补丁工作区根目录。
-func Normalize(call contracts.ToolCall, workspacePath string) (toolcontracts.NormalizedToolCall, error) {
+func Normalize(call coretool.ToolCall, workspacePath string) (toolcontracts.NormalizedToolCall, error) {
 	invalidArguments := func(reason string) (toolcontracts.NormalizedToolCall, error) {
 		return toolcontracts.NormalizedToolCall{}, fmt.Errorf("apply_patch arguments are invalid: %s", reason)
 	}
-	if call.Name != toolcontracts.ToolApplyPatch {
+	if call.Name != coretool.ToolApplyPatch {
 		return toolcontracts.NormalizedToolCall{}, errors.New("tool is not registered")
 	}
 	if err := toolshared.RejectDuplicateFields(call.Arguments); err != nil {

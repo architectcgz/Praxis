@@ -5,7 +5,8 @@ import (
 	"context"
 	"errors"
 
-	"praxis/internal/contracts"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	sessionmodel "praxis/internal/core/session"
 	toolmodel "praxis/internal/core/tool_execution"
 	"praxis/internal/repository"
@@ -51,24 +52,24 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				return err
 			}
 			if invocation.TurnID.String() != record.Data.TurnID || string(invocation.Name) != block.Name {
-				return contracts.ErrRequestConflict
+				return fault.ErrRequestConflict
 			}
 			switch block.Kind {
 			case sessionmodel.BlockToolCall:
 				if _, exists := pending(key); exists {
-					return contracts.ErrRequestConflict
+					return fault.ErrRequestConflict
 				}
 				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
 					return errors.New("tool call declaration must be committed with a new execution identity")
 				}
 				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolmodel.ArgumentsDigest(invocation.Name, block.Input) {
-					return contracts.ErrRequestConflict
+					return fault.ErrRequestConflict
 				}
 				fact := repository.MissingToolResult{
-					SessionID: contracts.SessionID(tx.scope),
+					SessionID: identity.SessionID(tx.scope),
 					AgentID:   record.AgentID,
-					TaskID:    contracts.TaskID(record.Data.TaskID),
-					TurnID:    contracts.TurnID(record.Data.TurnID),
+					TaskID:    identity.TaskID(record.Data.TaskID),
+					TurnID:    identity.TurnID(record.Data.TurnID),
 					CallID:    block.CallID,
 					RequestID: record.Data.RequestID,
 					Name:      block.Name,

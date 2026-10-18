@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"praxis/internal/contracts"
+
 	agentmodel "praxis/internal/core/agent"
 	contextmodel "praxis/internal/core/context"
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 )
@@ -35,7 +37,7 @@ func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, con
 		if message.Sequence > stream.SequenceBoundary || message.Role != sessionmodel.RoleUser || message.TaskID == "" || message.ID == inputMessageID {
 			continue
 		}
-		task, err := s.tasks.Get(ctx, contracts.TaskID(message.TaskID))
+		task, err := s.tasks.Get(ctx, identity.TaskID(message.TaskID))
 		if err != nil {
 			return taskmodel.ContextSelection{}, err
 		}
@@ -113,7 +115,7 @@ func selectTaskMessages(messages []sessionmodel.MessageData, selection taskmodel
 	return selectedMessages, continuation
 }
 
-func (s *Service) loadContextEntries(ctx context.Context, sessionID contracts.SessionID) ([]sessionmodel.SessionContextEntry, error) {
+func (s *Service) loadContextEntries(ctx context.Context, sessionID identity.SessionID) ([]sessionmodel.SessionContextEntry, error) {
 	var entries []sessionmodel.SessionContextEntry
 	for afterID := ""; ; {
 		page, err := s.contexts.List(ctx, sessionID, afterID, 512)
@@ -147,12 +149,12 @@ func (s *Service) LoadContext(ctx context.Context, task taskmodel.Task) (context
 		messages, next := selectTaskMessages(stream.Messages, task.ContextSelection, task.InputMessageID, task.ID.String())
 		shared := make([]sessionmodel.SessionContextEntry, 0, len(task.ContextSelection.SessionContextRefs))
 		for _, ref := range task.ContextSelection.SessionContextRefs {
-			entry, ok, err := s.contexts.GetByID(txCtx, contracts.ContextEntryID(ref.ID))
+			entry, ok, err := s.contexts.GetByID(txCtx, identity.ContextEntryID(ref.ID))
 			if err != nil {
 				return err
 			}
 			if !ok || entry.SessionID != task.SessionID || entry.ContentDigest != ref.Digest {
-				return fmt.Errorf("frozen context entry %s: %w", ref.ID, contracts.ErrRevisionConflict)
+				return fmt.Errorf("frozen context entry %s: %w", ref.ID, fault.ErrRevisionConflict)
 			}
 			shared = append(shared, entry)
 		}

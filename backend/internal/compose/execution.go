@@ -4,8 +4,8 @@ import (
 	"context"
 	"math"
 
-	"praxis/internal/contracts"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/identity"
 	"praxis/internal/repository"
 )
 
@@ -16,12 +16,12 @@ type recoverySource struct {
 	agents   repository.SessionAgentRepository
 }
 
-func (s recoverySource) ListDispatchableAgents(ctx context.Context) ([]contracts.AgentID, error) {
+func (s recoverySource) ListDispatchableAgents(ctx context.Context) ([]identity.AgentID, error) {
 	sessions, err := s.sessions.List(ctx, math.MaxInt)
 	if err != nil {
 		return nil, err
 	}
-	var ids []contracts.AgentID
+	var ids []identity.AgentID
 	for _, session := range sessions {
 		agents, err := s.agents.ListBySession(ctx, session.ID, math.MaxInt)
 		if err != nil {

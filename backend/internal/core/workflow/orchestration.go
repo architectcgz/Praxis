@@ -1,9 +1,9 @@
 package workflow
 
 import (
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"time"
-
-	"praxis/internal/contracts"
 )
 
 type WaitConditionKind string
@@ -30,9 +30,9 @@ const (
 )
 
 type WaitCondition struct {
-	ID                contracts.WaitConditionID
-	AgentID           contracts.AgentID
-	TaskID            contracts.TaskID
+	ID                identity.WaitConditionID
+	AgentID           identity.AgentID
+	TaskID            identity.TaskID
 	Kind              WaitConditionKind
 	Mode              WaitConditionMode
 	TargetIDs         []string
@@ -44,7 +44,7 @@ type WaitCondition struct {
 
 func (w *WaitCondition) Cancel(at time.Time) error {
 	if w.Status != WaitPending {
-		return contracts.InvalidTransition("waitCondition", string(w.Status), string(WaitCancelled))
+		return fault.InvalidTransition("waitCondition", string(w.Status), string(WaitCancelled))
 	}
 	w.Status = WaitCancelled
 	w.ResolvedAt = at.UTC()

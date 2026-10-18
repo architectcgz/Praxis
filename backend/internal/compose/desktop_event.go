@@ -3,20 +3,20 @@ package compose
 import (
 	"bytes"
 
+	agentcontracts "praxis/internal/app/agent/contracts"
+	appusage "praxis/internal/app/usage"
 	"praxis/internal/loop"
-	appservices "praxis/internal/service"
 	"praxis/internal/service/task"
-	"praxis/internal/timing"
 )
 
-// desktopAgentEvent 将 Loop 事件转换为稳定的前端通知。
-func desktopAgentEvent(event loop.Event) appservices.AgentEvent {
-	result := appservices.AgentEvent{
+// desktopAgentEvent 将执行循环事件转换为公开通知，Loop 不依赖应用契约。
+func desktopAgentEvent(event loop.Event) agentcontracts.AgentEvent {
+	result := agentcontracts.AgentEvent{
 		Kind:      string(event.Kind),
-		SessionID: event.SessionID,
-		AgentID:   event.AgentID,
-		TaskID:    event.TaskID,
-		TurnID:    event.TurnID,
+		SessionID: event.SessionID.String(),
+		AgentID:   event.AgentID.String(),
+		TaskID:    event.TaskID.String(),
+		TurnID:    event.TurnID.String(),
 		Text:      event.Text,
 		CallID:    event.CallID,
 		Name:      event.Name,
@@ -26,51 +26,20 @@ func desktopAgentEvent(event loop.Event) appservices.AgentEvent {
 		Error:     event.Error,
 	}
 	if event.Usage != nil {
-		result.Usage = &appservices.ModelUsage{
-			InputTokens:              event.Usage.InputTokens,
-			OutputTokens:             cloneValue(event.Usage.OutputTokens),
-			CacheReadInputTokens:     cloneValue(event.Usage.CacheReadInputTokens),
-			CacheCreationInputTokens: cloneValue(event.Usage.CacheCreationInputTokens),
-		}
+		usage := appusage.PublicUsage(*event.Usage)
+		result.Usage = &usage
 	}
 	return result
 }
 
-func terminalAgentEvent(event task.TerminalEvent) appservices.AgentEvent {
-	return appservices.AgentEvent{
+func terminalAgentEvent(event task.TerminalEvent) agentcontracts.AgentEvent {
+	return agentcontracts.AgentEvent{
 		Kind:           event.Kind,
-		SessionID:      event.SessionID,
-		AgentID:        event.AgentID,
-		TaskID:         event.TaskID,
+		SessionID:      event.SessionID.String(),
+		AgentID:        event.AgentID.String(),
+		TaskID:         event.TaskID.String(),
 		Outcome:        event.Outcome,
 		FailureCode:    string(event.FailureCode),
 		FailureMessage: event.FailureMessage,
 	}
-}
-
-func desktopTiming(record timing.Record) appservices.OperationTiming {
-	return appservices.OperationTiming{
-		SessionID:       record.SessionID,
-		AgentID:         record.AgentID,
-		TaskID:          record.TaskID,
-		Kind:            string(record.Kind),
-		Name:            record.Name,
-		ReferenceID:     record.ReferenceID,
-		ID:              record.ID,
-		ParentID:        record.ParentID,
-		StartedAt:       record.StartedAt,
-		FinishedAt:      record.FinishedAt,
-		DurationMS:      cloneValue(record.DurationMS),
-		FirstResponseMS: cloneValue(record.FirstResponseMS),
-		Status:          string(record.Status),
-		Revision:        record.Revision,
-	}
-}
-
-func cloneValue[T any](value *T) *T {
-	if value == nil {
-		return nil
-	}
-	copied := *value
-	return &copied
 }

@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"praxis/internal/contracts"
 	task "praxis/internal/core/task"
 
+	"praxis/internal/core/fault"
+	"praxis/internal/core/identity"
 	"time"
 )
 
@@ -21,12 +22,12 @@ const (
 
 // Agent 表示绑定到一个 Session 和一个 AgentDefinition 的运行实例。
 type Agent struct {
-	ID            contracts.AgentID
-	SessionID     contracts.SessionID
-	DefinitionID  contracts.AgentDefinitionID
-	Profile       contracts.AgentProfile
+	ID            identity.AgentID
+	SessionID     identity.SessionID
+	DefinitionID  identity.AgentDefinitionID
+	Profile       AgentProfile
 	State         AgentState
-	CurrentTaskID contracts.TaskID
+	CurrentTaskID identity.TaskID
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -47,7 +48,7 @@ func (a Agent) CanReadSessionContext() bool {
 }
 
 // NewAgent 使用已校验的身份与 Agent 定义创建 idle 实例，不重复检查入口字段。
-func NewAgent(id contracts.AgentID, sessionID contracts.SessionID, definitionID contracts.AgentDefinitionID, profile contracts.AgentProfile, at time.Time) Agent {
+func NewAgent(id identity.AgentID, sessionID identity.SessionID, definitionID identity.AgentDefinitionID, profile AgentProfile, at time.Time) Agent {
 	return Agent{
 		ID:           id,
 		SessionID:    sessionID,
@@ -59,12 +60,12 @@ func NewAgent(id contracts.AgentID, sessionID contracts.SessionID, definitionID 
 	}
 }
 
-func (a *Agent) Start(taskID contracts.TaskID, at time.Time) error {
+func (a *Agent) Start(taskID identity.TaskID, at time.Time) error {
 	if !a.State.Startable() {
-		return contracts.InvalidTransition("agent", string(a.State), string(AgentExecuting))
+		return fault.InvalidTransition("agent", string(a.State), string(AgentExecuting))
 	}
 	if taskID == "" {
-		return contracts.InvalidValue("agent.currentTaskID", "task id is required")
+		return fault.InvalidValue("agent.currentTaskID", "task id is required")
 	}
 	a.State, a.CurrentTaskID, a.UpdatedAt = AgentExecuting, taskID, at.UTC()
 	return nil
@@ -72,7 +73,7 @@ func (a *Agent) Start(taskID contracts.TaskID, at time.Time) error {
 
 func (a *Agent) RequestPause(at time.Time) error {
 	if a.State != AgentExecuting {
-		return contracts.InvalidTransition("agent", string(a.State), string(AgentPausing))
+		return fault.InvalidTransition("agent", string(a.State), string(AgentPausing))
 	}
 	a.State, a.UpdatedAt = AgentPausing, at.UTC()
 	return nil
@@ -81,13 +82,13 @@ func (a *Agent) RequestPause(at time.Time) error {
 // EndTask 根据本轮最终结果释放活动回合；中断后仍可开始新回合。
 func (a *Agent) EndTask(outcome task.TaskOutcome, at time.Time) error {
 	if a.State != AgentExecuting && a.State != AgentPausing {
-		return contracts.InvalidTransition("agent", string(a.State), "ended")
+		return fault.InvalidTransition("agent", string(a.State), "ended")
 	}
 	if !task.ValidTaskOutcome(outcome) {
-		return contracts.InvalidValue("agent.outcome", "unknown task outcome")
+		return fault.InvalidValue("agent.outcome", "unknown task outcome")
 	}
 	if outcome == task.TaskPaused && a.State != AgentPausing {
-		return contracts.InvalidTransition("agent", string(a.State), string(AgentPaused))
+		return fault.InvalidTransition("agent", string(a.State), string(AgentPaused))
 	}
 	switch outcome {
 	case task.TaskCompleted:

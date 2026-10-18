@@ -1,6 +1,7 @@
 package bash
 
 import (
+	coretool "praxis/internal/core/tool"
 	toolmodel "praxis/internal/core/tool_execution"
 	toolcontracts "praxis/internal/tools/contracts"
 	"praxis/internal/utils/pathutil"
@@ -52,7 +53,7 @@ func Execute(ctx context.Context, call toolcontracts.ExecutionCall) (toolcontrac
 	if err := ctx.Err(); err != nil {
 		return toolcontracts.ToolResult{}, err
 	}
-	if call.Name != toolcontracts.ToolBash {
+	if call.Name != coretool.ToolBash {
 		return toolcontracts.ToolResult{}, errors.New("bash executor does not support the call")
 	}
 	if !workspaceDirectory(call.Path, call.WorkspacePath) {
