@@ -84,7 +84,7 @@ export function createAgentStore() {
         receive(event: AgentEvent) {
             if (!data.byId[event.agentId]) return
             if (event.kind === 'turn_started') {
-                updateEntry(event.agentId, (entry) => ({ ...entry, agent: { ...entry.agent, state: entry.agent.state === 'pausing' ? 'pausing' : 'executing', currentTaskId: event.taskId } }))
+                updateEntry(event.agentId, (entry) => ({ ...entry, agent: { ...entry.agent, state: entry.agent.state === 'pausing' ? 'pausing' : 'executing', currentExecutionId: event.executionId } }))
                 return
             }
             const streamingOutputs = mergeStreamingEvent(output.streamingOutputs, event)
@@ -94,8 +94,8 @@ export function createAgentStore() {
         beginInput(message: PendingUserMessage) {
             updateOutput({ ...output, pendingUserMessages: [...output.pendingUserMessages, message], awaitingAgentId: message.agentId })
         },
-        acceptInput(requestId: string, taskId: string) {
-            updateOutput({ ...output, pendingUserMessages: output.pendingUserMessages.map((message) => message.requestId === requestId ? { ...message, taskId } : message) })
+        acceptInput(requestId: string, executionId: string) {
+            updateOutput({ ...output, pendingUserMessages: output.pendingUserMessages.map((message) => message.requestId === requestId ? { ...message, executionId } : message) })
             for (const id of data.ids) reconcile(id)
         },
         rejectInput(requestId: string) {

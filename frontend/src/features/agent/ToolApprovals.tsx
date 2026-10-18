@@ -34,7 +34,7 @@ export function ToolApprovalsProvider({ agentId, children }: { agentId: string; 
     }, [agentId])
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents((event) => {
-            if (event.agentId === agentId && ['tool_approval_required', 'tool_result', 'task_ended', 'request_canceled'].includes(event.kind)) void reload()
+            if (event.agentId === agentId && ['tool_approval_required', 'tool_result', 'execution_ended', 'request_canceled'].includes(event.kind)) void reload()
         })
         void reload()
         return () => { requestGeneration.current += 1; unsubscribe() }
@@ -53,9 +53,9 @@ export function ToolApprovalsProvider({ agentId, children }: { agentId: string; 
 }
 
 /** 按任务与调用身份关联审核，供活动账本读取后端冻结的参数。 */
-export function useToolApproval(taskId: string, callId?: string) {
+export function useToolApproval(executionId: string, callId?: string) {
     const approvals = useContext(ToolApprovalsContext)
-    return approvals ? { ...approvals, pendingApproval: approvals.pendingApprovals.find((pendingApproval) => pendingApproval.taskId === taskId && pendingApproval.callId === callId) } : null
+    return approvals ? { ...approvals, pendingApproval: approvals.pendingApprovals.find((pendingApproval) => pendingApproval.executionId === executionId && pendingApproval.callId === callId) } : null
 }
 
 /**

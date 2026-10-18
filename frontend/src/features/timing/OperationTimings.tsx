@@ -32,7 +32,7 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
         const unsubscribe = subscribeAgentEvents((event) => {
             if (!ids.has(event.agentId)) return
             if (event.kind === 'operation_timing' && event.timing) setRecords((current) => mergeTimings(current, [event.timing!]))
-            if (event.kind === 'task_ended' || event.kind === 'request_canceled') void load(event.agentId)
+            if (event.kind === 'execution_ended' || event.kind === 'request_canceled') void load(event.agentId)
         })
         for (const id of ids) void load(id)
         return () => { active = false; unsubscribe() }
@@ -44,8 +44,8 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
 }
 
 /** 查找关联操作的独立计时记录；没有记录时返回 undefined。 */
-export function useOperationTiming(taskId: string, kind: OperationTiming['kind'], referenceId?: string) {
-    return findTiming(useContext(TimingContext), taskId, kind, referenceId)
+export function useOperationTiming(executionId: string, kind: OperationTiming['kind'], referenceId?: string) {
+    return findTiming(useContext(TimingContext), executionId, kind, referenceId)
 }
 
 /** 运行中显示估算值，结束后只显示后端单调时钟测量值；异常退出不持续计时。
@@ -71,12 +71,12 @@ export function DurationLabel({ record, label = '耗时', compact = false }: { r
 }
 
 /** 将计时标签关联到消息或工具卡片，不把计时信息拼进业务内容。 */
-export function OperationDuration({ taskId, kind, referenceId, label }: { taskId: string; kind: OperationTiming['kind']; referenceId?: string; label?: string }) {
-    return <DurationLabel record={useOperationTiming(taskId, kind, referenceId)} label={label} />
+export function OperationDuration({ executionId, kind, referenceId, label }: { executionId: string; kind: OperationTiming['kind']; referenceId?: string; label?: string }) {
+    return <DurationLabel record={useOperationTiming(executionId, kind, referenceId)} label={label} />
 }
 
 /** 在当前 Agent 名称旁显示执行中的总计时；执行结束或计时缺失时不展示。 */
-export function AgentRuntime({ taskId }: { taskId: string }) {
-    const record = useOperationTiming(taskId, 'agent')
+export function AgentDuration({ executionId }: { executionId: string }) {
+    const record = useOperationTiming(executionId, 'agent')
     return record?.status === 'running' ? <DurationLabel record={record} label="运行中" /> : null
 }

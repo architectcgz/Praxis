@@ -10,25 +10,25 @@ func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
 	path, err := services.SessionLogPath(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return publicError(b.runtime, "SessionBindings.RevealSessionFile", err)
+		return publicError(b.host, "SessionBindings.RevealSessionFile", err)
 	}
 	command, err := revealFileCommand(path)
 	if err != nil {
-		return publicError(b.runtime, "SessionBindings.RevealSessionFile", err)
+		return publicError(b.host, "SessionBindings.RevealSessionFile", err)
 	}
 	if err := command.Start(); err != nil {
-		return publicError(b.runtime, "SessionBindings.RevealSessionFile", err)
+		return publicError(b.host, "SessionBindings.RevealSessionFile", err)
 	}
 	// 文件管理器可能持续运行，不阻塞 binding；后台等待以释放子进程资源。
 	go func() {
 		if err := command.Wait(); err != nil {
-			b.runtime.LogError("session file manager exited: %v", err)
+			b.host.LogError("session file manager exited: %v", err)
 		}
 	}()
 	return nil

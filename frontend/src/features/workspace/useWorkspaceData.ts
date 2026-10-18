@@ -209,7 +209,7 @@ export function useWorkspaceData() {
     useEffect(() => {
         let active = true
         const unsubscribe = subscribeAgentEvents((event) => {
-            if ((event.kind !== 'task_ended' && event.kind !== 'request_canceled') || !event.sessionId) return
+            if ((event.kind !== 'execution_ended' && event.kind !== 'request_canceled') || !event.sessionId) return
             const id = event.sessionId
             const request = (sessionMetadataRequests.current.get(id) || 0) + 1
             sessionMetadataRequests.current.set(id, request)

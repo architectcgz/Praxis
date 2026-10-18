@@ -3,17 +3,17 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"praxis/internal/infra/agentregistry"
 	"sync"
 
-	"praxis/internal/agent"
-	"praxis/internal/hook"
+	"praxis/internal/core/hook"
 	"praxis/internal/identity"
-	"praxis/internal/session"
-	"praxis/internal/storage/jsonl"
-	"praxis/internal/workspace/fs"
+	"praxis/internal/infra/filesystem"
+	"praxis/internal/infra/jsonl"
+	"praxis/internal/service/session"
 )
 
-func buildSessions(resources storageResources, repos jsonl.Repositories, agents *agent.Registry, hooks *hook.Dispatcher, configMu *sync.RWMutex) (*session.Service, error) {
+func buildSessions(resources storageResources, repos jsonl.Repositories, agents *agentregistry.Registry, hooks *hook.Dispatcher, configMu *sync.RWMutex) (*session.Service, error) {
 	usages := jsonl.ModelUsageStore{Store: resources.store}
 	return session.NewService(session.Dependencies{
 		ConfigMu:       configMu,

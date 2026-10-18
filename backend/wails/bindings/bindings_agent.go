@@ -2,35 +2,38 @@ package bindings
 
 import (
 	"bytes"
-	"praxis/internal/agent"
+	"praxis/internal/service/agent"
 	"strings"
 
+	"praxis/internal/core/message"
 	"praxis/internal/identity"
-	"praxis/internal/message"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
-type AgentBindings struct{ runtime Runtime }
+type AgentBindings struct{ host Host }
 
 func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 	if err := validation.ValidateAgentID(agentID); err != nil {
 		return dto.AgentSnapshot{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.AgentSnapshot{}, err
 	}
 	view, err := services.Agents.GetAgentView(ctx, identity.AgentID(agentID), 100)
 	if err != nil {
-		return dto.AgentSnapshot{}, publicError(b.runtime, "AgentBindings.GetAgent", err)
+		return dto.AgentSnapshot{}, publicError(b.host, "AgentBindings.GetAgent", err)
 	}
 	result := agentSnapshot(view.Agent)
-	result.ExecutionIDs = make([]string, 0, len(view.Tasks))
-	result.ControlCommandIDs = make([]string, 0, len(view.Controls))
 	for _, value := range view.Tasks {
+		result.Tasks = append(result.Tasks, dto.QueuedTaskSnapshot{ID: value.ID.String(), Status: string(value.Status), Sequence: value.Sequence, ExecutionID: value.ExecutionID.String(), CreatedAt: value.CreatedAt})
+	}
+	result.ExecutionIDs = make([]string, 0, len(view.Executions))
+	result.ControlCommandIDs = make([]string, 0, len(view.Controls))
+	for _, value := range view.Executions {
 		result.ExecutionIDs = append(result.ExecutionIDs, value.ID.String())
-		result.Tasks = append(result.Tasks, taskSnapshot(value))
+		result.Executions = append(result.Executions, executionSnapshot(value))
 	}
 	for _, value := range view.Controls {
 		result.ControlCommandIDs = append(result.ControlCommandIDs, value.ID.String())
@@ -42,13 +45,13 @@ func (b *AgentBindings) ListAgentMessages(agentID string) ([]dto.AgentMessage, e
 	if err := validation.ValidateAgentID(agentID); err != nil {
 		return nil, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	messages, err := services.Agents.ListAgentMessages(ctx, identity.AgentID(agentID), 200)
 	if err != nil {
-		return nil, publicError(b.runtime, "AgentBindings.ListAgentMessages", err)
+		return nil, publicError(b.host, "AgentBindings.ListAgentMessages", err)
 	}
 	return publicAgentMessages(messages), nil
 }
@@ -57,27 +60,28 @@ func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHisto
 	if err := validation.ValidateAgentID(agentID); err != nil {
 		return dto.AgentHistoryPage{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.AgentHistoryPage{}, err
 	}
 	page, err := listAgentHistory(ctx, services.Agents, identity.AgentID(agentID), before, 200)
 	if err != nil {
-		return dto.AgentHistoryPage{}, publicError(b.runtime, "AgentBindings.ListAgentHistory", err)
+		return dto.AgentHistoryPage{}, publicError(b.host, "AgentBindings.ListAgentHistory", err)
 	}
 	return page, nil
 }
 
 func agentSnapshot(value agent.Agent) dto.AgentSnapshot {
 	return dto.AgentSnapshot{
-		ID:               value.ID.String(),
-		Name:             agent.DisplayName(value.DefinitionID),
-		SessionID:        value.SessionID.String(),
-		DefinitionID:     value.DefinitionID.String(),
-		Profile:          string(value.Profile),
-		State:            string(value.State),
-		CurrentExecution: value.CurrentExecutionID.String(),
-		Tasks:            []dto.TaskSnapshot{},
+		Tasks:              []dto.QueuedTaskSnapshot{},
+		ID:                 value.ID.String(),
+		Name:               agent.DisplayName(value.DefinitionID),
+		SessionID:          value.SessionID.String(),
+		DefinitionID:       value.DefinitionID.String(),
+		Profile:            string(value.Profile),
+		State:              string(value.State),
+		CurrentExecutionID: value.CurrentExecutionID.String(),
+		Executions:         []dto.ExecutionSnapshot{},
 	}
 }
 
@@ -110,23 +114,25 @@ func publicAgentMessages(values []message.Message) []dto.AgentMessage {
 			continue
 		}
 		result = append(result, dto.AgentMessage{
-			ID:          value.ID,
-			Sequence:    value.Sequence,
-			At:          value.CreatedAt,
-			ExecutionID: value.ExecutionID,
-			Role:        string(value.Role),
-			AuthorKind:  string(value.AuthorKind),
-			AuthorID:    value.AuthorID,
-			Content:     content.String(),
-			Thinking:    thinking.String(),
-			Blocks:      blocks,
+			SourceTaskID: value.SourceTaskID,
+			ID:           value.ID,
+			Sequence:     value.Sequence,
+			At:           value.CreatedAt,
+			ExecutionID:  value.ExecutionID,
+			Role:         string(value.Role),
+			AuthorKind:   string(value.AuthorKind),
+			AuthorID:     value.AuthorID,
+			Content:      content.String(),
+			Thinking:     thinking.String(),
+			Blocks:       blocks,
 		})
 	}
 	return result
 }
 
-func taskSnapshot(value agent.Execution) dto.TaskSnapshot {
-	return dto.TaskSnapshot{
+func executionSnapshot(value agent.Execution) dto.ExecutionSnapshot {
+	return dto.ExecutionSnapshot{
+		SourceTaskID:   value.SourceTaskID.String(),
 		ID:             value.ID.String(),
 		Status:         string(value.Status),
 		Outcome:        string(value.Outcome),

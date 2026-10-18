@@ -10,13 +10,13 @@ func (b *AgentBindings) ListAgentTimings(agentID string) ([]dto.OperationTiming,
 	if err := validation.ValidateAgentID(agentID); err != nil {
 		return nil, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	records, err := services.Timings.ListAgent(ctx, agentID, 2000)
 	if err != nil {
-		return nil, publicError(b.runtime, "AgentBindings.ListAgentTimings", err)
+		return nil, publicError(b.host, "AgentBindings.ListAgentTimings", err)
 	}
 	result := make([]dto.OperationTiming, 0, len(records))
 	for _, record := range records {

@@ -35,7 +35,7 @@ export function useAgentData({ models, setError, setErrorCode, viewRequestRef }:
         if (generation.current !== sessionRequest || requests.current.get(id) !== request) return
         const currentAgent = store.getData().byId[id].agent
         // 查询期间新任务已开始时，保留事件确认的新任务身份。
-        const nextAgent = agentResult.status === 'fulfilled' && currentAgent.currentTaskId === entry.agent.currentTaskId ? agentResult.value : currentAgent
+        const nextAgent = agentResult.status === 'fulfilled' && currentAgent.currentExecutionId === entry.agent.currentExecutionId ? agentResult.value : currentAgent
         const error = agentResult.status === 'rejected' ? agentResult.reason : historyResult.status === 'rejected' ? historyResult.reason : undefined
         store.loaded(id, nextAgent, historyResult.status === 'fulfilled' ? historyResult.value : undefined, error ? readableError(error) : '')
         if (error && store.getSelectedAgentID() === id) {
@@ -89,7 +89,7 @@ export function useAgentData({ models, setError, setErrorCode, viewRequestRef }:
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents((event) => {
             store.receive(event)
-            if (event.kind === 'task_ended' || event.kind === 'request_canceled') void loadAgent(event.agentId)
+            if (event.kind === 'execution_ended' || event.kind === 'request_canceled') void loadAgent(event.agentId)
         })
         return () => { generation.current += 1; unsubscribe() }
     }, [store, loadAgent])

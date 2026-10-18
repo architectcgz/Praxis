@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/fault"
-	modelconfig "praxis/internal/model/config"
 	"praxis/wails/dto"
 )
 

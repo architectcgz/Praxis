@@ -5,25 +5,25 @@ import (
 
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/session"
+	"praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
-type SessionBindings struct{ runtime Runtime }
+type SessionBindings struct{ host Host }
 
 // ListSessions 返回指定项目的持久化会话。
 func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, error) {
 	if err := validation.ValidateProjectID(projectID); err != nil {
 		return nil, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	values, err := services.Sessions.ListSessionsByProject(ctx, identity.ProjectID(projectID), 100)
 	if err != nil {
-		return nil, publicError(b.runtime, "SessionBindings.ListSessions", err)
+		return nil, publicError(b.host, "SessionBindings.ListSessions", err)
 	}
 	result := make([]dto.SessionSummary, 0, len(values))
 	for _, value := range values {
@@ -36,7 +36,7 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	if err := validation.ValidateCreateSession(wire); err != nil {
 		return dto.CreateSessionResponse{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.CreateSessionResponse{}, err
 	}
@@ -50,7 +50,7 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	}
 	result, err := services.Sessions.CreateSession(ctx, params)
 	if err != nil {
-		return dto.CreateSessionResponse{}, publicError(b.runtime, "SessionBindings.CreateSession", err)
+		return dto.CreateSessionResponse{}, publicError(b.host, "SessionBindings.CreateSession", err)
 	}
 	return dto.CreateSessionResponse{
 		SessionID:         result.Session.ID.String(),
@@ -65,13 +65,13 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return dto.SessionSnapshot{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.SessionSnapshot{}, err
 	}
 	view, err := services.Sessions.GetSessionView(ctx, identity.SessionID(sessionID), 100)
 	if err != nil {
-		return dto.SessionSnapshot{}, publicError(b.runtime, "SessionBindings.GetSession", err)
+		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession", err)
 	}
 	result := dto.SessionSnapshot{
 		ID:          view.Session.ID.String(),
@@ -93,13 +93,13 @@ func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionU
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return dto.SessionUsageSummary{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.SessionUsageSummary{}, err
 	}
 	value, err := services.Usages.GetSessionUsageSummary(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return dto.SessionUsageSummary{}, publicError(b.runtime, "SessionBindings.GetSessionUsageSummary", err)
+		return dto.SessionUsageSummary{}, publicError(b.host, "SessionBindings.GetSessionUsageSummary", err)
 	}
 	return dto.SessionUsageSummary{
 		Records:              usageRecords(value.Records),
@@ -114,12 +114,12 @@ func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
 	if err := services.Sessions.DeleteSession(ctx, identity.SessionID(sessionID)); err != nil {
-		return publicError(b.runtime, "SessionBindings.DeleteSession", err)
+		return publicError(b.host, "SessionBindings.DeleteSession", err)
 	}
 	return nil
 }
@@ -131,14 +131,14 @@ func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		err := fault.InvalidValue("title", "session title is required")
-		return publicError(b.runtime, "SessionBindings.RenameSession.request", err)
+		return publicError(b.host, "SessionBindings.RenameSession.request", err)
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
 	if err := services.Sessions.RenameSession(ctx, identity.SessionID(sessionID), title); err != nil {
-		return publicError(b.runtime, "SessionBindings.RenameSession", err)
+		return publicError(b.host, "SessionBindings.RenameSession", err)
 	}
 	return nil
 }

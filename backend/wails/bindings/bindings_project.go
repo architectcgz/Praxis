@@ -6,38 +6,38 @@ import (
 
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	projectmodel "praxis/internal/project"
+	projectmodel "praxis/internal/service/project"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type ProjectBindings struct {
-	runtime Runtime
+	host Host
 }
 
 // SelectProjectPath 打开系统目录选择器并返回选中的项目路径；用户取消时返回空字符串。
 func (b *ProjectBindings) SelectProjectPath() (string, error) {
-	ctx, _, err := b.runtime.BindingContext()
+	ctx, _, err := b.host.BindingContext()
 	if err != nil {
 		return "", err
 	}
-	path, err := runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{Title: "选择项目路径"})
+	path, err := wailsruntime.OpenDirectoryDialog(ctx, wailsruntime.OpenDialogOptions{Title: "选择项目路径"})
 	if err != nil {
-		return "", publicError(b.runtime, "ProjectBindings.SelectProjectPath", err)
+		return "", publicError(b.host, "ProjectBindings.SelectProjectPath", err)
 	}
 	return path, nil
 }
 
 func (b *ProjectBindings) ListProjects() ([]dto.ProjectSummary, error) {
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	projects, err := services.Projects.ListProjects(ctx, 100)
 	if err != nil {
-		return nil, publicError(b.runtime, "ProjectBindings.ListProjects", err)
+		return nil, publicError(b.host, "ProjectBindings.ListProjects", err)
 	}
 	result := make([]dto.ProjectSummary, 0, len(projects))
 	for _, project := range projects {
@@ -56,7 +56,7 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 	if err := validation.ValidateCreateProject(wire); err != nil {
 		return dto.CreateProjectResponse{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.CreateProjectResponse{}, err
 	}
@@ -70,11 +70,11 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 	if params.Name == "" || strings.ContainsAny(params.Name, "\\/:*?\"<>|\x00\r\n") ||
 		params.Name == "." || params.Name == ".." || !filepath.IsAbs(params.Path) || strings.ContainsAny(params.Path, "\x00\r\n") {
 		err := fault.New(projectmodel.ProjectWorkspaceInvalid, "")
-		return dto.CreateProjectResponse{}, publicError(b.runtime, "ProjectBindings.CreateProject.request", err)
+		return dto.CreateProjectResponse{}, publicError(b.host, "ProjectBindings.CreateProject.request", err)
 	}
 	result, err := services.Projects.CreateProject(ctx, params)
 	if err != nil {
-		return dto.CreateProjectResponse{}, publicError(b.runtime, "ProjectBindings.CreateProject", err)
+		return dto.CreateProjectResponse{}, publicError(b.host, "ProjectBindings.CreateProject", err)
 	}
 	return dto.CreateProjectResponse{
 		ProjectID:   result.Project.ID.String(),

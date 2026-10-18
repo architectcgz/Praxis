@@ -56,7 +56,7 @@ func main() {
 			a.FailStartup(fmt.Errorf("initialize application services: %w", err))
 			return
 		}
-		if err := a.Attach(application.Services(), application.RuntimeLogger(), application); err != nil {
+		if err := a.Attach(application.Services(), application.ApplicationLogger(), application); err != nil {
 			a.FailStartup(fmt.Errorf("attach desktop services: %w", err))
 			if closeErr := application.Close(context.Background()); closeErr != nil {
 				a.LogError("close application after startup failed: %v", closeErr)

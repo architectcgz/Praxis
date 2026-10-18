@@ -2,28 +2,28 @@ package bootstrap
 
 import (
 	"context"
+	toolservice "praxis/internal/service/toolcall"
 	"sync"
 
-	taskservice "praxis/internal/agent/input"
-	"praxis/internal/execution"
-	"praxis/internal/execution/loop"
-	"praxis/internal/hook"
+	"praxis/internal/core/hook"
+	"praxis/internal/core/loop"
 	"praxis/internal/identity"
+	"praxis/internal/infra/jsonl"
 	"praxis/internal/security"
-	"praxis/internal/session"
-	"praxis/internal/storage/jsonl"
-	queueservice "praxis/internal/task/service"
-	"praxis/internal/toolcall"
+	execution "praxis/internal/service/agent/coordinator"
+	inputservice "praxis/internal/service/agent/input"
+	"praxis/internal/service/session"
+	queueservice "praxis/internal/service/task"
 )
 
-func buildExecution(resources storageResources, repos jsonl.Repositories, config *configuration, sessions *session.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Runtime, error) {
+func buildExecution(resources storageResources, repos jsonl.Repositories, config *configuration, sessions *session.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, error) {
 	active := &execution.ActiveTasks{}
-	tasks, err := taskservice.NewService(taskservice.Dependencies{
+	tasks, err := inputservice.NewService(inputservice.Dependencies{
 		Controls:       repos.Controls,
 		Transactions:   resources.store,
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
-		EventObserver: func(value taskservice.TerminalEvent) {
+		EventObserver: func(value inputservice.TerminalEvent) {
 			events.Publish(execution.Event{
 				Kind:           value.Kind,
 				SessionID:      value.SessionID,
@@ -37,7 +37,7 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 		Workspaces:     repos.Workspaces,
 		Sessions:       repos.Sessions,
 		Agents:         repos.Agents,
-		Tasks:          repos.Executions,
+		Records:        repos.Executions,
 		Queue:          repos.Tasks,
 		ToolExecutions: repos.ToolExecutions,
 		Executions:     active,
@@ -62,15 +62,14 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 	if err != nil {
 		return nil, err
 	}
-	return execution.NewRuntime(execution.Dependencies{
+	return assembleCoordinator(coordinatorDependencies{
 		Transactions: resources.store,
 		Tasks:        tasks,
 		Queue:        queue,
-		Progress:     tasks,
-		Recovery: recoverySource{
-			tasks:    repos.Executions,
-			sessions: repos.Sessions,
-			agents:   repos.Agents,
+		Recovery: execution.RecoveryCatalog{
+			Executions: repos.Executions,
+			Sessions:   repos.Sessions,
+			Agents:     repos.Agents,
 		},
 		ActiveTasks:    active,
 		ToolExecutions: repos.ToolExecutions,
@@ -78,7 +77,7 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 		Writers:        repos.Messages,
 		Models:         config.models,
 		Tools:          config.tools,
-		Rules: toolcall.ApprovalRules{
+		Rules: toolservice.ApprovalRules{
 			Catalog: config.tools,
 			DefaultMode: func(ctx context.Context, sessionID identity.SessionID) (security.ApprovalMode, error) {
 				session, err := repos.Sessions.Get(ctx, sessionID)

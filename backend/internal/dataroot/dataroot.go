@@ -16,7 +16,7 @@ type DataRoot struct {
 	Root                 string
 	Config               string
 	Projects             string
-	Runtime              string
+	State                string
 	Documents            string
 	Attachments          string
 	Temporary            string
@@ -42,15 +42,15 @@ func Resolve(root string) (DataRoot, error) {
 		return DataRoot{}, errors.New("data root cannot be the filesystem root")
 	}
 	config := filepath.Join(root, "config")
-	runtime := filepath.Join(root, "runtime")
+	state := filepath.Join(root, "state")
 	return DataRoot{
 		Root:                 root,
 		Config:               config,
 		Projects:             filepath.Join(root, "projects"),
-		Runtime:              runtime,
-		Documents:            filepath.Join(runtime, "documents"),
-		Attachments:          filepath.Join(runtime, "attachments"),
-		Temporary:            filepath.Join(runtime, "tmp"),
+		State:                state,
+		Documents:            filepath.Join(state, "documents"),
+		Attachments:          filepath.Join(state, "attachments"),
+		Temporary:            filepath.Join(state, "tmp"),
 		ModelProvidersConfig: filepath.Join(config, "models.json"),
 		ModelCredentialsFile: filepath.Join(config, "auth.json"),
 		ToolConfig:           filepath.Join(config, "tools.json"),
@@ -71,7 +71,7 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 		d.Root,
 		d.Config,
 		d.Projects,
-		d.Runtime,
+		d.State,
 		d.Documents,
 		d.AgentDefinitions,
 		d.Attachments,

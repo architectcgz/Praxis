@@ -5,8 +5,8 @@ import (
 
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	projectmodel "praxis/internal/project"
 	"praxis/internal/security"
+	projectmodel "praxis/internal/service/project"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -16,13 +16,13 @@ func (b *ProjectBindings) GetProjectApprovalMode(projectID string) (dto.ProjectA
 	if err := validation.ValidateProjectID(projectID); err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
 	value, err := services.Projects.GetApprovalMode(ctx, identity.ProjectID(projectID))
 	if err != nil {
-		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.GetProjectApprovalMode", err)
+		return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.GetProjectApprovalMode", err)
 	}
 	return approvalModeDTO(value), nil
 }
@@ -32,26 +32,26 @@ func (b *ProjectBindings) SetProjectApprovalMode(wire dto.SetProjectApprovalMode
 	if err := validation.ValidateProjectID(wire.ProjectID); err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
 	if strings.ContainsAny(wire.ProjectID, "\x00\r\n") {
 		err := fault.InvalidValue("projectId", "canonical project identity is required")
-		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.SetProjectApprovalMode.request", err)
+		return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.SetProjectApprovalMode.request", err)
 	}
 	var mode *security.ApprovalMode
 	if wire.Mode != nil {
 		parsed := security.ApprovalMode(strings.TrimSpace(*wire.Mode))
 		if !parsed.ValidDefault() {
 			err := fault.InvalidValue("approvalMode", "default approval mode must be ask, auto or yolo")
-			return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.SetProjectApprovalMode.request", err)
+			return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.SetProjectApprovalMode.request", err)
 		}
 		mode = &parsed
 	}
 	value, err := services.Projects.SetApprovalMode(ctx, identity.ProjectID(wire.ProjectID), mode)
 	if err != nil {
-		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.SetProjectApprovalMode", err)
+		return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.SetProjectApprovalMode", err)
 	}
 	return approvalModeDTO(value), nil
 }

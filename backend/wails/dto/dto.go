@@ -65,20 +65,22 @@ type CreateSessionResponse struct {
 }
 
 type AgentSnapshot struct {
-	ID                string         `json:"id"`
-	Name              string         `json:"name"`
-	SessionID         string         `json:"sessionId"`
-	DefinitionID      string         `json:"definitionId"`
-	Profile           string         `json:"profile"`
-	State             string         `json:"state"`
-	CurrentExecution  string         `json:"currentTaskId"`
-	ExecutionIDs      []string       `json:"executionIds"`
-	Tasks             []TaskSnapshot `json:"tasks"`
-	ControlCommandIDs []string       `json:"controlCommandIds"`
+	Tasks              []QueuedTaskSnapshot `json:"tasks"`
+	ID                 string               `json:"id"`
+	Name               string               `json:"name"`
+	SessionID          string               `json:"sessionId"`
+	DefinitionID       string               `json:"definitionId"`
+	Profile            string               `json:"profile"`
+	State              string               `json:"state"`
+	CurrentExecutionID string               `json:"currentExecutionId"`
+	ExecutionIDs       []string             `json:"executionIds"`
+	Executions         []ExecutionSnapshot  `json:"executions"`
+	ControlCommandIDs  []string             `json:"controlCommandIds"`
 }
 
-// TaskSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。
-type TaskSnapshot struct {
+// ExecutionSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。
+type ExecutionSnapshot struct {
+	SourceTaskID   string    `json:"sourceTaskId,omitempty"`
 	ID             string    `json:"id"`
 	Status         string    `json:"status"`
 	Outcome        string    `json:"outcome,omitempty"`
@@ -90,16 +92,17 @@ type TaskSnapshot struct {
 }
 
 type AgentMessage struct {
-	ID          string              `json:"id"`
-	Sequence    uint64              `json:"sequence"`
-	At          time.Time           `json:"at"`
-	ExecutionID string              `json:"executionId"`
-	Role        string              `json:"role"`
-	AuthorKind  string              `json:"authorKind"`
-	AuthorID    string              `json:"authorId,omitempty"`
-	Content     string              `json:"content"`
-	Thinking    string              `json:"thinking,omitempty"`
-	Blocks      []AgentMessageBlock `json:"blocks,omitempty"`
+	SourceTaskID string              `json:"sourceTaskId,omitempty"`
+	ID           string              `json:"id"`
+	Sequence     uint64              `json:"sequence"`
+	At           time.Time           `json:"at"`
+	ExecutionID  string              `json:"executionId"`
+	Role         string              `json:"role"`
+	AuthorKind   string              `json:"authorKind"`
+	AuthorID     string              `json:"authorId,omitempty"`
+	Content      string              `json:"content"`
+	Thinking     string              `json:"thinking,omitempty"`
+	Blocks       []AgentMessageBlock `json:"blocks,omitempty"`
 }
 
 // AgentMessageBlock 是消息中可安全展示的结构化内容块。
@@ -113,11 +116,11 @@ type AgentMessageBlock struct {
 }
 
 type AgentHistoryItem struct {
-	Kind     string        `json:"kind"`
-	Sequence uint64        `json:"sequence,omitempty"`
-	At       time.Time     `json:"at"`
-	Message  *AgentMessage `json:"message,omitempty"`
-	Task     *TaskSnapshot `json:"task,omitempty"`
+	Kind      string             `json:"kind"`
+	Sequence  uint64             `json:"sequence,omitempty"`
+	At        time.Time          `json:"at"`
+	Message   *AgentMessage      `json:"message,omitempty"`
+	Execution *ExecutionSnapshot `json:"execution,omitempty"`
 }
 
 type AgentHistoryPage struct {
@@ -207,15 +210,15 @@ type SendInputResponse struct {
 type PauseAgentRequest struct {
 	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
-	TargetExecutionID string `json:"targetTaskId"`
+	TargetExecutionID string `json:"targetExecutionId"`
 }
 
-type CancelTaskRequest = PauseAgentRequest
+type StopAgentRequest = PauseAgentRequest
 
 type AgentControlResponse struct {
 	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
-	TargetExecutionID string `json:"targetTaskId,omitempty"`
+	TargetExecutionID string `json:"targetExecutionId,omitempty"`
 	Kind              string `json:"kind"`
 	Status            string `json:"status"`
 	ExistingCommand   bool   `json:"existingCommand"`
@@ -223,7 +226,7 @@ type AgentControlResponse struct {
 }
 
 type QueueTaskRequest struct {
-	TaskID         string `json:"executionId"`
+	TaskID         string `json:"taskId"`
 	RequestID      string `json:"requestId"`
 	AgentID        string `json:"agentId"`
 	Prompt         string `json:"prompt"`
@@ -233,7 +236,16 @@ type QueueTaskRequest struct {
 }
 
 type QueueTaskResponse struct {
-	TaskID       string `json:"executionId"`
+	TaskID       string `json:"taskId"`
 	Status       string `json:"status"`
 	ExistingTask bool   `json:"existingTask"`
+}
+
+// QueuedTaskSnapshot 只表示预约及其派发关系，不携带执行终态。
+type QueuedTaskSnapshot struct {
+	ID          string    `json:"id"`
+	Status      string    `json:"status"`
+	Sequence    uint64    `json:"sequence"`
+	ExecutionID string    `json:"executionId,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
 }

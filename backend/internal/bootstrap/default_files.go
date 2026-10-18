@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	modelconfig "praxis/internal/core/model/config"
+	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	modelconfig "praxis/internal/model/config"
 	"praxis/internal/security"
 	"praxis/internal/settings"
-	"praxis/internal/tool"
 )
 
 // initializeDefaultFiles 只补充缺失文件，配置加载和重载均不调用此步骤。

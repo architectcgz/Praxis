@@ -2,10 +2,10 @@ package bootstrap
 
 import (
 	"context"
-	"praxis/internal/tool"
-	"praxis/internal/tool/builtin/applypatch"
-	"praxis/internal/tool/builtin/bash"
-	"praxis/internal/tool/builtin/readfile"
+	"praxis/internal/core/tool"
+	"praxis/internal/infra/tools/applypatch"
+	"praxis/internal/infra/tools/bash"
+	"praxis/internal/infra/tools/readfile"
 )
 
 type builtinTool struct {

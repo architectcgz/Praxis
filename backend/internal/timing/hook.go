@@ -2,8 +2,7 @@ package timing
 
 import (
 	"context"
-	taskmodel "praxis/internal/agent"
-	"praxis/internal/hook"
+	"praxis/internal/core/hook"
 )
 
 // Hook 将 Agent、Provider 和 Tool 执行边界映射成计时记录；其余操作及 nil Recorder 均忽略。
@@ -49,9 +48,9 @@ func (s hookScope) End(result hook.Result) {
 	switch s.kind {
 	case hook.OperationAgent:
 		switch result.Outcome {
-		case taskmodel.ExecutionFailed:
+		case "failed":
 			status = Failed
-		case taskmodel.ExecutionInterrupted, taskmodel.ExecutionPaused:
+		case "interrupted", "paused":
 			status = Cancelled
 		}
 		if s.ctx.Err() != nil {

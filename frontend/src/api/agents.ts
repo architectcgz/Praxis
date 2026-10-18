@@ -5,28 +5,28 @@ import { normalizeOperationTiming, type OperationTiming } from './timings'
 export const AGENT_EVENT_NAME = 'praxis:agent-event'
 
 export type AgentState = 'idle' | 'executing' | 'waiting' | 'pausing' | 'paused' | 'interrupted' | 'failed' | 'unknown'
-export type TaskStatus = 'pending' | 'starting' | 'running' | 'ending' | 'ended' | 'unknown'
-export type TaskOutcome = '' | 'completed' | 'yielded' | 'paused' | 'failed' | 'interrupted' | 'unknown'
-export type TaskFailureCode =
+export type ExecutionStatus = 'starting' | 'running' | 'waiting_approval' | 'ending' | 'ended' | 'unknown'
+export type ExecutionOutcome = '' | 'completed' | 'yielded' | 'paused' | 'failed' | 'interrupted' | 'unknown'
+export type ExecutionFailureCode =
     | ''
     | 'provider_unavailable'
-    | 'task_provider_error'
-    | 'task_tool_error'
-    | 'task_policy_blocked'
-    | 'task_approval_required'
-    | 'task_resource_limit'
-    | 'task_storage_error'
-    | 'task_contract_error'
-    | 'task_busy'
-    | 'task_interrupted'
+    | 'execution_provider_error'
+    | 'execution_tool_error'
+    | 'execution_policy_blocked'
+    | 'execution_approval_required'
+    | 'execution_resource_limit'
+    | 'execution_storage_error'
+    | 'execution_contract_error'
+    | 'execution_busy'
+    | 'execution_interrupted'
     | 'request_canceled'
-    | 'runtime_cancelled'
-    | 'runtime_failed'
-    | 'runtime_invalid_outcome'
+    | 'execution_cancelled'
+    | 'execution_failed'
+    | 'execution_invalid_outcome'
     | 'unknown'
 export type AgentMessageRole = 'user' | 'assistant' | 'tool' | 'unknown'
 export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'unknown'
-export type AgentHistoryKind = 'message' | 'task' | 'request_canceled' | 'unknown'
+export type AgentHistoryKind = 'message' | 'execution' | 'request_canceled' | 'unknown'
 
 export type AgentSnapshot = {
     id: string
@@ -35,17 +35,21 @@ export type AgentSnapshot = {
     definitionId: string
     profile: string
     state: AgentState
-    currentTaskId: string
-    taskIds: string[]
-    tasks: TaskSnapshot[]
+    currentExecutionId: string
+    executionIds: string[]
+    executions: ExecutionSnapshot[]
+    tasks: QueuedTaskSnapshot[]
     controlCommandIds: string[]
 }
 
-export type TaskSnapshot = {
+export type QueuedTaskSnapshot = { id: string; status: string; sequence: number; executionId: string }
+
+export type ExecutionSnapshot = {
+    sourceTaskId: string
     id: string
-    status: TaskStatus
-    outcome: TaskOutcome
-    failureCode: TaskFailureCode
+    status: ExecutionStatus
+    outcome: ExecutionOutcome
+    failureCode: ExecutionFailureCode
     failureMessage: string
     createdAt: string
     startedAt: string
@@ -56,7 +60,7 @@ export type AgentMessage = {
     id?: string
     sequence: number
     at: string
-    taskId: string
+    executionId: string
     role: AgentMessageRole
     content: string
     thinking?: string
@@ -77,7 +81,7 @@ export type AgentHistoryItem = {
     sequence?: number
     at: string
     message?: AgentMessage
-    task?: TaskSnapshot
+    execution?: ExecutionSnapshot
 }
 
 export type AgentHistoryPage = { items: AgentHistoryItem[]; nextCursor: string }
@@ -92,21 +96,21 @@ export type ModelUsage = {
 export type ModelUsageRecord = {
     sessionId: string
     agentId: string
-    taskId: string
+    executionId: string
     turnId: string
     usage: ModelUsage
 }
 
 export type AgentEvent = {
-    kind: 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'task_ended' | 'error' | 'operation_timing'
-    outcome?: TaskOutcome
-    failureCode?: TaskFailureCode
+    kind: 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'execution_ended' | 'error' | 'operation_timing'
+    outcome?: ExecutionOutcome
+    failureCode?: ExecutionFailureCode
     failureMessage?: string
     timing?: OperationTiming
     usage?: ModelUsage
     sessionId?: string
     agentId: string
-    taskId: string
+    executionId: string
     turnId?: string
     text?: string
     callId?: string
@@ -143,10 +147,10 @@ export function normalizeModelUsageRecords(values: unknown, sessionId: string): 
             throw new Error('Token 用量数据格式无效。')
         }
         const agentId = requiredString(record.agentId)
-        const taskId = requiredString(record.taskId)
+        const executionId = requiredString(record.executionId)
         const turnId = requiredString(record.turnId)
-        if (!agentId || !taskId || !turnId) throw new Error('Token 用量数据格式无效。')
-        return { sessionId, agentId, taskId, turnId, usage }
+        if (!agentId || !executionId || !turnId) throw new Error('Token 用量数据格式无效。')
+        return { sessionId, agentId, executionId, turnId, usage }
     })
 }
 
@@ -160,9 +164,18 @@ export function normalizeAgentSnapshot(value: unknown): AgentSnapshot {
         definitionId: definitionID,
         profile: requiredString(record.profile),
         state: enumValue(record.state, agentStates, 'unknown'),
-        currentTaskId: requiredString(record.currentTaskId),
-        taskIds: optionalStringArray(record.taskIds),
-        tasks: requiredArray(record.tasks).map(normalizeTaskSnapshot),
+        currentExecutionId: requiredString(record.currentExecutionId),
+        executionIds: optionalStringArray(record.executionIds),
+        executions: requiredArray(record.executions).map(normalizeExecutionSnapshot),
+        tasks: requiredArray(record.tasks).map((value) => {
+            const task = requiredRecord(value)
+            return {
+                id: requiredString(task.id),
+                status: requiredString(task.status),
+                sequence: requiredNumber(task.sequence),
+                executionId: optionalString(task.executionId),
+            }
+        }),
         controlCommandIds: optionalStringArray(record.controlCommandIds),
     }
 }
@@ -176,7 +189,7 @@ export function normalizeAgentHistory(value: unknown): AgentHistoryItem[] {
             sequence: kind === 'message' ? requiredNumber(record.sequence) : optionalNumber(record.sequence),
             at: requiredString(record.at),
             message: record.message == null ? undefined : normalizeAgentMessage(record.message),
-            task: record.task == null ? undefined : normalizeTaskSnapshot(record.task),
+            execution: record.execution == null ? undefined : normalizeExecutionSnapshot(record.execution),
         }
     })
 }
@@ -195,12 +208,12 @@ export function subscribeAgentEvents(listener: (event: AgentEvent) => void) {
 
 function parseAgentEvent(value: unknown): AgentEvent | null {
     if (!isRecord(value) || typeof value.agentId !== 'string' ||
-        typeof value.taskId !== 'string') {
+        typeof value.executionId !== 'string') {
         return null
     }
     if (value.kind !== 'turn_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
         value.kind !== 'tool_call' && value.kind !== 'tool_approval_required' && value.kind !== 'tool_result' && value.kind !== 'turn_completed' &&
-        value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'task_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
+        value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'execution_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
         return null
     }
     if ((value.kind === 'text_delta' || value.kind === 'thinking_delta') && typeof value.text !== 'string') {
@@ -210,20 +223,20 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         (typeof value.callId !== 'string' || typeof value.name !== 'string')) {
         return null
     }
-    const terminal = value.kind === 'task_ended' || value.kind === 'request_canceled'
-    const outcome = terminal ? enumValue(value.outcome, taskOutcomes, 'unknown') : undefined
+    const terminal = value.kind === 'execution_ended' || value.kind === 'request_canceled'
+    const outcome = terminal ? enumValue(value.outcome, executionOutcomes, 'unknown') : undefined
     const failureCode = terminal ? failureCodeValue(value.failureCode) : undefined
     if (terminal && (outcome === '' || outcome === 'unknown' || failureCode === 'unknown' ||
-        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.taskId)) return null
+        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.executionId)) return null
     if (value.kind === 'request_canceled' && (failureCode !== 'request_canceled' || outcome !== 'paused' && outcome !== 'interrupted')) return null
     const reportedUsage = value.kind === 'model_usage' ? normalizeModelUsage(value.usage) : undefined
     if (value.kind === 'model_usage' && (!reportedUsage || typeof value.turnId !== 'string' || !value.turnId ||
-        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.taskId)) return null
+        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.executionId)) return null
     let timing: OperationTiming | undefined
     if (value.kind === 'operation_timing') {
         try {
             timing = normalizeOperationTiming(value.timing)
-            if (timing.agentId !== value.agentId || timing.taskId !== value.taskId) return null
+            if (timing.agentId !== value.agentId || timing.executionId !== value.executionId) return null
         } catch {
             return null
         }
@@ -237,7 +250,7 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         usage: reportedUsage ?? undefined,
         sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined,
         agentId: value.agentId,
-        taskId: value.taskId,
+        executionId: value.executionId,
         turnId: typeof value.turnId === 'string' && value.turnId ? value.turnId : undefined,
         text: typeof value.text === 'string' ? value.text : undefined,
         callId: typeof value.callId === 'string' ? value.callId : undefined,
@@ -271,35 +284,36 @@ function normalizeModelUsage(value: unknown): ModelUsage | null {
 }
 
 const agentStates = ['idle', 'executing', 'waiting', 'pausing', 'paused', 'interrupted', 'failed'] as const
-const taskStatuses = ['pending', 'starting', 'running', 'ending', 'ended'] as const
-const taskOutcomes = ['', 'completed', 'yielded', 'paused', 'failed', 'interrupted'] as const
-const taskFailureCodes = [
+const executionStatuses = ['starting', 'running', 'waiting_approval', 'ending', 'ended'] as const
+const executionOutcomes = ['', 'completed', 'yielded', 'paused', 'failed', 'interrupted'] as const
+const executionFailureCodes = [
     '',
     'provider_unavailable',
-    'task_provider_error',
-    'task_tool_error',
-    'task_policy_blocked',
-    'task_approval_required',
-    'task_resource_limit',
-    'task_storage_error',
-    'task_contract_error',
-    'task_busy',
-    'task_interrupted',
+    'execution_provider_error',
+    'execution_tool_error',
+    'execution_policy_blocked',
+    'execution_approval_required',
+    'execution_resource_limit',
+    'execution_storage_error',
+    'execution_contract_error',
+    'execution_busy',
+    'execution_interrupted',
     'request_canceled',
-    'runtime_cancelled',
-    'runtime_failed',
-    'runtime_invalid_outcome',
+    'execution_cancelled',
+    'execution_failed',
+    'execution_invalid_outcome',
 ] as const
 const messageRoles = ['user', 'assistant', 'tool'] as const
 const blockKinds = ['text', 'thinking', 'tool_call', 'tool_result'] as const
-const historyKinds = ['message', 'task', 'request_canceled'] as const
+const historyKinds = ['message', 'execution', 'request_canceled'] as const
 
-function normalizeTaskSnapshot(value: unknown): TaskSnapshot {
+function normalizeExecutionSnapshot(value: unknown): ExecutionSnapshot {
     const record = requiredRecord(value)
     return {
+        sourceTaskId: typeof record.sourceTaskId === 'string' ? record.sourceTaskId : '',
         id: requiredString(record.id),
-        status: enumValue(record.status, taskStatuses, 'unknown'),
-        outcome: enumValue(record.outcome, taskOutcomes, 'unknown'),
+        status: enumValue(record.status, executionStatuses, 'unknown'),
+        outcome: enumValue(record.outcome, executionOutcomes, 'unknown'),
         failureCode: failureCodeValue(record.failureCode),
         failureMessage: optionalString(record.failureMessage),
         createdAt: requiredString(record.createdAt),
@@ -314,7 +328,7 @@ function normalizeAgentMessage(value: unknown): AgentMessage {
         id: optionalString(record.id),
         sequence: requiredNumber(record.sequence),
         at: requiredString(record.at),
-        taskId: requiredString(record.taskId),
+        executionId: requiredString(record.executionId),
         role: enumValue(record.role, messageRoles, 'unknown'),
         content: optionalString(record.content),
         thinking: optionalString(record.thinking),
@@ -334,11 +348,11 @@ function normalizeAgentMessageBlock(value: unknown): AgentMessageBlock {
     }
 }
 
-function failureCodeValue(value: unknown): TaskFailureCode {
+function failureCodeValue(value: unknown): ExecutionFailureCode {
     if (value == null) {
         return ''
     }
-    return enumValue(value, taskFailureCodes, 'unknown')
+    return enumValue(value, executionFailureCodes, 'unknown')
 }
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {

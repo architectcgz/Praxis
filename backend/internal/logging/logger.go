@@ -81,8 +81,8 @@ func (f Factory) Console() *Logger {
 	return result
 }
 
-// Runtime 返回同时写入 stderr 和受保护文件的日志器。
-func (f Factory) Runtime(path string) (*Logger, error) {
+// Application 返回同时写入 stderr 和受保护文件的日志器。
+func (f Factory) Application(path string) (*Logger, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err

@@ -1,7 +1,7 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import {
     API_ERROR_CODES,
-    cancelTask,
+    stopAgent,
     pauseAgent,
     sendInput,
     type AgentSnapshot,
@@ -62,7 +62,7 @@ export function useAgentCommands({
         const viewRequestID = viewRequestRef.current
         const isCurrentView = () => viewRequestRef.current === viewRequestID && getSelectedAgentID() === selectedAgentID
         setBusy(true)
-        inputActions.beginInput({ requestId: requestID, taskId: '', sessionId: sessionID, agentId: agentID, content, at: new Date().toISOString() })
+        inputActions.beginInput({ requestId: requestID, executionId: '', sessionId: sessionID, agentId: agentID, content, at: new Date().toISOString() })
         setError('')
         setErrorCode(undefined)
         try {
@@ -75,7 +75,7 @@ export function useAgentCommands({
                 modelId: selectedModelID,
                 reasoningLevel: reasoning,
             })
-            inputActions.acceptInput(requestID, response.taskId)
+            inputActions.acceptInput(requestID, response.executionId)
             if (isCurrentView()) {
                 setInput('')
             }
@@ -92,11 +92,11 @@ export function useAgentCommands({
     }, [agent, busy, input, reasoning, sessionID, selectedModelID, selectedProviderID, refreshAgent, getSelectedAgentID, inputActions, viewRequestRef, setBusy, setError, setErrorCode, setInput])
 
     const control = useCallback(async (kind: 'pause' | 'cancel') => {
-        if (!agent?.currentTaskId || busy) {
+        if (!agent?.currentExecutionId || busy) {
             return
         }
         const agentID = agent.id
-        const targetTaskId = agent.currentTaskId
+        const targetExecutionId = agent.currentExecutionId
         const selectedAgentID = getSelectedAgentID()
         const viewRequestID = viewRequestRef.current
         const isCurrentView = () => viewRequestRef.current === viewRequestID && getSelectedAgentID() === selectedAgentID
@@ -106,8 +106,8 @@ export function useAgentCommands({
         setErrorCode(undefined)
         try {
             const commandId = crypto.randomUUID()
-            const apply = kind === 'pause' ? pauseAgent : cancelTask
-            const response = await apply({ commandId, agentId: agentID, targetTaskId })
+            const apply = kind === 'pause' ? pauseAgent : stopAgent
+            const response = await apply({ commandId, agentId: agentID, targetExecutionId })
             if (response.cancellationError) throw new Error('取消通知失败，请重试。')
             await refreshAgent(agentID)
         } catch (err) {

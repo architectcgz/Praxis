@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strconv"
 
-	taskmodel "praxis/internal/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	taskmodel "praxis/internal/service/agent"
 	"praxis/wails/dto"
 )
 
@@ -22,7 +22,7 @@ func listAgentHistory(ctx context.Context, agents AgentService, agentID identity
 	if err != nil {
 		return dto.AgentHistoryPage{}, err
 	}
-	items := make([]dto.AgentHistoryItem, 0, len(messages)+len(view.Tasks))
+	items := make([]dto.AgentHistoryItem, 0, len(messages)+len(view.Executions))
 	for _, value := range publicAgentMessages(messages) {
 		items = append(items, dto.AgentHistoryItem{
 			Kind:     "message",
@@ -31,11 +31,11 @@ func listAgentHistory(ctx context.Context, agents AgentService, agentID identity
 			Message:  &value,
 		})
 	}
-	for _, value := range view.Tasks {
+	for _, value := range view.Executions {
 		if value.Status != taskmodel.ExecutionEnded {
 			continue
 		}
-		kind := "task"
+		kind := "execution"
 		if value.FailureCode == taskmodel.ExecutionFailureRequestCanceled {
 			kind = "request_canceled"
 		} else if value.Outcome != taskmodel.ExecutionFailed {
@@ -45,8 +45,8 @@ func listAgentHistory(ctx context.Context, agents AgentService, agentID identity
 		if at.IsZero() {
 			at = value.CreatedAt
 		}
-		snapshot := taskSnapshot(value)
-		items = append(items, dto.AgentHistoryItem{Kind: kind, At: at, Task: &snapshot})
+		snapshot := executionSnapshot(value)
+		items = append(items, dto.AgentHistoryItem{Kind: kind, At: at, Execution: &snapshot})
 	}
 	slices.SortStableFunc(items, func(a, b dto.AgentHistoryItem) int {
 		if order := a.At.Compare(b.At); order != 0 {
@@ -73,5 +73,5 @@ func historyItemCursor(value dto.AgentHistoryItem) string {
 	if value.Message != nil {
 		return "message:" + strconv.FormatUint(value.Sequence, 10)
 	}
-	return value.Kind + ":" + value.Task.ID
+	return value.Kind + ":" + value.Execution.ID
 }

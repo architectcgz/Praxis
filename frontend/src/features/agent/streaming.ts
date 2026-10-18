@@ -7,9 +7,9 @@ import type { PendingUserMessage, StreamingOutput, StreamingOutputs } from './ty
  */
 export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent): StreamingOutputs {
     const previous = outputs[event.agentId]
-    const output: StreamingOutput = previous?.taskId === event.taskId
+    const output: StreamingOutput = previous?.executionId === event.executionId
         ? previous
-        : { taskId: event.taskId, turns: [], error: '' }
+        : { executionId: event.executionId, turns: [], error: '' }
     switch (event.kind) {
         case 'text_delta':
         case 'thinking_delta':
@@ -50,9 +50,9 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
             return { ...outputs, [event.agentId]: { ...output, turns } }
         }
         case 'request_canceled':
-        case 'task_ended':
+        case 'execution_ended':
         case 'error':
-            if (event.kind !== 'error' && previous?.taskId !== event.taskId) return outputs
+            if (event.kind !== 'error' && previous?.executionId !== event.executionId) return outputs
             return { ...outputs, [event.agentId]: {
                 ...output,
                 turns: output.turns.map((turn) => ({ ...turn, events: turn.events.filter((item) => (
@@ -71,14 +71,14 @@ export function clearDurableStreamingOutput(outputs: StreamingOutputs, agent: Ag
     if (!output) {
         return outputs
     }
-    const ended = agent.tasks.some((task) => task.id === output.taskId && task.status === 'ended')
+    const ended = agent.executions.some((task) => task.id === output.executionId && task.status === 'ended')
     const persisted = history.some((item) => (
-        item.message?.role === 'assistant' && item.message.taskId === output.taskId
-    ) || item.task?.id === output.taskId)
+        item.message?.role === 'assistant' && item.message.executionId === output.executionId
+    ) || item.execution?.id === output.executionId)
     const fullyPersisted = output.turns.every((turn) => turn.events.every((event) => {
-        if (event.kind === 'text_delta' || event.kind === 'thinking_delta') return hasAssistantTurn(history, output.taskId, turn.turnId)
+        if (event.kind === 'text_delta' || event.kind === 'thinking_delta') return hasAssistantTurn(history, output.executionId, turn.turnId)
         if (event.kind === 'tool_call' || event.kind === 'tool_result') return history.some((item) => (
-            item.message?.taskId === output.taskId && item.message.blocks?.some((block) => block.kind === event.kind && block.callId === event.callId)
+            item.message?.executionId === output.executionId && item.message.blocks?.some((block) => block.kind === event.kind && block.callId === event.callId)
         ))
         return true
     }))
@@ -96,10 +96,10 @@ export function projectStreamingOutput(output: StreamingOutput | null, history: 
     return {
         ...output,
         turns: output.turns.flatMap((turn) => {
-            if (!hasAssistantTurn(history, output.taskId, turn.turnId)) return [turn]
+            if (!hasAssistantTurn(history, output.executionId, turn.turnId)) return [turn]
             const events = turn.events.filter((event) => {
                 if (event.kind === 'text_delta' || event.kind === 'thinking_delta' || event.kind === 'provider_waiting') return false
-                return !history.some((item) => item.message?.taskId === output.taskId && item.message.blocks?.some((block) => (
+                return !history.some((item) => item.message?.executionId === output.executionId && item.message.blocks?.some((block) => (
                     block.kind === 'tool_call' && block.callId === event.callId
                 )))
             })
@@ -108,8 +108,8 @@ export function projectStreamingOutput(output: StreamingOutput | null, history: 
     }
 }
 
-function hasAssistantTurn(history: AgentHistoryItem[], taskId: string, turnId: string): boolean {
-    return history.some((item) => item.message?.taskId === taskId && item.message.role === 'assistant' && item.message.id === `assistant:${turnId}`)
+function hasAssistantTurn(history: AgentHistoryItem[], executionId: string, turnId: string): boolean {
+    return history.some((item) => item.message?.executionId === executionId && item.message.role === 'assistant' && item.message.id === `assistant:${turnId}`)
 }
 
 /** 按落盘用户消息的 task ID 去重；尚未收到执行回执或其他执行的乐观消息继续保留。 */
@@ -119,13 +119,13 @@ export function clearDurablePendingUserMessages(pending: PendingUserMessage[], h
     }
     const persistedTaskIDs = new Set<string>()
     for (const item of history) {
-        if (item.message?.role === 'user' && item.message.taskId) {
-            persistedTaskIDs.add(item.message.taskId)
+        if (item.message?.role === 'user' && item.message.executionId) {
+            persistedTaskIDs.add(item.message.executionId)
         }
     }
     if (persistedTaskIDs.size === 0) {
         return pending
     }
-    const remaining = pending.filter((message) => message.taskId === '' || !persistedTaskIDs.has(message.taskId))
+    const remaining = pending.filter((message) => message.executionId === '' || !persistedTaskIDs.has(message.executionId))
     return remaining.length === pending.length ? pending : remaining
 }

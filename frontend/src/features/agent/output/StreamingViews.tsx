@@ -4,7 +4,7 @@ import type { AgentEvent } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { StreamingToolCallsView } from './ToolCallViews'
 import { ThinkingDetails } from './ThinkingDetails'
-import { AgentRuntime } from '../../timing/OperationTimings'
+import { AgentDuration } from '../../timing/OperationTimings'
 import { MessageTiming } from './MessageTiming'
 
 export const StreamingOutputView = memo(function StreamingOutputView({ content }: { content: string }) {
@@ -27,12 +27,12 @@ export const PendingUserMessageView = memo(function PendingUserMessageView({ con
     )
 })
 
-export function PendingOutputView({ agentProfile, taskId }: { agentProfile: string; taskId: string }) {
+export function PendingOutputView({ agentProfile, executionId }: { agentProfile: string; executionId: string }) {
     return (
         <article className="message message-assistant message-pending" role="status">
             <div className="message-meta">
                 <strong>{agentProfile}</strong>
-                <AgentRuntime taskId={taskId} />
+                <AgentDuration executionId={executionId} />
             </div>
             <div className="message-pending-status">
                 <LoaderCircle size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -52,10 +52,10 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, pro
     )
 })
 
-export function StreamingTurnView({ agentProfile, events, taskId, turnId, active, continuation = false, hasContinuation = false }: {
+export function StreamingTurnView({ agentProfile, events, executionId, turnId, active, continuation = false, hasContinuation = false }: {
     agentProfile: string
     events: AgentEvent[]
-    taskId: string
+    executionId: string
     turnId: string
     active: boolean
     continuation?: boolean
@@ -86,12 +86,12 @@ export function StreamingTurnView({ agentProfile, events, taskId, turnId, active
         {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">
                 <strong>{agentProfile}</strong>
-                {active && <AgentRuntime taskId={taskId} />}
+                {active && <AgentDuration executionId={executionId} />}
             </div>
         </div>}
         {segments}
         <div className="agent-activity turn-foot">
-            <MessageTiming taskId={taskId} referenceId={`assistant:${turnId}`} />
+            <MessageTiming executionId={executionId} referenceId={`assistant:${turnId}`} />
         </div>
     </div>
 }

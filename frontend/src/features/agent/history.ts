@@ -1,7 +1,7 @@
 import type { AgentHistoryItem, AgentHistoryPage } from '../../api'
 
 export function historyItemKey(item: AgentHistoryItem): string {
-    return item.message ? `message:${item.sequence}` : `${item.kind}:${item.task?.id}`
+    return item.message ? `message:${item.sequence}` : `${item.kind}:${item.execution?.id}`
 }
 
 /** 最新页与已加载记录之间出现跨度时补齐中间页，旧页游标不会越过未读取记录。 */

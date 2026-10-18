@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"praxis/internal/core/model"
 	"praxis/internal/dataroot"
-	"praxis/internal/execution"
 	"praxis/internal/identity"
+	"praxis/internal/infra/document"
+	"praxis/internal/infra/jsonl"
 	"praxis/internal/logging"
-	"praxis/internal/model"
-	"praxis/internal/storage/document"
-	"praxis/internal/storage/jsonl"
+	execution "praxis/internal/service/agent/coordinator"
 	"praxis/internal/timing"
 )
 
@@ -23,11 +23,11 @@ type storageResources struct {
 }
 
 func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
-	store, err := jsonl.Open(ctx, root.Runtime)
+	store, err := jsonl.Open(ctx, root.State)
 	if err != nil {
 		return storageResources{}, fmt.Errorf("open JSONL: %w", err)
 	}
-	logger, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
+	logger, err := logging.NewFactory().Application(filepath.Join(root.State, "praxis.log"))
 	if err != nil {
 		_ = store.Close(context.Background())
 		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
@@ -38,7 +38,7 @@ func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources,
 		_ = logger.Close()
 		return storageResources{}, fmt.Errorf("open document store: %w", err)
 	}
-	logger.Infof("application open started root=%s logs=%s", root.Root, root.Runtime)
+	logger.Infof("application open started root=%s logs=%s", root.Root, root.State)
 	return storageResources{store: store, documents: documents, logger: logger}, nil
 }
 

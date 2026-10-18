@@ -6,12 +6,12 @@ import { formatModelUsage, summarizeModelUsage } from '../modelUsage'
 const statusLabels = { running: '进行中', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' }
 
 /** 展示每轮已上报的耗时与分项用量；精确计数与首响应保留在悬浮提示中。 */
-export function MessageTiming({ taskId, referenceId }: { taskId: string; referenceId: string }) {
-    const record = useOperationTiming(taskId, 'provider', referenceId)
+export function MessageTiming({ executionId, referenceId }: { executionId: string; referenceId: string }) {
+    const record = useOperationTiming(executionId, 'provider', referenceId)
     const { records, error } = useSessionModelUsage()
     if (!record) return null
     const request = records.find((item) => item.sessionId === record.sessionId && item.agentId === record.agentId &&
-        item.taskId === taskId && referenceId === `assistant:${item.turnId}`)
+        item.executionId === executionId && referenceId === `assistant:${item.turnId}`)
     const usage = request ? formatModelUsage(summarizeModelUsage([request])) : undefined
     const firstResponse = record.firstResponseMs === undefined ? [] : [`首响应：${formatDuration(record.firstResponseMs)}`]
     const title = usage

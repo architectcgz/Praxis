@@ -3,20 +3,21 @@ package bindings
 import (
 	"context"
 	"errors"
+	modelservice "praxis/internal/service/model"
 
-	"praxis/internal/agent"
-	taskservice "praxis/internal/agent/input"
-	"praxis/internal/execution"
+	"praxis/internal/core/message"
+	"praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
+	"praxis/internal/core/toolcall"
 	"praxis/internal/identity"
-	"praxis/internal/message"
-	"praxis/internal/model"
-	modelconfig "praxis/internal/model/config"
-	"praxis/internal/project"
 	"praxis/internal/security"
-	"praxis/internal/session"
-	queueservice "praxis/internal/task/service"
+	"praxis/internal/service/agent"
+	execution "praxis/internal/service/agent/coordinator"
+	inputservice "praxis/internal/service/agent/input"
+	"praxis/internal/service/project"
+	"praxis/internal/service/session"
+	queueservice "praxis/internal/service/task"
 	"praxis/internal/timing"
-	"praxis/internal/toolcall"
 )
 
 // 接口只声明 Wails 实际消费的业务能力，协议投影留在 binding。
@@ -47,7 +48,7 @@ type AgentCommands interface {
 	ListToolApprovals(context.Context, identity.AgentID) ([]toolcall.Execution, error)
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
-	SendInput(context.Context, taskservice.SendInput) (execution.StartResult, error)
+	SendInput(context.Context, inputservice.SendInput) (execution.StartResult, error)
 	EnqueueTask(context.Context, queueservice.EnqueueInput) (queueservice.EnqueueResult, error)
 }
 
@@ -56,7 +57,7 @@ type ModelCatalog interface {
 }
 
 type ModelConfigService interface {
-	Configuration() model.ConfigSnapshot
+	Configuration() modelservice.ConfigSnapshot
 	SaveModelConfig(modelconfig.Config) error
 	ReloadConfig(context.Context) error
 	SetProviderKey(string, string) error

@@ -3,11 +3,11 @@ package bootstrap
 import (
 	"fmt"
 	"net/http"
-	modelapi "praxis/internal/model"
-	modelconfig "praxis/internal/model/config"
-	anthropicmessages "praxis/internal/model/provider/anthropic"
-	"praxis/internal/model/provider/openaichat"
-	"praxis/internal/model/provider/openairesponses"
+	modelapi "praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
+	anthropicmessages "praxis/internal/infra/providers/anthropic"
+	"praxis/internal/infra/providers/openai_chat"
+	"praxis/internal/infra/providers/openai_responses"
 )
 
 func newModelStream(

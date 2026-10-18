@@ -5,17 +5,17 @@ import (
 )
 
 type ModelBindings struct {
-	runtime Runtime
+	host Host
 }
 
 // ListModels 返回模型展示信息和推理能力，不暴露 Provider 凭据。
 func (b *ModelBindings) ListModels() ([]dto.ModelOption, error) {
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, publicError(b.runtime, "ModelBindings.ListModels.context", err)
+		return nil, publicError(b.host, "ModelBindings.ListModels.context", err)
 	}
 	models := services.Models.ListModels()
 	result := make([]dto.ModelOption, 0, len(models))

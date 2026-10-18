@@ -1,8 +1,8 @@
 package bindings
 
 import (
+	"praxis/internal/core/model"
 	"praxis/internal/identity"
-	"praxis/internal/model"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -12,13 +12,13 @@ func (b *AgentBindings) ListSessionUsage(sessionID string) ([]dto.ModelUsageReco
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return nil, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	records, err := services.Usages.ListSessionUsage(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return nil, publicError(b.runtime, "AgentBindings.ListSessionUsage", err)
+		return nil, publicError(b.host, "AgentBindings.ListSessionUsage", err)
 	}
 	return usageRecords(records), nil
 }

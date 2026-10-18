@@ -5,26 +5,26 @@ import (
 	"errors"
 	"sync"
 
-	"praxis/internal/agent"
+	"praxis/internal/core/hook"
+	"praxis/internal/core/loop"
+	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	"praxis/internal/execution"
-	"praxis/internal/execution/loop"
-	"praxis/internal/hook"
+	"praxis/internal/infra/filesystem"
 	"praxis/internal/logging"
-	"praxis/internal/project"
-	"praxis/internal/session"
+	"praxis/internal/service/agent"
+	execution "praxis/internal/service/agent/coordinator"
+	"praxis/internal/service/project"
+	"praxis/internal/service/session"
 	"praxis/internal/timing"
-	"praxis/internal/tool"
-	"praxis/internal/workspace/fs"
 	"praxis/wails/bindings"
 )
 
-// Application 拥有进程资源；业务状态与执行生命周期分别由业务能力和 Runtime 管理。
+// Application 拥有进程资源；业务状态与执行生命周期分别由业务能力和 Coordinator 管理。
 type Application struct {
 	storageResources
-	frontend bindings.Services
-	sessions *session.Service
-	runtime  *execution.Runtime
+	frontend    bindings.Services
+	sessions    *session.Service
+	coordinator *execution.Coordinator
 }
 
 func (a *Application) Services() bindings.Services {
@@ -56,8 +56,8 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 			return
 		}
 		// 装配失败也要先停止可能已恢复的执行，再关闭其依赖的日志资源。
-		if a.runtime != nil {
-			_ = a.runtime.Close(context.Background())
+		if a.coordinator != nil {
+			_ = a.coordinator.Close(context.Background())
 		}
 		_ = a.store.Close(context.Background())
 		_ = a.logger.Close()
@@ -78,17 +78,18 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	if err != nil {
 		return nil, err
 	}
-	a.runtime, err = buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, runner)
+	a.coordinator, err = buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, runner)
 	if err != nil {
 		return nil, err
 	}
 	agents, err := agent.NewService(agent.Dependencies{
-		Transactions: a.store,
-		Agents:       repos.Agents,
-		Tasks:        repos.Executions,
-		Controls:     repos.Controls,
-		Executions:   a.runtime,
-		Messages:     repos.Messages,
+		Transactions:     a.store,
+		Agents:           repos.Agents,
+		ExecutionRecords: repos.Executions,
+		Queue:            repos.Tasks,
+		Controls:         repos.Controls,
+		Executions:       a.coordinator,
+		Messages:         repos.Messages,
 	})
 	if err != nil {
 		return nil, err
@@ -109,7 +110,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 		Projects:       projects,
 		Sessions:       a.sessions,
 		Agents:         agents,
-		Commands:       a.runtime,
+		Commands:       a.coordinator,
 		Models:         models,
 		ModelConfig:    models,
 		Events:         events,
@@ -117,7 +118,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 		Usages:         a.sessions,
 		SessionLogPath: a.store.SessionLogPath,
 	}
-	if err := a.runtime.Restore(ctx); err != nil {
+	if err := a.coordinator.Restore(ctx); err != nil {
 		return nil, err
 	}
 	a.logger.Infof("application open completed ready=true")
@@ -125,7 +126,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	return a, nil
 }
 
-func (a *Application) RuntimeLogger() *logging.Logger {
+func (a *Application) ApplicationLogger() *logging.Logger {
 	factory := logging.NewFactory()
 	if a == nil || a.logger == nil {
 		return factory.Nop()
@@ -138,9 +139,9 @@ func (a *Application) Close(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("application close context is required")
 	}
-	logger := a.RuntimeLogger()
+	logger := a.ApplicationLogger()
 	logger.Infof("application close started")
-	if err := a.runtime.Close(ctx); err != nil {
+	if err := a.coordinator.Close(ctx); err != nil {
 		logger.Errorf("execution close incomplete: %v", err)
 		return err
 	}

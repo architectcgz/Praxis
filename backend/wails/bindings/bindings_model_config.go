@@ -20,12 +20,12 @@ type fieldValidationError interface {
 
 // GetModelConfig 返回可编辑模型元数据和密钥存在状态，不返回密钥内容。
 func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.ModelConfigDocument{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return dto.ModelConfigDocument{}, publicError(b.runtime, "ModelBindings.GetModelConfig.context", err)
+		return dto.ModelConfigDocument{}, publicError(b.host, "ModelBindings.GetModelConfig.context", err)
 	}
 	snapshot := services.ModelConfig.Configuration()
 	config := snapshot.Config
@@ -74,19 +74,19 @@ func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.Sa
 	if err != nil {
 		return validationResponse(err)
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.SaveModelConfigResponse{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return dto.SaveModelConfigResponse{}, publicError(b.runtime, "ModelBindings.SaveModelConfig.context", err)
+		return dto.SaveModelConfigResponse{}, publicError(b.host, "ModelBindings.SaveModelConfig.context", err)
 	}
 	if err := services.ModelConfig.SaveModelConfig(canonical); err != nil {
 		var validationError fieldValidationError
 		if errors.As(err, &validationError) {
 			return dto.SaveModelConfigResponse{ValidationError: validationError.Error()}, nil
 		}
-		return dto.SaveModelConfigResponse{}, publicError(b.runtime, "ModelBindings.SaveModelConfig", err)
+		return dto.SaveModelConfigResponse{}, publicError(b.host, "ModelBindings.SaveModelConfig", err)
 	}
 	return dto.SaveModelConfigResponse{Saved: true}, nil
 }
@@ -110,15 +110,15 @@ func (b *ModelBindings) SetProviderKey(providerID, value string) error {
 	if value != "" && strings.TrimSpace(value) == "" {
 		return fault.InvalidValue("key", "API key cannot contain only whitespace")
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return publicError(b.runtime, "ModelBindings.SetProviderKey.context", err)
+		return publicError(b.host, "ModelBindings.SetProviderKey.context", err)
 	}
 	if err := services.ModelConfig.SetProviderKey(providerID, value); err != nil {
-		return publicError(b.runtime, "ModelBindings.SetProviderKey", err)
+		return publicError(b.host, "ModelBindings.SetProviderKey", err)
 	}
 	return nil
 }
@@ -133,7 +133,7 @@ func (b *ModelBindings) ListProviderModels(providerID string) ([]string, error) 
 	if err := validation.ValidateProviderID(providerID); err != nil {
 		return nil, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
@@ -141,19 +141,19 @@ func (b *ModelBindings) ListProviderModels(providerID string) ([]string, error) 
 	defer cancel()
 	models, err := services.ModelConfig.DiscoverProviderModels(ctx, providerID)
 	if err != nil {
-		return nil, publicError(b.runtime, "ModelBindings.ListProviderModels", err)
+		return nil, publicError(b.host, "ModelBindings.ListProviderModels", err)
 	}
 	return append([]string{}, models...), nil
 }
 
 // ReloadConfig 从磁盘重新读取配置；失败时保留当前运行时配置。
 func (b *ModelBindings) ReloadConfig() error {
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
 	if err := services.ModelConfig.ReloadConfig(ctx); err != nil {
-		return publicError(b.runtime, "ModelBindings.ReloadConfig", err)
+		return publicError(b.host, "ModelBindings.ReloadConfig", err)
 	}
 	return nil
 }

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// App 持有 Wails context、前端服务集和关闭句柄，并实现 bindings.Runtime。
+// App 持有 Wails context、前端服务集和关闭句柄，并实现 bindings.Host。
 type App struct {
 	mu          sync.RWMutex
 	ctx         context.Context

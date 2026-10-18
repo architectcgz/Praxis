@@ -63,14 +63,14 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
             if (message?.role === 'assistant') {
                 for (const block of message.blocks || []) {
                     if (block.kind === 'tool_call' && block.callId && item.sequence !== undefined) {
-                        calls.set(`${message.taskId}:${block.callId}`, item.sequence)
+                        calls.set(`${message.executionId}:${block.callId}`, item.sequence)
                     }
                 }
             }
             if (message?.role === 'tool') {
                 const unpaired: AgentMessageBlock[] = []
                 for (const block of message.blocks || []) {
-                    const sequence = calls.get(`${message.taskId}:${block.callId}`)
+                    const sequence = calls.get(`${message.executionId}:${block.callId}`)
                     if (block.kind !== 'tool_result' || sequence === undefined) {
                         unpaired.push(block)
                     } else {
@@ -86,7 +86,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
         // 历史已有调用但工具结果仍在实时流中时，结果补到原调用卡片。
         for (const turn of streamingOutput?.turns || []) {
             for (const event of turn.events) {
-                const sequence = calls.get(`${event.taskId}:${event.callId}`)
+                const sequence = calls.get(`${event.executionId}:${event.callId}`)
                 if (event.kind !== 'tool_result' || sequence === undefined) continue
                 const results = toolResults.get(sequence) || []
                 if (!results.some((block) => block.callId === event.callId)) toolResults.set(sequence, [...results, {
@@ -217,7 +217,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                                 hasContinuation={hasContinuation}
                                 copyContent={copyContent}
                                 toolResults={item.sequence === undefined ? undefined : toolResults.get(item.sequence)}
-                                key={`${item.kind}-${item.sequence ?? 'at'}-${item.message?.taskId || item.task?.id || item.at}`}
+                                key={`${item.kind}-${item.sequence ?? 'at'}-${item.message?.executionId || item.execution?.id || item.at}`}
                             />
                         })
                     )}
@@ -229,16 +229,16 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                         <StreamingTurnView
                             agentProfile={agent.name}
                             events={turn.events}
-                            taskId={visibleStreamingOutput.taskId}
+                            executionId={visibleStreamingOutput.executionId}
                             turnId={turn.turnId}
                             active={active}
                             continuation={index > 0}
                             hasContinuation={index < visibleStreamingOutput.turns.length - 1}
-                            key={`${visibleStreamingOutput.taskId}-${turn.turnId}`}
+                            key={`${visibleStreamingOutput.executionId}-${turn.turnId}`}
                         />
                     ))}
                     {visibleStreamingOutput?.error && <AgentActivityView error={visibleStreamingOutput.error} />}
-                    {waitingForOutput && <PendingOutputView agentProfile={agent.name} taskId={agent.currentTaskId} />}
+                    {waitingForOutput && <PendingOutputView agentProfile={agent.name} executionId={agent.currentExecutionId} />}
                 </div>
                 {showScrollButton && (
                     <button
@@ -279,5 +279,5 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
 function sameAssistantTask(left?: AgentHistoryItem, right?: AgentHistoryItem): boolean {
     return left?.kind === 'message' && right?.kind === 'message' &&
         left.message?.role === 'assistant' && right.message?.role === 'assistant' &&
-        !!left.message.taskId && left.message.taskId === right.message.taskId
+        !!left.message.executionId && left.message.executionId === right.message.executionId
 }

@@ -3,10 +3,10 @@ package bindings
 import (
 	"strings"
 
-	"praxis/internal/execution"
+	"praxis/internal/core/toolcall"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/toolcall"
+	execution "praxis/internal/service/agent/coordinator"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -15,13 +15,13 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 	if err := validation.ValidateAgentID(agentID); err != nil {
 		return nil, err
 	}
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	values, err := services.Commands.ListToolApprovals(ctx, identity.AgentID(agentID))
 	if err != nil {
-		return nil, publicError(b.runtime, "CommandBindings.ListToolApprovals", err)
+		return nil, publicError(b.host, "CommandBindings.ListToolApprovals", err)
 	}
 	result := make([]dto.ToolApproval, 0, len(values))
 	for _, value := range values {
@@ -54,7 +54,7 @@ func (b *CommandBindings) DenyToolCall(wire dto.ToolDecisionRequest) error {
 }
 
 func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve bool) error {
-	ctx, services, err := b.runtime.BindingContext()
+	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 	}
 	if params.SessionID == "" || params.AgentID == "" || params.ExecutionID == "" || params.CallID == "" || params.ArgumentsDigest == "" {
 		err := fault.New(fault.InvalidRequest, "tool approval identity is required")
-		return publicError(b.runtime, "CommandBindings.ToolDecision.request", err)
+		return publicError(b.host, "CommandBindings.ToolDecision.request", err)
 	}
 	if approve {
 		err = services.Commands.ApproveToolCall(ctx, params)
@@ -75,7 +75,7 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 		err = services.Commands.DenyToolCall(ctx, params)
 	}
 	if err != nil {
-		return publicError(b.runtime, "CommandBindings.ToolDecision", err)
+		return publicError(b.host, "CommandBindings.ToolDecision", err)
 	}
 	return nil
 }

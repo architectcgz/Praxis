@@ -10,8 +10,8 @@ export type SendInputRequest = {
     reasoningLevel: string
 }
 
-export type PauseAgentRequest = { commandId: string; agentId: string; targetTaskId: string }
-export type CancelTaskRequest = PauseAgentRequest
+export type PauseAgentRequest = { commandId: string; agentId: string; targetExecutionId: string }
+export type StopAgentRequest = PauseAgentRequest
 export type QueueTaskRequest = {
     taskId: string
     requestId: string
@@ -24,7 +24,7 @@ export type QueueTaskRequest = {
 export type AgentControlResponse = {
     commandId: string
     agentId?: string
-    targetTaskId?: string
+    targetExecutionId?: string
     kind?: string
     status: string
     existingCommand?: boolean
@@ -40,16 +40,16 @@ export function pauseAgent(request: PauseAgentRequest) {
 }
 
 /** 取消明确指定的回合；延迟到达的请求不会取消后续回合。 */
-export function cancelTask(request: CancelTaskRequest) {
-    return getCommandBinding().CancelTask(request)
+export function stopAgent(request: StopAgentRequest) {
+    return getCommandBinding().StopAgent(request)
 }
 
-/** 预约忙碌期间的后续输入，后续执行沿用返回的 Task ID。 */
+/** 预约忙碌期间的后续输入，领取时创建独立 Execution ID。 */
 export function queueTask(request: QueueTaskRequest) {
     return getCommandBinding().QueueTask(request)
 }
 
-export type ToolDecisionRequest = { sessionId: string; agentId: string; taskId: string; callId: string; argumentsDigest: string }
+export type ToolDecisionRequest = { sessionId: string; agentId: string; executionId: string; callId: string; argumentsDigest: string }
 /** 待授权记录携带完整冻结参数与审核结论，展示字段不随授权决策提交。 */
 export type ToolApproval = ToolDecisionRequest & {
     name: string
@@ -73,6 +73,6 @@ export function denyToolCall(request: ToolDecisionRequest) {
 }
 
 /** 审批只提交调用身份与参数摘要，展示字段不参与决策请求。 */
-function toolDecisionRequest({ sessionId, agentId, taskId, callId, argumentsDigest }: ToolDecisionRequest): ToolDecisionRequest {
-    return { sessionId, agentId, taskId, callId, argumentsDigest }
+function toolDecisionRequest({ sessionId, agentId, executionId, callId, argumentsDigest }: ToolDecisionRequest): ToolDecisionRequest {
+    return { sessionId, agentId, executionId, callId, argumentsDigest }
 }

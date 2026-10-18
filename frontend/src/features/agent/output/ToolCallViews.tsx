@@ -16,25 +16,25 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
             result={activity.result?.result}
             isError={activity.result?.isError}
             pendingStatus={activity.approval ? 'awaiting_approval' : pendingStatus}
-            taskId={activity.call?.taskId || activity.approval?.taskId || activity.result?.taskId || ''}
+            executionId={activity.call?.executionId || activity.approval?.executionId || activity.result?.executionId || ''}
             callId={activity.call?.callId || activity.approval?.callId || activity.result?.callId}
         />)}
     </div></div>
 }
 
-export function ToolCallBlock({ block, result, taskId }: { block: AgentMessageBlock; result?: AgentMessageBlock; taskId: string }) {
-    return <ToolCard name={block.name || ''} input={block.input} result={result ? result.text || '' : undefined} isError={result?.isError} pendingStatus="unknown" taskId={taskId} callId={block.callId} />
+export function ToolCallBlock({ block, result, executionId }: { block: AgentMessageBlock; result?: AgentMessageBlock; executionId: string }) {
+    return <ToolCard name={block.name || ''} input={block.input} result={result ? result.text || '' : undefined} isError={result?.isError} pendingStatus="unknown" executionId={executionId} callId={block.callId} />
 }
 
-export function ToolResultBlock({ block, taskId }: { block: AgentMessageBlock; taskId: string }) {
-    return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} pendingStatus="unknown" taskId={taskId} callId={block.callId} />
+export function ToolResultBlock({ block, executionId }: { block: AgentMessageBlock; executionId: string }) {
+    return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} pendingStatus="unknown" executionId={executionId} callId={block.callId} />
 }
 
-function ToolCard({ name, input, result, isError = false, pendingStatus = 'running', taskId, callId }: {
-    name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; taskId: string; callId?: string
+function ToolCard({ name, input, result, isError = false, pendingStatus = 'running', executionId, callId }: {
+    name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; executionId: string; callId?: string
 }) {
-    const record = useOperationTiming(taskId, 'tool', callId)
-    const approval = useToolApproval(taskId, callId)
+    const record = useOperationTiming(executionId, 'tool', callId)
+    const approval = useToolApproval(executionId, callId)
     const pendingApproval = result === undefined ? approval?.pendingApproval : undefined
     // 没有计时记录时不传元素，活动账本右列会回落到状态词而不是留空。
     const duration = record ? <DurationLabel record={record} label="" /> : undefined
@@ -82,7 +82,7 @@ function groupToolEvents(events: AgentEvent[]): ToolActivity[] {
     const byCallID = new Map<string, ToolActivity>()
     events.forEach((event, index) => {
         if (event.kind !== 'tool_call' && event.kind !== 'tool_approval_required' && event.kind !== 'tool_result') return
-        const key = `${event.taskId}:${event.turnId}:${event.callId || `tool-${index}`}`
+        const key = `${event.executionId}:${event.turnId}:${event.callId || `tool-${index}`}`
         let activity = byCallID.get(key)
         if (!activity) {
             activity = { key }

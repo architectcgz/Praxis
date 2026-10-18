@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"praxis/internal/execution"
+	execution "praxis/internal/service/agent/coordinator"
 	"praxis/wails/dto"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -12,14 +12,14 @@ import (
 
 const agentEventName = "praxis:agent-event"
 
-type Runtime interface {
+type Host interface {
 	BindingContext() (context.Context, Services, error)
 	EventContext() context.Context
 	LogError(string, ...any)
 }
 
 type Bindings struct {
-	runtime  Runtime
+	host     Host
 	projects *ProjectBindings
 	sessions *SessionBindings
 	agents   *AgentBindings
@@ -27,14 +27,14 @@ type Bindings struct {
 	models   *ModelBindings
 }
 
-func New(runtime Runtime) *Bindings {
+func New(host Host) *Bindings {
 	return &Bindings{
-		runtime:  runtime,
-		projects: &ProjectBindings{runtime: runtime},
-		sessions: &SessionBindings{runtime: runtime},
-		agents:   &AgentBindings{runtime: runtime},
-		commands: &CommandBindings{runtime: runtime},
-		models:   &ModelBindings{runtime: runtime},
+		host:     host,
+		projects: &ProjectBindings{host: host},
+		sessions: &SessionBindings{host: host},
+		agents:   &AgentBindings{host: host},
+		commands: &CommandBindings{host: host},
+		models:   &ModelBindings{host: host},
 	}
 }
 
@@ -47,7 +47,7 @@ func (b *Bindings) EmitAgentEvent(event execution.Event) {
 	if event.AgentID == "" || event.ExecutionID == "" {
 		return
 	}
-	ctx := b.runtime.EventContext()
+	ctx := b.host.EventContext()
 	if ctx == nil {
 		return
 	}
