@@ -1,12 +1,13 @@
 package bindings
 
 import (
-	usagecontracts "praxis/internal/app/usage/contracts"
+	"praxis/internal/identity"
+	"praxis/internal/model"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
-// ListSessionUsage 返回会话所有请求的已上报用量；未上报的计数不补零。
+// ListSessionUsage 保留未上报计数与已知零值的区别。
 func (b *AgentBindings) ListSessionUsage(sessionID string) ([]dto.ModelUsageRecord, error) {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return nil, err
@@ -15,31 +16,35 @@ func (b *AgentBindings) ListSessionUsage(sessionID string) ([]dto.ModelUsageReco
 	if err != nil {
 		return nil, err
 	}
-	records, err := services.Usages.ListSession(ctx, sessionID)
+	records, err := services.Usages.ListSessionUsage(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return nil, publicError(b.runtime, "AgentBindings.ListSessionUsage", err)
 	}
 	return usageRecords(records), nil
 }
 
-func usageRecords(records []usagecontracts.ModelUsageRecord) []dto.ModelUsageRecord {
+func usageRecords(records []model.ModelUsageRecord) []dto.ModelUsageRecord {
 	if records == nil {
 		return nil
 	}
 	result := make([]dto.ModelUsageRecord, 0, len(records))
-	for _, record := range records {
+	for _, value := range records {
 		result = append(result, dto.ModelUsageRecord{
-			SessionID: record.SessionID,
-			AgentID:   record.AgentID,
-			TaskID:    record.TaskID,
-			TurnID:    record.TurnID,
-			Usage: dto.ModelUsage{
-				InputTokens:              record.Usage.InputTokens,
-				OutputTokens:             record.Usage.OutputTokens,
-				CacheReadInputTokens:     record.Usage.CacheReadInputTokens,
-				CacheCreationInputTokens: record.Usage.CacheCreationInputTokens,
-			},
+			SessionID: value.SessionID,
+			AgentID:   value.AgentID,
+			TaskID:    value.TaskID,
+			TurnID:    value.TurnID.String(),
+			Usage:     publicUsage(value.Usage),
 		})
 	}
 	return result
+}
+
+func publicUsage(value model.ModelUsage) dto.ModelUsage {
+	return dto.ModelUsage{
+		InputTokens:              value.InputTokens,
+		OutputTokens:             clonePointer(value.OutputTokens),
+		CacheReadInputTokens:     clonePointer(value.CacheReadInputTokens),
+		CacheCreationInputTokens: clonePointer(value.CacheCreationInputTokens),
+	}
 }

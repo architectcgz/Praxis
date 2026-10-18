@@ -1,12 +1,11 @@
 package bindings
 
 import (
-	timingcontracts "praxis/internal/app/timing/contracts"
+	"praxis/internal/timing"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
-// ListAgentTimings 返回 Agent 最近的独立计时记录，包含尚在运行的操作。
 func (b *AgentBindings) ListAgentTimings(agentID string) ([]dto.OperationTiming, error) {
 	if err := validation.ValidateAgentID(agentID); err != nil {
 		return nil, err
@@ -26,21 +25,29 @@ func (b *AgentBindings) ListAgentTimings(agentID string) ([]dto.OperationTiming,
 	return result, nil
 }
 
-func operationTiming(value timingcontracts.OperationTiming) dto.OperationTiming {
+func operationTiming(value timing.Record) dto.OperationTiming {
 	return dto.OperationTiming{
 		SessionID:       value.SessionID,
 		AgentID:         value.AgentID,
 		TaskID:          value.TaskID,
-		Kind:            value.Kind,
+		Kind:            string(value.Kind),
 		Name:            value.Name,
 		ReferenceID:     value.ReferenceID,
 		ID:              value.ID,
 		ParentID:        value.ParentID,
 		StartedAt:       value.StartedAt,
 		FinishedAt:      value.FinishedAt,
-		DurationMS:      value.DurationMS,
-		FirstResponseMS: value.FirstResponseMS,
-		Status:          value.Status,
+		DurationMS:      clonePointer(value.DurationMS),
+		FirstResponseMS: clonePointer(value.FirstResponseMS),
+		Status:          string(value.Status),
 		Revision:        value.Revision,
 	}
+}
+
+func clonePointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }

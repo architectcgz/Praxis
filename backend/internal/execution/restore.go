@@ -2,9 +2,8 @@ package execution
 
 import (
 	"context"
-
-	"praxis/internal/core/identity"
-	taskmodel "praxis/internal/core/task"
+	"praxis/internal/identity"
+	taskmodel "praxis/internal/task"
 )
 
 // RecoverySource 从当前持久化状态读取活动 Task 和允许派发的 Agent。

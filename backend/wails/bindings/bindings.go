@@ -4,24 +4,22 @@ import (
 	"bytes"
 	"context"
 
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	agentcontracts "praxis/internal/app/agent/contracts"
+	"praxis/internal/execution"
 	"praxis/wails/dto"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const agentEventName = "praxis:agent-event"
 
-// Runtime 提供 binding 调用所需的 Wails context 和前端服务集。
 type Runtime interface {
 	BindingContext() (context.Context, Services, error)
 	EventContext() context.Context
 	LogError(string, ...any)
 }
 
-// Bindings 聚合全部 Wails 暴露对象。
 type Bindings struct {
-	runtime Runtime
-
+	runtime  Runtime
 	projects *ProjectBindings
 	sessions *SessionBindings
 	agents   *AgentBindings
@@ -40,19 +38,12 @@ func New(runtime Runtime) *Bindings {
 	}
 }
 
-// All 返回交给 Wails Bind 的完整对象列表。
-func (b *Bindings) All() []interface{} {
-	return []interface{}{
-		b.projects,
-		b.sessions,
-		b.agents,
-		b.commands,
-		b.models,
-	}
+func (b *Bindings) All() []any {
+	return []any{b.projects, b.sessions, b.agents, b.commands, b.models}
 }
 
-// EmitAgentEvent 把 application 事件转换成专用 DTO 后推给前端。
-func (b *Bindings) EmitAgentEvent(event agentcontracts.AgentEvent) {
+// EmitAgentEvent 在协议出口复制可变字段，不向前端暴露业务对象。
+func (b *Bindings) EmitAgentEvent(event execution.Event) {
 	if event.AgentID == "" || event.TaskID == "" {
 		return
 	}
@@ -62,13 +53,13 @@ func (b *Bindings) EmitAgentEvent(event agentcontracts.AgentEvent) {
 	}
 	value := dto.AgentEvent{
 		Kind:           event.Kind,
-		SessionID:      event.SessionID,
-		AgentID:        event.AgentID,
-		TaskID:         event.TaskID,
+		SessionID:      event.SessionID.String(),
+		AgentID:        event.AgentID.String(),
+		TaskID:         event.TaskID.String(),
 		Outcome:        event.Outcome,
 		FailureCode:    event.FailureCode,
 		FailureMessage: event.FailureMessage,
-		TurnID:         event.TurnID,
+		TurnID:         event.TurnID.String(),
 		Text:           event.Text,
 		CallID:         event.CallID,
 		Name:           event.Name,
@@ -82,12 +73,8 @@ func (b *Bindings) EmitAgentEvent(event agentcontracts.AgentEvent) {
 		value.Timing = &timing
 	}
 	if event.Usage != nil {
-		value.Usage = &dto.ModelUsage{
-			InputTokens:              event.Usage.InputTokens,
-			OutputTokens:             event.Usage.OutputTokens,
-			CacheReadInputTokens:     event.Usage.CacheReadInputTokens,
-			CacheCreationInputTokens: event.Usage.CacheCreationInputTokens,
-		}
+		usage := publicUsage(*event.Usage)
+		value.Usage = &usage
 	}
 	wailsruntime.EventsEmit(ctx, agentEventName, value)
 }

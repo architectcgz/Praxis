@@ -3,9 +3,9 @@ package execution
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/core/fault"
-	"praxis/internal/core/identity"
+	agentmodel "praxis/internal/agent"
+	"praxis/internal/fault"
+	"praxis/internal/identity"
 	"sync"
 )
 

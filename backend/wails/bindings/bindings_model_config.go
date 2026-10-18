@@ -3,9 +3,11 @@ package bindings
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 
-	"praxis/internal/request"
+	"praxis/internal/fault"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -25,12 +27,13 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 	if err := ctx.Err(); err != nil {
 		return dto.ModelConfigDocument{}, publicError(b.runtime, "ModelBindings.GetModelConfig.context", err)
 	}
-	config := services.ModelConfig.ModelConfig()
+	snapshot := services.ModelConfig.Configuration()
+	config := snapshot.Config
 	document := dto.ModelConfigDocument{
 		Groups:            make([]dto.GroupConfigOption, 0, len(config.Groups)),
 		DefaultProviderID: config.DefaultProviderID,
 		Providers:         make([]dto.ProviderConfigOption, 0, len(config.Providers)),
-		Models:            make([]dto.ModelConfigOption, 0, len(config.Models)),
+		Models:            []dto.ModelConfigOption{},
 	}
 	for _, group := range config.Groups {
 		document.Groups = append(document.Groups, dto.GroupConfigOption{
@@ -45,65 +48,29 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 			BaseURL:        provider.BaseURL,
 			ProxyURL:       provider.ProxyURL,
 			DefaultModelID: provider.DefaultModelID,
-			HasAPIKey:      provider.HasAPIKey,
+			HasAPIKey:      snapshot.ProviderKeys[provider.ID],
 		})
-	}
-	for _, model := range config.Models {
-		document.Models = append(document.Models, dto.ModelConfigOption{
-			ProviderID:            model.ProviderID,
-			ModelID:               model.ModelID,
-			Label:                 model.DisplayName,
-			GroupID:               model.GroupID,
-			APIFormat:             model.APIFormat,
-			ContextWindow:         model.ContextWindow,
-			MaxOutputTokens:       model.MaxOutputTokens,
-			ReasoningLevels:       model.ReasoningLevels,
-			DefaultReasoningLevel: model.DefaultReasoningLevel,
-			Thinking:              model.Thinking,
-		})
+		for _, configured := range provider.Models {
+			document.Models = append(document.Models, dto.ModelConfigOption{
+				ProviderID:            provider.ID,
+				ModelID:               configured.ID,
+				Label:                 configured.DisplayName,
+				GroupID:               configured.GroupID,
+				APIFormat:             string(configured.APIFormat),
+				ContextWindow:         configured.ContextWindow,
+				MaxOutputTokens:       configured.MaxOutputTokens,
+				ReasoningLevels:       configured.ReasoningLevels,
+				DefaultReasoningLevel: configured.DefaultReasoningLevel,
+				Thinking:              dto.ModelThinking(configured.Thinking),
+			})
+		}
 	}
 	return document, nil
 }
 
-// SaveModelConfig 将 DTO 转为 request，并把用户可修正的配置错误作为正常结果返回。
+// SaveModelConfig 在模型输入边界规范化配置，并把可修正的字段错误作为正常结果返回。
 func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.SaveModelConfigResponse, error) {
-	candidate := request.SaveModelConfig{
-		Groups:            make([]request.ModelGroup, 0, len(wire.Groups)),
-		DefaultProviderID: wire.DefaultProviderID,
-		Providers:         make([]request.Provider, 0, len(wire.Providers)),
-		Models:            make([]request.ConfiguredModel, 0, len(wire.Models)),
-	}
-	for _, group := range wire.Groups {
-		candidate.Groups = append(candidate.Groups, request.ModelGroup{
-			ID:          group.ID,
-			DisplayName: group.DisplayName,
-		})
-	}
-	for _, provider := range wire.Providers {
-		candidate.Providers = append(candidate.Providers, request.Provider{
-			ID:             provider.ID,
-			DisplayName:    provider.ProviderName,
-			BaseURL:        provider.BaseURL,
-			ProxyURL:       provider.ProxyURL,
-			DefaultModelID: provider.DefaultModelID,
-			HasAPIKey:      provider.HasAPIKey,
-		})
-	}
-	for _, model := range wire.Models {
-		candidate.Models = append(candidate.Models, request.ConfiguredModel{
-			ProviderID:            model.ProviderID,
-			ModelID:               model.ModelID,
-			DisplayName:           model.Label,
-			GroupID:               model.GroupID,
-			APIFormat:             model.APIFormat,
-			ContextWindow:         model.ContextWindow,
-			MaxOutputTokens:       model.MaxOutputTokens,
-			ReasoningLevels:       model.ReasoningLevels,
-			DefaultReasoningLevel: model.DefaultReasoningLevel,
-			Thinking:              model.Thinking,
-		})
-	}
-	canonical, err := request.NewSaveModelConfig(candidate)
+	canonical, err := modelConfigFromRequest(wire)
 	if err != nil {
 		return validationResponse(err)
 	}
@@ -132,11 +99,16 @@ func validationResponse(err error) (dto.SaveModelConfigResponse, error) {
 	return dto.SaveModelConfigResponse{}, err
 }
 
-// SetProviderKey 保存或清除一个 Provider 的 API key。
+var providerKeyIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// SetProviderKey 在输入边界校验 Provider 身份；密钥原样保存，空字符串表示清除。
 func (b *ModelBindings) SetProviderKey(providerID, value string) error {
-	canonical, err := request.NewSetProviderKey(providerID, value)
-	if err != nil {
-		return err
+	providerID = strings.TrimSpace(providerID)
+	if !providerKeyIDPattern.MatchString(providerID) {
+		return fault.InvalidValue("providerId", "invalid provider id")
+	}
+	if value != "" && strings.TrimSpace(value) == "" {
+		return fault.InvalidValue("key", "API key cannot contain only whitespace")
 	}
 	ctx, services, err := b.runtime.BindingContext()
 	if err != nil {
@@ -145,7 +117,7 @@ func (b *ModelBindings) SetProviderKey(providerID, value string) error {
 	if err := ctx.Err(); err != nil {
 		return publicError(b.runtime, "ModelBindings.SetProviderKey.context", err)
 	}
-	if err := services.ModelConfig.SetProviderKey(canonical); err != nil {
+	if err := services.ModelConfig.SetProviderKey(providerID, value); err != nil {
 		return publicError(b.runtime, "ModelBindings.SetProviderKey", err)
 	}
 	return nil

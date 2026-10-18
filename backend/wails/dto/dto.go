@@ -3,8 +3,6 @@ package dto
 import (
 	"encoding/json"
 	"time"
-
-	modelcontracts "praxis/internal/app/model/contracts"
 )
 
 type SessionSnapshot struct {
@@ -156,16 +154,16 @@ type GroupConfigOption struct {
 
 // ModelConfigOption 携带设置界面编辑模型所需的全部字段。
 type ModelConfigOption struct {
-	ProviderID            string                       `json:"providerId"`
-	ModelID               string                       `json:"modelId"`
-	Label                 string                       `json:"label"`
-	GroupID               string                       `json:"groupId"`
-	APIFormat             string                       `json:"apiFormat"`
-	ContextWindow         int                          `json:"contextWindow"`
-	MaxOutputTokens       int                          `json:"maxOutputTokens"`
-	ReasoningLevels       []string                     `json:"reasoningLevels"`
-	DefaultReasoningLevel string                       `json:"defaultReasoningLevel"`
-	Thinking              modelcontracts.ModelThinking `json:"thinking,omitzero"`
+	ProviderID            string        `json:"providerId"`
+	ModelID               string        `json:"modelId"`
+	Label                 string        `json:"label"`
+	GroupID               string        `json:"groupId"`
+	APIFormat             string        `json:"apiFormat"`
+	ContextWindow         int           `json:"contextWindow"`
+	MaxOutputTokens       int           `json:"maxOutputTokens"`
+	ReasoningLevels       []string      `json:"reasoningLevels"`
+	DefaultReasoningLevel string        `json:"defaultReasoningLevel"`
+	Thinking              ModelThinking `json:"thinking,omitzero"`
 }
 
 // ModelConfigDocument 表示可编辑的模型注册表文档。

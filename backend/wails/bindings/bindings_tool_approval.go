@@ -1,65 +1,78 @@
 package bindings
 
 import (
-	"praxis/internal/request"
+	"strings"
+
+	"praxis/internal/execution"
+	"praxis/internal/fault"
+	"praxis/internal/identity"
+	"praxis/internal/toolcall"
 	"praxis/wails/dto"
+	"praxis/wails/validation"
 )
 
 func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval, error) {
+	if err := validation.ValidateAgentID(agentID); err != nil {
+		return nil, err
+	}
 	ctx, services, err := b.runtime.BindingContext()
 	if err != nil {
 		return nil, err
 	}
-	values, err := services.Commands.ListToolApprovals(ctx, agentID)
+	values, err := services.Commands.ListToolApprovals(ctx, identity.AgentID(agentID))
 	if err != nil {
 		return nil, publicError(b.runtime, "CommandBindings.ListToolApprovals", err)
 	}
 	result := make([]dto.ToolApproval, 0, len(values))
 	for _, value := range values {
+		review := value.LatestReview()
 		result = append(result, dto.ToolApproval{
 			ToolDecisionRequest: dto.ToolDecisionRequest{
-				SessionID:       value.SessionID,
-				AgentID:         value.AgentID,
-				TaskID:          value.TaskID,
-				CallID:          value.CallID,
-				ArgumentsDigest: value.ArgumentsDigest,
+				SessionID:       value.SessionID.String(),
+				AgentID:         value.AgentID.String(),
+				TaskID:          value.TaskID.String(),
+				CallID:          value.ProviderToolCallID,
+				ArgumentsDigest: toolcall.ArgumentsDigest(value.Name, value.NormalizedArguments),
 			},
-			Name:                value.Name,
-			NormalizedArguments: value.NormalizedArguments,
+			Name:                string(value.Name),
+			NormalizedArguments: string(value.NormalizedArguments),
 			Path:                value.Path,
-			RuleID:              value.RuleID,
-			Action:              value.Action,
-			RiskVerdict:         value.RiskVerdict,
-			RiskReason:          value.RiskReason,
+			RuleID:              value.Decision.RuleID,
+			Action:              string(value.Decision.Action),
+			RiskVerdict:         string(review.Assessment.Verdict),
+			RiskReason:          review.Assessment.Reason,
 		})
 	}
 	return result, nil
 }
+
 func (b *CommandBindings) ApproveToolCall(wire dto.ToolDecisionRequest) error {
 	return b.decideToolCall(wire, true)
 }
 func (b *CommandBindings) DenyToolCall(wire dto.ToolDecisionRequest) error {
 	return b.decideToolCall(wire, false)
 }
+
 func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve bool) error {
 	ctx, services, err := b.runtime.BindingContext()
 	if err != nil {
 		return err
 	}
-	canonical, err := request.NewToolDecision(request.ToolDecision{
-		SessionID:       wire.SessionID,
-		AgentID:         wire.AgentID,
-		TaskID:          wire.TaskID,
-		CallID:          wire.CallID,
-		ArgumentsDigest: wire.ArgumentsDigest,
-	})
-	if err != nil {
+	params := execution.ToolDecision{
+		SessionID:       identity.SessionID(wire.SessionID),
+		AgentID:         identity.AgentID(wire.AgentID),
+		TaskID:          identity.TaskID(wire.TaskID),
+		CallID:          strings.TrimSpace(wire.CallID),
+		ArgumentsDigest: strings.TrimSpace(wire.ArgumentsDigest),
+	}
+	if params.SessionID == "" || params.AgentID == "" || params.TaskID == "" || params.CallID == "" || params.ArgumentsDigest == "" {
+		err := fault.New(fault.InvalidRequest, "tool approval identity is required")
 		return publicError(b.runtime, "CommandBindings.ToolDecision.request", err)
 	}
 	if approve {
-		err = services.Commands.ApproveToolCall(ctx, canonical)
+		err = services.Commands.ApproveToolCall(ctx, params)
 	} else {
-		err = services.Commands.DenyToolCall(ctx, canonical)
+		err = services.Commands.DenyToolCall(ctx, params)
 	}
 	if err != nil {
 		return publicError(b.runtime, "CommandBindings.ToolDecision", err)

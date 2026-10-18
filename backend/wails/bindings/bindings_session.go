@@ -1,14 +1,16 @@
 package bindings
 
 import (
-	"praxis/internal/request"
+	"strings"
+
+	"praxis/internal/fault"
+	"praxis/internal/identity"
+	"praxis/internal/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
-type SessionBindings struct {
-	runtime Runtime
-}
+type SessionBindings struct{ runtime Runtime }
 
 // ListSessions 返回指定项目的持久化会话。
 func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, error) {
@@ -19,20 +21,13 @@ func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, 
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := services.Sessions.ListSessionsByProject(ctx, projectID, 100)
+	values, err := services.Sessions.ListSessionsByProject(ctx, identity.ProjectID(projectID), 100)
 	if err != nil {
 		return nil, publicError(b.runtime, "SessionBindings.ListSessions", err)
 	}
-	result := make([]dto.SessionSummary, 0, len(sessions))
-	for _, session := range sessions {
-		result = append(result, dto.SessionSummary{
-			ID:          session.ID,
-			ProjectID:   session.ProjectID,
-			WorkspaceID: session.WorkspaceID,
-			Title:       session.Title,
-			CreatedAt:   session.CreatedAt,
-			UpdatedAt:   session.UpdatedAt,
-		})
+	result := make([]dto.SessionSummary, 0, len(values))
+	for _, value := range values {
+		result = append(result, sessionSummary(value))
 	}
 	return result, nil
 }
@@ -45,23 +40,24 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	if err != nil {
 		return dto.CreateSessionResponse{}, err
 	}
-	result, err := services.Sessions.CreateSession(ctx, request.CreateSession{
-		SessionID:    wire.SessionID,
-		AgentID:      wire.AgentID,
-		RequestID:    wire.RequestID,
-		ProjectID:    wire.ProjectID,
-		WorkspaceID:  wire.WorkspaceID,
-		DefinitionID: wire.AgentDefinitionID,
-	})
+	params := session.CreateInput{
+		SessionID:    identity.SessionID(wire.SessionID),
+		AgentID:      identity.AgentID(wire.AgentID),
+		RequestID:    identity.RequestID(wire.RequestID),
+		ProjectID:    identity.ProjectID(wire.ProjectID),
+		WorkspaceID:  identity.WorkspaceID(wire.WorkspaceID),
+		DefinitionID: identity.AgentDefinitionID(wire.AgentDefinitionID),
+	}
+	result, err := services.Sessions.CreateSession(ctx, params)
 	if err != nil {
 		return dto.CreateSessionResponse{}, publicError(b.runtime, "SessionBindings.CreateSession", err)
 	}
 	return dto.CreateSessionResponse{
-		SessionID:         result.SessionID,
-		ProjectID:         result.ProjectID,
-		WorkspaceID:       result.WorkspaceID,
-		AgentID:           result.AgentID,
-		AgentDefinitionID: result.DefinitionID,
+		SessionID:         result.Session.ID.String(),
+		ProjectID:         result.Session.ProjectID.String(),
+		WorkspaceID:       result.Session.WorkspaceID.String(),
+		AgentID:           result.Agent.ID.String(),
+		AgentDefinitionID: result.Agent.DefinitionID.String(),
 	}, nil
 }
 
@@ -73,26 +69,26 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 	if err != nil {
 		return dto.SessionSnapshot{}, err
 	}
-	detail, err := services.Sessions.GetSessionDetail(ctx, sessionID, 100)
+	view, err := services.Sessions.GetSessionView(ctx, identity.SessionID(sessionID), 100)
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.runtime, "SessionBindings.GetSession", err)
 	}
 	result := dto.SessionSnapshot{
-		ID:          detail.Session.ID,
-		ProjectID:   detail.Session.ProjectID,
-		WorkspaceID: detail.Session.WorkspaceID,
-		Title:       detail.Session.Title,
-		CreatedAt:   detail.Session.CreatedAt,
-		UpdatedAt:   detail.Session.UpdatedAt,
-		Agents:      make([]dto.AgentSnapshot, 0, len(detail.Agents)),
+		ID:          view.Session.ID.String(),
+		ProjectID:   view.Session.ProjectID.String(),
+		WorkspaceID: view.Session.WorkspaceID.String(),
+		Title:       view.Session.Title,
+		CreatedAt:   view.Session.CreatedAt,
+		UpdatedAt:   view.Session.UpdatedAt,
+		Agents:      make([]dto.AgentSnapshot, 0, len(view.Agents)),
 	}
-	for _, agent := range detail.Agents {
-		result.Agents = append(result.Agents, agentSnapshot(agent))
+	for _, value := range view.Agents {
+		result.Agents = append(result.Agents, agentSnapshot(value))
 	}
 	return result, nil
 }
 
-// GetSessionUsageSummary 查询已保存用量，非法 Session ID 在 binding 边界拒绝。
+// GetSessionUsageSummary 直接投影业务侧的一致用量快照。
 func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionUsageSummary, error) {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return dto.SessionUsageSummary{}, err
@@ -101,20 +97,19 @@ func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionU
 	if err != nil {
 		return dto.SessionUsageSummary{}, err
 	}
-	summary, err := services.Usages.GetSessionUsageSummary(ctx, sessionID)
+	value, err := services.Usages.GetSessionUsageSummary(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return dto.SessionUsageSummary{}, publicError(b.runtime, "SessionBindings.GetSessionUsageSummary", err)
 	}
 	return dto.SessionUsageSummary{
-		Records:              usageRecords(summary.Records),
-		InputTokens:          summary.InputTokens,
-		CacheReadInputTokens: summary.CacheReadInputTokens,
-		CacheReadRatio:       summary.CacheReadRatio,
-		CacheReadComplete:    summary.CacheReadComplete,
+		Records:              usageRecords(value.Records),
+		InputTokens:          value.InputTokens,
+		CacheReadInputTokens: value.CacheReadInputTokens,
+		CacheReadRatio:       clonePointer(value.CacheReadRatio),
+		CacheReadComplete:    value.CacheReadComplete,
 	}, nil
 }
 
-// DeleteSession 删除指定会话，并将业务错误转换为前端可识别的错误码。
 func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return err
@@ -123,27 +118,38 @@ func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := services.Sessions.DeleteSession(ctx, sessionID); err != nil {
+	if err := services.Sessions.DeleteSession(ctx, identity.SessionID(sessionID)); err != nil {
 		return publicError(b.runtime, "SessionBindings.DeleteSession", err)
 	}
 	return nil
 }
 
-// RenameSession 更新指定会话标题，并将业务错误转换为前端可识别的错误码。
 func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
 		return err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		err := fault.InvalidValue("title", "session title is required")
+		return publicError(b.runtime, "SessionBindings.RenameSession.request", err)
 	}
 	ctx, services, err := b.runtime.BindingContext()
 	if err != nil {
 		return err
 	}
-	canonical, err := request.NewRenameSession(sessionID, title)
-	if err != nil {
-		return publicError(b.runtime, "SessionBindings.RenameSession.request", err)
-	}
-	if err := services.Sessions.RenameSession(ctx, canonical); err != nil {
+	if err := services.Sessions.RenameSession(ctx, identity.SessionID(sessionID), title); err != nil {
 		return publicError(b.runtime, "SessionBindings.RenameSession", err)
 	}
 	return nil
+}
+
+func sessionSummary(value session.Session) dto.SessionSummary {
+	return dto.SessionSummary{
+		ID:          value.ID.String(),
+		ProjectID:   value.ProjectID.String(),
+		WorkspaceID: value.WorkspaceID.String(),
+		Title:       value.Title,
+		CreatedAt:   value.CreatedAt,
+		UpdatedAt:   value.UpdatedAt,
+	}
 }

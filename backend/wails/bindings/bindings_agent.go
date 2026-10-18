@@ -1,14 +1,18 @@
 package bindings
 
 import (
-	agentcontracts "praxis/internal/app/agent/contracts"
+	"bytes"
+	"strings"
+
+	"praxis/internal/agent"
+	"praxis/internal/identity"
+	"praxis/internal/message"
+	"praxis/internal/task"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
-type AgentBindings struct {
-	runtime Runtime
-}
+type AgentBindings struct{ runtime Runtime }
 
 func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 	if err := validation.ValidateAgentID(agentID); err != nil {
@@ -18,11 +22,21 @@ func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 	if err != nil {
 		return dto.AgentSnapshot{}, err
 	}
-	value, err := services.Agents.GetAgentDetail(ctx, agentID, 100)
+	view, err := services.Agents.GetAgentView(ctx, identity.AgentID(agentID), 100)
 	if err != nil {
 		return dto.AgentSnapshot{}, publicError(b.runtime, "AgentBindings.GetAgent", err)
 	}
-	return agentSnapshot(value), nil
+	result := agentSnapshot(view.Agent)
+	result.TaskIDs = make([]string, 0, len(view.Tasks))
+	result.ControlCommandIDs = make([]string, 0, len(view.Controls))
+	for _, value := range view.Tasks {
+		result.TaskIDs = append(result.TaskIDs, value.ID.String())
+		result.Tasks = append(result.Tasks, taskSnapshot(value))
+	}
+	for _, value := range view.Controls {
+		result.ControlCommandIDs = append(result.ControlCommandIDs, value.ID.String())
+	}
+	return result, nil
 }
 
 func (b *AgentBindings) ListAgentMessages(agentID string) ([]dto.AgentMessage, error) {
@@ -33,15 +47,11 @@ func (b *AgentBindings) ListAgentMessages(agentID string) ([]dto.AgentMessage, e
 	if err != nil {
 		return nil, err
 	}
-	messages, err := services.Agents.ListAgentMessages(ctx, agentID, 200)
+	messages, err := services.Agents.ListAgentMessages(ctx, identity.AgentID(agentID), 200)
 	if err != nil {
 		return nil, publicError(b.runtime, "AgentBindings.ListAgentMessages", err)
 	}
-	result := make([]dto.AgentMessage, 0, len(messages))
-	for _, message := range messages {
-		result = append(result, agentMessage(message))
-	}
-	return result, nil
+	return publicAgentMessages(messages), nil
 }
 
 func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHistoryPage, error) {
@@ -52,81 +62,76 @@ func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHisto
 	if err != nil {
 		return dto.AgentHistoryPage{}, err
 	}
-	page, err := services.Agents.ListAgentHistory(ctx, agentID, before, 200)
+	page, err := listAgentHistory(ctx, services.Agents, identity.AgentID(agentID), before, 200)
 	if err != nil {
 		return dto.AgentHistoryPage{}, publicError(b.runtime, "AgentBindings.ListAgentHistory", err)
 	}
-	result := make([]dto.AgentHistoryItem, 0, len(page.Items))
-	for _, item := range page.Items {
-		value := dto.AgentHistoryItem{
-			Kind:     item.Kind,
-			Sequence: item.Sequence,
-			At:       item.At,
-		}
-		if item.Message != nil {
-			message := agentMessage(*item.Message)
-			value.Message = &message
-		}
-		if item.Task != nil {
-			task := taskSnapshot(*item.Task)
-			value.Task = &task
-		}
-		result = append(result, value)
-	}
-	return dto.AgentHistoryPage{Items: result, NextCursor: page.NextCursor}, nil
+	return page, nil
 }
 
-func agentSnapshot(value agentcontracts.AgentDetail) dto.AgentSnapshot {
-	result := dto.AgentSnapshot{
-		ID:                value.ID,
-		Name:              value.Name,
-		SessionID:         value.SessionID,
-		DefinitionID:      value.DefinitionID,
-		Profile:           value.Profile,
-		State:             value.State,
-		CurrentTask:       value.CurrentTaskID,
-		TaskIDs:           value.TaskIDs,
-		Tasks:             make([]dto.TaskSnapshot, 0, len(value.Tasks)),
-		ControlCommandIDs: value.ControlCommandIDs,
+func agentSnapshot(value agent.Agent) dto.AgentSnapshot {
+	return dto.AgentSnapshot{
+		ID:           value.ID.String(),
+		Name:         agent.DisplayName(value.DefinitionID),
+		SessionID:    value.SessionID.String(),
+		DefinitionID: value.DefinitionID.String(),
+		Profile:      string(value.Profile),
+		State:        string(value.State),
+		CurrentTask:  value.CurrentTaskID.String(),
+		Tasks:        []dto.TaskSnapshot{},
 	}
-	for _, task := range value.Tasks {
-		result.Tasks = append(result.Tasks, taskSnapshot(task))
-	}
-	return result
 }
 
-func agentMessage(value agentcontracts.AgentMessage) dto.AgentMessage {
-	result := dto.AgentMessage{
-		ID:         value.ID,
-		Sequence:   value.Sequence,
-		At:         value.At,
-		TaskID:     value.TaskID,
-		Role:       value.Role,
-		AuthorKind: value.AuthorKind,
-		AuthorID:   value.AuthorID,
-		Content:    value.Content,
-		Thinking:   value.Thinking,
-		Blocks:     make([]dto.AgentMessageBlock, 0, len(value.Blocks)),
-	}
-	for _, block := range value.Blocks {
-		result.Blocks = append(result.Blocks, dto.AgentMessageBlock{
-			Kind:    block.Kind,
-			Text:    block.Text,
-			CallID:  block.CallID,
-			Name:    block.Name,
-			Input:   block.Input,
-			IsError: block.IsError,
+// publicAgentMessages 只投影可展示内容，opaque 推理状态不进入前端协议。
+func publicAgentMessages(values []message.Message) []dto.AgentMessage {
+	result := make([]dto.AgentMessage, 0, len(values))
+	for _, value := range values {
+		var content, thinking strings.Builder
+		blocks := make([]dto.AgentMessageBlock, 0, len(value.Blocks))
+		for _, block := range value.Blocks {
+			if block.Kind == message.BlockText {
+				content.WriteString(block.Text)
+			}
+			if block.Kind == message.BlockThinking {
+				thinking.WriteString(block.Text)
+			}
+			if block.Kind == message.BlockText || block.Kind == message.BlockThinking || block.Kind == message.BlockToolCall || block.Kind == message.BlockToolResult {
+				blocks = append(blocks, dto.AgentMessageBlock{
+					Kind:    string(block.Kind),
+					Text:    block.Text,
+					CallID:  block.CallID,
+					Name:    block.Name,
+					Input:   bytes.Clone(block.Input),
+					IsError: block.IsError,
+				})
+			}
+		}
+		if (value.Role != message.RoleUser && value.Role != message.RoleAssistant && value.Role != message.RoleTool) ||
+			(strings.TrimSpace(content.String()) == "" && len(blocks) == 0 && strings.TrimSpace(thinking.String()) == "") {
+			continue
+		}
+		result = append(result, dto.AgentMessage{
+			ID:         value.ID,
+			Sequence:   value.Sequence,
+			At:         value.CreatedAt,
+			TaskID:     value.TaskID,
+			Role:       string(value.Role),
+			AuthorKind: string(value.AuthorKind),
+			AuthorID:   value.AuthorID,
+			Content:    content.String(),
+			Thinking:   thinking.String(),
+			Blocks:     blocks,
 		})
 	}
 	return result
 }
 
-func taskSnapshot(value agentcontracts.TaskInfo) dto.TaskSnapshot {
+func taskSnapshot(value task.Task) dto.TaskSnapshot {
 	return dto.TaskSnapshot{
-		ID:             value.ID,
-		Status:         value.Status,
-		Outcome:        value.Outcome,
-		FailureCode:    value.FailureCode,
+		ID:             value.ID.String(),
+		Status:         string(value.Status),
+		Outcome:        string(value.Outcome),
+		FailureCode:    string(value.FailureCode),
 		FailureMessage: value.FailureMessage,
 		CreatedAt:      value.CreatedAt,
 		StartedAt:      value.StartedAt,

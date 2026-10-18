@@ -1,8 +1,12 @@
 package bindings
 
 import (
-	projectcontracts "praxis/internal/app/project/contracts"
-	"praxis/internal/request"
+	"strings"
+
+	"praxis/internal/fault"
+	"praxis/internal/identity"
+	projectmodel "praxis/internal/project"
+	"praxis/internal/security"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -16,7 +20,7 @@ func (b *ProjectBindings) GetProjectApprovalMode(projectID string) (dto.ProjectA
 	if err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
-	value, err := services.Projects.GetProjectApprovalMode(ctx, projectID)
+	value, err := services.Projects.GetApprovalMode(ctx, identity.ProjectID(projectID))
 	if err != nil {
 		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.GetProjectApprovalMode", err)
 	}
@@ -32,22 +36,35 @@ func (b *ProjectBindings) SetProjectApprovalMode(wire dto.SetProjectApprovalMode
 	if err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
-	canonical, err := request.NewSetProjectApprovalMode(wire.ProjectID, wire.Mode)
-	if err != nil {
+	if strings.ContainsAny(wire.ProjectID, "\x00\r\n") {
+		err := fault.InvalidValue("projectId", "canonical project identity is required")
 		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.SetProjectApprovalMode.request", err)
 	}
-	value, err := services.Projects.SetProjectApprovalMode(ctx, canonical)
+	var mode *security.ApprovalMode
+	if wire.Mode != nil {
+		parsed := security.ApprovalMode(strings.TrimSpace(*wire.Mode))
+		if !parsed.ValidDefault() {
+			err := fault.InvalidValue("approvalMode", "default approval mode must be ask, auto or yolo")
+			return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.SetProjectApprovalMode.request", err)
+		}
+		mode = &parsed
+	}
+	value, err := services.Projects.SetApprovalMode(ctx, identity.ProjectID(wire.ProjectID), mode)
 	if err != nil {
 		return dto.ProjectApprovalMode{}, publicError(b.runtime, "ProjectBindings.SetProjectApprovalMode", err)
 	}
 	return approvalModeDTO(value), nil
 }
 
-func approvalModeDTO(value projectcontracts.ProjectApprovalMode) dto.ProjectApprovalMode {
-	return dto.ProjectApprovalMode{
-		ProjectID:     value.ProjectID,
-		GlobalMode:    value.GlobalMode,
-		ProjectMode:   value.ProjectMode,
-		EffectiveMode: value.EffectiveMode,
+func approvalModeDTO(value projectmodel.ApprovalSettings) dto.ProjectApprovalMode {
+	result := dto.ProjectApprovalMode{
+		ProjectID:     value.ProjectID.String(),
+		GlobalMode:    string(value.GlobalMode),
+		EffectiveMode: string(value.EffectiveMode),
 	}
+	if value.ProjectMode != nil {
+		mode := string(*value.ProjectMode)
+		result.ProjectMode = &mode
+	}
+	return result
 }

@@ -1,110 +1,112 @@
-# Praxis 架构规则
+# Praxis 后端架构
 
-本文档只规定架构规则：分层与依赖方向、Port 归属、契约包边界、内核内部顺序，以及这些规则的执行方式。产品结构、数据布局、协议细节和验证流程不在本文档范围内，以 `backend/`、`frontend/` 和 `backend/scripts/check-dependencies.sh` 为准。
+## 背景与目标
 
-## 一、分层与依赖方向
+后端按业务概念和明确能力组织。类型属于拥有其语义与生命周期的模块；跨模块的 Agent Task 执行流程由 `execution` 编排，具体实现由 `bootstrap` 装配。正常的跨包类型引用直接复用，不为消除 import 复制数据模型。
 
-依赖只能指向更内层（表中更靠上）。同层不新增依赖；允许的同层连接只有三类：父包与子包之间的值类型复用、调用方声明的 Port，以及本节表中明确列出的方向。
+## 模块与职责
 
-| 层 | 包 | 允许依赖 |
-| --- | --- | --- |
-| 基元 | `core/identity`、`core/fault`、`core/tool`、`core/security`、`system`、`utils/*`、`logging` | 无，仅标准库 |
-| 内核值 | `core/context`、`core/context/compress`、`core/project`、`core/workspace`、`core/workflow` | 基元；同层只允许 `core/context/compress → core/context` |
-| 内核模型 | `core/model/config`、`core/model`、`core/session` | 基元、内核值；同层只允许 `core/model → core/model/config` |
-| 内核业务 | `core/task`、`core/agent`、`core/tool_execution` | 基元、内核值、内核模型 |
-| 内核能力 | `repository`、`hooks` | 内核各层 |
-| 基础设施 | `infra/*` | 内核各层、`repository`、`infra/*` 内部、第一节白名单 |
-| 工具 | `tools/contracts`、`tools/shared`、`tools/{bash,read_file,apply_patch}`、`tools` | 基元、内核业务、`tools/*` 内部 |
-| 执行 | `timing`、`tool_execution`、`loop`、`execution` | 基元、内核各层、内核能力、工具；同层只允许 `execution → loop` |
-| 业务基础 | `service/{project,session,agent,model,task,runtime/queue}` | 基元、内核各层、内核能力、工具、执行 |
-| 业务编排 | `service/runtime` | 业务基础及其允许项 |
-| 输入 | `request` | 内核各层、`app/model/contracts`（见白名单） |
-| 应用 | `app/*`、`app/*/contracts` | 内核各层、执行、业务、输入、自身和其他 `app/*/contracts`；契约只依赖标准库和其他契约 |
-| 组合与传输 | `compose`、`wails/*`、`main` | 全部 |
-
-包路径省略前缀 `internal/`。两条分层顺序无法表达、必须单独成立的约束：
-
-- 除 `compose`、第一节白名单和 `main → infra/dataroot` 外，任何包不得 import `infra/*`。`repository` 与 `tools/contracts` 是内层实现对外暴露的唯一接口。
-- `service/...` 不得 import `app`、`request`、`execution`、`loop`、`compose`、`wails`；`app/...` 不得 import `infra`、`repository`、`compose`、`wails`。`main` 只负责桌面生命周期和数据根解析，不参与业务装配。
-
-允许的反向引用只有四处。新增反向引用必须先修改本节，并在门禁中列入白名单：
-
-| 反向引用 | 理由 |
+| 模块 | 职责 |
 | --- | --- |
-| `infra/workspacefs → service/session` | 实现 `WorkspaceTextReader`，需要该 Port 的哨兵错误 |
-| `infra/jsonl → timing` | 实现 `timing.Store`，需要 `timing.Record` |
-| `infra/toolconfig → tools/contracts` | 实现 `ToolCatalog`，需要契约值类型 |
-| `request → app/model/contracts` | 输入层复用公开值类型；不得引用应用入口 |
+| `agent` | Agent 实例、定义注册表、状态查询、固定目标的控制命令 |
+| `session` | 会话创建、共享事实、会话目录、文件预览用例与用量查询 |
+| `message` | 消息、内容块、消息流读取与工具回执写入契约 |
+| `project` | 项目、初始工作区创建与项目授权设置 |
+| `workspace` | 工作区模型与文本读取能力；`workspace/fs` 实现本地文件访问 |
+| `task` | Task 模型、冻结配置、状态机、预算、最终输出证据与基础存取契约 |
+| `task/service` | Task 创建、准入、上下文冻结、进度、队列、恢复与结算用例 |
+| `context` | 模型可见内容、历史构建与压缩算法 |
+| `model` | 模型目录、配置管理、凭据、模型构建与用量类型 |
+| `model/provider/*` | 各 Provider 的请求编码、流式解码与协议状态机 |
+| `tool` | 工具协议、注册表、可用性目录与结果大小边界 |
+| `tool/arguments` | 工具参数 JSON 和路径输入边界 |
+| `tool/builtin/*` | Bash、文件读取与补丁工具实现 |
+| `toolcall` | 单次调用的授权、风险审核、审批、执行、结果与持久化契约 |
+| `execution` | 进程级 Runtime、Coordinator、活动执行身份、审批续接与关闭协调 |
+| `execution/loop` | 模型与工具迭代算法，不拥有 Task 生命周期 |
+| `hook`、`timing` | 扩展通知与独立操作计时 |
+| `storage/jsonl` | 共享日志资源、事务、序号、位置索引、重放与业务持久化实现 |
+| `storage/document` | 内容寻址的不可变文档存储 |
+| `transaction` | 单一后端的原子提交契约 |
+| `identity`、`clock`、`fault` | 强类型身份与生成器、时间来源、错误分类 |
+| `settings`、`dataroot`、`logging` | 全局设置、数据目录布局与诊断日志 |
+| `bootstrap` | 进程级装配、配置发布与资源释放 |
+| `wails` | 桌面宿主、请求规范化与校验、业务参数构造、DTO 投影与错误映射 |
 
-## 二、Port 归属
+## 调用与依赖方向
 
-- Port 由调用方声明、被调用方实现。声明方是发起调用的一侧，与包所在层无关：内层可以声明由外层实现的 Port，外层也可以声明由内层实现的 Port。
-- 不为单一实现机械增加接口，不新增中间包；窄接口只声明消费方真正使用的能力，同一能力被多处消费时各自声明自己需要的部分。
-- 实现方不得反向 import 声明方。需要引用 Port 的类型或哨兵错误时，只能按第一节白名单执行。
-- 组合根负责把实现注入声明方。现成实现不匹配时由组合根定义适配器，不在业务包里做转换。
+```text
+Wails Binding
+    ├── project.Service
+    ├── session.Service
+    ├── agent.Service
+    ├── model.Service
+    └── execution.Runtime
+            ├── task/service.Service（Task 用例与持久化 FIFO 队列）
+            ├── Coordinator 与进程内执行身份
+            └── execution/loop.Runner
+                    ├── model.ModelBuilder
+                    └── toolcall.Executor → tool.Tool
+```
 
-| 声明方 | Port | 实现方 |
-| --- | --- | --- |
-| `loop` | `ToolExecutor` | `tool_execution.Executor` |
-| `loop` | `TaskProgress` | `service/task.Service` |
-| `loop` | `ToolExecutionReader` | `infra/jsonl` |
-| `execution` | `TaskOperations` | `service/task.Service` |
-| `execution` | `TaskQueue` | `service/runtime/queue.Service` |
-| `execution` | `RecoverySource` | `compose` |
-| `service/task` | `ExecutionSlots` | `execution.ActiveTasks` |
-| `service/task` | `PrimaryAgentProvider` | `service/session.Service` |
-| `service/task` | `AgentDefinitionProvider`、`ModelConfigResolver` | `compose` 的注册表适配器 |
-| `service/runtime` | `TaskActivator` | `execution.Coordinator` |
-| `service/runtime` | `TaskStarter` | `service/task.Service` |
-| `service/agent` | `ExecutionControl` | `execution.ActiveTasks` |
-| `service/session` | `WorkspaceTextReader` | `infra/workspacefs.Filesystem` |
-| `service/project` | `WorkspaceDirectory` | `infra/workspacefs.Filesystem` |
-| `timing` | `Store` | `infra/jsonl.TimingStore` |
-| `repository` | 各聚合仓储、`MessageStreams`、`MessageWriter`、`TxRunner` | `infra/jsonl` |
-| `tools/contracts` | `Tool`、`ToolCatalog` | `tools/{bash,read_file,apply_patch}`、`infra/toolconfig.Catalog` |
-| `tool_execution` | `ApprovalCatalog`、本地窄接口 `TaskRepository` | `infra/toolconfig.Catalog`、`infra/jsonl` |
+- `task`、`task/service`、`agent`、`session`、`model`、`context` 不依赖 `execution`。
+- `execution/loop` 不反向依赖父包，由消费者声明进度与执行接口。
+- 业务模块不引用 `storage/jsonl`、`storage/document`、`bootstrap` 或 `wails`。
+- `storage/jsonl` 不引用 `execution` 或 `hook`；存储不注册业务提交回调。
+- `model` 不引用 `model/provider/*`，`tool` 不引用 `tool/builtin/*`，`workspace` 不引用 `workspace/fs`。
+- `bootstrap` 连接具体实现与业务能力。Wails 只消费业务能力，不读取具体存储或构造 Provider。
+- 接口按能力命名，优先放在消费者或业务所有者附近。`task.Store` 只提供读取与保存，执行协调由 `execution` 声明窄接口，Agent 展示查询由 `agent.TaskReader` 声明。
 
-## 三、契约包边界
+## 输入与协议边界
 
-新增 `contracts` 包必须同时满足三条，缺任意一条就直接使用所有者包的类型：
+- Wails Binding 是桌面请求的输入边界，负责字段复制、规范化、默认值补充和校验。简单处理直接写在对应入口，较长的模型配置转换放在 Binding 包内的 `model_config_request.go`。
+- `CreateInput`、`SendInput` 等业务参数类型只描述业务操作所需的数据；业务包不提供桌面请求的规范化构造函数。Binding 使用已有 DTO 直接构造业务参数，不增加同形中间类型。
+- 内部方法接收 canonical 输入，不重复 Trim、补默认值或清洗路径。持久化恢复只读校验，不静默修复。
+- Binding 的模型配置转换直接生成 `model/config.Config`，并调用配置类型的只读校验；该校验也供配置文件恢复入口使用。Service 只检查依赖当前状态的 Agent 引用，不重复规范化或字段校验。
+- 业务查询返回业务对象或明确的查询结果。消息、配置和事件在 Wails 出口一次投影为 `wails/dto`；opaque 推理状态不进入前端或摘要。
+- 文件错误与受限文本读取能力属于 `workspace`。会话文件预览负责解析当前工作区并授权，`workspace/fs` 使用 `os.OpenRoot` 完成实际访问。
 
-1. 两侧由不同所有者维护、需要独立演进（例如前端协议与内核实体）。
-2. 契约形状必须与内核形状不同：要裁剪字段、重命名，或不暴露内核枚举和执行配置。
-3. 契约只依赖标准库和其他契约包，不含行为。
+## 状态、生命周期与恢复
 
-- 满足三条的只有 `app/<业务>/contracts`：它面向 Wails/前端协议，必须过滤内核字段（opaque 推理状态不进入公开消息、摘要和前端通知），并由门禁强制只依赖标准库。
-- 内核内部共享同形值类型时，直接使用所有者包的类型：`core` 各包之间、`core` 与 `infra`/`loop` 之间不做包装、不做逐字段复制。`core` 及其子包内不得出现 `contracts` 包。
-- 契约包之间可以互相依赖，但不得成环；owner 按数据所属业务线确定，不按页面需要确定。
-- 契约只包含公开数据：身份用字符串，状态用稳定值，不暴露内核实体、枚举和执行配置；可变切片和计数指针在契约边界复制。
+- `bootstrap.Application` 创建并拥有共享存储、日志、配置注册表、业务服务与一个 `execution.Runtime`。
+- `bootstrap` 装配一个 `task/service.Service`，并把它同时作为 Task 用例和队列能力注入 Runtime；Runtime 创建并拥有唯一的 `ActiveTasks`、Coordinator 和默认 Loop。一次执行的 Context、续接消息与等待状态不存入业务单例。
+- 启动时 Runtime 先协调上次进程的 running 工具调用，再恢复活动 Task，最后派发可执行队列。未知副作用不自动重试，等待人工审批的调用保持等待。
+- 直接输入、预约输入、工具审批与控制命令使用稳定身份进行幂等仲裁；队列使用持久化单调序号维持 FIFO。
+- 关闭时先拒绝新执行、取消并等待所有执行及结算退出，再清理空会话并关闭存储。执行退出超时时保留资源，后续允许继续关闭。
+- 模型修改、会话创建与直接输入共用同一个配置锁；锁顺序为配置锁在外、JSONL 事务锁在内。配置重载在同一事务锁内发布模型、定义、工具与授权快照。
 
-## 四、内核内部顺序
+## 持久化与通知
 
-`core` 只是目录分组，不设统一入口或转发层。包内固定四档，依赖只能从后档指向前档：
+- `storage/jsonl` 只创建一个共享 `Store`。各业务适配文件共用日志、锁、事务、序号和可重建索引，不各自建立底层资源或全局正文缓存。
+- `message.Reader` 的消息集合与序号边界来自一次一致性读取；业务调用方不选择 Session 流或 Agent 私有流的日志键位。
+- `toolcall.Writer` 将 Assistant 消息、工具调用身份和最终输出证据原子提交；工具回执与输出字节累计在同一事务中幂等提交。
+- `transaction.Runner` 只保证同一 JSONL 后端的提交边界，不覆盖文档存储或其他独立后端。跨后端清理与恢复由业务用例或执行流程显式协调。
+- 会话删除前的活动 Task 检查由会话删除用例在事务内执行；存储只提交删除事实及关联索引变化。
+- 用户输入、最终 Assistant 与 Task 终态在事务成功后由业务调用方显式发布提交 Hook。回滚与幂等重试不通知；Hook 失败只记录日志，不改变提交结果。
+- 执行事件是进程内瞬时通知，不能作为恢复依据或隐式核心编排机制。
 
-| 档 | 包 | 同档内允许 | 禁止依赖 |
-| --- | --- | --- | --- |
-| 基元 | `identity`、`fault`、`tool`、`security` | 无 | 其他任何 `core` 包 |
-| 值/规则 | `context`、`context/compress`、`project`、`workspace`、`workflow` | `context/compress → context` | `model`、`session`、`task`、`agent`、`tool_execution` |
-| 模型与会话 | `model/config`、`model`、`session` | `model → model/config` | `task`、`agent`、`tool_execution` |
-| 任务与执行 | `task`、`agent`、`tool_execution` | `agent → task` | 无额外限制 |
+## 风险与回滚边界
 
-推论：`session` 引用 `context` 的 opaque 推理状态、`model` 引用 `context` 的通用上下文类型、`task` 引用 `model` 的冻结配置都落在规则内。
+- Task 状态机、JSONL 字段和事件格式、Provider 协议、Wails DTO 及 FIFO 语义是独立于目录组织的稳定边界。
+- 架构变更不得通过迁移标记、兼容包或自动重放工具副作用修补数据；发现格式或恢复问题时停止写入并保留原始日志。
+- 发布回滚使用完整可构建版本与匹配的数据备份，不混用不同版本的执行组件和存储适配文件。
 
-## 五、规则的执行方式
+## 验证
 
-规则由 `backend/scripts/check-dependencies.sh` 在执行 `go vet ./...` 之后强制：用 `go list -f '{{.ImportPath}} {{join .Imports " "}}'` 枚举生产包的直接 import，匹配到禁止前缀即失败；`go list` 失败和 `rg` 工具错误必须原样失败，不得当成"无匹配"放过。
+```bash
+cd backend
+gofmt -l .
+go build ./...
+go vet ./...
+```
 
-门禁必须覆盖以下边界：
+前端协议涉及变更时重新生成 Wails 绑定，再执行前端静态检查与生产构建：
 
-- `wails/...` 不依赖 `service`、`core`、`execution`、`loop`、`timing`、`repository`、`infra`。
-- `app/...` 不依赖 `infra`、`execution`、`loop`、`repository`、`compose`、`wails` 或直接文件系统操作；`app/*/contracts` 只依赖标准库和其他契约。
-- `request/...` 不依赖 `service`、`repository`、`infra`、`execution`、`loop`、`compose`、`wails` 或应用入口包，只允许 `app/*/contracts`。
-- `service/...` 不依赖 `app`、`request`、`infra`、`execution`、`loop`、`compose`、`wails` 或 `os`。
-- `loop/...` 不依赖 `app`、`service`、`execution`；`execution/...` 不依赖 `app`、`service`。
-- `infra/...` 不依赖 `app`、`request`、`execution`、`loop`、`compose`、`wails`，且除第一节白名单外不依赖 `service`。
-- `repository/...`、`hooks/...`、`utils/...`、`system/...`、`tools/...` 只向内依赖，不依赖 `service`、`app`、`request`、`infra`、`execution`、`loop`、`compose`、`wails`。
-- `core/...` 不依赖 `app`、`service`、`request`、`repository`、`infra`、`execution`、`loop`、`compose`、`hooks`、`tools`，并按第四节逐档禁止内核内部反向依赖。
-- `core/context` 不得依赖 `core/task`、`core/session`、`core/agent`；`core/model` 不得依赖 `tools/contracts`；`infra/jsonl` 不得依赖 `hooks`。
-- 全仓不得依赖集中契约入口。
+```bash
+cd backend
+go run -tags bindings .
+cd ../frontend
+npm run check
+```
 
-规则变更必须同步本节和 `check-dependencies.sh`。
+依赖方向通过代码审查和包导入检查核对，不设置依赖门禁脚本。人工回归覆盖输入幂等、FIFO、暂停与取消、批准与拒绝、启动恢复、未知副作用、会话删除、配置重载及资源关闭；不自动启动服务或运行自动化测试。

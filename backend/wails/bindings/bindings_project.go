@@ -1,11 +1,16 @@
 package bindings
 
 import (
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"path/filepath"
+	"strings"
 
-	"praxis/internal/request"
+	"praxis/internal/fault"
+	"praxis/internal/identity"
+	projectmodel "praxis/internal/project"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type ProjectBindings struct {
@@ -37,11 +42,11 @@ func (b *ProjectBindings) ListProjects() ([]dto.ProjectSummary, error) {
 	result := make([]dto.ProjectSummary, 0, len(projects))
 	for _, project := range projects {
 		result = append(result, dto.ProjectSummary{
-			ID:                 project.ID,
+			ID:                 project.ID.String(),
 			Name:               project.Name,
-			DefaultWorkspaceID: project.DefaultWorkspaceID,
+			DefaultWorkspaceID: project.DefaultWorkspaceID.String(),
 			Path:               project.Path,
-			State:              project.State,
+			State:              string(project.State),
 		})
 	}
 	return result, nil
@@ -55,24 +60,26 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 	if err != nil {
 		return dto.CreateProjectResponse{}, err
 	}
-	canonical, err := request.NewCreateProject(request.CreateProject{
-		ProjectID:   wire.ProjectID,
-		WorkspaceID: wire.WorkspaceID,
-		Name:        wire.ProjectName,
-		Path:        wire.Path,
-		RequestID:   wire.RequestID,
-	})
-	if err != nil {
+	params := projectmodel.CreateInput{
+		ProjectID:   identity.ProjectID(wire.ProjectID),
+		WorkspaceID: identity.WorkspaceID(wire.WorkspaceID),
+		Name:        strings.TrimSpace(wire.ProjectName),
+		Path:        filepath.Clean(strings.TrimSpace(wire.Path)),
+		RequestID:   identity.RequestID(wire.RequestID),
+	}
+	if params.Name == "" || strings.ContainsAny(params.Name, "\\/:*?\"<>|\x00\r\n") ||
+		params.Name == "." || params.Name == ".." || !filepath.IsAbs(params.Path) || strings.ContainsAny(params.Path, "\x00\r\n") {
+		err := fault.New(projectmodel.ProjectWorkspaceInvalid, "")
 		return dto.CreateProjectResponse{}, publicError(b.runtime, "ProjectBindings.CreateProject.request", err)
 	}
-	result, err := services.Projects.CreateProject(ctx, canonical)
+	result, err := services.Projects.CreateProject(ctx, params)
 	if err != nil {
 		return dto.CreateProjectResponse{}, publicError(b.runtime, "ProjectBindings.CreateProject", err)
 	}
 	return dto.CreateProjectResponse{
-		ProjectID:   result.ProjectID,
-		Name:        result.Name,
-		WorkspaceID: result.WorkspaceID,
-		Path:        result.Path,
+		ProjectID:   result.Project.ID.String(),
+		Name:        result.Project.Name,
+		WorkspaceID: result.Workspace.ID.String(),
+		Path:        result.Workspace.Path,
 	}, nil
 }

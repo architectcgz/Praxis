@@ -1,0 +1,70 @@
+package bootstrap
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"time"
+
+	"praxis/internal/dataroot"
+	"praxis/internal/execution"
+	"praxis/internal/identity"
+	"praxis/internal/logging"
+	"praxis/internal/model"
+	"praxis/internal/storage/document"
+	"praxis/internal/storage/jsonl"
+	"praxis/internal/timing"
+)
+
+type storageResources struct {
+	store     *jsonl.Store
+	documents *document.Store
+	logger    *logging.Logger
+}
+
+func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
+	store, err := jsonl.Open(ctx, root.Runtime)
+	if err != nil {
+		return storageResources{}, fmt.Errorf("open JSONL: %w", err)
+	}
+	logger, err := logging.NewFactory().Runtime(filepath.Join(root.Runtime, "praxis.log"))
+	if err != nil {
+		_ = store.Close(context.Background())
+		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
+	}
+	documents, err := document.New(root.Documents)
+	if err != nil {
+		_ = store.Close(context.Background())
+		_ = logger.Close()
+		return storageResources{}, fmt.Errorf("open document store: %w", err)
+	}
+	logger.Infof("application open started root=%s logs=%s", root.Root, root.Runtime)
+	return storageResources{store: store, documents: documents, logger: logger}, nil
+}
+
+func buildTimings(ctx context.Context, store *jsonl.Store, events *execution.EventPublisher, logger *logging.Logger) (*timing.Recorder, error) {
+	timings := jsonl.TimingStore{Store: store}
+	if err := timings.RecoverInterrupted(ctx); err != nil {
+		return nil, fmt.Errorf("recover operation timings: %w", err)
+	}
+	return timing.New(timings, func(record timing.Record) {
+		events.Publish(execution.Event{
+			Kind:    "operation_timing",
+			AgentID: identity.AgentID(record.AgentID),
+			TaskID:  identity.TaskID(record.TaskID),
+			Timing:  &record,
+		})
+	}, logger.Errorf)
+}
+
+func usageObserver(store *jsonl.Store, logger *logging.Logger) func(model.ModelUsageRecord) {
+	usages := jsonl.ModelUsageStore{Store: store}
+	return func(record model.ModelUsageRecord) {
+		// 统计写入不继承业务取消；失败只影响统计，不改变模型响应。
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := usages.Save(ctx, record); err != nil {
+			logger.Errorf("token usage save failed task=%s turn=%s: %v", record.TaskID, record.TurnID, err)
+		}
+	}
+}

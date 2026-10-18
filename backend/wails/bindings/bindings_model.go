@@ -1,6 +1,8 @@
 package bindings
 
-import "praxis/wails/dto"
+import (
+	"praxis/wails/dto"
+)
 
 type ModelBindings struct {
 	runtime Runtime

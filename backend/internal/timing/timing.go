@@ -4,11 +4,10 @@ package timing
 import (
 	"context"
 	"errors"
+	"praxis/internal/identity"
 	"strings"
 	"sync"
 	"time"
-
-	"praxis/internal/system"
 )
 
 type Kind string
@@ -153,7 +152,7 @@ func (r *Recorder) Start(ctx context.Context, operation Operation) (context.Cont
 		started:  started,
 		record: Record{
 			Operation: operation,
-			ID:        (system.SecureIDGenerator{}).New("timing"),
+			ID:        (identity.SecureIDGenerator{}).New("timing"),
 			ParentID:  parentID,
 			StartedAt: started.UTC(),
 			Status:    Running,

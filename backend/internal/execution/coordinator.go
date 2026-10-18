@@ -4,24 +4,23 @@ package execution
 import (
 	"context"
 	"errors"
+	"praxis/internal/execution/loop"
+	"praxis/internal/fault"
+	"praxis/internal/hook"
+	"praxis/internal/logging"
+	taskmodel "praxis/internal/task"
+	"praxis/internal/toolcall"
 	"sync"
 	"time"
-
-	"praxis/internal/core/fault"
-	taskmodel "praxis/internal/core/task"
-	"praxis/internal/hooks"
-	"praxis/internal/logging"
-	"praxis/internal/loop"
-	"praxis/internal/repository"
 )
 
-type Config struct {
+type coordinatorConfig struct {
 	Loop              *loop.Runner
 	ActiveTasks       *ActiveTasks
 	Tasks             TaskOperations
 	Queue             TaskQueue
-	Messages          repository.MessageStreams
-	HookDispatcher    *hooks.Dispatcher
+	Messages          toolcall.WriterProvider
+	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
 }
@@ -32,8 +31,8 @@ type Coordinator struct {
 	activeTasks       *ActiveTasks
 	tasks             TaskOperations
 	queue             TaskQueue
-	messages          repository.MessageStreams
-	hookDispatcher    *hooks.Dispatcher
+	messages          toolcall.WriterProvider
+	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
 
@@ -43,7 +42,7 @@ type Coordinator struct {
 	running sync.WaitGroup
 }
 
-func NewCoordinator(config Config) (*Coordinator, error) {
+func newCoordinator(config coordinatorConfig) (*Coordinator, error) {
 	if config.Loop == nil || config.ActiveTasks == nil || config.Tasks == nil || config.Queue == nil || config.Messages == nil {
 		return nil, errors.New("execution loop, active tasks, task operations, queue and message streams are required")
 	}

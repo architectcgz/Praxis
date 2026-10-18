@@ -1,6 +1,6 @@
 # 模型协议适配约束
 
-`backend/internal/infra/providers` 提供官方模型协议适配器共用的 HTTP 基础设施和请求级 ToolCall ID 映射。每个协议独立使用 `protocol`、`encoder`、`provider`、`decoder`，不共享供应商状态机。
+`backend/internal/model/provider` 保存各模型协议的具体实现，`model` 提供共用 HTTP 能力和请求级 ToolCall ID 映射。每个协议独立使用 `protocol`、`encoder`、`provider`、`decoder`，不共享供应商状态机。
 
 ## 支持范围
 
@@ -21,13 +21,13 @@
 
 `RiskReviewer` 使用名为 `risk_assessment` 的 Schema，要求 `verdict` 和 `reason` 两个字段均存在、禁止额外字段，`verdict` 只允许 `safe`、`dangerous`、`uncertain`。结果仍须经过本地严格解析及领域校验。Provider 不支持该能力、拒答、截断、超时或返回非法结果时，审核按 `uncertain` 进入人工审批，不自动降级为无 Schema 请求。
 
-验证使用 `go build ./...`、`go vet ./...` 和依赖门禁；人工回归覆盖未设置 Schema、三种协议的格式参数、Messages 的格式与 effort 共存，以及审核正常结果和异常转人工的路径。
+验证使用 `go build ./...` 和 `go vet ./...`；人工回归覆盖未设置 Schema、三种协议的格式参数、Messages 的格式与 effort 共存，以及审核正常结果和异常转人工的路径。
 
 ## 推理状态与历史重放
 
 - Responses 使用 `store:false` 和 `reasoning.encrypted_content`，自行重放完整历史；只保存含 `encrypted_content` 的可重放 Reasoning Item。
 - Messages 保留签名 Thinking 与 `redacted_thinking`；Thinking 模式、预算、Effort 能力来自 Task 已保存的模型配置，不能按模型名字猜测。
-- `core/context.ReasoningState` 保存 `ProviderID`、`Protocol`、`ModelID` 和原始 `Payload`，不设置内部版本字段；上下文内核只提供数据与深拷贝。Decoder 在接收响应时负责协议解析、签名或加密字段及载荷上限；Loop 只确认协议并绑定冻结配置中的来源身份，不重复解析载荷。Message 和 Context 校验块结构，JSONL 写入与恢复边界统一校验完整且 canonical 的存储字段和 JSON 对象载荷。
+- `context.ReasoningState` 保存 `ProviderID`、`Protocol`、`ModelID` 和原始 `Payload`，不设置内部版本字段；上下文内核只提供数据与深拷贝。Decoder 在接收响应时负责协议解析、签名或加密字段及载荷上限；Loop 只确认协议并绑定冻结配置中的来源身份，不重复解析载荷。Message 和 Context 校验块结构，JSONL 写入与恢复边界统一校验完整且 canonical 的存储字段和 JSON 对象载荷。
 - Responses 和 Messages 仅在状态来源的 ProviderID、Protocol、ModelID 与目标配置的 ProviderID、APIFormat、ModelID 完全一致时原样重放；其他状态只从本次请求中忽略，OpenAI Chat 始终忽略推理状态。状态不进入摘要或前端，不转换成文本，不改写持久化历史，也不触发历史工具重执行。
 - Provider Encoder 只匹配状态来源并原样复制 opaque 载荷，不重复进行协议解析或签名字段检查。Messages 缺少前导 Thinking 块时照常发送请求，Thinking 续接的接受或降级由目标 Provider 决定。
 - Text、ToolCall 和 ToolResult 保持跨 Provider 可移植。请求编码时，ToolCall ID 的 ASCII 字母、数字、下划线和连字符且长度为 1 至 64 字节的值原样保留，其他值映射为无碰撞的请求级 ID；调用与回执共用映射，Context、JSONL 和工具执行身份保持原值。

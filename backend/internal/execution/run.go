@@ -3,11 +3,10 @@ package execution
 import (
 	"context"
 	"errors"
-
-	"praxis/internal/core/identity"
-	taskmodel "praxis/internal/core/task"
-	"praxis/internal/hooks"
-	"praxis/internal/repository"
+	"praxis/internal/hook"
+	"praxis/internal/identity"
+	taskmodel "praxis/internal/task"
+	"praxis/internal/toolcall"
 )
 
 func (r *Coordinator) run(
@@ -78,11 +77,11 @@ func (r *Coordinator) startTask(task taskmodel.Task) error {
 func (r *Coordinator) execute(
 	ctx context.Context,
 	task taskmodel.Task,
-	messageWriter repository.MessageWriter,
+	messageWriter toolcall.Writer,
 ) (taskmodel.TaskOutcome, taskmodel.TaskFailureCode, string) {
-	ctx, scope := r.hookDispatcher.Start(ctx, hooks.Operation{
-		Identity: hooks.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID},
-		Kind:     hooks.OperationAgent,
+	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
+		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, TaskID: task.ID},
+		Kind:     hook.OperationAgent,
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
@@ -92,7 +91,7 @@ func (r *Coordinator) execute(
 		outcome, failureCode, err = r.loop.Run(ctx, task, content, continuation, messageWriter)
 	}
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
-	scope.End(hooks.Result{Outcome: finalOutcome, Err: err})
+	scope.End(hook.Result{Outcome: finalOutcome, Err: err})
 	r.logEvent(task.ID, "provider completed")
 	if err != nil {
 		r.logError(task, "run provider", err)

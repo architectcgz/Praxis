@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-// Coded 由携带稳定错误码的错误实现；app 层据此透传，不依赖任何具体业务错误类型。
+// Coded 由携带稳定错误码的错误实现；Wails 边界据此透传，不依赖具体业务错误类型。
 type Coded interface {
 	ErrorCode() string
 }
@@ -53,7 +53,7 @@ func PublicError(err error) error {
 	return codedError{code: ErrorCodeInternal.String()}
 }
 
-// CodedError 构造 app 层自身的错误码错误，无附加信息。
+// CodedError 构造 Wails 宿主或传输边界的错误，无附加信息。
 func CodedError(code ErrorCode) error {
 	return codedError{code: code.String()}
 }

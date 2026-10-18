@@ -2,9 +2,8 @@ package timing
 
 import (
 	"context"
-
-	taskmodel "praxis/internal/core/task"
-	"praxis/internal/hooks"
+	"praxis/internal/hook"
+	taskmodel "praxis/internal/task"
 )
 
 // Hook 将 Agent、Provider 和 Tool 执行边界映射成计时记录；其余操作及 nil Recorder 均忽略。
@@ -13,9 +12,9 @@ type Hook struct {
 }
 
 // Start 启动单次计时并在 Context 中保留父子 Span 关联；归属由调用方显式提供。
-func (h Hook) Start(ctx context.Context, operation hooks.Operation) (context.Context, hooks.Scope) {
+func (h Hook) Start(ctx context.Context, operation hook.Operation) (context.Context, hook.Scope) {
 	switch operation.Kind {
-	case hooks.OperationAgent, hooks.OperationProvider, hooks.OperationTool:
+	case hook.OperationAgent, hook.OperationProvider, hook.OperationTool:
 	default:
 		return ctx, nil
 	}
@@ -35,20 +34,20 @@ func (h Hook) Start(ctx context.Context, operation hooks.Operation) (context.Con
 
 type hookScope struct {
 	ctx  context.Context
-	kind hooks.OperationKind
+	kind hook.OperationKind
 	span *Span
 }
 
-func (s hookScope) OnSignal(signal hooks.Signal) {
-	if signal == hooks.SignalFirstResponse {
+func (s hookScope) OnSignal(signal hook.Signal) {
+	if signal == hook.SignalFirstResponse {
 		s.span.FirstResponse()
 	}
 }
 
-func (s hookScope) End(result hooks.Result) {
+func (s hookScope) End(result hook.Result) {
 	status := ResultStatus(s.ctx, result.Err)
 	switch s.kind {
-	case hooks.OperationAgent:
+	case hook.OperationAgent:
 		switch result.Outcome {
 		case taskmodel.TaskFailed:
 			status = Failed
@@ -58,7 +57,7 @@ func (s hookScope) End(result hooks.Result) {
 		if s.ctx.Err() != nil {
 			status = Cancelled
 		}
-	case hooks.OperationTool:
+	case hook.OperationTool:
 		if status == Completed && result.ToolErrorClass != "" {
 			status = Failed
 		}
@@ -66,4 +65,4 @@ func (s hookScope) End(result hooks.Result) {
 	s.span.End(status)
 }
 
-var _ hooks.OperationHook = Hook{}
+var _ hook.OperationHook = Hook{}

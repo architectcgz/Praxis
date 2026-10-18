@@ -1,6 +1,8 @@
 package bindings
 
-import apperr "praxis/wails/error"
+import (
+	apperr "praxis/wails/error"
+)
 
 func publicError(runtime Runtime, operation string, err error) error {
 	if err == nil {

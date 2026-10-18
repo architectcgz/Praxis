@@ -3,29 +3,35 @@ package execution
 import (
 	"context"
 
-	appcontext "praxis/internal/core/context"
-	"praxis/internal/core/identity"
-	sessionmodel "praxis/internal/core/session"
-	taskmodel "praxis/internal/core/task"
+	appcontext "praxis/internal/context"
+	"praxis/internal/identity"
+	"praxis/internal/message"
+	"praxis/internal/task"
+	taskservice "praxis/internal/task/service"
 )
 
-// TaskOperations 保留 Task 准备、恢复和结算的事务边界。
+// TaskOperations 是 Coordinator 需要的 Task 用例能力；具体实现属于 task/service。
 type TaskOperations interface {
-	LoadContext(context.Context, taskmodel.Task) (appcontext.Content, []sessionmodel.MessageData, error)
-	PrepareQueuedTask(context.Context, taskmodel.Task) (taskmodel.Task, bool, error)
-	ReclaimTask(context.Context, taskmodel.Task) (taskmodel.Task, error)
+	task.Store
+	SendInput(context.Context, taskservice.SendInput) (taskservice.SendInputResult, error)
+	LoadContext(context.Context, task.Task) (appcontext.Content, []message.Message, error)
 	ConfirmRunning(context.Context, identity.TaskID) error
-	Settle(context.Context, identity.TaskID, taskmodel.TaskOutcome, taskmodel.TaskFailureCode, string) (taskmodel.Task, error)
+	Settle(context.Context, identity.TaskID, task.TaskOutcome, task.TaskFailureCode, string) (task.Task, error)
+	ReclaimTask(context.Context, task.Task) (task.Task, error)
+	ReconcileToolResults(context.Context) error
+	Abort(context.Context, identity.TaskID) error
+	ReleaseExecution(identity.AgentID, identity.TaskID)
 }
 
-// TaskQueue 只查询指定 Agent 的队首，准备成功后才推进持久化状态。
+// TaskQueue 是 Coordinator 在 Task 结束后领取下一项预约任务所需的能力。
 type TaskQueue interface {
-	Next(context.Context, identity.AgentID) (taskmodel.Task, bool, error)
+	EnqueueTask(context.Context, taskservice.EnqueueInput) (taskservice.EnqueueResult, error)
+	Next(context.Context, identity.AgentID) (task.Task, bool, error)
+	PrepareQueuedTask(context.Context, task.Task) (task.Task, bool, error)
 }
 
-// taskResult 暂存待提交的结算结果，提交失败后只重试结算，不重复执行 Loop。
 type taskResult struct {
-	outcome taskmodel.TaskOutcome
-	code    taskmodel.TaskFailureCode
+	outcome task.TaskOutcome
+	code    task.TaskFailureCode
 	message string
 }

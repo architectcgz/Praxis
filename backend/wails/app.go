@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"time"
-
 	"praxis/internal/logging"
 	"praxis/wails/bindings"
 	apperr "praxis/wails/error"
+	"sync"
+	"time"
 )
 
 // App 持有 Wails context、前端服务集和关闭句柄，并实现 bindings.Runtime。

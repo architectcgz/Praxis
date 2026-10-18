@@ -1,14 +1,13 @@
 // Package validation 在 Wails 边界校验请求 ID 等 wire shape。
 //
-// 内容规范化、大小限制和业务引用规则由 internal/request 统一处理。
+// 内容规范化、大小限制和请求字段校验由对应 Binding 完成。
 // 校验失败返回 Error，携带稳定码 invalid_request 与具体字段/原因。
 package validation
 
 import (
-	"strings"
-
 	"praxis/wails/dto"
 	apperr "praxis/wails/error"
+	"strings"
 )
 
 // Error 是入参校验错误：稳定码 + 字段 + 原因。

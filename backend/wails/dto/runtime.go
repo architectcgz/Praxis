@@ -40,7 +40,7 @@ type OperationTiming struct {
 	Revision        int       `json:"revision"`
 }
 
-// AgentEvent 是 Wails 事件专用 DTO，不携带 runtime、core 或 timing 类型。
+// AgentEvent 是 Wails 事件专用 DTO，不携带业务对象或内部执行状态。
 type AgentEvent struct {
 	Kind           string           `json:"kind"`
 	SessionID      string           `json:"sessionId,omitempty"`

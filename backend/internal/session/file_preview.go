@@ -1,0 +1,60 @@
+package session
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"praxis/internal/fault"
+	"praxis/internal/identity"
+	workspacemodel "praxis/internal/workspace"
+	"strings"
+)
+
+const maxPreviewBytes int64 = 1 << 20
+
+// FilePreview 是工作区内文本文件的只读快照；Path 为工作区相对路径。
+type FilePreview struct {
+	Path    string
+	Content string
+}
+
+// PreviewFile 接收 canonical 会话身份和路径，在工作区授权后读取有界文本。
+func (s *Service) PreviewFile(ctx context.Context, sessionID identity.SessionID, path string) (FilePreview, error) {
+	if ctx == nil {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "a valid session is required to preview files")
+	}
+	if err := ctx.Err(); err != nil {
+		return FilePreview{}, err
+	}
+	workspace, err := s.workspaceForSession(ctx, sessionID)
+	if err != nil {
+		return FilePreview{}, err
+	}
+	if filepath.IsAbs(path) {
+		path, err = filepath.Rel(workspace.Path, path)
+		if err != nil {
+			return FilePreview{}, fault.New(fault.InvalidRequest, "only files within the current workspace can be previewed")
+		}
+	}
+	// IsLocal 拦截词法越界；冒号额外拒绝 Windows 驱动器相对路径与 NTFS 数据流。
+	if !filepath.IsLocal(path) || path == "." || strings.ContainsRune(path, ':') {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "only files within the current workspace can be previewed")
+	}
+	content, err := s.textReader.ReadText(ctx, workspace.Path, path, maxPreviewBytes)
+	if errors.Is(err, workspacemodel.ErrFileTooLarge) {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "file exceeds the 1 MiB preview limit")
+	}
+	if errors.Is(err, workspacemodel.ErrNotRegularFile) {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "only regular text files can be previewed")
+	}
+	if errors.Is(err, workspacemodel.ErrInvalidText) {
+		return FilePreview{}, fault.New(fault.InvalidRequest, "only UTF-8 text can be previewed; binary files are not supported")
+	}
+	if err != nil {
+		return FilePreview{}, err
+	}
+	return FilePreview{
+		Path:    filepath.ToSlash(path),
+		Content: content,
+	}, nil
+}

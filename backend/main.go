@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"praxis/internal/compose"
-	"praxis/internal/infra/dataroot"
+	"praxis/internal/bootstrap"
+	"praxis/internal/dataroot"
 	"praxis/internal/logging"
 	"praxis/wails"
+	"strings"
 
 	wailslib "github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -52,7 +51,7 @@ func main() {
 			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return
 		}
-		application, err := compose.Open(ctx, root, nil)
+		application, err := bootstrap.Open(ctx, root, nil)
 		if err != nil {
 			a.FailStartup(fmt.Errorf("initialize application services: %w", err))
 			return

@@ -1,7 +1,12 @@
 package bindings
 
 import (
-	"praxis/internal/request"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"praxis/internal/fault"
+	"praxis/internal/identity"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -15,11 +20,17 @@ func (b *SessionBindings) PreviewFile(sessionID, path string) (dto.FilePreview, 
 	if err != nil {
 		return dto.FilePreview{}, err
 	}
-	canonical, err := request.NewFilePreview(sessionID, path)
-	if err != nil {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.ContainsRune(path, '\x00') || strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//") {
+		err := fault.InvalidValue("path", "file path is invalid")
 		return dto.FilePreview{}, publicError(b.runtime, "SessionBindings.PreviewFile.request", err)
 	}
-	preview, err := service.Sessions.PreviewFile(ctx, canonical)
+	if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == '/' &&
+		((path[1] >= 'a' && path[1] <= 'z') || (path[1] >= 'A' && path[1] <= 'Z')) {
+		path = path[1:2] + ":" + path[2:]
+	}
+	path = filepath.Clean(filepath.FromSlash(path))
+	preview, err := service.Sessions.PreviewFile(ctx, identity.SessionID(sessionID), path)
 	if err != nil {
 		return dto.FilePreview{}, publicError(b.runtime, "SessionBindings.PreviewFile", err)
 	}

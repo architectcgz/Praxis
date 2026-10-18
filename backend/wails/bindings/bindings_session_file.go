@@ -1,6 +1,7 @@
 package bindings
 
 import (
+	"praxis/internal/identity"
 	"praxis/wails/validation"
 )
 
@@ -13,7 +14,7 @@ func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	path, err := services.Sessions.SessionLogPath(ctx, sessionID)
+	path, err := services.SessionLogPath(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return publicError(b.runtime, "SessionBindings.RevealSessionFile", err)
 	}
