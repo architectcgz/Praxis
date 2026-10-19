@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	modelconfig "praxis/internal/core/model/config"
+	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	"praxis/internal/security"
 	"praxis/internal/settings"
 )
 

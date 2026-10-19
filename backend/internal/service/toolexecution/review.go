@@ -3,10 +3,10 @@ package toolexecution
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/security"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/security"
 	agentservice "praxis/internal/service/agent"
 	"time"
 )

@@ -9,11 +9,11 @@ import (
 	modelservice "praxis/internal/service/model"
 	"sync"
 
+	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/logging"
-	"praxis/internal/security"
 	"praxis/internal/settings"
 )
 

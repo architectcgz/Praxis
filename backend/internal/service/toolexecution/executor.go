@@ -9,11 +9,11 @@ import (
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
+	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/repository"
-	"praxis/internal/security"
 	agentservice "praxis/internal/service/agent"
 	"sync"
 )

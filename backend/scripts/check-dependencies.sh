@@ -10,14 +10,14 @@ function reject(reason) { print pkg ": " dep " (" reason ")" > "/dev/stderr"; fa
   dep=$i
   if (pkg ~ /^praxis\/internal\/core\// && dep ~ /^praxis\/(internal\/(repository|service|infra|bootstrap|loop|timing|workspace)|wails)(\/|$)/) reject("core dependency")
   if (pkg ~ /^praxis\/internal\/core\// && dep == "os") reject("core filesystem I/O")
-  if (pkg ~ /^praxis\/internal\/repository(\/|$)/ && dep ~ /^praxis\// && dep !~ /^praxis\/internal\/(core|identity|clock|fault|security)(\/|$)/) reject("repository dependency")
+  if (pkg ~ /^praxis\/internal\/repository(\/|$)/ && dep ~ /^praxis\// && dep !~ /^praxis\/internal\/(core|identity|clock|fault)(\/|$)/) reject("repository dependency")
   if (pkg ~ /^praxis\/internal\/repository(\/|$)/ && (dep == "os" || dep ~ /^net(\/|$)/)) reject("repository external I/O")
   if (pkg ~ /^praxis\/internal\/service\// && (dep == "os" || dep ~ /^praxis\/internal\/(infra|bootstrap)(\/|$)/ || dep ~ /^praxis\/wails(\/|$)/)) reject("service dependency")
   if (pkg ~ /^praxis\/internal\/loop(\/|$)/ && (dep == "os" || dep ~ /^praxis\/(internal\/(service|infra|bootstrap)|wails)(\/|$)/)) reject("loop dependency")
   if (pkg ~ /^praxis\/internal\/infra\// && dep ~ /^praxis\/(internal\/(service|bootstrap|loop)|wails)(\/|$)/) reject("infra business orchestration")
   if (pkg ~ /^praxis\/wails(\/|$)/ && dep ~ /^praxis\/internal\/(repository|infra|loop)(\/|$)/) reject("wails persistence dependency")
   if (pkg ~ /^praxis\/internal\/infra\/jsonl(\/|$)/ && dep ~ /^praxis\/internal\/core\/hook(\/|$)/) reject("repository business hook")
-  if (dep ~ /^praxis\/internal\/(execution|runtime|model|tool|task|message|context|hook|storage|transaction)(\/|$)/ || dep ~ /^praxis\/internal\/(core\/loop|service\/agent\/input)(\/|$)/) reject("obsolete module")
+  if (dep ~ /^praxis\/internal\/(execution|runtime|model|tool|task|message|context|hook|storage|transaction|security)(\/|$)/ || dep ~ /^praxis\/internal\/(core\/loop|service\/agent\/input)(\/|$)/) reject("obsolete module")
  }
 }
 END {exit failed}

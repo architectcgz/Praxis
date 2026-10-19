@@ -1,8 +1,8 @@
 package project
 
 import (
+	"praxis/internal/core/security"
 	"praxis/internal/identity"
-	"praxis/internal/security"
 	"time"
 )
 

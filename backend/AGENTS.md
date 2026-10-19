@@ -4,7 +4,8 @@
 
 ## 目录与职责
 
-- `internal/core/`：Agent、Execution、Session、Project、Workspace、Task、ToolExecution、计时和消息的实体与纯规则，以及 ContextBuilder、模型流、工具契约和 Hook 机制。不得定义仓储或依赖 `repository`、`loop`、`service`、`infra`、`bootstrap`、`wails`，不得读取配置文件、管理事务或操作文件系统。
+- `internal/core/`：Agent、Execution、Session、Project、Workspace、Task、ToolExecution、安全策略、计时和消息的实体与纯规则，以及 ContextBuilder、模型流、工具契约和 Hook 机制。不得定义仓储或依赖 `repository`、`loop`、`service`、`infra`、`bootstrap`、`wails`，不得读取配置文件、管理事务或操作文件系统。
+- `internal/core/security/`：审批模式、默认策略继承、命令匹配与审批决策，以及风险审核结果类型。只包含值对象与纯规则；工具执行状态转换由 `core/toolexecution` 负责，模型风险审核调用与审批编排由 Service 负责。
 - `internal/repository/`：统一定义持久化读写、查询结果、原子消息写入和跨仓储事务契约，方法使用 Core 实体。只依赖 Core 与必要的纯基础能力，不包含业务编排、Hook 或具体存储实现。
 - `internal/loop/`：一次执行内部的 ReAct 迭代，使用 Core 类型与 Repository 契约，不依赖 `service`、`infra`、`bootstrap` 或 Wails。进度通过 Execution Service 提供的业务操作检查状态和额度，不定义另一套仓储接口。
 - `internal/service/agent/`：Agent 的查询与控制。`execution/` 负责直接输入准入、冻结上下文、进度、结算与恢复事务；`coordinator/` 负责 Coordinator、ActiveTasks、审批唤醒与预约交接。实体位于 `core/agent`，子包拥有实际行为，不增加转发层。
@@ -14,7 +15,7 @@
 - `internal/infra/`：JSONL、Provider 编解码、具体工具、文件系统，以及 Agent/Model/Tool 配置加载。JSONL 引用 Core 实体并实现 Repository 接口；所有 Infra 均不得依赖 Service，不调用业务流程，不承担审批与执行调度。
 - `internal/bootstrap/`：唯一装配入口，创建实例、注入依赖、安排初始化和启动恢复，最后开放 Wails。不得承载运行期业务决策。
 - `wails/`：请求入口、DTO 转换、错误映射与桌面宿主操作。输入边界负责规范化及校验；不得重复构建执行业务流程。
-- `identity/`、`clock/`、`fault/`、`security/` 等只保留明确的共享能力，事务契约统一位于 Repository。目录与接口使用业务或能力名称，不引入 `port`、`adapter`、`runtime` 模块、`ExecutionSlots` 或无价值代理。
+- `identity/`、`clock/`、`fault/` 等只保留明确的共享能力，事务契约统一位于 Repository。目录与接口使用业务或能力名称，不引入 `port`、`adapter`、`runtime` 模块、`ExecutionSlots` 或无价值代理。
 
 ## 编排与依赖
 

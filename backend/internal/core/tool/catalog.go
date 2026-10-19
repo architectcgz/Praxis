@@ -4,7 +4,7 @@ package tool
 import (
 	"fmt"
 	"maps"
-	"praxis/internal/security"
+	"praxis/internal/core/security"
 	"sync"
 )
 

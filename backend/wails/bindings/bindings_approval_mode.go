@@ -1,9 +1,9 @@
 package bindings
 
 import (
+	"praxis/internal/core/security"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/security"
 	projectservice "praxis/internal/service/project"
 	"praxis/wails/dto"
 	"praxis/wails/validation"

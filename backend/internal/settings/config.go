@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"praxis/internal/security"
+	"praxis/internal/core/security"
 )
 
 // Config 保存全局授权配置，项目可以覆盖 ApprovalMode。

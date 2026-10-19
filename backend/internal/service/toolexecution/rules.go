@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
-	"praxis/internal/security"
 )
 
 // ApprovalCatalog 提供当前工具可用性及命令匹配，不授予整个工具的永久执行权限。

@@ -3,8 +3,8 @@ package project
 import (
 	"context"
 	projectmodel "praxis/internal/core/project"
+	"praxis/internal/core/security"
 	"praxis/internal/identity"
-	"praxis/internal/security"
 )
 
 // ApprovalSettings 返回业务层解析的继承关系和有效模式，与工具启动使用相同规则。

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"praxis/internal/clock"
 	projectmodel "praxis/internal/core/project"
+	"praxis/internal/core/security"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
-	"praxis/internal/security"
 )
 
 // WorkspaceDirectory 提供项目创建所需的目录操作能力。

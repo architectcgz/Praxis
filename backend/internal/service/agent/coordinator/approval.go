@@ -3,11 +3,11 @@ package coordinator
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/security"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
-	"praxis/internal/security"
 	"time"
 )
 

@@ -8,10 +8,10 @@ import (
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
+	"praxis/internal/core/security"
 	"praxis/internal/core/tool/arguments"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/repository"
-	"praxis/internal/security"
 	"strings"
 	"unicode/utf8"
 )
