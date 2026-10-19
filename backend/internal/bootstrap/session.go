@@ -1,13 +1,10 @@
 package bootstrap
 
 import (
-	"context"
-	"errors"
 	"praxis/internal/infra/agentregistry"
 	"sync"
 
 	"praxis/internal/core/hook"
-	"praxis/internal/identity"
 	"praxis/internal/infra/filesystem"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/service/session"
@@ -28,15 +25,5 @@ func buildSessions(resources storageResources, repos jsonl.Repositories, agents 
 		Definitions:    agents.Definition,
 		UsageRecords:   usages.ListSession,
 		TextReader:     fs.Filesystem{},
-		RemoveSessionData: func(ctx context.Context, _ identity.SessionID, refs []string) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			var cleanupErr error
-			for _, ref := range refs {
-				cleanupErr = errors.Join(cleanupErr, resources.documents.Remove(ctx, ref))
-			}
-			return cleanupErr
-		},
 	})
 }

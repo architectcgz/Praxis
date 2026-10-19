@@ -9,7 +9,6 @@ import (
 	"praxis/internal/core/model"
 	"praxis/internal/dataroot"
 	"praxis/internal/identity"
-	"praxis/internal/infra/document"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/logging"
 	execution "praxis/internal/service/agent/coordinator"
@@ -17,13 +16,12 @@ import (
 )
 
 type storageResources struct {
-	store     *jsonl.Store
-	documents *document.Store
-	logger    *logging.Logger
+	store  *jsonl.Store
+	logger *logging.Logger
 }
 
 func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
-	store, err := jsonl.Open(ctx, root.State)
+	store, err := jsonl.Open(ctx, root.Root)
 	if err != nil {
 		return storageResources{}, fmt.Errorf("open JSONL: %w", err)
 	}
@@ -32,14 +30,8 @@ func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources,
 		_ = store.Close(context.Background())
 		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
 	}
-	documents, err := document.New(root.Documents)
-	if err != nil {
-		_ = store.Close(context.Background())
-		_ = logger.Close()
-		return storageResources{}, fmt.Errorf("open document store: %w", err)
-	}
 	logger.Infof("application open started root=%s logs=%s", root.Root, root.State)
-	return storageResources{store: store, documents: documents, logger: logger}, nil
+	return storageResources{store: store, logger: logger}, nil
 }
 
 func buildTimings(ctx context.Context, store *jsonl.Store, events *execution.EventPublisher, logger *logging.Logger) (*timing.Recorder, error) {

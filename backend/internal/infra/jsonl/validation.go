@@ -364,6 +364,12 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 	case "session":
 		var v sessionmodel.Session
 		_ = decodeJSON(data, &v)
+		if !validScope(v.ProjectID.String()) {
+			return errors.New("session project ID is not a valid directory name")
+		}
+		if projectID := s.sessionProjects[scope]; projectID != "" && projectID != v.ProjectID.String() {
+			return errors.New("session project does not match log directory")
+		}
 		workspace, err := get[workspacemodel.Workspace](ctx, s, "workspace", v.WorkspaceID.String())
 		if err != nil {
 			return err

@@ -80,9 +80,9 @@ func (r SessionRepository) Rename(ctx context.Context, id identity.SessionID, ti
 }
 
 // Delete 追加删除标记并清理所属 Session 的查询索引；业务前置条件由删除用例检查。
-func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) ([]string, error) {
+func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) error {
 	if _, e := r.Get(ctx, id); e != nil {
-		return nil, e
+		return e
 	}
-	return nil, r.s.change(ctx, id.String(), "session", id.String(), "session.deleted", nil, nil)
+	return r.s.change(ctx, id.String(), "session", id.String(), "session.deleted", nil, nil)
 }

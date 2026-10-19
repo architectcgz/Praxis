@@ -1,6 +1,7 @@
 package jsonl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -27,13 +28,24 @@ func writeNewFile(path string, data []byte) error {
 	return publishFile(tmp, path)
 }
 
-func (s *Store) append(scope string, data []byte) error {
-	path, err := s.path(scope)
+func (s *Store) append(ctx context.Context, scope string, data []byte) error {
+	path, err := s.path(ctx, scope)
 	if err != nil {
 		return err
 	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) && s.lengths[scope] == 0 {
+		if scope != "" {
+			// 项目和会话目录按首次有效提交创建，并同步父目录以保证发布可恢复。
+			for _, directory := range []string{filepath.Dir(filepath.Dir(path)), filepath.Dir(path)} {
+				if err := os.MkdirAll(directory, 0700); err != nil {
+					return err
+				}
+				if err := syncDirectory(filepath.Dir(directory)); err != nil {
+					return err
+				}
+			}
+		}
 		if err := writeNewFile(path, data); err != nil {
 			// 发布结果不明时不再基于旧索引写入，重启后以日志为准。
 			if _, statErr := os.Lstat(path); statErr == nil {

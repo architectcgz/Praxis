@@ -17,9 +17,6 @@ type DataRoot struct {
 	Config               string
 	Projects             string
 	State                string
-	Documents            string
-	Attachments          string
-	Temporary            string
 	ModelProvidersConfig string
 	ModelCredentialsFile string
 	ToolConfig           string
@@ -48,9 +45,6 @@ func Resolve(root string) (DataRoot, error) {
 		Config:               config,
 		Projects:             filepath.Join(root, "projects"),
 		State:                state,
-		Documents:            filepath.Join(state, "documents"),
-		Attachments:          filepath.Join(state, "attachments"),
-		Temporary:            filepath.Join(state, "tmp"),
 		ModelProvidersConfig: filepath.Join(config, "models.json"),
 		ModelCredentialsFile: filepath.Join(config, "auth.json"),
 		ToolConfig:           filepath.Join(config, "tools.json"),
@@ -72,10 +66,7 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 		d.Config,
 		d.Projects,
 		d.State,
-		d.Documents,
 		d.AgentDefinitions,
-		d.Attachments,
-		d.Temporary,
 	} {
 		if path == "" {
 			return errors.New("data root contains an empty required path")

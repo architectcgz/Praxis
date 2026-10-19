@@ -27,40 +27,38 @@ type ActiveTaskCounter interface {
 
 // Dependencies 包含初始化 Session 与 Primary Agent 所需的依赖。
 type Dependencies struct {
-	ConfigMu          *sync.RWMutex
-	Transactions      txrunner.Runner
-	HookDispatcher    *hook.Dispatcher
-	Projects          projectmodel.Store
-	Workspaces        workspacemodel.Store
-	Sessions          Store
-	Contexts          ContextStore
-	Agents            agentmodel.Store
-	Tasks             ActiveTaskCounter
-	Definitions       AgentDefinitionFactory
-	UsageRecords      func(context.Context, string) ([]modelapi.ModelUsageRecord, error)
-	RemoveSessionData func(context.Context, identity.SessionID, []string) error
-	TextReader        workspacemodel.TextReader
-	Clock             clock.Clock
-	IDs               identity.IDGenerator
+	ConfigMu       *sync.RWMutex
+	Transactions   txrunner.Runner
+	HookDispatcher *hook.Dispatcher
+	Projects       projectmodel.Store
+	Workspaces     workspacemodel.Store
+	Sessions       Store
+	Contexts       ContextStore
+	Agents         agentmodel.Store
+	Tasks          ActiveTaskCounter
+	Definitions    AgentDefinitionFactory
+	UsageRecords   func(context.Context, string) ([]modelapi.ModelUsageRecord, error)
+	TextReader     workspacemodel.TextReader
+	Clock          clock.Clock
+	IDs            identity.IDGenerator
 }
 
 // Service 负责 Session 初始化和主 Agent 查询。
 type Service struct {
-	configMu          *sync.RWMutex
-	tx                txrunner.Runner
-	hookDispatcher    *hook.Dispatcher
-	projects          projectmodel.Store
-	workspaces        workspacemodel.Store
-	sessions          Store
-	contexts          ContextStore
-	agents            agentmodel.Store
-	tasks             ActiveTaskCounter
-	definitions       AgentDefinitionFactory
-	usageRecords      func(context.Context, string) ([]modelapi.ModelUsageRecord, error)
-	removeSessionData func(context.Context, identity.SessionID, []string) error
-	textReader        workspacemodel.TextReader
-	clock             clock.Clock
-	ids               identity.IDGenerator
+	configMu       *sync.RWMutex
+	tx             txrunner.Runner
+	hookDispatcher *hook.Dispatcher
+	projects       projectmodel.Store
+	workspaces     workspacemodel.Store
+	sessions       Store
+	contexts       ContextStore
+	agents         agentmodel.Store
+	tasks          ActiveTaskCounter
+	definitions    AgentDefinitionFactory
+	usageRecords   func(context.Context, string) ([]modelapi.ModelUsageRecord, error)
+	textReader     workspacemodel.TextReader
+	clock          clock.Clock
+	ids            identity.IDGenerator
 
 	createdSessionsMu sync.Mutex
 	createdSessions   map[identity.SessionID]struct{}
@@ -106,22 +104,21 @@ func NewService(deps Dependencies) (*Service, error) {
 		}
 	}
 	return &Service{
-		configMu:          deps.ConfigMu,
-		tx:                deps.Transactions,
-		hookDispatcher:    deps.HookDispatcher,
-		projects:          deps.Projects,
-		workspaces:        deps.Workspaces,
-		sessions:          deps.Sessions,
-		contexts:          deps.Contexts,
-		agents:            deps.Agents,
-		tasks:             deps.Tasks,
-		definitions:       deps.Definitions,
-		usageRecords:      deps.UsageRecords,
-		removeSessionData: deps.RemoveSessionData,
-		textReader:        deps.TextReader,
-		clock:             clock.ClockOrDefault(deps.Clock),
-		ids:               identity.IDsOrDefault(deps.IDs),
-		createdSessions:   make(map[identity.SessionID]struct{}),
+		configMu:        deps.ConfigMu,
+		tx:              deps.Transactions,
+		hookDispatcher:  deps.HookDispatcher,
+		projects:        deps.Projects,
+		workspaces:      deps.Workspaces,
+		sessions:        deps.Sessions,
+		contexts:        deps.Contexts,
+		agents:          deps.Agents,
+		tasks:           deps.Tasks,
+		definitions:     deps.Definitions,
+		usageRecords:    deps.UsageRecords,
+		textReader:      deps.TextReader,
+		clock:           clock.ClockOrDefault(deps.Clock),
+		ids:             identity.IDsOrDefault(deps.IDs),
+		createdSessions: make(map[identity.SessionID]struct{}),
 	}, nil
 }
 
@@ -369,7 +366,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	return result, err
 }
 
-// DeleteSession 删除没有活动执行的 Session 和关联文档。
+// DeleteSession 删除没有活动执行的 Session。
 func (s *Service) DeleteSession(ctx context.Context, sessionID identity.SessionID) error {
 	if ctx == nil {
 		return errors.New("delete session context is required")
@@ -398,9 +395,7 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 }
 
 func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
-	var documentRefs []string
-	deleted := false
-	if err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	return s.tx.InTx(ctx, func(txCtx context.Context) error {
 		if onlyEmpty {
 			if _, err := s.sessions.Get(txCtx, sessionID); errors.Is(err, fault.ErrNotFound) {
 				return nil
@@ -420,18 +415,8 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 		if active > 0 {
 			return agentmodel.ErrAgentExecuting
 		}
-		documentRefs, err = s.sessions.Delete(txCtx, sessionID)
-		deleted = err == nil
-		return err
-	}); err != nil {
-		return err
-	}
-	if deleted && s.removeSessionData != nil {
-		if err := s.removeSessionData(context.WithoutCancel(ctx), sessionID, documentRefs); err != nil {
-			return fmt.Errorf("remove session data: %w", err)
-		}
-	}
-	return nil
+		return s.sessions.Delete(txCtx, sessionID)
+	})
 }
 
 func (s *Service) hasSessionMessages(ctx context.Context, sessionID identity.SessionID) (bool, error) {

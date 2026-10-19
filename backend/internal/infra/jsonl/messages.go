@@ -226,7 +226,7 @@ func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, afte
 		if change, ok := r.s.tx(ctx).changes[key]; ok {
 			data = change.event.Payload
 		} else {
-			data, err = r.s.readRef(key, ref.location, reader)
+			data, err = r.s.readRef(ctx, key, ref.location, reader)
 			if err != nil {
 				return messagemodel.Stream{}, err
 			}

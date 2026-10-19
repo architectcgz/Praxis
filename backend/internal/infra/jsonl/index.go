@@ -185,6 +185,14 @@ func (s *Store) publish(tx *transaction, offset, length int64) {
 			entry := change.entry
 			entry.location.Offset, entry.location.Length = offset, length
 			s.index.add(key, entry)
+			if key.collection == "session" {
+				for _, group := range entry.groups {
+					if group.kind == "sessions-project" {
+						s.sessionProjects[tx.scope] = group.owner
+						break
+					}
+				}
+			}
 		}
 		for n, event := range tx.events {
 			if event.Collection != "message" {

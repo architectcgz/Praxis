@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Store) replay(ctx context.Context, scope string) error {
-	path, err := s.path(scope)
+	path, err := s.path(ctx, scope)
 	if err != nil {
 		return err
 	}

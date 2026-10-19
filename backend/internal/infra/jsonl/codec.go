@@ -37,12 +37,12 @@ type recordPosition struct {
 }
 type recordReader map[recordPosition]batch
 
-func (s *Store) readRecord(ref recordRef, reader recordReader) (batch, error) {
+func (s *Store) readRecord(ctx context.Context, ref recordRef, reader recordReader) (batch, error) {
 	position := recordPosition{ref.Scope, ref.Offset, ref.Length}
 	if value, ok := reader[position]; ok {
 		return value, nil
 	}
-	path, err := s.path(ref.Scope)
+	path, err := s.path(ctx, ref.Scope)
 	if err != nil {
 		return batch{}, err
 	}
@@ -75,8 +75,8 @@ func (s *Store) readRecord(ref recordRef, reader recordReader) (batch, error) {
 	return result, nil
 }
 
-func (s *Store) readRef(key entityKey, ref recordRef, reader recordReader) (json.RawMessage, error) {
-	record, err := s.readRecord(ref, reader)
+func (s *Store) readRef(ctx context.Context, key entityKey, ref recordRef, reader recordReader) (json.RawMessage, error) {
+	record, err := s.readRecord(ctx, ref, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -125,13 +125,13 @@ func (s *Store) payloadWithReader(ctx context.Context, key entityKey, reader rec
 		if !ok {
 			return nil, fault.ErrNotFound
 		}
-		return s.readRef(key, ref.location, reader)
+		return s.readRef(ctx, key, ref.location, reader)
 	}
 	entry, ok := s.entry(ctx, key)
 	if !ok {
 		return nil, fault.ErrNotFound
 	}
-	return s.readRef(key, entry.location, reader)
+	return s.readRef(ctx, key, entry.location, reader)
 }
 
 func get[T any](ctx context.Context, s *Store, collection, id string) (T, error) {

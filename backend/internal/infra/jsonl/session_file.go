@@ -13,22 +13,30 @@ func (s *Store) SessionLogPath(ctx context.Context, sessionID identity.SessionID
 	if !validScope(sessionID.String()) {
 		return "", fault.InvalidValue("sessionId", "session ID is not a valid file name")
 	}
-	if _, err := (SessionRepository{s}).Get(ctx, sessionID); err != nil {
-		return "", err
-	}
-	path, err := s.path(sessionID.String())
+	var path string
+	err := s.view(ctx, func(readCtx context.Context) error {
+		if _, err := (SessionRepository{s}).Get(readCtx, sessionID); err != nil {
+			return err
+		}
+		var err error
+		path, err = s.path(readCtx, sessionID.String())
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return fault.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return errors.New("session log must be a regular file")
+		}
+		return nil
+	})
 	if err != nil {
 		return "", err
-	}
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", fault.ErrNotFound
-	}
-	if err != nil {
-		return "", err
-	}
-	if !info.Mode().IsRegular() {
-		return "", errors.New("session log must be a regular file")
 	}
 	return path, nil
 }

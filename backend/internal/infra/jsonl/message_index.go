@@ -89,7 +89,7 @@ func (s *Store) scanMessages(ctx context.Context, scope string) (*sessionMessage
 	if s.lengths[scope] == 0 {
 		return index, nil
 	}
-	path, err := s.path(scope)
+	path, err := s.path(ctx, scope)
 	if err != nil {
 		return nil, err
 	}

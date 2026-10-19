@@ -119,7 +119,7 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 	}
 	encoded = append(encoded, '\n')
 	offset := s.lengths[tx.scope]
-	if err := s.append(tx.scope, encoded); err != nil {
+	if err := s.append(txCtx, tx.scope, encoded); err != nil {
 		return err
 	}
 	s.publish(tx, offset, int64(len(encoded)))
@@ -162,8 +162,8 @@ func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error 
 	if tx.deletedScope || s.index.deleted[tx.scope] {
 		return errors.New("cannot write to a deleted session")
 	}
-	if _, err := s.path(tx.scope); err != nil {
-		return err
+	if tx.scope != "" && !validScope(tx.scope) {
+		return errors.New("session ID is not a valid file name")
 	}
 	if event.Sequence != tx.nextSequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
 		return errors.New("invalid event identity or sequence")

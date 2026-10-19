@@ -12,7 +12,7 @@ type Store interface {
 	Save(context.Context, Session) error
 	HasMessages(context.Context, identity.SessionID) (bool, error)
 	Rename(context.Context, identity.SessionID, string, time.Time) error
-	Delete(context.Context, identity.SessionID) ([]string, error)
+	Delete(context.Context, identity.SessionID) error
 }
 
 // ListReader 提供会话目录查询能力。
