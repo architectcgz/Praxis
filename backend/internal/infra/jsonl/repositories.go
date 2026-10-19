@@ -1,13 +1,7 @@
 package jsonl
 
 import (
-	agentmodel "praxis/internal/service/agent"
-	projectmodel "praxis/internal/service/project"
-	sessionmodel "praxis/internal/service/session"
-
-	"praxis/internal/core/toolexecution"
-	txrunner "praxis/internal/transaction"
-	workspacemodel "praxis/internal/workspace"
+	"praxis/internal/repository"
 )
 
 // Repositories 将同一个日志事务入口提供给所有业务仓储。
@@ -22,6 +16,8 @@ type Repositories struct {
 	ToolExecutions ToolExecutionRepository
 	Controls       ControlRepository
 	Messages       MessageStreams
+	Timings        TimingStore
+	ModelUsage     ModelUsageStore
 }
 
 // Repositories 返回共享提交边界与位置索引的仓储集合。
@@ -37,17 +33,24 @@ func (s *Store) Repositories() Repositories {
 		ToolExecutions: ToolExecutionRepository{s},
 		Controls:       ControlRepository{s},
 		Messages:       MessageStreams{s},
+		Timings:        TimingStore{Store: s},
+		ModelUsage:     ModelUsageStore{Store: s},
 	}
 }
 
 var (
-	_ txrunner.Runner           = (*Store)(nil)
-	_ projectmodel.Store        = ProjectRepository{}
-	_ workspacemodel.Store      = WorkspaceRepository{}
-	_ sessionmodel.Store        = SessionRepository{}
-	_ agentmodel.Store          = AgentRepository{}
-	_ agentmodel.ExecutionStore = AgentExecutionRepository{}
-	_ toolexecution.Store       = ToolExecutionRepository{}
-	_ sessionmodel.ContextStore = ContextRepository{}
-	_ agentmodel.ControlStore   = ControlRepository{}
+	_ repository.Transaction    = (*Store)(nil)
+	_ repository.Project        = ProjectRepository{}
+	_ repository.Workspace      = WorkspaceRepository{}
+	_ repository.Session        = SessionRepository{}
+	_ repository.Agent          = AgentRepository{}
+	_ repository.AgentExecution = AgentExecutionRepository{}
+	_ repository.ToolExecution  = ToolExecutionRepository{}
+	_ repository.SessionContext = ContextRepository{}
+	_ repository.AgentControl   = ControlRepository{}
+	_ repository.Task           = TaskRepository{}
+	_ repository.MessageStreams = MessageStreams{}
+	_ repository.MessageWriter  = MessageWriter{}
+	_ repository.Timing         = TimingStore{}
+	_ repository.ModelUsage     = ModelUsageStore{}
 )

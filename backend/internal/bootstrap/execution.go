@@ -2,28 +2,27 @@ package bootstrap
 
 import (
 	"context"
-	toolservice "praxis/internal/service/toolexecution"
-	"sync"
-
 	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
+	"praxis/internal/loop"
 	"praxis/internal/security"
 	execution "praxis/internal/service/agent/coordinator"
-	inputservice "praxis/internal/service/agent/input"
-	"praxis/internal/service/session"
+	executionservice "praxis/internal/service/agent/execution"
+	sessionservice "praxis/internal/service/session"
 	queueservice "praxis/internal/service/task"
+	toolservice "praxis/internal/service/toolexecution"
+	"sync"
 )
 
-func buildExecution(resources storageResources, repos jsonl.Repositories, config *configuration, sessions *session.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, error) {
+func buildExecution(resources storageResources, repos jsonl.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, error) {
 	active := &execution.ActiveTasks{}
-	tasks, err := inputservice.NewService(inputservice.Dependencies{
+	tasks, err := executionservice.NewService(executionservice.Dependencies{
 		Controls:       repos.Controls,
 		Transactions:   resources.store,
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
-		EventObserver: func(value inputservice.TerminalEvent) {
+		EventObserver: func(value executionservice.TerminalEvent) {
 			events.Publish(execution.Event{
 				Kind:           value.Kind,
 				SessionID:      value.SessionID,
@@ -65,6 +64,7 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 	return assembleCoordinator(coordinatorDependencies{
 		Transactions: resources.store,
 		Tasks:        tasks,
+		Records:      repos.Executions,
 		Queue:        queue,
 		Recovery: execution.RecoveryCatalog{
 			Executions: repos.Executions,
@@ -95,7 +95,7 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 		Logger:         resources.logger,
 		ConfigMu:       configMu,
 		Events:         events,
-		ObserveUsage:   usageObserver(resources.store, resources.logger),
+		ObserveUsage:   usageObserver(repos.ModelUsage, resources.logger),
 		SummaryFormat:  defaultSummaryFormat(),
 		Runner:         runner,
 	})

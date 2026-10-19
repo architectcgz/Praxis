@@ -8,6 +8,7 @@ import (
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	"praxis/internal/repository"
 )
 
 type receiptKey struct{ scope, owner, task, call string }
@@ -15,11 +16,11 @@ type receiptKey struct{ scope, owner, task, call string }
 // prepareReceiptChanges 只校验调用声明和回执配对，不决定业务恢复或工具重试。
 func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 	tx := s.tx(ctx)
-	tx.receiptChanges = make(map[receiptKey]*messagemodel.MissingToolResult)
-	pending := func(key receiptKey) (messagemodel.MissingToolResult, bool) {
+	tx.receiptChanges = make(map[receiptKey]*repository.MissingToolResult)
+	pending := func(key receiptKey) (repository.MissingToolResult, bool) {
 		if value, changed := tx.receiptChanges[key]; changed {
 			if value == nil {
-				return messagemodel.MissingToolResult{}, false
+				return repository.MissingToolResult{}, false
 			}
 			return *value, true
 		}
@@ -63,7 +64,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolexecution.ArgumentsDigest(invocation.Name, block.Input) {
 					return fault.ErrRequestConflict
 				}
-				fact := messagemodel.MissingToolResult{
+				fact := repository.MissingToolResult{
 					SessionID:   identity.SessionID(tx.scope),
 					AgentID:     record.AgentID,
 					ExecutionID: identity.AgentExecutionID(record.Data.ExecutionID),
@@ -121,8 +122,8 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 	return nil
 }
 
-func (r MessageStreams) ListMissingToolResults(ctx context.Context) ([]messagemodel.MissingToolResult, error) {
-	values := make([]messagemodel.MissingToolResult, 0)
+func (r MessageStreams) ListMissingToolResults(ctx context.Context) ([]repository.MissingToolResult, error) {
+	values := make([]repository.MissingToolResult, 0)
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		tx := r.s.tx(readCtx)
 		if tx.deletedScope {
@@ -151,7 +152,7 @@ func (r MessageStreams) ListMissingToolResults(ctx context.Context) ([]messagemo
 		}
 		return nil
 	})
-	return sorted(values, func(a, b messagemodel.MissingToolResult) int {
+	return sorted(values, func(a, b repository.MissingToolResult) int {
 		return cmp.Or(cmp.Compare(a.SessionID, b.SessionID), cmp.Compare(a.Sequence, b.Sequence), cmp.Compare(a.CallIndex, b.CallIndex))
 	}), err
 }

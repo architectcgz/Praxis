@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	agentmodel "praxis/internal/core/agent"
 	messagemodel "praxis/internal/core/message"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
+	"praxis/internal/repository"
 	"strings"
 	"time"
 )
@@ -60,8 +60,8 @@ func (r MessageStreams) List(ctx context.Context, sessionID identity.SessionID, 
 	return result, err
 }
 
-func (r MessageStreams) LoadMessages(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, limit int) (messagemodel.Stream, error) {
-	var result messagemodel.Stream
+func (r MessageStreams) LoadMessages(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, limit int) (repository.MessageStream, error) {
+	var result repository.MessageStream
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		owner, err := r.owner(readCtx, sessionID, agentID)
 		if err != nil {
@@ -73,7 +73,7 @@ func (r MessageStreams) LoadMessages(ctx context.Context, sessionID identity.Ses
 	return result, err
 }
 
-func (r MessageStreams) Writer(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) (toolexecution.Writer, error) {
+func (r MessageStreams) Writer(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) (repository.MessageWriter, error) {
 	owner, err := r.owner(ctx, sessionID, agentID)
 	if err != nil {
 		return nil, err
@@ -175,14 +175,14 @@ func (w MessageWriter) AppendToolResult(ctx context.Context, data messagemodel.M
 	})
 }
 
-func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, after uint64, limit int, tail bool) (messagemodel.Stream, error) {
+func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, after uint64, limit int, tail bool) (repository.MessageStream, error) {
 	scope, ownerID := owner.SessionID.String(), appendOwner(owner)
 	if tx := r.s.tx(ctx); tx != nil && tx.deletedScope && tx.scope == scope {
-		return messagemodel.Stream{}, fault.ErrNotFound
+		return repository.MessageStream{}, fault.ErrNotFound
 	}
 	index, err := r.s.messageIndex(ctx, scope)
 	if err != nil {
-		return messagemodel.Stream{}, err
+		return repository.MessageStream{}, err
 	}
 	refs := index.streams[ownerID]
 	// 仅复制本次查询的引用，不修改共享缓存；事务消息由变更集补入。
@@ -199,7 +199,7 @@ func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, afte
 			}
 			var record messageRecord
 			if err := decodeJSON(change.event.Payload, &record); err != nil {
-				return messagemodel.Stream{}, err
+				return repository.MessageStream{}, err
 			}
 			if record.OwnerID == ownerID && record.Data.Sequence > after {
 				selected = append(selected, messageRef{id: record.Data.ID, sequence: record.Data.Sequence})
@@ -228,16 +228,16 @@ func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, afte
 		} else {
 			data, err = r.s.readRef(ctx, key, ref.location, reader)
 			if err != nil {
-				return messagemodel.Stream{}, err
+				return repository.MessageStream{}, err
 			}
 		}
 		var record messageRecord
 		if err := decodeJSON(data, &record); err != nil {
-			return messagemodel.Stream{}, err
+			return repository.MessageStream{}, err
 		}
 		result = append(result, record.Data)
 	}
-	return messagemodel.Stream{Messages: result, SequenceBoundary: boundary}, nil
+	return repository.MessageStream{Messages: result, SequenceBoundary: boundary}, nil
 }
 
 // Validate 在消息写入或磁盘读取入口检查消息结构和流身份。
@@ -329,6 +329,3 @@ func validateMessageBlock(role messagemodel.Role, block messagemodel.Block) erro
 	}
 	return nil
 }
-
-var _ messagemodel.Streams = MessageStreams{}
-var _ toolexecution.Writer = MessageWriter{}

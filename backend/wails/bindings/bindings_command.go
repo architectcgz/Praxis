@@ -2,17 +2,17 @@ package bindings
 
 import (
 	"context"
-	"praxis/internal/service/agent"
-	"strings"
-	"unicode/utf8"
-
+	agentmodel "praxis/internal/core/agent"
 	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	inputservice "praxis/internal/service/agent/input"
+	agentservice "praxis/internal/service/agent"
+	executionservice "praxis/internal/service/agent/execution"
 	queueservice "praxis/internal/service/task"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
+	"strings"
+	"unicode/utf8"
 )
 
 type CommandBindings struct{ host Host }
@@ -25,7 +25,7 @@ func (b *CommandBindings) SendInput(wire dto.SendInputRequest) (dto.SendInputRes
 	if err != nil {
 		return dto.SendInputResponse{}, err
 	}
-	params := inputservice.SendInput{
+	params := executionservice.SendInput{
 		SessionID:      identity.SessionID(wire.SessionID),
 		AgentID:        identity.AgentID(wire.AgentID),
 		RequestID:      identity.RequestID(wire.RequestID),
@@ -38,7 +38,7 @@ func (b *CommandBindings) SendInput(wire dto.SendInputRequest) (dto.SendInputRes
 		err := fault.New(modelconfig.ModelNotConfigured, "")
 		return dto.SendInputResponse{}, publicError(b.host, "CommandBindings.SendInput.request", err)
 	}
-	if params.Content == "" || len(params.Content) > agent.MaxInputBytes || !utf8.ValidString(params.Content) {
+	if params.Content == "" || len(params.Content) > agentmodel.MaxInputBytes || !utf8.ValidString(params.Content) {
 		err := fault.InvalidValue("content", "content must be non-empty UTF-8 text within the size limit")
 		return dto.SendInputResponse{}, publicError(b.host, "CommandBindings.SendInput.request", err)
 	}
@@ -57,7 +57,7 @@ func (b *CommandBindings) PauseAgent(wire dto.PauseAgentRequest) (dto.AgentContr
 	if err := validation.ValidateAgentControl(wire); err != nil {
 		return dto.AgentControlResponse{}, err
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (agent.ControlResult, error) {
+	return b.controlAgent(func(ctx context.Context, services Services) (agentservice.ControlResult, error) {
 		return services.Agents.PauseAgent(ctx, controlInput(wire))
 	})
 }
@@ -66,7 +66,7 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) (dto.AgentControl
 	if err := validation.ValidateAgentControl(wire); err != nil {
 		return dto.AgentControlResponse{}, err
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (agent.ControlResult, error) {
+	return b.controlAgent(func(ctx context.Context, services Services) (agentservice.ControlResult, error) {
 		return services.Agents.StopAgent(ctx, controlInput(wire))
 	})
 }
@@ -93,7 +93,7 @@ func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskRes
 		err := fault.New(modelconfig.ModelNotConfigured, "")
 		return dto.QueueTaskResponse{}, publicError(b.host, "CommandBindings.QueueTask.request", err)
 	}
-	if params.Prompt == "" || len(params.Prompt) > agent.MaxInputBytes || !utf8.ValidString(params.Prompt) {
+	if params.Prompt == "" || len(params.Prompt) > agentmodel.MaxInputBytes || !utf8.ValidString(params.Prompt) {
 		err := fault.InvalidValue("prompt", "prompt must be non-empty UTF-8 text within the size limit")
 		return dto.QueueTaskResponse{}, publicError(b.host, "CommandBindings.QueueTask.request", err)
 	}
@@ -104,15 +104,15 @@ func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskRes
 	return dto.QueueTaskResponse{TaskID: result.Task.ID.String(), Status: string(result.Task.Status), ExistingTask: result.ExistingTask}, nil
 }
 
-func controlInput(wire dto.PauseAgentRequest) agent.ControlInput {
-	return agent.ControlInput{
+func controlInput(wire dto.PauseAgentRequest) agentservice.ControlInput {
+	return agentservice.ControlInput{
 		CommandID:         identity.AgentControlCommandID(wire.CommandID),
 		AgentID:           identity.AgentID(wire.AgentID),
 		TargetExecutionID: identity.AgentExecutionID(wire.TargetExecutionID),
 	}
 }
 
-func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (agent.ControlResult, error)) (dto.AgentControlResponse, error) {
+func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (agentservice.ControlResult, error)) (dto.AgentControlResponse, error) {
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.AgentControlResponse{}, err

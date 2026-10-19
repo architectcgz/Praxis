@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
-	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool/arguments"
 	"praxis/internal/core/toolexecution"
+	"praxis/internal/repository"
 	"praxis/internal/security"
-	agentmodel "praxis/internal/service/agent"
 	"strings"
 	"unicode/utf8"
 )
@@ -41,7 +41,7 @@ const riskReviewSchema = `{
 // RiskReviewer 使用既有模型与消息读取能力进行独立审核，不写消息、不决定调用状态。
 type RiskReviewer struct {
 	Models       modelapi.ModelBuilder
-	Messages     messagemodel.Reader
+	Messages     repository.MessageReader
 	Hooks        *hook.Dispatcher
 	ObserveUsage func(modelapi.ModelUsageRecord)
 }

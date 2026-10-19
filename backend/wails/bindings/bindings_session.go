@@ -1,13 +1,13 @@
 package bindings
 
 import (
-	"strings"
-
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/service/session"
+	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
+	"strings"
 )
 
 type SessionBindings struct{ host Host }
@@ -40,7 +40,7 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	if err != nil {
 		return dto.CreateSessionResponse{}, err
 	}
-	params := session.CreateInput{
+	params := sessionservice.CreateInput{
 		SessionID:    identity.SessionID(wire.SessionID),
 		AgentID:      identity.AgentID(wire.AgentID),
 		RequestID:    identity.RequestID(wire.RequestID),
@@ -143,7 +143,7 @@ func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	return nil
 }
 
-func sessionSummary(value session.Session) dto.SessionSummary {
+func sessionSummary(value sessionmodel.Session) dto.SessionSummary {
 	return dto.SessionSummary{
 		ID:          value.ID.String(),
 		ProjectID:   value.ProjectID.String(),

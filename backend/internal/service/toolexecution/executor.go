@@ -7,36 +7,37 @@ import (
 	"errors"
 	"fmt"
 	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
+	"praxis/internal/repository"
 	"praxis/internal/security"
-	taskmodel "praxis/internal/service/agent"
-	txrunner "praxis/internal/transaction"
+	agentservice "praxis/internal/service/agent"
 	"sync"
 )
 
 type Dependencies struct {
 	Rules ApprovalRules
 	// Review 在模型响应边界完成规范化与校验，成功时只返回 canonical 结论。
-	Review         func(context.Context, taskmodel.Execution, executionmodel.Execution, executionmodel.RiskReview) (security.RiskAssessment, error)
+	Review         func(context.Context, agentmodel.Execution, executionmodel.Execution, executionmodel.RiskReview) (security.RiskAssessment, error)
 	HookDispatcher *hook.Dispatcher
-	Transactions   txrunner.Runner
-	Tasks          taskmodel.ExecutionStore
-	Executions     executionmodel.Store
+	Transactions   repository.Transaction
+	Tasks          repository.AgentExecution
+	Executions     repository.ToolExecution
 	Catalog        tool.ToolCatalog
 	Clock          clock.Clock
 }
 
 type Executor struct {
 	rules           ApprovalRules
-	reviewOperation func(context.Context, taskmodel.Execution, executionmodel.Execution, executionmodel.RiskReview) (security.RiskAssessment, error)
+	reviewOperation func(context.Context, agentmodel.Execution, executionmodel.Execution, executionmodel.RiskReview) (security.RiskAssessment, error)
 	reviewInFlight  sync.Map
 	hookDispatcher  *hook.Dispatcher
-	tx              txrunner.Runner
-	tasks           taskmodel.ExecutionStore
-	executions      executionmodel.Store
+	tx              repository.Transaction
+	tasks           repository.AgentExecution
+	executions      repository.ToolExecution
 	toolCatalog     tool.ToolCatalog
 	clock           clock.Clock
 }
@@ -66,8 +67,6 @@ func NewExecutor(deps Dependencies) (*Executor, error) {
 		clock:           clock.ClockOrDefault(deps.Clock),
 	}, nil
 }
-
-var errApprovalPending = errors.New("tool approval pending")
 
 // Execute 返回可靠结算结果或审批等待标记。
 func (s *Executor) Execute(ctx context.Context, prepared tool.PreparedToolCall, metadata executionmodel.ToolExecutionMetadata) (tool.ToolExecutionResult, error) {
@@ -111,7 +110,7 @@ func (s *Executor) invoke(
 	}
 	invocation, err = s.reserveCall(ctx, invocation.ID)
 	if err != nil {
-		if errors.Is(err, fault.New(taskmodel.ExecutionResourceLimit, "")) {
+		if errors.Is(err, fault.New(agentservice.ExecutionResourceLimit, "")) {
 			result, settleErr := s.reject(ctx, invocation.ID, executionmodel.FailureResourceLimit, "Tool call limit exceeded.")
 			if settleErr != nil {
 				return tool.ToolResult{}, settleErr
@@ -170,7 +169,7 @@ func (s *Executor) invoke(
 		if result, done := settledResult(invocation); done {
 			return result, nil
 		}
-		return tool.ToolResult{}, fault.New(taskmodel.ExecutionBusy, "tool call is already running or being reviewed")
+		return tool.ToolResult{}, fault.New(agentservice.ExecutionBusy, "tool call is already running or being reviewed")
 	}
 	execution := tool.ExecutionCall{
 		Name:                invocation.Name,

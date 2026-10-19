@@ -1,14 +1,13 @@
 package bindings
 
 import (
-	"strings"
-
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/security"
-	projectmodel "praxis/internal/service/project"
+	projectservice "praxis/internal/service/project"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
+	"strings"
 )
 
 // GetProjectApprovalMode 读取项目授权选择；空或非 canonical 项目身份返回校验错误。
@@ -56,7 +55,7 @@ func (b *ProjectBindings) SetProjectApprovalMode(wire dto.SetProjectApprovalMode
 	return approvalModeDTO(value), nil
 }
 
-func approvalModeDTO(value projectmodel.ApprovalSettings) dto.ProjectApprovalMode {
+func approvalModeDTO(value projectservice.ApprovalSettings) dto.ProjectApprovalMode {
 	result := dto.ProjectApprovalMode{
 		ProjectID:     value.ProjectID.String(),
 		GlobalMode:    string(value.GlobalMode),

@@ -3,11 +3,12 @@ package toolexecution
 import (
 	"bytes"
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	taskmodel "praxis/internal/service/agent"
+	agentservice "praxis/internal/service/agent"
 	"time"
 )
 
@@ -29,8 +30,8 @@ func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID)
 		if err != nil {
 			return err
 		}
-		if task.Progress.ToolCalls >= taskmodel.MaxToolCalls {
-			return fault.New(taskmodel.ExecutionResourceLimit, "tool call limit exceeded")
+		if task.Progress.ToolCalls >= agentmodel.MaxToolCalls {
+			return fault.New(agentservice.ExecutionResourceLimit, "tool call limit exceeded")
 		}
 		task.Progress.ToolCalls++
 		invocation.BudgetReserved = true
@@ -130,7 +131,7 @@ func (s *Executor) reject(ctx context.Context, id identity.ToolExecutionID, code
 			return nil
 		}
 		if current.Status == executionmodel.StatusRunning {
-			return fault.New(taskmodel.ExecutionBusy, "tool call is already running")
+			return fault.New(agentservice.ExecutionBusy, "tool call is already running")
 		}
 		if current.Status == executionmodel.StatusApproved {
 			code = executionmodel.FailureInterrupted

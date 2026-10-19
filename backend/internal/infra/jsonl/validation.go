@@ -6,21 +6,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	projectmodel "praxis/internal/core/project"
+	sessionmodel "praxis/internal/core/session"
 	queued "praxis/internal/core/task"
+	timingmodel "praxis/internal/core/timing"
+	"praxis/internal/core/toolexecution"
+	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
-	projectmodel "praxis/internal/service/project"
-	sessionmodel "praxis/internal/service/session"
-
-	"praxis/internal/core/toolexecution"
-	"praxis/internal/timing"
 	"praxis/internal/workflow"
-	workspacemodel "praxis/internal/workspace"
 	"reflect"
 	"slices"
 	"strings"
@@ -119,10 +118,10 @@ func describe(scope string, event Event, object any) (entityKey, indexEntry, err
 		identity, sessionID = v.Key(), v.SessionID
 		group("usage-session", sessionID, "")
 		link("agent_execution", v.ExecutionID)
-	case timing.Record:
+	case timingmodel.Record:
 		identity, sessionID = v.ID, v.SessionID
 		group("timings-agent", v.AgentID, "")
-		if v.Status == timing.Running {
+		if v.Status == timingmodel.Running {
 			group("running-timings", "", "")
 		}
 		link("agent_execution", v.ExecutionID)
@@ -188,7 +187,7 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 	case "usage":
 		target = new(modelapi.ModelUsageRecord)
 	case "timing":
-		target = new(timing.Record)
+		target = new(timingmodel.Record)
 	}
 	if err := decodeJSON(event.Payload, target); err != nil {
 		return indexEntry{}, err
@@ -219,7 +218,7 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 		err = value.Validate()
 	case *modelapi.ModelUsageRecord:
 		err = validateUsageRecord(*value)
-	case *timing.Record:
+	case *timingmodel.Record:
 		err = value.Validate()
 	default:
 		return indexEntry{}, fmt.Errorf("unsupported stored object %T", target)
@@ -457,7 +456,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 		_ = decodeJSON(data, &v)
 		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
 	case "timing":
-		var v timing.Record
+		var v timingmodel.Record
 		_ = decodeJSON(data, &v)
 		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
 	case "message":
@@ -578,14 +577,14 @@ func immutable(collection string, before, after json.RawMessage) error {
 		}
 		fields = []string{"agentId", "executionId", "turnId"}
 	case "timing":
-		var prior, next timing.Record
+		var prior, next timingmodel.Record
 		if err := decodeJSON(before, &prior); err != nil {
 			return err
 		}
 		if err := decodeJSON(after, &next); err != nil {
 			return err
 		}
-		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timing.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
+		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timingmodel.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
 			return fault.ErrRequestConflict
 		}
 	case "context", "message":

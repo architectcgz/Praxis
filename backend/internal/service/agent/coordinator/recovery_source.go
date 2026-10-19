@@ -3,21 +3,19 @@ package coordinator
 import (
 	"context"
 	"math"
-	"praxis/internal/service/agent"
-
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/identity"
-	inputservice "praxis/internal/service/agent/input"
-	"praxis/internal/service/session"
+	"praxis/internal/repository"
 )
 
 // RecoveryCatalog 把启动恢复所需的持久化事实装配给 execution，不参与执行决策。
 type RecoveryCatalog struct {
-	Executions inputservice.ExecutionStore
-	Sessions   session.ListReader
-	Agents     agent.Store
+	Executions repository.AgentExecution
+	Sessions   repository.Session
+	Agents     repository.Agent
 }
 
-func (s RecoveryCatalog) ListActive(ctx context.Context) ([]agent.Execution, error) {
+func (s RecoveryCatalog) ListActive(ctx context.Context) ([]agentmodel.Execution, error) {
 	return s.Executions.ListActive(ctx)
 }
 
@@ -33,7 +31,7 @@ func (s RecoveryCatalog) ListDispatchableAgents(ctx context.Context) ([]identity
 			return nil, err
 		}
 		for _, value := range agents {
-			if value.State == agent.AgentIdle || value.State == agent.AgentWaiting {
+			if value.State == agentmodel.AgentIdle || value.State == agentmodel.AgentWaiting {
 				ids = append(ids, value.ID)
 			}
 		}

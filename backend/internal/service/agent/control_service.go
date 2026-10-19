@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
@@ -16,23 +17,23 @@ type ControlInput struct {
 
 // ControlResult 返回持久化控制命令；信号送达不代表 runtime 已完成结算。
 type ControlResult struct {
-	Command           AgentControlCommand
+	Command           agentmodel.AgentControlCommand
 	ExistingCommand   bool
 	CancellationError string
 }
 
 // PauseAgent 先提交暂停意图，再通知执行控制能力；重复请求保持幂等。
 func (s *Service) PauseAgent(ctx context.Context, params ControlInput) (ControlResult, error) {
-	return s.applyControl(ctx, params, AgentControlPause)
+	return s.applyControl(ctx, params, agentmodel.AgentControlPause)
 }
 
 // StopAgent 停止明确指定的活动 Execution，保留预约任务，Agent 中断后可基于历史接收新输入。
 func (s *Service) StopAgent(ctx context.Context, params ControlInput) (ControlResult, error) {
-	return s.applyControl(ctx, params, AgentControlCancel)
+	return s.applyControl(ctx, params, agentmodel.AgentControlCancel)
 }
 
 // 控制意图必须先提交，结束事务才可以仲裁正常完成与暂停、停止的竞争。
-func (s *Service) applyControl(ctx context.Context, params ControlInput, kind AgentControlKind) (ControlResult, error) {
+func (s *Service) applyControl(ctx context.Context, params ControlInput, kind agentmodel.AgentControlKind) (ControlResult, error) {
 	if ctx == nil {
 		return ControlResult{}, errors.New("control command context is required")
 	}
@@ -61,21 +62,21 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind Ag
 			return fault.New(fault.InvalidRequest, "")
 		}
 		at := s.clock.Now()
-		control := NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
-		if task.Status == ExecutionEnded {
+		control := agentmodel.NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
+		if task.Status == agentmodel.ExecutionEnded {
 			if err := control.MarkApplied(at); err != nil {
 				return err
 			}
 		} else if agent.CurrentExecutionID != task.ID {
-			return fault.New(UnavailableCode, "")
-		} else if agent.State == AgentExecuting {
+			return fault.New(agentmodel.UnavailableCode, "")
+		} else if agent.State == agentmodel.AgentExecuting {
 			if err := agent.RequestPause(at); err != nil {
 				return err
 			}
-		} else if agent.State == AgentPausing {
+		} else if agent.State == agentmodel.AgentPausing {
 			// 人工重试可以接管上一次未完成的进程内取消。
 		} else {
-			return fault.New(UnavailableCode, "")
+			return fault.New(agentmodel.UnavailableCode, "")
 		}
 		if err := s.controls.Save(txCtx, control); err != nil {
 			return err
@@ -93,11 +94,11 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind Ag
 }
 
 func (s *Service) signalControl(result ControlResult) ControlResult {
-	if result.Command.Status == AgentControlApplied {
+	if result.Command.Status == agentmodel.AgentControlApplied {
 		return result
 	}
 	command := result.Command
-	if command.Kind == AgentControlPause {
+	if command.Kind == agentmodel.AgentControlPause {
 		s.executions.Pause(command.AgentID, command.TargetExecutionID)
 	} else {
 		s.executions.Stop(command.AgentID, command.TargetExecutionID)

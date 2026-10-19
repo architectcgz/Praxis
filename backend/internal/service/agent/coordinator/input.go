@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 	"praxis/internal/identity"
-	inputservice "praxis/internal/service/agent/input"
+	executionservice "praxis/internal/service/agent/execution"
 	queueservice "praxis/internal/service/task"
 )
 
 type StartResult struct {
-	inputservice.SendInputResult
+	executionservice.SendInputResult
 	ActivationError string
 }
 
-func (s *Coordinator) SendInput(ctx context.Context, input inputservice.SendInput) (StartResult, error) {
+func (s *Coordinator) SendInput(ctx context.Context, input executionservice.SendInput) (StartResult, error) {
 	if err := s.enter(ctx); err != nil {
 		return StartResult{}, err
 	}

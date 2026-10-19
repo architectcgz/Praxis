@@ -3,8 +3,8 @@ package jsonl
 import (
 	"cmp"
 	"context"
+	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/identity"
-	workspacemodel "praxis/internal/workspace"
 )
 
 type WorkspaceRepository struct{ s *Store }

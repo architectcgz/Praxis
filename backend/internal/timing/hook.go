@@ -3,6 +3,7 @@ package timing
 import (
 	"context"
 	"praxis/internal/core/hook"
+	timingmodel "praxis/internal/core/timing"
 )
 
 // Hook 将 Agent、Provider 和 Tool 执行边界映射成计时记录；其余操作及 nil Recorder 均忽略。
@@ -17,11 +18,11 @@ func (h Hook) Start(ctx context.Context, operation hook.Operation) (context.Cont
 	default:
 		return ctx, nil
 	}
-	ctx, span := h.Recorder.Start(ctx, Operation{
+	ctx, span := h.Recorder.Start(ctx, timingmodel.Operation{
 		SessionID:   operation.SessionID.String(),
 		AgentID:     operation.AgentID.String(),
 		ExecutionID: operation.ExecutionID.String(),
-		Kind:        Kind(operation.Kind),
+		Kind:        timingmodel.Kind(operation.Kind),
 		Name:        operation.Name,
 		ReferenceID: operation.ReferenceID,
 	})
@@ -49,16 +50,16 @@ func (s hookScope) End(result hook.Result) {
 	case hook.OperationAgent:
 		switch result.Outcome {
 		case "failed":
-			status = Failed
+			status = timingmodel.Failed
 		case "interrupted", "paused":
-			status = Cancelled
+			status = timingmodel.Cancelled
 		}
 		if s.ctx.Err() != nil {
-			status = Cancelled
+			status = timingmodel.Cancelled
 		}
 	case hook.OperationTool:
-		if status == Completed && result.ToolErrorClass != "" {
-			status = Failed
+		if status == timingmodel.Completed && result.ToolErrorClass != "" {
+			status = timingmodel.Failed
 		}
 	}
 	s.span.End(status)

@@ -1,15 +1,15 @@
-// Package execution 协调进程内 Execution 执行、审批等待和持久化队列交接。
+// Package coordinator 协调进程内 Execution 执行、审批等待和持久化队列交接。
 package coordinator
 
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/logging"
-	agentmodel "praxis/internal/service/agent"
+	"praxis/internal/loop"
+	"praxis/internal/repository"
 	"sync"
 	"time"
 )
@@ -22,7 +22,7 @@ type Config struct {
 	ActiveTasks       *ActiveTasks
 	Operations        ExecutionOperations
 	Queue             TaskQueue
-	Messages          toolexecution.WriterProvider
+	Messages          repository.MessageWriterProvider
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
@@ -37,7 +37,7 @@ type Coordinator struct {
 	activeTasks       *ActiveTasks
 	operations        ExecutionOperations
 	queue             TaskQueue
-	messages          toolexecution.WriterProvider
+	messages          repository.MessageWriterProvider
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration

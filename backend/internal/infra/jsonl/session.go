@@ -3,8 +3,8 @@ package jsonl
 import (
 	"cmp"
 	"context"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	sessionmodel "praxis/internal/service/session"
 	"strings"
 	"time"
 )

@@ -2,16 +2,15 @@ package jsonl
 
 import (
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	projectmodel "praxis/internal/core/project"
+	sessionmodel "praxis/internal/core/session"
+	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
-	agentmodel "praxis/internal/service/agent"
-	projectmodel "praxis/internal/service/project"
-	sessionmodel "praxis/internal/service/session"
-
 	"praxis/internal/utils/pathutil"
 	"praxis/internal/workflow"
-	workspacemodel "praxis/internal/workspace"
 	"regexp"
 	"slices"
 	"strings"

@@ -2,8 +2,7 @@ package coordinator
 
 import (
 	"bytes"
-
-	"praxis/internal/core/loop"
+	"praxis/internal/loop"
 )
 
 func LoopEvent(event loop.Event) Event {

@@ -2,21 +2,21 @@ package coordinator
 
 import (
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	"praxis/internal/repository"
 	"praxis/internal/security"
-	agentmodel "praxis/internal/service/agent"
-	txrunner "praxis/internal/transaction"
 	"time"
 )
 
 // ToolApprovals 保存审批决定，实际工具执行由 Coordinator 继续处理。
 type ToolApprovals struct {
 	DecideOperation func(context.Context, toolexecution.Execution) (security.ApprovalDecision, error)
-	Transactions    txrunner.Runner
-	Tasks           agentmodel.ExecutionStore
-	Executions      toolexecution.Store
+	Transactions    repository.Transaction
+	Tasks           repository.AgentExecution
+	Executions      repository.ToolExecution
 }
 
 // ToolDecision 固定审批目标和已规范化的参数摘要，避免决定作用于变更后的调用。

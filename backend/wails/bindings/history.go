@@ -3,13 +3,12 @@ package bindings
 import (
 	"cmp"
 	"context"
-	"slices"
-	"strconv"
-
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	taskmodel "praxis/internal/service/agent"
 	"praxis/wails/dto"
+	"slices"
+	"strconv"
 )
 
 // listAgentHistory 在协议出口合并可展示消息与失败、取消事实，游标不受追加影响。
@@ -32,13 +31,13 @@ func listAgentHistory(ctx context.Context, agents AgentService, agentID identity
 		})
 	}
 	for _, value := range view.Executions {
-		if value.Status != taskmodel.ExecutionEnded {
+		if value.Status != agentmodel.ExecutionEnded {
 			continue
 		}
 		kind := "execution"
-		if value.FailureCode == taskmodel.ExecutionFailureRequestCanceled {
+		if value.FailureCode == agentmodel.ExecutionFailureRequestCanceled {
 			kind = "request_canceled"
-		} else if value.Outcome != taskmodel.ExecutionFailed {
+		} else if value.Outcome != agentmodel.ExecutionFailed {
 			continue
 		}
 		at := value.EndedAt

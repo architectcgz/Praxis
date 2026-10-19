@@ -3,8 +3,8 @@ package jsonl
 import (
 	"cmp"
 	"context"
+	projectmodel "praxis/internal/core/project"
 	"praxis/internal/identity"
-	projectmodel "praxis/internal/service/project"
 )
 
 type ProjectRepository struct{ s *Store }

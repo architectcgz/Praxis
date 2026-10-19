@@ -3,11 +3,12 @@ package coordinator
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
+	"praxis/internal/loop"
+	"praxis/internal/repository"
+	agentservice "praxis/internal/service/agent"
 	"time"
 )
 
@@ -92,7 +93,7 @@ func (r *Coordinator) startExecution(task agentmodel.Execution) error {
 func (r *Coordinator) execute(
 	ctx context.Context,
 	task agentmodel.Execution,
-	messageWriter toolexecution.Writer,
+	messageWriter repository.MessageWriter,
 ) (bool, agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
@@ -140,7 +141,7 @@ func (r *Coordinator) executionResult(
 	failureCode agentmodel.ExecutionFailureCode,
 	err error,
 ) (agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
-	failureMessage := agentmodel.ExecutionFailureMessage(failureCode, err)
+	failureMessage := agentservice.ExecutionFailureMessage(failureCode, err)
 	if ctx.Err() != nil {
 		outcome = agentmodel.ExecutionInterrupted
 		if errors.Is(context.Cause(ctx), ErrExecutionPaused) {
@@ -245,7 +246,7 @@ func knownOutcome(outcome agentmodel.ExecutionOutcome) bool {
 	}
 }
 
-// loopFailureCode 在业务结算边界映射核心错误，不共享持久化枚举。
+// loopFailureCode 在业务结算边界把 Loop 错误转换为执行失败码。
 func loopFailureCode(err error) agentmodel.ExecutionFailureCode {
 	switch loop.FailureClassification(err) {
 	case loop.FailureProviderUnavailable:

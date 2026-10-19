@@ -2,11 +2,10 @@ package coordinator
 
 import (
 	"encoding/json"
-	"sync"
-
 	"praxis/internal/core/model"
+	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/identity"
-	"praxis/internal/timing"
+	"sync"
 )
 
 // Event 是进程内执行通知，持久化事实仍由业务查询读取。
@@ -26,7 +25,7 @@ type Event struct {
 	Result         string
 	IsError        bool
 	Error          string
-	Timing         *timing.Record
+	Timing         *timingmodel.Record
 	Usage          *model.ModelUsage
 }
 

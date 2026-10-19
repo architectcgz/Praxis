@@ -1,41 +1,38 @@
 package bootstrap
 
 import (
-	execution "praxis/internal/service/agent/coordinator"
-
-	toolservice "praxis/internal/service/toolexecution"
-	"sync"
-
 	"praxis/internal/clock"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
-	messagemodel "praxis/internal/core/message"
 	"praxis/internal/core/model"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
-	inputservice "praxis/internal/service/agent/input"
-	"praxis/internal/transaction"
+	"praxis/internal/loop"
+	"praxis/internal/repository"
+	execution "praxis/internal/service/agent/coordinator"
+	executionservice "praxis/internal/service/agent/execution"
+	toolservice "praxis/internal/service/toolexecution"
+	"sync"
 )
 
 // ModelSource 提供模型选择和冻结配置对应的请求流，不暴露 Provider 实现。
 type ModelSource interface {
 	model.ModelBuilder
-	inputservice.ModelConfigResolver
+	executionservice.ModelConfigResolver
 }
 
 // Dependencies 是进程级执行协调器的装配依赖；Task 用例和队列由 task/service 提供。
 type coordinatorDependencies struct {
-	Transactions   transaction.Runner
+	Transactions   repository.Transaction
 	Tasks          execution.ExecutionOperations
+	Records        repository.AgentExecution
 	Queue          execution.TaskQueue
 	Recovery       execution.RecoverySource
 	ActiveTasks    *execution.ActiveTasks
-	ToolExecutions toolexecution.Store
-	Messages       messagemodel.Reader
-	Writers        toolexecution.WriterProvider
+	ToolExecutions repository.ToolExecution
+	Messages       repository.MessageReader
+	Writers        repository.MessageWriterProvider
 	Models         ModelSource
 	Tools          tool.ToolCatalog
 	Rules          toolservice.ApprovalRules
@@ -85,7 +82,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 			HookDispatcher: deps.HookDispatcher,
 			Rules:          deps.Rules,
 			Review:         reviewer.Review,
-			Tasks:          deps.Tasks,
+			Tasks:          deps.Records,
 			Executions:     deps.ToolExecutions,
 			Catalog:        deps.Tools,
 			Clock:          deps.Clock,
@@ -123,7 +120,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		Approvals: execution.ToolApprovals{
 			DecideOperation: deps.Rules.Decide,
 			Transactions:    deps.Transactions,
-			Tasks:           deps.Tasks,
+			Tasks:           deps.Records,
 			Executions:      deps.ToolExecutions,
 		},
 	})

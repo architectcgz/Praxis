@@ -2,24 +2,22 @@ package coordinator
 
 import (
 	"context"
-	"praxis/internal/core/loop"
-
+	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/message"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
-	inputservice "praxis/internal/service/agent/input"
+	"praxis/internal/loop"
+	executionservice "praxis/internal/service/agent/execution"
 	queueservice "praxis/internal/service/task"
 )
 
-// ExecutionOperations 是 Coordinator 需要的 Execution 用例能力；具体实现属于 agent/input。
+// ExecutionOperations 是 Coordinator 需要的 Execution 用例能力，具体实现属于 agent/execution。
 type ExecutionOperations interface {
 	LoadProgress(context.Context, identity.AgentExecutionID) (loop.Progress, error)
 	RecordIteration(context.Context, identity.AgentExecutionID, uint64) error
 	RecordSummaryRequest(context.Context, identity.AgentExecutionID, uint64) error
 	RecordModelOutput(context.Context, identity.AgentExecutionID, int) error
-	agentmodel.ExecutionStore
-	SendInput(context.Context, inputservice.SendInput) (inputservice.SendInputResult, error)
+	SendInput(context.Context, executionservice.SendInput) (executionservice.SendInputResult, error)
 	LoadContext(context.Context, agentmodel.Execution) (appcontext.Content, []message.Message, error)
 	ConfirmRunning(context.Context, identity.AgentExecutionID) error
 	WaitForApproval(context.Context, identity.AgentExecutionID) error
@@ -40,7 +38,7 @@ type executionResultState struct {
 	message string
 }
 
-// executionProgress 将写入能力绑定到唯一执行，Loop 不选择仓储键。
+// executionProgress 将进度业务操作绑定到唯一执行，由 Execution Service 校验和提交。
 type executionProgress struct {
 	operations ExecutionOperations
 	id         identity.AgentExecutionID

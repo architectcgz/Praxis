@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
 	messagemodel "praxis/internal/core/message"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
 )
 
 type EnqueueInput struct {

@@ -1,9 +1,9 @@
 package bootstrap
 
 import (
+	agentmodel "praxis/internal/core/agent"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
 )
 
 func defaultAgentConfigs() map[identity.AgentDefinitionID]agentmodel.AgentConfig {

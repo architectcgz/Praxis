@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	projectmodel "praxis/internal/core/project"
 	"praxis/internal/identity"
 	"praxis/internal/security"
 )
@@ -54,7 +55,7 @@ func (s *Service) SetApprovalMode(ctx context.Context, projectID identity.Projec
 	return result, nil
 }
 
-func (s *Service) approvalSettings(project Project) ApprovalSettings {
+func (s *Service) approvalSettings(project projectmodel.Project) ApprovalSettings {
 	global := s.globalApprovalMode()
 	return ApprovalSettings{
 		ProjectID:     project.ID,

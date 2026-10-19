@@ -7,10 +7,11 @@ import (
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	"praxis/internal/repository"
 )
 
 // AppendAssistant 原子提交调用方已构建的消息、工具身份及最终输出证据。
-func (w MessageWriter) AppendAssistant(ctx context.Context, value toolexecution.AssistantWrite) (stored messagemodel.Message, inserted bool, err error) {
+func (w MessageWriter) AppendAssistant(ctx context.Context, value repository.AssistantWrite) (stored messagemodel.Message, inserted bool, err error) {
 	message := value.Message
 	if ctx == nil || message.Role != messagemodel.RoleAssistant || message.AuthorKind != messagemodel.AuthorAgent || message.AuthorID != w.owner.ID.String() || message.TurnID == "" {
 		return stored, false, errors.New("assistant ownership is required")

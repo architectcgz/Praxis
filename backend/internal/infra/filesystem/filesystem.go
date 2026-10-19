@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	workspacemodel "praxis/internal/workspace"
+	workspaceio "praxis/internal/workspace"
 	"unicode/utf8"
 )
 
@@ -65,10 +65,10 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", fmt.Errorf("inspect workspace file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", workspacemodel.ErrNotRegularFile
+		return "", workspaceio.ErrNotRegularFile
 	}
 	if info.Size() > maxBytes {
-		return "", workspacemodel.ErrFileTooLarge
+		return "", workspaceio.ErrFileTooLarge
 	}
 	file, err := root.Open(relativePath)
 	if err != nil {
@@ -80,7 +80,7 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", fmt.Errorf("inspect opened workspace file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", workspacemodel.ErrNotRegularFile
+		return "", workspaceio.ErrNotRegularFile
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
@@ -90,10 +90,10 @@ func (Filesystem) ReadText(ctx context.Context, workspaceRoot, relativePath stri
 		return "", err
 	}
 	if int64(len(data)) > maxBytes {
-		return "", workspacemodel.ErrFileTooLarge
+		return "", workspaceio.ErrFileTooLarge
 	}
 	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
-		return "", workspacemodel.ErrInvalidText
+		return "", workspaceio.ErrInvalidText
 	}
 	return string(bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))), nil
 }

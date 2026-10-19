@@ -2,16 +2,10 @@ package coordinator
 
 import (
 	"context"
-	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
 	"sync"
-)
-
-var (
-	ErrExecutionPaused  = errors.New("agent execution paused")
-	ErrExecutionStopped = errors.New("agent execution stopped")
 )
 
 // ActiveTasks 保存唯一的进程内执行状态，零值可用；准入、控制与协调器共享此实例。

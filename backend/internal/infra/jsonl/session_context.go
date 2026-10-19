@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	sessionmodel "praxis/internal/service/session"
 )
 
 type ContextRepository struct{ s *Store }

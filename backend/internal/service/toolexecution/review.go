@@ -2,11 +2,12 @@ package toolexecution
 
 import (
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/security"
-	taskmodel "praxis/internal/service/agent"
+	agentservice "praxis/internal/service/agent"
 	"time"
 )
 
@@ -15,11 +16,11 @@ const riskReviewTimeout = time.Minute
 // review 仅编排审核身份、外部模型调用和结果提交；所有状态决策由 Core 完成。
 func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (executionmodel.Execution, error) {
 	if _, loaded := s.reviewInFlight.LoadOrStore(id, struct{}{}); loaded {
-		return executionmodel.Execution{}, fault.New(taskmodel.ExecutionBusy, "this operation is already being reviewed")
+		return executionmodel.Execution{}, fault.New(agentservice.ExecutionBusy, "this operation is already being reviewed")
 	}
 	defer s.reviewInFlight.Delete(id)
 	var invocation executionmodel.Execution
-	var task taskmodel.Execution
+	var task agentmodel.Execution
 	var attempt executionmodel.RiskReview
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error

@@ -2,10 +2,10 @@ package session
 
 import (
 	"context"
+	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	projectmodel "praxis/internal/service/project"
-	workspacemodel "praxis/internal/workspace"
+	projectservice "praxis/internal/service/project"
 )
 
 func (s *Service) workspaceForSession(ctx context.Context, sessionID identity.SessionID) (workspacemodel.Workspace, error) {
@@ -24,7 +24,7 @@ func (s *Service) workspaceForSession(ctx context.Context, sessionID identity.Se
 		return workspacemodel.Workspace{}, err
 	}
 	if workspace.ProjectID != session.ProjectID || workspace.State != workspacemodel.WorkspaceReady {
-		return workspacemodel.Workspace{}, fault.New(projectmodel.ProjectWorkspaceInvalid, "current session workspace is unavailable")
+		return workspacemodel.Workspace{}, fault.New(projectservice.ProjectWorkspaceInvalid, "current session workspace is unavailable")
 	}
 	return workspace, nil
 }

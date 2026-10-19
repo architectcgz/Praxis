@@ -2,8 +2,8 @@ package jsonl
 
 import (
 	"context"
-	messagemodel "praxis/internal/core/message"
 	"praxis/internal/fault"
+	"praxis/internal/repository"
 	"slices"
 )
 
@@ -33,7 +33,7 @@ type index struct {
 	maxQueue    map[string]uint64
 	hasMessages map[string]bool
 	deleted     map[string]bool
-	missing     map[receiptKey]messagemodel.MissingToolResult
+	missing     map[receiptKey]repository.MissingToolResult
 }
 
 func newIndex() *index {
@@ -44,7 +44,7 @@ func newIndex() *index {
 		maxQueue:    make(map[string]uint64),
 		hasMessages: make(map[string]bool),
 		deleted:     make(map[string]bool),
-		missing:     make(map[receiptKey]messagemodel.MissingToolResult),
+		missing:     make(map[receiptKey]repository.MissingToolResult),
 	}
 }
 

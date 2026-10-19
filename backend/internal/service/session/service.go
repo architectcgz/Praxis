@@ -6,39 +6,36 @@ import (
 	"errors"
 	"fmt"
 	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
-	modelapi "praxis/internal/core/model"
+	projectmodel "praxis/internal/core/project"
+	sessionmodel "praxis/internal/core/session"
+	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
-	projectmodel "praxis/internal/service/project"
-	txrunner "praxis/internal/transaction"
-	workspacemodel "praxis/internal/workspace"
+	"praxis/internal/repository"
+	projectservice "praxis/internal/service/project"
+	workspaceio "praxis/internal/workspace"
 	"sync"
 )
 
 // AgentDefinitionFactory 解析可复用的 Agent 定义。
 type AgentDefinitionFactory func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 
-// ActiveTaskCounter 提供会话删除前的执行存在性判断。
-type ActiveTaskCounter interface {
-	CountActiveBySession(context.Context, identity.SessionID) (int, error)
-}
-
 // Dependencies 包含初始化 Session 与 Primary Agent 所需的依赖。
 type Dependencies struct {
 	ConfigMu       *sync.RWMutex
-	Transactions   txrunner.Runner
+	Transactions   repository.Transaction
 	HookDispatcher *hook.Dispatcher
-	Projects       projectmodel.Store
-	Workspaces     workspacemodel.Store
-	Sessions       Store
-	Contexts       ContextStore
-	Agents         agentmodel.Store
-	Tasks          ActiveTaskCounter
+	Projects       repository.Project
+	Workspaces     repository.Workspace
+	Sessions       repository.Session
+	Contexts       repository.SessionContext
+	Agents         repository.Agent
+	Tasks          repository.AgentExecution
 	Definitions    AgentDefinitionFactory
-	UsageRecords   func(context.Context, string) ([]modelapi.ModelUsageRecord, error)
-	TextReader     workspacemodel.TextReader
+	UsageRecords   repository.ModelUsage
+	TextReader     workspaceio.TextReader
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -46,17 +43,17 @@ type Dependencies struct {
 // Service 负责 Session 初始化和主 Agent 查询。
 type Service struct {
 	configMu       *sync.RWMutex
-	tx             txrunner.Runner
+	tx             repository.Transaction
 	hookDispatcher *hook.Dispatcher
-	projects       projectmodel.Store
-	workspaces     workspacemodel.Store
-	sessions       Store
-	contexts       ContextStore
-	agents         agentmodel.Store
-	tasks          ActiveTaskCounter
+	projects       repository.Project
+	workspaces     repository.Workspace
+	sessions       repository.Session
+	contexts       repository.SessionContext
+	agents         repository.Agent
+	tasks          repository.AgentExecution
 	definitions    AgentDefinitionFactory
-	usageRecords   func(context.Context, string) ([]modelapi.ModelUsageRecord, error)
-	textReader     workspacemodel.TextReader
+	usageRecords   repository.ModelUsage
+	textReader     workspaceio.TextReader
 	clock          clock.Clock
 	ids            identity.IDGenerator
 
@@ -76,7 +73,7 @@ type CreateInput struct {
 }
 
 type CreateResult struct {
-	Session Session
+	Session sessionmodel.Session
 	Agent   agentmodel.Agent
 }
 
@@ -124,32 +121,24 @@ func NewService(deps Dependencies) (*Service, error) {
 
 // SessionView 聚合会话及其 Agent 持久化状态，不包含应用展示数据。
 type SessionView struct {
-	Session Session
+	Session sessionmodel.Session
 	Agents  []agentmodel.Agent
 }
 
 // ListSessionsByProject 返回指定 Project 下按索引查询的 Session 列表。
-func (s *Service) ListSessionsByProject(ctx context.Context, projectID identity.ProjectID, limit int) ([]Session, error) {
+func (s *Service) ListSessionsByProject(ctx context.Context, projectID identity.ProjectID, limit int) ([]sessionmodel.Session, error) {
 	if ctx == nil {
 		return nil, errors.New("project session catalog context is required")
 	}
-	lister, ok := s.sessions.(ProjectListReader)
-	if !ok {
-		return nil, errors.New("project session catalog is unavailable")
-	}
-	return lister.ListByProject(ctx, projectID, limit)
+	return s.sessions.ListByProject(ctx, projectID, limit)
 }
 
 // ListSessions 返回持久化 Session 目录。
-func (s *Service) ListSessions(ctx context.Context, limit int) ([]Session, error) {
+func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.Session, error) {
 	if ctx == nil {
 		return nil, errors.New("session catalog context is required")
 	}
-	lister, ok := s.sessions.(ListReader)
-	if !ok {
-		return nil, errors.New("session catalog is unavailable")
-	}
-	return lister.List(ctx, limit)
+	return s.sessions.List(ctx, limit)
 }
 
 // GetSessionView 返回 Session 及其按索引查询的 Agent 列表。
@@ -169,7 +158,7 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID identity.Session
 }
 
 // ListSessionContext 按稳定时间和 ID 游标读取 SessionContext 条目。
-func (s *Service) ListSessionContext(ctx context.Context, sessionID identity.SessionID, afterID string, limit int) ([]SessionContextEntry, error) {
+func (s *Service) ListSessionContext(ctx context.Context, sessionID identity.SessionID, afterID string, limit int) ([]sessionmodel.SessionContextEntry, error) {
 	if ctx == nil {
 		return nil, fault.New(fault.InvalidRequest, "session context query is invalid")
 	}
@@ -235,17 +224,17 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 			if err != nil {
 				return err
 			}
-			return fault.New(projectmodel.ProjectWorkspaceInvalid, "")
+			return fault.New(projectservice.ProjectWorkspaceInvalid, "")
 		}
 		workspace, err := s.workspaces.Get(txCtx, params.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		if workspace.ProjectID != project.ID || workspace.State != workspacemodel.WorkspaceReady {
-			return fault.New(projectmodel.ProjectWorkspaceInvalid, "")
+			return fault.New(projectservice.ProjectWorkspaceInvalid, "")
 		}
 		at := s.clock.Now().UTC()
-		session := NewSession(params.SessionID, project.ID, workspace.ID, at)
+		session := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, at)
 		agent := agentmodel.NewAgent(params.AgentID, session.ID, definition.ID, definition.Profile, at)
 		if err := s.sessions.Save(txCtx, session); err != nil {
 			return err
@@ -317,7 +306,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 }
 
 type AppendContextResult struct {
-	Entry         SessionContextEntry
+	Entry         sessionmodel.SessionContextEntry
 	ExistingEntry bool
 }
 
@@ -325,7 +314,7 @@ type AppendContextResult struct {
 type AppendContextParams struct {
 	EntryID           identity.ContextEntryID
 	SessionID         identity.SessionID
-	Kind              SessionContextKind
+	Kind              sessionmodel.SessionContextKind
 	SourceExecutionID identity.AgentExecutionID
 	Content           string
 }
@@ -337,7 +326,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	}
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		entry := NewSessionContextEntry(
+		entry := sessionmodel.NewSessionContextEntry(
 			params.EntryID,
 			params.SessionID,
 			params.Kind,

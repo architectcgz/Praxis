@@ -3,9 +3,9 @@ package jsonl
 import (
 	"cmp"
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
 )
 
 type AgentRepository struct{ s *Store }

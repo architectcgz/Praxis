@@ -4,21 +4,21 @@ import (
 	"context"
 	"errors"
 	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/message"
 	"praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
-	"praxis/internal/service/agent"
-	"praxis/internal/transaction"
+	"praxis/internal/repository"
 )
 
 type Dependencies struct {
-	Transactions   transaction.Runner
-	Tasks          Store
-	Agents         agent.Store
-	Messages       message.Streams
+	Transactions   repository.Transaction
+	Tasks          repository.Task
+	Agents         repository.Agent
+	Messages       repository.MessageStreams
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	Clock          clock.Clock
@@ -26,10 +26,10 @@ type Dependencies struct {
 
 // Service 管理预约的幂等提交、FIFO 查询与取消，不运行模型或结算执行。
 type Service struct {
-	tx             transaction.Runner
-	tasks          Store
-	agents         agent.Store
-	messages       message.Streams
+	tx             repository.Transaction
+	tasks          repository.Task
+	agents         repository.Agent
+	messages       repository.MessageStreams
 	hookDispatcher *hook.Dispatcher
 	logger         *logging.Logger
 	clock          clock.Clock
@@ -50,7 +50,7 @@ func NewService(d Dependencies) (*Service, error) {
 	}, nil
 }
 
-func (s *Service) inputMessageContent(ctx context.Context, owner agent.Agent, requestID identity.RequestID) (string, error) {
+func (s *Service) inputMessageContent(ctx context.Context, owner agentmodel.Agent, requestID identity.RequestID) (string, error) {
 	messages, err := s.messages.List(ctx, owner.SessionID, owner.ID, 0, 0)
 	if err != nil {
 		return "", err

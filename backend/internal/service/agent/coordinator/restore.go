@@ -2,8 +2,8 @@ package coordinator
 
 import (
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/identity"
-	agentmodel "praxis/internal/service/agent"
 )
 
 // RecoverySource 从当前持久化状态读取活动 Execution 和允许派发的 Agent。

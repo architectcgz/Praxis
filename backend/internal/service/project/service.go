@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"praxis/internal/clock"
+	projectmodel "praxis/internal/core/project"
+	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
+	"praxis/internal/repository"
 	"praxis/internal/security"
-	txrunner "praxis/internal/transaction"
-	workspacemodel "praxis/internal/workspace"
 )
 
 // WorkspaceDirectory 提供项目创建所需的目录操作能力。
@@ -22,9 +23,9 @@ type WorkspaceDirectory interface {
 
 // Dependencies 包含创建 Project 持久化状态所需的依赖。
 type Dependencies struct {
-	Transactions       txrunner.Runner
-	Projects           Store
-	Workspaces         workspacemodel.Store
+	Transactions       repository.Transaction
+	Projects           repository.Project
+	Workspaces         repository.Workspace
 	Clock              clock.Clock
 	Directory          WorkspaceDirectory
 	Logger             *logging.Logger
@@ -33,9 +34,9 @@ type Dependencies struct {
 
 // Service 负责 Project 变更及其事务边界。
 type Service struct {
-	tx                 txrunner.Runner
-	projects           Store
-	workspaces         workspacemodel.Store
+	tx                 repository.Transaction
+	projects           repository.Project
+	workspaces         repository.Workspace
 	clock              clock.Clock
 	directory          WorkspaceDirectory
 	logger             *logging.Logger
@@ -53,7 +54,7 @@ type CreateInput struct {
 
 // CreateProjectResult 返回 Project 及其初始 Workspace。
 type CreateProjectResult struct {
-	Project   Project
+	Project   projectmodel.Project
 	Workspace workspacemodel.Workspace
 }
 
@@ -124,7 +125,7 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (Create
 			params.Path,
 			at,
 		)
-		project := NewProject(params.ProjectID, params.Name, params.Path, workspace.ID, at)
+		project := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, workspace.ID, at)
 		if err := s.projects.Save(txCtx, project); err != nil {
 			return err
 		}
@@ -143,15 +144,11 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (Create
 }
 
 // ListProjects 返回按索引查询的 Project 列表。
-func (s *Service) ListProjects(ctx context.Context, limit int) ([]Project, error) {
+func (s *Service) ListProjects(ctx context.Context, limit int) ([]projectmodel.Project, error) {
 	if ctx == nil {
 		return nil, errors.New("project catalog context is required")
 	}
-	lister, ok := s.projects.(Reader)
-	if !ok {
-		return nil, errors.New("project catalog is unavailable")
-	}
-	return lister.List(ctx, limit)
+	return s.projects.List(ctx, limit)
 }
 
 // ListWorkspaces 返回指定 Project 下按索引查询的 Workspace 列表。

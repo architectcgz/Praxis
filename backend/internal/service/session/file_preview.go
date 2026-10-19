@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	workspacemodel "praxis/internal/workspace"
+	workspaceio "praxis/internal/workspace"
 	"strings"
 )
 
@@ -41,13 +41,13 @@ func (s *Service) PreviewFile(ctx context.Context, sessionID identity.SessionID,
 		return FilePreview{}, fault.New(fault.InvalidRequest, "only files within the current workspace can be previewed")
 	}
 	content, err := s.textReader.ReadText(ctx, workspace.Path, path, maxPreviewBytes)
-	if errors.Is(err, workspacemodel.ErrFileTooLarge) {
+	if errors.Is(err, workspaceio.ErrFileTooLarge) {
 		return FilePreview{}, fault.New(fault.InvalidRequest, "file exceeds the 1 MiB preview limit")
 	}
-	if errors.Is(err, workspacemodel.ErrNotRegularFile) {
+	if errors.Is(err, workspaceio.ErrNotRegularFile) {
 		return FilePreview{}, fault.New(fault.InvalidRequest, "only regular text files can be previewed")
 	}
-	if errors.Is(err, workspacemodel.ErrInvalidText) {
+	if errors.Is(err, workspaceio.ErrInvalidText) {
 		return FilePreview{}, fault.New(fault.InvalidRequest, "only UTF-8 text can be previewed; binary files are not supported")
 	}
 	if err != nil {

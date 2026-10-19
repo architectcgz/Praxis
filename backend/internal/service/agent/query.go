@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	messagemodel "praxis/internal/core/message"
 	"praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	txrunner "praxis/internal/transaction"
+	"praxis/internal/repository"
 )
 
 // ExecutionControl 只在控制意图持久化成功后传递取消信号。
@@ -19,46 +20,35 @@ type ExecutionControl interface {
 	Stop(identity.AgentID, identity.AgentExecutionID) bool
 }
 
-// ExecutionReader 只查询 Agent 展示和固定目标控制所需的 Execution 事实。
-type ExecutionReader interface {
-	Get(context.Context, identity.AgentExecutionID) (Execution, error)
-	GetActiveByAgent(context.Context, identity.AgentID) (Execution, error)
-	ListByAgent(context.Context, identity.AgentID, int) ([]Execution, error)
-}
-
-type QueueReader interface {
-	ListByAgent(context.Context, identity.AgentID, int) ([]task.Task, error)
-}
-
 type Dependencies struct {
-	Transactions     txrunner.Runner
-	Agents           Store
-	ExecutionRecords ExecutionReader
-	Queue            QueueReader
-	Controls         ControlStore
+	Transactions     repository.Transaction
+	Agents           repository.Agent
+	ExecutionRecords repository.AgentExecution
+	Queue            repository.Task
+	Controls         repository.AgentControl
 	Executions       ExecutionControl
-	Messages         messagemodel.Reader
+	Messages         repository.MessageReader
 	Clock            clock.Clock
 }
 
 type Service struct {
-	tx               txrunner.Runner
-	agents           Store
-	executionRecords ExecutionReader
-	queue            QueueReader
-	controls         ControlStore
+	tx               repository.Transaction
+	agents           repository.Agent
+	executionRecords repository.AgentExecution
+	queue            repository.Task
+	controls         repository.AgentControl
 	executions       ExecutionControl
-	messages         messagemodel.Reader
+	messages         repository.MessageReader
 	clock            clock.Clock
 }
 
 // AgentView 是单个 Agent 的持久化详情视图。
 type AgentView struct {
-	Agent           Agent
-	ActiveExecution *Execution
-	Executions      []Execution
+	Agent           agentmodel.Agent
+	ActiveExecution *agentmodel.Execution
+	Executions      []agentmodel.Execution
 	Tasks           []task.Task
-	Controls        []AgentControlCommand
+	Controls        []agentmodel.AgentControlCommand
 }
 
 // NewService 校验查询依赖并创建 Agent 查询服务；缺少仓储或消息读取函数时返回错误。
@@ -103,7 +93,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID, li
 	}
 	active, err := s.executionRecords.GetActiveByAgent(ctx, agentID)
 	if errors.Is(err, fault.ErrNotFound) {
-		active = Execution{}
+		active = agentmodel.Execution{}
 	} else if err != nil {
 		return AgentView{}, fmt.Errorf("load active agent task: %w", err)
 	}

@@ -2,13 +2,12 @@ package bindings
 
 import (
 	"bytes"
-	"praxis/internal/service/agent"
-	"strings"
-
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/message"
 	"praxis/internal/identity"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
+	"strings"
 )
 
 type AgentBindings struct{ host Host }
@@ -71,11 +70,11 @@ func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHisto
 	return page, nil
 }
 
-func agentSnapshot(value agent.Agent) dto.AgentSnapshot {
+func agentSnapshot(value agentmodel.Agent) dto.AgentSnapshot {
 	return dto.AgentSnapshot{
 		Tasks:              []dto.QueuedTaskSnapshot{},
 		ID:                 value.ID.String(),
-		Name:               agent.DisplayName(value.DefinitionID),
+		Name:               agentDisplayName(value.DefinitionID),
 		SessionID:          value.SessionID.String(),
 		DefinitionID:       value.DefinitionID.String(),
 		Profile:            string(value.Profile),
@@ -130,7 +129,7 @@ func publicAgentMessages(values []message.Message) []dto.AgentMessage {
 	return result
 }
 
-func executionSnapshot(value agent.Execution) dto.ExecutionSnapshot {
+func executionSnapshot(value agentmodel.Execution) dto.ExecutionSnapshot {
 	return dto.ExecutionSnapshot{
 		SourceTaskID:   value.SourceTaskID.String(),
 		ID:             value.ID.String(),
@@ -141,5 +140,21 @@ func executionSnapshot(value agent.Execution) dto.ExecutionSnapshot {
 		CreatedAt:      value.CreatedAt,
 		StartedAt:      value.StartedAt,
 		EndedAt:        value.EndedAt,
+	}
+}
+
+// agentDisplayName 返回 Agent definition 对用户展示的英文名称，definition ID 只用于内部关联。
+func agentDisplayName(id identity.AgentDefinitionID) string {
+	switch id {
+	case agentmodel.DefinitionPrimary:
+		return "Leader"
+	case agentmodel.DefinitionDelegate:
+		return "Builder"
+	case agentmodel.DefinitionAdvisor:
+		return "Scout"
+	case agentmodel.DefinitionCurator:
+		return "Editor"
+	default:
+		return "Agent"
 	}
 }

@@ -3,52 +3,53 @@ package bindings
 import (
 	"context"
 	"errors"
-	modelservice "praxis/internal/service/model"
-
 	"praxis/internal/core/message"
 	"praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	projectmodel "praxis/internal/core/project"
+	sessionmodel "praxis/internal/core/session"
+	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/security"
-	"praxis/internal/service/agent"
+	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
-	inputservice "praxis/internal/service/agent/input"
-	"praxis/internal/service/project"
-	"praxis/internal/service/session"
+	executionservice "praxis/internal/service/agent/execution"
+	modelservice "praxis/internal/service/model"
+	projectservice "praxis/internal/service/project"
+	sessionservice "praxis/internal/service/session"
 	queueservice "praxis/internal/service/task"
-	"praxis/internal/timing"
 )
 
 // 接口只声明 Wails 实际消费的业务能力，协议投影留在 binding。
 type ProjectService interface {
-	ListProjects(context.Context, int) ([]project.Project, error)
-	CreateProject(context.Context, project.CreateInput) (project.CreateProjectResult, error)
-	GetApprovalMode(context.Context, identity.ProjectID) (project.ApprovalSettings, error)
-	SetApprovalMode(context.Context, identity.ProjectID, *security.ApprovalMode) (project.ApprovalSettings, error)
+	ListProjects(context.Context, int) ([]projectmodel.Project, error)
+	CreateProject(context.Context, projectservice.CreateInput) (projectservice.CreateProjectResult, error)
+	GetApprovalMode(context.Context, identity.ProjectID) (projectservice.ApprovalSettings, error)
+	SetApprovalMode(context.Context, identity.ProjectID, *security.ApprovalMode) (projectservice.ApprovalSettings, error)
 }
 
 type SessionService interface {
-	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]session.Session, error)
-	CreateSession(context.Context, session.CreateInput) (session.CreateResult, error)
-	GetSessionView(context.Context, identity.SessionID, int) (session.SessionView, error)
+	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.Session, error)
+	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
+	GetSessionView(context.Context, identity.SessionID, int) (sessionservice.SessionView, error)
 	DeleteSession(context.Context, identity.SessionID) error
 	RenameSession(context.Context, identity.SessionID, string) error
-	PreviewFile(context.Context, identity.SessionID, string) (session.FilePreview, error)
+	PreviewFile(context.Context, identity.SessionID, string) (sessionservice.FilePreview, error)
 }
 
 type AgentService interface {
-	GetAgentView(context.Context, identity.AgentID, int) (agent.AgentView, error)
+	GetAgentView(context.Context, identity.AgentID, int) (agentservice.AgentView, error)
 	ListAgentMessages(context.Context, identity.AgentID, int) ([]message.Message, error)
-	PauseAgent(context.Context, agent.ControlInput) (agent.ControlResult, error)
-	StopAgent(context.Context, agent.ControlInput) (agent.ControlResult, error)
+	PauseAgent(context.Context, agentservice.ControlInput) (agentservice.ControlResult, error)
+	StopAgent(context.Context, agentservice.ControlInput) (agentservice.ControlResult, error)
 }
 
 type AgentCommands interface {
 	ListToolApprovals(context.Context, identity.AgentID) ([]toolexecution.Execution, error)
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
-	SendInput(context.Context, inputservice.SendInput) (execution.StartResult, error)
+	SendInput(context.Context, executionservice.SendInput) (execution.StartResult, error)
 	EnqueueTask(context.Context, queueservice.EnqueueInput) (queueservice.EnqueueResult, error)
 }
 
@@ -69,12 +70,12 @@ type AgentEventSource interface {
 }
 
 type TimingService interface {
-	ListAgent(context.Context, string, int) ([]timing.Record, error)
+	ListAgent(context.Context, string, int) ([]timingmodel.Record, error)
 }
 
 type UsageService interface {
 	ListSessionUsage(context.Context, identity.SessionID) ([]model.ModelUsageRecord, error)
-	GetSessionUsageSummary(context.Context, identity.SessionID) (session.SessionUsageSummary, error)
+	GetSessionUsageSummary(context.Context, identity.SessionID) (sessionservice.SessionUsageSummary, error)
 }
 
 // Services 由 Bootstrap 注入业务对象和只读日志定位能力，不创建中间应用层。

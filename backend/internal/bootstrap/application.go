@@ -3,27 +3,26 @@ package bootstrap
 import (
 	"context"
 	"errors"
-	"sync"
-
 	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
 	"praxis/internal/infra/filesystem"
 	"praxis/internal/logging"
-	"praxis/internal/service/agent"
+	"praxis/internal/loop"
+	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
-	"praxis/internal/service/project"
-	"praxis/internal/service/session"
+	projectservice "praxis/internal/service/project"
+	sessionservice "praxis/internal/service/session"
 	"praxis/internal/timing"
 	"praxis/wails/bindings"
+	"sync"
 )
 
 // Application 拥有进程资源；业务状态与执行生命周期分别由业务能力和 Coordinator 管理。
 type Application struct {
 	storageResources
 	frontend    bindings.Services
-	sessions    *session.Service
+	sessions    *sessionservice.Service
 	coordinator *execution.Coordinator
 }
 
@@ -68,7 +67,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	}
 	repos := a.store.Repositories()
 	events := execution.NewEventPublisher()
-	timings, err := buildTimings(ctx, a.store, events, a.logger)
+	timings, err := buildTimings(ctx, repos.Timings, events, a.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +81,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	if err != nil {
 		return nil, err
 	}
-	agents, err := agent.NewService(agent.Dependencies{
+	agents, err := agentservice.NewService(agentservice.Dependencies{
 		Transactions:     a.store,
 		Agents:           repos.Agents,
 		ExecutionRecords: repos.Executions,
@@ -94,7 +93,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	if err != nil {
 		return nil, err
 	}
-	projects, err := project.NewService(project.Dependencies{
+	projects, err := projectservice.NewService(projectservice.Dependencies{
 		GlobalApprovalMode: config.globalApprovalMode,
 		Transactions:       a.store,
 		Projects:           repos.Projects,

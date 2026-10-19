@@ -21,7 +21,7 @@ type SessionUsageSummary struct {
 
 // ListSessionUsage 查询完整请求用量，不受消息分页影响。
 func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.SessionID) ([]modelapi.ModelUsageRecord, error) {
-	return s.usageRecords(ctx, sessionID.String())
+	return s.usageRecords.ListSession(ctx, sessionID.String())
 }
 
 // GetSessionUsageSummary 查询会话全部最新用量记录，以 token 加权计算缓存率。
@@ -33,7 +33,7 @@ func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID identity
 	if err := ctx.Err(); err != nil {
 		return SessionUsageSummary{}, err
 	}
-	records, err := s.usageRecords(ctx, sessionID.String())
+	records, err := s.usageRecords.ListSession(ctx, sessionID.String())
 	if err != nil {
 		return SessionUsageSummary{}, err
 	}
