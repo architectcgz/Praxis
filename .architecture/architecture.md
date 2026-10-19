@@ -1,109 +1,135 @@
 # Praxis 后端架构
 
-## 背景与目标
+## 架构目标
 
-后端按业务概念和明确能力组织。类型属于拥有其语义与生命周期的模块；跨模块的 Agent Task 执行流程由 `execution` 编排，具体实现由 `bootstrap` 装配。正常的跨包类型引用直接复用，不为消除 import 复制数据模型。
+Praxis 是 Go + Wails + React 的本地桌面应用。后端按业务实体和明确能力划分职责：纯模型与状态转换放在 Core，业务用例由 Service 编排，外部协议与本地持久化由 Infra 实现，进程装配统一由 Bootstrap 完成。
 
-## 模块与职责
+两个业务模块需要协作时，由拥有完整用例的上层模块负责编排；仅需要对方局部能力时，由消费方定义窄接口并在 Bootstrap 注入。跨包类型由事实拥有者定义，不为消除 import 而建立同形副本或无价值的中间层。
 
-| 模块 | 职责 |
+## 当前模块与目录
+
+以下目录对应当前实现，路径均以仓库根目录为起点。
+
+| 目录 | 职责 |
 | --- | --- |
-| `agent` | Agent 实例、定义注册表、状态查询、固定目标的控制命令 |
-| `session` | 会话创建、共享事实、会话目录、文件预览用例与用量查询 |
-| `message` | 消息、内容块、消息流读取与工具回执写入契约 |
-| `project` | 项目、初始工作区创建与项目授权设置 |
-| `workspace` | 工作区模型与文本读取能力；`workspace/fs` 实现本地文件访问 |
-| `task` | Task 模型、冻结配置、状态机、预算、最终输出证据与基础存取契约 |
-| `task/service` | Task 创建、准入、上下文冻结、进度、队列、恢复与结算用例 |
-| `context` | 模型可见内容、历史构建与压缩算法 |
-| `model` | 模型目录、配置管理、凭据、模型构建与用量类型 |
-| `model/provider/*` | 各 Provider 的请求编码、流式解码与协议状态机 |
-| `tool` | 工具协议、注册表、可用性目录与结果大小边界 |
-| `tool/arguments` | 工具参数 JSON 和路径输入边界 |
-| `tool/builtin/*` | Bash、文件读取与补丁工具实现 |
-| `core/toolexecution` | 工具执行记录、状态转换、结果与原子输出持久化契约 |
-| `service/toolexecution` | 工具执行的准入、授权、风险审核、审批与结算编排 |
-| `execution` | 进程级 Runtime、Coordinator、活动执行身份、审批续接与关闭协调 |
-| `execution/loop` | 模型与工具迭代算法，不拥有 Task 生命周期 |
-| `hook`、`timing` | 扩展通知与独立操作计时 |
-| `storage/jsonl` | 共享日志资源、事务、序号、位置索引、重放与业务持久化实现 |
-| `storage/document` | 内容寻址的不可变文档存储 |
-| `transaction` | 单一后端的原子提交契约 |
-| `identity`、`clock`、`fault` | 强类型身份与生成器、时间来源、错误分类 |
-| `settings`、`dataroot`、`logging` | 全局设置、数据目录布局与诊断日志 |
-| `bootstrap` | 进程级装配、配置发布与资源释放 |
-| `wails` | 桌面宿主、请求规范化与校验、业务参数构造、DTO 投影与错误映射 |
+| `frontend/src/` | React 页面、业务组件、前端状态、Wails 调用边界和样式 |
+| `backend/main.go` | 桌面进程入口，解析数据目录、启动 Wails 并嵌入前端产物 |
+| `backend/wails/` | Wails 绑定、请求校验、DTO、事件和错误映射 |
+| `backend/internal/bootstrap/` | 唯一进程装配入口；配置加载、依赖连接、启动恢复、资源关闭 |
+| `backend/internal/core/context/` | Provider 无关的上下文内容、容量检查及压缩策略 |
+| `backend/internal/core/loop/` | ReAct Loop，决定模型迭代、工具调用和模型流处理；不管理 Execution 终态 |
+| `backend/internal/core/model/` | 模型配置、请求与流、停止原因、Usage 和工具调用 ID 契约 |
+| `backend/internal/core/message/` | 消息实体、内容块和按 Agent 归属读取的消息流契约 |
+| `backend/internal/core/tool/` | 工具请求、执行参数、结果、注册表、目录及参数规范化契约 |
+| `backend/internal/core/toolexecution/` | 单次工具执行的领域事实、状态转换、审批状态和持久化写入契约 |
+| `backend/internal/core/task/` | 预约 Task 的状态和转换（`pending/dispatched/cancelled`） |
+| `backend/internal/core/hook/` | 操作 Hook 与业务提交后通知的分发机制 |
+| `backend/internal/service/agent/` | Agent、AgentExecution 的实体、控制与查询 |
+| `backend/internal/service/agent/input/` | 直接输入准入、Execution 创建、配置及历史冻结、进度、结算和恢复 |
+| `backend/internal/service/agent/coordinator/` | 进程内 Coordinator、ActiveTasks、运行交接、审批唤醒、启动恢复及关闭 |
+| `backend/internal/service/task/` | 预约输入与 FIFO 队列的提交、查询及取消；不执行模型 |
+| `backend/internal/service/toolexecution/` | 工具准入、参数授权、风险审核、审批和执行结算 |
+| `backend/internal/service/project/`、`session/`、`model/` | 项目、会话与模型配置等业务用例 |
+| `backend/internal/infra/jsonl/` | 共享 JSONL Store、事务、重放、轻量索引与业务 Repository |
+| `backend/internal/infra/providers/` | OpenAI Chat、OpenAI Responses、Anthropic 的独立协议 Encoder/Decoder 与流处理 |
+| `backend/internal/infra/modelregistry/`、`agentregistry/`、`toolregistry/` | 模型、Agent 和工具配置的加载与注册 |
+| `backend/internal/infra/tools/`、`filesystem/` | Bash、ReadFile、ApplyPatch 与受限文件系统访问的具体实现 |
+| `backend/internal/identity/`、`clock/`、`fault/`、`security/`、`transaction/` | 共享身份、时间、错误、授权策略和事务契约 |
+| `backend/internal/settings/`、`dataroot/`、`logging/`、`timing/` | 全局配置、数据目录、日志与执行耗时 |
+
+协议行为与 Schema 的约束独立记录在 [模型协议契约](../docs/protocols/providers.md)；架构文档只说明协议实现的归属及依赖边界。
 
 ## 调用与依赖方向
 
 ```text
-Wails Binding
-    ├── project.Service
-    ├── session.Service
-    ├── agent.Service
-    ├── model.Service
-    └── execution.Runtime
-            ├── task/service.Service（Task 用例与持久化 FIFO 队列）
-            ├── Coordinator 与进程内执行身份
-            └── execution/loop.Runner
-                    ├── model.ModelBuilder
-                    └── toolexecution.Executor → tool.Tool
+React UI
+    │  Wails Binding
+    ▼
+Wails（请求入口、DTO、事件）
+    │
+    ├── Project / Session / Model Service
+    ├── Agent Service（查询、控制）
+    └── Coordinator（接收输入、预约交接、审批唤醒）
+            │
+            ├── Agent Input Service（准入、Execution、历史冻结、进度、结算）
+            ├── Task Service（预约 FIFO）
+            ├── ActiveTasks（进程内执行权）
+            └── Core ReAct Loop（模型与工具迭代）
+                    ├── Core ContextBuilder / Compressor
+                    ├── ModelBuilder → Infra Providers
+                    └── ToolExecution Service → Infra Tools
+
+Bootstrap 注入各业务能力与共享的 JSONL Repository / Hook / EventPublisher
 ```
 
-- `task`、`task/service`、`agent`、`session`、`model`、`context` 不依赖 `execution`。
-- `execution/loop` 不反向依赖父包，由消费者声明进度与执行接口。
-- 业务模块不引用 `storage/jsonl`、`storage/document`、`bootstrap` 或 `wails`。
-- `storage/jsonl` 不引用 `execution` 或 `hook`；存储不注册业务提交回调。
-- `model` 不引用 `model/provider/*`，`tool` 不引用 `tool/builtin/*`，`workspace` 不引用 `workspace/fs`。
-- `bootstrap` 连接具体实现与业务能力。Wails 只消费业务能力，不读取具体存储或构造 Provider。
-- 接口按能力命名，优先放在消费者或业务所有者附近。`task.Store` 只提供读取与保存，执行协调由 `execution` 声明窄接口，Agent 展示查询由 `agent.TaskReader` 声明。
+- `core` 不依赖 `service`、`infra`、`bootstrap` 或 Wails，也不执行文件 I/O。
+- `service` 编排用例和事务，通过业务契约使用仓储；不直接调用 Infra 的文件系统和 JSONL 实现。
+- `infra` 实现协议、存储、配置和工具，不负责审批、队列派发或运行期业务决策。
+- `coordinator` 负责进程内执行权和运行交接；`loop` 只负责一次执行内部的模型与工具迭代。
+- `bootstrap` 构建并注入依赖，完成恢复后才对 Wails 开放业务入口；不在运行期重新解释业务决策。
+- 业务能力接口放在事实拥有者或消费方附近，避免为依赖注入再建不必要的转发服务。
 
-## 输入与协议边界
+## AgentExecution、预约 Task 与执行流程
 
-- `tool.ToolCall` 表示模型提出的工具请求，只携带调用 ID、工具名和参数；协议事件、消息内容块和 Provider 调用身份使用 ToolCall 命名。
-- `toolexecution.Execution` 表示从请求登记到最终结算的一次工具执行过程，包含等待审批和执行前拒绝；审批恢复复用同一记录。调用额度 `ToolCalls` 统计请求数量。
-- Wails Binding 是桌面请求的输入边界，负责字段复制、规范化、默认值补充和校验。简单处理直接写在对应入口，较长的模型配置转换放在 Binding 包内的 `model_config_request.go`。
-- `CreateInput`、`SendInput` 等业务参数类型只描述业务操作所需的数据；业务包不提供桌面请求的规范化构造函数。Binding 使用已有 DTO 直接构造业务参数，不增加同形中间类型。
-- 内部方法接收 canonical 输入，不重复 Trim、补默认值或清洗路径。持久化恢复只读校验，不静默修复。
-- Binding 的模型配置转换直接生成 `model/config.Config`，并调用配置类型的只读校验；该校验也供配置文件恢复入口使用。Service 只检查依赖当前状态的 Agent 引用，不重复规范化或字段校验。
-- 业务查询返回业务对象或明确的查询结果。消息、配置和事件在 Wails 出口一次投影为 `wails/dto`；opaque 推理状态不进入前端或摘要。
-- 文件错误与受限文本读取能力属于 `workspace`。会话文件预览负责解析当前工作区并授权，`workspace/fs` 使用 `os.OpenRoot` 完成实际访问。
+**AgentExecution 是一次真实运行的唯一身份。** 直接输入不会创建预约 Task；预约 Task 只保存待执行输入，领取时才创建 AgentExecution，并通过 `SourceTaskID` 保留来源。模型请求、消息、工具执行、审批、用量、计时和控制均关联具体的 Execution。
 
-## 状态、生命周期与恢复
+**直接输入：**
 
-- `bootstrap.Application` 创建并拥有共享存储、日志、配置注册表、业务服务与一个 `execution.Runtime`。
-- `bootstrap` 装配一个 `task/service.Service`，并把它同时作为 Task 用例和队列能力注入 Runtime；Runtime 创建并拥有唯一的 `ActiveTasks`、Coordinator 和默认 Loop。一次执行的 Context、续接消息与等待状态不存入业务单例。
-- 启动时 Runtime 先协调上次进程的 running 工具调用，再恢复活动 Task，最后派发可执行队列。未知副作用不自动重试，等待人工审批的调用保持等待。
-- 直接输入、预约输入、工具审批与控制命令使用稳定身份进行幂等仲裁；队列使用持久化单调序号维持 FIFO。
-- 关闭时先拒绝新执行、取消并等待所有执行及结算退出，再清理空会话并关闭存储。执行退出超时时保留资源，后续允许继续关闭。
-- 模型修改、会话创建与直接输入共用同一个配置锁；锁顺序为配置锁在外、JSONL 事务锁在内。配置重载在同一事务锁内发布模型、定义、工具与授权快照。
+1. 请求边界完成输入规范化和必要校验。
+2. Input Service 在同一事务中检查幂等请求与 Agent 归属，保存用户消息、冻结执行配置与历史可见性，并创建 AgentExecution。
+3. Coordinator 取得 ActiveTasks 执行权，读取冻结上下文，交由 ReAct Loop 运行。
+4. Loop 保存模型输出并执行工具；Input Service 负责进度记录和持久化结算。只有结算提交并释放执行权后，才可能领取下一预约。
 
-## 持久化与通知
+**预约输入：**
 
-- `storage/jsonl` 只创建一个共享 `Store`。各业务适配文件共用日志、锁、事务、序号和可重建索引，不各自建立底层资源或全局正文缓存。
-- `message.Reader` 的消息集合与序号边界来自一次一致性读取；业务调用方不选择 Session 流或 Agent 私有流的日志键位。
-- `toolexecution.Writer` 将 Assistant 消息、工具调用身份和最终输出证据原子提交；工具回执与输出字节累计在同一事务中幂等提交。
-- `transaction.Runner` 只保证同一 JSONL 后端的提交边界，不覆盖文档存储或其他独立后端。跨后端清理与恢复由业务用例或执行流程显式协调。
-- 会话删除前的活动 Task 检查由会话删除用例在事务内执行；存储只提交删除事实及关联索引变化。
-- 用户输入、最终 Assistant 与 Task 终态在事务成功后由业务调用方显式发布提交 Hook。回滚与幂等重试不通知；Hook 失败只记录日志，不改变提交结果。
-- 执行事件是进程内瞬时通知，不能作为恢复依据或隐式核心编排机制。
+1. Task Service 幂等保存预约及输入消息，按持久化序号维护 FIFO。
+2. Coordinator 在 Agent 可运行时调用 Input Service 领取队首；领取事务冻结配置与上下文、创建 Execution、将 Task 标记为 `dispatched`。
+3. 预约可以在 `pending` 时取消；预约不承担执行结果的终态语义。
+4. 后续运行与结算复用直接输入的 Execution 流程。
 
-## 风险与回滚边界
+模型响应终止原因、Loop 返回原因和业务 Execution 结算结果是不同层次，分别由 `model.ModelStopReason`、`loop.EndReason` 和 `agent.ExecutionOutcome` 表达，不互相混用。
 
-- Task 状态机、JSONL 字段和事件格式、Provider 协议、Wails DTO 及 FIFO 语义是独立于目录组织的稳定边界。
-- 架构变更不得通过迁移标记、兼容包或自动重放工具副作用修补数据；发现格式或恢复问题时停止写入并保留原始日志。
-- 发布回滚使用完整可构建版本与匹配的数据备份，不混用不同版本的执行组件和存储适配文件。
+## 上下文、模型与工具
+
+- Input Service 在准入或领取事务中冻结执行配置、消息序号边界、需要排除的未派发输入以及共享上下文引用。队列中后到的输入不能进入已经开始的 Execution。
+- 恢复上下文时，业务层加载冻结范围内的历史、当前输入与本次 Execution 的续接消息；工具请求和回执按 `(ExecutionID, CallID)` 配对，并转换为有序的 `context.Content`。
+- `ContextBuilder` 只接收通用 Content 和 Limits，不理解 Session、Task 或 Repository；它负责复制、处理模型可见内容并检查必要原文容量。历史压缩由 Core 压缩策略执行。
+- ModelBuilder 根据冻结的模型配置提供 Provider 请求流；各 Provider 独立编码请求、解析响应和停止信号，不承担历史选择或 Execution 生命周期。
+- `tool.ToolCall` 是模型发出的工具请求；`toolexecution.Execution` 是从请求登记、授权、可能的人工审批到结算的工具执行事实。工具执行的身份唯一性为 `(ExecutionID, ProviderToolCallID)`。
+- ToolExecution Service 调用工具前执行准入、规范化结果检查、命令策略和风险审核；需要审批时保留原 Execution，批准后唤醒同一执行，不重复创建新执行。
+
+## 持久化、恢复与通知
+
+- 应用使用共享的 JSONL Store。项目索引与应用状态放在数据根目录的 `state/`，会话日志位于 `projects/<projectID>/sessions/<sessionID>.jsonl`，配置位于 `config/`。
+- 一行日志对应一次原子提交。Store 维护可重建轻量索引、日志位置与序号，正文按需读取，不在全局内存中缓存完整业务对象。
+- Assistant 消息、其工具调用记录及最终输出证据保持原子提交；工具回执和累计输出字节在同一事务内幂等提交。
+- JSONL 的普通读取保持只读；ToolResult 缺失与遗留运行工具的恢复决策属于业务层。已开始且副作用未知的工具不能自动重试。
+- 启动时先协调遗留 running 工具，再恢复活动 Execution，最后检查空闲 Agent 的 Pending 队列。审批等待不释放执行归属。
+- 结算失败时保留执行占用和结果，只重试结算，不重新调用模型或工具。关闭时先停止新准入并等待运行退出，再清理和关闭持久化资源。
+- Store 与 Repository 不发布业务 Hook。用户输入、最终 Assistant 和 Execution 终态由业务调用方在事务成功后发布 best-effort 提交 Hook；回滚和幂等重复不通知。
+- Operation Hook 在真实运行边界记录模型、工具与 Agent 操作的耗时；事件发布用于 UI 实时展示，不作为持久化恢复事实来源。
+- 配置更新通过共享配置锁和存储事务协调，避免执行准入读取混合配置；持久化恢复只校验当前 Schema，不自动迁移或修补原始数据。
+
+## 输入与桌面边界
+
+- Wails 负责请求形状、字段输入边界、DTO 转换和错误映射，不读取底层存储或构造 Provider。
+- 一份输入由实际入口完成规范化、默认值和校验；下游只消费 canonical 值，不反复 Trim、Clean 或重新解析。磁盘恢复是独立的不可信输入边界，只读校验，不静默写回修复。
+- 文件预览由 Session 业务确认工作区与访问授权，再由 Infra Filesystem 执行受限读取。
+- 前端经 `frontend/src/api/` 消费 Wails Binding 与事件；React 页面及状态处理不直接依赖持久化格式。
 
 ## 验证
+
+后端使用格式检查、编译、静态分析和包依赖门禁：
 
 ```bash
 cd backend
 gofmt -l .
 go build ./...
 go vet ./...
+bash scripts/check-dependencies.sh
 ```
 
-前端协议涉及变更时重新生成 Wails 绑定，再执行前端静态检查与生产构建：
+Wails Binding 签名发生变化时，重新生成绑定并检查前端：
 
 ```bash
 cd backend
@@ -112,4 +138,4 @@ cd ../frontend
 npm run check
 ```
 
-依赖方向通过代码审查和包导入检查核对，不设置依赖门禁脚本。人工回归覆盖输入幂等、FIFO、暂停与取消、批准与拒绝、启动恢复、未知副作用、会话删除、配置重载及资源关闭；不自动启动服务或运行自动化测试。
+此次仅更新文档，不改变任何程序行为。运行期正确性需要独立验证直接输入、预约 FIFO、幂等、审批与拒绝、Pause/Stop 竞争、启动恢复、未知副作用、结算失败、配置重载和关闭行为。验证不自动启动开发服务。
