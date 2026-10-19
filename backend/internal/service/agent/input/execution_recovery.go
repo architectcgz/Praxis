@@ -5,7 +5,7 @@ import (
 	"errors"
 	messagemodel "praxis/internal/core/message"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
@@ -40,18 +40,18 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID identity.S
 			}
 			at := s.clock.Now()
 			switch invocation.Status {
-			case toolcall.StatusRequested, toolcall.StatusPrepared, toolcall.StatusReviewing, toolcall.StatusApproved, toolcall.StatusAwaitingApproval:
+			case toolexecution.StatusRequested, toolexecution.StatusPrepared, toolexecution.StatusReviewing, toolexecution.StatusApproved, toolexecution.StatusAwaitingApproval:
 				if task.Active() {
 					return nil
 				}
-				result := tool.NewToolError(string(toolcall.FailureInterrupted), "The tool call was interrupted before execution.")
-				err = invocation.Interrupt(toolcall.Result{InlineContent: result.Payload, ErrorCode: toolcall.FailureInterrupted}, at)
-			case toolcall.StatusRunning:
+				result := tool.NewToolError(string(toolexecution.FailureInterrupted), "The tool call was interrupted before execution.")
+				err = invocation.Interrupt(toolexecution.Result{InlineContent: result.Payload, ErrorCode: toolexecution.FailureInterrupted}, at)
+			case toolexecution.StatusRunning:
 				if task.Active() && !startup {
 					return nil
 				}
-				result := tool.NewToolError(string(toolcall.FailureResultUnknown), "Execution stopped after the tool started. Its side effects are unknown; do not automatically retry.")
-				err = invocation.MarkResultUnknown(toolcall.Result{InlineContent: result.Payload, ErrorCode: toolcall.FailureResultUnknown}, at)
+				result := tool.NewToolError(string(toolexecution.FailureResultUnknown), "Execution stopped after the tool started. Its side effects are unknown; do not automatically retry.")
+				err = invocation.MarkResultUnknown(toolexecution.Result{InlineContent: result.Payload, ErrorCode: toolexecution.FailureResultUnknown}, at)
 			}
 			if err != nil {
 				return err

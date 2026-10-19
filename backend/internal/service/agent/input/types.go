@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"praxis/internal/core/message"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	agentmodel "praxis/internal/service/agent"
 	"praxis/internal/service/session"
@@ -28,7 +28,7 @@ type SessionStore interface {
 // MessageStreams 提供 Execution 输入、历史和工具回执的统一消息能力。
 type MessageStreams interface {
 	message.Streams
-	toolcall.WriterProvider
+	toolexecution.WriterProvider
 }
 
 // ActiveTasks 为 Execution 提供进程内执行身份，具体生命周期由 execution 持有。

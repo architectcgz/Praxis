@@ -1,10 +1,10 @@
-package toolcall
+package toolexecution
 
 import (
 	"bytes"
 	"context"
 	"praxis/internal/core/tool"
-	calls "praxis/internal/core/toolcall"
+	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	taskmodel "praxis/internal/service/agent"
@@ -14,8 +14,8 @@ import (
 const settlementTimeout = 5 * time.Second
 
 // reserveCall 对一次调用只扣减一次额度，审批、拒绝和重启都复用同一保留记录。
-func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID) (calls.Execution, error) {
-	var invocation calls.Execution
+func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID) (executionmodel.Execution, error) {
+	var invocation executionmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error
 		invocation, err = s.executions.Get(txCtx, id)
@@ -44,8 +44,8 @@ func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID)
 
 // start 在同一事务中重新读取配置、核对审批参数并保存 running。
 // 配置重载与这里共享事务边界；已启动的进程不受后续配置变更影响。
-func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (calls.Execution, bool, error) {
-	var invocation calls.Execution
+func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (executionmodel.Execution, bool, error) {
+	var invocation executionmodel.Execution
 	execute := false
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		current, err := s.executions.Get(txCtx, id)
@@ -53,14 +53,14 @@ func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (call
 			return err
 		}
 		invocation = current
-		if current.Status != calls.StatusApproved && current.Status != calls.StatusAwaitingApproval {
+		if current.Status != executionmodel.StatusApproved && current.Status != executionmodel.StatusAwaitingApproval {
 			return nil
 		}
 		task, err := s.tasks.Get(txCtx, current.ExecutionID)
 		if err != nil {
 			return err
 		}
-		if err := s.checkTask(txCtx, calls.ToolExecutionMetadata{
+		if err := s.checkTask(txCtx, executionmodel.ToolExecutionMetadata{
 			ExecutionID:   current.ExecutionID,
 			TurnID:        current.TurnID,
 			SessionID:     current.SessionID,
@@ -81,10 +81,10 @@ func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (call
 		if current.Status != previousStatus {
 			return s.executions.Save(txCtx, current)
 		}
-		if current.Status != calls.StatusApproved {
+		if current.Status != executionmodel.StatusApproved {
 			return nil
 		}
-		if current.Approval.ArgumentsDigest != calls.ArgumentsDigest(current.Name, current.NormalizedArguments) {
+		if current.Approval.ArgumentsDigest != executionmodel.ArgumentsDigest(current.Name, current.NormalizedArguments) {
 			return fault.ErrRequestConflict
 		}
 		if current.Name == tool.ToolBash || current.Name == tool.ToolApplyPatch {
@@ -93,10 +93,10 @@ func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (call
 				return err
 			}
 			for _, previous := range prior {
-				if previous.Status == calls.StatusUnknown && previous.Name == current.Name &&
+				if previous.Status == executionmodel.StatusUnknown && previous.Name == current.Name &&
 					(previous.ArgumentsDigest == current.ArgumentsDigest || bytes.Equal(previous.NormalizedArguments, current.NormalizedArguments)) {
-					result := tool.NewToolError(string(calls.FailureInterrupted), "A previous identical call has unknown side effects. Confirm its outcome before retrying.")
-					if err := current.Interrupt(calls.Result{InlineContent: result.Payload, ErrorCode: calls.FailureInterrupted}, s.clock.Now()); err != nil {
+					result := tool.NewToolError(string(executionmodel.FailureInterrupted), "A previous identical call has unknown side effects. Confirm its outcome before retrying.")
+					if err := current.Interrupt(executionmodel.Result{InlineContent: result.Payload, ErrorCode: executionmodel.FailureInterrupted}, s.clock.Now()); err != nil {
 						return err
 					}
 					invocation = current
@@ -118,8 +118,8 @@ func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (call
 }
 
 // reject 结算执行前的拒绝；已经批准的调用使用 interrupted，不改写运行中调用。
-func (s *Executor) reject(ctx context.Context, id identity.ToolExecutionID, code calls.FailureCode, message string) (tool.ToolResult, error) {
-	var invocation calls.Execution
+func (s *Executor) reject(ctx context.Context, id identity.ToolExecutionID, code executionmodel.FailureCode, message string) (tool.ToolResult, error) {
+	var invocation executionmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		current, err := s.executions.Get(txCtx, id)
 		if err != nil {
@@ -129,15 +129,15 @@ func (s *Executor) reject(ctx context.Context, id identity.ToolExecutionID, code
 			invocation = current
 			return nil
 		}
-		if current.Status == calls.StatusRunning {
+		if current.Status == executionmodel.StatusRunning {
 			return fault.New(taskmodel.ExecutionBusy, "tool call is already running")
 		}
-		if current.Status == calls.StatusApproved {
-			code = calls.FailureInterrupted
+		if current.Status == executionmodel.StatusApproved {
+			code = executionmodel.FailureInterrupted
 		}
 		result := tool.NewToolError(string(code), message)
-		domain := calls.Result{InlineContent: result.Payload, ErrorCode: code}
-		if current.Status == calls.StatusApproved {
+		domain := executionmodel.Result{InlineContent: result.Payload, ErrorCode: code}
+		if current.Status == executionmodel.StatusApproved {
 			err = current.Interrupt(domain, s.clock.Now())
 		} else {
 			err = current.Deny(domain, s.clock.Now())
@@ -160,10 +160,10 @@ func (s *Executor) succeed(
 	id identity.ToolExecutionID,
 	result tool.ToolResult,
 ) error {
-	domainResult := calls.Result{
+	domainResult := executionmodel.Result{
 		InlineContent: result.Payload, SideEffect: result.SideEffect, Truncated: result.Truncated,
 	}
-	return s.settle(ctx, id, func(invocation *calls.Execution) error {
+	return s.settle(ctx, id, func(invocation *executionmodel.Execution) error {
 		return invocation.Succeed(domainResult, s.clock.Now())
 	})
 }
@@ -173,11 +173,11 @@ func (s *Executor) fail(
 	id identity.ToolExecutionID,
 	result tool.ToolResult,
 ) error {
-	domainResult := calls.Result{
-		InlineContent: result.Payload, ErrorCode: calls.FailureExecutionFailed,
+	domainResult := executionmodel.Result{
+		InlineContent: result.Payload, ErrorCode: executionmodel.FailureExecutionFailed,
 	}
-	return s.settle(ctx, id, func(invocation *calls.Execution) error {
-		return invocation.Fail(domainResult, calls.FailureExecutionFailed, s.clock.Now())
+	return s.settle(ctx, id, func(invocation *executionmodel.Execution) error {
+		return invocation.Fail(domainResult, executionmodel.FailureExecutionFailed, s.clock.Now())
 	})
 }
 
@@ -186,10 +186,10 @@ func (s *Executor) interrupt(
 	id identity.ToolExecutionID,
 	result tool.ToolResult,
 ) error {
-	domainResult := calls.Result{
-		InlineContent: result.Payload, ErrorCode: calls.FailureResultUnknown,
+	domainResult := executionmodel.Result{
+		InlineContent: result.Payload, ErrorCode: executionmodel.FailureResultUnknown,
 	}
-	return s.settle(ctx, id, func(invocation *calls.Execution) error {
+	return s.settle(ctx, id, func(invocation *executionmodel.Execution) error {
 		return invocation.MarkResultUnknown(domainResult, s.clock.Now())
 	})
 }
@@ -197,7 +197,7 @@ func (s *Executor) interrupt(
 func (s *Executor) settle(
 	ctx context.Context,
 	id identity.ToolExecutionID,
-	transition func(*calls.Execution) error,
+	transition func(*executionmodel.Execution) error,
 ) error {
 	settlementContext := ctx
 	cancel := func() {}
@@ -220,7 +220,7 @@ func (s *Executor) settle(
 	})
 }
 
-func settledResult(invocation calls.Execution) (tool.ToolResult, bool) {
+func settledResult(invocation executionmodel.Execution) (tool.ToolResult, bool) {
 	if !invocation.Status.Terminal() {
 		return tool.ToolResult{}, false
 	}

@@ -11,7 +11,7 @@ import (
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
@@ -83,7 +83,7 @@ func (r *Runner) run(
 	input Input,
 	content appcontext.Content,
 	continuation []messagemodel.Message,
-	messageWriter toolcall.Writer,
+	messageWriter toolexecution.Writer,
 ) (EndReason, FailureCode, error) {
 	progress, err := input.Progress.LoadProgress(ctx)
 	if err != nil {
@@ -174,7 +174,7 @@ func (r *Runner) executeTurn(
 	ctx context.Context,
 	input Input,
 	builtModel modelapi.Model,
-	messageWriter toolcall.Writer,
+	messageWriter toolexecution.Writer,
 	request modelapi.ModelRequest,
 	modelContext *appcontext.ModelContext,
 	turnID identity.TurnID,
@@ -215,7 +215,7 @@ func (r *Runner) executeTurn(
 	}
 	assistant := modelapi.ContextBlocksFromEvents(response.events)
 	calls := response.toolCalls()
-	metadata := toolcall.ToolExecutionMetadata{
+	metadata := toolexecution.ToolExecutionMetadata{
 		ExecutionID:   input.ID,
 		TurnID:        turnID,
 		SessionID:     input.SessionID,
@@ -233,13 +233,13 @@ func (r *Runner) executeTurn(
 			AuthorKind:  messagemodel.AuthorAgent,
 			AuthorID:    input.AgentID.String(),
 		}, assistant)
-		value := toolcall.AssistantWrite{Message: message}
+		value := toolexecution.AssistantWrite{Message: message}
 		for _, call := range calls {
-			invocation := toolcall.NewExecution(identity.ToolExecutionID(r.IDs.New("toolcall")), input.ID, turnID, input.SessionID, input.AgentID, call.ID, call.Name, call.Arguments, toolcall.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
+			invocation := toolexecution.NewExecution(identity.ToolExecutionID(r.IDs.New("toolcall")), input.ID, turnID, input.SessionID, input.AgentID, call.ID, call.Name, call.Arguments, toolexecution.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
 			value.ToolCalls = append(value.ToolCalls, invocation)
 		}
 		if response.stopReason == modelapi.StopCompleted || response.stopReason == modelapi.StopSequence {
-			value.FinalOutput = &toolcall.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
+			value.FinalOutput = &toolexecution.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
 		}
 		message, inserted, err := messageWriter.AppendAssistant(ctx, value)
 		if err != nil {

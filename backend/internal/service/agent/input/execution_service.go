@@ -13,7 +13,7 @@ import (
 	sessionmodel "praxis/internal/service/session"
 	queueservice "praxis/internal/service/task"
 
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	txrunner "praxis/internal/transaction"
 	workspacemodel "praxis/internal/workspace"
 )
@@ -40,7 +40,7 @@ type Dependencies struct {
 	Agents         agentmodel.Store
 	Records        ExecutionStore
 	Queue          queueservice.Store
-	ToolExecutions toolcall.Store
+	ToolExecutions toolexecution.Store
 	Executions     ActiveTasks
 	Messages       MessageStreams
 	PrimaryAgent   PrimaryAgentProvider
@@ -63,7 +63,7 @@ type Service struct {
 	agents         agentmodel.Store
 	records        ExecutionStore
 	queue          queueservice.Store
-	toolExecutions toolcall.Store
+	toolExecutions toolexecution.Store
 	executions     ActiveTasks
 	messages       MessageStreams
 	primary        PrimaryAgentProvider

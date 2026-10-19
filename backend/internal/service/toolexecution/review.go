@@ -1,8 +1,8 @@
-package toolcall
+package toolexecution
 
 import (
 	"context"
-	calls "praxis/internal/core/toolcall"
+	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/security"
@@ -13,14 +13,14 @@ import (
 const riskReviewTimeout = time.Minute
 
 // review 仅编排审核身份、外部模型调用和结果提交；所有状态决策由 Core 完成。
-func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (calls.Execution, error) {
+func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (executionmodel.Execution, error) {
 	if _, loaded := s.reviewInFlight.LoadOrStore(id, struct{}{}); loaded {
-		return calls.Execution{}, fault.New(taskmodel.ExecutionBusy, "this operation is already being reviewed")
+		return executionmodel.Execution{}, fault.New(taskmodel.ExecutionBusy, "this operation is already being reviewed")
 	}
 	defer s.reviewInFlight.Delete(id)
-	var invocation calls.Execution
+	var invocation executionmodel.Execution
 	var task taskmodel.Execution
-	var attempt calls.RiskReview
+	var attempt executionmodel.RiskReview
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error
 		invocation, err = s.executions.Get(txCtx, id)
@@ -38,11 +38,11 @@ func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (cal
 		if err != nil {
 			return err
 		}
-		if invocation.Status == calls.StatusReviewing && invocation.Decision != decision {
+		if invocation.Status == executionmodel.StatusReviewing && invocation.Decision != decision {
 			if err := invocation.ResetReview(decision, s.clock.Now()); err != nil {
 				return err
 			}
-		} else if invocation.Status == calls.StatusPrepared {
+		} else if invocation.Status == executionmodel.StatusPrepared {
 			if err := invocation.ApplyAuthorization(decision, s.clock.Now()); err != nil {
 				return err
 			}
@@ -53,9 +53,9 @@ func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (cal
 		sequence := max(uint64(1), task.Progress.NextSequence)
 		task.Progress.NextSequence = sequence + 1
 		task.Progress.ModelRequests++
-		attempt = calls.RiskReview{
+		attempt = executionmodel.RiskReview{
 			TurnID:          identity.NewTurnID(task.ID, sequence),
-			ArgumentsDigest: calls.ArgumentsDigest(invocation.Name, invocation.NormalizedArguments),
+			ArgumentsDigest: executionmodel.ArgumentsDigest(invocation.Name, invocation.NormalizedArguments),
 			ProviderID:      task.Config.Model.ProviderID,
 			ModelID:         task.Config.Model.ModelID,
 			StartedAt:       s.clock.Now().UTC(),
@@ -79,7 +79,7 @@ func (s *Executor) review(ctx context.Context, id identity.ToolExecutionID) (cal
 	}
 	cancel()
 	if err := ctx.Err(); err != nil {
-		return calls.Execution{}, err
+		return executionmodel.Execution{}, err
 	}
 	if reviewErr != nil {
 		assessment = security.RiskAssessment{Verdict: security.RiskUncertain, Reason: "Risk assessment failed or returned an invalid result; manual approval is required."}

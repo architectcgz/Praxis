@@ -6,7 +6,7 @@ import (
 	"errors"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/logging"
 	agentmodel "praxis/internal/service/agent"
@@ -22,7 +22,7 @@ type Config struct {
 	ActiveTasks       *ActiveTasks
 	Operations        ExecutionOperations
 	Queue             TaskQueue
-	Messages          toolcall.WriterProvider
+	Messages          toolexecution.WriterProvider
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
@@ -37,7 +37,7 @@ type Coordinator struct {
 	activeTasks       *ActiveTasks
 	operations        ExecutionOperations
 	queue             TaskQueue
-	messages          toolcall.WriterProvider
+	messages          toolexecution.WriterProvider
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration

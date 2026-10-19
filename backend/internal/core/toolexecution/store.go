@@ -1,4 +1,4 @@
-package toolcall
+package toolexecution
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"praxis/internal/identity"
 )
 
-// Store 提供工具调用生命周期所需的最小持久化能力。
+// Store 提供工具执行从请求登记到结果结算所需的最小持久化能力。
 type Store interface {
 	Get(context.Context, identity.ToolExecutionID) (Execution, error)
 	FindByExecutionCall(context.Context, identity.AgentExecutionID, string) (Execution, error)

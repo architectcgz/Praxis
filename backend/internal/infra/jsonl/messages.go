@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	messagemodel "praxis/internal/core/message"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	agentmodel "praxis/internal/service/agent"
@@ -73,7 +73,7 @@ func (r MessageStreams) LoadMessages(ctx context.Context, sessionID identity.Ses
 	return result, err
 }
 
-func (r MessageStreams) Writer(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) (toolcall.Writer, error) {
+func (r MessageStreams) Writer(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) (toolexecution.Writer, error) {
 	owner, err := r.owner(ctx, sessionID, agentID)
 	if err != nil {
 		return nil, err
@@ -331,4 +331,4 @@ func validateMessageBlock(role messagemodel.Role, block messagemodel.Block) erro
 }
 
 var _ messagemodel.Streams = MessageStreams{}
-var _ toolcall.Writer = MessageWriter{}
+var _ toolexecution.Writer = MessageWriter{}

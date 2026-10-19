@@ -6,7 +6,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	messagemodel "praxis/internal/core/message"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"regexp"
@@ -35,7 +35,7 @@ func (r *Runner) runToolCalls(
 	ctx context.Context,
 	messageWriter messagemodel.Writer,
 	calls []ToolCall,
-	metadata toolcall.ToolExecutionMetadata,
+	metadata toolexecution.ToolExecutionMetadata,
 	requestID identity.RequestID,
 ) ([]tool.ToolResult, error) {
 	results := make([]tool.ToolResult, 0, len(calls))
@@ -46,7 +46,7 @@ func (r *Runner) runToolCalls(
 		if err != nil {
 			return results, failCause(FailureStorage, err)
 		}
-		if invocation.Status == toolcall.StatusRequested {
+		if invocation.Status == toolexecution.StatusRequested {
 			tool, ok := r.Tools.Get(call.Name)
 			if ok {
 				prepared.Normalized, prepared.Err = tool.Normalize(call, metadata.WorkspacePath)
@@ -100,7 +100,7 @@ func (r *Runner) runToolCalls(
 		}
 		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.ExecutionID, metadata.TurnID, block)
 		results = append(results, result)
-		limited = limited || result.ErrorClass == string(toolcall.FailureResourceLimit)
+		limited = limited || result.ErrorClass == string(toolexecution.FailureResourceLimit)
 
 	}
 	if limited {

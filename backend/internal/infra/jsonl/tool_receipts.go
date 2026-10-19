@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	messagemodel "praxis/internal/core/message"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
@@ -45,7 +45,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				record.Data.ExecutionID,
 				block.CallID,
 			}
-			invocation, err := getByClaim[toolcall.Execution](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
+			invocation, err := getByClaim[toolexecution.Execution](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
 			if err != nil {
 				return err
 			}
@@ -60,7 +60,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
 					return errors.New("tool call declaration must be committed with a new execution identity")
 				}
-				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolcall.ArgumentsDigest(invocation.Name, block.Input) {
+				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolexecution.ArgumentsDigest(invocation.Name, block.Input) {
 					return fault.ErrRequestConflict
 				}
 				fact := messagemodel.MissingToolResult{
@@ -95,7 +95,7 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 		if _, exists := s.index.latest[key]; exists {
 			continue
 		}
-		var invocation toolcall.Execution
+		var invocation toolexecution.Execution
 		if err := decodeJSON(change.event.Payload, &invocation); err != nil {
 			return err
 		}

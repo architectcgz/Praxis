@@ -3,7 +3,7 @@ package bootstrap
 import (
 	execution "praxis/internal/service/agent/coordinator"
 
-	toolservice "praxis/internal/service/toolcall"
+	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 
 	"praxis/internal/clock"
@@ -13,7 +13,7 @@ import (
 	messagemodel "praxis/internal/core/message"
 	"praxis/internal/core/model"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	inputservice "praxis/internal/service/agent/input"
@@ -33,9 +33,9 @@ type coordinatorDependencies struct {
 	Queue          execution.TaskQueue
 	Recovery       execution.RecoverySource
 	ActiveTasks    *execution.ActiveTasks
-	ToolExecutions toolcall.Store
+	ToolExecutions toolexecution.Store
 	Messages       messagemodel.Reader
-	Writers        toolcall.WriterProvider
+	Writers        toolexecution.WriterProvider
 	Models         ModelSource
 	Tools          tool.ToolCatalog
 	Rules          toolservice.ApprovalRules

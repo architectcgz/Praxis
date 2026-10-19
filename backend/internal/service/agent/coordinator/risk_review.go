@@ -9,7 +9,7 @@ import (
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool/arguments"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/security"
 	agentmodel "praxis/internal/service/agent"
 	"strings"
@@ -47,7 +47,7 @@ type RiskReviewer struct {
 }
 
 // Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
-func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, invocation toolcall.Execution, attempt toolcall.RiskReview) (assessment security.RiskAssessment, err error) {
+func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, invocation toolexecution.Execution, attempt toolexecution.RiskReview) (assessment security.RiskAssessment, err error) {
 	ctx, scope := r.Hooks.Start(ctx, hook.Operation{
 		Identity:    hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID, TurnID: attempt.TurnID},
 		Kind:        hook.OperationProvider,

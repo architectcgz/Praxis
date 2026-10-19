@@ -2,7 +2,7 @@ package bootstrap
 
 import (
 	"context"
-	toolservice "praxis/internal/service/toolcall"
+	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 
 	"praxis/internal/core/hook"

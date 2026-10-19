@@ -5,7 +5,7 @@ import (
 	"errors"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	agentmodel "praxis/internal/service/agent"
 	"time"
@@ -92,7 +92,7 @@ func (r *Coordinator) startExecution(task agentmodel.Execution) error {
 func (r *Coordinator) execute(
 	ctx context.Context,
 	task agentmodel.Execution,
-	messageWriter toolcall.Writer,
+	messageWriter toolexecution.Writer,
 ) (bool, agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},

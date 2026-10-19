@@ -1,15 +1,15 @@
-package toolcall
+package toolexecution
 
 import (
 	"context"
 	"praxis/internal/core/tool"
-	calls "praxis/internal/core/toolcall"
+	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
 
 // checkTask 固定执行归属与工作区，不能通过重新准备参数改变被批准的操作。
-func (s *Executor) checkTask(ctx context.Context, provided calls.ToolExecutionMetadata) error {
+func (s *Executor) checkTask(ctx context.Context, provided executionmodel.ToolExecutionMetadata) error {
 	task, err := s.tasks.Get(ctx, provided.ExecutionID)
 	if err != nil {
 		return err
@@ -21,13 +21,13 @@ func (s *Executor) checkTask(ctx context.Context, provided calls.ToolExecutionMe
 	return nil
 }
 
-func (s *Executor) admit(ctx context.Context, invocation calls.Execution, call tool.NormalizedToolCall) (calls.Execution, error) {
+func (s *Executor) admit(ctx context.Context, invocation executionmodel.Execution, call tool.NormalizedToolCall) (executionmodel.Execution, error) {
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		current, err := s.executions.Get(txCtx, invocation.ID)
 		if err != nil {
 			return err
 		}
-		if current.Status == calls.StatusRequested {
+		if current.Status == executionmodel.StatusRequested {
 			if err := current.Prepare(call.NormalizedArguments, call.Path); err != nil {
 				return err
 			}
@@ -41,12 +41,12 @@ func (s *Executor) admit(ctx context.Context, invocation calls.Execution, call t
 	return invocation, err
 }
 
-func (s *Executor) authorize(ctx context.Context, id identity.ToolExecutionID) (calls.Execution, error) {
-	var invocation calls.Execution
+func (s *Executor) authorize(ctx context.Context, id identity.ToolExecutionID) (executionmodel.Execution, error) {
+	var invocation executionmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		var err error
 		invocation, err = s.executions.Get(txCtx, id)
-		if err != nil || invocation.Status != calls.StatusPrepared {
+		if err != nil || invocation.Status != executionmodel.StatusPrepared {
 			return err
 		}
 		decision, err := s.rules.Decide(txCtx, invocation)

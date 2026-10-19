@@ -1,6 +1,6 @@
-// Package toolcall 定义工具调用的持久化身份、状态转换与结算不变量。
+// Package toolexecution 定义工具执行的持久化身份、状态转换与结算不变量。
 // 状态修改不提供并发同步；调用方必须在事务内读取、转换并保存，终态不得重新执行。
-package toolcall
+package toolexecution
 
 import (
 	"bytes"
@@ -88,8 +88,8 @@ type Result struct {
 	Truncated     bool
 }
 
-// Execution 归属于一次 Task 的一次 loop 迭代（Turn），以 ProviderToolCallID
-// 和参数摘要识别重试。仓储负责保证 (ExecutionID, ProviderToolCallID) 唯一，
+// Execution 记录一次工具请求从登记、准入和审批到执行结算的完整过程，归属于一次 Agent 执行的 Turn。
+// 仓储保证 (ExecutionID, ProviderToolCallID) 唯一，审批恢复和幂等重入复用同一记录。
 // 原始调用身份不可变；规范化参数在准入时冻结，之后不可变。
 type Execution struct {
 	ID                  identity.ToolExecutionID

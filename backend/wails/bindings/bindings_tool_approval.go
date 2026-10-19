@@ -3,7 +3,7 @@ package bindings
 import (
 	"strings"
 
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	execution "praxis/internal/service/agent/coordinator"
@@ -32,7 +32,7 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 				AgentID:         value.AgentID.String(),
 				ExecutionID:     value.ExecutionID.String(),
 				CallID:          value.ProviderToolCallID,
-				ArgumentsDigest: toolcall.ArgumentsDigest(value.Name, value.NormalizedArguments),
+				ArgumentsDigest: toolexecution.ArgumentsDigest(value.Name, value.NormalizedArguments),
 			},
 			Name:                string(value.Name),
 			NormalizedArguments: string(value.NormalizedArguments),

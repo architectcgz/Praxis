@@ -6,7 +6,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	messagemodel "praxis/internal/core/message"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 )
 
@@ -26,7 +26,7 @@ func (r *Runner) resumeToolCalls(ctx context.Context, input Input, messages []me
 		if message.Role != messagemodel.RoleAssistant {
 			continue
 		}
-		metadata := toolcall.ToolExecutionMetadata{
+		metadata := toolexecution.ToolExecutionMetadata{
 			ExecutionID:   input.ID,
 			TurnID:        identity.TurnID(message.TurnID),
 			SessionID:     input.SessionID,

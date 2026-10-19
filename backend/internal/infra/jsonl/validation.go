@@ -17,7 +17,7 @@ import (
 	projectmodel "praxis/internal/service/project"
 	sessionmodel "praxis/internal/service/session"
 
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/timing"
 	"praxis/internal/workflow"
 	workspacemodel "praxis/internal/workspace"
@@ -82,14 +82,14 @@ func describe(scope string, event Event, object any) (entityKey, indexEntry, err
 		}
 		link("agent", v.AgentID.String())
 		link("agent_execution", v.ExecutionID.String())
-	case toolcall.Execution:
+	case toolexecution.Execution:
 		identity, sessionID = v.ID.String(), v.SessionID.String()
 		claim("tool-call", v.ExecutionID.String(), v.ProviderToolCallID)
 		group("tools-task", v.ExecutionID.String(), "")
 		if !v.Status.Terminal() {
 			group("unsettled-session", sessionID, "")
 		}
-		if v.Status == toolcall.StatusAwaitingApproval {
+		if v.Status == toolexecution.StatusAwaitingApproval {
 			group("awaiting-agent", v.AgentID.String(), "")
 		}
 		link("agent_execution", v.ExecutionID.String())
@@ -176,7 +176,7 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 	case "agent_execution":
 		target = new(agentmodel.Execution)
 	case "tool":
-		target = new(toolcall.Execution)
+		target = new(toolexecution.Execution)
 	case "context":
 		target = new(sessionmodel.SessionContextEntry)
 	case "control":
@@ -207,7 +207,7 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 		err = validateAgentExecution(*value)
 	case *queued.Task:
 		err = validateQueuedTask(*value)
-	case *toolcall.Execution:
+	case *toolexecution.Execution:
 		err = validateToolExecution(*value)
 	case *sessionmodel.SessionContextEntry:
 		err = validateContextEntry(*value)
@@ -429,7 +429,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 			}
 		}
 	case "tool":
-		var v toolcall.Execution
+		var v toolexecution.Execution
 		_ = decodeJSON(data, &v)
 		return taskOwner(v.ExecutionID, v.AgentID)
 	case "context":
@@ -536,14 +536,14 @@ func immutable(collection string, before, after json.RawMessage) error {
 		}
 		return queued.ValidateUpdate(prior, next)
 	case "tool":
-		var prior, next toolcall.Execution
+		var prior, next toolexecution.Execution
 		if err := decodeJSON(before, &prior); err != nil {
 			return err
 		}
 		if err := decodeJSON(after, &next); err != nil {
 			return err
 		}
-		if err := toolcall.ValidateUpdate(prior, next); err != nil {
+		if err := toolexecution.ValidateUpdate(prior, next); err != nil {
 			return fmt.Errorf("%w: %v", fault.ErrRequestConflict, err)
 		}
 		return nil

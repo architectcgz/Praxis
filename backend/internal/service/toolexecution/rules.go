@@ -1,11 +1,11 @@
-package toolcall
+package toolexecution
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"praxis/internal/core/tool"
-	calls "praxis/internal/core/toolcall"
+	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/security"
 )
@@ -24,7 +24,7 @@ type ApprovalRules struct {
 }
 
 // Decide 优先拒绝禁用工具和 deny 命令，其他操作没有隐含的 allow 豁免。
-func (r ApprovalRules) Decide(ctx context.Context, invocation calls.Execution) (security.ApprovalDecision, error) {
+func (r ApprovalRules) Decide(ctx context.Context, invocation executionmodel.Execution) (security.ApprovalDecision, error) {
 	if _, enabled := r.Catalog.Get(invocation.Name); !enabled {
 		return security.ApprovalDecision{Action: security.ApprovalDeny, RuleID: "tool-disabled"}, nil
 	}

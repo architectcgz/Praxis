@@ -8,7 +8,7 @@ import (
 	"praxis/internal/core/message"
 	"praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/security"
 	"praxis/internal/service/agent"
@@ -45,7 +45,7 @@ type AgentService interface {
 }
 
 type AgentCommands interface {
-	ListToolApprovals(context.Context, identity.AgentID) ([]toolcall.Execution, error)
+	ListToolApprovals(context.Context, identity.AgentID) ([]toolexecution.Execution, error)
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
 	SendInput(context.Context, inputservice.SendInput) (execution.StartResult, error)

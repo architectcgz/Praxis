@@ -6,18 +6,18 @@ import (
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 )
 
 // ToolExecutionReader 只读取是否已有冻结的调用参数。
 type ToolExecutionReader interface {
-	FindByExecutionCall(context.Context, identity.AgentExecutionID, string) (toolcall.Execution, error)
+	FindByExecutionCall(context.Context, identity.AgentExecutionID, string) (toolexecution.Execution, error)
 }
 
 // ToolExecutor 执行已经登记的调用；等待审批时不产生工具回执。
 type ToolExecutor interface {
-	Execute(context.Context, tool.PreparedToolCall, toolcall.ToolExecutionMetadata) (tool.ToolExecutionResult, error)
+	Execute(context.Context, tool.PreparedToolCall, toolexecution.ToolExecutionMetadata) (tool.ToolExecutionResult, error)
 }
 
 type (
@@ -61,7 +61,7 @@ type Input struct {
 	Config       Config
 	Content      appcontext.Content
 	Continuation []messagemodel.Message
-	Writer       toolcall.Writer
+	Writer       toolexecution.Writer
 }
 type Config struct {
 	Model         modelapi.Config

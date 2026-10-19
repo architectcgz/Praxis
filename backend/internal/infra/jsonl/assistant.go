@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	messagemodel "praxis/internal/core/message"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
 
 // AppendAssistant 原子提交调用方已构建的消息、工具身份及最终输出证据。
-func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.AssistantWrite) (stored messagemodel.Message, inserted bool, err error) {
+func (w MessageWriter) AppendAssistant(ctx context.Context, value toolexecution.AssistantWrite) (stored messagemodel.Message, inserted bool, err error) {
 	message := value.Message
 	if ctx == nil || message.Role != messagemodel.RoleAssistant || message.AuthorKind != messagemodel.AuthorAgent || message.AuthorID != w.owner.ID.String() || message.TurnID == "" {
 		return stored, false, errors.New("assistant ownership is required")
@@ -23,12 +23,12 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.Assis
 		if !task.Active() || task.SessionID != w.owner.SessionID || task.AgentID != w.owner.ID || message.RequestID != task.RequestID.String() {
 			return fault.ErrRequestConflict
 		}
-		calls := make(map[string]toolcall.Execution, len(value.ToolCalls))
+		calls := make(map[string]toolexecution.Execution, len(value.ToolCalls))
 		for _, call := range value.ToolCalls {
 			if _, ok := calls[call.ProviderToolCallID]; ok {
 				return fault.ErrRequestConflict
 			}
-			if call.ExecutionID != task.ID || call.SessionID != task.SessionID || call.AgentID != task.AgentID || call.TurnID.String() != message.TurnID || call.ArgumentsDigest != toolcall.ArgumentsDigest(call.Name, call.Arguments) || call.Status != toolcall.StatusRequested || call.BudgetReserved || len(call.NormalizedArguments) != 0 || call.Path != "" {
+			if call.ExecutionID != task.ID || call.SessionID != task.SessionID || call.AgentID != task.AgentID || call.TurnID.String() != message.TurnID || call.ArgumentsDigest != toolexecution.ArgumentsDigest(call.Name, call.Arguments) || call.Status != toolexecution.StatusRequested || call.BudgetReserved || len(call.NormalizedArguments) != 0 || call.Path != "" {
 				return fault.ErrRequestConflict
 			}
 			calls[call.ProviderToolCallID] = call
@@ -38,7 +38,7 @@ func (w MessageWriter) AppendAssistant(ctx context.Context, value toolcall.Assis
 				continue
 			}
 			call, ok := calls[block.CallID]
-			if !ok || string(call.Name) != block.Name || call.ArgumentsDigest != toolcall.ArgumentsDigest(call.Name, block.Input) {
+			if !ok || string(call.Name) != block.Name || call.ArgumentsDigest != toolexecution.ArgumentsDigest(call.Name, block.Input) {
 				return fault.ErrRequestConflict
 			}
 			delete(calls, block.CallID)

@@ -2,7 +2,7 @@ package coordinator
 
 import (
 	"context"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/security"
@@ -13,10 +13,10 @@ import (
 
 // ToolApprovals 保存审批决定，实际工具执行由 Coordinator 继续处理。
 type ToolApprovals struct {
-	DecideOperation func(context.Context, toolcall.Execution) (security.ApprovalDecision, error)
+	DecideOperation func(context.Context, toolexecution.Execution) (security.ApprovalDecision, error)
 	Transactions    txrunner.Runner
 	Tasks           agentmodel.ExecutionStore
-	Executions      toolcall.Store
+	Executions      toolexecution.Store
 }
 
 // ToolDecision 固定审批目标和已规范化的参数摘要，避免决定作用于变更后的调用。
@@ -44,14 +44,14 @@ func (a ToolApprovals) Decide(ctx context.Context, params ToolDecision, approve 
 		if err != nil {
 			return err
 		}
-		if params.ArgumentsDigest != toolcall.ArgumentsDigest(invocation.Name, invocation.NormalizedArguments) {
+		if params.ArgumentsDigest != toolexecution.ArgumentsDigest(invocation.Name, invocation.NormalizedArguments) {
 			return fault.ErrRequestConflict
 		}
-		if approve && invocation.Approval.Source == toolcall.ApprovalSourceUser ||
-			!approve && invocation.FailureCode == toolcall.FailureApprovalDenied {
+		if approve && invocation.Approval.Source == toolexecution.ApprovalSourceUser ||
+			!approve && invocation.FailureCode == toolexecution.FailureApprovalDenied {
 			return nil
 		}
-		if !task.Active() || invocation.Status != toolcall.StatusAwaitingApproval {
+		if !task.Active() || invocation.Status != toolexecution.StatusAwaitingApproval {
 			return fault.ErrRequestConflict
 		}
 		if approve {
@@ -62,14 +62,14 @@ func (a ToolApprovals) Decide(ctx context.Context, params ToolDecision, approve 
 			if err := invocation.RecheckAuthorization(decision, time.Now()); err != nil {
 				return err
 			}
-			if invocation.Status != toolcall.StatusAwaitingApproval {
+			if invocation.Status != toolexecution.StatusAwaitingApproval {
 				return a.Executions.Save(txCtx, invocation)
 			}
 		}
 		if approve {
-			err = invocation.Approve(toolcall.ApprovalRecord{Source: toolcall.ApprovalSourceUser, ArgumentsDigest: params.ArgumentsDigest, ApprovedAt: time.Now().UTC()})
+			err = invocation.Approve(toolexecution.ApprovalRecord{Source: toolexecution.ApprovalSourceUser, ArgumentsDigest: params.ArgumentsDigest, ApprovedAt: time.Now().UTC()})
 		} else {
-			err = invocation.Deny(toolcall.Result{InlineContent: "The user denied this tool call.", ErrorCode: toolcall.FailureApprovalDenied}, time.Now().UTC())
+			err = invocation.Deny(toolexecution.Result{InlineContent: "The user denied this tool call.", ErrorCode: toolexecution.FailureApprovalDenied}, time.Now().UTC())
 		}
 		if err != nil {
 			return err
@@ -98,7 +98,7 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, a
 	}
 	return nil
 }
-func (s *Coordinator) ListToolApprovals(ctx context.Context, agentID identity.AgentID) ([]toolcall.Execution, error) {
+func (s *Coordinator) ListToolApprovals(ctx context.Context, agentID identity.AgentID) ([]toolexecution.Execution, error) {
 	values, err := s.approvals.Executions.ListAwaitingByAgent(ctx, agentID)
 	if err != nil {
 		return nil, err

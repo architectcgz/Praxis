@@ -21,7 +21,8 @@
 | `tool` | 工具协议、注册表、可用性目录与结果大小边界 |
 | `tool/arguments` | 工具参数 JSON 和路径输入边界 |
 | `tool/builtin/*` | Bash、文件读取与补丁工具实现 |
-| `toolcall` | 单次调用的授权、风险审核、审批、执行、结果与持久化契约 |
+| `core/toolexecution` | 工具执行记录、状态转换、结果与原子输出持久化契约 |
+| `service/toolexecution` | 工具执行的准入、授权、风险审核、审批与结算编排 |
 | `execution` | 进程级 Runtime、Coordinator、活动执行身份、审批续接与关闭协调 |
 | `execution/loop` | 模型与工具迭代算法，不拥有 Task 生命周期 |
 | `hook`、`timing` | 扩展通知与独立操作计时 |
@@ -46,7 +47,7 @@ Wails Binding
             ├── Coordinator 与进程内执行身份
             └── execution/loop.Runner
                     ├── model.ModelBuilder
-                    └── toolcall.Executor → tool.Tool
+                    └── toolexecution.Executor → tool.Tool
 ```
 
 - `task`、`task/service`、`agent`、`session`、`model`、`context` 不依赖 `execution`。
@@ -59,6 +60,8 @@ Wails Binding
 
 ## 输入与协议边界
 
+- `tool.ToolCall` 表示模型提出的工具请求，只携带调用 ID、工具名和参数；协议事件、消息内容块和 Provider 调用身份使用 ToolCall 命名。
+- `toolexecution.Execution` 表示从请求登记到最终结算的一次工具执行过程，包含等待审批和执行前拒绝；审批恢复复用同一记录。调用额度 `ToolCalls` 统计请求数量。
 - Wails Binding 是桌面请求的输入边界，负责字段复制、规范化、默认值补充和校验。简单处理直接写在对应入口，较长的模型配置转换放在 Binding 包内的 `model_config_request.go`。
 - `CreateInput`、`SendInput` 等业务参数类型只描述业务操作所需的数据；业务包不提供桌面请求的规范化构造函数。Binding 使用已有 DTO 直接构造业务参数，不增加同形中间类型。
 - 内部方法接收 canonical 输入，不重复 Trim、补默认值或清洗路径。持久化恢复只读校验，不静默修复。
@@ -79,7 +82,7 @@ Wails Binding
 
 - `storage/jsonl` 只创建一个共享 `Store`。各业务适配文件共用日志、锁、事务、序号和可重建索引，不各自建立底层资源或全局正文缓存。
 - `message.Reader` 的消息集合与序号边界来自一次一致性读取；业务调用方不选择 Session 流或 Agent 私有流的日志键位。
-- `toolcall.Writer` 将 Assistant 消息、工具调用身份和最终输出证据原子提交；工具回执与输出字节累计在同一事务中幂等提交。
+- `toolexecution.Writer` 将 Assistant 消息、工具调用身份和最终输出证据原子提交；工具回执与输出字节累计在同一事务中幂等提交。
 - `transaction.Runner` 只保证同一 JSONL 后端的提交边界，不覆盖文档存储或其他独立后端。跨后端清理与恢复由业务用例或执行流程显式协调。
 - 会话删除前的活动 Task 检查由会话删除用例在事务内执行；存储只提交删除事实及关联索引变化。
 - 用户输入、最终 Assistant 与 Task 终态在事务成功后由业务调用方显式发布提交 Hook。回滚与幂等重试不通知；Hook 失败只记录日志，不改变提交结果。

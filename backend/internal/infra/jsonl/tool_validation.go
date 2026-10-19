@@ -6,7 +6,7 @@ import (
 	"errors"
 	"io"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/security"
 	"praxis/internal/utils/pathutil"
@@ -19,7 +19,7 @@ import (
 var storedToolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
 
 // validateToolExecution 只在磁盘输入边界检查调用快照，保留审批绑定和生命周期约束。
-func validateToolExecution(i toolcall.Execution) error {
+func validateToolExecution(i toolexecution.Execution) error {
 	for _, value := range []string{
 		i.ID.String(),
 		i.ExecutionID.String(),
@@ -36,7 +36,7 @@ func validateToolExecution(i toolcall.Execution) error {
 	if !storedToolNamePattern.MatchString(string(i.Name)) || len(i.Arguments) == 0 || !json.Valid(i.Arguments) {
 		return fault.InvalidValue("toolExecution", "tool name and valid JSON arguments are required")
 	}
-	if i.ArgumentsDigest != toolcall.ArgumentsDigest(i.Name, i.Arguments) {
+	if i.ArgumentsDigest != toolexecution.ArgumentsDigest(i.Name, i.Arguments) {
 		return fault.InvalidValue("toolExecution.argumentsDigest", "arguments digest does not match the original call")
 	}
 	if i.Path != "" && !pathutil.IsAbsoluteNormalized(i.Path) {
@@ -62,16 +62,16 @@ func validateToolExecution(i toolcall.Execution) error {
 		return fault.InvalidValue("toolExecution.result", "result size or failure code is invalid")
 	}
 	if i.ApprovedAt.IsZero() {
-		if i.Approval != (toolcall.ApprovalRecord{}) || !i.StartedAt.IsZero() {
+		if i.Approval != (toolexecution.ApprovalRecord{}) || !i.StartedAt.IsZero() {
 			return fault.InvalidValue("toolExecution.approval", "unapproved invocation has approval or start fields")
 		}
 	} else {
 		switch i.Approval.Source {
-		case toolcall.ApprovalSourceUser, toolcall.ApprovalSourceYolo, toolcall.ApprovalSourceAuto:
+		case toolexecution.ApprovalSourceUser, toolexecution.ApprovalSourceYolo, toolexecution.ApprovalSourceAuto:
 		default:
 			return fault.InvalidValue("toolExecution.approval.source", "unknown approval source")
 		}
-		if !i.Approval.ApprovedAt.Equal(i.ApprovedAt) || i.Approval.ArgumentsDigest != toolcall.ArgumentsDigest(i.Name, i.NormalizedArguments) {
+		if !i.Approval.ApprovedAt.Equal(i.ApprovedAt) || i.Approval.ArgumentsDigest != toolexecution.ArgumentsDigest(i.Name, i.NormalizedArguments) {
 			return fault.InvalidValue("toolExecution.approval", "approval time or arguments digest is inconsistent")
 		}
 	}
@@ -88,45 +88,45 @@ func validateToolExecution(i toolcall.Execution) error {
 		if i.SettledAt.IsZero() || i.Result.ErrorCode != i.FailureCode {
 			return fault.InvalidValue("toolExecution", "terminal invocation requires a settlement time and matching result code")
 		}
-	} else if !i.SettledAt.IsZero() || i.FailureCode != toolcall.FailureNone || i.Result != (toolcall.Result{}) {
+	} else if !i.SettledAt.IsZero() || i.FailureCode != toolexecution.FailureNone || i.Result != (toolexecution.Result{}) {
 		return fault.InvalidValue("toolExecution", "active invocation contains terminal fields")
 	}
 	if i.StartedAt.IsZero() && i.Result.SideEffect {
 		return fault.InvalidValue("toolExecution.result", "unstarted invocation cannot report a side effect")
 	}
 	switch i.Status {
-	case toolcall.StatusRequested, toolcall.StatusPrepared, toolcall.StatusReviewing, toolcall.StatusAwaitingApproval, toolcall.StatusDenied:
+	case toolexecution.StatusRequested, toolexecution.StatusPrepared, toolexecution.StatusReviewing, toolexecution.StatusAwaitingApproval, toolexecution.StatusDenied:
 		if !i.ApprovedAt.IsZero() {
 			return fault.InvalidValue("toolExecution.approvedAt", "unapproved invocation has an approval time")
 		}
-	case toolcall.StatusApproved:
+	case toolexecution.StatusApproved:
 		if i.ApprovedAt.IsZero() || !i.StartedAt.IsZero() {
 			return fault.InvalidValue("toolExecution", "approved invocation has invalid lifecycle fields")
 		}
-	case toolcall.StatusRunning, toolcall.StatusSucceeded, toolcall.StatusFailed, toolcall.StatusUnknown:
+	case toolexecution.StatusRunning, toolexecution.StatusSucceeded, toolexecution.StatusFailed, toolexecution.StatusUnknown:
 		if i.StartedAt.IsZero() {
 			return fault.InvalidValue("toolExecution.startedAt", "executed invocation requires a start time")
 		}
 	}
 	switch i.Status {
-	case toolcall.StatusSucceeded:
-		if i.FailureCode != toolcall.FailureNone {
+	case toolexecution.StatusSucceeded:
+		if i.FailureCode != toolexecution.FailureNone {
 			return fault.InvalidValue("toolExecution.result", "successful invocation cannot contain a failure")
 		}
-	case toolcall.StatusFailed:
-		if i.FailureCode == toolcall.FailureNone {
+	case toolexecution.StatusFailed:
+		if i.FailureCode == toolexecution.FailureNone {
 			return fault.InvalidValue("toolExecution.result", "failed invocation requires a failure code")
 		}
-	case toolcall.StatusDenied:
-		if i.FailureCode != toolcall.FailureResourceLimit && i.FailureCode != toolcall.FailureNotAllowed && i.FailureCode != toolcall.FailureApprovalDenied && i.FailureCode != toolcall.FailureRiskDenied && i.FailureCode != toolcall.FailureInvalidCall {
+	case toolexecution.StatusDenied:
+		if i.FailureCode != toolexecution.FailureResourceLimit && i.FailureCode != toolexecution.FailureNotAllowed && i.FailureCode != toolexecution.FailureApprovalDenied && i.FailureCode != toolexecution.FailureRiskDenied && i.FailureCode != toolexecution.FailureInvalidCall {
 			return fault.InvalidValue("toolExecution.result", "denial requires a denial failure code")
 		}
-	case toolcall.StatusInterrupted:
-		if i.FailureCode != toolcall.FailureInterrupted {
+	case toolexecution.StatusInterrupted:
+		if i.FailureCode != toolexecution.FailureInterrupted {
 			return fault.InvalidValue("toolExecution.result", "interruption requires its stable failure code")
 		}
-	case toolcall.StatusUnknown:
-		if i.FailureCode != toolcall.FailureResultUnknown {
+	case toolexecution.StatusUnknown:
+		if i.FailureCode != toolexecution.FailureResultUnknown {
 			return fault.InvalidValue("toolExecution.result", "unknown result requires its stable failure code")
 		}
 	}
@@ -182,19 +182,19 @@ func validateStoredBashArguments(data json.RawMessage, path string) error {
 	return nil
 }
 
-func validateStoredAuthorization(i toolcall.Execution) error {
-	if (i.Status == toolcall.StatusPrepared || i.Status == toolcall.StatusReviewing) && len(i.NormalizedArguments) == 0 {
+func validateStoredAuthorization(i toolexecution.Execution) error {
+	if (i.Status == toolexecution.StatusPrepared || i.Status == toolexecution.StatusReviewing) && len(i.NormalizedArguments) == 0 {
 		return fault.InvalidValue("toolExecution.arguments", "prepared operation requires frozen arguments")
 	}
 	if i.Decision != (security.ApprovalDecision{}) && (!i.Decision.Action.Valid() || i.Decision.RuleID == "") {
 		return fault.InvalidValue("toolExecution.decision", "a valid action and rule identity are required")
 	}
 	for index, review := range i.Reviews {
-		if review.TurnID == "" || review.ArgumentsDigest != toolcall.ArgumentsDigest(i.Name, i.NormalizedArguments) || review.ProviderID == "" || review.ModelID == "" || review.StartedAt.Before(i.CreatedAt) || review.StartedAt.IsZero() {
+		if review.TurnID == "" || review.ArgumentsDigest != toolexecution.ArgumentsDigest(i.Name, i.NormalizedArguments) || review.ProviderID == "" || review.ModelID == "" || review.StartedAt.Before(i.CreatedAt) || review.StartedAt.IsZero() {
 			return fault.InvalidValue("toolExecution.review", "risk review must match the frozen operation and model identity")
 		}
 		if review.CompletedAt.IsZero() {
-			if index != len(i.Reviews)-1 || i.Status != toolcall.StatusReviewing && i.Status != toolcall.StatusInterrupted || review.Assessment != (security.RiskAssessment{}) {
+			if index != len(i.Reviews)-1 || i.Status != toolexecution.StatusReviewing && i.Status != toolexecution.StatusInterrupted || review.Assessment != (security.RiskAssessment{}) {
 				return fault.InvalidValue("toolExecution.review", "only an active or interrupted review may be incomplete")
 			}
 		} else {
@@ -206,17 +206,17 @@ func validateStoredAuthorization(i toolcall.Execution) error {
 			}
 		}
 	}
-	if i.Status == toolcall.StatusReviewing && (len(i.Reviews) == 0 || !i.LatestReview().CompletedAt.IsZero() || i.Decision.Action != security.ApprovalAuto) {
+	if i.Status == toolexecution.StatusReviewing && (len(i.Reviews) == 0 || !i.LatestReview().CompletedAt.IsZero() || i.Decision.Action != security.ApprovalAuto) {
 		return fault.InvalidValue("toolExecution.review", "reviewing operation requires a pending auto assessment")
 	}
-	if i.Approval.Source == toolcall.ApprovalSourceAuto && (i.LatestReview().Assessment.Verdict != security.RiskSafe || i.Decision.Action != security.ApprovalAuto) {
+	if i.Approval.Source == toolexecution.ApprovalSourceAuto && (i.LatestReview().Assessment.Verdict != security.RiskSafe || i.Decision.Action != security.ApprovalAuto) {
 		return fault.InvalidValue("toolExecution.approval", "auto approval requires an auto decision and durable safe assessment")
 	}
 	if i.Decision != (security.ApprovalDecision{}) {
-		if i.Approval.Source == toolcall.ApprovalSourceYolo && i.Decision.Action != security.ApprovalYolo {
+		if i.Approval.Source == toolexecution.ApprovalSourceYolo && i.Decision.Action != security.ApprovalYolo {
 			return fault.InvalidValue("toolExecution.approval", "yolo approval cannot satisfy a different action")
 		}
-		if i.Approval.Source == toolcall.ApprovalSourceUser && i.Decision.Action == security.ApprovalAuto && i.LatestReview().Assessment.Verdict != security.RiskUncertain {
+		if i.Approval.Source == toolexecution.ApprovalSourceUser && i.Decision.Action == security.ApprovalAuto && i.LatestReview().Assessment.Verdict != security.RiskUncertain {
 			return fault.InvalidValue("toolExecution.approval", "manual approval of an auto operation requires an uncertain assessment")
 		}
 	}

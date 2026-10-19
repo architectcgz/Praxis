@@ -5,7 +5,7 @@ import (
 	projectmodel "praxis/internal/service/project"
 	sessionmodel "praxis/internal/service/session"
 
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	txrunner "praxis/internal/transaction"
 	workspacemodel "praxis/internal/workspace"
 )
@@ -47,7 +47,7 @@ var (
 	_ sessionmodel.Store        = SessionRepository{}
 	_ agentmodel.Store          = AgentRepository{}
 	_ agentmodel.ExecutionStore = AgentExecutionRepository{}
-	_ toolcall.Store            = ToolExecutionRepository{}
+	_ toolexecution.Store       = ToolExecutionRepository{}
 	_ sessionmodel.ContextStore = ContextRepository{}
 	_ agentmodel.ControlStore   = ControlRepository{}
 )

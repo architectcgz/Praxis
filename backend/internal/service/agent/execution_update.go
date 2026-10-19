@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"praxis/internal/core/toolcall"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"reflect"
 )
@@ -53,7 +53,7 @@ func ValidateExecutionUpdate(before, after Execution) error {
 	return nil
 }
 
-func (e *Execution) RecordFinalOutput(value toolcall.FinalOutput) error {
+func (e *Execution) RecordFinalOutput(value toolexecution.FinalOutput) error {
 	if !e.Active() || e.Progress.FinalAssistantID != "" && (e.Progress.FinalAssistantID != value.AssistantID || e.Progress.FinalStopReason != value.StopReason) {
 		return fault.ErrRequestConflict
 	}
