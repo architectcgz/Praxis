@@ -13,6 +13,7 @@ type CommandContext = {
     busy: boolean
     createNewSession: (projectID: string, workspaceID: string) => Promise<boolean>
     refreshCatalog: (manual?: boolean, throwOnError?: boolean) => Promise<void>
+    refreshModels: () => Promise<unknown>
     viewRequestRef: RefObject<number>
     selectedAgentID: string
     getSelectedAgentID: () => string
@@ -23,7 +24,7 @@ type CommandContext = {
 }
 
 /** 统一处理工作区命令；命令不进入 Agent 消息流。 */
-export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNewSession, refreshCatalog, viewRequestRef, selectedAgentID, getSelectedAgentID, setBusy, setError, setErrorCode, setInput }: CommandContext) {
+export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNewSession, refreshCatalog, refreshModels, viewRequestRef, selectedAgentID, getSelectedAgentID, setBusy, setError, setErrorCode, setInput }: CommandContext) {
     const running = useRef(false)
     const [commandNotice, setCommandNotice] = useState('')
     const clearCommandNotice = useCallback(() => setCommandNotice(''), [])
@@ -55,7 +56,7 @@ export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNew
             setErrorCode(undefined)
             try {
                 await reloadConfig()
-                await refreshCatalog(true, true)
+                await Promise.all([refreshCatalog(true, true), refreshModels()])
                 if (isCurrentView()) {
                     setInput('')
                     setCommandNotice('Praxis 配置已重新加载')
@@ -73,7 +74,7 @@ export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNew
         } finally {
             running.current = false
         }
-    }, [bridgeAvailable, busy, createNewSession, refreshCatalog, session, viewRequestRef, getSelectedAgentID, setBusy, setError, setErrorCode, setInput])
+    }, [bridgeAvailable, busy, createNewSession, refreshCatalog, refreshModels, session, viewRequestRef, getSelectedAgentID, setBusy, setError, setErrorCode, setInput])
 
     return { runCommand, commandNotice, clearCommandNotice }
 }

@@ -8,6 +8,7 @@ import { NewProjectDialog } from '../project/NewProjectDialog'
 import { ProjectsPanel } from '../project/ProjectsPanel'
 import { groupSessions } from '../project/projectGroups'
 import { SessionPanel } from '../session/SessionPanel'
+import { TaskQueue } from '../task/TaskQueue'
 import { SettingsPanel } from '../setting/SettingsPanel'
 import { useProjectWorkspace } from './useProjectWorkspace'
 import { WORKSPACE_COMMANDS } from './useWorkspaceCommands'
@@ -243,6 +244,8 @@ export function ProjectWorkspace() {
                                         selectedModelID={workspace.selectedModelID}
                                         reasoning={workspace.reasoning}
                                         busy={workspace.busy}
+                                        canQueue={workspace.canQueue}
+                                        beforeInput={workspace.agent && <TaskQueue tasks={workspace.agent.tasks} history={workspace.history} />}
                                         onSend={() => void workspace.submitInput()}
                                         onControl={(kind) => void workspace.control(kind)}
                                         onModelChange={workspace.selectModel}

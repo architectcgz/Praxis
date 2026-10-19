@@ -9,6 +9,7 @@ type AgentTaskInputProps = {
     projectId: string
     sessionId: string
     active: boolean
+    canQueue: boolean
     input: string
     setInput: (value: string) => void
     models: ModelOption[]
@@ -24,9 +25,9 @@ type AgentTaskInputProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ projectId, sessionId, active, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
     const inputRef = useRef<HTMLTextAreaElement>(null)
-    const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy || active)
+    const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy)
     const providerPickerRef = useRef<HTMLDivElement>(null)
     const modelPickerRef = useRef<HTMLDivElement>(null)
     const reasoningPickerRef = useRef<HTMLDivElement>(null)
@@ -52,6 +53,13 @@ export function AgentTaskInput({ projectId, sessionId, active, input, setInput, 
         setReasoningPickerOpen(false)
         setApprovalPickerOpen(false)
     }, [])
+
+    useEffect(() => {
+        // 解除禁用后恢复输入；用户已聚焦其他控件时不抢焦点。
+        if (!busy && document.activeElement === document.body) {
+            inputRef.current?.focus({ preventScroll: true })
+        }
+    }, [busy])
 
     useLayoutEffect(() => {
         const textarea = inputRef.current
@@ -160,27 +168,21 @@ export function AgentTaskInput({ projectId, sessionId, active, input, setInput, 
 
     useEffect(() => {
         if (busy) setApprovalPickerOpen(false)
-        if (busy || active || models.length === 0) {
+        if (busy || models.length === 0) {
             setProviderPickerOpen(false)
             setModelPickerOpen(false)
         }
-        if (busy || active || !reasoningAvailable) {
+        if (busy || !reasoningAvailable) {
             setReasoningPickerOpen(false)
         }
-    }, [busy, models.length, reasoningAvailable, active])
+    }, [busy, models.length, reasoningAvailable])
 
-    const submitOrStop = useCallback(() => {
-        if (active) {
-            onControl('cancel')
-            return
-        }
-        onSend()
-    }, [active, onControl, onSend])
+    const sendDisabled = busy || !input.trim() || (active && !canQueue)
 
     const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
         if (slash.handleKeyDown(event) || event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
         event.preventDefault()
-        submitOrStop()
+        if (!sendDisabled) onSend()
     }
 
     return (
@@ -210,8 +212,8 @@ export function AgentTaskInput({ projectId, sessionId, active, input, setInput, 
                     value={input}
                     onChange={(event) => slash.changeInput(event.target.value)}
                     onKeyDown={handleInputKeyDown}
-                    placeholder={active ? '代理处于活动状态时输入不可用。' : '为此代理编写新任务'}
-                    disabled={active || busy}
+                    placeholder={canQueue ? '编写后续任务，发送后排队执行' : '为此代理编写新任务'}
+                    disabled={busy}
                     rows={1}
                 />
                 <SessionTokenUsage key={sessionId} />
@@ -229,7 +231,7 @@ export function AgentTaskInput({ projectId, sessionId, active, input, setInput, 
                                 closePickers()
                                 setProviderPickerOpen(!providerPickerOpen)
                             }}
-                            disabled={busy || active || models.length === 0}
+                            disabled={busy || models.length === 0}
                         >
                             <Server size={15} strokeWidth={1.8} aria-hidden="true" />
                             <span>{selectedProvider?.providerName || '无 Provider'}</span>
@@ -275,7 +277,7 @@ export function AgentTaskInput({ projectId, sessionId, active, input, setInput, 
                                 closePickers()
                                 setModelPickerOpen(!modelPickerOpen)
                             }}
-                            disabled={busy || active || models.length === 0}
+                            disabled={busy || models.length === 0}
                         >
                             <Cpu size={15} strokeWidth={1.8} aria-hidden="true" />
                             <span>{selectedModel?.label || '无模型'}</span>
@@ -318,7 +320,7 @@ export function AgentTaskInput({ projectId, sessionId, active, input, setInput, 
                                 closePickers()
                                 setReasoningPickerOpen(!reasoningPickerOpen)
                             }}
-                            disabled={busy || active || !reasoningAvailable}
+                            disabled={busy || !reasoningAvailable}
                         >
                             <Brain size={15} strokeWidth={1.8} aria-hidden="true" />
                             <span>{selectedReasoning}</span>
@@ -365,15 +367,27 @@ export function AgentTaskInput({ projectId, sessionId, active, input, setInput, 
                         }}
                     />
                     <div className="composer-send-controls">
+                        {active && (
+                            <button
+                                className="composer-submit composer-submit-danger"
+                                type="button"
+                                title="停止当前执行"
+                                aria-label="停止当前执行"
+                                onClick={() => onControl('cancel')}
+                                disabled={busy}
+                            >
+                                <Square size={16} strokeWidth={2.1} aria-hidden="true" />
+                            </button>
+                        )}
                         <button
-                            className={`composer-submit ${active ? 'composer-submit-danger' : ''}`}
+                            className="composer-submit"
                             type="button"
-                            title={active ? '停止执行' : '发送输入'}
-                            aria-label={active ? '停止执行' : '发送输入'}
-                            onClick={submitOrStop}
-                            disabled={busy || (!active && !input.trim())}
+                            title={canQueue ? '加入任务队列' : '发送输入'}
+                            aria-label={canQueue ? '加入任务队列' : '发送输入'}
+                            onClick={onSend}
+                            disabled={sendDisabled}
                         >
-                            {active ? <Square size={16} strokeWidth={2.1} aria-hidden="true" /> : <Send size={16} strokeWidth={2.1} aria-hidden="true" />}
+                            <Send size={16} strokeWidth={2.1} aria-hidden="true" />
                         </button>
                     </div>
                 </div>

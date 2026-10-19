@@ -112,20 +112,22 @@ function hasAssistantTurn(history: AgentHistoryItem[], executionId: string, turn
     return history.some((item) => item.message?.executionId === executionId && item.message.role === 'assistant' && item.message.id === `assistant:${turnId}`)
 }
 
-/** 按落盘用户消息的 task ID 去重；尚未收到执行回执或其他执行的乐观消息继续保留。 */
+/** 用户消息按稳定输入身份去重；排队任务尚无 Execution ID，也能在落盘后移除乐观副本。 */
 export function clearDurablePendingUserMessages(pending: PendingUserMessage[], history: AgentHistoryItem[]): PendingUserMessage[] {
     if (pending.length === 0) {
         return pending
     }
-    const persistedTaskIDs = new Set<string>()
+    const persistedInputIDs = new Set<string>()
+    const persistedExecutionIDs = new Set<string>()
     for (const item of history) {
-        if (item.message?.role === 'user' && item.message.executionId) {
-            persistedTaskIDs.add(item.message.executionId)
-        }
+        if (item.message?.role !== 'user') continue
+        if (item.message.id) persistedInputIDs.add(item.message.id)
+        if (item.message.executionId) persistedExecutionIDs.add(item.message.executionId)
     }
-    if (persistedTaskIDs.size === 0) {
+    if (persistedInputIDs.size === 0 && persistedExecutionIDs.size === 0) {
         return pending
     }
-    const remaining = pending.filter((message) => message.executionId === '' || !persistedTaskIDs.has(message.executionId))
+    const remaining = pending.filter((message) => !persistedInputIDs.has(`input:${message.requestId}`) &&
+        (message.executionId === '' || !persistedExecutionIDs.has(message.executionId)))
     return remaining.length === pending.length ? pending : remaining
 }

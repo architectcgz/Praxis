@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Cpu, FileJson, Settings2 } from 'lucide-react'
-import { ModelOption } from '../../api'
+import type { ModelOption } from '../../api'
+import { hasPrimaryModel } from './model-config/modelConfigHelpers'
 
 type SettingsPanelProps = {
     models: ModelOption[]
@@ -7,7 +8,7 @@ type SettingsPanelProps = {
 }
 
 export function SettingsPanel({ models, onOpenModels }: SettingsPanelProps) {
-    const configured = models.some((model) => model.assignedAgentDefinitions.includes('primary'))
+    const configured = hasPrimaryModel(models)
     const providers = new Set(models.map((model) => model.providerName)).size
     return (
         <section className="region settings-region" aria-labelledby="settings-title">

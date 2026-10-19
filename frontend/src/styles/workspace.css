@@ -7,6 +7,7 @@
 @import './common.css';
 @import '../features/project/styles.css';
 @import '../features/agent/styles.css';
+@import '../features/task/styles.css';
 @import '../features/setting/styles.css';
 @import '../features/workspace/styles.css';
 

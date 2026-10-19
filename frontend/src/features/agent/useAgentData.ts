@@ -88,8 +88,11 @@ export function useAgentData({ models, setError, setErrorCode, viewRequestRef }:
 
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents((event) => {
+            const previousExecutionID = store.getData().byId[event.agentId]?.agent.currentExecutionId
             store.receive(event)
-            if (event.kind === 'execution_ended' || event.kind === 'request_canceled') void loadAgent(event.agentId)
+            // 新执行领取队首后刷新队列；同一次执行的后续 turn 不重复查询。
+            const executionStarted = event.kind === 'turn_started' && event.executionId !== previousExecutionID
+            if (executionStarted || event.kind === 'execution_ended' || event.kind === 'request_canceled') void loadAgent(event.agentId)
         })
         return () => { generation.current += 1; unsubscribe() }
     }, [store, loadAgent])

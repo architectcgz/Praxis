@@ -26,6 +26,8 @@ export type AgentConversationProps = {
     selectedModelID: string
     reasoning: string
     busy: boolean
+    canQueue: boolean
+    beforeInput?: ReactNode
     onSend: () => void
     onControl: (kind: 'pause' | 'cancel') => void
     onModelChange: (providerId: string, modelId: string) => void
@@ -34,7 +36,7 @@ export type AgentConversationProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ projectId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyCursor, historyLoadingOlder, historyError, onLoadOlderHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ projectId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyCursor, historyLoadingOlder, historyError, onLoadOlderHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -253,10 +255,12 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                 )}
             </div>
             <ApprovalGate />
+            <div className="command-band agent-input-accessory">{beforeInput}</div>
             <AgentTaskInput
                 projectId={projectId}
                 sessionId={agent.sessionId}
                 active={active}
+                canQueue={canQueue}
                 input={input}
                 setInput={setInput}
                 models={models}

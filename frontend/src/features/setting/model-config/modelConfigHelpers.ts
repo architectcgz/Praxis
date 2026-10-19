@@ -1,5 +1,9 @@
-import type { ModelAPIFormat, ProviderConfigOption } from '../../../api'
+import type { ModelAPIFormat, ModelOption, ProviderConfigOption } from '../../../api'
 import type { ModelDraft } from './modelConfigTypes'
+
+export function hasPrimaryModel(models: readonly ModelOption[]): boolean {
+    return models.some((model) => model.assignedAgentDefinitions.includes('primary'))
+}
 
 export function createProviderID(): string {
     return `provider-${crypto.randomUUID()}`

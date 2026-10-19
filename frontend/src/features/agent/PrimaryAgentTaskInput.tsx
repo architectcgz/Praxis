@@ -1,4 +1,4 @@
-import { type KeyboardEvent } from 'react'
+import { useEffect, type KeyboardEvent } from 'react'
 import { Plus, Send } from 'lucide-react'
 import { useSlashCommandMenu } from './SlashCommandMenu'
 
@@ -13,6 +13,14 @@ type PrimaryAgentTaskInputProps = {
 
 export function PrimaryAgentTaskInput({ input, setInput, busy, onSend, commands, onCommand }: PrimaryAgentTaskInputProps) {
     const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy)
+
+    useEffect(() => {
+        // 发送失败或命令结束后恢复输入，但不抢占其他控件的焦点。
+        if (!busy && document.activeElement === document.body) {
+            document.getElementById('agent-input')?.focus({ preventScroll: true })
+        }
+    }, [busy])
+
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
         if (slash.handleKeyDown(event)) return
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {

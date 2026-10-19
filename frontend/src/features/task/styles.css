@@ -1,0 +1,92 @@
+/* 队列只管理内部展示与局部滚动，外层宽度和摆放位置由调用方决定。 */
+.task-queue {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: var(--paper-2);
+    font-size: var(--font-size-meta);
+    line-height: var(--line-height-meta);
+}
+
+.task-queue-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--control-height);
+    padding: 4px 12px;
+    color: var(--muted);
+}
+
+.task-queue-head strong {
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+.task-queue-head > span {
+    margin-left: auto;
+    color: var(--faint);
+}
+
+.task-queue-list {
+    max-height: min(160px, 20dvh);
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+}
+
+.task-queue-list > li {
+    border-top: 1px solid var(--line);
+}
+
+.task-queue-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--control-height);
+    padding: 6px 12px;
+    color: var(--ink);
+    list-style: none;
+    cursor: pointer;
+}
+
+.task-queue-summary::-webkit-details-marker {
+    display: none;
+}
+
+.task-queue-summary:hover,
+.task-queue-summary:focus-visible {
+    background: var(--fill);
+}
+
+.task-queue-position {
+    flex: 0 0 20px;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+}
+
+.task-queue-preview {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.task-queue-next,
+.task-queue-chevron {
+    flex: 0 0 auto;
+    color: var(--muted);
+}
+
+.task-queue details[open] .task-queue-chevron {
+    transform: rotate(180deg);
+}
+
+.task-queue-content {
+    margin: 0;
+    padding: 0 12px 10px 40px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}

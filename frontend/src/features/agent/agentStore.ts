@@ -91,8 +91,11 @@ export function createAgentStore() {
             if (streamingOutputs === output.streamingOutputs) return
             updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === event.agentId ? '' : output.awaitingAgentId })
         },
-        beginInput(message: PendingUserMessage) {
-            updateOutput({ ...output, pendingUserMessages: [...output.pendingUserMessages, message], awaitingAgentId: message.agentId })
+        beginInput({ requestId, sessionId, agentId, content }: Pick<PendingUserMessage, 'requestId' | 'sessionId' | 'agentId' | 'content'>) {
+            const message: PendingUserMessage = { requestId, sessionId, agentId, content, executionId: '', at: new Date().toISOString() }
+            // 运行中提交的是后续任务，不给当前回合额外显示等待响应。
+            const awaitingAgentId = data.byId[agentId]?.agent.state === 'executing' ? output.awaitingAgentId : agentId
+            updateOutput({ ...output, pendingUserMessages: [...output.pendingUserMessages, message], awaitingAgentId })
         },
         acceptInput(requestId: string, executionId: string) {
             updateOutput({ ...output, pendingUserMessages: output.pendingUserMessages.map((message) => message.requestId === requestId ? { ...message, executionId } : message) })

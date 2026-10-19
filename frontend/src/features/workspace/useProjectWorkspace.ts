@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAgentCommands } from '../agent/useAgentCommands'
 import { useSessionCommands } from '../session/useSessionCommands'
+import { useTaskSubmission } from '../task/useTaskSubmission'
 import { useWorkspaceData } from './useWorkspaceData'
 import { useWorkspaceCommands } from './useWorkspaceCommands'
 
@@ -29,6 +30,17 @@ export function useProjectWorkspace() {
     const agentCommands = useAgentCommands({
         agent: workspace.agent,
         busy,
+        refreshAgent: workspace.refreshAgent,
+        getSelectedAgentID: workspace.getSelectedAgentID,
+        inputActions: workspace.inputActions,
+        setBusy,
+        setError,
+        setErrorCode,
+        viewRequestRef,
+    })
+    const taskSubmission = useTaskSubmission({
+        agent: workspace.agent,
+        busy,
         input: workspace.input,
         reasoning: workspace.reasoning,
         refreshAgent: workspace.refreshAgent,
@@ -50,6 +62,7 @@ export function useProjectWorkspace() {
         busy,
         createNewSession: sessionCommands.createNewSession,
         refreshCatalog: workspace.refreshCatalog,
+        refreshModels: workspace.refreshModels,
         viewRequestRef,
         selectedAgentID: workspace.selectedAgentID,
         getSelectedAgentID: workspace.getSelectedAgentID,
@@ -64,7 +77,7 @@ export function useProjectWorkspace() {
         if (content.startsWith('/')) {
             void runCommand(content)
         } else {
-            void agentCommands.submitInput()
+            void taskSubmission.submitTask()
         }
     }
 
@@ -72,6 +85,7 @@ export function useProjectWorkspace() {
         ...workspace,
         ...sessionCommands,
         ...agentCommands,
+        canQueue: taskSubmission.canQueue,
         submitInput,
         runCommand,
         commandNotice,

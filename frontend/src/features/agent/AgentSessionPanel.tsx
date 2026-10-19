@@ -1,3 +1,4 @@
+import { useSyncExternalStore, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import type { AgentHistoryItem, AgentSnapshot, ModelOption } from '../../api'
 import type { AgentOutputSource } from './agentStore'
@@ -29,6 +30,8 @@ type AgentSessionPanelProps = {
     selectedModelID: string
     reasoning: string
     busy: boolean
+    canQueue: boolean
+    beforeInput?: ReactNode
     onSend: () => void
     onControl: (kind: 'pause' | 'cancel') => void
     onModelChange: (providerId: string, modelId: string) => void
@@ -38,7 +41,7 @@ type AgentSessionPanelProps = {
 }
 
 /** 展示当前 Session 中选中的 Agent 对话和输入控件。 */
-export function AgentSessionPanel({ projectId, loading, agents, agent, history, agentHistories, agentHistoryErrors, outputStore, onSelectAgent, historyCursor, historyLoadingOlder, historyError, onLoadOlderHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
+export function AgentSessionPanel({ projectId, loading, agents, agent, history, agentHistories, agentHistoryErrors, outputStore, onSelectAgent, historyCursor, historyLoadingOlder, historyError, onLoadOlderHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
     const { streamingOutputs, pendingUserMessages, awaitingAgentId } = useSyncExternalStore(outputStore.subscribeOutput, outputStore.getOutput)
     if (loading) {
         return <div className="agent-loading" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>加载对话中</span></div>
@@ -79,6 +82,8 @@ export function AgentSessionPanel({ projectId, loading, agents, agent, history, 
             selectedModelID={selectedModelID}
             reasoning={reasoning}
             busy={busy}
+            canQueue={canQueue}
+            beforeInput={beforeInput}
             onSend={onSend}
             onControl={onControl}
             onModelChange={onModelChange}
@@ -91,4 +96,3 @@ export function AgentSessionPanel({ projectId, loading, agents, agent, history, 
         </ModelUsageProvider>
     )
 }
-import { useSyncExternalStore } from 'react'

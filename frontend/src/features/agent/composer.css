@@ -62,6 +62,15 @@
     padding-bottom: 14px;
 }
 
+/* 扩展内容与输入框共用阅读列，具体展示由调用方提供。 */
+.agent-input-accessory {
+    padding-bottom: 8px;
+}
+
+.agent-input-accessory:empty {
+    display: none;
+}
+
 /* 输入框聚焦只把边框加深一档中性色，不使用主色边框或外侧光晕。 */
 .composer-shell {
     display: block;

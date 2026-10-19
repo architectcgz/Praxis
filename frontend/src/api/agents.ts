@@ -1,6 +1,7 @@
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { getAgentBinding, isBindingAvailable } from './bindings'
 import { normalizeOperationTiming, type OperationTiming } from './timings'
+import type { QueuedTaskSnapshot } from './tasks'
 
 export const AGENT_EVENT_NAME = 'praxis:agent-event'
 
@@ -42,8 +43,6 @@ export type AgentSnapshot = {
     controlCommandIds: string[]
 }
 
-export type QueuedTaskSnapshot = { id: string; status: string; sequence: number; executionId: string }
-
 export type ExecutionSnapshot = {
     sourceTaskId: string
     id: string
@@ -58,6 +57,7 @@ export type ExecutionSnapshot = {
 
 export type AgentMessage = {
     id?: string
+    sourceTaskId?: string
     sequence: number
     at: string
     executionId: string
@@ -326,6 +326,7 @@ function normalizeAgentMessage(value: unknown): AgentMessage {
     const record = requiredRecord(value)
     return {
         id: optionalString(record.id),
+        sourceTaskId: optionalString(record.sourceTaskId),
         sequence: requiredNumber(record.sequence),
         at: requiredString(record.at),
         executionId: requiredString(record.executionId),

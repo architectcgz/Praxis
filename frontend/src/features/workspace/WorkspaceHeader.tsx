@@ -39,7 +39,7 @@ export function WorkspaceHeader({ busy, refreshing, projectName, sessionTitle, o
             <div className="spacer" />
             <div className="status">
                 <i className={`dot ${busy || refreshing ? 'live' : ''}`} aria-hidden="true" />
-                {refreshing ? '刷新中' : busy ? 'Primary 执行中' : '已就绪'}
+                {refreshing ? '刷新中' : busy ? '处理中' : '已就绪'}
             </div>
             <button
                 className="icon-button"
