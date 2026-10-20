@@ -1,11 +1,53 @@
-package project
+// Package approval 负责审批模式配置与继承关系的查询和变更。
+package approval
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"praxis/internal/clock"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	"praxis/internal/identity"
+	"praxis/internal/repository"
 )
+
+// Dependencies 包含审批模式配置所需的持久化能力和全局默认值来源。
+type Dependencies struct {
+	Transactions       repository.Transaction
+	Projects           repository.Project
+	Clock              clock.Clock
+	GlobalApprovalMode func() security.ApprovalMode
+}
+
+// Service 负责审批模式配置及其事务边界。
+type Service struct {
+	tx                 repository.Transaction
+	projects           repository.Project
+	clock              clock.Clock
+	globalApprovalMode func() security.ApprovalMode
+}
+
+// NewService 创建审批模式业务服务。
+func NewService(deps Dependencies) (*Service, error) {
+	if deps.GlobalApprovalMode == nil {
+		return nil, errors.New("approval service global approval mode is required")
+	}
+	for name, value := range map[string]any{
+		"transactions": deps.Transactions,
+		"projects":     deps.Projects,
+	} {
+		if value == nil {
+			return nil, fmt.Errorf("approval service %s is required", name)
+		}
+	}
+	return &Service{
+		tx:                 deps.Transactions,
+		projects:           deps.Projects,
+		clock:              clock.ClockOrDefault(deps.Clock),
+		globalApprovalMode: deps.GlobalApprovalMode,
+	}, nil
+}
 
 // ApprovalSettings 返回业务层解析的继承关系和有效模式，与工具启动使用相同规则。
 type ApprovalSettings struct {

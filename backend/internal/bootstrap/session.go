@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"praxis/internal/core/hook"
 	"praxis/internal/infra/agentregistry"
-	"praxis/internal/infra/filesystem"
 	"praxis/internal/infra/jsonl"
 	sessionservice "praxis/internal/service/session"
 	"sync"
@@ -22,6 +21,5 @@ func buildSessions(resources storageResources, repos jsonl.Repositories, agents 
 		Tasks:          repos.Executions,
 		Definitions:    agents.Definition,
 		UsageRecords:   repos.ModelUsage,
-		TextReader:     fs.Filesystem{},
 	})
 }

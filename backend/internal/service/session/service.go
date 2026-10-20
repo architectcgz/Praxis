@@ -15,7 +15,6 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	projectservice "praxis/internal/service/project"
-	workspaceio "praxis/internal/workspace"
 	"sync"
 )
 
@@ -35,7 +34,6 @@ type Dependencies struct {
 	Tasks          repository.AgentExecution
 	Definitions    AgentDefinitionFactory
 	UsageRecords   repository.ModelUsage
-	TextReader     workspaceio.TextReader
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -53,7 +51,6 @@ type Service struct {
 	tasks          repository.AgentExecution
 	definitions    AgentDefinitionFactory
 	usageRecords   repository.ModelUsage
-	textReader     workspaceio.TextReader
 	clock          clock.Clock
 	ids            identity.IDGenerator
 
@@ -86,15 +83,14 @@ func NewService(deps Dependencies) (*Service, error) {
 		return nil, errors.New("session service usage reader is required")
 	}
 	for name, value := range map[string]any{
-		"transactions":          deps.Transactions,
-		"projects":              deps.Projects,
-		"workspaces":            deps.Workspaces,
-		"sessions":              deps.Sessions,
-		"session contexts":      deps.Contexts,
-		"agents":                deps.Agents,
-		"tasks":                 deps.Tasks,
-		"agent definitions":     deps.Definitions,
-		"workspace text reader": deps.TextReader,
+		"transactions":      deps.Transactions,
+		"projects":          deps.Projects,
+		"workspaces":        deps.Workspaces,
+		"sessions":          deps.Sessions,
+		"session contexts":  deps.Contexts,
+		"agents":            deps.Agents,
+		"tasks":             deps.Tasks,
+		"agent definitions": deps.Definitions,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("session service %s is required", name)
@@ -112,7 +108,6 @@ func NewService(deps Dependencies) (*Service, error) {
 		tasks:           deps.Tasks,
 		definitions:     deps.Definitions,
 		usageRecords:    deps.UsageRecords,
-		textReader:      deps.TextReader,
 		clock:           clock.ClockOrDefault(deps.Clock),
 		ids:             identity.IDsOrDefault(deps.IDs),
 		createdSessions: make(map[identity.SessionID]struct{}),

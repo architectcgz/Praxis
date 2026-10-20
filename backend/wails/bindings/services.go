@@ -15,18 +15,23 @@ import (
 	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
 	executionservice "praxis/internal/service/agent/execution"
+	approvalservice "praxis/internal/service/approval"
 	modelservice "praxis/internal/service/model"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	queueservice "praxis/internal/service/task"
+	workspaceservice "praxis/internal/service/workspace"
 )
 
 // 接口只声明 Wails 实际消费的业务能力，协议投影留在 binding。
 type ProjectService interface {
 	ListProjects(context.Context, int) ([]projectmodel.Project, error)
 	CreateProject(context.Context, projectservice.CreateInput) (projectservice.CreateProjectResult, error)
-	GetApprovalMode(context.Context, identity.ProjectID) (projectservice.ApprovalSettings, error)
-	SetApprovalMode(context.Context, identity.ProjectID, *security.ApprovalMode) (projectservice.ApprovalSettings, error)
+}
+
+type ApprovalService interface {
+	GetApprovalMode(context.Context, identity.ProjectID) (approvalservice.ApprovalSettings, error)
+	SetApprovalMode(context.Context, identity.ProjectID, *security.ApprovalMode) (approvalservice.ApprovalSettings, error)
 }
 
 type SessionService interface {
@@ -35,7 +40,10 @@ type SessionService interface {
 	GetSessionView(context.Context, identity.SessionID, int) (sessionservice.SessionView, error)
 	DeleteSession(context.Context, identity.SessionID) error
 	RenameSession(context.Context, identity.SessionID, string) error
-	PreviewFile(context.Context, identity.SessionID, string) (sessionservice.FilePreview, error)
+}
+
+type WorkspaceService interface {
+	PreviewFile(context.Context, identity.SessionID, string) (workspaceservice.FilePreview, error)
 }
 
 type AgentService interface {
@@ -81,7 +89,9 @@ type UsageService interface {
 // Services 由 Bootstrap 注入业务对象和只读日志定位能力，不创建中间应用层。
 type Services struct {
 	Projects       ProjectService
+	Approvals      ApprovalService
 	Sessions       SessionService
+	Workspaces     WorkspaceService
 	Agents         AgentService
 	Commands       AgentCommands
 	Models         ModelCatalog
@@ -96,7 +106,9 @@ type Services struct {
 func (s Services) Validate() error {
 	for name, missing := range map[string]bool{
 		"projects":            s.Projects == nil,
+		"approvals":           s.Approvals == nil,
 		"sessions":            s.Sessions == nil,
+		"workspaces":          s.Workspaces == nil,
 		"agents":              s.Agents == nil,
 		"commands":            s.Commands == nil,
 		"models":              s.Models == nil,

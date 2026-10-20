@@ -30,7 +30,7 @@ func (b *SessionBindings) PreviewFile(sessionID, path string) (dto.FilePreview, 
 		path = path[1:2] + ":" + path[2:]
 	}
 	path = filepath.Clean(filepath.FromSlash(path))
-	preview, err := service.Sessions.PreviewFile(ctx, identity.SessionID(sessionID), path)
+	preview, err := service.Workspaces.PreviewFile(ctx, identity.SessionID(sessionID), path)
 	if err != nil {
 		return dto.FilePreview{}, publicError(b.host, "SessionBindings.PreviewFile", err)
 	}

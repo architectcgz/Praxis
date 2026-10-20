@@ -11,8 +11,10 @@ import (
 	"praxis/internal/loop"
 	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
+	approvalservice "praxis/internal/service/approval"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
+	workspaceservice "praxis/internal/service/workspace"
 	"praxis/internal/timing"
 	"praxis/wails/bindings"
 	"sync"
@@ -94,12 +96,27 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 		return nil, err
 	}
 	projects, err := projectservice.NewService(projectservice.Dependencies{
+		Transactions: a.store,
+		Projects:     repos.Projects,
+		Workspaces:   repos.Workspaces,
+		Directory:    fs.Filesystem{},
+		Logger:       a.logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	approvals, err := approvalservice.NewService(approvalservice.Dependencies{
 		GlobalApprovalMode: config.globalApprovalMode,
 		Transactions:       a.store,
 		Projects:           repos.Projects,
-		Workspaces:         repos.Workspaces,
-		Directory:          fs.Filesystem{},
-		Logger:             a.logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	workspaces, err := workspaceservice.NewService(workspaceservice.Dependencies{
+		Sessions:   repos.Sessions,
+		Workspaces: repos.Workspaces,
+		TextReader: fs.Filesystem{},
 	})
 	if err != nil {
 		return nil, err
@@ -107,7 +124,9 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	models := buildModelService(root, config, a.store, a.logger, configMu)
 	a.frontend = bindings.Services{
 		Projects:       projects,
+		Approvals:      approvals,
 		Sessions:       a.sessions,
+		Workspaces:     workspaces,
 		Agents:         agents,
 		Commands:       a.coordinator,
 		Models:         models,

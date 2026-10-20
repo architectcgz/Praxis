@@ -4,7 +4,7 @@ import (
 	"praxis/internal/core/security"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	projectservice "praxis/internal/service/project"
+	approvalservice "praxis/internal/service/approval"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
@@ -19,7 +19,7 @@ func (b *ProjectBindings) GetProjectApprovalMode(projectID string) (dto.ProjectA
 	if err != nil {
 		return dto.ProjectApprovalMode{}, err
 	}
-	value, err := services.Projects.GetApprovalMode(ctx, identity.ProjectID(projectID))
+	value, err := services.Approvals.GetApprovalMode(ctx, identity.ProjectID(projectID))
 	if err != nil {
 		return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.GetProjectApprovalMode", err)
 	}
@@ -48,14 +48,14 @@ func (b *ProjectBindings) SetProjectApprovalMode(wire dto.SetProjectApprovalMode
 		}
 		mode = &parsed
 	}
-	value, err := services.Projects.SetApprovalMode(ctx, identity.ProjectID(wire.ProjectID), mode)
+	value, err := services.Approvals.SetApprovalMode(ctx, identity.ProjectID(wire.ProjectID), mode)
 	if err != nil {
 		return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.SetProjectApprovalMode", err)
 	}
 	return approvalModeDTO(value), nil
 }
 
-func approvalModeDTO(value projectservice.ApprovalSettings) dto.ProjectApprovalMode {
+func approvalModeDTO(value approvalservice.ApprovalSettings) dto.ProjectApprovalMode {
 	result := dto.ProjectApprovalMode{
 		ProjectID:     value.ProjectID.String(),
 		GlobalMode:    string(value.GlobalMode),
