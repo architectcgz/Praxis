@@ -17,7 +17,7 @@ export function formatDuration(milliseconds: number): string {
     const seconds = milliseconds / 1000
     if (seconds < 60) return `${(Math.floor(seconds * 10) / 10).toFixed(1)} s`
     if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${Math.floor(seconds % 60)} 秒`
-    return `${Math.floor(seconds / 3600)} 时 ${Math.floor(seconds % 3600 / 60)} 分`
+    return `${Math.floor(seconds / 3600)} 时 ${Math.floor(seconds % 3600 / 60)} 分 ${Math.floor(seconds % 60)} 秒`
 }
 
 /** 关联消息与操作，重试分别保留；行内标签展示同一引用的最近一次尝试。 */

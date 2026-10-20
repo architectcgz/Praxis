@@ -56,7 +56,8 @@ export function DurationLabel({ record, label = '耗时', compact = false }: { r
     useEffect(() => {
         if (!running) return
         setNow(Date.now())
-        const timer = window.setInterval(() => setNow(Date.now()), 1000)
+        // 刷新频率与 0.1 秒的展示精度一致，不依赖模型输出触发重绘。
+        const timer = window.setInterval(() => setNow(Date.now()), 100)
         return () => window.clearInterval(timer)
     }, [record?.id, running])
     if (!record) return null

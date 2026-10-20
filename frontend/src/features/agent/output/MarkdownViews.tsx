@@ -1,4 +1,4 @@
-import { Children, createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
+import { Children, createContext, isValidElement, memo, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 import { Check, ChevronDown, Copy } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -36,6 +36,12 @@ const codeLanguageLabels: Record<string, string> = {
 }
 
 export const MessageMarkdown = memo(function MessageMarkdown({ content, streaming = false }: { content: string; streaming?: boolean }) {
+    const deferredContent = useDeferredValue(content)
+    // 流式事件同步到达时复用已渲染内容，Markdown 解析不能阻塞计时和输入；落盘内容立即展示。
+    return <MarkdownContent content={streaming ? deferredContent : content} streaming={streaming} />
+})
+
+const MarkdownContent = memo(function MarkdownContent({ content, streaming }: { content: string; streaming: boolean }) {
     const components = useMemo<Components>(() => ({
         ...markdownComponents,
         pre: (props) => <MarkdownCodeBlock {...props} streaming={streaming} />,

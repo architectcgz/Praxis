@@ -233,7 +233,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                             events={turn.events}
                             executionId={visibleStreamingOutput.executionId}
                             turnId={turn.turnId}
-                            active={active}
+                            active={active && index === visibleStreamingOutput.turns.length - 1 && !visibleStreamingOutput.error}
                             continuation={index > 0}
                             hasContinuation={index < visibleStreamingOutput.turns.length - 1}
                             key={`${visibleStreamingOutput.executionId}-${turn.turnId}`}

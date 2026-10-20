@@ -42,11 +42,11 @@ export function PendingOutputView({ agentProfile, executionId }: { agentProfile:
     )
 }
 
-export const AgentActivityView = memo(function AgentActivityView({ thinking, providerWaiting, error }: { thinking?: string; providerWaiting?: boolean; error?: string }) {
+export const AgentActivityView = memo(function AgentActivityView({ thinking, streaming = false, providerWaiting, error }: { thinking?: string; streaming?: boolean; providerWaiting?: boolean; error?: string }) {
     return (
         <div className="agent-activity" aria-live="polite">
             {providerWaiting && <div className="message-pending-status"><LoaderCircle size={16} strokeWidth={1.8} aria-hidden="true" /><span>等待模型响应</span></div>}
-            {thinking && <ThinkingDetails content={thinking} streaming />}
+            {thinking && <ThinkingDetails content={thinking} streaming={streaming} />}
             {error && <p role="alert">{error}</p>}
         </div>
     )
@@ -76,7 +76,8 @@ export function StreamingTurnView({ agentProfile, events, executionId, turnId, a
         if (event.kind === 'provider_waiting' && active && index === events.length - 1) {
             segments.push(<AgentActivityView providerWaiting key={`provider-waiting-${index}`} />)
         } else if (event.kind === 'thinking_delta' && event.text) {
-            segments.push(<AgentActivityView thinking={event.text} key={`thinking-${index}`} />)
+            // 只有当前末尾的思考仍在流式输出；工具或正文出现后，前一段思考结束并收起。
+            segments.push(<AgentActivityView thinking={event.text} streaming={active && index === events.length - 1} key={`thinking-${index}`} />)
         } else if (event.kind === 'text_delta' && event.text) {
             segments.push(<StreamingOutputView content={event.text} key={`text-${index}`} />)
         }
@@ -86,7 +87,7 @@ export function StreamingTurnView({ agentProfile, events, executionId, turnId, a
         {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">
                 <strong>{agentProfile}</strong>
-                {active && <AgentDuration executionId={executionId} />}
+                <AgentDuration executionId={executionId} />
             </div>
         </div>}
         {segments}
