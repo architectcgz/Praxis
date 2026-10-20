@@ -7,6 +7,7 @@ import (
 
 // Tool 接收已准备好的参数，资源访问约束由具体工具在副作用边界检查。
 type Tool interface {
+	// Definition 返回独立副本，InputSchema 不与工具内部共享可变数据。
 	Definition() ToolDefinition
 	Call(context.Context, json.RawMessage) (ToolResult, error)
 }

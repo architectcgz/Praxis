@@ -52,7 +52,7 @@ func (r *ToolRegistry) List() []ToolDefinition {
 	}
 	definitions := make([]ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
-		definitions = append(definitions, tool.Definition().Snapshot())
+		definitions = append(definitions, tool.Definition())
 	}
 	slices.SortFunc(definitions, func(left, right ToolDefinition) int {
 		if left.Name < right.Name {
