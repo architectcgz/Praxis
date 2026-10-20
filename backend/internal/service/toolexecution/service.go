@@ -19,7 +19,7 @@ import (
 type Dependencies struct {
 	Rules          ApprovalRules
 	Review         func(context.Context, agentmodel.Execution, message.ToolCall, json.RawMessage, string, security.ApprovalDecision, executionmodel.RiskReview) (security.RiskAssessment, error)
-	Prepare        func(tool.ToolName, json.RawMessage, string) (json.RawMessage, error)
+	Prepare        func(tool.Tool, json.RawMessage, string) (json.RawMessage, error)
 	Bind           func(tool.Tool, string) tool.Tool
 	HookDispatcher *hook.Dispatcher
 	Transactions   repository.Transaction

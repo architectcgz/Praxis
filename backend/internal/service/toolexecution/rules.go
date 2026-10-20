@@ -15,6 +15,11 @@ type ApprovalCatalog interface {
 	DecideCommand(string) security.ApprovalDecision
 }
 
+// commandTool 提供已准备参数中的待审批命令，空字符串表示不应用命令规则。
+type commandTool interface {
+	ApprovalCommand(json.RawMessage) (string, error)
+}
+
 type ApprovalRules struct {
 	Catalog     ApprovalCatalog
 	DefaultMode func(context.Context, identity.SessionID) (security.ApprovalMode, error)
@@ -22,21 +27,22 @@ type ApprovalRules struct {
 
 // Decide 与配置重载共用事务边界，显式 deny 始终优先。
 func (r ApprovalRules) Decide(ctx context.Context, call message.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
-	if _, enabled := r.Catalog.Get(call.Name); !enabled {
+	registered, enabled := r.Catalog.Get(call.Name)
+	if !enabled {
 		return security.ApprovalDecision{Action: security.ApprovalDeny, RuleID: "tool-disabled"}, nil
 	}
 	var matched security.ApprovalDecision
-	if call.Name == tool.ToolBash {
-		var input struct {
-			Command string `json:"command"`
+	if source, ok := registered.(commandTool); ok {
+		command, err := source.ApprovalCommand(args)
+		if err != nil {
+			return security.ApprovalDecision{}, err
 		}
-		if err := json.Unmarshal(args, &input); err != nil || input.Command == "" {
-			return security.ApprovalDecision{}, errors.New("prepared bash command is required")
+		if command != "" {
+			matched = r.Catalog.DecideCommand(command)
 		}
-		matched = r.Catalog.DecideCommand(input.Command)
-		if matched.Action == security.ApprovalDeny {
-			return matched, nil
-		}
+	}
+	if matched.Action == security.ApprovalDeny {
+		return matched, nil
 	}
 	mode, err := r.DefaultMode(ctx, call.SessionID)
 	if err != nil {

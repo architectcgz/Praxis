@@ -26,7 +26,11 @@ func (scope *Scope) Execute(ctx context.Context, executionID identity.AgentExecu
 		}
 		return message.Message{}, false, err
 	}
-	args, err := s.deps.Prepare(call.Name, call.Arguments, scope.workspacePath)
+	t, ok := s.deps.Catalog.Get(call.Name)
+	if !ok {
+		return s.appendError(ctx, call, "tool_not_allowed", "The requested tool is disabled or unregistered.")
+	}
+	args, err := s.deps.Prepare(t, call.Arguments, scope.workspacePath)
 	if err != nil {
 		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
 	}

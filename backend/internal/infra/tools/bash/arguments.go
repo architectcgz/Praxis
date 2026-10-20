@@ -3,6 +3,7 @@ package bash
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	toolargs "praxis/internal/infra/tools/arguments"
@@ -26,6 +27,15 @@ type input struct {
 	Command string          `json:"command"`
 	Path    string          `json:"path"`
 	Timeout json.RawMessage `json:"timeout,omitempty"`
+}
+
+// ApprovalCommand 从已准备的参数中提取命令，不执行规范化或审批决策。
+func ApprovalCommand(args json.RawMessage) (string, error) {
+	var prepared arguments
+	if err := json.Unmarshal(args, &prepared); err != nil || prepared.Command == "" {
+		return "", errors.New("prepared bash command is required")
+	}
+	return prepared.Command, nil
 }
 
 // Prepare 校验 bash 参数，并将工作目录交给统一路径解析流程处理。
