@@ -180,7 +180,7 @@ func validateControlCommand(r agentmodel.AgentControlCommand) error {
 }
 
 func validateAgentExecution(e agentmodel.Execution) error {
-	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 || e.Progress.ToolCalls > agentmodel.MaxToolCalls || e.Progress.Iterations > agentmodel.MaxIterations || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
+	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
 		return fault.InvalidValue("execution.progress", "usage counters or request sequence are invalid")
 	}
 	if (e.Progress.FinalAssistantID == "") != (e.Progress.FinalStopReason == "") || e.Progress.FinalStopReason != "" && e.Progress.FinalStopReason != "completed" && e.Progress.FinalStopReason != "stop_sequence" {

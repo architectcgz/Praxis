@@ -2,28 +2,26 @@ package execution
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
-	agentservice "praxis/internal/service/agent"
 )
 
-// LoadProgress 只向核心循环暴露已提交的预算和输出证据。
+// LoadProgress 只向核心循环暴露已提交的请求序号和最终输出证据。
 func (s *Service) LoadProgress(ctx context.Context, id identity.AgentExecutionID) (loop.Progress, error) {
 	execution, err := s.records.Get(ctx, id)
 	if err != nil {
 		return loop.Progress{}, err
 	}
-	return loop.Progress{NextSequence: execution.Progress.NextSequence, Iterations: execution.Progress.Iterations, FinalStopReason: execution.Progress.FinalStopReason}, nil
+	return loop.Progress{NextSequence: execution.Progress.NextSequence, FinalStopReason: execution.Progress.FinalStopReason}, nil
 }
 
-// RecordIteration 在真实 ReAct 请求前原子预留一次迭代。
+// RecordIteration 在真实 ReAct 请求前原子记录迭代次数与请求序号。
 func (s *Service) RecordIteration(ctx context.Context, id identity.AgentExecutionID, sequence uint64) error {
 	return s.recordRequest(ctx, id, sequence, true)
 }
 
-// RecordSummaryRequest 仅统计摘要请求，不消耗 ReAct 迭代。
+// RecordSummaryRequest 仅统计摘要请求，不计入 ReAct 迭代次数。
 func (s *Service) RecordSummaryRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64) error {
 	return s.recordRequest(ctx, id, sequence, false)
 }
@@ -38,9 +36,6 @@ func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionI
 			return fault.ErrRequestConflict
 		}
 		if iteration {
-			if task.Progress.Iterations >= agentmodel.MaxIterations {
-				return fault.New(agentservice.ExecutionResourceLimit, "model iteration limit exceeded")
-			}
 			task.Progress.Iterations++
 		}
 		task.Progress.NextSequence = sequence + 1

@@ -14,7 +14,6 @@ const (
 	ExecutionStorage       fault.Code = "execution.storage_error"
 	ExecutionProvider      fault.Code = "execution.provider_error"
 	ExecutionTool          fault.Code = "execution.tool_error"
-	ExecutionResourceLimit fault.Code = "execution.resource_limit"
 )
 
 // ExecutionFailureMessage 只为 Provider 失败提取可展示详情，其他错误仍由前端按失败码展示。

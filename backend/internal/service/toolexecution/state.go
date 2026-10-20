@@ -3,7 +3,6 @@ package toolexecution
 import (
 	"bytes"
 	"context"
-	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
@@ -14,7 +13,7 @@ import (
 
 const settlementTimeout = 5 * time.Second
 
-// reserveCall 对一次调用只扣减一次额度，审批、拒绝和重启都复用同一保留记录。
+// reserveCall 对一次调用只计数一次，审批、拒绝和重启都复用同一计数标记。
 func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID) (executionmodel.Execution, error) {
 	var invocation executionmodel.Execution
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
@@ -29,9 +28,6 @@ func (s *Executor) reserveCall(ctx context.Context, id identity.ToolExecutionID)
 		task, err := s.tasks.Get(txCtx, invocation.ExecutionID)
 		if err != nil {
 			return err
-		}
-		if task.Progress.ToolCalls >= agentmodel.MaxToolCalls {
-			return fault.New(agentservice.ExecutionResourceLimit, "tool call limit exceeded")
 		}
 		task.Progress.ToolCalls++
 		invocation.BudgetReserved = true

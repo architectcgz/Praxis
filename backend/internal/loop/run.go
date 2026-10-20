@@ -12,7 +12,6 @@ import (
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool"
 	"praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
@@ -69,7 +68,7 @@ func NewRunner(deps Dependencies) (Runner, error) {
 
 // Run 使用本次执行输入与消息写入器运行 provider/tool loop，返回结果及失败分类。
 // 业务上层提供已选通用内容与续接消息，消息写入器负责可靠提交输出；
-// ProgressTracker 负责加载持久化预算、记录模型及摘要请求和模型输出消耗；
+// ProgressTracker 负责加载持久化进度、记录模型及摘要请求和模型输出消耗；
 // 每次执行的输入（context、消息写入器）为空时返回错误；
 // 持久化生命周期、取消和后续任务调度由执行协调器负责。
 func (r *Runner) Run(ctx context.Context, input Input) (Result, error) {
@@ -110,11 +109,7 @@ func (r *Runner) run(
 		return loopResult(err)
 	}
 
-	iterations := progress.Iterations
 	for sequence := max(uint64(1), progress.NextSequence); ; {
-		if iterations >= MaxIterations {
-			return loopResult(fail(FailureResourceLimit, ErrorResourceLimit, "model iteration limit exceeded"))
-		}
 		request := buildModelRequest(modelapi.ModelRequest{
 			ExecutionID:     input.ID,
 			PromptCacheKey:  input.SessionID.String(),
@@ -147,13 +142,9 @@ func (r *Runner) run(
 		}
 		turnSequence := sequence
 		if err := input.Progress.RecordIteration(ctx, turnSequence); err != nil {
-			if errors.Is(err, fault.New(ErrorResourceLimit, "")) {
-				return loopResult(failCause(FailureResourceLimit, err))
-			}
 			return loopResult(failCause(FailureStorage, err))
 		}
 		sequence++
-		iterations++
 		turnID := identity.NewTurnID(input.ID, turnSequence)
 		request.TurnID = turnID
 		outcome, failureCode, finished, err := r.executeTurn(ctx, input, builtModel, messageWriter, request, &modelContext, turnID)

@@ -110,13 +110,6 @@ func (s *Executor) invoke(
 	}
 	invocation, err = s.reserveCall(ctx, invocation.ID)
 	if err != nil {
-		if errors.Is(err, fault.New(agentservice.ExecutionResourceLimit, "")) {
-			result, settleErr := s.reject(ctx, invocation.ID, executionmodel.FailureResourceLimit, "Tool call limit exceeded.")
-			if settleErr != nil {
-				return tool.ToolResult{}, settleErr
-			}
-			return result, nil
-		}
 		return tool.ToolResult{}, err
 	}
 	invalid := func(message string) (tool.ToolResult, error) {

@@ -23,14 +23,14 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// ProgressTracker 提供绑定本次执行的进度业务操作，由 Execution Service 检查状态、额度并提交事务。
+// ProgressTracker 提供绑定本次执行的进度业务操作，由 Execution Service 检查状态并提交事务。
 // 工具调用次数和回执字节由工具准入、消息写入负责，Loop 不直接修改执行实体。
 type ProgressTracker interface {
-	// LoadProgress 返回当前持久化快照；读取失败时停止执行，不用旧预算继续运行。
+	// LoadProgress 返回当前持久化进度；读取失败时停止执行，不用旧序号继续运行。
 	LoadProgress(context.Context) (Progress, error)
 	// RecordIteration 在模型请求前推进序号和请求次数；失败时不得调用模型。
 	RecordIteration(context.Context, uint64) error
-	// RecordSummaryRequest 推进唯一请求序号，不消耗 ReAct 迭代。
+	// RecordSummaryRequest 推进唯一请求序号，不计入 ReAct 迭代次数。
 	RecordSummaryRequest(context.Context, uint64) error
 	// RecordModelOutput 保存一次模型响应的文本消耗，取消后也不丢失已用额度。
 	RecordModelOutput(context.Context, int) error
@@ -64,14 +64,11 @@ type Config struct {
 	WorkspacePath string
 }
 
-// Progress 是 Loop 消费的已提交额度及输出证据。
+// Progress 是 Loop 消费的已提交请求序号及输出证据。
 type Progress struct {
 	NextSequence    uint64
-	Iterations      uint64
 	FinalStopReason string
 }
-
-const MaxIterations = 30
 
 type FailureCode string
 

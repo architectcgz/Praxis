@@ -27,7 +27,7 @@ func validateToolCalls(calls []ToolCall) error {
 	return nil
 }
 
-// runToolCalls 顺序派发工具，逐个提交回执，额度不足时结算同批剩余调用。
+// runToolCalls 顺序派发工具，逐个提交回执。
 // 返回的结果与 calls 顺序一致；失败时只返回此前已写入回执的结果，不继续执行后续工具。
 // 授权和持久化准入由 ToolExecutor 负责。
 // 下一次模型请求读取结果前必须写入工具结果回执，避免崩溃后留下无法对账的副作用。
@@ -39,7 +39,6 @@ func (r *Runner) runToolCalls(
 	requestID identity.RequestID,
 ) ([]tool.ToolResult, error) {
 	results := make([]tool.ToolResult, 0, len(calls))
-	limited := false
 	for callIndex, call := range calls {
 		prepared := tool.PreparedToolCall{Call: call}
 		invocation, err := r.Executions.FindByExecutionCall(ctx, metadata.ExecutionID, call.ID)
@@ -77,9 +76,6 @@ func (r *Runner) runToolCalls(
 				if errors.Is(err, fault.New(ErrorPolicyBlocked, "")) {
 					return results, failCause(FailurePolicyBlocked, err)
 				}
-				if errors.Is(err, fault.New(ErrorResourceLimit, "")) {
-					return results, failCause(FailureResourceLimit, err)
-				}
 				return results, failCause(FailureStorage, err)
 			}
 			block := appcontext.NewToolResultBlock(call.ID, string(call.Name), payload, true)
@@ -100,11 +96,6 @@ func (r *Runner) runToolCalls(
 		}
 		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.ExecutionID, metadata.TurnID, block)
 		results = append(results, result)
-		limited = limited || result.ErrorClass == string(toolexecution.FailureResourceLimit)
-
-	}
-	if limited {
-		return results, fail(FailureResourceLimit, ErrorResourceLimit, "tool call limit exceeded")
 	}
 	return results, nil
 }
