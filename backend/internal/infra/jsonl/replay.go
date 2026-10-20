@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"praxis/internal/fault"
 )
 
 func (s *Store) replay(ctx context.Context, scope string) error {
@@ -63,6 +64,14 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 				if err != nil {
 					return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
 				}
+				prior, err := s.payload(txCtx, eventKey(scope, event))
+				if err == nil {
+					if err := immutable(event.Collection, prior, event.Payload); err != nil {
+						return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
+					}
+				} else if !errors.Is(err, fault.ErrNotFound) {
+					return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
+				}
 			}
 			if err := s.stage(txCtx, event, entry); err != nil {
 				return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
@@ -71,7 +80,7 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 		if len(tx.events) != len(record.Events) {
 			return fmt.Errorf("%s offset %d: redundant or duplicate event", path, offset)
 		}
-		if err := s.validateTransaction(txCtx); err != nil {
+		if err := s.validateRestoredTransaction(txCtx); err != nil {
 			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
 		s.publish(tx, offset, int64(len(line)))

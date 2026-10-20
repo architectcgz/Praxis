@@ -133,9 +133,6 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 			AgentID: owner.ID,
 			Data:    data,
 		}
-		if err := record.Validate(); err != nil {
-			return err
-		}
 		if err := save(txCtx, s, scope, "message", messageKey(ownerID, data.ID), "message.appended", record); err != nil {
 			return err
 		}
@@ -240,7 +237,7 @@ func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, afte
 	return repository.MessageStream{Messages: result, SequenceBoundary: boundary}, nil
 }
 
-// Validate 在消息写入或磁盘读取入口检查消息结构和流身份。
+// Validate 只在磁盘读取入口检查消息结构和流身份。
 func (r messageRecord) Validate() error {
 	if r.AgentID == "" || r.AgentID.String() != strings.TrimSpace(r.AgentID.String()) || strings.ContainsAny(r.AgentID.String(), "\x00\r\n") {
 		return errors.New("message agent identity must be canonical and nonempty")
@@ -261,7 +258,7 @@ func (r messageRecord) Validate() error {
 	return nil
 }
 
-// validateMessageData 在消息写入和磁盘读取入口检查身份、角色及内容结构。
+// validateMessageData 只在磁盘读取入口检查身份、角色及内容结构。
 func validateMessageData(m messagemodel.Message) error {
 	if m.ID == "" || m.Sequence == 0 || m.CreatedAt.IsZero() {
 		return errors.New("message identity, sequence and creation time are required")

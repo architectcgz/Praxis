@@ -270,20 +270,10 @@ func validateReasoningState(state *appcontext.ReasoningState) error {
 	return nil
 }
 
-func (s *Store) validateTransaction(ctx context.Context) error {
+// prepareCommit 维护存储唯一性和回执索引，不重复检查调用方已保证的业务状态与关联。
+func (s *Store) prepareCommit(ctx context.Context) error {
 	tx := s.tx(ctx)
 	if tx.deletedScope {
-		// 删除检查最终事务状态，但不能因为即将清理索引而隐藏仍在运行的 Task。
-		tx.deletedScope = false
-		_, err := s.payload(ctx, entityKey{"session", tx.scope})
-		active := len(s.keys(ctx, lookupKey{kind: "active-session", owner: tx.scope}))
-		tx.deletedScope = true
-		if err != nil {
-			return err
-		}
-		if active != 0 {
-			return agentmodel.ErrAgentExecuting
-		}
 		return nil
 	}
 	for key, change := range tx.changes {
@@ -299,6 +289,28 @@ func (s *Store) validateTransaction(ctx context.Context) error {
 				}
 			}
 		}
+	}
+	return s.prepareReceiptChanges(ctx)
+}
+
+// validateRestoredTransaction 只在磁盘恢复边界检查业务关联，拒绝不一致的日志。
+func (s *Store) validateRestoredTransaction(ctx context.Context) error {
+	tx := s.tx(ctx)
+	if tx.deletedScope {
+		// 删除检查最终事务状态，但不能因为即将清理索引而隐藏仍在运行的 Execution。
+		tx.deletedScope = false
+		_, err := s.payload(ctx, entityKey{"session", tx.scope})
+		active := len(s.keys(ctx, lookupKey{kind: "active-session", owner: tx.scope}))
+		tx.deletedScope = true
+		if err != nil {
+			return err
+		}
+		if active != 0 {
+			return agentmodel.ErrAgentExecuting
+		}
+		return nil
+	}
+	for key, change := range tx.changes {
 		if err := s.validateRelations(ctx, key, change.entry); err != nil {
 			return fmt.Errorf("%s/%s: %w", key.collection, key.id, err)
 		}
@@ -312,7 +324,7 @@ func (s *Store) validateTransaction(ctx context.Context) error {
 			}
 		}
 	}
-	return s.prepareReceiptChanges(ctx)
+	return s.prepareCommit(ctx)
 }
 
 func (s *Store) validateRelations(ctx context.Context, key entityKey, entry indexEntry) error {

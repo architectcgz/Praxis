@@ -73,7 +73,7 @@ func (s *Store) view(ctx context.Context, fn func(context.Context) error) error 
 	return fn(context.WithValue(ctx, transactionKey{}, tx))
 }
 
-// InTx 只保留本次变更；嵌套调用共享事务，最终关联约束在整笔事务完成后验证。
+// InTx 只保留本次变更；嵌套调用共享事务，提交前准备唯一索引和回执索引。
 func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error {
 	if ctx == nil || fn == nil {
 		return errors.New("transaction context and callback are required")
@@ -110,7 +110,7 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.validateTransaction(txCtx); err != nil {
+	if err := s.prepareCommit(txCtx); err != nil {
 		return err
 	}
 	encoded, err := json.Marshal(batch{Events: tx.events})
@@ -182,9 +182,6 @@ func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error 
 				if old.location.Scope != tx.scope {
 					return fault.ErrRequestConflict
 				}
-			}
-			if err := immutable(event.Collection, prior, event.Payload); err != nil {
-				return err
 			}
 			if bytes.Equal(prior, event.Payload) {
 				return nil
