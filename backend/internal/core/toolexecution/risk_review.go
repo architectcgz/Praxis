@@ -66,12 +66,12 @@ func (i *Execution) ApplyRiskAssessment(turnID identity.TurnID, assessment secur
 	case current.Action == security.ApprovalDeny:
 		next.Status = StatusDenied
 		next.FailureCode = FailureNotAllowed
-		next.Result = Result{InlineContent: "The operation is prohibited by rule: " + current.RuleID, ErrorCode: FailureNotAllowed}
+		next.Result = Result{InlineContent: "The operation is prohibited by rule: " + current.RuleID}
 		next.SettledAt = at.UTC()
 	case assessment.Verdict == security.RiskDangerous:
 		next.Status = StatusDenied
 		next.FailureCode = FailureRiskDenied
-		next.Result = Result{InlineContent: "Risk review denied this operation: " + assessment.Reason, ErrorCode: FailureRiskDenied}
+		next.Result = Result{InlineContent: "Risk review denied this operation: " + assessment.Reason}
 		next.SettledAt = at.UTC()
 	case assessment.Verdict == security.RiskUncertain:
 		next.Status = StatusAwaitingApproval

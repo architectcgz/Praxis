@@ -93,7 +93,7 @@ func (s *Executor) start(ctx context.Context, id identity.ToolExecutionID) (exec
 				if previous.Status == executionmodel.StatusUnknown && previous.Name == current.Name &&
 					(previous.ArgumentsDigest == current.ArgumentsDigest || bytes.Equal(previous.NormalizedArguments, current.NormalizedArguments)) {
 					result := tool.NewToolError(string(executionmodel.FailureInterrupted), "A previous identical call has unknown side effects. Confirm its outcome before retrying.")
-					if err := current.Interrupt(executionmodel.Result{InlineContent: result.Payload, ErrorCode: executionmodel.FailureInterrupted}, s.clock.Now()); err != nil {
+					if err := current.Interrupt(executionmodel.Result{InlineContent: result.Payload}, s.clock.Now()); err != nil {
 						return err
 					}
 					invocation = current
@@ -133,11 +133,11 @@ func (s *Executor) reject(ctx context.Context, id identity.ToolExecutionID, code
 			code = executionmodel.FailureInterrupted
 		}
 		result := tool.NewToolError(string(code), message)
-		domain := executionmodel.Result{InlineContent: result.Payload, ErrorCode: code}
+		domain := executionmodel.Result{InlineContent: result.Payload}
 		if current.Status == executionmodel.StatusApproved {
 			err = current.Interrupt(domain, s.clock.Now())
 		} else {
-			err = current.Deny(domain, s.clock.Now())
+			err = current.Deny(domain, code, s.clock.Now())
 		}
 		if err != nil {
 			return err
@@ -170,11 +170,9 @@ func (s *Executor) fail(
 	id identity.ToolExecutionID,
 	result tool.ToolResult,
 ) error {
-	domainResult := executionmodel.Result{
-		InlineContent: result.Payload, ErrorCode: executionmodel.FailureExecutionFailed,
-	}
+	domainResult := executionmodel.Result{InlineContent: result.Payload}
 	return s.settle(ctx, id, func(invocation *executionmodel.Execution) error {
-		return invocation.Fail(domainResult, executionmodel.FailureExecutionFailed, s.clock.Now())
+		return invocation.Fail(domainResult, s.clock.Now())
 	})
 }
 
@@ -183,9 +181,7 @@ func (s *Executor) interrupt(
 	id identity.ToolExecutionID,
 	result tool.ToolResult,
 ) error {
-	domainResult := executionmodel.Result{
-		InlineContent: result.Payload, ErrorCode: executionmodel.FailureResultUnknown,
-	}
+	domainResult := executionmodel.Result{InlineContent: result.Payload}
 	return s.settle(ctx, id, func(invocation *executionmodel.Execution) error {
 		return invocation.MarkResultUnknown(domainResult, s.clock.Now())
 	})

@@ -69,7 +69,7 @@ func (a ToolApprovals) Decide(ctx context.Context, params ToolDecision, approve 
 		if approve {
 			err = invocation.Approve(toolexecution.ApprovalRecord{Source: toolexecution.ApprovalSourceUser, ArgumentsDigest: params.ArgumentsDigest, ApprovedAt: time.Now().UTC()})
 		} else {
-			err = invocation.Deny(toolexecution.Result{InlineContent: "The user denied this tool call.", ErrorCode: toolexecution.FailureApprovalDenied}, time.Now().UTC())
+			err = invocation.Deny(toolexecution.Result{InlineContent: "The user denied this tool call."}, toolexecution.FailureApprovalDenied, time.Now().UTC())
 		}
 		if err != nil {
 			return err

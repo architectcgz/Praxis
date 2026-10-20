@@ -68,7 +68,7 @@ func (i *Execution) ApplyAuthorization(decision security.ApprovalDecision, at ti
 	case security.ApprovalDeny:
 		next.Status = StatusDenied
 		next.FailureCode = FailureNotAllowed
-		next.Result = Result{InlineContent: "The operation is prohibited by rule: " + decision.RuleID, ErrorCode: FailureNotAllowed}
+		next.Result = Result{InlineContent: "The operation is prohibited by rule: " + decision.RuleID}
 		next.SettledAt = at.UTC()
 	}
 	return i.apply(next)
@@ -90,9 +90,9 @@ func (i *Execution) RecheckAuthorization(decision security.ApprovalDecision, at 
 	if decision.Action == security.ApprovalDeny {
 		message := "The current configuration prohibits this operation. Rule: " + decision.RuleID
 		if i.Status == StatusAwaitingApproval {
-			return i.Deny(Result{InlineContent: message, ErrorCode: FailureNotAllowed}, at)
+			return i.Deny(Result{InlineContent: message}, FailureNotAllowed, at)
 		}
-		return i.Interrupt(Result{InlineContent: message, ErrorCode: FailureInterrupted}, at)
+		return i.Interrupt(Result{InlineContent: message}, at)
 	}
 	if i.Status == StatusApproved && i.Decision != decision {
 		// 用户已明确批准同一次冻结操作，仍满足当前 ask 要求，无须重复询问。

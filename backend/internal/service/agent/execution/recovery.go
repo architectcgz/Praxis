@@ -45,13 +45,13 @@ func (s *Service) reconcileToolResults(ctx context.Context, sessionID identity.S
 					return nil
 				}
 				result := tool.NewToolError(string(toolexecution.FailureInterrupted), "The tool call was interrupted before execution.")
-				err = invocation.Interrupt(toolexecution.Result{InlineContent: result.Payload, ErrorCode: toolexecution.FailureInterrupted}, at)
+				err = invocation.Interrupt(toolexecution.Result{InlineContent: result.Payload}, at)
 			case toolexecution.StatusRunning:
 				if task.Active() && !startup {
 					return nil
 				}
 				result := tool.NewToolError(string(toolexecution.FailureResultUnknown), "Execution stopped after the tool started. Its side effects are unknown; do not automatically retry.")
-				err = invocation.MarkResultUnknown(toolexecution.Result{InlineContent: result.Payload, ErrorCode: toolexecution.FailureResultUnknown}, at)
+				err = invocation.MarkResultUnknown(toolexecution.Result{InlineContent: result.Payload}, at)
 			}
 			if err != nil {
 				return err

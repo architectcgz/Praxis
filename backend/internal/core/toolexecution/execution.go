@@ -69,7 +69,7 @@ const (
 	FailureInterrupted     FailureCode = "tool_interrupted"
 )
 
-// Valid 判断失败码是否受支持；空值表示没有失败。
+// Valid 在持久化恢复边界判断失败码是否受支持；空值表示没有失败。
 func (c FailureCode) Valid() bool {
 	switch c {
 	case FailureResourceLimit, FailureNone, FailureInvalidCall, FailureNotAllowed, FailureApprovalDenied, FailureRiskDenied,
@@ -83,7 +83,7 @@ func (c FailureCode) Valid() bool {
 // Result 保存有界的结果正文及错误、副作用和截断标记。
 type Result struct {
 	InlineContent string
-	ErrorCode     FailureCode
+	ErrorCode     FailureCode // 由状态变更入口根据 Execution.FailureCode 写入。
 	SideEffect    bool
 	Truncated     bool
 }
@@ -153,11 +153,8 @@ func (i Execution) validateState() error {
 	if !i.ApprovedAt.IsZero() && len(i.NormalizedArguments) == 0 {
 		return fault.InvalidValue("toolExecution", "approved invocation requires normalized arguments")
 	}
-	if !i.Status.Valid() || !i.FailureCode.Valid() || i.CreatedAt.IsZero() {
-		return fault.InvalidValue("toolExecution", "status, failure code, or creation time is invalid")
-	}
-	if !i.Result.ErrorCode.Valid() {
-		return fault.InvalidValue("toolExecution.result.errorCode", "unknown tool failure code")
+	if !i.Status.Valid() || i.CreatedAt.IsZero() {
+		return fault.InvalidValue("toolExecution", "status or creation time is invalid")
 	}
 	if i.ApprovedAt.IsZero() {
 		if i.Approval != (ApprovalRecord{}) || !i.StartedAt.IsZero() {
@@ -184,10 +181,10 @@ func (i Execution) validateState() error {
 		}
 	}
 	if i.Status.Terminal() {
-		if i.SettledAt.IsZero() || i.Result.ErrorCode != i.FailureCode {
-			return fault.InvalidValue("toolExecution", "terminal invocation requires a settlement time and matching result code")
+		if i.SettledAt.IsZero() {
+			return fault.InvalidValue("toolExecution", "terminal invocation requires a settlement time")
 		}
-	} else if !i.SettledAt.IsZero() || i.FailureCode != FailureNone || i.Result != (Result{}) {
+	} else if !i.SettledAt.IsZero() || i.Result != (Result{}) {
 		return fault.InvalidValue("toolExecution", "active invocation contains terminal fields")
 	}
 	if i.StartedAt.IsZero() && i.Result.SideEffect {
@@ -205,28 +202,6 @@ func (i Execution) validateState() error {
 	case StatusRunning, StatusSucceeded, StatusFailed, StatusUnknown:
 		if i.StartedAt.IsZero() {
 			return fault.InvalidValue("toolExecution.startedAt", "executed invocation requires a start time")
-		}
-	}
-	switch i.Status {
-	case StatusSucceeded:
-		if i.FailureCode != FailureNone {
-			return fault.InvalidValue("toolExecution.result", "successful invocation cannot contain a failure")
-		}
-	case StatusFailed:
-		if i.FailureCode == FailureNone {
-			return fault.InvalidValue("toolExecution.result", "failed invocation requires a failure code")
-		}
-	case StatusDenied:
-		if i.FailureCode != FailureResourceLimit && i.FailureCode != FailureNotAllowed && i.FailureCode != FailureApprovalDenied && i.FailureCode != FailureRiskDenied && i.FailureCode != FailureInvalidCall {
-			return fault.InvalidValue("toolExecution.result", "denial requires a denial failure code")
-		}
-	case StatusInterrupted:
-		if i.FailureCode != FailureInterrupted {
-			return fault.InvalidValue("toolExecution.result", "interruption requires its stable failure code")
-		}
-	case StatusUnknown:
-		if i.FailureCode != FailureResultUnknown {
-			return fault.InvalidValue("toolExecution.result", "unknown result requires its stable failure code")
 		}
 	}
 	return nil
@@ -268,22 +243,22 @@ func (i *Execution) Start(at time.Time) error {
 	return i.apply(next)
 }
 
-// Succeed 结算 running 调用；结果不得带错误码，结算失败不修改对象。
+// Succeed 结算 running 调用并清空失败码，结算失败不修改对象。
 func (i *Execution) Succeed(result Result, at time.Time) error {
 	return i.settle(StatusSucceeded, result, FailureNone, at)
 }
 
-// Fail 结算 running 调用；code 必须非空且与结果匹配，失败不修改对象。
-func (i *Execution) Fail(result Result, code FailureCode, at time.Time) error {
-	return i.settle(StatusFailed, result, code, at)
+// Fail 以固定失败码结算 running 调用，失败不修改对象。
+func (i *Execution) Fail(result Result, at time.Time) error {
+	return i.settle(StatusFailed, result, FailureExecutionFailed, at)
 }
 
-// Deny 拒绝尚未审批的调用；参数无效或权限拒绝均不能产生副作用。
-func (i *Execution) Deny(result Result, at time.Time) error {
-	return i.settle(StatusDenied, result, result.ErrorCode, at)
+// Deny 使用准入或审批流程给出的失败码拒绝尚未审批的调用，不得产生副作用。
+func (i *Execution) Deny(result Result, code FailureCode, at time.Time) error {
+	return i.settle(StatusDenied, result, code, at)
 }
 
-// Interrupt 中断任一非终态调用；允许恢复尚未启动的调用，错误码须为 interrupted。
+// Interrupt 中断任一非终态调用，由方法写入固定的中断失败码。
 func (i *Execution) Interrupt(result Result, at time.Time) error {
 	return i.settle(StatusInterrupted, result, FailureInterrupted, at)
 }
@@ -306,8 +281,9 @@ func (i *Execution) settle(status Status, result Result, code FailureCode, at ti
 	return i.apply(next)
 }
 
-// apply 先检查状态转换和本次产生的结果，失败时保留原对象；输入格式由入口负责。
+// apply 统一派生结果错误码并检查状态变更，失败时保留原对象；输入格式由入口负责。
 func (i *Execution) apply(next Execution) error {
+	next.Result.ErrorCode = next.FailureCode
 	if next.Result != i.Result && len(next.Result.InlineContent) > tool.MaxInlineResultBytes {
 		return fault.InvalidValue("toolExecution.result.inlineContent", "inline result exceeds the size limit")
 	}
