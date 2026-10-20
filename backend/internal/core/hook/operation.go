@@ -1,4 +1,4 @@
-// Package hook 定义业务执行边界的扩展协议；Hook 不参与授权、校验或事务仲裁。
+// Package hook 定义业务执行边界的扩展协议，区分观察通知与必须成功的同步记录。
 package hook
 
 import (

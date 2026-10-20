@@ -19,22 +19,34 @@ type modelResponse struct {
 	stopReason modelapi.ModelStopReason
 }
 
-// requestModel 发起一次模型请求并收集 Provider 事件，不读取 执行输入、不写入消息或上下文。
+// requestModel 在同步记录 Hook 成功后发起请求，结束时记录包括失败响应在内的已消费输出。
+// 本方法不读取执行实体、不执行恢复，也不写入消息或上下文。
 func requestModel(
 	ctx context.Context,
 	stream modelapi.ModelStream,
 	request modelapi.ModelRequest,
-	identity hook.Identity,
+	boundary hook.ModelRequest,
 	dispatcher *hook.Dispatcher,
 	onEvent func(modelapi.ModelStreamEvent),
 ) (response modelResponse, err error) {
+	if err := dispatcher.BeforeModelRequest(ctx, boundary); err != nil {
+		return response, failCause(FailureStorage, err)
+	}
 	ctx, scope := dispatcher.Start(ctx, hook.Operation{
-		Identity:    identity,
+		Identity:    boundary.Identity,
 		Kind:        hook.OperationProvider,
 		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
 		ReferenceID: "assistant:" + request.TurnID.String(),
 	})
-	defer func() { scope.End(hook.Result{Err: err, StopReason: response.stopReason}) }()
+	defer func() {
+		if hookErr := dispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
+			Request:     boundary,
+			OutputBytes: response.textBytes,
+		}); hookErr != nil {
+			err = failCause(FailureStorage, errors.Join(err, hookErr))
+		}
+		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
+	}()
 	firstResponse := false
 	callback := func(event modelapi.ModelStreamEvent) {
 		if !firstResponse && (event.Kind == modelapi.StreamTextDelta || event.Kind == modelapi.StreamThinkingDelta || event.Kind == modelapi.StreamToolCall) {

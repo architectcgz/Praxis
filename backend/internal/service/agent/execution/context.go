@@ -11,6 +11,7 @@ import (
 	queued "praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	"praxis/internal/loop"
 )
 
 // selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并检查必要原文容量。
@@ -127,15 +128,28 @@ func (s *Service) loadContextEntries(ctx context.Context, sessionID identity.Ses
 	}
 }
 
-// LoadContext 读取冻结历史与本 Execution 已提交的续接消息，只输出通用模型内容。
-// 业务恢复先协调已停止的工具调用；消息 Repository 读取保持只读。
-func (s *Service) LoadContext(ctx context.Context, task agentmodel.Execution) (appcontext.Content, []messagemodel.Message, error) {
+// PrepareLoop 在工具回执补齐后校验当前执行归属、判断完成证据并准备冻结上下文。
+// completed 为 true 时由 Coordinator 直接结算，不能再次进入 Loop。
+func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExecutionID) (executionInput loop.Input, completed bool, err error) {
 	if ctx == nil {
-		return appcontext.Content{}, nil, errors.New("task context is required")
+		return loop.Input{}, false, errors.New("execution preparation context is required")
 	}
-	var content appcontext.Content
-	var continuation []messagemodel.Message
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+		task, err := s.records.Get(txCtx, executionID)
+		if err != nil {
+			return err
+		}
+		agent, err := s.agents.Get(txCtx, task.AgentID)
+		if err != nil {
+			return err
+		}
+		if !task.Active() || agent.CurrentExecutionID != task.ID {
+			return fault.ErrRequestConflict
+		}
+		if task.Progress.FinalStopReason != "" {
+			completed = true
+			return nil
+		}
 		stream, err := s.messages.LoadMessages(txCtx, task.SessionID, task.AgentID, 0)
 		if err != nil {
 			return err
@@ -152,12 +166,22 @@ func (s *Service) LoadContext(ctx context.Context, task agentmodel.Execution) (a
 			}
 			shared = append(shared, entry)
 		}
-		content, err = contextContent(task.Config.SystemPrompt, task.InputMessageID, shared, messages, next)
-		continuation = next
-		return err
+		content, err := contextContent(task.Config.SystemPrompt, task.InputMessageID, shared, messages, next)
+		if err != nil {
+			return err
+		}
+		executionInput = loop.Input{
+			ID:        task.ID,
+			SessionID: task.SessionID,
+			AgentID:   task.AgentID,
+			RequestID: task.RequestID,
+			Config:    loop.Config{Model: task.Config.Model.Clone()},
+			Content:   content,
+		}
+		return nil
 	})
 	if err != nil {
-		return appcontext.Content{}, nil, err
+		return loop.Input{}, false, err
 	}
-	return content, continuation, nil
+	return executionInput, completed, nil
 }

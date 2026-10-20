@@ -23,24 +23,24 @@ func validateToolCalls(calls []ToolCall) error {
 }
 
 // runToolCalls 顺序消费 Service 已提交的回执；审批等待保留在当前 Loop 中。
-func (r *Runner) runToolCalls(ctx context.Context, input Input, calls []ToolCall, turnID identity.TurnID) ([]message.Message, error) {
+func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps ExecutionDependencies, calls []ToolCall, turnID identity.TurnID) ([]message.Message, error) {
 	results := make([]message.Message, 0, len(calls))
 	for _, call := range calls {
-		receipt, pending, err := input.ToolExecutor.Execute(ctx, input.ID, call.ID)
+		receipt, pending, err := deps.ToolExecutor.Execute(ctx, executionInput.ID, call.ID)
 		for err == nil && pending {
 			r.emit(Event{
 				Kind:        EventToolApprovalRequired,
-				SessionID:   input.SessionID,
-				AgentID:     input.AgentID,
-				ExecutionID: input.ID,
+				SessionID:   executionInput.SessionID,
+				AgentID:     executionInput.AgentID,
+				ExecutionID: executionInput.ID,
 				TurnID:      turnID,
 				CallID:      call.ID,
 				Name:        string(call.Name),
 			})
-			if err := input.AwaitApproval(ctx); err != nil {
+			if err := deps.AwaitApproval(ctx); err != nil {
 				return results, failCause(FailureStorage, err)
 			}
-			receipt, pending, err = input.ToolExecutor.Resume(ctx, input.ID, call.ID)
+			receipt, pending, err = deps.ToolExecutor.Resume(ctx, executionInput.ID, call.ID)
 		}
 		if err != nil {
 			return results, failCause(FailureStorage, err)
@@ -49,7 +49,7 @@ func (r *Runner) runToolCalls(ctx context.Context, input Input, calls []ToolCall
 			return results, failCause(FailureContract, errors.New("tool service returned an invalid committed receipt"))
 		}
 		block := receipt.Blocks[0]
-		r.emitToolResult(input.SessionID, input.AgentID, input.ID, turnID, appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
+		r.emitToolResult(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
 		results = append(results, receipt)
 		if err := ctx.Err(); err != nil {
 			return results, err

@@ -13,51 +13,52 @@ import (
 )
 
 // summarizeContext 在真实模型请求边界执行摘要，不执行工具、不发布思考或回答文本。
-// 请求在 执行输入 创建事务之外运行；原历史仍由调用方持有。
+// 请求和输出由同步 Hook 记录，原历史仍由调用方持有。
 func (r *Runner) summarizeContext(
 	ctx context.Context,
-	input Input,
+	executionInput Input,
 	stream modelapi.ModelStream,
 	history appcontext.ModelContext,
 	limit int,
-	sequence uint64,
 ) (string, error) {
-	if err := input.Progress.RecordSummaryRequest(ctx, sequence); err != nil {
-		return "", err
+	sequence, err := r.Requests.NextRequestSequence(ctx, executionInput.ID)
+	if err != nil {
+		return "", failCause(FailureStorage, err)
 	}
-	turnID := identity.NewTurnID(input.ID, sequence)
+	turnID := identity.NewTurnID(executionInput.ID, sequence)
 	r.emit(Event{
 		Kind:        EventTurnStarted,
-		SessionID:   input.SessionID,
-		AgentID:     input.AgentID,
-		ExecutionID: input.ID,
+		SessionID:   executionInput.SessionID,
+		AgentID:     executionInput.AgentID,
+		ExecutionID: executionInput.ID,
 		TurnID:      turnID,
 	})
 	request := modelapi.ModelRequest{
-		ExecutionID:     input.ID,
-		PromptCacheKey:  input.SessionID.String(),
+		ExecutionID:     executionInput.ID,
+		PromptCacheKey:  executionInput.SessionID.String(),
 		Context:         history,
-		Model:           input.Config.Model,
+		Model:           executionInput.Config.Model,
 		MaxOutputTokens: limit,
 		TurnID:          turnID,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := requestModel(requestCtx, stream, request, hook.Identity{
-		SessionID:   input.SessionID,
-		AgentID:     input.AgentID,
-		ExecutionID: input.ID,
-		TurnID:      turnID,
+	response, err := requestModel(requestCtx, stream, request, hook.ModelRequest{
+		Identity: hook.Identity{
+			SessionID:   executionInput.SessionID,
+			AgentID:     executionInput.AgentID,
+			ExecutionID: executionInput.ID,
+			TurnID:      turnID,
+		},
+		Kind:     hook.ModelRequestSummary,
+		Sequence: sequence,
 	}, r.HookDispatcher, func(event modelapi.ModelStreamEvent) {
 		if event.Kind == modelapi.StreamUsage {
-			r.emitModelEvent(input.SessionID, input.AgentID, input.ID, turnID, event)
+			r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 		}
 	})
 	if err != nil {
 		return "", modelFailure(err)
-	}
-	if err := input.Progress.RecordModelOutput(ctx, response.textBytes); err != nil {
-		return "", failCause(FailureStorage, err)
 	}
 	if len(response.toolCalls()) != 0 {
 		return "", errors.New("context summary returned a tool call")
@@ -70,9 +71,9 @@ func (r *Runner) summarizeContext(
 	}
 	r.emit(Event{
 		Kind:        EventTurnCompleted,
-		SessionID:   input.SessionID,
-		AgentID:     input.AgentID,
-		ExecutionID: input.ID,
+		SessionID:   executionInput.SessionID,
+		AgentID:     executionInput.AgentID,
+		ExecutionID: executionInput.ID,
 		TurnID:      turnID,
 		StopReason:  response.stopReason,
 	})

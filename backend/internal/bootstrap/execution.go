@@ -62,6 +62,8 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 	return assembleCoordinator(coordinatorDependencies{
 		Transactions: resources.store,
 		Tasks:        tasks,
+		Requests:     tasks,
+		ProgressHook: executionservice.ProgressHook{Service: tasks},
 		Records:      repos.Executions,
 		Queue:        queue,
 		Recovery: execution.RecoveryCatalog{

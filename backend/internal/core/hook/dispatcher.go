@@ -9,6 +9,7 @@ import (
 type Dispatcher struct {
 	operations []OperationHook
 	events     []CommittedHook
+	models     []ModelHook
 }
 
 // NewDispatcher 复制注册列表；不传 Hook 时返回空分发器，Hook 实例应支持并发执行。

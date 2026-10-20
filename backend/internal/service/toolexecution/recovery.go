@@ -10,12 +10,8 @@ import (
 	"praxis/internal/identity"
 )
 
-// Recover 仅由已确认旧 Loop 终止的 Coordinator 或 Loop 初始恢复阶段调用。
+// Recover 仅由已确认旧 Loop 和工具终止的业务恢复编排调用。
 // 不读取审批或 started 判断重放，所有孤儿调用都补同一错误回执。
-func (scope *Scope) Recover(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.Message, error) {
-	return scope.service.Recover(ctx, executionID, callID)
-}
-
 func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.Message, error) {
 	key := executionmodel.Key{ExecutionID: executionID, CallID: callID}
 	s.controlMu.Lock()

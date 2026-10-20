@@ -27,6 +27,8 @@ type ModelSource interface {
 type coordinatorDependencies struct {
 	Transactions   repository.Transaction
 	Tasks          execution.ExecutionOperations
+	Requests       loop.RequestSequencer
+	ProgressHook   hook.ModelHook
 	Records        repository.AgentExecution
 	Queue          execution.TaskQueue
 	Recovery       execution.RecoverySource
@@ -50,7 +52,6 @@ type coordinatorDependencies struct {
 }
 
 func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, error) {
-	runner := deps.Runner
 	observe := func(event loop.Event) {
 		if deps.ObserveUsage != nil && event.Kind == loop.EventModelUsage && event.Usage != nil {
 			deps.ObserveUsage(model.ModelUsageRecord{
@@ -95,22 +96,29 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		return nil, err
 	}
 
-	if runner == nil {
-		built, err := loop.NewRunner(loop.Dependencies{
-			ModelBuilder:   deps.Models,
-			SummaryFormat:  deps.SummaryFormat,
-			Tools:          deps.Tools,
-			HookDispatcher: deps.HookDispatcher,
-			EventObserver:  observe,
-			Logf:           logging.NewFactory().Ensure(deps.Logger).Infof,
-		})
-		if err != nil {
-			return nil, err
-		}
-		runner = &built
+	runnerDeps := loop.Dependencies{
+		ModelBuilder:   deps.Models,
+		SummaryFormat:  deps.SummaryFormat,
+		Tools:          deps.Tools,
+		HookDispatcher: deps.HookDispatcher,
+		EventObserver:  observe,
+		Logf:           logging.NewFactory().Ensure(deps.Logger).Infof,
+	}
+	if deps.Runner != nil {
+		runnerDeps = deps.Runner.Dependencies
+	}
+	// 执行序号和记录 Hook 始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
+	runnerDeps.Requests = deps.Requests
+	if runnerDeps.HookDispatcher == nil {
+		runnerDeps.HookDispatcher = deps.HookDispatcher
+	}
+	runnerDeps.HookDispatcher = runnerDeps.HookDispatcher.WithModelHooks(deps.ProgressHook)
+	runner, err := loop.NewRunner(runnerDeps)
+	if err != nil {
+		return nil, err
 	}
 	return execution.NewCoordinator(execution.Config{
-		Loop:           runner,
+		Loop:           &runner,
 		ActiveTasks:    deps.ActiveTasks,
 		Operations:     deps.Tasks,
 		Queue:          deps.Queue,

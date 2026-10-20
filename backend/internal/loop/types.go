@@ -14,7 +14,6 @@ import (
 type ToolExecutor interface {
 	Execute(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, bool, error)
 	Resume(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, bool, error)
-	Recover(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, error)
 }
 
 type (
@@ -24,17 +23,10 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// ProgressTracker 提供绑定本次执行的进度业务操作，由 Execution Service 检查状态并提交事务。
-// 工具调用次数和回执字节由消息写入负责，Loop 不直接修改执行实体。
-type ProgressTracker interface {
-	// LoadProgress 返回当前持久化进度；读取失败时停止执行，不用旧序号继续运行。
-	LoadProgress(context.Context) (Progress, error)
-	// RecordIteration 在模型请求前推进序号和请求次数；失败时不得调用模型。
-	RecordIteration(context.Context, uint64) error
-	// RecordSummaryRequest 推进唯一请求序号，不计入 ReAct 迭代次数。
-	RecordSummaryRequest(context.Context, uint64) error
-	// RecordModelOutput 保存一次模型响应的文本消耗，取消后也不丢失已用额度。
-	RecordModelOutput(context.Context, int) error
+// RequestSequencer 提供本次请求可使用的序号；请求 Hook 在调用模型前原子确认并推进序号。
+// 风险审核也会消耗序号，每次请求都读取最新值，不保留进度或执行恢复能力。
+type RequestSequencer interface {
+	NextRequestSequence(context.Context, identity.AgentExecutionID) (uint64, error)
 }
 
 // EndReason 只描述 Loop 为什么返回，不表示业务持久化结果。
@@ -47,28 +39,25 @@ const (
 
 type Result struct{ Reason EndReason }
 
-// Input 是调用方冻结的本次模型和工具执行输入。
+// Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
 type Input struct {
-	ToolExecutor  ToolExecutor
-	AwaitApproval func(context.Context) error
-	Progress      ProgressTracker
-	ID            identity.AgentExecutionID
-	SessionID     identity.SessionID
-	AgentID       identity.AgentID
-	RequestID     identity.RequestID
-	Config        Config
-	Content       appcontext.Content
-	Continuation  []messagemodel.Message
-	Writer        repository.MessageWriter
-}
-type Config struct {
-	Model modelapi.Config
+	ID        identity.AgentExecutionID
+	SessionID identity.SessionID
+	AgentID   identity.AgentID
+	RequestID identity.RequestID
+	Config    Config
+	Content   appcontext.Content
 }
 
-// Progress 是 Loop 消费的已提交请求序号及输出证据。
-type Progress struct {
-	NextSequence    uint64
-	FinalStopReason string
+// ExecutionDependencies 只在本次 Run 中使用；共享 Runner 不保存单次执行的环境或等待状态。
+type ExecutionDependencies struct {
+	ToolExecutor  ToolExecutor
+	AwaitApproval func(context.Context) error
+	Writer        repository.MessageWriter
+}
+
+type Config struct {
+	Model modelapi.Config
 }
 
 type FailureCode string

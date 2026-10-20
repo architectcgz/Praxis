@@ -4,26 +4,19 @@ import (
 	"context"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/loop"
 )
 
-// LoadProgress 只向核心循环暴露已提交的请求序号和最终输出证据。
-func (s *Service) LoadProgress(ctx context.Context, id identity.AgentExecutionID) (loop.Progress, error) {
+// NextRequestSequence 返回当前可用序号；同步请求 Hook 在模型调用前校验并原子推进。
+// 此操作仅协调正常执行中的请求身份，不执行状态恢复或读取上下文。
+func (s *Service) NextRequestSequence(ctx context.Context, id identity.AgentExecutionID) (uint64, error) {
 	execution, err := s.records.Get(ctx, id)
 	if err != nil {
-		return loop.Progress{}, err
+		return 0, err
 	}
-	return loop.Progress{NextSequence: execution.Progress.NextSequence, FinalStopReason: execution.Progress.FinalStopReason}, nil
-}
-
-// RecordIteration 在真实 ReAct 请求前原子记录迭代次数与请求序号。
-func (s *Service) RecordIteration(ctx context.Context, id identity.AgentExecutionID, sequence uint64) error {
-	return s.recordRequest(ctx, id, sequence, true)
-}
-
-// RecordSummaryRequest 仅统计摘要请求，不计入 ReAct 迭代次数。
-func (s *Service) RecordSummaryRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64) error {
-	return s.recordRequest(ctx, id, sequence, false)
+	if !execution.Active() {
+		return 0, fault.ErrRequestConflict
+	}
+	return max(uint64(1), execution.Progress.NextSequence), nil
 }
 
 func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64, iteration bool) error {
@@ -44,9 +37,12 @@ func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionI
 	})
 }
 
-// RecordModelOutput 累计一次模型响应的文本字节；ctx 必须非 nil，取消后仍保存已消耗额度。
-// 调用方只记录模型输出；工具回执由消息存储层计费，不在此重复累计。
-func (s *Service) RecordModelOutput(ctx context.Context, id identity.AgentExecutionID, outputBytes int) error {
+// recordModelOutput 累计模型实际返回的文本字节，取消后仍保存已消耗额度。
+// 工具回执由消息存储层计费，不在此重复累计。
+func (s *Service) recordModelOutput(ctx context.Context, id identity.AgentExecutionID, outputBytes int) error {
+	if outputBytes == 0 {
+		return nil
+	}
 	return s.tx.InTx(context.WithoutCancel(ctx), func(txCtx context.Context) error {
 		task, err := s.records.Get(txCtx, id)
 		if err != nil {

@@ -118,22 +118,16 @@ func (r *Coordinator) execute(
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
-	content, continuation, err := r.operations.LoadContext(ctx, task)
+	executionInput, completed, err := r.operations.PrepareLoop(ctx, task.ID)
 	outcome, failureCode := agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage
 	if err == nil {
-		_, err = r.loop.Run(ctx, loop.Input{
-			Progress:      executionProgress{operations: r.operations, id: task.ID},
-			ID:            task.ID,
-			SessionID:     task.SessionID,
-			AgentID:       task.AgentID,
-			RequestID:     task.RequestID,
-			Config:        loop.Config{Model: task.Config.Model.Clone()},
-			ToolExecutor:  executor,
-			AwaitApproval: awaitApproval,
-			Content:       content,
-			Continuation:  continuation,
-			Writer:        messageWriter,
-		})
+		if !completed {
+			_, err = r.loop.Run(ctx, executionInput, loop.ExecutionDependencies{
+				ToolExecutor:  executor,
+				AwaitApproval: awaitApproval,
+				Writer:        messageWriter,
+			})
+		}
 		outcome, failureCode = agentmodel.ExecutionCompleted, ""
 		if err != nil {
 			outcome = agentmodel.ExecutionFailed
