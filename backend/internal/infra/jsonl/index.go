@@ -2,6 +2,7 @@ package jsonl
 
 import (
 	"context"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/repository"
 	"slices"
@@ -34,6 +35,7 @@ type index struct {
 	hasMessages map[string]bool
 	deleted     map[string]bool
 	missing     map[receiptKey]repository.MissingToolResult
+	calls       map[toolexecution.Key]callReference
 }
 
 func newIndex() *index {
@@ -45,6 +47,7 @@ func newIndex() *index {
 		hasMessages: make(map[string]bool),
 		deleted:     make(map[string]bool),
 		missing:     make(map[receiptKey]repository.MissingToolResult),
+		calls:       make(map[toolexecution.Key]callReference),
 	}
 }
 
@@ -168,6 +171,11 @@ func (s *Store) publish(tx *transaction, offset, length int64) {
 				delete(s.index.missing, key)
 			}
 		}
+		for key, ref := range s.index.calls {
+			if ref.fact.SessionID.String() == tx.scope {
+				delete(s.index.calls, key)
+			}
+		}
 		delete(s.index.hasMessages, tx.scope)
 		s.messages.remove(tx.scope)
 		s.index.deleted[tx.scope] = true
@@ -212,6 +220,9 @@ func (s *Store) publish(tx *transaction, offset, length int64) {
 				tx.replayMessages.add(record, ref)
 			}
 			s.index.hasMessages[tx.scope] = true
+		}
+		for key, ref := range tx.callChanges {
+			s.index.calls[key] = ref
 		}
 		for key, value := range tx.receiptChanges {
 			if value == nil {

@@ -21,24 +21,21 @@ type output struct {
 	NextOffset *int   `json:"nextOffset,omitempty"`
 }
 
-// Execute 读取 Workspace 内的 UTF-8 普通文件并返回有界结果。
-func Execute(ctx context.Context, call tool.ExecutionCall) (tool.ToolResult, error) {
+// Call 读取 Workspace 内的 UTF-8 普通文件并返回有界结果。
+func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
 	if ctx == nil {
 		return tool.ToolResult{}, errors.New("tool task context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	if call.Name != tool.ToolReadFile {
-		return tool.ToolResult{}, errors.New("read_file executor does not support the call")
-	}
 	var toolArguments arguments
-	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil {
-		return tool.ToolResult{}, errors.New("normalized read_file arguments are invalid")
+	if err := json.Unmarshal(args, &toolArguments); err != nil {
+		return tool.ToolResult{}, errors.New("read_file arguments are invalid")
 	}
-	if toolArguments.Path != call.Path || toolArguments.Offset < 0 ||
+	if toolArguments.Offset < 0 ||
 		toolArguments.Limit < minLimit || toolArguments.Limit > maxLimit ||
-		!workspaceFile(toolArguments.Path, call.WorkspacePath) {
+		!workspaceFile(toolArguments.Path, workspacePath) {
 		return tool.ToolResult{}, errors.New("read_file path is outside a workspace regular file")
 	}
 	file, err := os.Open(toolArguments.Path)
@@ -47,7 +44,7 @@ func Execute(ctx context.Context, call tool.ExecutionCall) (tool.ToolResult, err
 	}
 	defer file.Close()
 	fileInfo, err := file.Stat()
-	if err != nil || !fileInfo.Mode().IsRegular() || !workspaceFile(toolArguments.Path, call.WorkspacePath) {
+	if err != nil || !fileInfo.Mode().IsRegular() || !workspaceFile(toolArguments.Path, workspacePath) {
 		return tool.ToolResult{}, errors.New("read_file path is outside a workspace regular file")
 	}
 	if err := ctx.Err(); err != nil {

@@ -10,6 +10,7 @@ import (
 	"praxis/internal/logging"
 	"praxis/internal/loop"
 	"praxis/internal/repository"
+	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 	"time"
 )
@@ -17,7 +18,9 @@ import (
 type Config struct {
 	ConfigMu          *sync.RWMutex
 	Recovery          RecoverySource
-	Approvals         ToolApprovals
+	Tools             *toolservice.Service
+	Sessions          repository.Session
+	Workspaces        repository.Workspace
 	Loop              *loop.Runner
 	ActiveTasks       *ActiveTasks
 	Operations        ExecutionOperations
@@ -32,7 +35,11 @@ type Config struct {
 type Coordinator struct {
 	configMu          *sync.RWMutex
 	recovery          RecoverySource
-	approvals         ToolApprovals
+	tools             *toolservice.Service
+	sessions          repository.Session
+	workspaces        repository.Workspace
+	restored          bool
+	restoring         bool
 	loop              *loop.Runner
 	activeTasks       *ActiveTasks
 	operations        ExecutionOperations
@@ -49,7 +56,7 @@ type Coordinator struct {
 }
 
 func NewCoordinator(config Config) (*Coordinator, error) {
-	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.Queue == nil || config.Messages == nil {
+	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.Queue == nil || config.Messages == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil {
 		return nil, errors.New("execution loop, active tasks, task operations, queue and message streams are required")
 	}
 	timeout := config.TransitionTimeout
@@ -62,7 +69,9 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 	return &Coordinator{
 		configMu:          config.ConfigMu,
 		recovery:          config.Recovery,
-		approvals:         config.Approvals,
+		tools:             config.Tools,
+		sessions:          config.Sessions,
+		workspaces:        config.Workspaces,
 		loop:              config.Loop,
 		activeTasks:       config.ActiveTasks,
 		operations:        config.Operations,

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"reflect"
 )
@@ -29,8 +28,12 @@ func ValidateExecutionUpdate(before, after Execution) error {
 	if !canExecutionTransition(before.Status, after.Status) {
 		return fault.ErrRequestConflict
 	}
-	if before.Status == ExecutionEnded && !reflect.DeepEqual(before, after) {
-		return fault.ErrRequestConflict
+	if before.Status == ExecutionEnded {
+		prior := before
+		prior.Progress.OutputBytes = after.Progress.OutputBytes
+		if !reflect.DeepEqual(prior, after) {
+			return fault.ErrRequestConflict
+		}
 	}
 	left, right := before, after
 	left.Status, right.Status = "", ""
@@ -53,7 +56,7 @@ func ValidateExecutionUpdate(before, after Execution) error {
 	return nil
 }
 
-func (e *Execution) RecordFinalOutput(value toolexecution.FinalOutput) error {
+func (e *Execution) RecordFinalOutput(value FinalOutput) error {
 	if !e.Active() || e.Progress.FinalAssistantID != "" && (e.Progress.FinalAssistantID != value.AssistantID || e.Progress.FinalStopReason != value.StopReason) {
 		return fault.ErrRequestConflict
 	}

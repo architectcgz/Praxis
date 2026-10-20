@@ -6,8 +6,6 @@ import (
 	"praxis/internal/fault"
 )
 
-var errAwaitingApproval = errors.New("input is awaiting tool approval")
-
 // ErrorCode 是运行时失败的稳定业务分类，供编排与 app 层映射使用。
 type ErrorCode = fault.Code
 

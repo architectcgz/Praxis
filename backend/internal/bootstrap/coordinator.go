@@ -7,6 +7,7 @@ import (
 	"praxis/internal/core/model"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
+	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	"praxis/internal/loop"
 	"praxis/internal/repository"
@@ -31,7 +32,9 @@ type coordinatorDependencies struct {
 	Recovery       execution.RecoverySource
 	ActiveTasks    *execution.ActiveTasks
 	ToolExecutions repository.ToolExecution
-	Messages       repository.MessageReader
+	Messages       repository.MessageStreams
+	Sessions       repository.Session
+	Workspaces     repository.Workspace
 	Writers        repository.MessageWriterProvider
 	Models         ModelSource
 	Tools          tool.ToolCatalog
@@ -44,63 +47,62 @@ type coordinatorDependencies struct {
 	SummaryFormat  contextcompress.SummaryFormat
 	Runner         *loop.Runner
 	Clock          clock.Clock
-	IDs            identity.IDGenerator
 }
 
 func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, error) {
 	runner := deps.Runner
+	observe := func(event loop.Event) {
+		if deps.ObserveUsage != nil && event.Kind == loop.EventModelUsage && event.Usage != nil {
+			deps.ObserveUsage(model.ModelUsageRecord{
+				SessionID:   event.SessionID.String(),
+				AgentID:     event.AgentID.String(),
+				ExecutionID: event.ExecutionID.String(),
+				TurnID:      event.TurnID,
+				Usage:       *event.Usage,
+			})
+		}
+		deps.Events.Publish(execution.LoopEvent(event))
+	}
+	reviewer := toolservice.RiskReviewer{
+		Models:   deps.Models,
+		Messages: deps.Messages,
+		Hooks:    deps.HookDispatcher,
+		ObserveUsage: func(record model.ModelUsageRecord) {
+			observe(loop.Event{
+				Kind:        loop.EventModelUsage,
+				SessionID:   identity.SessionID(record.SessionID),
+				AgentID:     identity.AgentID(record.AgentID),
+				ExecutionID: identity.AgentExecutionID(record.ExecutionID),
+				TurnID:      record.TurnID,
+				Usage:       &record.Usage,
+			})
+		},
+	}
+	executor, err := toolservice.NewService(toolservice.Dependencies{
+		Transactions:   deps.Transactions,
+		HookDispatcher: deps.HookDispatcher,
+		Rules:          deps.Rules,
+		Review:         reviewer.Review,
+		Tasks:          deps.Records,
+		Events:         deps.ToolExecutions,
+		Messages:       deps.Messages,
+		Prepare:        toolinfra.Prepare,
+		Bind:           toolinfra.Bind,
+		Catalog:        deps.Tools,
+		Clock:          deps.Clock,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	if runner == nil {
-		observe := func(event loop.Event) {
-			if deps.ObserveUsage != nil && event.Kind == loop.EventModelUsage && event.Usage != nil {
-				deps.ObserveUsage(model.ModelUsageRecord{
-					SessionID:   event.SessionID.String(),
-					AgentID:     event.AgentID.String(),
-					ExecutionID: event.ExecutionID.String(),
-					TurnID:      event.TurnID,
-					Usage:       *event.Usage,
-				})
-			}
-			deps.Events.Publish(execution.LoopEvent(event))
-		}
-		reviewer := execution.RiskReviewer{
-			Models:   deps.Models,
-			Messages: deps.Messages,
-			Hooks:    deps.HookDispatcher,
-			ObserveUsage: func(record model.ModelUsageRecord) {
-				observe(loop.Event{
-					Kind:        loop.EventModelUsage,
-					SessionID:   identity.SessionID(record.SessionID),
-					AgentID:     identity.AgentID(record.AgentID),
-					ExecutionID: identity.AgentExecutionID(record.ExecutionID),
-					TurnID:      record.TurnID,
-					Usage:       &record.Usage,
-				})
-			},
-		}
-		executor, err := toolservice.NewExecutor(toolservice.Dependencies{
-			Transactions:   deps.Transactions,
-			HookDispatcher: deps.HookDispatcher,
-			Rules:          deps.Rules,
-			Review:         reviewer.Review,
-			Tasks:          deps.Records,
-			Executions:     deps.ToolExecutions,
-			Catalog:        deps.Tools,
-			Clock:          deps.Clock,
-		})
-		if err != nil {
-			return nil, err
-		}
 		built, err := loop.NewRunner(loop.Dependencies{
 			ModelBuilder:   deps.Models,
-			Executions:     deps.ToolExecutions,
 			SummaryFormat:  deps.SummaryFormat,
-			ToolExecutor:   executor,
 			Tools:          deps.Tools,
 			HookDispatcher: deps.HookDispatcher,
 			EventObserver:  observe,
 			Logf:           logging.NewFactory().Ensure(deps.Logger).Infof,
-			Clock:          deps.Clock,
-			IDs:            deps.IDs,
 		})
 		if err != nil {
 			return nil, err
@@ -117,11 +119,8 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		Logger:         deps.Logger,
 		ConfigMu:       deps.ConfigMu,
 		Recovery:       deps.Recovery,
-		Approvals: execution.ToolApprovals{
-			DecideOperation: deps.Rules.Decide,
-			Transactions:    deps.Transactions,
-			Tasks:           deps.Records,
-			Executions:      deps.ToolExecutions,
-		},
+		Tools:          executor,
+		Sessions:       deps.Sessions,
+		Workspaces:     deps.Workspaces,
 	})
 }

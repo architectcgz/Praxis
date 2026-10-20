@@ -3,10 +3,10 @@ package bindings
 import (
 	"strings"
 
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	execution "praxis/internal/service/agent/coordinator"
+	toolservice "praxis/internal/service/toolexecution"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -25,22 +25,22 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 	}
 	result := make([]dto.ToolApproval, 0, len(values))
 	for _, value := range values {
-		review := value.LatestReview()
+		review := value.Review
 		result = append(result, dto.ToolApproval{
 			ToolDecisionRequest: dto.ToolDecisionRequest{
-				SessionID:       value.SessionID.String(),
-				AgentID:         value.AgentID.String(),
-				ExecutionID:     value.ExecutionID.String(),
-				CallID:          value.ProviderToolCallID,
-				ArgumentsDigest: toolexecution.ArgumentsDigest(value.Name, value.NormalizedArguments),
+				SessionID:       value.Call.SessionID.String(),
+				AgentID:         value.Call.AgentID.String(),
+				ExecutionID:     value.Call.ExecutionID.String(),
+				CallID:          value.Call.CallID,
+				ArgumentsDigest: value.ArgumentsDigest,
 			},
-			Name:                string(value.Name),
-			NormalizedArguments: string(value.NormalizedArguments),
-			Path:                value.Path,
-			RuleID:              value.Decision.RuleID,
-			Action:              string(value.Decision.Action),
-			RiskVerdict:         string(review.Assessment.Verdict),
-			RiskReason:          review.Assessment.Reason,
+			Name:      string(value.Call.Name),
+			Arguments: string(value.Arguments),
+
+			RuleID:      value.Decision.RuleID,
+			Action:      string(value.Decision.Action),
+			RiskVerdict: string(review.Assessment.Verdict),
+			RiskReason:  review.Assessment.Reason,
 		})
 	}
 	return result, nil
@@ -78,4 +78,21 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 		return publicError(b.host, "CommandBindings.ToolDecision", err)
 	}
 	return nil
+}
+
+func (b *CommandBindings) StopToolCall(wire dto.ToolControlRequest) error {
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return err
+	}
+	request := toolservice.ControlRequest{
+		SessionID:   identity.SessionID(strings.TrimSpace(wire.SessionID)),
+		AgentID:     identity.AgentID(strings.TrimSpace(wire.AgentID)),
+		ExecutionID: identity.AgentExecutionID(strings.TrimSpace(wire.ExecutionID)),
+		CallID:      strings.TrimSpace(wire.CallID),
+	}
+	if request.SessionID == "" || request.AgentID == "" || request.ExecutionID == "" || request.CallID == "" {
+		return publicError(b.host, "CommandBindings.StopToolCall.request", fault.New(fault.InvalidRequest, "tool control identity is required"))
+	}
+	return publicError(b.host, "CommandBindings.StopToolCall", services.Commands.StopToolCall(ctx, request))
 }

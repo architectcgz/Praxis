@@ -153,3 +153,9 @@ func (e *ActiveTasks) stopAll() {
 		active.cancel(ErrExecutionStopped)
 	}
 }
+
+func (e *ActiveTasks) hasActive() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.active) != 0
+}

@@ -5,10 +5,13 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
+	workspacemodel "praxis/internal/core/workspace"
+	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
 	"praxis/internal/repository"
 	agentservice "praxis/internal/service/agent"
+	toolservice "praxis/internal/service/toolexecution"
 	"time"
 )
 
@@ -46,34 +49,46 @@ func (r *Coordinator) run(
 		return
 	}
 
-	for {
-		awaiting, outcome, failureCode, failureMessage := r.execute(ctx, task, messageWriter)
-		if awaiting && ctx.Err() == nil {
-			if err := r.operations.WaitForApproval(ctx, task.ID); err != nil {
-				outcome, failureCode, failureMessage = r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
-				r.endExecution(task, active, outcome, failureCode, failureMessage)
-				return
-			}
-			select {
-			case <-active.wake:
-				if err := r.startExecution(task); err != nil {
-					outcome, failureCode, failureMessage = r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
-					r.endExecution(task, active, outcome, failureCode, failureMessage)
-					return
-				}
-				continue
-			case <-ctx.Done():
-				outcome, failureCode, failureMessage = r.executionResult(ctx, agentmodel.ExecutionInterrupted, agentmodel.ExecutionFailureCancelled, ctx.Err())
-			}
-		}
-		if ctx.Err() != nil {
-			outcome, failureCode, failureMessage = r.executionResult(ctx, outcome, failureCode, ctx.Err())
-		}
-		if !r.endExecution(task, active, outcome, failureCode, failureMessage) {
-			return
-		}
-		r.logEvent(task.ID, "task ended")
+	session, err := r.sessions.Get(ctx, task.SessionID)
+	if err != nil {
+		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
+		r.endExecution(task, active, outcome, code, message)
 		return
+	}
+	workspace, err := r.workspaces.Get(ctx, session.WorkspaceID)
+	if err != nil || workspace.ProjectID != session.ProjectID || workspace.State != workspacemodel.WorkspaceReady {
+		if err == nil {
+			err = fault.ErrRequestConflict
+		}
+		r.logError(task, "resolve current workspace", err)
+		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
+		r.endExecution(task, active, outcome, code, message)
+		return
+	}
+	executor := r.tools.ForWorkspace(workspace.Path)
+	// TryRun 已确认本次运行权唯一，旧 Loop 和工具已停止；恢复必须先于上下文读取。
+	if err := r.tools.RecoverExecution(ctx, task.ID); err != nil {
+		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
+		r.endExecution(task, active, outcome, code, message)
+		return
+	}
+	awaitApproval := func(waitCtx context.Context) error {
+		if err := r.operations.WaitForApproval(waitCtx, task.ID); err != nil {
+			return err
+		}
+		select {
+		case <-active.wake:
+			return r.startExecution(task)
+		case <-waitCtx.Done():
+			return waitCtx.Err()
+		}
+	}
+	outcome, failureCode, failureMessage := r.execute(ctx, task, messageWriter, executor, awaitApproval)
+	if ctx.Err() != nil {
+		outcome, failureCode, failureMessage = r.executionResult(ctx, outcome, failureCode, ctx.Err())
+	}
+	if r.endExecution(task, active, outcome, failureCode, failureMessage) {
+		r.logEvent(task.ID, "task ended")
 	}
 
 }
@@ -94,35 +109,35 @@ func (r *Coordinator) execute(
 	ctx context.Context,
 	task agentmodel.Execution,
 	messageWriter repository.MessageWriter,
-) (bool, agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
+	executor *toolservice.Scope,
+	awaitApproval func(context.Context) error,
+) (agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
 		Kind:     hook.OperationAgent,
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
-	awaiting := false
 	content, continuation, err := r.operations.LoadContext(ctx, task)
 	outcome, failureCode := agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage
 	if err == nil {
-		var result loop.Result
-		result, err = r.loop.Run(ctx, loop.Input{
-			Progress:     executionProgress{operations: r.operations, id: task.ID},
-			ID:           task.ID,
-			SessionID:    task.SessionID,
-			AgentID:      task.AgentID,
-			RequestID:    task.RequestID,
-			Config:       loop.Config{Model: task.Config.Model.Clone(), WorkspacePath: task.Config.WorkspacePath},
-			Content:      content,
-			Continuation: continuation,
-			Writer:       messageWriter,
+		_, err = r.loop.Run(ctx, loop.Input{
+			Progress:      executionProgress{operations: r.operations, id: task.ID},
+			ID:            task.ID,
+			SessionID:     task.SessionID,
+			AgentID:       task.AgentID,
+			RequestID:     task.RequestID,
+			Config:        loop.Config{Model: task.Config.Model.Clone()},
+			ToolExecutor:  executor,
+			AwaitApproval: awaitApproval,
+			Content:       content,
+			Continuation:  continuation,
+			Writer:        messageWriter,
 		})
 		outcome, failureCode = agentmodel.ExecutionCompleted, ""
 		if err != nil {
 			outcome = agentmodel.ExecutionFailed
 			failureCode = loopFailureCode(err)
-		} else if result.Reason == loop.EndAwaitingApproval {
-			awaiting = true
 		}
 	}
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
@@ -131,7 +146,7 @@ func (r *Coordinator) execute(
 	if err != nil {
 		r.logError(task, "run provider", err)
 	}
-	return awaiting, finalOutcome, finalCode, message
+	return finalOutcome, finalCode, message
 }
 
 // executionResult 读取 Agent 提供的取消原因；持久化控制命令由结束事务最终仲裁。
@@ -177,7 +192,10 @@ func (r *Coordinator) endExecution(
 	for {
 		endContext, cancelEnd := r.transitionContext()
 		var err error
-		endedExecution, err = r.operations.Settle(endContext, task.ID, outcome, failureCode, failureMessage)
+		err = r.tools.RecoverExecution(endContext, task.ID)
+		if err == nil {
+			endedExecution, err = r.operations.Settle(endContext, task.ID, outcome, failureCode, failureMessage)
+		}
 		cancelEnd()
 		if err == nil {
 			break

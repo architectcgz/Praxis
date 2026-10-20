@@ -39,7 +39,7 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     // 没有计时记录时不传元素，活动账本右列会回落到状态词而不是留空。
     const duration = record ? <DurationLabel record={record} label="" /> : undefined
     // 所有工具都展示后端冻结参数，不能以原始模型请求替换将被批准的操作。
-    const toolInput = pendingApproval ? pendingApproval.normalizedArguments : input
+    const toolInput = pendingApproval ? pendingApproval.arguments : input
     const tool = presentTool(name, toolInput, result, isError, pendingStatus)
     if (result === undefined) {
         if (record?.status === 'failed') tool.status = 'failed'

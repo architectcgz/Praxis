@@ -15,14 +15,6 @@ func (s *Service) buildConfig(
 	modelID string,
 	reasoningLevel string,
 ) (agentmodel.ExecutionConfig, error) {
-	session, err := s.sessions.Get(ctx, agent.SessionID)
-	if err != nil {
-		return agentmodel.ExecutionConfig{}, err
-	}
-	workspace, err := s.workspaces.Get(ctx, session.WorkspaceID)
-	if err != nil {
-		return agentmodel.ExecutionConfig{}, err
-	}
 	definition, err := s.definitions.Definition(agent.DefinitionID)
 	if err != nil {
 		return agentmodel.ExecutionConfig{}, err
@@ -50,7 +42,6 @@ func (s *Service) buildConfig(
 		AgentDefinitionID: definition.ID,
 		SystemPrompt:      definition.Instructions,
 		Model:             modelConfig,
-		WorkspacePath:     workspace.Path,
 	}
 	return config, nil
 }

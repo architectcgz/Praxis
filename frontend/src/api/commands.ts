@@ -21,12 +21,17 @@ export function stopAgent(request: StopAgentRequest) {
     return getCommandBinding().StopAgent(request)
 }
 
-export type ToolDecisionRequest = { sessionId: string; agentId: string; executionId: string; callId: string; argumentsDigest: string }
+export type ToolControlRequest = { sessionId: string; agentId: string; executionId: string; callId: string }
+
+export function stopToolCall({ sessionId, agentId, executionId, callId }: ToolControlRequest) {
+    return getCommandBinding().StopToolCall({ sessionId, agentId, executionId, callId })
+}
+
+export type ToolDecisionRequest = ToolControlRequest & { argumentsDigest: string }
 /** 待授权记录携带完整冻结参数与审核结论，展示字段不随授权决策提交。 */
 export type ToolApproval = ToolDecisionRequest & {
     name: string
-    normalizedArguments: unknown
-    path: string
+    arguments: unknown
     ruleId: string
     action: string
     riskVerdict: string
@@ -34,7 +39,7 @@ export type ToolApproval = ToolDecisionRequest & {
 }
 export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
     const values = await getCommandBinding().ListToolApprovals(agentId)
-    return values.map((value) => ({ ...value, normalizedArguments: JSON.parse(value.normalizedArguments) as unknown }))
+    return values.map((value) => ({ ...value, arguments: JSON.parse(value.arguments) as unknown }))
 }
 export function approveToolCall(request: ToolDecisionRequest) {
     return getCommandBinding().ApproveToolCall(toolDecisionRequest(request))

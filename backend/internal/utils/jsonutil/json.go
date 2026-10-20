@@ -1,5 +1,5 @@
-// Package arguments 在工具参数边界校验 JSON 结构与路径。
-package arguments
+// Package jsonutil 提供输入边界使用的纯 JSON 校验。
+package jsonutil
 
 import (
 	"bytes"

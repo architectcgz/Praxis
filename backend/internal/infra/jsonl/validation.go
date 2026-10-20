@@ -81,16 +81,12 @@ func describe(scope string, event Event, object any) (entityKey, indexEntry, err
 		}
 		link("agent", v.AgentID.String())
 		link("agent_execution", v.ExecutionID.String())
-	case toolexecution.Execution:
-		identity, sessionID = v.ID.String(), v.SessionID.String()
-		claim("tool-call", v.ExecutionID.String(), v.ProviderToolCallID)
-		group("tools-task", v.ExecutionID.String(), "")
-		if !v.Status.Terminal() {
-			group("unsettled-session", sessionID, "")
+	case toolexecution.Event:
+		if event.Type != string(v.Kind) {
+			return key, entry, errors.New("tool event payload does not match its event type")
 		}
-		if v.Status == toolexecution.StatusAwaitingApproval {
-			group("awaiting-agent", v.AgentID.String(), "")
-		}
+		identity, sessionID = fmt.Sprintf("%s@%d", v.Key, event.Sequence), v.SessionID.String()
+		group("tool-events", v.ExecutionID.String(), v.CallID)
 		link("agent_execution", v.ExecutionID.String())
 	case sessionmodel.SessionContextEntry:
 		identity, sessionID = v.ID.String(), v.SessionID.String()
@@ -143,13 +139,18 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 		"agent":           "agent.saved",
 		"agent_execution": "agent_execution.saved",
 		"task":            "task.saved",
-		"tool":            "tool.saved",
 		"wait":            "wait.saved",
 		"control":         "control.saved",
 		"context":         "context.entry_appended",
 		"message":         "message.appended",
 		"timing":          "timing.saved",
 		"usage":           "usage.saved",
+	}
+	if event.Collection == "tool_event" {
+		kinds["tool_event"] = string(toolexecution.EventKind(event.Type))
+		if !validToolEventKind(toolexecution.EventKind(event.Type)) {
+			return indexEntry{}, errors.New("unknown tool control event")
+		}
 	}
 	if kinds[event.Collection] == "" || kinds[event.Collection] != event.Type {
 		return indexEntry{}, errors.New("unknown event type")
@@ -174,8 +175,8 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 		target = new(queued.Task)
 	case "agent_execution":
 		target = new(agentmodel.Execution)
-	case "tool":
-		target = new(toolexecution.Execution)
+	case "tool_event":
+		target = new(toolexecution.Event)
 	case "context":
 		target = new(sessionmodel.SessionContextEntry)
 	case "control":
@@ -206,8 +207,8 @@ func restoreIndexEntry(scope string, event Event) (indexEntry, error) {
 		err = validateAgentExecution(*value)
 	case *queued.Task:
 		err = validateQueuedTask(*value)
-	case *toolexecution.Execution:
-		err = validateToolExecution(*value)
+	case *toolexecution.Event:
+		err = validateToolEvent(*value)
 	case *sessionmodel.SessionContextEntry:
 		err = validateContextEntry(*value)
 	case *agentmodel.AgentControlCommand:
@@ -439,10 +440,23 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry inde
 				return errors.New("queued task execution mismatch")
 			}
 		}
-	case "tool":
-		var v toolexecution.Execution
+	case "tool_event":
+		var v toolexecution.Event
 		_ = decodeJSON(data, &v)
-		return taskOwner(v.ExecutionID, v.AgentID)
+		call, err := (MessageStreams{s}).ToolCall(ctx, v.Key)
+		if err != nil {
+			return err
+		}
+		if v.Kind == toolexecution.Approved || v.Kind == toolexecution.ApprovalRequired {
+			if toolexecution.ArgumentsDigest(call.Name, []byte(v.Summary)) != v.ArgumentsDigest {
+				return fault.ErrRequestConflict
+			}
+		}
+		if call.SessionID.String() != scope || v.At.Before(call.CreatedAt) {
+			return fault.ErrRequestConflict
+		}
+		_, err = (ToolExecutionRepository{s}).Read(ctx, v.Key)
+		return err
 	case "context":
 		var v sessionmodel.SessionContextEntry
 		_ = decodeJSON(data, &v)
@@ -546,18 +560,6 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return err
 		}
 		return queued.ValidateUpdate(prior, next)
-	case "tool":
-		var prior, next toolexecution.Execution
-		if err := decodeJSON(before, &prior); err != nil {
-			return err
-		}
-		if err := decodeJSON(after, &next); err != nil {
-			return err
-		}
-		if err := toolexecution.ValidateUpdate(prior, next); err != nil {
-			return fmt.Errorf("%w: %v", fault.ErrRequestConflict, err)
-		}
-		return nil
 	case "agent":
 		fields = []string{
 			"ID",
@@ -599,7 +601,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timingmodel.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
 			return fault.ErrRequestConflict
 		}
-	case "context", "message":
+	case "context", "message", "tool_event":
 		if !bytes.Equal(before, after) {
 			return fault.ErrRequestConflict
 		}

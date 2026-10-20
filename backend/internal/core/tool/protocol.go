@@ -5,19 +5,6 @@ import (
 	"encoding/json"
 )
 
-// ToolCall 是 Provider 与模型调用方共享的纯工具请求数据。
-type ToolCall struct {
-	ID        string
-	Name      ToolName
-	Arguments json.RawMessage
-}
-
-// Snapshot 复制 JSON 参数，避免跨边界共享可变切片；身份由输入入口处理。
-func (call ToolCall) Snapshot() ToolCall {
-	call.Arguments = bytes.Clone(call.Arguments)
-	return call
-}
-
 // ToolDefinition 是 Provider 中立的模型可见工具定义。
 type ToolDefinition struct {
 	Name        ToolName

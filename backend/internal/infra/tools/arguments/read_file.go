@@ -3,9 +3,8 @@ package arguments
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"praxis/internal/core/tool"
+	"praxis/internal/utils/jsonutil"
 	"strings"
 )
 
@@ -21,42 +20,38 @@ type pathInput struct {
 	Limit  json.RawMessage `json:"limit,omitempty"`
 }
 
-// NormalizePathArguments 校验并规范化使用 path、offset、limit 参数的工具调用。
-// name 指定工具名称，三个 limit 参数指定默认值和有效范围；参数无效时返回错误。
-func NormalizePathArguments(
-	call tool.ToolCall,
+// PreparePathArguments 校验并规范化使用 path、offset、limit 参数的工具调用。
+// 三个 limit 参数指定默认值和有效范围；参数无效时返回错误。
+func PreparePathArguments(
+	args json.RawMessage,
 	workspacePath string,
-	name tool.ToolName,
 	defaultLimit int,
 	minLimit int,
 	maxLimit int,
-) (tool.NormalizedToolCall, error) {
-	toolLabel := string(name)
-	invalidArguments := func(reason string) (tool.NormalizedToolCall, error) {
-		return tool.NormalizedToolCall{}, fmt.Errorf("%s arguments are invalid: %s", toolLabel, reason)
+) (json.RawMessage, error) {
+	toolLabel := "read_file"
+	invalidArguments := func(reason string) (json.RawMessage, error) {
+		return nil, fmt.Errorf("%s arguments are invalid: %s", toolLabel, reason)
 	}
-	if call.Name != name {
-		return tool.NormalizedToolCall{}, errors.New("tool is not registered")
-	}
-	if err := RejectDuplicateFields(call.Arguments); err != nil {
+	if err := jsonutil.RejectDuplicateFields(args); err != nil {
 		return invalidArguments(err.Error())
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
+	decoder := json.NewDecoder(bytes.NewReader(args))
 	decoder.DisallowUnknownFields()
 	var toolInput pathInput
 	if err := decoder.Decode(&toolInput); err != nil {
 		return invalidArguments(err.Error())
 	}
-	if err := RejectTrailingJSON(decoder); err != nil {
+	if err := jsonutil.RejectTrailingJSON(decoder); err != nil {
 		return invalidArguments(err.Error())
 	}
 	normalizedArguments := pathArguments{Path: toolInput.Path, Limit: defaultLimit}
-	if err := DecodeOptionalInteger(toolInput.Offset, &normalizedArguments.Offset); err != nil {
+	if err := jsonutil.DecodeOptionalInteger(toolInput.Offset, &normalizedArguments.Offset); err != nil {
 		return invalidArguments("offset: " + err.Error())
 	}
 	if len(toolInput.Limit) > 0 {
 		normalizedArguments.Limit = 0
-		if err := DecodeOptionalInteger(toolInput.Limit, &normalizedArguments.Limit); err != nil {
+		if err := jsonutil.DecodeOptionalInteger(toolInput.Limit, &normalizedArguments.Limit); err != nil {
 			return invalidArguments("limit: " + err.Error())
 		}
 	}
@@ -79,11 +74,7 @@ func NormalizePathArguments(
 	}
 	normalized, err := json.Marshal(normalizedArguments)
 	if err != nil {
-		return tool.NormalizedToolCall{}, fmt.Errorf("encode %s arguments: %w", toolLabel, err)
+		return nil, fmt.Errorf("encode %s arguments: %w", toolLabel, err)
 	}
-	return tool.NormalizedToolCall{
-		Name:                call.Name,
-		NormalizedArguments: normalized,
-		Path:                normalizedArguments.Path,
-	}, nil
+	return normalized, nil
 }

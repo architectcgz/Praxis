@@ -4,18 +4,13 @@ import (
 	"context"
 	"errors"
 	appcontext "praxis/internal/core/context"
-	"praxis/internal/core/tool"
-	"praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/core/message"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
 	"regexp"
 )
 
 var toolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
 
-// validateToolCalls 检查本层的调用唯一性与工具名契约。
-// 调用身份和参数 JSON 已由 Provider 解码入口校验，工具参数随后由对应 Normalizer 准备。
 func validateToolCalls(calls []ToolCall) error {
 	seen := map[string]bool{}
 	for _, call := range calls {
@@ -27,75 +22,38 @@ func validateToolCalls(calls []ToolCall) error {
 	return nil
 }
 
-// runToolCalls 顺序派发工具，逐个提交回执。
-// 返回的结果与 calls 顺序一致；失败时只返回此前已写入回执的结果，不继续执行后续工具。
-// 授权和持久化准入由 ToolExecutor 负责。
-// 下一次模型请求读取结果前必须写入工具结果回执，避免崩溃后留下无法对账的副作用。
-func (r *Runner) runToolCalls(
-	ctx context.Context,
-	messageWriter repository.ToolResultWriter,
-	calls []ToolCall,
-	metadata toolexecution.ToolExecutionMetadata,
-	requestID identity.RequestID,
-) ([]tool.ToolResult, error) {
-	results := make([]tool.ToolResult, 0, len(calls))
-	for callIndex, call := range calls {
-		prepared := tool.PreparedToolCall{Call: call}
-		invocation, err := r.Executions.FindByExecutionCall(ctx, metadata.ExecutionID, call.ID)
-		if err != nil {
-			return results, failCause(FailureStorage, err)
-		}
-		if invocation.Status == toolexecution.StatusRequested {
-			tool, ok := r.Tools.Get(call.Name)
-			if ok {
-				prepared.Normalized, prepared.Err = tool.Normalize(call, metadata.WorkspacePath)
-			}
-		}
-		execution, err := r.ToolExecutor.Execute(ctx, prepared, metadata)
-		if execution.ApprovalPending {
-			// 授权事件只通知调用状态；参数由工具调用事件和持久化查询提供。
+// runToolCalls 顺序消费 Service 已提交的回执；审批等待保留在当前 Loop 中。
+func (r *Runner) runToolCalls(ctx context.Context, input Input, calls []ToolCall, turnID identity.TurnID) ([]message.Message, error) {
+	results := make([]message.Message, 0, len(calls))
+	for _, call := range calls {
+		receipt, pending, err := input.ToolExecutor.Execute(ctx, input.ID, call.ID)
+		for err == nil && pending {
 			r.emit(Event{
 				Kind:        EventToolApprovalRequired,
-				SessionID:   metadata.SessionID,
-				AgentID:     metadata.AgentID,
-				ExecutionID: metadata.ExecutionID,
-				TurnID:      metadata.TurnID,
+				SessionID:   input.SessionID,
+				AgentID:     input.AgentID,
+				ExecutionID: input.ID,
+				TurnID:      turnID,
 				CallID:      call.ID,
 				Name:        string(call.Name),
 			})
-			return results, errAwaitingApproval
-		}
-		result := execution.Result
-		if err != nil {
-			// 在结算失败前写入受限回执，确保人工检查时能看到已尝试的副作用。
-			payload := result.Payload
-			if payload == "" {
-				if errors.Is(err, fault.New(ErrorBusy, "")) {
-					return results, failCause(FailureBusy, err)
-				}
-				if errors.Is(err, fault.New(ErrorPolicyBlocked, "")) {
-					return results, failCause(FailurePolicyBlocked, err)
-				}
+			if err := input.AwaitApproval(ctx); err != nil {
 				return results, failCause(FailureStorage, err)
 			}
-			block := appcontext.NewToolResultBlock(call.ID, string(call.Name), payload, true)
-			if receiptErr := appendToolResult(ctx, messageWriter, requestID, metadata.ExecutionID, metadata.TurnID, callIndex, block); receiptErr != nil {
-				return results, failCause(FailureStorage,
-					&OperationError{Code: ErrorStorage, Message: "tool result receipt failed", Cause: receiptErr})
-			}
-			r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.ExecutionID, metadata.TurnID, block)
-			return results, failCause(FailureTool,
-				&OperationError{Code: ErrorTool, Message: "tool execution failed", Cause: err})
+			receipt, pending, err = input.ToolExecutor.Resume(ctx, input.ID, call.ID)
 		}
-		if result.Payload == "" {
-			result.Payload = "(empty tool result)"
+		if err != nil {
+			return results, failCause(FailureStorage, err)
 		}
-		block := appcontext.NewToolResultBlock(call.ID, string(call.Name), result.Payload, result.ErrorClass != "")
-		if err := appendToolResult(ctx, messageWriter, requestID, metadata.ExecutionID, metadata.TurnID, callIndex, block); err != nil {
+		if len(receipt.Blocks) != 1 || receipt.Blocks[0].Kind != message.BlockToolResult {
+			return results, failCause(FailureContract, errors.New("tool service returned an invalid committed receipt"))
+		}
+		block := receipt.Blocks[0]
+		r.emitToolResult(input.SessionID, input.AgentID, input.ID, turnID, appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
+		results = append(results, receipt)
+		if err := ctx.Err(); err != nil {
 			return results, err
 		}
-		r.emitToolResult(metadata.SessionID, metadata.AgentID, metadata.ExecutionID, metadata.TurnID, block)
-		results = append(results, result)
 	}
 	return results, nil
 }

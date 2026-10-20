@@ -4,26 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
 
 // Dependencies 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Dependencies struct {
-	IDs            identity.IDGenerator
-	Clock          clock.Clock
-	Executions     repository.ToolExecution
 	ModelBuilder   modelapi.ModelBuilder
 	Tools          tool.ToolCatalog
-	ToolExecutor   ToolExecutor
 	HookDispatcher *hook.Dispatcher
 	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
 	CompressionStrategy contextcompress.Strategy
@@ -40,17 +35,11 @@ type Runner struct {
 // NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
 // 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
 func NewRunner(deps Dependencies) (Runner, error) {
-	if deps.Executions == nil {
-		return Runner{}, errors.New("loop tool execution repository is required")
-	}
 	if deps.ModelBuilder == nil {
 		return Runner{}, errors.New("loop model builder is required")
 	}
 	if deps.Tools == nil {
 		return Runner{}, errors.New("loop tool catalog is required")
-	}
-	if deps.ToolExecutor == nil {
-		return Runner{}, errors.New("loop tool call handler is required")
 	}
 	if deps.EventObserver == nil {
 		return Runner{}, errors.New("loop event observer is required")
@@ -61,8 +50,6 @@ func NewRunner(deps Dependencies) (Runner, error) {
 	if deps.CompressionStrategy == nil {
 		deps.CompressionStrategy = contextcompress.FullStrategy{}
 	}
-	deps.IDs = identity.IDsOrDefault(deps.IDs)
-	deps.Clock = clock.ClockOrDefault(deps.Clock)
 	return Runner{Dependencies: deps}, nil
 }
 
@@ -85,6 +72,9 @@ func (r *Runner) run(
 	continuation []messagemodel.Message,
 	messageWriter repository.MessageWriter,
 ) (EndReason, FailureCode, error) {
+	if input.ToolExecutor == nil || input.AwaitApproval == nil {
+		return loopResult(fail(FailureContract, ErrorContract, "scoped tool execution and approval continuation are required"))
+	}
 	progress, err := input.Progress.LoadProgress(ctx)
 	if err != nil {
 		return loopResult(failCause(FailureStorage, err))
@@ -96,10 +86,7 @@ func (r *Runner) run(
 	if progress.FinalStopReason != "" {
 		return EndCompleted, "", nil
 	}
-	if err := r.resumeToolCalls(ctx, input, continuation, messageWriter, &modelContext); err != nil {
-		if errors.Is(err, errAwaitingApproval) {
-			return EndAwaitingApproval, "", nil
-		}
+	if err := r.resumeToolCalls(ctx, input, continuation, &modelContext); err != nil {
 		return loopResult(err)
 	}
 
@@ -207,13 +194,7 @@ func (r *Runner) executeTurn(
 	}
 	assistant := modelapi.ContextBlocksFromEvents(response.events)
 	calls := response.toolCalls()
-	metadata := toolexecution.ToolExecutionMetadata{
-		ExecutionID:   input.ID,
-		TurnID:        turnID,
-		SessionID:     input.SessionID,
-		AgentID:       input.AgentID,
-		WorkspacePath: input.Config.WorkspacePath,
-	}
+
 	{
 		message := outputMessage(messagemodel.Message{
 			ID:          "assistant:" + turnID.String(),
@@ -226,12 +207,8 @@ func (r *Runner) executeTurn(
 			AuthorID:    input.AgentID.String(),
 		}, assistant)
 		value := repository.AssistantWrite{Message: message}
-		for _, call := range calls {
-			invocation := toolexecution.NewExecution(identity.ToolExecutionID(r.IDs.New("toolcall")), input.ID, turnID, input.SessionID, input.AgentID, call.ID, call.Name, call.Arguments, toolexecution.ArgumentsDigest(call.Name, call.Arguments), r.Clock.Now())
-			value.ToolCalls = append(value.ToolCalls, invocation)
-		}
 		if response.stopReason == modelapi.StopCompleted || response.stopReason == modelapi.StopSequence {
-			value.FinalOutput = &toolexecution.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
+			value.FinalOutput = &agentmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
 		}
 		message, inserted, err := messageWriter.AppendAssistant(ctx, value)
 		if err != nil {
@@ -278,22 +255,15 @@ func (r *Runner) executeTurn(
 		})
 		return EndCompleted, "", true, nil
 	}
-	results, err := r.runToolCalls(ctx, messageWriter, calls, metadata, input.RequestID)
+	results, err := r.runToolCalls(ctx, input, calls, turnID)
 	if err != nil {
-		if errors.Is(err, errAwaitingApproval) {
-			return EndAwaitingApproval, "", false, nil
-		}
 		r.emitError(input.AgentID, input.ID, turnID, err)
 		outcome, code, cause := loopResult(err)
 		return outcome, code, false, cause
 	}
-	for index, result := range results {
-		*modelContext = modelContext.AppendToolResult(appcontext.NewToolResultBlock(
-			calls[index].ID,
-			string(calls[index].Name),
-			result.Payload,
-			result.ErrorClass != "",
-		))
+	for _, result := range results {
+		block := result.Blocks[0]
+		*modelContext = modelContext.AppendToolResult(appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
 	}
 
 	r.emit(Event{

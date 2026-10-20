@@ -3,10 +3,9 @@ package applypatch
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"praxis/internal/core/tool"
-	toolargs "praxis/internal/core/tool/arguments"
+	toolargs "praxis/internal/infra/tools/arguments"
+	"praxis/internal/utils/jsonutil"
 	"strings"
 )
 
@@ -15,18 +14,15 @@ type arguments struct {
 	Path  string `json:"path"`
 }
 
-// Normalize 校验补丁格式并规范化补丁工作区根目录。
-func Normalize(call tool.ToolCall, workspacePath string) (tool.NormalizedToolCall, error) {
-	invalidArguments := func(reason string) (tool.NormalizedToolCall, error) {
-		return tool.NormalizedToolCall{}, fmt.Errorf("apply_patch arguments are invalid: %s", reason)
+// Prepare 校验补丁格式并规范化补丁工作区根目录。
+func Prepare(args json.RawMessage, workspacePath string) (json.RawMessage, error) {
+	invalidArguments := func(reason string) (json.RawMessage, error) {
+		return nil, fmt.Errorf("apply_patch arguments are invalid: %s", reason)
 	}
-	if call.Name != tool.ToolApplyPatch {
-		return tool.NormalizedToolCall{}, errors.New("tool is not registered")
-	}
-	if err := toolargs.RejectDuplicateFields(call.Arguments); err != nil {
+	if err := jsonutil.RejectDuplicateFields(args); err != nil {
 		return invalidArguments(err.Error())
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
+	decoder := json.NewDecoder(bytes.NewReader(args))
 	decoder.DisallowUnknownFields()
 	var raw struct {
 		Patch string `json:"patch"`
@@ -35,7 +31,7 @@ func Normalize(call tool.ToolCall, workspacePath string) (tool.NormalizedToolCal
 	if err := decoder.Decode(&raw); err != nil {
 		return invalidArguments(err.Error())
 	}
-	if err := toolargs.RejectTrailingJSON(decoder); err != nil {
+	if err := jsonutil.RejectTrailingJSON(decoder); err != nil {
 		return invalidArguments(err.Error())
 	}
 	if raw.Patch == "" {
@@ -62,11 +58,7 @@ func Normalize(call tool.ToolCall, workspacePath string) (tool.NormalizedToolCal
 	}
 	encoded, err := json.Marshal(normalized)
 	if err != nil {
-		return tool.NormalizedToolCall{}, fmt.Errorf("encode apply_patch arguments: %w", err)
+		return nil, fmt.Errorf("encode apply_patch arguments: %w", err)
 	}
-	return tool.NormalizedToolCall{
-		Name:                call.Name,
-		NormalizedArguments: encoded,
-		Path:                normalized.Path,
-	}, nil
+	return encoded, nil
 }

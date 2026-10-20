@@ -3,11 +3,10 @@ package bash
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
-	"praxis/internal/core/tool"
-	toolargs "praxis/internal/core/tool/arguments"
+	toolargs "praxis/internal/infra/tools/arguments"
+	"praxis/internal/utils/jsonutil"
 	"strings"
 )
 
@@ -29,24 +28,21 @@ type input struct {
 	Timeout json.RawMessage `json:"timeout,omitempty"`
 }
 
-// Normalize 校验 bash 参数，并将工作目录交给统一路径解析流程处理。
-func Normalize(call tool.ToolCall, workspacePath string) (tool.NormalizedToolCall, error) {
-	invalidArguments := func(reason string) (tool.NormalizedToolCall, error) {
-		return tool.NormalizedToolCall{}, fmt.Errorf("bash arguments are invalid: %s", reason)
+// Prepare 校验 bash 参数，并将工作目录交给统一路径解析流程处理。
+func Prepare(args json.RawMessage, workspacePath string) (json.RawMessage, error) {
+	invalidArguments := func(reason string) (json.RawMessage, error) {
+		return nil, fmt.Errorf("bash arguments are invalid: %s", reason)
 	}
-	if call.Name != tool.ToolBash {
-		return tool.NormalizedToolCall{}, errors.New("tool is not registered")
-	}
-	if err := toolargs.RejectDuplicateFields(call.Arguments); err != nil {
+	if err := jsonutil.RejectDuplicateFields(args); err != nil {
 		return invalidArguments(err.Error())
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
+	decoder := json.NewDecoder(bytes.NewReader(args))
 	decoder.DisallowUnknownFields()
 	var raw input
 	if err := decoder.Decode(&raw); err != nil {
 		return invalidArguments(err.Error())
 	}
-	if err := toolargs.RejectTrailingJSON(decoder); err != nil {
+	if err := jsonutil.RejectTrailingJSON(decoder); err != nil {
 		return invalidArguments(err.Error())
 	}
 	if strings.TrimSpace(raw.Command) == "" {
@@ -80,11 +76,7 @@ func Normalize(call tool.ToolCall, workspacePath string) (tool.NormalizedToolCal
 	}
 	encoded, err := json.Marshal(normalized)
 	if err != nil {
-		return tool.NormalizedToolCall{}, fmt.Errorf("encode bash arguments: %w", err)
+		return nil, fmt.Errorf("encode bash arguments: %w", err)
 	}
-	return tool.NormalizedToolCall{
-		Name:                call.Name,
-		NormalizedArguments: encoded,
-		Path:                normalized.Path,
-	}, nil
+	return encoded, nil
 }

@@ -42,30 +42,25 @@ func (w *outputWriter) Write(value []byte) (int, error) {
 	return len(value), nil
 }
 
-// Execute 在 Workspace 内的工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
-func Execute(ctx context.Context, call tool.ExecutionCall) (tool.ToolResult, error) {
+// Call 在 Workspace 内的工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
+func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
 	if ctx == nil {
 		return tool.ToolResult{}, errors.New("tool task context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	if call.Name != tool.ToolBash {
-		return tool.ToolResult{}, errors.New("bash executor does not support the call")
-	}
-	if !workspaceDirectory(call.Path, call.WorkspacePath) {
-		return tool.ToolResult{}, errors.New("bash working directory is outside the workspace")
-	}
 	shell, err := resolveShell()
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
 	var toolArguments arguments
-	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil {
-		return tool.ToolResult{}, fmt.Errorf("decode normalized bash arguments: %w", err)
+	if err := json.Unmarshal(args, &toolArguments); err != nil {
+		return tool.ToolResult{}, fmt.Errorf("decode bash arguments: %w", err)
 	}
-	if toolArguments.Path != call.Path {
-		return tool.ToolResult{}, errors.New("normalized bash arguments are invalid")
+
+	if !workspaceDirectory(toolArguments.Path, workspacePath) {
+		return tool.ToolResult{}, errors.New("bash working directory is outside the workspace")
 	}
 
 	runContext, cancel := context.WithTimeout(ctx, time.Duration(toolArguments.Timeout*float64(time.Second)))

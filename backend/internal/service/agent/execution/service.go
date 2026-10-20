@@ -30,12 +30,10 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	EventObserver  func(TerminalEvent)
-	Workspaces     repository.Workspace
 	Sessions       repository.Session
 	Agents         repository.Agent
 	Records        repository.AgentExecution
 	Queue          repository.Task
-	ToolExecutions repository.ToolExecution
 	Executions     ActiveTasks
 	Messages       repository.MessageStreams
 	PrimaryAgent   PrimaryAgentProvider
@@ -53,12 +51,10 @@ type Service struct {
 	hookDispatcher *hook.Dispatcher
 	logger         *logging.Logger
 	eventObserver  func(TerminalEvent)
-	workspaces     repository.Workspace
 	sessions       repository.Session
 	agents         repository.Agent
 	records        repository.AgentExecution
 	queue          repository.Task
-	toolExecutions repository.ToolExecution
 	executions     ActiveTasks
 	messages       repository.MessageStreams
 	primary        PrimaryAgentProvider
@@ -78,17 +74,15 @@ func NewService(deps Dependencies) (*Service, error) {
 		return nil, errors.New("task service contexts are required")
 	}
 	for name, value := range map[string]any{
-		"transactions":    deps.Transactions,
-		"controls":        deps.Controls,
-		"workspaces":      deps.Workspaces,
-		"sessions":        deps.Sessions,
-		"agents":          deps.Agents,
-		"tasks":           deps.Records,
-		"tool executions": deps.ToolExecutions,
-		"messages":        deps.Messages,
-		"primary agent":   deps.PrimaryAgent,
-		"definitions":     deps.Definitions,
-		"models":          deps.Models,
+		"transactions":  deps.Transactions,
+		"controls":      deps.Controls,
+		"sessions":      deps.Sessions,
+		"agents":        deps.Agents,
+		"tasks":         deps.Records,
+		"messages":      deps.Messages,
+		"primary agent": deps.PrimaryAgent,
+		"definitions":   deps.Definitions,
+		"models":        deps.Models,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("task service %s is required", name)
@@ -100,12 +94,10 @@ func NewService(deps Dependencies) (*Service, error) {
 		hookDispatcher: deps.HookDispatcher,
 		logger:         logging.NewFactory().Ensure(deps.Logger),
 		eventObserver:  deps.EventObserver,
-		workspaces:     deps.Workspaces,
 		sessions:       deps.Sessions,
 		agents:         deps.Agents,
 		records:        deps.Records,
 		queue:          deps.Queue,
-		toolExecutions: deps.ToolExecutions,
 		executions:     deps.Executions,
 		messages:       deps.Messages,
 		primary:        deps.PrimaryAgent,

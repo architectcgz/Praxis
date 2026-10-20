@@ -146,30 +146,29 @@ func (s *Store) appendMessage(ctx context.Context, owner agentmodel.Agent, data 
 }
 
 // AppendToolResult 原子追加回执并累计输出字节；普通 Append 不修改预算。
-func (w MessageWriter) AppendToolResult(ctx context.Context, data messagemodel.Message) error {
-	if data.Role != messagemodel.RoleTool || data.ExecutionID == "" {
-		return errors.New("tool receipt must include task identity")
+func (w MessageWriter) AppendToolResult(ctx context.Context, data messagemodel.Message) (stored messagemodel.Message, inserted bool, err error) {
+	if data.Role != messagemodel.RoleTool || data.ExecutionID == "" || len(data.Blocks) != 1 || data.Blocks[0].Kind != messagemodel.BlockToolResult || data.AuthorKind != messagemodel.AuthorTool || data.AuthorID != data.Blocks[0].Name {
+		return stored, false, errors.New("tool receipt must include a single result and execution identity")
 	}
-	return w.streams.s.InTx(ctx, func(txCtx context.Context) error {
-		stored, inserted, err := w.streams.s.appendMessage(txCtx, w.owner, data)
-		if err != nil || !inserted {
-			return err
-		}
-		task, err := (AgentExecutionRepository{w.streams.s}).Get(txCtx, identity.AgentExecutionID(stored.ExecutionID))
+	err = w.streams.s.InTx(ctx, func(txCtx context.Context) error {
+		execution, err := (AgentExecutionRepository{w.streams.s}).Get(txCtx, identity.AgentExecutionID(data.ExecutionID))
 		if err != nil {
 			return err
 		}
-		if task.AgentID != w.owner.ID || task.SessionID != w.owner.SessionID {
+		if execution.AgentID != w.owner.ID || execution.SessionID != w.owner.SessionID || execution.RequestID.String() != data.RequestID {
 			return fault.ErrRequestConflict
 		}
-		if task.Active() {
-			for _, block := range stored.Blocks {
-				task.Progress.OutputBytes += int64(len(block.Text))
-			}
-			return (AgentExecutionRepository{w.streams.s}).Save(txCtx, task)
+		stored, inserted, err = w.streams.s.appendMessage(txCtx, w.owner, data)
+		if err != nil || !inserted {
+			return err
 		}
-		return nil
+		execution.Progress.OutputBytes += int64(len(stored.Blocks[0].Text))
+		return (AgentExecutionRepository{w.streams.s}).Save(txCtx, execution)
 	})
+	if err != nil {
+		return messagemodel.Message{}, false, err
+	}
+	return stored, inserted, nil
 }
 
 func (r MessageStreams) values(ctx context.Context, owner agentmodel.Agent, after uint64, limit int, tail bool) (repository.MessageStream, error) {

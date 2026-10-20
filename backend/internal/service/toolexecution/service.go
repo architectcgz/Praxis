@@ -1,0 +1,58 @@
+package toolexecution
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/hook"
+	"praxis/internal/core/message"
+	"praxis/internal/core/security"
+	"praxis/internal/core/tool"
+	executionmodel "praxis/internal/core/toolexecution"
+	"praxis/internal/identity"
+	"praxis/internal/repository"
+	"sync"
+)
+
+type Dependencies struct {
+	Rules          ApprovalRules
+	Review         func(context.Context, agentmodel.Execution, message.ToolCall, json.RawMessage, string, security.ApprovalDecision, executionmodel.RiskReview) (security.RiskAssessment, error)
+	Prepare        func(tool.ToolName, json.RawMessage, string) (json.RawMessage, error)
+	Bind           func(tool.Tool, string) tool.Tool
+	HookDispatcher *hook.Dispatcher
+	Transactions   repository.Transaction
+	Tasks          repository.AgentExecution
+	Events         repository.ToolExecution
+	Messages       repository.MessageStreams
+	Catalog        tool.ToolCatalog
+	Clock          clock.Clock
+}
+
+// Service 拥有授权与消息提交；活动实例表只用于取消，不领取工具运行权。
+type Service struct {
+	deps      Dependencies
+	clock     clock.Clock
+	controlMu sync.Mutex
+	active    map[executionmodel.Key]*executionmodel.Execution
+}
+
+func NewService(deps Dependencies) (*Service, error) {
+	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Review == nil || deps.Prepare == nil || deps.Bind == nil || deps.Transactions == nil || deps.Tasks == nil || deps.Events == nil || deps.Messages == nil || deps.Catalog == nil {
+		return nil, errors.New("tool service dependencies are required")
+	}
+	return &Service{deps: deps, clock: clock.ClockOrDefault(deps.Clock), active: make(map[executionmodel.Key]*executionmodel.Execution)}, nil
+}
+
+// Scope 绑定 Coordinator 已解析的当前项目环境，Loop 只消费其执行能力。
+type Scope struct {
+	service       *Service
+	workspacePath string
+}
+
+func (s *Service) ForWorkspace(path string) *Scope { return &Scope{service: s, workspacePath: path} }
+
+func (s *Service) call(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.ToolCall, error) {
+	return s.deps.Messages.ToolCall(ctx, executionmodel.Key{ExecutionID: executionID, CallID: callID})
+}

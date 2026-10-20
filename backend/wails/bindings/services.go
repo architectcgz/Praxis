@@ -10,7 +10,6 @@ import (
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	timingmodel "praxis/internal/core/timing"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
@@ -20,6 +19,7 @@ import (
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	queueservice "praxis/internal/service/task"
+	toolservice "praxis/internal/service/toolexecution"
 	workspaceservice "praxis/internal/service/workspace"
 )
 
@@ -54,7 +54,8 @@ type AgentService interface {
 }
 
 type AgentCommands interface {
-	ListToolApprovals(context.Context, identity.AgentID) ([]toolexecution.Execution, error)
+	ListToolApprovals(context.Context, identity.AgentID) ([]toolservice.Approval, error)
+	StopToolCall(context.Context, toolservice.ControlRequest) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
 	SendInput(context.Context, executionservice.SendInput) (execution.StartResult, error)

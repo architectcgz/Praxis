@@ -1,8 +1,9 @@
 package readfile
 
 import (
+	"encoding/json"
 	"praxis/internal/core/tool"
-	toolargs "praxis/internal/core/tool/arguments"
+	toolargs "praxis/internal/infra/tools/arguments"
 	"unicode/utf8"
 )
 
@@ -18,10 +19,10 @@ type arguments struct {
 	Limit  int    `json:"limit,omitempty"`
 }
 
-// Normalize 校验 read_file 参数并提取待授权的资源路径。
-func Normalize(
-	call tool.ToolCall,
+// Prepare 校验 read_file 参数并提取待授权的资源路径。
+func Prepare(
+	args json.RawMessage,
 	workspacePath string,
-) (tool.NormalizedToolCall, error) {
-	return toolargs.NormalizePathArguments(call, workspacePath, tool.ToolReadFile, defaultLimit, minLimit, maxLimit)
+) (json.RawMessage, error) {
+	return toolargs.PreparePathArguments(args, workspacePath, defaultLimit, minLimit, maxLimit)
 }

@@ -166,9 +166,6 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 		if err := s.agents.Save(txCtx, agent); err != nil {
 			return err
 		}
-		if err := s.reconcileToolResults(txCtx, task.SessionID, task.AgentID, false); err != nil {
-			return err
-		}
 		return s.nameSessionAfterAnswer(txCtx, task, params.Outcome, at)
 	})
 	if err != nil {

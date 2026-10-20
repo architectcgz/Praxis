@@ -3,15 +3,10 @@ package repository
 import (
 	"context"
 	"praxis/internal/core/toolexecution"
-	"praxis/internal/identity"
 )
 
-// ToolExecution 保存从工具请求登记到结果结算的执行事实。
+// ToolExecution 只追加控制事件并按调用键读取投影，不保存执行实体或结果。
 type ToolExecution interface {
-	Get(context.Context, identity.ToolExecutionID) (toolexecution.Execution, error)
-	FindByExecutionCall(context.Context, identity.AgentExecutionID, string) (toolexecution.Execution, error)
-	ListUnsettledBySession(context.Context, identity.SessionID) ([]toolexecution.Execution, error)
-	ListByExecution(context.Context, identity.AgentExecutionID) ([]toolexecution.Execution, error)
-	ListAwaitingByAgent(context.Context, identity.AgentID) ([]toolexecution.Execution, error)
-	Save(context.Context, toolexecution.Execution) error
+	Read(context.Context, toolexecution.Key) (toolexecution.Facts, error)
+	Append(context.Context, toolexecution.Event) error
 }

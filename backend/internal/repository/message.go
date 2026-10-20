@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"praxis/internal/core/agent"
 	"praxis/internal/core/message"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
@@ -29,8 +30,7 @@ type MissingToolResult struct {
 // AssistantWrite 在同一次提交中保存消息、工具调用和最终输出证据。
 type AssistantWrite struct {
 	Message     message.Message
-	ToolCalls   []toolexecution.Execution
-	FinalOutput *toolexecution.FinalOutput
+	FinalOutput *agent.FinalOutput
 }
 
 // MessageReader 按 Session 和 Agent 的消息归属读取一致性历史。
@@ -40,7 +40,7 @@ type MessageReader interface {
 
 // ToolResultWriter 原子、幂等地保存工具回执及其输出消耗。
 type ToolResultWriter interface {
-	AppendToolResult(context.Context, message.Message) error
+	AppendToolResult(context.Context, message.Message) (message.Message, bool, error)
 }
 
 // MessageWriter 提供绑定消息归属的执行输出写入能力。
@@ -57,6 +57,8 @@ type MessageWriterProvider interface {
 // MessageStreams 根据持久化 Agent 归属选择消息流，调用方不决定日志键位。
 type MessageStreams interface {
 	MessageReader
+	ToolCall(context.Context, toolexecution.Key) (message.ToolCall, error)
+	ToolResult(context.Context, toolexecution.Key) (message.Message, error)
 	MessageWriterProvider
 	ListMissingToolResults(context.Context) ([]MissingToolResult, error)
 	Append(context.Context, identity.SessionID, identity.AgentID, message.Message) (message.Message, error)

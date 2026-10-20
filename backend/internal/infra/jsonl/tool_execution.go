@@ -1,44 +1,82 @@
 package jsonl
 
 import (
-	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"praxis/internal/core/toolexecution"
-	"praxis/internal/identity"
+	"praxis/internal/fault"
+	"slices"
 )
 
 type ToolExecutionRepository struct{ s *Store }
 
-// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
-func (r ToolExecutionRepository) Get(ctx context.Context, id identity.ToolExecutionID) (toolexecution.Execution, error) {
-	return get[toolexecution.Execution](ctx, r.s, "tool", id.String())
+// Read 按日志序号读取控制事件；投影仅在本次查询中存在。
+func (r ToolExecutionRepository) Read(ctx context.Context, key toolexecution.Key) (facts toolexecution.Facts, err error) {
+	err = r.s.view(ctx, func(readCtx context.Context) error {
+		keys := r.s.keys(readCtx, lookupKey{kind: "tool-events", owner: key.ExecutionID.String(), value: key.CallID})
+		slices.SortFunc(keys, func(a, b entityKey) int {
+			left, _ := r.s.entry(readCtx, a)
+			right, _ := r.s.entry(readCtx, b)
+			if left.location.Sequence < right.location.Sequence {
+				return -1
+			}
+			if left.location.Sequence > right.location.Sequence {
+				return 1
+			}
+			return 0
+		})
+		reader := make(recordReader)
+		for _, key := range keys {
+			data, err := r.s.payloadWithReader(readCtx, key, reader)
+			if err != nil {
+				return err
+			}
+			var event toolexecution.Event
+			if err := decodeJSON(data, &event); err != nil {
+				return err
+			}
+			if err := facts.Apply(event); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return facts, err
 }
 
-// Save 保存入口已处理的对象，事务未提交时只更新工作区。
-func (r ToolExecutionRepository) Save(ctx context.Context, v toolexecution.Execution) error {
-	return save(ctx, r.s, v.SessionID.String(), "tool", v.ID.String(), "tool.saved", v)
-}
-
-// FindByExecutionCall 按 Agent 执行和 Provider 调用身份查询工具执行记录。
-func (r ToolExecutionRepository) FindByExecutionCall(ctx context.Context, id identity.AgentExecutionID, call string) (toolexecution.Execution, error) {
-	return getByClaim[toolexecution.Execution](ctx, r.s, lookupKey{kind: "tool-call", owner: id.String(), value: call})
-}
-
-// ListUnsettledBySession 返回指定 Session 尚未结算的工具调用，供恢复使用。
-func (r ToolExecutionRepository) ListUnsettledBySession(ctx context.Context, id identity.SessionID) ([]toolexecution.Execution, error) {
-	v, e := listIndexed[toolexecution.Execution](ctx, r.s, lookupKey{kind: "unsettled-session", owner: id.String()}, nil)
-	return sorted(v, func(a, b toolexecution.Execution) int {
-		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
-	}), e
-}
-
-func (r ToolExecutionRepository) ListByExecution(ctx context.Context, id identity.AgentExecutionID) ([]toolexecution.Execution, error) {
-	return listIndexed[toolexecution.Execution](ctx, r.s, lookupKey{kind: "tools-task", owner: id.String()}, nil)
-}
-
-func (r ToolExecutionRepository) ListAwaitingByAgent(ctx context.Context, id identity.AgentID) ([]toolexecution.Execution, error) {
-	values, err := listIndexed[toolexecution.Execution](ctx, r.s, lookupKey{kind: "awaiting-agent", owner: id.String()}, nil)
-	return sorted(values, func(a, b toolexecution.Execution) int {
-		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
-	}), err
+// Append 的事务不包裹工具调用；started 的唯一性由事件投影约束。
+func (r ToolExecutionRepository) Append(ctx context.Context, event toolexecution.Event) error {
+	return r.s.InTx(ctx, func(txCtx context.Context) error {
+		call, err := (MessageStreams{r.s}).ToolCall(txCtx, event.Key)
+		if err != nil {
+			return err
+		}
+		if event.Kind == toolexecution.Approved || event.Kind == toolexecution.ApprovalRequired {
+			if toolexecution.ArgumentsDigest(call.Name, []byte(event.Summary)) != event.ArgumentsDigest {
+				return fault.ErrRequestConflict
+			}
+		}
+		if call.SessionID != event.SessionID {
+			return fault.ErrRequestConflict
+		}
+		if _, err := (MessageStreams{r.s}).ToolResult(txCtx, event.Key); err == nil {
+			return fault.ErrRequestConflict
+		} else if !errors.Is(err, fault.ErrNotFound) {
+			return err
+		}
+		facts, err := r.Read(txCtx, event.Key)
+		if err != nil {
+			return err
+		}
+		if err := facts.Apply(event); err != nil {
+			return err
+		}
+		tx := r.s.tx(txCtx)
+		sequence := r.s.sequences[event.SessionID.String()] + 1
+		if len(tx.events) > 0 {
+			sequence = tx.nextSequence + 1
+		}
+		return save(txCtx, r.s, event.SessionID.String(), "tool_event", fmt.Sprintf("%s@%d", event.Key, sequence), string(event.Kind), event)
+	})
 }

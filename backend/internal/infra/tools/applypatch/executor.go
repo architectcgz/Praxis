@@ -36,30 +36,27 @@ type output struct {
 	Files []fileResult `json:"files"`
 }
 
-// Execute 在 Workspace 内校验并应用完整补丁。
-func Execute(ctx context.Context, call tool.ExecutionCall) (tool.ToolResult, error) {
+// Call 在 Workspace 内校验并应用完整补丁。
+func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
 	if ctx == nil {
 		return tool.ToolResult{}, errors.New("tool task context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	if call.Name != tool.ToolApplyPatch {
-		return tool.ToolResult{}, errors.New("apply_patch executor does not support the call")
-	}
 	var toolArguments arguments
-	if err := json.Unmarshal(call.NormalizedArguments, &toolArguments); err != nil ||
-		toolArguments.Patch == "" || toolArguments.Path != call.Path {
-		return tool.ToolResult{}, errors.New("normalized apply_patch arguments are invalid")
+	if err := json.Unmarshal(args, &toolArguments); err != nil ||
+		toolArguments.Patch == "" {
+		return tool.ToolResult{}, errors.New("apply_patch arguments are invalid")
 	}
 	operations, err := parsePatch(toolArguments.Patch)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
-	if !workspaceDirectory(call.Path, call.WorkspacePath) {
+	if !workspaceDirectory(toolArguments.Path, workspacePath) {
 		return tool.ToolResult{}, errors.New("apply_patch root is outside the workspace")
 	}
-	changes, results, err := prepareChanges(ctx, call.Path, call.WorkspacePath, operations)
+	changes, results, err := prepareChanges(ctx, toolArguments.Path, workspacePath, operations)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -112,7 +109,12 @@ func prepareChanges(
 			if err != nil {
 				return nil, nil, fmt.Errorf("delete target %q: %w", operation.path, err)
 			}
-			changes = append(changes, &fileChange{path: source, mode: mode, delete: true, existed: true})
+			changes = append(changes, &fileChange{
+				path:    source,
+				mode:    mode,
+				delete:  true,
+				existed: true,
+			})
 			results = append(results, fileResult{Path: operation.path, Action: "deleted"})
 		case operationUpdate:
 			content, mode, err := readWorkspaceFile(source, workspace)
@@ -124,7 +126,12 @@ func prepareChanges(
 				return nil, nil, fmt.Errorf("update target %q: %w", operation.path, err)
 			}
 			if operation.moveTo == "" {
-				changes = append(changes, &fileChange{path: source, content: updated, mode: mode, existed: true})
+				changes = append(changes, &fileChange{
+					path:    source,
+					content: updated,
+					mode:    mode,
+					existed: true,
+				})
 				results = append(results, fileResult{Path: operation.path, Action: "updated"})
 				continue
 			}
@@ -136,7 +143,12 @@ func prepareChanges(
 				return nil, nil, fmt.Errorf("move target %q already exists", operation.moveTo)
 			}
 			changes = append(changes,
-				&fileChange{path: source, mode: mode, delete: true, existed: true},
+				&fileChange{
+					path:    source,
+					mode:    mode,
+					delete:  true,
+					existed: true,
+				},
 				&fileChange{path: destination, content: updated, mode: mode},
 			)
 			results = append(results, fileResult{Path: operation.moveTo, From: operation.path, Action: "moved"})

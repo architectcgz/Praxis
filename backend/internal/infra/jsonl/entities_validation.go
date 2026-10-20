@@ -255,9 +255,6 @@ func validateExecutionConfig(s agentmodel.ExecutionConfig) error {
 	if err := validateExecutionModel(s.Model); err != nil {
 		return fault.FieldError("execution.config.model", err)
 	}
-	if !pathutil.IsAbsoluteNormalized(s.WorkspacePath) {
-		return fault.InvalidValue("execution.config.workspacePath", "workspace path must be an absolute normalized path")
-	}
 	return nil
 }
 

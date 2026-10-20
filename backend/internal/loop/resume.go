@@ -3,47 +3,35 @@ package loop
 import (
 	"context"
 	appcontext "praxis/internal/core/context"
-	messagemodel "praxis/internal/core/message"
-	"praxis/internal/core/tool"
-	"praxis/internal/core/toolexecution"
-	"praxis/internal/identity"
-	"praxis/internal/repository"
+	message "praxis/internal/core/message"
 )
 
-// resumeToolCalls 先结算已经提交的工具轮，再发起新的模型请求。
-func (r *Runner) resumeToolCalls(ctx context.Context, input Input, messages []messagemodel.Message, recorder repository.ToolResultWriter, modelContext *appcontext.ModelContext) error {
-	receipts := make(map[string]bool)
-	for _, message := range messages {
-		for _, block := range message.Blocks {
-			if block.Kind == messagemodel.BlockToolResult {
-				receipts[block.CallID] = true
+// resumeToolCalls 只恢复消息配对；旧 Loop 已由 Coordinator 确认停止，不重放工具。
+func (r *Runner) resumeToolCalls(ctx context.Context, input Input, messages []message.Message, modelContext *appcontext.ModelContext) error {
+	type key struct{ executionID, callID string }
+	receipts := make(map[key]bool)
+	for _, item := range messages {
+		for _, block := range item.Blocks {
+			if block.Kind == message.BlockToolResult {
+				receipts[key{item.ExecutionID, block.CallID}] = true
 			}
 		}
 	}
-	for _, message := range messages {
-		if message.Role != messagemodel.RoleAssistant {
+	for _, item := range messages {
+		if item.Role != message.RoleAssistant || item.ExecutionID != input.ID.String() {
 			continue
 		}
-		metadata := toolexecution.ToolExecutionMetadata{
-			ExecutionID:   input.ID,
-			TurnID:        identity.TurnID(message.TurnID),
-			SessionID:     input.SessionID,
-			AgentID:       input.AgentID,
-			WorkspacePath: input.Config.WorkspacePath,
-		}
-		var calls []ToolCall
-		for _, block := range message.Blocks {
-			if block.Kind == messagemodel.BlockToolCall && !receipts[block.CallID] {
-				calls = append(calls, tool.ToolCall{ID: block.CallID, Name: tool.ToolName(block.Name), Arguments: block.Input})
+		for _, block := range item.Blocks {
+			if block.Kind != message.BlockToolCall || receipts[key{item.ExecutionID, block.CallID}] {
+				continue
 			}
-		}
-		results, err := r.runToolCalls(ctx, recorder, calls, metadata, input.RequestID)
-		if err != nil {
-			return err
-		}
-		for index, result := range results {
-			call := calls[index]
-			*modelContext = modelContext.RestoreToolResult(appcontext.NewToolResultBlock(call.ID, string(call.Name), result.Payload, result.ErrorClass != ""))
+			stored, err := input.ToolExecutor.Recover(ctx, input.ID, block.CallID)
+			if err != nil {
+				return failCause(FailureStorage, err)
+			}
+			result := stored.Blocks[0]
+			*modelContext = modelContext.RestoreToolResult(appcontext.NewToolResultBlock(result.CallID, result.Name, result.Text, result.IsError))
+			receipts[key{item.ExecutionID, block.CallID}] = true
 		}
 	}
 	return nil

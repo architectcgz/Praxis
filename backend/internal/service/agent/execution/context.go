@@ -16,9 +16,6 @@ import (
 // selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并检查必要原文容量。
 // 容量检查是准入的业务前置条件：连 Protected 原文都放不进窗口的 Execution 不允许进入执行。
 func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, config agentmodel.ExecutionConfig, inputMessageID string) (agentmodel.ContextSelection, error) {
-	if err := s.reconcileToolResults(ctx, agent.SessionID, agent.ID, false); err != nil {
-		return agentmodel.ContextSelection{}, err
-	}
 	var selection agentmodel.ContextSelection
 	var shared []sessionmodel.SessionContextEntry
 	var err error
@@ -139,9 +136,6 @@ func (s *Service) LoadContext(ctx context.Context, task agentmodel.Execution) (a
 	var content appcontext.Content
 	var continuation []messagemodel.Message
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if err := s.reconcileToolResults(txCtx, task.SessionID, task.AgentID, false); err != nil {
-			return err
-		}
 		stream, err := s.messages.LoadMessages(txCtx, task.SessionID, task.AgentID, 0)
 		if err != nil {
 			return err

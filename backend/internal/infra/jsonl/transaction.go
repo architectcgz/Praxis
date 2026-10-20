@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/repository"
 	"time"
@@ -26,6 +27,7 @@ type transaction struct {
 	changes        map[entityKey]change
 	deletedScope   bool
 	receiptChanges map[receiptKey]*repository.MissingToolResult
+	callChanges    map[toolexecution.Key]callReference
 	// 启动只为正在扫描的一个 Session 临时保存消息位置，扫描结束即释放。
 	replayMessages *sessionMessages
 }

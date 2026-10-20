@@ -13,6 +13,7 @@ import (
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
 	"praxis/internal/infra/jsonl"
+	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	"praxis/internal/settings"
 )
@@ -35,7 +36,7 @@ func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configu
 	if err != nil {
 		return nil, err
 	}
-	registry, err := buildToolRegistry(extensions)
+	registry, err := toolinfra.NewRegistry(extensions)
 	if err != nil {
 		return nil, err
 	}

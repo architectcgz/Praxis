@@ -70,7 +70,9 @@ export function ApprovalGate() {
     const total = approvals.pendingApprovals.length
     const busy = approvals.busy === pending.callId
     const disabled = approvals.busy !== ''
-    const summary = presentTool(pending.name, pending.normalizedArguments).summary
+    const presentation = presentTool(pending.name, pending.arguments)
+    const summary = presentation.summary
+    const path = typeof presentation.input.path === 'string' ? presentation.input.path : ''
     return <section className="approval-gate" aria-label="待批准的操作" aria-busy={busy}>
         <div className="approval-gate-box">
             <div className="approval-gate-head">
@@ -81,7 +83,7 @@ export function ApprovalGate() {
             </div>
             <dl className="approval-gate-details">
                 <div><dt>工具</dt><dd>{pending.name}</dd></div>
-                {pending.path && <div><dt>操作路径</dt><dd><code>{pending.path}</code></dd></div>}
+                {path && <div><dt>操作路径</dt><dd><code>{path}</code></dd></div>}
                 <div><dt>命中规则</dt><dd>{pending.ruleId === 'default' ? '项目或全局默认' : pending.ruleId}</dd></div>
                 <div><dt>处理方式</dt><dd>{pending.action === 'auto' ? '模型不确定，转人工' : '必须人工确认'}</dd></div>
                 {pending.riskVerdict && <div><dt>模型审核</dt><dd>{pending.riskReason || pending.riskVerdict}</dd></div>}

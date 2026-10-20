@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	messagemodel "praxis/internal/core/message"
+	"praxis/internal/core/tool"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -13,20 +14,20 @@ import (
 
 type receiptKey struct{ scope, owner, task, call string }
 
-// prepareReceiptChanges 只校验调用声明和回执配对，不决定业务恢复或工具重试。
+// callReference 只索引消息位置和配对身份，不缓存参数或结果正文。
+type callReference struct {
+	fact       repository.MissingToolResult
+	owner      string
+	messageID  string
+	blockIndex int
+	resultID   string
+}
+
+// prepareReceiptChanges 以消息声明与回执为唯一配对事实。
 func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 	tx := s.tx(ctx)
 	tx.receiptChanges = make(map[receiptKey]*repository.MissingToolResult)
-	pending := func(key receiptKey) (repository.MissingToolResult, bool) {
-		if value, changed := tx.receiptChanges[key]; changed {
-			if value == nil {
-				return repository.MissingToolResult{}, false
-			}
-			return *value, true
-		}
-		value, ok := s.index.missing[key]
-		return value, ok
-	}
+	tx.callChanges = make(map[toolexecution.Key]callReference)
 	for _, event := range tx.events {
 		if event.Collection != "message" {
 			continue
@@ -36,111 +37,144 @@ func (s *Store) prepareReceiptChanges(ctx context.Context) error {
 			return err
 		}
 		callIndex := 0
-		for _, block := range record.Data.Blocks {
+		for blockIndex, block := range record.Data.Blocks {
 			if block.Kind != messagemodel.BlockToolCall && block.Kind != messagemodel.BlockToolResult {
 				continue
 			}
-			key := receiptKey{
+			if record.Data.ExecutionID == "" || record.Data.TurnID == "" {
+				return errors.New("tool message ownership is required")
+			}
+			key := toolexecution.Key{ExecutionID: identity.AgentExecutionID(record.Data.ExecutionID), CallID: block.CallID}
+			receipt := receiptKey{
 				tx.scope,
 				record.OwnerID,
 				record.Data.ExecutionID,
 				block.CallID,
 			}
-			invocation, err := getByClaim[toolexecution.Execution](ctx, s, lookupKey{kind: "tool-call", owner: key.task, value: key.call})
-			if err != nil {
-				return err
-			}
-			if invocation.TurnID.String() != record.Data.TurnID || string(invocation.Name) != block.Name {
-				return fault.ErrRequestConflict
+			prior, exists := tx.callChanges[key]
+			if !exists {
+				prior, exists = s.index.calls[key]
 			}
 			switch block.Kind {
 			case messagemodel.BlockToolCall:
-				if _, exists := pending(key); exists {
-					return fault.ErrRequestConflict
-				}
-				if _, exists := s.index.latest[entityKey{"tool", invocation.ID.String()}]; exists {
-					return errors.New("tool call declaration must be committed with a new execution identity")
-				}
-				if invocation.AgentID.String() != record.Data.AuthorID || invocation.ArgumentsDigest != toolexecution.ArgumentsDigest(invocation.Name, block.Input) {
+				if exists {
 					return fault.ErrRequestConflict
 				}
 				fact := repository.MissingToolResult{
 					SessionID:   identity.SessionID(tx.scope),
 					AgentID:     record.AgentID,
-					ExecutionID: identity.AgentExecutionID(record.Data.ExecutionID),
-					TurnID:      identity.TurnID(record.Data.TurnID),
-					CallID:      block.CallID,
+					ExecutionID: key.ExecutionID,
+					CallID:      key.CallID,
 					RequestID:   record.Data.RequestID,
+					TurnID:      identity.TurnID(record.Data.TurnID),
 					Name:        block.Name,
 					Sequence:    event.Sequence,
 					CallIndex:   callIndex,
 				}
-				tx.receiptChanges[key] = &fact
+				tx.callChanges[key] = callReference{
+					fact:       fact,
+					owner:      record.OwnerID,
+					messageID:  record.Data.ID,
+					blockIndex: blockIndex,
+				}
+				tx.receiptChanges[receipt] = &fact
 				callIndex++
 			case messagemodel.BlockToolResult:
-				fact, exists := pending(key)
-				if !exists || fact.TurnID.String() != record.Data.TurnID || fact.Name != block.Name || fact.AgentID != record.AgentID {
-					return errors.New("tool receipt has no previously committed call declaration")
+				if !exists || prior.resultID != "" || prior.fact.SessionID.String() != tx.scope || prior.owner != record.OwnerID || prior.fact.AgentID != record.AgentID || prior.fact.TurnID.String() != record.Data.TurnID || prior.fact.RequestID != record.Data.RequestID || prior.fact.Name != block.Name {
+					return errors.New("tool receipt has no matching unfinished call declaration")
 				}
-				if !invocation.Status.Terminal() {
-					return errors.New("tool receipt must correspond to a settled execution")
-				}
-				tx.receiptChanges[key] = nil
+				prior.resultID = record.Data.ID
+				tx.callChanges[key] = prior
+				tx.receiptChanges[receipt] = nil
 			}
-		}
-	}
-	for key, change := range tx.changes {
-		if key.collection != "tool" {
-			continue
-		}
-		if _, exists := s.index.latest[key]; exists {
-			continue
-		}
-		var invocation toolexecution.Execution
-		if err := decodeJSON(change.event.Payload, &invocation); err != nil {
-			return err
-		}
-		declared := false
-		for _, event := range tx.events {
-			if event.Collection != "message" {
-				continue
-			}
-			var record messageRecord
-			if err := decodeJSON(event.Payload, &record); err != nil {
-				return err
-			}
-			for _, block := range record.Data.Blocks {
-				if block.Kind == messagemodel.BlockToolCall && record.Data.ExecutionID == invocation.ExecutionID.String() && record.Data.TurnID == invocation.TurnID.String() && block.CallID == invocation.ProviderToolCallID {
-					declared = true
-				}
-			}
-		}
-		if !declared {
-			return errors.New("new tool execution identity has no assistant declaration in the same transaction")
 		}
 	}
 	return nil
+}
+
+func (r MessageStreams) callReference(ctx context.Context, key toolexecution.Key) (callReference, error) {
+	tx := r.s.tx(ctx)
+	if len(tx.events) > 0 {
+		if err := r.s.prepareReceiptChanges(ctx); err != nil {
+			return callReference{}, err
+		}
+		if ref, ok := tx.callChanges[key]; ok {
+			return ref, nil
+		}
+	}
+	ref, ok := r.s.index.calls[key]
+	if !ok || tx.deletedScope && ref.fact.SessionID.String() == tx.scope {
+		return callReference{}, fault.ErrNotFound
+	}
+	return ref, nil
+}
+
+func (r MessageStreams) ToolCall(ctx context.Context, key toolexecution.Key) (result messagemodel.ToolCall, err error) {
+	err = r.s.view(ctx, func(readCtx context.Context) error {
+		ref, err := r.callReference(readCtx, key)
+		if err != nil {
+			return err
+		}
+		data, err := r.s.payload(readCtx, messageEntityKey(ref.fact.SessionID.String(), ref.owner, ref.messageID))
+		if err != nil {
+			return err
+		}
+		var record messageRecord
+		if err := decodeJSON(data, &record); err != nil {
+			return err
+		}
+		block := record.Data.Blocks[ref.blockIndex]
+		result = messagemodel.ToolCall{
+			Key:       key,
+			SessionID: ref.fact.SessionID,
+			AgentID:   ref.fact.AgentID,
+			RequestID: ref.fact.RequestID,
+			TurnID:    ref.fact.TurnID,
+			Name:      tool.ToolName(block.Name),
+			Arguments: block.Input,
+			CreatedAt: record.Data.CreatedAt,
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (r MessageStreams) ToolResult(ctx context.Context, key toolexecution.Key) (result messagemodel.Message, err error) {
+	err = r.s.view(ctx, func(readCtx context.Context) error {
+		ref, err := r.callReference(readCtx, key)
+		if err != nil {
+			return err
+		}
+		if ref.resultID == "" {
+			return fault.ErrNotFound
+		}
+		data, err := r.s.payload(readCtx, messageEntityKey(ref.fact.SessionID.String(), ref.owner, ref.resultID))
+		if err != nil {
+			return err
+		}
+		var record messageRecord
+		if err := decodeJSON(data, &record); err != nil {
+			return err
+		}
+		result = record.Data
+		return nil
+	})
+	return result, err
 }
 
 func (r MessageStreams) ListMissingToolResults(ctx context.Context) ([]repository.MissingToolResult, error) {
 	values := make([]repository.MissingToolResult, 0)
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		tx := r.s.tx(readCtx)
-		if tx.deletedScope {
-			for key, value := range r.s.index.missing {
-				if key.scope != tx.scope {
-					values = append(values, value)
-				}
-			}
-			return nil
-		}
-		// 事务内恢复查询也要看到本事务新增的声明及已追加的回执。
 		if len(tx.events) > 0 {
 			if err := r.s.prepareReceiptChanges(readCtx); err != nil {
 				return err
 			}
 		}
 		for key, value := range r.s.index.missing {
+			if tx.deletedScope && key.scope == tx.scope {
+				continue
+			}
 			if _, changed := tx.receiptChanges[key]; !changed {
 				values = append(values, value)
 			}

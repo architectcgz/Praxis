@@ -3,7 +3,6 @@ package model
 import (
 	"context"
 	appcontext "praxis/internal/core/context"
-	"praxis/internal/core/tool"
 )
 
 // ModelStreamEventKind 标识模型 Provider 适配器产生的流事件类型。
@@ -39,7 +38,7 @@ const (
 type ModelStreamEvent struct {
 	Kind           ModelStreamEventKind
 	Text           string
-	ToolCall       tool.ToolCall
+	ToolCall       ToolCall
 	Usage          *ModelUsage
 	StopReason     ModelStopReason
 	Err            error

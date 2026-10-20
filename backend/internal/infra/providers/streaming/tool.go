@@ -35,7 +35,7 @@ func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
 	args := json.RawMessage(call.Arguments)
 	return emit(modelapi.ModelStreamEvent{
 		Kind: modelapi.StreamToolCall,
-		ToolCall: tool.ToolCall{
+		ToolCall: modelapi.ToolCall{
 			ID:        call.ID,
 			Name:      tool.ToolName(call.Name),
 			Arguments: bytes.Clone(args),

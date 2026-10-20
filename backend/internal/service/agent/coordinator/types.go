@@ -23,7 +23,6 @@ type ExecutionOperations interface {
 	WaitForApproval(context.Context, identity.AgentExecutionID) error
 	Settle(context.Context, identity.AgentExecutionID, agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) (agentmodel.Execution, error)
 	ReclaimExecution(context.Context, agentmodel.Execution) (agentmodel.Execution, error)
-	ReconcileToolResults(context.Context) error
 	PrepareNext(context.Context, identity.AgentID) (agentmodel.Execution, bool, error)
 }
 

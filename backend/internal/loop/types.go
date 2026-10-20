@@ -6,25 +6,26 @@ import (
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
 
 // ToolExecutor 执行已经登记的调用；等待审批时不产生工具回执。
 type ToolExecutor interface {
-	Execute(context.Context, tool.PreparedToolCall, toolexecution.ToolExecutionMetadata) (tool.ToolExecutionResult, error)
+	Execute(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, bool, error)
+	Resume(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, bool, error)
+	Recover(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, error)
 }
 
 type (
-	ToolCall                   = tool.ToolCall
+	ToolCall                   = modelapi.ToolCall
 	ToolDefinition             = tool.ToolDefinition
 	ModelContext               = appcontext.ModelContext
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
 // ProgressTracker 提供绑定本次执行的进度业务操作，由 Execution Service 检查状态并提交事务。
-// 工具调用次数和回执字节由工具准入、消息写入负责，Loop 不直接修改执行实体。
+// 工具调用次数和回执字节由消息写入负责，Loop 不直接修改执行实体。
 type ProgressTracker interface {
 	// LoadProgress 返回当前持久化进度；读取失败时停止执行，不用旧序号继续运行。
 	LoadProgress(context.Context) (Progress, error)
@@ -40,28 +41,28 @@ type ProgressTracker interface {
 type EndReason string
 
 const (
-	EndCompleted        EndReason = "completed"
-	EndAwaitingApproval EndReason = "awaiting_approval"
-	endFailed           EndReason = "failed"
+	EndCompleted EndReason = "completed"
+	endFailed    EndReason = "failed"
 )
 
 type Result struct{ Reason EndReason }
 
 // Input 是调用方冻结的本次模型和工具执行输入。
 type Input struct {
-	Progress     ProgressTracker
-	ID           identity.AgentExecutionID
-	SessionID    identity.SessionID
-	AgentID      identity.AgentID
-	RequestID    identity.RequestID
-	Config       Config
-	Content      appcontext.Content
-	Continuation []messagemodel.Message
-	Writer       repository.MessageWriter
+	ToolExecutor  ToolExecutor
+	AwaitApproval func(context.Context) error
+	Progress      ProgressTracker
+	ID            identity.AgentExecutionID
+	SessionID     identity.SessionID
+	AgentID       identity.AgentID
+	RequestID     identity.RequestID
+	Config        Config
+	Content       appcontext.Content
+	Continuation  []messagemodel.Message
+	Writer        repository.MessageWriter
 }
 type Config struct {
-	Model         modelapi.Config
-	WorkspacePath string
+	Model modelapi.Config
 }
 
 // Progress 是 Loop 消费的已提交请求序号及输出证据。

@@ -5,12 +5,12 @@
 ## 目录与职责
 
 - `internal/core/`：Agent、Execution、Session、Project、Workspace、Task、ToolExecution、安全策略、计时和消息的实体与纯规则，以及 ContextBuilder、模型流、工具契约和 Hook 机制。不得定义仓储或依赖 `repository`、`loop`、`service`、`infra`、`bootstrap`、`wails`，不得读取配置文件、管理事务或操作文件系统。
-- `internal/core/security/`：审批模式、默认策略继承、命令匹配与审批决策，以及风险审核结果类型。只包含值对象与纯规则；工具执行状态转换由 `core/toolexecution` 负责，模型风险审核调用与审批编排由 Service 负责。
+- `internal/core/security/`：审批模式、默认策略继承、命令匹配与审批决策，以及风险审核结果类型。只包含值对象与纯规则；`core/toolexecution.Execution` 仅持有 ctx/cancel/tool/args，通过 Run/Stop 调用纯 Tool 接口，模型风险审核调用与审批编排由 Service 负责。
 - `internal/repository/`：统一定义持久化读写、查询结果、原子消息写入和跨仓储事务契约，方法使用 Core 实体。只依赖 Core 与必要的纯基础能力，不包含业务编排、Hook 或具体存储实现。
 - `internal/loop/`：一次执行内部的 ReAct 迭代，使用 Core 类型与 Repository 契约，不依赖 `service`、`infra`、`bootstrap` 或 Wails。进度通过 Execution Service 提供的业务操作检查状态和额度，不定义另一套仓储接口。
 - `internal/service/agent/`：Agent 的查询与控制。`execution/` 负责直接输入准入、冻结上下文、进度、结算与恢复事务；`coordinator/` 负责 Coordinator、ActiveTasks、审批唤醒与预约交接。实体位于 `core/agent`，子包拥有实际行为，不增加转发层。
 - `internal/service/task/`：预约输入、FIFO 查询与取消，依赖 `repository.Task`。Task 仅表示预约，持久状态为 `pending/dispatched/cancelled`。
-- `internal/service/toolexecution/`：工具执行准入、授权、风险审核编排与结算；纯执行事实位于 `core/toolexecution/`，原子消息写入契约位于 Repository。
+- `internal/service/toolexecution/`：工具执行准入、授权、风险审核、停止与 ToolResult 消息提交；控制事实由 append-only 事件投影，原子消息写入契约位于 Repository。
 - `internal/service/session/`、`project/`、`model/`：各业务用例与事务。Service 不自行构建其他 Service，不直接进行文件 I/O。
 - `internal/infra/`：JSONL、Provider 编解码、具体工具、文件系统，以及 Agent/Model/Tool 配置加载。JSONL 引用 Core 实体并实现 Repository 接口；所有 Infra 均不得依赖 Service，不调用业务流程，不承担审批与执行调度。
 - `internal/bootstrap/`：唯一装配入口，创建实例、注入依赖、安排初始化和启动恢复，最后开放 Wails。不得承载运行期业务决策。
@@ -35,11 +35,16 @@
 - Assistant、ToolCalls 和最终输出证据保持原子提交；工具回执和累计字节保持幂等原子提交。
 - 只有 Execution 结算事务提交且归属释放后，Coordinator 才能领取下一预约。Provider/执行错误默认保留待办并停止自动派发。
 - 等待审批不结束 Execution，不释放归属；审批后用相同 ExecutionID 恢复。控制命令绑定目标 ExecutionID，已提交控制意图在结算事务中仲裁。
-- 结算失败保留占用及结果，仅重试结算，禁止重放模型和工具。启动先处理遗留 running 工具的未知副作用，再恢复 Execution，最后检查空闲 Agent 的队列。
+- 结算失败保留占用及结果，仅重试结算，禁止重放模型和工具。启动先确认旧执行者已停止，由 ToolExecution Service 为缺少 ToolResult 的调用追加 `No result provided` 错误回执，再恢复 Execution，最后检查空闲 Agent 的队列。
 
 ## 上下文与持久化
 
 - 配置和历史可见边界在准入/领取时冻结；后续排队输入不能混入已启动的执行。工具调用与回执按 `(ExecutionID, CallID)` 配对。
+- ToolCall 保存在 Assistant 消息，ToolResult 保存在 Tool 消息。匹配 ToolResult 是唯一完成记录，不另存结果正文、终态或独立 ToolExecutionID。审批、启动、停止及审核只追加控制事件，不保存可变工具执行实体。
+- Coordinator 在 ReAct Loop 外解析当前项目 WorkspacePath，注入已绑定环境的工具执行能力；Loop 和 Core.Tool 不透传 WorkspacePath。Tool 接口为 `Call(ctx, args)`，参数准备由 Service 的输入边界完成。
+- 正常工具入口不先查询已完成结果，不建立第二套进程内去重或运行权；单次 Loop 由 ActiveTasks.TryRun 保证。活动工具实例索引仅用于 Stop，固定锁序为控制锁后仓储事务。
+- Service 在工具调用前可靠追加 `tool.started`，工具返回后逐个独立提交 ToolResult 与输出统计。回执写入失败不得重跑工具；恢复只补 `No result provided`，不依赖审批或 started 决定重放。
+- 人工审批等待保留在同一 Loop 中，Coordinator 唤醒已有执行。恢复补写仅在旧 Loop 与工具已停止后进行，不能提前关闭当前活动工具的消息配对。
 - JSONL 只保存日志资源、序号和可重建轻量索引，正文按需读取，不建立全局业务对象缓存。
 - 应用运行状态写入独立的 `state/` 目录，旧 `runtime/` 数据保持原样，不自动加载或覆盖。
 - JSONL 按当前 Schema 严格恢复，不实现旧数据迁移、兼容读取或版本标记。验证使用独立临时数据目录，不覆盖已有用户数据。

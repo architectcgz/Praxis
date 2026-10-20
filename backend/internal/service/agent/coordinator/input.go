@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"praxis/internal/identity"
 	executionservice "praxis/internal/service/agent/execution"
@@ -43,8 +44,31 @@ func (s *Coordinator) EnqueueTask(ctx context.Context, input queueservice.Enqueu
 }
 
 // Restore 必须在外部准入开放前调用，先协调上次进程的未知副作用，再恢复任务与队列。
-func (s *Coordinator) Restore(ctx context.Context) error {
-	if err := s.operations.ReconcileToolResults(ctx); err != nil {
+func (s *Coordinator) Restore(ctx context.Context) (err error) {
+	if err := s.enter(ctx); err != nil {
+		return err
+	}
+	defer s.running.Done()
+	s.mu.Lock()
+	if s.restored {
+		s.mu.Unlock()
+		return nil
+	}
+	if s.restoring || s.activeTasks.hasActive() {
+		s.mu.Unlock()
+		return errors.New("execution recovery requires stopped executors")
+	}
+	s.restoring = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.restoring = false
+		if err == nil {
+			s.restored = true
+		}
+		s.mu.Unlock()
+	}()
+	if err := s.tools.RecoverAll(ctx); err != nil {
 		return fmt.Errorf("reconcile tool results: %w", err)
 	}
 	if err := s.restore(ctx, s.recovery); err != nil {
