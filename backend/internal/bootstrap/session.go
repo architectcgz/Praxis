@@ -8,10 +8,10 @@ import (
 	"sync"
 )
 
-func buildSessions(resources storageResources, repos storage.Repositories, agents *agentregistry.Registry, hooks *hook.Dispatcher, configMu *sync.RWMutex) (*sessionservice.Service, error) {
+func buildSessions(resources storageResources, repos storage.Repositories, agents *agentregistry.Registry, hooks *hook.Dispatcher, configMu *sync.RWMutex, models sessionservice.ModelConfigResolver) (*sessionservice.Service, error) {
 	return sessionservice.NewService(sessionservice.Dependencies{
 		ConfigMu:       configMu,
-		Transactions:   resources.store,
+		ModelConfigs:   models,
 		HookDispatcher: hooks,
 		Projects:       repos.Projects,
 		Workspaces:     repos.Workspaces,

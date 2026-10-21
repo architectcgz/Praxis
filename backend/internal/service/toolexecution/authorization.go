@@ -3,6 +3,7 @@ package toolexecution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/message"
 	"praxis/internal/core/security"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-// authorize 在事务内检查当前授权，外部风险审核保持在存储锁外。
+// authorize 根据当前事实确定授权，审核请求先条件预留序号，再调用外部模型。
 func (scope *Scope) authorize(ctx context.Context, call message.ToolCall, args json.RawMessage) (bool, *tool.ToolResult, error) {
 	s := scope.service
 	digest := executionmodel.ArgumentsDigest(call.Name, args)
@@ -23,7 +24,7 @@ func (scope *Scope) authorize(ctx context.Context, call message.ToolCall, args j
 		var task agentmodel.Execution
 		var decision security.ApprovalDecision
 		var attempt executionmodel.RiskReview
-		err := s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
+		err := func(txCtx context.Context) error {
 			var err error
 			task, err = s.deps.Tasks.Get(txCtx, call.ExecutionID)
 			if err != nil {
@@ -97,7 +98,10 @@ func (scope *Scope) authorize(ctx context.Context, call message.ToolCall, args j
 				StartedAt:       s.clock.Now().UTC(),
 			}
 			return s.deps.Tasks.Save(txCtx, task)
-		})
+		}(ctx)
+		if errors.Is(err, fault.ErrRevisionConflict) {
+			continue
+		}
 		if err != nil || pending || denied != nil || attempt.TurnID == "" {
 			return pending, denied, err
 		}
@@ -114,7 +118,7 @@ func (scope *Scope) authorize(ctx context.Context, call message.ToolCall, args j
 			assessment = security.RiskAssessment{Verdict: security.RiskUncertain, Reason: "Risk assessment failed or returned an invalid result; manual approval is required."}
 		}
 		attempt.Assessment, attempt.CompletedAt = assessment, s.clock.Now().UTC()
-		err = s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
+		err = func(txCtx context.Context) error {
 			facts, err := s.deps.Events.Read(txCtx, call.Key)
 			if err != nil {
 				return err
@@ -129,7 +133,7 @@ func (scope *Scope) authorize(ctx context.Context, call message.ToolCall, args j
 				At:        attempt.CompletedAt,
 				Review:    &attempt,
 			})
-		})
+		}(ctx)
 		if err != nil {
 			return false, nil, err
 		}

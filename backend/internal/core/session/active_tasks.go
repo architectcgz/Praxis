@@ -1,4 +1,4 @@
-package coordinator
+package session
 
 import (
 	"context"
@@ -11,21 +11,31 @@ import (
 // ActiveTasks 保存唯一的进程内执行状态，零值可用；准入、控制与协调器共享此实例。
 type ActiveTasks struct {
 	mu     sync.Mutex
-	active map[identity.AgentID]*activeTask
+	active map[identity.AgentID]*ActiveTask
 }
 
-type activeTask struct {
-	executionID identity.AgentExecutionID
-	ctx         context.Context
+// ActiveTask 的结果只由领取运行权的 Coordinator 读写；TryRun 的锁同步结算重试。
+type ActiveTask struct {
+	ExecutionID identity.AgentExecutionID
+	Context     context.Context
+	Result      *ExecutionResult
 	cancel      context.CancelCauseFunc
 	ending      bool
 	running     bool
 	wake        chan struct{}
-	result      *executionResultState
 }
 
+// ExecutionResult 保留结算结果，结算重试不得重新运行模型或工具。
+type ExecutionResult struct {
+	Outcome agentmodel.ExecutionOutcome
+	Code    agentmodel.ExecutionFailureCode
+	Message string
+}
+
+func (a *ActiveTask) WakeSignal() <-chan struct{} { return a.wake }
+
 // Reserve 为已准入的 Execution 创建执行 Context；重复启动返回原 Context。
-// 调用方应在同一准入事务中先建立绑定，再持久化 Agent 的 executing 状态。
+// 调用方先建立绑定，再条件保存 Execution；保存失败必须释放本次预留。
 func (e *ActiveTasks) Reserve(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID) (context.Context, bool, error) {
 	if ctx == nil || agentID == "" || executionID == "" {
 		return nil, false, fault.InvalidValue("agent.execution", "context, agent and task are required")
@@ -33,18 +43,18 @@ func (e *ActiveTasks) Reserve(ctx context.Context, agentID identity.AgentID, exe
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if active := e.active[agentID]; active != nil {
-		if active.executionID == executionID {
-			return active.ctx, false, nil
+		if active.ExecutionID == executionID {
+			return active.Context, false, nil
 		}
 		return nil, false, agentmodel.ErrAgentExecuting
 	}
 	if e.active == nil {
-		e.active = make(map[identity.AgentID]*activeTask)
+		e.active = make(map[identity.AgentID]*ActiveTask)
 	}
 	executionCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
-	e.active[agentID] = &activeTask{
-		executionID: executionID,
-		ctx:         executionCtx,
+	e.active[agentID] = &ActiveTask{
+		ExecutionID: executionID,
+		Context:     executionCtx,
 		cancel:      cancel,
 		wake:        make(chan struct{}, 1),
 	}
@@ -57,10 +67,10 @@ func (e *ActiveTasks) Context(agentID identity.AgentID, executionID identity.Age
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	active := e.active[agentID]
-	if active == nil || active.executionID != executionID {
+	if active == nil || active.ExecutionID != executionID {
 		return nil, fault.ErrNotFound
 	}
-	return active.ctx, nil
+	return active.Context, nil
 }
 
 // Pause 暂停指定 Execution 的活动执行；返回 true 仅表示信号送达，不表示已经持久化终态。
@@ -77,19 +87,19 @@ func (e *ActiveTasks) cancel(agentID identity.AgentID, executionID identity.Agen
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	active := e.active[agentID]
-	if active == nil || active.executionID != executionID || active.ending {
+	if active == nil || active.ExecutionID != executionID || active.ending {
 		return false
 	}
-	// Context 保留第一次取消原因；多条控制命令的最终优先级由持久化结算事务确定。
+	// Context 保留第一次取消原因；多条控制命令的最终优先级由结算确定。
 	active.cancel(cause)
 	return true
 }
 
-// BeginEnding 标记 loop 已返回，之后控制请求由结算事务仲裁，不再向执行发送信号。
+// BeginEnding 标记 loop 已返回，之后控制请求由结算仲裁，不再向执行发送信号。
 func (e *ActiveTasks) BeginEnding(agentID identity.AgentID, executionID identity.AgentExecutionID) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if active := e.active[agentID]; active != nil && active.executionID == executionID {
+	if active := e.active[agentID]; active != nil && active.ExecutionID == executionID {
 		active.ending = true
 	}
 }
@@ -98,18 +108,18 @@ func (e *ActiveTasks) BeginEnding(agentID identity.AgentID, executionID identity
 func (e *ActiveTasks) Release(agentID identity.AgentID, executionID identity.AgentExecutionID) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if active := e.active[agentID]; active != nil && active.executionID == executionID {
+	if active := e.active[agentID]; active != nil && active.ExecutionID == executionID {
 		active.cancel(nil)
 		delete(e.active, agentID)
 	}
 }
 
 // TryRun 原子领取同一 Execution 的运行权；重复激活不会创建第二个 Loop。
-func (e *ActiveTasks) TryRun(agentID identity.AgentID, executionID identity.AgentExecutionID) (*activeTask, bool, error) {
+func (e *ActiveTasks) TryRun(agentID identity.AgentID, executionID identity.AgentExecutionID) (*ActiveTask, bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	active := e.active[agentID]
-	if active == nil || active.executionID != executionID {
+	if active == nil || active.ExecutionID != executionID {
 		return nil, false, fault.ErrNotFound
 	}
 	if active.running {
@@ -119,8 +129,8 @@ func (e *ActiveTasks) TryRun(agentID identity.AgentID, executionID identity.Agen
 	return active, true, nil
 }
 
-// runReturned 保留结算失败的占用，允许后续激活重试同一份结算结果。
-func (e *ActiveTasks) runReturned(agentID identity.AgentID, active *activeTask) {
+// RunReturned 保留结算失败的占用，允许后续激活重试同一份结算结果。
+func (e *ActiveTasks) RunReturned(agentID identity.AgentID, active *ActiveTask) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.active[agentID] == active {
@@ -132,7 +142,7 @@ func (e *ActiveTasks) runReturned(agentID identity.AgentID, active *activeTask) 
 func (e *ActiveTasks) Wake(agentID identity.AgentID, executionID identity.AgentExecutionID) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if active := e.active[agentID]; active != nil && active.executionID == executionID && !active.ending {
+	if active := e.active[agentID]; active != nil && active.ExecutionID == executionID && !active.ending {
 		select {
 		case active.wake <- struct{}{}:
 		default:
@@ -140,13 +150,13 @@ func (e *ActiveTasks) Wake(agentID identity.AgentID, executionID identity.AgentE
 	}
 }
 
-func (e *ActiveTasks) occupied(agentID identity.AgentID) bool {
+func (e *ActiveTasks) Occupied(agentID identity.AgentID) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.active[agentID] != nil
 }
 
-func (e *ActiveTasks) stopAll() {
+func (e *ActiveTasks) StopAll() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for _, active := range e.active {
@@ -154,7 +164,7 @@ func (e *ActiveTasks) stopAll() {
 	}
 }
 
-func (e *ActiveTasks) hasActive() bool {
+func (e *ActiveTasks) HasActive() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return len(e.active) != 0

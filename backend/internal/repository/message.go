@@ -16,6 +16,8 @@ type MessageQuery struct {
 	After  uint64
 	Limit  int
 	Tail   bool
+	// IncludeUnadmitted 供准入冻结排除列表；普通展示查询隐藏尚未提交 Execution/Task 的输入。
+	IncludeUnadmitted bool
 }
 
 // Message 只存取显式指定流的消息，不选择流或更新 Execution。

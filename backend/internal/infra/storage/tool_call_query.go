@@ -14,28 +14,32 @@ import (
 type ToolCallQueries struct{ s *Store }
 
 func (r ToolCallQueries) GetCall(ctx context.Context, callKey toolexecution.Key) (call messagemodel.ToolCall, err error) {
-	err = r.s.view(ctx, func(readCtx context.Context) error {
-		key, err := r.s.lookup(readCtx, lookupKey{kind: "tool-call", owner: callKey.ExecutionID.String(), value: callKey.CallID})
-		if err != nil {
-			return err
-		}
-		entry, ok := r.s.entry(readCtx, key)
-		if !ok {
-			return fault.ErrNotFound
-		}
-		var record messageRecord
-		if err := decodeJSON(entry.payload, &record); err != nil {
-			return err
-		}
-		for _, value := range record.Data.ToolCalls(identity.SessionID(entry.scope), record.AgentID) {
-			if value.Key == callKey {
-				call = value
-				return nil
-			}
-		}
-		return fault.ErrNotFound
+	err = r.s.view(ctx, func() error {
+		call, err = r.getCallLocked(callKey)
+		return err
 	})
 	return call, err
+}
+
+func (r ToolCallQueries) getCallLocked(callKey toolexecution.Key) (messagemodel.ToolCall, error) {
+	key, err := r.s.lookup(lookupKey{kind: "tool-call", owner: callKey.ExecutionID.String(), value: callKey.CallID})
+	if err != nil {
+		return messagemodel.ToolCall{}, err
+	}
+	entry, ok := r.s.entry(key)
+	if !ok {
+		return messagemodel.ToolCall{}, fault.ErrNotFound
+	}
+	var record messageRecord
+	if err := decodeJSON(entry.payload, &record); err != nil {
+		return messagemodel.ToolCall{}, err
+	}
+	for _, value := range record.Data.ToolCalls(identity.SessionID(entry.scope), record.AgentID) {
+		if value.Key == callKey {
+			return value, nil
+		}
+	}
+	return messagemodel.ToolCall{}, fault.ErrNotFound
 }
 
 func (r ToolCallQueries) GetResult(ctx context.Context, key toolexecution.Key) (messagemodel.Message, error) {
@@ -45,9 +49,9 @@ func (r ToolCallQueries) GetResult(ctx context.Context, key toolexecution.Key) (
 
 func (r ToolCallQueries) ListMissingToolResults(ctx context.Context) ([]repository.MissingToolResult, error) {
 	values := make([]repository.MissingToolResult, 0)
-	err := r.s.view(ctx, func(readCtx context.Context) error {
-		for _, key := range r.s.keys(readCtx, lookupKey{kind: "all-tool-call-messages"}) {
-			entry, _ := r.s.entry(readCtx, key)
+	err := r.s.view(ctx, func() error {
+		for _, key := range r.s.keys(lookupKey{kind: "all-tool-call-messages"}) {
+			entry, _ := r.s.entry(key)
 			var record messageRecord
 			if err := decodeJSON(entry.payload, &record); err != nil {
 				return err
@@ -57,7 +61,7 @@ func (r ToolCallQueries) ListMissingToolResults(ctx context.Context) ([]reposito
 				if block.Kind != messagemodel.BlockToolCall {
 					continue
 				}
-				_, err := r.s.lookup(readCtx, lookupKey{kind: "tool-result", owner: record.Data.ExecutionID, value: block.CallID})
+				_, err := r.s.lookup(lookupKey{kind: "tool-result", owner: record.Data.ExecutionID, value: block.CallID})
 				if errors.Is(err, fault.ErrNotFound) {
 					values = append(values, repository.MissingToolResult{
 						SessionID:   identity.SessionID(entry.scope),

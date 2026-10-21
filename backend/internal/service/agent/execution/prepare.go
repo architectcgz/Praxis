@@ -4,79 +4,133 @@ import (
 	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/hook"
+	messagemodel "praxis/internal/core/message"
+	modelapi "praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
+	taskmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 )
 
-// PrepareNext 在一次事务中读取队首、冻结执行输入、创建执行并标记预约派发。
-// 事务失败释放本次预留；提交后崩溃由 Execution 恢复扫描接管。
-func (s *Service) PrepareNext(ctx context.Context, agentID identity.AgentID) (agentmodel.Execution, bool, error) {
-	var built agentmodel.Execution
-	var admitted bool
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
-		owner, err := s.agents.Get(txCtx, agentID)
+// PrepareTask 将内存 Task 准入为 Execution，开始时才保存用户消息并冻结上下文。
+// 返回值的 bool 表示重复请求；失败释放本次预留，队列是否重入由上层决定。
+func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID identity.AgentID, modelConfig modelapi.Config) (result agentmodel.Execution, existing bool, err error) {
+	if ctx == nil {
+		return result, false, errors.New("task preparation context is required")
+	}
+	if modelConfig.ProviderID == "" || modelConfig.ModelID == "" {
+		return result, false, fault.New(modelconfig.ModelNotConfigured, "")
+	}
+	// 请求身份只在调度准入时建立；由 Task ID 派生以保证准备重试使用同一身份。
+	requestID := identity.RequestID(input.ID)
+	inputMessageID := "input:" + requestID.String()
+	owner, err := s.agents.Get(ctx, agentID)
+	if err != nil {
+		return result, false, err
+	}
+	if owner.SessionID != input.SessionID {
+		return result, false, fault.ErrRequestConflict
+	}
+	previous, err := s.records.FindByRequest(ctx, owner.ID, requestID)
+	if err == nil {
+		stored, err := s.messages.Get(ctx, agentservice.MessageStream(owner), previous.InputMessageID)
 		if err != nil {
-			return err
+			return result, false, err
 		}
-		if err := sessionservice.RequireWritable(txCtx, s.sessions, owner.SessionID); err != nil {
-			return err
+		if previous.SourceTaskID != input.ID || stored.Role != messagemodel.RoleUser || stored.TextContent() != input.Prompt {
+			return result, false, fault.ErrRequestConflict
 		}
-		if !owner.CanReadSessionContext() {
-			return fault.New(fault.InvalidRequest, "queue requires the session main agent")
+		return previous, true, nil
+	}
+	if !errors.Is(err, fault.ErrNotFound) {
+		return result, false, err
+	}
+	if err := sessionservice.RequireWritable(ctx, s.sessions, owner.SessionID); err != nil {
+		return result, false, err
+	}
+	if !owner.State.Startable() {
+		return result, false, agentmodel.ErrAgentExecuting
+	}
+	count, err := s.records.CountActiveBySession(ctx, owner.SessionID)
+	if err != nil {
+		return result, false, err
+	}
+	if count != 0 {
+		return result, false, agentmodel.ErrAgentExecuting
+	}
+	definition, err := s.definitions.Definition(owner.DefinitionID)
+	if err != nil {
+		return result, false, err
+	}
+	if definition.Profile != owner.Profile {
+		return result, false, fault.ErrRevisionConflict
+	}
+	config := agentmodel.ExecutionConfig{
+		AgentDefinitionID: definition.ID,
+		SystemPrompt:      definition.Instructions,
+		Model:             modelConfig,
+	}
+	at := s.clock.Now()
+	executionID := identity.AgentExecutionID(s.ids.New("execution"))
+	if previous, err := s.messages.Get(ctx, agentservice.MessageStream(owner), inputMessageID); err == nil {
+		if previous.Role != messagemodel.RoleUser || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
+			return result, false, fault.ErrRequestConflict
 		}
-		if owner.State != agentmodel.AgentIdle && owner.State != agentmodel.AgentWaiting {
-			return nil
-		}
-		pending, err := s.queue.FindNextPendingByAgent(txCtx, owner.ID)
-		if errors.Is(err, fault.ErrNotFound) {
-			return nil
-		}
+		executionID = identity.AgentExecutionID(previous.ExecutionID)
+	} else if !errors.Is(err, fault.ErrNotFound) {
+		return result, false, err
+	}
+	_, admitted, err := s.executions.Reserve(ctx, owner.ID, executionID)
+	if err != nil {
+		return result, false, err
+	}
+	if !admitted {
+		return result, false, fault.ErrRequestConflict
+	}
+	defer func() {
 		if err != nil {
-			return err
+			s.executions.Release(owner.ID, executionID)
 		}
-		if err := pending.Prepare(); err != nil {
-			return err
-		}
-		count, err := s.records.CountActiveBySession(txCtx, owner.SessionID)
-		if err != nil || count != 0 {
-			return err
-		}
-		config, err := s.buildConfig(txCtx, owner, pending.ProviderID, pending.ModelID, pending.ReasoningLevel)
-		if err != nil {
-			return err
-		}
-		selection, err := s.selectContext(txCtx, owner, config, pending.InputMessageID)
-		if err != nil {
-			return err
-		}
-		at := s.clock.Now()
-		built = agentmodel.NewExecution(identity.AgentExecutionID(s.ids.New("execution")), owner.SessionID, owner.ID, pending.RequestID, pending.InputMessageID, config, selection, at)
-		built.SourceTaskID = pending.ID
-		built.ProviderID, built.ModelID, built.ReasoningLevel = pending.ProviderID, pending.ModelID, pending.ReasoningLevel
-		if err := owner.StartExecution(built.ID, at); err != nil {
-			return err
-		}
-		if err := pending.MarkDispatched(built.ID, at); err != nil {
-			return err
-		}
-		_, admitted, err = s.executions.Reserve(ctx, owner.ID, built.ID)
-		if err != nil {
-			return err
-		}
-		if err := s.records.Save(txCtx, built); err != nil {
-			return err
-		}
-		if err := s.queue.Save(txCtx, pending); err != nil {
-			return err
-		}
-		return s.agents.Save(txCtx, owner)
+	}()
+	stored, _, err := s.messages.Append(ctx, messagemodel.Record{
+		Stream:  agentservice.MessageStream(owner),
+		AgentID: owner.ID,
+		Data: messagemodel.Message{
+			ID:           inputMessageID,
+			RequestID:    requestID.String(),
+			SourceTaskID: input.ID.String(),
+			ExecutionID:  executionID.String(),
+			Role:         messagemodel.RoleUser,
+			AuthorKind:   messagemodel.AuthorUser,
+			Blocks:       []messagemodel.Block{{Kind: messagemodel.BlockText, Text: input.Prompt}},
+			CreatedAt:    at,
+		},
 	})
 	if err != nil {
-		if admitted {
-			s.executions.Release(agentID, built.ID)
-		}
+		return result, false, err
+	}
+	selection, err := s.selectContext(ctx, owner, config, inputMessageID)
+	if err != nil {
+		return result, false, err
+	}
+	result = agentmodel.NewExecution(executionID, owner.SessionID, owner.ID, requestID, inputMessageID, config, selection, at)
+	result.SourceTaskID = input.ID
+	if err = s.records.Save(ctx, result); err != nil {
 		return agentmodel.Execution{}, false, err
 	}
-	return built, built.ID != "", nil
+	if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
+		Identity: hook.Identity{
+			SessionID:    result.SessionID,
+			AgentID:      result.AgentID,
+			SourceTaskID: result.SourceTaskID,
+			ExecutionID:  result.ID,
+		},
+		Message: &stored,
+	}); hookErr != nil {
+		s.logger.Errorf("user message committed hook failed: %v", hookErr)
+	}
+	return result, false, nil
 }

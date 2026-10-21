@@ -1,12 +1,13 @@
 package agent
 
-// ExecutionProgress 在模型请求及消息提交时更新，重启不能重置已消耗预算。
+// ExecutionProgress 保存模型请求消耗；消息相关统计由仓储派生，重启不能重置预算。
 type ExecutionProgress struct {
 	NextSequence     uint64
 	Iterations       uint64
 	ModelRequests    uint64
-	OutputBytes      int64
-	ToolCalls        int
-	FinalStopReason  string
-	FinalAssistantID string
+	ModelOutputBytes int64
+	OutputBytes      int64  `json:"-"`
+	ToolCalls        int    `json:"-"`
+	FinalStopReason  string `json:"-"`
+	FinalAssistantID string `json:"-"`
 }

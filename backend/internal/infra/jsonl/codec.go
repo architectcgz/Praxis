@@ -18,11 +18,6 @@ type Event struct {
 	Payload    json.RawMessage `json:"payload,omitempty"`
 }
 
-// Commit 是一个日志行中原子提交的事件集合。
-type Commit struct {
-	Events []Event `json:"events"`
-}
-
 func Decode(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

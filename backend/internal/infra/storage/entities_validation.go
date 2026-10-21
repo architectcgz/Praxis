@@ -83,18 +83,6 @@ func validateAgent(a agentmodel.Agent) error {
 	default:
 		return fault.InvalidValue("agent.profile", "unknown agent profile")
 	}
-	switch a.State {
-	case agentmodel.AgentIdle, agentmodel.AgentExecuting, agentmodel.AgentWaiting, agentmodel.AgentPausing, agentmodel.AgentPaused, agentmodel.AgentInterrupted, agentmodel.AgentFailed:
-	default:
-		return fault.InvalidValue("agent.state", "unknown agent state")
-	}
-	if a.State == agentmodel.AgentExecuting || a.State == agentmodel.AgentPausing {
-		if a.CurrentExecutionID == "" || a.CurrentExecutionID.String() != strings.TrimSpace(a.CurrentExecutionID.String()) {
-			return fault.InvalidValue("agent.currentExecutionID", "active state requires a task")
-		}
-	} else if a.CurrentExecutionID != "" {
-		return fault.InvalidValue("agent.currentExecutionID", "inactive state cannot retain a task")
-	}
 	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return fault.InvalidValue("agent.timestamps", "timestamps are invalid")
 	}
@@ -167,24 +155,15 @@ func validateControlCommand(r agentmodel.AgentControlCommand) error {
 	if r.Kind != agentmodel.AgentControlPause && r.Kind != agentmodel.AgentControlCancel {
 		return fault.InvalidValue("agentControlCommand.kind", "unknown control kind")
 	}
-	if r.Status != agentmodel.AgentControlPending && r.Status != agentmodel.AgentControlApplied {
-		return fault.InvalidValue("agentControlCommand.status", "unknown control status")
-	}
-	if r.CreatedAt.IsZero() || !r.AppliedAt.IsZero() && r.AppliedAt.Before(r.CreatedAt) {
-		return fault.InvalidValue("agentControlCommand.timestamps", "timestamps are invalid")
-	}
-	if (r.Status == agentmodel.AgentControlPending) != r.AppliedAt.IsZero() {
-		return fault.InvalidValue("agentControlCommand.appliedAt", "apply time does not match status")
+	if r.CreatedAt.IsZero() {
+		return fault.InvalidValue("agentControlCommand.createdAt", "creation time is required")
 	}
 	return nil
 }
 
 func validateAgentExecution(e agentmodel.Execution) error {
-	if e.Progress.OutputBytes < 0 || e.Progress.ToolCalls < 0 || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
+	if e.Progress.ModelOutputBytes < 0 || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
 		return fault.InvalidValue("execution.progress", "usage counters or request sequence are invalid")
-	}
-	if (e.Progress.FinalAssistantID == "") != (e.Progress.FinalStopReason == "") || e.Progress.FinalStopReason != "" && e.Progress.FinalStopReason != "completed" && e.Progress.FinalStopReason != "stop_sequence" {
-		return fault.InvalidValue("execution.progress", "final output evidence is inconsistent")
 	}
 	for _, id := range []string{
 		e.ID.String(),
@@ -201,14 +180,6 @@ func validateAgentExecution(e agentmodel.Execution) error {
 	case agentmodel.ExecutionStarting, agentmodel.ExecutionRunning, agentmodel.ExecutionWaitingApproval, agentmodel.ExecutionEnding, agentmodel.ExecutionEnded:
 	default:
 		return fault.InvalidValue("agent_execution", "unknown status")
-	}
-	if (e.ProviderID == "") != (e.ModelID == "") || e.ProviderID == "" && e.ReasoningLevel != "" {
-		return fault.InvalidValue("execution.model", "provider and model are required together")
-	}
-	for _, value := range []string{e.ProviderID, e.ModelID, e.ReasoningLevel} {
-		if value != strings.TrimSpace(value) {
-			return fault.InvalidValue("execution.model", "model selection must be canonical")
-		}
 	}
 	if err := validateExecutionConfig(e.Config); err != nil {
 		return fault.FieldError("execution.config", err)

@@ -2,12 +2,13 @@ package execution
 
 import (
 	"context"
+	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
 
-// NextRequestSequence 返回当前可用序号；同步请求 Hook 在模型调用前校验并原子推进。
-// 此操作仅协调正常执行中的请求身份，不执行状态恢复或读取上下文。
+// NextRequestSequence 返回当前可用序号，请求 Hook 在模型调用前条件写入预留。
 func (s *Service) NextRequestSequence(ctx context.Context, id identity.AgentExecutionID) (uint64, error) {
 	execution, err := s.records.Get(ctx, id)
 	if err != nil {
@@ -19,36 +20,47 @@ func (s *Service) NextRequestSequence(ctx context.Context, id identity.AgentExec
 	return max(uint64(1), execution.Progress.NextSequence), nil
 }
 
-func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64, iteration bool) error {
-	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		task, err := s.records.Get(txCtx, id)
+// update 只重试未提交的单记录状态转换，不重放模型、工具或其他外部副作用。
+func (s *Service) update(ctx context.Context, id identity.AgentExecutionID, change func(*agentmodel.Execution) error) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		value, err := s.records.Get(ctx, id)
 		if err != nil {
 			return err
 		}
-		if !task.Active() || sequence != max(uint64(1), task.Progress.NextSequence) {
+		if err := change(&value); err != nil {
+			return err
+		}
+		err = s.records.Save(ctx, value)
+		if !errors.Is(err, fault.ErrRevisionConflict) {
+			return err
+		}
+	}
+}
+
+func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64, iteration bool) error {
+	return s.update(ctx, id, func(value *agentmodel.Execution) error {
+		if !value.Active() || sequence != max(uint64(1), value.Progress.NextSequence) {
 			return fault.ErrRequestConflict
 		}
 		if iteration {
-			task.Progress.Iterations++
+			value.Progress.Iterations++
 		}
-		task.Progress.NextSequence = sequence + 1
-		task.Progress.ModelRequests++
-		return s.records.Save(txCtx, task)
+		value.Progress.NextSequence = sequence + 1
+		value.Progress.ModelRequests++
+		return nil
 	})
 }
 
-// recordModelOutput 累计模型实际返回的文本字节，取消后仍保存已消耗额度。
-// 工具回执由 ToolExecution Service 在回执事务中累计。
+// recordModelOutput 保存已经返回的模型消耗，工具字节始终从回执派生。
 func (s *Service) recordModelOutput(ctx context.Context, id identity.AgentExecutionID, outputBytes int) error {
 	if outputBytes == 0 {
 		return nil
 	}
-	return s.tx.InTx(context.WithoutCancel(ctx), func(txCtx context.Context) error {
-		task, err := s.records.Get(txCtx, id)
-		if err != nil {
-			return err
-		}
-		task.Progress.OutputBytes += int64(outputBytes)
-		return s.records.Save(txCtx, task)
+	return s.update(context.WithoutCancel(ctx), id, func(value *agentmodel.Execution) error {
+		value.Progress.ModelOutputBytes += int64(outputBytes)
+		return nil
 	})
 }

@@ -6,7 +6,7 @@ import (
 	"praxis/internal/core/hook"
 )
 
-// ProgressHook 在模型边界调用 Execution 用例，序号和计数在同一事务中提交。
+// ProgressHook 在模型边界调用 Execution 用例，序号和计数通过单记录条件写入提交。
 // Hook 不持有某次执行的状态，可由共享 Runner 并发使用。
 type ProgressHook struct {
 	Service *Service

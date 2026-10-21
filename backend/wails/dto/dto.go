@@ -13,6 +13,7 @@ type SessionSnapshot struct {
 	CreatedAt   time.Time       `json:"createdAt"`
 	UpdatedAt   time.Time       `json:"updatedAt"`
 	Agents      []AgentSnapshot `json:"agents"`
+	Tasks       []QueuedTask    `json:"tasks"`
 }
 
 type SessionSummary struct {
@@ -65,17 +66,16 @@ type CreateSessionResponse struct {
 }
 
 type AgentSnapshot struct {
-	Tasks              []QueuedTaskSnapshot `json:"tasks"`
-	ID                 string               `json:"id"`
-	Name               string               `json:"name"`
-	SessionID          string               `json:"sessionId"`
-	DefinitionID       string               `json:"definitionId"`
-	Profile            string               `json:"profile"`
-	State              string               `json:"state"`
-	CurrentExecutionID string               `json:"currentExecutionId"`
-	ExecutionIDs       []string             `json:"executionIds"`
-	Executions         []ExecutionSnapshot  `json:"executions"`
-	ControlCommandIDs  []string             `json:"controlCommandIds"`
+	ID                 string              `json:"id"`
+	Name               string              `json:"name"`
+	SessionID          string              `json:"sessionId"`
+	DefinitionID       string              `json:"definitionId"`
+	Profile            string              `json:"profile"`
+	State              string              `json:"state"`
+	CurrentExecutionID string              `json:"currentExecutionId"`
+	ExecutionIDs       []string            `json:"executionIds"`
+	Executions         []ExecutionSnapshot `json:"executions"`
+	ControlCommandIDs  []string            `json:"controlCommandIds"`
 }
 
 // ExecutionSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。
@@ -129,25 +129,21 @@ type AgentHistoryPage struct {
 }
 
 type ModelOption struct {
-	ProviderID               string   `json:"providerId"`
-	ModelID                  string   `json:"modelId"`
-	DefaultProviderID        string   `json:"defaultProviderId"`
-	DefaultModelID           string   `json:"defaultModelId"`
-	Label                    string   `json:"label"`
-	ProviderName             string   `json:"providerName"`
-	ReasoningLevels          []string `json:"reasoningLevels"`
-	DefaultReasoningLevel    string   `json:"defaultReasoningLevel"`
-	AssignedAgentDefinitions []string `json:"assignedAgentDefinitions"`
+	ProviderID            string   `json:"providerId"`
+	ModelID               string   `json:"modelId"`
+	Label                 string   `json:"label"`
+	ProviderName          string   `json:"providerName"`
+	ReasoningLevels       []string `json:"reasoningLevels"`
+	DefaultReasoningLevel string   `json:"defaultReasoningLevel"`
 }
 
 // ProviderConfigOption 携带可编辑的 Provider 元数据和密钥状态。
 type ProviderConfigOption struct {
-	ID             string `json:"id"`
-	ProviderName   string `json:"providerName"`
-	BaseURL        string `json:"baseURL"`
-	ProxyURL       string `json:"proxyURL"`
-	DefaultModelID string `json:"defaultModelId"`
-	HasAPIKey      bool   `json:"hasAPIKey"`
+	ID           string `json:"id"`
+	ProviderName string `json:"providerName"`
+	BaseURL      string `json:"baseURL"`
+	ProxyURL     string `json:"proxyURL"`
+	HasAPIKey    bool   `json:"hasAPIKey"`
 }
 
 type GroupConfigOption struct {
@@ -171,17 +167,30 @@ type ModelConfigOption struct {
 
 // ModelConfigDocument 表示可编辑的模型注册表文档。
 type ModelConfigDocument struct {
-	Groups            []GroupConfigOption    `json:"groups"`
-	DefaultProviderID string                 `json:"defaultProviderId"`
-	Providers         []ProviderConfigOption `json:"providers"`
-	Models            []ModelConfigOption    `json:"models"`
+	Groups    []GroupConfigOption    `json:"groups"`
+	Providers []ProviderConfigOption `json:"providers"`
+	Models    []ModelConfigOption    `json:"models"`
 }
 
 type SaveModelConfigRequest struct {
-	Groups            []GroupConfigOption    `json:"groups"`
-	DefaultProviderID string                 `json:"defaultProviderId"`
-	Providers         []ProviderConfigOption `json:"providers"`
-	Models            []ModelConfigOption    `json:"models"`
+	Groups    []GroupConfigOption    `json:"groups"`
+	Providers []ProviderConfigOption `json:"providers"`
+	Models    []ModelConfigOption    `json:"models"`
+}
+
+// SelectModelRequest 更新指定会话的选择；模型字段全空表示清除该会话的选择。
+type SelectModelRequest struct {
+	SessionID      string `json:"sessionId"`
+	ProviderID     string `json:"providerId"`
+	ModelID        string `json:"modelId"`
+	ReasoningLevel string `json:"reasoningLevel"`
+}
+
+// ModelSelection 只返回会话选择的公开字段，不包含完整模型配置。
+type ModelSelection struct {
+	ProviderID     string `json:"providerId"`
+	ModelID        string `json:"modelId"`
+	ReasoningLevel string `json:"reasoningLevel"`
 }
 
 // SaveModelConfigResponse 通过 validationError 报告用户可修正的配置问题。
@@ -191,20 +200,14 @@ type SaveModelConfigResponse struct {
 	ValidationError string `json:"validationError,omitempty"`
 }
 
-type SendInputRequest struct {
-	SessionID      string `json:"sessionId"`
-	AgentID        string `json:"agentId"`
-	RequestID      string `json:"requestId"`
-	Content        string `json:"content"`
-	ProviderID     string `json:"providerId"`
-	ModelID        string `json:"modelId"`
-	ReasoningLevel string `json:"reasoningLevel"`
+type CreateTaskRequest struct {
+	SessionID string `json:"sessionId"`
+	Prompt    string `json:"prompt"`
 }
 
-type SendInputResponse struct {
-	ExecutionID     string `json:"executionId"`
-	ExistingRequest bool   `json:"existingRequest"`
-	ActivationError string `json:"activationError,omitempty"`
+type CreateTaskResponse struct {
+	TaskID          string `json:"taskId"`
+	SchedulingError string `json:"schedulingError,omitempty"`
 }
 
 type PauseAgentRequest struct {
@@ -225,27 +228,15 @@ type AgentControlResponse struct {
 	CancellationError string `json:"cancellationError,omitempty"`
 }
 
-type QueueTaskRequest struct {
-	TaskID         string `json:"taskId"`
-	RequestID      string `json:"requestId"`
-	AgentID        string `json:"agentId"`
-	Prompt         string `json:"prompt"`
-	ProviderID     string `json:"providerId"`
-	ModelID        string `json:"modelId"`
-	ReasoningLevel string `json:"reasoningLevel"`
+type CancelTaskRequest struct {
+	SessionID string `json:"sessionId"`
+	TaskID    string `json:"taskId"`
 }
 
-type QueueTaskResponse struct {
-	TaskID       string `json:"taskId"`
-	Status       string `json:"status"`
-	ExistingTask bool   `json:"existingTask"`
-}
-
-// QueuedTaskSnapshot 只表示预约及其派发关系，不携带执行终态。
-type QueuedTaskSnapshot struct {
-	ID          string    `json:"id"`
-	Status      string    `json:"status"`
-	Sequence    uint64    `json:"sequence"`
-	ExecutionID string    `json:"executionId,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
+// QueuedTask 展示内存待办与正文，不携带执行终态。
+type QueuedTask struct {
+	ID        string    `json:"id"`
+	Prompt    string    `json:"prompt"`
+	Sequence  uint64    `json:"sequence"`
+	CreatedAt time.Time `json:"createdAt"`
 }

@@ -72,7 +72,7 @@ const (
 	FailureInternal            FailureCode = "internal"
 )
 
-// AssistantWrite 是一次输出提交用例的输入，最终证据与消息必须在同一事务保存。
+// AssistantWrite 是一次输出提交的输入；FinalOutput 用于校验，完成证据以消息为准。
 type AssistantWrite struct {
 	Message     messagemodel.Message
 	FinalOutput *agentmodel.FinalOutput

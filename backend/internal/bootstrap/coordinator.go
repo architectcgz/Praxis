@@ -5,6 +5,7 @@ import (
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/model"
+	taskmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	toolinfra "praxis/internal/infra/tools"
@@ -12,34 +13,28 @@ import (
 	"praxis/internal/loop"
 	"praxis/internal/repository"
 	execution "praxis/internal/service/agent/coordinator"
-	executionservice "praxis/internal/service/agent/execution"
 	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 )
 
-// ModelSource 提供模型选择和冻结配置对应的请求流，不暴露 Provider 实现。
-type ModelSource interface {
-	model.ModelBuilder
-	executionservice.ModelConfigResolver
-}
-
-// Dependencies 是进程级执行协调器的装配依赖；Task 用例和队列由 task/service 提供。
+// coordinatorDependencies 装配业务用例、Core 内存队列与执行能力。
 type coordinatorDependencies struct {
-	Transactions   repository.Transaction
 	Tasks          execution.ExecutionOperations
 	Requests       loop.RequestSequencer
 	ProgressHook   hook.ModelHook
 	Records        repository.AgentExecution
-	Queue          execution.TaskQueue
-	Recovery       execution.RecoverySource
-	ActiveTasks    *execution.ActiveTasks
+	SessionTasks   execution.SessionTasks
+	PrimaryAgent   execution.PrimaryAgentProvider
+	SessionModels  execution.SessionModels
+	Recovery       repository.AgentExecution
+	ActiveTasks    *taskmodel.ActiveTasks
 	ToolExecutions repository.ToolExecution
 	Messages       repository.Message
 	ToolCalls      repository.ToolCallQueries
 	Agents         repository.Agent
 	Sessions       repository.Session
 	Workspaces     repository.Workspace
-	Models         ModelSource
+	Models         model.ModelBuilder
 	Tools          tool.ToolCatalog
 	Rules          toolservice.ApprovalRules
 	HookDispatcher *hook.Dispatcher
@@ -82,7 +77,6 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		},
 	}
 	executor, err := toolservice.NewService(toolservice.Dependencies{
-		Transactions:   deps.Transactions,
 		HookDispatcher: deps.HookDispatcher,
 		Rules:          deps.Rules,
 		Review:         reviewer.Review,
@@ -127,7 +121,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		Loop:           &runner,
 		ActiveTasks:    deps.ActiveTasks,
 		Operations:     deps.Tasks,
-		Queue:          deps.Queue,
+		SessionTasks:   deps.SessionTasks,
 		HookDispatcher: deps.HookDispatcher,
 		Logger:         deps.Logger,
 		ConfigMu:       deps.ConfigMu,
@@ -135,5 +129,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		Tools:          executor,
 		Sessions:       deps.Sessions,
 		Workspaces:     deps.Workspaces,
+		PrimaryAgent:   deps.PrimaryAgent,
+		SessionModels:  deps.SessionModels,
 	})
 }

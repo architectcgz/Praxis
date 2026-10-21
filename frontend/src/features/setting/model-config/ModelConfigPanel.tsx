@@ -12,8 +12,7 @@ import { readableError } from '../../../shared/errors'
 import { ProviderDialog } from './ProviderDialog'
 import { ProviderDirectoryList } from './ProviderDirectory'
 import { ModelDialog } from './ModelDialog'
-import { Field } from './ModelConfigDialogParts'
-import { providerDisplayName, modelKey } from './modelConfigHelpers'
+import { modelKey } from './modelConfigHelpers'
 import type { Editor, ModelConfigPanelProps } from './modelConfigTypes'
 
 export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
@@ -72,11 +71,10 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         } else {
             providers[providerIndex] = provider
         }
-        const defaultProviderId = config.defaultProviderId || (config.providers.length === 0 ? provider.id : '')
         setSaving(true)
         setError('')
         try {
-            const savedConfig = await saveConfig({ ...config, defaultProviderId, providers })
+            const savedConfig = await saveConfig({ ...config, providers })
             setConfig(savedConfig)
             setEditor({ kind: 'provider', index: savedConfig.providers.findIndex((item) => item.id === provider.id) })
             if (key.trim()) {
@@ -93,13 +91,6 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         }
     }
 
-    const saveDefaultProvider = async (defaultProviderId: string) => {
-        if (!config || !defaultProviderId || defaultProviderId === config.defaultProviderId) {
-            return
-        }
-        await persist({ ...config, defaultProviderId })
-    }
-
     const saveModel = async (model: ModelConfigOption) => {
         if (!config || editor?.kind !== 'model') {
             return
@@ -112,22 +103,12 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
             return
         }
         const models = [...config.models]
-        const previousModel = editor.index === null ? null : config.models[editor.index]
         if (editor.index === null) {
             models.push(nextModel)
         } else {
             models[editor.index] = nextModel
         }
-        const providers = config.providers.map((provider) => {
-            if (provider.id !== editor.providerID) {
-                return provider
-            }
-            if (!provider.defaultModelId || previousModel?.modelId === provider.defaultModelId) {
-                return { ...provider, defaultModelId: nextModel.modelId }
-            }
-            return provider
-        })
-        await persist({ ...config, models, providers })
+        await persist({ ...config, models })
     }
 
     const deleteProvider = async (index: number) => {
@@ -138,7 +119,6 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         const providers = config.providers.filter((_, itemIndex) => itemIndex !== index)
         await persist({
             ...config,
-            defaultProviderId: config.defaultProviderId === provider.id ? providers[0]?.id || '' : config.defaultProviderId,
             providers,
             models: config.models.filter((model) => model.providerId !== provider.id),
         })
@@ -148,19 +128,10 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
         if (!config) {
             return
         }
-        const model = config.models[index]
         const remainingModels = config.models.filter((_, itemIndex) => itemIndex !== index)
         await persist({
             ...config,
             models: remainingModels,
-            providers: config.providers.map((provider) => (
-                provider.id === model.providerId && provider.defaultModelId === model.modelId
-                    ? {
-                        ...provider,
-                        defaultModelId: remainingModels.find((item) => item.providerId === provider.id)?.modelId || '',
-                    }
-                    : provider
-            )),
         })
     }
 
@@ -183,22 +154,6 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
                                 <p>首先添加 Provider，然后配置 Praxis 将在该 Provider 下使用的 Model。</p>
                             </div>
                             <div className="model-config-header-actions">
-                                <div className="model-config-default-provider">
-                                    <Field label="默认 Provider">
-                                        <select
-                                            value={config?.defaultProviderId || ''}
-                                            disabled={loading || saving || !config?.providers.length}
-                                            onChange={(event) => void saveDefaultProvider(event.target.value)}
-                                        >
-                                            {!config?.providers.length && <option value="">暂无 Provider</option>}
-                                            {config?.providers.map((provider) => (
-                                                <option key={provider.id} value={provider.id}>
-                                                    {providerDisplayName(provider)}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </Field>
-                                </div>
                                 <button
                                     className="management-primary"
                                     type="button"
@@ -252,9 +207,6 @@ export function ModelConfigPanel({ onRefresh, onBack }: ModelConfigPanelProps) {
                     modelCount={editor.index === null ? 0 : config.models.filter((model) => (
                         model.providerId === config.providers[editor.index!].id
                     )).length}
-                    models={editor.index === null ? [] : config.models.filter((model) => (
-                        model.providerId === config.providers[editor.index!].id
-                    ))}
                     error={error}
                     saving={saving}
                     onSave={saveProvider}

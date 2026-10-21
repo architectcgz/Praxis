@@ -15,5 +15,6 @@ type Session interface {
 	ListByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.Session, error)
 	HasMessages(context.Context, identity.SessionID) (bool, error)
 	Rename(context.Context, identity.SessionID, string, time.Time) error
-	Delete(context.Context, identity.SessionID) error
+	NameFromInput(context.Context, identity.SessionID, string, time.Time) error
+	Delete(context.Context, identity.SessionID, bool) error
 }

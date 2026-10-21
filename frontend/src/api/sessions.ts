@@ -1,5 +1,7 @@
 import { getSessionBinding } from './bindings'
+import { dto } from '../../wailsjs/go/models'
 import { normalizeAgentSnapshot, normalizeModelUsageRecords, type AgentSnapshot, type ModelUsageRecord } from './agents'
+import { normalizeQueuedTasks, type QueuedTask } from './tasks'
 
 export type SessionSnapshot = {
     id: string
@@ -9,6 +11,7 @@ export type SessionSnapshot = {
     createdAt: string
     updatedAt: string
     agents: AgentSnapshot[]
+    tasks: QueuedTask[]
 }
 
 export type SessionSummary = {
@@ -43,6 +46,24 @@ export function listSessions(projectID: string) {
 
 export function createSession(request: CreateSessionRequest) {
     return getSessionBinding().CreateSession(request)
+}
+
+export type ModelSelection = { providerId: string; modelId: string; reasoningLevel: string }
+
+/** 模型选择属于指定会话，不改变其他会话或已经创建的执行。 */
+export function selectSessionModel(sessionID: string, selection: ModelSelection) {
+    return getSessionBinding().SelectModel(new dto.SelectModelRequest({ sessionId: sessionID, ...selection }))
+}
+
+/** 读取后端保存的会话选择，不从本地全局偏好恢复。 */
+export async function getSessionModelSelection(sessionID: string): Promise<ModelSelection> {
+    const value: unknown = await getSessionBinding().GetModelSelection(sessionID)
+    if (!isRecord(value)) throw new Error('会话模型选择数据格式无效。')
+    return {
+        providerId: requiredString(value.providerId),
+        modelId: requiredString(value.modelId),
+        reasoningLevel: requiredString(value.reasoningLevel),
+    }
 }
 
 export function getSession(sessionID: string) {
@@ -93,6 +114,7 @@ function normalizeSessionSnapshot(value: unknown): SessionSnapshot {
         createdAt: requiredString(value.createdAt),
         updatedAt: requiredString(value.updatedAt),
         agents: value.agents.map(normalizeAgentSnapshot),
+        tasks: normalizeQueuedTasks(value.tasks),
     }
 }
 

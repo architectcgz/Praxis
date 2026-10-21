@@ -245,7 +245,7 @@ export function ProjectWorkspace() {
                                         reasoning={workspace.reasoning}
                                         busy={workspace.busy}
                                         canQueue={workspace.canQueue}
-                                        beforeInput={workspace.agent && <TaskQueue tasks={workspace.agent.tasks} history={workspace.history} />}
+                                        beforeInput={workspace.session && <TaskQueue tasks={workspace.session.tasks} busy={workspace.busy} onCancel={workspace.cancelQueuedTask} />}
                                         onSend={() => void workspace.submitInput()}
                                         onControl={(kind) => void workspace.control(kind)}
                                         onModelChange={workspace.selectModel}

@@ -1,8 +1,8 @@
 package storage
 
 import (
-	"context"
 	"encoding/json"
+	"maps"
 	"praxis/internal/fault"
 	"slices"
 )
@@ -16,10 +16,9 @@ type stateEntry struct {
 	groups        []lookupKey
 	claims        []lookupKey
 	eventSequence uint64
-	orderSequence uint64
 }
 
-// state 只保存完整实体和可由事件重建的通用查询索引。
+// state 保存已持久化实体及其可重建索引，只能在 Store.mu 内访问。
 type state struct {
 	entries map[entityKey]stateEntry
 	groups  map[lookupKey]map[entityKey]struct{}
@@ -78,48 +77,11 @@ func (s *state) removeScope(scope string) {
 	}
 }
 
-func (s *Store) keys(ctx context.Context, group lookupKey) []entityKey {
-	tx := s.tx(ctx)
-	keys := make([]entityKey, 0, len(s.state.groups[group]))
-	for key := range s.state.groups[group] {
-		if tx != nil {
-			if tx.deletedScope && s.state.entries[key].scope == tx.scope {
-				continue
-			}
-			if _, changed := tx.changes[key]; changed {
-				continue
-			}
-		}
-		keys = append(keys, key)
-	}
-	if tx != nil && !tx.deletedScope {
-		for key, change := range tx.changes {
-			if slices.Contains(change.entry.groups, group) {
-				keys = append(keys, key)
-			}
-		}
-	}
-	return keys
+func (s *Store) keys(group lookupKey) []entityKey {
+	return slices.Collect(maps.Keys(s.state.groups[group]))
 }
 
-func (s *Store) lookup(ctx context.Context, claim lookupKey) (entityKey, error) {
-	if tx := s.tx(ctx); tx != nil {
-		if !tx.deletedScope {
-			for key, change := range tx.changes {
-				if slices.Contains(change.entry.claims, claim) {
-					return key, nil
-				}
-			}
-		}
-		if key, ok := s.state.unique[claim]; ok {
-			if _, changed := tx.changes[key]; changed {
-				return entityKey{}, fault.ErrNotFound
-			}
-			if tx.deletedScope && s.state.entries[key].scope == tx.scope {
-				return entityKey{}, fault.ErrNotFound
-			}
-		}
-	}
+func (s *Store) lookup(claim lookupKey) (entityKey, error) {
 	key, ok := s.state.unique[claim]
 	if !ok {
 		return entityKey{}, fault.ErrNotFound
@@ -127,32 +89,7 @@ func (s *Store) lookup(ctx context.Context, claim lookupKey) (entityKey, error) 
 	return key, nil
 }
 
-func (s *Store) entry(ctx context.Context, key entityKey) (stateEntry, bool) {
-	if tx := s.tx(ctx); tx != nil {
-		if changed, ok := tx.changes[key]; ok {
-			if tx.deletedScope {
-				return stateEntry{}, false
-			}
-			return changed.entry, true
-		}
-		if tx.deletedScope && s.state.entries[key].scope == tx.scope {
-			return stateEntry{}, false
-		}
-	}
+func (s *Store) entry(key entityKey) (stateEntry, bool) {
 	entry, ok := s.state.entries[key]
 	return entry, ok
-}
-
-func (s *Store) publish(tx *transaction) {
-	if tx.deletedScope {
-		s.state.removeScope(tx.scope)
-		return
-	}
-	// 先移除所有旧索引，再发布最终实体，允许事务内合法的唯一键交换。
-	for key := range tx.changes {
-		s.state.remove(key)
-	}
-	for key, change := range tx.changes {
-		s.state.add(key, change.entry)
-	}
 }

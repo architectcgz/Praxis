@@ -26,9 +26,10 @@ type AgentControlCommand struct {
 	AgentID           identity.AgentID
 	TargetExecutionID identity.AgentExecutionID
 	Kind              AgentControlKind
-	Status            AgentControlStatus
-	CreatedAt         time.Time
-	AppliedAt         time.Time
+	// 命令是否已应用由目标 Execution 的终态派生，只持久化控制意图。
+	Status    AgentControlStatus `json:"-"`
+	CreatedAt time.Time
+	AppliedAt time.Time `json:"-"`
 }
 
 // NewAgentControlCommand 使用入口已校验的身份和控制类型创建待应用命令。

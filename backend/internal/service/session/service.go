@@ -1,4 +1,4 @@
-// Package session 负责 Session 初始化、状态读取、上下文追加和 Primary Agent 准入。
+// Package session 负责 Session 初始化、会话模型选择、状态读取、上下文追加和 Primary Agent 准入。
 package session
 
 import (
@@ -21,10 +21,10 @@ import (
 // AgentDefinitionFactory 解析可复用的 Agent 定义。
 type AgentDefinitionFactory func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 
-// Dependencies 包含初始化 Session 与 Primary Agent 所需的依赖。
+// Dependencies 包含 Session 用例、会话模型选择与 Primary Agent 准入所需的依赖。
 type Dependencies struct {
 	ConfigMu       *sync.RWMutex
-	Transactions   repository.Transaction
+	ModelConfigs   ModelConfigResolver
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
 	Workspaces     repository.Workspace
@@ -39,10 +39,10 @@ type Dependencies struct {
 	IDs            identity.IDGenerator
 }
 
-// Service 负责 Session 初始化和主 Agent 查询。
+// Service 管理 Session 用例与当前进程内按会话隔离的模型选择。
 type Service struct {
 	configMu       *sync.RWMutex
-	tx             repository.Transaction
+	modelConfigs   ModelConfigResolver
 	hookDispatcher *hook.Dispatcher
 	projects       repository.Project
 	workspaces     repository.Workspace
@@ -55,6 +55,10 @@ type Service struct {
 	usageRecords   repository.ModelUsage
 	clock          clock.Clock
 	ids            identity.IDGenerator
+
+	selectionMu     sync.RWMutex
+	modelSelections map[identity.SessionID]sessionmodel.ModelSelection
+	taskQueues      map[identity.SessionID]*sessionmodel.TaskQueue
 
 	createdSessionsMu sync.Mutex
 	createdSessions   map[identity.SessionID]struct{}
@@ -85,7 +89,6 @@ func NewService(deps Dependencies) (*Service, error) {
 		return nil, errors.New("session service usage reader is required")
 	}
 	for name, value := range map[string]any{
-		"transactions":      deps.Transactions,
 		"projects":          deps.Projects,
 		"workspaces":        deps.Workspaces,
 		"sessions":          deps.Sessions,
@@ -94,6 +97,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		"agents":            deps.Agents,
 		"tasks":             deps.Tasks,
 		"agent definitions": deps.Definitions,
+		"model configs":     deps.ModelConfigs,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("session service %s is required", name)
@@ -101,7 +105,9 @@ func NewService(deps Dependencies) (*Service, error) {
 	}
 	return &Service{
 		configMu:        deps.ConfigMu,
-		tx:              deps.Transactions,
+		modelConfigs:    deps.ModelConfigs,
+		modelSelections: make(map[identity.SessionID]sessionmodel.ModelSelection),
+		taskQueues:      make(map[identity.SessionID]*sessionmodel.TaskQueue),
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		workspaces:      deps.Workspaces,
@@ -118,10 +124,11 @@ func NewService(deps Dependencies) (*Service, error) {
 	}, nil
 }
 
-// SessionView 聚合会话及其 Agent 持久化状态，不包含应用展示数据。
+// SessionView 聚合会话、Agent 持久化状态和本进程的输入待办。
 type SessionView struct {
 	Session sessionmodel.Session
 	Agents  []agentmodel.Agent
+	Tasks   []sessionmodel.Task
 }
 
 // ListSessionsByProject 返回指定 Project 下按索引查询的 Session 列表。
@@ -153,7 +160,14 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID identity.Session
 	if err != nil {
 		return SessionView{}, fmt.Errorf("list agents in session %s: %w", sessionID, err)
 	}
-	return SessionView{Session: session, Agents: agents}, nil
+	if len(agents) == 0 {
+		return SessionView{}, fault.ErrNotFound
+	}
+	return SessionView{
+		Session: session,
+		Agents:  agents,
+		Tasks:   s.ListTasks(sessionID, 0),
+	}, nil
 }
 
 // ListSessionContext 按稳定时间和 ID 游标读取 SessionContext 条目。
@@ -167,7 +181,7 @@ func (s *Service) ListSessionContext(ctx context.Context, sessionID identity.Ses
 	return s.contexts.List(ctx, sessionID, afterID, limit)
 }
 
-// CreateSession 在一个事务中创建 Session 和主 Agent。
+// CreateSession 分别保存会话和初始 Agent；重复请求继续完成未就绪会话。
 // OperationHook 覆盖本次创建尝试，Start/End 均在创建锁之外，End 观察提交结果或错误。
 func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result CreateResult, err error) {
 	s.configMu.RLock()
@@ -196,12 +210,19 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 	if err != nil {
 		return CreateResult{}, fault.New(fault.InvalidRequest, "")
 	}
-	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		existing, err := s.sessions.Get(txCtx, params.SessionID)
 		if err == nil {
-			agent, agentErr := s.agents.Get(txCtx, params.AgentID)
-			if agentErr != nil {
+			if existing.ProjectID != params.ProjectID || existing.WorkspaceID != params.WorkspaceID {
 				return fault.ErrRequestConflict
+			}
+			agent, agentErr := s.agents.Get(txCtx, params.AgentID)
+			if errors.Is(agentErr, fault.ErrNotFound) {
+				agent = agentmodel.NewAgent(params.AgentID, existing.ID, definition.ID, definition.Profile, existing.CreatedAt)
+				agentErr = s.agents.Save(txCtx, agent)
+			}
+			if agentErr != nil {
+				return agentErr
 			}
 			if existing.ProjectID != params.ProjectID || existing.WorkspaceID != params.WorkspaceID ||
 				agent.SessionID != params.SessionID || agent.DefinitionID != definition.ID || agent.Profile != definition.Profile {
@@ -238,13 +259,14 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 		if err := s.sessions.Save(txCtx, session); err != nil {
 			return err
 		}
+		s.createdSessions[params.SessionID] = struct{}{}
 		if err := s.agents.Save(txCtx, agent); err != nil {
 			return err
 		}
 		result = CreateResult{Session: session, Agent: agent}
 		created = true
 		return nil
-	})
+	}(ctx)
 	if err == nil && created {
 		s.createdSessions[params.SessionID] = struct{}{}
 	}
@@ -261,7 +283,7 @@ func (s *Service) CreateSessionForProject(ctx context.Context, sessionID identit
 }
 
 // GetOrCreatePrimaryAgent 为已初始化的 Session 创建缺失的主 Agent。
-func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identity.SessionID, requestID identity.RequestID) (agentmodel.Agent, error) {
+func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identity.SessionID) (agentmodel.Agent, error) {
 	if ctx == nil {
 		return agentmodel.Agent{}, errors.New("ensure primary agent context is required")
 	}
@@ -276,12 +298,19 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 	if !errors.Is(err, fault.ErrNotFound) {
 		return agentmodel.Agent{}, err
 	}
+	initialized, err := s.agents.ListBySession(ctx, sessionID, 1)
+	if err != nil {
+		return agentmodel.Agent{}, err
+	}
+	if len(initialized) == 0 {
+		return agentmodel.Agent{}, fault.ErrRequestConflict
+	}
 	definition, err := s.definitions(agentmodel.DefinitionPrimary)
 	if err != nil {
 		return agentmodel.Agent{}, err
 	}
 	var created agentmodel.Agent
-	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		if err := RequireWritable(txCtx, s.sessions, sessionID); err != nil {
 			return err
 		}
@@ -296,11 +325,14 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 		at := s.clock.Now().UTC()
 		agent := agentmodel.NewAgent(identity.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, at)
 		if err := s.agents.Save(txCtx, agent); err != nil {
+			if errors.Is(err, fault.ErrRequestConflict) {
+				created, err = s.agents.GetBySessionAndDefinition(txCtx, sessionID, definition.ID)
+			}
 			return err
 		}
 		created = agent
 		return nil
-	})
+	}(ctx)
 	if err != nil {
 		return agentmodel.Agent{}, err
 	}
@@ -327,7 +359,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 		return AppendContextResult{}, errors.New("append session context is required")
 	}
 	var result AppendContextResult
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err := func(txCtx context.Context) error {
 		if err := RequireWritable(txCtx, s.sessions, params.SessionID); err != nil {
 			return err
 		}
@@ -354,9 +386,9 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 		if err := s.contexts.Append(txCtx, entry); err != nil {
 			return err
 		}
-		result.Entry = entry
-		return nil
-	})
+		result.Entry, _, err = s.contexts.GetByID(txCtx, entry.ID)
+		return err
+	}(ctx)
 	return result, err
 }
 
@@ -385,37 +417,27 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 		}
 		delete(s.createdSessions, sessionID)
 	}
+	s.selectionMu.Lock()
+	for _, queue := range s.taskQueues {
+		queue.Clear()
+	}
+	clear(s.taskQueues)
+	s.selectionMu.Unlock()
 	return cleanupErr
 }
 
 func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
-	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if _, err := s.sessions.Get(txCtx, sessionID); err != nil {
-			if onlyEmpty && errors.Is(err, fault.ErrNotFound) {
-				return nil
-			}
-			return err
-		}
-		if onlyEmpty {
-			// 消息检查和删除共用事务，避免并发输入提交后被误删。
-			if hasMessages, err := s.hasSessionMessages(txCtx, sessionID); err != nil || hasMessages {
-				return err
-			}
-		}
-		// 活跃执行是删除用例的业务约束，和删除标记在同一事务内检查。
-		active, err := s.tasks.CountActiveBySession(txCtx, sessionID)
-		if err != nil {
-			return err
-		}
-		if active > 0 {
-			return agentmodel.ErrAgentExecuting
-		}
-		return s.sessions.Delete(txCtx, sessionID)
-	})
-}
-
-func (s *Service) hasSessionMessages(ctx context.Context, sessionID identity.SessionID) (bool, error) {
-	return s.sessions.HasMessages(ctx, sessionID)
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
+	if err := s.sessions.Delete(ctx, sessionID, onlyEmpty); err != nil {
+		return err
+	}
+	delete(s.modelSelections, sessionID)
+	if queue := s.taskQueues[sessionID]; queue != nil {
+		queue.Clear()
+		delete(s.taskQueues, sessionID)
+	}
+	return nil
 }
 
 // RenameSession 接收已规范化标题，并刷新会话目录排序使用的更新时间。
@@ -423,7 +445,5 @@ func (s *Service) RenameSession(ctx context.Context, sessionID identity.SessionI
 	if ctx == nil {
 		return errors.New("rename session context is required")
 	}
-	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		return s.sessions.Rename(txCtx, sessionID, title, s.clock.Now())
-	})
+	return s.sessions.Rename(ctx, sessionID, title, s.clock.Now())
 }

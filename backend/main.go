@@ -37,7 +37,36 @@ func startupDataRootPath() (string, error) {
 	return filepath.Join(home, ".praxis"), nil
 }
 
+// acquireInstanceLock 使用固定的用户级路径，切换数据目录也不能绕过单实例约束。
+func acquireInstanceLock() (*os.File, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve application instance directory: %w", err)
+	}
+	directory := filepath.Join(cache, "praxis")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return nil, fmt.Errorf("create application instance directory: %w", err)
+	}
+	file, err := os.OpenFile(filepath.Join(directory, "instance.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open application instance lock: %w", err)
+	}
+	if err := lockInstanceFile(file); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("acquire application instance lock (Praxis may already be running): %w", err)
+	}
+	return file, nil
+}
+
 func main() {
+	instance, err := acquireInstanceLock()
+	if err != nil {
+		println("fatal:", err.Error())
+		return
+	}
+	// 持有运行权直到 Wails 完成关闭；不删除文件，避免重建文件绕过已有锁。
+	defer instance.Close()
+
 	a := wails.New(logging.NewFactory().Console())
 	startup := func(ctx context.Context) {
 		a.Startup(ctx)
@@ -64,7 +93,7 @@ func main() {
 		}
 	}
 
-	err := wailslib.Run(&options.App{
+	err = wailslib.Run(&options.App{
 		Title:       "Praxis",
 		Width:       1280,
 		Height:      800,

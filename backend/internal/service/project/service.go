@@ -10,34 +10,28 @@ import (
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/logging"
 	"praxis/internal/repository"
 )
 
 // WorkspaceDirectory 提供项目创建所需的目录操作能力。
 type WorkspaceDirectory interface {
 	Ensure(context.Context, string) (created bool, err error)
-	RemoveEmpty(context.Context, string) error
 }
 
 // Dependencies 包含创建 Project 持久化状态所需的依赖。
 type Dependencies struct {
-	Transactions repository.Transaction
-	Projects     repository.Project
-	Workspaces   repository.Workspace
-	Clock        clock.Clock
-	Directory    WorkspaceDirectory
-	Logger       *logging.Logger
+	Projects   repository.Project
+	Workspaces repository.Workspace
+	Clock      clock.Clock
+	Directory  WorkspaceDirectory
 }
 
-// Service 负责 Project 变更及其事务边界。
+// Service 负责 Project 创建与查询，默认工作区由 Project 派生。
 type Service struct {
-	tx         repository.Transaction
 	projects   repository.Project
 	workspaces repository.Workspace
 	clock      clock.Clock
 	directory  WorkspaceDirectory
-	logger     *logging.Logger
 }
 
 // CreateInput 包含新 Project 的持久化身份和规范化工作区数据。
@@ -58,7 +52,6 @@ type CreateProjectResult struct {
 // NewService 创建 Project 业务服务。
 func NewService(deps Dependencies) (*Service, error) {
 	for name, value := range map[string]any{
-		"transactions":        deps.Transactions,
 		"projects":            deps.Projects,
 		"workspaces":          deps.Workspaces,
 		"workspace directory": deps.Directory,
@@ -68,26 +61,24 @@ func NewService(deps Dependencies) (*Service, error) {
 		}
 	}
 	return &Service{
-		tx:         deps.Transactions,
 		projects:   deps.Projects,
 		workspaces: deps.Workspaces,
 		clock:      clock.ClockOrDefault(deps.Clock),
 		directory:  deps.Directory,
-		logger:     logging.NewFactory().Ensure(deps.Logger),
 	}, nil
 }
 
-// CreateProject 在一个事务内持久化 Project、初始 Workspace 和幂等结果。
+// CreateProject 保存单条 Project 创建事实，失败后保留已创建目录供重试。
 func (s *Service) CreateProject(ctx context.Context, params CreateInput) (CreateProjectResult, error) {
 	if ctx == nil {
 		return CreateProjectResult{}, errors.New("create project context is required")
 	}
-	createdDirectory, err := s.directory.Ensure(ctx, params.Path)
+	_, err := s.directory.Ensure(ctx, params.Path)
 	if err != nil {
 		return CreateProjectResult{}, err
 	}
 	var result CreateProjectResult
-	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		existing, err := s.projects.Get(txCtx, params.ProjectID)
 		if err == nil {
 			workspace, workspaceErr := s.workspaces.Get(txCtx, params.WorkspaceID)
@@ -122,17 +113,9 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (Create
 		if err := s.projects.Save(txCtx, project); err != nil {
 			return err
 		}
-		if err := s.workspaces.Save(txCtx, workspace); err != nil {
-			return err
-		}
 		result = CreateProjectResult{Project: project, Workspace: workspace}
 		return nil
-	})
-	if err != nil && createdDirectory {
-		if removeErr := s.directory.RemoveEmpty(context.WithoutCancel(ctx), params.Path); removeErr != nil {
-			s.logger.Warnf("failed to remove uncommitted project directory path=%s err=%v", params.Path, removeErr)
-		}
-	}
+	}(ctx)
 	return result, err
 }
 

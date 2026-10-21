@@ -19,7 +19,7 @@ func (r *Registry) Save(config modelconfig.Config) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	nextCredentials := retainCredentialsForProviders(r.credentials, nextConfig.Providers)
-	modelsByKey, providersByID := buildIndexes(nextConfig.Providers)
+	providersByID, modelConfigs := buildIndexes(nextConfig.Providers)
 	if credentialsChanged(r.credentials, nextCredentials) && r.credentialsPath != "" {
 		if err := writeConfigAtomically(r.credentialsPath, nextCredentials); err != nil {
 			return &ConfigurationError{Path: r.credentialsPath, Err: err}
@@ -30,7 +30,7 @@ func (r *Registry) Save(config modelconfig.Config) error {
 	}
 	r.config = nextConfig
 	r.credentials = nextCredentials
-	r.modelsByKey = modelsByKey
+	r.modelConfigs = modelConfigs
 	r.providersByID = providersByID
 	r.providerClients = providerClients
 	return nil

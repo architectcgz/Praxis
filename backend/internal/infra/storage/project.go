@@ -13,7 +13,7 @@ func (r ProjectRepository) Get(ctx context.Context, id identity.ProjectID) (proj
 	return get[projectmodel.Project](ctx, r.s, "project", id.String())
 }
 
-// Save 保存入口已处理的对象，事务未提交时只更新工作区。
+// Save 保存单条项目事实，默认 Workspace 由该事实派生。
 func (r ProjectRepository) Save(ctx context.Context, v projectmodel.Project) error {
 	return save(ctx, r.s, "", "project", v.ID.String(), "project.saved", v)
 }

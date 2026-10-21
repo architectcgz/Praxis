@@ -8,13 +8,13 @@ import (
 	"praxis/internal/fault"
 )
 
-// TimingStore 将计时更新放入所属 Session 日志，不影响主业务事务。
+// TimingStore 将计时更新独立追加到所属 Session 日志。
 type TimingStore struct{ Store *Store }
 
 // Save 拒绝旧版本及终态回退，重复保存相同版本时要求内容一致。
 func (r TimingStore) Save(ctx context.Context, v timingmodel.Record) error {
-	return r.Store.InTx(ctx, func(ctx context.Context) error {
-		old, e := get[timingmodel.Record](ctx, r.Store, "timing", v.ID)
+	return r.Store.view(ctx, func() error {
+		old, e := getLocked[timingmodel.Record](r.Store, "timing", v.ID)
 		if e == nil {
 			if v.Revision < old.Revision {
 				return errors.New("stale timing version rejected")
@@ -31,7 +31,7 @@ func (r TimingStore) Save(ctx context.Context, v timingmodel.Record) error {
 		} else if !errors.Is(e, fault.ErrNotFound) {
 			return e
 		}
-		return save(ctx, r.Store, v.SessionID, "timing", v.ID, "timing.saved", v)
+		return r.Store.appendLocked(ctx, v.SessionID, "timing", v.ID, "timing.saved", v)
 	})
 }
 

@@ -32,13 +32,13 @@ func (s *Service) StopAgent(ctx context.Context, params ControlInput) (ControlRe
 	return s.applyControl(ctx, params, agentmodel.AgentControlCancel)
 }
 
-// 控制意图必须先提交，结束事务才可以仲裁正常完成与暂停、停止的竞争。
+// 控制意图先提交，Execution 的条件写入负责仲裁完成与暂停、停止的竞争。
 func (s *Service) applyControl(ctx context.Context, params ControlInput, kind agentmodel.AgentControlKind) (ControlResult, error) {
 	if ctx == nil {
 		return ControlResult{}, errors.New("control command context is required")
 	}
 	var result ControlResult
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err := func(txCtx context.Context) error {
 		existing, err := s.controls.Get(txCtx, params.CommandID)
 		if err == nil {
 			if existing.AgentID != params.AgentID || existing.TargetExecutionID != params.TargetExecutionID || existing.Kind != kind {
@@ -63,30 +63,15 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind ag
 		}
 		at := s.clock.Now()
 		control := agentmodel.NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
-		if task.Status == agentmodel.ExecutionEnded {
-			if err := control.MarkApplied(at); err != nil {
-				return err
-			}
-		} else if agent.CurrentExecutionID != task.ID {
-			return fault.New(agentmodel.UnavailableCode, "")
-		} else if agent.State == agentmodel.AgentExecuting {
-			if err := agent.RequestPause(at); err != nil {
-				return err
-			}
-		} else if agent.State == agentmodel.AgentPausing {
-			// 人工重试可以接管上一次未完成的进程内取消。
-		} else {
+		if task.Active() && (agent.CurrentExecutionID != task.ID || agent.State != agentmodel.AgentExecuting && agent.State != agentmodel.AgentPausing) {
 			return fault.New(agentmodel.UnavailableCode, "")
 		}
 		if err := s.controls.Save(txCtx, control); err != nil {
 			return err
 		}
-		if err := s.agents.Save(txCtx, agent); err != nil {
-			return err
-		}
-		result.Command = control
-		return nil
-	})
+		result.Command, err = s.controls.Get(txCtx, control.ID)
+		return err
+	}(ctx)
 	if err != nil {
 		return ControlResult{}, err
 	}
@@ -103,6 +88,6 @@ func (s *Service) signalControl(result ControlResult) ControlResult {
 	} else {
 		s.executions.Stop(command.AgentID, command.TargetExecutionID)
 	}
-	// loop 已返回时无需再发信号，结束事务负责应用已提交的控制命令。
+	// loop 已返回时无需再发信号，结算负责仲裁已提交的控制命令。
 	return result
 }

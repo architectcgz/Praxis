@@ -22,7 +22,7 @@ func MessageStream(owner agentmodel.Agent) messagemodel.StreamKey {
 
 // AppendMessage 追加非主 Agent 的私有输入；执行输出通过 Execution/ToolExecution 提交。
 func (s *Service) AppendMessage(ctx context.Context, agentID identity.AgentID, data messagemodel.Message) (stored messagemodel.Message, inserted bool, err error) {
-	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		owner, err := s.agents.Get(txCtx, agentID)
 		if err != nil {
 			return err
@@ -35,7 +35,7 @@ func (s *Service) AppendMessage(ctx context.Context, agentID identity.AgentID, d
 		}
 		stored, inserted, err = s.messages.Append(txCtx, messagemodel.Record{Stream: MessageStream(owner), AgentID: owner.ID, Data: data})
 		return err
-	})
+	}(ctx)
 	if err != nil {
 		return messagemodel.Message{}, false, err
 	}
@@ -51,7 +51,7 @@ func (s *Service) ListAgentMessages(ctx context.Context, agentID identity.AgentI
 		return nil, errors.New("agent message query is unavailable")
 	}
 	var messages []messagemodel.Message
-	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+	err := func(ctx context.Context) error {
 		agent, err := s.agents.Get(ctx, agentID)
 		if err != nil {
 			return err
@@ -82,6 +82,6 @@ func (s *Service) ListAgentMessages(ctx context.Context, agentID identity.AgentI
 
 		messages = stream.Messages
 		return nil
-	})
+	}(ctx)
 	return messages, err
 }

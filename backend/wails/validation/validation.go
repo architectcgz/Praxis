@@ -53,6 +53,9 @@ func requireID(field, value string) error {
 // ValidateAgentID 校验 agentId 必填。
 func ValidateAgentID(value string) error { return requireID("agentId", value) }
 
+// ValidateTaskID 校验 taskId 必填且已规范化。
+func ValidateTaskID(value string) error { return requireID("taskId", value) }
+
 // ValidateSessionID 校验 sessionId 必填。
 func ValidateSessionID(value string) error { return requireID("sessionId", value) }
 
@@ -64,27 +67,6 @@ func ValidateProviderID(value string) error {
 	return requireID("providerId", value)
 }
 
-// ValidateSendInput 校验 requestId 和目标 ID 的 wire shape。
-func ValidateSendInput(request dto.SendInputRequest) error {
-	if err := requireID("requestId", request.RequestID); err != nil {
-		return err
-	}
-	if request.SessionID == "" && request.AgentID == "" {
-		return invalid("sessionId", "sessionId or agentId is required")
-	}
-	if request.SessionID != "" {
-		if err := requireID("sessionId", request.SessionID); err != nil {
-			return err
-		}
-	}
-	if request.AgentID != "" {
-		if err := requireID("agentId", request.AgentID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ValidateAgentControl 校验暂停或取消请求的 commandId、agentId、targetTaskId 必填且已规范化。
 func ValidateAgentControl(request dto.PauseAgentRequest) error {
 	if err := requireID("commandId", request.CommandID); err != nil {
@@ -94,17 +76,6 @@ func ValidateAgentControl(request dto.PauseAgentRequest) error {
 		return err
 	}
 	return requireID("targetTaskId", request.TargetExecutionID)
-}
-
-// ValidateQueueTask 校验预约 Task 的身份字段。
-func ValidateQueueTask(request dto.QueueTaskRequest) error {
-	if err := requireID("executionId", request.TaskID); err != nil {
-		return err
-	}
-	if err := requireID("requestId", request.RequestID); err != nil {
-		return err
-	}
-	return requireID("agentId", request.AgentID)
 }
 
 // ValidateCreateProject 校验建项目请求的必填字段。

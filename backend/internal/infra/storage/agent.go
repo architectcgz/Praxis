@@ -3,6 +3,7 @@ package storage
 import (
 	"cmp"
 	"context"
+	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -17,7 +18,7 @@ func (r AgentRepository) Get(ctx context.Context, id identity.AgentID) (agentmod
 	return get[agentmodel.Agent](ctx, r.s, "agent", id.String())
 }
 
-// Save 保存入口已处理的对象，事务未提交时只更新工作区。
+// Save 持锁保存单条 Agent 身份事实，执行状态不参与持久化。
 func (r AgentRepository) Save(ctx context.Context, v agentmodel.Agent) error {
 	return save(ctx, r.s, v.SessionID.String(), "agent", v.ID.String(), "agent.saved", v)
 }
@@ -46,18 +47,28 @@ func (r ControlRepository) Get(ctx context.Context, id identity.AgentControlComm
 	return get[agentmodel.AgentControlCommand](ctx, r.s, "control", id.String())
 }
 
-// Save 保存入口已处理的对象，事务未提交时只更新工作区。
+// Save 在同一临界区内检查幂等身份并保存控制意图。
 func (r ControlRepository) Save(ctx context.Context, v agentmodel.AgentControlCommand) error {
-	a, e := (AgentRepository{r.s}).Get(ctx, v.AgentID)
-	if e != nil {
-		return e
-	}
-	return save(ctx, r.s, a.SessionID.String(), "control", v.ID.String(), "control.saved", v)
+	return r.s.view(ctx, func() error {
+		a, err := getLocked[agentmodel.Agent](r.s, "agent", v.AgentID.String())
+		if err != nil {
+			return err
+		}
+		if existing, err := getLocked[agentmodel.AgentControlCommand](r.s, "control", v.ID.String()); err == nil {
+			if existing.AgentID != v.AgentID || existing.TargetExecutionID != v.TargetExecutionID || existing.Kind != v.Kind {
+				return fault.ErrRequestConflict
+			}
+			return nil
+		} else if !errors.Is(err, fault.ErrNotFound) {
+			return err
+		}
+		return r.s.appendLocked(ctx, a.SessionID.String(), "control", v.ID.String(), "control.saved", v)
+	})
 }
 
 // ListOpenByAgent 返回 Agent 尚未应用的控制命令。
 func (r ControlRepository) ListOpenByAgent(ctx context.Context, id identity.AgentID, limit int) ([]agentmodel.AgentControlCommand, error) {
-	v, e := listIndexed[agentmodel.AgentControlCommand](ctx, r.s, lookupKey{kind: "controls-agent", owner: id.String()}, nil)
+	v, e := listIndexed[agentmodel.AgentControlCommand](ctx, r.s, lookupKey{kind: "controls-agent", owner: id.String()}, func(v agentmodel.AgentControlCommand) bool { return v.Status == agentmodel.AgentControlPending })
 	return capped(sorted(v, func(a, b agentmodel.AgentControlCommand) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	}), limit), e

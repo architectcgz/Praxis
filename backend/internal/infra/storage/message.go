@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	agentmodel "praxis/internal/core/agent"
 	messagemodel "praxis/internal/core/message"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -33,9 +34,9 @@ func (r MessageRepository) Append(ctx context.Context, value messagemodel.Record
 	if scope == "" || value.AgentID == "" || owner != "" && owner != value.AgentID.String() {
 		return stored, false, errors.New("message stream ownership is required")
 	}
-	err = r.s.InTx(ctx, func(txCtx context.Context) error {
+	err = r.s.view(ctx, func() error {
 		key := messageEntityKey(scope, owner, value.Data.ID)
-		prior, err := r.s.payload(txCtx, key)
+		prior, err := r.s.payload(key)
 		if err == nil {
 			var record messageRecord
 			if err := decodeJSON(prior, &record); err != nil {
@@ -52,13 +53,18 @@ func (r MessageRepository) Append(ctx context.Context, value messagemodel.Record
 		if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
-		tx := r.s.tx(txCtx)
-		sequence := r.s.log.Sequence(scope)
-		if len(tx.events) > 0 {
-			sequence = tx.nextSequence
+		// 幂等回读先于状态检查；新输出必须在当前执行仍允许写入时提交。
+		if value.Data.Role == messagemodel.RoleAssistant {
+			execution, err := getLocked[agentmodel.Execution](r.s, "agent_execution", value.Data.ExecutionID)
+			if err != nil {
+				return err
+			}
+			if !execution.Active() || execution.Progress.FinalAssistantID != "" {
+				return fault.ErrRequestConflict
+			}
 		}
 		data := value.Data
-		data.Sequence = sequence + 1
+		data.Sequence = r.s.log.Sequence(scope) + 1
 		if data.CreatedAt.IsZero() {
 			data.CreatedAt = time.Now().UTC()
 		}
@@ -66,11 +72,11 @@ func (r MessageRepository) Append(ctx context.Context, value messagemodel.Record
 		if err := record.Validate(); err != nil {
 			return err
 		}
-		if err := save(txCtx, r.s, scope, "message", messageKey(owner, data.ID), "message.appended", record); err != nil {
+		if err := r.s.appendLocked(ctx, scope, "message", messageKey(owner, data.ID), "message.appended", record); err != nil {
 			return err
 		}
 		// 返回值与 State 的 RawMessage 及调用方传入的 slice 均不共享可变引用。
-		payload, err := r.s.payload(txCtx, key)
+		payload, err := r.s.payload(key)
 		if err != nil {
 			return err
 		}
@@ -92,22 +98,33 @@ func (r MessageRepository) Get(ctx context.Context, stream messagemodel.StreamKe
 }
 
 func (r MessageRepository) List(ctx context.Context, query repository.MessageQuery) (page repository.MessagePage, err error) {
-	err = r.s.view(ctx, func(readCtx context.Context) error {
-		keys := r.s.keys(readCtx, lookupKey{kind: "messages-stream", owner: query.Stream.SessionID.String(), value: query.Stream.OwnerAgentID.String()})
+	err = r.s.view(ctx, func() error {
+		keys := r.s.keys(lookupKey{kind: "messages-stream", owner: query.Stream.SessionID.String(), value: query.Stream.OwnerAgentID.String()})
 		selected := make([]entityKey, 0, len(keys))
 		for _, key := range keys {
-			entry, _ := r.s.entry(readCtx, key)
+			entry, _ := r.s.entry(key)
 			if entry.eventSequence > query.After {
+				var record messageRecord
+				if err := decodeJSON(entry.payload, &record); err != nil {
+					return err
+				}
+				if record.Data.Role == messagemodel.RoleUser && !query.IncludeUnadmitted {
+					if id := record.Data.ExecutionID; id != "" {
+						if _, exists := r.s.entry(entityKey{"agent_execution", id}); !exists {
+							continue
+						}
+					}
+				}
 				selected = append(selected, key)
 			}
 		}
 		sorted(selected, func(a, b entityKey) int {
-			left, _ := r.s.entry(readCtx, a)
-			right, _ := r.s.entry(readCtx, b)
+			left, _ := r.s.entry(a)
+			right, _ := r.s.entry(b)
 			return cmp.Compare(left.eventSequence, right.eventSequence)
 		})
 		if len(selected) > 0 {
-			entry, _ := r.s.entry(readCtx, selected[len(selected)-1])
+			entry, _ := r.s.entry(selected[len(selected)-1])
 			page.SequenceBoundary = entry.eventSequence
 		}
 		if query.Limit > 0 {
@@ -119,7 +136,7 @@ func (r MessageRepository) List(ctx context.Context, query repository.MessageQue
 		}
 		page.Messages = make([]messagemodel.Message, 0, len(selected))
 		for _, key := range selected {
-			data, err := r.s.payload(readCtx, key)
+			data, err := r.s.payload(key)
 			if err != nil {
 				return err
 			}
@@ -163,6 +180,7 @@ func validateMessageData(m messagemodel.Message) error {
 	for _, value := range []string{
 		m.ID,
 		m.RequestID,
+		m.SourceTaskID,
 		m.HandoffID,
 		m.ExecutionID,
 		m.TurnID,

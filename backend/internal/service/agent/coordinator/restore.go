@@ -2,38 +2,46 @@ package coordinator
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/identity"
+	"errors"
+	"fmt"
 )
 
-// RecoverySource 从当前持久化状态读取活动 Execution 和允许派发的 Agent。
-type RecoverySource interface {
-	ListActive(context.Context) ([]agentmodel.Execution, error)
-	ListDispatchableAgents(context.Context) ([]identity.AgentID, error)
-}
-
-// Restore 先恢复已有 Execution，再检查空闲 Agent 的 Pending 队列；不改写历史数据。
-func (r *Coordinator) restore(ctx context.Context, source RecoverySource) error {
-	if err := r.enter(ctx); err != nil {
+// Restore 必须在外部准入开放前调用，只恢复已开始并持久化的 Execution。
+// 未开始的输入只在内存中存在，不参与启动恢复。
+func (s *Coordinator) Restore(ctx context.Context) (err error) {
+	if err := s.enter(ctx); err != nil {
 		return err
 	}
-	defer r.running.Done()
-	tasks, err := source.ListActive(ctx)
-	if err != nil {
-		return err
+	defer s.running.Done()
+	s.mu.Lock()
+	if s.restored {
+		s.mu.Unlock()
+		return nil
 	}
-	for _, task := range tasks {
-		if err := r.Activate(ctx, task); err != nil {
-			return err
+	if s.restoring || s.activeTasks.HasActive() {
+		s.mu.Unlock()
+		return errors.New("execution recovery requires stopped executors")
+	}
+	s.restoring = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.restoring = false
+		if err == nil {
+			s.restored = true
 		}
+		s.mu.Unlock()
+	}()
+	if err := s.tools.RecoverAll(ctx); err != nil {
+		return fmt.Errorf("reconcile tool results: %w", err)
 	}
-	agents, err := source.ListDispatchableAgents(ctx)
+	executions, err := s.recovery.ListActive(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("load active executions: %w", err)
 	}
-	for _, agentID := range agents {
-		if _, err := r.StartNext(ctx, agentID); err != nil {
-			return err
+	for _, execution := range executions {
+		if err := s.Activate(ctx, execution); err != nil {
+			return fmt.Errorf("restore execution: %w", err)
 		}
 	}
 	return nil

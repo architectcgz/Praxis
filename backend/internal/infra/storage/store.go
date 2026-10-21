@@ -1,4 +1,4 @@
-// Package storage 在可靠日志之上实现事务、内存 State 和实体仓储。
+// Package storage 在可靠日志之上实现单事件写入、内存 State 和实体仓储。
 package storage
 
 import (
@@ -49,15 +49,21 @@ func (s *Store) Close(ctx context.Context) error {
 	return s.log.Close()
 }
 
-func (s *Store) project(ctx context.Context, scope string) string {
-	if project := s.log.Project(scope); project != "" {
-		return project
+// view 的回调只调用持锁内部函数；同一把锁覆盖条件检查、单事件落盘和索引更新。
+func (s *Store) view(ctx context.Context, fn func() error) error {
+	if ctx == nil {
+		return errors.New("storage context is required")
 	}
-	entry, _ := s.entry(ctx, entityKey{"session", scope})
-	for _, group := range entry.groups {
-		if group.kind == "sessions-project" {
-			return group.owner
-		}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return ""
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.log.Check(); err != nil {
+		return err
+	}
+	return fn()
 }

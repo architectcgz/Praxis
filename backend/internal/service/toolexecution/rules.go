@@ -8,6 +8,7 @@ import (
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
+	"sync"
 )
 
 type ApprovalCatalog interface {
@@ -21,12 +22,22 @@ type commandTool interface {
 }
 
 type ApprovalRules struct {
+	ConfigMu    *sync.RWMutex
 	Catalog     ApprovalCatalog
 	DefaultMode func(context.Context, identity.SessionID) (security.ApprovalMode, error)
 }
 
-// Decide 与配置重载共用事务边界，显式 deny 始终优先。
+// Decide 用配置读锁取得同一配置快照，显式 deny 始终优先。
 func (r ApprovalRules) Decide(ctx context.Context, call message.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
+	if r.ConfigMu != nil {
+		r.ConfigMu.RLock()
+		defer r.ConfigMu.RUnlock()
+	}
+	return r.decide(ctx, call, args)
+}
+
+// decide 供已经持有配置读锁的启动临界区使用，避免嵌套 RWMutex 读锁。
+func (r ApprovalRules) decide(ctx context.Context, call message.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
 	registered, enabled := r.Catalog.Get(call.Name)
 	if !enabled {
 		return security.ApprovalDecision{Action: security.ApprovalDeny, RuleID: "tool-disabled"}, nil

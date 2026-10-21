@@ -13,12 +13,10 @@ import (
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
-	executionservice "praxis/internal/service/agent/execution"
 	approvalservice "praxis/internal/service/approval"
 	modelservice "praxis/internal/service/model"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
-	queueservice "praxis/internal/service/task"
 	toolservice "praxis/internal/service/toolexecution"
 	workspaceservice "praxis/internal/service/workspace"
 )
@@ -40,6 +38,7 @@ type SessionService interface {
 	GetSessionView(context.Context, identity.SessionID, int) (sessionservice.SessionView, error)
 	DeleteSession(context.Context, identity.SessionID) error
 	RenameSession(context.Context, identity.SessionID, string) error
+	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
 }
 
 type WorkspaceService interface {
@@ -58,8 +57,9 @@ type AgentCommands interface {
 	StopToolCall(context.Context, toolservice.ControlRequest) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
-	SendInput(context.Context, executionservice.SendInput) (execution.StartResult, error)
-	EnqueueTask(context.Context, queueservice.EnqueueInput) (queueservice.EnqueueResult, error)
+	SubmitTask(context.Context, sessionservice.TaskInput) (execution.SubmitResult, error)
+	CancelTask(context.Context, identity.SessionID, identity.TaskID) error
+	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
 }
 
 type ModelCatalog interface {

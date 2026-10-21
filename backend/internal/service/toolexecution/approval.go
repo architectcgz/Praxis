@@ -40,8 +40,10 @@ func (s *Service) Deny(ctx context.Context, executionID identity.AgentExecutionI
 }
 
 func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve bool) (task agentmodel.Execution, err error) {
+	s.controlMu.Lock()
+	defer s.controlMu.Unlock()
 	executionID, callID, digest := request.ExecutionID, request.CallID, request.ArgumentsDigest
-	err = s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		call, err := s.call(txCtx, executionID, callID)
 		if err != nil {
 			return err
@@ -97,13 +99,13 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 			Source:          executionmodel.ApprovalSourceUser,
 			Summary:         facts.Summary,
 		})
-	})
+	}(ctx)
 	return task, err
 }
 
 func (s *Service) ListApprovals(ctx context.Context, agentID identity.AgentID) ([]Approval, error) {
 	result := make([]Approval, 0)
-	err := s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
+	err := func(txCtx context.Context) error {
 		missing, err := s.deps.Calls.ListMissingToolResults(txCtx)
 		if err != nil {
 			return err
@@ -140,6 +142,6 @@ func (s *Service) ListApprovals(ctx context.Context, agentID identity.AgentID) (
 			})
 		}
 		return nil
-	})
+	}(ctx)
 	return result, err
 }

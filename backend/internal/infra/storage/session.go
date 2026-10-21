@@ -3,7 +3,10 @@ package storage
 import (
 	"cmp"
 	"context"
+	"errors"
+	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
+	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"strings"
 	"time"
@@ -16,7 +19,7 @@ func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sess
 	return get[sessionmodel.Session](ctx, r.s, "session", id.String())
 }
 
-// Save 保存入口已处理的对象，事务未提交时只更新工作区。
+// Save 持锁保存单条会话事实，初始 Agent 由调用方独立保存。
 func (r SessionRepository) Save(ctx context.Context, v sessionmodel.Session) error {
 	return save(ctx, r.s, v.ID.String(), "session", v.ID.String(), "session.saved", v)
 }
@@ -42,7 +45,7 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 		group = lookupKey{kind: "sessions-project", owner: project.String()}
 	}
 	v, e := listIndexed[sessionmodel.Session](ctx, r.s, group, func(v sessionmodel.Session) bool {
-		return (project == "" || v.ProjectID == project) && strings.Contains(strings.ToLower(v.Title), title)
+		return len(r.s.keys(lookupKey{kind: "agents-session", owner: v.ID.String()})) > 0 && (project == "" || v.ProjectID == project) && strings.Contains(strings.ToLower(v.Title), title)
 	})
 	return capped(sorted(v, func(a, b sessionmodel.Session) int {
 		return cmp.Or(b.UpdatedAt.Compare(a.UpdatedAt), cmp.Compare(a.ID, b.ID))
@@ -52,11 +55,11 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 // HasMessages 从消息分组派生会话级存在性，不解码消息正文。
 func (r SessionRepository) HasMessages(ctx context.Context, id identity.SessionID) (bool, error) {
 	found := false
-	err := r.s.view(ctx, func(readCtx context.Context) error {
-		if _, err := r.Get(readCtx, id); err != nil {
+	err := r.s.view(ctx, func() error {
+		if _, err := getLocked[sessionmodel.Session](r.s, "session", id.String()); err != nil {
 			return err
 		}
-		found = len(r.s.keys(readCtx, lookupKey{kind: "messages-session", owner: id.String()})) > 0
+		found = len(r.s.keys(lookupKey{kind: "messages-session", owner: id.String()})) > 0
 		return nil
 	})
 	return found, err
@@ -64,19 +67,43 @@ func (r SessionRepository) HasMessages(ctx context.Context, id identity.SessionI
 
 // Rename 更新规范化的非空标题，归属和创建时间保持不变。
 func (r SessionRepository) Rename(ctx context.Context, id identity.SessionID, title string, at time.Time) error {
-	v, e := r.Get(ctx, id)
-	if e != nil {
-		return e
-	}
-	v.Title = title
-	v.UpdatedAt = at
-	return r.Save(ctx, v)
+	return r.s.view(ctx, func() error {
+		v, err := getLocked[sessionmodel.Session](r.s, "session", id.String())
+		if err != nil {
+			return err
+		}
+		v.Title, v.UpdatedAt = title, at
+		return r.s.appendLocked(ctx, id.String(), "session", id.String(), "session.saved", v)
+	})
 }
 
-// Delete 追加删除标记并清理所属 Session 的查询索引；业务前置条件由删除用例检查。
-func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) error {
-	if _, e := r.Get(ctx, id); e != nil {
-		return e
-	}
-	return r.s.change(ctx, id.String(), "session", id.String(), "session.deleted", nil, nil)
+// NameFromInput 只在标题仍为空时写入，附属命名重试不能覆盖人工修改。
+func (r SessionRepository) NameFromInput(ctx context.Context, id identity.SessionID, content string, at time.Time) error {
+	return r.s.view(ctx, func() error {
+		v, err := getLocked[sessionmodel.Session](r.s, "session", id.String())
+		if err != nil {
+			return err
+		}
+		v.NameFromInput(content, at)
+		return r.s.appendLocked(ctx, id.String(), "session", id.String(), "session.saved", v)
+	})
+}
+
+// Delete 在删除标记写入锁内重新检查活动执行；onlyEmpty 用于退出时的空会话清理。
+func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, onlyEmpty bool) error {
+	return r.s.view(ctx, func() error {
+		if _, err := getLocked[sessionmodel.Session](r.s, "session", id.String()); err != nil {
+			if onlyEmpty && errors.Is(err, fault.ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		if onlyEmpty && len(r.s.keys(lookupKey{kind: "messages-session", owner: id.String()})) > 0 {
+			return nil
+		}
+		if len(r.s.keys(lookupKey{kind: "active-session", owner: id.String()})) > 0 {
+			return agentmodel.ErrAgentExecuting
+		}
+		return r.s.appendLocked(ctx, id.String(), "session", id.String(), "session.deleted", nil)
+	})
 }

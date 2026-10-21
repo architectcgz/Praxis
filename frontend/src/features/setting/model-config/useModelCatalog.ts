@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listModels, type ModelOption } from '../../../api'
-import { hasPrimaryModel } from './modelConfigHelpers'
+import { hasModels } from './modelConfigHelpers'
 
 /** 模型目录独立加载，配置查询失败不影响项目和会话数据。 */
 export function useModelCatalog() {
@@ -35,5 +35,5 @@ export function useModelCatalog() {
 
     useEffect(() => () => { request.current += 1 }, [])
 
-    return { models, primaryConfigured: hasPrimaryModel(models), loading, error, refreshModels, resetModels }
+    return { models, modelsConfigured: hasModels(models), loading, error, refreshModels, resetModels }
 }

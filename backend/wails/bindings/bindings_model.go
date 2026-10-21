@@ -21,14 +21,12 @@ func (b *ModelBindings) ListModels() ([]dto.ModelOption, error) {
 	result := make([]dto.ModelOption, 0, len(models))
 	for _, option := range models {
 		result = append(result, dto.ModelOption{
-			ProviderID:               option.ProviderID,
-			ModelID:                  option.ModelID,
-			DefaultModelID:           option.DefaultModelID,
-			Label:                    option.Label,
-			ProviderName:             option.ProviderName,
-			ReasoningLevels:          option.ReasoningLevels,
-			DefaultReasoningLevel:    option.DefaultReasoningLevel,
-			AssignedAgentDefinitions: option.AssignedAgentDefinitions,
+			ProviderID:            option.ProviderID,
+			ModelID:               option.ModelID,
+			Label:                 option.Label,
+			ProviderName:          option.ProviderName,
+			ReasoningLevels:       option.ReasoningLevels,
+			DefaultReasoningLevel: option.DefaultReasoningLevel,
 		})
 	}
 	return result, nil

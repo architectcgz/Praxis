@@ -20,7 +20,7 @@ func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecuti
 		return message.Message{}, fault.ErrRequestConflict
 	}
 	var result message.Message
-	err := s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
+	err := func(txCtx context.Context) error {
 		stored, err := s.deps.Calls.GetResult(txCtx, key)
 		if err == nil {
 			result = stored
@@ -35,7 +35,7 @@ func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecuti
 		}
 		result, err = s.appendResult(txCtx, call, tool.ToolResult{Payload: "No result provided", ErrorClass: "missing_tool_result"})
 		return err
-	})
+	}(ctx)
 	return result, err
 }
 

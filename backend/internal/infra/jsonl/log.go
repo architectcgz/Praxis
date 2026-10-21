@@ -1,4 +1,4 @@
-// Package jsonl 提供单进程日志锁、可靠追加、文件寻址和启动 Replay。
+// Package jsonl 提供可靠追加、文件寻址和启动 Replay。
 package jsonl
 
 import (
@@ -11,11 +11,10 @@ import (
 	"strings"
 )
 
-// Log 由 Storage 在事务锁内串行访问；只保存日志资源和文件游标。
+// Log 由 Storage 在进程内互斥锁下串行访问；只保存日志资源和文件游标。
 type Log struct {
 	root            string
 	projects        string
-	lock            *os.File
 	closed          bool
 	fault           error
 	sequences       map[string]uint64
@@ -28,6 +27,7 @@ type Scope struct {
 	ProjectID string
 }
 
+// Open 初始化日志资源；调用方必须在日志关闭前持续持有应用独占运行权。
 func Open(ctx context.Context, root string) (*Log, error) {
 	if ctx == nil || !pathutil.IsAbsoluteNormalized(root) {
 		return nil, errors.New("log context and canonical absolute directory are required")
@@ -47,18 +47,9 @@ func Open(ctx context.Context, root string) (*Log, error) {
 			return nil, err
 		}
 	}
-	lock, err := os.OpenFile(filepath.Join(state, "writer.lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return nil, err
-	}
-	if err = lockFile(lock); err != nil {
-		_ = lock.Close()
-		return nil, fmt.Errorf("data directory is already in use: %w", err)
-	}
 	s := &Log{
 		root:            state,
 		projects:        projects,
-		lock:            lock,
 		sequences:       make(map[string]uint64),
 		lengths:         make(map[string]int64),
 		sessionProjects: make(map[string]string),
@@ -173,9 +164,6 @@ func (s *Log) ExistingPath(scope string) (string, error) {
 }
 
 func (s *Log) Close() error {
-	if s.closed {
-		return nil
-	}
 	s.closed = true
-	return s.lock.Close()
+	return nil
 }

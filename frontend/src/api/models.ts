@@ -4,13 +4,10 @@ import { dto } from '../../wailsjs/go/models'
 export type ModelOption = {
     providerId: string
     modelId: string
-    defaultProviderId: string
-    defaultModelId: string
     label: string
     providerName: string
     reasoningLevels: string[]
     defaultReasoningLevel: string
-    assignedAgentDefinitions: string[]
 }
 
 export type ProviderConfigOption = {
@@ -18,7 +15,6 @@ export type ProviderConfigOption = {
     providerName: string
     baseURL: string
     proxyURL: string
-    defaultModelId: string
     hasAPIKey: boolean
 }
 
@@ -50,7 +46,6 @@ export type ModelConfigOption = {
 
 export type ModelConfigDocument = {
     groups: GroupConfigOption[]
-    defaultProviderId: string
     providers: ProviderConfigOption[]
     models: ModelConfigOption[]
 }
@@ -70,7 +65,6 @@ export function getModelConfig() {
 export function saveModelConfig(config: ModelConfigDocument) {
     return getModelBinding().SaveModelConfig(new dto.SaveModelConfigRequest({
         groups: config.groups,
-        defaultProviderId: config.defaultProviderId,
         providers: config.providers,
         models: config.models,
     }))
@@ -100,13 +94,10 @@ function normalizeModelCatalog(value: unknown): ModelOption[] {
         return {
             providerId: stringValue(model.providerId),
             modelId: stringValue(model.modelId),
-            defaultProviderId: stringValue(model.defaultProviderId),
-            defaultModelId: model.defaultModelId == null ? '' : stringValue(model.defaultModelId),
             label: stringValue(model.label),
             providerName: stringValue(model.providerName),
             reasoningLevels: model.reasoningLevels == null ? [] : stringArray(model.reasoningLevels),
             defaultReasoningLevel: model.defaultReasoningLevel == null ? '' : stringValue(model.defaultReasoningLevel),
-            assignedAgentDefinitions: stringArray(model.assignedAgentDefinitions),
         }
     })
 }
@@ -120,7 +111,6 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
             if (!isRecord(group)) throw new Error('Model 配置响应无效。')
             return { id: stringValue(group.id), displayName: stringValue(group.displayName) }
         }),
-        defaultProviderId: stringValue(value.defaultProviderId),
         providers: value.providers.map((provider) => {
             if (!isRecord(provider)) throw new Error('Model 配置响应无效。')
             return {
@@ -128,7 +118,6 @@ function normalizeModelConfig(value: unknown): ModelConfigDocument {
                 providerName: stringValue(provider.providerName),
                 baseURL: stringValue(provider.baseURL),
                 proxyURL: stringValue(provider.proxyURL),
-                defaultModelId: provider.defaultModelId == null ? '' : stringValue(provider.defaultModelId),
                 hasAPIKey: provider.hasAPIKey === true,
             }
         }),

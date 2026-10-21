@@ -14,9 +14,8 @@ import (
 // modelConfigFromRequest 在 Wails 输入边界复制、规范化并校验配置；回显的密钥状态不参与保存。
 func modelConfigFromRequest(value dto.SaveModelConfigRequest) (modelconfig.Config, error) {
 	config := modelconfig.Config{
-		Groups:            make([]modelconfig.Group, 0, len(value.Groups)),
-		DefaultProviderID: strings.TrimSpace(value.DefaultProviderID),
-		Providers:         make([]modelconfig.Provider, 0, len(value.Providers)),
+		Groups:    make([]modelconfig.Group, 0, len(value.Groups)),
+		Providers: make([]modelconfig.Provider, 0, len(value.Providers)),
 	}
 	for _, group := range value.Groups {
 		config.Groups = append(config.Groups, modelconfig.Group{
@@ -27,11 +26,10 @@ func modelConfigFromRequest(value dto.SaveModelConfigRequest) (modelconfig.Confi
 	for _, provider := range value.Providers {
 		providerID := strings.TrimSpace(provider.ID)
 		config.Providers = append(config.Providers, modelconfig.Provider{
-			ID:             providerID,
-			DisplayName:    cmp.Or(strings.TrimSpace(provider.ProviderName), providerID),
-			BaseURL:        strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/"),
-			ProxyURL:       strings.TrimRight(strings.TrimSpace(provider.ProxyURL), "/"),
-			DefaultModelID: strings.TrimSpace(provider.DefaultModelID),
+			ID:          providerID,
+			DisplayName: cmp.Or(strings.TrimSpace(provider.ProviderName), providerID),
+			BaseURL:     strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/"),
+			ProxyURL:    strings.TrimRight(strings.TrimSpace(provider.ProxyURL), "/"),
 		})
 	}
 	providerIDs := make(map[string]struct{}, len(config.Providers))

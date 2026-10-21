@@ -4,9 +4,8 @@ import (
 	"praxis/internal/repository"
 )
 
-// Repositories 将同一个日志事务入口提供给所有业务仓储。
+// Repositories 为所有业务仓储提供同一个单事件写入入口。
 type Repositories struct {
-	Tasks          TaskRepository
 	Projects       ProjectRepository
 	Workspaces     WorkspaceRepository
 	Sessions       SessionRepository
@@ -21,10 +20,9 @@ type Repositories struct {
 	ModelUsage     ModelUsageStore
 }
 
-// Repositories 返回共享提交边界与内存 State的仓储集合。
+// Repositories 返回共享进程内互斥锁与内存 State 的仓储集合。
 func (s *Store) Repositories() Repositories {
 	return Repositories{
-		Tasks:          TaskRepository{s},
 		Projects:       ProjectRepository{s},
 		Workspaces:     WorkspaceRepository{s},
 		Sessions:       SessionRepository{s},
@@ -41,7 +39,6 @@ func (s *Store) Repositories() Repositories {
 }
 
 var (
-	_ repository.Transaction     = (*Store)(nil)
 	_ repository.Project         = ProjectRepository{}
 	_ repository.Workspace       = WorkspaceRepository{}
 	_ repository.Session         = SessionRepository{}
@@ -50,7 +47,6 @@ var (
 	_ repository.ToolExecution   = ToolExecutionRepository{}
 	_ repository.SessionContext  = ContextRepository{}
 	_ repository.AgentControl    = ControlRepository{}
-	_ repository.Task            = TaskRepository{}
 	_ repository.Message         = MessageRepository{}
 	_ repository.ToolCallQueries = ToolCallQueries{}
 	_ repository.Timing          = TimingStore{}

@@ -4,6 +4,7 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/message"
+	taskmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	toolservice "praxis/internal/service/toolexecution"
 )
@@ -17,7 +18,7 @@ func (s *Coordinator) DenyToolCall(ctx context.Context, params ToolDecision) err
 	return s.decideToolCall(ctx, params, false)
 }
 
-// 审批业务和事务归 Service，Coordinator 只在提交后唤醒已有执行。
+// 审批事实由 Service 保存，Coordinator 只在提交后唤醒已有执行。
 func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, approve bool) error {
 	task, err := s.tools.Decide(ctx, params, approve)
 	if err != nil {
@@ -49,7 +50,7 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request toolservice.Cont
 }
 
 // waitForToolApproval 在状态提交后发布通知，审批提前到达时由 wake 的缓冲保留唤醒。
-func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentmodel.Execution, active *activeTask, call message.ToolCall) error {
+func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentmodel.Execution, active *taskmodel.ActiveTask, call message.ToolCall) error {
 	if err := s.operations.WaitForApproval(ctx, task.ID); err != nil {
 		return err
 	}
@@ -63,7 +64,7 @@ func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentmodel.E
 		Name:        string(call.Name),
 	})
 	select {
-	case <-active.wake:
+	case <-active.WakeSignal():
 		return s.startExecution(task)
 	case <-ctx.Done():
 		return ctx.Err()

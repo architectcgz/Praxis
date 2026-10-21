@@ -3,7 +3,9 @@ package storage
 import (
 	"cmp"
 	"context"
+	"errors"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/fault"
 	"praxis/internal/identity"
 )
 
@@ -14,9 +16,18 @@ func (r AgentExecutionRepository) Get(ctx context.Context, id identity.AgentExec
 	return get[agentmodel.Execution](ctx, r.s, "agent_execution", id.String())
 }
 
-// Save 保存入口已处理的对象，事务未提交时只更新工作区。
+// Save 将读取版本与当前执行及控制事实比较；竞争失败由业务方重新读取并仲裁。
 func (r AgentExecutionRepository) Save(ctx context.Context, v agentmodel.Execution) error {
-	return save(ctx, r.s, v.SessionID.String(), "agent_execution", v.ID.String(), "agent_execution.saved", v)
+	return r.s.view(ctx, func() error {
+		current, err := getLocked[agentmodel.Execution](r.s, "agent_execution", v.ID.String())
+		if err == nil && current.Revision != v.Revision {
+			return fault.ErrRevisionConflict
+		}
+		if err != nil && (!errors.Is(err, fault.ErrNotFound) || v.Revision != 0) {
+			return err
+		}
+		return r.s.appendLocked(ctx, v.SessionID.String(), "agent_execution", v.ID.String(), "agent_execution.saved", v)
+	})
 }
 
 // FindByRequest 按 Agent 与请求身份查找，未找到时返回 fault.ErrNotFound。
@@ -52,8 +63,8 @@ func (r AgentExecutionRepository) ListByAgent(ctx context.Context, id identity.A
 // CountActiveBySession 返回 Session 内活动 Execution 的数量。
 func (r AgentExecutionRepository) CountActiveBySession(ctx context.Context, id identity.SessionID) (int, error) {
 	count := 0
-	err := r.s.view(ctx, func(readCtx context.Context) error {
-		count = len(r.s.keys(readCtx, lookupKey{kind: "active-session", owner: id.String()}))
+	err := r.s.view(ctx, func() error {
+		count = len(r.s.keys(lookupKey{kind: "active-session", owner: id.String()}))
 		return nil
 	})
 	return count, err

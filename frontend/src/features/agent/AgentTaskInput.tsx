@@ -37,7 +37,7 @@ export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, 
     const [reasoningPickerOpen, setReasoningPickerOpen] = useState(false)
     const [approvalPickerOpen, setApprovalPickerOpen] = useState(false)
     const providerOptions = Array.from(new Map(models.map((model) => [model.providerId, model])).values())
-    const providerModels = models.filter((model) => model.providerId === selectedProviderID)
+    const providerModels = models.filter((model) => !selectedProviderID || model.providerId === selectedProviderID)
     const selectedProvider = providerOptions.find((provider) => provider.providerId === selectedProviderID)
     const selectedModel = models.find((model) => model.providerId === selectedProviderID && model.modelId === selectedModelID)
     const reasoningAvailable = (selectedModel?.reasoningLevels.length || 0) > 0
@@ -222,8 +222,8 @@ export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, 
                         <button
                             className="composer-select-trigger composer-provider-trigger"
                             type="button"
-                            title={selectedProvider?.providerName || '没有配置的 Provider'}
-                            aria-label={selectedProvider ? `Provider: ${selectedProvider.providerName}` : '没有配置的 Provider'}
+                            title={selectedProvider?.providerName || '请选择 Provider'}
+                            aria-label={selectedProvider ? `Provider: ${selectedProvider.providerName}` : '请选择 Provider'}
                             aria-expanded={providerPickerOpen}
                             aria-haspopup="menu"
                             aria-controls="provider-picker-menu"
@@ -234,7 +234,7 @@ export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, 
                             disabled={busy || models.length === 0}
                         >
                             <Server size={15} strokeWidth={1.8} aria-hidden="true" />
-                            <span>{selectedProvider?.providerName || '无 Provider'}</span>
+                            <span>{selectedProvider?.providerName || '选择 Provider'}</span>
                             <ChevronDown className={`composer-select-chevron ${providerPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {providerPickerOpen && (
@@ -248,10 +248,8 @@ export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, 
                                         key={provider.providerId}
                                         aria-current={provider.providerId === selectedProviderID ? 'true' : undefined}
                                         onClick={() => {
-                                            const providerModel = models.find((model) => model.providerId === provider.providerId && model.modelId === model.defaultModelId) ||
-                                                models.find((model) => model.providerId === provider.providerId)
-                                            if (providerModel) {
-                                                onModelChange(providerModel.providerId, providerModel.modelId)
+                                            if (provider.providerId !== selectedProviderID) {
+                                                onModelChange(provider.providerId, '')
                                             }
                                             setProviderPickerOpen(false)
                                             providerPickerRef.current?.querySelector('button')?.focus({ preventScroll: true })
@@ -268,8 +266,8 @@ export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, 
                         <button
                             className="composer-select-trigger composer-model-trigger"
                             type="button"
-                            title={selectedModel ? `${selectedModel.label} 通过 ${selectedModel.providerName}` : '没有配置的模型'}
-                            aria-label={selectedModel ? `模型: ${selectedModel.label}` : '没有配置的模型'}
+                            title={selectedModel ? `${selectedModel.label} 通过 ${selectedModel.providerName}` : '请选择模型'}
+                            aria-label={selectedModel ? `模型: ${selectedModel.label}` : '请选择模型'}
                             aria-expanded={modelPickerOpen}
                             aria-haspopup="menu"
                             aria-controls="model-picker-menu"
@@ -280,7 +278,7 @@ export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, 
                             disabled={busy || models.length === 0}
                         >
                             <Cpu size={15} strokeWidth={1.8} aria-hidden="true" />
-                            <span>{selectedModel?.label || '无模型'}</span>
+                            <span>{selectedModel?.label || '选择模型'}</span>
                             <ChevronDown className={`composer-select-chevron ${modelPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {modelPickerOpen && (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
@@ -15,8 +16,8 @@ func (s *Store) SessionLogPath(ctx context.Context, sessionID identity.SessionID
 		return "", fault.InvalidValue("sessionId", "session ID is not a valid file name")
 	}
 	var path string
-	err := s.view(ctx, func(readCtx context.Context) error {
-		if _, err := (SessionRepository{s}).Get(readCtx, sessionID); err != nil {
+	err := s.view(ctx, func() error {
+		if _, err := getLocked[sessionmodel.Session](s, "session", sessionID.String()); err != nil {
 			return err
 		}
 		var err error

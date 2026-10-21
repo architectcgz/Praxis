@@ -13,14 +13,15 @@ type ContextRepository struct{ s *Store }
 
 // Append 幂等追加记录，身份相同但内容不一致时返回冲突。
 func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SessionContextEntry) error {
-	existing, ok, e := r.GetByID(ctx, v.ID)
-	if e != nil {
-		return e
-	}
-	if ok {
-		v.CreatedAt = existing.CreatedAt
-	}
-	return save(ctx, r.s, v.SessionID.String(), "context", v.ID.String(), "context.entry_appended", v)
+	return r.s.view(ctx, func() error {
+		existing, err := getLocked[sessionmodel.SessionContextEntry](r.s, "context", v.ID.String())
+		if err == nil {
+			v.CreatedAt = existing.CreatedAt
+		} else if !errors.Is(err, fault.ErrNotFound) {
+			return err
+		}
+		return r.s.appendLocked(ctx, v.SessionID.String(), "context", v.ID.String(), "context.entry_appended", v)
+	})
 }
 
 // GetByID 读取指定记录，第二个返回值表示是否存在。

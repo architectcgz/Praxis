@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const MaxInputBytes = 32 * 1024
-
 type ExecutionStatus string
 
 const (
@@ -29,15 +27,14 @@ const (
 )
 
 type Execution struct {
+	// Revision 由仓储的执行及控制事件序号派生，条件写入时必须与读取时一致。
+	Revision         uint64 `json:"-"`
 	Progress         ExecutionProgress
 	ID               identity.AgentExecutionID
 	SessionID        identity.SessionID
 	AgentID          identity.AgentID
 	RequestID        identity.RequestID
 	SourceTaskID     identity.TaskID
-	ProviderID       string
-	ModelID          string
-	ReasoningLevel   string
 	Status           ExecutionStatus
 	InputMessageID   string
 	Config           ExecutionConfig

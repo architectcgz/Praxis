@@ -8,7 +8,6 @@ import (
 	appcontext "praxis/internal/core/context"
 	messagemodel "praxis/internal/core/message"
 	sessionmodel "praxis/internal/core/session"
-	queued "praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
@@ -17,7 +16,7 @@ import (
 	sessionservice "praxis/internal/service/session"
 )
 
-// selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并检查必要原文容量。
+// selectContext 冻结历史边界、排除项和共享条目版本，并检查必要原文容量。
 // 容量检查是准入的业务前置条件：连 Protected 原文都放不进窗口的 Execution 不允许进入执行。
 func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, config agentmodel.ExecutionConfig, inputMessageID string) (agentmodel.ContextSelection, error) {
 	var selection agentmodel.ContextSelection
@@ -29,20 +28,25 @@ func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, con
 			return selection, err
 		}
 	}
-	stream, err := s.messages.List(ctx, repository.MessageQuery{Stream: agentservice.MessageStream(agent)})
+	stream, err := s.messages.List(ctx, repository.MessageQuery{Stream: agentservice.MessageStream(agent), IncludeUnadmitted: true})
 	if err != nil {
 		return selection, err
 	}
 	selection.MessageSequenceBoundary = stream.SequenceBoundary
 	for _, message := range stream.Messages {
-		if message.Sequence > stream.SequenceBoundary || message.Role != messagemodel.RoleUser || message.SourceTaskID == "" || message.ID == inputMessageID {
+		if message.Sequence > stream.SequenceBoundary || message.Role != messagemodel.RoleUser || message.ID == inputMessageID {
 			continue
 		}
-		task, err := s.queue.Get(ctx, identity.TaskID(message.SourceTaskID))
-		if err != nil {
-			return agentmodel.ContextSelection{}, err
+		// 将当前未准入输入也冻结到排除列表，防止它在本次执行期间补齐后混入历史。
+		exclude := false
+		if message.ExecutionID != "" {
+			_, err := s.records.Get(ctx, identity.AgentExecutionID(message.ExecutionID))
+			if err != nil && !errors.Is(err, fault.ErrNotFound) {
+				return selection, err
+			}
+			exclude = errors.Is(err, fault.ErrNotFound)
 		}
-		if task.Status == queued.Pending {
+		if exclude {
 			selection.ExcludedMessageIDs = append(selection.ExcludedMessageIDs, message.ID)
 		}
 	}
@@ -137,7 +141,7 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 	if ctx == nil {
 		return loop.Input{}, false, errors.New("execution preparation context is required")
 	}
-	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		task, err := s.records.Get(txCtx, executionID)
 		if err != nil {
 			return err
@@ -152,7 +156,8 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 		if !task.Active() || agent.CurrentExecutionID != task.ID {
 			return fault.ErrRequestConflict
 		}
-		if task.Progress.FinalStopReason != "" {
+		// 完成证据由仓储从最后一条 Assistant 派生；消息落盘后重启不再请求模型。
+		if task.Progress.FinalAssistantID != "" {
 			completed = true
 			return nil
 		}
@@ -185,7 +190,7 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 			Content:   content,
 		}
 		return nil
-	})
+	}(ctx)
 	if err != nil {
 		return loop.Input{}, false, err
 	}

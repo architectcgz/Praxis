@@ -9,7 +9,6 @@ import type { ProviderDialogProps } from './modelConfigTypes'
 export function ProviderDialog({
     provider,
     modelCount,
-    models,
     error,
     saving,
     onSave,
@@ -22,7 +21,6 @@ export function ProviderDialog({
             providerName: '',
             baseURL: '',
             proxyURL: '',
-            defaultModelId: '',
             hasAPIKey: false,
         },
     )
@@ -36,7 +34,6 @@ export function ProviderDialog({
             providerName: draft.providerName.trim(),
             baseURL: draft.baseURL.trim(),
             proxyURL: draft.proxyURL.trim(),
-            defaultModelId: draft.defaultModelId.trim(),
         }, apiKey)
     }
 
@@ -97,23 +94,6 @@ export function ProviderDialog({
                             }
                             placeholder="http://127.0.0.1:7897"
                         />
-                    </Field>
-                    <Field label="Model">
-                        <select
-                            value={draft.defaultModelId}
-                            disabled={!models.length}
-                            onChange={(event) =>
-                                setDraft({ ...draft, defaultModelId: event.target.value })
-                            }
-                        >
-                            {!models.length && <option value="">请先配置 Model</option>}
-                            {models.length > 0 && <option value="">使用第一个 Model</option>}
-                            {models.map((model) => (
-                                <option key={model.modelId} value={model.modelId}>
-                                    {model.label || model.modelId}
-                                </option>
-                            ))}
-                        </select>
                     </Field>
                     <Field label="API Key">
                         <input

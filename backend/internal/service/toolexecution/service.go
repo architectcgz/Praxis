@@ -22,7 +22,6 @@ type Dependencies struct {
 	Prepare        func(tool.Tool, json.RawMessage, string) (json.RawMessage, error)
 	Bind           func(tool.Tool, string) tool.Tool
 	HookDispatcher *hook.Dispatcher
-	Transactions   repository.Transaction
 	Tasks          repository.AgentExecution
 	Events         repository.ToolExecution
 	Messages       repository.Message
@@ -42,7 +41,7 @@ type Service struct {
 }
 
 func NewService(deps Dependencies) (*Service, error) {
-	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Review == nil || deps.Prepare == nil || deps.Bind == nil || deps.Transactions == nil || deps.Tasks == nil || deps.Events == nil || deps.Messages == nil || deps.Calls == nil || deps.Sessions == nil || deps.Agents == nil || deps.Catalog == nil {
+	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Review == nil || deps.Prepare == nil || deps.Bind == nil || deps.Tasks == nil || deps.Events == nil || deps.Messages == nil || deps.Calls == nil || deps.Sessions == nil || deps.Agents == nil || deps.Catalog == nil {
 		return nil, errors.New("tool service dependencies are required")
 	}
 	return &Service{deps: deps, clock: clock.ClockOrDefault(deps.Clock), active: make(map[executionmodel.Key]*executionmodel.Execution)}, nil

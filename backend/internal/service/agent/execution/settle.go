@@ -7,7 +7,6 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
 	agentservice "praxis/internal/service/agent"
 	"time"
 )
@@ -17,7 +16,7 @@ const (
 	TerminalRequestCanceled = "request_canceled"
 )
 
-// TerminalEvent 是事务提交后发布的最小终态事实。
+// TerminalEvent 是 Execution 终态提交后发布的最小事实。
 type TerminalEvent struct {
 	Kind           string
 	SessionID      identity.SessionID
@@ -42,11 +41,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 	if ctx == nil {
 		return errors.New("task start context is required")
 	}
-	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		task, err := s.records.Get(txCtx, executionID)
-		if err != nil {
-			return err
-		}
+	return s.update(ctx, executionID, func(task *agentmodel.Execution) error {
 		if task.Status == agentmodel.ExecutionRunning || task.Status == agentmodel.ExecutionEnding {
 			return nil
 		}
@@ -56,13 +51,13 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 		if err := task.MarkRunning(s.clock.Now()); err != nil {
 			return err
 		}
-		return s.records.Save(txCtx, task)
+		return nil
 	})
 }
 
-// Settle 接收 Coordinator 的执行结果，原子更新 Execution、Agent 和控制命令。
+// Settle 仲裁控制意图并保存 Execution 终态，Agent 与控制命令状态由查询派生。
 // 返回控制命令仲裁后的持久化回合；重复结束返回已有终态，不再次发布事件。
-// OperationHook 在事务外观察结算前后；回滚时只返回 Err，不把待提交 Outcome 当作最终结果。
+// OperationHook 观察结算前后；条件写入失败时不把待提交 Outcome 当作最终结果。
 func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutionID, outcome agentmodel.ExecutionOutcome, failureCode agentmodel.ExecutionFailureCode, failureMessage string) (result agentmodel.Execution, err error) {
 	params := settleParams{
 		ExecutionID:    executionID,
@@ -76,7 +71,7 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 	if !agentmodel.ValidExecutionOutcome(params.Outcome) {
 		return agentmodel.Execution{}, fault.New(fault.InvalidRequest, "")
 	}
-	// 只预读不可变归属，Hook 不能在持有仓储事务锁时启动；状态与控制命令仍在事务内重新仲裁。
+	// Hook 在存储锁外执行；条件写入冲突时重新读取状态及控制命令再仲裁。
 	observedExecution, err := s.records.Get(ctx, params.ExecutionID)
 	if err != nil {
 		s.logger.Errorf("operation=execution_end execution_id=%s status=failed outcome=%s error=%v", params.ExecutionID, params.Outcome, err)
@@ -94,82 +89,67 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 	defer func() { scope.End(hook.Result{Err: err, Outcome: string(result.Outcome)}) }()
 	var endedExecution agentmodel.Execution
 	var firstEnd bool
-	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
-		task, err := s.records.Get(txCtx, params.ExecutionID)
-		if err != nil {
-			return err
-		}
-		endedExecution = task
-		if task.Status == agentmodel.ExecutionEnded {
+	requested := params
+	for {
+		params = requested
+		err = func(txCtx context.Context) error {
+			task, err := s.records.Get(txCtx, params.ExecutionID)
+			if err != nil {
+				return err
+			}
+			endedExecution = task
+			if task.Status == agentmodel.ExecutionEnded {
+				return nil
+			}
+			controls, err := s.controls.ListOpenByAgent(txCtx, task.AgentID, 0)
+			if err != nil {
+				return err
+			}
+			// 终态之前提交的控制命令优先；之后的新命令使本次条件写入冲突。
+			for _, control := range controls {
+				if control.TargetExecutionID != task.ID {
+					continue
+				}
+				if params.FailureCode != agentmodel.ExecutionFailureRequestCanceled {
+					params.Outcome = agentmodel.ExecutionPaused
+				}
+				if control.Kind == agentmodel.AgentControlCancel {
+					params.Outcome = agentmodel.ExecutionInterrupted
+				}
+				params.FailureCode = agentmodel.ExecutionFailureRequestCanceled
+				params.FailureMessage = ""
+			}
+			at := s.clock.Now()
+			if task.Status == agentmodel.ExecutionStarting {
+				if err := task.MarkRunning(at); err != nil {
+					return err
+				}
+			}
+			if task.Status == agentmodel.ExecutionRunning || task.Status == agentmodel.ExecutionWaitingApproval {
+				if err := task.BeginEnding(at); err != nil {
+					return err
+				}
+			}
+			if err := task.End(params.Outcome, params.FailureCode, at); err != nil {
+				return err
+			}
+			if params.Outcome == agentmodel.ExecutionFailed {
+				task.FailureMessage = params.FailureMessage
+			}
+			if err := s.records.Save(txCtx, task); err != nil {
+				return err
+			}
+			endedExecution = task
+			firstEnd = true
 			return nil
+		}(ctx)
+		if !errors.Is(err, fault.ErrRevisionConflict) {
+			break
 		}
-		controls, err := s.controls.ListOpenByAgent(txCtx, task.AgentID, 100)
-		if err != nil {
-			return err
+		if err = ctx.Err(); err != nil {
+			break
 		}
-		// 结束事务之前提交的控制命令优先，取消与正常完成竞争时以提交顺序为准。
-		for _, control := range controls {
-			if control.TargetExecutionID != task.ID {
-				continue
-			}
-			if params.FailureCode != agentmodel.ExecutionFailureRequestCanceled {
-				params.Outcome = agentmodel.ExecutionPaused
-			}
-			if control.Kind == agentmodel.AgentControlCancel {
-				params.Outcome = agentmodel.ExecutionInterrupted
-			}
-			params.FailureCode = agentmodel.ExecutionFailureRequestCanceled
-			params.FailureMessage = ""
-		}
-		at := s.clock.Now()
-		if task.Status == agentmodel.ExecutionStarting {
-			if err := task.MarkRunning(at); err != nil {
-				return err
-			}
-		}
-		if task.Status == agentmodel.ExecutionRunning || task.Status == agentmodel.ExecutionWaitingApproval {
-			if err := task.BeginEnding(at); err != nil {
-				return err
-			}
-		}
-		if err := task.End(params.Outcome, params.FailureCode, at); err != nil {
-			return err
-		}
-		if params.Outcome == agentmodel.ExecutionFailed {
-			task.FailureMessage = params.FailureMessage
-		}
-		agent, err := s.agents.Get(txCtx, task.AgentID)
-		if err != nil {
-			return err
-		}
-		if agent.CurrentExecutionID != task.ID {
-			return fault.New(agentmodel.UnavailableCode, "")
-		}
-		if err := agent.EndExecution(params.Outcome, at); err != nil {
-			return err
-		}
-		for index := range controls {
-			control := &controls[index]
-			if control.TargetExecutionID != task.ID {
-				continue
-			}
-			if err := control.MarkApplied(at); err != nil {
-				return err
-			}
-			if err := s.controls.Save(txCtx, *control); err != nil {
-				return err
-			}
-		}
-		if err := s.records.Save(txCtx, task); err != nil {
-			return err
-		}
-		endedExecution = task
-		firstEnd = true
-		if err := s.agents.Save(txCtx, agent); err != nil {
-			return err
-		}
-		return s.nameSessionAfterAnswer(txCtx, task, params.Outcome, at)
-	})
+	}
 	if err != nil {
 		s.logger.Errorf(
 			"operation=execution_end request_id=%s session_id=%s agent_id=%s execution_id=%s status=failed outcome=%s error=%v",
@@ -182,6 +162,12 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 		)
 		return agentmodel.Execution{}, err
 	}
+	// 终态已提交，附属命名失败只记录日志；重复结算可以继续完成命名。
+	defer func() {
+		if nameErr := s.nameSessionAfterAnswer(context.WithoutCancel(ctx), endedExecution, endedExecution.Outcome, endedExecution.EndedAt); nameErr != nil {
+			s.logger.Errorf("name settled session execution_id=%s error=%v", endedExecution.ID, nameErr)
+		}
+	}()
 	if !firstEnd {
 		return endedExecution, nil
 	}
@@ -238,39 +224,16 @@ func (s *Service) nameSessionAfterAnswer(
 	if err != nil {
 		return err
 	}
-	stream, err := s.messages.List(ctx, repository.MessageQuery{Stream: agentservice.MessageStream(owner)})
+	message, err := s.messages.Get(ctx, agentservice.MessageStream(owner), task.InputMessageID)
 	if err != nil {
 		return err
 	}
-	for _, message := range stream.Messages {
-		if message.ExecutionID != task.ID.String() || message.Role != "user" {
-			continue
-		}
-		session, err := s.sessions.Get(ctx, task.SessionID)
-		if err != nil {
-			return err
-		}
-		if session.Title == "" {
-			session.NameFromInput(message.TextContent(), at)
-			if err := s.sessions.Save(ctx, session); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	return nil
+	return s.sessions.NameFromInput(ctx, task.SessionID, message.TextContent(), at)
 }
 
-// WaitForApproval 提交非终态等待状态，控制命令仍由结算事务仲裁。
+// WaitForApproval 提交非终态等待状态，控制命令仍由结算仲裁。
 func (s *Service) WaitForApproval(ctx context.Context, id identity.AgentExecutionID) error {
-	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		value, err := s.records.Get(txCtx, id)
-		if err != nil {
-			return err
-		}
-		if err := value.WaitForApproval(); err != nil {
-			return err
-		}
-		return s.records.Save(txCtx, value)
+	return s.update(ctx, id, func(value *agentmodel.Execution) error {
+		return value.WaitForApproval()
 	})
 }

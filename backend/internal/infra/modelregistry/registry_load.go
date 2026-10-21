@@ -3,7 +3,9 @@ package modelregistry
 import (
 	"fmt"
 	"net/http"
+	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	"slices"
 )
 
 // Load 读取并校验模型配置与凭证文件，然后构造运行时注册表。
@@ -44,7 +46,7 @@ func newRegistry(
 	if err != nil {
 		return nil, err
 	}
-	modelsByKey, providersByID := buildIndexes(config.Providers)
+	providersByID, modelConfigs := buildIndexes(config.Providers)
 	return &Registry{
 		modelsPath:      modelsPath,
 		credentialsPath: credentialsPath,
@@ -53,7 +55,7 @@ func newRegistry(
 		client:          client,
 		streamFactory:   streamFactory,
 		providerClients: providerClients,
-		modelsByKey:     modelsByKey,
+		modelConfigs:    modelConfigs,
 		providersByID:   providersByID,
 	}, nil
 }
@@ -70,14 +72,27 @@ func buildProviderClients(providers []modelconfig.Provider, base *http.Client) (
 	return clients, nil
 }
 
-func buildIndexes(providers []modelconfig.Provider) (map[modelKey]modelconfig.Model, map[string]modelconfig.Provider) {
-	modelsByKey := make(map[modelKey]modelconfig.Model)
+// buildIndexes 在配置发布前建立查询索引和完整的执行配置，运行期不再逐字段组装。
+func buildIndexes(providers []modelconfig.Provider) (map[string]modelconfig.Provider, map[modelKey]modelapi.Config) {
 	providersByID := make(map[string]modelconfig.Provider, len(providers))
+	modelConfigs := make(map[modelKey]modelapi.Config)
 	for _, provider := range providers {
 		providersByID[provider.ID] = provider
 		for _, model := range provider.Models {
-			modelsByKey[modelKey{provider.ID, model.ID}] = model
+			key := modelKey{ProviderID: provider.ID, ModelID: model.ID}
+			modelConfigs[key] = modelapi.Config{
+				ProviderID:      provider.ID,
+				ModelID:         model.ID,
+				ReasoningLevel:  model.DefaultReasoningLevel,
+				ReasoningLevels: slices.Clone(model.ReasoningLevels),
+				Thinking:        model.Thinking,
+				APIFormat:       string(model.APIFormat),
+				ContextWindow:   model.ContextWindow,
+				MaxOutputTokens: model.MaxOutputTokens,
+				BaseURL:         provider.BaseURL,
+				ProxyURL:        provider.ProxyURL,
+			}
 		}
 	}
-	return modelsByKey, providersByID
+	return providersByID, modelConfigs
 }

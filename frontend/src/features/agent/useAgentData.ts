@@ -6,6 +6,7 @@ import { loadLatestHistory } from './history'
 import { useAgentTaskInput } from './useAgentTaskInput'
 
 type AgentDataOptions = {
+    sessionID: string
     models: ModelOption[]
     setError: Dispatch<SetStateAction<string>>
     setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>
@@ -14,12 +15,12 @@ type AgentDataOptions = {
 const emptyHistory: AgentHistoryItem[] = []
 
 /** 管理会话查询与选择；实时输出由对话区域直接订阅，不触发工作区重渲染。 */
-export function useAgentData({ models, setError, setErrorCode, viewRequestRef }: AgentDataOptions) {
+export function useAgentData({ sessionID, models, setError, setErrorCode, viewRequestRef }: AgentDataOptions) {
     const [store] = useState(createAgentStore)
     const data = useSyncExternalStore(store.subscribeData, store.getData)
     const selected = data.byId[data.selectedId]
     const agent = selected?.agent || null
-    const taskInput = useAgentTaskInput(agent, models)
+    const taskInput = useAgentTaskInput(sessionID, models, setError, setErrorCode)
     const { setInput } = taskInput
     const generation = useRef(0)
     const requests = useRef(new Map<string, number>())

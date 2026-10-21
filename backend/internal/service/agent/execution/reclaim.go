@@ -10,7 +10,7 @@ import (
 func (s *Service) ReclaimExecution(ctx context.Context, selected agentmodel.Execution) (agentmodel.Execution, error) {
 	var task agentmodel.Execution
 	created := false
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err := func(txCtx context.Context) error {
 		var err error
 		task, err = s.records.Get(txCtx, selected.ID)
 		if err != nil {
@@ -45,7 +45,7 @@ func (s *Service) ReclaimExecution(ctx context.Context, selected agentmodel.Exec
 			}
 		}
 		return nil
-	})
+	}(ctx)
 	if err != nil && created {
 		s.executions.Release(selected.AgentID, selected.ID)
 	}

@@ -24,7 +24,19 @@ function reject(reason) { print pkg ": " dep " (" reason ")" > "/dev/stderr"; fa
 END {exit failed}
 ' <<< "$imports"
 
-# 仓储契约集中在 Repository，禁止在消费方重新声明已迁移的持久化接口。
+# 持久化只允许单事件写入，静态拒绝通用事务和批量提交入口。
+if obsolete=$(rg -n '\b(InTx|transactionKey|prepareCommit|validateRestoredTransaction)\b|^type (transaction|Commit)\b|jsonl\.Commit\b' internal/infra/storage internal/infra/jsonl internal/repository --glob '*.go'); then
+ printf '%s\n' "$obsolete" >&2
+ printf '%s\n' 'persistence must append one event without a transaction workspace' >&2
+ exit 1
+else
+ status=$?
+ if (( status != 1 )); then
+  exit "$status"
+ fi
+fi
+
+# 仓储契约集中在 Repository，禁止在消费方重新声明持久化接口。
 if contracts=$(rg -n '^type (Store|[[:alnum:]]*Store|Reader|Writer|Streams|WriterProvider|ToolExecutionReader|MessageReader|MessageWriter|MessageStreams|ExecutionReader|QueueReader|ActiveTaskCounter) interface' internal/core internal/service internal/loop internal/workspace internal/timing); then
  printf '%s\n' "$contracts" >&2
  printf '%s\n' 'persistence interfaces must be declared in internal/repository' >&2

@@ -21,7 +21,7 @@ type assistantCommitter struct {
 // AssistantCommitter 校验归属并冻结本次输出流；返回的是业务提交能力。
 func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecutionID) (loop.AssistantCommitter, error) {
 	var committer assistantCommitter
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err := func(txCtx context.Context) error {
 		execution, err := s.records.Get(txCtx, id)
 		if err != nil {
 			return err
@@ -43,20 +43,20 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 			stream:      agentservice.MessageStream(owner),
 		}
 		return nil
-	})
+	}(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return committer, nil
 }
 
-// AppendAssistant 原子保存消息及最终输出证据，不创建工具执行实体。
+// AppendAssistant 保存 Assistant 消息；完成证据与工具调用计数由消息派生。
 func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.AssistantWrite) (stored messagemodel.Message, inserted bool, err error) {
 	message := value.Message
 	if ctx == nil || message.Role != messagemodel.RoleAssistant || message.AuthorKind != messagemodel.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
 		return stored, false, errors.New("assistant ownership is required")
 	}
-	err = w.service.tx.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		if err := sessionservice.RequireWritable(txCtx, w.service.sessions, w.stream.SessionID); err != nil {
 			return err
 		}
@@ -84,31 +84,10 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.Assi
 			return err
 		}
 		if !inserted {
-			if value.FinalOutput != nil && (execution.Progress.FinalAssistantID != stored.ID || execution.Progress.FinalStopReason != stored.StopReason) {
-				return fault.ErrRequestConflict
-			}
 			return nil
 		}
-		if !execution.Active() || owner.CurrentExecutionID != execution.ID {
-			return fault.ErrRequestConflict
-		}
-		if value.FinalOutput != nil {
-			if err := execution.RecordFinalOutput(*value.FinalOutput); err != nil {
-				return err
-			}
-		}
-		calls := 0
-		for _, block := range stored.Blocks {
-			if block.Kind == messagemodel.BlockToolCall {
-				calls++
-			}
-		}
-		execution.Progress.ToolCalls += calls
-		if value.FinalOutput != nil || calls > 0 {
-			return w.service.records.Save(txCtx, execution)
-		}
 		return nil
-	})
+	}(ctx)
 	if err != nil {
 		return messagemodel.Message{}, false, err
 	}

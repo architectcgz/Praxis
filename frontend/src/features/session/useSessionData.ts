@@ -82,7 +82,7 @@ export function useSessionData() {
             } : item).sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
             catalog.current = values
             setSessions(values)
-            setSession((current) => current?.id === id ? { ...current, title: summary.title, updatedAt: summary.updatedAt } : current)
+            setSession((current) => current?.id === id ? { ...current, title: summary.title, updatedAt: summary.updatedAt, tasks: summary.tasks } : current)
         } catch (reason) {
             if (isCurrent() && detailID.current === id) setSessionError(() => reason)
         }

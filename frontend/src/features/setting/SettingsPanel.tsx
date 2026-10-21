@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Cpu, FileJson, Settings2 } from 'lucide-react'
 import type { ModelOption } from '../../api'
-import { hasPrimaryModel } from './model-config/modelConfigHelpers'
+import { hasModels } from './model-config/modelConfigHelpers'
 
 type SettingsPanelProps = {
     models: ModelOption[]
@@ -8,7 +8,7 @@ type SettingsPanelProps = {
 }
 
 export function SettingsPanel({ models, onOpenModels }: SettingsPanelProps) {
-    const configured = hasPrimaryModel(models)
+    const configured = hasModels(models)
     const providers = new Set(models.map((model) => model.providerName)).size
     return (
         <section className="region settings-region" aria-labelledby="settings-title">
@@ -41,7 +41,7 @@ export function SettingsPanel({ models, onOpenModels }: SettingsPanelProps) {
                                 </div>
                                 <div className="settings-alert-body">
                                     <strong>需要操作</strong>
-                                    <p>配置主 Model 以启用 Agent 会话。<code>agents/primary/agent.json</code> 必须绑定 Model。</p>
+                                    <p>添加 Provider 和 Model 后，在输入区显式选择要使用的模型。</p>
                                 </div>
                             </div>
                         </div>
@@ -89,7 +89,7 @@ export function SettingsPanel({ models, onOpenModels }: SettingsPanelProps) {
                             </div>
                             <div className="settings-info-content">
                                 <strong>配置存储</strong>
-                                <p>更改保存到 <code>~/.praxis/config/models.json</code> 并立即生效。</p>
+                                <p>更改保存到 <code>~/.praxis/config/models.json</code>；当前使用的模型在输入区单独选择。</p>
                             </div>
                         </div>
                     </div>

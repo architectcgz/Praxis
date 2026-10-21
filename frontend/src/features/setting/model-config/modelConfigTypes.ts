@@ -16,7 +16,6 @@ export type ModelDraft = Omit<ModelConfigOption, 'apiFormat'> & {
 export type ProviderDialogProps = {
     provider: ProviderConfigOption | null
     modelCount: number
-    models: ModelConfigOption[]
     error: string
     saving: boolean
     onSave: (provider: ProviderConfigOption, key: string) => Promise<void>

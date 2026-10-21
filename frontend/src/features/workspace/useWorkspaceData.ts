@@ -22,8 +22,8 @@ export function useWorkspaceData() {
         sessions, session, catalogLoading, sessionLoading, catalogError, sessionError,
         getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions,
     } = useSessionData()
-    const { models, primaryConfigured, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog()
-    const { loadForSession, resetForSessionChange, ...agents } = useAgentData({ models, setError, setErrorCode, viewRequestRef })
+    const { models, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog()
+    const { loadForSession, resetForSessionChange, ...agents } = useAgentData({ sessionID: selectedSessionID, models, setError, setErrorCode, viewRequestRef })
 
     useLayoutEffect(() => {
         errorCodeRef.current = errorCode
@@ -34,10 +34,10 @@ export function useWorkspaceData() {
         setErrorCode(undefined)
     }, [])
 
-    // 仅在模型目录更新后移除已解决的配置错误，不吞掉后来发生的发送失败。
+    // 只有当前会话的选择已由后端确认，才清除尚未选择模型的错误。
     useEffect(() => {
-        if (primaryConfigured && errorCodeRef.current === API_ERROR_CODES.modelNotConfigured) clearError()
-    }, [models, primaryConfigured, clearError])
+        if (agents.modelSelectionReady && errorCodeRef.current === API_ERROR_CODES.modelNotConfigured) clearError()
+    }, [agents.modelSelectionReady, clearError])
 
     const changeSelectedSession = useCallback((id: string) => {
         viewRequestRef.current += 1
@@ -149,7 +149,7 @@ export function useWorkspaceData() {
     }, [changeSelectedSession])
 
     useEffect(() => subscribeAgentEvents((event) => {
-        if ((event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId) {
+        if ((event.kind === 'turn_started' || event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId) {
             void refreshSummary(event.sessionId)
         }
     }), [refreshSummary])
@@ -167,6 +167,7 @@ export function useWorkspaceData() {
         refresh,
         refreshCatalog,
         refreshModels,
+        refreshSession,
         refreshing: projectsLoading || catalogLoading || modelsLoading,
         workspaceLoading: !catalogLoaded,
         sessionLoading: sessionLoading || Boolean(catalogLoaded && selectedSessionID && !session && !sessionError),

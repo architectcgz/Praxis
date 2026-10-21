@@ -36,33 +36,28 @@ type Model struct {
 
 // Provider 保存模型端点和模型目录；密钥由注册表独立管理。
 type Provider struct {
-	ID             string  `json:"id"`
-	DisplayName    string  `json:"displayName"`
-	BaseURL        string  `json:"baseUrl"`
-	ProxyURL       string  `json:"proxyUrl,omitempty"`
-	DefaultModelID string  `json:"defaultModelId,omitempty"`
-	Models         []Model `json:"models"`
+	ID          string  `json:"id"`
+	DisplayName string  `json:"displayName"`
+	BaseURL     string  `json:"baseUrl"`
+	ProxyURL    string  `json:"proxyUrl,omitempty"`
+	Models      []Model `json:"models"`
 }
 
 // Config 是模型配置的完整文档；业务层只使用输入边界已规范化的值。
 type Config struct {
-	Groups            []Group    `json:"groups"`
-	DefaultProviderID string     `json:"defaultProviderId"`
-	Providers         []Provider `json:"providers"`
+	Groups    []Group    `json:"groups"`
+	Providers []Provider `json:"providers"`
 }
 
-// Option 是模型目录中的可选条目，携带分组、默认选择和关联的 Agent 定义。
+// Option 是模型目录中的可选条目，携带分组与推理能力。
 type Option struct {
-	GroupID                  string
-	ProviderID               string
-	ModelID                  string
-	DefaultProviderID        string
-	DefaultModelID           string
-	Label                    string
-	ProviderName             string
-	ReasoningLevels          []string
-	DefaultReasoningLevel    string
-	AssignedAgentDefinitions []string
+	GroupID               string
+	ProviderID            string
+	ModelID               string
+	Label                 string
+	ProviderName          string
+	ReasoningLevels       []string
+	DefaultReasoningLevel string
 }
 
 // Catalog 读取已确认的模型能力。
@@ -79,12 +74,6 @@ type ConfigManager interface {
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
 	DiscoverProviderModels(context.Context, string) ([]string, error)
-}
-
-// AgentDefinitions 提供模型配置关联的 Agent 定义查询和校验。
-type AgentDefinitions interface {
-	DefinitionsForModel(string, string) []string
-	ValidateModelConfiguration(Config) error
 }
 
 // ValidationError 表示用户可修正的配置内容错误。

@@ -10,19 +10,20 @@ import (
 	"praxis/internal/core/security"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
+	"sync"
 )
 
 // Dependencies 包含审批模式配置所需的持久化能力和全局默认值来源。
 type Dependencies struct {
-	Transactions       repository.Transaction
+	ConfigMu           *sync.RWMutex
 	Projects           repository.Project
 	Clock              clock.Clock
 	GlobalApprovalMode func() security.ApprovalMode
 }
 
-// Service 负责审批模式配置及其事务边界。
+// Service 负责审批模式配置，并与工具启动共用配置锁。
 type Service struct {
-	tx                 repository.Transaction
+	configMu           *sync.RWMutex
 	projects           repository.Project
 	clock              clock.Clock
 	globalApprovalMode func() security.ApprovalMode
@@ -30,19 +31,21 @@ type Service struct {
 
 // NewService 创建审批模式业务服务。
 func NewService(deps Dependencies) (*Service, error) {
+	if deps.ConfigMu == nil {
+		deps.ConfigMu = &sync.RWMutex{}
+	}
 	if deps.GlobalApprovalMode == nil {
 		return nil, errors.New("approval service global approval mode is required")
 	}
 	for name, value := range map[string]any{
-		"transactions": deps.Transactions,
-		"projects":     deps.Projects,
+		"projects": deps.Projects,
 	} {
 		if value == nil {
 			return nil, fmt.Errorf("approval service %s is required", name)
 		}
 	}
 	return &Service{
-		tx:                 deps.Transactions,
+		configMu:           deps.ConfigMu,
 		projects:           deps.Projects,
 		clock:              clock.ClockOrDefault(deps.Clock),
 		globalApprovalMode: deps.GlobalApprovalMode,
@@ -57,30 +60,31 @@ type ApprovalSettings struct {
 	EffectiveMode security.ApprovalMode
 }
 
-// GetApprovalMode 在与工具启动相同的事务边界读取项目与全局模式。
+// GetApprovalMode 组合项目覆盖与当前全局模式，供配置界面展示。
 func (s *Service) GetApprovalMode(ctx context.Context, projectID identity.ProjectID) (ApprovalSettings, error) {
 	var result ApprovalSettings
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	err := func(txCtx context.Context) error {
 		project, err := s.projects.Get(txCtx, projectID)
 		if err != nil {
 			return err
 		}
 		result = s.approvalSettings(project)
 		return nil
-	})
+	}(ctx)
 	return result, err
 }
 
 // SetApprovalMode 持久化项目覆盖并返回提交后的有效模式；写入失败不返回成功状态。
 func (s *Service) SetApprovalMode(ctx context.Context, projectID identity.ProjectID, mode *security.ApprovalMode) (ApprovalSettings, error) {
-	var result ApprovalSettings
-	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+	var updated projectmodel.Project
+	s.configMu.Lock()
+	err := func(txCtx context.Context) error {
 		project, err := s.projects.Get(txCtx, projectID)
 		if err != nil {
 			return err
 		}
 		if project.ApprovalMode == nil && mode == nil || project.ApprovalMode != nil && mode != nil && *project.ApprovalMode == *mode {
-			result = s.approvalSettings(project)
+			updated = project
 			return nil
 		}
 		project.ApprovalMode = mode
@@ -88,13 +92,14 @@ func (s *Service) SetApprovalMode(ctx context.Context, projectID identity.Projec
 		if err := s.projects.Save(txCtx, project); err != nil {
 			return err
 		}
-		result = s.approvalSettings(project)
+		updated = project
 		return nil
-	})
+	}(ctx)
+	s.configMu.Unlock()
 	if err != nil {
 		return ApprovalSettings{}, err
 	}
-	return result, nil
+	return s.approvalSettings(updated), nil
 }
 
 func (s *Service) approvalSettings(project projectmodel.Project) ApprovalSettings {

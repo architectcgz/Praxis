@@ -39,7 +39,7 @@ type Registry struct {
 	client          *http.Client
 	streamFactory   StreamFactory
 	providerClients map[string]*http.Client
-	modelsByKey     map[modelKey]modelconfig.Model
+	modelConfigs    map[modelKey]modelapi.Config
 	providersByID   map[string]modelconfig.Provider
 }
 
@@ -64,17 +64,8 @@ func (r *Registry) ReplaceFrom(candidate *Registry) {
 	r.config = candidate.config
 	r.credentials = candidate.credentials
 	r.providerClients = candidate.providerClients
-	r.modelsByKey = candidate.modelsByKey
+	r.modelConfigs = candidate.modelConfigs
 	r.providersByID = candidate.providersByID
-}
-
-// modelByKeyLocked 要求调用方已持有 r.mu，且 key 已完成规范化。
-func (r *Registry) modelByKeyLocked(key modelKey) (modelconfig.Model, error) {
-	config, ok := r.modelsByKey[key]
-	if !ok {
-		return modelconfig.Model{}, fmt.Errorf("model %q for provider %q is not configured", key.ModelID, key.ProviderID)
-	}
-	return config, nil
 }
 
 // ListModels 返回可用于下一 Task 的模型及推理等级。
@@ -88,8 +79,6 @@ func (r *Registry) ListModels() []modelconfig.Option {
 				GroupID:               candidate.GroupID,
 				ProviderID:            provider.ID,
 				ModelID:               candidate.ID,
-				DefaultProviderID:     r.config.DefaultProviderID,
-				DefaultModelID:        provider.DefaultModelID,
 				Label:                 candidate.DisplayName,
 				ProviderName:          provider.DisplayName,
 				ReasoningLevels:       slices.Clone(candidate.ReasoningLevels),
@@ -201,45 +190,23 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 	return models, nil
 }
 
-// ResolveModelConfig 从模型目录解析 Task 的非敏感模型配置；失败时返回错误。
-func (r *Registry) ResolveModelConfig(providerID, modelID, reasoningLevel string) (modelapi.Config, error) {
-	selection, err := newModelSelection(providerID, modelID, reasoningLevel)
-	if err != nil {
-		return modelapi.Config{}, err
+// ModelConfig 返回显式选定模型的内存快照，只覆盖本次请求指定的推理等级。
+// 完整配置在加载或保存时构建；返回独立副本，避免单次执行修改注册表状态。
+func (r *Registry) ModelConfig(providerID, modelID, reasoningLevel string) (modelapi.Config, error) {
+	if providerID == "" || modelID == "" {
+		return modelapi.Config{}, errors.New("model provider ID and model ID are required")
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	configured, selected, err := r.selectModelLocked(selection)
-	if err != nil {
-		return modelapi.Config{}, err
-	}
-	provider, ok := r.providersByID[selected.ProviderID]
+	config, ok := r.modelConfigs[modelKey{ProviderID: providerID, ModelID: modelID}]
 	if !ok {
-		return modelapi.Config{}, fmt.Errorf("provider %q is not configured", selected.ProviderID)
+		return modelapi.Config{}, fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
 	}
-	config := modelapi.Config{
-		ProviderID:      selected.ProviderID,
-		ModelID:         selected.ModelID,
-		ReasoningLevel:  selected.ReasoningLevel,
-		ReasoningLevels: slices.Clone(configured.ReasoningLevels),
-		Thinking:        configured.Thinking,
-		APIFormat:       string(configured.APIFormat),
-		ContextWindow:   configured.ContextWindow,
-		MaxOutputTokens: configured.MaxOutputTokens,
-		BaseURL:         provider.BaseURL,
-		ProxyURL:        provider.ProxyURL,
+	if reasoningLevel != "" {
+		if !slices.Contains(config.ReasoningLevels, reasoningLevel) {
+			return modelapi.Config{}, fmt.Errorf("model %q does not support reasoning %q", modelID, reasoningLevel)
+		}
+		config.ReasoningLevel = reasoningLevel
 	}
-	return config, nil
-}
-
-func (r *Registry) selectModelLocked(selection modelSelection) (modelconfig.Model, modelSelection, error) {
-	config, err := r.modelByKeyLocked(modelKey{ProviderID: selection.ProviderID, ModelID: selection.ModelID})
-	if err != nil {
-		return modelconfig.Model{}, modelSelection{}, err
-	}
-	selected, err := selectReasoning(config, selection.ProviderID, selection.ReasoningLevel)
-	if err != nil {
-		return modelconfig.Model{}, modelSelection{}, err
-	}
-	return config, selected, nil
+	return config.Clone(), nil
 }

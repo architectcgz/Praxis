@@ -81,6 +81,15 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 		CreatedAt:   view.Session.CreatedAt,
 		UpdatedAt:   view.Session.UpdatedAt,
 		Agents:      make([]dto.AgentSnapshot, 0, len(view.Agents)),
+		Tasks:       make([]dto.QueuedTask, 0, len(view.Tasks)),
+	}
+	for _, value := range view.Tasks {
+		result.Tasks = append(result.Tasks, dto.QueuedTask{
+			ID:        value.ID.String(),
+			Prompt:    value.Prompt,
+			Sequence:  value.Sequence,
+			CreatedAt: value.CreatedAt,
+		})
 	}
 	for _, value := range view.Agents {
 		result.Agents = append(result.Agents, agentSnapshot(value))

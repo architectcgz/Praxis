@@ -6,6 +6,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
 	messagemodel "praxis/internal/core/message"
+	taskmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -18,12 +19,12 @@ import (
 func (r *Coordinator) run(
 	ctx context.Context,
 	task agentmodel.Execution,
-	active *activeTask,
+	active *taskmodel.ActiveTask,
 ) {
 	r.logEvent(task.ID, "task started")
-	defer r.activeTasks.runReturned(task.AgentID, active)
-	if active.result != nil {
-		r.endExecution(task, active, active.result.outcome, active.result.code, active.result.message)
+	defer r.activeTasks.RunReturned(task.AgentID, active)
+	if active.Result != nil {
+		r.endExecution(task, active, active.Result.Outcome, active.Result.Code, active.Result.Message)
 		return
 	}
 
@@ -132,7 +133,7 @@ func (r *Coordinator) execute(
 	return finalOutcome, finalCode, message
 }
 
-// executionResult 读取 Agent 提供的取消原因；持久化控制命令由结束事务最终仲裁。
+// executionResult 读取 Agent 提供的取消原因；持久化控制命令由结算条件写入最终仲裁。
 func (r *Coordinator) executionResult(
 	ctx context.Context,
 	outcome agentmodel.ExecutionOutcome,
@@ -142,7 +143,7 @@ func (r *Coordinator) executionResult(
 	failureMessage := agentservice.ExecutionFailureMessage(failureCode, err)
 	if ctx.Err() != nil {
 		outcome = agentmodel.ExecutionInterrupted
-		if errors.Is(context.Cause(ctx), ErrExecutionPaused) {
+		if errors.Is(context.Cause(ctx), taskmodel.ErrExecutionPaused) {
 			outcome = agentmodel.ExecutionPaused
 		}
 		failureCode = agentmodel.ExecutionFailureCancelled
@@ -162,14 +163,18 @@ func (r *Coordinator) executionResult(
 
 func (r *Coordinator) endExecution(
 	task agentmodel.Execution,
-	active *activeTask,
+	active *taskmodel.ActiveTask,
 	outcome agentmodel.ExecutionOutcome,
 	failureCode agentmodel.ExecutionFailureCode,
 	failureMessage string,
 ) bool {
 	// 先保留结算结果与占用，失败后只重试结算。
-	active.result = &executionResultState{outcome: outcome, code: failureCode, message: failureMessage}
-	r.activeTasks.BeginEnding(task.AgentID, active.executionID)
+	active.Result = &taskmodel.ExecutionResult{
+		Outcome: outcome,
+		Code:    failureCode,
+		Message: failureMessage,
+	}
+	r.activeTasks.BeginEnding(task.AgentID, active.ExecutionID)
 	var endedExecution agentmodel.Execution
 	retryDelay := 100 * time.Millisecond
 	for {
@@ -196,12 +201,12 @@ func (r *Coordinator) endExecution(
 	}
 
 	// 结算提交后才释放执行槽；入队唤醒不能在暂停或取消结算途中抢先续跑。
-	r.activeTasks.Release(task.AgentID, active.executionID)
+	r.activeTasks.Release(task.AgentID, active.ExecutionID)
 	// 只有已提交的最终结果允许续跑；已提交的暂停或取消可以覆盖 loop 的正常完成。
 	if endedExecution.Outcome == agentmodel.ExecutionCompleted || endedExecution.Outcome == agentmodel.ExecutionYielded {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
-		if _, err := r.StartNext(queueContext, task.AgentID); err != nil {
+		if _, err := r.StartNext(queueContext, task.SessionID); err != nil {
 			r.logError(task, "prepare next queued task", err)
 		}
 	}

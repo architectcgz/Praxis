@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"praxis/internal/core/hook"
+	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
 	"praxis/internal/infra/filesystem"
@@ -75,20 +76,19 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	}
 	hooks := hook.NewDispatcher(timing.Hook{Recorder: timings})
 	configMu := &sync.RWMutex{}
-	a.sessions, err = buildSessions(resources, repos, config.agents, hooks, configMu)
+	a.sessions, err = buildSessions(resources, repos, config.agents, hooks, configMu, config.models)
 	if err != nil {
 		return nil, err
 	}
+	models := buildModelService(root, config, a.logger, configMu)
 	a.coordinator, err = buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, runner)
 	if err != nil {
 		return nil, err
 	}
 	agents, err := agentservice.NewService(agentservice.Dependencies{
-		Transactions:     a.store,
 		Agents:           repos.Agents,
 		ExecutionRecords: repos.Executions,
 		Sessions:         repos.Sessions,
-		Queue:            repos.Tasks,
 		Controls:         repos.Controls,
 		Executions:       a.coordinator,
 		Messages:         repos.Messages,
@@ -97,19 +97,21 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 		return nil, err
 	}
 	projects, err := projectservice.NewService(projectservice.Dependencies{
-		Transactions: a.store,
-		Projects:     repos.Projects,
-		Workspaces:   repos.Workspaces,
-		Directory:    fs.Filesystem{},
-		Logger:       a.logger,
+		Projects:   repos.Projects,
+		Workspaces: repos.Workspaces,
+		Directory:  fs.Filesystem{},
 	})
 	if err != nil {
 		return nil, err
 	}
 	approvals, err := approvalservice.NewService(approvalservice.Dependencies{
-		GlobalApprovalMode: config.globalApprovalMode,
-		Transactions:       a.store,
-		Projects:           repos.Projects,
+		ConfigMu: configMu,
+		GlobalApprovalMode: func() security.ApprovalMode {
+			configMu.RLock()
+			defer configMu.RUnlock()
+			return config.settings.ApprovalMode
+		},
+		Projects: repos.Projects,
 	})
 	if err != nil {
 		return nil, err
@@ -122,7 +124,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	if err != nil {
 		return nil, err
 	}
-	models := buildModelService(root, config, a.store, a.logger, configMu)
 	a.frontend = bindings.Services{
 		Projects:       projects,
 		Approvals:      approvals,

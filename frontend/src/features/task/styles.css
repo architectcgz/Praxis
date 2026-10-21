@@ -83,6 +83,33 @@
     transform: rotate(180deg);
 }
 
+.task-queue-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 12px 10px 40px;
+    color: var(--muted);
+}
+
+.task-queue-actions button {
+    min-height: var(--control-height);
+    padding: 2px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--ink);
+}
+
+.task-queue-actions .task-queue-cancel {
+    border-color: var(--danger-line);
+    color: var(--danger);
+}
+
+.task-queue-actions button:hover:not(:disabled) {
+    background: var(--fill);
+}
+
 .task-queue-content {
     margin: 0;
     padding: 0 12px 10px 40px;

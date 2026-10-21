@@ -20,17 +20,6 @@ func Validate(config Config) error {
 	if err := validateProviders(config.Providers, groupsSeen); err != nil {
 		return err
 	}
-	if config.DefaultProviderID == "" {
-		if len(config.Providers) > 0 {
-			return errors.New("models config: default provider is required")
-		}
-		return nil
-	}
-	if !slices.ContainsFunc(config.Providers, func(provider Provider) bool {
-		return provider.ID == config.DefaultProviderID
-	}) {
-		return fmt.Errorf("models config: default provider %q is not configured", config.DefaultProviderID)
-	}
 	return nil
 }
 
@@ -72,11 +61,6 @@ func validateProviders(providers []Provider, groupsSeen map[string]struct{}) err
 		}
 		if err := validateModels(provider, groupsSeen); err != nil {
 			return err
-		}
-		if provider.DefaultModelID != "" && !slices.ContainsFunc(provider.Models, func(configured Model) bool {
-			return configured.ID == provider.DefaultModelID
-		}) {
-			return fmt.Errorf("models config: provider %q default model %q is not configured", provider.ID, provider.DefaultModelID)
 		}
 	}
 	return nil

@@ -1,4 +1,4 @@
-// Package coordinator 协调进程内 Execution 执行、审批等待和持久化队列交接。
+// Package coordinator 协调进程内 Execution 执行、审批等待和内存输入队列交接。
 package coordinator
 
 import (
@@ -6,6 +6,7 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
+	taskmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/logging"
 	"praxis/internal/loop"
@@ -17,14 +18,16 @@ import (
 
 type Config struct {
 	ConfigMu          *sync.RWMutex
-	Recovery          RecoverySource
+	Recovery          repository.AgentExecution
 	Tools             *toolservice.Service
 	Sessions          repository.Session
 	Workspaces        repository.Workspace
+	PrimaryAgent      PrimaryAgentProvider
+	SessionModels     SessionModels
 	Loop              *loop.Runner
-	ActiveTasks       *ActiveTasks
+	ActiveTasks       *taskmodel.ActiveTasks
 	Operations        ExecutionOperations
-	Queue             TaskQueue
+	SessionTasks      SessionTasks
 	Events            *EventPublisher
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
@@ -34,16 +37,18 @@ type Config struct {
 // Coordinator 是进程级执行协调器；活动身份只保存在共享的 ActiveTasks 中。
 type Coordinator struct {
 	configMu          *sync.RWMutex
-	recovery          RecoverySource
+	recovery          repository.AgentExecution
 	tools             *toolservice.Service
 	sessions          repository.Session
 	workspaces        repository.Workspace
+	primary           PrimaryAgentProvider
+	sessionModels     SessionModels
 	restored          bool
 	restoring         bool
 	loop              *loop.Runner
-	activeTasks       *ActiveTasks
+	activeTasks       *taskmodel.ActiveTasks
 	operations        ExecutionOperations
-	queue             TaskQueue
+	sessionTasks      SessionTasks
 	events            *EventPublisher
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
@@ -56,8 +61,11 @@ type Coordinator struct {
 }
 
 func NewCoordinator(config Config) (*Coordinator, error) {
-	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.Queue == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil || config.Events == nil {
+	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.SessionTasks == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil || config.Events == nil {
 		return nil, errors.New("execution loop, active tasks, task operations, queue, tool services and event publisher are required")
+	}
+	if config.PrimaryAgent == nil || config.SessionModels == nil || config.Recovery == nil {
+		return nil, errors.New("primary agent, session models and execution recovery source are required")
 	}
 	timeout := config.TransitionTimeout
 	if timeout <= 0 {
@@ -72,10 +80,12 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 		tools:             config.Tools,
 		sessions:          config.Sessions,
 		workspaces:        config.Workspaces,
+		primary:           config.PrimaryAgent,
+		sessionModels:     config.SessionModels,
 		loop:              config.Loop,
 		activeTasks:       config.ActiveTasks,
 		operations:        config.Operations,
-		queue:             config.Queue,
+		sessionTasks:      config.SessionTasks,
 		events:            config.Events,
 		hookDispatcher:    config.HookDispatcher,
 		logger:            logging.NewFactory().Ensure(config.Logger),
@@ -122,7 +132,7 @@ func (r *Coordinator) activate(ctx context.Context, task agentmodel.Execution) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		// 恢复事务可能在 Close 发送取消后才预留身份，补发取消但保留持久化恢复能力。
+		// 恢复可能在 Close 发送取消后才预留身份，补发取消但保留持久化恢复能力。
 		r.activeTasks.Stop(task.AgentID, task.ID)
 		return errors.New("execution coordinator is closed")
 	}
@@ -130,11 +140,11 @@ func (r *Coordinator) activate(ctx context.Context, task agentmodel.Execution) e
 	if err != nil || !claimed {
 		return err
 	}
-	r.running.Go(func() { r.run(active.ctx, task, active) })
+	r.running.Go(func() { r.run(active.Context, task, active) })
 	return nil
 }
 
-// ResumeApproved 在审批事务提交后唤醒同一执行；尚未建立协程时正常激活。
+// ResumeApproved 在审批事实提交后唤醒同一执行；尚未建立协程时正常激活。
 func (r *Coordinator) ResumeApproved(ctx context.Context, task agentmodel.Execution) error {
 	if err := r.Activate(ctx, task); err != nil {
 		return err
@@ -151,7 +161,7 @@ func (r *Coordinator) Close(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	r.closed = true
-	r.activeTasks.stopAll()
+	r.activeTasks.StopAll()
 	r.mu.Unlock()
 	done := make(chan struct{})
 	go func() { r.running.Wait(); close(done) }()

@@ -25,9 +25,6 @@ func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 		return dto.AgentSnapshot{}, publicError(b.host, "AgentBindings.GetAgent", err)
 	}
 	result := agentSnapshot(view.Agent)
-	for _, value := range view.Tasks {
-		result.Tasks = append(result.Tasks, dto.QueuedTaskSnapshot{ID: value.ID.String(), Status: string(value.Status), Sequence: value.Sequence, ExecutionID: value.ExecutionID.String(), CreatedAt: value.CreatedAt})
-	}
 	result.ExecutionIDs = make([]string, 0, len(view.Executions))
 	result.ControlCommandIDs = make([]string, 0, len(view.Controls))
 	for _, value := range view.Executions {
@@ -72,7 +69,6 @@ func (b *AgentBindings) ListAgentHistory(agentID, before string) (dto.AgentHisto
 
 func agentSnapshot(value agentmodel.Agent) dto.AgentSnapshot {
 	return dto.AgentSnapshot{
-		Tasks:              []dto.QueuedTaskSnapshot{},
 		ID:                 value.ID.String(),
 		Name:               agentDisplayName(value.DefinitionID),
 		SessionID:          value.SessionID.String(),

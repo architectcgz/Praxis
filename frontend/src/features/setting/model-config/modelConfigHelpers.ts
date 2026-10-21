@@ -1,8 +1,8 @@
 import type { ModelAPIFormat, ModelOption, ProviderConfigOption } from '../../../api'
 import type { ModelDraft } from './modelConfigTypes'
 
-export function hasPrimaryModel(models: readonly ModelOption[]): boolean {
-    return models.some((model) => model.assignedAgentDefinitions.includes('primary'))
+export function hasModels(models: readonly ModelOption[]): boolean {
+    return models.length > 0
 }
 
 export function createProviderID(): string {

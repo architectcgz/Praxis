@@ -13,8 +13,8 @@ type ModelUsageStore struct{ Store *Store }
 
 // Save 按请求身份幂等保存累计计数；拒绝身份变更、计数回退和已知字段丢失。
 func (r ModelUsageStore) Save(ctx context.Context, value modelapi.ModelUsageRecord) error {
-	return r.Store.InTx(ctx, func(ctx context.Context) error {
-		previous, err := get[modelapi.ModelUsageRecord](ctx, r.Store, "usage", value.Key())
+	return r.Store.view(ctx, func() error {
+		previous, err := getLocked[modelapi.ModelUsageRecord](r.Store, "usage", value.Key())
 		if err == nil {
 			if previous.SessionID != value.SessionID || previous.AgentID != value.AgentID || previous.Usage.InputTokens > value.Usage.InputTokens {
 				return fault.ErrRequestConflict
@@ -31,7 +31,7 @@ func (r ModelUsageStore) Save(ctx context.Context, value modelapi.ModelUsageReco
 		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
-		return save(ctx, r.Store, value.SessionID, "usage", value.Key(), "usage.saved", value)
+		return r.Store.appendLocked(ctx, value.SessionID, "usage", value.Key(), "usage.saved", value)
 	})
 }
 

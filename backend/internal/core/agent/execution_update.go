@@ -28,16 +28,14 @@ func ValidateExecutionUpdate(before, after Execution) error {
 	if !canExecutionTransition(before.Status, after.Status) {
 		return fault.ErrRequestConflict
 	}
-	if before.Status == ExecutionEnded {
-		prior := before
-		prior.Progress.OutputBytes = after.Progress.OutputBytes
-		if !reflect.DeepEqual(prior, after) {
-			return fault.ErrRequestConflict
-		}
-	}
 	left, right := before, after
-	left.Status, right.Status = "", ""
+	left.Revision, right.Revision = 0, 0
+	// 派生统计不参与持久化更新校验；终态仅允许补记已返回的模型输出消耗。
 	left.Progress, right.Progress = ExecutionProgress{}, ExecutionProgress{}
+	if before.Status == ExecutionEnded && !reflect.DeepEqual(left, right) {
+		return fault.ErrRequestConflict
+	}
+	left.Status, right.Status = "", ""
 	left.StartedAt = right.StartedAt
 	left.EndedAt = right.EndedAt
 	left.Outcome, right.Outcome = "", ""
@@ -47,19 +45,11 @@ func ValidateExecutionUpdate(before, after Execution) error {
 		return fault.ErrRequestConflict
 	}
 	p, n := before.Progress, after.Progress
-	if n.NextSequence < p.NextSequence || n.Iterations < p.Iterations || n.ModelRequests < p.ModelRequests || n.OutputBytes < p.OutputBytes || n.ToolCalls < p.ToolCalls {
+	if n.NextSequence < p.NextSequence || n.Iterations < p.Iterations || n.ModelRequests < p.ModelRequests || n.ModelOutputBytes < p.ModelOutputBytes {
 		return fault.ErrRequestConflict
 	}
-	if p.FinalAssistantID != "" && (p.FinalAssistantID != n.FinalAssistantID || p.FinalStopReason != n.FinalStopReason) {
+	if before.Status == ExecutionEnded && (n.NextSequence != p.NextSequence || n.Iterations != p.Iterations || n.ModelRequests != p.ModelRequests) {
 		return fault.ErrRequestConflict
 	}
-	return nil
-}
-
-func (e *Execution) RecordFinalOutput(value FinalOutput) error {
-	if !e.Active() || e.Progress.FinalAssistantID != "" && (e.Progress.FinalAssistantID != value.AssistantID || e.Progress.FinalStopReason != value.StopReason) {
-		return fault.ErrRequestConflict
-	}
-	e.Progress.FinalAssistantID, e.Progress.FinalStopReason = value.AssistantID, value.StopReason
 	return nil
 }

@@ -1,6 +1,6 @@
 //go:build !windows
 
-package jsonl
+package main
 
 import (
 	"os"
@@ -8,6 +8,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func lockFile(file *os.File) error {
+func lockInstanceFile(file *os.File) error {
 	return unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 }

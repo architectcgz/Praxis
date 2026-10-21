@@ -2,13 +2,11 @@ package bindings
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
-	modelconfig "praxis/internal/core/model/config"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
-	executionservice "praxis/internal/service/agent/execution"
-	queueservice "praxis/internal/service/task"
+	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
@@ -17,39 +15,30 @@ import (
 
 type CommandBindings struct{ host Host }
 
-func (b *CommandBindings) SendInput(wire dto.SendInputRequest) (dto.SendInputResponse, error) {
-	if err := validation.ValidateSendInput(wire); err != nil {
-		return dto.SendInputResponse{}, err
+// CreateTask 只接收 Session 和正文，不要求前端提供 Task、Request 或 Agent 身份。
+func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTaskResponse, error) {
+	if err := validation.ValidateSessionID(wire.SessionID); err != nil {
+		return dto.CreateTaskResponse{}, err
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.SendInputResponse{}, err
+		return dto.CreateTaskResponse{}, err
 	}
-	params := executionservice.SendInput{
-		SessionID:      identity.SessionID(wire.SessionID),
-		AgentID:        identity.AgentID(wire.AgentID),
-		RequestID:      identity.RequestID(wire.RequestID),
-		Content:        strings.TrimSpace(wire.Content),
-		ProviderID:     strings.TrimSpace(wire.ProviderID),
-		ModelID:        strings.TrimSpace(wire.ModelID),
-		ReasoningLevel: strings.TrimSpace(wire.ReasoningLevel),
+	input := sessionservice.TaskInput{
+		SessionID: identity.SessionID(wire.SessionID),
+		Prompt:    strings.TrimSpace(wire.Prompt),
 	}
-	if params.ProviderID == "" || params.ModelID == "" {
-		err := fault.New(modelconfig.ModelNotConfigured, "")
-		return dto.SendInputResponse{}, publicError(b.host, "CommandBindings.SendInput.request", err)
+	if input.Prompt == "" || len(input.Prompt) > sessionmodel.MaxInputBytes || !utf8.ValidString(input.Prompt) {
+		err := fault.InvalidValue("prompt", "prompt must be non-empty UTF-8 text within the size limit")
+		return dto.CreateTaskResponse{}, publicError(b.host, "CommandBindings.CreateTask.request", err)
 	}
-	if params.Content == "" || len(params.Content) > agentmodel.MaxInputBytes || !utf8.ValidString(params.Content) {
-		err := fault.InvalidValue("content", "content must be non-empty UTF-8 text within the size limit")
-		return dto.SendInputResponse{}, publicError(b.host, "CommandBindings.SendInput.request", err)
-	}
-	result, err := services.Commands.SendInput(ctx, params)
+	result, err := services.Commands.SubmitTask(ctx, input)
 	if err != nil {
-		return dto.SendInputResponse{}, publicError(b.host, "CommandBindings.SendInput", err)
+		return dto.CreateTaskResponse{}, publicError(b.host, "CommandBindings.CreateTask", err)
 	}
-	return dto.SendInputResponse{
-		ExecutionID:     result.Execution.ID.String(),
-		ExistingRequest: result.ExistingRequest,
-		ActivationError: result.ActivationError,
+	return dto.CreateTaskResponse{
+		TaskID:          result.Task.ID.String(),
+		SchedulingError: result.SchedulingError,
 	}, nil
 }
 
@@ -71,37 +60,19 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) (dto.AgentControl
 	})
 }
 
-// QueueTask 只预约输入，领取和 FIFO 交接由 Execution 负责。
-func (b *CommandBindings) QueueTask(wire dto.QueueTaskRequest) (dto.QueueTaskResponse, error) {
-	if err := validation.ValidateQueueTask(wire); err != nil {
-		return dto.QueueTaskResponse{}, err
+// CancelTask 只移除该 Session 尚未开始的输入，不影响当前 Loop。
+func (b *CommandBindings) CancelTask(wire dto.CancelTaskRequest) error {
+	if err := validation.ValidateSessionID(wire.SessionID); err != nil {
+		return err
+	}
+	if err := validation.ValidateTaskID(wire.TaskID); err != nil {
+		return err
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.QueueTaskResponse{}, err
+		return err
 	}
-	params := queueservice.EnqueueInput{
-		ID:             identity.TaskID(wire.TaskID),
-		RequestID:      identity.RequestID(wire.RequestID),
-		AgentID:        identity.AgentID(wire.AgentID),
-		Prompt:         strings.TrimSpace(wire.Prompt),
-		ProviderID:     strings.TrimSpace(wire.ProviderID),
-		ModelID:        strings.TrimSpace(wire.ModelID),
-		ReasoningLevel: strings.TrimSpace(wire.ReasoningLevel),
-	}
-	if params.ProviderID == "" || params.ModelID == "" {
-		err := fault.New(modelconfig.ModelNotConfigured, "")
-		return dto.QueueTaskResponse{}, publicError(b.host, "CommandBindings.QueueTask.request", err)
-	}
-	if params.Prompt == "" || len(params.Prompt) > agentmodel.MaxInputBytes || !utf8.ValidString(params.Prompt) {
-		err := fault.InvalidValue("prompt", "prompt must be non-empty UTF-8 text within the size limit")
-		return dto.QueueTaskResponse{}, publicError(b.host, "CommandBindings.QueueTask.request", err)
-	}
-	result, err := services.Commands.EnqueueTask(ctx, params)
-	if err != nil {
-		return dto.QueueTaskResponse{}, publicError(b.host, "CommandBindings.QueueTask", err)
-	}
-	return dto.QueueTaskResponse{TaskID: result.Task.ID.String(), Status: string(result.Task.Status), ExistingTask: result.ExistingTask}, nil
+	return publicError(b.host, "CommandBindings.CancelTask", services.Commands.CancelTask(ctx, identity.SessionID(wire.SessionID), identity.TaskID(wire.TaskID)))
 }
 
 func controlInput(wire dto.PauseAgentRequest) agentservice.ControlInput {

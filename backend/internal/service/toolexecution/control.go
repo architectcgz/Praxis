@@ -12,12 +12,16 @@ import (
 	"praxis/internal/identity"
 )
 
-// 锁顺序固定为 controlMu → 仓储事务；授权及工具 I/O 均不持有 controlMu。
+// 锁顺序固定为 controlMu → 配置读锁 → 仓储写入锁；工具 I/O 不持有这些锁。
 // started 和活动登记共用此锁，Stop 持久化成功后才取消，启动间隙不会丢信号。
 func (s *Service) registerAndMarkStarted(ctx context.Context, call message.ToolCall, args json.RawMessage, execution *executionmodel.Execution) error {
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
-	err := s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
+	if s.deps.Rules.ConfigMu != nil {
+		s.deps.Rules.ConfigMu.RLock()
+		defer s.deps.Rules.ConfigMu.RUnlock()
+	}
+	err := func(txCtx context.Context) error {
 		task, err := s.deps.Tasks.Get(txCtx, call.ExecutionID)
 		if err != nil {
 			return err
@@ -32,7 +36,7 @@ func (s *Service) registerAndMarkStarted(ctx context.Context, call message.ToolC
 		if !facts.StopRequestedAt.IsZero() {
 			return errStopRequested
 		}
-		decision, err := s.deps.Rules.Decide(txCtx, call, args)
+		decision, err := s.deps.Rules.decide(txCtx, call, args)
 		if err != nil {
 			return err
 		}
@@ -50,7 +54,7 @@ func (s *Service) registerAndMarkStarted(ctx context.Context, call message.ToolC
 			return err
 		}
 		return nil
-	})
+	}(ctx)
 	if err == nil {
 		s.active[call.Key] = execution
 	}
@@ -82,7 +86,7 @@ func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task ag
 	key := executionmodel.Key{ExecutionID: request.ExecutionID, CallID: request.CallID}
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
-	err = s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
+	err = func(txCtx context.Context) error {
 		call, err := s.call(txCtx, key.ExecutionID, key.CallID)
 		if err != nil {
 			return err
@@ -100,23 +104,25 @@ func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task ag
 			return err
 		}
 		facts, err := s.deps.Events.Read(txCtx, key)
-		if err != nil || !facts.StopRequestedAt.IsZero() {
+		if err != nil {
 			return err
 		}
-		if err := s.deps.Events.Append(txCtx, executionmodel.Event{
-			Key:       key,
-			SessionID: call.SessionID,
-			Kind:      executionmodel.StopRequested,
-			At:        s.clock.Now().UTC(),
-		}); err != nil {
-			return err
+		if facts.StopRequestedAt.IsZero() {
+			if err := s.deps.Events.Append(txCtx, executionmodel.Event{
+				Key:       key,
+				SessionID: call.SessionID,
+				Kind:      executionmodel.StopRequested,
+				At:        s.clock.Now().UTC(),
+			}); err != nil {
+				return err
+			}
 		}
 		if facts.StartedAt.IsZero() {
 			_, err := s.appendError(txCtx, call, "tool_interrupted", "The tool call was canceled before execution.")
 			return err
 		}
 		return nil
-	})
+	}(ctx)
 	if err == nil {
 		if execution := s.active[key]; execution != nil {
 			execution.Stop()

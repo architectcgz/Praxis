@@ -30,10 +30,9 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 	snapshot := services.ModelConfig.Configuration()
 	config := snapshot.Config
 	document := dto.ModelConfigDocument{
-		Groups:            make([]dto.GroupConfigOption, 0, len(config.Groups)),
-		DefaultProviderID: config.DefaultProviderID,
-		Providers:         make([]dto.ProviderConfigOption, 0, len(config.Providers)),
-		Models:            []dto.ModelConfigOption{},
+		Groups:    make([]dto.GroupConfigOption, 0, len(config.Groups)),
+		Providers: make([]dto.ProviderConfigOption, 0, len(config.Providers)),
+		Models:    []dto.ModelConfigOption{},
 	}
 	for _, group := range config.Groups {
 		document.Groups = append(document.Groups, dto.GroupConfigOption{
@@ -43,12 +42,11 @@ func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
 	}
 	for _, provider := range config.Providers {
 		document.Providers = append(document.Providers, dto.ProviderConfigOption{
-			ID:             provider.ID,
-			ProviderName:   provider.DisplayName,
-			BaseURL:        provider.BaseURL,
-			ProxyURL:       provider.ProxyURL,
-			DefaultModelID: provider.DefaultModelID,
-			HasAPIKey:      snapshot.ProviderKeys[provider.ID],
+			ID:           provider.ID,
+			ProviderName: provider.DisplayName,
+			BaseURL:      provider.BaseURL,
+			ProxyURL:     provider.ProxyURL,
+			HasAPIKey:    snapshot.ProviderKeys[provider.ID],
 		})
 		for _, configured := range provider.Models {
 			document.Models = append(document.Models, dto.ModelConfigOption{

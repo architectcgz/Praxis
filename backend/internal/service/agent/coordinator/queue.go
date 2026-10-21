@@ -2,29 +2,59 @@ package coordinator
 
 import (
 	"context"
-	"praxis/internal/fault"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/identity"
 )
 
-// StartNext 按 Agent 查询队首；活动任务（包括等待结算）占用期间不领取。
-// 并发准备由 Execution 用例的准入事务仲裁，不持有进程级调度锁。
-func (r *Coordinator) StartNext(ctx context.Context, agentID identity.AgentID) (bool, error) {
+// StartNext 由 Loop 上层在结算并释放占用后调用，以 Session 为调度单位。
+func (r *Coordinator) StartNext(ctx context.Context, sessionID identity.SessionID) (bool, error) {
 	if err := r.enter(ctx); err != nil {
 		return false, err
 	}
 	defer r.running.Done()
-	if r.activeTasks.occupied(agentID) {
-		return false, nil
-	}
-	task, prepared, err := r.operations.PrepareNext(ctx, agentID)
+	execution, prepared, err := r.prepareNext(ctx, sessionID)
 	if err != nil || !prepared {
 		return false, err
 	}
-	if task.AgentID != agentID {
-		return false, fault.ErrRequestConflict
-	}
-	if err := r.activate(ctx, task); err != nil {
+	if err := r.activate(ctx, execution); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *Coordinator) prepareNext(ctx context.Context, sessionID identity.SessionID) (agentmodel.Execution, bool, error) {
+	r.configMu.RLock()
+	defer r.configMu.RUnlock()
+	queue, ok := r.sessionTasks.TaskQueue(sessionID)
+	if !ok {
+		return agentmodel.Execution{}, false, nil
+	}
+	count, err := r.recovery.CountActiveBySession(ctx, sessionID)
+	if err != nil || count != 0 {
+		return agentmodel.Execution{}, false, err
+	}
+	input, ok := queue.Next()
+	if !ok {
+		return agentmodel.Execution{}, false, nil
+	}
+	// 准入失败必须回到原队首；会话删除时 Clear 会让延迟 Retry 失效。
+	defer queue.Retry(input)
+	// owner 只在领取后确定，创建和排队阶段不绑定 Agent。
+	owner, err := r.primary.GetOrCreatePrimaryAgent(ctx, sessionID)
+	if err != nil {
+		return agentmodel.Execution{}, false, err
+	}
+	if r.activeTasks.Occupied(owner.ID) || !owner.State.Startable() {
+		return agentmodel.Execution{}, false, nil
+	}
+	modelConfig, err := r.sessionModels.CurrentModelConfig(ctx, sessionID)
+	if err != nil {
+		return agentmodel.Execution{}, false, err
+	}
+	execution, _, err := r.operations.PrepareTask(ctx, input, owner.ID, modelConfig)
+	if err != nil {
+		return agentmodel.Execution{}, false, err
+	}
+	queue.Complete(input)
+	return execution, true, nil
 }

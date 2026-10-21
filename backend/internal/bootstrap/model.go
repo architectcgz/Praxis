@@ -2,17 +2,14 @@ package bootstrap
 
 import (
 	"context"
-	"fmt"
 	"praxis/internal/infra/agentregistry"
 	modelregistry "praxis/internal/infra/modelregistry"
 	"praxis/internal/infra/toolregistry"
 	modelservice "praxis/internal/service/model"
 	"sync"
 
-	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	"praxis/internal/infra/storage"
 	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	"praxis/internal/settings"
@@ -51,12 +48,7 @@ func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configu
 	if err := tools.ValidateRegistered(names); err != nil {
 		return nil, err
 	}
-	agents, err := agentregistry.Load(root.AgentDefinitions, func(providerID, modelID string) error {
-		if !modelregistry.ContainsModel(models.Config(), providerID, modelID) {
-			return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
-		}
-		return nil
-	})
+	agents, err := agentregistry.Load(root.AgentDefinitions)
 	if err != nil {
 		return nil, err
 	}
@@ -70,12 +62,9 @@ func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configu
 	}, nil
 }
 
-func (c *configuration) globalApprovalMode() security.ApprovalMode { return c.settings.ApprovalMode }
-
-func buildModelService(root dataroot.DataRoot, config *configuration, store *storage.Store, logger *logging.Logger, configMu *sync.RWMutex) *modelservice.Service {
+func buildModelService(root dataroot.DataRoot, config *configuration, logger *logging.Logger, configMu *sync.RWMutex) *modelservice.Service {
 	return modelservice.NewService(modelservice.Dependencies{
 		Models:   config.models,
-		Agents:   config.agents,
 		ConfigMu: configMu,
 		Logger:   logger,
 		ReloadConfig: func(ctx context.Context) error {
@@ -90,13 +79,7 @@ func buildModelService(root dataroot.DataRoot, config *configuration, store *sto
 			if err != nil {
 				return err
 			}
-			candidate := models.Config()
-			agents, err := agentregistry.Load(root.AgentDefinitions, func(providerID, modelID string) error {
-				if !modelregistry.ContainsModel(candidate, providerID, modelID) {
-					return fmt.Errorf("model %q for provider %q is not configured", modelID, providerID)
-				}
-				return nil
-			})
+			agents, err := agentregistry.Load(root.AgentDefinitions)
 			if err != nil {
 				return err
 			}
@@ -108,14 +91,12 @@ func buildModelService(root dataroot.DataRoot, config *configuration, store *sto
 				return err
 			}
 			catalog := tool.NewCatalog(tools, config.registry)
-			// 配置锁在外、JSONL 事务锁在内，队列准入和工具授权不会读取混合快照。
-			return store.InTx(ctx, func(context.Context) error {
-				config.settings = configured
-				config.models.ReplaceFrom(models)
-				config.agents.ReplaceFrom(agents)
-				config.tools.ReplaceFrom(catalog)
-				return nil
-			})
+			// Model Service 已持有配置写锁；配置发布不占用持久化锁。
+			config.settings = configured
+			config.models.ReplaceFrom(models)
+			config.agents.ReplaceFrom(agents)
+			config.tools.ReplaceFrom(catalog)
+			return nil
 		},
 	})
 }

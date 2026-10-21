@@ -11,20 +11,17 @@ import (
 )
 
 // Append 先完成可靠追加，再推进日志游标；实体发布由调用方完成。
-func (s *Log) Append(ctx context.Context, scope, projectID string, commit Commit) error {
+func (s *Log) Append(ctx context.Context, scope, projectID string, event Event) error {
 	if err := s.Check(); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if len(commit.Events) == 0 {
-		return errors.New("empty commit")
-	}
-	if err := s.validateSequence(scope, commit); err != nil {
+	if err := s.validateSequence(scope, event); err != nil {
 		return err
 	}
-	encoded, err := json.Marshal(commit)
+	encoded, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
@@ -32,23 +29,20 @@ func (s *Log) Append(ctx context.Context, scope, projectID string, commit Commit
 	if err := s.append(ctx, scope, projectID, encoded); err != nil {
 		return err
 	}
-	s.advance(scope, projectID, commit, int64(len(encoded)))
+	s.advance(scope, projectID, event, int64(len(encoded)))
 	return nil
 }
 
-func (s *Log) validateSequence(scope string, commit Commit) error {
+func (s *Log) validateSequence(scope string, event Event) error {
 	sequence := s.sequences[scope]
-	for _, event := range commit.Events {
-		if sequence == ^uint64(0) || event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
-			return errors.New("invalid event identity or sequence")
-		}
-		sequence = event.Sequence
+	if sequence == ^uint64(0) || event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
+		return errors.New("invalid event identity or sequence")
 	}
 	return nil
 }
 
-func (s *Log) advance(scope, projectID string, commit Commit, length int64) {
-	s.sequences[scope] = commit.Events[len(commit.Events)-1].Sequence
+func (s *Log) advance(scope, projectID string, event Event, length int64) {
+	s.sequences[scope] = event.Sequence
 	s.lengths[scope] += length
 	if scope != "" && projectID != "" {
 		s.sessionProjects[scope] = projectID
@@ -56,7 +50,7 @@ func (s *Log) advance(scope, projectID string, commit Commit, length int64) {
 }
 
 // Replay 按行解码并调用投影函数；未完成的尾行备份并截断，完整坏行直接报错。
-func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Commit) error) error {
+func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Event) error) error {
 	path, err := s.Path(scope.ID, scope.ProjectID)
 	if err != nil {
 		return err
@@ -92,20 +86,18 @@ func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Commit) error)
 		if readErr != nil {
 			return readErr
 		}
-		var commit Commit
-		if err := Decode(line, &commit); err != nil {
+		var event Event
+		// 严格解码完整行，未知结构必须报错，不能忽略已存在的历史。
+		if err := Decode(line, &event); err != nil {
+			return fmt.Errorf("%s offset %d: expected a single JSONL event: %w", path, offset, err)
+		}
+		if err := s.validateSequence(scope.ID, event); err != nil {
 			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
-		if len(commit.Events) == 0 {
-			return fmt.Errorf("%s offset %d: empty commit", path, offset)
-		}
-		if err := s.validateSequence(scope.ID, commit); err != nil {
+		if err := apply(event); err != nil {
 			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
-		if err := apply(commit); err != nil {
-			return fmt.Errorf("%s offset %d: %w", path, offset, err)
-		}
-		s.advance(scope.ID, scope.ProjectID, commit, int64(len(line)))
+		s.advance(scope.ID, scope.ProjectID, event, int64(len(line)))
 		offset += int64(len(line))
 	}
 }

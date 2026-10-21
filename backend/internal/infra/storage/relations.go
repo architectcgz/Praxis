@@ -2,16 +2,13 @@ package storage
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
-	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
-	queued "praxis/internal/core/task"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
@@ -19,107 +16,28 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/workflow"
-	"slices"
 )
 
-// prepareCommit 校验最终 overlay 的唯一性和消息配对，不编排业务状态。
-func (s *Store) prepareCommit(ctx context.Context) error {
-	tx := s.tx(ctx)
-	if tx.deletedScope {
-		return nil
-	}
-	claimed := make(map[lookupKey]entityKey)
-	for key, change := range tx.changes {
-		if key.collection == "message" {
-			if err := s.validateRelations(ctx, key, change.entry); err != nil {
-				return err
-			}
-		}
-		// Scope 引用与日志身份是结构约束；Session 活跃状态由 Service 检查。
-		if change.entry.scope != "" {
-			if _, ok := s.entry(ctx, entityKey{"session", change.entry.scope}); !ok {
-				return fault.ErrNotFound
-			}
-		}
-		if key.collection == "session" {
-			if _, exists := s.state.entries[key]; !exists && s.log.Sequence(change.entry.scope) != 0 {
-				return errors.New("session identity cannot be reused")
-			}
-		}
-		for _, claim := range change.entry.claims {
-			if _, exists := claimed[claim]; exists {
-				return fault.ErrRequestConflict
-			}
-			claimed[claim] = key
-			if old, exists := s.state.unique[claim]; exists && old != key {
-				if next, changed := tx.changes[old]; !changed || slices.Contains(next.entry.claims, claim) {
-					return fault.ErrRequestConflict
-				}
-			}
-		}
-	}
-
-	return s.validateToolReceipts(ctx)
-}
-
-// validateRestoredTransaction 只在磁盘恢复边界检查业务关联，拒绝不一致的日志。
-func (s *Store) validateRestoredTransaction(ctx context.Context) error {
-	tx := s.tx(ctx)
-	if tx.deletedScope {
-		// 删除检查最终事务状态，但不能因为即将清理索引而隐藏仍在运行的 Execution。
-		tx.deletedScope = false
-		_, err := s.payload(ctx, entityKey{"session", tx.scope})
-		active := len(s.keys(ctx, lookupKey{kind: "active-session", owner: tx.scope}))
-		tx.deletedScope = true
-		if err != nil {
-			return err
-		}
-		if active != 0 {
-			return agentmodel.ErrAgentExecuting
-		}
-		return nil
-	}
-	for key, change := range tx.changes {
-		if key.collection != "message" {
-			if err := s.validateRelations(ctx, key, change.entry); err != nil {
-				return fmt.Errorf("%s/%s: %w", key.collection, key.id, err)
-			}
-		}
-		// Workspace.ProjectID 可变，需同时校验引用它的 Project / Session。
-		if key.collection == "workspace" {
-			for _, dependent := range s.keys(ctx, referenceKey(key)) {
-				entry, _ := s.entry(ctx, dependent)
-				if err := s.validateRelations(ctx, dependent, entry); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return s.prepareCommit(ctx)
-}
-
-func (s *Store) validateRelations(ctx context.Context, key entityKey, entry stateEntry) error {
-	data, err := s.payload(ctx, key)
-	if err != nil {
-		return err
-	}
+// validateRelations 用候选实体检查已提交的引用、领取条件和消息配对。
+func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
+	data := entry.payload
 	scope := entry.scope
 	reference := func(collection, id string) error {
-		_, err := s.payload(ctx, entityKey{collection, id})
+		_, err := s.payload(entityKey{collection, id})
 		if err != nil {
 			return err
 		}
 		if collection == "workspace" || collection == "project" {
 			return nil
 		}
-		ref, ok := s.entry(ctx, entityKey{collection, id})
+		ref, ok := s.entry(entityKey{collection, id})
 		if !ok || ref.scope != scope {
 			return errors.New("reference ownership mismatch")
 		}
 		return nil
 	}
 	taskOwner := func(id identity.AgentExecutionID, agent identity.AgentID) error {
-		value, err := get[agentmodel.Execution](ctx, s, "agent_execution", id.String())
+		value, err := getLocked[agentmodel.Execution](s, "agent_execution", id.String())
 		if err != nil {
 			return err
 		}
@@ -130,19 +48,26 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry stat
 	}
 	switch key.collection {
 	case "project":
-		var v projectmodel.Project
-		_ = decodeJSON(data, &v)
-		workspace, err := get[workspacemodel.Workspace](ctx, s, "workspace", v.DefaultWorkspaceID.String())
-		if err != nil {
-			return err
-		}
-		if workspace.ProjectID != v.ID {
-			return errors.New("project default workspace ownership mismatch")
-		}
+		return nil
 	case "workspace":
 		var v workspacemodel.Workspace
 		_ = decodeJSON(data, &v)
-		return reference("project", v.ProjectID.String())
+		if err := reference("project", v.ProjectID.String()); err != nil {
+			return err
+		}
+		// 已被会话引用的 Workspace 不能被改到另一个项目。
+		for _, dependent := range s.keys(referenceKey(key)) {
+			if dependent.collection != "session" {
+				continue
+			}
+			session, err := getLocked[sessionmodel.Session](s, "session", dependent.id)
+			if err != nil {
+				return err
+			}
+			if session.ProjectID != v.ProjectID {
+				return fault.ErrRequestConflict
+			}
+		}
 	case "session":
 		var v sessionmodel.Session
 		_ = decodeJSON(data, &v)
@@ -152,7 +77,7 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry stat
 		if projectID := s.log.Project(scope); projectID != "" && projectID != v.ProjectID.String() {
 			return errors.New("session project does not match log directory")
 		}
-		workspace, err := get[workspacemodel.Workspace](ctx, s, "workspace", v.WorkspaceID.String())
+		workspace, err := getLocked[workspacemodel.Workspace](s, "workspace", v.WorkspaceID.String())
 		if err != nil {
 			return err
 		}
@@ -160,60 +85,43 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry stat
 			return errors.New("session workspace ownership mismatch")
 		}
 	case "agent":
-		var v agentmodel.Agent
-		_ = decodeJSON(data, &v)
-		if err := reference("session", scope); err != nil {
-			return err
-		}
-		active, err := s.lookup(ctx, lookupKey{kind: "active-agent", owner: v.ID.String()})
-		if err != nil && !errors.Is(err, fault.ErrNotFound) {
-			return err
-		}
-		if (err == nil && active.id != v.CurrentExecutionID.String()) || (err != nil && v.CurrentExecutionID != "") {
-			return errors.New("agent does not match active task")
-		}
+		return reference("session", scope)
 	case "agent_execution":
 		var v agentmodel.Execution
 		_ = decodeJSON(data, &v)
-		agent, err := get[agentmodel.Agent](ctx, s, "agent", v.AgentID.String())
+		agent, err := getLocked[agentmodel.Agent](s, "agent", v.AgentID.String())
 		if err != nil {
 			return err
 		}
-		if agent.SessionID != v.SessionID || v.Active() != (agent.CurrentExecutionID == v.ID) {
-			return errors.New("execution does not match agent active identity")
+		if agent.SessionID != v.SessionID {
+			return errors.New("execution does not match agent ownership")
 		}
-		if v.SourceTaskID != "" {
-			pending, err := get[queued.Task](ctx, s, "task", v.SourceTaskID.String())
-			if err != nil {
-				return err
-			}
-			if pending.Status != queued.Dispatched || pending.ExecutionID != v.ID || pending.AgentID != v.AgentID || pending.RequestID != v.RequestID {
-				return errors.New("execution source task mismatch")
-			}
+		owner := ""
+		if !agent.CanReadSessionContext() {
+			owner = agent.ID.String()
 		}
-	case "task":
-		var v queued.Task
-		_ = decodeJSON(data, &v)
-		owner, err := get[agentmodel.Agent](ctx, s, "agent", v.AgentID.String())
+		input, err := s.payload(messageEntityKey(scope, owner, v.InputMessageID))
 		if err != nil {
 			return err
 		}
-		if owner.SessionID != v.SessionID {
-			return errors.New("queued task ownership mismatch")
+		var record messageRecord
+		if err := decodeJSON(input, &record); err != nil {
+			return err
 		}
-		if v.Status == queued.Dispatched {
-			execution, err := get[agentmodel.Execution](ctx, s, "agent_execution", v.ExecutionID.String())
-			if err != nil {
-				return err
-			}
-			if execution.SourceTaskID != v.ID || execution.AgentID != v.AgentID || execution.RequestID != v.RequestID || execution.InputMessageID != v.InputMessageID {
-				return errors.New("queued task execution mismatch")
-			}
+		if record.AgentID != v.AgentID || record.Data.Role != messagemodel.RoleUser || record.Data.RequestID != v.RequestID.String() || record.Data.SourceTaskID != v.SourceTaskID.String() || record.Data.ExecutionID != v.ID.String() {
+			return fault.ErrRequestConflict
 		}
 	case "tool_event":
 		var v toolexecution.Event
 		_ = decodeJSON(data, &v)
-		call, err := (ToolCallQueries{s}).GetCall(ctx, v.Key)
+		execution, err := getLocked[agentmodel.Execution](s, "agent_execution", v.ExecutionID.String())
+		if err != nil {
+			return err
+		}
+		if !execution.Active() {
+			return fault.ErrRequestConflict
+		}
+		call, err := (ToolCallQueries{s}).getCallLocked(v.Key)
 		if err != nil {
 			return err
 		}
@@ -225,8 +133,16 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry stat
 		if call.SessionID.String() != scope || v.At.Before(call.CreatedAt) {
 			return fault.ErrRequestConflict
 		}
-		_, err = (ToolExecutionRepository{s}).Read(ctx, v.Key)
-		return err
+		if _, err := s.lookup(lookupKey{kind: "tool-result", owner: v.ExecutionID.String(), value: v.CallID}); err == nil {
+			return fault.ErrRequestConflict
+		} else if !errors.Is(err, fault.ErrNotFound) {
+			return err
+		}
+		facts, err := (ToolExecutionRepository{s}).readLocked(v.Key)
+		if err != nil {
+			return err
+		}
+		return facts.Apply(v)
 	case "context":
 		var v sessionmodel.SessionContextEntry
 		_ = decodeJSON(data, &v)
@@ -261,41 +177,36 @@ func (s *Store) validateRelations(ctx context.Context, key entityKey, entry stat
 		if err := reference("session", scope); err != nil {
 			return err
 		}
-		agent, err := get[agentmodel.Agent](ctx, s, "agent", v.AgentID.String())
+		agent, err := getLocked[agentmodel.Agent](s, "agent", v.AgentID.String())
 		if err != nil {
 			return err
 		}
 		if agent.SessionID.String() != scope || v.OwnerID != "" && v.OwnerID != v.AgentID.String() {
 			return errors.New("message agent does not match the stream ownership")
 		}
-		if v.Data.SourceTaskID != "" {
-			pending, err := get[queued.Task](ctx, s, "task", v.Data.SourceTaskID)
-			if err != nil {
-				return err
-			}
-			if pending.AgentID != v.AgentID || pending.SessionID.String() != scope || pending.RequestID.String() != v.Data.RequestID || pending.InputMessageID != v.Data.ID || v.Data.Role != messagemodel.RoleUser || v.Data.ExecutionID != "" {
-				return errors.New("queued message ownership mismatch")
-			}
+		if v.Data.SourceTaskID != "" && (v.Data.Role != messagemodel.RoleUser || v.Data.ExecutionID == "") {
+			return errors.New("task input requires a user message and execution identity")
 		}
 		if v.Data.ExecutionID != "" {
-			if err := reference("agent_execution", v.Data.ExecutionID); err != nil {
-				return err
+			task, err := getLocked[agentmodel.Execution](s, "agent_execution", v.Data.ExecutionID)
+			if errors.Is(err, fault.ErrNotFound) && v.Data.Role == messagemodel.RoleUser && v.Data.ID == "input:"+v.Data.RequestID {
+				return nil
 			}
-			task, err := get[agentmodel.Execution](ctx, s, "agent_execution", v.Data.ExecutionID)
 			if err != nil {
 				return err
 			}
-			agent, err := get[agentmodel.Agent](ctx, s, "agent", task.AgentID.String())
+			agent, err := getLocked[agentmodel.Agent](s, "agent", task.AgentID.String())
 			if err != nil {
 				return err
 			}
-			if agent.ID != v.AgentID || v.Data.RequestID != task.RequestID.String() {
+			if agent.ID != v.AgentID || task.SessionID.String() != scope || v.Data.RequestID != task.RequestID.String() {
 				return errors.New("message stream or request ownership mismatch")
 			}
-			if v.Data.Role == messagemodel.RoleAssistant && v.Data.AuthorID != task.AgentID.String() {
-				return errors.New("assistant author ownership mismatch")
+			if v.Data.Role == messagemodel.RoleAssistant && (v.Data.AuthorID != task.AgentID.String() || !task.Active() || task.Progress.FinalAssistantID != "") {
+				return errors.New("assistant author or execution state mismatch")
 			}
 		}
+		return s.validateToolReceipts(entry)
 	}
 	return nil
 }
@@ -309,6 +220,8 @@ func immutable(collection string, before, after json.RawMessage) error {
 	}
 	var fields []string
 	switch collection {
+	case "project":
+		fields = []string{"ID", "Name", "Path", "DefaultWorkspaceID", "CreatedAt"}
 	case "agent_execution":
 		var prior, next agentmodel.Execution
 		if err := decodeJSON(before, &prior); err != nil {
@@ -321,18 +234,10 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return fmt.Errorf("%w: %v", fault.ErrRequestConflict, err)
 		}
 		return nil
-	case "task":
-		var prior, next queued.Task
-		if err := decodeJSON(before, &prior); err != nil {
-			return err
-		}
-		if err := decodeJSON(after, &next); err != nil {
-			return err
-		}
-		return queued.ValidateUpdate(prior, next)
 	case "agent":
 		fields = []string{
 			"ID",
+			"SessionID",
 			"DefinitionID",
 			"Profile",
 			"CreatedAt",
@@ -371,7 +276,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timingmodel.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
 			return fault.ErrRequestConflict
 		}
-	case "context", "message", "tool_event":
+	case "context", "message", "tool_event", "control":
 		if !bytes.Equal(before, after) {
 			return fault.ErrRequestConflict
 		}

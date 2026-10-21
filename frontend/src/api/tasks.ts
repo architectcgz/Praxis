@@ -1,32 +1,31 @@
 import { getCommandBinding } from './bindings'
 
-export type QueuedTaskSnapshot = { id: string; status: string; sequence: number; executionId: string }
+export type QueuedTask = { id: string; prompt: string; sequence: number }
 
-export type SendInputRequest = {
+/** 校验 Session 查询返回的待办，不把执行状态混入输入模型。 */
+export function normalizeQueuedTasks(value: unknown): QueuedTask[] {
+    if (!Array.isArray(value)) throw new Error('任务队列数据格式无效。')
+    return value.map((item: unknown) => {
+        if (typeof item !== 'object' || item === null ||
+            !('id' in item) || typeof item.id !== 'string' ||
+            !('prompt' in item) || typeof item.prompt !== 'string' ||
+            !('sequence' in item) || typeof item.sequence !== 'number' || !Number.isSafeInteger(item.sequence) || item.sequence < 1) {
+            throw new Error('任务队列数据格式无效。')
+        }
+        return { id: item.id, prompt: item.prompt, sequence: item.sequence }
+    })
+}
+
+export type CreateTaskRequest = {
     sessionId: string
-    agentId: string
-    requestId: string
-    content: string
-    providerId: string
-    modelId: string
-    reasoningLevel: string
-}
-
-export function sendInput(request: SendInputRequest) {
-    return getCommandBinding().SendInput(request)
-}
-
-export type QueueTaskRequest = {
-    taskId: string
-    requestId: string
-    agentId: string
     prompt: string
-    providerId: string
-    modelId: string
-    reasoningLevel: string
 }
 
-/** 预约忙碌期间的后续输入，领取时创建独立 Execution ID。 */
-export function queueTask(request: QueueTaskRequest) {
-    return getCommandBinding().QueueTask(request)
+/** 创建 Session 输入并排队，Agent 与请求身份由后端调度时分配。 */
+export function createTask(request: CreateTaskRequest) {
+    return getCommandBinding().CreateTask(request)
+}
+
+export function cancelTask(sessionId: string, taskId: string) {
+    return getCommandBinding().CancelTask({ sessionId, taskId })
 }
