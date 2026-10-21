@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/message"
 	"praxis/internal/identity"
 	toolservice "praxis/internal/service/toolexecution"
 )
@@ -44,4 +46,26 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request toolservice.Cont
 		s.activeTasks.Wake(task.AgentID, task.ID)
 	}
 	return nil
+}
+
+// waitForToolApproval 在状态提交后发布通知，审批提前到达时由 wake 的缓冲保留唤醒。
+func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentmodel.Execution, active *activeTask, call message.ToolCall) error {
+	if err := s.operations.WaitForApproval(ctx, task.ID); err != nil {
+		return err
+	}
+	s.events.Publish(Event{
+		Kind:        EventToolApprovalRequired,
+		SessionID:   call.SessionID,
+		AgentID:     call.AgentID,
+		ExecutionID: call.ExecutionID,
+		TurnID:      call.TurnID,
+		CallID:      call.CallID,
+		Name:        string(call.Name),
+	})
+	select {
+	case <-active.wake:
+		return s.startExecution(task)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

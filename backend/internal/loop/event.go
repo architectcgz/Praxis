@@ -10,16 +10,15 @@ import (
 type EventKind string
 
 const (
-	EventTurnStarted          EventKind = "turn_started"
-	EventProviderWaiting      EventKind = "provider_waiting"
-	EventTextDelta            EventKind = "text_delta"
-	EventThinkingDelta        EventKind = "thinking_delta"
-	EventToolApprovalRequired EventKind = "tool_approval_required"
-	EventToolCall             EventKind = "tool_call"
-	EventToolResult           EventKind = "tool_result"
-	EventTurnCompleted        EventKind = "turn_completed"
-	EventModelUsage           EventKind = "model_usage"
-	EventError                EventKind = "error"
+	EventTurnStarted     EventKind = "turn_started"
+	EventProviderWaiting EventKind = "provider_waiting"
+	EventTextDelta       EventKind = "text_delta"
+	EventThinkingDelta   EventKind = "thinking_delta"
+	EventToolCall        EventKind = "tool_call"
+	EventToolResult      EventKind = "tool_result"
+	EventTurnCompleted   EventKind = "turn_completed"
+	EventModelUsage      EventKind = "model_usage"
+	EventError           EventKind = "error"
 )
 
 // Event 是单次 执行输入 的瞬时 Loop 事件；持久化消息与执行状态是最终事实。

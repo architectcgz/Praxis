@@ -75,7 +75,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 			return fault.ErrRequestConflict
 		}
 		if !approve {
-			_, _, err := s.appendError(txCtx, call, "tool_approval_denied", "The user denied this tool call.")
+			_, err := s.appendError(txCtx, call, "tool_approval_denied", "The user denied this tool call.")
 			return err
 		}
 		decision, err := s.deps.Rules.Decide(txCtx, call, json.RawMessage(facts.Summary))
@@ -83,7 +83,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 			return err
 		}
 		if decision.Action == security.ApprovalDeny {
-			_, _, err := s.appendError(txCtx, call, "tool_not_allowed", "The current configuration prohibits this operation. Rule: "+decision.RuleID)
+			_, err := s.appendError(txCtx, call, "tool_not_allowed", "The current configuration prohibits this operation. Rule: "+decision.RuleID)
 			return err
 		}
 		// 只批准展示的那份操作；启动前仍按最新规则重新授权或审核。

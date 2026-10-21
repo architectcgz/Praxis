@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+const EventToolApprovalRequired = "tool_approval_required"
+
 // Event 是进程内执行通知，持久化事实仍由业务查询读取。
 type Event struct {
 	Kind           string

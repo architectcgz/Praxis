@@ -1,6 +1,7 @@
 package toolexecution
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,10 +13,13 @@ import (
 	"time"
 )
 
-// Execute 使用已提交的完整调用；授权读取控制事实，正常入口不反查调用或已完成结果。
-func (scope *Scope) Execute(ctx context.Context, call message.ToolCall) (message.Message, bool, error) {
+// Execute 在同一次调用中准备参数、授权、等待审批、执行工具并提交回执。
+func (scope *Scope) Execute(ctx context.Context, call message.ToolCall) (message.Message, error) {
 	if ctx == nil {
-		return message.Message{}, false, errors.New("tool execution context is required")
+		return message.Message{}, errors.New("tool execution context is required")
+	}
+	if scope.awaitApproval == nil {
+		return message.Message{}, errors.New("tool approval wait callback is required")
 	}
 	s := scope.service
 	if err := ctx.Err(); err != nil {
@@ -29,10 +33,10 @@ func (scope *Scope) Execute(ctx context.Context, call message.ToolCall) (message
 	if err != nil {
 		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
 	}
-	return scope.execute(ctx, call, args)
+	return scope.execute(ctx, call, bytes.Clone(args))
 }
 
-func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args json.RawMessage) (message.Message, bool, error) {
+func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args json.RawMessage) (message.Message, error) {
 	s := scope.service
 	for {
 		pending, denied, err := scope.authorize(ctx, call, args)
@@ -40,13 +44,25 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 			if ctx.Err() != nil {
 				return s.appendError(ctx, call, "tool_interrupted", ctx.Err().Error())
 			}
-			return message.Message{}, false, err
+			return message.Message{}, err
 		}
 		if denied != nil {
 			return s.appendResult(ctx, call, *denied)
 		}
 		if pending {
-			return message.Message{}, true, nil
+			// 审批等待保留在本次调用栈，参数只准备一次；回调不持有存储锁或工具控制锁。
+			if err := scope.awaitApproval(ctx, call); err != nil {
+				return message.Message{}, err
+			}
+			// 拒绝和停止会直接提交回执，唤醒后优先消费已经完成的调用。
+			result, err := s.deps.Calls.GetResult(ctx, call.Key)
+			if err == nil {
+				return result, nil
+			}
+			if !errors.Is(err, fault.ErrNotFound) {
+				return message.Message{}, err
+			}
+			continue
 		}
 		t, ok := s.deps.Catalog.Get(call.Name)
 		if !ok {
@@ -76,7 +92,7 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 			if errors.Is(err, errStopRequested) {
 				return s.appendError(ctx, call, "tool_interrupted", "The tool call was canceled before execution.")
 			}
-			return message.Message{}, false, err
+			return message.Message{}, err
 		}
 		result := execution.Run()
 		// 保留取消入口直到回执提交结束；迟到 Stop 不会覆盖结果。
@@ -97,33 +113,12 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 	}
 }
 
-// Resume 仅用于当前 Loop 的人工审批续接；拒绝已经直接提交回执。
-func (scope *Scope) Resume(ctx context.Context, call message.ToolCall) (message.Message, bool, error) {
-	key := call.Key
-	result, err := scope.service.deps.Calls.GetResult(ctx, key)
-	if err == nil {
-		return result, false, nil
-	}
-	if !errors.Is(err, fault.ErrNotFound) {
-		return message.Message{}, false, err
-	}
-	facts, err := scope.service.deps.Events.Read(ctx, key)
-	if err != nil {
-		return message.Message{}, false, err
-	}
-	if facts.RequiredAt.IsZero() || executionmodel.ArgumentsDigest(call.Name, []byte(facts.Summary)) != facts.ArgumentsDigest {
-		return message.Message{}, false, fault.ErrRequestConflict
-	}
-	// 沿用本次 Loop 已准备并展示的参数，不再次清洗输入。
-	return scope.execute(ctx, call, json.RawMessage(facts.Summary))
-}
-
-func (s *Service) appendError(ctx context.Context, call message.ToolCall, code, text string) (message.Message, bool, error) {
+func (s *Service) appendError(ctx context.Context, call message.ToolCall, code, text string) (message.Message, error) {
 	return s.appendResult(ctx, call, tool.NewToolError(code, text))
 }
 
 // appendResult 是唯一的正常回执路径，写入失败只向上传播存储错误。
-func (s *Service) appendResult(ctx context.Context, call message.ToolCall, result tool.ToolResult) (message.Message, bool, error) {
+func (s *Service) appendResult(ctx context.Context, call message.ToolCall, result tool.ToolResult) (message.Message, error) {
 	if len(result.Payload) > tool.MaxInlineResultBytes {
 		result = tool.NewToolError("tool_execution_failed", "Tool result exceeds the inline size limit.")
 	}
@@ -149,7 +144,7 @@ func (s *Service) appendResult(ctx context.Context, call message.ToolCall, resul
 			IsError: result.ErrorClass != "",
 		}},
 	})
-	return stored, false, err
+	return stored, err
 }
 
 // observedTool 只观察真实调用，不参与授权或结果保存。

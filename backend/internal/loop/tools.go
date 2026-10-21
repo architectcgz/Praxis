@@ -22,26 +22,11 @@ func validateToolCalls(calls []ToolCall) error {
 	return nil
 }
 
-// runToolCalls 顺序消费 Service 已提交的回执；审批等待保留在当前 Loop 中。
+// runToolCalls 顺序执行工具，只消费 Service 完成整次调用后提交的回执。
 func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps ExecutionDependencies, calls []message.ToolCall, turnID identity.TurnID) ([]message.Message, error) {
 	results := make([]message.Message, 0, len(calls))
 	for _, call := range calls {
-		receipt, pending, err := deps.ToolExecutor.Execute(ctx, call)
-		for err == nil && pending {
-			r.emit(Event{
-				Kind:        EventToolApprovalRequired,
-				SessionID:   executionInput.SessionID,
-				AgentID:     executionInput.AgentID,
-				ExecutionID: executionInput.ID,
-				TurnID:      turnID,
-				CallID:      call.CallID,
-				Name:        string(call.Name),
-			})
-			if err := deps.AwaitApproval(ctx); err != nil {
-				return results, failCause(FailureStorage, err)
-			}
-			receipt, pending, err = deps.ToolExecutor.Resume(ctx, call)
-		}
+		receipt, err := deps.ToolExecutor.Execute(ctx, call)
 		if err != nil {
 			return results, failCause(FailureStorage, err)
 		}

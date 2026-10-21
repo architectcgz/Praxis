@@ -5,6 +5,7 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
+	messagemodel "praxis/internal/core/message"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -64,25 +65,16 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForWorkspace(workspace.Path)
 	// TryRun 已确认本次运行权唯一，旧 Loop 和工具已停止；恢复必须先于上下文读取。
 	if err := r.tools.RecoverExecution(ctx, task.ID); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	awaitApproval := func(waitCtx context.Context) error {
-		if err := r.operations.WaitForApproval(waitCtx, task.ID); err != nil {
-			return err
-		}
-		select {
-		case <-active.wake:
-			return r.startExecution(task)
-		case <-waitCtx.Done():
-			return waitCtx.Err()
-		}
-	}
-	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor, awaitApproval)
+	executor := r.tools.ForWorkspace(workspace.Path, func(waitCtx context.Context, call messagemodel.ToolCall) error {
+		return r.waitForToolApproval(waitCtx, task, active, call)
+	})
+	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor)
 	if ctx.Err() != nil {
 		outcome, failureCode, failureMessage = r.executionResult(ctx, outcome, failureCode, ctx.Err())
 	}
@@ -109,7 +101,6 @@ func (r *Coordinator) execute(
 	task agentmodel.Execution,
 	assistantCommitter loop.AssistantCommitter,
 	executor *toolservice.Scope,
-	awaitApproval func(context.Context) error,
 ) (agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
@@ -122,9 +113,8 @@ func (r *Coordinator) execute(
 	if err == nil {
 		if !completed {
 			_, err = r.loop.Run(ctx, executionInput, loop.ExecutionDependencies{
-				ToolExecutor:  executor,
-				AwaitApproval: awaitApproval,
-				Assistant:     assistantCommitter,
+				ToolExecutor: executor,
+				Assistant:    assistantCommitter,
 			})
 		}
 		outcome, failureCode = agentmodel.ExecutionCompleted, ""

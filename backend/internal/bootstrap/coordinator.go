@@ -123,6 +123,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		return nil, err
 	}
 	return execution.NewCoordinator(execution.Config{
+		Events:         deps.Events,
 		Loop:           &runner,
 		ActiveTasks:    deps.ActiveTasks,
 		Operations:     deps.Tasks,

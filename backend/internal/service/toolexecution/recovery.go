@@ -33,7 +33,7 @@ func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecuti
 		if err != nil {
 			return err
 		}
-		result, _, err = s.appendResult(txCtx, call, tool.ToolResult{Payload: "No result provided", ErrorClass: "missing_tool_result"})
+		result, err = s.appendResult(txCtx, call, tool.ToolResult{Payload: "No result provided", ErrorClass: "missing_tool_result"})
 		return err
 	})
 	return result, err

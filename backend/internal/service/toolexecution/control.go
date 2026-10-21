@@ -112,7 +112,7 @@ func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task ag
 			return err
 		}
 		if facts.StartedAt.IsZero() {
-			_, _, err := s.appendError(txCtx, call, "tool_interrupted", "The tool call was canceled before execution.")
+			_, err := s.appendError(txCtx, call, "tool_interrupted", "The tool call was canceled before execution.")
 			return err
 		}
 		return nil

@@ -74,8 +74,8 @@ func (r *Runner) run(
 	executionInput Input,
 	deps ExecutionDependencies,
 ) (EndReason, FailureCode, error) {
-	if deps.ToolExecutor == nil || deps.AwaitApproval == nil || deps.Assistant == nil {
-		return loopResult(fail(FailureContract, ErrorContract, "scoped tool execution, approval continuation and assistant committer are required"))
+	if deps.ToolExecutor == nil || deps.Assistant == nil {
+		return loopResult(fail(FailureContract, ErrorContract, "scoped tool execution and assistant committer are required"))
 	}
 	modelContext, err := (appcontext.ContextBuilder{}).Build(executionInput.Content, appcontext.Limits{ContextWindow: executionInput.Config.Model.ContextWindow, MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens})
 	if err != nil {

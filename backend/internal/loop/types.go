@@ -10,10 +10,9 @@ import (
 	"praxis/internal/identity"
 )
 
-// ToolExecutor 执行已经登记的调用；等待审批时不产生工具回执。
+// ToolExecutor 执行已提交的完整调用，完成授权、审批等待和执行后返回已提交回执。
 type ToolExecutor interface {
-	Execute(context.Context, messagemodel.ToolCall) (messagemodel.Message, bool, error)
-	Resume(context.Context, messagemodel.ToolCall) (messagemodel.Message, bool, error)
+	Execute(context.Context, messagemodel.ToolCall) (messagemodel.Message, error)
 }
 
 type (
@@ -51,9 +50,8 @@ type Input struct {
 
 // ExecutionDependencies 只在本次 Run 中使用；共享 Runner 不保存单次执行的环境或等待状态。
 type ExecutionDependencies struct {
-	ToolExecutor  ToolExecutor
-	AwaitApproval func(context.Context) error
-	Assistant     AssistantCommitter
+	ToolExecutor ToolExecutor
+	Assistant    AssistantCommitter
 }
 
 type Config struct {

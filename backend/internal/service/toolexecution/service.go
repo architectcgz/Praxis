@@ -48,13 +48,16 @@ func NewService(deps Dependencies) (*Service, error) {
 	return &Service{deps: deps, clock: clock.ClockOrDefault(deps.Clock), active: make(map[executionmodel.Key]*executionmodel.Execution)}, nil
 }
 
-// Scope 绑定 Coordinator 已解析的当前项目环境，Loop 只消费其执行能力。
+// Scope 绑定项目环境和本次执行的审批等待能力，Loop 只发起完整工具调用。
 type Scope struct {
 	service       *Service
 	workspacePath string
+	awaitApproval func(context.Context, message.ToolCall) error
 }
 
-func (s *Service) ForWorkspace(path string) *Scope { return &Scope{service: s, workspacePath: path} }
+func (s *Service) ForWorkspace(path string, awaitApproval func(context.Context, message.ToolCall) error) *Scope {
+	return &Scope{service: s, workspacePath: path, awaitApproval: awaitApproval}
+}
 
 func (s *Service) call(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.ToolCall, error) {
 	return s.deps.Calls.GetCall(ctx, executionmodel.Key{ExecutionID: executionID, CallID: callID})

@@ -105,7 +105,7 @@ flowchart TD
 - StreamKey 只表示逻辑分组。Session Service 管理共享消息，Agent Service 管理私有消息，Execution Service 使用不可变 Agent 身份确定并冻结输出流；Storage 只接收显式流键。
 - Task 的队列序号与 Event 的日志序号分开。NextSequence 从该 Agent 保留的全部 Task 及事务暂存变更计算；取消或派发不回收序号。
 - Execution Service 在同一事务保存 Assistant、工具调用计数和最终输出证据；ToolExecution Service 在同一事务保存 ToolResult 和累计输出字节，幂等重试不重复累计。
-- ToolCall 与 ToolResult 的唯一索引指向所属 Message，缺失回执由工具消息分组与结果索引派生；审批、Stop 和恢复只查询内存。正常 Execute/Resume 直接使用同一 Loop 的完整 ToolCall，审批续接使用已审核参数快照。
+- ToolCall 与 ToolResult 的唯一索引指向所属 Message，缺失回执由工具消息分组与结果索引派生；审批、Stop 和恢复只查询内存。Execute 在同一次调用中完成授权、审批等待、工具执行和回执提交；ToolCall 与已准备参数保留在调用栈，唤醒后重新确认授权。Coordinator 注入等待能力，并在等待状态提交后发布审批通知，Loop 只消费最终回执。
 - Session 的存在性和可写性在 Service 的写入事务内校验，删除同时检查活动 Execution。删除事件清空 Scope 的实体与全部索引；Session 身份不复用，Replay 拒绝终止事件之后的业务事件。
 - ToolResult 缺失与遗留运行工具的恢复决策属于业务层。已开始且副作用未知的工具不能自动重试。
 - 启动时先协调遗留 running 工具，再恢复活动 Execution，最后检查空闲 Agent 的 Pending 队列。审批等待不释放执行归属。
