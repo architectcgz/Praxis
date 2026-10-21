@@ -28,8 +28,8 @@ func writeNewFile(path string, data []byte) error {
 	return publishFile(tmp, path)
 }
 
-func (s *Store) append(ctx context.Context, scope string, data []byte) error {
-	path, err := s.path(ctx, scope)
+func (s *Log) append(ctx context.Context, scope, projectID string, data []byte) error {
+	path, err := s.Path(scope, projectID)
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func (s *Store) append(ctx context.Context, scope string, data []byte) error {
 			}
 		}
 		if err := writeNewFile(path, data); err != nil {
-			// 发布结果不明时不再基于旧索引写入，重启后以日志为准。
+			// 发布结果不明时停止写入，重启后以日志恢复 State。
 			if _, statErr := os.Lstat(path); statErr == nil {
 				s.fault = fmt.Errorf("initial log commit outcome is unknown; restart required: %w", err)
 			}
@@ -77,7 +77,7 @@ type logFile interface {
 	Truncate(int64) error
 }
 
-func (s *Store) appendTo(file logFile, offset int64, data []byte) error {
+func (s *Log) appendTo(file logFile, offset int64, data []byte) error {
 	n, err := file.WriteAt(data, offset)
 	if err == nil && n != len(data) {
 		err = io.ErrShortWrite

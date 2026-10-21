@@ -63,7 +63,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 		if approve && facts.Approval.Source == executionmodel.ApprovalSourceUser && facts.Approval.ArgumentsDigest == digest {
 			return nil
 		}
-		if result, err := s.deps.Messages.ToolResult(txCtx, call.Key); err == nil {
+		if result, err := s.deps.Calls.GetResult(txCtx, call.Key); err == nil {
 			if !approve && len(result.Blocks) == 1 && result.Blocks[0].Text == tool.NewToolError("tool_approval_denied", "The user denied this tool call.").Payload {
 				return nil
 			}
@@ -104,7 +104,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 func (s *Service) ListApprovals(ctx context.Context, agentID identity.AgentID) ([]Approval, error) {
 	result := make([]Approval, 0)
 	err := s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
-		missing, err := s.deps.Messages.ListMissingToolResults(txCtx)
+		missing, err := s.deps.Calls.ListMissingToolResults(txCtx)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func (s *Service) ListApprovals(ctx context.Context, agentID identity.AgentID) (
 			if !facts.AwaitingApproval() {
 				continue
 			}
-			call, err := s.deps.Messages.ToolCall(txCtx, key)
+			call, err := s.deps.Calls.GetCall(txCtx, key)
 			if err != nil {
 				return err
 			}

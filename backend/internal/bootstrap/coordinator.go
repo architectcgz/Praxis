@@ -34,10 +34,11 @@ type coordinatorDependencies struct {
 	Recovery       execution.RecoverySource
 	ActiveTasks    *execution.ActiveTasks
 	ToolExecutions repository.ToolExecution
-	Messages       repository.MessageStreams
+	Messages       repository.Message
+	ToolCalls      repository.ToolCallQueries
+	Agents         repository.Agent
 	Sessions       repository.Session
 	Workspaces     repository.Workspace
-	Writers        repository.MessageWriterProvider
 	Models         ModelSource
 	Tools          tool.ToolCatalog
 	Rules          toolservice.ApprovalRules
@@ -67,6 +68,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 	reviewer := toolservice.RiskReviewer{
 		Models:   deps.Models,
 		Messages: deps.Messages,
+		Agents:   deps.Agents,
 		Hooks:    deps.HookDispatcher,
 		ObserveUsage: func(record model.ModelUsageRecord) {
 			observe(loop.Event{
@@ -87,6 +89,9 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		Tasks:          deps.Records,
 		Events:         deps.ToolExecutions,
 		Messages:       deps.Messages,
+		Calls:          deps.ToolCalls,
+		Sessions:       deps.Sessions,
+		Agents:         deps.Agents,
 		Prepare:        toolinfra.Prepare,
 		Bind:           toolinfra.Bind,
 		Catalog:        deps.Tools,
@@ -122,7 +127,6 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		ActiveTasks:    deps.ActiveTasks,
 		Operations:     deps.Tasks,
 		Queue:          deps.Queue,
-		Messages:       deps.Writers,
 		HookDispatcher: deps.HookDispatcher,
 		Logger:         deps.Logger,
 		ConfigMu:       deps.ConfigMu,

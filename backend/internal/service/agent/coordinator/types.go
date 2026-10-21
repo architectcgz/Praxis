@@ -11,6 +11,7 @@ import (
 
 // ExecutionOperations 是 Coordinator 需要的 Execution 用例能力，具体实现属于 agent/execution。
 type ExecutionOperations interface {
+	AssistantCommitter(context.Context, identity.AgentExecutionID) (loop.AssistantCommitter, error)
 	SendInput(context.Context, executionservice.SendInput) (executionservice.SendInputResult, error)
 	PrepareLoop(context.Context, identity.AgentExecutionID) (loop.Input, bool, error)
 	ConfirmRunning(context.Context, identity.AgentExecutionID) error

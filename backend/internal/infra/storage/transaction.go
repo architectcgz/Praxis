@@ -1,4 +1,4 @@
-package jsonl
+package storage
 
 import (
 	"bytes"
@@ -6,30 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
-	"praxis/internal/repository"
+	"praxis/internal/infra/jsonl"
 	"time"
 )
 
 type change struct {
-	event Event
-	entry indexEntry
+	event jsonl.Event
+	entry stateEntry
 }
 
 type transaction struct {
-	store          *Store
-	active         bool
-	readOnly       bool
-	scope          string
-	nextSequence   uint64
-	events         []Event
-	changes        map[entityKey]change
-	deletedScope   bool
-	receiptChanges map[receiptKey]*repository.MissingToolResult
-	callChanges    map[toolexecution.Key]callReference
-	// 启动只为正在扫描的一个 Session 临时保存消息位置，扫描结束即释放。
-	replayMessages *sessionMessages
+	store        *Store
+	active       bool
+	readOnly     bool
+	scope        string
+	nextSequence uint64
+	events       []jsonl.Event
+	changes      map[entityKey]change
+	deletedScope bool
 }
 
 type transactionKey struct{}
@@ -64,18 +59,15 @@ func (s *Store) view(ctx context.Context, fn func(context.Context) error) error 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return errors.New("log is closed")
-	}
-	if s.fault != nil {
-		return s.fault
+	if err := s.log.Check(); err != nil {
+		return err
 	}
 	tx := &transaction{store: s, active: true, readOnly: true}
 	defer func() { tx.active = false }()
 	return fn(context.WithValue(ctx, transactionKey{}, tx))
 }
 
-// InTx 只保留本次变更；嵌套调用共享事务，提交前准备唯一索引和回执索引。
+// InTx 暂存本次变更；校验成功后先提交日志，再原子发布 State。
 func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error {
 	if ctx == nil || fn == nil {
 		return errors.New("transaction context and callback are required")
@@ -91,11 +83,8 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return errors.New("log is closed")
-	}
-	if s.fault != nil {
-		return s.fault
+	if err := s.log.Check(); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -115,16 +104,10 @@ func (s *Store) InTx(ctx context.Context, fn func(context.Context) error) error 
 	if err := s.prepareCommit(txCtx); err != nil {
 		return err
 	}
-	encoded, err := json.Marshal(batch{Events: tx.events})
-	if err != nil {
+	if err := s.log.Append(txCtx, tx.scope, s.project(txCtx, tx.scope), jsonl.Commit{Events: tx.events}); err != nil {
 		return err
 	}
-	encoded = append(encoded, '\n')
-	offset := s.lengths[tx.scope]
-	if err := s.append(txCtx, tx.scope, encoded); err != nil {
-		return err
-	}
-	s.publish(tx, offset, int64(len(encoded)))
+	s.publish(tx)
 	return nil
 }
 
@@ -134,12 +117,12 @@ func (s *Store) change(ctx context.Context, scope, collection, id, kind string, 
 		return errors.New("changes require an active transaction")
 	}
 	if len(tx.events) == 0 {
-		tx.scope, tx.nextSequence = scope, s.sequences[scope]
+		tx.scope, tx.nextSequence = scope, s.log.Sequence(scope)
 	}
 	if tx.scope != scope {
 		return errors.New("a transaction cannot write to multiple log files")
 	}
-	event := Event{
+	event := jsonl.Event{
 		Sequence:   tx.nextSequence + 1,
 		ID:         fmt.Sprintf("event:%d", tx.nextSequence+1),
 		Type:       kind,
@@ -148,7 +131,7 @@ func (s *Store) change(ctx context.Context, scope, collection, id, kind string, 
 		CreatedAt:  time.Now().UTC(),
 		Payload:    bytes.Clone(data),
 	}
-	var entry indexEntry
+	var entry stateEntry
 	if event.Type != "session.deleted" {
 		var err error
 		_, entry, err = describe(scope, event, object)
@@ -159,15 +142,15 @@ func (s *Store) change(ctx context.Context, scope, collection, id, kind string, 
 	return s.stage(ctx, event, entry)
 }
 
-func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error {
+func (s *Store) stage(ctx context.Context, event jsonl.Event, entry stateEntry) error {
 	tx := s.tx(ctx)
-	if tx.deletedScope || s.index.deleted[tx.scope] {
+	if tx.deletedScope {
 		return errors.New("cannot write to a deleted session")
 	}
-	if tx.scope != "" && !validScope(tx.scope) {
+	if tx.scope != "" && !jsonl.ValidScope(tx.scope) {
 		return errors.New("session ID is not a valid file name")
 	}
-	if event.Sequence != tx.nextSequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
+	if tx.nextSequence == ^uint64(0) || event.Sequence != tx.nextSequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
 		return errors.New("invalid event identity or sequence")
 	}
 	if event.Type == "session.deleted" {
@@ -181,7 +164,7 @@ func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error 
 		if err == nil {
 			if key.collection != "message" {
 				old, _ := s.entry(ctx, key)
-				if old.location.Scope != tx.scope {
+				if old.scope != tx.scope {
 					return fault.ErrRequestConflict
 				}
 			}
@@ -191,7 +174,7 @@ func (s *Store) stage(ctx context.Context, event Event, entry indexEntry) error 
 		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
-		entry.location = recordRef{Scope: tx.scope, EventIndex: len(tx.events), Sequence: event.Sequence}
+		entry.scope, entry.eventSequence = tx.scope, event.Sequence
 		tx.changes[key] = change{event: event, entry: entry}
 	}
 	tx.nextSequence = event.Sequence

@@ -38,7 +38,7 @@ func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionI
 }
 
 // recordModelOutput 累计模型实际返回的文本字节，取消后仍保存已消耗额度。
-// 工具回执由消息存储层计费，不在此重复累计。
+// 工具回执由 ToolExecution Service 在回执事务中累计。
 func (s *Service) recordModelOutput(ctx context.Context, id identity.AgentExecutionID, outputBytes int) error {
 	if outputBytes == 0 {
 		return nil

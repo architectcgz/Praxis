@@ -3,15 +3,61 @@ package jsonl
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"praxis/internal/fault"
 )
 
-func (s *Store) replay(ctx context.Context, scope string) error {
-	path, err := s.path(ctx, scope)
+// Append 先完成可靠追加，再推进日志游标；实体发布由调用方完成。
+func (s *Log) Append(ctx context.Context, scope, projectID string, commit Commit) error {
+	if err := s.Check(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(commit.Events) == 0 {
+		return errors.New("empty commit")
+	}
+	if err := s.validateSequence(scope, commit); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(commit)
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	if err := s.append(ctx, scope, projectID, encoded); err != nil {
+		return err
+	}
+	s.advance(scope, projectID, commit, int64(len(encoded)))
+	return nil
+}
+
+func (s *Log) validateSequence(scope string, commit Commit) error {
+	sequence := s.sequences[scope]
+	for _, event := range commit.Events {
+		if sequence == ^uint64(0) || event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
+			return errors.New("invalid event identity or sequence")
+		}
+		sequence = event.Sequence
+	}
+	return nil
+}
+
+func (s *Log) advance(scope, projectID string, commit Commit, length int64) {
+	s.sequences[scope] = commit.Events[len(commit.Events)-1].Sequence
+	s.lengths[scope] += length
+	if scope != "" && projectID != "" {
+		s.sessionProjects[scope] = projectID
+	}
+}
+
+// Replay 按行解码并调用投影函数；未完成的尾行备份并截断，完整坏行直接报错。
+func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Commit) error) error {
+	path, err := s.Path(scope.ID, scope.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -31,7 +77,6 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 	}
 	defer file.Close()
 	reader := bufio.NewReader(file)
-	messages := newSessionMessages()
 	var offset int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -47,52 +92,25 @@ func (s *Store) replay(ctx context.Context, scope string) error {
 		if readErr != nil {
 			return readErr
 		}
-		var record batch
-		if err := decodeJSON(line, &record); err != nil {
+		var commit Commit
+		if err := Decode(line, &commit); err != nil {
 			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
-		if len(record.Events) == 0 {
+		if len(commit.Events) == 0 {
 			return fmt.Errorf("%s offset %d: empty commit", path, offset)
 		}
-		tx := s.newTransaction()
-		tx.scope, tx.nextSequence, tx.replayMessages = scope, s.sequences[scope], messages
-		txCtx := context.WithValue(ctx, transactionKey{}, tx)
-		for _, event := range record.Events {
-			var entry indexEntry
-			if event.Type != "session.deleted" {
-				entry, err = restoreIndexEntry(scope, event)
-				if err != nil {
-					return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
-				}
-				prior, err := s.payload(txCtx, eventKey(scope, event))
-				if err == nil {
-					if err := immutable(event.Collection, prior, event.Payload); err != nil {
-						return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
-					}
-				} else if !errors.Is(err, fault.ErrNotFound) {
-					return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
-				}
-			}
-			if err := s.stage(txCtx, event, entry); err != nil {
-				return fmt.Errorf("%s seq=%d: %w", path, event.Sequence, err)
-			}
-		}
-		if len(tx.events) != len(record.Events) {
-			return fmt.Errorf("%s offset %d: redundant or duplicate event", path, offset)
-		}
-		if err := s.validateRestoredTransaction(txCtx); err != nil {
+		if err := s.validateSequence(scope.ID, commit); err != nil {
 			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
-		s.publish(tx, offset, int64(len(line)))
-		tx.active = false
-		if tx.deletedScope {
-			messages = newSessionMessages()
+		if err := apply(commit); err != nil {
+			return fmt.Errorf("%s offset %d: %w", path, offset, err)
 		}
+		s.advance(scope.ID, scope.ProjectID, commit, int64(len(line)))
 		offset += int64(len(line))
 	}
 }
 
-func (s *Store) truncateTail(file *os.File, offset int64, tail []byte) error {
+func (s *Log) truncateTail(file *os.File, offset int64, tail []byte) error {
 	backup, err := os.CreateTemp(s.root, "incomplete-tail-*")
 	if err != nil {
 		return err

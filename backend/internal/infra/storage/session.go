@@ -1,4 +1,4 @@
-package jsonl
+package storage
 
 import (
 	"cmp"
@@ -49,20 +49,14 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 	}), limit), e
 }
 
-// HasMessages 读取消息存在性元数据，不加载消息正文或位置列表。
+// HasMessages 从消息分组派生会话级存在性，不解码消息正文。
 func (r SessionRepository) HasMessages(ctx context.Context, id identity.SessionID) (bool, error) {
 	found := false
 	err := r.s.view(ctx, func(readCtx context.Context) error {
 		if _, err := r.Get(readCtx, id); err != nil {
 			return err
 		}
-		found = r.s.index.hasMessages[id.String()]
-		for key, change := range r.s.tx(readCtx).changes {
-			if key.collection == "message" && change.entry.location.Scope == id.String() {
-				found = true
-				break
-			}
-		}
+		found = len(r.s.keys(readCtx, lookupKey{kind: "messages-session", owner: id.String()})) > 0
 		return nil
 	})
 	return found, err

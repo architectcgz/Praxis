@@ -12,6 +12,9 @@ import (
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
+	"praxis/internal/repository"
+	agentservice "praxis/internal/service/agent"
+	sessionservice "praxis/internal/service/session"
 )
 
 // selectContext 在准入事务内冻结历史边界、排除项和共享条目版本，并检查必要原文容量。
@@ -26,7 +29,7 @@ func (s *Service) selectContext(ctx context.Context, agent agentmodel.Agent, con
 			return selection, err
 		}
 	}
-	stream, err := s.messages.LoadMessages(ctx, agent.SessionID, agent.ID, 0)
+	stream, err := s.messages.List(ctx, repository.MessageQuery{Stream: agentservice.MessageStream(agent)})
 	if err != nil {
 		return selection, err
 	}
@@ -143,6 +146,9 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 		if err != nil {
 			return err
 		}
+		if err := sessionservice.RequireWritable(txCtx, s.sessions, task.SessionID); err != nil {
+			return err
+		}
 		if !task.Active() || agent.CurrentExecutionID != task.ID {
 			return fault.ErrRequestConflict
 		}
@@ -150,7 +156,7 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 			completed = true
 			return nil
 		}
-		stream, err := s.messages.LoadMessages(txCtx, task.SessionID, task.AgentID, 0)
+		stream, err := s.messages.List(txCtx, repository.MessageQuery{Stream: agentservice.MessageStream(agent)})
 		if err != nil {
 			return err
 		}

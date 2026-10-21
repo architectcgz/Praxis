@@ -1,4 +1,4 @@
-package jsonl
+package storage
 
 import (
 	"praxis/internal/core/task"

@@ -2,18 +2,18 @@ package loop
 
 import (
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
 )
 
 // ToolExecutor 执行已经登记的调用；等待审批时不产生工具回执。
 type ToolExecutor interface {
-	Execute(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, bool, error)
-	Resume(context.Context, identity.AgentExecutionID, string) (messagemodel.Message, bool, error)
+	Execute(context.Context, messagemodel.ToolCall) (messagemodel.Message, bool, error)
+	Resume(context.Context, messagemodel.ToolCall) (messagemodel.Message, bool, error)
 }
 
 type (
@@ -53,7 +53,7 @@ type Input struct {
 type ExecutionDependencies struct {
 	ToolExecutor  ToolExecutor
 	AwaitApproval func(context.Context) error
-	Writer        repository.MessageWriter
+	Assistant     AssistantCommitter
 }
 
 type Config struct {
@@ -73,3 +73,14 @@ const (
 	FailureBusy                FailureCode = "busy"
 	FailureInternal            FailureCode = "internal"
 )
+
+// AssistantWrite 是一次输出提交用例的输入，最终证据与消息必须在同一事务保存。
+type AssistantWrite struct {
+	Message     messagemodel.Message
+	FinalOutput *agentmodel.FinalOutput
+}
+
+// AssistantCommitter 是绑定本次执行的输出提交能力，由 Execution Service 实现。
+type AssistantCommitter interface {
+	AppendAssistant(context.Context, AssistantWrite) (messagemodel.Message, bool, error)
+}

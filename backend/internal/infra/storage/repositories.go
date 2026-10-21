@@ -1,4 +1,4 @@
-package jsonl
+package storage
 
 import (
 	"praxis/internal/repository"
@@ -15,12 +15,13 @@ type Repositories struct {
 	Contexts       ContextRepository
 	ToolExecutions ToolExecutionRepository
 	Controls       ControlRepository
-	Messages       MessageStreams
+	Messages       MessageRepository
+	ToolCalls      ToolCallQueries
 	Timings        TimingStore
 	ModelUsage     ModelUsageStore
 }
 
-// Repositories 返回共享提交边界与位置索引的仓储集合。
+// Repositories 返回共享提交边界与内存 State的仓储集合。
 func (s *Store) Repositories() Repositories {
 	return Repositories{
 		Tasks:          TaskRepository{s},
@@ -32,25 +33,26 @@ func (s *Store) Repositories() Repositories {
 		Contexts:       ContextRepository{s},
 		ToolExecutions: ToolExecutionRepository{s},
 		Controls:       ControlRepository{s},
-		Messages:       MessageStreams{s},
+		Messages:       MessageRepository{s},
+		ToolCalls:      ToolCallQueries{s},
 		Timings:        TimingStore{Store: s},
 		ModelUsage:     ModelUsageStore{Store: s},
 	}
 }
 
 var (
-	_ repository.Transaction    = (*Store)(nil)
-	_ repository.Project        = ProjectRepository{}
-	_ repository.Workspace      = WorkspaceRepository{}
-	_ repository.Session        = SessionRepository{}
-	_ repository.Agent          = AgentRepository{}
-	_ repository.AgentExecution = AgentExecutionRepository{}
-	_ repository.ToolExecution  = ToolExecutionRepository{}
-	_ repository.SessionContext = ContextRepository{}
-	_ repository.AgentControl   = ControlRepository{}
-	_ repository.Task           = TaskRepository{}
-	_ repository.MessageStreams = MessageStreams{}
-	_ repository.MessageWriter  = MessageWriter{}
-	_ repository.Timing         = TimingStore{}
-	_ repository.ModelUsage     = ModelUsageStore{}
+	_ repository.Transaction     = (*Store)(nil)
+	_ repository.Project         = ProjectRepository{}
+	_ repository.Workspace       = WorkspaceRepository{}
+	_ repository.Session         = SessionRepository{}
+	_ repository.Agent           = AgentRepository{}
+	_ repository.AgentExecution  = AgentExecutionRepository{}
+	_ repository.ToolExecution   = ToolExecutionRepository{}
+	_ repository.SessionContext  = ContextRepository{}
+	_ repository.AgentControl    = ControlRepository{}
+	_ repository.Task            = TaskRepository{}
+	_ repository.Message         = MessageRepository{}
+	_ repository.ToolCallQueries = ToolCallQueries{}
+	_ repository.Timing          = TimingStore{}
+	_ repository.ModelUsage      = ModelUsageStore{}
 )

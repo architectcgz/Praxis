@@ -9,7 +9,6 @@ import (
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
-	"praxis/internal/repository"
 	agentservice "praxis/internal/service/agent"
 	toolservice "praxis/internal/service/toolexecution"
 	"time"
@@ -38,12 +37,12 @@ func (r *Coordinator) run(
 		return
 	}
 
-	messageWriter, err := r.messages.Writer(ctx, task.SessionID, task.AgentID)
-	if err != nil || messageWriter == nil {
+	assistantCommitter, err := r.operations.AssistantCommitter(ctx, task.ID)
+	if err != nil || assistantCommitter == nil {
 		if err == nil {
-			err = errors.New("message streams returned a nil writer")
+			err = errors.New("execution service returned a nil assistant committer")
 		}
-		r.logError(task, "resolve message writer", err)
+		r.logError(task, "resolve assistant committer", err)
 		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
@@ -83,7 +82,7 @@ func (r *Coordinator) run(
 			return waitCtx.Err()
 		}
 	}
-	outcome, failureCode, failureMessage := r.execute(ctx, task, messageWriter, executor, awaitApproval)
+	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor, awaitApproval)
 	if ctx.Err() != nil {
 		outcome, failureCode, failureMessage = r.executionResult(ctx, outcome, failureCode, ctx.Err())
 	}
@@ -108,7 +107,7 @@ func (r *Coordinator) startExecution(task agentmodel.Execution) error {
 func (r *Coordinator) execute(
 	ctx context.Context,
 	task agentmodel.Execution,
-	messageWriter repository.MessageWriter,
+	assistantCommitter loop.AssistantCommitter,
 	executor *toolservice.Scope,
 	awaitApproval func(context.Context) error,
 ) (agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
@@ -125,7 +124,7 @@ func (r *Coordinator) execute(
 			_, err = r.loop.Run(ctx, executionInput, loop.ExecutionDependencies{
 				ToolExecutor:  executor,
 				AwaitApproval: awaitApproval,
-				Writer:        messageWriter,
+				Assistant:     assistantCommitter,
 			})
 		}
 		outcome, failureCode = agentmodel.ExecutionCompleted, ""

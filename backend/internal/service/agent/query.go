@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
-	messagemodel "praxis/internal/core/message"
 	"praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -27,7 +26,8 @@ type Dependencies struct {
 	Queue            repository.Task
 	Controls         repository.AgentControl
 	Executions       ExecutionControl
-	Messages         repository.MessageReader
+	Sessions         repository.Session
+	Messages         repository.Message
 	Clock            clock.Clock
 }
 
@@ -38,7 +38,8 @@ type Service struct {
 	queue            repository.Task
 	controls         repository.AgentControl
 	executions       ExecutionControl
-	messages         repository.MessageReader
+	sessions         repository.Session
+	messages         repository.Message
 	clock            clock.Clock
 }
 
@@ -55,6 +56,7 @@ type AgentView struct {
 func NewService(deps Dependencies) (*Service, error) {
 	for name, value := range map[string]any{
 		"transactions":     deps.Transactions,
+		"sessions":         deps.Sessions,
 		"agents":           deps.Agents,
 		"executions":       deps.ExecutionRecords,
 		"queue":            deps.Queue,
@@ -75,6 +77,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		controls:         deps.Controls,
 		executions:       deps.Executions,
 		messages:         deps.Messages,
+		sessions:         deps.Sessions,
 		clock:            clock.ClockOrDefault(deps.Clock),
 	}, nil
 }
@@ -120,40 +123,4 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID, li
 		view.ActiveExecution = &activeCopy
 	}
 	return view, nil
-}
-
-// ListAgentMessages 读取 Agent 自有消息流。
-func (s *Service) ListAgentMessages(ctx context.Context, agentID identity.AgentID, limit int) ([]messagemodel.Message, error) {
-	if ctx == nil {
-		return nil, errors.New("agent message context is required")
-	}
-	if s.messages == nil {
-		return nil, errors.New("agent message query is unavailable")
-	}
-	agent, err := s.agents.Get(ctx, agentID)
-	if err != nil {
-		return nil, err
-	}
-	stream, err := s.messages.LoadMessages(ctx, agent.SessionID, agent.ID, limit)
-	if err != nil {
-		return nil, err
-	}
-	executions, err := s.executionRecords.ListByAgent(ctx, agentID, 0)
-	if err != nil {
-		return nil, err
-	}
-	sources := make(map[string]string, len(executions))
-	for _, execution := range executions {
-		if execution.SourceTaskID != "" {
-			sources[execution.SourceTaskID.String()] = execution.ID.String()
-		}
-	}
-	for index := range stream.Messages {
-		value := &stream.Messages[index]
-		if value.ExecutionID == "" && value.SourceTaskID != "" {
-			value.ExecutionID = sources[value.SourceTaskID]
-		}
-	}
-
-	return stream.Messages, nil
 }

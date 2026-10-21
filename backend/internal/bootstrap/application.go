@@ -87,6 +87,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 		Transactions:     a.store,
 		Agents:           repos.Agents,
 		ExecutionRecords: repos.Executions,
+		Sessions:         repos.Sessions,
 		Queue:            repos.Tasks,
 		Controls:         repos.Controls,
 		Executions:       a.coordinator,

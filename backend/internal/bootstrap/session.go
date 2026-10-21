@@ -3,12 +3,12 @@ package bootstrap
 import (
 	"praxis/internal/core/hook"
 	"praxis/internal/infra/agentregistry"
-	"praxis/internal/infra/jsonl"
+	"praxis/internal/infra/storage"
 	sessionservice "praxis/internal/service/session"
 	"sync"
 )
 
-func buildSessions(resources storageResources, repos jsonl.Repositories, agents *agentregistry.Registry, hooks *hook.Dispatcher, configMu *sync.RWMutex) (*sessionservice.Service, error) {
+func buildSessions(resources storageResources, repos storage.Repositories, agents *agentregistry.Registry, hooks *hook.Dispatcher, configMu *sync.RWMutex) (*sessionservice.Service, error) {
 	return sessionservice.NewService(sessionservice.Dependencies{
 		ConfigMu:       configMu,
 		Transactions:   resources.store,
@@ -16,6 +16,7 @@ func buildSessions(resources storageResources, repos jsonl.Repositories, agents 
 		Projects:       repos.Projects,
 		Workspaces:     repos.Workspaces,
 		Sessions:       repos.Sessions,
+		Messages:       repos.Messages,
 		Contexts:       repos.Contexts,
 		Agents:         repos.Agents,
 		Tasks:          repos.Executions,

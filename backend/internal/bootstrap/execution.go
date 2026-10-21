@@ -5,7 +5,7 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/security"
 	"praxis/internal/identity"
-	"praxis/internal/infra/jsonl"
+	"praxis/internal/infra/storage"
 	"praxis/internal/loop"
 	execution "praxis/internal/service/agent/coordinator"
 	executionservice "praxis/internal/service/agent/execution"
@@ -15,7 +15,7 @@ import (
 	"sync"
 )
 
-func buildExecution(resources storageResources, repos jsonl.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, error) {
+func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, error) {
 	active := &execution.ActiveTasks{}
 	tasks, err := executionservice.NewService(executionservice.Dependencies{
 		Controls:       repos.Controls,
@@ -52,6 +52,7 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 		Transactions:   resources.store,
 		Tasks:          repos.Tasks,
 		Agents:         repos.Agents,
+		Sessions:       repos.Sessions,
 		Messages:       repos.Messages,
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
@@ -73,10 +74,11 @@ func buildExecution(resources storageResources, repos jsonl.Repositories, config
 		},
 		ActiveTasks:    active,
 		ToolExecutions: repos.ToolExecutions,
+		ToolCalls:      repos.ToolCalls,
+		Agents:         repos.Agents,
 		Messages:       repos.Messages,
 		Sessions:       repos.Sessions,
 		Workspaces:     repos.Workspaces,
-		Writers:        repos.Messages,
 		Models:         config.models,
 		Tools:          config.tools,
 		Rules: toolservice.ApprovalRules{

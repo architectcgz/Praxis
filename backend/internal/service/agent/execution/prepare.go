@@ -6,6 +6,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	sessionservice "praxis/internal/service/session"
 )
 
 // PrepareNext 在一次事务中读取队首、冻结执行输入、创建执行并标记预约派发。
@@ -16,6 +17,9 @@ func (s *Service) PrepareNext(ctx context.Context, agentID identity.AgentID) (ag
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		owner, err := s.agents.Get(txCtx, agentID)
 		if err != nil {
+			return err
+		}
+		if err := sessionservice.RequireWritable(txCtx, s.sessions, owner.SessionID); err != nil {
 			return err
 		}
 		if !owner.CanReadSessionContext() {

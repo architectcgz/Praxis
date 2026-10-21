@@ -8,7 +8,7 @@ import (
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/dataroot"
 	"praxis/internal/identity"
-	"praxis/internal/infra/jsonl"
+	"praxis/internal/infra/storage"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
 	execution "praxis/internal/service/agent/coordinator"
@@ -17,14 +17,14 @@ import (
 )
 
 type storageResources struct {
-	store  *jsonl.Store
+	store  *storage.Store
 	logger *logging.Logger
 }
 
 func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
-	store, err := jsonl.Open(ctx, root.Root)
+	store, err := storage.Open(ctx, root.Root)
 	if err != nil {
-		return storageResources{}, fmt.Errorf("open JSONL: %w", err)
+		return storageResources{}, fmt.Errorf("open storage: %w", err)
 	}
 	logger, err := logging.NewFactory().Application(filepath.Join(root.State, "praxis.log"))
 	if err != nil {

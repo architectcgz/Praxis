@@ -1,4 +1,4 @@
-package jsonl
+package storage
 
 import (
 	"cmp"
@@ -7,7 +7,6 @@ import (
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"slices"
 )
 
 type TaskRepository struct{ s *Store }
@@ -43,11 +42,9 @@ func (r TaskRepository) ListByAgent(ctx context.Context, id identity.AgentID, li
 func (r TaskRepository) NextSequence(ctx context.Context, id identity.AgentID) (uint64, error) {
 	var sequence uint64
 	err := r.s.view(ctx, func(readCtx context.Context) error {
-		sequence = r.s.index.maxQueue[id.String()]
-		for _, change := range r.s.tx(readCtx).changes {
-			if slices.Contains(change.entry.groups, lookupKey{kind: "tasks-agent", owner: id.String()}) {
-				sequence = max(sequence, change.entry.sequence)
-			}
+		for _, key := range r.s.keys(readCtx, lookupKey{kind: "tasks-agent", owner: id.String()}) {
+			entry, _ := r.s.entry(readCtx, key)
+			sequence = max(sequence, entry.orderSequence)
 		}
 		return nil
 	})
@@ -69,8 +66,8 @@ func (r TaskRepository) FindNextPendingByAgent(ctx context.Context, id identity.
 		var sequence uint64
 		for _, key := range r.s.keys(readCtx, lookupKey{kind: "pending-agent", owner: id.String()}) {
 			entry, _ := r.s.entry(readCtx, key)
-			if next.id == "" || entry.sequence < sequence {
-				next, sequence = key, entry.sequence
+			if next.id == "" || entry.orderSequence < sequence {
+				next, sequence = key, entry.orderSequence
 			}
 		}
 		if next.id == "" {

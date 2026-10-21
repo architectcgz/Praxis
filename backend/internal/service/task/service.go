@@ -12,13 +12,15 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
+	agentservice "praxis/internal/service/agent"
 )
 
 type Dependencies struct {
 	Transactions   repository.Transaction
 	Tasks          repository.Task
 	Agents         repository.Agent
-	Messages       repository.MessageStreams
+	Sessions       repository.Session
+	Messages       repository.Message
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	Clock          clock.Clock
@@ -29,14 +31,15 @@ type Service struct {
 	tx             repository.Transaction
 	tasks          repository.Task
 	agents         repository.Agent
-	messages       repository.MessageStreams
+	sessions       repository.Session
+	messages       repository.Message
 	hookDispatcher *hook.Dispatcher
 	logger         *logging.Logger
 	clock          clock.Clock
 }
 
 func NewService(d Dependencies) (*Service, error) {
-	if d.Transactions == nil || d.Tasks == nil || d.Agents == nil || d.Messages == nil {
+	if d.Transactions == nil || d.Tasks == nil || d.Agents == nil || d.Messages == nil || d.Sessions == nil {
 		return nil, errors.New("queue dependencies are required")
 	}
 	return &Service{
@@ -44,6 +47,7 @@ func NewService(d Dependencies) (*Service, error) {
 		tasks:          d.Tasks,
 		agents:         d.Agents,
 		messages:       d.Messages,
+		sessions:       d.Sessions,
 		hookDispatcher: d.HookDispatcher,
 		logger:         logging.NewFactory().Ensure(d.Logger),
 		clock:          clock.ClockOrDefault(d.Clock),
@@ -51,16 +55,14 @@ func NewService(d Dependencies) (*Service, error) {
 }
 
 func (s *Service) inputMessageContent(ctx context.Context, owner agentmodel.Agent, requestID identity.RequestID) (string, error) {
-	messages, err := s.messages.List(ctx, owner.SessionID, owner.ID, 0, 0)
+	stored, err := s.messages.Get(ctx, agentservice.MessageStream(owner), "input:"+requestID.String())
 	if err != nil {
 		return "", err
 	}
-	for _, m := range messages {
-		if m.ID == "input:"+requestID.String() && m.Role == message.RoleUser {
-			return m.TextContent(), nil
-		}
+	if stored.Role != message.RoleUser {
+		return "", fault.ErrRequestConflict
 	}
-	return "", fault.ErrNotFound
+	return stored.TextContent(), nil
 }
 
 func (s *Service) Cancel(ctx context.Context, id identity.TaskID) error {

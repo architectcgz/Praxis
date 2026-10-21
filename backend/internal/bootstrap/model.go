@@ -12,7 +12,7 @@ import (
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	"praxis/internal/infra/jsonl"
+	"praxis/internal/infra/storage"
 	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	"praxis/internal/settings"
@@ -72,7 +72,7 @@ func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configu
 
 func (c *configuration) globalApprovalMode() security.ApprovalMode { return c.settings.ApprovalMode }
 
-func buildModelService(root dataroot.DataRoot, config *configuration, store *jsonl.Store, logger *logging.Logger, configMu *sync.RWMutex) *modelservice.Service {
+func buildModelService(root dataroot.DataRoot, config *configuration, store *storage.Store, logger *logging.Logger, configMu *sync.RWMutex) *modelservice.Service {
 	return modelservice.NewService(modelservice.Dependencies{
 		Models:   config.models,
 		Agents:   config.agents,

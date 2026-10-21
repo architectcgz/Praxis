@@ -25,7 +25,10 @@ type Dependencies struct {
 	Transactions   repository.Transaction
 	Tasks          repository.AgentExecution
 	Events         repository.ToolExecution
-	Messages       repository.MessageStreams
+	Messages       repository.Message
+	Calls          repository.ToolCallQueries
+	Sessions       repository.Session
+	Agents         repository.Agent
 	Catalog        tool.ToolCatalog
 	Clock          clock.Clock
 }
@@ -39,7 +42,7 @@ type Service struct {
 }
 
 func NewService(deps Dependencies) (*Service, error) {
-	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Review == nil || deps.Prepare == nil || deps.Bind == nil || deps.Transactions == nil || deps.Tasks == nil || deps.Events == nil || deps.Messages == nil || deps.Catalog == nil {
+	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Review == nil || deps.Prepare == nil || deps.Bind == nil || deps.Transactions == nil || deps.Tasks == nil || deps.Events == nil || deps.Messages == nil || deps.Calls == nil || deps.Sessions == nil || deps.Agents == nil || deps.Catalog == nil {
 		return nil, errors.New("tool service dependencies are required")
 	}
 	return &Service{deps: deps, clock: clock.ClockOrDefault(deps.Clock), active: make(map[executionmodel.Key]*executionmodel.Execution)}, nil
@@ -54,5 +57,5 @@ type Scope struct {
 func (s *Service) ForWorkspace(path string) *Scope { return &Scope{service: s, workspacePath: path} }
 
 func (s *Service) call(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.ToolCall, error) {
-	return s.deps.Messages.ToolCall(ctx, executionmodel.Key{ExecutionID: executionID, CallID: callID})
+	return s.deps.Calls.GetCall(ctx, executionmodel.Key{ExecutionID: executionID, CallID: callID})
 }

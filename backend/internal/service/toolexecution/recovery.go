@@ -21,7 +21,7 @@ func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecuti
 	}
 	var result message.Message
 	err := s.deps.Transactions.InTx(ctx, func(txCtx context.Context) error {
-		stored, err := s.deps.Messages.ToolResult(txCtx, key)
+		stored, err := s.deps.Calls.GetResult(txCtx, key)
 		if err == nil {
 			result = stored
 			return nil
@@ -50,7 +50,7 @@ func (s *Service) RecoverExecution(ctx context.Context, id identity.AgentExecuti
 }
 
 func (s *Service) recoverMatching(ctx context.Context, executionID identity.AgentExecutionID) error {
-	missing, err := s.deps.Messages.ListMissingToolResults(ctx)
+	missing, err := s.deps.Calls.ListMissingToolResults(ctx)
 	if err != nil {
 		return err
 	}

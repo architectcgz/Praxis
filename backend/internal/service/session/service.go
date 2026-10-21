@@ -29,6 +29,7 @@ type Dependencies struct {
 	Projects       repository.Project
 	Workspaces     repository.Workspace
 	Sessions       repository.Session
+	Messages       repository.Message
 	Contexts       repository.SessionContext
 	Agents         repository.Agent
 	Tasks          repository.AgentExecution
@@ -46,6 +47,7 @@ type Service struct {
 	projects       repository.Project
 	workspaces     repository.Workspace
 	sessions       repository.Session
+	messages       repository.Message
 	contexts       repository.SessionContext
 	agents         repository.Agent
 	tasks          repository.AgentExecution
@@ -87,6 +89,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		"projects":          deps.Projects,
 		"workspaces":        deps.Workspaces,
 		"sessions":          deps.Sessions,
+		"messages":          deps.Messages,
 		"session contexts":  deps.Contexts,
 		"agents":            deps.Agents,
 		"tasks":             deps.Tasks,
@@ -103,6 +106,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		projects:        deps.Projects,
 		workspaces:      deps.Workspaces,
 		sessions:        deps.Sessions,
+		messages:        deps.Messages,
 		contexts:        deps.Contexts,
 		agents:          deps.Agents,
 		tasks:           deps.Tasks,
@@ -278,6 +282,9 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 	}
 	var created agentmodel.Agent
 	err = s.tx.InTx(ctx, func(txCtx context.Context) error {
+		if err := RequireWritable(txCtx, s.sessions, sessionID); err != nil {
+			return err
+		}
 		existing, err := s.agents.GetBySessionAndDefinition(txCtx, sessionID, definition.ID)
 		if err == nil {
 			created = existing
@@ -321,6 +328,9 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 	}
 	var result AppendContextResult
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
+		if err := RequireWritable(txCtx, s.sessions, params.SessionID); err != nil {
+			return err
+		}
 		entry := sessionmodel.NewSessionContextEntry(
 			params.EntryID,
 			params.SessionID,
@@ -380,12 +390,13 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 
 func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
 	return s.tx.InTx(ctx, func(txCtx context.Context) error {
-		if onlyEmpty {
-			if _, err := s.sessions.Get(txCtx, sessionID); errors.Is(err, fault.ErrNotFound) {
+		if _, err := s.sessions.Get(txCtx, sessionID); err != nil {
+			if onlyEmpty && errors.Is(err, fault.ErrNotFound) {
 				return nil
-			} else if err != nil {
-				return err
 			}
+			return err
+		}
+		if onlyEmpty {
 			// 消息检查和删除共用事务，避免并发输入提交后被误删。
 			if hasMessages, err := s.hasSessionMessages(txCtx, sessionID); err != nil || hasMessages {
 				return err

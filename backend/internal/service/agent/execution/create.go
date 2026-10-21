@@ -8,6 +8,8 @@ import (
 	messagemodel "praxis/internal/core/message"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	agentservice "praxis/internal/service/agent"
+	sessionservice "praxis/internal/service/session"
 )
 
 // SendInput 是直接输入的身份、正文和模型选择，不接受调用方预构建的 Context。
@@ -80,6 +82,9 @@ func (s *Service) createImmediate(ctx context.Context, params SendInput) (SendIn
 		if err != nil {
 			return err
 		}
+		if err := sessionservice.RequireWritable(txCtx, s.sessions, agent.SessionID); err != nil {
+			return err
+		}
 		if params.SessionID != "" && agent.SessionID != params.SessionID {
 			return fault.New(fault.InvalidRequest, "")
 		}
@@ -109,7 +114,7 @@ func (s *Service) createImmediate(ctx context.Context, params SendInput) (SendIn
 			Blocks:      []messagemodel.Block{{Kind: messagemodel.BlockText, Text: params.Content}},
 			CreatedAt:   at,
 		}
-		stored, err := s.messages.Append(txCtx, agent.SessionID, agent.ID, value)
+		stored, _, err := s.messages.Append(txCtx, messagemodel.Record{Stream: agentservice.MessageStream(agent), AgentID: agent.ID, Data: value})
 		if err != nil {
 			return err
 		}
@@ -162,15 +167,12 @@ func (s *Service) createImmediate(ctx context.Context, params SendInput) (SendIn
 }
 
 func (s *Service) inputMessageContent(ctx context.Context, agent agentmodel.Agent, requestID identity.RequestID) (string, error) {
-	messageID := "input:" + requestID.String()
-	messages, err := s.messages.List(ctx, agent.SessionID, agent.ID, 0, 0)
+	stored, err := s.messages.Get(ctx, agentservice.MessageStream(agent), "input:"+requestID.String())
 	if err != nil {
 		return "", err
 	}
-	for _, message := range messages {
-		if message.ID == messageID && message.Role == messagemodel.RoleUser {
-			return message.TextContent(), nil
-		}
+	if stored.Role != messagemodel.RoleUser {
+		return "", fault.ErrRequestConflict
 	}
-	return "", fault.ErrNotFound
+	return stored.TextContent(), nil
 }

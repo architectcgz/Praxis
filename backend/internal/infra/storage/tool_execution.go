@@ -1,4 +1,4 @@
-package jsonl
+package storage
 
 import (
 	"context"
@@ -18,17 +18,16 @@ func (r ToolExecutionRepository) Read(ctx context.Context, key toolexecution.Key
 		slices.SortFunc(keys, func(a, b entityKey) int {
 			left, _ := r.s.entry(readCtx, a)
 			right, _ := r.s.entry(readCtx, b)
-			if left.location.Sequence < right.location.Sequence {
+			if left.eventSequence < right.eventSequence {
 				return -1
 			}
-			if left.location.Sequence > right.location.Sequence {
+			if left.eventSequence > right.eventSequence {
 				return 1
 			}
 			return 0
 		})
-		reader := make(recordReader)
 		for _, key := range keys {
-			data, err := r.s.payloadWithReader(readCtx, key, reader)
+			data, err := r.s.payload(readCtx, key)
 			if err != nil {
 				return err
 			}
@@ -48,7 +47,7 @@ func (r ToolExecutionRepository) Read(ctx context.Context, key toolexecution.Key
 // Append 的事务不包裹工具调用；started 的唯一性由事件投影约束。
 func (r ToolExecutionRepository) Append(ctx context.Context, event toolexecution.Event) error {
 	return r.s.InTx(ctx, func(txCtx context.Context) error {
-		call, err := (MessageStreams{r.s}).ToolCall(txCtx, event.Key)
+		call, err := (ToolCallQueries{r.s}).GetCall(txCtx, event.Key)
 		if err != nil {
 			return err
 		}
@@ -60,7 +59,7 @@ func (r ToolExecutionRepository) Append(ctx context.Context, event toolexecution
 		if call.SessionID != event.SessionID {
 			return fault.ErrRequestConflict
 		}
-		if _, err := (MessageStreams{r.s}).ToolResult(txCtx, event.Key); err == nil {
+		if _, err := (ToolCallQueries{r.s}).GetResult(txCtx, event.Key); err == nil {
 			return fault.ErrRequestConflict
 		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
@@ -73,7 +72,7 @@ func (r ToolExecutionRepository) Append(ctx context.Context, event toolexecution
 			return err
 		}
 		tx := r.s.tx(txCtx)
-		sequence := r.s.sequences[event.SessionID.String()] + 1
+		sequence := r.s.log.Sequence(event.SessionID.String()) + 1
 		if len(tx.events) > 0 {
 			sequence = tx.nextSequence + 1
 		}

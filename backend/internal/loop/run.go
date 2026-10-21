@@ -12,7 +12,6 @@ import (
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
 )
 
 // Dependencies 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
@@ -75,8 +74,8 @@ func (r *Runner) run(
 	executionInput Input,
 	deps ExecutionDependencies,
 ) (EndReason, FailureCode, error) {
-	if deps.ToolExecutor == nil || deps.AwaitApproval == nil || deps.Writer == nil {
-		return loopResult(fail(FailureContract, ErrorContract, "scoped tool execution, approval continuation and message writer are required"))
+	if deps.ToolExecutor == nil || deps.AwaitApproval == nil || deps.Assistant == nil {
+		return loopResult(fail(FailureContract, ErrorContract, "scoped tool execution, approval continuation and assistant committer are required"))
 	}
 	modelContext, err := (appcontext.ContextBuilder{}).Build(executionInput.Content, appcontext.Limits{ContextWindow: executionInput.Config.Model.ContextWindow, MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens})
 	if err != nil {
@@ -177,7 +176,7 @@ func (r *Runner) executeTurn(
 		return outcome, code, false, cause
 	}
 	assistant := modelapi.ContextBlocksFromEvents(response.events)
-	calls := response.toolCalls()
+	var calls []messagemodel.ToolCall
 
 	{
 		message := outputMessage(messagemodel.Message{
@@ -190,16 +189,17 @@ func (r *Runner) executeTurn(
 			AuthorKind:  messagemodel.AuthorAgent,
 			AuthorID:    executionInput.AgentID.String(),
 		}, assistant)
-		value := repository.AssistantWrite{Message: message}
+		value := AssistantWrite{Message: message}
 		if response.stopReason == modelapi.StopCompleted || response.stopReason == modelapi.StopSequence {
 			value.FinalOutput = &agentmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
 		}
-		message, inserted, err := deps.Writer.AppendAssistant(ctx, value)
+		message, inserted, err := deps.Assistant.AppendAssistant(ctx, value)
 		if err != nil {
 			r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 			outcome, code, cause := loopResult(failCause(FailureStorage, err))
 			return outcome, code, false, cause
 		}
+		calls = message.ToolCalls(executionInput.SessionID, executionInput.AgentID)
 		if inserted && value.FinalOutput != nil {
 			if hookErr := r.HookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
 				Identity: hook.Identity{
@@ -221,7 +221,7 @@ func (r *Runner) executeTurn(
 			AgentID:     executionInput.AgentID,
 			ExecutionID: executionInput.ID,
 			TurnID:      turnID,
-			CallID:      call.ID,
+			CallID:      call.CallID,
 			Name:        string(call.Name),
 			Input:       append([]byte(nil), call.Arguments...),
 		})

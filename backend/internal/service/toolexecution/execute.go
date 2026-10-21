@@ -9,22 +9,17 @@ import (
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
-	"praxis/internal/identity"
 	"time"
 )
 
-// Execute 只读取调用声明与控制事实，正常入口不查询已有结果。
-func (scope *Scope) Execute(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.Message, bool, error) {
+// Execute 使用已提交的完整调用；授权读取控制事实，正常入口不反查调用或已完成结果。
+func (scope *Scope) Execute(ctx context.Context, call message.ToolCall) (message.Message, bool, error) {
 	if ctx == nil {
 		return message.Message{}, false, errors.New("tool execution context is required")
 	}
 	s := scope.service
-	call, err := s.call(ctx, executionID, callID)
-	if err != nil {
-		if ctx.Err() != nil {
-			return s.appendCanceledCall(ctx, executionID, callID)
-		}
-		return message.Message{}, false, err
+	if err := ctx.Err(); err != nil {
+		return s.appendError(ctx, call, "tool_interrupted", err.Error())
 	}
 	t, ok := s.deps.Catalog.Get(call.Name)
 	if !ok {
@@ -103,24 +98,20 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 }
 
 // Resume 仅用于当前 Loop 的人工审批续接；拒绝已经直接提交回执。
-func (scope *Scope) Resume(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.Message, bool, error) {
-	key := executionmodel.Key{ExecutionID: executionID, CallID: callID}
-	result, err := scope.service.deps.Messages.ToolResult(ctx, key)
+func (scope *Scope) Resume(ctx context.Context, call message.ToolCall) (message.Message, bool, error) {
+	key := call.Key
+	result, err := scope.service.deps.Calls.GetResult(ctx, key)
 	if err == nil {
 		return result, false, nil
 	}
 	if !errors.Is(err, fault.ErrNotFound) {
 		return message.Message{}, false, err
 	}
-	call, err := scope.service.call(ctx, executionID, callID)
-	if err != nil {
-		return message.Message{}, false, err
-	}
 	facts, err := scope.service.deps.Events.Read(ctx, key)
 	if err != nil {
 		return message.Message{}, false, err
 	}
-	if facts.RequiredAt.IsZero() {
+	if facts.RequiredAt.IsZero() || executionmodel.ArgumentsDigest(call.Name, []byte(facts.Summary)) != facts.ArgumentsDigest {
 		return message.Message{}, false, fault.ErrRequestConflict
 	}
 	// 沿用本次 Loop 已准备并展示的参数，不再次清洗输入。
@@ -141,11 +132,8 @@ func (s *Service) appendResult(ctx context.Context, call message.ToolCall, resul
 	}
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	writer, err := s.deps.Messages.Writer(commitCtx, call.SessionID, call.AgentID)
-	if err != nil {
-		return message.Message{}, false, err
-	}
-	stored, _, err := writer.AppendToolResult(commitCtx, message.Message{
+
+	stored, _, err := s.commitResult(commitCtx, call, message.Message{
 		ID:          "tool-result:" + call.ExecutionID.String() + ":" + call.CallID,
 		RequestID:   call.RequestID,
 		ExecutionID: call.ExecutionID.String(),
@@ -181,15 +169,4 @@ func (t observedTool) Call(ctx context.Context, args json.RawMessage) (result to
 	})
 	defer func() { scope.End(hook.Result{Err: err, ToolErrorClass: result.ErrorClass}) }()
 	return t.Tool.Call(ctx, args)
-}
-
-// appendCanceledCall 在准入前取消时使用独立提交 Context，保留明确的取消回执。
-func (s *Service) appendCanceledCall(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.Message, bool, error) {
-	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	call, err := s.call(readCtx, executionID, callID)
-	if err != nil {
-		return message.Message{}, false, err
-	}
-	return s.appendError(readCtx, call, "tool_interrupted", ctx.Err().Error())
 }

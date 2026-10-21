@@ -19,20 +19,21 @@ Praxis 是 Go + Wails + React 的本地桌面应用。后端按业务实体和�
 | `backend/internal/core/context/` | Provider 无关的上下文内容、容量检查及压缩策略 |
 | `backend/internal/loop/` | ReAct Loop，决定模型迭代、工具调用和模型流处理；不管理 Execution 终态 |
 | `backend/internal/core/model/` | 模型配置、请求与流、停止原因、Usage 和工具调用 ID 契约 |
-| `backend/internal/core/message/` | 消息实体和内容块；流读取与原子写入契约位于 Repository |
+| `backend/internal/core/message/` | 消息实体、内容块、逻辑 StreamKey 和 Record；调用从已提交消息派生 |
 | `backend/internal/core/tool/` | 工具请求、执行参数、结果、注册表、目录及参数规范化契约 |
-| `backend/internal/core/toolexecution/` | 单次工具执行的领域事实、状态转换、审批状态和最终输出证据 |
+| `backend/internal/core/toolexecution/` | 工具控制事件、审批事实及可取消的运行实例 |
 | `backend/internal/core/task/` | 预约 Task 的状态和转换（`pending/dispatched/cancelled`） |
 | `backend/internal/core/hook/` | 操作 Hook 与业务提交后通知的分发机制 |
 | `backend/internal/core/agent/`、`session/`、`project/`、`workspace/`、`timing/` | 业务实体、值类型、不变量和纯状态规则 |
-| `backend/internal/repository/` | 所有业务仓储、消息流读写、查询结果、用量与计时持久化及事务契约 |
-| `backend/internal/service/agent/` | Agent 查询、控制、用例错误分类和简单失败消息转换 |
-| `backend/internal/service/agent/execution/` | 直接输入准入、Execution 创建、配置及历史冻结、进度、结算和恢复 |
+| `backend/internal/repository/` | 所有业务仓储、统一 Message 存取、ToolCall 派生查询、用量与计时持久化及事务契约 |
+| `backend/internal/service/agent/` | Agent 查询、控制、私有消息入口和消息流选择规则 |
+| `backend/internal/service/agent/execution/` | 直接输入准入、配置及历史冻结、Assistant 与 Execution 原子提交、进度、结算和恢复 |
 | `backend/internal/service/agent/coordinator/` | 进程内 Coordinator、ActiveTasks、运行交接、审批唤醒、启动恢复及关闭 |
 | `backend/internal/service/task/` | 预约输入与 FIFO 队列的提交、查询及取消；不执行模型 |
 | `backend/internal/service/toolexecution/` | 工具准入、参数授权、风险审核、审批和执行结算 |
 | `backend/internal/service/project/`、`session/`、`model/` | 项目、会话与模型配置等业务用例 |
-| `backend/internal/infra/jsonl/` | 共享 JSONL Store、事务、重放、轻量索引与业务 Repository |
+| `backend/internal/infra/storage/` | 事务、完整内存 State、通用 groups/unique 索引和 Repository 实现 |
+| `backend/internal/infra/jsonl/` | JSONL codec、append/fsync、启动 Replay、尾行恢复、文件锁与文件寻址 |
 | `backend/internal/infra/providers/` | OpenAI Chat、OpenAI Responses、Anthropic 的独立协议 Encoder/Decoder 与流处理 |
 | `backend/internal/infra/modelregistry/`、`agentregistry/`、`toolregistry/` | 模型、Agent 和工具配置的加载与注册 |
 | `backend/internal/infra/tools/`、`filesystem/` | Bash、ReadFile、ApplyPatch 与受限文件系统访问的具体实现 |
@@ -51,7 +52,6 @@ flowchart TD
     Boot --> Infra["Infra"]
     Services --> Loop["ReAct Loop"]
     Services --> Repo["Repository"]
-    Loop --> Repo
     Infra --> Repo
     Repo --> Core["Core"]
     Loop --> Core
@@ -61,9 +61,9 @@ flowchart TD
 
 - `core` 不依赖 `repository`、`loop`、`service`、`infra`、`bootstrap` 或 Wails，也不执行文件 I/O。
 - `service` 编排用例和事务，通过 Repository 契约使用仓储；不直接调用 Infra 的文件系统和 JSONL 实现。
-- `repository` 只依赖 Core 实体与纯基础能力，统一定义持久化契约；JSONL 通过编译期断言检查实现。
+- `repository` 只依赖 Core 实体与纯基础能力，统一定义持久化契约；Storage 通过编译期断言检查实现。
 - `infra` 实现协议、存储、配置和工具，不依赖 Service，不负责审批、队列派发或运行期业务决策。
-- `loop` 位于 Core 外，通过 Repository 读取工具事实并原子提交消息；迭代预留、状态检查和进度事务由 Execution Service 提供。
+- `loop` 位于 Core 外，通过 Execution Service 注入的 AssistantCommitter 原子提交输出，再将已提交的完整 ToolCall 传给 ToolExecution Service；迭代预留、状态检查和进度事务由 Execution Service 提供。
 - `coordinator` 负责进程内执行权和运行交接；`loop` 只负责一次执行内部的模型与工具迭代。
 - `bootstrap` 构建并注入依赖，完成恢复后才对 Wails 开放业务入口；不在运行期重新解释业务决策。
 - 业务能力接口放在事实拥有者或消费方附近，避免为依赖注入再建不必要的转发服务。
@@ -94,18 +94,23 @@ flowchart TD
 - 恢复上下文时，业务层加载冻结范围内的历史、当前输入与本次 Execution 的续接消息；工具请求和回执按 `(ExecutionID, CallID)` 配对，并转换为有序的 `context.Content`。
 - `ContextBuilder` 只接收通用 Content 和 Limits，不理解 Session、Task 或 Repository；它负责复制、处理模型可见内容并检查必要原文容量。历史压缩由 Core 压缩策略执行。
 - ModelBuilder 根据冻结的模型配置提供 Provider 请求流；各 Provider 独立编码请求、解析响应和停止信号，不承担历史选择或 Execution 生命周期。
-- `tool.ToolCall` 是模型发出的工具请求；`toolexecution.Execution` 是从请求登记、授权、可能的人工审批到结算的工具执行事实。工具执行的身份唯一性为 `(ExecutionID, ProviderToolCallID)`。
+- `model.ToolCall` 是 Provider 返回的纯工具请求；`message.ToolCall` 是从已提交 Assistant 派生的完整调用及执行归属。`toolexecution.Execution` 只管理正在运行的工具实例，控制事件与结果分别由 ToolExecution Repository 和 Message 保存。调用唯一性为 `(ExecutionID, ProviderToolCallID)`。
 - ToolExecution Service 调用工具前执行准入、规范化结果检查、命令策略和风险审核；需要审批时保留原 Execution，批准后唤醒同一执行，不重复创建新执行。
 
 ## 持久化、恢复与通知
 
-- 应用使用共享的 JSONL Store。项目索引与应用状态放在数据根目录的 `state/`，会话日志位于 `projects/<projectID>/sessions/<sessionID>.jsonl`，配置位于 `config/`。
-- 一行日志对应一次原子提交。Store 维护可重建轻量索引、日志位置与序号，正文按需读取，不在全局内存中缓存完整业务对象。
-- Assistant 消息、其工具调用记录及最终输出证据保持原子提交；工具回执和累计输出字节在同一事务内幂等提交。
-- JSONL 的普通读取保持只读；ToolResult 缺失与遗留运行工具的恢复决策属于业务层。已开始且副作用未知的工具不能自动重试。
+- 应用使用共享的 Storage Store，底层持久化由 JSONL Log 提供。项目索引与应用状态放在数据根目录的 `state/`，会话日志位于 `projects/<projectID>/sessions/<sessionID>.jsonl`，配置位于 `config/`。
+- 一行日志对应一次原子提交。启动完整 Replay 建立 Memory State；entries 保存独立 json.RawMessage，groups 保存集合索引，unique 保存唯一索引。普通 Repository 查询只解码内存 payload，返回独立对象。
+- 写入先暂存并校验 overlay，再 append + fsync，成功后在事务锁内原子发布 State。文件长度、路径和游标仅由 JSONL Log 管理。
+- StreamKey 只表示逻辑分组。Session Service 管理共享消息，Agent Service 管理私有消息，Execution Service 使用不可变 Agent 身份确定并冻结输出流；Storage 只接收显式流键。
+- Task 的队列序号与 Event 的日志序号分开。NextSequence 从该 Agent 保留的全部 Task 及事务暂存变更计算；取消或派发不回收序号。
+- Execution Service 在同一事务保存 Assistant、工具调用计数和最终输出证据；ToolExecution Service 在同一事务保存 ToolResult 和累计输出字节，幂等重试不重复累计。
+- ToolCall 与 ToolResult 的唯一索引指向所属 Message，缺失回执由工具消息分组与结果索引派生；审批、Stop 和恢复只查询内存。正常 Execute/Resume 直接使用同一 Loop 的完整 ToolCall，审批续接使用已审核参数快照。
+- Session 的存在性和可写性在 Service 的写入事务内校验，删除同时检查活动 Execution。删除事件清空 Scope 的实体与全部索引；Session 身份不复用，Replay 拒绝终止事件之后的业务事件。
+- ToolResult 缺失与遗留运行工具的恢复决策属于业务层。已开始且副作用未知的工具不能自动重试。
 - 启动时先协调遗留 running 工具，再恢复活动 Execution，最后检查空闲 Agent 的 Pending 队列。审批等待不释放执行归属。
 - 结算失败时保留执行占用和结果，只重试结算，不重新调用模型或工具。关闭时先停止新准入并等待运行退出，再清理和关闭持久化资源。
-- 所有消息、工具执行、计时、用量和跨仓储事务接口统一在 Repository，Service 与 Loop 不声明重复的 Store、Reader 或 Writer。
+- 所有实体存取、工具查询、计时、用量和跨仓储事务接口统一在 Repository。Loop 的 AssistantCommitter 是绑定执行的跨实体业务用例接口。
 - Store 与 Repository 不发布业务 Hook。用户输入、最终 Assistant 和 Execution 终态由业务调用方在事务成功后发布 best-effort 提交 Hook；回滚和幂等重复不通知。
 - Operation Hook 在真实运行边界记录模型、工具与 Agent 操作的耗时；事件发布用于 UI 实时展示，不作为持久化恢复事实来源。
 - 配置更新通过共享配置锁和存储事务协调，避免执行准入读取混合配置；持久化恢复只校验当前 Schema，不自动迁移或修补原始数据。

@@ -7,6 +7,8 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	"praxis/internal/repository"
+	agentservice "praxis/internal/service/agent"
 	"time"
 )
 
@@ -232,7 +234,11 @@ func (s *Service) nameSessionAfterAnswer(
 	if outcome != agentmodel.ExecutionCompleted && outcome != agentmodel.ExecutionYielded {
 		return nil
 	}
-	stream, err := s.messages.LoadMessages(ctx, task.SessionID, task.AgentID, 0)
+	owner, err := s.agents.Get(ctx, task.AgentID)
+	if err != nil {
+		return err
+	}
+	stream, err := s.messages.List(ctx, repository.MessageQuery{Stream: agentservice.MessageStream(owner)})
 	if err != nil {
 		return err
 	}

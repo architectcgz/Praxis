@@ -25,7 +25,6 @@ type Config struct {
 	ActiveTasks       *ActiveTasks
 	Operations        ExecutionOperations
 	Queue             TaskQueue
-	Messages          repository.MessageWriterProvider
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
@@ -44,7 +43,6 @@ type Coordinator struct {
 	activeTasks       *ActiveTasks
 	operations        ExecutionOperations
 	queue             TaskQueue
-	messages          repository.MessageWriterProvider
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
@@ -56,8 +54,8 @@ type Coordinator struct {
 }
 
 func NewCoordinator(config Config) (*Coordinator, error) {
-	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.Queue == nil || config.Messages == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil {
-		return nil, errors.New("execution loop, active tasks, task operations, queue and message streams are required")
+	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.Queue == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil {
+		return nil, errors.New("execution loop, active tasks, task operations, queue and tool services are required")
 	}
 	timeout := config.TransitionTimeout
 	if timeout <= 0 {
@@ -76,7 +74,6 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 		activeTasks:       config.ActiveTasks,
 		operations:        config.Operations,
 		queue:             config.Queue,
-		messages:          config.Messages,
 		hookDispatcher:    config.HookDispatcher,
 		logger:            logging.NewFactory().Ensure(config.Logger),
 		transitionTimeout: timeout,

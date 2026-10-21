@@ -23,10 +23,10 @@ func validateToolCalls(calls []ToolCall) error {
 }
 
 // runToolCalls 顺序消费 Service 已提交的回执；审批等待保留在当前 Loop 中。
-func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps ExecutionDependencies, calls []ToolCall, turnID identity.TurnID) ([]message.Message, error) {
+func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps ExecutionDependencies, calls []message.ToolCall, turnID identity.TurnID) ([]message.Message, error) {
 	results := make([]message.Message, 0, len(calls))
 	for _, call := range calls {
-		receipt, pending, err := deps.ToolExecutor.Execute(ctx, executionInput.ID, call.ID)
+		receipt, pending, err := deps.ToolExecutor.Execute(ctx, call)
 		for err == nil && pending {
 			r.emit(Event{
 				Kind:        EventToolApprovalRequired,
@@ -34,13 +34,13 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 				AgentID:     executionInput.AgentID,
 				ExecutionID: executionInput.ID,
 				TurnID:      turnID,
-				CallID:      call.ID,
+				CallID:      call.CallID,
 				Name:        string(call.Name),
 			})
 			if err := deps.AwaitApproval(ctx); err != nil {
 				return results, failCause(FailureStorage, err)
 			}
-			receipt, pending, err = deps.ToolExecutor.Resume(ctx, executionInput.ID, call.ID)
+			receipt, pending, err = deps.ToolExecutor.Resume(ctx, call)
 		}
 		if err != nil {
 			return results, failCause(FailureStorage, err)

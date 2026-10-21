@@ -35,7 +35,7 @@ type Dependencies struct {
 	Records        repository.AgentExecution
 	Queue          repository.Task
 	Executions     ActiveTasks
-	Messages       repository.MessageStreams
+	Messages       repository.Message
 	PrimaryAgent   PrimaryAgentProvider
 	Definitions    AgentDefinitionProvider
 	Models         ModelConfigResolver
@@ -56,7 +56,7 @@ type Service struct {
 	records        repository.AgentExecution
 	queue          repository.Task
 	executions     ActiveTasks
-	messages       repository.MessageStreams
+	messages       repository.Message
 	primary        PrimaryAgentProvider
 	models         ModelConfigResolver
 	definitions    AgentDefinitionProvider

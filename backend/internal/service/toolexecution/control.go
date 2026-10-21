@@ -94,7 +94,7 @@ func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task ag
 		if err != nil {
 			return err
 		}
-		if _, err := s.deps.Messages.ToolResult(txCtx, key); err == nil {
+		if _, err := s.deps.Calls.GetResult(txCtx, key); err == nil {
 			return nil
 		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err

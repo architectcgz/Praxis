@@ -11,7 +11,9 @@ import (
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
 	"praxis/internal/core/toolexecution"
+	"praxis/internal/fault"
 	"praxis/internal/repository"
+	agentservice "praxis/internal/service/agent"
 	"praxis/internal/utils/jsonutil"
 	"strings"
 	"unicode/utf8"
@@ -42,7 +44,8 @@ const riskReviewSchema = `{
 // RiskReviewer 使用既有模型与消息读取能力进行独立审核，不写消息、不决定调用状态。
 type RiskReviewer struct {
 	Models       modelapi.ModelBuilder
-	Messages     repository.MessageReader
+	Messages     repository.Message
+	Agents       repository.Agent
 	Hooks        *hook.Dispatcher
 	ObserveUsage func(modelapi.ModelUsageRecord)
 }
@@ -61,17 +64,18 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 		ReferenceID: "risk-review:" + attempt.TurnID.String(),
 	})
 	defer func() { scope.End(hook.Result{Err: err}) }()
-	messages, err := r.Messages.LoadMessages(ctx, task.SessionID, task.AgentID, 0)
+	owner, err := r.Agents.Get(ctx, task.AgentID)
 	if err != nil {
 		return assessment, err
 	}
-	var userTask string
-	for _, message := range messages.Messages {
-		if message.ID == task.InputMessageID {
-			userTask = message.TextContent()
-			break
-		}
+	if owner.SessionID != task.SessionID || call.AgentID != owner.ID {
+		return assessment, fault.ErrRequestConflict
 	}
+	input, err := r.Messages.Get(ctx, agentservice.MessageStream(owner), task.InputMessageID)
+	if err != nil {
+		return assessment, err
+	}
+	userTask := input.TextContent()
 	if userTask == "" {
 		return assessment, errors.New("risk review cannot locate the task input")
 	}

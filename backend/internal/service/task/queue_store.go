@@ -9,6 +9,8 @@ import (
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	agentservice "praxis/internal/service/agent"
+	sessionservice "praxis/internal/service/session"
 )
 
 type EnqueueInput struct {
@@ -36,6 +38,9 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueInput) (Enqueue
 	err := s.tx.InTx(ctx, func(txCtx context.Context) error {
 		agent, err := s.agents.Get(txCtx, params.AgentID)
 		if err != nil {
+			return err
+		}
+		if err := sessionservice.RequireWritable(txCtx, s.sessions, agent.SessionID); err != nil {
 			return err
 		}
 		if !agent.CanReadSessionContext() {
@@ -84,7 +89,7 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueInput) (Enqueue
 		if err := s.tasks.Save(txCtx, task); err != nil {
 			return err
 		}
-		stored, err := s.messages.Append(txCtx, agent.SessionID, agent.ID, messagemodel.Message{
+		stored, _, err := s.messages.Append(txCtx, messagemodel.Record{Stream: agentservice.MessageStream(agent), AgentID: agent.ID, Data: messagemodel.Message{
 			ID:           "input:" + params.RequestID.String(),
 			RequestID:    params.RequestID.String(),
 			SourceTaskID: task.ID.String(),
@@ -92,7 +97,7 @@ func (s *Service) EnqueueTask(ctx context.Context, params EnqueueInput) (Enqueue
 			AuthorKind:   messagemodel.AuthorUser,
 			Blocks:       []messagemodel.Block{{Kind: messagemodel.BlockText, Text: params.Prompt}},
 			CreatedAt:    at,
-		})
+		}})
 		if err != nil {
 			return err
 		}

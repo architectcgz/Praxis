@@ -16,7 +16,8 @@ function reject(reason) { print pkg ": " dep " (" reason ")" > "/dev/stderr"; fa
   if (pkg ~ /^praxis\/internal\/loop(\/|$)/ && (dep == "os" || dep ~ /^praxis\/(internal\/(service|infra|bootstrap)|wails)(\/|$)/)) reject("loop dependency")
   if (pkg ~ /^praxis\/internal\/infra\// && dep ~ /^praxis\/(internal\/(service|bootstrap|loop)|wails)(\/|$)/) reject("infra business orchestration")
   if (pkg ~ /^praxis\/wails(\/|$)/ && dep ~ /^praxis\/internal\/(repository|infra|loop)(\/|$)/) reject("wails persistence dependency")
-  if (pkg ~ /^praxis\/internal\/infra\/jsonl(\/|$)/ && dep ~ /^praxis\/internal\/core\/hook(\/|$)/) reject("repository business hook")
+  if (pkg ~ /^praxis\/internal\/infra\/jsonl(\/|$)/ && dep ~ /^praxis\// && dep != "praxis/internal/utils/pathutil") reject("JSONL persistence dependency")
+  if (pkg ~ /^praxis\/internal\/infra\/storage(\/|$)/ && dep ~ /^praxis\/internal\/core\/hook(\/|$)/) reject("repository business hook")
   if (dep ~ /^praxis\/internal\/(execution|runtime|model|tool|task|message|context|hook|storage|transaction|security)(\/|$)/ || dep ~ /^praxis\/internal\/(core\/loop|service\/agent\/input)(\/|$)/) reject("obsolete module")
  }
 }
