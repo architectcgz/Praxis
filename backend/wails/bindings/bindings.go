@@ -42,7 +42,7 @@ func (b *Bindings) All() []any {
 	return []any{b.projects, b.sessions, b.agents, b.commands, b.models}
 }
 
-// EmitAgentEvent 在协议出口复制可变字段，不向前端暴露业务对象。
+// EmitAgentEvent 转发 Loop 展示流；Entry 直接沿用核心类型，其他事件字段按协议映射。
 func (b *Bindings) EmitAgentEvent(event execution.Event) {
 	if event.AgentID == "" || event.ExecutionID == "" {
 		return
@@ -53,6 +53,7 @@ func (b *Bindings) EmitAgentEvent(event execution.Event) {
 	}
 	value := dto.AgentEvent{
 		Kind:           event.Kind,
+		Entries:        event.Entries,
 		SessionID:      event.SessionID.String(),
 		AgentID:        event.AgentID.String(),
 		ExecutionID:    event.ExecutionID.String(),

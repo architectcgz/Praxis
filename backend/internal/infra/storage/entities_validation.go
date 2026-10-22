@@ -170,7 +170,7 @@ func validateAgentExecution(e agentmodel.Execution) error {
 		e.SessionID.String(),
 		e.AgentID.String(),
 		e.RequestID.String(),
-		e.InputMessageID,
+		e.InputEntryID,
 	} {
 		if id == "" || id != strings.TrimSpace(id) {
 			return fault.InvalidValue("agent_execution", "required reference must be canonical and nonempty")
@@ -185,19 +185,6 @@ func validateAgentExecution(e agentmodel.Execution) error {
 		return fault.FieldError("execution.config", err)
 	}
 
-	if slices.Contains(e.ContextSelection.ExcludedMessageIDs, e.InputMessageID) {
-		return fault.InvalidValue("execution.contextSelection", "current input cannot be excluded")
-	}
-	for _, id := range e.ContextSelection.ExcludedMessageIDs {
-		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("execution.contextSelection.excludedMessageIDs", "message id must be canonical and nonempty")
-		}
-	}
-	for _, ref := range e.ContextSelection.SessionContextRefs {
-		if ref.ID == "" || ref.ID != strings.TrimSpace(ref.ID) || ref.Digest == "" || ref.Digest != strings.TrimSpace(ref.Digest) {
-			return fault.InvalidValue("execution.contextSelection.sessionContextRefs", "context reference must be canonical and nonempty")
-		}
-	}
 	if e.CreatedAt.IsZero() || !e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt) || !e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt) {
 		return fault.InvalidValue("execution.timestamps", "timestamps are invalid")
 	}
@@ -283,7 +270,7 @@ func validateExecutionModel(s modelapi.Config) error {
 	return err
 }
 
-func validateContextEntry(e sessionmodel.SessionContextEntry) error {
+func validateContextEntry(e sessionmodel.SharedFact) error {
 	if e.SourceExecutionID.String() != strings.TrimSpace(e.SourceExecutionID.String()) {
 		return fault.InvalidValue("sessionContext.sourceExecutionID", "source task id must be canonical")
 	}
@@ -297,7 +284,7 @@ func validateContextEntry(e sessionmodel.SessionContextEntry) error {
 	default:
 		return fault.InvalidValue("sessionContext.kind", "unknown context entry kind")
 	}
-	if e.Content == "" || e.Content != strings.TrimSpace(e.Content) || !utf8.ValidString(e.Content) || len(e.Content) > sessionmodel.MaxSessionContextContentBytes {
+	if e.Content == "" || e.Content != strings.TrimSpace(e.Content) || !utf8.ValidString(e.Content) || len(e.Content) > sessionmodel.MaxSharedFactContentBytes {
 		return fault.InvalidValue("sessionContext.content", "content must be canonical UTF-8 text within the size limit")
 	}
 	if e.ContentDigest != sessionmodel.ContentDigest(e.Content) {

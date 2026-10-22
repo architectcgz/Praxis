@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	sessionentry "praxis/internal/core/session/entry"
 	"time"
 )
 
@@ -40,23 +41,24 @@ type OperationTiming struct {
 	Revision        int       `json:"revision"`
 }
 
-// AgentEvent 是 Wails 事件专用 DTO，不携带业务对象或内部执行状态。
+// AgentEvent 是 Loop 展示流的 Wails 事件结构，完整记录直接携带核心 Entry。
 type AgentEvent struct {
-	Kind           string           `json:"kind"`
-	SessionID      string           `json:"sessionId,omitempty"`
-	AgentID        string           `json:"agentId"`
-	ExecutionID    string           `json:"executionId"`
-	Outcome        string           `json:"outcome,omitempty"`
-	FailureCode    string           `json:"failureCode,omitempty"`
-	FailureMessage string           `json:"failureMessage,omitempty"`
-	TurnID         string           `json:"turnId,omitempty"`
-	Text           string           `json:"text,omitempty"`
-	CallID         string           `json:"callId,omitempty"`
-	Name           string           `json:"name,omitempty"`
-	Input          json.RawMessage  `json:"input,omitempty"`
-	Result         string           `json:"result,omitempty"`
-	IsError        bool             `json:"isError,omitzero"`
-	Error          string           `json:"error,omitempty"`
-	Timing         *OperationTiming `json:"timing,omitempty"`
-	Usage          *ModelUsage      `json:"usage,omitempty"`
+	Entries        []sessionentry.ContextEntry `json:"entries,omitempty"`
+	Kind           string                      `json:"kind"`
+	SessionID      string                      `json:"sessionId,omitempty"`
+	AgentID        string                      `json:"agentId"`
+	ExecutionID    string                      `json:"executionId"`
+	Outcome        string                      `json:"outcome,omitempty"`
+	FailureCode    string                      `json:"failureCode,omitempty"`
+	FailureMessage string                      `json:"failureMessage,omitempty"`
+	TurnID         string                      `json:"turnId,omitempty"`
+	Text           string                      `json:"text,omitempty"`
+	CallID         string                      `json:"callId,omitempty"`
+	Name           string                      `json:"name,omitempty"`
+	Input          json.RawMessage             `json:"input,omitempty"`
+	Result         string                      `json:"result,omitempty"`
+	IsError        bool                        `json:"isError,omitzero"`
+	Error          string                      `json:"error,omitempty"`
+	Timing         *OperationTiming            `json:"timing,omitempty"`
+	Usage          *ModelUsage                 `json:"usage,omitempty"`
 }

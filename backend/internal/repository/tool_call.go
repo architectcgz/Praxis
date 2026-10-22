@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"praxis/internal/core/message"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 )
@@ -22,7 +22,7 @@ type MissingToolResult struct {
 
 // ToolCallQueries 从消息声明与回执派生查询，不保存独立工具调用实体。
 type ToolCallQueries interface {
-	GetCall(context.Context, toolexecution.Key) (message.ToolCall, error)
-	GetResult(context.Context, toolexecution.Key) (message.Message, error)
+	GetCall(context.Context, toolexecution.Key) (sessionentry.ToolCall, error)
+	GetResult(context.Context, toolexecution.Key) (sessionentry.ContextEntry, error)
 	ListMissingToolResults(context.Context) ([]MissingToolResult, error)
 }

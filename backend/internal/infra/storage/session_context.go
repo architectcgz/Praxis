@@ -12,9 +12,9 @@ import (
 type ContextRepository struct{ s *Store }
 
 // Append 幂等追加记录，身份相同但内容不一致时返回冲突。
-func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SessionContextEntry) error {
+func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SharedFact) error {
 	return r.s.view(ctx, func() error {
-		existing, err := getLocked[sessionmodel.SessionContextEntry](r.s, "context", v.ID.String())
+		existing, err := getLocked[sessionmodel.SharedFact](r.s, "context", v.ID.String())
 		if err == nil {
 			v.CreatedAt = existing.CreatedAt
 		} else if !errors.Is(err, fault.ErrNotFound) {
@@ -25,8 +25,8 @@ func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SessionCon
 }
 
 // GetByID 读取指定记录，第二个返回值表示是否存在。
-func (r ContextRepository) GetByID(ctx context.Context, id identity.ContextEntryID) (sessionmodel.SessionContextEntry, bool, error) {
-	v, e := get[sessionmodel.SessionContextEntry](ctx, r.s, "context", id.String())
+func (r ContextRepository) GetByID(ctx context.Context, id identity.ContextEntryID) (sessionmodel.SharedFact, bool, error) {
+	v, e := get[sessionmodel.SharedFact](ctx, r.s, "context", id.String())
 	if errors.Is(e, fault.ErrNotFound) {
 		return v, false, nil
 	}
@@ -34,9 +34,9 @@ func (r ContextRepository) GetByID(ctx context.Context, id identity.ContextEntry
 }
 
 // List 返回查询结果的独立副本，limit 为 0 时不限制。
-func (r ContextRepository) List(ctx context.Context, id identity.SessionID, after string, limit int) ([]sessionmodel.SessionContextEntry, error) {
-	v, e := listIndexed[sessionmodel.SessionContextEntry](ctx, r.s, lookupKey{kind: "contexts-session", owner: id.String()}, nil)
-	sorted(v, func(a, b sessionmodel.SessionContextEntry) int {
+func (r ContextRepository) List(ctx context.Context, id identity.SessionID, after string, limit int) ([]sessionmodel.SharedFact, error) {
+	v, e := listIndexed[sessionmodel.SharedFact](ctx, r.s, lookupKey{kind: "contexts-session", owner: id.String()}, nil)
+	sorted(v, func(a, b sessionmodel.SharedFact) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	})
 	if after != "" {

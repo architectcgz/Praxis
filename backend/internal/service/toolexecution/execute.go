@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/message"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
@@ -14,12 +14,12 @@ import (
 )
 
 // Execute 在同一次调用中准备参数、授权、等待审批、执行工具并提交回执。
-func (scope *Scope) Execute(ctx context.Context, call message.ToolCall) (message.Message, error) {
+func (scope *Scope) Execute(ctx context.Context, call sessionentry.ToolCall) (sessionentry.ContextEntry, error) {
 	if ctx == nil {
-		return message.Message{}, errors.New("tool execution context is required")
+		return sessionentry.ContextEntry{}, errors.New("tool execution context is required")
 	}
 	if scope.awaitApproval == nil {
-		return message.Message{}, errors.New("tool approval wait callback is required")
+		return sessionentry.ContextEntry{}, errors.New("tool approval wait callback is required")
 	}
 	s := scope.service
 	if err := ctx.Err(); err != nil {
@@ -36,7 +36,7 @@ func (scope *Scope) Execute(ctx context.Context, call message.ToolCall) (message
 	return scope.execute(ctx, call, bytes.Clone(args))
 }
 
-func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args json.RawMessage) (message.Message, error) {
+func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (sessionentry.ContextEntry, error) {
 	s := scope.service
 	for {
 		pending, denied, err := scope.authorize(ctx, call, args)
@@ -44,7 +44,7 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 			if ctx.Err() != nil {
 				return s.appendError(ctx, call, "tool_interrupted", ctx.Err().Error())
 			}
-			return message.Message{}, err
+			return sessionentry.ContextEntry{}, err
 		}
 		if denied != nil {
 			return s.appendResult(ctx, call, *denied)
@@ -52,7 +52,7 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 		if pending {
 			// 审批等待保留在本次调用栈，参数只准备一次；回调不持有存储锁或工具控制锁。
 			if err := scope.awaitApproval(ctx, call); err != nil {
-				return message.Message{}, err
+				return sessionentry.ContextEntry{}, err
 			}
 			// 拒绝和停止会直接提交回执，唤醒后优先消费已经完成的调用。
 			result, err := s.deps.Calls.GetResult(ctx, call.Key)
@@ -60,7 +60,7 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 				return result, nil
 			}
 			if !errors.Is(err, fault.ErrNotFound) {
-				return message.Message{}, err
+				return sessionentry.ContextEntry{}, err
 			}
 			continue
 		}
@@ -92,7 +92,7 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 			if errors.Is(err, errStopRequested) {
 				return s.appendError(ctx, call, "tool_interrupted", "The tool call was canceled before execution.")
 			}
-			return message.Message{}, err
+			return sessionentry.ContextEntry{}, err
 		}
 		result := execution.Run()
 		// 保留取消入口直到回执提交结束；迟到 Stop 不会覆盖结果。
@@ -113,12 +113,12 @@ func (scope *Scope) execute(ctx context.Context, call message.ToolCall, args jso
 	}
 }
 
-func (s *Service) appendError(ctx context.Context, call message.ToolCall, code, text string) (message.Message, error) {
+func (s *Service) appendError(ctx context.Context, call sessionentry.ToolCall, code, text string) (sessionentry.ContextEntry, error) {
 	return s.appendResult(ctx, call, tool.NewToolError(code, text))
 }
 
 // appendResult 是唯一的正常回执路径，写入失败只向上传播存储错误。
-func (s *Service) appendResult(ctx context.Context, call message.ToolCall, result tool.ToolResult) (message.Message, error) {
+func (s *Service) appendResult(ctx context.Context, call sessionentry.ToolCall, result tool.ToolResult) (sessionentry.ContextEntry, error) {
 	if len(result.Payload) > tool.MaxInlineResultBytes {
 		result = tool.NewToolError("tool_execution_failed", "Tool result exceeds the inline size limit.")
 	}
@@ -128,16 +128,16 @@ func (s *Service) appendResult(ctx context.Context, call message.ToolCall, resul
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
-	stored, _, err := s.commitResult(commitCtx, call, message.Message{
+	stored, _, err := s.commitResult(commitCtx, call, sessionentry.ContextEntry{
 		ID:          "tool-result:" + call.ExecutionID.String() + ":" + call.CallID,
 		RequestID:   call.RequestID,
 		ExecutionID: call.ExecutionID.String(),
 		TurnID:      call.TurnID.String(),
-		Role:        message.RoleTool,
-		AuthorKind:  message.AuthorTool,
+		Role:        sessionentry.RoleTool,
+		AuthorKind:  sessionentry.AuthorTool,
 		AuthorID:    string(call.Name),
-		Blocks: []message.Block{{
-			Kind:    message.BlockToolResult,
+		Content: []sessionentry.Block{{
+			Kind:    sessionentry.BlockToolResult,
 			CallID:  call.CallID,
 			Name:    string(call.Name),
 			Text:    result.Payload,

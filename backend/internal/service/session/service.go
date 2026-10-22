@@ -29,8 +29,8 @@ type Dependencies struct {
 	Projects       repository.Project
 	Workspaces     repository.Workspace
 	Sessions       repository.Session
-	Messages       repository.Message
-	Contexts       repository.SessionContext
+	Entries        repository.Entries
+	Contexts       repository.SessionFacts
 	Agents         repository.Agent
 	Tasks          repository.AgentExecution
 	Definitions    AgentDefinitionFactory
@@ -47,8 +47,8 @@ type Service struct {
 	projects       repository.Project
 	workspaces     repository.Workspace
 	sessions       repository.Session
-	messages       repository.Message
-	contexts       repository.SessionContext
+	entries        repository.Entries
+	contexts       repository.SessionFacts
 	agents         repository.Agent
 	tasks          repository.AgentExecution
 	definitions    AgentDefinitionFactory
@@ -92,7 +92,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		"projects":          deps.Projects,
 		"workspaces":        deps.Workspaces,
 		"sessions":          deps.Sessions,
-		"messages":          deps.Messages,
+		"entries":           deps.Entries,
 		"session contexts":  deps.Contexts,
 		"agents":            deps.Agents,
 		"tasks":             deps.Tasks,
@@ -112,7 +112,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		projects:        deps.Projects,
 		workspaces:      deps.Workspaces,
 		sessions:        deps.Sessions,
-		messages:        deps.Messages,
+		entries:         deps.Entries,
 		contexts:        deps.Contexts,
 		agents:          deps.Agents,
 		tasks:           deps.Tasks,
@@ -171,7 +171,7 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID identity.Session
 }
 
 // ListSessionContext 按稳定时间和 ID 游标读取 SessionContext 条目。
-func (s *Service) ListSessionContext(ctx context.Context, sessionID identity.SessionID, afterID string, limit int) ([]sessionmodel.SessionContextEntry, error) {
+func (s *Service) ListSessionContext(ctx context.Context, sessionID identity.SessionID, afterID string, limit int) ([]sessionmodel.SharedFact, error) {
 	if ctx == nil {
 		return nil, fault.New(fault.InvalidRequest, "session context query is invalid")
 	}
@@ -340,7 +340,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 }
 
 type AppendContextResult struct {
-	Entry         sessionmodel.SessionContextEntry
+	Entry         sessionmodel.SharedFact
 	ExistingEntry bool
 }
 
@@ -348,7 +348,7 @@ type AppendContextResult struct {
 type AppendContextParams struct {
 	EntryID           identity.ContextEntryID
 	SessionID         identity.SessionID
-	Kind              sessionmodel.SessionContextKind
+	Kind              sessionmodel.SharedFactKind
 	SourceExecutionID identity.AgentExecutionID
 	Content           string
 }
@@ -363,7 +363,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 		if err := RequireWritable(txCtx, s.sessions, params.SessionID); err != nil {
 			return err
 		}
-		entry := sessionmodel.NewSessionContextEntry(
+		entry := sessionmodel.NewSharedFact(
 			params.EntryID,
 			params.SessionID,
 			params.Kind,

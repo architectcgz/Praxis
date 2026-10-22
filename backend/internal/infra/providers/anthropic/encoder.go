@@ -7,6 +7,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -54,20 +55,20 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthrop
 	return result, nil
 }
 
-func anthropicContextEntry(entry appcontext.ContextEntry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
+func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
 	var messages []anthropicMessage
 	for index, block := range entry.Content {
 		role := string(entry.Role)
 		var content any
 		var raw json.RawMessage
 		switch block.Kind {
-		case appcontext.ContextBlockText:
-			if entry.Role == appcontext.ContextRoleTool {
+		case sessionentry.BlockText:
+			if entry.Role == sessionentry.RoleTool {
 				return nil, errors.New("anthropic tool role requires tool results")
 			}
 			content = requestTextBlock{Type: "text", Text: block.Text}
-		case appcontext.ContextBlockToolCall:
-			if entry.Role != appcontext.ContextRoleAssistant {
+		case sessionentry.BlockToolCall:
+			if entry.Role != sessionentry.RoleAssistant {
 				return nil, errors.New("anthropic tool_use requires assistant role")
 			}
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
@@ -79,7 +80,7 @@ func anthropicContextEntry(entry appcontext.ContextEntry, config modelapi.Config
 				Name:  block.Name,
 				Input: block.Input,
 			}
-		case appcontext.ContextBlockToolResult:
+		case sessionentry.BlockToolResult:
 			role = "user"
 			content = requestToolResultBlock{
 				Type:      "tool_result",
@@ -87,7 +88,7 @@ func anthropicContextEntry(entry appcontext.ContextEntry, config modelapi.Config
 				Content:   block.Text,
 				IsError:   block.IsError,
 			}
-		case appcontext.ContextBlockReasoningState:
+		case sessionentry.BlockReasoningState:
 			state := block.ReasoningState
 			if !config.CanReplayReasoningState(state) {
 				continue

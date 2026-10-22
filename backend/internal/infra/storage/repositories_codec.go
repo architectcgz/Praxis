@@ -13,7 +13,7 @@ import (
 func decodeJSON(data []byte, target any) error { return jsonl.Decode(data, target) }
 
 func eventKey(scope string, event jsonl.Event) entityKey {
-	if event.Collection == "message" {
+	if event.Collection == "entry" {
 		return entityKey{event.Collection, scope + "\x00" + event.Key}
 	}
 	return entityKey{event.Collection, event.Key}
@@ -38,6 +38,9 @@ func (s *Store) payload(key entityKey) (json.RawMessage, error) {
 			}
 		}
 		return nil, fault.ErrNotFound
+	}
+	if entry.record != nil {
+		return json.Marshal(entry.entryValue())
 	}
 	return entry.payload, nil
 }

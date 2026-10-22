@@ -8,14 +8,18 @@ import (
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/fault"
 	"praxis/internal/infra/jsonl"
 	"time"
 )
 
-// appendLocked 在 Store.mu 内校验并追加单个事实；日志同步成功前不修改 State。
+// appendLocked 先更新内存状态，再按顺序持久化；失败保留待写记录供重试或重启恢复。
 // 调用方的条件检查、序号分配和本次写入必须处于同一次持锁操作中。
 func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind string, object any) error {
+	if err := s.flushLocked(ctx); err != nil {
+		return err
+	}
 	if scope != "" && collection != "session" && collection != "usage" && collection != "timing" {
 		session, err := getLocked[sessionmodel.Session](s, "session", scope)
 		if err != nil {
@@ -26,8 +30,8 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 		}
 	}
 	event := jsonl.Event{
-		Sequence:   s.log.Sequence(scope) + 1,
-		ID:         fmt.Sprintf("event:%d", s.log.Sequence(scope)+1),
+		Sequence:   s.sequences[scope] + 1,
+		ID:         fmt.Sprintf("event:%d", s.sequences[scope]+1),
 		Type:       kind,
 		Collection: collection,
 		Key:        id,
@@ -44,8 +48,14 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 		if err != nil {
 			return err
 		}
-		if prior, ok := s.entry(eventKey(scope, event)); ok && prior.scope == scope && bytes.Equal(prior.payload, event.Payload) {
-			return nil
+		if prior, ok := s.entry(eventKey(scope, event)); ok && prior.scope == scope {
+			payload, err := s.payload(eventKey(scope, event))
+			if err != nil {
+				return err
+			}
+			if bytes.Equal(payload, event.Payload) {
+				return nil
+			}
 		}
 	}
 	if err := s.validateEvent(scope, event, entry); err != nil {
@@ -58,6 +68,11 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 				projectID = group.owner
 			}
 		}
+	}
+	if collection == "entry" {
+		s.applyEvent(scope, event, entry)
+		s.pending = append(s.pending, pendingEvent{scope: scope, projectID: projectID, event: event})
+		return s.flushLocked(ctx)
 	}
 	if err := s.log.Append(ctx, scope, projectID, event); err != nil {
 		return err
@@ -88,7 +103,11 @@ func (s *Store) validateEvent(scope string, event jsonl.Event, entry stateEntry)
 		if prior.scope != scope {
 			return fault.ErrRequestConflict
 		}
-		if err := immutable(key.collection, prior.payload, event.Payload); err != nil {
+		payload, err := s.payload(key)
+		if err != nil {
+			return err
+		}
+		if err := immutable(key.collection, payload, event.Payload); err != nil {
 			return err
 		}
 	} else if key.collection == "session" && s.log.Sequence(scope) != 0 {
@@ -113,11 +132,51 @@ func (s *Store) validateEvent(scope string, event jsonl.Event, entry stateEntry)
 }
 
 func (s *Store) applyEvent(scope string, event jsonl.Event, entry stateEntry) {
+	s.sequences[scope] = event.Sequence
 	if event.Type == "session.deleted" {
 		s.state.removeScope(scope)
+		for stream := range s.histories {
+			if stream.SessionID.String() == scope {
+				delete(s.histories, stream)
+			}
+		}
 		return
 	}
 	key := eventKey(scope, event)
 	s.state.remove(key)
+	if entry.record != nil {
+		entry.payload = nil
+	}
 	s.state.add(key, entry)
+	if entry.record != nil {
+		s.history(entry.record.Stream).Append(entry.record.Data)
+	}
+}
+
+type pendingEvent struct {
+	scope     string
+	projectID string
+	event     jsonl.Event
+}
+
+// flushLocked 仅负责追加待写事件，不重新执行模型或工具，不回滚已接收的内存事实。
+func (s *Store) flushLocked(ctx context.Context) error {
+	for len(s.pending) > 0 {
+		next := s.pending[0]
+		if err := s.log.Append(ctx, next.scope, next.projectID, next.event); err != nil {
+			return err
+		}
+		s.pending[0] = pendingEvent{}
+		s.pending = s.pending[1:]
+	}
+	return nil
+}
+
+func (s *Store) history(stream sessionentry.StreamKey) *sessionmodel.History {
+	h := s.histories[stream]
+	if h == nil {
+		h = &sessionmodel.History{}
+		s.histories[stream] = h
+	}
+	return h
 }

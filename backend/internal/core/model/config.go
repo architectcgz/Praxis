@@ -1,8 +1,8 @@
 package model
 
 import (
-	appcontext "praxis/internal/core/context"
 	modelconfig "praxis/internal/core/model/config"
+	sessionentry "praxis/internal/core/session/entry"
 	"slices"
 )
 
@@ -30,6 +30,6 @@ func (s Config) Clone() Config {
 }
 
 // CanReplayReasoningState 判断完整状态的来源是否与目标 Provider、API 和模型完全一致；nil 状态不可重放。
-func (s Config) CanReplayReasoningState(state *appcontext.ReasoningState) bool {
+func (s Config) CanReplayReasoningState(state *sessionentry.ReasoningState) bool {
 	return state != nil && state.ProviderID == s.ProviderID && state.Protocol == s.APIFormat && state.ModelID == s.ModelID
 }

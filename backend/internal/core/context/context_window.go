@@ -3,6 +3,7 @@ package context
 import (
 	"encoding/json"
 	"fmt"
+	sessionentry "praxis/internal/core/session/entry"
 	"unicode/utf8"
 )
 
@@ -22,7 +23,18 @@ func EstimateTokens(text string) int {
 
 // EstimatedTokens 估算上下文正文和结构开销，工具定义需由请求边界另行预留。
 func (c ModelContext) EstimatedTokens() (int, error) {
-	payload, err := json.Marshal(c)
+	type modelEntry struct {
+		Role    sessionentry.Role
+		Content []sessionentry.Block
+	}
+	values := make([]modelEntry, 0, len(c.Entries))
+	for _, entry := range c.Entries {
+		values = append(values, modelEntry{Role: entry.Role, Content: entry.Content})
+	}
+	payload, err := json.Marshal(struct {
+		SystemPrompt string
+		Entries      []modelEntry
+	}{SystemPrompt: c.SystemPrompt, Entries: values})
 	if err != nil {
 		return 0, err
 	}

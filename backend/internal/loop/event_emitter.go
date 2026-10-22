@@ -2,8 +2,8 @@ package loop
 
 import (
 	"errors"
-	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
 
@@ -46,7 +46,7 @@ func (r *Runner) emitToolResult(
 	agentID identity.AgentID,
 	executionID identity.AgentExecutionID,
 	turnID identity.TurnID,
-	block appcontext.ContextBlock,
+	block sessionentry.Block,
 ) {
 	r.emit(Event{
 		Kind:        EventToolResult,

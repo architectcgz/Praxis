@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/session/entry"
 	"regexp"
 )
 
@@ -15,7 +16,7 @@ func BuildToolCallIDMap(ctx appcontext.ModelContext) map[string]string {
 	used := make(map[string]bool)
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.Kind == appcontext.ContextBlockToolCall || block.Kind == appcontext.ContextBlockToolResult {
+			if block.Kind == sessionentry.BlockToolCall || block.Kind == sessionentry.BlockToolResult {
 				ids[block.CallID] = block.CallID
 				used[block.CallID] = true
 			}
@@ -24,7 +25,7 @@ func BuildToolCallIDMap(ctx appcontext.ModelContext) map[string]string {
 	sequence := 1
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.Kind != appcontext.ContextBlockToolCall && block.Kind != appcontext.ContextBlockToolResult {
+			if block.Kind != sessionentry.BlockToolCall && block.Kind != sessionentry.BlockToolResult {
 				continue
 			}
 			if ids[block.CallID] != block.CallID || portableToolCallID.MatchString(block.CallID) {

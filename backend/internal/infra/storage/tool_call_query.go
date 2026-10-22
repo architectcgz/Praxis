@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	messagemodel "praxis/internal/core/message"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -13,7 +13,7 @@ import (
 
 type ToolCallQueries struct{ s *Store }
 
-func (r ToolCallQueries) GetCall(ctx context.Context, callKey toolexecution.Key) (call messagemodel.ToolCall, err error) {
+func (r ToolCallQueries) GetCall(ctx context.Context, callKey toolexecution.Key) (call sessionentry.ToolCall, err error) {
 	err = r.s.view(ctx, func() error {
 		call, err = r.getCallLocked(callKey)
 		return err
@@ -21,44 +21,38 @@ func (r ToolCallQueries) GetCall(ctx context.Context, callKey toolexecution.Key)
 	return call, err
 }
 
-func (r ToolCallQueries) getCallLocked(callKey toolexecution.Key) (messagemodel.ToolCall, error) {
+func (r ToolCallQueries) getCallLocked(callKey toolexecution.Key) (sessionentry.ToolCall, error) {
 	key, err := r.s.lookup(lookupKey{kind: "tool-call", owner: callKey.ExecutionID.String(), value: callKey.CallID})
 	if err != nil {
-		return messagemodel.ToolCall{}, err
+		return sessionentry.ToolCall{}, err
 	}
 	entry, ok := r.s.entry(key)
 	if !ok {
-		return messagemodel.ToolCall{}, fault.ErrNotFound
+		return sessionentry.ToolCall{}, fault.ErrNotFound
 	}
-	var record messageRecord
-	if err := decodeJSON(entry.payload, &record); err != nil {
-		return messagemodel.ToolCall{}, err
-	}
+	record := entry.entryValue()
 	for _, value := range record.Data.ToolCalls(identity.SessionID(entry.scope), record.AgentID) {
 		if value.Key == callKey {
 			return value, nil
 		}
 	}
-	return messagemodel.ToolCall{}, fault.ErrNotFound
+	return sessionentry.ToolCall{}, fault.ErrNotFound
 }
 
-func (r ToolCallQueries) GetResult(ctx context.Context, key toolexecution.Key) (messagemodel.Message, error) {
-	record, err := getByClaim[messageRecord](ctx, r.s, lookupKey{kind: "tool-result", owner: key.ExecutionID.String(), value: key.CallID})
+func (r ToolCallQueries) GetResult(ctx context.Context, key toolexecution.Key) (sessionentry.ContextEntry, error) {
+	record, err := getByClaim[entryRecord](ctx, r.s, lookupKey{kind: "tool-result", owner: key.ExecutionID.String(), value: key.CallID})
 	return record.Data, err
 }
 
 func (r ToolCallQueries) ListMissingToolResults(ctx context.Context) ([]repository.MissingToolResult, error) {
 	values := make([]repository.MissingToolResult, 0)
 	err := r.s.view(ctx, func() error {
-		for _, key := range r.s.keys(lookupKey{kind: "all-tool-call-messages"}) {
+		for _, key := range r.s.keys(lookupKey{kind: "all-tool-call-entries"}) {
 			entry, _ := r.s.entry(key)
-			var record messageRecord
-			if err := decodeJSON(entry.payload, &record); err != nil {
-				return err
-			}
+			record := entry.entryValue()
 			callIndex := 0
-			for _, block := range record.Data.Blocks {
-				if block.Kind != messagemodel.BlockToolCall {
+			for _, block := range record.Data.Content {
+				if block.Kind != sessionentry.BlockToolCall {
 					continue
 				}
 				_, err := r.s.lookup(lookupKey{kind: "tool-result", owner: record.Data.ExecutionID, value: block.CallID})

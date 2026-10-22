@@ -4,6 +4,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -25,7 +26,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	return messages, nil
 }
 
-func chatMessagesFromContext(entry appcontext.ContextEntry, ids map[string]string) ([]chatMessage, error) {
+func chatMessagesFromContext(entry sessionentry.ContextEntry, ids map[string]string) ([]chatMessage, error) {
 	var messages []chatMessage
 	result := chatMessage{Role: string(entry.Role)}
 	flush := func() {
@@ -36,8 +37,8 @@ func chatMessagesFromContext(entry appcontext.ContextEntry, ids map[string]strin
 	}
 	for index, block := range entry.Content {
 		switch block.Kind {
-		case appcontext.ContextBlockText:
-			if entry.Role == appcontext.ContextRoleTool {
+		case sessionentry.BlockText:
+			if entry.Role == sessionentry.RoleTool {
 				return nil, fmt.Errorf("tool role requires tool results")
 			}
 			if result.Content == nil {
@@ -46,8 +47,8 @@ func chatMessagesFromContext(entry appcontext.ContextEntry, ids map[string]strin
 			} else {
 				*result.Content += block.Text
 			}
-		case appcontext.ContextBlockToolCall:
-			if entry.Role != appcontext.ContextRoleAssistant {
+		case sessionentry.BlockToolCall:
+			if entry.Role != sessionentry.RoleAssistant {
 				return nil, fmt.Errorf("tool call requires assistant role")
 			}
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
@@ -58,11 +59,11 @@ func chatMessagesFromContext(entry appcontext.ContextEntry, ids map[string]strin
 				Type:     "function",
 				Function: chatFunctionCall{Name: block.Name, Arguments: string(block.Input)},
 			})
-		case appcontext.ContextBlockToolResult:
+		case sessionentry.BlockToolResult:
 			flush()
 			text := block.Text
 			messages = append(messages, chatMessage{Role: "tool", ToolCallID: ids[block.CallID], Content: &text})
-		case appcontext.ContextBlockReasoningState:
+		case sessionentry.BlockReasoningState:
 			continue
 		default:
 			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)

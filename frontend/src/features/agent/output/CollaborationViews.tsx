@@ -1,5 +1,5 @@
 import { Bot, ChevronDown, ExternalLink, GitBranch } from 'lucide-react'
-import type { AgentHistoryItem, AgentSnapshot } from '../../../api'
+import type { ContextEntry, AgentSnapshot } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { OutputStatus } from './OutputStatus'
 import type { ToolStatus } from './toolPresentation'
@@ -8,7 +8,7 @@ import { OperationDuration } from '../../timing/OperationTimings'
 
 type CollaborationViewsProps = {
     agents: AgentSnapshot[]
-    histories: Record<string, AgentHistoryItem[]>
+    histories: Record<string, ContextEntry[]>
     historyErrors: Record<string, string>
     streamingOutputs: Record<string, StreamingOutput>
     onSelectAgent: (id: string) => void
@@ -55,14 +55,15 @@ export function CollaborationViews({ agents, histories, historyErrors, streaming
     </div>
 }
 
-function taskView(agent: AgentSnapshot, history: AgentHistoryItem[], streaming?: StreamingOutput, historyError?: string) {
+function taskView(agent: AgentSnapshot, history: ContextEntry[], streaming?: StreamingOutput, historyError?: string) {
     const task = agent.executions.find((item) => item.id === agent.currentExecutionId) || [...agent.executions].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0]
     const live = streaming && !agent.executions.some((item) => item.id === streaming.executionId && item.status === 'ended') ? streaming : undefined
     const executionId = live?.executionId || task?.id || ''
-    const messages = history.filter((item) => item.message && (!executionId || item.message.executionId === executionId)).sort((left, right) => (right.message?.sequence || 0) - (left.message?.sequence || 0))
-    const input = messages.find((item) => item.message?.role === 'user')?.message
-    const reply = messages.find((item) => item.message?.role === 'assistant' && (item.message.content || item.message.blocks?.some((block) => block.kind === 'text' && block.text)))?.message
-    const result = live?.turns.flatMap((turn) => turn.events.filter((event) => event.kind === 'text_delta').map((event) => event.text || '')).join('') || reply?.content || reply?.blocks?.filter((block) => block.kind === 'text').map((block) => block.text || '').join('\n') || ''
+    const messages = history.filter((item) => !executionId || item.executionId === executionId)
+    const text = (item?: ContextEntry) => item?.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') || ''
+    const input = messages.find((item) => item.role === 'user')
+    const reply = messages.findLast((item) => item.role === 'assistant' && text(item))
+    const result = live?.turns.flatMap((turn) => turn.events.filter((event) => event.kind === 'text_delta').map((event) => event.text || '')).join('') || text(reply)
     let status: ToolStatus = 'queued'
     let label = '等待执行'
     if (live?.error) {
@@ -84,5 +85,5 @@ function taskView(agent: AgentSnapshot, history: AgentHistoryItem[], streaming?:
         status = 'completed'
         label = '已完成'
     }
-    return { agent, executionId, task: input?.content || input?.blocks?.filter((block) => block.kind === 'text').map((block) => block.text || '').join('\n') || '', result, status, label, error: historyError ? `历史加载失败：${historyError}` : live?.error || task?.failureCode || '' }
+    return { agent, executionId, task: text(input), result, status, label, error: historyError ? `历史加载失败：${historyError}` : live?.error || task?.failureCode || '' }
 }

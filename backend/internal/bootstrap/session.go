@@ -16,7 +16,7 @@ func buildSessions(resources storageResources, repos storage.Repositories, agent
 		Projects:       repos.Projects,
 		Workspaces:     repos.Workspaces,
 		Sessions:       repos.Sessions,
-		Messages:       repos.Messages,
+		Entries:        repos.Entries,
 		Contexts:       repos.Contexts,
 		Agents:         repos.Agents,
 		Tasks:          repos.Executions,

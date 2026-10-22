@@ -14,7 +14,7 @@ type Repositories struct {
 	Contexts       ContextRepository
 	ToolExecutions ToolExecutionRepository
 	Controls       ControlRepository
-	Messages       MessageRepository
+	Entries        EntryRepository
 	ToolCalls      ToolCallQueries
 	Timings        TimingStore
 	ModelUsage     ModelUsageStore
@@ -31,7 +31,7 @@ func (s *Store) Repositories() Repositories {
 		Contexts:       ContextRepository{s},
 		ToolExecutions: ToolExecutionRepository{s},
 		Controls:       ControlRepository{s},
-		Messages:       MessageRepository{s},
+		Entries:        EntryRepository{s},
 		ToolCalls:      ToolCallQueries{s},
 		Timings:        TimingStore{Store: s},
 		ModelUsage:     ModelUsageStore{Store: s},
@@ -45,9 +45,9 @@ var (
 	_ repository.Agent           = AgentRepository{}
 	_ repository.AgentExecution  = AgentExecutionRepository{}
 	_ repository.ToolExecution   = ToolExecutionRepository{}
-	_ repository.SessionContext  = ContextRepository{}
+	_ repository.SessionFacts    = ContextRepository{}
 	_ repository.AgentControl    = ControlRepository{}
-	_ repository.Message         = MessageRepository{}
+	_ repository.Entries         = EntryRepository{}
 	_ repository.ToolCallQueries = ToolCallQueries{}
 	_ repository.Timing          = TimingStore{}
 	_ repository.ModelUsage      = ModelUsageStore{}

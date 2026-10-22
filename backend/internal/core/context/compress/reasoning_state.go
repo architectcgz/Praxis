@@ -1,18 +1,18 @@
 package compress
 
 import (
-	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/session/entry"
 )
 
 // summaryHistory 不把签名、加密载荷或展示性思考正文发送给摘要模型。
 // 只作用于可安全丢弃的连续历史区段，保留区段仍使用原始深拷贝。
-func summaryHistory(entries []appcontext.ContextEntry) []appcontext.ContextEntry {
-	var history []appcontext.ContextEntry
+func summaryHistory(entries []sessionentry.ContextEntry) []sessionentry.ContextEntry {
+	var history []sessionentry.ContextEntry
 	for _, entry := range entries {
 		copy := entry
 		copy.Content = nil
 		for _, block := range entry.Content {
-			if block.Kind != appcontext.ContextBlockReasoningState && block.Kind != appcontext.ContextBlockThinking {
+			if block.Kind != sessionentry.BlockReasoningState && block.Kind != sessionentry.BlockThinking {
 				copy.Content = append(copy.Content, block.Clone())
 			}
 		}

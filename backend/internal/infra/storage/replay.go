@@ -21,8 +21,14 @@ func (s *Store) replay(ctx context.Context, scope jsonl.Scope) error {
 			if err != nil {
 				return err
 			}
-			if prior, ok := s.entry(eventKey(scope.ID, event)); ok && bytes.Equal(prior.payload, event.Payload) {
-				return errors.New("redundant or duplicate event")
+			if _, ok := s.entry(eventKey(scope.ID, event)); ok {
+				payload, err := s.payload(eventKey(scope.ID, event))
+				if err != nil {
+					return err
+				}
+				if bytes.Equal(payload, event.Payload) {
+					return errors.New("redundant or duplicate event")
+				}
 			}
 		}
 		if event.Collection == "session" && event.Type != "session.deleted" {

@@ -8,8 +8,8 @@ import (
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
-	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 )
@@ -77,9 +77,12 @@ func (r *Runner) run(
 	if deps.ToolExecutor == nil || deps.Assistant == nil {
 		return loopResult(fail(FailureContract, ErrorContract, "scoped tool execution and assistant committer are required"))
 	}
-	modelContext, err := (appcontext.ContextBuilder{}).Build(executionInput.Content, appcontext.Limits{ContextWindow: executionInput.Config.Model.ContextWindow, MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens})
-	if err != nil {
-		return loopResult(modelFailure(err))
+	if executionInput.Context == nil {
+		return loopResult(fail(FailureContract, ErrorContract, "session context is required"))
+	}
+	modelContext := executionInput.Context
+	if executionInput.InputEntry != nil {
+		r.emit(Event{Kind: EventEntriesAppended, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, Entries: []sessionentry.ContextEntry{*executionInput.InputEntry}})
 	}
 	builtModel, err := r.buildModel(executionInput.Config.Model)
 	if err != nil {
@@ -93,12 +96,12 @@ func (r *Runner) run(
 			PromptCacheKey:  executionInput.SessionID.String(),
 			Model:           executionInput.Config.Model,
 			MaxOutputTokens: builtModel.MaxOutputTokens,
-		}, modelContext, r.Tools)
+		}, *modelContext, r.Tools)
 		toolPayload, err := json.Marshal(request.Tools)
 		if err != nil {
 			return loopResult(failCause(FailureContract, err))
 		}
-		compressed, changed, err := r.CompressionStrategy.Compress(ctx, modelContext, contextcompress.Options{
+		compressed, changed, err := r.CompressionStrategy.Compress(ctx, *modelContext, contextcompress.Options{
 			SummaryFormat:   r.SummaryFormat,
 			ContextWindow:   executionInput.Config.Model.ContextWindow,
 			MaxOutputTokens: builtModel.MaxOutputTokens,
@@ -112,8 +115,19 @@ func (r *Runner) run(
 			return loopResult(err)
 		}
 		if changed {
+			for index, entry := range compressed.Entries {
+				if entry.Kind != sessionentry.ContextEntrySummary || entry.ID != "" {
+					continue
+				}
+				stored, err := deps.Assistant.AppendSummary(ctx, entry)
+				if err != nil {
+					return loopResult(failCause(FailureStorage, err))
+				}
+				compressed.Entries[index] = stored
+				r.emit(Event{Kind: EventEntriesAppended, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, Entries: []sessionentry.ContextEntry{stored}})
+			}
 			r.Logf("context compressed execution_id=%s entriesBefore=%d entriesAfter=%d", executionInput.ID, len(modelContext.Entries), len(compressed.Entries))
-			modelContext = compressed
+			*modelContext = compressed
 			request.Context = modelContext.Clone()
 		}
 		sequence, err := r.Requests.NextRequestSequence(ctx, executionInput.ID)
@@ -122,7 +136,7 @@ func (r *Runner) run(
 		}
 		turnID := identity.NewTurnID(executionInput.ID, sequence)
 		request.TurnID = turnID
-		outcome, failureCode, finished, err := r.executeTurn(ctx, executionInput, deps, builtModel, request, &modelContext, sequence)
+		outcome, failureCode, finished, err := r.executeTurn(ctx, executionInput, deps, builtModel, request, modelContext, sequence)
 
 		if err != nil || outcome != EndCompleted || finished {
 			return outcome, failureCode, err
@@ -170,26 +184,53 @@ func (r *Runner) executeTurn(
 		r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 	})
 	if err != nil {
+		blocks := modelapi.EntryBlocksFromEvents(response.events)
+		partial := make([]sessionentry.Block, 0, len(blocks))
+		for _, block := range blocks {
+			if block.Kind == sessionentry.BlockText || block.Kind == sessionentry.BlockThinking {
+				partial = append(partial, block)
+			}
+		}
+		if len(partial) > 0 {
+			stopReason := "error"
+			if ctx.Err() != nil {
+				stopReason = "aborted"
+			}
+			stored, _, writeErr := deps.Assistant.AppendAssistant(context.WithoutCancel(ctx), AssistantWrite{Entry: sessionentry.ContextEntry{
+				ID: "assistant:" + turnID.String(), RequestID: executionInput.RequestID.String(), ExecutionID: executionInput.ID.String(),
+				TurnID: turnID.String(), StopReason: stopReason, Role: sessionentry.RoleAssistant, AuthorKind: sessionentry.AuthorAgent,
+				AuthorID: executionInput.AgentID.String(), Content: partial,
+			}})
+			if writeErr != nil {
+				err = errors.Join(err, writeErr)
+			} else {
+				*modelContext = modelContext.Append(stored)
+				r.emit(Event{Kind: EventTurnCompleted, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, TurnID: turnID, Entries: []sessionentry.ContextEntry{stored}})
+			}
+		}
 		err = modelFailure(err)
 		r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 		outcome, code, cause := loopResult(err)
 		return outcome, code, false, cause
 	}
-	assistant := modelapi.ContextBlocksFromEvents(response.events)
-	var calls []messagemodel.ToolCall
+
+	assistant := modelapi.EntryBlocksFromEvents(response.events)
+	var calls []sessionentry.ToolCall
+	var committed []sessionentry.ContextEntry
 
 	{
-		message := outputMessage(messagemodel.Message{
+		message := sessionentry.ContextEntry{
 			ID:          "assistant:" + turnID.String(),
 			RequestID:   executionInput.RequestID.String(),
 			ExecutionID: executionInput.ID.String(),
 			TurnID:      turnID.String(),
 			StopReason:  string(response.stopReason),
-			Role:        messagemodel.RoleAssistant,
-			AuthorKind:  messagemodel.AuthorAgent,
+			Role:        sessionentry.RoleAssistant,
+			AuthorKind:  sessionentry.AuthorAgent,
 			AuthorID:    executionInput.AgentID.String(),
-		}, assistant)
-		value := AssistantWrite{Message: message}
+			Content:     assistant,
+		}
+		value := AssistantWrite{Entry: message}
 		if response.stopReason == modelapi.StopCompleted || response.stopReason == modelapi.StopSequence {
 			value.FinalOutput = &agentmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
 		}
@@ -199,7 +240,9 @@ func (r *Runner) executeTurn(
 			outcome, code, cause := loopResult(failCause(FailureStorage, err))
 			return outcome, code, false, cause
 		}
+		committed = append(committed, message)
 		calls = message.ToolCalls(executionInput.SessionID, executionInput.AgentID)
+		*modelContext = modelContext.Append(message)
 		if inserted && value.FinalOutput != nil {
 			if hookErr := r.HookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
 				Identity: hook.Identity{
@@ -208,7 +251,7 @@ func (r *Runner) executeTurn(
 					ExecutionID: executionInput.ID,
 					TurnID:      turnID,
 				},
-				Message: &message,
+				Entry: &message,
 			}); hookErr != nil {
 				r.Logf("assistant committed hook failed: %v", hookErr)
 			}
@@ -226,11 +269,11 @@ func (r *Runner) executeTurn(
 			Input:       append([]byte(nil), call.Arguments...),
 		})
 	}
-	*modelContext = modelContext.AppendProviderOutput(assistant)
 	if response.stopReason == modelapi.StopCompleted || response.stopReason == modelapi.StopSequence {
 
 		r.emit(Event{
 			Kind:        EventTurnCompleted,
+			Entries:     committed,
 			SessionID:   executionInput.SessionID,
 			AgentID:     executionInput.AgentID,
 			ExecutionID: executionInput.ID,
@@ -240,18 +283,22 @@ func (r *Runner) executeTurn(
 		return EndCompleted, "", true, nil
 	}
 	results, err := r.runToolCalls(ctx, executionInput, deps, calls, turnID)
+	committed = append(committed, results...)
 	if err != nil {
+		if len(committed) > 0 {
+			r.emit(Event{Kind: EventTurnCompleted, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, TurnID: turnID, Entries: committed})
+		}
 		r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 		outcome, code, cause := loopResult(err)
 		return outcome, code, false, cause
 	}
 	for _, result := range results {
-		block := result.Blocks[0]
-		*modelContext = modelContext.AppendToolResult(appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
+		*modelContext = modelContext.Append(result)
 	}
 
 	r.emit(Event{
 		Kind:        EventTurnCompleted,
+		Entries:     committed,
 		SessionID:   executionInput.SessionID,
 		AgentID:     executionInput.AgentID,
 		ExecutionID: executionInput.ID,

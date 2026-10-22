@@ -6,8 +6,8 @@ import (
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	anthropicmessages "praxis/internal/infra/providers/anthropic"
-	"praxis/internal/infra/providers/openai_chat"
-	"praxis/internal/infra/providers/openai_responses"
+	openaichat "praxis/internal/infra/providers/openai_chat"
+	openairesponses "praxis/internal/infra/providers/openai_responses"
 )
 
 func newModelStream(

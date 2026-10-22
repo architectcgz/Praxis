@@ -5,10 +5,10 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
-	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	taskmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
@@ -26,7 +26,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	}
 	// 请求身份只在调度准入时建立；由 Task ID 派生以保证准备重试使用同一身份。
 	requestID := identity.RequestID(input.ID)
-	inputMessageID := "input:" + requestID.String()
+	inputEntryID := "input:" + requestID.String()
 	owner, err := s.agents.Get(ctx, agentID)
 	if err != nil {
 		return result, false, err
@@ -36,11 +36,11 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	}
 	previous, err := s.records.FindByRequest(ctx, owner.ID, requestID)
 	if err == nil {
-		stored, err := s.messages.Get(ctx, agentservice.MessageStream(owner), previous.InputMessageID)
+		stored, err := s.entries.Get(ctx, agentservice.EntryStream(owner), previous.InputEntryID)
 		if err != nil {
 			return result, false, err
 		}
-		if previous.SourceTaskID != input.ID || stored.Role != messagemodel.RoleUser || stored.TextContent() != input.Prompt {
+		if previous.SourceTaskID != input.ID || stored.Role != sessionentry.RoleUser || stored.TextContent() != input.Prompt {
 			return result, false, fault.ErrRequestConflict
 		}
 		return previous, true, nil
@@ -75,8 +75,8 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	}
 	at := s.clock.Now()
 	executionID := identity.AgentExecutionID(s.ids.New("execution"))
-	if previous, err := s.messages.Get(ctx, agentservice.MessageStream(owner), inputMessageID); err == nil {
-		if previous.Role != messagemodel.RoleUser || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
+	if previous, err := s.entries.Get(ctx, agentservice.EntryStream(owner), inputEntryID); err == nil {
+		if previous.Role != sessionentry.RoleUser || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
 			return result, false, fault.ErrRequestConflict
 		}
 		executionID = identity.AgentExecutionID(previous.ExecutionID)
@@ -95,28 +95,24 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 			s.executions.Release(owner.ID, executionID)
 		}
 	}()
-	stored, _, err := s.messages.Append(ctx, messagemodel.Record{
-		Stream:  agentservice.MessageStream(owner),
+	stored, _, err := s.entries.Append(ctx, sessionentry.Record{
+		Stream:  agentservice.EntryStream(owner),
 		AgentID: owner.ID,
-		Data: messagemodel.Message{
-			ID:           inputMessageID,
+		Data: sessionentry.ContextEntry{
+			ID:           inputEntryID,
 			RequestID:    requestID.String(),
 			SourceTaskID: input.ID.String(),
 			ExecutionID:  executionID.String(),
-			Role:         messagemodel.RoleUser,
-			AuthorKind:   messagemodel.AuthorUser,
-			Blocks:       []messagemodel.Block{{Kind: messagemodel.BlockText, Text: input.Prompt}},
+			Role:         sessionentry.RoleUser,
+			AuthorKind:   sessionentry.AuthorUser,
+			Content:      []sessionentry.Block{{Kind: sessionentry.BlockText, Text: input.Prompt}},
 			CreatedAt:    at,
 		},
 	})
 	if err != nil {
 		return result, false, err
 	}
-	selection, err := s.selectContext(ctx, owner, config, inputMessageID)
-	if err != nil {
-		return result, false, err
-	}
-	result = agentmodel.NewExecution(executionID, owner.SessionID, owner.ID, requestID, inputMessageID, config, selection, at)
+	result = agentmodel.NewExecution(executionID, owner.SessionID, owner.ID, requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID
 	if err = s.records.Save(ctx, result); err != nil {
 		return agentmodel.Execution{}, false, err
@@ -128,7 +124,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 			SourceTaskID: result.SourceTaskID,
 			ExecutionID:  result.ID,
 		},
-		Message: &stored,
+		Entry: &stored,
 	}); hookErr != nil {
 		s.logger.Errorf("user message committed hook failed: %v", hookErr)
 	}

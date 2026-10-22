@@ -3,6 +3,7 @@ package coordinator
 import (
 	"encoding/json"
 	"praxis/internal/core/model"
+	sessionentry "praxis/internal/core/session/entry"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/identity"
 	"sync"
@@ -12,6 +13,7 @@ const EventToolApprovalRequired = "tool_approval_required"
 
 // Event 是进程内执行通知，持久化事实仍由业务查询读取。
 type Event struct {
+	Entries        []sessionentry.ContextEntry
 	Kind           string
 	SessionID      identity.SessionID
 	AgentID        identity.AgentID

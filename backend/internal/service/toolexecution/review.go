@@ -7,9 +7,9 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/repository"
@@ -44,14 +44,14 @@ const riskReviewSchema = `{
 // RiskReviewer 使用既有模型与消息读取能力进行独立审核，不写消息、不决定调用状态。
 type RiskReviewer struct {
 	Models       modelapi.ModelBuilder
-	Messages     repository.Message
+	Entries      repository.Entries
 	Agents       repository.Agent
 	Hooks        *hook.Dispatcher
 	ObserveUsage func(modelapi.ModelUsageRecord)
 }
 
 // Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
-func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, call message.ToolCall, args json.RawMessage, workspacePath string, decision security.ApprovalDecision, attempt toolexecution.RiskReview) (assessment security.RiskAssessment, err error) {
+func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, call sessionentry.ToolCall, args json.RawMessage, workspacePath string, decision security.ApprovalDecision, attempt toolexecution.RiskReview) (assessment security.RiskAssessment, err error) {
 	ctx, scope := r.Hooks.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
 			SessionID:   task.SessionID,
@@ -71,7 +71,7 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 	if owner.SessionID != task.SessionID || call.AgentID != owner.ID {
 		return assessment, fault.ErrRequestConflict
 	}
-	input, err := r.Messages.Get(ctx, agentservice.MessageStream(owner), task.InputMessageID)
+	input, err := r.Entries.Get(ctx, agentservice.EntryStream(owner), task.InputEntryID)
 	if err != nil {
 		return assessment, err
 	}
@@ -104,11 +104,11 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 	}
 	history, err := appcontext.NewContextBuilder().Build(appcontext.Content{
 		SystemPrompt: riskReviewPrompt,
-		Entries: []appcontext.ContextEntry{{
+		Entries: []sessionentry.ContextEntry{{
 			Protected: true,
-			Kind:      appcontext.ContextEntryUserInput,
-			Role:      appcontext.ContextRoleUser,
-			Content:   []appcontext.ContextBlock{{Kind: appcontext.ContextBlockText, Text: string(data)}},
+			Kind:      sessionentry.ContextEntryUserInput,
+			Role:      sessionentry.RoleUser,
+			Content:   []sessionentry.Block{{Kind: sessionentry.BlockText, Text: string(data)}},
 		}},
 	}, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: built.MaxOutputTokens})
 	if err != nil {

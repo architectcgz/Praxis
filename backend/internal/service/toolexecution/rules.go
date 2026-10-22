@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"praxis/internal/core/message"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"sync"
@@ -28,7 +28,7 @@ type ApprovalRules struct {
 }
 
 // Decide 用配置读锁取得同一配置快照，显式 deny 始终优先。
-func (r ApprovalRules) Decide(ctx context.Context, call message.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
+func (r ApprovalRules) Decide(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
 	if r.ConfigMu != nil {
 		r.ConfigMu.RLock()
 		defer r.ConfigMu.RUnlock()
@@ -37,7 +37,7 @@ func (r ApprovalRules) Decide(ctx context.Context, call message.ToolCall, args j
 }
 
 // decide 供已经持有配置读锁的启动临界区使用，避免嵌套 RWMutex 读锁。
-func (r ApprovalRules) decide(ctx context.Context, call message.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
+func (r ApprovalRules) decide(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
 	registered, enabled := r.Catalog.Get(call.Name)
 	if !enabled {
 		return security.ApprovalDecision{Action: security.ApprovalDeny, RuleID: "tool-disabled"}, nil

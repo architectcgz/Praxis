@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
-	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
+	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/workflow"
 	"reflect"
@@ -36,24 +37,24 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 			entry.groups = append(entry.groups, referenceKey(entityKey{collection, id}))
 		}
 	}
-	var identity, sessionID string
+	var entityID, sessionID string
 	switch v := object.(type) {
 	case projectmodel.Project:
-		identity = v.ID.String()
+		entityID = v.ID.String()
 		claim("workspace-id", v.DefaultWorkspaceID.String(), "")
 		claim("workspace-path", v.ID.String(), v.Path)
 	case workspacemodel.Workspace:
-		identity = v.ID.String()
+		entityID = v.ID.String()
 		claim("workspace-id", v.ID.String(), "")
 		group("workspaces-project", v.ProjectID.String(), "")
 		claim("workspace-path", v.ProjectID.String(), v.Path)
 		link("project", v.ProjectID.String())
 	case sessionmodel.Session:
-		identity, sessionID = v.ID.String(), v.ID.String()
+		entityID, sessionID = v.ID.String(), v.ID.String()
 		group("sessions-project", v.ProjectID.String(), "")
 		link("workspace", v.WorkspaceID.String())
 	case agentmodel.Agent:
-		identity, sessionID = v.ID.String(), v.SessionID.String()
+		entityID, sessionID = v.ID.String(), v.SessionID.String()
 		group("agents-session", sessionID, "")
 		group("agents-definition", sessionID, v.DefinitionID.String())
 		if v.DefinitionID == agentmodel.DefinitionPrimary {
@@ -61,7 +62,7 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 		}
 		link("session", sessionID)
 	case agentmodel.Execution:
-		identity, sessionID = v.ID.String(), v.SessionID.String()
+		entityID, sessionID = v.ID.String(), v.SessionID.String()
 
 		group("executions-agent", v.AgentID.String(), "")
 		claim("execution-request", v.AgentID.String(), v.RequestID.String())
@@ -79,45 +80,46 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 		if event.Type != string(v.Kind) {
 			return key, entry, errors.New("tool event payload does not match its event type")
 		}
-		identity, sessionID = fmt.Sprintf("%s@%d", v.Key, event.Sequence), v.SessionID.String()
+		entityID, sessionID = fmt.Sprintf("%s@%d", v.Key, event.Sequence), v.SessionID.String()
 		group("tool-events", v.ExecutionID.String(), v.CallID)
 		link("agent_execution", v.ExecutionID.String())
-	case sessionmodel.SessionContextEntry:
-		identity, sessionID = v.ID.String(), v.SessionID.String()
+	case sessionmodel.SharedFact:
+		entityID, sessionID = v.ID.String(), v.SessionID.String()
 		group("contexts-session", sessionID, "")
 		link("session", sessionID)
 		link("agent_execution", v.SourceExecutionID.String())
 	case agentmodel.AgentControlCommand:
-		identity, sessionID = v.ID.String(), scope
+		entityID, sessionID = v.ID.String(), scope
 		group("controls-execution", v.TargetExecutionID.String(), "")
 		group("controls-agent", v.AgentID.String(), "")
 		link("agent", v.AgentID.String())
 		link("agent_execution", v.TargetExecutionID.String())
 	case workflow.WaitCondition:
-		identity, sessionID = v.ID.String(), scope
+		entityID, sessionID = v.ID.String(), scope
 		link("agent_execution", v.ExecutionID.String())
-	case messageRecord:
-		identity, sessionID = messageKey(v.OwnerID, v.Data.ID), scope
+	case entryRecord:
+		entry.record = &sessionentry.Record{Stream: sessionentry.StreamKey{SessionID: identity.SessionID(scope), OwnerAgentID: identity.AgentID(v.OwnerID)}, AgentID: v.AgentID, Data: v.Data}
+		entityID, sessionID = entryKey(v.OwnerID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
 			return key, entry, errors.New("message sequence does not match event sequence")
 		}
-		group("messages-session", scope, "")
-		group("messages-stream", scope, v.OwnerID)
+		group("entries-session", scope, "")
+		group("entries-stream", scope, v.OwnerID)
 		if v.Data.ExecutionID != "" {
-			group("messages-execution", v.Data.ExecutionID, "")
+			group("entries-execution", v.Data.ExecutionID, "")
 		}
 		link("session", scope)
 		link("agent", v.AgentID.String())
 		link("agent_execution", v.Data.ExecutionID)
 		hasCalls := false
-		for _, block := range v.Data.Blocks {
-			if block.Kind != messagemodel.BlockToolCall && block.Kind != messagemodel.BlockToolResult {
+		for _, block := range v.Data.Content {
+			if block.Kind != sessionentry.BlockToolCall && block.Kind != sessionentry.BlockToolResult {
 				continue
 			}
 			if v.Data.ExecutionID == "" || v.Data.TurnID == "" || block.CallID == "" {
 				return key, entry, errors.New("tool message ownership is required")
 			}
-			if block.Kind == messagemodel.BlockToolCall {
+			if block.Kind == sessionentry.BlockToolCall {
 				claim("tool-call", v.Data.ExecutionID, block.CallID)
 				hasCalls = true
 			} else {
@@ -125,15 +127,15 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 			}
 		}
 		if hasCalls {
-			group("tool-call-messages", v.Data.ExecutionID, "")
-			group("all-tool-call-messages", "", "")
+			group("tool-call-entries", v.Data.ExecutionID, "")
+			group("all-tool-call-entries", "", "")
 		}
 	case modelapi.ModelUsageRecord:
-		identity, sessionID = v.Key(), v.SessionID
+		entityID, sessionID = v.Key(), v.SessionID
 		group("usage-session", sessionID, "")
 		link("agent_execution", v.ExecutionID)
 	case timingmodel.Record:
-		identity, sessionID = v.ID, v.SessionID
+		entityID, sessionID = v.ID, v.SessionID
 		group("timings-agent", v.AgentID, "")
 		if v.Status == timingmodel.Running {
 			group("running-timings", "", "")
@@ -142,7 +144,7 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 	default:
 		return key, entry, fmt.Errorf("unsupported stored object %T", object)
 	}
-	if identity != event.Key || sessionID != scope {
+	if entityID != event.Key || sessionID != scope {
 		return key, entry, errors.New("object identity or session ownership does not match event")
 	}
 	return key, entry, nil
@@ -159,7 +161,7 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 		"wait":            "wait.saved",
 		"control":         "control.saved",
 		"context":         "context.entry_appended",
-		"message":         "message.appended",
+		"entry":           "entry.appended",
 		"timing":          "timing.saved",
 		"usage":           "usage.saved",
 	}
@@ -193,13 +195,13 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 	case "tool_event":
 		target = new(toolexecution.Event)
 	case "context":
-		target = new(sessionmodel.SessionContextEntry)
+		target = new(sessionmodel.SharedFact)
 	case "control":
 		target = new(agentmodel.AgentControlCommand)
 	case "wait":
 		target = new(workflow.WaitCondition)
-	case "message":
-		target = new(messageRecord)
+	case "entry":
+		target = new(entryRecord)
 	case "usage":
 		target = new(modelapi.ModelUsageRecord)
 	case "timing":
@@ -222,13 +224,13 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 		err = validateAgentExecution(*value)
 	case *toolexecution.Event:
 		err = validateToolEvent(*value)
-	case *sessionmodel.SessionContextEntry:
+	case *sessionmodel.SharedFact:
 		err = validateContextEntry(*value)
 	case *agentmodel.AgentControlCommand:
 		err = validateControlCommand(*value)
 	case *workflow.WaitCondition:
 		err = validateWaitCondition(*value)
-	case *messageRecord:
+	case *entryRecord:
 		err = value.Validate()
 	case *modelapi.ModelUsageRecord:
 		err = validateUsageRecord(*value)
@@ -347,26 +349,20 @@ func (s *Store) projectExecution(value *agentmodel.Execution) error {
 	value.Progress.OutputBytes = value.Progress.ModelOutputBytes
 	value.Progress.ToolCalls = 0
 	value.Progress.FinalAssistantID, value.Progress.FinalStopReason = "", ""
-	var lastAssistant messagemodel.Message
+	var lastAssistant sessionentry.ContextEntry
 	// ponytail: 按执行扫描消息派生统计；单次执行消息量成为瓶颈时再缓存增量计数。
-	for _, key := range s.keys(lookupKey{kind: "messages-execution", owner: value.ID.String()}) {
-		data, err := s.payload(key)
-		if err != nil {
-			return err
-		}
-		var record messageRecord
-		if err := decodeJSON(data, &record); err != nil {
-			return err
-		}
+	for _, key := range s.keys(lookupKey{kind: "entries-execution", owner: value.ID.String()}) {
+		source, _ := s.entry(key)
+		record := source.entryValue()
 		message := record.Data
-		if message.Role == messagemodel.RoleAssistant && message.Sequence > lastAssistant.Sequence {
+		if message.Role == sessionentry.RoleAssistant && message.Sequence > lastAssistant.Sequence {
 			lastAssistant = message
 		}
-		for _, block := range message.Blocks {
+		for _, block := range message.Content {
 			switch block.Kind {
-			case messagemodel.BlockToolCall:
+			case sessionentry.BlockToolCall:
 				value.Progress.ToolCalls++
-			case messagemodel.BlockToolResult:
+			case sessionentry.BlockToolResult:
 				value.Progress.OutputBytes += int64(len(block.Text))
 			}
 		}

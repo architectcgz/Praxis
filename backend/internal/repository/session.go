@@ -13,7 +13,7 @@ type Session interface {
 	Save(context.Context, sessionmodel.Session) error
 	List(context.Context, int) ([]sessionmodel.Session, error)
 	ListByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.Session, error)
-	HasMessages(context.Context, identity.SessionID) (bool, error)
+	HasEntries(context.Context, identity.SessionID) (bool, error)
 	Rename(context.Context, identity.SessionID, string, time.Time) error
 	NameFromInput(context.Context, identity.SessionID, string, time.Time) error
 	Delete(context.Context, identity.SessionID, bool) error

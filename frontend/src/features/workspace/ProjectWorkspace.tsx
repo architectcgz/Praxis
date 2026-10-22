@@ -233,10 +233,7 @@ export function ProjectWorkspace() {
                                         agentHistoryErrors={workspace.agentHistoryErrors}
                                         outputStore={workspace.outputStore}
                                         onSelectAgent={(id) => void workspace.selectAgent(id)}
-                                        historyCursor={workspace.historyCursor}
-                                        historyLoadingOlder={workspace.historyLoadingOlder}
                                         historyError={workspace.historyError}
-                                        onLoadOlderHistory={() => void workspace.loadOlderHistory()}
                                         input={workspace.input}
                                         setInput={workspace.setInput}
                                         models={workspace.models}

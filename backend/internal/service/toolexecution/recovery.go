@@ -3,7 +3,7 @@ package toolexecution
 import (
 	"context"
 	"errors"
-	"praxis/internal/core/message"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
@@ -12,14 +12,14 @@ import (
 
 // Recover 仅由已确认旧 Loop 和工具终止的业务恢复编排调用。
 // 不读取审批或 started 判断重放，所有孤儿调用都补同一错误回执。
-func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.Message, error) {
+func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecutionID, callID string) (sessionentry.ContextEntry, error) {
 	key := executionmodel.Key{ExecutionID: executionID, CallID: callID}
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
 	if s.active[key] != nil {
-		return message.Message{}, fault.ErrRequestConflict
+		return sessionentry.ContextEntry{}, fault.ErrRequestConflict
 	}
-	var result message.Message
+	var result sessionentry.ContextEntry
 	err := func(txCtx context.Context) error {
 		stored, err := s.deps.Calls.GetResult(txCtx, key)
 		if err == nil {

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/core/message"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -14,7 +14,7 @@ import (
 
 // 锁顺序固定为 controlMu → 配置读锁 → 仓储写入锁；工具 I/O 不持有这些锁。
 // started 和活动登记共用此锁，Stop 持久化成功后才取消，启动间隙不会丢信号。
-func (s *Service) registerAndMarkStarted(ctx context.Context, call message.ToolCall, args json.RawMessage, execution *executionmodel.Execution) error {
+func (s *Service) registerAndMarkStarted(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, execution *executionmodel.Execution) error {
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
 	if s.deps.Rules.ConfigMu != nil {

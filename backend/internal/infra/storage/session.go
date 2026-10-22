@@ -52,14 +52,14 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 	}), limit), e
 }
 
-// HasMessages 从消息分组派生会话级存在性，不解码消息正文。
-func (r SessionRepository) HasMessages(ctx context.Context, id identity.SessionID) (bool, error) {
+// HasEntries 从消息分组派生会话级存在性，不解码消息正文。
+func (r SessionRepository) HasEntries(ctx context.Context, id identity.SessionID) (bool, error) {
 	found := false
 	err := r.s.view(ctx, func() error {
 		if _, err := getLocked[sessionmodel.Session](r.s, "session", id.String()); err != nil {
 			return err
 		}
-		found = len(r.s.keys(lookupKey{kind: "messages-session", owner: id.String()})) > 0
+		found = len(r.s.keys(lookupKey{kind: "entries-session", owner: id.String()})) > 0
 		return nil
 	})
 	return found, err
@@ -98,7 +98,7 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, on
 			}
 			return err
 		}
-		if onlyEmpty && len(r.s.keys(lookupKey{kind: "messages-session", owner: id.String()})) > 0 {
+		if onlyEmpty && len(r.s.keys(lookupKey{kind: "entries-session", owner: id.String()})) > 0 {
 			return nil
 		}
 		if len(r.s.keys(lookupKey{kind: "active-session", owner: id.String()})) > 0 {

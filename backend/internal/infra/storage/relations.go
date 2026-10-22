@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
-	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
@@ -100,15 +100,15 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if !agent.CanReadSessionContext() {
 			owner = agent.ID.String()
 		}
-		input, err := s.payload(messageEntityKey(scope, owner, v.InputMessageID))
+		input, err := s.payload(entryEntityKey(scope, owner, v.InputEntryID))
 		if err != nil {
 			return err
 		}
-		var record messageRecord
+		var record entryRecord
 		if err := decodeJSON(input, &record); err != nil {
 			return err
 		}
-		if record.AgentID != v.AgentID || record.Data.Role != messagemodel.RoleUser || record.Data.RequestID != v.RequestID.String() || record.Data.SourceTaskID != v.SourceTaskID.String() || record.Data.ExecutionID != v.ID.String() {
+		if record.AgentID != v.AgentID || record.Data.Role != sessionentry.RoleUser || record.Data.RequestID != v.RequestID.String() || record.Data.SourceTaskID != v.SourceTaskID.String() || record.Data.ExecutionID != v.ID.String() {
 			return fault.ErrRequestConflict
 		}
 	case "tool_event":
@@ -144,7 +144,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		}
 		return facts.Apply(v)
 	case "context":
-		var v sessionmodel.SessionContextEntry
+		var v sessionmodel.SharedFact
 		_ = decodeJSON(data, &v)
 		if err := reference("session", scope); err != nil {
 			return err
@@ -171,8 +171,8 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		var v timingmodel.Record
 		_ = decodeJSON(data, &v)
 		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
-	case "message":
-		var v messageRecord
+	case "entry":
+		var v entryRecord
 		_ = decodeJSON(data, &v)
 		if err := reference("session", scope); err != nil {
 			return err
@@ -184,12 +184,25 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if agent.SessionID.String() != scope || v.OwnerID != "" && v.OwnerID != v.AgentID.String() {
 			return errors.New("message agent does not match the stream ownership")
 		}
-		if v.Data.SourceTaskID != "" && (v.Data.Role != messagemodel.RoleUser || v.Data.ExecutionID == "") {
+		if v.Data.Kind == sessionentry.ContextEntrySummary {
+			seen := make(map[string]bool, len(v.Data.Replaces))
+			for _, id := range v.Data.Replaces {
+				if seen[id] {
+					return errors.New("summary repeats a source entry")
+				}
+				seen[id] = true
+				prior, exists := s.entry(entryEntityKey(scope, v.OwnerID, id))
+				if !exists || prior.eventSequence >= entry.eventSequence {
+					return errors.New("summary source entry is missing or follows the summary")
+				}
+			}
+		}
+		if v.Data.SourceTaskID != "" && (v.Data.Role != sessionentry.RoleUser || v.Data.ExecutionID == "") {
 			return errors.New("task input requires a user message and execution identity")
 		}
 		if v.Data.ExecutionID != "" {
 			task, err := getLocked[agentmodel.Execution](s, "agent_execution", v.Data.ExecutionID)
-			if errors.Is(err, fault.ErrNotFound) && v.Data.Role == messagemodel.RoleUser && v.Data.ID == "input:"+v.Data.RequestID {
+			if errors.Is(err, fault.ErrNotFound) && v.Data.Role == sessionentry.RoleUser && v.Data.ID == "input:"+v.Data.RequestID {
 				return nil
 			}
 			if err != nil {
@@ -202,7 +215,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 			if agent.ID != v.AgentID || task.SessionID.String() != scope || v.Data.RequestID != task.RequestID.String() {
 				return errors.New("message stream or request ownership mismatch")
 			}
-			if v.Data.Role == messagemodel.RoleAssistant && (v.Data.AuthorID != task.AgentID.String() || !task.Active() || task.Progress.FinalAssistantID != "") {
+			if v.Data.Role == sessionentry.RoleAssistant && (v.Data.AuthorID != task.AgentID.String() || !task.Active() || task.Progress.FinalAssistantID != "") {
 				return errors.New("assistant author or execution state mismatch")
 			}
 		}
@@ -276,7 +289,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timingmodel.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
 			return fault.ErrRequestConflict
 		}
-	case "context", "message", "tool_event", "control":
+	case "context", "entry", "tool_event", "control":
 		if !bytes.Equal(before, after) {
 			return fault.ErrRequestConflict
 		}

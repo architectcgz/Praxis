@@ -2,7 +2,7 @@ package model
 
 import (
 	"context"
-	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/session/entry"
 )
 
 // ModelStreamEventKind 标识模型 Provider 适配器产生的流事件类型。
@@ -42,7 +42,7 @@ type ModelStreamEvent struct {
 	Usage          *ModelUsage
 	StopReason     ModelStopReason
 	Err            error
-	ReasoningState *appcontext.ReasoningState
+	ReasoningState *sessionentry.ReasoningState
 	// OutputIndex 保存协议输出块顺序，Loop 收集后按此顺序构造历史，不影响实时展示。
 	OutputIndex *int
 }

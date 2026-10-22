@@ -1,3 +1,4 @@
+import type { entry } from '../../wailsjs/go/models'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { getAgentBinding, isBindingAvailable } from './bindings'
 import { normalizeOperationTiming, type OperationTiming } from './timings'
@@ -24,9 +25,8 @@ export type ExecutionFailureCode =
     | 'execution_failed'
     | 'execution_invalid_outcome'
     | 'unknown'
-export type AgentMessageRole = 'user' | 'assistant' | 'tool' | 'unknown'
-export type AgentMessageBlockKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'unknown'
-export type AgentHistoryKind = 'message' | 'execution' | 'request_canceled' | 'unknown'
+export type ContextEntry = entry.ContextEntry
+export type EntryBlock = entry.Block
 
 export type AgentSnapshot = {
     id: string
@@ -53,37 +53,6 @@ export type ExecutionSnapshot = {
     endedAt: string
 }
 
-export type AgentMessage = {
-    id?: string
-    sourceTaskId?: string
-    sequence: number
-    at: string
-    executionId: string
-    role: AgentMessageRole
-    content: string
-    thinking?: string
-    blocks?: AgentMessageBlock[]
-}
-
-export type AgentMessageBlock = {
-    kind: AgentMessageBlockKind
-    text?: string
-    callId?: string
-    name?: string
-    input?: unknown
-    isError?: boolean
-}
-
-export type AgentHistoryItem = {
-    kind: AgentHistoryKind
-    sequence?: number
-    at: string
-    message?: AgentMessage
-    execution?: ExecutionSnapshot
-}
-
-export type AgentHistoryPage = { items: AgentHistoryItem[]; nextCursor: string }
-
 export type ModelUsage = {
     inputTokens: number
     outputTokens?: number
@@ -100,7 +69,8 @@ export type ModelUsageRecord = {
 }
 
 export type AgentEvent = {
-    kind: 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'execution_ended' | 'error' | 'operation_timing'
+    entries?: ContextEntry[]
+    kind: 'entries_appended' | 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'execution_ended' | 'error' | 'operation_timing'
     outcome?: ExecutionOutcome
     failureCode?: ExecutionFailureCode
     failureMessage?: string
@@ -123,14 +93,10 @@ export function getAgent(agentID: string) {
     return getAgentBinding().GetAgent(agentID).then(normalizeAgentSnapshot)
 }
 
-export function listAgentHistory(agentID: string, before = ''): Promise<AgentHistoryPage> {
-    return getAgentBinding().ListAgentHistory(agentID, before).then((value: unknown) => {
-        const record = requiredRecord(value)
-        return { items: normalizeAgentHistory(record.items), nextCursor: requiredString(record.nextCursor) }
-    })
+export function listAgentEntries(agentID: string): Promise<ContextEntry[]> {
+    return getAgentBinding().ListAgentEntries(agentID)
 }
 
-/** 查询会话全部请求的用量；缺失计数保留为未知，不推算 token。 */
 export async function listSessionUsage(sessionId: string): Promise<ModelUsageRecord[]> {
     const values: unknown = await getAgentBinding().ListSessionUsage(sessionId)
     return normalizeModelUsageRecords(values, sessionId)
@@ -169,19 +135,6 @@ export function normalizeAgentSnapshot(value: unknown): AgentSnapshot {
     }
 }
 
-export function normalizeAgentHistory(value: unknown): AgentHistoryItem[] {
-    return requiredArray(value).map((item) => {
-        const record = requiredRecord(item)
-        const kind = enumValue(record.kind, historyKinds, 'unknown')
-        return {
-            kind,
-            sequence: kind === 'message' ? requiredNumber(record.sequence) : optionalNumber(record.sequence),
-            at: requiredString(record.at),
-            message: record.message == null ? undefined : normalizeAgentMessage(record.message),
-            execution: record.execution == null ? undefined : normalizeExecutionSnapshot(record.execution),
-        }
-    })
-}
 
 export function subscribeAgentEvents(listener: (event: AgentEvent) => void) {
     if (!isBindingAvailable()) {
@@ -200,7 +153,7 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         typeof value.executionId !== 'string') {
         return null
     }
-    if (value.kind !== 'turn_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
+    if (value.kind !== 'entries_appended' && value.kind !== 'turn_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
         value.kind !== 'tool_call' && value.kind !== 'tool_approval_required' && value.kind !== 'tool_result' && value.kind !== 'turn_completed' &&
         value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'execution_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
         return null
@@ -232,6 +185,7 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
     }
     return {
         kind: value.kind,
+        entries: value.entries as ContextEntry[] | undefined,
         outcome,
         failureCode,
         failureMessage: terminal && typeof value.failureMessage === 'string' ? value.failureMessage : undefined,
@@ -292,9 +246,6 @@ const executionFailureCodes = [
     'execution_failed',
     'execution_invalid_outcome',
 ] as const
-const messageRoles = ['user', 'assistant', 'tool'] as const
-const blockKinds = ['text', 'thinking', 'tool_call', 'tool_result'] as const
-const historyKinds = ['message', 'execution', 'request_canceled'] as const
 
 function normalizeExecutionSnapshot(value: unknown): ExecutionSnapshot {
     const record = requiredRecord(value)
@@ -311,32 +262,6 @@ function normalizeExecutionSnapshot(value: unknown): ExecutionSnapshot {
     }
 }
 
-function normalizeAgentMessage(value: unknown): AgentMessage {
-    const record = requiredRecord(value)
-    return {
-        id: optionalString(record.id),
-        sourceTaskId: optionalString(record.sourceTaskId),
-        sequence: requiredNumber(record.sequence),
-        at: requiredString(record.at),
-        executionId: requiredString(record.executionId),
-        role: enumValue(record.role, messageRoles, 'unknown'),
-        content: optionalString(record.content),
-        thinking: optionalString(record.thinking),
-        blocks: record.blocks == null ? [] : requiredArray(record.blocks).map(normalizeAgentMessageBlock),
-    }
-}
-
-function normalizeAgentMessageBlock(value: unknown): AgentMessageBlock {
-    const record = requiredRecord(value)
-    return {
-        kind: enumValue(record.kind, blockKinds, 'unknown'),
-        text: optionalString(record.text),
-        callId: optionalString(record.callId),
-        name: optionalString(record.name),
-        input: record.input,
-        isError: typeof record.isError === 'boolean' ? record.isError : undefined,
-    }
-}
 
 function failureCodeValue(value: unknown): ExecutionFailureCode {
     if (value == null) {
@@ -374,16 +299,6 @@ function optionalString(value: unknown): string {
     return typeof value === 'string' ? value : ''
 }
 
-function optionalNumber(value: unknown): number | undefined {
-    return value == null ? undefined : requiredNumber(value)
-}
-
-function requiredNumber(value: unknown): number {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-        throw new Error('Agent 数据格式无效。')
-    }
-    return value
-}
 
 function optionalStringArray(value: unknown): string[] {
     if (value == null) {

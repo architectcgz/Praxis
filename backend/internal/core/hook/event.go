@@ -3,15 +3,15 @@ package hook
 import (
 	"context"
 	"errors"
-	messagemodel "praxis/internal/core/message"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
 
 // CommittedEvent 只通知已经可靠提交的事实，供记忆或审计订阅。
-// 由业务调用方在事务成功返回后发布；通知为 best-effort，不保证跨重启必达或并发全局顺序。
+// 由业务调用方在事实可靠写入后发布；通知为 best-effort，不保证跨重启必达或并发全局顺序。
 type CommittedEvent struct {
 	Identity
-	Message   *messagemodel.Message
+	Entry     *sessionentry.ContextEntry
 	Execution *Execution
 }
 type CommittedHook interface {
@@ -25,7 +25,7 @@ func NewDispatcherWithEvents(operations []OperationHook, events ...CommittedHook
 	return dispatcher
 }
 
-// OnCommitted 收集扩展错误，调用方只能记录错误，不能撤销已提交事务。
+// OnCommitted 收集扩展错误，调用方只能记录错误，不能撤销已提交事实。
 func (d *Dispatcher) OnCommitted(ctx context.Context, event CommittedEvent) error {
 	if d == nil {
 		return nil

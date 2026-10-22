@@ -3,9 +3,9 @@ package storage
 import (
 	"encoding/json"
 	"errors"
-	appcontext "praxis/internal/core/context"
 	modelconfig "praxis/internal/core/model/config"
 	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/fault"
 	"reflect"
 	"slices"
@@ -29,7 +29,7 @@ func validateSession(value sessionmodel.Session) error {
 }
 
 // validateReasoningState 在消息输入边界检查存储字段，不解释 Provider 的 opaque 内容。
-func validateReasoningState(state *appcontext.ReasoningState) error {
+func validateReasoningState(state *sessionentry.ReasoningState) error {
 	if state == nil {
 		return errors.New("reasoning state is required")
 	}
@@ -42,7 +42,7 @@ func validateReasoningState(state *appcontext.ReasoningState) error {
 	if state.Protocol != string(modelconfig.APIFormatOpenAIResponses) && state.Protocol != string(modelconfig.APIFormatAnthropicMessages) {
 		return errors.New("unsupported reasoning state protocol")
 	}
-	if len(state.Payload) == 0 || len(state.Payload) > appcontext.MaxReasoningStateBytes {
+	if len(state.Payload) == 0 || len(state.Payload) > sessionentry.MaxReasoningStateBytes {
 		return errors.New("invalid or oversized reasoning state payload")
 	}
 	var object map[string]json.RawMessage

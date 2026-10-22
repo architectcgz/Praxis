@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"maps"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/fault"
 	"slices"
 )
@@ -11,6 +12,7 @@ type entityKey struct{ collection, id string }
 type lookupKey struct{ kind, owner, value string }
 
 type stateEntry struct {
+	record        *sessionentry.Record
 	scope         string
 	payload       json.RawMessage
 	groups        []lookupKey
@@ -92,4 +94,9 @@ func (s *Store) lookup(claim lookupKey) (entityKey, error) {
 func (s *Store) entry(key entityKey) (stateEntry, bool) {
 	entry, ok := s.state.entries[key]
 	return entry, ok
+}
+
+// entryValue 与 Session History 共享只读正文，索引不再持有另一份序列化正文。
+func (e stateEntry) entryValue() entryRecord {
+	return entryRecord{OwnerID: e.record.Stream.OwnerAgentID.String(), AgentID: e.record.AgentID, Data: e.record.Data}
 }

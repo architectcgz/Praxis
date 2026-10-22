@@ -7,6 +7,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
 )
@@ -33,7 +34,7 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) ([]json.
 	return input, nil
 }
 
-func responseItems(entry appcontext.ContextEntry, config modelapi.Config, ids map[string]string) ([]json.RawMessage, error) {
+func responseItems(entry sessionentry.ContextEntry, config modelapi.Config, ids map[string]string) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	var text strings.Builder
 	appendItem := func(item any) error {
@@ -54,19 +55,19 @@ func responseItems(entry appcontext.ContextEntry, config modelapi.Config, ids ma
 		return err
 	}
 	for index, block := range entry.Content {
-		if block.Kind != appcontext.ContextBlockText {
+		if block.Kind != sessionentry.BlockText {
 			if err := flushText(); err != nil {
 				return nil, err
 			}
 		}
 		switch block.Kind {
-		case appcontext.ContextBlockText:
-			if entry.Role == appcontext.ContextRoleTool {
+		case sessionentry.BlockText:
+			if entry.Role == sessionentry.RoleTool {
 				return nil, errors.New("responses tool role requires tool results")
 			}
 			text.WriteString(block.Text)
-		case appcontext.ContextBlockToolCall:
-			if entry.Role != appcontext.ContextRoleAssistant {
+		case sessionentry.BlockToolCall:
+			if entry.Role != sessionentry.RoleAssistant {
 				return nil, errors.New("responses function call requires assistant role")
 			}
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
@@ -80,7 +81,7 @@ func responseItems(entry appcontext.ContextEntry, config modelapi.Config, ids ma
 			}); err != nil {
 				return nil, err
 			}
-		case appcontext.ContextBlockToolResult:
+		case sessionentry.BlockToolResult:
 			if err := appendItem(inputFunctionOutput{
 				Type:   "function_call_output",
 				CallID: ids[block.CallID],
@@ -88,7 +89,7 @@ func responseItems(entry appcontext.ContextEntry, config modelapi.Config, ids ma
 			}); err != nil {
 				return nil, err
 			}
-		case appcontext.ContextBlockReasoningState:
+		case sessionentry.BlockReasoningState:
 			state := block.ReasoningState
 			if !config.CanReplayReasoningState(state) {
 				continue

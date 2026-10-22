@@ -4,15 +4,15 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
-	messagemodel "praxis/internal/core/message"
 	modelapi "praxis/internal/core/model"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 )
 
 // ToolExecutor 执行已提交的完整调用，完成授权、审批等待和执行后返回已提交回执。
 type ToolExecutor interface {
-	Execute(context.Context, messagemodel.ToolCall) (messagemodel.Message, error)
+	Execute(context.Context, sessionentry.ToolCall) (sessionentry.ContextEntry, error)
 }
 
 type (
@@ -40,12 +40,13 @@ type Result struct{ Reason EndReason }
 
 // Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
 type Input struct {
-	ID        identity.AgentExecutionID
-	SessionID identity.SessionID
-	AgentID   identity.AgentID
-	RequestID identity.RequestID
-	Config    Config
-	Content   appcontext.Content
+	ID         identity.AgentExecutionID
+	SessionID  identity.SessionID
+	AgentID    identity.AgentID
+	RequestID  identity.RequestID
+	Config     Config
+	Context    *appcontext.ModelContext
+	InputEntry *sessionentry.ContextEntry
 }
 
 // ExecutionDependencies 只在本次 Run 中使用；共享 Runner 不保存单次执行的环境或等待状态。
@@ -74,11 +75,12 @@ const (
 
 // AssistantWrite 是一次输出提交的输入；FinalOutput 用于校验，完成证据以消息为准。
 type AssistantWrite struct {
-	Message     messagemodel.Message
+	Entry       sessionentry.ContextEntry
 	FinalOutput *agentmodel.FinalOutput
 }
 
 // AssistantCommitter 是绑定本次执行的输出提交能力，由 Execution Service 实现。
 type AssistantCommitter interface {
-	AppendAssistant(context.Context, AssistantWrite) (messagemodel.Message, bool, error)
+	AppendAssistant(context.Context, AssistantWrite) (sessionentry.ContextEntry, bool, error)
+	AppendSummary(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, error)
 }

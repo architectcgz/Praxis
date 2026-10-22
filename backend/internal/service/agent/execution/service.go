@@ -26,9 +26,9 @@ type Dependencies struct {
 	Agents         repository.Agent
 	Records        repository.AgentExecution
 	Executions     *taskmodel.ActiveTasks
-	Messages       repository.Message
+	Entries        repository.Entries
 	Definitions    AgentDefinitionProvider
-	Contexts       repository.SessionContext
+	Contexts       repository.SessionFacts
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -43,9 +43,9 @@ type Service struct {
 	agents         repository.Agent
 	records        repository.AgentExecution
 	executions     *taskmodel.ActiveTasks
-	messages       repository.Message
+	entries        repository.Entries
 	definitions    AgentDefinitionProvider
-	contexts       repository.SessionContext
+	contexts       repository.SessionFacts
 	clock          clock.Clock
 	ids            identity.IDGenerator
 }
@@ -63,7 +63,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		"sessions":    deps.Sessions,
 		"agents":      deps.Agents,
 		"tasks":       deps.Records,
-		"messages":    deps.Messages,
+		"entries":     deps.Entries,
 		"definitions": deps.Definitions,
 	} {
 		if value == nil {
@@ -79,7 +79,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		agents:         deps.Agents,
 		records:        deps.Records,
 		executions:     deps.Executions,
-		messages:       deps.Messages,
+		entries:        deps.Entries,
 		definitions:    deps.Definitions,
 		contexts:       deps.Contexts,
 		clock:          clock.ClockOrDefault(deps.Clock),

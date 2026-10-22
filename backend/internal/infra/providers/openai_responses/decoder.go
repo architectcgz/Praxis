@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
 )
@@ -486,7 +486,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if item.Status != nil && *item.Status != "completed" {
 				return "", errors.New("responses completed with incomplete reasoning")
 			}
-			if stringValue(item.EncryptedContent) != "" && len(s.Items[index].Raw) > appcontext.MaxReasoningStateBytes {
+			if stringValue(item.EncryptedContent) != "" && len(s.Items[index].Raw) > sessionentry.MaxReasoningStateBytes {
 				return "", errors.New("responses reasoning state payload exceeds size limit")
 			}
 		}
@@ -504,7 +504,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			}
 			if err := emit(modelapi.ModelStreamEvent{
 				Kind: modelapi.StreamReasoningState,
-				ReasoningState: &appcontext.ReasoningState{
+				ReasoningState: &sessionentry.ReasoningState{
 					Protocol: string(modelconfig.APIFormatOpenAIResponses),
 					Payload:  bytes.Clone(s.Items[index].Raw),
 				},

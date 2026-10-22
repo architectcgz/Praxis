@@ -7,7 +7,7 @@ import (
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	"praxis/internal/infra/filesystem"
+	fs "praxis/internal/infra/filesystem"
 	"praxis/internal/logging"
 	"praxis/internal/loop"
 	agentservice "praxis/internal/service/agent"
@@ -91,7 +91,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 		Sessions:         repos.Sessions,
 		Controls:         repos.Controls,
 		Executions:       a.coordinator,
-		Messages:         repos.Messages,
+		Entries:          repos.Entries,
 	})
 	if err != nil {
 		return nil, err

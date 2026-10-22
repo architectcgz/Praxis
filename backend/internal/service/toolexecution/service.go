@@ -7,8 +7,8 @@ import (
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/message"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
@@ -18,13 +18,13 @@ import (
 
 type Dependencies struct {
 	Rules          ApprovalRules
-	Review         func(context.Context, agentmodel.Execution, message.ToolCall, json.RawMessage, string, security.ApprovalDecision, executionmodel.RiskReview) (security.RiskAssessment, error)
+	Review         func(context.Context, agentmodel.Execution, sessionentry.ToolCall, json.RawMessage, string, security.ApprovalDecision, executionmodel.RiskReview) (security.RiskAssessment, error)
 	Prepare        func(tool.Tool, json.RawMessage, string) (json.RawMessage, error)
 	Bind           func(tool.Tool, string) tool.Tool
 	HookDispatcher *hook.Dispatcher
 	Tasks          repository.AgentExecution
 	Events         repository.ToolExecution
-	Messages       repository.Message
+	Entries        repository.Entries
 	Calls          repository.ToolCallQueries
 	Sessions       repository.Session
 	Agents         repository.Agent
@@ -41,7 +41,7 @@ type Service struct {
 }
 
 func NewService(deps Dependencies) (*Service, error) {
-	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Review == nil || deps.Prepare == nil || deps.Bind == nil || deps.Tasks == nil || deps.Events == nil || deps.Messages == nil || deps.Calls == nil || deps.Sessions == nil || deps.Agents == nil || deps.Catalog == nil {
+	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Review == nil || deps.Prepare == nil || deps.Bind == nil || deps.Tasks == nil || deps.Events == nil || deps.Entries == nil || deps.Calls == nil || deps.Sessions == nil || deps.Agents == nil || deps.Catalog == nil {
 		return nil, errors.New("tool service dependencies are required")
 	}
 	return &Service{deps: deps, clock: clock.ClockOrDefault(deps.Clock), active: make(map[executionmodel.Key]*executionmodel.Execution)}, nil
@@ -51,13 +51,13 @@ func NewService(deps Dependencies) (*Service, error) {
 type Scope struct {
 	service       *Service
 	workspacePath string
-	awaitApproval func(context.Context, message.ToolCall) error
+	awaitApproval func(context.Context, sessionentry.ToolCall) error
 }
 
-func (s *Service) ForWorkspace(path string, awaitApproval func(context.Context, message.ToolCall) error) *Scope {
+func (s *Service) ForWorkspace(path string, awaitApproval func(context.Context, sessionentry.ToolCall) error) *Scope {
 	return &Scope{service: s, workspacePath: path, awaitApproval: awaitApproval}
 }
 
-func (s *Service) call(ctx context.Context, executionID identity.AgentExecutionID, callID string) (message.ToolCall, error) {
+func (s *Service) call(ctx context.Context, executionID identity.AgentExecutionID, callID string) (sessionentry.ToolCall, error) {
 	return s.deps.Calls.GetCall(ctx, executionmodel.Key{ExecutionID: executionID, CallID: callID})
 }

@@ -1,5 +1,7 @@
 package context
 
+import sessionentry "praxis/internal/core/session/entry"
+
 // ContextBuilder 复制通用内容、丢弃展示用思考块并保持顺序，拒绝连必要原文都无法容纳的窗口。
 // 输入内容的结构约束由调用方的输入边界保证，本包只做复制与容量检查。
 // 可压缩历史允许暂时超窗，由请求边界在调用模型前执行压缩。
@@ -17,8 +19,8 @@ func (ContextBuilder) Build(content Content, limits Limits) (ModelContext, error
 		copy := entry
 		copy.Content = nil
 		for _, block := range entry.Content {
-			if block.Kind != ContextBlockThinking {
-				copy.Content = append(copy.Content, block.Clone())
+			if block.Kind != sessionentry.BlockThinking {
+				copy.Content = append(copy.Content, block)
 			}
 		}
 		if len(copy.Content) == 0 {

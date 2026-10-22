@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/core/message"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
@@ -24,7 +24,7 @@ type ApprovalRequest struct {
 
 // Approval 是消息声明和审批事件组合的查询结果，不是持久化实体。
 type Approval struct {
-	Call            message.ToolCall
+	Call            sessionentry.ToolCall
 	ArgumentsDigest string
 	Arguments       json.RawMessage
 	Decision        security.ApprovalDecision
@@ -66,7 +66,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 			return nil
 		}
 		if result, err := s.deps.Calls.GetResult(txCtx, call.Key); err == nil {
-			if !approve && len(result.Blocks) == 1 && result.Blocks[0].Text == tool.NewToolError("tool_approval_denied", "The user denied this tool call.").Payload {
+			if !approve && len(result.Content) == 1 && result.Content[0].Text == tool.NewToolError("tool_approval_denied", "The user denied this tool call.").Payload {
 				return nil
 			}
 			return fault.ErrRequestConflict

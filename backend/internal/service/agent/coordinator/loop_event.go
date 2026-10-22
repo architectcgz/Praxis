@@ -8,6 +8,7 @@ import (
 func LoopEvent(event loop.Event) Event {
 	return Event{
 		Kind:        string(event.Kind),
+		Entries:     event.Entries,
 		SessionID:   event.SessionID,
 		AgentID:     event.AgentID,
 		ExecutionID: event.ExecutionID,

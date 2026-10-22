@@ -1,5 +1,5 @@
 import { Bot, Check, CircleAlert, Wrench } from 'lucide-react'
-import type { AgentHistoryItem } from '../../api'
+import type { ContextEntry } from '../../api'
 import type { AgentsPanelProps } from './types'
 
 const stateLabels: Record<string, string> = {
@@ -61,19 +61,18 @@ export function AgentsPanel({ loading, session, histories, selectedAgentID, onSe
     )
 }
 
-function agentStats(history: AgentHistoryItem[]) {
+function agentStats(history: ContextEntry[]) {
     let messages = 0
     let tools = 0
     let failures = 0
     for (const item of history) {
-        if (item.message) {
+        {
             messages++
-            for (const block of item.message.blocks || []) {
+            for (const block of item.content) {
                 if (block.kind === 'tool_call') tools++
                 if (block.kind === 'tool_result' && block.isError) failures++
             }
         }
-        if (item.execution?.outcome === 'failed') failures++
     }
     return { messages, tools, failures }
 }

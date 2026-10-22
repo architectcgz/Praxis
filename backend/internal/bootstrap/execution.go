@@ -36,7 +36,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		Agents:      repos.Agents,
 		Records:     repos.Executions,
 		Executions:  active,
-		Messages:    repos.Messages,
+		Entries:     repos.Entries,
 		Definitions: config.agents,
 		Contexts:    repos.Contexts,
 	})
@@ -57,7 +57,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		ToolExecutions: repos.ToolExecutions,
 		ToolCalls:      repos.ToolCalls,
 		Agents:         repos.Agents,
-		Messages:       repos.Messages,
+		Entries:        repos.Entries,
 		Sessions:       repos.Sessions,
 		Workspaces:     repos.Workspaces,
 		Models:         config.models,

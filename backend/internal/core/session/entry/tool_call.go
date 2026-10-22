@@ -1,4 +1,4 @@
-package message
+package entry
 
 import (
 	"bytes"
@@ -22,9 +22,9 @@ type ToolCall struct {
 }
 
 // ToolCalls 从已提交的 Assistant 提取调用，正常执行和派生查询共用此身份映射。
-func (m Message) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
+func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
 	calls := make([]ToolCall, 0)
-	for _, block := range m.Blocks {
+	for _, block := range m.Content {
 		if block.Kind != BlockToolCall {
 			continue
 		}

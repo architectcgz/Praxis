@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/core/message"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
@@ -15,7 +15,7 @@ import (
 )
 
 // authorize 根据当前事实确定授权，审核请求先条件预留序号，再调用外部模型。
-func (scope *Scope) authorize(ctx context.Context, call message.ToolCall, args json.RawMessage) (bool, *tool.ToolResult, error) {
+func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (bool, *tool.ToolResult, error) {
 	s := scope.service
 	digest := executionmodel.ArgumentsDigest(call.Name, args)
 	for {

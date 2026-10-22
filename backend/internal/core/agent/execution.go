@@ -28,26 +28,25 @@ const (
 
 type Execution struct {
 	// Revision 由仓储的执行及控制事件序号派生，条件写入时必须与读取时一致。
-	Revision         uint64 `json:"-"`
-	Progress         ExecutionProgress
-	ID               identity.AgentExecutionID
-	SessionID        identity.SessionID
-	AgentID          identity.AgentID
-	RequestID        identity.RequestID
-	SourceTaskID     identity.TaskID
-	Status           ExecutionStatus
-	InputMessageID   string
-	Config           ExecutionConfig
-	ContextSelection ContextSelection
-	CreatedAt        time.Time
-	StartedAt        time.Time
-	EndedAt          time.Time
-	Outcome          ExecutionOutcome
-	FailureCode      ExecutionFailureCode
-	FailureMessage   string
+	Revision       uint64 `json:"-"`
+	Progress       ExecutionProgress
+	ID             identity.AgentExecutionID
+	SessionID      identity.SessionID
+	AgentID        identity.AgentID
+	RequestID      identity.RequestID
+	SourceTaskID   identity.TaskID
+	Status         ExecutionStatus
+	InputEntryID   string
+	Config         ExecutionConfig
+	CreatedAt      time.Time
+	StartedAt      time.Time
+	EndedAt        time.Time
+	Outcome        ExecutionOutcome
+	FailureCode    ExecutionFailureCode
+	FailureMessage string
 }
 
-// NewExecution 创建空闲 runtime 可以立即启动的 Execution；执行输入必须已构建完成。
+// NewExecution 创建已准入的 Execution；模型上下文在执行准备阶段构建。
 func NewExecution(
 	id identity.AgentExecutionID,
 	sessionID identity.SessionID,
@@ -55,19 +54,17 @@ func NewExecution(
 	requestID identity.RequestID,
 	inputMessageID string,
 	config ExecutionConfig,
-	selection ContextSelection,
 	at time.Time,
 ) Execution {
 	return Execution{
-		ID:               id,
-		SessionID:        sessionID,
-		AgentID:          agentID,
-		RequestID:        requestID,
-		Status:           ExecutionStarting,
-		InputMessageID:   inputMessageID,
-		Config:           config.Clone(),
-		ContextSelection: selection.Clone(),
-		CreatedAt:        at.UTC(),
+		ID:           id,
+		SessionID:    sessionID,
+		AgentID:      agentID,
+		RequestID:    requestID,
+		Status:       ExecutionStarting,
+		InputEntryID: inputMessageID,
+		Config:       config.Clone(),
+		CreatedAt:    at.UTC(),
 	}
 }
 

@@ -1,5 +1,5 @@
-import type { AgentEvent, AgentHistoryItem, AgentSnapshot } from '../../api'
-import type { PendingUserMessage, StreamingOutput, StreamingOutputs } from './types'
+import type { AgentEvent } from '../../api'
+import type { StreamingOutput, StreamingOutputs } from './types'
 
 /**
  * 按 Agent、task 和 turn 合并实时事件，不修改输入对象。
@@ -63,71 +63,4 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
         default:
             return outputs
     }
-}
-
-/** 仅在执行已结算且历史包含对应输出时移除流式副本；工具输出还需等待工具记录落盘。 */
-export function clearDurableStreamingOutput(outputs: StreamingOutputs, agent: AgentSnapshot, history: AgentHistoryItem[]): StreamingOutputs {
-    const output = outputs[agent.id]
-    if (!output) {
-        return outputs
-    }
-    const ended = agent.executions.some((task) => task.id === output.executionId && task.status === 'ended')
-    const persisted = history.some((item) => (
-        item.message?.role === 'assistant' && item.message.executionId === output.executionId
-    ) || item.execution?.id === output.executionId)
-    const fullyPersisted = output.turns.every((turn) => turn.events.every((event) => {
-        if (event.kind === 'text_delta' || event.kind === 'thinking_delta') return hasAssistantTurn(history, output.executionId, turn.turnId)
-        if (event.kind === 'tool_call' || event.kind === 'tool_result') return history.some((item) => (
-            item.message?.executionId === output.executionId && item.message.blocks?.some((block) => block.kind === event.kind && block.callId === event.callId)
-        ))
-        return true
-    }))
-    if (!ended || !persisted || !fullyPersisted) {
-        return outputs
-    }
-    const remaining = { ...outputs }
-    delete remaining[agent.id]
-    return remaining
-}
-
-/** 持久化轮次拥有正文与调用卡片；未落盘的工具结果由调用卡片消费。 */
-export function projectStreamingOutput(output: StreamingOutput | null, history: AgentHistoryItem[]): StreamingOutput | null {
-    if (!output) return null
-    return {
-        ...output,
-        turns: output.turns.flatMap((turn) => {
-            if (!hasAssistantTurn(history, output.executionId, turn.turnId)) return [turn]
-            const events = turn.events.filter((event) => {
-                if (event.kind === 'text_delta' || event.kind === 'thinking_delta' || event.kind === 'provider_waiting') return false
-                return !history.some((item) => item.message?.executionId === output.executionId && item.message.blocks?.some((block) => (
-                    block.kind === 'tool_call' && block.callId === event.callId
-                )))
-            })
-            return events.length > 0 ? [{ ...turn, events }] : []
-        }),
-    }
-}
-
-function hasAssistantTurn(history: AgentHistoryItem[], executionId: string, turnId: string): boolean {
-    return history.some((item) => item.message?.executionId === executionId && item.message.role === 'assistant' && item.message.id === `assistant:${turnId}`)
-}
-
-/** 用户消息按稳定输入身份去重；排队任务尚无 Execution ID，也能在落盘后移除乐观副本。 */
-export function clearDurablePendingUserMessages(pending: PendingUserMessage[], history: AgentHistoryItem[]): PendingUserMessage[] {
-    if (pending.length === 0) {
-        return pending
-    }
-    const persistedInputIDs = new Set<string>()
-    const persistedExecutionIDs = new Set<string>()
-    for (const item of history) {
-        if (item.message?.role !== 'user') continue
-        if (item.message.id) persistedInputIDs.add(item.message.id)
-        if (item.message.executionId) persistedExecutionIDs.add(item.message.executionId)
-    }
-    if (persistedInputIDs.size === 0 && persistedExecutionIDs.size === 0) {
-        return pending
-    }
-    const remaining = pending.filter((message) => !persistedInputIDs.has(`input:${message.requestId}`) &&
-        (message.executionId === '' || !persistedExecutionIDs.has(message.executionId)))
-    return remaining.length === pending.length ? pending : remaining
 }

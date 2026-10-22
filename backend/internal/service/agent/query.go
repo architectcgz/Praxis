@@ -24,7 +24,7 @@ type Dependencies struct {
 	Controls         repository.AgentControl
 	Executions       ExecutionControl
 	Sessions         repository.Session
-	Messages         repository.Message
+	Entries          repository.Entries
 	Clock            clock.Clock
 }
 
@@ -34,7 +34,7 @@ type Service struct {
 	controls         repository.AgentControl
 	executions       ExecutionControl
 	sessions         repository.Session
-	messages         repository.Message
+	entries          repository.Entries
 	clock            clock.Clock
 }
 
@@ -58,15 +58,15 @@ func NewService(deps Dependencies) (*Service, error) {
 			return nil, fmt.Errorf("agent service %s is required", name)
 		}
 	}
-	if deps.Messages == nil || deps.Executions == nil {
-		return nil, errors.New("agent service messages and executions are required")
+	if deps.Entries == nil || deps.Executions == nil {
+		return nil, errors.New("agent service entries and executions are required")
 	}
 	return &Service{
 		agents:           deps.Agents,
 		executionRecords: deps.ExecutionRecords,
 		controls:         deps.Controls,
 		executions:       deps.Executions,
-		messages:         deps.Messages,
+		entries:          deps.Entries,
 		sessions:         deps.Sessions,
 		clock:            clock.ClockOrDefault(deps.Clock),
 	}, nil

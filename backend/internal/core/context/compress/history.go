@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/session/entry"
 )
 
 // protectedEntries 扩大保护范围到完整工具链，避免将调用和回执拆进不同摘要。
@@ -18,21 +19,21 @@ func protectedEntries(value appcontext.ModelContext, partial bool) []bool {
 		pinned[index] = entry.Protected
 		hasCalls, hasText := false, false
 		for _, block := range entry.Content {
-			if block.Kind == appcontext.ContextBlockText {
+			if block.Kind == sessionentry.BlockText {
 				hasText = true
 			}
 			switch block.Kind {
-			case appcontext.ContextBlockToolCall, appcontext.ContextBlockMCPCall:
+			case sessionentry.BlockToolCall, sessionentry.BlockMCPCall:
 				hasCalls = true
 				pending[callKey(block)] = true
-			case appcontext.ContextBlockToolResult, appcontext.ContextBlockMCPResult:
+			case sessionentry.BlockToolResult, sessionentry.BlockMCPResult:
 				delete(pending, callKey(block))
 			}
 		}
 		if hasCalls && chainStart < 0 {
 			chainStart = index
 		}
-		if chainStart >= 0 && entry.Role == appcontext.ContextRoleAssistant && hasText && !hasCalls && len(pending) == 0 {
+		if chainStart >= 0 && entry.Role == sessionentry.RoleAssistant && hasText && !hasCalls && len(pending) == 0 {
 			protected := false
 			for i := chainStart; i <= index; i++ {
 				protected = protected || pinned[i]
@@ -55,12 +56,12 @@ func protectedEntries(value appcontext.ModelContext, partial bool) []bool {
 		// 保留最近一条最终回答及最近完整工具交互；只依赖通用角色和内容。
 		for i := len(value.Entries) - 1; i >= 0; i-- {
 			entry := value.Entries[i]
-			if entry.Role != appcontext.ContextRoleAssistant {
+			if entry.Role != sessionentry.RoleAssistant {
 				continue
 			}
 			textOnly := true
 			for _, block := range entry.Content {
-				textOnly = textOnly && block.Kind == appcontext.ContextBlockText
+				textOnly = textOnly && block.Kind == sessionentry.BlockText
 			}
 			if textOnly {
 				pinned[i] = true
@@ -76,18 +77,18 @@ func protectedEntries(value appcontext.ModelContext, partial bool) []bool {
 	return pinned
 }
 
-func callKey(block appcontext.ContextBlock) string {
-	if block.Kind == appcontext.ContextBlockMCPCall || block.Kind == appcontext.ContextBlockMCPResult {
+func callKey(block sessionentry.Block) string {
+	if block.Kind == sessionentry.BlockMCPCall || block.Kind == sessionentry.BlockMCPResult {
 		return "mcp:" + block.CallID
 	}
 	return "tool:" + block.CallID
 }
 
-func summaryEntry(format SummaryFormat, text string) appcontext.ContextEntry {
-	return appcontext.ContextEntry{
-		Kind:    appcontext.ContextEntrySummary,
-		Role:    appcontext.ContextRoleUser,
-		Content: []appcontext.ContextBlock{{Kind: appcontext.ContextBlockText, Text: format.ResultPrefix + text}},
+func summaryEntry(format SummaryFormat, text string) sessionentry.ContextEntry {
+	return sessionentry.ContextEntry{
+		Kind:    sessionentry.ContextEntrySummary,
+		Role:    sessionentry.RoleUser,
+		Content: []sessionentry.Block{{Kind: sessionentry.BlockText, Text: format.ResultPrefix + text}},
 	}
 }
 
@@ -159,6 +160,11 @@ func compressHistory(ctx context.Context, value appcontext.ModelContext, options
 			return appcontext.ModelContext{}, false, err
 		}
 		compressed.Entries[span.output] = summaryEntry(options.SummaryFormat, summary)
+		for _, original := range value.Entries[span.start:span.end] {
+			if original.ID != "" {
+				compressed.Entries[span.output].Replaces = append(compressed.Entries[span.output].Replaces, original.ID)
+			}
+		}
 		allowance -= appcontext.EstimateTokens(summary)
 	}
 	after, err := compressed.EstimatedTokens()

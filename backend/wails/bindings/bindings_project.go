@@ -1,7 +1,6 @@
 package bindings
 
 import (
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"path/filepath"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -9,6 +8,8 @@ import (
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type ProjectBindings struct {

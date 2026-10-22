@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentMessageBlock } from '../../../api'
+import type { AgentEvent, EntryBlock } from '../../../api'
 import { FileChanges } from './FileChanges'
 import { TerminalOutput } from './TerminalOutput'
 import { ToolResultContent } from './ToolResultContent'
@@ -22,11 +22,11 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
     </div></div>
 }
 
-export function ToolCallBlock({ block, result, executionId }: { block: AgentMessageBlock; result?: AgentMessageBlock; executionId: string }) {
+export function ToolCallBlock({ block, result, executionId }: { block: EntryBlock; result?: EntryBlock; executionId: string }) {
     return <ToolCard name={block.name || ''} input={block.input} result={result ? result.text || '' : undefined} isError={result?.isError} pendingStatus="unknown" executionId={executionId} callId={block.callId} />
 }
 
-export function ToolResultBlock({ block, executionId }: { block: AgentMessageBlock; executionId: string }) {
+export function ToolResultBlock({ block, executionId }: { block: EntryBlock; executionId: string }) {
     return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} pendingStatus="unknown" executionId={executionId} callId={block.callId} />
 }
 

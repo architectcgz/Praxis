@@ -1,4 +1,4 @@
-package message
+package entry
 
 import "praxis/internal/identity"
 
@@ -8,9 +8,9 @@ type StreamKey struct {
 	OwnerAgentID identity.AgentID
 }
 
-// Record 将关联 Agent 与流归属分开；不向 Message 增加持久化字段。
+// Record 将关联 Agent 与流归属分开；不向 ContextEntry 增加流分组字段。
 type Record struct {
 	Stream  StreamKey
 	AgentID identity.AgentID
-	Data    Message
+	Data    ContextEntry
 }

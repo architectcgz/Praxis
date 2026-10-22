@@ -5,8 +5,8 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/hook"
-	messagemodel "praxis/internal/core/message"
 	taskmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -72,7 +72,7 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForWorkspace(workspace.Path, func(waitCtx context.Context, call messagemodel.ToolCall) error {
+	executor := r.tools.ForWorkspace(workspace.Path, func(waitCtx context.Context, call sessionentry.ToolCall) error {
 		return r.waitForToolApproval(waitCtx, task, active, call)
 	})
 	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor)

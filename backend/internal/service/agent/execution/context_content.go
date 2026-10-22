@@ -1,121 +1,88 @@
 package execution
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	appcontext "praxis/internal/core/context"
-	messagemodel "praxis/internal/core/message"
 	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	"slices"
 	"strings"
 )
 
 // contextContent 将已选业务数据转换为通用有序条目；当前输入和共享事实保留原文。
-func contextContent(systemPrompt, inputMessageID string, shared []sessionmodel.SessionContextEntry, messages, continuation []messagemodel.Message) (appcontext.Content, error) {
+func contextContent(systemPrompt, inputEntryID string, shared []sessionmodel.SharedFact, entries []sessionentry.ContextEntry) (appcontext.Content, error) {
 	content := appcontext.Content{SystemPrompt: systemPrompt}
 	shared = slices.Clone(shared)
-	slices.SortFunc(shared, func(a, b sessionmodel.SessionContextEntry) int {
-		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
-			return c
+	slices.SortFunc(shared, func(a, b sessionmodel.SharedFact) int {
+		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
+			return order
 		}
 		return strings.Compare(a.ID.String(), b.ID.String())
 	})
-	for _, entry := range shared {
-		content.Entries = append(content.Entries, appcontext.ContextEntry{
-			Kind:      appcontext.ContextEntryReference,
-			Role:      appcontext.ContextRoleUser,
-			Protected: true,
-			Content:   []appcontext.ContextBlock{{Kind: appcontext.ContextBlockText, Text: fmt.Sprintf("[Session context: %s]\n%s", entry.Kind, entry.Content)}},
+	for _, fact := range shared {
+		content.Entries = append(content.Entries, sessionentry.ContextEntry{
+			Kind: sessionentry.ContextEntryReference, Role: sessionentry.RoleUser, Protected: true,
+			Content: []sessionentry.Block{{Kind: sessionentry.BlockText, Text: fmt.Sprintf("[Session context: %s]\n%s", fact.Kind, fact.Content)}},
 		})
 	}
-	var current messagemodel.Message
-	history := make([]messagemodel.Message, 0, len(messages))
-	for _, message := range messages {
-		if message.ID == inputMessageID {
-			current = message
-		} else {
-			history = append(history, message)
+	selected := historyEntries(entries)
+	found := false
+	for index := range selected {
+		if selected[index].ID == inputEntryID && selected[index].Role == sessionentry.RoleUser {
+			selected[index].Protected = true
+			found = true
 		}
 	}
-	if current.ID == "" || current.Role != messagemodel.RoleUser {
-		return appcontext.Content{}, errors.New("current input user message is missing")
+	if !found {
+		return appcontext.Content{}, errors.New("current input user entry is missing")
 	}
-	entry, ok := entryFromMessageData(current)
-	if !ok {
-		return appcontext.Content{}, errors.New("current input has no model-visible content")
-	}
-	entry.Protected = true
-	content.Entries = append(content.Entries, historyEntries(history)...)
-	content.Entries = append(content.Entries, entry)
-	content.Entries = append(content.Entries, historyEntries(continuation)...)
+	content.Entries = append(content.Entries, selected...)
 	return content, nil
 }
 
-// entryFromMessageData 把消息投影为运行期 Context，思考内容只供展示，不能进入模型请求。
-func entryFromMessageData(value messagemodel.Message) (appcontext.ContextEntry, bool) {
-	if len(value.Blocks) == 0 {
-		return appcontext.ContextEntry{}, false
-	}
-	role := appcontext.ContextRole(value.Role)
-	kind := appcontext.ContextEntryProviderOutput
-	switch role {
-	case appcontext.ContextRoleUser:
-		kind = appcontext.ContextEntryUserInput
-	case appcontext.ContextRoleTool:
-		kind = appcontext.ContextEntryToolResult
-	case appcontext.ContextRoleAssistant:
-	default:
-		return appcontext.ContextEntry{}, false
-	}
-	content := make([]appcontext.ContextBlock, 0, len(value.Blocks))
-	for _, block := range value.Blocks {
-		if block.Kind != messagemodel.BlockThinking {
-			content = append(content, appcontext.ContextBlock{
-				Kind:           appcontext.ContextBlockKind(block.Kind),
-				Text:           block.Text,
-				CallID:         block.CallID,
-				Name:           block.Name,
-				Input:          bytes.Clone(block.Input),
-				IsError:        block.IsError,
-				ReasoningState: block.ReasoningState.Clone(),
-			})
+// modelVisibleEntry 选择模型可见块，保留原 Entry 身份及执行归属。
+func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool) {
+	content := make([]sessionentry.Block, 0, len(value.Content))
+	for _, block := range value.Content {
+		if block.Kind != sessionentry.BlockThinking {
+			content = append(content, block)
 		}
 	}
-	if len(content) == 0 {
-		return appcontext.ContextEntry{}, false
-	}
-	return appcontext.ContextEntry{Kind: kind, Role: role, Content: content}, true
+	value.Content = content
+	return value, len(content) > 0
 }
 
 // historyEntries 把回执关联到对应调用后，恢复补写和执行期间入队的用户消息不打断工具交互。
 // 只调整模型投影，不改写日志顺序；使用 Execution 和 call ID 避免跨任务误配同名调用。
-func historyEntries(messages []messagemodel.Message) []appcontext.ContextEntry {
+func historyEntries(entries []sessionentry.ContextEntry) []sessionentry.ContextEntry {
 	type callKey struct{ executionID, callID string }
-	results := make(map[callKey]appcontext.ContextBlock)
+	results := make(map[callKey]sessionentry.ContextEntry)
 	calls := make(map[callKey]bool)
-	for _, message := range messages {
-		if entry, ok := entryFromMessageData(message); ok {
+	for _, message := range entries {
+		if entry, ok := modelVisibleEntry(message); ok {
 			for _, block := range entry.Content {
-				if block.Kind == appcontext.ContextBlockToolCall {
+				if block.Kind == sessionentry.BlockToolCall {
 					calls[callKey{message.ExecutionID, block.CallID}] = true
 				}
-				if block.Kind == appcontext.ContextBlockToolResult {
-					results[callKey{message.ExecutionID, block.CallID}] = block
+				if block.Kind == sessionentry.BlockToolResult {
+					result := entry
+					result.Content = []sessionentry.Block{block}
+					results[callKey{message.ExecutionID, block.CallID}] = result
 				}
 			}
 		}
 	}
-	entries := make([]appcontext.ContextEntry, 0, len(messages))
-	for _, message := range messages {
-		entry, ok := entryFromMessageData(message)
+	selected := make([]sessionentry.ContextEntry, 0, len(entries))
+	for _, message := range entries {
+		entry, ok := modelVisibleEntry(message)
 		if !ok {
 			continue
 		}
-		if message.Role == messagemodel.RoleTool {
-			content := make([]appcontext.ContextBlock, 0, len(entry.Content))
+		if message.Role == sessionentry.RoleTool {
+			content := make([]sessionentry.Block, 0, len(entry.Content))
 			for _, block := range entry.Content {
-				if block.Kind != appcontext.ContextBlockToolResult || !calls[callKey{message.ExecutionID, block.CallID}] {
+				if block.Kind != sessionentry.BlockToolResult || !calls[callKey{message.ExecutionID, block.CallID}] {
 					content = append(content, block)
 				}
 			}
@@ -124,19 +91,15 @@ func historyEntries(messages []messagemodel.Message) []appcontext.ContextEntry {
 			}
 			entry.Content = content
 		}
-		entries = append(entries, entry)
+		selected = append(selected, entry)
 		for _, block := range entry.Content {
-			if block.Kind != appcontext.ContextBlockToolCall {
+			if block.Kind != sessionentry.BlockToolCall {
 				continue
 			}
 			if result, ok := results[callKey{message.ExecutionID, block.CallID}]; ok {
-				entries = append(entries, appcontext.ContextEntry{
-					Kind:    appcontext.ContextEntryToolResult,
-					Role:    appcontext.ContextRoleTool,
-					Content: []appcontext.ContextBlock{result},
-				})
+				selected = append(selected, result)
 			}
 		}
 	}
-	return entries
+	return selected
 }

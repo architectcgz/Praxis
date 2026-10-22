@@ -181,7 +181,6 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 	)
 	committedExecution := endedExecution
 	committedExecution.Config = endedExecution.Config.Clone()
-	committedExecution.ContextSelection = endedExecution.ContextSelection.Clone()
 	if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
 		Identity: hook.Identity{
 			SessionID:   endedExecution.SessionID,
@@ -224,7 +223,7 @@ func (s *Service) nameSessionAfterAnswer(
 	if err != nil {
 		return err
 	}
-	message, err := s.messages.Get(ctx, agentservice.MessageStream(owner), task.InputMessageID)
+	message, err := s.entries.Get(ctx, agentservice.EntryStream(owner), task.InputEntryID)
 	if err != nil {
 		return err
 	}

@@ -1,79 +1,48 @@
 import { memo, type ReactNode } from 'react'
-import type { AgentHistoryItem, AgentMessageBlock } from '../../../api'
+import type { ContextEntry, EntryBlock } from '../../../api'
 import { CopyIconButton, MessageMarkdown } from './MarkdownViews'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock } from './ToolCallViews'
-import { useOperationTiming } from '../../timing/OperationTimings'
 import { MessageTiming } from './MessageTiming'
-
-const failureMessages: Record<string, string> = {
-    provider_unavailable: '代理无法响应，因为没有配置模型提供者。',
-    execution_provider_error: '模型提供者无法完成请求。',
-    execution_tool_error: '代理无法响应，因为必需的工具失败了。',
-    execution_policy_blocked: '请求被配置的执行策略阻止。',
-    execution_approval_required: '代理正在等待批准才能响应。',
-    execution_storage_error: '代理无法响应，因为无法保存其持久状态。',
-    execution_cancelled: '执行在代理响应之前被取消。',
-    request_canceled: '请求已取消。',
-    execution_invalid_outcome: '代理返回了无效的执行结果。',
-    execution_failed: '代理运行时在响应之前失败。',
-}
 
 export const HistoryItemView = memo(function HistoryItemView({ agentProfile, item, toolResults, continuation = false, hasContinuation = false, copyContent }: {
     agentProfile: string
-    item: AgentHistoryItem
-    toolResults?: AgentMessageBlock[]
+    item: ContextEntry
+    toolResults?: EntryBlock[]
     continuation?: boolean
     hasContinuation?: boolean
     copyContent?: string
 }) {
-    if (item.kind === 'request_canceled' && item.execution) {
-        return <CanceledRequestView agentProfile={agentProfile} executionId={item.execution.id} at={item.at} />
-    }
-    if (item.kind === 'execution' && item.execution) {
-        const content = item.execution.failureMessage || failureMessage(item.execution.failureCode)
-        return (
-            <article className="message message-error">
-                <div className="message-meta">
-                    <strong>Praxis</strong>
-                    <time dateTime={item.at} title={item.at}>{formatMessageTime(item.at)}</time>
-                </div>
-                <p>{content}</p>
-                <MessageActions content={content} />
-            </article>
-        )
-    }
-    if (!item.message) return null
-    const message = item.message
-    const messageBlocks = message.blocks || []
+    const message = item
+    const content = message.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')
+    const messageBlocks = message.content
     const resultBlocks = messageBlocks.filter((block) => block.kind === 'tool_result')
     if (message.role === 'tool') {
         return (
             <article className="message message-tool">
                 <div className="message-meta">
                     <strong>工具输出</strong>
-                    <time dateTime={message.at} title={message.at}>{formatMessageTime(message.at)}</time>
+                    <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
                 </div>
                 <div className="acts">
-                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} executionId={message.executionId} key={`${block.callId}-${index}`} />)}
+                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} executionId={message.executionId || ''} key={`${block.callId}-${index}`} />)}
                 </div>
             </article>
         )
     }
     const messageRole = message.role
     const messageClass = messageRole === 'assistant' || messageRole === 'user' ? messageRole : 'unknown'
-    const author = messageRole === 'assistant' ? agentProfile : messageRole === 'user' ? '你' : '未知来源'
-    const contentToCopy = copyContent ?? message.content
+    const author = message.kind === 'summary' ? '上下文摘要' : messageRole === 'assistant' ? agentProfile : messageRole === 'user' ? '你' : '未知来源'
+    const contentToCopy = copyContent ?? content
     const segments = messageRole === 'assistant' ? groupAssistantBlocks(messageBlocks) : []
     return (
         <article className={`message message-${messageClass}${hasContinuation ? ' message-continued' : ''}`}>
             {!continuation && <div className="message-meta">
                 <strong>{author}</strong>
-                <time dateTime={message.at} title={message.at}>{formatMessageTime(message.at)}</time>
+                <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
             </div>}
             {messageRole === 'assistant' ? (
                 <>
-                    {message.thinking && !messageBlocks.some((block) => block.kind === 'thinking') && <ThinkingDetails content={message.thinking} />}
                     {segments.length > 0 ? segments.map((segment) => {
                         if (segment.kind === 'thinking') return <ThinkingDetails content={segment.text} key={segment.key} />
                         if (segment.kind === 'text') return <MessageMarkdown content={segment.text} key={segment.key} />
@@ -81,16 +50,16 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
                         return <div className="acts" key={segment.key}>
                             {segment.blocks.map((block, index) => <ToolCallBlock
                                 block={block}
-                                executionId={message.executionId}
+                                executionId={message.executionId || ''}
                                 result={toolResults?.find((result) => result.callId === block.callId)}
                                 key={`${block.callId}-${index}`}
                             />)}
                         </div>
-                    }) : message.content && <MessageMarkdown content={message.content} />}
+                    }) : content && <MessageMarkdown content={content} />}
                 </>
-            ) : message.content && <p>{message.content}</p>}
+            ) : content && <p>{content}</p>}
             <MessageActions content={hasContinuation ? '' : contentToCopy}>
-                {messageRole === 'assistant' && message.id && <MessageTiming executionId={message.executionId} referenceId={message.id} />}
+                {messageRole === 'assistant' && message.id && <MessageTiming executionId={message.executionId || ''} referenceId={message.id} />}
             </MessageActions>
         </article>
     )
@@ -99,10 +68,10 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
 type AssistantSegment =
     | { key: string; kind: 'thinking'; text: string }
     | { key: string; kind: 'text'; text: string }
-    | { key: string; kind: 'tools'; blocks: AgentMessageBlock[] }
+    | { key: string; kind: 'tools'; blocks: EntryBlock[] }
 
 /** 相邻的工具调用归入同一张活动账本，正文与思考保持原有先后。 */
-function groupAssistantBlocks(blocks: AgentMessageBlock[]): AssistantSegment[] {
+function groupAssistantBlocks(blocks: EntryBlock[]): AssistantSegment[] {
     const segments: AssistantSegment[] = []
     blocks.forEach((block, index) => {
         if (block.kind === 'thinking') {
@@ -124,19 +93,6 @@ function groupAssistantBlocks(blocks: AgentMessageBlock[]): AssistantSegment[] {
     return segments
 }
 
-/** 取消记录来自持久化 Task；请求耗时单独查询，重启后保持相同状态。 */
-function CanceledRequestView({ agentProfile, executionId, at }: { agentProfile: string; executionId: string; at: string }) {
-    const timing = useOperationTiming(executionId, 'provider')
-    return <article className="message message-assistant" role="status">
-        <div className="message-meta">
-            <strong>{agentProfile}</strong>
-            <time dateTime={at} title={at}>{formatMessageTime(at)}</time>
-        </div>
-        <p>请求已取消</p>
-        {timing?.referenceId && <MessageTiming executionId={executionId} referenceId={timing.referenceId} />}
-    </article>
-}
-
 function MessageActions({ content, children }: { content: string; children?: ReactNode }) {
     return (
         <div className="message-copy-actions">
@@ -154,10 +110,6 @@ function MessageActions({ content, children }: { content: string; children?: Rea
 async function copyText(content: string) {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable')
     await navigator.clipboard.writeText(content)
-}
-
-function failureMessage(code: string) {
-    return failureMessages[code] || (code && code !== 'unknown' ? `代理无法响应。失败代码: ${code}` : '代理无法响应。')
 }
 
 let dateFormatter: Intl.DateTimeFormat | null = null

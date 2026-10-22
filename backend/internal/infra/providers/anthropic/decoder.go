@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"math"
-	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -21,7 +21,7 @@ type contentBlockState struct {
 	HasArgumentDelta bool
 	Signed           bool
 	Closed           bool
-	ReasoningState   *appcontext.ReasoningState
+	ReasoningState   *sessionentry.ReasoningState
 }
 
 // Decode 按事件、Content Block 和 Delta 三层类型分派；工具只在 message_stop 后释放。
@@ -158,10 +158,10 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				if err != nil {
 					return "", err
 				}
-				if len(payload) > appcontext.MaxReasoningStateBytes {
+				if len(payload) > sessionentry.MaxReasoningStateBytes {
 					return "", errors.New("anthropic reasoning state payload exceeds size limit")
 				}
-				state.ReasoningState = &appcontext.ReasoningState{
+				state.ReasoningState = &sessionentry.ReasoningState{
 					Protocol: string(modelconfig.APIFormatAnthropicMessages),
 					Payload:  payload,
 				}

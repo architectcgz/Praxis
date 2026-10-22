@@ -2,19 +2,16 @@ package storage
 
 import (
 	"errors"
-	messagemodel "praxis/internal/core/message"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/fault"
 	"slices"
 )
 
 // validateToolReceipts 检查候选消息与已提交调用的配对、声明顺序和归属。
 func (s *Store) validateToolReceipts(entry stateEntry) error {
-	var result messageRecord
-	if err := decodeJSON(entry.payload, &result); err != nil {
-		return err
-	}
-	for _, block := range result.Data.Blocks {
-		if block.Kind != messagemodel.BlockToolResult {
+	result := entry.entryValue()
+	for _, block := range result.Data.Content {
+		if block.Kind != sessionentry.BlockToolResult {
 			continue
 		}
 		declaration, err := s.lookup(lookupKey{kind: "tool-call", owner: result.Data.ExecutionID, value: block.CallID})
@@ -25,15 +22,12 @@ func (s *Store) validateToolReceipts(entry stateEntry) error {
 		if !ok {
 			return fault.ErrNotFound
 		}
-		var call messageRecord
-		if err := decodeJSON(declared.payload, &call); err != nil {
-			return err
-		}
+		call := declared.entryValue()
 		if declared.scope != entry.scope || declared.eventSequence >= entry.eventSequence || call.OwnerID != result.OwnerID || call.AgentID != result.AgentID || call.Data.RequestID != result.Data.RequestID || call.Data.TurnID != result.Data.TurnID {
 			return errors.New("tool receipt ownership or declaration order mismatch")
 		}
-		if !slices.ContainsFunc(call.Data.Blocks, func(candidate messagemodel.Block) bool {
-			return candidate.Kind == messagemodel.BlockToolCall && candidate.CallID == block.CallID && candidate.Name == block.Name
+		if !slices.ContainsFunc(call.Data.Content, func(candidate sessionentry.Block) bool {
+			return candidate.Kind == sessionentry.BlockToolCall && candidate.CallID == block.CallID && candidate.Name == block.Name
 		}) {
 			return errors.New("tool receipt name does not match its call declaration")
 		}

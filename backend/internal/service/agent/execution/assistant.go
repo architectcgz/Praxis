@@ -2,8 +2,11 @@ package execution
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
-	messagemodel "praxis/internal/core/message"
+	"fmt"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
@@ -15,7 +18,7 @@ type assistantCommitter struct {
 	service     *Service
 	executionID identity.AgentExecutionID
 	agentID     identity.AgentID
-	stream      messagemodel.StreamKey
+	stream      sessionentry.StreamKey
 }
 
 // AssistantCommitter 校验归属并冻结本次输出流；返回的是业务提交能力。
@@ -40,7 +43,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 			service:     s,
 			executionID: id,
 			agentID:     owner.ID,
-			stream:      agentservice.MessageStream(owner),
+			stream:      agentservice.EntryStream(owner),
 		}
 		return nil
 	}(ctx)
@@ -51,9 +54,9 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 }
 
 // AppendAssistant 保存 Assistant 消息；完成证据与工具调用计数由消息派生。
-func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.AssistantWrite) (stored messagemodel.Message, inserted bool, err error) {
-	message := value.Message
-	if ctx == nil || message.Role != messagemodel.RoleAssistant || message.AuthorKind != messagemodel.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
+func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.AssistantWrite) (stored sessionentry.ContextEntry, inserted bool, err error) {
+	message := value.Entry
+	if ctx == nil || message.Role != sessionentry.RoleAssistant || message.AuthorKind != sessionentry.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
 		return stored, false, errors.New("assistant ownership is required")
 	}
 	err = func(txCtx context.Context) error {
@@ -64,7 +67,7 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.Assi
 		if err != nil {
 			return err
 		}
-		if agentservice.MessageStream(owner) != w.stream {
+		if agentservice.EntryStream(owner) != w.stream {
 			return fault.ErrRequestConflict
 		}
 		execution, err := w.service.records.Get(txCtx, identity.AgentExecutionID(message.ExecutionID))
@@ -79,7 +82,7 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.Assi
 				return fault.ErrRequestConflict
 			}
 		}
-		stored, inserted, err = w.service.messages.Append(txCtx, messagemodel.Record{Stream: w.stream, AgentID: w.agentID, Data: message})
+		stored, inserted, err = w.service.entries.Append(txCtx, sessionentry.Record{Stream: w.stream, AgentID: w.agentID, Data: message})
 		if err != nil {
 			return err
 		}
@@ -89,7 +92,32 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.Assi
 		return nil
 	}(ctx)
 	if err != nil {
-		return messagemodel.Message{}, false, err
+		return sessionentry.ContextEntry{}, false, err
 	}
 	return stored, inserted, nil
+}
+
+// AppendSummary 只保存摘要及替代范围，完整构建结果留在 Session 内存。
+func (w assistantCommitter) AppendSummary(ctx context.Context, value sessionentry.ContextEntry) (sessionentry.ContextEntry, error) {
+	value.Kind = sessionentry.ContextEntrySummary
+	value.Role = sessionentry.RoleUser
+	value.AuthorKind = sessionentry.AuthorSystem
+	value.AuthorID = w.agentID.String()
+	value.ExecutionID = w.executionID.String()
+	execution, err := w.service.records.Get(ctx, w.executionID)
+	if err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	value.RequestID = execution.RequestID.String()
+	encoded, err := json.Marshal(struct {
+		Content  []sessionentry.Block
+		Replaces []string
+	}{Content: value.Content, Replaces: value.Replaces})
+	if err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	digest := sha256.Sum256(encoded)
+	value.ID = fmt.Sprintf("summary:%s:%x", w.executionID, digest[:12])
+	stored, _, err := w.service.entries.Append(ctx, sessionentry.Record{Stream: w.stream, AgentID: w.agentID, Data: value})
+	return stored, err
 }

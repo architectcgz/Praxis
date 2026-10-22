@@ -4,14 +4,19 @@ package storage
 import (
 	"context"
 	"errors"
+	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/jsonl"
 	"sync"
 )
 
 type Store struct {
-	mu    sync.Mutex
-	log   *jsonl.Log
-	state *state
+	mu        sync.Mutex
+	log       *jsonl.Log
+	state     *state
+	histories map[sessionentry.StreamKey]*sessionmodel.History
+	pending   []pendingEvent
+	sequences map[string]uint64
 }
 
 // Open 在开放业务入口前完整 Replay 全部日志，建立唯一的运行时查询状态。
@@ -20,7 +25,7 @@ func Open(ctx context.Context, root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{log: log, state: newState()}
+	s := &Store{log: log, state: newState(), histories: make(map[sessionentry.StreamKey]*sessionmodel.History), sequences: make(map[string]uint64)}
 	if err := s.replay(ctx, jsonl.Scope{}); err != nil {
 		_ = log.Close()
 		return nil, err
@@ -46,7 +51,7 @@ func (s *Store) Close(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.log.Close()
+	return errors.Join(s.flushLocked(ctx), s.log.Close())
 }
 
 // view 的回调只调用持锁内部函数；同一把锁覆盖条件检查、单事件落盘和索引更新。

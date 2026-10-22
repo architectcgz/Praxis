@@ -1,7 +1,6 @@
 package dto
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -89,43 +88,6 @@ type ExecutionSnapshot struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	StartedAt      time.Time `json:"startedAt,omitempty"`
 	EndedAt        time.Time `json:"endedAt,omitzero"`
-}
-
-type AgentMessage struct {
-	SourceTaskID string              `json:"sourceTaskId,omitempty"`
-	ID           string              `json:"id"`
-	Sequence     uint64              `json:"sequence"`
-	At           time.Time           `json:"at"`
-	ExecutionID  string              `json:"executionId"`
-	Role         string              `json:"role"`
-	AuthorKind   string              `json:"authorKind"`
-	AuthorID     string              `json:"authorId,omitempty"`
-	Content      string              `json:"content"`
-	Thinking     string              `json:"thinking,omitempty"`
-	Blocks       []AgentMessageBlock `json:"blocks,omitempty"`
-}
-
-// AgentMessageBlock 是消息中可安全展示的结构化内容块。
-type AgentMessageBlock struct {
-	Kind    string          `json:"kind"`
-	Text    string          `json:"text,omitempty"`
-	CallID  string          `json:"callId,omitempty"`
-	Name    string          `json:"name,omitempty"`
-	Input   json.RawMessage `json:"input,omitempty"`
-	IsError bool            `json:"isError,omitzero"`
-}
-
-type AgentHistoryItem struct {
-	Kind      string             `json:"kind"`
-	Sequence  uint64             `json:"sequence,omitempty"`
-	At        time.Time          `json:"at"`
-	Message   *AgentMessage      `json:"message,omitempty"`
-	Execution *ExecutionSnapshot `json:"execution,omitempty"`
-}
-
-type AgentHistoryPage struct {
-	Items      []AgentHistoryItem `json:"items"`
-	NextCursor string             `json:"nextCursor"`
 }
 
 type ModelOption struct {
