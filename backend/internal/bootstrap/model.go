@@ -9,6 +9,7 @@ import (
 	"praxis/internal/infra/toolregistry"
 	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
+	agentservice "praxis/internal/service/agent"
 	modelservice "praxis/internal/service/model"
 	"praxis/internal/settings"
 	"sync"
@@ -90,6 +91,9 @@ func buildModelService(root dataroot.DataRoot, config *configuration, logger *lo
 				return err
 			}
 			catalog := tool.NewCatalog(tools, config.registry)
+			if err := agentservice.ValidateDefinitions(config.agents.List(), agents.List()); err != nil {
+				return err
+			}
 			// Model Service 已持有配置写锁；配置发布不占用持久化锁。
 			config.settings = configured
 			config.models.ReplaceFrom(models)

@@ -3,7 +3,6 @@ package agentregistry
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -40,7 +40,7 @@ func (e *ConfigurationError) Unwrap() error {
 	return e.Err
 }
 
-// Registry 保存进程启动时加载并校验的 Agent 定义。
+// Registry 保存已加载并发布的 Agent 定义。
 type Registry struct {
 	mu          sync.RWMutex
 	definitions map[identity.AgentDefinitionID]agentmodel.AgentDefinition
@@ -67,6 +67,20 @@ func (r *Registry) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDe
 		return agentmodel.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
 	}
 	return definition.Snapshot(), nil
+}
+
+// List 按 ID 排序返回全部定义的独立快照。
+func (r *Registry) List() []agentmodel.AgentDefinition {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	definitions := make([]agentmodel.AgentDefinition, 0, len(r.definitions))
+	for _, definition := range r.definitions {
+		definitions = append(definitions, definition.Snapshot())
+	}
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i].ID < definitions[j].ID
+	})
+	return definitions
 }
 
 func validateAgentConfig(config agentmodel.AgentConfig) error {
@@ -143,38 +157,23 @@ func loadDefinitions(root string) (map[identity.AgentDefinitionID]agentmodel.Age
 		if content == "" || content != strings.TrimSpace(content) {
 			return nil, fmt.Errorf("agent definition %q AGENT.md must be canonical and nonempty", id)
 		}
-		revision, err := definitionRevision(config, content)
-		if err != nil {
-			return nil, fmt.Errorf("revision agent definition %q: %w", id, err)
-		}
 		definitions[id] = agentmodel.AgentDefinition{
 			ID:           id,
 			Profile:      config.Profile,
 			Instructions: content,
-			Revision:     revision,
 		}
 	}
 	return definitions, nil
 }
 
-func definitionRevision(config agentmodel.AgentConfig, instructions string) (string, error) {
-	encoded, err := json.Marshal(struct {
-		Config       agentmodel.AgentConfig `json:"config"`
-		Instructions string                 `json:"instructions"`
-	}{
-		Config:       config,
-		Instructions: instructions,
-	})
-	if err != nil {
-		return "", err
-	}
-	digest := sha256.Sum256(encoded)
-	return fmt.Sprintf("sha256-%x", digest), nil
-}
-
-// ReplaceFrom 用已校验的磁盘快照替换 Agent 定义；已有会话的权限不随之提升。
+// ReplaceFrom 复制候选快照并整体发布，不与候选 Registry 共享可变 Map。
 func (r *Registry) ReplaceFrom(candidate *Registry) {
+	definitions := candidate.List()
+	replacement := make(map[identity.AgentDefinitionID]agentmodel.AgentDefinition, len(definitions))
+	for _, definition := range definitions {
+		replacement[definition.ID] = definition
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.definitions = candidate.definitions
+	r.definitions = replacement
 }

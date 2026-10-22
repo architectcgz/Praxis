@@ -67,7 +67,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		return result, false, err
 	}
 	if definition.Profile != owner.Profile {
-		return result, false, fault.ErrRevisionConflict
+		return result, false, fault.ErrRequestConflict
 	}
 	config := agentmodel.ExecutionConfig{
 		AgentDefinitionID: definition.ID,

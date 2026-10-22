@@ -16,7 +16,6 @@ type AgentDefinition struct {
 	ID           identity.AgentDefinitionID
 	Profile      AgentProfile
 	Instructions string
-	Revision     string
 }
 
 // Snapshot 返回定义副本。

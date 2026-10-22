@@ -75,6 +75,9 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		return nil, err
 	}
 	repos := a.store.Repositories()
+	if err := agentservice.ValidateStoredDefinitions(ctx, config.agents.List(), repos.Sessions, repos.Agents); err != nil {
+		return nil, err
+	}
 	events := execution.NewEventPublisher()
 	hooks, err := hook.NewDispatcher(options.Hooks...)
 	if err != nil {
