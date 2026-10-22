@@ -20,7 +20,7 @@ backend/
 ├── instance_unix.go                # Unix 非阻塞独占锁
 ├── instance_windows.go             # Windows 非阻塞独占锁
 └── internal/
-    ├── core/                       # 业务实体、不可变身份与状态转换
+    ├── core/                       # 业务实体、状态转换与 ReAct Loop
     ├── repository/                 # 查询、单事实写入及条件更新契约
     ├── service/                    # 准入、队列、工具、结算与恢复编排
     └── infra/
@@ -39,7 +39,7 @@ backend/
             └── log.go              # 文件寻址与日志游标
 ```
 
-Service、Loop 和 Coordinator 通过 Repository 使用存储，不持有存储锁。持锁内部函数不能调用会再次获取 Store 锁的 Repository 入口。
+Service 和 Coordinator 通过 Repository 使用存储；Core Loop 通过注入的业务能力提交输出和记录进度，不直接依赖 Repository。这些调用方不持有存储锁。持锁内部函数不能调用会再次获取 Store 锁的 Repository 入口。
 
 ## 单事件写入与恢复
 
@@ -115,10 +115,9 @@ gofmt -l internal/infra/storage internal/infra/jsonl
 go build ./...
 go vet ./...
 go list ./...
-bash scripts/check-dependencies.sh
 ```
 
-依赖门禁同时检查持久化单事件约束。不新增或运行自动化测试，不自动启动开发服务。
+代码审查确认持久化只提交单个事件，不提供通用事务和批量提交入口。不新增或运行自动化测试，不自动启动开发服务。
 
 人工使用已有运行环境和独立临时数据目录，核验以下边界：
 

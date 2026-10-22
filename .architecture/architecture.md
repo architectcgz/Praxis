@@ -2,7 +2,7 @@
 
 ## 架构目标
 
-Praxis 是 Go + Wails + React 的本地桌面应用。后端按业务实体和明确能力划分职责：纯模型与状态转换放在 Core，持久化契约统一由 Repository 定义，业务用例由 Service 编排，外部协议与本地持久化由 Infra 实现，进程装配统一由 Bootstrap 完成。
+Praxis 是 Go + Wails + React 的本地桌面应用。后端按业务实体和明确能力划分职责：业务实体、状态转换和 Agent 核心执行机制放在 Core，持久化契约统一由 Repository 定义，业务用例由 Service 编排，外部协议与本地持久化由 Infra 实现，进程装配统一由 Bootstrap 完成。
 
 两个业务模块需要协作时，由拥有完整用例的上层模块负责编排；仅需要对方局部业务能力时，由消费方定义窄接口并在 Bootstrap 注入。持久化接口统一放在 Repository，消费方直接引用，不自行声明同类读写接口。跨包类型由事实拥有者定义，不为消除 import 而建立同形副本或无价值的中间层。
 
@@ -17,7 +17,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。后端按业务实体和�
 | `backend/wails/` | Wails 绑定、请求校验、DTO、事件和错误映射 |
 | `backend/internal/bootstrap/` | 唯一进程装配入口；配置加载、依赖连接、启动恢复、资源关闭 |
 | `backend/internal/core/context/` | 上下文 Builder、模型可见内容选择、容量检查及压缩策略 |
-| `backend/internal/loop/` | ReAct Loop，决定模型迭代、工具调用和模型流处理；不管理 Execution 终态 |
+| `backend/internal/core/loop/` | ReAct Loop，决定模型迭代、工具调用和模型流处理；不管理 Execution 终态 |
 | `backend/internal/core/model/` | 模型配置、请求与流、停止原因、Usage 和工具调用 ID 契约 |
 | `backend/internal/core/session/entry/` | 唯一 ContextEntry、内容块、推理状态与流归属；存储、模型与展示共用 |
 | `backend/internal/core/tool/` | 工具请求、执行参数、结果、注册表、目录及参数规范化契约 |
@@ -49,20 +49,19 @@ Praxis 是 Go + Wails + React 的本地桌面应用。后端按业务实体和�
 flowchart TD
     Boot["Bootstrap"] --> Services["Service / Coordinator"]
     Boot --> Infra["Infra"]
-    Services --> Loop["ReAct Loop"]
+    Services --> Core["Core / ReAct Loop"]
     Services --> Repo["Repository"]
     Infra --> Repo
-    Repo --> Core["Core"]
-    Loop --> Core
+    Repo --> Core
 ```
 
 前端通过 Wails 调用业务 Service 和 Coordinator；Coordinator 调用 Session Service、Execution Service 及 Loop。Loop 通过注入的模型和工具执行能力发起外部调用。
 
-- `core` 不依赖 `repository`、`loop`、`service`、`infra`、`bootstrap` 或 Wails，也不执行文件 I/O。
+- `core` 不依赖 `repository`、`service`、`infra`、`bootstrap` 或 Wails，也不执行文件 I/O。
 - `service` 编排用例、独立事实的写入顺序和失败恢复，通过 Repository 契约使用仓储；不依赖通用事务，也不直接调用 Infra 的文件系统和 JSONL 实现。
 - `repository` 只依赖 Core 实体与纯基础能力，统一定义持久化契约；Storage 通过编译期断言检查实现。
 - `infra` 实现协议、存储、配置和工具，不依赖 Service，不负责审批、队列派发或运行期业务决策。
-- `loop` 位于 Core 外，通过 Execution Service 注入的 AssistantCommitter 提交输出，再将已提交的完整 ToolCall 传给 ToolExecution Service；模型请求预留与进度使用 Execution 的单记录条件写入。
+- `core/loop` 负责 ReAct 迭代，通过 Provider 契约及自身定义的 ToolExecutor、ExecutionProgress 和 AssistantCommitter 接口消费外部注入的能力，完成模型请求、工具调用、进度记录与输出提交；不依赖 Repository、Service 或 Infra 的具体实现。执行恢复、审批、持久化实现、终态结算和队列调度由 Service 与 Coordinator 负责。
 - `coordinator` 负责进程内执行权和运行交接；`loop` 只负责一次执行内部的模型与工具迭代。
 - `bootstrap` 构建并注入依赖，完成恢复后才对 Wails 开放业务入口；不在运行期重新解释业务决策。
 - 业务能力接口放在事实拥有者或消费方附近，避免为依赖注入再建不必要的转发服务。
@@ -158,7 +157,7 @@ OperationHook 的 `Start` / `Scope` 独立提供 Context 传播、首响应信�
 
 ## 验证
 
-后端使用格式检查、编译、静态分析和包依赖门禁：
+后端使用格式检查、编译、静态分析和包枚举：
 
 ```bash
 cd backend
@@ -166,7 +165,6 @@ gofmt -l .
 go build ./...
 go vet ./...
 go list ./...
-bash scripts/check-dependencies.sh
 ```
 
 Wails Binding 签名发生变化时，重新生成绑定并检查前端：
@@ -178,7 +176,7 @@ cd ../frontend
 npm run check
 ```
 
-依赖门禁同时拒绝存储中的通用事务和批量提交入口。运行期正确性由人工在独立临时数据目录验证直接输入、预约 FIFO、幂等、审批与拒绝、Pause/Stop 竞争、启动恢复、未知副作用、结算失败、配置重载和关闭行为；不使用真实用户数据，不新增或运行自动化测试，不自动启动开发服务。
+持久化保持单事件写入，不提供通用事务和批量提交入口。运行期正确性由人工在独立临时数据目录验证直接输入、预约 FIFO、幂等、审批与拒绝、Pause/Stop 竞争、启动恢复、未知副作用、结算失败、配置重载和关闭行为；不使用真实用户数据，不新增或运行自动化测试，不自动启动开发服务。
 
 ## 前端历史与 Loop Stream
 

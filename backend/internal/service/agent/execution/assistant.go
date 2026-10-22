@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"praxis/internal/core/loop"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
-	"praxis/internal/loop"
 	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 )

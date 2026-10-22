@@ -3,12 +3,12 @@ package bootstrap
 import (
 	"context"
 	"praxis/internal/core/hook"
+	"praxis/internal/core/loop"
 	"praxis/internal/core/security"
 	taskmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/storage"
-	"praxis/internal/loop"
 	execution "praxis/internal/service/agent/coordinator"
 	executionservice "praxis/internal/service/agent/execution"
 	sessionservice "praxis/internal/service/session"

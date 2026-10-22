@@ -3,10 +3,10 @@ package coordinator
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/loop"
 	modelapi "praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	"praxis/internal/loop"
 	sessionservice "praxis/internal/service/session"
 )
 
