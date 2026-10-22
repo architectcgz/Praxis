@@ -7,6 +7,7 @@ import (
 	"errors"
 	"praxis/internal/core/hook"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
@@ -133,7 +134,7 @@ func (s *Service) appendResult(ctx context.Context, call sessionentry.ToolCall, 
 		RequestID:   call.RequestID,
 		ExecutionID: call.ExecutionID.String(),
 		TurnID:      call.TurnID.String(),
-		Role:        sessionentry.RoleTool,
+		Role:        role.Tool,
 		AuthorKind:  sessionentry.AuthorTool,
 		AuthorID:    string(call.Name),
 		Content: []sessionentry.Block{{

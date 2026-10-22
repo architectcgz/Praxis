@@ -10,6 +10,7 @@ import (
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/fault"
 	"praxis/internal/repository"
@@ -106,8 +107,7 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 		SystemPrompt: riskReviewPrompt,
 		Entries: []sessionentry.ContextEntry{{
 			Protected: true,
-			Kind:      sessionentry.ContextEntryUserInput,
-			Role:      sessionentry.RoleUser,
+			Role:      role.User,
 			Content:   []sessionentry.Block{{Kind: sessionentry.BlockText, Text: string(data)}},
 		}},
 	}, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: built.MaxOutputTokens})

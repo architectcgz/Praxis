@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/fault"
 	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
@@ -11,7 +12,7 @@ import (
 
 // commitResult 只保存消息回执；输出字节从回执派生，重复请求不会重复累计。
 func (s *Service) commitResult(ctx context.Context, call sessionentry.ToolCall, data sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
-	if data.Role != sessionentry.RoleTool || len(data.Content) != 1 || data.Content[0].Kind != sessionentry.BlockToolResult || data.AuthorKind != sessionentry.AuthorTool || data.AuthorID != data.Content[0].Name {
+	if data.Role != role.Tool || len(data.Content) != 1 || data.Content[0].Kind != sessionentry.BlockToolResult || data.AuthorKind != sessionentry.AuthorTool || data.AuthorID != data.Content[0].Name {
 		return stored, false, errors.New("tool receipt must contain a single owned result")
 	}
 	err = func(txCtx context.Context) error {

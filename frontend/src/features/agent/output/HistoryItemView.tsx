@@ -32,7 +32,7 @@ export const HistoryItemView = memo(function HistoryItemView({ agentProfile, ite
     }
     const messageRole = message.role
     const messageClass = messageRole === 'assistant' || messageRole === 'user' ? messageRole : 'unknown'
-    const author = message.kind === 'summary' ? '上下文摘要' : messageRole === 'assistant' ? agentProfile : messageRole === 'user' ? '你' : '未知来源'
+    const author = (message.replaces?.length ?? 0) > 0 ? '上下文摘要' : messageRole === 'assistant' ? agentProfile : messageRole === 'user' ? '你' : '未知来源'
     const contentToCopy = copyContent ?? content
     const segments = messageRole === 'assistant' ? groupAssistantBlocks(messageBlocks) : []
     return (

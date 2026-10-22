@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
@@ -18,7 +19,7 @@ func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID,
 		if err != nil {
 			return err
 		}
-		if owner.SessionID != sessionID || !owner.CanReadSessionContext() || data.Role != sessionentry.RoleUser || data.ExecutionID != "" || data.SourceTaskID != "" {
+		if owner.SessionID != sessionID || !owner.CanReadSessionContext() || data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
 			return fault.ErrRequestConflict
 		}
 		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{Stream: sessionentry.StreamKey{SessionID: sessionID}, AgentID: agentID, Data: data})

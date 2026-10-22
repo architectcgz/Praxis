@@ -6,6 +6,7 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 )
 
 // protectedEntries 扩大保护范围到完整工具链，避免将调用和回执拆进不同摘要。
@@ -33,7 +34,7 @@ func protectedEntries(value appcontext.ModelContext, partial bool) []bool {
 		if hasCalls && chainStart < 0 {
 			chainStart = index
 		}
-		if chainStart >= 0 && entry.Role == sessionentry.RoleAssistant && hasText && !hasCalls && len(pending) == 0 {
+		if chainStart >= 0 && entry.Role == role.Assistant && hasText && !hasCalls && len(pending) == 0 {
 			protected := false
 			for i := chainStart; i <= index; i++ {
 				protected = protected || pinned[i]
@@ -56,7 +57,7 @@ func protectedEntries(value appcontext.ModelContext, partial bool) []bool {
 		// 保留最近一条最终回答及最近完整工具交互；只依赖通用角色和内容。
 		for i := len(value.Entries) - 1; i >= 0; i-- {
 			entry := value.Entries[i]
-			if entry.Role != sessionentry.RoleAssistant {
+			if entry.Role != role.Assistant {
 				continue
 			}
 			textOnly := true
@@ -86,8 +87,7 @@ func callKey(block sessionentry.Block) string {
 
 func summaryEntry(format SummaryFormat, text string) sessionentry.ContextEntry {
 	return sessionentry.ContextEntry{
-		Kind:    sessionentry.ContextEntrySummary,
-		Role:    sessionentry.RoleUser,
+		Role:    role.User,
 		Content: []sessionentry.Block{{Kind: sessionentry.BlockText, Text: format.ResultPrefix + text}},
 	}
 }

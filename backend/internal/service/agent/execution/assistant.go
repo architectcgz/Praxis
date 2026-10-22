@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
@@ -56,7 +57,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 // AppendAssistant 保存 Assistant 消息；完成证据与工具调用计数由消息派生。
 func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.AssistantWrite) (stored sessionentry.ContextEntry, inserted bool, err error) {
 	message := value.Entry
-	if ctx == nil || message.Role != sessionentry.RoleAssistant || message.AuthorKind != sessionentry.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
+	if ctx == nil || message.Role != role.Assistant || message.AuthorKind != sessionentry.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
 		return stored, false, errors.New("assistant ownership is required")
 	}
 	err = func(txCtx context.Context) error {
@@ -99,8 +100,10 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.Assi
 
 // AppendSummary 只保存摘要及替代范围，完整构建结果留在 Session 内存。
 func (w assistantCommitter) AppendSummary(ctx context.Context, value sessionentry.ContextEntry) (sessionentry.ContextEntry, error) {
-	value.Kind = sessionentry.ContextEntrySummary
-	value.Role = sessionentry.RoleUser
+	if !value.IsSummary() {
+		return sessionentry.ContextEntry{}, errors.New("summary entry requires its replaced history")
+	}
+	value.Role = role.User
 	value.AuthorKind = sessionentry.AuthorSystem
 	value.AuthorID = w.agentID.String()
 	value.ExecutionID = w.executionID.String()

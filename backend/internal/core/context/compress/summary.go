@@ -6,6 +6,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 )
 
 const (
@@ -72,8 +73,7 @@ func summaryContext(format SummaryFormat, previous, transcript string) appcontex
 	return appcontext.ModelContext{
 		SystemPrompt: format.SystemPrompt,
 		Entries: []sessionentry.ContextEntry{{
-			Kind: sessionentry.ContextEntryUserInput,
-			Role: sessionentry.RoleUser,
+			Role: role.User,
 			Content: []sessionentry.Block{{
 				Kind: sessionentry.BlockText,
 				Text: format.PreviousSummaryHeader + previous + format.TranscriptHeader + transcript,

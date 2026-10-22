@@ -9,6 +9,7 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 	taskmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
@@ -40,7 +41,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		if err != nil {
 			return result, false, err
 		}
-		if previous.SourceTaskID != input.ID || stored.Role != sessionentry.RoleUser || stored.TextContent() != input.Prompt {
+		if previous.SourceTaskID != input.ID || stored.Role != role.User || stored.TextContent() != input.Prompt {
 			return result, false, fault.ErrRequestConflict
 		}
 		return previous, true, nil
@@ -76,7 +77,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	at := s.clock.Now()
 	executionID := identity.AgentExecutionID(s.ids.New("execution"))
 	if previous, err := s.entries.Get(ctx, agentservice.EntryStream(owner), inputEntryID); err == nil {
-		if previous.Role != sessionentry.RoleUser || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
+		if previous.Role != role.User || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
 			return result, false, fault.ErrRequestConflict
 		}
 		executionID = identity.AgentExecutionID(previous.ExecutionID)
@@ -103,7 +104,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 			RequestID:    requestID.String(),
 			SourceTaskID: input.ID.String(),
 			ExecutionID:  executionID.String(),
-			Role:         sessionentry.RoleUser,
+			Role:         role.User,
 			AuthorKind:   sessionentry.AuthorUser,
 			Content:      []sessionentry.Block{{Kind: sessionentry.BlockText, Text: input.Prompt}},
 			CreatedAt:    at,

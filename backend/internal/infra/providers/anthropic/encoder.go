@@ -8,6 +8,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -58,17 +59,17 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthrop
 func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
 	var messages []anthropicMessage
 	for index, block := range entry.Content {
-		role := string(entry.Role)
+		messageRole := string(entry.Role)
 		var content any
 		var raw json.RawMessage
 		switch block.Kind {
 		case sessionentry.BlockText:
-			if entry.Role == sessionentry.RoleTool {
+			if entry.Role == role.Tool {
 				return nil, errors.New("anthropic tool role requires tool results")
 			}
 			content = requestTextBlock{Type: "text", Text: block.Text}
 		case sessionentry.BlockToolCall:
-			if entry.Role != sessionentry.RoleAssistant {
+			if entry.Role != role.Assistant {
 				return nil, errors.New("anthropic tool_use requires assistant role")
 			}
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
@@ -81,7 +82,7 @@ func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Conf
 				Input: block.Input,
 			}
 		case sessionentry.BlockToolResult:
-			role = "user"
+			messageRole = "user"
 			content = requestToolResultBlock{
 				Type:      "tool_result",
 				ToolUseID: ids[block.CallID],
@@ -97,7 +98,7 @@ func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Conf
 		default:
 			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
 		}
-		if role != "user" && role != "assistant" {
+		if messageRole != "user" && messageRole != "assistant" {
 			return nil, errors.New("anthropic unsupported message role")
 		}
 		if raw == nil {
@@ -108,10 +109,10 @@ func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Conf
 			}
 		}
 		last := len(messages) - 1
-		if last >= 0 && messages[last].Role == role {
+		if last >= 0 && messages[last].Role == messageRole {
 			messages[last].Content = append(messages[last].Content, raw)
 		} else {
-			messages = append(messages, anthropicMessage{Role: role, Content: []json.RawMessage{raw}})
+			messages = append(messages, anthropicMessage{Role: messageRole, Content: []json.RawMessage{raw}})
 		}
 	}
 	return messages, nil

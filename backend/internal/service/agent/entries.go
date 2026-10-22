@@ -5,6 +5,7 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
@@ -27,7 +28,7 @@ func (s *Service) AppendEntry(ctx context.Context, agentID identity.AgentID, dat
 		if err != nil {
 			return err
 		}
-		if owner.CanReadSessionContext() || data.Role != sessionentry.RoleUser || data.ExecutionID != "" || data.SourceTaskID != "" {
+		if owner.CanReadSessionContext() || data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
 			return fault.ErrRequestConflict
 		}
 		if err := sessionservice.RequireWritable(txCtx, s.sessions, owner.SessionID); err != nil {

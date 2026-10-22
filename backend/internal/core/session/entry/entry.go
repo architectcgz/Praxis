@@ -3,6 +3,7 @@ package entry
 import (
 	"bytes"
 	"encoding/json"
+	"praxis/internal/core/session/entry/role"
 	"slices"
 	"strings"
 	"time"
@@ -15,28 +16,6 @@ const (
 	AuthorAgent  AuthorKind = "agent"
 	AuthorTool   AuthorKind = "tool"
 	AuthorSystem AuthorKind = "system"
-)
-
-// ContextEntryKind 标识历史记录的语义类别。
-type ContextEntryKind string
-
-const (
-	ContextEntryReference      ContextEntryKind = "reference"
-	ContextEntrySummary        ContextEntryKind = "summary"
-	ContextEntryUserInput      ContextEntryKind = "user_input"
-	ContextEntryProviderOutput ContextEntryKind = "provider_output"
-	ContextEntryToolResult     ContextEntryKind = "tool_result"
-	ContextEntryMCPCall        ContextEntryKind = "mcp_call"
-	ContextEntryMCPResult      ContextEntryKind = "mcp_result"
-)
-
-// Role 表示上下文条目的参与方。
-type Role string
-
-const (
-	RoleUser      Role = "user"
-	RoleAssistant Role = "assistant"
-	RoleTool      Role = "tool"
 )
 
 // BlockKind 表示上下文条目中的语义内容。
@@ -80,10 +59,14 @@ type ContextEntry struct {
 	CreatedAt    time.Time  `json:"createdAt"`
 
 	// Protected 要求压缩时保留原文；来源与保护策略由调用方决定。
-	Protected bool             `json:"protected,omitempty"`
-	Kind      ContextEntryKind `json:"kind"`
-	Role      Role             `json:"role"`
-	Content   []Block          `json:"content"`
+	Protected bool      `json:"protected,omitempty"`
+	Role      role.Role `json:"role"`
+	Content   []Block   `json:"content"`
+}
+
+// IsSummary 根据历史替代范围识别压缩摘要。
+func (e ContextEntry) IsSummary() bool {
+	return len(e.Replaces) > 0
 }
 
 // Clone 返回 Block 的独立副本，避免跨边界修改共享输入。

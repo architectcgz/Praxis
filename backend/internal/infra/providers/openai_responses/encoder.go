@@ -8,6 +8,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
 )
@@ -62,12 +63,12 @@ func responseItems(entry sessionentry.ContextEntry, config modelapi.Config, ids 
 		}
 		switch block.Kind {
 		case sessionentry.BlockText:
-			if entry.Role == sessionentry.RoleTool {
+			if entry.Role == role.Tool {
 				return nil, errors.New("responses tool role requires tool results")
 			}
 			text.WriteString(block.Text)
 		case sessionentry.BlockToolCall:
-			if entry.Role != sessionentry.RoleAssistant {
+			if entry.Role != role.Assistant {
 				return nil, errors.New("responses function call requires assistant role")
 			}
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {

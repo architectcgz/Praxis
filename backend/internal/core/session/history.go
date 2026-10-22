@@ -45,7 +45,7 @@ func (h *History) SetContext(value appcontext.ModelContext) *appcontext.ModelCon
 func (h *History) ContextHistory() []sessionentry.ContextEntry {
 	values := make([]sessionentry.ContextEntry, 0, len(h.entries))
 	for _, value := range h.entries {
-		if value.Kind != sessionentry.ContextEntrySummary {
+		if !value.IsSummary() {
 			values = append(values, value)
 			continue
 		}

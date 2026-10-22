@@ -5,6 +5,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -38,7 +39,7 @@ func chatMessagesFromContext(entry sessionentry.ContextEntry, ids map[string]str
 	for index, block := range entry.Content {
 		switch block.Kind {
 		case sessionentry.BlockText:
-			if entry.Role == sessionentry.RoleTool {
+			if entry.Role == role.Tool {
 				return nil, fmt.Errorf("tool role requires tool results")
 			}
 			if result.Content == nil {
@@ -48,7 +49,7 @@ func chatMessagesFromContext(entry sessionentry.ContextEntry, ids map[string]str
 				*result.Content += block.Text
 			}
 		case sessionentry.BlockToolCall:
-			if entry.Role != sessionentry.RoleAssistant {
+			if entry.Role != role.Assistant {
 				return nil, fmt.Errorf("tool call requires assistant role")
 			}
 			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {

@@ -10,6 +10,7 @@ import (
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 )
@@ -116,7 +117,7 @@ func (r *Runner) run(
 		}
 		if changed {
 			for index, entry := range compressed.Entries {
-				if entry.Kind != sessionentry.ContextEntrySummary || entry.ID != "" {
+				if !entry.IsSummary() || entry.ID != "" {
 					continue
 				}
 				stored, err := deps.Assistant.AppendSummary(ctx, entry)
@@ -198,7 +199,7 @@ func (r *Runner) executeTurn(
 			}
 			stored, _, writeErr := deps.Assistant.AppendAssistant(context.WithoutCancel(ctx), AssistantWrite{Entry: sessionentry.ContextEntry{
 				ID: "assistant:" + turnID.String(), RequestID: executionInput.RequestID.String(), ExecutionID: executionInput.ID.String(),
-				TurnID: turnID.String(), StopReason: stopReason, Role: sessionentry.RoleAssistant, AuthorKind: sessionentry.AuthorAgent,
+				TurnID: turnID.String(), StopReason: stopReason, Role: role.Assistant, AuthorKind: sessionentry.AuthorAgent,
 				AuthorID: executionInput.AgentID.String(), Content: partial,
 			}})
 			if writeErr != nil {
@@ -225,7 +226,7 @@ func (r *Runner) executeTurn(
 			ExecutionID: executionInput.ID.String(),
 			TurnID:      turnID.String(),
 			StopReason:  string(response.stopReason),
-			Role:        sessionentry.RoleAssistant,
+			Role:        role.Assistant,
 			AuthorKind:  sessionentry.AuthorAgent,
 			AuthorID:    executionInput.AgentID.String(),
 			Content:     assistant,

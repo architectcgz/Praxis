@@ -8,6 +8,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
@@ -42,9 +43,6 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 		if prior, exists := r.s.entry(key); exists {
 			record := prior.entryValue()
 			candidate := value.Data
-			if candidate.Kind == "" {
-				candidate.Kind = record.Data.Kind
-			}
 			candidate.Sequence, candidate.CreatedAt = record.Data.Sequence, record.Data.CreatedAt
 			if record.AgentID != value.AgentID || !same(record.Data, candidate) {
 				return fault.ErrRequestConflict
@@ -54,7 +52,7 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 		}
 
 		// 幂等回读先于状态检查；新输出必须在当前执行仍允许写入时提交。
-		if value.Data.Role == sessionentry.RoleAssistant {
+		if value.Data.Role == role.Assistant {
 			execution, err := getLocked[agentmodel.Execution](r.s, "agent_execution", value.Data.ExecutionID)
 			if err != nil {
 				return err
@@ -64,16 +62,6 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 			}
 		}
 		data := value.Data.Clone()
-		if data.Kind == "" {
-			switch data.Role {
-			case sessionentry.RoleUser:
-				data.Kind = sessionentry.ContextEntryUserInput
-			case sessionentry.RoleAssistant:
-				data.Kind = sessionentry.ContextEntryProviderOutput
-			case sessionentry.RoleTool:
-				data.Kind = sessionentry.ContextEntryToolResult
-			}
-		}
 		data.Sequence = r.s.sequences[scope] + 1
 		if data.CreatedAt.IsZero() {
 			data.CreatedAt = time.Now().UTC()
@@ -115,7 +103,7 @@ func (r EntryRepository) List(ctx context.Context, query repository.EntryQuery) 
 			values = r.s.history(query.Stream).ContextHistory()
 		}
 		for _, value := range values {
-			if value.Role == sessionentry.RoleUser && !query.IncludeUnadmitted && value.ExecutionID != "" {
+			if value.Role == role.User && !query.IncludeUnadmitted && value.ExecutionID != "" {
 				if _, exists := r.s.entry(entityKey{"agent_execution", value.ExecutionID}); !exists {
 					continue
 				}
@@ -138,7 +126,7 @@ func (r entryRecord) Validate() error {
 	if r.AgentID == "" || r.AgentID.String() != strings.TrimSpace(r.AgentID.String()) || strings.ContainsAny(r.AgentID.String(), "\x00\r\n") {
 		return errors.New("message agent identity must be canonical and nonempty")
 	}
-	if r.Data.Role == sessionentry.RoleAssistant && (r.Data.AuthorKind != sessionentry.AuthorAgent || r.Data.AuthorID != r.AgentID.String()) {
+	if r.Data.Role == role.Assistant && (r.Data.AuthorKind != sessionentry.AuthorAgent || r.Data.AuthorID != r.AgentID.String()) {
 		return errors.New("assistant author does not match the message agent")
 	}
 	if err := validateEntryData(r.Data); err != nil {
@@ -173,7 +161,7 @@ func validateEntryData(m sessionentry.ContextEntry) error {
 		}
 	}
 	switch m.Role {
-	case sessionentry.RoleUser, sessionentry.RoleAssistant, sessionentry.RoleTool:
+	case role.User, role.Assistant, role.Tool:
 	default:
 		return errors.New("message role is invalid")
 	}
@@ -182,12 +170,12 @@ func validateEntryData(m sessionentry.ContextEntry) error {
 	default:
 		return errors.New("message author is invalid")
 	}
-	if m.Kind == sessionentry.ContextEntrySummary {
-		if m.Role != sessionentry.RoleUser || m.AuthorKind != sessionentry.AuthorSystem || len(m.Replaces) == 0 {
-			return errors.New("summary entry requires its replaced history")
+	if m.IsSummary() {
+		if m.Role != role.User || m.AuthorKind != sessionentry.AuthorSystem {
+			return errors.New("summary entry requires user role and system author")
 		}
 	}
-	if len(m.Content) == 0 && !(m.Role == sessionentry.RoleAssistant && (m.StopReason == "completed" || m.StopReason == "stop_sequence")) {
+	if len(m.Content) == 0 && !(m.Role == role.Assistant && (m.StopReason == "completed" || m.StopReason == "stop_sequence")) {
 		return errors.New("message blocks are required")
 	}
 	for _, block := range m.Content {
@@ -198,13 +186,13 @@ func validateEntryData(m sessionentry.ContextEntry) error {
 	return nil
 }
 
-func validateEntryBlock(role sessionentry.Role, block sessionentry.Block) error {
+func validateEntryBlock(messageRole role.Role, block sessionentry.Block) error {
 	if block.Kind != sessionentry.BlockReasoningState && block.ReasoningState != nil {
 		return errors.New("reasoning state requires a reasoning state message block")
 	}
 	switch block.Kind {
 	case sessionentry.BlockReasoningState:
-		if role != sessionentry.RoleAssistant || block.ReasoningState == nil || block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
+		if messageRole != role.Assistant || block.ReasoningState == nil || block.Text != "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
 			return errors.New("message contains an invalid reasoning state block")
 		}
 	case sessionentry.BlockText:
@@ -212,15 +200,15 @@ func validateEntryBlock(role sessionentry.Role, block sessionentry.Block) error 
 			return errors.New("message contains an invalid text block")
 		}
 	case sessionentry.BlockThinking:
-		if role != sessionentry.RoleAssistant || strings.TrimSpace(block.Text) == "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
+		if messageRole != role.Assistant || strings.TrimSpace(block.Text) == "" || block.CallID != "" || block.Name != "" || len(block.Input) > 0 || block.IsError {
 			return errors.New("message contains an invalid thinking block")
 		}
 	case sessionentry.BlockToolCall:
-		if role != sessionentry.RoleAssistant || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || block.IsError || len(block.Input) > 0 && !json.Valid(block.Input) {
+		if messageRole != role.Assistant || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || block.IsError || len(block.Input) > 0 && !json.Valid(block.Input) {
 			return errors.New("message contains an invalid tool call block")
 		}
 	case sessionentry.BlockToolResult:
-		if role != sessionentry.RoleTool || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || len(block.Input) > 0 {
+		if messageRole != role.Tool || block.CallID == "" || block.Name == "" || block.CallID != strings.TrimSpace(block.CallID) || block.Name != strings.TrimSpace(block.Name) || len(block.Input) > 0 {
 			return errors.New("message contains an invalid tool result block")
 		}
 	default:

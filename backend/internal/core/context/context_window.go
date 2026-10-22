@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"unicode/utf8"
 )
 
@@ -24,7 +25,7 @@ func EstimateTokens(text string) int {
 // EstimatedTokens 估算上下文正文和结构开销，工具定义需由请求边界另行预留。
 func (c ModelContext) EstimatedTokens() (int, error) {
 	type modelEntry struct {
-		Role    sessionentry.Role
+		Role    role.Role
 		Content []sessionentry.Block
 	}
 	values := make([]modelEntry, 0, len(c.Entries))

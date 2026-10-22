@@ -6,6 +6,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"slices"
 	"strings"
 )
@@ -22,14 +23,14 @@ func contextContent(systemPrompt, inputEntryID string, shared []sessionmodel.Sha
 	})
 	for _, fact := range shared {
 		content.Entries = append(content.Entries, sessionentry.ContextEntry{
-			Kind: sessionentry.ContextEntryReference, Role: sessionentry.RoleUser, Protected: true,
+			Role: role.User, Protected: true,
 			Content: []sessionentry.Block{{Kind: sessionentry.BlockText, Text: fmt.Sprintf("[Session context: %s]\n%s", fact.Kind, fact.Content)}},
 		})
 	}
 	selected := historyEntries(entries)
 	found := false
 	for index := range selected {
-		if selected[index].ID == inputEntryID && selected[index].Role == sessionentry.RoleUser {
+		if selected[index].ID == inputEntryID && selected[index].Role == role.User {
 			selected[index].Protected = true
 			found = true
 		}
@@ -79,7 +80,7 @@ func historyEntries(entries []sessionentry.ContextEntry) []sessionentry.ContextE
 		if !ok {
 			continue
 		}
-		if message.Role == sessionentry.RoleTool {
+		if message.Role == role.Tool {
 			content := make([]sessionentry.Block, 0, len(entry.Content))
 			for _, block := range entry.Content {
 				if block.Kind != sessionentry.BlockToolResult || !calls[callKey{message.ExecutionID, block.CallID}] {

@@ -8,7 +8,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	modelapi "praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
@@ -108,7 +108,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if err := decodeJSON(input, &record); err != nil {
 			return err
 		}
-		if record.AgentID != v.AgentID || record.Data.Role != sessionentry.RoleUser || record.Data.RequestID != v.RequestID.String() || record.Data.SourceTaskID != v.SourceTaskID.String() || record.Data.ExecutionID != v.ID.String() {
+		if record.AgentID != v.AgentID || record.Data.Role != role.User || record.Data.RequestID != v.RequestID.String() || record.Data.SourceTaskID != v.SourceTaskID.String() || record.Data.ExecutionID != v.ID.String() {
 			return fault.ErrRequestConflict
 		}
 	case "tool_event":
@@ -184,7 +184,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if agent.SessionID.String() != scope || v.OwnerID != "" && v.OwnerID != v.AgentID.String() {
 			return errors.New("message agent does not match the stream ownership")
 		}
-		if v.Data.Kind == sessionentry.ContextEntrySummary {
+		if v.Data.IsSummary() {
 			seen := make(map[string]bool, len(v.Data.Replaces))
 			for _, id := range v.Data.Replaces {
 				if seen[id] {
@@ -197,12 +197,12 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 				}
 			}
 		}
-		if v.Data.SourceTaskID != "" && (v.Data.Role != sessionentry.RoleUser || v.Data.ExecutionID == "") {
+		if v.Data.SourceTaskID != "" && (v.Data.Role != role.User || v.Data.ExecutionID == "") {
 			return errors.New("task input requires a user message and execution identity")
 		}
 		if v.Data.ExecutionID != "" {
 			task, err := getLocked[agentmodel.Execution](s, "agent_execution", v.Data.ExecutionID)
-			if errors.Is(err, fault.ErrNotFound) && v.Data.Role == sessionentry.RoleUser && v.Data.ID == "input:"+v.Data.RequestID {
+			if errors.Is(err, fault.ErrNotFound) && v.Data.Role == role.User && v.Data.ID == "input:"+v.Data.RequestID {
 				return nil
 			}
 			if err != nil {
@@ -215,7 +215,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 			if agent.ID != v.AgentID || task.SessionID.String() != scope || v.Data.RequestID != task.RequestID.String() {
 				return errors.New("message stream or request ownership mismatch")
 			}
-			if v.Data.Role == sessionentry.RoleAssistant && (v.Data.AuthorID != task.AgentID.String() || !task.Active() || task.Progress.FinalAssistantID != "") {
+			if v.Data.Role == role.Assistant && (v.Data.AuthorID != task.AgentID.String() || !task.Active() || task.Progress.FinalAssistantID != "") {
 				return errors.New("assistant author or execution state mismatch")
 			}
 		}

@@ -9,6 +9,7 @@ import (
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
@@ -355,7 +356,7 @@ func (s *Store) projectExecution(value *agentmodel.Execution) error {
 		source, _ := s.entry(key)
 		record := source.entryValue()
 		message := record.Data
-		if message.Role == sessionentry.RoleAssistant && message.Sequence > lastAssistant.Sequence {
+		if message.Role == role.Assistant && message.Sequence > lastAssistant.Sequence {
 			lastAssistant = message
 		}
 		for _, block := range message.Content {
