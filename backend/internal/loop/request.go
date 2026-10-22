@@ -5,7 +5,7 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"strings"
@@ -17,7 +17,6 @@ import (
 func (r *Runner) summarizeContext(
 	ctx context.Context,
 	executionInput Input,
-	stream modelapi.ModelStream,
 	history appcontext.ModelContext,
 	limit int,
 ) (string, error) {
@@ -33,7 +32,7 @@ func (r *Runner) summarizeContext(
 		ExecutionID: executionInput.ID,
 		TurnID:      turnID,
 	})
-	request := modelapi.ModelRequest{
+	request := providerapi.Request{
 		ExecutionID:     executionInput.ID,
 		PromptCacheKey:  executionInput.SessionID.String(),
 		Context:         history,
@@ -43,7 +42,7 @@ func (r *Runner) summarizeContext(
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := requestModel(requestCtx, stream, request, hook.ModelRequest{
+	response, err := requestModel(requestCtx, r.Provider, request, hook.ModelRequest{
 		Identity: hook.Identity{
 			SessionID:   executionInput.SessionID,
 			AgentID:     executionInput.AgentID,
@@ -52,8 +51,8 @@ func (r *Runner) summarizeContext(
 		},
 		Kind:     hook.ModelRequestSummary,
 		Sequence: sequence,
-	}, r.HookDispatcher, func(event modelapi.ModelStreamEvent) {
-		if event.Kind == modelapi.StreamUsage {
+	}, r.HookDispatcher, func(event providerapi.Event) {
+		if event.Kind == providerapi.StreamUsage {
 			r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 		}
 	})
@@ -65,7 +64,7 @@ func (r *Runner) summarizeContext(
 	}
 	var text strings.Builder
 	for _, event := range response.events {
-		if event.Kind == modelapi.StreamTextDelta {
+		if event.Kind == providerapi.StreamTextDelta {
 			text.WriteString(event.Text)
 		}
 	}
@@ -82,10 +81,10 @@ func (r *Runner) summarizeContext(
 
 // buildModelRequest 在编排边界将任务快照映射为请求，模型调用只接收构造后的请求。
 func buildModelRequest(
-	request modelapi.ModelRequest,
+	request providerapi.Request,
 	modelContext appcontext.ModelContext,
 	catalog tool.ToolCatalog,
-) modelapi.ModelRequest {
+) providerapi.Request {
 	request.Context = modelContext.Clone()
 	request.Model = request.Model.Clone()
 	request.Tools = catalog.List()

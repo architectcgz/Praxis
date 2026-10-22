@@ -1,4 +1,4 @@
-// Registry 加载模型配置和凭据，并提供冻结配置对应的模型构建能力。
+// Registry 加载并管理模型配置和凭据。
 package modelregistry
 
 import (
@@ -11,22 +11,13 @@ import (
 	"net/http"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	"praxis/internal/infra/providers/httpclient"
 	"slices"
 	"strings"
 	"sync"
 )
 
 const maxProviderCatalogBytes = 1 << 20
-
-// StreamFactory 根据已校验的配置创建一次执行使用的模型流。
-// API Key 只在注册表内部传入该工厂，不会进入配置返回值或 runtime contract。
-type StreamFactory func(
-	format modelconfig.APIFormat,
-	provider modelconfig.Provider,
-	configured modelconfig.Model,
-	apiKey string,
-	client *http.Client,
-) (modelapi.ModelStream, error)
 
 // Registry 在进程内统一管理模型配置。界面保存时原地替换配置及索引，
 // 因此所有读取路径必须持有 mu，持有此指针的调用方不会观察到切换中的状态。
@@ -37,7 +28,6 @@ type Registry struct {
 	config          modelconfig.Config
 	credentials     ProviderCredentials
 	client          *http.Client
-	streamFactory   StreamFactory
 	providerClients map[string]*http.Client
 	modelConfigs    map[modelKey]modelapi.Config
 	providersByID   map[string]modelconfig.Provider
@@ -47,7 +37,7 @@ func (r *Registry) providerClientLocked(providerID string) *http.Client {
 	if client := r.providerClients[providerID]; client != nil {
 		return client
 	}
-	return RequestClient(r.client)
+	return httpclient.RequestClient(r.client)
 }
 
 // modelapi.Config 返回当前配置的独立副本，读取方不能修改注册表内部状态。
@@ -151,7 +141,7 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 		return nil, fmt.Errorf("retrieve provider models: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, DecodeErrorResponse(response)
+		return nil, httpclient.DecodeErrorResponse(response)
 	}
 	defer response.Body.Close()
 	var payload struct {

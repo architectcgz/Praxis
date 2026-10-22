@@ -5,36 +5,36 @@ import (
 	"errors"
 	"mime"
 	"net/http"
-	modelapi "praxis/internal/core/model"
-	modelregistry "praxis/internal/infra/modelregistry"
+	providerapi "praxis/internal/core/provider"
+	"praxis/internal/infra/providers/httpclient"
 	"strings"
 )
 
-type EmitFunc func(modelapi.ModelStreamEvent) error
+type EmitFunc func(providerapi.Event) error
 
 const eventBufferCapacity = 16
 
 type Decoder interface {
-	Decode(context.Context, *SSEReader, EmitFunc) (modelapi.ModelStopReason, error)
+	Decode(context.Context, *SSEReader, EmitFunc) (providerapi.StopReason, error)
 }
 
-type DecoderFunc func(context.Context, *SSEReader, EmitFunc) (modelapi.ModelStopReason, error)
+type DecoderFunc func(context.Context, *SSEReader, EmitFunc) (providerapi.StopReason, error)
 
 func (f DecoderFunc) Decode(
 	ctx context.Context,
 	reader *SSEReader,
 	emit EmitFunc,
-) (modelapi.ModelStopReason, error) {
+) (providerapi.StopReason, error) {
 	return f(ctx, reader, emit)
 }
 
 func Open(client *http.Client, request *http.Request) (*http.Response, error) {
-	response, err := modelregistry.RequestClient(client).Do(request)
+	response, err := httpclient.RequestClient(client).Do(request)
 	if err != nil {
 		return nil, err
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, modelregistry.DecodeErrorResponse(response)
+		return nil, httpclient.DecodeErrorResponse(response)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
@@ -51,15 +51,15 @@ func Start(
 	response *http.Response,
 	decoder Decoder,
 	sensitiveValues ...string,
-) <-chan modelapi.ModelStreamEvent {
-	events := make(chan modelapi.ModelStreamEvent, eventBufferCapacity)
+) <-chan providerapi.Event {
+	events := make(chan providerapi.Event, eventBufferCapacity)
 	go func() {
 		defer close(events)
 		defer response.Body.Close()
 		stopClose := context.AfterFunc(ctx, func() { _ = response.Body.Close() })
 		defer stopClose()
 		// 解码器通过 emit 转发事件，取消 context 后不再等待消费方。
-		emit := func(event modelapi.ModelStreamEvent) error {
+		emit := func(event providerapi.Event) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -69,11 +69,11 @@ func Start(
 		}
 		stopReason, err := decoder.Decode(ctx, NewSSEReader(response.Body), emit)
 		if err != nil {
-			_ = emit(modelapi.ModelStreamEvent{Kind: modelapi.StreamError, Err: RedactError(err, sensitiveValues)})
+			_ = emit(providerapi.Event{Kind: providerapi.StreamError, Err: RedactError(err, sensitiveValues)})
 			return
 		}
-		_ = emit(modelapi.ModelStreamEvent{
-			Kind:       modelapi.StreamComplete,
+		_ = emit(providerapi.Event{
+			Kind:       providerapi.StreamComplete,
 			StopReason: stopReason,
 		})
 	}()

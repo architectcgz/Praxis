@@ -2,7 +2,7 @@ package coordinator
 
 import (
 	"encoding/json"
-	"praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/identity"
@@ -30,7 +30,7 @@ type Event struct {
 	IsError        bool
 	Error          string
 	Timing         *timingmodel.Record
-	Usage          *model.ModelUsage
+	Usage          *providerapi.Usage
 }
 
 // EventPublisher 只保存进程级订阅，不缓存任务事件或持久化消息。

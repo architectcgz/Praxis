@@ -6,6 +6,7 @@ import (
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
+	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
@@ -129,7 +130,7 @@ func validateWaitCondition(w workflow.WaitCondition) error {
 	return nil
 }
 
-func validateUsageRecord(r modelapi.ModelUsageRecord) error {
+func validateUsageRecord(r providerapi.UsageRecord) error {
 	for _, id := range []string{
 		r.SessionID,
 		r.AgentID,

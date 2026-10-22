@@ -1,7 +1,7 @@
 package bindings
 
 import (
-	"praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/identity"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -23,7 +23,7 @@ func (b *AgentBindings) ListSessionUsage(sessionID string) ([]dto.ModelUsageReco
 	return usageRecords(records), nil
 }
 
-func usageRecords(records []model.ModelUsageRecord) []dto.ModelUsageRecord {
+func usageRecords(records []providerapi.UsageRecord) []dto.ModelUsageRecord {
 	if records == nil {
 		return nil
 	}
@@ -40,7 +40,7 @@ func usageRecords(records []model.ModelUsageRecord) []dto.ModelUsageRecord {
 	return result
 }
 
-func publicUsage(value model.ModelUsage) dto.ModelUsage {
+func publicUsage(value providerapi.Usage) dto.ModelUsage {
 	return dto.ModelUsage{
 		InputTokens:              value.InputTokens,
 		OutputTokens:             clonePointer(value.OutputTokens),

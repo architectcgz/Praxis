@@ -1,4 +1,4 @@
-package modelregistry
+package httpclient
 
 import (
 	"errors"

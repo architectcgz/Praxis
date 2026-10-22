@@ -5,6 +5,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
@@ -16,7 +17,7 @@ type ToolExecutor interface {
 }
 
 type (
-	ToolCall                   = modelapi.ToolCall
+	ToolCall                   = providerapi.ToolCall
 	ToolDefinition             = tool.ToolDefinition
 	ModelContext               = appcontext.ModelContext
 	ContextWindowExceededError = appcontext.ContextWindowExceededError

@@ -5,16 +5,12 @@ import (
 	"net/http"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	"praxis/internal/infra/providers/httpclient"
 	"slices"
 )
 
 // Load 读取并校验模型配置与凭证文件，然后构造运行时注册表。
-// 可选的 StreamFactory 负责在组合根创建具体协议适配器。
-func Load(modelsPath, credentialsPath string, client *http.Client, factories ...StreamFactory) (*Registry, error) {
-	var streamFactory StreamFactory
-	if len(factories) > 0 {
-		streamFactory = factories[0]
-	}
+func Load(modelsPath, credentialsPath string, client *http.Client) (*Registry, error) {
 	config, err := readModelConfigFile(modelsPath)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
@@ -27,7 +23,7 @@ func Load(modelsPath, credentialsPath string, client *http.Client, factories ...
 	if err != nil {
 		return nil, &ConfigurationError{Path: credentialsPath, Err: err}
 	}
-	registry, err := newRegistry(modelsPath, credentialsPath, config, credentials, client, streamFactory)
+	registry, err := newRegistry(modelsPath, credentialsPath, config, credentials, client)
 	if err != nil {
 		return nil, &ConfigurationError{Path: modelsPath, Err: err}
 	}
@@ -40,7 +36,6 @@ func newRegistry(
 	config modelconfig.Config,
 	credentials ProviderCredentials,
 	client *http.Client,
-	streamFactory StreamFactory,
 ) (*Registry, error) {
 	providerClients, err := buildProviderClients(config.Providers, client)
 	if err != nil {
@@ -53,7 +48,6 @@ func newRegistry(
 		config:          config,
 		credentials:     credentials,
 		client:          client,
-		streamFactory:   streamFactory,
 		providerClients: providerClients,
 		modelConfigs:    modelConfigs,
 		providersByID:   providersByID,
@@ -63,7 +57,7 @@ func newRegistry(
 func buildProviderClients(providers []modelconfig.Provider, base *http.Client) (map[string]*http.Client, error) {
 	clients := make(map[string]*http.Client, len(providers))
 	for _, provider := range providers {
-		client, err := NewProxyClient(base, provider.ProxyURL)
+		client, err := httpclient.NewProxyClient(base, provider.ProxyURL)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", provider.ID, err)
 		}

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/session/entry/role"
 	timingmodel "praxis/internal/core/timing"
@@ -164,7 +164,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		_ = decodeJSON(data, &v)
 		return taskOwner(v.ExecutionID, v.AgentID)
 	case "usage":
-		var v modelapi.ModelUsageRecord
+		var v providerapi.UsageRecord
 		_ = decodeJSON(data, &v)
 		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
 	case "timing":
@@ -258,7 +258,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 	case "session":
 		fields = []string{"ProjectID", "WorkspaceID", "CreatedAt"}
 	case "usage":
-		var prior, next modelapi.ModelUsageRecord
+		var prior, next providerapi.UsageRecord
 		if err := decodeJSON(before, &prior); err != nil {
 			return err
 		}

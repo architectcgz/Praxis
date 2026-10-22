@@ -2,17 +2,16 @@ package bootstrap
 
 import (
 	"context"
+	"praxis/internal/core/tool"
+	"praxis/internal/dataroot"
 	"praxis/internal/infra/agentregistry"
 	modelregistry "praxis/internal/infra/modelregistry"
 	"praxis/internal/infra/toolregistry"
-	modelservice "praxis/internal/service/model"
-	"sync"
-
-	"praxis/internal/core/tool"
-	"praxis/internal/dataroot"
 	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
+	modelservice "praxis/internal/service/model"
 	"praxis/internal/settings"
+	"sync"
 )
 
 type configuration struct {
@@ -29,7 +28,7 @@ func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configu
 	if err != nil {
 		return nil, err
 	}
-	models, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil, newModelStream)
+	models, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +74,7 @@ func buildModelService(root dataroot.DataRoot, config *configuration, logger *lo
 			if err != nil {
 				return err
 			}
-			models, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil, newModelStream)
+			models, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil)
 			if err != nil {
 				return err
 			}

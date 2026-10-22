@@ -8,7 +8,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
@@ -17,7 +17,7 @@ import (
 
 // Dependencies 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Dependencies struct {
-	ModelBuilder   modelapi.ModelBuilder
+	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
 	Requests       RequestSequencer
 	HookDispatcher *hook.Dispatcher
@@ -36,8 +36,8 @@ type Runner struct {
 // NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
 // 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
 func NewRunner(deps Dependencies) (Runner, error) {
-	if deps.ModelBuilder == nil {
-		return Runner{}, errors.New("loop model builder is required")
+	if deps.Provider == nil {
+		return Runner{}, errors.New("loop provider is required")
 	}
 	if deps.Tools == nil {
 		return Runner{}, errors.New("loop tool catalog is required")
@@ -77,18 +77,12 @@ func (r *Runner) run(
 ) (EndReason, FailureCode, error) {
 	modelContext := executionInput.Context
 
-	builtModel, err := r.buildModel(executionInput.Config.Model)
-	if err != nil {
-		r.emitError(executionInput.AgentID, executionInput.ID, "", err)
-		return loopResult(err)
-	}
-
 	for {
-		request := buildModelRequest(modelapi.ModelRequest{
+		request := buildModelRequest(providerapi.Request{
 			ExecutionID:     executionInput.ID,
 			PromptCacheKey:  executionInput.SessionID.String(),
 			Model:           executionInput.Config.Model,
-			MaxOutputTokens: builtModel.MaxOutputTokens,
+			MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens,
 		}, *modelContext, r.Tools)
 		toolPayload, err := json.Marshal(request.Tools)
 		if err != nil {
@@ -97,10 +91,10 @@ func (r *Runner) run(
 		compressed, changed, err := r.CompressionStrategy.Compress(ctx, *modelContext, contextcompress.Options{
 			SummaryFormat:   r.SummaryFormat,
 			ContextWindow:   executionInput.Config.Model.ContextWindow,
-			MaxOutputTokens: builtModel.MaxOutputTokens,
+			MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens,
 			ReservedTokens:  appcontext.EstimateTokens(string(toolPayload)),
 		}, func(summaryCtx context.Context, history appcontext.ModelContext, limit int) (string, error) {
-			return r.summarizeContext(summaryCtx, executionInput, builtModel.Stream, history, limit)
+			return r.summarizeContext(summaryCtx, executionInput, history, limit)
 		})
 		if err != nil {
 			err = modelFailure(err)
@@ -129,7 +123,7 @@ func (r *Runner) run(
 		}
 		turnID := identity.NewTurnID(executionInput.ID, sequence)
 		request.TurnID = turnID
-		outcome, failureCode, finished, err := r.executeTurn(ctx, executionInput, deps, builtModel, request, modelContext, sequence)
+		outcome, failureCode, finished, err := r.executeTurn(ctx, executionInput, deps, request, modelContext, sequence)
 
 		if err != nil || outcome != EndCompleted || finished {
 			return outcome, failureCode, err
@@ -142,8 +136,7 @@ func (r *Runner) executeTurn(
 	ctx context.Context,
 	executionInput Input,
 	deps ExecutionDependencies,
-	builtModel modelapi.Model,
-	request modelapi.ModelRequest,
+	request providerapi.Request,
 	modelContext *appcontext.ModelContext,
 	sequence uint64,
 ) (EndReason, FailureCode, bool, error) {
@@ -164,7 +157,7 @@ func (r *Runner) executeTurn(
 		TurnID:      turnID,
 		Name:        executionInput.Config.Model.ProviderID + "/" + executionInput.Config.Model.ModelID,
 	})
-	response, err := requestModel(ctx, builtModel.Stream, request, hook.ModelRequest{
+	response, err := requestModel(ctx, r.Provider, request, hook.ModelRequest{
 		Identity: hook.Identity{
 			SessionID:   executionInput.SessionID,
 			AgentID:     executionInput.AgentID,
@@ -173,11 +166,11 @@ func (r *Runner) executeTurn(
 		},
 		Kind:     hook.ModelRequestIteration,
 		Sequence: sequence,
-	}, r.HookDispatcher, func(event modelapi.ModelStreamEvent) {
+	}, r.HookDispatcher, func(event providerapi.Event) {
 		r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 	})
 	if err != nil {
-		blocks := modelapi.EntryBlocksFromEvents(response.events)
+		blocks := entryBlocksFromEvents(response.events)
 		partial := make([]sessionentry.Block, 0, len(blocks))
 		for _, block := range blocks {
 			if block.Kind == sessionentry.BlockText || block.Kind == sessionentry.BlockThinking {
@@ -207,7 +200,7 @@ func (r *Runner) executeTurn(
 		return outcome, code, false, cause
 	}
 
-	assistant := modelapi.EntryBlocksFromEvents(response.events)
+	assistant := entryBlocksFromEvents(response.events)
 	var calls []sessionentry.ToolCall
 	var committed []sessionentry.ContextEntry
 
@@ -224,7 +217,7 @@ func (r *Runner) executeTurn(
 			Content:     assistant,
 		}
 		value := AssistantWrite{Entry: message}
-		if response.stopReason == modelapi.StopCompleted || response.stopReason == modelapi.StopSequence {
+		if response.stopReason == providerapi.StopCompleted || response.stopReason == providerapi.StopSequence {
 			value.FinalOutput = &agentmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
 		}
 		message, inserted, err := deps.Assistant.AppendAssistant(ctx, value)
@@ -262,7 +255,7 @@ func (r *Runner) executeTurn(
 			Input:       append([]byte(nil), call.Arguments...),
 		})
 	}
-	if response.stopReason == modelapi.StopCompleted || response.stopReason == modelapi.StopSequence {
+	if response.stopReason == providerapi.StopCompleted || response.stopReason == providerapi.StopSequence {
 
 		r.emit(Event{
 			Kind:        EventTurnCompleted,
@@ -299,15 +292,4 @@ func (r *Runner) executeTurn(
 		StopReason:  response.stopReason,
 	})
 	return EndCompleted, "", false, nil
-}
-
-func (r *Runner) buildModel(config modelapi.Config) (modelapi.Model, error) {
-	built, err := r.ModelBuilder.BuildModel(config)
-	if err != nil {
-		return modelapi.Model{}, failCause(FailureProvider, err)
-	}
-	if built.Stream == nil {
-		return modelapi.Model{}, fail(FailureProviderUnavailable, ErrorProvider, "model stream is unavailable")
-	}
-	return built, nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/infra/providers/streaming"
@@ -21,7 +22,7 @@ type anthropicContext struct {
 // 上下文结构由消息写入与恢复边界保证，此处不复查。
 func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthropicContext, error) {
 	result := anthropicContext{System: ctx.SystemPrompt}
-	ids := modelapi.BuildToolCallIDMap(ctx)
+	ids := providerapi.BuildToolCallIDMap(ctx)
 	for index, entry := range ctx.Entries {
 		messages, err := anthropicContextEntry(entry, config, ids)
 		if err != nil {

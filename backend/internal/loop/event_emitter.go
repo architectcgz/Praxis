@@ -2,7 +2,7 @@ package loop
 
 import (
 	"errors"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
@@ -17,7 +17,7 @@ func (r *Runner) emitModelEvent(
 	agentID identity.AgentID,
 	executionID identity.AgentExecutionID,
 	turnID identity.TurnID,
-	event modelapi.ModelStreamEvent,
+	event providerapi.Event,
 ) {
 	output := Event{
 		AgentID:     agentID,
@@ -26,13 +26,13 @@ func (r *Runner) emitModelEvent(
 		SessionID:   sessionID,
 	}
 	switch event.Kind {
-	case modelapi.StreamTextDelta:
+	case providerapi.StreamTextDelta:
 		output.Kind = EventTextDelta
 		output.Text = event.Text
-	case modelapi.StreamThinkingDelta:
+	case providerapi.StreamThinkingDelta:
 		output.Kind = EventThinkingDelta
 		output.Text = event.Text
-	case modelapi.StreamUsage:
+	case providerapi.StreamUsage:
 		output.Kind = EventModelUsage
 		output.Usage = event.Usage
 	default:

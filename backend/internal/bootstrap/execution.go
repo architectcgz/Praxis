@@ -6,6 +6,7 @@ import (
 	"praxis/internal/core/security"
 	taskmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
+	"praxis/internal/infra/providers"
 	"praxis/internal/infra/storage"
 	"praxis/internal/loop"
 	execution "praxis/internal/service/agent/coordinator"
@@ -45,6 +46,11 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		return nil, err
 	}
 
+	provider, err := providers.New(providers.Dependencies{Credentials: config.models})
+	if err != nil {
+		return nil, err
+	}
+
 	return assembleCoordinator(coordinatorDependencies{
 		Tasks:          tasks,
 		Requests:       tasks,
@@ -61,7 +67,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		Entries:        repos.Entries,
 		Sessions:       repos.Sessions,
 		Workspaces:     repos.Workspaces,
-		Models:         config.models,
+		Provider:       provider,
 		Tools:          config.tools,
 		Rules: toolservice.ApprovalRules{
 			ConfigMu: configMu,

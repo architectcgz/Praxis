@@ -9,25 +9,26 @@ import (
 	"io"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"slices"
 )
 
 // modelResponse 保存有序模型内容与原始文本字节数，不包含消息或上下文类型。
 type modelResponse struct {
-	events     []modelapi.ModelStreamEvent
+	events     []providerapi.Event
 	textBytes  int
-	stopReason modelapi.ModelStopReason
+	stopReason providerapi.StopReason
 }
 
 // requestModel 在同步记录 Hook 成功后发起请求，结束时记录包括失败响应在内的已消费输出。
 // 本方法不读取执行实体、不执行恢复，也不写入消息或上下文。
 func requestModel(
 	ctx context.Context,
-	stream modelapi.ModelStream,
-	request modelapi.ModelRequest,
+	modelProvider providerapi.Provider,
+	request providerapi.Request,
 	boundary hook.ModelRequest,
 	dispatcher *hook.Dispatcher,
-	onEvent func(modelapi.ModelStreamEvent),
+	onEvent func(providerapi.Event),
 ) (response modelResponse, err error) {
 	if err := dispatcher.BeforeModelRequest(ctx, boundary); err != nil {
 		return response, failCause(FailureStorage, err)
@@ -48,8 +49,8 @@ func requestModel(
 		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
 	}()
 	firstResponse := false
-	callback := func(event modelapi.ModelStreamEvent) {
-		if !firstResponse && (event.Kind == modelapi.StreamTextDelta || event.Kind == modelapi.StreamThinkingDelta || event.Kind == modelapi.StreamToolCall) {
+	callback := func(event providerapi.Event) {
+		if !firstResponse && (event.Kind == providerapi.StreamTextDelta || event.Kind == providerapi.StreamThinkingDelta || event.Kind == providerapi.StreamToolCall) {
 			firstResponse = true
 			scope.OnSignal(hook.SignalFirstResponse)
 		}
@@ -58,12 +59,9 @@ func requestModel(
 		}
 	}
 
-	if stream == nil {
-		return modelResponse{}, errors.New("provider stream is required")
-	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	input, err := stream.Stream(streamCtx, request)
+	input, err := modelProvider.Stream(streamCtx, request)
 	if err != nil {
 		return modelResponse{}, err
 	}
@@ -78,8 +76,8 @@ func requestModel(
 // 相邻文本增量合并为一个内容事件，用量只实时转发；流失败时返回已收到的部分内容和错误。
 func collectModelResponse(
 	ctx context.Context,
-	stream <-chan modelapi.ModelStreamEvent,
-	onEvent func(modelapi.ModelStreamEvent),
+	stream <-chan providerapi.Event,
+	onEvent func(providerapi.Event),
 ) (modelResponse, error) {
 	var response modelResponse
 	if stream == nil {
@@ -94,42 +92,42 @@ func collectModelResponse(
 				return response, fmt.Errorf("provider stream ended before a terminal event: %w", io.ErrUnexpectedEOF)
 			}
 			switch event.Kind {
-			case modelapi.StreamTextDelta, modelapi.StreamThinkingDelta:
+			case providerapi.StreamTextDelta, providerapi.StreamThinkingDelta:
 				if event.Text == "" {
 					continue
 				}
-				if event.Kind == modelapi.StreamTextDelta {
+				if event.Kind == providerapi.StreamTextDelta {
 					response.textBytes += len(event.Text)
 				}
 				last := len(response.events) - 1
 				if last >= 0 && response.events[last].Kind == event.Kind && sameOutputIndex(response.events[last].OutputIndex, event.OutputIndex) {
 					response.events[last].Text += event.Text
 				} else {
-					response.events = append(response.events, modelapi.ModelStreamEvent{Kind: event.Kind, Text: event.Text, OutputIndex: cloneOutputIndex(event.OutputIndex)})
+					response.events = append(response.events, providerapi.Event{Kind: event.Kind, Text: event.Text, OutputIndex: cloneOutputIndex(event.OutputIndex)})
 				}
-			case modelapi.StreamToolCall:
+			case providerapi.StreamToolCall:
 				call := event.ToolCall
 				call.Arguments = bytes.Clone(call.Arguments)
-				response.events = append(response.events, modelapi.ModelStreamEvent{Kind: modelapi.StreamToolCall, ToolCall: call, OutputIndex: cloneOutputIndex(event.OutputIndex)})
+				response.events = append(response.events, providerapi.Event{Kind: providerapi.StreamToolCall, ToolCall: call, OutputIndex: cloneOutputIndex(event.OutputIndex)})
 				// 回调与已收集结果各自拥有参数副本，观察者不能改写待执行调用。
 				event.ToolCall = call
 				event.ToolCall.Arguments = bytes.Clone(call.Arguments)
-			case modelapi.StreamReasoningState:
+			case providerapi.StreamReasoningState:
 				if event.ReasoningState == nil {
 					return response, errors.New("provider emitted a nil reasoning state")
 				}
-				response.events = append(response.events, modelapi.ModelStreamEvent{
-					Kind:           modelapi.StreamReasoningState,
+				response.events = append(response.events, providerapi.Event{
+					Kind:           providerapi.StreamReasoningState,
 					ReasoningState: event.ReasoningState.Clone(),
 					OutputIndex:    cloneOutputIndex(event.OutputIndex),
 				})
 				// 推理状态仅保存在内部，观察者不接收签名或加密载荷。
 				continue
-			case modelapi.StreamUsage:
+			case providerapi.StreamUsage:
 				if event.Usage == nil || !event.Usage.Valid() {
 					continue
 				}
-			case modelapi.StreamComplete:
+			case providerapi.StreamComplete:
 				if err := ctx.Err(); err != nil {
 					return response, err
 				}
@@ -141,14 +139,14 @@ func collectModelResponse(
 					}
 				}
 				// 输出块按协议顺序重放；工具事件可在流终态才发送，不改变块的历史位置。
-				slices.SortStableFunc(response.events, func(a, b modelapi.ModelStreamEvent) int {
+				slices.SortStableFunc(response.events, func(a, b providerapi.Event) int {
 					if a.OutputIndex == nil || b.OutputIndex == nil {
 						return 0
 					}
 					return cmp.Compare(*a.OutputIndex, *b.OutputIndex)
 				})
 				return response, response.validateStopReason()
-			case modelapi.StreamError:
+			case providerapi.StreamError:
 				if event.Err != nil {
 					return response, event.Err
 				}
@@ -167,26 +165,26 @@ func collectModelResponse(
 func (r modelResponse) validateStopReason() error {
 	toolCount := 0
 	for _, event := range r.events {
-		if event.Kind == modelapi.StreamToolCall {
+		if event.Kind == providerapi.StreamToolCall {
 			toolCount++
 		}
 	}
 	switch r.stopReason {
-	case modelapi.StopCompleted, modelapi.StopSequence:
+	case providerapi.StopCompleted, providerapi.StopSequence:
 		if toolCount != 0 {
 			return errors.New("provider completed with unexpected tool calls")
 		}
-	case modelapi.StopToolCalls:
+	case providerapi.StopToolCalls:
 		if toolCount == 0 {
 			return errors.New("provider requested tools without a tool call")
 		}
-	case modelapi.StopTruncated:
+	case providerapi.StopTruncated:
 		return errors.New("model output was truncated")
-	case modelapi.StopFiltered:
+	case providerapi.StopFiltered:
 		return errors.New("model output was filtered")
-	case modelapi.StopRefused:
+	case providerapi.StopRefused:
 		return errors.New("model refused the request")
-	case modelapi.StopPaused:
+	case providerapi.StopPaused:
 		return errors.New("model paused the turn; continuation is not supported")
 	default:
 		return fmt.Errorf("provider returned an unknown stop reason %q", r.stopReason)
@@ -197,7 +195,7 @@ func (r modelResponse) validateStopReason() error {
 func (r modelResponse) toolCalls() []ToolCall {
 	calls := make([]ToolCall, 0)
 	for _, event := range r.events {
-		if event.Kind == modelapi.StreamToolCall {
+		if event.Kind == providerapi.StreamToolCall {
 			call := event.ToolCall
 			call.Arguments = bytes.Clone(call.Arguments)
 			calls = append(calls, call)
@@ -221,7 +219,7 @@ func sameOutputIndex(a, b *int) bool {
 // bindReasoningState 确认响应协议后绑定冻结的请求身份，不重复解析 Decoder 已处理的载荷。
 func (r *modelResponse) bindReasoningState(config modelapi.Config) error {
 	for _, event := range r.events {
-		if event.Kind != modelapi.StreamReasoningState {
+		if event.Kind != providerapi.StreamReasoningState {
 			continue
 		}
 		state := event.ReasoningState

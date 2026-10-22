@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
@@ -43,7 +43,7 @@ type responseDecoderState struct {
 
 // Decode 按官方具体事件分派，流式状态与最终快照一致后才释放任何工具。
 // output_item.added 的加密状态不能续传，原始推理载荷取自 output_item.done。
-func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (modelapi.ModelStopReason, error) {
+func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (providerapi.StopReason, error) {
 	state := responseDecoderState{Items: map[int]*responseItemState{}, IDs: map[string]int{}}
 	lastSequence := int64(-1)
 	for {
@@ -253,12 +253,12 @@ func (s *responseDecoderState) closePart(ref responseItemReference, key response
 	return nil
 }
 func (s *responseDecoderState) updatePart(index int, key responsePartKey, part *responsePartState, text string, snapshot bool, emit streaming.EmitFunc) error {
-	kind := modelapi.StreamThinkingDelta
+	kind := providerapi.StreamThinkingDelta
 	switch key.Kind {
 	case "output_text":
-		kind = modelapi.StreamTextDelta
+		kind = providerapi.StreamTextDelta
 	case "refusal":
-		kind = modelapi.StreamTextDelta
+		kind = providerapi.StreamTextDelta
 		s.Refused = true
 	case "summary_text", "reasoning_text":
 	default:
@@ -271,7 +271,7 @@ func (s *responseDecoderState) updatePart(index int, key responsePartKey, part *
 		text = text[len(part.Text):]
 	}
 	if text != "" {
-		if err := emit(modelapi.ModelStreamEvent{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
+		if err := emit(providerapi.Event{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
 			return err
 		}
 		part.Text += text
@@ -402,7 +402,7 @@ func validateFinalItem(current, final responseOutputValue) error {
 	return nil
 }
 
-func (s *responseDecoderState) terminal(response *responseSnapshot, status string, emit streaming.EmitFunc) (modelapi.ModelStopReason, error) {
+func (s *responseDecoderState) terminal(response *responseSnapshot, status string, emit streaming.EmitFunc) (providerapi.StopReason, error) {
 	if err := s.checkIdentity(response); err != nil {
 		return "", err
 	}
@@ -446,7 +446,7 @@ func (s *responseDecoderState) terminal(response *responseSnapshot, status strin
 			detail = stringValue(response.IncompleteDetails.Reason)
 		}
 		reason := mapStopReason(status, detail, false, s.Refused)
-		if reason == modelapi.StopUnknown {
+		if reason == providerapi.StopUnknown {
 			return "", fmt.Errorf("responses unknown incomplete reason %q", detail)
 		}
 		return reason, nil
@@ -457,7 +457,7 @@ func (s *responseDecoderState) terminal(response *responseSnapshot, status strin
 	return s.complete(response, emit)
 }
 
-func (s *responseDecoderState) complete(response *responseSnapshot, emit streaming.EmitFunc) (modelapi.ModelStopReason, error) {
+func (s *responseDecoderState) complete(response *responseSnapshot, emit streaming.EmitFunc) (providerapi.StopReason, error) {
 	seenCalls, toolCount := map[string]bool{}, 0
 	for index := range response.Output {
 		for _, part := range s.Items[index].Parts {
@@ -492,7 +492,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 		}
 	}
 	if s.Refused {
-		return modelapi.StopRefused, nil
+		return providerapi.StopRefused, nil
 	}
 	// 全部校验成功后，按 output 顺序发送状态与完整工具，签名不进入展示文本。
 	for index := range response.Output {
@@ -502,8 +502,8 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if stringValue(item.EncryptedContent) == "" {
 				continue
 			}
-			if err := emit(modelapi.ModelStreamEvent{
-				Kind: modelapi.StreamReasoningState,
+			if err := emit(providerapi.Event{
+				Kind: providerapi.StreamReasoningState,
 				ReasoningState: &sessionentry.ReasoningState{
 					Protocol: string(modelconfig.APIFormatOpenAIResponses),
 					Payload:  bytes.Clone(s.Items[index].Raw),
@@ -513,7 +513,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 				return "", err
 			}
 		case *responseFunctionCallOutput:
-			if err := streaming.EmitTool(func(event modelapi.ModelStreamEvent) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: item.CallID, Name: item.Name, Arguments: item.Arguments}); err != nil {
+			if err := streaming.EmitTool(func(event providerapi.Event) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: item.CallID, Name: item.Name, Arguments: item.Arguments}); err != nil {
 				return "", err
 			}
 		}
@@ -526,9 +526,9 @@ func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.DecodeUsage(raw, &reported, string(modelconfig.APIFormatOpenAIResponses)) {
 		return nil
 	}
-	var usage *modelapi.ModelUsage
+	var usage *providerapi.Usage
 	if reported.InputTokens != nil && reported.OutputTokens != nil {
-		usage = &modelapi.ModelUsage{
+		usage = &providerapi.Usage{
 			InputTokens:  *reported.InputTokens,
 			OutputTokens: reported.OutputTokens,
 		}
@@ -539,27 +539,27 @@ func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.ValidUsage(string(modelconfig.APIFormatOpenAIResponses), usage) {
 		return nil
 	}
-	return emit(modelapi.ModelStreamEvent{Kind: modelapi.StreamUsage, Usage: usage})
+	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage})
 }
 
 // mapStopReason 只将官方终态和明确的截断原因映射为内部结束语义。
-func mapStopReason(status, incompleteReason string, hasToolCalls, refused bool) modelapi.ModelStopReason {
+func mapStopReason(status, incompleteReason string, hasToolCalls, refused bool) providerapi.StopReason {
 	switch status {
 	case "completed":
 		if refused {
-			return modelapi.StopRefused
+			return providerapi.StopRefused
 		}
 		if hasToolCalls {
-			return modelapi.StopToolCalls
+			return providerapi.StopToolCalls
 		}
-		return modelapi.StopCompleted
+		return providerapi.StopCompleted
 	case "incomplete":
 		switch incompleteReason {
 		case "max_output_tokens":
-			return modelapi.StopTruncated
+			return providerapi.StopTruncated
 		case "content_filter":
-			return modelapi.StopFiltered
+			return providerapi.StopFiltered
 		}
 	}
-	return modelapi.StopUnknown
+	return providerapi.StopUnknown
 }

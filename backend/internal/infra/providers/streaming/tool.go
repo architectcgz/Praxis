@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/tool"
 	"strings"
 )
@@ -33,9 +33,9 @@ func ValidateToolCall(call *ToolAccumulator) error {
 // 此处仅返回 emit 的错误；Schema 和授权由工具执行边界负责。
 func EmitTool(emit EmitFunc, call *ToolAccumulator) error {
 	args := json.RawMessage(call.Arguments)
-	return emit(modelapi.ModelStreamEvent{
-		Kind: modelapi.StreamToolCall,
-		ToolCall: modelapi.ToolCall{
+	return emit(providerapi.Event{
+		Kind: providerapi.StreamToolCall,
+		ToolCall: providerapi.ToolCall{
 			ID:        call.ID,
 			Name:      tool.ToolName(call.Name),
 			Arguments: bytes.Clone(args),

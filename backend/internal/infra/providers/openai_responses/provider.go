@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	appcontext "praxis/internal/core/context"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
 )
@@ -44,13 +44,13 @@ func New(config Config, deps Dependencies) (*Provider, error) {
 	}, nil
 }
 
-var _ modelapi.ModelStream = (*Provider)(nil)
+var _ providerapi.Provider = (*Provider)(nil)
 
 // Stream 将一次 provider-neutral 请求编码为 Responses 流并返回事件通道。
 func (p *Provider) Stream(
 	ctx context.Context,
-	request modelapi.ModelRequest,
-) (<-chan modelapi.ModelStreamEvent, error) {
+	request providerapi.Request,
+) (<-chan providerapi.Event, error) {
 	if ctx == nil {
 		return nil, errors.New("openai responses stream context is required")
 	}
@@ -81,7 +81,7 @@ func (p *Provider) Stream(
 	return streaming.Start(ctx, response, decoder{}, sensitiveStateValues(request.Context)...), nil
 }
 
-func buildPayload(request modelapi.ModelRequest) ([]byte, int, error) {
+func buildPayload(request providerapi.Request) ([]byte, int, error) {
 	if request.Model.ModelID == "" {
 		return nil, 0, errors.New("openai responses model is required")
 	}

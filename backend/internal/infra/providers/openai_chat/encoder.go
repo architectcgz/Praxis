@@ -3,7 +3,7 @@ package openaichat
 import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/infra/providers/streaming"
@@ -16,7 +16,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	if ctx.SystemPrompt != "" {
 		messages = append(messages, chatMessage{Role: "system", Content: &ctx.SystemPrompt})
 	}
-	ids := modelapi.BuildToolCallIDMap(ctx)
+	ids := providerapi.BuildToolCallIDMap(ctx)
 	for index, entry := range ctx.Entries {
 		encoded, err := chatMessagesFromContext(entry, ids)
 		if err != nil {

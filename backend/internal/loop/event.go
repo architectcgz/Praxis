@@ -2,7 +2,7 @@ package loop
 
 import (
 	"encoding/json"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
@@ -32,7 +32,7 @@ type Event struct {
 	AgentID     identity.AgentID            `json:"agentId"`
 	ExecutionID identity.AgentExecutionID   `json:"executionId"`
 	TurnID      identity.TurnID             `json:"turnId,omitempty"`
-	StopReason  modelapi.ModelStopReason    `json:"stopReason,omitempty"`
+	StopReason  providerapi.StopReason      `json:"stopReason,omitempty"`
 	Text        string                      `json:"text,omitempty"`
 	CallID      string                      `json:"callId,omitempty"`
 	Name        string                      `json:"name,omitempty"`
@@ -40,7 +40,7 @@ type Event struct {
 	Result      string                      `json:"result,omitempty"`
 	IsError     bool                        `json:"isError,omitzero"`
 	Error       string                      `json:"error,omitempty"`
-	Usage       *modelapi.ModelUsage        `json:"usage,omitempty"`
+	Usage       *providerapi.Usage          `json:"usage,omitempty"`
 }
 
 // EventObserver 接收实时事件；监听者不得把事件作为持久状态来源。

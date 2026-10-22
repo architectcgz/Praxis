@@ -7,7 +7,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
@@ -44,11 +44,11 @@ const riskReviewSchema = `{
 
 // RiskReviewer 使用既有模型与消息读取能力进行独立审核，不写消息、不决定调用状态。
 type RiskReviewer struct {
-	Models       modelapi.ModelBuilder
+	Provider     providerapi.Provider
 	Entries      repository.Entries
 	Agents       repository.Agent
 	Hooks        *hook.Dispatcher
-	ObserveUsage func(modelapi.ModelUsageRecord)
+	ObserveUsage func(providerapi.UsageRecord)
 }
 
 // Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
@@ -96,13 +96,6 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 	if err != nil {
 		return assessment, err
 	}
-	built, err := r.Models.BuildModel(task.Config.Model)
-	if err != nil {
-		return assessment, err
-	}
-	if built.Stream == nil {
-		return assessment, errors.New("risk review model has no stream")
-	}
 	history, err := appcontext.NewContextBuilder().Build(appcontext.Content{
 		SystemPrompt: riskReviewPrompt,
 		Entries: []sessionentry.ContextEntry{{
@@ -110,18 +103,18 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 			Role:      role.User,
 			Content:   []sessionentry.Block{{Kind: sessionentry.BlockText, Text: string(data)}},
 		}},
-	}, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: built.MaxOutputTokens})
+	}, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: task.Config.Model.MaxOutputTokens})
 	if err != nil {
 		return assessment, err
 	}
-	stream, err := built.Stream.Stream(ctx, modelapi.ModelRequest{
+	stream, err := r.Provider.Stream(ctx, providerapi.Request{
 		ExecutionID:     task.ID,
 		PromptCacheKey:  task.SessionID.String(),
 		Context:         history,
 		Model:           task.Config.Model.Clone(),
-		MaxOutputTokens: built.MaxOutputTokens,
+		MaxOutputTokens: task.Config.Model.MaxOutputTokens,
 		TurnID:          attempt.TurnID,
-		OutputSchema: &modelapi.OutputSchema{
+		OutputSchema: &providerapi.OutputSchema{
 			Name:   "risk_assessment",
 			Schema: json.RawMessage(riskReviewSchema),
 		},
@@ -143,14 +136,14 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 				return assessment, errors.New("risk review ended without a terminal event")
 			}
 			switch event.Kind {
-			case modelapi.StreamTextDelta:
+			case providerapi.StreamTextDelta:
 				if text.Len()+len(event.Text) > 4096 {
 					return assessment, errors.New("risk review output exceeds 4096 bytes")
 				}
 				text.WriteString(event.Text)
-			case modelapi.StreamUsage:
+			case providerapi.StreamUsage:
 				if event.Usage != nil && event.Usage.Valid() && r.ObserveUsage != nil {
-					r.ObserveUsage(modelapi.ModelUsageRecord{
+					r.ObserveUsage(providerapi.UsageRecord{
 						SessionID:   task.SessionID.String(),
 						AgentID:     task.AgentID.String(),
 						ExecutionID: task.ID.String(),
@@ -158,17 +151,17 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 						Usage:       *event.Usage,
 					})
 				}
-			case modelapi.StreamThinkingDelta, modelapi.StreamReasoningState:
+			case providerapi.StreamThinkingDelta, providerapi.StreamReasoningState:
 				// 审核推理内容不进入用户会话或审计正文。
-			case modelapi.StreamComplete:
+			case providerapi.StreamComplete:
 				if ctx.Err() != nil {
 					return assessment, ctx.Err()
 				}
-				if event.StopReason != modelapi.StopCompleted && event.StopReason != modelapi.StopSequence {
+				if event.StopReason != providerapi.StopCompleted && event.StopReason != providerapi.StopSequence {
 					return assessment, errors.New("risk review did not complete normally")
 				}
 				return parseRiskAssessment(text.String())
-			case modelapi.StreamError:
+			case providerapi.StreamError:
 				if event.Err != nil {
 					return assessment, event.Err
 				}

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	appcontext "praxis/internal/core/context"
-	modelapi "praxis/internal/core/model"
-	modelregistry "praxis/internal/infra/modelregistry"
+	providerapi "praxis/internal/core/provider"
+	"praxis/internal/infra/providers/httpclient"
 	"praxis/internal/infra/providers/streaming"
 	"slices"
 	"strings"
@@ -51,14 +51,14 @@ func New(config Config, deps Dependencies) (*Provider, error) {
 	}, nil
 }
 
-var _ modelapi.ModelStream = (*Provider)(nil)
+var _ providerapi.Provider = (*Provider)(nil)
 
 // Stream 组装完整模型请求并返回统一事件通道；请求无效或连接失败时返回错误。
 // 调用方提前停止消费时必须取消 ctx，以释放流资源。
 func (p *Provider) Stream(
 	ctx context.Context,
-	request modelapi.ModelRequest,
-) (<-chan modelapi.ModelStreamEvent, error) {
+	request providerapi.Request,
+) (<-chan providerapi.Event, error) {
 	if ctx == nil {
 		return nil, errors.New("anthropic stream context is required")
 	}
@@ -82,14 +82,14 @@ func (p *Provider) Stream(
 	httpRequest.Header.Set("anthropic-version", p.version)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")
-	response, err := streaming.Open(modelregistry.RequestClient(p.client), httpRequest)
+	response, err := streaming.Open(httpclient.RequestClient(p.client), httpRequest)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request: %w", streaming.RedactError(err, sensitiveStateValues(request.Context)))
 	}
 	return streaming.Start(ctx, response, decoder{}, sensitiveStateValues(request.Context)...), nil
 }
 
-func buildPayload(request modelapi.ModelRequest) ([]byte, error) {
+func buildPayload(request providerapi.Request) ([]byte, error) {
 	modelID := request.Model.ModelID
 	if modelID == "" {
 		return nil, errors.New("anthropic model is required")

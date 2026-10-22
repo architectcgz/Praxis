@@ -1,13 +1,13 @@
-package model
+package provider
 
 import (
 	"math"
 	"praxis/internal/identity"
 )
 
-// ModelUsage 记录一次模型请求的累计 token 用量；InputTokens 包含缓存读取和写入部分。
+// Usage 记录一次模型请求的累计 token 用量；InputTokens 包含缓存读取和写入部分。
 // 可选计数为 nil 表示 Provider 未提供该值，不能当作零用量。
-type ModelUsage struct {
+type Usage struct {
 	InputTokens              int64  `json:"inputTokens"`
 	OutputTokens             *int64 `json:"outputTokens,omitempty"`
 	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
@@ -15,7 +15,7 @@ type ModelUsage struct {
 }
 
 // Valid 校验 Provider 返回的计数；无效计数不应影响模型响应，只是不参与统计。
-func (u ModelUsage) Valid() bool {
+func (u Usage) Valid() bool {
 	if u.InputTokens < 0 {
 		return false
 	}
@@ -32,16 +32,16 @@ func (u ModelUsage) Valid() bool {
 	return read >= 0 && creation >= 0 && creation <= u.InputTokens && read <= u.InputTokens-creation
 }
 
-// ModelUsageRecord 按 Turn 保存请求用量，同一请求的累计更新不重复计费。
-type ModelUsageRecord struct {
+// UsageRecord 按 Turn 保存请求用量，同一请求的累计更新不重复计费。
+type UsageRecord struct {
 	SessionID   string          `json:"sessionId"`
 	AgentID     string          `json:"agentId"`
 	ExecutionID string          `json:"executionId"`
 	TurnID      identity.TurnID `json:"turnId"`
-	Usage       ModelUsage      `json:"usage"`
+	Usage       Usage           `json:"usage"`
 }
 
 // Key 返回请求的稳定身份，供持久化和实时更新去重。
-func (r ModelUsageRecord) Key() string {
+func (r UsageRecord) Key() string {
 	return "usage:" + r.TurnID.String()
 }

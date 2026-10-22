@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
-	modelapi "praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
+	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
@@ -131,7 +131,7 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 			group("tool-call-entries", v.Data.ExecutionID, "")
 			group("all-tool-call-entries", "", "")
 		}
-	case modelapi.ModelUsageRecord:
+	case providerapi.UsageRecord:
 		entityID, sessionID = v.Key(), v.SessionID
 		group("usage-session", sessionID, "")
 		link("agent_execution", v.ExecutionID)
@@ -204,7 +204,7 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 	case "entry":
 		target = new(entryRecord)
 	case "usage":
-		target = new(modelapi.ModelUsageRecord)
+		target = new(providerapi.UsageRecord)
 	case "timing":
 		target = new(timingmodel.Record)
 	}
@@ -233,7 +233,7 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 		err = validateWaitCondition(*value)
 	case *entryRecord:
 		err = value.Validate()
-	case *modelapi.ModelUsageRecord:
+	case *providerapi.UsageRecord:
 		err = validateUsageRecord(*value)
 	case *timingmodel.Record:
 		err = value.Validate()

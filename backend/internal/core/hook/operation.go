@@ -3,7 +3,7 @@ package hook
 
 import (
 	"context"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/identity"
 )
 
@@ -38,7 +38,7 @@ type Operation struct {
 type Result struct {
 	Err            error
 	Outcome        string
-	StopReason     modelapi.ModelStopReason
+	StopReason     providerapi.StopReason
 	ToolErrorClass string
 }
 

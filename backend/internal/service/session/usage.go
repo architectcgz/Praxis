@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/identity"
 )
 
@@ -12,7 +12,7 @@ import (
 // CacheReadRatio 使用 0 到 1，零输入或存在未知缓存计数时为 nil。
 // CacheReadComplete 只表示 Records 内的缓存读取计数完整，不推算未上报的请求。
 type SessionUsageSummary struct {
-	Records              []modelapi.ModelUsageRecord
+	Records              []providerapi.UsageRecord
 	InputTokens          int64
 	CacheReadInputTokens int64
 	CacheReadRatio       *float64
@@ -20,7 +20,7 @@ type SessionUsageSummary struct {
 }
 
 // ListSessionUsage 查询完整请求用量，不受消息分页影响。
-func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.SessionID) ([]modelapi.ModelUsageRecord, error) {
+func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.SessionID) ([]providerapi.UsageRecord, error) {
 	return s.usageRecords.ListSession(ctx, sessionID.String())
 }
 
@@ -38,7 +38,7 @@ func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID identity
 		return SessionUsageSummary{}, err
 	}
 	if records == nil {
-		records = []modelapi.ModelUsageRecord{}
+		records = []providerapi.UsageRecord{}
 	}
 	summary := SessionUsageSummary{
 		Records:           records,

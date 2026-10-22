@@ -3,9 +3,9 @@ package bindings
 import (
 	"context"
 	"errors"
-	"praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
@@ -83,7 +83,7 @@ type TimingService interface {
 }
 
 type UsageService interface {
-	ListSessionUsage(context.Context, identity.SessionID) ([]model.ModelUsageRecord, error)
+	ListSessionUsage(context.Context, identity.SessionID) ([]providerapi.UsageRecord, error)
 	GetSessionUsageSummary(context.Context, identity.SessionID) (sessionservice.SessionUsageSummary, error)
 }
 

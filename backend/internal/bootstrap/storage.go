@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/dataroot"
 	"praxis/internal/identity"
@@ -49,8 +49,8 @@ func buildTimings(ctx context.Context, timings repository.Timing, events *execut
 	}, logger.Errorf)
 }
 
-func usageObserver(usages repository.ModelUsage, logger *logging.Logger) func(model.ModelUsageRecord) {
-	return func(record model.ModelUsageRecord) {
+func usageObserver(usages repository.ModelUsage, logger *logging.Logger) func(providerapi.UsageRecord) {
+	return func(record providerapi.UsageRecord) {
 		// 统计写入不继承业务取消；失败只影响统计，不改变模型响应。
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

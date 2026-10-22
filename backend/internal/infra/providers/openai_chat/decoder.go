@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	modelapi "praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/streaming"
 	"slices"
 	"strings"
@@ -16,7 +16,7 @@ import (
 type decoder struct{}
 
 // Decode 只支持 choice 0；finish_reason 后继续读取 Usage，必须收到 [DONE] 才成功。
-func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (modelapi.ModelStopReason, error) {
+func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (providerapi.StopReason, error) {
 	calls := map[int]*streaming.ToolAccumulator{}
 	stopReason, refused, usageSeen := "", false, false
 	var identity *chatCompletionChunk
@@ -37,13 +37,13 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		}
 		if data == "[DONE]" {
 			reason := mapStopReason(stopReason)
-			if reason == modelapi.StopUnknown {
+			if reason == providerapi.StopUnknown {
 				return "", fmt.Errorf("openai chat invalid finish_reason %q", stopReason)
 			}
-			if refused && (reason == modelapi.StopCompleted || reason == modelapi.StopToolCalls) {
-				return modelapi.StopRefused, nil
+			if refused && (reason == providerapi.StopCompleted || reason == providerapi.StopToolCalls) {
+				return providerapi.StopRefused, nil
 			}
-			if reason == modelapi.StopToolCalls {
+			if reason == providerapi.StopToolCalls {
 				if len(calls) == 0 {
 					return "", errors.New("openai chat tool_calls finish without calls")
 				}
@@ -65,7 +65,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 						return "", err
 					}
 				}
-			} else if reason == modelapi.StopCompleted && len(calls) > 0 {
+			} else if reason == providerapi.StopCompleted && len(calls) > 0 {
 				return "", errors.New("openai chat tool calls conflict with finish_reason")
 			}
 			return reason, nil
@@ -102,7 +102,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		}
 		for _, text := range []*string{choice.Delta.Content, choice.Delta.Refusal} {
 			if text != nil && *text != "" {
-				if err := emit(modelapi.ModelStreamEvent{Kind: modelapi.StreamTextDelta, Text: *text}); err != nil {
+				if err := emit(providerapi.Event{Kind: providerapi.StreamTextDelta, Text: *text}); err != nil {
 					return "", err
 				}
 			}
@@ -140,9 +140,9 @@ func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.DecodeUsage(raw, &reported, "openai_chat") {
 		return nil
 	}
-	var usage *modelapi.ModelUsage
+	var usage *providerapi.Usage
 	if reported.PromptTokens != nil && reported.CompletionTokens != nil {
-		usage = &modelapi.ModelUsage{
+		usage = &providerapi.Usage{
 			InputTokens:  *reported.PromptTokens,
 			OutputTokens: reported.CompletionTokens,
 		}
@@ -153,21 +153,21 @@ func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.ValidUsage("openai_chat", usage) {
 		return nil
 	}
-	return emit(modelapi.ModelStreamEvent{Kind: modelapi.StreamUsage, Usage: usage})
+	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage})
 }
 
 // mapStopReason 将 finish_reason 映射为统一结束语义；空值或未知值返回 StopUnknown。
-func mapStopReason(reason string) modelapi.ModelStopReason {
+func mapStopReason(reason string) providerapi.StopReason {
 	switch reason {
 	case "stop":
-		return modelapi.StopCompleted
+		return providerapi.StopCompleted
 	case "tool_calls":
-		return modelapi.StopToolCalls
+		return providerapi.StopToolCalls
 	case "length":
-		return modelapi.StopTruncated
+		return providerapi.StopTruncated
 	case "content_filter":
-		return modelapi.StopFiltered
+		return providerapi.StopFiltered
 	default:
-		return modelapi.StopUnknown
+		return providerapi.StopUnknown
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"praxis/internal/clock"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/model"
+	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
@@ -34,14 +34,14 @@ type coordinatorDependencies struct {
 	Agents         repository.Agent
 	Sessions       repository.Session
 	Workspaces     repository.Workspace
-	Models         model.ModelBuilder
+	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
 	Rules          toolservice.ApprovalRules
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	ConfigMu       *sync.RWMutex
 	Events         *execution.EventPublisher
-	ObserveUsage   func(model.ModelUsageRecord)
+	ObserveUsage   func(providerapi.UsageRecord)
 	SummaryFormat  contextcompress.SummaryFormat
 	Runner         *loop.Runner
 	Clock          clock.Clock
@@ -50,7 +50,7 @@ type coordinatorDependencies struct {
 func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, error) {
 	observe := func(event loop.Event) {
 		if deps.ObserveUsage != nil && event.Kind == loop.EventModelUsage && event.Usage != nil {
-			deps.ObserveUsage(model.ModelUsageRecord{
+			deps.ObserveUsage(providerapi.UsageRecord{
 				SessionID:   event.SessionID.String(),
 				AgentID:     event.AgentID.String(),
 				ExecutionID: event.ExecutionID.String(),
@@ -61,11 +61,11 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		deps.Events.Publish(execution.LoopEvent(event))
 	}
 	reviewer := toolservice.RiskReviewer{
-		Models:  deps.Models,
-		Entries: deps.Entries,
-		Agents:  deps.Agents,
-		Hooks:   deps.HookDispatcher,
-		ObserveUsage: func(record model.ModelUsageRecord) {
+		Provider: deps.Provider,
+		Entries:  deps.Entries,
+		Agents:   deps.Agents,
+		Hooks:    deps.HookDispatcher,
+		ObserveUsage: func(record providerapi.UsageRecord) {
 			observe(loop.Event{
 				Kind:        loop.EventModelUsage,
 				SessionID:   identity.SessionID(record.SessionID),
@@ -96,7 +96,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 	}
 
 	runnerDeps := loop.Dependencies{
-		ModelBuilder:   deps.Models,
+		Provider:       deps.Provider,
 		SummaryFormat:  deps.SummaryFormat,
 		Tools:          deps.Tools,
 		HookDispatcher: deps.HookDispatcher,

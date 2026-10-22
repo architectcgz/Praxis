@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"math"
-	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/infra/providers/streaming"
 )
@@ -26,7 +26,7 @@ type contentBlockState struct {
 
 // Decode 按事件、Content Block 和 Delta 三层类型分派；工具只在 message_stop 后释放。
 // 签名和 redacted 数据只内部保存，推理续传不重建或丢弃官方附加字段。
-func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (modelapi.ModelStopReason, error) {
+func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (providerapi.StopReason, error) {
 	blocks := map[int]*contentBlockState{}
 	started, ending, stopReason := false, false, ""
 	var usage *tokenCounts
@@ -68,17 +68,17 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			}
 			index := *e.Index
 			state := &contentBlockState{Block: e.ContentBlock.Value, Raw: e.ContentBlock.Raw}
-			text, kind := "", modelapi.StreamTextDelta
+			text, kind := "", providerapi.StreamTextDelta
 			switch block := state.Block.(type) {
 			case *textBlock:
 				text = block.Text
 			case *thinkingBlock:
-				text, kind, state.Signed = block.Thinking, modelapi.StreamThinkingDelta, block.Signature != ""
+				text, kind, state.Signed = block.Thinking, providerapi.StreamThinkingDelta, block.Signature != ""
 			case *toolUseBlock:
 				state.Arguments = string(block.Input)
 			}
 			if text != "" {
-				if err := emit(modelapi.ModelStreamEvent{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
+				if err := emit(providerapi.Event{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
 					return "", err
 				}
 			}
@@ -91,7 +91,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			if ending {
 				return "", errors.New("anthropic content delta after message_delta")
 			}
-			text, kind := "", modelapi.StreamTextDelta
+			text, kind := "", providerapi.StreamTextDelta
 			switch delta := e.Delta.Value.(type) {
 			case *textDelta:
 				block, ok := state.Block.(*textBlock)
@@ -106,7 +106,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					return "", errors.New("anthropic thinking delta targets wrong or signed block")
 				}
 				block.Thinking += delta.Thinking
-				text, kind = delta.Thinking, modelapi.StreamThinkingDelta
+				text, kind = delta.Thinking, providerapi.StreamThinkingDelta
 			case *signatureDelta:
 				block, ok := state.Block.(*thinkingBlock)
 				if !ok {
@@ -137,7 +137,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				return "", errors.New("anthropic unsupported content delta")
 			}
 			if text != "" {
-				if err := emit(modelapi.ModelStreamEvent{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
+				if err := emit(providerapi.Event{Kind: kind, Text: text, OutputIndex: &index}); err != nil {
 					return "", err
 				}
 			}
@@ -178,7 +178,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			}
 			ending = true
 			if e.Delta.StopReason != nil {
-				if stopReason != "" || mapStopReason(*e.Delta.StopReason) == modelapi.StopUnknown {
+				if stopReason != "" || mapStopReason(*e.Delta.StopReason) == providerapi.StopUnknown {
 					return "", errors.New("anthropic duplicate or invalid stop_reason")
 				}
 				stopReason = *e.Delta.StopReason
@@ -197,7 +197,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				return "", errors.New("anthropic message_stop before message_delta")
 			}
 			reason := mapStopReason(stopReason)
-			if reason == modelapi.StopUnknown {
+			if reason == providerapi.StopUnknown {
 				return "", fmt.Errorf("anthropic invalid stop_reason %q", stopReason)
 			}
 			for index := range len(blocks) {
@@ -205,7 +205,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					return "", errors.New("anthropic missing or unclosed content block")
 				}
 			}
-			if reason != modelapi.StopCompleted && reason != modelapi.StopSequence && reason != modelapi.StopToolCalls {
+			if reason != providerapi.StopCompleted && reason != providerapi.StopSequence && reason != providerapi.StopToolCalls {
 				return reason, nil
 			}
 			seen, toolCount := map[string]bool{}, 0
@@ -227,19 +227,19 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					toolCount++
 				}
 			}
-			if (reason == modelapi.StopCompleted || reason == modelapi.StopSequence) && toolCount != 0 || reason == modelapi.StopToolCalls && toolCount == 0 {
+			if (reason == providerapi.StopCompleted || reason == providerapi.StopSequence) && toolCount != 0 || reason == providerapi.StopToolCalls && toolCount == 0 {
 				return "", errors.New("anthropic tool blocks conflict with stop_reason")
 			}
 			// 所有块、签名与终态都已验证后，再发送任何可执行工具。
 			for index := range len(blocks) {
 				state := blocks[index]
 				if state.ReasoningState != nil {
-					if err := emit(modelapi.ModelStreamEvent{Kind: modelapi.StreamReasoningState, ReasoningState: state.ReasoningState.Clone(), OutputIndex: &index}); err != nil {
+					if err := emit(providerapi.Event{Kind: providerapi.StreamReasoningState, ReasoningState: state.ReasoningState.Clone(), OutputIndex: &index}); err != nil {
 						return "", err
 					}
 				}
 				if block, ok := state.Block.(*toolUseBlock); ok {
-					if err := streaming.EmitTool(func(event modelapi.ModelStreamEvent) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: block.ID, Name: block.Name, Arguments: state.Arguments}); err != nil {
+					if err := streaming.EmitTool(func(event providerapi.Event) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: block.ID, Name: block.Name, Arguments: state.Arguments}); err != nil {
 						return "", err
 					}
 				}
@@ -283,19 +283,19 @@ func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit stream
 			*targets[index] = value
 		}
 	}
-	var usage *modelapi.ModelUsage
+	var usage *providerapi.Usage
 	if delta.OutputTokens != nil {
 		usage = normalizeMessageUsage(&next)
 	}
 	if !streaming.ValidUsage(string(modelconfig.APIFormatAnthropicMessages), usage) {
 		return previous, nil
 	}
-	if err := emit(modelapi.ModelStreamEvent{Kind: modelapi.StreamUsage, Usage: usage}); err != nil {
+	if err := emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage}); err != nil {
 		return previous, err
 	}
 	return &next, nil
 }
-func normalizeMessageUsage(reported *tokenCounts) *modelapi.ModelUsage {
+func normalizeMessageUsage(reported *tokenCounts) *providerapi.Usage {
 	if reported == nil || reported.InputTokens == nil || *reported.InputTokens < 0 {
 		return nil
 	}
@@ -316,7 +316,7 @@ func normalizeMessageUsage(reported *tokenCounts) *modelapi.ModelUsage {
 		copy := *value
 		return &copy
 	}
-	usage := &modelapi.ModelUsage{
+	usage := &providerapi.Usage{
 		InputTokens:              total,
 		OutputTokens:             copyCount(reported.OutputTokens),
 		CacheReadInputTokens:     copyCount(reported.CacheReadInputTokens),
@@ -326,21 +326,21 @@ func normalizeMessageUsage(reported *tokenCounts) *modelapi.ModelUsage {
 }
 
 // mapStopReason 保留截断、拒绝和自定义停止序列的独立语义。
-func mapStopReason(reason string) modelapi.ModelStopReason {
+func mapStopReason(reason string) providerapi.StopReason {
 	switch reason {
 	case "end_turn":
-		return modelapi.StopCompleted
+		return providerapi.StopCompleted
 	case "tool_use":
-		return modelapi.StopToolCalls
+		return providerapi.StopToolCalls
 	case "max_tokens", "model_context_window_exceeded":
-		return modelapi.StopTruncated
+		return providerapi.StopTruncated
 	case "pause_turn":
-		return modelapi.StopPaused
+		return providerapi.StopPaused
 	case "refusal":
-		return modelapi.StopRefused
+		return providerapi.StopRefused
 	case "stop_sequence":
-		return modelapi.StopSequence
+		return providerapi.StopSequence
 	default:
-		return modelapi.StopUnknown
+		return providerapi.StopUnknown
 	}
 }
