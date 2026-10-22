@@ -21,7 +21,7 @@ type Dependencies struct {
 	Controls       repository.AgentControl
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
-	EventObserver  func(TerminalEvent)
+	EventObserver  func(Event)
 	Sessions       repository.Session
 	Agents         repository.Agent
 	Records        repository.AgentExecution
@@ -38,7 +38,7 @@ type Service struct {
 	controls       repository.AgentControl
 	hookDispatcher *hook.Dispatcher
 	logger         *logging.Logger
-	eventObserver  func(TerminalEvent)
+	eventObserver  func(Event)
 	sessions       repository.Session
 	agents         repository.Agent
 	records        repository.AgentExecution

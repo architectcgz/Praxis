@@ -40,13 +40,12 @@ type Result struct{ Reason EndReason }
 
 // Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
 type Input struct {
-	ID         identity.AgentExecutionID
-	SessionID  identity.SessionID
-	AgentID    identity.AgentID
-	RequestID  identity.RequestID
-	Config     Config
-	Context    *appcontext.ModelContext
-	InputEntry *sessionentry.ContextEntry
+	ID        identity.AgentExecutionID
+	SessionID identity.SessionID
+	AgentID   identity.AgentID
+	RequestID identity.RequestID
+	Config    Config
+	Context   *appcontext.ModelContext
 }
 
 // ExecutionDependencies 只在本次 Run 中使用；共享 Runner 不保存单次执行的环境或等待状态。

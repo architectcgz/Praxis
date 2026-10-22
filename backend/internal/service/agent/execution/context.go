@@ -5,7 +5,6 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/loop"
@@ -78,22 +77,13 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 		if err != nil {
 			return err
 		}
-		var inputEntry *sessionentry.ContextEntry
-		if task.Progress.ModelRequests == 0 {
-			value, err := s.entries.Get(txCtx, agentservice.EntryStream(agent), task.InputEntryID)
-			if err != nil {
-				return err
-			}
-			inputEntry = &value
-		}
 		executionInput = loop.Input{
-			ID:         task.ID,
-			SessionID:  task.SessionID,
-			AgentID:    task.AgentID,
-			RequestID:  task.RequestID,
-			Config:     loop.Config{Model: task.Config.Model.Clone()},
-			Context:    sessionContext,
-			InputEntry: inputEntry,
+			ID:        task.ID,
+			SessionID: task.SessionID,
+			AgentID:   task.AgentID,
+			RequestID: task.RequestID,
+			Config:    loop.Config{Model: task.Config.Model.Clone()},
+			Context:   sessionContext,
 		}
 		return nil
 	}(ctx)

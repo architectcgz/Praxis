@@ -151,4 +151,4 @@ npm run check
 
 ## 前端历史与 Loop Stream
 
-前端直接使用 Wails 从 `session/entry.ContextEntry` 生成的类型，首次加载全部可见历史，无消息 DTO、分页、正文去重或顺序修补。Session 的模型 Context 仅在后端维护。执行流由 Loop 提供，开始时推送本次输入 Entry，迭代中推送文本、思考和工具进度，轮次完成事件携带该轮完整 Entry。前端展示这些 Entry 并结束对应的流式草稿；执行状态独立刷新，不反复加载或合并历史。
+前端直接使用 Wails 从 `session/entry.ContextEntry` 生成的类型，首次加载全部可见历史，无消息 DTO、分页、正文去重或顺序修补。Session 的模型 Context 仅在后端维护。Execution Service 在用户输入与 Execution 成功提交后推送本次输入 Entry，幂等重试与恢复不重复通知；Loop 在迭代中推送文本、思考和工具进度，轮次完成事件携带该轮完整 Entry。前端展示这些 Entry 并结束对应的流式草稿；执行状态独立刷新，不反复加载或合并历史。

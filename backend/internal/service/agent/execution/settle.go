@@ -11,22 +11,6 @@ import (
 	"time"
 )
 
-const (
-	TerminalExecutionEnded  = "execution_ended"
-	TerminalRequestCanceled = "request_canceled"
-)
-
-// TerminalEvent 是 Execution 终态提交后发布的最小事实。
-type TerminalEvent struct {
-	Kind           string
-	SessionID      identity.SessionID
-	AgentID        identity.AgentID
-	ExecutionID    identity.AgentExecutionID
-	Outcome        string
-	FailureCode    agentmodel.ExecutionFailureCode
-	FailureMessage string
-}
-
 type settleParams struct {
 	ExecutionID    identity.AgentExecutionID
 	Outcome        agentmodel.ExecutionOutcome
@@ -193,11 +177,11 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 	}
 	// 每轮仅发布一个终态事件；取消原因来自持久化控制命令，不由 outcome 推断。
 	if s.eventObserver != nil {
-		kind := TerminalExecutionEnded
+		kind := EventExecutionEnded
 		if endedExecution.FailureCode == agentmodel.ExecutionFailureRequestCanceled {
-			kind = TerminalRequestCanceled
+			kind = EventRequestCanceled
 		}
-		s.eventObserver(TerminalEvent{
+		s.eventObserver(Event{
 			Kind:           kind,
 			SessionID:      endedExecution.SessionID,
 			AgentID:        endedExecution.AgentID,

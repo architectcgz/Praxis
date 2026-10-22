@@ -118,6 +118,16 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	if err = s.records.Save(ctx, result); err != nil {
 		return agentmodel.Execution{}, false, err
 	}
+	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。
+	if s.eventObserver != nil {
+		s.eventObserver(Event{
+			Kind:        EventEntriesAppended,
+			SessionID:   result.SessionID,
+			AgentID:     result.AgentID,
+			ExecutionID: result.ID,
+			Entries:     []sessionentry.ContextEntry{stored},
+		})
+	}
 	if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
 		Identity: hook.Identity{
 			SessionID:    result.SessionID,

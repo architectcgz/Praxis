@@ -24,5 +24,6 @@ type Entries interface {
 	Append(context.Context, sessionentry.Record) (sessionentry.ContextEntry, bool, error)
 	Get(context.Context, sessionentry.StreamKey, string) (sessionentry.ContextEntry, error)
 	List(context.Context, EntryQuery) (EntryList, error)
+	// SetContext 保存本次执行上下文；成功时返回可供 Loop 更新的非 nil 指针。
 	SetContext(context.Context, sessionentry.StreamKey, appcontext.ModelContext) (*appcontext.ModelContext, error)
 }

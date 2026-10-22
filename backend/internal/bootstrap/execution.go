@@ -21,9 +21,10 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		Controls:       repos.Controls,
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
-		EventObserver: func(value executionservice.TerminalEvent) {
+		EventObserver: func(value executionservice.Event) {
 			events.Publish(execution.Event{
 				Kind:           value.Kind,
+				Entries:        value.Entries,
 				SessionID:      value.SessionID,
 				AgentID:        value.AgentID,
 				ExecutionID:    value.ExecutionID,

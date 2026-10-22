@@ -75,16 +75,8 @@ func (r *Runner) run(
 	executionInput Input,
 	deps ExecutionDependencies,
 ) (EndReason, FailureCode, error) {
-	if deps.ToolExecutor == nil || deps.Assistant == nil {
-		return loopResult(fail(FailureContract, ErrorContract, "scoped tool execution and assistant committer are required"))
-	}
-	if executionInput.Context == nil {
-		return loopResult(fail(FailureContract, ErrorContract, "session context is required"))
-	}
 	modelContext := executionInput.Context
-	if executionInput.InputEntry != nil {
-		r.emit(Event{Kind: EventEntriesAppended, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, Entries: []sessionentry.ContextEntry{*executionInput.InputEntry}})
-	}
+
 	builtModel, err := r.buildModel(executionInput.Config.Model)
 	if err != nil {
 		r.emitError(executionInput.AgentID, executionInput.ID, "", err)
