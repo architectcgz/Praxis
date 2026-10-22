@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/hook"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"regexp"
@@ -27,7 +28,11 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 	results := make([]sessionentry.ContextEntry, 0, len(calls))
 	for _, call := range calls {
 		receipt, err := deps.ToolExecutor.Execute(ctx, call)
-		if err != nil {
+		if err != nil && receipt.ID == "" {
+			var hookErr *hook.Error
+			if errors.As(err, &hookErr) {
+				return results, failCause(FailureInternal, err)
+			}
 			return results, failCause(FailureStorage, err)
 		}
 		if len(receipt.Content) != 1 || receipt.Content[0].Kind != sessionentry.BlockToolResult {
@@ -36,6 +41,9 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 		block := receipt.Content[0]
 		r.emitToolResult(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
 		results = append(results, receipt)
+		if err != nil {
+			return results, failCause(FailureInternal, err)
+		}
 		if err := ctx.Err(); err != nil {
 			return results, err
 		}

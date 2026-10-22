@@ -8,7 +8,7 @@ import (
 	"praxis/internal/identity"
 )
 
-// NextRequestSequence 返回当前可用序号，请求 Hook 在模型调用前条件写入预留。
+// NextRequestSequence 返回当前可用序号，执行服务在模型调用前条件写入预留。
 func (s *Service) NextRequestSequence(ctx context.Context, id identity.AgentExecutionID) (uint64, error) {
 	execution, err := s.records.Get(ctx, id)
 	if err != nil {
@@ -40,7 +40,8 @@ func (s *Service) update(ctx context.Context, id identity.AgentExecutionID, chan
 	}
 }
 
-func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64, iteration bool) error {
+// RecordModelRequest 在请求前可靠预留序号并累计次数，不依赖扩展装配。
+func (s *Service) RecordModelRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64, iteration bool) error {
 	return s.update(ctx, id, func(value *agentmodel.Execution) error {
 		if !value.Active() || sequence != max(uint64(1), value.Progress.NextSequence) {
 			return fault.ErrRequestConflict
@@ -54,8 +55,8 @@ func (s *Service) recordRequest(ctx context.Context, id identity.AgentExecutionI
 	})
 }
 
-// recordModelOutput 保存已经返回的模型消耗，工具字节始终从回执派生。
-func (s *Service) recordModelOutput(ctx context.Context, id identity.AgentExecutionID, outputBytes int) error {
+// RecordModelOutput 保存已经返回的模型消耗，工具字节始终从回执派生。
+func (s *Service) RecordModelOutput(ctx context.Context, id identity.AgentExecutionID, outputBytes int) error {
 	if outputBytes == 0 {
 		return nil
 	}

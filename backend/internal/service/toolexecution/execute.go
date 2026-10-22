@@ -30,14 +30,25 @@ func (scope *Scope) Execute(ctx context.Context, call sessionentry.ToolCall) (se
 	if !ok {
 		return s.appendError(ctx, call, "tool_not_allowed", "The requested tool is disabled or unregistered.")
 	}
+	boundary := toolHookEvent(call, call.Arguments)
+	boundary.OperationID = hook.NewOperationID()
+	modified, hookErr := s.deps.HookDispatcher.BeforeToolExecution(ctx, boundary)
+	if hookErr != nil {
+		return sessionentry.ContextEntry{}, hookErr
+	}
+	if err := ctx.Err(); err != nil {
+		return s.appendError(ctx, call, "tool_interrupted", err.Error())
+	}
+	call.Arguments = bytes.Clone(modified)
 	args, err := s.deps.Prepare(t, call.Arguments, scope.workspacePath)
 	if err != nil {
 		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
 	}
-	return scope.execute(ctx, call, bytes.Clone(args))
+	boundary.Arguments = bytes.Clone(args)
+	return scope.execute(ctx, call, bytes.Clone(args), boundary)
 }
 
-func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (sessionentry.ContextEntry, error) {
+func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, boundary hook.ToolExecution) (sessionentry.ContextEntry, error) {
 	s := scope.service
 	for {
 		pending, denied, err := scope.authorize(ctx, call, args)
@@ -52,7 +63,9 @@ func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, arg
 		}
 		if pending {
 			// 审批等待保留在本次调用栈，参数只准备一次；回调不持有存储锁或工具控制锁。
-			if err := scope.awaitApproval(ctx, call); err != nil {
+			waiting := call
+			waiting.Arguments = bytes.Clone(args)
+			if err := scope.awaitApproval(ctx, waiting, boundary.OperationID); err != nil {
 				return sessionentry.ContextEntry{}, err
 			}
 			// 拒绝和停止会直接提交回执，唤醒后优先消费已经完成的调用。
@@ -73,6 +86,7 @@ func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, arg
 			Tool:  s.deps.Bind(t, scope.workspacePath),
 			hooks: s.deps.HookDispatcher,
 			identity: hook.Identity{
+				OperationID: boundary.OperationID,
 				SessionID:   call.SessionID,
 				AgentID:     call.AgentID,
 				ExecutionID: call.ExecutionID,
@@ -110,7 +124,24 @@ func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, arg
 				value.ErrorClass = "tool_execution_failed"
 			}
 		}
-		return s.appendResult(ctx, call, value)
+		modified, hookErr := s.deps.HookDispatcher.AfterToolExecution(context.WithoutCancel(ctx), hook.ToolExecutionResult{
+			ToolExecution: boundary,
+			Result:        value,
+			Err:           result.Err,
+		})
+		if hookErr == nil && (modified.ErrorClass != value.ErrorClass || modified.SideEffect != value.SideEffect) {
+			hookErr = &hook.Error{Point: "AfterToolExecution", Cause: errors.New("tool result hook cannot change execution error or side-effect facts")}
+		}
+		if hookErr == nil {
+			modified.Truncated = modified.Truncated || value.Truncated
+			value = modified
+		}
+		stored, writeErr := s.appendResult(ctx, call, value)
+		if writeErr != nil {
+			return stored, writeErr
+		}
+		// 工具已经运行，扩展失败只终止后续流程，不能丢弃结果或重跑副作用。
+		return stored, hookErr
 	}
 }
 
@@ -165,4 +196,12 @@ func (t observedTool) Call(ctx context.Context, args json.RawMessage) (result to
 	})
 	defer func() { scope.End(hook.Result{Err: err, ToolErrorClass: result.ErrorClass}) }()
 	return t.Tool.Call(ctx, args)
+}
+
+func toolHookEvent(call sessionentry.ToolCall, args json.RawMessage) hook.ToolExecution {
+	return hook.ToolExecution{
+		Identity:  hook.Identity{SessionID: call.SessionID, AgentID: call.AgentID, ExecutionID: call.ExecutionID, TurnID: call.TurnID},
+		Call:      call,
+		Arguments: bytes.Clone(args),
+	}
 }

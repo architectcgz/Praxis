@@ -23,10 +23,12 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// RequestSequencer 提供本次请求可使用的序号；请求 Hook 在调用模型前原子确认并推进序号。
-// 风险审核也会消耗序号，每次请求都读取最新值，不保留进度或执行恢复能力。
-type RequestSequencer interface {
+// ExecutionProgress 由 Execution Service 原生提供请求预留与输出记录，不承担执行恢复。
+// 风险审核也会消耗序号，每次请求都读取最新值，不在 Loop 缓存进度。
+type ExecutionProgress interface {
 	NextRequestSequence(context.Context, identity.AgentExecutionID) (uint64, error)
+	RecordModelRequest(context.Context, identity.AgentExecutionID, uint64, bool) error
+	RecordModelOutput(context.Context, identity.AgentExecutionID, int) error
 }
 
 // EndReason 只描述 Loop 为什么返回，不表示业务持久化结果。
@@ -41,12 +43,13 @@ type Result struct{ Reason EndReason }
 
 // Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
 type Input struct {
-	ID        identity.AgentExecutionID
-	SessionID identity.SessionID
-	AgentID   identity.AgentID
-	RequestID identity.RequestID
-	Config    Config
-	Context   *appcontext.ModelContext
+	ID           identity.AgentExecutionID
+	SourceTaskID identity.TaskID
+	SessionID    identity.SessionID
+	AgentID      identity.AgentID
+	RequestID    identity.RequestID
+	Config       Config
+	Context      *appcontext.ModelContext
 }
 
 // ExecutionDependencies 只在本次 Run 中使用；共享 Runner 不保存单次执行的环境或等待状态。

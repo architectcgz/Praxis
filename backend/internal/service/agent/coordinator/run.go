@@ -28,7 +28,7 @@ func (r *Coordinator) run(
 		return
 	}
 
-	if err := r.startExecution(task); err != nil {
+	if err := r.startExecution(task, ""); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
@@ -72,8 +72,8 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForWorkspace(workspace.Path, func(waitCtx context.Context, call sessionentry.ToolCall) error {
-		return r.waitForToolApproval(waitCtx, task, active, call)
+	executor := r.tools.ForWorkspace(workspace.Path, func(waitCtx context.Context, call sessionentry.ToolCall, operationID string) error {
+		return r.waitForToolApproval(waitCtx, task, active, call, operationID)
 	})
 	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor)
 	if ctx.Err() != nil {
@@ -85,12 +85,31 @@ func (r *Coordinator) run(
 
 }
 
-func (r *Coordinator) startExecution(task agentmodel.Execution) error {
+func (r *Coordinator) startExecution(task agentmodel.Execution, resumeReason string) error {
 	startContext, cancelStart := r.transitionContext()
 	defer cancelStart()
 	if err := r.operations.ConfirmRunning(startContext, task.ID); err != nil {
 		r.logError(task, "start product task", err)
 		return err
+	}
+	event := hook.ExecutionEvent{Identity: hook.Identity{
+		SourceTaskID: task.SourceTaskID,
+		SessionID:    task.SessionID,
+		AgentID:      task.AgentID,
+		ExecutionID:  task.ID,
+	}}
+	if resumeReason == "" && !task.StartedAt.IsZero() {
+		resumeReason = "recovery"
+	}
+	var hookErr error
+	if resumeReason != "" {
+		event.ResumeReason = resumeReason
+		hookErr = r.hookDispatcher.ExecutionResumed(context.WithoutCancel(startContext), event)
+	} else {
+		hookErr = r.hookDispatcher.ExecutionStarted(context.WithoutCancel(startContext), event)
+	}
+	if hookErr != nil {
+		r.logger.Errorf("execution start hook failed: %v", hookErr)
 	}
 	return nil
 }
@@ -123,6 +142,10 @@ func (r *Coordinator) execute(
 			outcome = agentmodel.ExecutionFailed
 			failureCode = loopFailureCode(err)
 		}
+	}
+	var hookErr *hook.Error
+	if errors.As(err, &hookErr) && loop.FailureClassification(err) == loop.FailureInternal {
+		failureCode = agentmodel.ExecutionFailureInternal
 	}
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
 	scope.End(hook.Result{Outcome: string(finalOutcome), Err: err})

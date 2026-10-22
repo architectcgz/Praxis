@@ -80,7 +80,7 @@ func main() {
 			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return
 		}
-		application, err := bootstrap.Open(ctx, root, nil)
+		application, err := bootstrap.Open(ctx, root, bootstrap.Options{})
 		if err != nil {
 			a.FailStartup(fmt.Errorf("initialize application services: %w", err))
 			return

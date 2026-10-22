@@ -163,17 +163,23 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 		params.ExecutionID,
 		params.Outcome,
 	)
-	committedExecution := endedExecution
-	committedExecution.Config = endedExecution.Config.Clone()
-	if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
+	event := hook.ExecutionEvent{
 		Identity: hook.Identity{
-			SessionID:   endedExecution.SessionID,
-			AgentID:     endedExecution.AgentID,
-			ExecutionID: endedExecution.ID,
+			SourceTaskID: endedExecution.SourceTaskID,
+			SessionID:    endedExecution.SessionID,
+			AgentID:      endedExecution.AgentID,
+			ExecutionID:  endedExecution.ID,
 		},
-		Execution: &hook.Execution{ID: committedExecution.ID, Outcome: string(committedExecution.Outcome), FailureCode: string(committedExecution.FailureCode)},
-	}); hookErr != nil {
-		s.logger.Errorf("task committed hook failed: %v", hookErr)
+		Outcome:     string(endedExecution.Outcome),
+		FailureCode: string(endedExecution.FailureCode),
+	}
+	if endedExecution.Outcome == agentmodel.ExecutionPaused {
+		if hookErr := s.hookDispatcher.ExecutionPaused(context.WithoutCancel(ctx), event); hookErr != nil {
+			s.logger.Errorf("execution paused hook failed: %v", hookErr)
+		}
+	}
+	if hookErr := s.hookDispatcher.ExecutionCommitted(context.WithoutCancel(ctx), event); hookErr != nil {
+		s.logger.Errorf("execution committed hook failed: %v", hookErr)
 	}
 	// 每轮仅发布一个终态事件；取消原因来自持久化控制命令，不由 outcome 推断。
 	if s.eventObserver != nil {

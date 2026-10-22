@@ -10,6 +10,8 @@ import (
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
+	"praxis/internal/core/tool"
+	"reflect"
 	"slices"
 )
 
@@ -20,36 +22,80 @@ type modelResponse struct {
 	stopReason providerapi.StopReason
 }
 
-// requestModel 在同步记录 Hook 成功后发起请求，结束时记录包括失败响应在内的已消费输出。
-// 本方法不读取执行实体、不执行恢复，也不写入消息或上下文。
+// requestModel 只发起请求和消费模型事件，不读取 Execution、不记录进度或触发 Hook。
 func requestModel(
 	ctx context.Context,
 	modelProvider providerapi.Provider,
 	request providerapi.Request,
-	boundary hook.ModelRequest,
-	dispatcher *hook.Dispatcher,
+	onEvent func(providerapi.Event),
+) (modelResponse, error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	input, err := modelProvider.Stream(streamCtx, request)
+	if err != nil {
+		return modelResponse{}, err
+	}
+	response, err := collectModelResponse(streamCtx, input, onEvent)
+	if err == nil {
+		err = response.bindReasoningState(request.Model)
+	}
+	return response, err
+}
+
+// callModel 在固定位置执行数据扩展、原生进度记录与模型计时。
+func (r *Runner) callModel(
+	ctx context.Context,
+	executionInput Input,
+	request providerapi.Request,
+	requestKind hook.ModelRequestKind,
+	sequence uint64,
 	onEvent func(providerapi.Event),
 ) (response modelResponse, err error) {
-	if err := dispatcher.BeforeModelRequest(ctx, boundary); err != nil {
+	boundary := hook.ModelRequest{
+		Identity: executionIdentity(executionInput, request.TurnID),
+		Kind:     requestKind,
+		Sequence: sequence,
+		Request:  request,
+	}
+	boundary.OperationID = hook.NewOperationID()
+	modified, hookErr := r.HookDispatcher.BeforeModelRequest(ctx, boundary)
+	if hookErr != nil {
+		return response, failCause(FailureInternal, hookErr)
+	}
+	if err := validateHookRequest(request, modified); err != nil {
+		return response, failCause(FailureContract, err)
+	}
+	request = modified
+	if err := ctx.Err(); err != nil {
+		return response, err
+	}
+	if err := r.Progress.RecordModelRequest(ctx, executionInput.ID, sequence, requestKind == hook.ModelRequestIteration); err != nil {
 		return response, failCause(FailureStorage, err)
 	}
-	ctx, scope := dispatcher.Start(ctx, hook.Operation{
+	boundary.Request = request.Clone()
+	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
 		Identity:    boundary.Identity,
 		Kind:        hook.OperationProvider,
 		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
 		ReferenceID: "assistant:" + request.TurnID.String(),
 	})
 	defer func() {
-		if hookErr := dispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
+		// 输出保存是原生可靠性步骤；取消或断流也不能遗漏已经收到的消耗。
+		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), executionInput.ID, response.textBytes); progressErr != nil {
+			err = failCause(FailureStorage, errors.Join(err, progressErr))
+		}
+		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
 			Request:     boundary,
 			OutputBytes: response.textBytes,
+			StopReason:  response.stopReason,
+			Err:         err,
 		}); hookErr != nil {
-			err = failCause(FailureStorage, errors.Join(err, hookErr))
+			r.Logf("after model response hook failed: %v", hookErr)
 		}
 		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
 	}()
 	firstResponse := false
-	callback := func(event providerapi.Event) {
+	return requestModel(ctx, r.Provider, request, func(event providerapi.Event) {
 		if !firstResponse && (event.Kind == providerapi.StreamTextDelta || event.Kind == providerapi.StreamThinkingDelta || event.Kind == providerapi.StreamToolCall) {
 			firstResponse = true
 			scope.OnSignal(hook.SignalFirstResponse)
@@ -57,19 +103,31 @@ func requestModel(
 		if onEvent != nil {
 			onEvent(event)
 		}
-	}
+	})
+}
 
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	input, err := modelProvider.Stream(streamCtx, request)
-	if err != nil {
-		return modelResponse{}, err
+// validateHookRequest 保留冻结模型、归属及结构化输出约束；扩展只能缩小输出和工具范围。
+// 最终编码后的上下文窗口继续由 Provider 原生校验。
+func validateHookRequest(original, modified providerapi.Request) error {
+	if original.ExecutionID != modified.ExecutionID || original.TurnID != modified.TurnID || original.PromptCacheKey != modified.PromptCacheKey ||
+		!reflect.DeepEqual(original.Model, modified.Model) || !reflect.DeepEqual(original.OutputSchema, modified.OutputSchema) {
+		return errors.New("model request hook cannot change frozen configuration or identity")
 	}
-	response, err = collectModelResponse(streamCtx, input, callback)
-	if err == nil {
-		err = response.bindReasoningState(request.Model)
+	if modified.MaxOutputTokens <= 0 || modified.MaxOutputTokens > original.MaxOutputTokens {
+		return errors.New("model request hook cannot increase the output token limit")
 	}
-	return response, err
+	allowed := make(map[tool.ToolName]tool.ToolDefinition, len(original.Tools))
+	for _, definition := range original.Tools {
+		allowed[definition.Name] = definition
+	}
+	for _, definition := range modified.Tools {
+		expected, ok := allowed[definition.Name]
+		if !ok || !reflect.DeepEqual(expected, definition) {
+			return errors.New("model request hook cannot add or redefine tools")
+		}
+		delete(allowed, definition.Name)
+	}
+	return nil
 }
 
 // collectModelResponse 只消费模型事件流；预算、任务失败分类和实时事件映射由调用方负责。

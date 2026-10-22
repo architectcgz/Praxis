@@ -13,14 +13,14 @@ import (
 )
 
 // summarizeContext 在真实模型请求边界执行摘要，不执行工具、不发布思考或回答文本。
-// 请求和输出由同步 Hook 记录，原历史仍由调用方持有。
+// 请求和输出由 Execution Service 原生记录，原历史仍由调用方持有。
 func (r *Runner) summarizeContext(
 	ctx context.Context,
 	executionInput Input,
 	history appcontext.ModelContext,
 	limit int,
 ) (string, error) {
-	sequence, err := r.Requests.NextRequestSequence(ctx, executionInput.ID)
+	sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.ID)
 	if err != nil {
 		return "", failCause(FailureStorage, err)
 	}
@@ -42,16 +42,7 @@ func (r *Runner) summarizeContext(
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := requestModel(requestCtx, r.Provider, request, hook.ModelRequest{
-		Identity: hook.Identity{
-			SessionID:   executionInput.SessionID,
-			AgentID:     executionInput.AgentID,
-			ExecutionID: executionInput.ID,
-			TurnID:      turnID,
-		},
-		Kind:     hook.ModelRequestSummary,
-		Sequence: sequence,
-	}, r.HookDispatcher, func(event providerapi.Event) {
+	response, err := r.callModel(requestCtx, executionInput, request, hook.ModelRequestSummary, sequence, func(event providerapi.Event) {
 		if event.Kind == providerapi.StreamUsage {
 			r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 		}

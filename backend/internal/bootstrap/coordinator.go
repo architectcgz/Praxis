@@ -20,8 +20,7 @@ import (
 // coordinatorDependencies 装配业务用例、Core 内存队列与执行能力。
 type coordinatorDependencies struct {
 	Tasks          execution.ExecutionOperations
-	Requests       loop.RequestSequencer
-	ProgressHook   hook.ModelHook
+	Progress       loop.ExecutionProgress
 	Records        repository.AgentExecution
 	SessionTasks   execution.SessionTasks
 	PrimaryAgent   execution.PrimaryAgentProvider
@@ -106,12 +105,9 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 	if deps.Runner != nil {
 		runnerDeps = deps.Runner.Dependencies
 	}
-	// 执行序号和记录 Hook 始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
-	runnerDeps.Requests = deps.Requests
-	if runnerDeps.HookDispatcher == nil {
-		runnerDeps.HookDispatcher = deps.HookDispatcher
-	}
-	runnerDeps.HookDispatcher = runnerDeps.HookDispatcher.WithModelHooks(deps.ProgressHook)
+	// 执行进度始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
+	runnerDeps.Progress = deps.Progress
+	runnerDeps.HookDispatcher = deps.HookDispatcher
 	runner, err := loop.NewRunner(runnerDeps)
 	if err != nil {
 		return nil, err

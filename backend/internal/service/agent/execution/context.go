@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/hook"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -69,7 +70,22 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 		if err != nil {
 			return err
 		}
-		built, err := (appcontext.ContextBuilder{}).Build(content, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: task.Config.Model.MaxOutputTokens})
+		identity := hook.Identity{
+			OperationID:  hook.NewOperationID(),
+			SourceTaskID: task.SourceTaskID,
+			SessionID:    task.SessionID,
+			AgentID:      task.AgentID,
+			ExecutionID:  task.ID,
+		}
+		limits := appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: task.Config.Model.MaxOutputTokens}
+		content, err = s.hookDispatcher.BeforeContextBuild(txCtx, hook.ContextBuild{Identity: identity, Content: content, Limits: limits})
+		if err != nil {
+			return err
+		}
+		built, err := (appcontext.ContextBuilder{}).Build(content, limits)
+		if hookErr := s.hookDispatcher.AfterContextBuild(context.WithoutCancel(txCtx), hook.ContextBuilt{Identity: identity, Context: built, Err: err}); hookErr != nil {
+			s.logger.Errorf("after context build hook failed: %v", hookErr)
+		}
 		if err != nil {
 			return err
 		}
@@ -78,12 +94,13 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 			return err
 		}
 		executionInput = loop.Input{
-			ID:        task.ID,
-			SessionID: task.SessionID,
-			AgentID:   task.AgentID,
-			RequestID: task.RequestID,
-			Config:    loop.Config{Model: task.Config.Model.Clone()},
-			Context:   sessionContext,
+			ID:           task.ID,
+			SourceTaskID: task.SourceTaskID,
+			SessionID:    task.SessionID,
+			AgentID:      task.AgentID,
+			RequestID:    task.RequestID,
+			Config:       loop.Config{Model: task.Config.Model.Clone()},
+			Context:      sessionContext,
 		}
 		return nil
 	}(ctx)

@@ -3,9 +3,11 @@ package session
 import (
 	"context"
 	"errors"
+	"praxis/internal/core/hook"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
+	"strings"
 )
 
 // TaskInput 仅接收 Session 与已规范化正文，不要求调用方分配任何执行身份。
@@ -19,6 +21,17 @@ type TaskInput struct {
 func (s *Service) CreateTask(ctx context.Context, input TaskInput) (sessionmodel.Task, error) {
 	if ctx == nil {
 		return sessionmodel.Task{}, errors.New("create task context is required")
+	}
+	prompt, err := s.hookDispatcher.BeforeUserInput(ctx, hook.UserInput{SessionID: input.SessionID, Prompt: input.Prompt})
+	if err != nil {
+		return sessionmodel.Task{}, err
+	}
+	input.Prompt = strings.TrimSpace(prompt)
+	if input.Prompt == "" {
+		return sessionmodel.Task{}, errors.New("task prompt is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return sessionmodel.Task{}, err
 	}
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()

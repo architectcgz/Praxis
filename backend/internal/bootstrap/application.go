@@ -36,8 +36,15 @@ func (a *Application) Services() bindings.Services {
 	return a.frontend
 }
 
+// Options 在初始化阶段注入执行器、工具和 Hook；运行期间不修改注册表。
+type Options struct {
+	Runner *loop.Runner
+	Tools  []tool.Tool
+	Hooks  []any
+}
+
 // Open 只做高层装配；恢复完成前不把业务入口交给桌面宿主。
-func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, extensions ...tool.Tool) (*Application, error) {
+func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Application, error) {
 	if ctx == nil {
 		return nil, errors.New("application composition context is required")
 	}
@@ -64,7 +71,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 		_ = a.store.Close(context.Background())
 		_ = a.logger.Close()
 	}()
-	config, err := loadConfiguration(root, extensions)
+	config, err := loadConfiguration(root, options.Tools)
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +81,17 @@ func Open(ctx context.Context, root dataroot.DataRoot, runner *loop.Runner, exte
 	if err != nil {
 		return nil, err
 	}
-	hooks := hook.NewDispatcher(timing.Hook{Recorder: timings})
+	hooks, err := hook.NewDispatcher(append([]any{timing.Hook{Recorder: timings}}, options.Hooks...)...)
+	if err != nil {
+		return nil, err
+	}
 	configMu := &sync.RWMutex{}
 	a.sessions, err = buildSessions(resources, repos, config.agents, hooks, configMu, config.models)
 	if err != nil {
 		return nil, err
 	}
 	models := buildModelService(root, config, a.logger, configMu)
-	a.coordinator, err = buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, runner)
+	a.coordinator, err = buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, options.Runner)
 	if err != nil {
 		return nil, err
 	}

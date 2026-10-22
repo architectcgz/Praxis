@@ -128,14 +128,14 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 			Entries:     []sessionentry.ContextEntry{stored},
 		})
 	}
-	if hookErr := s.hookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
+	if hookErr := s.hookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{
 		Identity: hook.Identity{
 			SessionID:    result.SessionID,
 			AgentID:      result.AgentID,
 			SourceTaskID: result.SourceTaskID,
 			ExecutionID:  result.ID,
 		},
-		Entry: &stored,
+		Entry: stored,
 	}); hookErr != nil {
 		s.logger.Errorf("user message committed hook failed: %v", hookErr)
 	}

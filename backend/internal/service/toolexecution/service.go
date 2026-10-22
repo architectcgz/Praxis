@@ -51,10 +51,10 @@ func NewService(deps Dependencies) (*Service, error) {
 type Scope struct {
 	service       *Service
 	workspacePath string
-	awaitApproval func(context.Context, sessionentry.ToolCall) error
+	awaitApproval func(context.Context, sessionentry.ToolCall, string) error
 }
 
-func (s *Service) ForWorkspace(path string, awaitApproval func(context.Context, sessionentry.ToolCall) error) *Scope {
+func (s *Service) ForWorkspace(path string, awaitApproval func(context.Context, sessionentry.ToolCall, string) error) *Scope {
 	return &Scope{service: s, workspacePath: path, awaitApproval: awaitApproval}
 }
 

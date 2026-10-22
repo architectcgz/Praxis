@@ -19,7 +19,7 @@ import (
 type Dependencies struct {
 	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
-	Requests       RequestSequencer
+	Progress       ExecutionProgress
 	HookDispatcher *hook.Dispatcher
 	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
 	CompressionStrategy contextcompress.Strategy
@@ -42,11 +42,8 @@ func NewRunner(deps Dependencies) (Runner, error) {
 	if deps.Tools == nil {
 		return Runner{}, errors.New("loop tool catalog is required")
 	}
-	if deps.Requests == nil {
-		return Runner{}, errors.New("loop request sequencer is required")
-	}
-	if !deps.HookDispatcher.HasModelHooks() {
-		return Runner{}, errors.New("loop model request hooks are required")
+	if deps.Progress == nil {
+		return Runner{}, errors.New("loop execution progress is required")
 	}
 	if deps.EventObserver == nil {
 		return Runner{}, errors.New("loop event observer is required")
@@ -61,7 +58,7 @@ func NewRunner(deps Dependencies) (Runner, error) {
 }
 
 // Run 使用已准备的执行数据和本次执行依赖运行模型与工具循环。
-// 恢复、已完成判断和上下文数据加载由业务上层完成；请求和输出记录由同步 Hook 负责。
+// 恢复、已完成判断和上下文数据加载由业务上层完成；请求和输出记录由 Execution Service 原生负责。
 // Loop 不决定执行终态、释放归属或调度后续预约。
 func (r *Runner) Run(ctx context.Context, executionInput Input, deps ExecutionDependencies) (Result, error) {
 	reason, _, err := r.run(ctx, executionInput, deps)
@@ -88,13 +85,11 @@ func (r *Runner) run(
 		if err != nil {
 			return loopResult(failCause(FailureContract, err))
 		}
-		compressed, changed, err := r.CompressionStrategy.Compress(ctx, *modelContext, contextcompress.Options{
+		compressed, changed, err := r.compressContext(ctx, executionInput, deps.Assistant, *modelContext, contextcompress.Options{
 			SummaryFormat:   r.SummaryFormat,
 			ContextWindow:   executionInput.Config.Model.ContextWindow,
 			MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens,
 			ReservedTokens:  appcontext.EstimateTokens(string(toolPayload)),
-		}, func(summaryCtx context.Context, history appcontext.ModelContext, limit int) (string, error) {
-			return r.summarizeContext(summaryCtx, executionInput, history, limit)
 		})
 		if err != nil {
 			err = modelFailure(err)
@@ -102,22 +97,11 @@ func (r *Runner) run(
 			return loopResult(err)
 		}
 		if changed {
-			for index, entry := range compressed.Entries {
-				if !entry.IsSummary() || entry.ID != "" {
-					continue
-				}
-				stored, err := deps.Assistant.AppendSummary(ctx, entry)
-				if err != nil {
-					return loopResult(failCause(FailureStorage, err))
-				}
-				compressed.Entries[index] = stored
-				r.emit(Event{Kind: EventEntriesAppended, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, Entries: []sessionentry.ContextEntry{stored}})
-			}
 			r.Logf("context compressed execution_id=%s entriesBefore=%d entriesAfter=%d", executionInput.ID, len(modelContext.Entries), len(compressed.Entries))
 			*modelContext = compressed
 			request.Context = modelContext.Clone()
 		}
-		sequence, err := r.Requests.NextRequestSequence(ctx, executionInput.ID)
+		sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.ID)
 		if err != nil {
 			return loopResult(failCause(FailureStorage, err))
 		}
@@ -139,8 +123,23 @@ func (r *Runner) executeTurn(
 	request providerapi.Request,
 	modelContext *appcontext.ModelContext,
 	sequence uint64,
-) (EndReason, FailureCode, bool, error) {
+) (outcome EndReason, failureCode FailureCode, finished bool, err error) {
 	turnID := request.TurnID
+	iteration := hook.Iteration{Identity: executionIdentity(executionInput, turnID), Sequence: sequence}
+	iteration.OperationID = hook.NewOperationID()
+	if hookErr := r.HookDispatcher.BeforeIteration(ctx, iteration); hookErr != nil {
+		return endFailed, FailureInternal, false, failCause(FailureInternal, hookErr)
+	}
+	var stopReason providerapi.StopReason
+	defer func() {
+		if hookErr := r.HookDispatcher.AfterIteration(context.WithoutCancel(ctx), hook.IterationResult{
+			Iteration:  iteration,
+			StopReason: stopReason,
+			Err:        err,
+		}); hookErr != nil {
+			r.Logf("after iteration hook failed: %v", hookErr)
+		}
+	}()
 	r.emit(Event{
 		Kind:        EventTurnStarted,
 		SessionID:   executionInput.SessionID,
@@ -157,18 +156,10 @@ func (r *Runner) executeTurn(
 		TurnID:      turnID,
 		Name:        executionInput.Config.Model.ProviderID + "/" + executionInput.Config.Model.ModelID,
 	})
-	response, err := requestModel(ctx, r.Provider, request, hook.ModelRequest{
-		Identity: hook.Identity{
-			SessionID:   executionInput.SessionID,
-			AgentID:     executionInput.AgentID,
-			ExecutionID: executionInput.ID,
-			TurnID:      turnID,
-		},
-		Kind:     hook.ModelRequestIteration,
-		Sequence: sequence,
-	}, r.HookDispatcher, func(event providerapi.Event) {
+	response, err := r.callModel(ctx, executionInput, request, hook.ModelRequestIteration, sequence, func(event providerapi.Event) {
 		r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 	})
+	stopReason = response.stopReason
 	if err != nil {
 		blocks := entryBlocksFromEvents(response.events)
 		partial := make([]sessionentry.Block, 0, len(blocks))
@@ -182,14 +173,17 @@ func (r *Runner) executeTurn(
 			if ctx.Err() != nil {
 				stopReason = "aborted"
 			}
-			stored, _, writeErr := deps.Assistant.AppendAssistant(context.WithoutCancel(ctx), AssistantWrite{Entry: sessionentry.ContextEntry{
+			stored, inserted, writeErr := deps.Assistant.AppendAssistant(context.WithoutCancel(ctx), AssistantWrite{Entry: sessionentry.ContextEntry{
 				ID: "assistant:" + turnID.String(), RequestID: executionInput.RequestID.String(), ExecutionID: executionInput.ID.String(),
 				TurnID: turnID.String(), StopReason: stopReason, Role: role.Assistant, AuthorKind: sessionentry.AuthorAgent,
 				AuthorID: executionInput.AgentID.String(), Content: partial,
 			}})
 			if writeErr != nil {
-				err = errors.Join(err, writeErr)
+				err = failCause(FailureStorage, errors.Join(err, writeErr))
 			} else {
+				if inserted {
+					r.notifyAssistant(ctx, executionInput, stored, false)
+				}
 				*modelContext = modelContext.Append(stored)
 				r.emit(Event{Kind: EventTurnCompleted, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, TurnID: turnID, Entries: []sessionentry.ContextEntry{stored}})
 			}
@@ -229,18 +223,8 @@ func (r *Runner) executeTurn(
 		committed = append(committed, message)
 		calls = message.ToolCalls(executionInput.SessionID, executionInput.AgentID)
 		*modelContext = modelContext.Append(message)
-		if inserted && value.FinalOutput != nil {
-			if hookErr := r.HookDispatcher.OnCommitted(context.WithoutCancel(ctx), hook.CommittedEvent{
-				Identity: hook.Identity{
-					SessionID:   executionInput.SessionID,
-					AgentID:     executionInput.AgentID,
-					ExecutionID: executionInput.ID,
-					TurnID:      turnID,
-				},
-				Entry: &message,
-			}); hookErr != nil {
-				r.Logf("assistant committed hook failed: %v", hookErr)
-			}
+		if inserted {
+			r.notifyAssistant(ctx, executionInput, message, value.FinalOutput != nil)
 		}
 	}
 	for _, call := range calls {

@@ -1,20 +1,26 @@
-// Package hook 定义业务执行边界的扩展协议，区分观察通知与必须成功的同步记录。
+// Package hook 定义业务执行边界的扩展协议，提供强类型数据扩展、观察通知和操作计时。
 package hook
 
 import (
 	"context"
+	"crypto/rand"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/identity"
 )
 
-// Identity 显式关联本次执行的持久化归属；没有迭代边界时 TurnID 为空。
+// Identity 显式关联执行归属；OperationID 标识本次操作尝试，恢复后重新生成。
+// 提交通知没有操作尝试，OperationID 为空；没有迭代边界时 TurnID 为空。
 type Identity struct {
+	OperationID  string
 	SourceTaskID identity.TaskID
 	SessionID    identity.SessionID
 	AgentID      identity.AgentID
 	ExecutionID  identity.AgentExecutionID
 	TurnID       identity.TurnID
 }
+
+// NewOperationID 为一次操作尝试生成关联标识，Before、After 和 Scope 共用该值。
+func NewOperationID() string { return rand.Text() }
 
 type OperationKind string
 

@@ -2,48 +2,54 @@ package hook
 
 import (
 	"context"
-	"errors"
 	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/identity"
 )
 
-// CommittedEvent 只通知已经可靠提交的事实，供记忆或审计订阅。
-// 由业务调用方在事实可靠写入后发布；通知为 best-effort，不保证跨重启必达或并发全局顺序。
-type CommittedEvent struct {
+// EntryCommitted 只携带首次保存成功的条目，不允许处理器改变已经提交的事实。
+// 通知在业务锁外执行，不保证跨重启必达或并发提交的全局顺序。
+type EntryCommitted struct {
 	Identity
-	Entry     *sessionentry.ContextEntry
-	Execution *Execution
-}
-type CommittedHook interface {
-	OnCommitted(context.Context, CommittedEvent) error
+	Entry sessionentry.ContextEntry
 }
 
-// NewDispatcherWithEvents 冻结操作 Hook 和提交后 Hook 的注册列表。
-func NewDispatcherWithEvents(operations []OperationHook, events ...CommittedHook) *Dispatcher {
-	dispatcher := NewDispatcher(operations...)
-	dispatcher.events = append([]CommittedHook(nil), events...)
-	return dispatcher
+func (e EntryCommitted) clone() EntryCommitted {
+	e.Entry = e.Entry.Clone()
+	return e
 }
 
-// OnCommitted 收集扩展错误，调用方只能记录错误，不能撤销已提交事实。
-func (d *Dispatcher) OnCommitted(ctx context.Context, event CommittedEvent) error {
-	if d == nil {
-		return nil
-	}
-	var errs []error
-	for _, hook := range d.events {
-		if err := hook.OnCommitted(ctx, event); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+type UserInputCommittedHook interface {
+	UserInputCommitted(context.Context, EntryCommitted) error
 }
 
-func (d *Dispatcher) HasCommittedHooks() bool { return d != nil && len(d.events) > 0 }
+type AssistantCommittedHook interface {
+	AssistantCommitted(context.Context, EntryCommitted) error
+}
 
-// Execution 是提交后观察所需的最小执行事实，不暴露可变业务实体。
-type Execution struct {
-	ID          identity.AgentExecutionID
+type FinalOutputCommittedHook interface {
+	FinalOutputCommitted(context.Context, EntryCommitted) error
+}
+
+// ExecutionEvent 只暴露已经确定的执行事实，不提供可变业务实体或进度写入能力。
+type ExecutionEvent struct {
+	Identity
 	Outcome     string
 	FailureCode string
+	// ResumeReason 区分进程恢复和审批唤醒；新执行为空。
+	ResumeReason string
+}
+
+type ExecutionStartedHook interface {
+	ExecutionStarted(context.Context, ExecutionEvent) error
+}
+
+type ExecutionResumedHook interface {
+	ExecutionResumed(context.Context, ExecutionEvent) error
+}
+
+type ExecutionPausedHook interface {
+	ExecutionPaused(context.Context, ExecutionEvent) error
+}
+
+type ExecutionCommittedHook interface {
+	ExecutionCommitted(context.Context, ExecutionEvent) error
 }

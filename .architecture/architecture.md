@@ -23,7 +23,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。后端按业务实体和�
 | `backend/internal/core/tool/` | 工具请求、执行参数、结果、注册表、目录及参数规范化契约 |
 | `backend/internal/core/toolexecution/` | 工具控制事件、审批事实及可取消的运行实例 |
 | `backend/internal/core/session/` | 会话实体、内存 History 与构建后的 Context、模型选择、TaskQueue 和 ActiveTasks |
-| `backend/internal/core/hook/` | 操作 Hook 与业务提交后通知的分发机制 |
+| `backend/internal/core/hook/` | 强类型业务 Hook、数据扩展、提交后通知与操作计时 |
 | `backend/internal/core/agent/`、`session/`、`project/`、`workspace/`、`timing/` | 业务实体、值类型、不变量和纯状态规则 |
 | `backend/internal/repository/` | 所有业务仓储、统一 Entry 存取、ToolCall 派生查询、用量与计时持久化及条件写入契约 |
 | `backend/internal/service/agent/` | Agent 查询、控制、私有消息入口和消息流选择规则 |
@@ -110,9 +110,40 @@ flowchart TD
 - Execution 的查询版本由自身事件和关联控制命令的最新序号派生，不单独持久化。结算读取控制意图后条件保存终态；竞争时重新仲裁。`ended` 保存成功即确认终态，控制命令的 `applied` 状态由该终态派生，自动命名失败只记录日志并允许重试。
 - 终态写入失败时保留执行占用和结果，只重试结算，不重新调用模型或工具。关闭时先停止新准入并等待运行退出，再清理和关闭持久化资源。
 - 所有实体存取、工具查询、计时、用量及条件写入契约统一在 Repository。Loop 的 AssistantCommitter 是绑定执行、校验归属并提交消息的业务能力。
-- Store 与 Repository 不发布业务 Hook。用户输入在 Execution 准入成功后通知，内存入队不发布提交 Hook；最终 Assistant 和 Execution 终态在各自提交后通知。Hook 在锁外 best-effort 执行，失败不撤销已提交事实，幂等重复不再次通知。
+- Store 与 Repository 不发布业务 Hook。用户输入在 Execution 准入成功后通知，内存入队不发布提交 Hook；每条 Assistant 首次保存后通知，最终输出另行通知，Execution 终态保存后通知。通知失败不撤销已提交事实，幂等重复不再次通知。
 - Operation Hook 在真实运行边界记录模型、工具与 Agent 操作的耗时；事件发布用于 UI 实时展示，不作为持久化恢复事实来源。
 - 配置发布、执行配置冻结和工具启动通过共享配置读写锁协调。工具启动按 `controlMu → 配置读锁 → 仓储写入锁` 获取锁，外部模型与工具调用不持锁。持久化恢复只校验当前 Schema，不自动迁移或修补原始数据。
+
+## Hook 扩展契约
+
+`core/hook.Dispatcher` 提供按业务命名的可选接口，每个处理器只实现需要的切入点。`bootstrap.Options.Hooks` 是应用的统一注册入口；启动时复制并验证注册列表，Coordinator、Loop 和 Service 共用同一 Dispatcher。处理器按注册顺序同步调用，同一个处理器可能同时服务多个 Execution，不得以共享字段保存某次操作的临时状态。
+
+| 切入点 | 位置与数据契约 |
+| --- | --- |
+| `BeforeUserInput` | Session 输入入队前返回正文；Session 身份不可更改，修改后重新规范化和检查非空。 |
+| `UserInputCommitted` | 用户条目与 Execution 准入成功后通知；重复准入和进程恢复不重放通知。 |
+| `ExecutionStarted` / `ExecutionResumed` | 运行状态保存成功后通知；恢复原因区分 `recovery` 与 `approval`，不提供状态修改能力。 |
+| `BeforeContextBuild` | 历史选择完成后、ContextBuilder 构建前返回本次构建内容；不改写历史 Entry。 |
+| `AfterContextBuild` | 观察 ContextBuilder 的结果或错误，不修改结果。 |
+| `BeforeContextCompression` / `AfterContextCompression` | 包围每次原生压缩策略检查和摘要保存，`Changed` 区分无需压缩与完成压缩；失败时携带错误并保留原上下文。策略负责保护范围和是否压缩。 |
+| `BeforeIteration` / `AfterIteration` | 包围一次普通模型响应及其工具执行；摘要请求不增加迭代。After 包含停止原因、失败或取消错误。 |
+| `BeforeModelRequest` | 普通生成与摘要共用入口，通过 Kind 区分；返回修改后的请求，只能调整上下文、减少工具和降低输出上限。 |
+| `AfterModelResponse` | 模型流结束、断流或取消后通知，包含实际请求、已消费文本字节、停止原因和错误；不提供修改模型结果的能力。 |
+| `BeforeToolExecution` | 返回工具参数，位于参数规范化、授权及审批之前；不能更改工具名和调用归属。审批唤醒不重复改写参数。 |
+| `ToolExecutionWaiting` | 工具审批等待状态保存成功后通知，携带最终准备的参数。 |
+| `AfterToolExecution` | 工具实际返回后、回执保存前返回结果正文；不能更改原生错误和副作用事实。失败时先保存原始回执，再停止后续操作。 |
+| `AssistantCommitted` / `FinalOutputCommitted` | 每条 Assistant 首次保存后通知；最终输出依次触发两种通知，部分响应只触发 Assistant 通知。 |
+| `ExecutionPaused` / `ExecutionCommitted` | 首次终态保存后通知；暂停结果依次触发两种通知，重复结算不重复通知。 |
+
+转换处理器接收独立数据副本，返回值成为下一处理器的输入；失败即停止转换，不使用半成品。修改只作用于当前业务操作，不直接覆盖已保存历史。用户正文和工具回执由原生流程保存其最终采用的内容。请求归属、冻结模型、结构化输出约束以及工具授权仍由原生流程检查；Provider 校验最终编码请求的上下文窗口。
+
+Before 回调失败阻止本次操作；After 观察及提交通知执行全部处理器并汇总错误，由调用方记录，不改变业务结果。AfterToolExecution 属于返回数据的步骤，失败必须阻止后续操作；工具已发生的副作用及其原始回执不能丢失。业务层可以通过 `hook.Error` 区分处理器失败与存储或 Provider 失败。
+
+Execution Service 原生提供 `NextRequestSequence`、`RecordModelRequest` 和 `RecordModelOutput`。请求前可靠保存序号和次数，流结束后保存包括部分响应在内的输出消耗；失败阻止后续操作。没有注册任何 Hook 时，执行、进度、审批、持久化、压缩和恢复仍然完整工作。预算、重试、降级和审批规则属于原生业务能力，不交由用户 Hook 维护。
+
+每次构建、压缩、迭代、模型请求和工具调用尝试均由系统生成独立的 `OperationID`；对应 Before、After、等待事件和操作 Scope 共用该标识，恢复后的新尝试不复用旧值。模型 `Sequence` 是持久化请求序号，不等同于迭代次数。
+
+OperationHook 的 `Start` / `Scope` 独立提供 Context 传播、首响应信号和逆序结束；通知不能代替 Scope。业务 Hook 在存储锁和工具控制锁之外执行，提交通知不保证跨重启必达，不保证并发提交的全局顺序。风险审核仍由原生审核路径隔离执行，只提供操作计时，不经过普通生成的数据修改 Hook。
 
 ## 错误归属与文件组织
 

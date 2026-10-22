@@ -53,8 +53,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 
 	return assembleCoordinator(coordinatorDependencies{
 		Tasks:          tasks,
-		Requests:       tasks,
-		ProgressHook:   executionservice.ProgressHook{Service: tasks},
+		Progress:       tasks,
 		Records:        repos.Executions,
 		SessionTasks:   sessions,
 		PrimaryAgent:   sessions,
