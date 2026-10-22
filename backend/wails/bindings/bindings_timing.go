@@ -1,7 +1,7 @@
 package bindings
 
 import (
-	timingmodel "praxis/internal/core/timing"
+	executionservice "praxis/internal/service/agent/execution"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -14,7 +14,7 @@ func (b *AgentBindings) ListAgentTimings(agentID string) ([]dto.OperationTiming,
 	if err != nil {
 		return nil, err
 	}
-	records, err := services.Timings.ListAgent(ctx, agentID, 2000)
+	records, err := services.Timings.ListAgentTimings(ctx, agentID, 2000)
 	if err != nil {
 		return nil, publicError(b.host, "AgentBindings.ListAgentTimings", err)
 	}
@@ -25,7 +25,7 @@ func (b *AgentBindings) ListAgentTimings(agentID string) ([]dto.OperationTiming,
 	return result, nil
 }
 
-func operationTiming(value timingmodel.Record) dto.OperationTiming {
+func operationTiming(value executionservice.Timing) dto.OperationTiming {
 	return dto.OperationTiming{
 		SessionID:       value.SessionID,
 		AgentID:         value.AgentID,

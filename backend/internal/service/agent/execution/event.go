@@ -14,6 +14,7 @@ const (
 
 // Event 是 Execution Service 在业务提交成功后发布的执行通知。
 type Event struct {
+	Timing         *Timing
 	Entries        []sessionentry.ContextEntry
 	Kind           string
 	SessionID      identity.SessionID

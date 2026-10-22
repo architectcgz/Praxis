@@ -25,7 +25,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 	if ctx == nil {
 		return errors.New("task start context is required")
 	}
-	return s.update(ctx, executionID, func(task *agentmodel.Execution) error {
+	err := s.update(ctx, executionID, func(task *agentmodel.Execution) error {
 		if task.Status == agentmodel.ExecutionRunning || task.Status == agentmodel.ExecutionEnding {
 			return nil
 		}
@@ -37,6 +37,15 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 		}
 		return nil
 	})
+	if err == nil {
+		execution, readErr := s.records.Get(ctx, executionID)
+		if readErr != nil {
+			s.logger.Errorf("execution timing lookup failed: %v", readErr)
+		} else {
+			s.publishExecutionTiming(execution)
+		}
+	}
+	return err
 }
 
 // Settle 仲裁控制意图并保存 Execution 终态，Agent 与控制命令状态由查询派生。
@@ -152,6 +161,9 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 			s.logger.Errorf("name settled session execution_id=%s error=%v", endedExecution.ID, nameErr)
 		}
 	}()
+	if firstEnd {
+		s.publishExecutionTiming(endedExecution)
+	}
 	if !firstEnd {
 		return endedExecution, nil
 	}

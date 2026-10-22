@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
@@ -17,6 +18,7 @@ import (
 
 // Dependencies 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Dependencies struct {
+	TimingRecorder *timing.Recorder
 	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
 	Progress       ExecutionProgress

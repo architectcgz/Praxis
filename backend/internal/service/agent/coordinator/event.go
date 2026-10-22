@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
-	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/identity"
+	executionservice "praxis/internal/service/agent/execution"
 	"sync"
 )
 
@@ -29,7 +29,7 @@ type Event struct {
 	Result         string
 	IsError        bool
 	Error          string
-	Timing         *timingmodel.Record
+	Timing         *executionservice.Timing
 	Usage          *providerapi.Usage
 }
 

@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
+	timingmodel "praxis/internal/core/agent/execution/timing"
 	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/session/entry/role"
-	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
@@ -167,10 +167,10 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		var v providerapi.UsageRecord
 		_ = decodeJSON(data, &v)
 		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
-	case "timing":
+	case "agent_execution_timing":
 		var v timingmodel.Record
 		_ = decodeJSON(data, &v)
-		return taskOwner(identity.AgentExecutionID(v.ExecutionID), identity.AgentID(v.AgentID))
+		return reference("agent_execution", v.ExecutionID)
 	case "entry":
 		var v entryRecord
 		_ = decodeJSON(data, &v)
@@ -278,7 +278,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			}
 		}
 		fields = []string{"agentId", "executionId", "turnId"}
-	case "timing":
+	case "agent_execution_timing":
 		var prior, next timingmodel.Record
 		if err := decodeJSON(before, &prior); err != nil {
 			return err
@@ -286,9 +286,13 @@ func immutable(collection string, before, after json.RawMessage) error {
 		if err := decodeJSON(after, &next); err != nil {
 			return err
 		}
-		if next.Revision < prior.Revision || next.Revision == prior.Revision && !same(prior, next) || prior.Status != timingmodel.Running && !same(prior, next) || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
+		if same(prior, next) {
+			return nil
+		}
+		if prior.Status != timingmodel.Running || next.Status == timingmodel.Running || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
 			return fault.ErrRequestConflict
 		}
+
 	case "context", "entry", "tool_event", "control":
 		if !bytes.Equal(before, after) {
 			return fault.ErrRequestConflict

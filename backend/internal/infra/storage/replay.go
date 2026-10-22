@@ -17,7 +17,7 @@ func (s *Store) replay(ctx context.Context, scope jsonl.Scope) error {
 		var entry stateEntry
 		if event.Type != "session.deleted" {
 			var err error
-			entry, err = restoreStateEntry(scope.ID, event)
+			entry, err = s.restoreStateEntry(scope.ID, event)
 			if err != nil {
 				return err
 			}
@@ -27,6 +27,10 @@ func (s *Store) replay(ctx context.Context, scope jsonl.Scope) error {
 					return err
 				}
 				if bytes.Equal(payload, event.Payload) {
+					if event.Collection == "agent_execution_timing" {
+						s.sequences[scope.ID] = event.Sequence
+						return nil
+					}
 					return errors.New("redundant or duplicate event")
 				}
 			}

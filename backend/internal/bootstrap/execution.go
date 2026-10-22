@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/security"
@@ -16,7 +17,7 @@ import (
 	"sync"
 )
 
-func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, error) {
+func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, *executionservice.Service, error) {
 	active := &taskmodel.ActiveTasks{}
 	tasks, err := executionservice.NewService(executionservice.Dependencies{
 		Controls:       repos.Controls,
@@ -25,6 +26,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		EventObserver: func(value executionservice.Event) {
 			events.Publish(execution.Event{
 				Kind:           value.Kind,
+				Timing:         value.Timing,
 				Entries:        value.Entries,
 				SessionID:      value.SessionID,
 				AgentID:        value.AgentID,
@@ -43,15 +45,16 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		Contexts:    repos.Contexts,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	provider, err := providers.New(providers.Dependencies{Credentials: config.models})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return assembleCoordinator(coordinatorDependencies{
+	coordinator, err := assembleCoordinator(coordinatorDependencies{
+		TimingRecorder: timing.New(tasks.RecordTiming),
 		Tasks:          tasks,
 		Progress:       tasks,
 		Records:        repos.Executions,
@@ -91,4 +94,5 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		SummaryFormat:  defaultSummaryFormat(),
 		Runner:         runner,
 	})
+	return coordinator, tasks, err
 }

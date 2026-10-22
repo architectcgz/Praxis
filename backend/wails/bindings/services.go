@@ -9,10 +9,10 @@ import (
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
-	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
+	executionservice "praxis/internal/service/agent/execution"
 	approvalservice "praxis/internal/service/approval"
 	modelservice "praxis/internal/service/model"
 	projectservice "praxis/internal/service/project"
@@ -79,7 +79,7 @@ type AgentEventSource interface {
 }
 
 type TimingService interface {
-	ListAgent(context.Context, string, int) ([]timingmodel.Record, error)
+	ListAgentTimings(context.Context, string, int) ([]executionservice.Timing, error)
 }
 
 type UsageService interface {

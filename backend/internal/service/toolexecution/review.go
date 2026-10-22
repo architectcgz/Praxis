@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -44,11 +45,12 @@ const riskReviewSchema = `{
 
 // RiskReviewer 使用既有模型与消息读取能力进行独立审核，不写消息、不决定调用状态。
 type RiskReviewer struct {
-	Provider     providerapi.Provider
-	Entries      repository.Entries
-	Agents       repository.Agent
-	Hooks        *hook.Dispatcher
-	ObserveUsage func(providerapi.UsageRecord)
+	TimingRecorder *timing.Recorder
+	Provider       providerapi.Provider
+	Entries        repository.Entries
+	Agents         repository.Agent
+	Hooks          *hook.Dispatcher
+	ObserveUsage   func(providerapi.UsageRecord)
 }
 
 // Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
@@ -107,6 +109,13 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 	if err != nil {
 		return assessment, err
 	}
+	ctx, span := r.TimingRecorder.Start(ctx, timing.Operation{
+		ExecutionID: task.ID.String(),
+		Kind:        timing.Provider,
+		Name:        task.Config.Model.ProviderID + "/" + task.Config.Model.ModelID,
+		ReferenceID: "risk-review:" + attempt.TurnID.String(),
+	})
+	defer func() { span.End(timing.ResultStatus(ctx, err)) }()
 	stream, err := r.Provider.Stream(ctx, providerapi.Request{
 		ExecutionID:     task.ID,
 		PromptCacheKey:  task.SessionID.String(),
@@ -134,6 +143,9 @@ func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, cal
 		case event, ok := <-stream:
 			if !ok {
 				return assessment, errors.New("risk review ended without a terminal event")
+			}
+			if (event.Kind == providerapi.StreamTextDelta || event.Kind == providerapi.StreamThinkingDelta) && event.Text != "" {
+				span.FirstResponse()
 			}
 			switch event.Kind {
 			case providerapi.StreamTextDelta:

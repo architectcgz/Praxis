@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
+	timingmodel "praxis/internal/core/agent/execution/timing"
 	projectmodel "praxis/internal/core/project"
 	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/fault"
@@ -23,7 +23,7 @@ import (
 )
 
 // describe 直接从实体构建查询索引，不重新解析或校验业务输入。
-func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntry, error) {
+func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey, stateEntry, error) {
 	key := eventKey(scope, event)
 	entry := stateEntry{
 		scope:         scope,
@@ -136,8 +136,20 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 		group("usage-session", sessionID, "")
 		link("agent_execution", v.ExecutionID)
 	case timingmodel.Record:
-		entityID, sessionID = v.ID, v.SessionID
-		group("timings-agent", v.AgentID, "")
+		if (event.Type == "agent_execution.timing_started") != (v.Status == timingmodel.Running) || v.Status == timingmodel.Interrupted {
+			return key, entry, errors.New("timing state does not match its event type")
+		}
+		data, err := s.payload(entityKey{"agent_execution", v.ExecutionID})
+		if err != nil {
+			return key, entry, err
+		}
+		var execution agentmodel.Execution
+		if err := decodeJSON(data, &execution); err != nil {
+			return key, entry, err
+		}
+		entityID, sessionID = timingKey(v.ExecutionID, v.ID), execution.SessionID.String()
+		group("timings-agent", execution.AgentID.String(), "")
+		group("timings-execution", v.ExecutionID, "")
 		if v.Status == timingmodel.Running {
 			group("running-timings", "", "")
 		}
@@ -152,7 +164,10 @@ func describe(scope string, event jsonl.Event, object any) (entityKey, stateEntr
 }
 
 // restoreStateEntry 在磁盘输入边界严格解码并校验实体，再恢复其查询索引。
-func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
+func (s *Store) restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
+	if event.Type == "timing.saved" {
+		return stateEntry{}, errors.New("legacy timing.saved events are unsupported; archive the existing state directory and start with a fresh state directory")
+	}
 	kinds := map[string]string{
 		"project":         "project.saved",
 		"workspace":       "workspace.saved",
@@ -163,8 +178,10 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 		"control":         "control.saved",
 		"context":         "context.entry_appended",
 		"entry":           "entry.appended",
-		"timing":          "timing.saved",
 		"usage":           "usage.saved",
+	}
+	if event.Collection == "agent_execution_timing" && (event.Type == "agent_execution.timing_started" || event.Type == "agent_execution.timing_finished") {
+		kinds[event.Collection] = event.Type
 	}
 	if event.Collection == "tool_event" {
 		kinds["tool_event"] = string(toolexecution.EventKind(event.Type))
@@ -205,7 +222,7 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 		target = new(entryRecord)
 	case "usage":
 		target = new(providerapi.UsageRecord)
-	case "timing":
+	case "agent_execution_timing":
 		target = new(timingmodel.Record)
 	}
 	if err := decodeJSON(event.Payload, target); err != nil {
@@ -243,7 +260,7 @@ func restoreStateEntry(scope string, event jsonl.Event) (stateEntry, error) {
 	if err != nil {
 		return stateEntry{}, err
 	}
-	_, entry, err := describe(scope, event, reflect.ValueOf(target).Elem().Interface())
+	_, entry, err := s.describe(scope, event, reflect.ValueOf(target).Elem().Interface())
 	return entry, err
 }
 
@@ -253,6 +270,11 @@ func (s *Store) decodeProjected(data []byte, target any) error {
 		return err
 	}
 	switch value := target.(type) {
+	case *timingmodel.Record:
+		entry, _ := s.entry(entityKey{"agent_execution_timing", timingKey(value.ExecutionID, value.ID)})
+		if entry.interrupted {
+			value.Status = timingmodel.Interrupted
+		}
 	case *agentmodel.Agent:
 		return s.projectAgent(value)
 	case *agentmodel.Execution:

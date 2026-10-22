@@ -12,6 +12,7 @@ type entityKey struct{ collection, id string }
 type lookupKey struct{ kind, owner, value string }
 
 type stateEntry struct {
+	interrupted   bool
 	record        *sessionentry.Record
 	scope         string
 	payload       json.RawMessage

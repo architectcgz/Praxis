@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
@@ -94,16 +95,25 @@ func (r *Runner) callModel(
 		}
 		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
 	}()
+	ctx, span := r.TimingRecorder.Start(ctx, timing.Operation{
+		ExecutionID: executionInput.ID.String(),
+		Kind:        timing.Provider,
+		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
+		ReferenceID: "assistant:" + request.TurnID.String(),
+	})
 	firstResponse := false
-	return requestModel(ctx, r.Provider, request, func(event providerapi.Event) {
+	response, err = requestModel(ctx, r.Provider, request, func(event providerapi.Event) {
 		if !firstResponse && (event.Kind == providerapi.StreamTextDelta || event.Kind == providerapi.StreamThinkingDelta || event.Kind == providerapi.StreamToolCall) {
 			firstResponse = true
+			span.FirstResponse()
 			scope.OnSignal(hook.SignalFirstResponse)
 		}
 		if onEvent != nil {
 			onEvent(event)
 		}
 	})
+	span.End(timing.ResultStatus(ctx, err))
+	return response, err
 }
 
 // validateHookRequest 保留冻结模型、归属及结构化输出约束；扩展只能缩小输出和工具范围。

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/hook"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
@@ -83,8 +84,9 @@ func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, arg
 			return s.appendError(ctx, call, "tool_not_allowed", "The requested tool is disabled or unregistered.")
 		}
 		observed := observedTool{
-			Tool:  s.deps.Bind(t, scope.workspacePath),
-			hooks: s.deps.HookDispatcher,
+			Tool:     s.deps.Bind(t, scope.workspacePath),
+			recorder: s.deps.TimingRecorder,
+			hooks:    s.deps.HookDispatcher,
 			identity: hook.Identity{
 				OperationID: boundary.OperationID,
 				SessionID:   call.SessionID,
@@ -182,6 +184,7 @@ func (s *Service) appendResult(ctx context.Context, call sessionentry.ToolCall, 
 // observedTool 只观察真实调用，不参与授权或结果保存。
 type observedTool struct {
 	tool.Tool
+	recorder *timing.Recorder
 	hooks    *hook.Dispatcher
 	identity hook.Identity
 	callID   string
@@ -195,7 +198,19 @@ func (t observedTool) Call(ctx context.Context, args json.RawMessage) (result to
 		ReferenceID: t.callID,
 	})
 	defer func() { scope.End(hook.Result{Err: err, ToolErrorClass: result.ErrorClass}) }()
-	return t.Tool.Call(ctx, args)
+	ctx, span := t.recorder.Start(ctx, timing.Operation{
+		ExecutionID: t.identity.ExecutionID.String(),
+		Kind:        timing.Tool,
+		Name:        string(t.Definition().Name),
+		ReferenceID: t.callID,
+	})
+	result, err = t.Tool.Call(ctx, args)
+	status := timing.ResultStatus(ctx, err)
+	if status == timing.Completed && result.ErrorClass != "" {
+		status = timing.Failed
+	}
+	span.End(status)
+	return result, err
 }
 
 func toolHookEvent(call sessionentry.ToolCall, args json.RawMessage) hook.ToolExecution {

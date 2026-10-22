@@ -23,7 +23,7 @@ type ModelUsageRecord struct {
 	Usage       ModelUsage `json:"usage"`
 }
 
-// OperationTiming 是独立的操作计时事实；可选耗时为 nil 时保持未知。
+// OperationTiming 展示 Execution 总耗时及其操作计时；可选耗时为 nil 时保持未知。
 type OperationTiming struct {
 	SessionID       string    `json:"sessionId"`
 	AgentID         string    `json:"agentId"`

@@ -20,7 +20,7 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 	if err := s.flushLocked(ctx); err != nil {
 		return err
 	}
-	if scope != "" && collection != "session" && collection != "usage" && collection != "timing" {
+	if scope != "" && collection != "session" && collection != "usage" && collection != "agent_execution_timing" {
 		session, err := getLocked[sessionmodel.Session](s, "session", scope)
 		if err != nil {
 			return err
@@ -44,7 +44,7 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 		if err != nil {
 			return err
 		}
-		_, entry, err = describe(scope, event, object)
+		_, entry, err = s.describe(scope, event, object)
 		if err != nil {
 			return err
 		}

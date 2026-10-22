@@ -16,7 +16,6 @@ type Repositories struct {
 	Controls       ControlRepository
 	Entries        EntryRepository
 	ToolCalls      ToolCallQueries
-	Timings        TimingStore
 	ModelUsage     ModelUsageStore
 }
 
@@ -33,7 +32,6 @@ func (s *Store) Repositories() Repositories {
 		Controls:       ControlRepository{s},
 		Entries:        EntryRepository{s},
 		ToolCalls:      ToolCallQueries{s},
-		Timings:        TimingStore{Store: s},
 		ModelUsage:     ModelUsageStore{Store: s},
 	}
 }
@@ -49,6 +47,5 @@ var (
 	_ repository.AgentControl    = ControlRepository{}
 	_ repository.Entries         = EntryRepository{}
 	_ repository.ToolCallQueries = ToolCallQueries{}
-	_ repository.Timing          = TimingStore{}
 	_ repository.ModelUsage      = ModelUsageStore{}
 )

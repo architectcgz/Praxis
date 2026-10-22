@@ -42,6 +42,7 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		_ = log.Close()
 		return nil, err
 	}
+	s.projectInterruptedTimings()
 	return s, nil
 }
 

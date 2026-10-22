@@ -6,6 +6,7 @@ import (
 	"errors"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
@@ -17,6 +18,7 @@ import (
 )
 
 type Dependencies struct {
+	TimingRecorder *timing.Recorder
 	Rules          ApprovalRules
 	Review         func(context.Context, agentmodel.Execution, sessionentry.ToolCall, json.RawMessage, string, security.ApprovalDecision, executionmodel.RiskReview) (security.RiskAssessment, error)
 	Prepare        func(tool.Tool, json.RawMessage, string) (json.RawMessage, error)

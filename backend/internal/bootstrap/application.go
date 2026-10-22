@@ -16,7 +16,6 @@ import (
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	workspaceservice "praxis/internal/service/workspace"
-	"praxis/internal/timing"
 	"praxis/wails/bindings"
 	"sync"
 )
@@ -77,11 +76,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 	}
 	repos := a.store.Repositories()
 	events := execution.NewEventPublisher()
-	timings, err := buildTimings(ctx, repos.Timings, events, a.logger)
-	if err != nil {
-		return nil, err
-	}
-	hooks, err := hook.NewDispatcher(append([]any{timing.Hook{Recorder: timings}}, options.Hooks...)...)
+	hooks, err := hook.NewDispatcher(options.Hooks...)
 	if err != nil {
 		return nil, err
 	}
@@ -91,10 +86,11 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		return nil, err
 	}
 	models := buildModelService(root, config, a.logger, configMu)
-	a.coordinator, err = buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, options.Runner)
+	coordinator, timings, err := buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, options.Runner)
 	if err != nil {
 		return nil, err
 	}
+	a.coordinator = coordinator
 	agents, err := agentservice.NewService(agentservice.Dependencies{
 		Agents:           repos.Agents,
 		ExecutionRecords: repos.Executions,

@@ -5,14 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 	providerapi "praxis/internal/core/provider"
-	timingmodel "praxis/internal/core/timing"
 	"praxis/internal/dataroot"
-	"praxis/internal/identity"
 	"praxis/internal/infra/storage"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
-	execution "praxis/internal/service/agent/coordinator"
-	"praxis/internal/timing"
 	"time"
 )
 
@@ -33,20 +29,6 @@ func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources,
 	}
 	logger.Infof("application open started root=%s logs=%s", root.Root, root.State)
 	return storageResources{store: store, logger: logger}, nil
-}
-
-func buildTimings(ctx context.Context, timings repository.Timing, events *execution.EventPublisher, logger *logging.Logger) (*timing.Recorder, error) {
-	if err := timings.RecoverInterrupted(ctx); err != nil {
-		return nil, fmt.Errorf("recover operation timings: %w", err)
-	}
-	return timing.New(timings, func(record timingmodel.Record) {
-		events.Publish(execution.Event{
-			Kind:        "operation_timing",
-			AgentID:     identity.AgentID(record.AgentID),
-			ExecutionID: identity.AgentExecutionID(record.ExecutionID),
-			Timing:      &record,
-		})
-	}, logger.Errorf)
 }
 
 func usageObserver(usages repository.ModelUsage, logger *logging.Logger) func(providerapi.UsageRecord) {

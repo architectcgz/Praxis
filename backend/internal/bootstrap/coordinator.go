@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"praxis/internal/clock"
+	"praxis/internal/core/agent/execution/timing"
 	contextcompress "praxis/internal/core/context/compress"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -19,6 +20,7 @@ import (
 
 // coordinatorDependencies 装配业务用例、Core 内存队列与执行能力。
 type coordinatorDependencies struct {
+	TimingRecorder *timing.Recorder
 	Tasks          execution.ExecutionOperations
 	Progress       loop.ExecutionProgress
 	Records        repository.AgentExecution
@@ -60,10 +62,11 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		deps.Events.Publish(execution.LoopEvent(event))
 	}
 	reviewer := toolservice.RiskReviewer{
-		Provider: deps.Provider,
-		Entries:  deps.Entries,
-		Agents:   deps.Agents,
-		Hooks:    deps.HookDispatcher,
+		Provider:       deps.Provider,
+		Entries:        deps.Entries,
+		Agents:         deps.Agents,
+		Hooks:          deps.HookDispatcher,
+		TimingRecorder: deps.TimingRecorder,
 		ObserveUsage: func(record providerapi.UsageRecord) {
 			observe(loop.Event{
 				Kind:        loop.EventModelUsage,
@@ -76,6 +79,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		},
 	}
 	executor, err := toolservice.NewService(toolservice.Dependencies{
+		TimingRecorder: deps.TimingRecorder,
 		HookDispatcher: deps.HookDispatcher,
 		Rules:          deps.Rules,
 		Review:         reviewer.Review,
@@ -107,6 +111,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 	}
 	// 执行进度始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
 	runnerDeps.Progress = deps.Progress
+	runnerDeps.TimingRecorder = deps.TimingRecorder
 	runnerDeps.HookDispatcher = deps.HookDispatcher
 	runner, err := loop.NewRunner(runnerDeps)
 	if err != nil {
