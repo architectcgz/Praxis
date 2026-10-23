@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"praxis/internal/clock"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/security"
@@ -20,7 +20,7 @@ import (
 type Dependencies struct {
 	TimingRecorder *timing.Recorder
 	Rules          ApprovalRules
-	Review         func(context.Context, agentmodel.Execution, sessionentry.ToolCall, json.RawMessage, string, security.ApprovalDecision, executionmodel.RiskReview) (security.RiskAssessment, error)
+	Review         func(context.Context, agentexecution.Execution, sessionentry.ToolCall, json.RawMessage, string, security.ApprovalDecision, executionmodel.RiskReview) (security.RiskAssessment, error)
 	Prepare        func(tool.Tool, json.RawMessage, string) (json.RawMessage, error)
 	Bind           func(tool.Tool, string) tool.Tool
 	HookDispatcher *hook.Dispatcher

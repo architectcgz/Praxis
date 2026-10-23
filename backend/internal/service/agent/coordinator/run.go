@@ -3,7 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	taskmodel "praxis/internal/core/session"
@@ -18,7 +18,7 @@ import (
 
 func (r *Coordinator) run(
 	ctx context.Context,
-	task agentmodel.Execution,
+	task agentexecution.Execution,
 	active *taskmodel.ActiveTask,
 ) {
 	r.logEvent(task.ID, "task started")
@@ -29,12 +29,17 @@ func (r *Coordinator) run(
 	}
 
 	if err := r.startExecution(task, ""); err != nil {
-		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureInternal, err)
+		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
+	if task.Progress.FinalAssistantID != "" {
+		// 已提交的完成证据不受恢复时重放的暂停信号影响，也不能再次请求模型。
+		r.endExecution(task, active, agentexecution.ExecutionCompleted, "", "")
+		return
+	}
 	if ctx.Err() != nil {
-		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionInterrupted, agentmodel.ExecutionFailureCancelled, ctx.Err())
+		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionInterrupted, agentexecution.ExecutionFailureCancelled, ctx.Err())
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
@@ -45,14 +50,14 @@ func (r *Coordinator) run(
 			err = errors.New("execution service returned a nil assistant committer")
 		}
 		r.logError(task, "resolve assistant committer", err)
-		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureInternal, err)
+		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
 
 	session, err := r.sessions.Get(ctx, task.SessionID)
 	if err != nil {
-		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
+		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
@@ -62,13 +67,13 @@ func (r *Coordinator) run(
 			err = fault.ErrRequestConflict
 		}
 		r.logError(task, "resolve current workspace", err)
-		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
+		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
 	// TryRun 已确认本次运行权唯一，旧 Loop 和工具已停止；恢复必须先于上下文读取。
 	if err := r.tools.RecoverExecution(ctx, task.ID); err != nil {
-		outcome, code, message := r.executionResult(ctx, agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage, err)
+		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
@@ -76,16 +81,13 @@ func (r *Coordinator) run(
 		return r.waitForToolApproval(waitCtx, task, active, call, operationID)
 	})
 	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor)
-	if ctx.Err() != nil {
-		outcome, failureCode, failureMessage = r.executionResult(ctx, outcome, failureCode, ctx.Err())
-	}
 	if r.endExecution(task, active, outcome, failureCode, failureMessage) {
 		r.logEvent(task.ID, "task ended")
 	}
 
 }
 
-func (r *Coordinator) startExecution(task agentmodel.Execution, resumeReason string) error {
+func (r *Coordinator) startExecution(task agentexecution.Execution, resumeReason string) error {
 	startContext, cancelStart := r.transitionContext()
 	defer cancelStart()
 	if err := r.operations.ConfirmRunning(startContext, task.ID); err != nil {
@@ -118,10 +120,10 @@ func (r *Coordinator) startExecution(task agentmodel.Execution, resumeReason str
 // loop 不拥有持久化生命周期，因此 context 取消后仍会交由业务服务保存结束状态。
 func (r *Coordinator) execute(
 	ctx context.Context,
-	task agentmodel.Execution,
+	task agentexecution.Execution,
 	assistantCommitter loop.AssistantCommitter,
 	executor *toolservice.Scope,
-) (agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
+) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
 		Kind:     hook.OperationAgent,
@@ -129,7 +131,7 @@ func (r *Coordinator) execute(
 	})
 
 	executionInput, completed, err := r.operations.PrepareLoop(ctx, task.ID)
-	outcome, failureCode := agentmodel.ExecutionFailed, agentmodel.ExecutionFailureStorage
+	outcome, failureCode := agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage
 	if err == nil {
 		if !completed {
 			_, err = r.loop.Run(ctx, executionInput, loop.ExecutionDependencies{
@@ -137,15 +139,15 @@ func (r *Coordinator) execute(
 				Assistant:    assistantCommitter,
 			})
 		}
-		outcome, failureCode = agentmodel.ExecutionCompleted, ""
+		outcome, failureCode = agentexecution.ExecutionCompleted, ""
 		if err != nil {
-			outcome = agentmodel.ExecutionFailed
+			outcome = agentexecution.ExecutionFailed
 			failureCode = loopFailureCode(err)
 		}
 	}
 	var hookErr *hook.Error
 	if errors.As(err, &hookErr) && loop.FailureClassification(err) == loop.FailureInternal {
-		failureCode = agentmodel.ExecutionFailureInternal
+		failureCode = agentexecution.ExecutionFailureInternal
 	}
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
 	scope.End(hook.Result{Outcome: string(finalOutcome), Err: err})
@@ -156,39 +158,42 @@ func (r *Coordinator) execute(
 	return finalOutcome, finalCode, message
 }
 
-// executionResult 读取 Agent 提供的取消原因；持久化控制命令由结算条件写入最终仲裁。
+// executionResult 只将实际返回的取消错误映射为暂停或中断；正常完成不受迟到信号影响。
 func (r *Coordinator) executionResult(
 	ctx context.Context,
-	outcome agentmodel.ExecutionOutcome,
-	failureCode agentmodel.ExecutionFailureCode,
+	outcome agentexecution.ExecutionOutcome,
+	failureCode agentexecution.ExecutionFailureCode,
 	err error,
-) (agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) {
+) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
 	failureMessage := agentservice.ExecutionFailureMessage(failureCode, err)
-	if ctx.Err() != nil {
-		outcome = agentmodel.ExecutionInterrupted
-		if errors.Is(context.Cause(ctx), taskmodel.ErrExecutionPaused) {
-			outcome = agentmodel.ExecutionPaused
+	if err != nil && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
+		outcome = agentexecution.ExecutionInterrupted
+		failureCode = agentexecution.ExecutionFailureCancelled
+		switch cause := context.Cause(ctx); {
+		case errors.Is(cause, taskmodel.ErrExecutionPaused):
+			outcome = agentexecution.ExecutionPaused
+			failureCode = agentexecution.ExecutionFailureRequestCanceled
+		case errors.Is(cause, taskmodel.ErrExecutionStopped):
+			failureCode = agentexecution.ExecutionFailureRequestCanceled
 		}
-		failureCode = agentmodel.ExecutionFailureCancelled
 		failureMessage = ""
 	} else if err != nil {
-		outcome = agentmodel.ExecutionFailed
-		if failureCode == "" {
-			failureCode = agentmodel.ExecutionFailureInternal
-		}
+		outcome = agentexecution.ExecutionFailed
 	}
-	outcome, failureCode = normalizeOutcome(outcome, failureCode)
-	if failureCode != agentmodel.ExecutionFailureProvider {
+	if outcome == agentexecution.ExecutionFailed && failureCode == "" {
+		failureCode = agentexecution.ExecutionFailureInternal
+	}
+	if failureCode != agentexecution.ExecutionFailureProvider {
 		failureMessage = ""
 	}
 	return outcome, failureCode, failureMessage
 }
 
 func (r *Coordinator) endExecution(
-	task agentmodel.Execution,
+	task agentexecution.Execution,
 	active *taskmodel.ActiveTask,
-	outcome agentmodel.ExecutionOutcome,
-	failureCode agentmodel.ExecutionFailureCode,
+	outcome agentexecution.ExecutionOutcome,
+	failureCode agentexecution.ExecutionFailureCode,
 	failureMessage string,
 ) bool {
 	// 先保留结算结果与占用，失败后只重试结算。
@@ -198,7 +203,7 @@ func (r *Coordinator) endExecution(
 		Message: failureMessage,
 	}
 	r.activeTasks.BeginEnding(task.AgentID, active.ExecutionID)
-	var endedExecution agentmodel.Execution
+	var endedExecution agentexecution.Execution
 	retryDelay := 100 * time.Millisecond
 	for {
 		endContext, cancelEnd := r.transitionContext()
@@ -225,8 +230,8 @@ func (r *Coordinator) endExecution(
 
 	// 结算提交后才释放执行槽；入队唤醒不能在暂停或取消结算途中抢先续跑。
 	r.activeTasks.Release(task.AgentID, active.ExecutionID)
-	// 只有已提交的最终结果允许续跑；已提交的暂停或取消可以覆盖 loop 的正常完成。
-	if endedExecution.Outcome == agentmodel.ExecutionCompleted || endedExecution.Outcome == agentmodel.ExecutionYielded {
+	// 只有实际完成且已提交终态的执行允许续跑；迟到的控制命令不改写结果。
+	if endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
 		if _, err := r.StartNext(queueContext, task.SessionID); err != nil {
@@ -236,25 +241,7 @@ func (r *Coordinator) endExecution(
 	return true
 }
 
-func normalizeOutcome(
-	outcome agentmodel.ExecutionOutcome,
-	failureCode agentmodel.ExecutionFailureCode,
-) (agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode) {
-	if !knownOutcome(outcome) {
-		outcome = agentmodel.ExecutionFailed
-		failureCode = agentmodel.ExecutionFailureInvalidOutcome
-	}
-	if outcome == agentmodel.ExecutionFailed && failureCode == "" {
-		failureCode = agentmodel.ExecutionFailureInternal
-	}
-	if !agentmodel.ValidFailureCode(failureCode) {
-		outcome = agentmodel.ExecutionFailed
-		failureCode = agentmodel.ExecutionFailureInternal
-	}
-	return outcome, failureCode
-}
-
-func (r *Coordinator) logError(task agentmodel.Execution, stage string, err error) {
+func (r *Coordinator) logError(task agentexecution.Execution, stage string, err error) {
 	if err == nil {
 		return
 	}
@@ -265,36 +252,26 @@ func (r *Coordinator) logEvent(executionID identity.AgentExecutionID, stage stri
 	r.logger.Infof("task id=%s stage=%s", executionID, stage)
 }
 
-func knownOutcome(outcome agentmodel.ExecutionOutcome) bool {
-	switch outcome {
-	case agentmodel.ExecutionCompleted, agentmodel.ExecutionYielded, agentmodel.ExecutionPaused,
-		agentmodel.ExecutionFailed, agentmodel.ExecutionInterrupted:
-		return true
-	default:
-		return false
-	}
-}
-
 // loopFailureCode 在业务结算边界把 Loop 错误转换为执行失败码。
-func loopFailureCode(err error) agentmodel.ExecutionFailureCode {
+func loopFailureCode(err error) agentexecution.ExecutionFailureCode {
 	switch loop.FailureClassification(err) {
 	case loop.FailureProviderUnavailable:
-		return agentmodel.ExecutionFailureProviderUnavailable
+		return agentexecution.ExecutionFailureProviderUnavailable
 	case loop.FailureProvider:
-		return agentmodel.ExecutionFailureProvider
+		return agentexecution.ExecutionFailureProvider
 	case loop.FailureTool:
-		return agentmodel.ExecutionFailureTool
+		return agentexecution.ExecutionFailureTool
 	case loop.FailurePolicyBlocked:
-		return agentmodel.ExecutionFailurePolicyBlocked
+		return agentexecution.ExecutionFailurePolicyBlocked
 	case loop.FailureResourceLimit:
-		return agentmodel.ExecutionFailureResourceLimit
+		return agentexecution.ExecutionFailureResourceLimit
 	case loop.FailureStorage:
-		return agentmodel.ExecutionFailureStorage
+		return agentexecution.ExecutionFailureStorage
 	case loop.FailureContract:
-		return agentmodel.ExecutionFailureContract
+		return agentexecution.ExecutionFailureContract
 	case loop.FailureBusy:
-		return agentmodel.ExecutionFailureBusy
+		return agentexecution.ExecutionFailureBusy
 	default:
-		return agentmodel.ExecutionFailureInternal
+		return agentexecution.ExecutionFailureInternal
 	}
 }

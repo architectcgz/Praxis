@@ -32,7 +32,7 @@ func (s *Service) StopAgent(ctx context.Context, params ControlInput) (ControlRe
 	return s.applyControl(ctx, params, agentmodel.AgentControlCancel)
 }
 
-// 控制意图先提交，Execution 的条件写入负责仲裁完成与暂停、停止的竞争。
+// 控制意图先提交，再向所属执行者发送取消信号；实际完成的执行不因控制记录而改写结果。
 func (s *Service) applyControl(ctx context.Context, params ControlInput, kind agentmodel.AgentControlKind) (ControlResult, error) {
 	if ctx == nil {
 		return ControlResult{}, errors.New("control command context is required")
@@ -88,6 +88,6 @@ func (s *Service) signalControl(result ControlResult) ControlResult {
 	} else {
 		s.executions.Stop(command.AgentID, command.TargetExecutionID)
 	}
-	// loop 已返回时无需再发信号，结算负责仲裁已提交的控制命令。
+	// loop 已返回时信号不会生效，结算保留执行者已经确定的实际结果。
 	return result
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
@@ -31,15 +31,15 @@ type Approval struct {
 	Review          executionmodel.RiskReview
 }
 
-func (s *Service) Approve(ctx context.Context, executionID identity.AgentExecutionID, callID, digest string) (agentmodel.Execution, error) {
+func (s *Service) Approve(ctx context.Context, executionID identity.AgentExecutionID, callID, digest string) (agentexecution.Execution, error) {
 	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID, ArgumentsDigest: digest}, true)
 }
 
-func (s *Service) Deny(ctx context.Context, executionID identity.AgentExecutionID, callID, digest string) (agentmodel.Execution, error) {
+func (s *Service) Deny(ctx context.Context, executionID identity.AgentExecutionID, callID, digest string) (agentexecution.Execution, error) {
 	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID, ArgumentsDigest: digest}, false)
 }
 
-func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve bool) (task agentmodel.Execution, err error) {
+func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve bool) (task agentexecution.Execution, err error) {
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
 	executionID, callID, digest := request.ExecutionID, request.CallID, request.ArgumentsDigest

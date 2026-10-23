@@ -1,4 +1,4 @@
-package agent
+package execution
 
 // ExecutionFailureCode 是任务持久化结果的稳定失败原因。
 type ExecutionFailureCode string

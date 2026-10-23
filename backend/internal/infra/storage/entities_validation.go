@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
@@ -162,7 +163,8 @@ func validateControlCommand(r agentmodel.AgentControlCommand) error {
 	return nil
 }
 
-func validateAgentExecution(e agentmodel.Execution) error {
+// validateAgentExecution 仅在 JSONL 恢复时校验解码后的执行记录，不修复或补默认值。
+func validateAgentExecution(e agentexecution.Execution) error {
 	if e.Progress.ModelOutputBytes < 0 || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
 		return fault.InvalidValue("execution.progress", "usage counters or request sequence are invalid")
 	}
@@ -178,7 +180,7 @@ func validateAgentExecution(e agentmodel.Execution) error {
 		}
 	}
 	switch e.Status {
-	case agentmodel.ExecutionStarting, agentmodel.ExecutionRunning, agentmodel.ExecutionWaitingApproval, agentmodel.ExecutionEnding, agentmodel.ExecutionEnded:
+	case agentexecution.ExecutionStarting, agentexecution.ExecutionRunning, agentexecution.ExecutionWaitingApproval, agentexecution.ExecutionEnding, agentexecution.ExecutionEnded:
 	default:
 		return fault.InvalidValue("agent_execution", "unknown status")
 	}
@@ -189,25 +191,33 @@ func validateAgentExecution(e agentmodel.Execution) error {
 	if e.CreatedAt.IsZero() || !e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt) || !e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt) {
 		return fault.InvalidValue("execution.timestamps", "timestamps are invalid")
 	}
-	if e.Status == agentmodel.ExecutionStarting && (!e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
+	if e.Status == agentexecution.ExecutionStarting && (!e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
 		return fault.InvalidValue("agent_execution", "starting execution has terminal fields")
 	}
-	if (e.Status == agentmodel.ExecutionRunning || e.Status == agentmodel.ExecutionWaitingApproval || e.Status == agentmodel.ExecutionEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
+	if (e.Status == agentexecution.ExecutionRunning || e.Status == agentexecution.ExecutionWaitingApproval || e.Status == agentexecution.ExecutionEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
 		return fault.InvalidValue("agent_execution", "active execution has invalid lifecycle fields")
 	}
-	if e.Status == agentmodel.ExecutionEnded && (e.StartedAt.IsZero() || e.EndedAt.IsZero() || !agentmodel.ValidExecutionOutcome(e.Outcome) || e.Outcome == agentmodel.ExecutionFailed && e.FailureCode == "") {
-		return fault.InvalidValue("agent_execution", "ended execution has invalid terminal fields")
+	if e.Status == agentexecution.ExecutionEnded {
+		if e.StartedAt.IsZero() || e.EndedAt.IsZero() || e.Outcome == agentexecution.ExecutionFailed && e.FailureCode == "" {
+			return fault.InvalidValue("agent_execution", "ended execution has invalid terminal fields")
+		}
+		switch e.Outcome {
+		case agentexecution.ExecutionCompleted, agentexecution.ExecutionYielded, agentexecution.ExecutionPaused,
+			agentexecution.ExecutionFailed, agentexecution.ExecutionInterrupted:
+		default:
+			return fault.InvalidValue("agent_execution", "ended execution has invalid terminal fields")
+		}
 	}
-	if !agentmodel.ValidFailureCode(e.FailureCode) || e.FailureCode == agentmodel.ExecutionFailureRequestCanceled && e.Outcome != agentmodel.ExecutionPaused && e.Outcome != agentmodel.ExecutionInterrupted {
+	if e.FailureCode == agentexecution.ExecutionFailureRequestCanceled && e.Outcome != agentexecution.ExecutionPaused && e.Outcome != agentexecution.ExecutionInterrupted {
 		return fault.InvalidValue("execution.failureCode", "failure code does not match outcome")
 	}
-	if len([]rune(e.FailureMessage)) > agentmodel.MaxExecutionFailureMessageRunes || e.FailureMessage != "" && (e.Status != agentmodel.ExecutionEnded || e.Outcome != agentmodel.ExecutionFailed) {
+	if len([]rune(e.FailureMessage)) > agentexecution.MaxExecutionFailureMessageRunes || e.FailureMessage != "" && (e.Status != agentexecution.ExecutionEnded || e.Outcome != agentexecution.ExecutionFailed) {
 		return fault.InvalidValue("execution.failureMessage", "failure message is invalid")
 	}
 	return nil
 }
 
-func validateExecutionConfig(s agentmodel.ExecutionConfig) error {
+func validateExecutionConfig(s agentexecution.ExecutionConfig) error {
 	if !definitionIDPattern.MatchString(s.AgentDefinitionID.String()) {
 		return fault.InvalidValue("execution.config.agentDefinition", "definition id is required")
 	}

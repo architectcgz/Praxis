@@ -3,7 +3,7 @@ package coordinator
 import (
 	"bytes"
 	"context"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	taskmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
@@ -52,7 +52,7 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request toolservice.Cont
 }
 
 // waitForToolApproval 在状态提交后发布通知，审批提前到达时由 wake 的缓冲保留唤醒。
-func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentmodel.Execution, active *taskmodel.ActiveTask, call sessionentry.ToolCall, operationID string) error {
+func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentexecution.Execution, active *taskmodel.ActiveTask, call sessionentry.ToolCall, operationID string) error {
 	if err := s.operations.WaitForApproval(ctx, task.ID); err != nil {
 		return err
 	}

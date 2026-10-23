@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	timingmodel "praxis/internal/core/agent/execution/timing"
 	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
@@ -37,7 +38,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		return nil
 	}
 	taskOwner := func(id identity.AgentExecutionID, agent identity.AgentID) error {
-		value, err := getLocked[agentmodel.Execution](s, "agent_execution", id.String())
+		value, err := getLocked[agentexecution.Execution](s, "agent_execution", id.String())
 		if err != nil {
 			return err
 		}
@@ -87,7 +88,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 	case "agent":
 		return reference("session", scope)
 	case "agent_execution":
-		var v agentmodel.Execution
+		var v agentexecution.Execution
 		_ = decodeJSON(data, &v)
 		agent, err := getLocked[agentmodel.Agent](s, "agent", v.AgentID.String())
 		if err != nil {
@@ -114,7 +115,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 	case "tool_event":
 		var v toolexecution.Event
 		_ = decodeJSON(data, &v)
-		execution, err := getLocked[agentmodel.Execution](s, "agent_execution", v.ExecutionID.String())
+		execution, err := getLocked[agentexecution.Execution](s, "agent_execution", v.ExecutionID.String())
 		if err != nil {
 			return err
 		}
@@ -201,7 +202,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 			return errors.New("task input requires a user message and execution identity")
 		}
 		if v.Data.ExecutionID != "" {
-			task, err := getLocked[agentmodel.Execution](s, "agent_execution", v.Data.ExecutionID)
+			task, err := getLocked[agentexecution.Execution](s, "agent_execution", v.Data.ExecutionID)
 			if errors.Is(err, fault.ErrNotFound) && v.Data.Role == role.User && v.Data.ID == "input:"+v.Data.RequestID {
 				return nil
 			}
@@ -224,6 +225,10 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 	return nil
 }
 func immutable(collection string, before, after json.RawMessage) error {
+	// Execution 由所属执行者串行修改，不重复比较内部生成的执行快照。
+	if collection == "agent_execution" {
+		return nil
+	}
 	var left, right map[string]json.RawMessage
 	if err := json.Unmarshal(before, &left); err != nil {
 		return err
@@ -235,18 +240,6 @@ func immutable(collection string, before, after json.RawMessage) error {
 	switch collection {
 	case "project":
 		fields = []string{"ID", "Name", "Path", "DefaultWorkspaceID", "CreatedAt"}
-	case "agent_execution":
-		var prior, next agentmodel.Execution
-		if err := decodeJSON(before, &prior); err != nil {
-			return err
-		}
-		if err := decodeJSON(after, &next); err != nil {
-			return err
-		}
-		if err := agentmodel.ValidateExecutionUpdate(prior, next); err != nil {
-			return fmt.Errorf("%w: %v", fault.ErrRequestConflict, err)
-		}
-		return nil
 	case "agent":
 		fields = []string{
 			"ID",

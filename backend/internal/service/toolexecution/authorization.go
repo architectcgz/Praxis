@@ -3,8 +3,7 @@ package toolexecution
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
@@ -14,14 +13,14 @@ import (
 	"time"
 )
 
-// authorize 根据当前事实确定授权，审核请求先条件预留序号，再调用外部模型。
+// authorize 根据当前事实确定授权；在所属执行流程内保存审核请求序号，再调用外部模型。
 func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (bool, *tool.ToolResult, error) {
 	s := scope.service
 	digest := executionmodel.ArgumentsDigest(call.Name, args)
 	for {
 		var pending bool
 		var denied *tool.ToolResult
-		var task agentmodel.Execution
+		var task agentexecution.Execution
 		var decision security.ApprovalDecision
 		var attempt executionmodel.RiskReview
 		err := func(txCtx context.Context) error {
@@ -99,9 +98,6 @@ func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, a
 			}
 			return s.deps.Tasks.Save(txCtx, task)
 		}(ctx)
-		if errors.Is(err, fault.ErrRevisionConflict) {
-			continue
-		}
 		if err != nil || pending || denied != nil || attempt.TurnID == "" {
 			return pending, denied, err
 		}

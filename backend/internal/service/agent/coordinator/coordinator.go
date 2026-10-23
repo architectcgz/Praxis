@@ -4,7 +4,7 @@ package coordinator
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	taskmodel "praxis/internal/core/session"
@@ -108,7 +108,7 @@ func (r *Coordinator) enter(ctx context.Context) error {
 }
 
 // Activate 接管已持久化的活动 Execution，重复调用只领取一次运行权。
-func (r *Coordinator) Activate(ctx context.Context, task agentmodel.Execution) error {
+func (r *Coordinator) Activate(ctx context.Context, task agentexecution.Execution) error {
 	if err := r.enter(ctx); err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func (r *Coordinator) Activate(ctx context.Context, task agentmodel.Execution) e
 	return r.activate(ctx, task)
 }
 
-func (r *Coordinator) activate(ctx context.Context, task agentmodel.Execution) error {
+func (r *Coordinator) activate(ctx context.Context, task agentexecution.Execution) error {
 	if _, err := r.activeTasks.Context(task.AgentID, task.ID); errors.Is(err, fault.ErrNotFound) {
 		reclaimed, err := r.operations.ReclaimExecution(ctx, task)
 		if err != nil {
@@ -145,7 +145,7 @@ func (r *Coordinator) activate(ctx context.Context, task agentmodel.Execution) e
 }
 
 // ResumeApproved 在审批事实提交后唤醒同一执行；尚未建立协程时正常激活。
-func (r *Coordinator) ResumeApproved(ctx context.Context, task agentmodel.Execution) error {
+func (r *Coordinator) ResumeApproved(ctx context.Context, task agentexecution.Execution) error {
 	if err := r.Activate(ctx, task); err != nil {
 		return err
 	}

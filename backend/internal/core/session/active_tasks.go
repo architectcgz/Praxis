@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"sync"
@@ -27,15 +28,15 @@ type ActiveTask struct {
 
 // ExecutionResult 保留结算结果，结算重试不得重新运行模型或工具。
 type ExecutionResult struct {
-	Outcome agentmodel.ExecutionOutcome
-	Code    agentmodel.ExecutionFailureCode
+	Outcome agentexecution.ExecutionOutcome
+	Code    agentexecution.ExecutionFailureCode
 	Message string
 }
 
 func (a *ActiveTask) WakeSignal() <-chan struct{} { return a.wake }
 
 // Reserve 为已准入的 Execution 创建执行 Context；重复启动返回原 Context。
-// 调用方先建立绑定，再条件保存 Execution；保存失败必须释放本次预留。
+// 调用方先建立绑定，再保存 Execution；保存失败必须释放本次预留。
 func (e *ActiveTasks) Reserve(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID) (context.Context, bool, error) {
 	if ctx == nil || agentID == "" || executionID == "" {
 		return nil, false, fault.InvalidValue("agent.execution", "context, agent and task are required")
@@ -90,12 +91,12 @@ func (e *ActiveTasks) cancel(agentID identity.AgentID, executionID identity.Agen
 	if active == nil || active.ExecutionID != executionID || active.ending {
 		return false
 	}
-	// Context 保留第一次取消原因；多条控制命令的最终优先级由结算确定。
+	// Context 保留第一次取消原因；执行者只有实际响应取消时才据此确定结果。
 	active.cancel(cause)
 	return true
 }
 
-// BeginEnding 标记 loop 已返回，之后控制请求由结算仲裁，不再向执行发送信号。
+// BeginEnding 标记 loop 已返回并固定本次结果；之后不再向执行发送控制信号。
 func (e *ActiveTasks) BeginEnding(agentID identity.AgentID, executionID identity.AgentExecutionID) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -160,7 +161,8 @@ func (e *ActiveTasks) StopAll() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for _, active := range e.active {
-		active.cancel(ErrExecutionStopped)
+		// 进程关闭属于生命周期取消，不标记为用户暂停或停止请求。
+		active.cancel(context.Canceled)
 	}
 }
 

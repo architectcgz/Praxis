@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
@@ -53,7 +53,7 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 
 		// 幂等回读先于状态检查；新输出必须在当前执行仍允许写入时提交。
 		if value.Data.Role == role.Assistant {
-			execution, err := getLocked[agentmodel.Execution](r.s, "agent_execution", value.Data.ExecutionID)
+			execution, err := getLocked[agentexecution.Execution](r.s, "agent_execution", value.Data.ExecutionID)
 			if err != nil {
 				return err
 			}

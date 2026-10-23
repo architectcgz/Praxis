@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
@@ -54,7 +54,7 @@ type RiskReviewer struct {
 }
 
 // Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
-func (r RiskReviewer) Review(ctx context.Context, task agentmodel.Execution, call sessionentry.ToolCall, args json.RawMessage, workspacePath string, decision security.ApprovalDecision, attempt toolexecution.RiskReview) (assessment security.RiskAssessment, err error) {
+func (r RiskReviewer) Review(ctx context.Context, task agentexecution.Execution, call sessionentry.ToolCall, args json.RawMessage, workspacePath string, decision security.ApprovalDecision, attempt toolexecution.RiskReview) (assessment security.RiskAssessment, err error) {
 	ctx, scope := r.Hooks.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
 			SessionID:   task.SessionID,

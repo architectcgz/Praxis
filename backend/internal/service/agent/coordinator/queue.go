@@ -2,7 +2,7 @@ package coordinator
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/identity"
 )
 
@@ -22,38 +22,38 @@ func (r *Coordinator) StartNext(ctx context.Context, sessionID identity.SessionI
 	return true, nil
 }
 
-func (r *Coordinator) prepareNext(ctx context.Context, sessionID identity.SessionID) (agentmodel.Execution, bool, error) {
+func (r *Coordinator) prepareNext(ctx context.Context, sessionID identity.SessionID) (agentexecution.Execution, bool, error) {
 	r.configMu.RLock()
 	defer r.configMu.RUnlock()
 	queue, ok := r.sessionTasks.TaskQueue(sessionID)
 	if !ok {
-		return agentmodel.Execution{}, false, nil
+		return agentexecution.Execution{}, false, nil
 	}
 	count, err := r.recovery.CountActiveBySession(ctx, sessionID)
 	if err != nil || count != 0 {
-		return agentmodel.Execution{}, false, err
+		return agentexecution.Execution{}, false, err
 	}
 	input, ok := queue.Next()
 	if !ok {
-		return agentmodel.Execution{}, false, nil
+		return agentexecution.Execution{}, false, nil
 	}
 	// 准入失败必须回到原队首；会话删除时 Clear 会让延迟 Retry 失效。
 	defer queue.Retry(input)
 	// owner 只在领取后确定，创建和排队阶段不绑定 Agent。
 	owner, err := r.primary.GetOrCreatePrimaryAgent(ctx, sessionID)
 	if err != nil {
-		return agentmodel.Execution{}, false, err
+		return agentexecution.Execution{}, false, err
 	}
 	if r.activeTasks.Occupied(owner.ID) || !owner.State.Startable() {
-		return agentmodel.Execution{}, false, nil
+		return agentexecution.Execution{}, false, nil
 	}
 	modelConfig, err := r.sessionModels.CurrentModelConfig(ctx, sessionID)
 	if err != nil {
-		return agentmodel.Execution{}, false, err
+		return agentexecution.Execution{}, false, err
 	}
 	execution, _, err := r.operations.PrepareTask(ctx, input, owner.ID, modelConfig)
 	if err != nil {
-		return agentmodel.Execution{}, false, err
+		return agentexecution.Execution{}, false, err
 	}
 	queue.Complete(input)
 	return execution, true, nil

@@ -3,7 +3,7 @@ package execution
 import (
 	"cmp"
 	"context"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/identity"
 	"slices"
@@ -53,7 +53,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 	if err != nil {
 		return nil, err
 	}
-	owners := make(map[string]agentmodel.Execution, len(executions))
+	owners := make(map[string]agentexecution.Execution, len(executions))
 	result := make([]Timing, 0, len(records)+len(executions))
 	for _, execution := range executions {
 		owners[execution.ID.String()] = execution
@@ -79,7 +79,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 	return result, nil
 }
 
-func operationTiming(execution agentmodel.Execution, record timing.Record) Timing {
+func operationTiming(execution agentexecution.Execution, record timing.Record) Timing {
 	revision := 1
 	if record.Status != timing.Running {
 		revision = 2
@@ -102,7 +102,7 @@ func operationTiming(execution agentmodel.Execution, record timing.Record) Timin
 	}
 }
 
-func executionTiming(execution agentmodel.Execution) *Timing {
+func executionTiming(execution agentexecution.Execution) *Timing {
 	if execution.StartedAt.IsZero() {
 		return nil
 	}
@@ -122,9 +122,9 @@ func executionTiming(execution agentmodel.Execution) *Timing {
 		value.DurationMS, value.FinishedAt, value.Revision = &elapsed, execution.EndedAt, 2
 		value.Status = string(timing.Completed)
 		switch execution.Outcome {
-		case agentmodel.ExecutionFailed:
+		case agentexecution.ExecutionFailed:
 			value.Status = string(timing.Failed)
-		case agentmodel.ExecutionInterrupted, agentmodel.ExecutionPaused:
+		case agentexecution.ExecutionInterrupted, agentexecution.ExecutionPaused:
 			value.Status = string(timing.Cancelled)
 		}
 	}
@@ -143,7 +143,7 @@ func (s *Service) publishTiming(value Timing) {
 	}
 }
 
-func (s *Service) publishExecutionTiming(execution agentmodel.Execution) {
+func (s *Service) publishExecutionTiming(execution agentexecution.Execution) {
 	if value := executionTiming(execution); value != nil {
 		s.publishTiming(*value)
 	}

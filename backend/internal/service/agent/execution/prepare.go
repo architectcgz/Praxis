@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
@@ -18,7 +19,7 @@ import (
 
 // PrepareTask 将内存 Task 准入为 Execution，开始时才保存用户消息并冻结上下文。
 // 返回值的 bool 表示重复请求；失败释放本次预留，队列是否重入由上层决定。
-func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID identity.AgentID, modelConfig modelapi.Config) (result agentmodel.Execution, existing bool, err error) {
+func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID identity.AgentID, modelConfig modelapi.Config) (result agentexecution.Execution, existing bool, err error) {
 	if ctx == nil {
 		return result, false, errors.New("task preparation context is required")
 	}
@@ -69,7 +70,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	if definition.Profile != owner.Profile {
 		return result, false, fault.ErrRequestConflict
 	}
-	config := agentmodel.ExecutionConfig{
+	config := agentexecution.ExecutionConfig{
 		AgentDefinitionID: definition.ID,
 		SystemPrompt:      definition.Instructions,
 		Model:             modelConfig,
@@ -113,10 +114,10 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	if err != nil {
 		return result, false, err
 	}
-	result = agentmodel.NewExecution(executionID, owner.SessionID, owner.ID, requestID, inputEntryID, config, at)
+	result = agentexecution.NewExecution(executionID, owner.SessionID, owner.ID, requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID
 	if err = s.records.Save(ctx, result); err != nil {
-		return agentmodel.Execution{}, false, err
+		return agentexecution.Execution{}, false, err
 	}
 	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。
 	if s.eventObserver != nil {

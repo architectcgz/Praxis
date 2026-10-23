@@ -65,18 +65,14 @@ const (
 	Internal              Code = "generic.internal_error"
 )
 
-// 冲突分类不依赖具体聚合；保留稳定码供持久化和边界识别。
-const (
-	RevisionConflict Code = "project.revision_conflict"
-	RequestConflict  Code = "request.conflict"
-)
+// 请求冲突不依赖具体聚合，由持久化和边界统一识别。
+const RequestConflict Code = "request.conflict"
 
 // 领域哨兵错误统一承载业务码，app 层据业务码翻译为前端错误码。
 var (
 	ErrInvalidValue      = New(InvalidValueCode, "")
 	ErrInvalidTransition = New(InvalidTransitionCode, "")
 	ErrRequestConflict   = New(RequestConflict, "")
-	ErrRevisionConflict  = New(RevisionConflict, "")
 	ErrNotFound          = New(NotFound, "")
 )
 

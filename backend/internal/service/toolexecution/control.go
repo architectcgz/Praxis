@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	executionmodel "praxis/internal/core/toolexecution"
@@ -82,7 +82,7 @@ func (s *Service) Stop(ctx context.Context, executionID identity.AgentExecutionI
 }
 
 // StopCall 返回已校验的执行归属，供 Coordinator 在提交后唤醒审批等待。
-func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task agentmodel.Execution, err error) {
+func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task agentexecution.Execution, err error) {
 	key := executionmodel.Key{ExecutionID: request.ExecutionID, CallID: request.CallID}
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()

@@ -41,8 +41,6 @@ function readableApiError(code: string) {
             return '发送前请先配置 Provider 和 Model。'
         case API_ERROR_CODES.validation:
             return '请求参数无效。'
-        case API_ERROR_CODES.revisionConflict:
-            return '此项已在加载后发生变化，请刷新后重试。'
         case API_ERROR_CODES.invalidTransition:
             return '当前状态不允许执行此操作。'
         case API_ERROR_CODES.notFound:

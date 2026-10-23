@@ -1,7 +1,7 @@
 package execution
 
 import (
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
@@ -21,6 +21,6 @@ type Event struct {
 	AgentID        identity.AgentID
 	ExecutionID    identity.AgentExecutionID
 	Outcome        string
-	FailureCode    agentmodel.ExecutionFailureCode
+	FailureCode    agentexecution.ExecutionFailureCode
 	FailureMessage string
 }

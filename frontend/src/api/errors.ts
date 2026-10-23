@@ -15,7 +15,6 @@ export const API_ERROR_CODES = {
     notReady: 'orchestration.not_ready',
     projectWorkspaceInvalid: 'project.workspace_invalid',
     workspaceConflict: 'project.lease_conflict',
-    revisionConflict: 'project.revision_conflict',
     agentExecuting: 'agent.executing',
     agentUnavailable: 'agent.unavailable',
     alreadyEnded: 'agent.already_ended',

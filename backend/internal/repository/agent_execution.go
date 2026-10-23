@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/identity"
 )
@@ -12,11 +12,11 @@ type AgentExecution interface {
 	AppendTiming(context.Context, timing.Record) error
 	ListTimings(context.Context, identity.AgentExecutionID) ([]timing.Record, error)
 	ListAgentTimings(context.Context, identity.AgentID, int) ([]timing.Record, error)
-	Get(context.Context, identity.AgentExecutionID) (agentmodel.Execution, error)
-	Save(context.Context, agentmodel.Execution) error
-	FindByRequest(context.Context, identity.AgentID, identity.RequestID) (agentmodel.Execution, error)
-	GetActiveByAgent(context.Context, identity.AgentID) (agentmodel.Execution, error)
-	ListActive(context.Context) ([]agentmodel.Execution, error)
-	ListByAgent(context.Context, identity.AgentID, int) ([]agentmodel.Execution, error)
+	Get(context.Context, identity.AgentExecutionID) (agentexecution.Execution, error)
+	Save(context.Context, agentexecution.Execution) error
+	FindByRequest(context.Context, identity.AgentID, identity.RequestID) (agentexecution.Execution, error)
+	GetActiveByAgent(context.Context, identity.AgentID) (agentexecution.Execution, error)
+	ListActive(context.Context) ([]agentexecution.Execution, error)
+	ListByAgent(context.Context, identity.AgentID, int) ([]agentexecution.Execution, error)
 	CountActiveBySession(context.Context, identity.SessionID) (int, error)
 }

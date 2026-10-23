@@ -1,7 +1,7 @@
 package agent
 
 import (
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/fault"
 	"strings"
 )
@@ -17,8 +17,8 @@ const (
 )
 
 // ExecutionFailureMessage 只为 Provider 失败提取可展示详情，其他错误仍由前端按失败码展示。
-func ExecutionFailureMessage(code agentmodel.ExecutionFailureCode, err error) string {
-	if code != agentmodel.ExecutionFailureProvider || err == nil {
+func ExecutionFailureMessage(code agentexecution.ExecutionFailureCode, err error) string {
+	if code != agentexecution.ExecutionFailureProvider || err == nil {
 		return ""
 	}
 	message := strings.TrimSpace(err.Error())
@@ -26,8 +26,8 @@ func ExecutionFailureMessage(code agentmodel.ExecutionFailureCode, err error) st
 		return ""
 	}
 	runes := []rune(message)
-	if len(runes) > agentmodel.MaxExecutionFailureMessageRunes {
-		return string(runes[:agentmodel.MaxExecutionFailureMessageRunes]) + "..."
+	if len(runes) > agentexecution.MaxExecutionFailureMessageRunes {
+		return string(runes[:agentexecution.MaxExecutionFailureMessageRunes]) + "..."
 	}
 	return message
 }

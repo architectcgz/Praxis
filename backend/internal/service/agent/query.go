@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
@@ -41,8 +42,8 @@ type Service struct {
 // AgentView 是单个 Agent 的持久化详情视图。
 type AgentView struct {
 	Agent           agentmodel.Agent
-	ActiveExecution *agentmodel.Execution
-	Executions      []agentmodel.Execution
+	ActiveExecution *agentexecution.Execution
+	Executions      []agentexecution.Execution
 	Controls        []agentmodel.AgentControlCommand
 }
 
@@ -86,7 +87,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID, li
 	}
 	active, err := s.executionRecords.GetActiveByAgent(ctx, agentID)
 	if errors.Is(err, fault.ErrNotFound) {
-		active = agentmodel.Execution{}
+		active = agentexecution.Execution{}
 	} else if err != nil {
 		return AgentView{}, fmt.Errorf("load active agent task: %w", err)
 	}

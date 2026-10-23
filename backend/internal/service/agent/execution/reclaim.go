@@ -3,12 +3,13 @@ package execution
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/fault"
 )
 
 // ReclaimExecution 为同一个遗留 Execution 重新建立执行身份；冻结输入和已使用预算不变。
-func (s *Service) ReclaimExecution(ctx context.Context, selected agentmodel.Execution) (agentmodel.Execution, error) {
-	var task agentmodel.Execution
+func (s *Service) ReclaimExecution(ctx context.Context, selected agentexecution.Execution) (agentexecution.Execution, error) {
+	var task agentexecution.Execution
 	created := false
 	err := func(txCtx context.Context) error {
 		var err error

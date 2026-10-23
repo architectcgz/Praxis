@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	timingmodel "praxis/internal/core/agent/execution/timing"
 	projectmodel "praxis/internal/core/project"
 	providerapi "praxis/internal/core/provider"
@@ -62,7 +63,7 @@ func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey
 			claim("primary-agent", sessionID, "")
 		}
 		link("session", sessionID)
-	case agentmodel.Execution:
+	case agentexecution.Execution:
 		entityID, sessionID = v.ID.String(), v.SessionID.String()
 
 		group("executions-agent", v.AgentID.String(), "")
@@ -91,7 +92,6 @@ func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey
 		link("agent_execution", v.SourceExecutionID.String())
 	case agentmodel.AgentControlCommand:
 		entityID, sessionID = v.ID.String(), scope
-		group("controls-execution", v.TargetExecutionID.String(), "")
 		group("controls-agent", v.AgentID.String(), "")
 		link("agent", v.AgentID.String())
 		link("agent_execution", v.TargetExecutionID.String())
@@ -143,7 +143,7 @@ func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey
 		if err != nil {
 			return key, entry, err
 		}
-		var execution agentmodel.Execution
+		var execution agentexecution.Execution
 		if err := decodeJSON(data, &execution); err != nil {
 			return key, entry, err
 		}
@@ -209,7 +209,7 @@ func (s *Store) restoreStateEntry(scope string, event jsonl.Event) (stateEntry, 
 	case "agent":
 		target = new(agentmodel.Agent)
 	case "agent_execution":
-		target = new(agentmodel.Execution)
+		target = new(agentexecution.Execution)
 	case "tool_event":
 		target = new(toolexecution.Event)
 	case "context":
@@ -238,7 +238,7 @@ func (s *Store) restoreStateEntry(scope string, event jsonl.Event) (stateEntry, 
 		err = validateSession(*value)
 	case *agentmodel.Agent:
 		err = validateAgent(*value)
-	case *agentmodel.Execution:
+	case *agentexecution.Execution:
 		err = validateAgentExecution(*value)
 	case *toolexecution.Event:
 		err = validateToolEvent(*value)
@@ -277,11 +277,11 @@ func (s *Store) decodeProjected(data []byte, target any) error {
 		}
 	case *agentmodel.Agent:
 		return s.projectAgent(value)
-	case *agentmodel.Execution:
+	case *agentexecution.Execution:
 		return s.projectExecution(value)
 	case *agentmodel.AgentControlCommand:
 		value.Status, value.AppliedAt = agentmodel.AgentControlPending, time.Time{}
-		execution, err := getLocked[agentmodel.Execution](s, "agent_execution", value.TargetExecutionID.String())
+		execution, err := getLocked[agentexecution.Execution](s, "agent_execution", value.TargetExecutionID.String())
 		if err != nil {
 			return err
 		}
@@ -302,7 +302,7 @@ func (s *Store) projectAgent(value *agentmodel.Agent) error {
 	if err != nil && !errors.Is(err, fault.ErrNotFound) {
 		return err
 	}
-	var latest agentmodel.Execution
+	var latest agentexecution.Execution
 	keys := []entityKey{key}
 	if errors.Is(err, fault.ErrNotFound) {
 		keys = s.keys(lookupKey{kind: "executions-agent", owner: value.ID.String()})
@@ -313,7 +313,7 @@ func (s *Store) projectAgent(value *agentmodel.Agent) error {
 		if err != nil {
 			return err
 		}
-		var execution agentmodel.Execution
+		var execution agentexecution.Execution
 		if err := decodeJSON(data, &execution); err != nil {
 			return err
 		}
@@ -350,25 +350,19 @@ func (s *Store) projectAgent(value *agentmodel.Agent) error {
 		return nil
 	}
 	switch latest.Outcome {
-	case agentmodel.ExecutionYielded:
+	case agentexecution.ExecutionYielded:
 		value.State = agentmodel.AgentWaiting
-	case agentmodel.ExecutionPaused:
+	case agentexecution.ExecutionPaused:
 		value.State = agentmodel.AgentPaused
-	case agentmodel.ExecutionFailed:
+	case agentexecution.ExecutionFailed:
 		value.State = agentmodel.AgentFailed
-	case agentmodel.ExecutionInterrupted:
+	case agentexecution.ExecutionInterrupted:
 		value.State = agentmodel.AgentInterrupted
 	}
 	return nil
 }
 
-func (s *Store) projectExecution(value *agentmodel.Execution) error {
-	entry, _ := s.entry(entityKey{"agent_execution", value.ID.String()})
-	value.Revision = entry.eventSequence
-	for _, key := range s.keys(lookupKey{kind: "controls-execution", owner: value.ID.String()}) {
-		entry, _ := s.entry(key)
-		value.Revision = max(value.Revision, entry.eventSequence)
-	}
+func (s *Store) projectExecution(value *agentexecution.Execution) error {
 	value.Progress.OutputBytes = value.Progress.ModelOutputBytes
 	value.Progress.ToolCalls = 0
 	value.Progress.FinalAssistantID, value.Progress.FinalStopReason = "", ""

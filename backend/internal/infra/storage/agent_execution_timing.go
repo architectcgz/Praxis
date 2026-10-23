@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -34,7 +34,7 @@ func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing
 		} else if !errors.Is(err, fault.ErrNotFound) {
 			return err
 		}
-		execution, err := getLocked[agentmodel.Execution](r.s, "agent_execution", value.ExecutionID)
+		execution, err := getLocked[agentexecution.Execution](r.s, "agent_execution", value.ExecutionID)
 		if err != nil {
 			return err
 		}
@@ -50,7 +50,7 @@ func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing
 func (r AgentExecutionRepository) ListTimings(ctx context.Context, id identity.AgentExecutionID) ([]timing.Record, error) {
 	var result []timing.Record
 	err := r.s.view(ctx, func() error {
-		if _, err := getLocked[agentmodel.Execution](r.s, "agent_execution", id.String()); err != nil {
+		if _, err := getLocked[agentexecution.Execution](r.s, "agent_execution", id.String()); err != nil {
 			return err
 		}
 		var err error

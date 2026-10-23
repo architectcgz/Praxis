@@ -1,4 +1,4 @@
-package agent
+package execution
 
 import (
 	modelapi "praxis/internal/core/model"

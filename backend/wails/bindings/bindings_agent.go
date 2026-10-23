@@ -2,6 +2,7 @@ package bindings
 
 import (
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"praxis/wails/dto"
@@ -64,7 +65,7 @@ func agentSnapshot(value agentmodel.Agent) dto.AgentSnapshot {
 	}
 }
 
-func executionSnapshot(value agentmodel.Execution) dto.ExecutionSnapshot {
+func executionSnapshot(value agentexecution.Execution) dto.ExecutionSnapshot {
 	return dto.ExecutionSnapshot{
 		SourceTaskID:   value.SourceTaskID.String(),
 		ID:             value.ID.String(),

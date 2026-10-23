@@ -2,7 +2,7 @@ package coordinator
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/loop"
 	modelapi "praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
@@ -16,9 +16,9 @@ type ExecutionOperations interface {
 	PrepareLoop(context.Context, identity.AgentExecutionID) (loop.Input, bool, error)
 	ConfirmRunning(context.Context, identity.AgentExecutionID) error
 	WaitForApproval(context.Context, identity.AgentExecutionID) error
-	Settle(context.Context, identity.AgentExecutionID, agentmodel.ExecutionOutcome, agentmodel.ExecutionFailureCode, string) (agentmodel.Execution, error)
-	ReclaimExecution(context.Context, agentmodel.Execution) (agentmodel.Execution, error)
-	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, modelapi.Config) (agentmodel.Execution, bool, error)
+	Settle(context.Context, identity.AgentExecutionID, agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) (agentexecution.Execution, error)
+	ReclaimExecution(context.Context, agentexecution.Execution) (agentexecution.Execution, error)
+	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, modelapi.Config) (agentexecution.Execution, bool, error)
 }
 
 // SessionTasks 提供会话输入能力；队列和正文的生命周期由 Session Service 拥有。
