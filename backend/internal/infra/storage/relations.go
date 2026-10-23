@@ -129,6 +129,10 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if call.SessionID.String() != scope || v.At.Before(call.CreatedAt) {
 			return errorcode.ErrRequestConflict
 		}
+
+		if err := (ToolExecutionRepository{s}).validateAuthorizationLocked(v); err != nil {
+			return err
+		}
 		if _, err := s.lookup(lookupKey{kind: "tool-result", owner: v.ExecutionID.String(), value: v.CallID}); err == nil {
 			return errorcode.ErrRequestConflict
 		} else if !errors.Is(err, errorcode.ErrNotFound) {

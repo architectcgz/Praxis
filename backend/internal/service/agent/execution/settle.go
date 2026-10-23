@@ -15,8 +15,8 @@ import (
 	agentservice "praxis/internal/service/agent"
 )
 
-// ConfirmRunning 根据最新状态区分首次启动、审批恢复和重复确认。
-// 首次启动记录开始时间，审批恢复保留原时间，已结束的执行不能重新启动。
+// ConfirmRunning 区分首次启动与重复确认；审批等待不改变运行状态。
+// 首次启动记录开始时间，已结束的执行不能重新启动。
 // executionID 来自 Coordinator 准入时已校验的持久化 Execution。
 func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.AgentExecutionID) error {
 	if ctx == nil {
@@ -26,8 +26,6 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 		switch task.Status {
 		case agentexecution.ExecutionStarting:
 			task.Start(s.clock.Now())
-		case agentexecution.ExecutionWaitingApproval:
-			task.Resume()
 		case agentexecution.ExecutionRunning, agentexecution.ExecutionEnding:
 			return nil
 		default:
@@ -78,7 +76,7 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 			// 尚未启动即进入结算时，将本次结算时间同时记录为启动时间。
 			endedExecution.Start(at)
 		}
-		if endedExecution.Status == agentexecution.ExecutionRunning || endedExecution.Status == agentexecution.ExecutionWaitingApproval {
+		if endedExecution.Status == agentexecution.ExecutionRunning {
 			endedExecution.BeginEnding()
 		}
 		endedExecution.End(outcome, failureCode, at)
@@ -171,19 +169,4 @@ func (s *Service) nameSessionAfterAnswer(
 		return err
 	}
 	return s.sessions.NameFromInput(ctx, task.SessionID, message.TextContent(), at)
-}
-
-// WaitForApproval 仅将运行中的执行置为等待审批；重复等待不改变状态，暂停通过执行 Context 响应。
-func (s *Service) WaitForApproval(ctx context.Context, id identity.AgentExecutionID) error {
-	return s.update(ctx, id, func(value *agentexecution.Execution) error {
-		switch value.Status {
-		case agentexecution.ExecutionRunning:
-			value.WaitForApproval()
-			return nil
-		case agentexecution.ExecutionWaitingApproval:
-			return nil
-		default:
-			return errorcode.ErrRequestConflict
-		}
-	})
 }

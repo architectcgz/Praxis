@@ -1,4 +1,4 @@
-package authorization
+package toolexecution
 
 import (
 	"context"
@@ -40,9 +40,9 @@ const riskReviewSchema = `{
 }`
 
 // review 直接调用 Provider 审核冻结操作，不读取仓储或调用 Service。
-func (r *Authorizer) review(ctx context.Context, request Input) (assessment security.RiskAssessment, err error) {
-	call, args, model := request.Call, request.Arguments, request.Review.Model
-	attempt := request.Review.Attempt
+func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessment security.RiskAssessment, err error) {
+	call, args, model := request.Call, request.Arguments, request.Model
+	attempt := request.Attempt
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
 			SessionID:   call.SessionID,
@@ -62,10 +62,10 @@ func (r *Authorizer) review(ctx context.Context, request Input) (assessment secu
 		Workspace string          `json:"workspace"`
 		Rule      string          `json:"rule"`
 	}{
-		Task:      request.Review.UserTask,
+		Task:      request.UserTask,
 		Tool:      string(call.Name),
 		Arguments: args,
-		Workspace: request.Review.WorkspacePath,
+		Workspace: request.WorkspacePath,
 		Rule:      request.Decision.RuleID,
 	})
 	if err != nil {

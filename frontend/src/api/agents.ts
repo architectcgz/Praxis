@@ -1,12 +1,10 @@
-import type { entry } from '../../wailsjs/go/models'
+import type { agent, entry } from '../../wailsjs/go/models'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { getAgentBinding, isBindingAvailable } from './bindings'
 import { normalizeOperationTiming, type OperationTiming } from './timings'
 
 export const AGENT_EVENT_NAME = 'praxis:agent-event'
 
-export type AgentState = 'idle' | 'executing' | 'waiting' | 'pausing' | 'paused' | 'interrupted' | 'failed' | 'unknown'
-export type ExecutionStatus = 'starting' | 'running' | 'waiting_approval' | 'ending' | 'ended' | 'unknown'
 export type ExecutionOutcome = '' | 'completed' | 'yielded' | 'paused' | 'failed' | 'interrupted' | 'unknown'
 export type ExecutionFailureCode =
     | ''
@@ -28,30 +26,8 @@ export type ExecutionFailureCode =
 export type ContextEntry = entry.ContextEntry
 export type EntryBlock = entry.Block
 
-export type AgentSnapshot = {
-    id: string
-    name: string
-    sessionId: string
-    definitionId: string
-    profile: string
-    state: AgentState
-    currentExecutionId: string
-    executionIds: string[]
-    executions: ExecutionSnapshot[]
-    controlCommandIds: string[]
-}
-
-export type ExecutionSnapshot = {
-    sourceTaskId: string
-    id: string
-    status: ExecutionStatus
-    outcome: ExecutionOutcome
-    failureCode: ExecutionFailureCode
-    failureMessage: string
-    createdAt: string
-    startedAt: string
-    endedAt: string
-}
+/** 查询结构直接沿用后端 Service；排除 Wails 生成类的转换方法。 */
+export type AgentView = Omit<agent.AgentView, 'convertValues'>
 
 export type ModelUsage = {
     inputTokens: number
@@ -90,7 +66,7 @@ export type AgentEvent = {
 }
 
 export function getAgent(agentID: string) {
-    return getAgentBinding().GetAgent(agentID).then(normalizeAgentSnapshot)
+    return getAgentBinding().GetAgent(agentID)
 }
 
 export function listAgentEntries(agentID: string): Promise<ContextEntry[]> {
@@ -117,24 +93,6 @@ export function normalizeModelUsageRecords(values: unknown, sessionId: string): 
         return { sessionId, agentId, executionId, turnId, usage }
     })
 }
-
-export function normalizeAgentSnapshot(value: unknown): AgentSnapshot {
-    const record = requiredRecord(value)
-    const definitionID = requiredString(record.definitionId)
-    return {
-        id: requiredString(record.id),
-        name: requiredString(record.name),
-        sessionId: requiredString(record.sessionId),
-        definitionId: definitionID,
-        profile: requiredString(record.profile),
-        state: enumValue(record.state, agentStates, 'unknown'),
-        currentExecutionId: requiredString(record.currentExecutionId),
-        executionIds: optionalStringArray(record.executionIds),
-        executions: requiredArray(record.executions).map(normalizeExecutionSnapshot),
-        controlCommandIds: optionalStringArray(record.controlCommandIds),
-    }
-}
-
 
 export function subscribeAgentEvents(listener: (event: AgentEvent) => void) {
     if (!isBindingAvailable()) {
@@ -226,8 +184,6 @@ function normalizeModelUsage(value: unknown): ModelUsage | null {
     }
 }
 
-const agentStates = ['idle', 'executing', 'waiting', 'pausing', 'paused', 'interrupted', 'failed'] as const
-const executionStatuses = ['starting', 'running', 'waiting_approval', 'ending', 'ended'] as const
 const executionOutcomes = ['', 'completed', 'yielded', 'paused', 'failed', 'interrupted'] as const
 const executionFailureCodes = [
     '',
@@ -246,22 +202,6 @@ const executionFailureCodes = [
     'execution_failed',
     'execution_invalid_outcome',
 ] as const
-
-function normalizeExecutionSnapshot(value: unknown): ExecutionSnapshot {
-    const record = requiredRecord(value)
-    return {
-        sourceTaskId: typeof record.sourceTaskId === 'string' ? record.sourceTaskId : '',
-        id: requiredString(record.id),
-        status: enumValue(record.status, executionStatuses, 'unknown'),
-        outcome: enumValue(record.outcome, executionOutcomes, 'unknown'),
-        failureCode: failureCodeValue(record.failureCode),
-        failureMessage: optionalString(record.failureMessage),
-        createdAt: requiredString(record.createdAt),
-        startedAt: optionalString(record.startedAt),
-        endedAt: optionalString(record.endedAt),
-    }
-}
-
 
 function failureCodeValue(value: unknown): ExecutionFailureCode {
     if (value == null) {
@@ -290,21 +230,6 @@ function requiredArray(value: unknown): unknown[] {
 
 function requiredString(value: unknown): string {
     if (typeof value !== 'string') {
-        throw new Error('Agent 数据格式无效。')
-    }
-    return value
-}
-
-function optionalString(value: unknown): string {
-    return typeof value === 'string' ? value : ''
-}
-
-
-function optionalStringArray(value: unknown): string[] {
-    if (value == null) {
-        return []
-    }
-    if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
         throw new Error('Agent 数据格式无效。')
     }
     return value

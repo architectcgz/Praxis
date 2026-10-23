@@ -1,18 +1,19 @@
 package dto
 
 import (
+	agentservice "praxis/internal/service/agent"
 	"time"
 )
 
 type SessionSnapshot struct {
-	ID          string          `json:"id"`
-	ProjectID   string          `json:"projectId"`
-	WorkspaceID string          `json:"workspaceId"`
-	Title       string          `json:"title"`
-	CreatedAt   time.Time       `json:"createdAt"`
-	UpdatedAt   time.Time       `json:"updatedAt"`
-	Agents      []AgentSnapshot `json:"agents"`
-	Tasks       []QueuedTask    `json:"tasks"`
+	ID          string                   `json:"id"`
+	ProjectID   string                   `json:"projectId"`
+	WorkspaceID string                   `json:"workspaceId"`
+	Title       string                   `json:"title"`
+	CreatedAt   time.Time                `json:"createdAt"`
+	UpdatedAt   time.Time                `json:"updatedAt"`
+	Agents      []agentservice.AgentView `json:"agents"`
+	Tasks       []QueuedTask             `json:"tasks"`
 }
 
 type SessionSummary struct {
@@ -62,32 +63,6 @@ type CreateSessionResponse struct {
 	WorkspaceID       string `json:"workspaceId"`
 	AgentID           string `json:"agentId"`
 	AgentDefinitionID string `json:"agentDefinitionId"`
-}
-
-type AgentSnapshot struct {
-	ID                 string              `json:"id"`
-	Name               string              `json:"name"`
-	SessionID          string              `json:"sessionId"`
-	DefinitionID       string              `json:"definitionId"`
-	Profile            string              `json:"profile"`
-	State              string              `json:"state"`
-	CurrentExecutionID string              `json:"currentExecutionId"`
-	ExecutionIDs       []string            `json:"executionIds"`
-	Executions         []ExecutionSnapshot `json:"executions"`
-	ControlCommandIDs  []string            `json:"controlCommandIds"`
-}
-
-// ExecutionSnapshot 返回持久化生命周期与安全的失败码，不暴露凭据或原始错误。
-type ExecutionSnapshot struct {
-	SourceTaskID   string    `json:"sourceTaskId,omitempty"`
-	ID             string    `json:"id"`
-	Status         string    `json:"status"`
-	Outcome        string    `json:"outcome,omitempty"`
-	FailureCode    string    `json:"failureCode,omitempty"`
-	FailureMessage string    `json:"failureMessage,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
-	StartedAt      time.Time `json:"startedAt,omitempty"`
-	EndedAt        time.Time `json:"endedAt,omitzero"`
 }
 
 type ModelOption struct {

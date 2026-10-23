@@ -1,6 +1,6 @@
 import { getSessionBinding } from './bindings'
 import { dto } from '../../wailsjs/go/models'
-import { normalizeAgentSnapshot, normalizeModelUsageRecords, type AgentSnapshot, type ModelUsageRecord } from './agents'
+import { normalizeModelUsageRecords, type AgentView, type ModelUsageRecord } from './agents'
 import { normalizeQueuedTasks, type QueuedTask } from './tasks'
 
 export type SessionSnapshot = {
@@ -10,7 +10,7 @@ export type SessionSnapshot = {
     title: string
     createdAt: string
     updatedAt: string
-    agents: AgentSnapshot[]
+    agents: AgentView[]
     tasks: QueuedTask[]
 }
 
@@ -102,7 +102,7 @@ export function revealSessionFile(sessionID: string) {
     return getSessionBinding().RevealSessionFile(sessionID)
 }
 
-function normalizeSessionSnapshot(value: unknown): SessionSnapshot {
+function normalizeSessionSnapshot(value: dto.SessionSnapshot): SessionSnapshot {
     if (!isRecord(value) || !Array.isArray(value.agents)) {
         throw new Error('Session 数据格式无效。')
     }
@@ -113,7 +113,7 @@ function normalizeSessionSnapshot(value: unknown): SessionSnapshot {
         title: requiredString(value.title),
         createdAt: requiredString(value.createdAt),
         updatedAt: requiredString(value.updatedAt),
-        agents: value.agents.map(normalizeAgentSnapshot),
+        agents: value.agents,
         tasks: normalizeQueuedTasks(value.tasks),
     }
 }

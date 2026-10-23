@@ -1,22 +1,27 @@
 package toolexecution
 
 import (
+	"encoding/json"
 	"praxis/internal/core/security"
 	"praxis/internal/identity"
 	"time"
 )
 
-type ApprovalSource string
+// ApprovalRequest 保存一次人工审批所针对的冻结参数和生效规则。
+type ApprovalRequest struct {
+	Key
+	SessionID   identity.SessionID
+	Arguments   json.RawMessage
+	Decision    security.ApprovalDecision
+	RequestedAt time.Time
+}
 
-const (
-	ApprovalSourceUser ApprovalSource = "user"
-	ApprovalSourceYolo ApprovalSource = "yolo"
-	ApprovalSourceAuto ApprovalSource = "auto"
-)
-
-type ApprovalRecord struct {
-	Source     ApprovalSource
-	ApprovedAt time.Time
+// UserDecision 绑定当前 ToolCall 唯一的审批请求。
+type UserDecision struct {
+	Key
+	SessionID identity.SessionID
+	Approved  bool
+	DecidedAt time.Time
 }
 
 type RiskReview struct {
@@ -28,20 +33,11 @@ type RiskReview struct {
 	Assessment  security.RiskAssessment
 }
 
-// ApprovalFacts 只表示审批和审核事实，不包含执行控制状态。
-type ApprovalFacts struct {
-	RequiredAt time.Time
-	Decision   security.ApprovalDecision
-	Summary    string
-	Approval   ApprovalRecord
-	Review     RiskReview
-}
-
-func (f ApprovalFacts) AwaitingApproval() bool {
-	return !f.RequiredAt.IsZero() && f.Approval.ApprovedAt.IsZero()
-}
-
-// Allows 判断已有批准是否适用于当前规则，执行状态由调用方检查。
-func (f ApprovalFacts) Allows(decision security.ApprovalDecision) bool {
-	return !f.Approval.ApprovedAt.IsZero() && (f.Decision == decision || decision.Action == security.ApprovalAsk && f.Approval.Source == ApprovalSourceUser)
+// ReviewRecord 将模型审核证据绑定到冻结操作与当时的规则。
+type ReviewRecord struct {
+	Key
+	SessionID identity.SessionID
+	Arguments json.RawMessage
+	Decision  security.ApprovalDecision
+	RiskReview
 }

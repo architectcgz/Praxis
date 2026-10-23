@@ -8,7 +8,6 @@ import (
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
@@ -39,12 +38,35 @@ type Service struct {
 	clock            clock.Clock
 }
 
-// AgentView 是单个 Agent 的持久化详情视图。
+// AgentView 直接组合 Agent 实体、派生运行状态和页面所需的执行信息。
 type AgentView struct {
-	Agent           agentmodel.Agent
-	ActiveExecution *agentexecution.Execution
-	Executions      []agentexecution.Execution
-	Controls        []agentmodel.AgentControlCommand
+	agentmodel.Agent
+	Name               string                    `json:"name"`
+	State              agentmodel.AgentState     `json:"state"`
+	CurrentExecutionID identity.AgentExecutionID `json:"currentExecutionId"`
+	CurrentExecution   *agentexecution.Execution `json:"currentExecution"`
+	LatestExecution    *agentexecution.Execution `json:"latestExecution"`
+}
+
+// DescribeAgent 组合目录展示信息；执行详情由 GetAgentView 查询。
+func DescribeAgent(value agentmodel.Agent) AgentView {
+	name := "Agent"
+	switch value.DefinitionID {
+	case agentmodel.DefinitionPrimary:
+		name = "Leader"
+	case agentmodel.DefinitionDelegate:
+		name = "Builder"
+	case agentmodel.DefinitionAdvisor:
+		name = "Scout"
+	case agentmodel.DefinitionCurator:
+		name = "Editor"
+	}
+	return AgentView{
+		Agent:              value,
+		Name:               name,
+		State:              value.State,
+		CurrentExecutionID: value.CurrentExecutionID,
+	}
 }
 
 // NewService 校验查询依赖并创建 Agent 查询服务；缺少仓储或消息读取函数时返回错误。
@@ -73,40 +95,33 @@ func NewService(deps Dependencies) (*Service, error) {
 	}, nil
 }
 
-// GetAgentView 返回 Agent、执行、预约和控制状态，不包含 workflow 编排状态。
-func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID, limit int) (AgentView, error) {
+// GetAgentView 返回当前执行与最近一次执行，不返回执行历史和控制命令列表。
+func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (AgentView, error) {
 	if ctx == nil {
 		return AgentView{}, errors.New("agent query context is required")
 	}
-	if s.executionRecords == nil || s.controls == nil {
-		return AgentView{}, errors.New("agent detail query is unavailable")
-	}
-	agent, err := s.agents.Get(ctx, agentID)
+	value, err := s.agents.Get(ctx, agentID)
 	if err != nil {
 		return AgentView{}, err
 	}
-	active, err := s.executionRecords.GetActiveByAgent(ctx, agentID)
-	if errors.Is(err, errorcode.ErrNotFound) {
-		active = agentexecution.Execution{}
-	} else if err != nil {
-		return AgentView{}, fmt.Errorf("load active agent task: %w", err)
-	}
-	tasks, err := s.executionRecords.ListByAgent(ctx, agentID, limit)
+	view := DescribeAgent(value)
+	latest, err := s.executionRecords.ListByAgent(ctx, agentID, 1)
 	if err != nil {
 		return AgentView{}, err
 	}
-	controls, err := s.controls.ListOpenByAgent(ctx, agentID, limit)
-	if err != nil {
-		return AgentView{}, err
+	if len(latest) > 0 {
+		view.LatestExecution = &latest[0]
 	}
-	view := AgentView{
-		Agent:      agent,
-		Executions: tasks,
-		Controls:   controls,
-	}
-	if active.ID != "" {
-		activeCopy := active
-		view.ActiveExecution = &activeCopy
+	if value.CurrentExecutionID != "" {
+		if view.LatestExecution != nil && view.LatestExecution.ID == value.CurrentExecutionID {
+			view.CurrentExecution = view.LatestExecution
+		} else {
+			current, err := s.executionRecords.Get(ctx, value.CurrentExecutionID)
+			if err != nil {
+				return AgentView{}, fmt.Errorf("load current agent execution: %w", err)
+			}
+			view.CurrentExecution = &current
+		}
 	}
 	return view, nil
 }

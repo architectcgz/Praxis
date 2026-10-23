@@ -11,7 +11,6 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
-	toolservice "praxis/internal/service/toolexecution"
 	"time"
 )
 
@@ -71,15 +70,14 @@ func (r *Coordinator) run(
 		return
 	}
 	// TryRun 已确认本次运行权唯一，旧 Loop 和工具已停止；恢复必须先于上下文读取。
-	if err := r.tools.RecoverExecution(ctx, task.ID); err != nil {
+	if err := r.toolRecords.RecoverExecution(ctx, task.ID); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForWorkspace(workspace.Path, func(waitCtx context.Context) error {
-		return r.operations.WaitForApproval(waitCtx, task.ID)
-	}, func(waitCtx context.Context) error {
-		return r.waitForToolApproval(waitCtx, task, active)
+
+	executor := r.tools.ForExecution(task.ID, workspace.Path, func(waitCtx context.Context) error {
+		return r.waitForToolApproval(waitCtx, active)
 	})
 	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor)
 	if r.endExecution(task, active, outcome, failureCode, failureMessage) {
@@ -123,7 +121,7 @@ func (r *Coordinator) execute(
 	ctx context.Context,
 	task agentexecution.Execution,
 	assistantCommitter loop.AssistantCommitter,
-	executor *toolservice.Scope,
+	executor loop.ToolExecutor,
 ) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
@@ -209,7 +207,7 @@ func (r *Coordinator) endExecution(
 	for {
 		endContext, cancelEnd := r.transitionContext()
 		var err error
-		err = r.tools.RecoverExecution(endContext, task.ID)
+		err = r.toolRecords.RecoverExecution(endContext, task.ID)
 		if err == nil {
 			endedExecution, err = r.operations.Settle(endContext, task.ID, outcome, failureCode, failureMessage)
 		}

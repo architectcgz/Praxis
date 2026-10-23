@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"time"
 )
 
+// Key 复用工具契约的调用身份。
+type Key = tool.CallKey
+
 // ToolCall 是已提交 Assistant 中的完整调用及执行归属，不另行持久化。
 type ToolCall struct {
-	toolexecution.Key
+	Key
 	SessionID identity.SessionID
 	AgentID   identity.AgentID
 	RequestID string
@@ -29,7 +31,7 @@ func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.A
 			continue
 		}
 		calls = append(calls, ToolCall{
-			Key:       toolexecution.Key{ExecutionID: identity.AgentExecutionID(m.ExecutionID), CallID: block.CallID},
+			Key:       Key{ExecutionID: identity.AgentExecutionID(m.ExecutionID), CallID: block.CallID},
 			SessionID: sessionID,
 			AgentID:   agentID,
 			RequestID: m.RequestID,

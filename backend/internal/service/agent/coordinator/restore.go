@@ -32,7 +32,7 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		}
 		s.mu.Unlock()
 	}()
-	if err := s.tools.RecoverAll(ctx); err != nil {
+	if err := s.toolRecords.RecoverAll(ctx); err != nil {
 		return fmt.Errorf("reconcile tool results: %w", err)
 	}
 	executions, err := s.recovery.ListActive(ctx)

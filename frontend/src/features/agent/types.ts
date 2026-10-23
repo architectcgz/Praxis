@@ -1,4 +1,4 @@
-import type { AgentEvent, ContextEntry, AgentSnapshot } from '../../api'
+import type { AgentEvent, ContextEntry, AgentView } from '../../api'
 
 /** 单次执行的临时输出，持久化历史回填后移除。 */
 export type StreamingOutput = {
@@ -20,7 +20,7 @@ export type PendingUserMessage = {
 }
 
 /** Agent 侧栏展示所需的最小 Session 摘要。 */
-export type AgentSessionSummary = { title: string; agents: AgentSnapshot[] }
+export type AgentSessionSummary = { title: string; agents: AgentView[] }
 
 export type AgentsPanelProps = {
     loading: boolean

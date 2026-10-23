@@ -1,9 +1,9 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { cancelTask, createTask, type AgentSnapshot, type ApiErrorCode } from '../../api'
+import { cancelTask, createTask, type AgentView, type ApiErrorCode } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 
 type TaskSubmissionContext = {
-    agent: Pick<AgentSnapshot, 'state'> | null
+    agent: Pick<AgentView, 'state'> | null
     busy: boolean
     input: string
     sessionID: string

@@ -8,6 +8,7 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	taskmodel "praxis/internal/core/session"
+	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/errorcode"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
@@ -19,7 +20,8 @@ import (
 type Config struct {
 	ConfigMu          *sync.RWMutex
 	Recovery          repository.AgentExecution
-	Tools             *toolservice.Service
+	Tools             *executionmodel.Executor
+	ToolRecords       *toolservice.Service
 	Sessions          repository.Session
 	Workspaces        repository.Workspace
 	PrimaryAgent      PrimaryAgentProvider
@@ -37,7 +39,8 @@ type Config struct {
 type Coordinator struct {
 	configMu          *sync.RWMutex
 	recovery          repository.AgentExecution
-	tools             *toolservice.Service
+	tools             *executionmodel.Executor
+	toolRecords       *toolservice.Service
 	sessions          repository.Session
 	workspaces        repository.Workspace
 	primary           PrimaryAgentProvider
@@ -59,7 +62,7 @@ type Coordinator struct {
 }
 
 func NewCoordinator(config Config) (*Coordinator, error) {
-	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.SessionTasks == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil {
+	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.SessionTasks == nil || config.Tools == nil || config.ToolRecords == nil || config.Sessions == nil || config.Workspaces == nil {
 		return nil, errors.New("execution loop, active tasks, task operations, queue and tool services are required")
 	}
 	if config.PrimaryAgent == nil || config.SessionModels == nil || config.Recovery == nil {
@@ -76,6 +79,7 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 		configMu:          config.ConfigMu,
 		recovery:          config.Recovery,
 		tools:             config.Tools,
+		toolRecords:       config.ToolRecords,
 		sessions:          config.Sessions,
 		workspaces:        config.Workspaces,
 		primary:           config.PrimaryAgent,

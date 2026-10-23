@@ -24,16 +24,16 @@ export function AgentsPanel({ loading, session, histories, selectedAgentID, onSe
                     <div className="scroll-region scroll">
                         <div className="agent-list">
                             {agents.map((item) => {
-                                const history = histories[item.id] || []
+                                const history = histories[item.ID] || []
                                 const stats = agentStats(history)
                                 const state = stateLabels[item.state] || stateLabels.unknown
                                 return (
                                     <button
-                                        className={`agent-row agent ${item.id === selectedAgentID ? 'selected' : ''}`}
-                                        key={item.id}
+                                        className={`agent-row agent ${item.ID === selectedAgentID ? 'selected' : ''}`}
+                                        key={item.ID}
                                         type="button"
-                                        onClick={() => onSelectAgent(item.id)}
-                                        aria-current={item.id === selectedAgentID ? 'true' : undefined}
+                                        onClick={() => onSelectAgent(item.ID)}
+                                        aria-current={item.ID === selectedAgentID ? 'true' : undefined}
                                     >
                                         <span className={`state-marker astate state-${item.state}`} aria-hidden="true" />
                                         <span className="agent-row-copy">

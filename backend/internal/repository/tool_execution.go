@@ -5,8 +5,10 @@ import (
 	"praxis/internal/core/toolexecution"
 )
 
-// ToolExecution 只追加控制事件并按调用键读取投影，不保存执行实体或结果。
+// ToolExecution 只保存可靠审批事实，工具完成必须查询消息回执。
 type ToolExecution interface {
-	Read(context.Context, toolexecution.Key) (toolexecution.Facts, error)
-	Append(context.Context, toolexecution.Event) error
+	GetApprovalRequest(context.Context, toolexecution.Key) (toolexecution.ApprovalRequest, bool, error)
+	GetUserDecision(context.Context, toolexecution.Key) (toolexecution.UserDecision, bool, error)
+	GetReview(context.Context, toolexecution.Key) (toolexecution.ReviewRecord, bool, error)
+	SaveAuthorization(context.Context, toolexecution.Event) error
 }

@@ -3,25 +3,13 @@ package toolexecution
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
-// ApprovalRequest 绑定审批请求的会话、Agent 和具体调用。
-type ApprovalRequest struct {
-	SessionID   identity.SessionID
-	AgentID     identity.AgentID
-	ExecutionID identity.AgentExecutionID
-	CallID      string
-}
-
-// Approval 是消息声明和审批事件组合的查询结果，不是持久化实体。
+// Approval 是消息声明与可靠审批事实组合的查询结果。
 type Approval struct {
 	Call      sessionentry.ToolCall
 	Arguments json.RawMessage
@@ -29,103 +17,57 @@ type Approval struct {
 	Review    executionmodel.RiskReview
 }
 
-func (s *Service) Approve(ctx context.Context, executionID identity.AgentExecutionID, callID string) (agentexecution.Execution, error) {
-	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID}, true)
-}
-
-func (s *Service) Deny(ctx context.Context, executionID identity.AgentExecutionID, callID string) (agentexecution.Execution, error) {
-	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID}, false)
-}
-
-func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve bool) (task agentexecution.Execution, err error) {
-	s.controlMu.Lock()
-	defer s.controlMu.Unlock()
-	executionID, callID := request.ExecutionID, request.CallID
-	err = func(txCtx context.Context) error {
-		call, err := s.call(txCtx, executionID, callID)
-		if err != nil {
-			return err
-		}
-		if request.SessionID != "" && request.SessionID != call.SessionID || request.AgentID != "" && request.AgentID != call.AgentID {
-			return errorcode.ErrRequestConflict
-		}
-		task, err = s.deps.Tasks.Get(txCtx, executionID)
-		if err != nil {
-			return err
-		}
-		facts, err := s.deps.Events.Read(txCtx, call.Key)
-		if err != nil {
-			return err
-		}
-		if approve && facts.Approval.Source == executionmodel.ApprovalSourceUser {
-			return nil
-		}
-		if result, err := s.deps.Calls.GetResult(txCtx, call.Key); err == nil {
-			if !approve && len(result.Content) == 1 && result.Content[0].Text == tool.NewToolError("tool_approval_denied", "The user denied this tool call.").Payload {
-				return nil
-			}
-			return errorcode.ErrRequestConflict
-		} else if !errors.Is(err, errorcode.ErrNotFound) {
-			return err
-		}
-		if !task.Active() || !facts.AwaitingApproval() || !facts.StartedAt.IsZero() || !facts.StopRequestedAt.IsZero() {
-			return errorcode.ErrRequestConflict
-		}
-		var decision security.ApprovalDecision
-		if approve {
-			decision, err = s.deps.Rules.Decide(txCtx, call, json.RawMessage(facts.Summary))
-			if err != nil {
-				return err
-			}
-		}
-		result := s.deps.Authorization.DecideApproval(call, facts.ApprovalFacts, decision, approve)
-		if result.Denied != nil {
-			_, err := s.appendResult(txCtx, call, *result.Denied)
-			return err
-		}
-		return s.deps.Events.Append(txCtx, *result.Event)
-	}(ctx)
-	return task, err
-}
-
 func (s *Service) ListApprovals(ctx context.Context, agentID identity.AgentID) ([]Approval, error) {
 	result := make([]Approval, 0)
-	err := func(txCtx context.Context) error {
-		missing, err := s.deps.Calls.ListMissingToolResults(txCtx)
+	missing, err := s.deps.Calls.ListMissingToolResults(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range missing {
+		if item.AgentID != agentID {
+			continue
+		}
+		execution, err := s.deps.Tasks.Get(ctx, item.ExecutionID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		for _, item := range missing {
-			if item.AgentID != agentID {
-				continue
-			}
-			task, err := s.deps.Tasks.Get(txCtx, item.ExecutionID)
-			if err != nil {
-				return err
-			}
-			if !task.Active() {
-				continue
-			}
-			key := executionmodel.Key{ExecutionID: item.ExecutionID, CallID: item.CallID}
-			facts, err := s.deps.Events.Read(txCtx, key)
-			if err != nil {
-				return err
-			}
-			if !facts.AwaitingApproval() || !facts.StartedAt.IsZero() || !facts.StopRequestedAt.IsZero() {
-				continue
-			}
-			call, err := s.deps.Calls.GetCall(txCtx, key)
-			if err != nil {
-				return err
-			}
-			result = append(result, Approval{
-				Call:      call,
-				Arguments: json.RawMessage(facts.Summary),
-				Decision:  facts.Decision,
-				Review:    facts.Review,
-			})
+		if !execution.Active() {
+			continue
 		}
-		return nil
-	}(ctx)
-	return result, err
+		key := executionmodel.Key{ExecutionID: item.ExecutionID, CallID: item.CallID}
+		request, found, err := s.deps.Events.GetApprovalRequest(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			continue
+		}
+		_, decided, err := s.deps.Events.GetUserDecision(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if decided {
+			continue
+		}
+		call, err := s.deps.Calls.GetCall(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		review, _, err := s.deps.Events.GetReview(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if _, found, err := s.GetResult(ctx, key); err != nil {
+			return nil, err
+		} else if found {
+			continue
+		}
+		result = append(result, Approval{
+			Call:      call,
+			Arguments: request.Arguments,
+			Decision:  request.Decision,
+			Review:    review.RiskReview,
+		})
+	}
+	return result, nil
 }

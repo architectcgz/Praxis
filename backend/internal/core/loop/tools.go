@@ -23,7 +23,7 @@ func validateToolCalls(calls []ToolCall) error {
 	return nil
 }
 
-// runToolCalls 顺序执行工具，只消费 Service 完成整次调用后提交的回执。
+// runToolCalls 顺序执行工具，只消费 Core ToolExecutor 完成整次调用后提交的回执。
 func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps ExecutionDependencies, calls []sessionentry.ToolCall, turnID identity.TurnID) ([]sessionentry.ContextEntry, error) {
 	results := make([]sessionentry.ContextEntry, 0, len(calls))
 	for _, call := range calls {
@@ -36,7 +36,7 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 			return results, failCause(FailureStorage, err)
 		}
 		if len(receipt.Content) != 1 || receipt.Content[0].Kind != sessionentry.BlockToolResult {
-			return results, failCause(FailureContract, errors.New("tool service returned an invalid committed receipt"))
+			return results, failCause(FailureContract, errors.New("tool executor returned an invalid committed receipt"))
 		}
 		block := receipt.Content[0]
 		r.emitToolResult(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))

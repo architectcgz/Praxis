@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, MessageSquare } from 'lucide-react'
-import type { ContextEntry, AgentSnapshot, ModelOption } from '../../api'
+import type { ContextEntry, AgentView, ModelOption } from '../../api'
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
 import { ApprovalGate, ToolApprovalsProvider } from './ToolApprovals'
@@ -8,7 +8,7 @@ import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessa
 
 export type AgentConversationProps = {
     projectId: string
-    agent: AgentSnapshot
+    agent: AgentView
     history: ContextEntry[]
     collaboration?: ReactNode
     streamingOutput: StreamingOutput | null
@@ -41,16 +41,16 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
     const active = agent.state === 'executing' || agent.state === 'pausing'
     const waitingForOutput = awaitingOutput || (agent.state === 'executing' && !busy && !streamingOutput)
     const visibleStreamingOutput = streamingOutput
-    const latestExecution = agent.executions[0]
-    const executionError = latestExecution?.status === 'ended' && latestExecution.outcome === 'failed'
-        ? latestExecution.failureMessage || `执行失败：${latestExecution.failureCode}` : ''
+    const latestExecution = agent.latestExecution
+    const executionError = latestExecution?.Status === 'ended' && latestExecution.Outcome === 'failed'
+        ? latestExecution.FailureMessage || `执行失败：${latestExecution.FailureCode}` : ''
     const orderedHistory = history
     const visibleHistory = history
 
     // Pending messages belong to the agent that was active when they were sent.
     const visiblePendingMessages = useMemo(() => pendingUserMessages.filter((message) => (
-        message.agentId ? message.agentId === agent.id : message.sessionId === agent.sessionId
-    )), [agent.id, agent.sessionId, pendingUserMessages])
+        message.agentId ? message.agentId === agent.ID : message.sessionId === agent.SessionID
+    )), [agent.ID, agent.SessionID, pendingUserMessages])
     const threadEmpty = orderedHistory.length === 0 && visiblePendingMessages.length === 0 && !streamingOutput && !waitingForOutput && !collaboration
 
     useLayoutEffect(() => {
@@ -58,7 +58,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
         if (!messageThread) {
             return
         }
-        const switchingAgent = previousAgentIDRef.current !== agent.id
+        const switchingAgent = previousAgentIDRef.current !== agent.ID
         // 刚发出的用户消息是明确意图：即使此前正在浏览历史，也要回到最新输出并恢复跟随。
         const justSent = visiblePendingMessages.some((message) => !pendingRequestIDsRef.current.has(message.requestId))
         pendingRequestIDsRef.current = new Set(visiblePendingMessages.map((message) => message.requestId))
@@ -70,8 +70,8 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
             behavior: 'auto',
         })
         followingOutputRef.current = true
-        previousAgentIDRef.current = agent.id
-    }, [agent.id, orderedHistory, visiblePendingMessages, streamingOutput, waitingForOutput, collaboration])
+        previousAgentIDRef.current = agent.ID
+    }, [agent.ID, orderedHistory, visiblePendingMessages, streamingOutput, waitingForOutput, collaboration])
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
@@ -85,7 +85,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
         })
         observer.observe(messageThread, { childList: true, characterData: true, subtree: true })
         return () => observer.disconnect()
-    }, [agent.id])
+    }, [agent.ID])
 
     const updateOutputFollowing = useCallback(() => {
         const messageThread = messageThreadRef.current
@@ -110,7 +110,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
         setShowScrollButton(false)
     }, [])
 
-    return <ToolApprovalsProvider key={agent.id} agentId={agent.id}>
+    return <ToolApprovalsProvider key={agent.ID} agentId={agent.ID}>
         <div className="agent-conversation">
             <div className="message-thread-container">
                 <div
@@ -186,7 +186,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
             <div className="command-band agent-input-accessory">{beforeInput}</div>
             <AgentTaskInput
                 projectId={projectId}
-                sessionId={agent.sessionId}
+                sessionId={agent.SessionID}
                 active={active}
                 canQueue={canQueue}
                 input={input}

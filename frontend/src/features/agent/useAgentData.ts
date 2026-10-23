@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { getAgent, listAgentEntries, subscribeAgentEvents, type ContextEntry, type AgentSnapshot, type ApiErrorCode, type ModelOption } from '../../api'
+import { getAgent, listAgentEntries, subscribeAgentEvents, type ContextEntry, type AgentView, type ApiErrorCode, type ModelOption } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import { createAgentStore } from './agentStore'
 import { useAgentTaskInput } from './useAgentTaskInput'
@@ -53,12 +53,12 @@ export function useAgentData({ sessionID, models, setError, setErrorCode, viewRe
         }
     }, [store, setError, setErrorCode])
 
-    const loadForSession = useCallback(async ({ agents }: { agents: AgentSnapshot[] }, requestID: number) => {
+    const loadForSession = useCallback(async ({ agents }: { agents: AgentView[] }, requestID: number) => {
         if (viewRequestRef.current !== requestID) return
         generation.current += 1
         requests.current.clear()
         store.setRoster(agents)
-        await Promise.all(agents.map((item) => loadAgent(item.id)))
+        await Promise.all(agents.map((item) => loadAgent(item.ID)))
     }, [store, loadAgent, viewRequestRef])
 
     const resetForSessionChange = useCallback(() => {

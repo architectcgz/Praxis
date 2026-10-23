@@ -5,7 +5,6 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	execution "praxis/internal/service/agent/coordinator"
-	toolservice "praxis/internal/service/toolexecution"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
@@ -57,6 +56,7 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 	if err != nil {
 		return err
 	}
+
 	params := execution.ToolDecision{
 		SessionID:   identity.SessionID(wire.SessionID),
 		AgentID:     identity.AgentID(wire.AgentID),
@@ -83,7 +83,7 @@ func (b *CommandBindings) StopToolCall(wire dto.ToolControlRequest) error {
 	if err != nil {
 		return err
 	}
-	request := toolservice.ControlRequest{
+	request := execution.ToolControl{
 		SessionID:   identity.SessionID(strings.TrimSpace(wire.SessionID)),
 		AgentID:     identity.AgentID(strings.TrimSpace(wire.AgentID)),
 		ExecutionID: identity.AgentExecutionID(strings.TrimSpace(wire.ExecutionID)),

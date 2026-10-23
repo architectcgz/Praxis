@@ -11,14 +11,9 @@ import (
 )
 
 // Recover 仅由已确认旧 Loop 和工具终止的业务恢复编排调用。
-// 不读取审批或 started 判断重放，所有孤儿调用都补同一错误回执。
+// 不读取审批事实判断重放，所有孤儿调用都补同一错误回执。
 func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecutionID, callID string) (sessionentry.ContextEntry, error) {
 	key := executionmodel.Key{ExecutionID: executionID, CallID: callID}
-	s.controlMu.Lock()
-	defer s.controlMu.Unlock()
-	if s.active[key] != nil {
-		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
-	}
 	var result sessionentry.ContextEntry
 	err := func(txCtx context.Context) error {
 		stored, err := s.deps.Calls.GetResult(txCtx, key)
@@ -33,7 +28,7 @@ func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecuti
 		if err != nil {
 			return err
 		}
-		result, err = s.appendResult(txCtx, call, tool.ToolResult{Payload: "No result provided", ErrorClass: "missing_tool_result"})
+		result, err = s.CommitResult(txCtx, call, tool.ToolResult{Payload: "No result provided", ErrorClass: "missing_tool_result"})
 		return err
 	}(ctx)
 	return result, err

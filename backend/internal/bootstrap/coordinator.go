@@ -10,7 +10,7 @@ import (
 	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/toolexecution/authorization"
+	executionmodel "praxis/internal/core/toolexecution"
 	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
@@ -64,29 +64,37 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 			}
 		})
 	}
-	authorizer := &authorization.Authorizer{
+	reviewer := &executionmodel.Reviewer{
 		Provider:       deps.Provider,
 		TimingRecorder: deps.TimingRecorder,
 		HookDispatcher: deps.HookDispatcher,
 		Emitter:        deps.Emitter,
-		Clock:          deps.Clock,
-		Logf:           logging.NewFactory().Ensure(deps.Logger).Errorf,
 	}
-	executor, err := toolservice.NewService(toolservice.Dependencies{
-		TimingRecorder: deps.TimingRecorder,
-		HookDispatcher: deps.HookDispatcher,
-		Rules:          deps.Rules,
-		Authorization:  authorizer,
-		Tasks:          deps.Records,
-		Events:         deps.ToolExecutions,
-		Entries:        deps.Entries,
-		Calls:          deps.ToolCalls,
-		Sessions:       deps.Sessions,
-		Agents:         deps.Agents,
+	records, err := toolservice.NewService(toolservice.Dependencies{
+		Rules:    deps.Rules,
+		Tasks:    deps.Records,
+		Events:   deps.ToolExecutions,
+		Entries:  deps.Entries,
+		Calls:    deps.ToolCalls,
+		Sessions: deps.Sessions,
+		Agents:   deps.Agents,
+		Clock:    deps.Clock,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	executor, err := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
+		Catalog:        deps.Tools,
+		Operations:     records,
+		Reviewer:       reviewer,
 		Prepare:        toolinfra.Prepare,
 		Bind:           toolinfra.Bind,
-		Catalog:        deps.Tools,
+		HookDispatcher: deps.HookDispatcher,
+		TimingRecorder: deps.TimingRecorder,
+		Emitter:        deps.Emitter,
 		Clock:          deps.Clock,
+		Logf:           logging.NewFactory().Ensure(deps.Logger).Errorf,
 	})
 	if err != nil {
 		return nil, err
@@ -122,6 +130,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		ConfigMu:       deps.ConfigMu,
 		Recovery:       deps.Recovery,
 		Tools:          executor,
+		ToolRecords:    records,
 		Sessions:       deps.Sessions,
 		Workspaces:     deps.Workspaces,
 		PrimaryAgent:   deps.PrimaryAgent,

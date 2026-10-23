@@ -1,10 +1,10 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { stopAgent, pauseAgent, type AgentSnapshot, type ApiErrorCode } from '../../api'
+import { stopAgent, pauseAgent, type AgentView, type ApiErrorCode } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import type { AgentStore } from './agentStore'
 
 type AgentCommandContext = {
-    agent: AgentSnapshot | null
+    agent: AgentView | null
     busy: boolean
     refreshAgent: (id: string) => Promise<void>
     getSelectedAgentID: () => string
@@ -29,7 +29,7 @@ export function useAgentCommands({
 }: AgentCommandContext) {
     const control = useCallback(async (kind: 'pause' | 'cancel') => {
         if (!agent?.currentExecutionId || busy) return
-        const agentID = agent.id
+        const agentID = agent.ID
         const targetExecutionId = agent.currentExecutionId
         const selectedAgentID = getSelectedAgentID()
         const viewRequestID = viewRequestRef.current

@@ -1,50 +1,132 @@
 package storage
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"praxis/internal/core/toolexecution"
-	"slices"
+	"praxis/internal/errorcode"
+	"reflect"
 )
 
 type ToolExecutionRepository struct{ s *Store }
 
-// Read 按日志序号读取控制事件；投影仅在本次查询中存在。
-func (r ToolExecutionRepository) Read(ctx context.Context, key toolexecution.Key) (facts toolexecution.Facts, err error) {
+func (r ToolExecutionRepository) GetApprovalRequest(ctx context.Context, key toolexecution.Key) (value toolexecution.ApprovalRequest, found bool, err error) {
 	err = r.s.view(ctx, func() error {
-		facts, err = r.readLocked(key)
-		return err
+		event, ok, readErr := r.latestLocked(key, toolexecution.ApprovalRequired)
+		if readErr == nil && ok {
+			value, found = *event.Request, true
+		}
+		return readErr
 	})
-	return facts, err
+	return
 }
 
-func (r ToolExecutionRepository) readLocked(key toolexecution.Key) (toolexecution.Facts, error) {
-	var facts toolexecution.Facts
-	keys := r.s.keys(lookupKey{kind: "tool-events", owner: key.ExecutionID.String(), value: key.CallID})
-	slices.SortFunc(keys, func(a, b entityKey) int {
-		left, _ := r.s.entry(a)
-		right, _ := r.s.entry(b)
-		return cmp.Compare(left.eventSequence, right.eventSequence)
+func (r ToolExecutionRepository) GetUserDecision(ctx context.Context, key toolexecution.Key) (value toolexecution.UserDecision, found bool, err error) {
+	err = r.s.view(ctx, func() error {
+		event, ok, readErr := r.latestLocked(key, toolexecution.ApprovalDecided)
+		if readErr == nil && ok {
+			value, found = *event.UserDecision, true
+		}
+		return readErr
 	})
-	for _, key := range keys {
-		data, err := r.s.payload(key)
-		if err != nil {
-			return facts, err
+	return
+}
+
+func (r ToolExecutionRepository) GetReview(ctx context.Context, key toolexecution.Key) (value toolexecution.ReviewRecord, found bool, err error) {
+	err = r.s.view(ctx, func() error {
+		event, ok, readErr := r.latestLocked(key, toolexecution.Reviewed)
+		if readErr == nil && ok {
+			value, found = *event.Review, true
 		}
-		var event toolexecution.Event
-		if err := decodeJSON(data, &event); err != nil {
-			return facts, err
+		return readErr
+	})
+	return
+}
+
+// latestLocked 只按序号定位所需事实并读取正文，不构建审批聚合投影。
+func (r ToolExecutionRepository) latestLocked(key toolexecution.Key, kind toolexecution.EventKind) (toolexecution.Event, bool, error) {
+	keys := r.s.keys(lookupKey{kind: "tool-event-kind", owner: key.String(), value: string(kind)})
+	var latest entityKey
+	var sequence uint64
+	for _, candidate := range keys {
+		entry, _ := r.s.entry(candidate)
+		if entry.eventSequence > sequence {
+			latest, sequence = candidate, entry.eventSequence
 		}
-		facts.Apply(event)
 	}
-	return facts, nil
+	if sequence == 0 {
+		return toolexecution.Event{}, false, nil
+	}
+	data, err := r.s.payload(latest)
+	if err != nil {
+		return toolexecution.Event{}, false, err
+	}
+	var event toolexecution.Event
+	err = decodeJSON(data, &event)
+	return event, err == nil, err
 }
 
-// Append 独立提交一个控制事件，工具调用不在存储锁内执行。
-func (r ToolExecutionRepository) Append(ctx context.Context, event toolexecution.Event) error {
+// SaveAuthorization 在单次存储锁内验证决定幂等性，矛盾决定不能覆盖已提交事实。
+func (r ToolExecutionRepository) SaveAuthorization(ctx context.Context, event toolexecution.Event) error {
 	return r.s.view(ctx, func() error {
+		if err := validateToolEvent(event); err != nil {
+			return err
+		}
+		if event.Kind == toolexecution.ApprovalDecided {
+			previous, found, err := r.latestLocked(event.Key, toolexecution.ApprovalDecided)
+			if err != nil {
+				return err
+			}
+			if found {
+				if previous.UserDecision.Approved != event.UserDecision.Approved {
+					return errorcode.ErrRequestConflict
+				}
+				return nil
+			}
+		}
+		if event.Kind == toolexecution.ApprovalRequired {
+			previous, found, err := r.latestLocked(event.Key, event.Kind)
+			if err != nil {
+				return err
+			}
+			if found {
+				if reflect.DeepEqual(previous.Request, event.Request) {
+					return nil
+				}
+				return errorcode.ErrRequestConflict
+			}
+		}
 		sequence := r.s.log.Sequence(event.SessionID.String()) + 1
 		return r.s.appendLocked(ctx, event.SessionID.String(), "tool_event", fmt.Sprintf("%s@%d", event.Key, sequence), string(event.Kind), event)
 	})
+}
+
+// validateAuthorizationLocked 在写入与重放时共同检查事实引用，不派生执行状态。
+func (r ToolExecutionRepository) validateAuthorizationLocked(event toolexecution.Event) error {
+	switch event.Kind {
+	case toolexecution.ApprovalRequired:
+		_, found, err := r.latestLocked(event.Key, event.Kind)
+		if err != nil {
+			return err
+		}
+		if found {
+			return errorcode.ErrRequestConflict
+		}
+	case toolexecution.ApprovalDecided:
+		request, found, err := r.latestLocked(event.Key, toolexecution.ApprovalRequired)
+		if err != nil {
+			return err
+		}
+		if !found || event.At.Before(request.At) {
+			return errorcode.ErrRequestConflict
+		}
+		_, found, err = r.latestLocked(event.Key, event.Kind)
+		if err != nil {
+			return err
+		}
+		if found {
+			return errorcode.ErrRequestConflict
+		}
+	}
+	return nil
 }

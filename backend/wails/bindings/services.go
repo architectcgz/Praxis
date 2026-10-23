@@ -47,7 +47,7 @@ type WorkspaceService interface {
 }
 
 type AgentService interface {
-	GetAgentView(context.Context, identity.AgentID, int) (agentservice.AgentView, error)
+	GetAgentView(context.Context, identity.AgentID) (agentservice.AgentView, error)
 	ListAgentEntries(context.Context, identity.AgentID) ([]sessionentry.ContextEntry, error)
 	PauseAgent(context.Context, agentservice.ControlInput) (agentservice.ControlResult, error)
 	StopAgent(context.Context, agentservice.ControlInput) (agentservice.ControlResult, error)
@@ -55,7 +55,7 @@ type AgentService interface {
 
 type AgentCommands interface {
 	ListToolApprovals(context.Context, identity.AgentID) ([]toolservice.Approval, error)
-	StopToolCall(context.Context, toolservice.ControlRequest) error
+	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
 	SubmitTask(context.Context, sessionservice.TaskInput) (execution.SubmitResult, error)

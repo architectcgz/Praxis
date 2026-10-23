@@ -9,11 +9,10 @@ import (
 type ExecutionStatus string
 
 const (
-	ExecutionStarting        ExecutionStatus = "starting"
-	ExecutionRunning         ExecutionStatus = "running"
-	ExecutionWaitingApproval ExecutionStatus = "waiting_approval"
-	ExecutionEnding          ExecutionStatus = "ending"
-	ExecutionEnded           ExecutionStatus = "ended"
+	ExecutionStarting ExecutionStatus = "starting"
+	ExecutionRunning  ExecutionStatus = "running"
+	ExecutionEnding   ExecutionStatus = "ending"
+	ExecutionEnded    ExecutionStatus = "ended"
 )
 
 type ExecutionOutcome string
@@ -79,18 +78,13 @@ func NewExecution(
 }
 
 func (e Execution) Active() bool {
-	return e.Status == ExecutionStarting || e.Status == ExecutionRunning || e.Status == ExecutionWaitingApproval || e.Status == ExecutionEnding
+	return e.Status == ExecutionStarting || e.Status == ExecutionRunning || e.Status == ExecutionEnding
 }
 
 // Start 记录首次启动状态和时间；调用方负责确认执行尚未启动。
 func (e *Execution) Start(at time.Time) {
 	e.Status = ExecutionRunning
 	e.StartedAt = at.UTC()
-}
-
-// Resume 恢复运行状态并保留首次启动时间；调用方负责确认执行允许恢复。
-func (e *Execution) Resume() {
-	e.Status = ExecutionRunning
 }
 
 // BeginEnding 标记执行已返回；调用方负责检查前置状态。
@@ -108,9 +102,4 @@ func (e *Execution) End(
 	e.Outcome = outcome
 	e.FailureCode = failureCode
 	e.EndedAt = at.UTC()
-}
-
-// WaitForApproval 记录审批等待状态；调用方负责确认执行允许等待审批。
-func (e *Execution) WaitForApproval() {
-	e.Status = ExecutionWaitingApproval
 }

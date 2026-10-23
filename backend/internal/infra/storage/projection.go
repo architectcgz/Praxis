@@ -83,7 +83,7 @@ func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey
 			return key, entry, errors.New("tool event payload does not match its event type")
 		}
 		entityID, sessionID = fmt.Sprintf("%s@%d", v.Key, event.Sequence), v.SessionID.String()
-		group("tool-events", v.ExecutionID.String(), v.CallID)
+		group("tool-event-kind", v.Key.String(), string(v.Kind))
 		link("agent_execution", v.ExecutionID.String())
 	case sessionmodel.SharedFact:
 		entityID, sessionID = v.ID.String(), v.SessionID.String()

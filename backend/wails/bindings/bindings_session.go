@@ -5,6 +5,7 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -81,7 +82,7 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 		Title:       view.Session.Title,
 		CreatedAt:   view.Session.CreatedAt,
 		UpdatedAt:   view.Session.UpdatedAt,
-		Agents:      make([]dto.AgentSnapshot, 0, len(view.Agents)),
+		Agents:      make([]agentservice.AgentView, 0, len(view.Agents)),
 		Tasks:       make([]dto.QueuedTask, 0, len(view.Tasks)),
 	}
 	for _, value := range view.Tasks {
@@ -93,7 +94,7 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 		})
 	}
 	for _, value := range view.Agents {
-		result.Agents = append(result.Agents, agentSnapshot(value))
+		result.Agents = append(result.Agents, agentservice.DescribeAgent(value))
 	}
 	return result, nil
 }

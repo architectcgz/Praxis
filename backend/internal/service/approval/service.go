@@ -21,7 +21,7 @@ type Dependencies struct {
 	GlobalApprovalMode func() security.ApprovalMode
 }
 
-// Service 负责审批模式配置，并与工具启动共用配置锁。
+// Service 负责审批模式配置，与新 ToolCall 的规则读取共用配置锁。
 type Service struct {
 	configMu           *sync.RWMutex
 	projects           repository.Project

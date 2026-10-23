@@ -181,7 +181,7 @@ func validateAgentExecution(e agentexecution.Execution) error {
 		}
 	}
 	switch e.Status {
-	case agentexecution.ExecutionStarting, agentexecution.ExecutionRunning, agentexecution.ExecutionWaitingApproval, agentexecution.ExecutionEnding, agentexecution.ExecutionEnded:
+	case agentexecution.ExecutionStarting, agentexecution.ExecutionRunning, agentexecution.ExecutionEnding, agentexecution.ExecutionEnded:
 	default:
 		return fmt.Errorf("agent_execution: unknown status: %w", errorcode.ErrInvalidValue)
 	}
@@ -195,7 +195,7 @@ func validateAgentExecution(e agentexecution.Execution) error {
 	if e.Status == agentexecution.ExecutionStarting && (!e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
 		return fmt.Errorf("agent_execution: starting execution has terminal fields: %w", errorcode.ErrInvalidValue)
 	}
-	if (e.Status == agentexecution.ExecutionRunning || e.Status == agentexecution.ExecutionWaitingApproval || e.Status == agentexecution.ExecutionEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
+	if (e.Status == agentexecution.ExecutionRunning || e.Status == agentexecution.ExecutionEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
 		return fmt.Errorf("agent_execution: active execution has invalid lifecycle fields: %w", errorcode.ErrInvalidValue)
 	}
 	if e.Status == agentexecution.ExecutionEnded {

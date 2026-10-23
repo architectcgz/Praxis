@@ -1,9 +1,9 @@
-import type { AgentEvent, ContextEntry, AgentSnapshot } from '../../api'
+import type { AgentEvent, ContextEntry, AgentView } from '../../api'
 import { mergeStreamingEvent } from './streaming'
 import type { PendingUserMessage, StreamingOutputs } from './types'
 
 export type AgentEntry = {
-    agent: AgentSnapshot
+    agent: AgentView
     history?: ContextEntry[]
     loading: boolean
     error: string
@@ -34,11 +34,11 @@ export function createAgentStore() {
             emitData()
             updateOutput({ ...output, streamingOutputs: {}, awaitingAgentId: '' })
         },
-        setRoster(agents: AgentSnapshot[]) {
-            const ids = agents.map((agent) => agent.id)
+        setRoster(agents: AgentView[]) {
+            const ids = agents.map((agent) => agent.ID)
             const byId = Object.fromEntries(agents.map((agent) => {
-                const cached = data.byId[agent.id]
-                return [agent.id, cached ? { ...cached } : {
+                const cached = data.byId[agent.ID]
+                return [agent.ID, cached ? { ...cached } : {
                     agent, loading: false, error: '',
                 }]
             }))
@@ -51,12 +51,12 @@ export function createAgentStore() {
             updateOutput({ ...output, awaitingAgentId: '' })
         },
         startLoading(id: string) { updateEntry(id, (entry) => ({ ...entry, loading: entry.history === undefined })) },
-        loaded(id: string, agent: AgentSnapshot, history?: ContextEntry[], error = '') {
+        loaded(id: string, agent: AgentView, history?: ContextEntry[], error = '') {
             updateEntry(id, (entry) => ({ ...entry, agent, loading: false, error, history: history ?? entry.history }))
             // 完整历史加载成功后直接结束该执行的临时展示，不扫描正文做去重或修补。
             if (history) {
                 const current = output.streamingOutputs[id]
-                const ended = current && agent.executions.some((execution) => execution.id === current.executionId && execution.status === 'ended')
+                const ended = current && agent.currentExecutionId !== current.executionId
                 const streamingOutputs = { ...output.streamingOutputs }
                 if (ended) delete streamingOutputs[id]
                 updateOutput({ ...output, streamingOutputs,

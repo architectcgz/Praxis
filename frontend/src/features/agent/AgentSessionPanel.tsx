@@ -1,6 +1,6 @@
 import { useSyncExternalStore, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
-import type { ContextEntry, AgentSnapshot, ModelOption } from '../../api'
+import type { ContextEntry, AgentView, ModelOption } from '../../api'
 import type { AgentOutputSource } from './agentStore'
 import { CollaborationViews } from './output/CollaborationViews'
 import { AgentConversation } from './AgentConversation'
@@ -12,8 +12,8 @@ import { ModelUsageProvider } from './SessionTokenUsage'
 type AgentSessionPanelProps = {
     projectId: string
     loading: boolean
-    agents: AgentSnapshot[]
-    agent: AgentSnapshot | null
+    agents: AgentView[]
+    agent: AgentView | null
     history: ContextEntry[]
     agentHistories: Record<string, ContextEntry[]>
     agentHistoryErrors: Record<string, string>
@@ -47,16 +47,16 @@ export function AgentSessionPanel({ projectId, loading, agents, agent, history, 
         return <PrimaryAgentTaskInput input={input} setInput={setInput} busy={busy} onSend={onSend} commands={commands} onCommand={onCommand} />
     }
 
-    const hasDelegates = agents.some((item) => item.definitionId === 'delegate' || item.profile === 'delegate')
+    const hasDelegates = agents.some((item) => item.DefinitionID === 'delegate' || item.Profile === 'delegate')
     return (
-        <ModelUsageProvider key={agent.sessionId} sessionId={agent.sessionId}>
-        <OperationTimingsProvider key={agent.sessionId} agentIds={agents.map((item) => item.id)}>
-        <FilePreviewProvider sessionId={agent.sessionId}>
+        <ModelUsageProvider key={agent.SessionID} sessionId={agent.SessionID}>
+        <OperationTimingsProvider key={agent.SessionID} agentIds={agents.map((item) => item.ID)}>
+        <FilePreviewProvider sessionId={agent.SessionID}>
         <AgentConversation
             projectId={projectId}
             agent={agent}
             history={history}
-            collaboration={agent.definitionId === 'primary' && hasDelegates ? (
+            collaboration={agent.DefinitionID === 'primary' && hasDelegates ? (
                 <CollaborationViews
                     agents={agents}
                     histories={agentHistories}
@@ -65,9 +65,9 @@ export function AgentSessionPanel({ projectId, loading, agents, agent, history, 
                     onSelectAgent={onSelectAgent}
                 />
             ) : undefined}
-            streamingOutput={streamingOutputs[agent.id] || null}
+            streamingOutput={streamingOutputs[agent.ID] || null}
             pendingUserMessages={pendingUserMessages}
-            awaitingOutput={awaitingAgentId === agent.id}
+            awaitingOutput={awaitingAgentId === agent.ID}
             historyError={historyError}
             input={input}
             setInput={setInput}
