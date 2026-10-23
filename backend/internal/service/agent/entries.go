@@ -48,9 +48,6 @@ func (s *Service) ListAgentEntries(ctx context.Context, agentID identity.AgentID
 	if ctx == nil {
 		return nil, errors.New("agent message context is required")
 	}
-	if s.entries == nil {
-		return nil, errors.New("agent message query is unavailable")
-	}
 	var entries []sessionentry.ContextEntry
 	err := func(ctx context.Context) error {
 		agent, err := s.agents.Get(ctx, agentID)

@@ -43,10 +43,7 @@ func (r *Coordinator) run(
 	}
 
 	assistantCommitter, err := r.operations.AssistantCommitter(ctx, task.ID)
-	if err != nil || assistantCommitter == nil {
-		if err == nil {
-			err = errors.New("execution service returned a nil assistant committer")
-		}
+	if err != nil {
 		r.logError(task, "resolve assistant committer", err)
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
@@ -76,7 +73,7 @@ func (r *Coordinator) run(
 		return
 	}
 
-	executor := r.tools.ForExecution(task.ID, workspace.Path, func(waitCtx context.Context) error {
+	executor := r.tools.ForExecution(workspace.Path, func(waitCtx context.Context) error {
 		return r.waitForToolApproval(waitCtx, active)
 	})
 	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor)

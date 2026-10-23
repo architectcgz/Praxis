@@ -17,15 +17,12 @@ func (s *Service) PrepareReview(ctx context.Context, call sessionentry.ToolCall,
 	if err != nil {
 		return executionmodel.ReviewRequest{}, err
 	}
-	if task.Status != agentexecution.ExecutionRunning || task.AgentID != call.AgentID || task.SessionID != call.SessionID {
+	if task.Status != agentexecution.ExecutionRunning {
 		return executionmodel.ReviewRequest{}, errorcode.ErrRequestConflict
 	}
 	owner, err := s.deps.Agents.Get(ctx, task.AgentID)
 	if err != nil {
 		return executionmodel.ReviewRequest{}, err
-	}
-	if owner.SessionID != task.SessionID || call.AgentID != owner.ID {
-		return executionmodel.ReviewRequest{}, errorcode.ErrRequestConflict
 	}
 	input, err := s.deps.Entries.Get(ctx, agentservice.EntryStream(owner), task.InputEntryID)
 	if err != nil {

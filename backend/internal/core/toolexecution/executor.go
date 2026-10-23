@@ -50,15 +50,13 @@ func NewExecutor(deps ExecutorDependencies) (*Executor, error) {
 // ExecutionTools 只绑定本次已取得运行权的 AgentExecution 的环境。
 type ExecutionTools struct {
 	executor      *Executor
-	executionID   identity.AgentExecutionID
 	workspacePath string
 	awaitApproval func(context.Context) error
 }
 
-func (e *Executor) ForExecution(id identity.AgentExecutionID, workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
+func (e *Executor) ForExecution(workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
 	return &ExecutionTools{
 		executor:      e,
-		executionID:   id,
 		workspacePath: workspacePath,
 		awaitApproval: awaitApproval,
 	}
@@ -66,17 +64,7 @@ func (e *Executor) ForExecution(id identity.AgentExecutionID, workspacePath stri
 
 // Execute 在同一次调用中准备参数、授权、等待审批、执行工具并提交回执。
 func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.ToolCall) (sessionentry.ContextEntry, error) {
-	if ctx == nil {
-		return sessionentry.ContextEntry{}, errors.New("tool execution context is required")
-	}
-	if tools.awaitApproval == nil {
-		return sessionentry.ContextEntry{}, errors.New("tool approval wait callback is required")
-	}
-
 	s := tools.executor
-	if tools.executionID == "" || call.ExecutionID != tools.executionID {
-		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
-	}
 	if stored, found, err := s.deps.Operations.GetResult(ctx, call.Key); err != nil || found {
 		return stored, err
 	}
@@ -255,7 +243,7 @@ func (e *Executor) appendError(ctx context.Context, call sessionentry.ToolCall, 
 }
 
 func (e *Executor) checkCall(ctx context.Context, call sessionentry.ToolCall) (identity.TaskID, error) {
-	stored, execution, err := e.deps.Operations.ResolveCall(ctx, ControlRequest{
+	_, execution, err := e.deps.Operations.ResolveCall(ctx, ControlRequest{
 		SessionID:   call.SessionID,
 		AgentID:     call.AgentID,
 		ExecutionID: call.ExecutionID,
@@ -264,7 +252,7 @@ func (e *Executor) checkCall(ctx context.Context, call sessionentry.ToolCall) (i
 	if err != nil {
 		return "", err
 	}
-	if execution.Status != agentexecution.ExecutionRunning || stored.TurnID != call.TurnID || stored.Name != call.Name || stored.RequestID != call.RequestID {
+	if execution.Status != agentexecution.ExecutionRunning {
 		return "", errorcode.ErrRequestConflict
 	}
 	return execution.SourceTaskID, nil
