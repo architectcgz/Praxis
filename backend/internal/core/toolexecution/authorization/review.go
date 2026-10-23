@@ -1,21 +1,17 @@
-package toolexecution
+package authorization
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/core/toolexecution"
-	"praxis/internal/errorcode"
-	"praxis/internal/repository"
-	agentservice "praxis/internal/service/agent"
 	"praxis/internal/utils/jsonutil"
 	"strings"
 	"unicode/utf8"
@@ -43,45 +39,22 @@ const riskReviewSchema = `{
 	"additionalProperties": false
 }`
 
-// RiskReviewer 使用既有模型与消息读取能力进行独立审核，不写消息、不决定调用状态。
-type RiskReviewer struct {
-	TimingRecorder *timing.Recorder
-	Provider       providerapi.Provider
-	Entries        repository.Entries
-	Agents         repository.Agent
-	Hooks          *hook.Dispatcher
-	ObserveUsage   func(providerapi.UsageRecord)
-}
-
-// Review 对冻结操作返回审核结论；流异常、非法输出或超窗返回错误，由编排层提交不确定结论。
-func (r RiskReviewer) Review(ctx context.Context, task agentexecution.Execution, call sessionentry.ToolCall, args json.RawMessage, workspacePath string, decision security.ApprovalDecision, attempt toolexecution.RiskReview) (assessment security.RiskAssessment, err error) {
-	ctx, scope := r.Hooks.Start(ctx, hook.Operation{
+// review 直接调用 Provider 审核冻结操作，不读取仓储或调用 Service。
+func (r *Authorizer) review(ctx context.Context, request Input) (assessment security.RiskAssessment, err error) {
+	call, args, model := request.Call, request.Arguments, request.Review.Model
+	attempt := request.Review.Attempt
+	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
-			SessionID:   task.SessionID,
-			AgentID:     task.AgentID,
-			ExecutionID: task.ID,
+			SessionID:   call.SessionID,
+			AgentID:     call.AgentID,
+			ExecutionID: call.ExecutionID,
 			TurnID:      attempt.TurnID,
 		},
 		Kind:        hook.OperationProvider,
-		Name:        task.Config.Model.ProviderID + "/" + task.Config.Model.ModelID,
+		Name:        model.ProviderID + "/" + model.ModelID,
 		ReferenceID: "risk-review:" + attempt.TurnID.String(),
 	})
 	defer func() { scope.End(hook.Result{Err: err}) }()
-	owner, err := r.Agents.Get(ctx, task.AgentID)
-	if err != nil {
-		return assessment, err
-	}
-	if owner.SessionID != task.SessionID || call.AgentID != owner.ID {
-		return assessment, errorcode.ErrRequestConflict
-	}
-	input, err := r.Entries.Get(ctx, agentservice.EntryStream(owner), task.InputEntryID)
-	if err != nil {
-		return assessment, err
-	}
-	userTask := input.TextContent()
-	if userTask == "" {
-		return assessment, errors.New("risk review cannot locate the task input")
-	}
 	data, err := json.Marshal(struct {
 		Task      string          `json:"task"`
 		Tool      string          `json:"tool"`
@@ -89,11 +62,11 @@ func (r RiskReviewer) Review(ctx context.Context, task agentexecution.Execution,
 		Workspace string          `json:"workspace"`
 		Rule      string          `json:"rule"`
 	}{
-		Task:      userTask,
+		Task:      request.Review.UserTask,
 		Tool:      string(call.Name),
 		Arguments: args,
-		Workspace: workspacePath,
-		Rule:      decision.RuleID,
+		Workspace: request.Review.WorkspacePath,
+		Rule:      request.Decision.RuleID,
 	})
 	if err != nil {
 		return assessment, err
@@ -105,23 +78,23 @@ func (r RiskReviewer) Review(ctx context.Context, task agentexecution.Execution,
 			Role:      role.User,
 			Content:   []sessionentry.Block{{Kind: sessionentry.BlockText, Text: string(data)}},
 		}},
-	}, appcontext.Limits{ContextWindow: task.Config.Model.ContextWindow, MaxOutputTokens: task.Config.Model.MaxOutputTokens})
+	}, appcontext.Limits{ContextWindow: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens})
 	if err != nil {
 		return assessment, err
 	}
 	ctx, span := r.TimingRecorder.Start(ctx, timing.Operation{
-		ExecutionID: task.ID.String(),
+		ExecutionID: call.ExecutionID.String(),
 		Kind:        timing.Provider,
-		Name:        task.Config.Model.ProviderID + "/" + task.Config.Model.ModelID,
+		Name:        model.ProviderID + "/" + model.ModelID,
 		ReferenceID: "risk-review:" + attempt.TurnID.String(),
 	})
 	defer func() { span.End(timing.ResultStatus(ctx, err)) }()
 	stream, err := r.Provider.Stream(ctx, providerapi.Request{
-		ExecutionID:     task.ID,
-		PromptCacheKey:  task.SessionID.String(),
+		ExecutionID:     call.ExecutionID,
+		PromptCacheKey:  call.SessionID.String(),
 		Context:         history,
-		Model:           task.Config.Model.Clone(),
-		MaxOutputTokens: task.Config.Model.MaxOutputTokens,
+		Model:           model.Clone(),
+		MaxOutputTokens: model.MaxOutputTokens,
 		TurnID:          attempt.TurnID,
 		OutputSchema: &providerapi.OutputSchema{
 			Name:   "risk_assessment",
@@ -154,13 +127,14 @@ func (r RiskReviewer) Review(ctx context.Context, task agentexecution.Execution,
 				}
 				text.WriteString(event.Text)
 			case providerapi.StreamUsage:
-				if event.Usage != nil && event.Usage.Valid() && r.ObserveUsage != nil {
-					r.ObserveUsage(providerapi.UsageRecord{
-						SessionID:   task.SessionID.String(),
-						AgentID:     task.AgentID.String(),
-						ExecutionID: task.ID.String(),
+				if event.Usage != nil && event.Usage.Valid() {
+					r.Emitter.Emit(coreevent.Event{
+						Kind:        coreevent.ModelUsage,
+						SessionID:   call.SessionID,
+						AgentID:     call.AgentID,
+						ExecutionID: call.ExecutionID,
 						TurnID:      attempt.TurnID,
-						Usage:       *event.Usage,
+						Usage:       event.Usage,
 					})
 				}
 			case providerapi.StreamThinkingDelta, providerapi.StreamReasoningState:

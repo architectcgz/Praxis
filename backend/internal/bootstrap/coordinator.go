@@ -4,12 +4,13 @@ import (
 	"praxis/internal/clock"
 	"praxis/internal/core/agent/execution/timing"
 	contextcompress "praxis/internal/core/context/compress"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
-	"praxis/internal/identity"
+	"praxis/internal/core/toolexecution/authorization"
 	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
@@ -41,7 +42,7 @@ type coordinatorDependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	ConfigMu       *sync.RWMutex
-	Events         *execution.EventPublisher
+	Emitter        *coreevent.Emitter
 	ObserveUsage   func(providerapi.UsageRecord)
 	SummaryFormat  contextcompress.SummaryFormat
 	Runner         *loop.Runner
@@ -49,40 +50,33 @@ type coordinatorDependencies struct {
 }
 
 func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, error) {
-	observe := func(event loop.Event) {
-		if deps.ObserveUsage != nil && event.Kind == loop.EventModelUsage && event.Usage != nil {
-			deps.ObserveUsage(providerapi.UsageRecord{
-				SessionID:   event.SessionID.String(),
-				AgentID:     event.AgentID.String(),
-				ExecutionID: event.ExecutionID.String(),
-				TurnID:      event.TurnID,
-				Usage:       *event.Usage,
-			})
-		}
-		deps.Events.Publish(execution.LoopEvent(event))
+	if deps.ObserveUsage != nil {
+		// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
+		deps.Emitter.Subscribe(func(value coreevent.Event) {
+			if value.Kind == coreevent.ModelUsage && value.Usage != nil {
+				deps.ObserveUsage(providerapi.UsageRecord{
+					SessionID:   value.SessionID.String(),
+					AgentID:     value.AgentID.String(),
+					ExecutionID: value.ExecutionID.String(),
+					TurnID:      value.TurnID,
+					Usage:       *value.Usage,
+				})
+			}
+		})
 	}
-	reviewer := toolservice.RiskReviewer{
+	authorizer := &authorization.Authorizer{
 		Provider:       deps.Provider,
-		Entries:        deps.Entries,
-		Agents:         deps.Agents,
-		Hooks:          deps.HookDispatcher,
 		TimingRecorder: deps.TimingRecorder,
-		ObserveUsage: func(record providerapi.UsageRecord) {
-			observe(loop.Event{
-				Kind:        loop.EventModelUsage,
-				SessionID:   identity.SessionID(record.SessionID),
-				AgentID:     identity.AgentID(record.AgentID),
-				ExecutionID: identity.AgentExecutionID(record.ExecutionID),
-				TurnID:      record.TurnID,
-				Usage:       &record.Usage,
-			})
-		},
+		HookDispatcher: deps.HookDispatcher,
+		Emitter:        deps.Emitter,
+		Clock:          deps.Clock,
+		Logf:           logging.NewFactory().Ensure(deps.Logger).Errorf,
 	}
 	executor, err := toolservice.NewService(toolservice.Dependencies{
 		TimingRecorder: deps.TimingRecorder,
 		HookDispatcher: deps.HookDispatcher,
 		Rules:          deps.Rules,
-		Review:         reviewer.Review,
+		Authorization:  authorizer,
 		Tasks:          deps.Records,
 		Events:         deps.ToolExecutions,
 		Entries:        deps.Entries,
@@ -103,13 +97,14 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		SummaryFormat:  deps.SummaryFormat,
 		Tools:          deps.Tools,
 		HookDispatcher: deps.HookDispatcher,
-		EventObserver:  observe,
+		Emitter:        deps.Emitter,
 		Logf:           logging.NewFactory().Ensure(deps.Logger).Infof,
 	}
 	if deps.Runner != nil {
 		runnerDeps = deps.Runner.Dependencies
 	}
 	// 执行进度始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
+	runnerDeps.Emitter = deps.Emitter
 	runnerDeps.Progress = deps.Progress
 	runnerDeps.TimingRecorder = deps.TimingRecorder
 	runnerDeps.HookDispatcher = deps.HookDispatcher
@@ -118,7 +113,6 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		return nil, err
 	}
 	return execution.NewCoordinator(execution.Config{
-		Events:         deps.Events,
 		Loop:           &runner,
 		ActiveTasks:    deps.ActiveTasks,
 		Operations:     deps.Tasks,

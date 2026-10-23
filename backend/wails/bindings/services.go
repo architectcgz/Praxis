@@ -3,6 +3,8 @@ package bindings
 import (
 	"context"
 	"errors"
+	"praxis/internal/core/agent/execution/timing"
+	coreevent "praxis/internal/core/event"
 	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
 	providerapi "praxis/internal/core/provider"
@@ -12,7 +14,6 @@ import (
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	execution "praxis/internal/service/agent/coordinator"
-	executionservice "praxis/internal/service/agent/execution"
 	approvalservice "praxis/internal/service/approval"
 	modelservice "praxis/internal/service/model"
 	projectservice "praxis/internal/service/project"
@@ -74,12 +75,8 @@ type ModelConfigService interface {
 	DiscoverProviderModels(context.Context, string) ([]string, error)
 }
 
-type AgentEventSource interface {
-	SubscribeAgentEvents(func(execution.Event)) func()
-}
-
 type TimingService interface {
-	ListAgentTimings(context.Context, string, int) ([]executionservice.Timing, error)
+	ListAgentTimings(context.Context, string, int) ([]timing.View, error)
 }
 
 type UsageService interface {
@@ -97,7 +94,7 @@ type Services struct {
 	Commands       AgentCommands
 	Models         ModelCatalog
 	ModelConfig    ModelConfigService
-	Events         AgentEventSource
+	Emitter        *coreevent.Emitter
 	Timings        TimingService
 	Usages         UsageService
 	SessionLogPath func(context.Context, identity.SessionID) (string, error)
@@ -114,7 +111,7 @@ func (s Services) Validate() error {
 		"commands":            s.Commands == nil,
 		"models":              s.Models == nil,
 		"model configuration": s.ModelConfig == nil,
-		"events":              s.Events == nil,
+		"event emitter":       s.Emitter == nil,
 		"timings":             s.Timings == nil,
 		"usages":              s.Usages == nil,
 		"session log path":    s.SessionLogPath == nil,

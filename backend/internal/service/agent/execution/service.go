@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	taskmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
@@ -21,7 +22,7 @@ type Dependencies struct {
 	Controls       repository.AgentControl
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
-	EventObserver  func(Event)
+	Emitter        *coreevent.Emitter
 	Sessions       repository.Session
 	Agents         repository.Agent
 	Records        repository.AgentExecution
@@ -38,7 +39,7 @@ type Service struct {
 	controls       repository.AgentControl
 	hookDispatcher *hook.Dispatcher
 	logger         *logging.Logger
-	eventObserver  func(Event)
+	emitter        *coreevent.Emitter
 	sessions       repository.Session
 	agents         repository.Agent
 	records        repository.AgentExecution
@@ -74,7 +75,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		controls:       deps.Controls,
 		hookDispatcher: deps.HookDispatcher,
 		logger:         logging.NewFactory().Ensure(deps.Logger),
-		eventObserver:  deps.EventObserver,
+		emitter:        deps.Emitter,
 		sessions:       deps.Sessions,
 		agents:         deps.Agents,
 		records:        deps.Records,

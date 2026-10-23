@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/security"
@@ -78,7 +79,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 	if err := agentservice.ValidateStoredDefinitions(ctx, config.agents.List(), repos.Sessions, repos.Agents); err != nil {
 		return nil, err
 	}
-	events := execution.NewEventPublisher()
+	emitter := coreevent.NewEmitter()
 	hooks, err := hook.NewDispatcher(options.Hooks...)
 	if err != nil {
 		return nil, err
@@ -89,7 +90,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		return nil, err
 	}
 	models := buildModelService(root, config, a.logger, configMu)
-	coordinator, timings, err := buildExecution(resources, repos, config, a.sessions, hooks, events, configMu, options.Runner)
+	coordinator, timings, err := buildExecution(resources, repos, config, a.sessions, hooks, emitter, configMu, options.Runner)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +143,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		Commands:       a.coordinator,
 		Models:         models,
 		ModelConfig:    models,
-		Events:         events,
+		Emitter:        emitter,
 		Timings:        timings,
 		Usages:         a.sessions,
 		SessionLogPath: a.store.SessionLogPath,

@@ -68,31 +68,22 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
-		if !task.Active() || !facts.AwaitingApproval() {
+		if !task.Active() || !facts.AwaitingApproval() || !facts.StartedAt.IsZero() || !facts.StopRequestedAt.IsZero() {
 			return errorcode.ErrRequestConflict
 		}
-		if !approve {
-			_, err := s.appendError(txCtx, call, "tool_approval_denied", "The user denied this tool call.")
+		var decision security.ApprovalDecision
+		if approve {
+			decision, err = s.deps.Rules.Decide(txCtx, call, json.RawMessage(facts.Summary))
+			if err != nil {
+				return err
+			}
+		}
+		result := s.deps.Authorization.DecideApproval(call, facts.ApprovalFacts, decision, approve)
+		if result.Denied != nil {
+			_, err := s.appendResult(txCtx, call, *result.Denied)
 			return err
 		}
-		decision, err := s.deps.Rules.Decide(txCtx, call, json.RawMessage(facts.Summary))
-		if err != nil {
-			return err
-		}
-		if decision.Action == security.ApprovalDeny {
-			_, err := s.appendError(txCtx, call, "tool_not_allowed", "The current configuration prohibits this operation. Rule: "+decision.RuleID)
-			return err
-		}
-		// 只批准展示的那份操作；启动前仍按最新规则重新授权或审核。
-		return s.deps.Events.Append(txCtx, executionmodel.Event{
-			Key:       call.Key,
-			SessionID: call.SessionID,
-			Kind:      executionmodel.Approved,
-			At:        s.clock.Now().UTC(),
-			Decision:  facts.Decision,
-			Source:    executionmodel.ApprovalSourceUser,
-			Summary:   facts.Summary,
-		})
+		return s.deps.Events.Append(txCtx, *result.Event)
 	}(ctx)
 	return task, err
 }
@@ -120,7 +111,7 @@ func (s *Service) ListApprovals(ctx context.Context, agentID identity.AgentID) (
 			if err != nil {
 				return err
 			}
-			if !facts.AwaitingApproval() {
+			if !facts.AwaitingApproval() || !facts.StartedAt.IsZero() || !facts.StopRequestedAt.IsZero() {
 				continue
 			}
 			call, err := s.deps.Calls.GetCall(txCtx, key)

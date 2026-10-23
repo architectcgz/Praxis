@@ -3,8 +3,7 @@ package bindings
 import (
 	"bytes"
 	"context"
-
-	execution "praxis/internal/service/agent/coordinator"
+	coreevent "praxis/internal/core/event"
 	"praxis/wails/dto"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -42,8 +41,8 @@ func (b *Bindings) All() []any {
 	return []any{b.projects, b.sessions, b.agents, b.commands, b.models}
 }
 
-// EmitAgentEvent 转发 Loop 展示流；Entry 直接沿用核心类型，其他事件字段按协议映射。
-func (b *Bindings) EmitAgentEvent(event execution.Event) {
+// EmitAgentEvent 将 Core 业务通知转为前端协议；Entry 直接沿用核心类型。
+func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	if event.AgentID == "" || event.ExecutionID == "" {
 		return
 	}
@@ -52,7 +51,7 @@ func (b *Bindings) EmitAgentEvent(event execution.Event) {
 		return
 	}
 	value := dto.AgentEvent{
-		Kind:           event.Kind,
+		Kind:           string(event.Kind),
 		Entries:        event.Entries,
 		SessionID:      event.SessionID.String(),
 		AgentID:        event.AgentID.String(),

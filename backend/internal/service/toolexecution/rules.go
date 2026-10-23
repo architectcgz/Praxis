@@ -6,24 +6,14 @@ import (
 	"errors"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/tool"
+	"praxis/internal/core/toolexecution/authorization"
 	"praxis/internal/identity"
 	"sync"
 )
 
-type ApprovalCatalog interface {
-	Get(tool.ToolName) (tool.Tool, bool)
-	DecideCommand(string) security.ApprovalDecision
-}
-
-// commandTool 提供已准备参数中的待审批命令，空字符串表示不应用命令规则。
-type commandTool interface {
-	ApprovalCommand(json.RawMessage) (string, error)
-}
-
 type ApprovalRules struct {
 	ConfigMu    *sync.RWMutex
-	Catalog     ApprovalCatalog
+	Catalog     authorization.ApprovalCatalog
 	DefaultMode func(context.Context, identity.SessionID) (security.ApprovalMode, error)
 }
 
@@ -38,19 +28,9 @@ func (r ApprovalRules) Decide(ctx context.Context, call sessionentry.ToolCall, a
 
 // decide 供已经持有配置读锁的启动临界区使用，避免嵌套 RWMutex 读锁。
 func (r ApprovalRules) decide(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
-	registered, enabled := r.Catalog.Get(call.Name)
-	if !enabled {
-		return security.ApprovalDecision{Action: security.ApprovalDeny, RuleID: "tool-disabled"}, nil
-	}
-	var matched security.ApprovalDecision
-	if source, ok := registered.(commandTool); ok {
-		command, err := source.ApprovalCommand(args)
-		if err != nil {
-			return security.ApprovalDecision{}, err
-		}
-		if command != "" {
-			matched = r.Catalog.DecideCommand(command)
-		}
+	matched, err := authorization.MatchApprovalRule(r.Catalog, call.Name, args)
+	if err != nil {
+		return security.ApprovalDecision{}, err
 	}
 	if matched.Action == security.ApprovalDeny {
 		return matched, nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
@@ -120,9 +121,9 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		return agentexecution.Execution{}, false, err
 	}
 	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。
-	if s.eventObserver != nil {
-		s.eventObserver(Event{
-			Kind:        EventEntriesAppended,
+	if s.emitter != nil {
+		s.emitter.Emit(coreevent.Event{
+			Kind:        coreevent.EntriesAppended,
 			SessionID:   result.SessionID,
 			AgentID:     result.AgentID,
 			ExecutionID: result.ID,

@@ -8,6 +8,7 @@ import (
 
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
@@ -134,18 +135,18 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 		s.logger.Errorf("execution committed hook failed: %v", hookErr)
 	}
 	// 每轮仅发布一个终态事件；仅实际响应用户取消的执行发布取消通知。
-	if s.eventObserver != nil {
-		kind := EventExecutionEnded
+	if s.emitter != nil {
+		kind := coreevent.ExecutionEnded
 		if endedExecution.FailureCode == agentexecution.ExecutionFailureRequestCanceled {
-			kind = EventRequestCanceled
+			kind = coreevent.RequestCanceled
 		}
-		s.eventObserver(Event{
+		s.emitter.Emit(coreevent.Event{
 			Kind:           kind,
 			SessionID:      endedExecution.SessionID,
 			AgentID:        endedExecution.AgentID,
 			ExecutionID:    endedExecution.ID,
 			Outcome:        string(endedExecution.Outcome),
-			FailureCode:    endedExecution.FailureCode,
+			FailureCode:    string(endedExecution.FailureCode),
 			FailureMessage: endedExecution.FailureMessage,
 		})
 	}

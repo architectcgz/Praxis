@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	appcontext "praxis/internal/core/context"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/tool"
@@ -25,8 +26,8 @@ func (r *Runner) summarizeContext(
 		return "", failCause(FailureStorage, err)
 	}
 	turnID := identity.NewTurnID(executionInput.ID, sequence)
-	r.emit(Event{
-		Kind:        EventTurnStarted,
+	r.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.TurnStarted,
 		SessionID:   executionInput.SessionID,
 		AgentID:     executionInput.AgentID,
 		ExecutionID: executionInput.ID,
@@ -59,8 +60,8 @@ func (r *Runner) summarizeContext(
 			text.WriteString(event.Text)
 		}
 	}
-	r.emit(Event{
-		Kind:        EventTurnCompleted,
+	r.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.TurnCompleted,
 		SessionID:   executionInput.SessionID,
 		AgentID:     executionInput.AgentID,
 		ExecutionID: executionInput.ID,

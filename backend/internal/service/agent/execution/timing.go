@@ -5,28 +5,11 @@ import (
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/identity"
 	"slices"
 	"time"
 )
-
-// Timing 是前端计时查询与通知的展示值；Agent 总耗时来自 Execution，不是操作 Span。
-type Timing struct {
-	ID              string
-	ParentID        string
-	SessionID       string
-	AgentID         string
-	ExecutionID     string
-	Kind            string
-	Name            string
-	ReferenceID     string
-	StartedAt       time.Time
-	FinishedAt      time.Time
-	DurationMS      *int64
-	FirstResponseMS *int64
-	Status          string
-	Revision        int
-}
 
 // RecordTiming 是 Recorder 的记录回调；观测失败只记日志，不能重放业务操作。
 func (s *Service) RecordTiming(record timing.Record) {
@@ -44,7 +27,7 @@ func (s *Service) RecordTiming(record timing.Record) {
 }
 
 // ListAgentTimings 从 Execution 仓储聚合操作记录，并派生执行本身的墙上时钟耗时。
-func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit int) ([]Timing, error) {
+func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit int) ([]timing.View, error) {
 	records, err := s.records.ListAgentTimings(ctx, identity.AgentID(agentID), limit)
 	if err != nil {
 		return nil, err
@@ -54,7 +37,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 		return nil, err
 	}
 	owners := make(map[string]agentexecution.Execution, len(executions))
-	result := make([]Timing, 0, len(records)+len(executions))
+	result := make([]timing.View, 0, len(records)+len(executions))
 	for _, execution := range executions {
 		owners[execution.ID.String()] = execution
 		if value := executionTiming(execution); value != nil {
@@ -72,19 +55,21 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 		}
 		result = append(result, operationTiming(execution, record))
 	}
-	slices.SortFunc(result, func(a, b Timing) int { return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID)) })
+	slices.SortFunc(result, func(a, b timing.View) int {
+		return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
+	})
 	if limit > 0 && len(result) > limit {
 		result = result[:limit]
 	}
 	return result, nil
 }
 
-func operationTiming(execution agentexecution.Execution, record timing.Record) Timing {
+func operationTiming(execution agentexecution.Execution, record timing.Record) timing.View {
 	revision := 1
 	if record.Status != timing.Running {
 		revision = 2
 	}
-	return Timing{
+	return timing.View{
 		ID:              record.ID,
 		ParentID:        record.ParentID,
 		SessionID:       execution.SessionID.String(),
@@ -102,11 +87,11 @@ func operationTiming(execution agentexecution.Execution, record timing.Record) T
 	}
 }
 
-func executionTiming(execution agentexecution.Execution) *Timing {
+func executionTiming(execution agentexecution.Execution) *timing.View {
 	if execution.StartedAt.IsZero() {
 		return nil
 	}
-	value := &Timing{
+	value := &timing.View{
 		ID:          "execution:" + execution.ID.String(),
 		SessionID:   execution.SessionID.String(),
 		AgentID:     execution.AgentID.String(),
@@ -131,10 +116,10 @@ func executionTiming(execution agentexecution.Execution) *Timing {
 	return value
 }
 
-func (s *Service) publishTiming(value Timing) {
-	if s.eventObserver != nil {
-		s.eventObserver(Event{
-			Kind:        "operation_timing",
+func (s *Service) publishTiming(value timing.View) {
+	if s.emitter != nil {
+		s.emitter.Emit(coreevent.Event{
+			Kind:        coreevent.OperationTiming,
 			SessionID:   identity.SessionID(value.SessionID),
 			AgentID:     identity.AgentID(value.AgentID),
 			ExecutionID: identity.AgentExecutionID(value.ExecutionID),

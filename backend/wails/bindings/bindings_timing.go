@@ -1,7 +1,7 @@
 package bindings
 
 import (
-	executionservice "praxis/internal/service/agent/execution"
+	"praxis/internal/core/agent/execution/timing"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
@@ -25,7 +25,7 @@ func (b *AgentBindings) ListAgentTimings(agentID string) ([]dto.OperationTiming,
 	return result, nil
 }
 
-func operationTiming(value executionservice.Timing) dto.OperationTiming {
+func operationTiming(value timing.View) dto.OperationTiming {
 	return dto.OperationTiming{
 		SessionID:       value.SessionID,
 		AgentID:         value.AgentID,

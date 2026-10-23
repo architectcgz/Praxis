@@ -28,7 +28,6 @@ type Config struct {
 	ActiveTasks       *taskmodel.ActiveTasks
 	Operations        ExecutionOperations
 	SessionTasks      SessionTasks
-	Events            *EventPublisher
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
@@ -49,7 +48,6 @@ type Coordinator struct {
 	activeTasks       *taskmodel.ActiveTasks
 	operations        ExecutionOperations
 	sessionTasks      SessionTasks
-	events            *EventPublisher
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
@@ -61,8 +59,8 @@ type Coordinator struct {
 }
 
 func NewCoordinator(config Config) (*Coordinator, error) {
-	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.SessionTasks == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil || config.Events == nil {
-		return nil, errors.New("execution loop, active tasks, task operations, queue, tool services and event publisher are required")
+	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.SessionTasks == nil || config.Tools == nil || config.Sessions == nil || config.Workspaces == nil {
+		return nil, errors.New("execution loop, active tasks, task operations, queue and tool services are required")
 	}
 	if config.PrimaryAgent == nil || config.SessionModels == nil || config.Recovery == nil {
 		return nil, errors.New("primary agent, session models and execution recovery source are required")
@@ -86,7 +84,6 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 		activeTasks:       config.ActiveTasks,
 		operations:        config.Operations,
 		sessionTasks:      config.SessionTasks,
-		events:            config.Events,
 		hookDispatcher:    config.HookDispatcher,
 		logger:            logging.NewFactory().Ensure(config.Logger),
 		transitionTimeout: timeout,

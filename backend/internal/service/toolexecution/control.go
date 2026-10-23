@@ -40,7 +40,7 @@ func (s *Service) registerAndMarkStarted(ctx context.Context, call sessionentry.
 		if err != nil {
 			return err
 		}
-		if decision.Action == security.ApprovalDeny || facts.Approval.ApprovedAt.IsZero() || facts.Decision != decision && !(decision.Action == security.ApprovalAsk && facts.Approval.Source == executionmodel.ApprovalSourceUser) {
+		if decision.Action == security.ApprovalDeny || !facts.ApprovalFacts.Allows(decision) {
 			return errAuthorizationChanged
 		}
 		if err := s.deps.Events.Append(txCtx, executionmodel.Event{

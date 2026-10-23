@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"praxis/internal/core/agent/execution/timing"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/security"
@@ -17,32 +18,20 @@ import (
 	"sync"
 )
 
-func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, events *execution.EventPublisher, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, *executionservice.Service, error) {
+func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, *executionservice.Service, error) {
 	active := &taskmodel.ActiveTasks{}
 	tasks, err := executionservice.NewService(executionservice.Dependencies{
 		Controls:       repos.Controls,
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
-		EventObserver: func(value executionservice.Event) {
-			events.Publish(execution.Event{
-				Kind:           value.Kind,
-				Timing:         value.Timing,
-				Entries:        value.Entries,
-				SessionID:      value.SessionID,
-				AgentID:        value.AgentID,
-				ExecutionID:    value.ExecutionID,
-				Outcome:        value.Outcome,
-				FailureCode:    string(value.FailureCode),
-				FailureMessage: value.FailureMessage,
-			})
-		},
-		Sessions:    repos.Sessions,
-		Agents:      repos.Agents,
-		Records:     repos.Executions,
-		Executions:  active,
-		Entries:     repos.Entries,
-		Definitions: config.agents,
-		Contexts:    repos.Contexts,
+		Emitter:        emitter,
+		Sessions:       repos.Sessions,
+		Agents:         repos.Agents,
+		Records:        repos.Executions,
+		Executions:     active,
+		Entries:        repos.Entries,
+		Definitions:    config.agents,
+		Contexts:       repos.Contexts,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -89,7 +78,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		ConfigMu:       configMu,
-		Events:         events,
+		Emitter:        emitter,
 		ObserveUsage:   usageObserver(repos.ModelUsage, resources.logger),
 		SummaryFormat:  defaultSummaryFormat(),
 		Runner:         runner,

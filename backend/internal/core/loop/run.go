@@ -7,6 +7,7 @@ import (
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
@@ -25,7 +26,7 @@ type Dependencies struct {
 	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
 	CompressionStrategy contextcompress.Strategy
 	SummaryFormat       contextcompress.SummaryFormat
-	EventObserver       EventObserver
+	Emitter             *coreevent.Emitter
 	Logf                func(string, ...any)
 }
 
@@ -46,8 +47,8 @@ func NewRunner(deps Dependencies) (Runner, error) {
 	if deps.Progress == nil {
 		return Runner{}, errors.New("loop execution progress is required")
 	}
-	if deps.EventObserver == nil {
-		return Runner{}, errors.New("loop event observer is required")
+	if deps.Emitter == nil {
+		return Runner{}, errors.New("loop event emitter is required")
 	}
 	if deps.Logf == nil {
 		deps.Logf = func(string, ...any) {}
@@ -141,16 +142,16 @@ func (r *Runner) executeTurn(
 			r.Logf("after iteration hook failed: %v", hookErr)
 		}
 	}()
-	r.emit(Event{
-		Kind:        EventTurnStarted,
+	r.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.TurnStarted,
 		SessionID:   executionInput.SessionID,
 		AgentID:     executionInput.AgentID,
 		ExecutionID: executionInput.ID,
 		TurnID:      turnID,
 	})
 	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", executionInput.ID, executionInput.Config.Model.ModelID, len(modelContext.Entries), turnID)
-	r.emit(Event{
-		Kind:        EventProviderWaiting,
+	r.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.ProviderWaiting,
 		SessionID:   executionInput.SessionID,
 		AgentID:     executionInput.AgentID,
 		ExecutionID: executionInput.ID,
@@ -186,7 +187,14 @@ func (r *Runner) executeTurn(
 					r.notifyAssistant(ctx, executionInput, stored)
 				}
 				*modelContext = modelContext.Append(stored)
-				r.emit(Event{Kind: EventTurnCompleted, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, TurnID: turnID, Entries: []sessionentry.ContextEntry{stored}})
+				r.Emitter.Emit(coreevent.Event{
+					Kind:        coreevent.TurnCompleted,
+					SessionID:   executionInput.SessionID,
+					AgentID:     executionInput.AgentID,
+					ExecutionID: executionInput.ID,
+					TurnID:      turnID,
+					Entries:     []sessionentry.ContextEntry{stored},
+				})
 			}
 		}
 		err = modelFailure(err)
@@ -225,8 +233,8 @@ func (r *Runner) executeTurn(
 		}
 	}
 	for _, call := range calls {
-		r.emit(Event{
-			Kind:        EventToolCall,
+		r.Emitter.Emit(coreevent.Event{
+			Kind:        coreevent.ToolCall,
 			SessionID:   executionInput.SessionID,
 			AgentID:     executionInput.AgentID,
 			ExecutionID: executionInput.ID,
@@ -238,8 +246,8 @@ func (r *Runner) executeTurn(
 	}
 	if response.stopReason == providerapi.StopCompleted || response.stopReason == providerapi.StopSequence {
 
-		r.emit(Event{
-			Kind:        EventTurnCompleted,
+		r.Emitter.Emit(coreevent.Event{
+			Kind:        coreevent.TurnCompleted,
 			Entries:     committed,
 			SessionID:   executionInput.SessionID,
 			AgentID:     executionInput.AgentID,
@@ -253,7 +261,14 @@ func (r *Runner) executeTurn(
 	committed = append(committed, results...)
 	if err != nil {
 		if len(committed) > 0 {
-			r.emit(Event{Kind: EventTurnCompleted, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, TurnID: turnID, Entries: committed})
+			r.Emitter.Emit(coreevent.Event{
+				Kind:        coreevent.TurnCompleted,
+				SessionID:   executionInput.SessionID,
+				AgentID:     executionInput.AgentID,
+				ExecutionID: executionInput.ID,
+				TurnID:      turnID,
+				Entries:     committed,
+			})
 		}
 		r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 		outcome, code, cause := loopResult(err)
@@ -263,8 +278,8 @@ func (r *Runner) executeTurn(
 		*modelContext = modelContext.Append(result)
 	}
 
-	r.emit(Event{
-		Kind:        EventTurnCompleted,
+	r.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.TurnCompleted,
 		Entries:     committed,
 		SessionID:   executionInput.SessionID,
 		AgentID:     executionInput.AgentID,

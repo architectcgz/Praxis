@@ -2,14 +2,11 @@ package loop
 
 import (
 	"errors"
+	coreevent "praxis/internal/core/event"
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
-
-func (r *Runner) emit(event Event) {
-	r.EventObserver(event)
-}
 
 // emitModelEvent 为实时模型事件补齐任务归属；工具事件需在 assistant 回执落库后发布。
 func (r *Runner) emitModelEvent(
@@ -19,7 +16,7 @@ func (r *Runner) emitModelEvent(
 	turnID identity.TurnID,
 	event providerapi.Event,
 ) {
-	output := Event{
+	output := coreevent.Event{
 		AgentID:     agentID,
 		ExecutionID: executionID,
 		TurnID:      turnID,
@@ -27,18 +24,18 @@ func (r *Runner) emitModelEvent(
 	}
 	switch event.Kind {
 	case providerapi.StreamTextDelta:
-		output.Kind = EventTextDelta
+		output.Kind = coreevent.TextDelta
 		output.Text = event.Text
 	case providerapi.StreamThinkingDelta:
-		output.Kind = EventThinkingDelta
+		output.Kind = coreevent.ThinkingDelta
 		output.Text = event.Text
 	case providerapi.StreamUsage:
-		output.Kind = EventModelUsage
+		output.Kind = coreevent.ModelUsage
 		output.Usage = event.Usage
 	default:
 		return
 	}
-	r.emit(output)
+	r.Emitter.Emit(output)
 }
 
 func (r *Runner) emitToolResult(
@@ -48,8 +45,8 @@ func (r *Runner) emitToolResult(
 	turnID identity.TurnID,
 	block sessionentry.Block,
 ) {
-	r.emit(Event{
-		Kind:        EventToolResult,
+	r.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.ToolResult,
 		SessionID:   sessionID,
 		AgentID:     agentID,
 		ExecutionID: executionID,
@@ -74,8 +71,8 @@ func (r *Runner) emitError(agentID identity.AgentID, executionID identity.AgentE
 			message = detail
 		}
 	}
-	r.emit(Event{
-		Kind:        EventError,
+	r.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.Error,
 		AgentID:     agentID,
 		ExecutionID: executionID,
 		TurnID:      turnID,

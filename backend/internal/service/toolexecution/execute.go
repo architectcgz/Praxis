@@ -20,7 +20,7 @@ func (scope *Scope) Execute(ctx context.Context, call sessionentry.ToolCall) (se
 	if ctx == nil {
 		return sessionentry.ContextEntry{}, errors.New("tool execution context is required")
 	}
-	if scope.awaitApproval == nil {
+	if scope.prepareApprovalWait == nil || scope.awaitApproval == nil {
 		return sessionentry.ContextEntry{}, errors.New("tool approval wait callback is required")
 	}
 	s := scope.service
@@ -63,10 +63,19 @@ func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, arg
 			return s.appendResult(ctx, call, *denied)
 		}
 		if pending {
-			// 审批等待保留在本次调用栈，参数只准备一次；回调不持有存储锁或工具控制锁。
-			waiting := call
-			waiting.Arguments = bytes.Clone(args)
-			if err := scope.awaitApproval(ctx, waiting, boundary.OperationID); err != nil {
+			// 先保存 Execution 等待状态，再由 Core 发布审批通知；参数在等待期间保持冻结。
+			task, err := s.deps.Tasks.Get(ctx, call.ExecutionID)
+			if err != nil {
+				return sessionentry.ContextEntry{}, err
+			}
+			if err := scope.prepareApprovalWait(ctx); err != nil {
+				return sessionentry.ContextEntry{}, err
+			}
+			waiting := boundary
+			waiting.SourceTaskID = task.SourceTaskID
+			waiting.Call.Arguments = bytes.Clone(args)
+			s.deps.Authorization.NotifyWaiting(ctx, waiting)
+			if err := scope.awaitApproval(ctx); err != nil {
 				return sessionentry.ContextEntry{}, err
 			}
 			// 拒绝和停止会直接提交回执，唤醒后优先消费已经完成的调用。

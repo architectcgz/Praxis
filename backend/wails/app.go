@@ -58,7 +58,7 @@ func (a *App) Attach(frontend bindings.Services, logger *logging.Logger, closer 
 	if closer == nil {
 		return errors.New("desktop application closer is required")
 	}
-	unsubscribe := frontend.Events.SubscribeAgentEvents(a.bindings.EmitAgentEvent)
+	unsubscribe := frontend.Emitter.Subscribe(a.bindings.EmitAgentEvent)
 	logger = logging.NewFactory().Ensure(logger)
 
 	a.mu.Lock()

@@ -4,6 +4,7 @@ import (
 	"context"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	sessionentry "praxis/internal/core/session/entry"
 )
@@ -51,8 +52,8 @@ func (r *Runner) compressContext(
 			return compressed, false, failCause(FailureStorage, writeErr)
 		}
 		compressed.Entries[index] = stored
-		r.emit(Event{
-			Kind:        EventEntriesAppended,
+		r.Emitter.Emit(coreevent.Event{
+			Kind:        coreevent.EntriesAppended,
 			SessionID:   input.SessionID,
 			AgentID:     input.AgentID,
 			ExecutionID: input.ID,

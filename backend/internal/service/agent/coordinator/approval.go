@@ -1,12 +1,9 @@
 package coordinator
 
 import (
-	"bytes"
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/core/hook"
 	taskmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	toolservice "praxis/internal/service/toolexecution"
 )
@@ -51,34 +48,8 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request toolservice.Cont
 	return nil
 }
 
-// waitForToolApproval 在状态提交后发布通知，审批提前到达时由 wake 的缓冲保留唤醒。
-func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentexecution.Execution, active *taskmodel.ActiveTask, call sessionentry.ToolCall, operationID string) error {
-	if err := s.operations.WaitForApproval(ctx, task.ID); err != nil {
-		return err
-	}
-	if hookErr := s.hookDispatcher.ToolExecutionWaiting(context.WithoutCancel(ctx), hook.ToolExecution{
-		Identity: hook.Identity{
-			OperationID:  operationID,
-			SourceTaskID: task.SourceTaskID,
-			SessionID:    call.SessionID,
-			AgentID:      call.AgentID,
-			ExecutionID:  call.ExecutionID,
-			TurnID:       call.TurnID,
-		},
-		Call:      call,
-		Arguments: bytes.Clone(call.Arguments),
-	}); hookErr != nil {
-		s.logger.Errorf("tool execution waiting hook failed: %v", hookErr)
-	}
-	s.events.Publish(Event{
-		Kind:        EventToolApprovalRequired,
-		SessionID:   call.SessionID,
-		AgentID:     call.AgentID,
-		ExecutionID: call.ExecutionID,
-		TurnID:      call.TurnID,
-		CallID:      call.CallID,
-		Name:        string(call.Name),
-	})
+// waitForToolApproval 只等待已有执行的唤醒并恢复运行状态，不发布审批通知。
+func (s *Coordinator) waitForToolApproval(ctx context.Context, task agentexecution.Execution, active *taskmodel.ActiveTask) error {
 	select {
 	case <-active.WakeSignal():
 		return s.startExecution(task, "approval")
