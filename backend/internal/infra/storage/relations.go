@@ -126,11 +126,6 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if err != nil {
 			return err
 		}
-		if v.Kind == toolexecution.Approved || v.Kind == toolexecution.ApprovalRequired {
-			if toolexecution.ArgumentsDigest(call.Name, []byte(v.Summary)) != v.ArgumentsDigest {
-				return errorcode.ErrRequestConflict
-			}
-		}
 		if call.SessionID.String() != scope || v.At.Before(call.CreatedAt) {
 			return errorcode.ErrRequestConflict
 		}

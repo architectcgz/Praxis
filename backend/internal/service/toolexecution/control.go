@@ -40,16 +40,14 @@ func (s *Service) registerAndMarkStarted(ctx context.Context, call sessionentry.
 		if err != nil {
 			return err
 		}
-		digest := executionmodel.ArgumentsDigest(call.Name, args)
-		if decision.Action == security.ApprovalDeny || facts.Approval.ArgumentsDigest != digest || facts.Approval.ApprovedAt.IsZero() || facts.Decision != decision && !(decision.Action == security.ApprovalAsk && facts.Approval.Source == executionmodel.ApprovalSourceUser) {
+		if decision.Action == security.ApprovalDeny || facts.Approval.ApprovedAt.IsZero() || facts.Decision != decision && !(decision.Action == security.ApprovalAsk && facts.Approval.Source == executionmodel.ApprovalSourceUser) {
 			return errAuthorizationChanged
 		}
 		if err := s.deps.Events.Append(txCtx, executionmodel.Event{
-			Key:             call.Key,
-			SessionID:       call.SessionID,
-			Kind:            executionmodel.Started,
-			At:              s.clock.Now().UTC(),
-			ArgumentsDigest: digest,
+			Key:       call.Key,
+			SessionID: call.SessionID,
+			Kind:      executionmodel.Started,
+			At:        s.clock.Now().UTC(),
 		}); err != nil {
 			return err
 		}

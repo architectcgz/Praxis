@@ -16,7 +16,6 @@ import (
 // authorize 根据当前事实确定授权；在所属执行流程内保存审核请求序号，再调用外部模型。
 func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (bool, *tool.ToolResult, error) {
 	s := scope.service
-	digest := executionmodel.ArgumentsDigest(call.Name, args)
 	for {
 		var pending bool
 		var denied *tool.ToolResult
@@ -50,18 +49,17 @@ func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, a
 				denied = &value
 				return nil
 			}
-			if facts.Approval.ArgumentsDigest == digest && !facts.Approval.ApprovedAt.IsZero() && (facts.Decision == decision || decision.Action == security.ApprovalAsk && facts.Approval.Source == executionmodel.ApprovalSourceUser) {
+			if !facts.Approval.ApprovedAt.IsZero() && (facts.Decision == decision || decision.Action == security.ApprovalAsk && facts.Approval.Source == executionmodel.ApprovalSourceUser) {
 				return nil
 			}
 			event := executionmodel.Event{
-				Key:             call.Key,
-				SessionID:       call.SessionID,
-				At:              s.clock.Now().UTC(),
-				ArgumentsDigest: digest,
-				Decision:        decision,
-				Summary:         string(args),
+				Key:       call.Key,
+				SessionID: call.SessionID,
+				At:        s.clock.Now().UTC(),
+				Decision:  decision,
+				Summary:   string(args),
 			}
-			if facts.AwaitingApproval() && facts.ArgumentsDigest == digest && facts.Decision == decision {
+			if facts.AwaitingApproval() && facts.Decision == decision {
 				pending = true
 				return nil
 			}
@@ -74,7 +72,7 @@ func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, a
 				event.Kind, event.Source = executionmodel.Approved, executionmodel.ApprovalSourceYolo
 				return s.deps.Events.Append(txCtx, event)
 			}
-			if facts.Review.ArgumentsDigest == digest {
+			if facts.Review.TurnID != "" {
 				switch facts.Review.Assessment.Verdict {
 				case security.RiskDangerous:
 					value := tool.NewToolError("tool_risk_denied", "Risk review denied this operation: "+facts.Review.Assessment.Reason)
@@ -90,11 +88,10 @@ func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, a
 			sequence := max(uint64(1), task.Progress.NextSequence)
 			task.Progress.NextSequence, task.Progress.ModelRequests = sequence+1, task.Progress.ModelRequests+1
 			attempt = executionmodel.RiskReview{
-				TurnID:          identity.NewTurnID(task.ID, sequence),
-				ArgumentsDigest: digest,
-				ProviderID:      task.Config.Model.ProviderID,
-				ModelID:         task.Config.Model.ModelID,
-				StartedAt:       s.clock.Now().UTC(),
+				TurnID:     identity.NewTurnID(task.ID, sequence),
+				ProviderID: task.Config.Model.ProviderID,
+				ModelID:    task.Config.Model.ModelID,
+				StartedAt:  s.clock.Now().UTC(),
 			}
 			return s.deps.Tasks.Save(txCtx, task)
 		}(ctx)

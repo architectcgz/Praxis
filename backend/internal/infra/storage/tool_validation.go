@@ -28,8 +28,8 @@ func validateToolEvent(e toolexecution.Event) error {
 	}
 	switch e.Kind {
 	case toolexecution.ApprovalRequired, toolexecution.Approved:
-		if len(e.ArgumentsDigest) != 64 || e.Summary == "" || !e.Decision.Action.Valid() || e.Decision.RuleID == "" {
-			return errors.New("approval event must identify the authorized arguments and rule")
+		if e.Summary == "" || !e.Decision.Action.Valid() || e.Decision.RuleID == "" {
+			return errors.New("approval event must include the arguments and rule")
 		}
 		if e.Kind == toolexecution.Approved {
 			switch e.Source {
@@ -40,16 +40,12 @@ func validateToolEvent(e toolexecution.Event) error {
 		} else if e.Source != "" {
 			return errors.New("approval request cannot contain an approval source")
 		}
-	case toolexecution.Started:
-		if len(e.ArgumentsDigest) != 64 {
-			return errors.New("tool start must bind the approved arguments")
-		}
 	case toolexecution.Reviewed:
 		if e.Review == nil {
 			return errors.New("risk review evidence is required")
 		}
 		r := e.Review
-		if r.TurnID == "" || len(r.ArgumentsDigest) != 64 || r.ProviderID == "" || r.ModelID == "" || r.StartedAt.IsZero() || r.CompletedAt.Before(r.StartedAt) || !e.At.Equal(r.CompletedAt) {
+		if r.TurnID == "" || r.ProviderID == "" || r.ModelID == "" || r.StartedAt.IsZero() || r.CompletedAt.Before(r.StartedAt) || !e.At.Equal(r.CompletedAt) {
 			return errors.New("risk review identity and times are invalid")
 		}
 		if r.Assessment.Verdict != security.RiskSafe && r.Assessment.Verdict != security.RiskDangerous && r.Assessment.Verdict != security.RiskUncertain {

@@ -28,11 +28,10 @@ func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval,
 		review := value.Review
 		result = append(result, dto.ToolApproval{
 			ToolDecisionRequest: dto.ToolDecisionRequest{
-				SessionID:       value.Call.SessionID.String(),
-				AgentID:         value.Call.AgentID.String(),
-				ExecutionID:     value.Call.ExecutionID.String(),
-				CallID:          value.Call.CallID,
-				ArgumentsDigest: value.ArgumentsDigest,
+				SessionID:   value.Call.SessionID.String(),
+				AgentID:     value.Call.AgentID.String(),
+				ExecutionID: value.Call.ExecutionID.String(),
+				CallID:      value.Call.CallID,
 			},
 			Name:      string(value.Call.Name),
 			Arguments: string(value.Arguments),
@@ -59,13 +58,12 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 		return err
 	}
 	params := execution.ToolDecision{
-		SessionID:       identity.SessionID(wire.SessionID),
-		AgentID:         identity.AgentID(wire.AgentID),
-		ExecutionID:     identity.AgentExecutionID(wire.ExecutionID),
-		CallID:          strings.TrimSpace(wire.CallID),
-		ArgumentsDigest: strings.TrimSpace(wire.ArgumentsDigest),
+		SessionID:   identity.SessionID(wire.SessionID),
+		AgentID:     identity.AgentID(wire.AgentID),
+		ExecutionID: identity.AgentExecutionID(wire.ExecutionID),
+		CallID:      strings.TrimSpace(wire.CallID),
 	}
-	if params.SessionID == "" || params.AgentID == "" || params.ExecutionID == "" || params.CallID == "" || params.ArgumentsDigest == "" {
+	if params.SessionID == "" || params.AgentID == "" || params.ExecutionID == "" || params.CallID == "" {
 		err := fmt.Errorf("tool approval identity is required: %w", errorcode.ErrInvalidRequest)
 		return publicError(b.host, "CommandBindings.ToolDecision.request", err)
 	}

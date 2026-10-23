@@ -27,7 +27,7 @@ export function stopToolCall({ sessionId, agentId, executionId, callId }: ToolCo
     return getCommandBinding().StopToolCall({ sessionId, agentId, executionId, callId })
 }
 
-export type ToolDecisionRequest = ToolControlRequest & { argumentsDigest: string }
+export type ToolDecisionRequest = ToolControlRequest
 /** 待授权记录携带完整冻结参数与审核结论，展示字段不随授权决策提交。 */
 export type ToolApproval = ToolDecisionRequest & {
     name: string
@@ -49,7 +49,7 @@ export function denyToolCall(request: ToolDecisionRequest) {
     return getCommandBinding().DenyToolCall(toolDecisionRequest(request))
 }
 
-/** 审批只提交调用身份与参数摘要，展示字段不参与决策请求。 */
-function toolDecisionRequest({ sessionId, agentId, executionId, callId, argumentsDigest }: ToolDecisionRequest): ToolDecisionRequest {
-    return { sessionId, agentId, executionId, callId, argumentsDigest }
+/** 审批只提交调用身份，展示字段不参与决策请求。 */
+function toolDecisionRequest({ sessionId, agentId, executionId, callId }: ToolDecisionRequest): ToolDecisionRequest {
+    return { sessionId, agentId, executionId, callId }
 }

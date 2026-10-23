@@ -15,34 +15,32 @@ import (
 
 // ApprovalRequest 绑定审批请求的会话、Agent 和具体调用。
 type ApprovalRequest struct {
-	SessionID       identity.SessionID
-	AgentID         identity.AgentID
-	ExecutionID     identity.AgentExecutionID
-	CallID          string
-	ArgumentsDigest string
+	SessionID   identity.SessionID
+	AgentID     identity.AgentID
+	ExecutionID identity.AgentExecutionID
+	CallID      string
 }
 
 // Approval 是消息声明和审批事件组合的查询结果，不是持久化实体。
 type Approval struct {
-	Call            sessionentry.ToolCall
-	ArgumentsDigest string
-	Arguments       json.RawMessage
-	Decision        security.ApprovalDecision
-	Review          executionmodel.RiskReview
+	Call      sessionentry.ToolCall
+	Arguments json.RawMessage
+	Decision  security.ApprovalDecision
+	Review    executionmodel.RiskReview
 }
 
-func (s *Service) Approve(ctx context.Context, executionID identity.AgentExecutionID, callID, digest string) (agentexecution.Execution, error) {
-	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID, ArgumentsDigest: digest}, true)
+func (s *Service) Approve(ctx context.Context, executionID identity.AgentExecutionID, callID string) (agentexecution.Execution, error) {
+	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID}, true)
 }
 
-func (s *Service) Deny(ctx context.Context, executionID identity.AgentExecutionID, callID, digest string) (agentexecution.Execution, error) {
-	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID, ArgumentsDigest: digest}, false)
+func (s *Service) Deny(ctx context.Context, executionID identity.AgentExecutionID, callID string) (agentexecution.Execution, error) {
+	return s.Decide(ctx, ApprovalRequest{ExecutionID: executionID, CallID: callID}, false)
 }
 
 func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve bool) (task agentexecution.Execution, err error) {
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
-	executionID, callID, digest := request.ExecutionID, request.CallID, request.ArgumentsDigest
+	executionID, callID := request.ExecutionID, request.CallID
 	err = func(txCtx context.Context) error {
 		call, err := s.call(txCtx, executionID, callID)
 		if err != nil {
@@ -59,10 +57,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 		if err != nil {
 			return err
 		}
-		if digest != facts.ArgumentsDigest {
-			return errorcode.ErrRequestConflict
-		}
-		if approve && facts.Approval.Source == executionmodel.ApprovalSourceUser && facts.Approval.ArgumentsDigest == digest {
+		if approve && facts.Approval.Source == executionmodel.ApprovalSourceUser {
 			return nil
 		}
 		if result, err := s.deps.Calls.GetResult(txCtx, call.Key); err == nil {
@@ -90,14 +85,13 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 		}
 		// 只批准展示的那份操作；启动前仍按最新规则重新授权或审核。
 		return s.deps.Events.Append(txCtx, executionmodel.Event{
-			Key:             call.Key,
-			SessionID:       call.SessionID,
-			Kind:            executionmodel.Approved,
-			At:              s.clock.Now().UTC(),
-			ArgumentsDigest: digest,
-			Decision:        facts.Decision,
-			Source:          executionmodel.ApprovalSourceUser,
-			Summary:         facts.Summary,
+			Key:       call.Key,
+			SessionID: call.SessionID,
+			Kind:      executionmodel.Approved,
+			At:        s.clock.Now().UTC(),
+			Decision:  facts.Decision,
+			Source:    executionmodel.ApprovalSourceUser,
+			Summary:   facts.Summary,
 		})
 	}(ctx)
 	return task, err
@@ -134,11 +128,10 @@ func (s *Service) ListApprovals(ctx context.Context, agentID identity.AgentID) (
 				return err
 			}
 			result = append(result, Approval{
-				Call:            call,
-				ArgumentsDigest: facts.ArgumentsDigest,
-				Arguments:       json.RawMessage(facts.Summary),
-				Decision:        facts.Decision,
-				Review:          facts.Review,
+				Call:      call,
+				Arguments: json.RawMessage(facts.Summary),
+				Decision:  facts.Decision,
+				Review:    facts.Review,
 			})
 		}
 		return nil
