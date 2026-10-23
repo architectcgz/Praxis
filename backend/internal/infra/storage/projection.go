@@ -290,7 +290,7 @@ func (s *Store) decodeProjected(data []byte, target any) error {
 			if value.CreatedAt.After(at) {
 				at = value.CreatedAt
 			}
-			return value.MarkApplied(at)
+			value.MarkApplied(at)
 		}
 	}
 	return nil

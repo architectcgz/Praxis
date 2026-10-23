@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"time"
 )
@@ -44,15 +43,8 @@ func NewAgentControlCommand(id identity.AgentControlCommandID, agentID identity.
 	}
 }
 
-// MarkApplied 确认控制命令已结算；重复确认或时间早于创建时间时拒绝修改。
-func (r *AgentControlCommand) MarkApplied(at time.Time) error {
-	if r.Status != AgentControlPending {
-		return fault.InvalidTransition("agentControlCommand", string(r.Status), string(AgentControlApplied))
-	}
-	if at.Before(r.CreatedAt) {
-		return fault.InvalidValue("agentControlCommand.appliedAt", "apply time cannot precede creation")
-	}
+// MarkApplied 记录控制命令的应用结果，应用条件和时间由调用方确定。
+func (r *AgentControlCommand) MarkApplied(at time.Time) {
 	r.Status = AgentControlApplied
 	r.AppliedAt = at.UTC()
-	return nil
 }
