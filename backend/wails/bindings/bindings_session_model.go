@@ -11,7 +11,7 @@ import (
 // SelectModel 只更新指定会话的选择；队列唤醒由 Coordinator 编排。
 func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
 	if err := validation.ValidateSessionID(wire.SessionID); err != nil {
-		return err
+		return publicInputError(b.host, "SessionBindings.SelectModel.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -31,7 +31,7 @@ func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
 // GetModelSelection 返回会话自身的选择；查询不会设置模型或唤醒预约。
 func (b *SessionBindings) GetModelSelection(sessionID string) (dto.ModelSelection, error) {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
-		return dto.ModelSelection{}, err
+		return dto.ModelSelection{}, publicInputError(b.host, "SessionBindings.GetModelSelection.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {

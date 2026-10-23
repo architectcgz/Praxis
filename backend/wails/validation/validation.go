@@ -1,45 +1,18 @@
 // Package validation 在 Wails 边界校验请求 ID 等 wire shape。
 //
 // 内容规范化、大小限制和请求字段校验由对应 Binding 完成。
-// 校验失败返回 Error，携带稳定码 invalid_request 与具体字段/原因。
+// 校验失败返回携带 invalid_request 错误码的标准错误，由 Binding 编码为前端协议。
 package validation
 
 import (
+	"fmt"
 	"praxis/wails/dto"
 	apperr "praxis/wails/error"
 	"strings"
 )
 
-// Error 是入参校验错误：稳定码 + 字段 + 原因。
-type Error struct {
-	Field  string
-	Reason string
-}
-
-// Unwrap 让标准库判断错误类别，边界从错误链提取稳定码。
-func (e *Error) Unwrap() error { return apperr.ErrInvalidRequest }
-
-// ValidationMessage 只公开当前字段的校验详情。
-func (e *Error) ValidationMessage() string { return e.detail() }
-
-// Error 返回 wire 信封 {"code","message"}，message 为具体字段/原因。
-func (e *Error) Error() string {
-	return apperr.Encode(apperr.ErrInvalidRequest.ErrorCode(), e.detail())
-}
-
-func (e *Error) detail() string {
-	switch {
-	case e.Field != "" && e.Reason != "":
-		return e.Field + ": " + e.Reason
-	case e.Field != "":
-		return e.Field
-	default:
-		return e.Reason
-	}
-}
-
 func invalid(field, reason string) error {
-	return &Error{Field: field, Reason: reason}
+	return fmt.Errorf("%s: %s: %w", field, reason, apperr.ErrInvalidRequest)
 }
 
 func requireID(field, value string) error {

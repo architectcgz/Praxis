@@ -1,4 +1,4 @@
-// Package config 定义模型配置的共享数据类型、管理接口和校验错误。
+// Package config 定义模型配置的共享数据类型和管理接口。
 package config
 
 import (
@@ -74,27 +74,6 @@ type ConfigManager interface {
 	SetProviderKey(string, string) error
 	HasProviderKey(string) bool
 	DiscoverProviderModels(context.Context, string) ([]string, error)
-}
-
-// ValidationError 表示用户可修正的配置内容错误。
-type ValidationError struct {
-	Err error
-}
-
-// Error 返回配置校验说明；没有具体原因时返回通用提示。
-func (e *ValidationError) Error() string {
-	if e == nil || e.Err == nil {
-		return "invalid model configuration"
-	}
-	return e.Err.Error()
-}
-
-// Unwrap 返回底层校验错误，便于调用方识别具体原因。
-func (e *ValidationError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
 }
 
 // Clone 返回配置的深拷贝，调用方修改嵌套模型或推理等级不会影响原配置。

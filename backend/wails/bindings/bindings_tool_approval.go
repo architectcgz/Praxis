@@ -13,7 +13,7 @@ import (
 
 func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval, error) {
 	if err := validation.ValidateAgentID(agentID); err != nil {
-		return nil, err
+		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -65,7 +65,7 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 	}
 	if params.SessionID == "" || params.AgentID == "" || params.ExecutionID == "" || params.CallID == "" {
 		err := fmt.Errorf("tool approval identity is required: %w", errorcode.ErrInvalidRequest)
-		return publicError(b.host, "CommandBindings.ToolDecision.request", err)
+		return publicInputError(b.host, "CommandBindings.ToolDecision.request", err)
 	}
 	if approve {
 		err = services.Commands.ApproveToolCall(ctx, params)
@@ -90,7 +90,7 @@ func (b *CommandBindings) StopToolCall(wire dto.ToolControlRequest) error {
 		CallID:      strings.TrimSpace(wire.CallID),
 	}
 	if request.SessionID == "" || request.AgentID == "" || request.ExecutionID == "" || request.CallID == "" {
-		return publicError(b.host, "CommandBindings.StopToolCall.request", fmt.Errorf("tool control identity is required: %w", errorcode.ErrInvalidRequest))
+		return publicInputError(b.host, "CommandBindings.StopToolCall.request", fmt.Errorf("tool control identity is required: %w", errorcode.ErrInvalidRequest))
 	}
 	return publicError(b.host, "CommandBindings.StopToolCall", services.Commands.StopToolCall(ctx, request))
 }

@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"regexp"
 	"sort"
@@ -88,7 +88,7 @@ func validateAgentConfig(config agentmodel.AgentConfig) error {
 	case agentmodel.ProfilePrimary, agentmodel.ProfileDelegate, agentmodel.ProfileAdvisor, agentmodel.ProfileCurator:
 		return nil
 	default:
-		return fault.InvalidValue("agentDefinition.profile", "unknown agent profile")
+		return fmt.Errorf("agentDefinition.profile: unknown agent profile: %w", errorcode.ErrInvalidValue)
 	}
 }
 
@@ -139,7 +139,7 @@ func loadDefinitions(root string) (map[identity.AgentDefinitionID]agentmodel.Age
 		}
 		id := identity.AgentDefinitionID(entry.Name())
 		if !definitionIDPattern.MatchString(id.String()) {
-			return nil, fault.InvalidValue("agentDefinition.id", "definition id is invalid")
+			return nil, fmt.Errorf("agentDefinition.id: definition id is invalid: %w", errorcode.ErrInvalidValue)
 		}
 		directory := filepath.Join(root, entry.Name())
 		config, err := readAgentConfig(filepath.Join(directory, "agent.json"))

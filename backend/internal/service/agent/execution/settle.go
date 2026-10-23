@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	"fmt"
 	"praxis/internal/errorcode"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
-	"praxis/internal/fault"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 )
@@ -71,7 +71,7 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 	firstEnd := endedExecution.Status != agentexecution.ExecutionEnded
 	if firstEnd {
 		if !endedExecution.Active() {
-			return agentexecution.Execution{}, fault.InvalidTransition("task", string(endedExecution.Status), string(agentexecution.ExecutionEnded))
+			return agentexecution.Execution{}, fmt.Errorf("task cannot transition from %q to %q: %w", endedExecution.Status, agentexecution.ExecutionEnded, errorcode.ErrInvalidTransition)
 		}
 		at := s.clock.Now()
 		if endedExecution.Status == agentexecution.ExecutionStarting {

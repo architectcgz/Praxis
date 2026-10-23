@@ -1,8 +1,9 @@
 package bindings
 
 import (
+	"fmt"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
@@ -15,7 +16,7 @@ type SessionBindings struct{ host Host }
 // ListSessions 返回指定项目的持久化会话。
 func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, error) {
 	if err := validation.ValidateProjectID(projectID); err != nil {
-		return nil, err
+		return nil, publicInputError(b.host, "SessionBindings.ListSessions.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -34,7 +35,7 @@ func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, 
 
 func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.CreateSessionResponse, error) {
 	if err := validation.ValidateCreateSession(wire); err != nil {
-		return dto.CreateSessionResponse{}, err
+		return dto.CreateSessionResponse{}, publicInputError(b.host, "SessionBindings.CreateSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -63,7 +64,7 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 
 func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, error) {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
-		return dto.SessionSnapshot{}, err
+		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.GetSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -100,7 +101,7 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 // GetSessionUsageSummary 直接投影业务侧的一致用量快照。
 func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionUsageSummary, error) {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
-		return dto.SessionUsageSummary{}, err
+		return dto.SessionUsageSummary{}, publicInputError(b.host, "SessionBindings.GetSessionUsageSummary.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -121,7 +122,7 @@ func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionU
 
 func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
-		return err
+		return publicInputError(b.host, "SessionBindings.DeleteSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -135,12 +136,12 @@ func (b *SessionBindings) DeleteSession(sessionID string) error {
 
 func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
-		return err
+		return publicInputError(b.host, "SessionBindings.RenameSession.request", err)
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
-		err := fault.InvalidValue("title", "session title is required")
-		return publicError(b.host, "SessionBindings.RenameSession.request", err)
+		err := fmt.Errorf("title: session title is required: %w", errorcode.ErrInvalidValue)
+		return publicInputError(b.host, "SessionBindings.RenameSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {

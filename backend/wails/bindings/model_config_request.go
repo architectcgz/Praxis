@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	modelconfig "praxis/internal/core/model/config"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/wails/dto"
 )
 
@@ -40,10 +40,10 @@ func modelConfigFromRequest(value dto.SaveModelConfigRequest) (modelconfig.Confi
 		providerID := strings.TrimSpace(model.ProviderID)
 		modelID := strings.TrimSpace(model.ModelID)
 		if providerID == "" {
-			return modelconfig.Config{}, fault.InvalidValue(fmt.Sprintf("models[%d].providerId", index), "required")
+			return modelconfig.Config{}, fmt.Errorf("models[%d].providerId: required: %w", index, errorcode.ErrInvalidValue)
 		}
 		if _, ok := providerIDs[providerID]; !ok {
-			return modelconfig.Config{}, fault.InvalidValue(fmt.Sprintf("models[%d].providerId", index), "unknown provider")
+			return modelconfig.Config{}, fmt.Errorf("models[%d].providerId: unknown provider: %w", index, errorcode.ErrInvalidValue)
 		}
 		levels := slices.Clone(model.ReasoningLevels)
 		for levelIndex := range levels {
@@ -72,7 +72,7 @@ func modelConfigFromRequest(value dto.SaveModelConfigRequest) (modelconfig.Confi
 		}
 	}
 	if err := modelconfig.Validate(config); err != nil {
-		return modelconfig.Config{}, fault.InvalidValue("modelConfig", err.Error())
+		return modelconfig.Config{}, fmt.Errorf("modelConfig: %v: %w", err, errorcode.ErrInvalidValue)
 	}
 	return config, nil
 }

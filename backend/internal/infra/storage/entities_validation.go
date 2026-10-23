@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	modelapi "praxis/internal/core/model"
@@ -10,7 +11,7 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/utils/pathutil"
 	"praxis/internal/workflow"
 	"regexp"
@@ -24,25 +25,25 @@ var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 // 以下校验仅用于磁盘输入，拒绝非法字段，不清洗或修复持久化数据。
 func validateProject(p projectmodel.Project) error {
 	if p.ID == "" || p.ID.String() != strings.TrimSpace(p.ID.String()) {
-		return fault.InvalidValue("project.id", "id is required")
+		return fmt.Errorf("project.id: id is required: %w", errorcode.ErrInvalidValue)
 	}
 	if p.Name == "" || strings.ContainsAny(p.Name, "\x00\r\n") {
-		return fault.InvalidValue("project.name", "name is required and cannot contain control characters")
+		return fmt.Errorf("project.name: name is required and cannot contain control characters: %w", errorcode.ErrInvalidValue)
 	}
 	if !pathutil.IsAbsoluteNormalized(p.Path) {
-		return fault.InvalidValue("project.path", "path must be an absolute normalized path")
+		return fmt.Errorf("project.path: path must be an absolute normalized path: %w", errorcode.ErrInvalidValue)
 	}
 	if p.DefaultWorkspaceID == "" || p.DefaultWorkspaceID.String() != strings.TrimSpace(p.DefaultWorkspaceID.String()) {
-		return fault.InvalidValue("project.defaultWorkspaceID", "default workspace id is required")
+		return fmt.Errorf("project.defaultWorkspaceID: default workspace id is required: %w", errorcode.ErrInvalidValue)
 	}
 	if p.State != projectmodel.ProjectActive && p.State != projectmodel.ProjectArchived {
-		return fault.InvalidValue("project.state", "unknown project state")
+		return fmt.Errorf("project.state: unknown project state: %w", errorcode.ErrInvalidValue)
 	}
 	if p.ApprovalMode != nil && !p.ApprovalMode.ValidDefault() {
-		return fault.InvalidValue("project.approvalMode", "default approval mode must be ask, auto or yolo")
+		return fmt.Errorf("project.approvalMode: default approval mode must be ask, auto or yolo: %w", errorcode.ErrInvalidValue)
 	}
 	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
-		return fault.InvalidValue("project.timestamps", "timestamps are invalid")
+		return fmt.Errorf("project.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }
@@ -50,23 +51,23 @@ func validateProject(p projectmodel.Project) error {
 func validateWorkspace(w workspacemodel.Workspace) error {
 	for _, id := range []string{w.ID.String(), w.ProjectID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("workspace", "required reference must be canonical and nonempty")
+			return fmt.Errorf("workspace: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	if w.Kind != workspacemodel.WorkspaceProjectRoot && w.Kind != workspacemodel.WorkspaceWorktree && w.Kind != workspacemodel.WorkspaceTemporary {
-		return fault.InvalidValue("workspace.kind", "unknown workspace kind")
+		return fmt.Errorf("workspace.kind: unknown workspace kind: %w", errorcode.ErrInvalidValue)
 	}
 	if !pathutil.IsAbsoluteNormalized(w.Path) {
-		return fault.InvalidValue("workspace.path", "path must be an absolute normalized path")
+		return fmt.Errorf("workspace.path: path must be an absolute normalized path: %w", errorcode.ErrInvalidValue)
 	}
 	if w.State != workspacemodel.WorkspaceReady && w.State != workspacemodel.WorkspaceUnavailable && w.State != workspacemodel.WorkspaceArchived {
-		return fault.InvalidValue("workspace.state", "unknown workspace state")
+		return fmt.Errorf("workspace.state: unknown workspace state: %w", errorcode.ErrInvalidValue)
 	}
 	if w.Revision == 0 {
-		return fault.InvalidValue("workspace.revision", "revision must be positive")
+		return fmt.Errorf("workspace.revision: revision must be positive: %w", errorcode.ErrInvalidValue)
 	}
 	if w.CreatedAt.IsZero() || w.UpdatedAt.IsZero() || w.UpdatedAt.Before(w.CreatedAt) {
-		return fault.InvalidValue("workspace.timestamps", "timestamps are invalid")
+		return fmt.Errorf("workspace.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }
@@ -74,19 +75,19 @@ func validateWorkspace(w workspacemodel.Workspace) error {
 func validateAgent(a agentmodel.Agent) error {
 	for _, id := range []string{a.ID.String(), a.SessionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("agent", "required reference must be canonical and nonempty")
+			return fmt.Errorf("agent: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	if !definitionIDPattern.MatchString(a.DefinitionID.String()) {
-		return fault.InvalidValue("agent.definitionID", "invalid agent definition identity")
+		return fmt.Errorf("agent.definitionID: invalid agent definition identity: %w", errorcode.ErrInvalidValue)
 	}
 	switch a.Profile {
 	case agentmodel.ProfilePrimary, agentmodel.ProfileDelegate, agentmodel.ProfileAdvisor, agentmodel.ProfileCurator:
 	default:
-		return fault.InvalidValue("agent.profile", "unknown agent profile")
+		return fmt.Errorf("agent.profile: unknown agent profile: %w", errorcode.ErrInvalidValue)
 	}
 	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
-		return fault.InvalidValue("agent.timestamps", "timestamps are invalid")
+		return fmt.Errorf("agent.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }
@@ -94,39 +95,39 @@ func validateAgent(a agentmodel.Agent) error {
 func validateWaitCondition(w workflow.WaitCondition) error {
 	for _, id := range []string{w.ID.String(), w.AgentID.String(), w.ExecutionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("waitCondition", "required reference must be canonical and nonempty")
+			return fmt.Errorf("waitCondition: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	if !slices.Contains([]workflow.WaitConditionKind{workflow.WaitForDelivery, workflow.WaitForApproval, workflow.WaitForChild}, w.Kind) ||
 		w.Mode != workflow.WaitAny && w.Mode != workflow.WaitAll ||
 		!slices.Contains([]workflow.WaitConditionStatus{workflow.WaitPending, workflow.WaitResolved, workflow.WaitCancelled}, w.Status) {
-		return fault.InvalidValue("waitCondition", "unknown kind, mode or status")
+		return fmt.Errorf("waitCondition: unknown kind, mode or status: %w", errorcode.ErrInvalidValue)
 	}
 	if len(w.TargetIDs) == 0 {
-		return fault.InvalidValue("waitCondition.targetIDs", "at least one target is required")
+		return fmt.Errorf("waitCondition.targetIDs: at least one target is required: %w", errorcode.ErrInvalidValue)
 	}
 	seenTargets := make(map[string]bool, len(w.TargetIDs))
 	for _, id := range w.TargetIDs {
 		if id == "" || id != strings.TrimSpace(id) || strings.ContainsAny(id, "\x00\r\n") || seenTargets[id] {
-			return fault.InvalidValue("waitCondition.targetIDs", "target is invalid or duplicated")
+			return fmt.Errorf("waitCondition.targetIDs: target is invalid or duplicated: %w", errorcode.ErrInvalidValue)
 		}
 		seenTargets[id] = true
 	}
 	seenResolved := make(map[string]bool, len(w.ResolvedTargetIDs))
 	for _, id := range w.ResolvedTargetIDs {
 		if id == "" || id != strings.TrimSpace(id) || strings.ContainsAny(id, "\x00\r\n") || !seenTargets[id] || seenResolved[id] {
-			return fault.InvalidValue("waitCondition.resolvedTargetIDs", "resolved target is invalid, unknown or duplicated")
+			return fmt.Errorf("waitCondition.resolvedTargetIDs: resolved target is invalid, unknown or duplicated: %w", errorcode.ErrInvalidValue)
 		}
 		seenResolved[id] = true
 	}
 	if w.CreatedAt.IsZero() || !w.ResolvedAt.IsZero() && w.ResolvedAt.Before(w.CreatedAt) {
-		return fault.InvalidValue("waitCondition.timestamps", "timestamps are invalid")
+		return fmt.Errorf("waitCondition.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
 	}
 	if (w.Status == workflow.WaitPending) != w.ResolvedAt.IsZero() {
-		return fault.InvalidValue("waitCondition.resolvedAt", "resolution time does not match status")
+		return fmt.Errorf("waitCondition.resolvedAt: resolution time does not match status: %w", errorcode.ErrInvalidValue)
 	}
 	if w.Status == workflow.WaitResolved && (w.Mode == workflow.WaitAny && len(w.ResolvedTargetIDs) == 0 || w.Mode == workflow.WaitAll && len(w.ResolvedTargetIDs) != len(w.TargetIDs)) {
-		return fault.InvalidValue("waitCondition.resolvedTargetIDs", "resolved targets do not satisfy the wait")
+		return fmt.Errorf("waitCondition.resolvedTargetIDs: resolved targets do not satisfy the wait: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }
@@ -151,14 +152,14 @@ func validateUsageRecord(r providerapi.UsageRecord) error {
 func validateControlCommand(r agentmodel.AgentControlCommand) error {
 	for _, id := range []string{r.ID.String(), r.AgentID.String(), r.TargetExecutionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("agentControlCommand", "required reference must be canonical and nonempty")
+			return fmt.Errorf("agentControlCommand: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	if r.Kind != agentmodel.AgentControlPause && r.Kind != agentmodel.AgentControlCancel {
-		return fault.InvalidValue("agentControlCommand.kind", "unknown control kind")
+		return fmt.Errorf("agentControlCommand.kind: unknown control kind: %w", errorcode.ErrInvalidValue)
 	}
 	if r.CreatedAt.IsZero() {
-		return fault.InvalidValue("agentControlCommand.createdAt", "creation time is required")
+		return fmt.Errorf("agentControlCommand.createdAt: creation time is required: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }
@@ -166,7 +167,7 @@ func validateControlCommand(r agentmodel.AgentControlCommand) error {
 // validateAgentExecution 仅在 JSONL 恢复时校验解码后的执行记录，不修复或补默认值。
 func validateAgentExecution(e agentexecution.Execution) error {
 	if e.Progress.ModelOutputBytes < 0 || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
-		return fault.InvalidValue("execution.progress", "usage counters or request sequence are invalid")
+		return fmt.Errorf("execution.progress: usage counters or request sequence are invalid: %w", errorcode.ErrInvalidValue)
 	}
 	for _, id := range []string{
 		e.ID.String(),
@@ -176,53 +177,53 @@ func validateAgentExecution(e agentexecution.Execution) error {
 		e.InputEntryID,
 	} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("agent_execution", "required reference must be canonical and nonempty")
+			return fmt.Errorf("agent_execution: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	switch e.Status {
 	case agentexecution.ExecutionStarting, agentexecution.ExecutionRunning, agentexecution.ExecutionWaitingApproval, agentexecution.ExecutionEnding, agentexecution.ExecutionEnded:
 	default:
-		return fault.InvalidValue("agent_execution", "unknown status")
+		return fmt.Errorf("agent_execution: unknown status: %w", errorcode.ErrInvalidValue)
 	}
 	if err := validateExecutionConfig(e.Config); err != nil {
-		return fault.FieldError("execution.config", err)
+		return fmt.Errorf("execution.config: %w", err)
 	}
 
 	if e.CreatedAt.IsZero() || !e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt) || !e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt) {
-		return fault.InvalidValue("execution.timestamps", "timestamps are invalid")
+		return fmt.Errorf("execution.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
 	}
 	if e.Status == agentexecution.ExecutionStarting && (!e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
-		return fault.InvalidValue("agent_execution", "starting execution has terminal fields")
+		return fmt.Errorf("agent_execution: starting execution has terminal fields: %w", errorcode.ErrInvalidValue)
 	}
 	if (e.Status == agentexecution.ExecutionRunning || e.Status == agentexecution.ExecutionWaitingApproval || e.Status == agentexecution.ExecutionEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
-		return fault.InvalidValue("agent_execution", "active execution has invalid lifecycle fields")
+		return fmt.Errorf("agent_execution: active execution has invalid lifecycle fields: %w", errorcode.ErrInvalidValue)
 	}
 	if e.Status == agentexecution.ExecutionEnded {
 		if e.StartedAt.IsZero() || e.EndedAt.IsZero() || e.Outcome == agentexecution.ExecutionFailed && e.FailureCode == "" {
-			return fault.InvalidValue("agent_execution", "ended execution has invalid terminal fields")
+			return fmt.Errorf("agent_execution: ended execution has invalid terminal fields: %w", errorcode.ErrInvalidValue)
 		}
 		switch e.Outcome {
 		case agentexecution.ExecutionCompleted, agentexecution.ExecutionYielded, agentexecution.ExecutionPaused,
 			agentexecution.ExecutionFailed, agentexecution.ExecutionInterrupted:
 		default:
-			return fault.InvalidValue("agent_execution", "ended execution has invalid terminal fields")
+			return fmt.Errorf("agent_execution: ended execution has invalid terminal fields: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	if e.FailureCode == agentexecution.ExecutionFailureRequestCanceled && e.Outcome != agentexecution.ExecutionPaused && e.Outcome != agentexecution.ExecutionInterrupted {
-		return fault.InvalidValue("execution.failureCode", "failure code does not match outcome")
+		return fmt.Errorf("execution.failureCode: failure code does not match outcome: %w", errorcode.ErrInvalidValue)
 	}
 	if len([]rune(e.FailureMessage)) > agentexecution.MaxExecutionFailureMessageRunes || e.FailureMessage != "" && (e.Status != agentexecution.ExecutionEnded || e.Outcome != agentexecution.ExecutionFailed) {
-		return fault.InvalidValue("execution.failureMessage", "failure message is invalid")
+		return fmt.Errorf("execution.failureMessage: failure message is invalid: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }
 
 func validateExecutionConfig(s agentexecution.ExecutionConfig) error {
 	if !definitionIDPattern.MatchString(s.AgentDefinitionID.String()) {
-		return fault.InvalidValue("execution.config.agentDefinition", "definition id is required")
+		return fmt.Errorf("execution.config.agentDefinition: definition id is required: %w", errorcode.ErrInvalidValue)
 	}
 	if err := validateExecutionModel(s.Model); err != nil {
-		return fault.FieldError("execution.config.model", err)
+		return fmt.Errorf("execution.config.model: %w: %w", errorcode.ErrInvalidValue, err)
 	}
 	return nil
 }
@@ -283,26 +284,26 @@ func validateExecutionModel(s modelapi.Config) error {
 
 func validateContextEntry(e sessionmodel.SharedFact) error {
 	if e.SourceExecutionID.String() != strings.TrimSpace(e.SourceExecutionID.String()) {
-		return fault.InvalidValue("sessionContext.sourceExecutionID", "source task id must be canonical")
+		return fmt.Errorf("sessionContext.sourceExecutionID: source task id must be canonical: %w", errorcode.ErrInvalidValue)
 	}
 	for _, id := range []string{e.ID.String(), e.SessionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("sessionContext", "entry id and session id must be canonical and nonempty")
+			return fmt.Errorf("sessionContext: entry id and session id must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	switch e.Kind {
 	case sessionmodel.SessionContextUserMessage, sessionmodel.SessionContextAcceptedConclusion, sessionmodel.SessionContextDecision, sessionmodel.SessionContextReference:
 	default:
-		return fault.InvalidValue("sessionContext.kind", "unknown context entry kind")
+		return fmt.Errorf("sessionContext.kind: unknown context entry kind: %w", errorcode.ErrInvalidValue)
 	}
 	if e.Content == "" || e.Content != strings.TrimSpace(e.Content) || !utf8.ValidString(e.Content) || len(e.Content) > sessionmodel.MaxSharedFactContentBytes {
-		return fault.InvalidValue("sessionContext.content", "content must be canonical UTF-8 text within the size limit")
+		return fmt.Errorf("sessionContext.content: content must be canonical UTF-8 text within the size limit: %w", errorcode.ErrInvalidValue)
 	}
 	if e.ContentDigest != sessionmodel.ContentDigest(e.Content) {
-		return fault.InvalidValue("sessionContext.contentDigest", "content digest does not match content")
+		return fmt.Errorf("sessionContext.contentDigest: content digest does not match content: %w", errorcode.ErrInvalidValue)
 	}
 	if e.CreatedAt.IsZero() {
-		return fault.InvalidValue("sessionContext.createdAt", "createdAt is required")
+		return fmt.Errorf("sessionContext.createdAt: createdAt is required: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }

@@ -1,7 +1,8 @@
 package workflow
 
 import (
-	"praxis/internal/fault"
+	"fmt"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"time"
 )
@@ -44,7 +45,7 @@ type WaitCondition struct {
 
 func (w *WaitCondition) Cancel(at time.Time) error {
 	if w.Status != WaitPending {
-		return fault.InvalidTransition("waitCondition", string(w.Status), string(WaitCancelled))
+		return fmt.Errorf("waitCondition cannot transition from %q to %q: %w", w.Status, WaitCancelled, errorcode.ErrInvalidTransition)
 	}
 	w.Status = WaitCancelled
 	w.ResolvedAt = at.UTC()

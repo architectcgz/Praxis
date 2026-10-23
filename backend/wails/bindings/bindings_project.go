@@ -52,7 +52,7 @@ func (b *ProjectBindings) ListProjects() ([]dto.ProjectSummary, error) {
 
 func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.CreateProjectResponse, error) {
 	if err := validation.ValidateCreateProject(wire); err != nil {
-		return dto.CreateProjectResponse{}, err
+		return dto.CreateProjectResponse{}, publicInputError(b.host, "ProjectBindings.CreateProject.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -68,7 +68,7 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 	if params.Name == "" || strings.ContainsAny(params.Name, "\\/:*?\"<>|\x00\r\n") ||
 		params.Name == "." || params.Name == ".." || !filepath.IsAbs(params.Path) || strings.ContainsAny(params.Path, "\x00\r\n") {
 		err := projectservice.ErrWorkspaceInvalid
-		return dto.CreateProjectResponse{}, publicError(b.host, "ProjectBindings.CreateProject.request", err)
+		return dto.CreateProjectResponse{}, publicInputError(b.host, "ProjectBindings.CreateProject.request", err)
 	}
 	result, err := services.Projects.CreateProject(ctx, params)
 	if err != nil {

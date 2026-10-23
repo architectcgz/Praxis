@@ -3,10 +3,11 @@ package storage
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	modelconfig "praxis/internal/core/model/config"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,14 +17,14 @@ import (
 func validateSession(value sessionmodel.Session) error {
 	for _, id := range []string{value.ID.String(), value.ProjectID.String(), value.WorkspaceID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
-			return fault.InvalidValue("session", "required reference must be canonical and nonempty")
+			return fmt.Errorf("session: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
 	}
 	if value.State != sessionmodel.SessionActive && value.State != sessionmodel.SessionArchived {
-		return fault.InvalidValue("session.state", "unknown session state")
+		return fmt.Errorf("session.state: unknown session state: %w", errorcode.ErrInvalidValue)
 	}
 	if value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() || value.UpdatedAt.Before(value.CreatedAt) {
-		return fault.InvalidValue("session.timestamps", "timestamps are invalid")
+		return fmt.Errorf("session.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }

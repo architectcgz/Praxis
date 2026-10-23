@@ -10,7 +10,7 @@ import (
 // ListSessionUsage 保留未上报计数与已知零值的区别。
 func (b *AgentBindings) ListSessionUsage(sessionID string) ([]dto.ModelUsageRecord, error) {
 	if err := validation.ValidateSessionID(sessionID); err != nil {
-		return nil, err
+		return nil, publicInputError(b.host, "AgentBindings.ListSessionUsage.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {

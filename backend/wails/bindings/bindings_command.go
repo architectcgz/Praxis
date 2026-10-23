@@ -2,8 +2,9 @@ package bindings
 
 import (
 	"context"
+	"fmt"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
@@ -18,7 +19,7 @@ type CommandBindings struct{ host Host }
 // CreateTask 只接收 Session 和正文，不要求前端提供 Task、Request 或 Agent 身份。
 func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTaskResponse, error) {
 	if err := validation.ValidateSessionID(wire.SessionID); err != nil {
-		return dto.CreateTaskResponse{}, err
+		return dto.CreateTaskResponse{}, publicInputError(b.host, "CommandBindings.CreateTask.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -29,8 +30,8 @@ func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTask
 		Prompt:    strings.TrimSpace(wire.Prompt),
 	}
 	if input.Prompt == "" || len(input.Prompt) > sessionmodel.MaxInputBytes || !utf8.ValidString(input.Prompt) {
-		err := fault.InvalidValue("prompt", "prompt must be non-empty UTF-8 text within the size limit")
-		return dto.CreateTaskResponse{}, publicError(b.host, "CommandBindings.CreateTask.request", err)
+		err := fmt.Errorf("prompt: prompt must be non-empty UTF-8 text within the size limit: %w", errorcode.ErrInvalidValue)
+		return dto.CreateTaskResponse{}, publicInputError(b.host, "CommandBindings.CreateTask.request", err)
 	}
 	result, err := services.Commands.SubmitTask(ctx, input)
 	if err != nil {
@@ -44,7 +45,7 @@ func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTask
 
 func (b *CommandBindings) PauseAgent(wire dto.PauseAgentRequest) (dto.AgentControlResponse, error) {
 	if err := validation.ValidateAgentControl(wire); err != nil {
-		return dto.AgentControlResponse{}, err
+		return dto.AgentControlResponse{}, publicInputError(b.host, "CommandBindings.PauseAgent.request", err)
 	}
 	return b.controlAgent(func(ctx context.Context, services Services) (agentservice.ControlResult, error) {
 		return services.Agents.PauseAgent(ctx, controlInput(wire))
@@ -53,7 +54,7 @@ func (b *CommandBindings) PauseAgent(wire dto.PauseAgentRequest) (dto.AgentContr
 
 func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) (dto.AgentControlResponse, error) {
 	if err := validation.ValidateAgentControl(wire); err != nil {
-		return dto.AgentControlResponse{}, err
+		return dto.AgentControlResponse{}, publicInputError(b.host, "CommandBindings.StopAgent.request", err)
 	}
 	return b.controlAgent(func(ctx context.Context, services Services) (agentservice.ControlResult, error) {
 		return services.Agents.StopAgent(ctx, controlInput(wire))
@@ -63,10 +64,10 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) (dto.AgentControl
 // CancelTask 只移除该 Session 尚未开始的输入，不影响当前 Loop。
 func (b *CommandBindings) CancelTask(wire dto.CancelTaskRequest) error {
 	if err := validation.ValidateSessionID(wire.SessionID); err != nil {
-		return err
+		return publicInputError(b.host, "CommandBindings.CancelTask.request", err)
 	}
 	if err := validation.ValidateTaskID(wire.TaskID); err != nil {
-		return err
+		return publicInputError(b.host, "CommandBindings.CancelTask.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {

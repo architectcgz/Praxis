@@ -2,10 +2,10 @@ package session
 
 import (
 	"context"
+	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/errorcode"
-	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"sync"
 )
@@ -40,7 +40,7 @@ func (a *ActiveTask) WakeSignal() <-chan struct{} { return a.wake }
 // 调用方先建立绑定，再保存 Execution；保存失败必须释放本次预留。
 func (e *ActiveTasks) Reserve(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID) (context.Context, bool, error) {
 	if ctx == nil || agentID == "" || executionID == "" {
-		return nil, false, fault.InvalidValue("agent.execution", "context, agent and task are required")
+		return nil, false, fmt.Errorf("agent.execution: context, agent and task are required: %w", errorcode.ErrInvalidValue)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -3,10 +3,11 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -37,7 +38,7 @@ func (s *Service) SelectModel(ctx context.Context, sessionID identity.SessionID,
 	}
 	config, err := s.modelConfigs.ModelConfig(choice.ProviderID, choice.ModelID, choice.ReasoningLevel)
 	if err != nil {
-		return fault.InvalidValue("modelSelection", err.Error())
+		return fmt.Errorf("modelSelection: %v: %w", err, errorcode.ErrInvalidValue)
 	}
 	s.modelSelections[sessionID] = sessionmodel.NewModelSelection(config)
 	return nil

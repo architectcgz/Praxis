@@ -1,9 +1,9 @@
 package session
 
 import (
+	"fmt"
 	"math"
 	"praxis/internal/errorcode"
-	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"slices"
 	"sync"
@@ -23,7 +23,7 @@ func (q *TaskQueue) Enqueue(value Task) (Task, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.sequence == math.MaxUint64 {
-		return Task{}, fault.InvalidValue("task.sequence", "task sequence is exhausted")
+		return Task{}, fmt.Errorf("task.sequence: task sequence is exhausted: %w", errorcode.ErrInvalidValue)
 	}
 	q.sequence++
 	value.Sequence = q.sequence

@@ -13,7 +13,7 @@ type AgentBindings struct{ host Host }
 
 func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 	if err := validation.ValidateAgentID(agentID); err != nil {
-		return dto.AgentSnapshot{}, err
+		return dto.AgentSnapshot{}, publicInputError(b.host, "AgentBindings.GetAgent.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -39,7 +39,7 @@ func (b *AgentBindings) GetAgent(agentID string) (dto.AgentSnapshot, error) {
 // ListAgentEntries 直接返回已恢复的完整可见历史，不包装展示 DTO、不分页。
 func (b *AgentBindings) ListAgentEntries(agentID string) ([]sessionentry.ContextEntry, error) {
 	if err := validation.ValidateAgentID(agentID); err != nil {
-		return nil, err
+		return nil, publicInputError(b.host, "AgentBindings.ListAgentEntries.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {

@@ -3,20 +3,16 @@ package bindings
 import (
 	"context"
 	"errors"
+	"fmt"
+	"praxis/internal/errorcode"
+	apperr "praxis/wails/error"
 	"regexp"
 	"strings"
 	"time"
 
-	"praxis/internal/fault"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
-
-// fieldValidationError 由消费方识别可反馈的字段错误，不依赖具体内核错误类型。
-type fieldValidationError interface {
-	error
-	ValidationField() string
-}
 
 // GetModelConfig 返回可编辑模型元数据和密钥存在状态，不返回密钥内容。
 func (b *ModelBindings) GetModelConfig() (dto.ModelConfigDocument, error) {
@@ -80,9 +76,8 @@ func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.Sa
 		return dto.SaveModelConfigResponse{}, publicError(b.host, "ModelBindings.SaveModelConfig.context", err)
 	}
 	if err := services.ModelConfig.SaveModelConfig(canonical); err != nil {
-		var validationError fieldValidationError
-		if errors.As(err, &validationError) {
-			return dto.SaveModelConfigResponse{ValidationError: validationError.Error()}, nil
+		if errors.Is(err, errorcode.ErrInvalidValue) {
+			return validationResponse(err)
 		}
 		return dto.SaveModelConfigResponse{}, publicError(b.host, "ModelBindings.SaveModelConfig", err)
 	}
@@ -90,11 +85,10 @@ func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.Sa
 }
 
 func validationResponse(err error) (dto.SaveModelConfigResponse, error) {
-	var validationError fieldValidationError
-	if errors.As(err, &validationError) {
-		return dto.SaveModelConfigResponse{ValidationError: validationError.Error()}, nil
+	if errors.Is(err, errorcode.ErrInvalidValue) {
+		return dto.SaveModelConfigResponse{ValidationError: apperr.InputMessage(err)}, nil
 	}
-	return dto.SaveModelConfigResponse{}, err
+	return dto.SaveModelConfigResponse{}, apperr.PublicError(err)
 }
 
 var providerKeyIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -103,10 +97,10 @@ var providerKeyIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 func (b *ModelBindings) SetProviderKey(providerID, value string) error {
 	providerID = strings.TrimSpace(providerID)
 	if !providerKeyIDPattern.MatchString(providerID) {
-		return publicError(b.host, "ModelBindings.SetProviderKey.request", fault.InvalidValue("providerId", "invalid provider id"))
+		return publicInputError(b.host, "ModelBindings.SetProviderKey.request", fmt.Errorf("providerId: invalid provider id: %w", errorcode.ErrInvalidValue))
 	}
 	if value != "" && strings.TrimSpace(value) == "" {
-		return publicError(b.host, "ModelBindings.SetProviderKey.request", fault.InvalidValue("key", "API key cannot contain only whitespace"))
+		return publicInputError(b.host, "ModelBindings.SetProviderKey.request", fmt.Errorf("key: API key cannot contain only whitespace: %w", errorcode.ErrInvalidValue))
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -129,7 +123,7 @@ func (b *ModelBindings) ClearProviderKey(providerID string) error {
 // ListProviderModels 查询已保存 Provider 的远程模型目录。
 func (b *ModelBindings) ListProviderModels(providerID string) ([]string, error) {
 	if err := validation.ValidateProviderID(providerID); err != nil {
-		return nil, err
+		return nil, publicInputError(b.host, "ModelBindings.ListProviderModels.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
