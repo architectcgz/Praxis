@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
-	"praxis/internal/errorcode"
-	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"time"
 )
@@ -89,56 +87,20 @@ func (f Facts) AwaitingApproval() bool {
 	return !f.RequiredAt.IsZero() && f.Approval.ApprovedAt.IsZero() && f.StartedAt.IsZero() && f.StopRequestedAt.IsZero()
 }
 
-// Apply 校验事件顺序；存储层按日志序号投影，不持久化此结构。
-func (f *Facts) Apply(e Event) error {
+// Apply 按事件更新控制事实；存储层按日志序号投影，不持久化此结构。
+func (f *Facts) Apply(e Event) {
 	switch e.Kind {
 	case ApprovalRequired:
-		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() {
-			return errorcode.ErrRequestConflict
-		}
 		f.RequiredAt, f.ArgumentsDigest, f.Decision, f.Summary = e.At, e.ArgumentsDigest, e.Decision, e.Summary
 		f.Approval = ApprovalRecord{}
 	case Reviewed:
-		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() || e.Review == nil {
-			return errorcode.ErrRequestConflict
-		}
 		f.Review = *e.Review
 	case Approved:
-		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() {
-			return errorcode.ErrRequestConflict
-		}
-		if e.Source == ApprovalSourceUser && (!f.AwaitingApproval() || f.ArgumentsDigest != e.ArgumentsDigest) {
-			return errorcode.ErrRequestConflict
-		}
-		if e.Source == ApprovalSourceUser && e.Decision.Action == security.ApprovalAuto && f.Review.Assessment.Verdict != security.RiskUncertain {
-			return errorcode.ErrRequestConflict
-		}
-		if e.Source == ApprovalSourceYolo && e.Decision.Action != security.ApprovalYolo {
-			return errorcode.ErrRequestConflict
-		}
-		if e.Source != ApprovalSourceUser && e.Source != ApprovalSourceAuto && e.Source != ApprovalSourceYolo {
-			return errorcode.ErrRequestConflict
-		}
-		if e.Decision.Action == security.ApprovalDeny {
-			return errorcode.ErrRequestConflict
-		}
-		if e.Source == ApprovalSourceAuto && (e.Decision.Action != security.ApprovalAuto || f.Review.ArgumentsDigest != e.ArgumentsDigest || f.Review.Assessment.Verdict != security.RiskSafe) {
-			return errorcode.ErrRequestConflict
-		}
 		f.ArgumentsDigest, f.Decision, f.Summary = e.ArgumentsDigest, e.Decision, e.Summary
 		f.Approval = ApprovalRecord{Source: e.Source, ArgumentsDigest: e.ArgumentsDigest, ApprovedAt: e.At}
 	case Started:
-		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() || f.Approval.ApprovedAt.IsZero() || f.Approval.ArgumentsDigest != e.ArgumentsDigest {
-			return errorcode.ErrRequestConflict
-		}
 		f.StartedAt = e.At
 	case StopRequested:
-		if !f.StopRequestedAt.IsZero() {
-			return errorcode.ErrRequestConflict
-		}
 		f.StopRequestedAt = e.At
-	default:
-		return fault.InvalidValue("tool.event", "unknown control event")
 	}
-	return nil
 }

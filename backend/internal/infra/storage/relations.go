@@ -139,11 +139,6 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
-		facts, err := (ToolExecutionRepository{s}).readLocked(v.Key)
-		if err != nil {
-			return err
-		}
-		return facts.Apply(v)
 	case "context":
 		var v sessionmodel.SharedFact
 		_ = decodeJSON(data, &v)

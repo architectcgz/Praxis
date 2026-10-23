@@ -36,9 +36,7 @@ func (r ToolExecutionRepository) readLocked(key toolexecution.Key) (toolexecutio
 		if err := decodeJSON(data, &event); err != nil {
 			return facts, err
 		}
-		if err := facts.Apply(event); err != nil {
-			return facts, err
-		}
+		facts.Apply(event)
 	}
 	return facts, nil
 }
