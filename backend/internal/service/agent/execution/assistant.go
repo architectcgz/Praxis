@@ -55,8 +55,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 }
 
 // AppendAssistant 保存 Assistant 消息；完成证据与工具调用计数由消息派生。
-func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.AssistantWrite) (stored sessionentry.ContextEntry, inserted bool, err error) {
-	message := value.Entry
+func (w assistantCommitter) AppendAssistant(ctx context.Context, message sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
 	if ctx == nil || message.Role != role.Assistant || message.AuthorKind != sessionentry.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
 		return stored, false, errors.New("assistant ownership is required")
 	}
@@ -77,11 +76,6 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, value loop.Assi
 		}
 		if execution.ID != w.executionID || execution.SessionID != w.stream.SessionID || execution.AgentID != w.agentID || message.RequestID != execution.RequestID.String() {
 			return fault.ErrRequestConflict
-		}
-		if value.FinalOutput != nil {
-			if value.FinalOutput.AssistantID != message.ID || value.FinalOutput.StopReason != message.StopReason || message.StopReason != "completed" && message.StopReason != "stop_sequence" {
-				return fault.ErrRequestConflict
-			}
 		}
 		stored, inserted, err = w.service.entries.Append(txCtx, sessionentry.Record{Stream: w.stream, AgentID: w.agentID, Data: message})
 		if err != nil {

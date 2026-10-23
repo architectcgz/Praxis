@@ -2,7 +2,6 @@ package loop
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
@@ -76,14 +75,8 @@ const (
 	FailureInternal            FailureCode = "internal"
 )
 
-// AssistantWrite 是一次输出提交的输入；FinalOutput 用于校验，完成证据以消息为准。
-type AssistantWrite struct {
-	Entry       sessionentry.ContextEntry
-	FinalOutput *agentmodel.FinalOutput
-}
-
 // AssistantCommitter 是绑定本次执行的输出提交能力，由 Execution Service 实现。
 type AssistantCommitter interface {
-	AppendAssistant(context.Context, AssistantWrite) (sessionentry.ContextEntry, bool, error)
+	AppendAssistant(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error)
 	AppendSummary(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, error)
 }

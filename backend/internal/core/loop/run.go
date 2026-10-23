@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
@@ -175,16 +174,16 @@ func (r *Runner) executeTurn(
 			if ctx.Err() != nil {
 				stopReason = "aborted"
 			}
-			stored, inserted, writeErr := deps.Assistant.AppendAssistant(context.WithoutCancel(ctx), AssistantWrite{Entry: sessionentry.ContextEntry{
+			stored, inserted, writeErr := deps.Assistant.AppendAssistant(context.WithoutCancel(ctx), sessionentry.ContextEntry{
 				ID: "assistant:" + turnID.String(), RequestID: executionInput.RequestID.String(), ExecutionID: executionInput.ID.String(),
 				TurnID: turnID.String(), StopReason: stopReason, Role: role.Assistant, AuthorKind: sessionentry.AuthorAgent,
 				AuthorID: executionInput.AgentID.String(), Content: partial,
-			}})
+			})
 			if writeErr != nil {
 				err = failCause(FailureStorage, errors.Join(err, writeErr))
 			} else {
 				if inserted {
-					r.notifyAssistant(ctx, executionInput, stored, false)
+					r.notifyAssistant(ctx, executionInput, stored)
 				}
 				*modelContext = modelContext.Append(stored)
 				r.emit(Event{Kind: EventTurnCompleted, SessionID: executionInput.SessionID, AgentID: executionInput.AgentID, ExecutionID: executionInput.ID, TurnID: turnID, Entries: []sessionentry.ContextEntry{stored}})
@@ -212,11 +211,7 @@ func (r *Runner) executeTurn(
 			AuthorID:    executionInput.AgentID.String(),
 			Content:     assistant,
 		}
-		value := AssistantWrite{Entry: message}
-		if response.stopReason == providerapi.StopCompleted || response.stopReason == providerapi.StopSequence {
-			value.FinalOutput = &agentmodel.FinalOutput{AssistantID: message.ID, StopReason: message.StopReason}
-		}
-		message, inserted, err := deps.Assistant.AppendAssistant(ctx, value)
+		message, inserted, err := deps.Assistant.AppendAssistant(ctx, message)
 		if err != nil {
 			r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 			outcome, code, cause := loopResult(failCause(FailureStorage, err))
@@ -226,7 +221,7 @@ func (r *Runner) executeTurn(
 		calls = message.ToolCalls(executionInput.SessionID, executionInput.AgentID)
 		*modelContext = modelContext.Append(message)
 		if inserted {
-			r.notifyAssistant(ctx, executionInput, message, value.FinalOutput != nil)
+			r.notifyAssistant(ctx, executionInput, message)
 		}
 	}
 	for _, call := range calls {
