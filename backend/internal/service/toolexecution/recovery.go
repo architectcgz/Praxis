@@ -6,7 +6,7 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -17,7 +17,7 @@ func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecuti
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
 	if s.active[key] != nil {
-		return sessionentry.ContextEntry{}, fault.ErrRequestConflict
+		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
 	}
 	var result sessionentry.ContextEntry
 	err := func(txCtx context.Context) error {
@@ -26,7 +26,7 @@ func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecuti
 			result = stored
 			return nil
 		}
-		if !errors.Is(err, fault.ErrNotFound) {
+		if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		call, err := s.call(txCtx, executionID, callID)

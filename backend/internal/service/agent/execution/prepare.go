@@ -11,7 +11,7 @@ import (
 	taskmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
@@ -24,7 +24,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		return result, false, errors.New("task preparation context is required")
 	}
 	if modelConfig.ProviderID == "" || modelConfig.ModelID == "" {
-		return result, false, fault.New(modelconfig.ModelNotConfigured, "")
+		return result, false, modelconfig.ErrNotConfigured
 	}
 	// 请求身份只在调度准入时建立；由 Task ID 派生以保证准备重试使用同一身份。
 	requestID := identity.RequestID(input.ID)
@@ -34,7 +34,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		return result, false, err
 	}
 	if owner.SessionID != input.SessionID {
-		return result, false, fault.ErrRequestConflict
+		return result, false, errorcode.ErrRequestConflict
 	}
 	previous, err := s.records.FindByRequest(ctx, owner.ID, requestID)
 	if err == nil {
@@ -43,32 +43,32 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 			return result, false, err
 		}
 		if previous.SourceTaskID != input.ID || stored.Role != role.User || stored.TextContent() != input.Prompt {
-			return result, false, fault.ErrRequestConflict
+			return result, false, errorcode.ErrRequestConflict
 		}
 		return previous, true, nil
 	}
-	if !errors.Is(err, fault.ErrNotFound) {
+	if !errors.Is(err, errorcode.ErrNotFound) {
 		return result, false, err
 	}
 	if err := sessionservice.RequireWritable(ctx, s.sessions, owner.SessionID); err != nil {
 		return result, false, err
 	}
 	if !owner.State.Startable() {
-		return result, false, agentmodel.ErrAgentExecuting
+		return result, false, agentmodel.ErrExecuting
 	}
 	count, err := s.records.CountActiveBySession(ctx, owner.SessionID)
 	if err != nil {
 		return result, false, err
 	}
 	if count != 0 {
-		return result, false, agentmodel.ErrAgentExecuting
+		return result, false, agentmodel.ErrExecuting
 	}
 	definition, err := s.definitions.Definition(owner.DefinitionID)
 	if err != nil {
 		return result, false, err
 	}
 	if definition.Profile != owner.Profile {
-		return result, false, fault.ErrRequestConflict
+		return result, false, errorcode.ErrRequestConflict
 	}
 	config := agentexecution.ExecutionConfig{
 		AgentDefinitionID: definition.ID,
@@ -79,10 +79,10 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	executionID := identity.AgentExecutionID(s.ids.New("execution"))
 	if previous, err := s.entries.Get(ctx, agentservice.EntryStream(owner), inputEntryID); err == nil {
 		if previous.Role != role.User || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
-			return result, false, fault.ErrRequestConflict
+			return result, false, errorcode.ErrRequestConflict
 		}
 		executionID = identity.AgentExecutionID(previous.ExecutionID)
-	} else if !errors.Is(err, fault.ErrNotFound) {
+	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return result, false, err
 	}
 	_, admitted, err := s.executions.Reserve(ctx, owner.ID, executionID)
@@ -90,7 +90,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		return result, false, err
 	}
 	if !admitted {
-		return result, false, fault.ErrRequestConflict
+		return result, false, errorcode.ErrRequestConflict
 	}
 	defer func() {
 		if err != nil {

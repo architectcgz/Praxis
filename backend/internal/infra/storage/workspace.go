@@ -10,7 +10,7 @@ import (
 
 type WorkspaceRepository struct{ s *Store }
 
-// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+// Get 读取指定对象，不存在时返回 errorcode.ErrNotFound。
 func (r WorkspaceRepository) Get(ctx context.Context, id identity.WorkspaceID) (workspacemodel.Workspace, error) {
 	return get[workspacemodel.Workspace](ctx, r.s, "workspace", id.String())
 }

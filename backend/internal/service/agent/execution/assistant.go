@@ -9,7 +9,7 @@ import (
 	"praxis/internal/core/loop"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
@@ -35,7 +35,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 			return err
 		}
 		if !execution.Active() || owner.CurrentExecutionID != id || owner.SessionID != execution.SessionID {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if err := sessionservice.RequireWritable(txCtx, s.sessions, execution.SessionID); err != nil {
 			return err
@@ -68,14 +68,14 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, message session
 			return err
 		}
 		if agentservice.EntryStream(owner) != w.stream {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		execution, err := w.service.records.Get(txCtx, identity.AgentExecutionID(message.ExecutionID))
 		if err != nil {
 			return err
 		}
 		if execution.ID != w.executionID || execution.SessionID != w.stream.SessionID || execution.AgentID != w.agentID || message.RequestID != execution.RequestID.String() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		stored, inserted, err = w.service.entries.Append(txCtx, sessionentry.Record{Stream: w.stream, AgentID: w.agentID, Data: message})
 		if err != nil {

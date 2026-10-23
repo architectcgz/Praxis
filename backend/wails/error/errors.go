@@ -38,24 +38,20 @@ func PublicError(err error) error {
 	}
 	var coded Coded
 	if errors.As(err, &coded) {
-		message := err.Error()
-		if message == coded.ErrorCode() {
-			message = ""
+		message := ""
+		var validation interface{ ValidationMessage() string }
+		if errors.As(err, &validation) {
+			message = validation.ValidationMessage()
 		}
 		return codedError{code: coded.ErrorCode(), message: message}
 	}
 	switch {
 	case errors.Is(err, context.Canceled):
-		return codedError{code: ErrorCodeRequestCanceled.String()}
+		return codedError{code: ErrRequestCanceled.ErrorCode()}
 	case errors.Is(err, context.DeadlineExceeded):
-		return codedError{code: ErrorCodeRequestTimeout.String()}
+		return codedError{code: ErrRequestTimeout.ErrorCode()}
 	}
-	return codedError{code: ErrorCodeInternal.String()}
-}
-
-// CodedError 构造 Wails 宿主或传输边界的错误，无附加信息。
-func CodedError(code ErrorCode) error {
-	return codedError{code: code.String()}
+	return codedError{code: ErrInternal.ErrorCode()}
 }
 
 type codedError struct {

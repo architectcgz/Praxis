@@ -13,7 +13,7 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/workflow"
@@ -66,7 +66,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 				return err
 			}
 			if session.ProjectID != v.ProjectID {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 		}
 	case "session":
@@ -110,7 +110,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 			return err
 		}
 		if record.AgentID != v.AgentID || record.Data.Role != role.User || record.Data.RequestID != v.RequestID.String() || record.Data.SourceTaskID != v.SourceTaskID.String() || record.Data.ExecutionID != v.ID.String() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 	case "tool_event":
 		var v toolexecution.Event
@@ -120,7 +120,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 			return err
 		}
 		if !execution.Active() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		call, err := (ToolCallQueries{s}).getCallLocked(v.Key)
 		if err != nil {
@@ -128,15 +128,15 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		}
 		if v.Kind == toolexecution.Approved || v.Kind == toolexecution.ApprovalRequired {
 			if toolexecution.ArgumentsDigest(call.Name, []byte(v.Summary)) != v.ArgumentsDigest {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 		}
 		if call.SessionID.String() != scope || v.At.Before(call.CreatedAt) {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if _, err := s.lookup(lookupKey{kind: "tool-result", owner: v.ExecutionID.String(), value: v.CallID}); err == nil {
-			return fault.ErrRequestConflict
-		} else if !errors.Is(err, fault.ErrNotFound) {
+			return errorcode.ErrRequestConflict
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		facts, err := (ToolExecutionRepository{s}).readLocked(v.Key)
@@ -203,7 +203,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		}
 		if v.Data.ExecutionID != "" {
 			task, err := getLocked[agentexecution.Execution](s, "agent_execution", v.Data.ExecutionID)
-			if errors.Is(err, fault.ErrNotFound) && v.Data.Role == role.User && v.Data.ID == "input:"+v.Data.RequestID {
+			if errors.Is(err, errorcode.ErrNotFound) && v.Data.Role == role.User && v.Data.ID == "input:"+v.Data.RequestID {
 				return nil
 			}
 			if err != nil {
@@ -259,7 +259,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return err
 		}
 		if next.Usage.InputTokens < prior.Usage.InputTokens {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		for _, counts := range [][2]*int64{
 			{prior.Usage.OutputTokens, next.Usage.OutputTokens},
@@ -267,7 +267,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			{prior.Usage.CacheCreationInputTokens, next.Usage.CacheCreationInputTokens},
 		} {
 			if counts[0] != nil && (counts[1] == nil || *counts[1] < *counts[0]) {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 		}
 		fields = []string{"agentId", "executionId", "turnId"}
@@ -283,17 +283,17 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return nil
 		}
 		if prior.Status != timingmodel.Running || next.Status == timingmodel.Running || prior.Operation != next.Operation || prior.ParentID != next.ParentID || !prior.StartedAt.Equal(next.StartedAt) {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 
 	case "context", "entry", "tool_event", "control":
 		if !bytes.Equal(before, after) {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 	}
 	for _, field := range fields {
 		if !bytes.Equal(left[field], right[field]) {
-			return fmt.Errorf("%w: %s.%s is immutable", fault.ErrRequestConflict, collection, field)
+			return fmt.Errorf("%w: %s.%s is immutable", errorcode.ErrRequestConflict, collection, field)
 		}
 	}
 	return nil

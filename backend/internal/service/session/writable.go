@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
@@ -15,7 +15,7 @@ func RequireWritable(ctx context.Context, sessions repository.Session, id identi
 		return err
 	}
 	if value.State != sessionmodel.SessionActive {
-		return fault.ErrRequestConflict
+		return errorcode.ErrRequestConflict
 	}
 	return nil
 }

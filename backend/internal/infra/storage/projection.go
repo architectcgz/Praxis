@@ -14,7 +14,7 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/workflow"
@@ -299,12 +299,12 @@ func (s *Store) decodeProjected(data []byte, target any) error {
 func (s *Store) projectAgent(value *agentmodel.Agent) error {
 	value.State, value.CurrentExecutionID = agentmodel.AgentIdle, ""
 	key, err := s.lookup(lookupKey{kind: "active-agent", owner: value.ID.String()})
-	if err != nil && !errors.Is(err, fault.ErrNotFound) {
+	if err != nil && !errors.Is(err, errorcode.ErrNotFound) {
 		return err
 	}
 	var latest agentexecution.Execution
 	keys := []entityKey{key}
-	if errors.Is(err, fault.ErrNotFound) {
+	if errors.Is(err, errorcode.ErrNotFound) {
 		keys = s.keys(lookupKey{kind: "executions-agent", owner: value.ID.String()})
 	}
 	// ponytail: 无活动执行时扫描该 Agent 的历史；历史查询成为瓶颈时再增加最新执行索引。

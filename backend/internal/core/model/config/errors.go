@@ -1,7 +1,5 @@
 package config
 
-import (
-	"praxis/internal/fault"
-)
+import "praxis/internal/errorcode"
 
-const ModelNotConfigured fault.Code = "model.not_configured"
+const ErrNotConfigured errorcode.Code = "model.not_configured"

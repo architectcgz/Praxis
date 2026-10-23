@@ -8,7 +8,7 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	taskmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
 	toolservice "praxis/internal/service/toolexecution"
@@ -120,7 +120,7 @@ func (r *Coordinator) Activate(ctx context.Context, task agentexecution.Executio
 }
 
 func (r *Coordinator) activate(ctx context.Context, task agentexecution.Execution) error {
-	if _, err := r.activeTasks.Context(task.AgentID, task.ID); errors.Is(err, fault.ErrNotFound) {
+	if _, err := r.activeTasks.Context(task.AgentID, task.ID); errors.Is(err, errorcode.ErrNotFound) {
 		reclaimed, err := r.operations.ReclaimExecution(ctx, task)
 		if err != nil {
 			return err

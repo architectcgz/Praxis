@@ -3,8 +3,9 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	workspaceio "praxis/internal/workspace"
 	"strings"
@@ -21,7 +22,7 @@ type FilePreview struct {
 // PreviewFile 接收 canonical 会话身份和路径，在工作区授权后读取有界文本。
 func (s *Service) PreviewFile(ctx context.Context, sessionID identity.SessionID, path string) (FilePreview, error) {
 	if ctx == nil {
-		return FilePreview{}, fault.New(fault.InvalidRequest, "a valid session is required to preview files")
+		return FilePreview{}, fmt.Errorf("a valid session is required to preview files: %w", errorcode.ErrInvalidRequest)
 	}
 	if err := ctx.Err(); err != nil {
 		return FilePreview{}, err
@@ -33,22 +34,22 @@ func (s *Service) PreviewFile(ctx context.Context, sessionID identity.SessionID,
 	if filepath.IsAbs(path) {
 		path, err = filepath.Rel(workspace.Path, path)
 		if err != nil {
-			return FilePreview{}, fault.New(fault.InvalidRequest, "only files within the current workspace can be previewed")
+			return FilePreview{}, fmt.Errorf("only files within the current workspace can be previewed: %w", errorcode.ErrInvalidRequest)
 		}
 	}
 	// IsLocal 拦截词法越界；冒号额外拒绝 Windows 驱动器相对路径与 NTFS 数据流。
 	if !filepath.IsLocal(path) || path == "." || strings.ContainsRune(path, ':') {
-		return FilePreview{}, fault.New(fault.InvalidRequest, "only files within the current workspace can be previewed")
+		return FilePreview{}, fmt.Errorf("only files within the current workspace can be previewed: %w", errorcode.ErrInvalidRequest)
 	}
 	content, err := s.textReader.ReadText(ctx, workspace.Path, path, maxPreviewBytes)
 	if errors.Is(err, workspaceio.ErrFileTooLarge) {
-		return FilePreview{}, fault.New(fault.InvalidRequest, "file exceeds the 1 MiB preview limit")
+		return FilePreview{}, fmt.Errorf("file exceeds the 1 MiB preview limit: %w", errorcode.ErrInvalidRequest)
 	}
 	if errors.Is(err, workspaceio.ErrNotRegularFile) {
-		return FilePreview{}, fault.New(fault.InvalidRequest, "only regular text files can be previewed")
+		return FilePreview{}, fmt.Errorf("only regular text files can be previewed: %w", errorcode.ErrInvalidRequest)
 	}
 	if errors.Is(err, workspaceio.ErrInvalidText) {
-		return FilePreview{}, fault.New(fault.InvalidRequest, "only UTF-8 text can be previewed; binary files are not supported")
+		return FilePreview{}, fmt.Errorf("only UTF-8 text can be previewed; binary files are not supported: %w", errorcode.ErrInvalidRequest)
 	}
 	if err != nil {
 		return FilePreview{}, err

@@ -1,14 +1,14 @@
 package bindings
 
 import (
-	"strings"
-
-	"praxis/internal/fault"
+	"fmt"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	execution "praxis/internal/service/agent/coordinator"
 	toolservice "praxis/internal/service/toolexecution"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
+	"strings"
 )
 
 func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval, error) {
@@ -66,7 +66,7 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 		ArgumentsDigest: strings.TrimSpace(wire.ArgumentsDigest),
 	}
 	if params.SessionID == "" || params.AgentID == "" || params.ExecutionID == "" || params.CallID == "" || params.ArgumentsDigest == "" {
-		err := fault.New(fault.InvalidRequest, "tool approval identity is required")
+		err := fmt.Errorf("tool approval identity is required: %w", errorcode.ErrInvalidRequest)
 		return publicError(b.host, "CommandBindings.ToolDecision.request", err)
 	}
 	if approve {
@@ -92,7 +92,7 @@ func (b *CommandBindings) StopToolCall(wire dto.ToolControlRequest) error {
 		CallID:      strings.TrimSpace(wire.CallID),
 	}
 	if request.SessionID == "" || request.AgentID == "" || request.ExecutionID == "" || request.CallID == "" {
-		return publicError(b.host, "CommandBindings.StopToolCall.request", fault.New(fault.InvalidRequest, "tool control identity is required"))
+		return publicError(b.host, "CommandBindings.StopToolCall.request", fmt.Errorf("tool control identity is required: %w", errorcode.ErrInvalidRequest))
 	}
 	return publicError(b.host, "CommandBindings.StopToolCall", services.Commands.StopToolCall(ctx, request))
 }

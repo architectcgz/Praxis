@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -13,7 +13,7 @@ type AgentRepository struct{ s *Store }
 
 type ControlRepository struct{ s *Store }
 
-// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+// Get 读取指定对象，不存在时返回 errorcode.ErrNotFound。
 func (r AgentRepository) Get(ctx context.Context, id identity.AgentID) (agentmodel.Agent, error) {
 	return get[agentmodel.Agent](ctx, r.s, "agent", id.String())
 }
@@ -29,20 +29,20 @@ func (r AgentRepository) ListBySession(ctx context.Context, id identity.SessionI
 	return capped(sorted(v, func(a, b agentmodel.Agent) int { return cmp.Compare(a.ID, b.ID) }), limit), e
 }
 
-// GetBySessionAndDefinition 按 Session 与 Agent 定义查找，未找到时返回 fault.ErrNotFound。
+// GetBySessionAndDefinition 按 Session 与 Agent 定义查找，未找到时返回 errorcode.ErrNotFound。
 func (r AgentRepository) GetBySessionAndDefinition(ctx context.Context, id identity.SessionID, definition identity.AgentDefinitionID) (agentmodel.Agent, error) {
 	v, e := listIndexed[agentmodel.Agent](ctx, r.s, lookupKey{kind: "agents-definition", owner: id.String(), value: definition.String()}, nil)
 	if e != nil {
 		return agentmodel.Agent{}, e
 	}
 	if len(v) == 0 {
-		return agentmodel.Agent{}, fault.ErrNotFound
+		return agentmodel.Agent{}, errorcode.ErrNotFound
 	}
 	sorted(v, func(a, b agentmodel.Agent) int { return cmp.Compare(a.ID, b.ID) })
 	return v[0], nil
 }
 
-// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+// Get 读取指定对象，不存在时返回 errorcode.ErrNotFound。
 func (r ControlRepository) Get(ctx context.Context, id identity.AgentControlCommandID) (agentmodel.AgentControlCommand, error) {
 	return get[agentmodel.AgentControlCommand](ctx, r.s, "control", id.String())
 }
@@ -56,10 +56,10 @@ func (r ControlRepository) Save(ctx context.Context, v agentmodel.AgentControlCo
 		}
 		if existing, err := getLocked[agentmodel.AgentControlCommand](r.s, "control", v.ID.String()); err == nil {
 			if existing.AgentID != v.AgentID || existing.TargetExecutionID != v.TargetExecutionID || existing.Kind != v.Kind {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			return nil
-		} else if !errors.Is(err, fault.ErrNotFound) {
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		return r.s.appendLocked(ctx, a.SessionID.String(), "control", v.ID.String(), "control.saved", v)

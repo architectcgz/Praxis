@@ -1,14 +1,22 @@
 // wails 层错误码：入参校验与传输/宿主。
-// 业务错误码来自 internal/contracts，由 wails 层原样透传，前端直接识别。
+// 业务错误码由后端所属包定义，Wails 透传稳定码，前端按码提供文案。
 export const API_ERROR_CODES = {
     // wails 层
     invalidRequest: 'invalid_request',
+    validationError: 'validation_error',
+    configuration: 'configuration_error',
     bindingUnavailable: 'binding_unavailable',
     requestCanceled: 'request_canceled',
     requestTimeout: 'request_timeout',
     internal: 'internal_error',
 
-    // 业务层（internal/contracts）
+    // 通用业务错误
+    genericInvalidRequest: 'generic.invalid_request',
+    genericRequestCanceled: 'generic.request_canceled',
+    genericRequestTimeout: 'generic.request_timeout',
+    genericInternal: 'generic.internal_error',
+
+    // 业务领域
     validation: 'generic.invalid_value',
     invalidTransition: 'generic.invalid_transition',
     notFound: 'generic.not_found',
@@ -22,15 +30,15 @@ export const API_ERROR_CODES = {
     requestNotFound: 'request.not_found',
     requestConflict: 'request.conflict',
     modelNotConfigured: 'model.not_configured',
-    taskContract: 'task.contract_error',
-    taskPolicyBlocked: 'task.policy_blocked',
-    taskApprovalRequired: 'task.approval_required',
-    taskStorage: 'task.storage_error',
-    taskProvider: 'task.provider_error',
-    taskTool: 'task.tool_error',
-    taskResourceLimit: 'task.resource_limit',
-    taskBusy: 'task.busy',
-    taskInterrupted: 'task.interrupted',
+    executionContract: 'execution.contract_error',
+    executionPolicyBlocked: 'execution.policy_blocked',
+    executionApprovalRequired: 'execution.approval_required',
+    executionStorage: 'execution.storage_error',
+    executionProvider: 'execution.provider_error',
+    executionTool: 'execution.tool_error',
+    executionResourceLimit: 'execution.resource_limit',
+    executionBusy: 'execution.busy',
+    executionInterrupted: 'interrupted',
 } as const
 
 export type ApiErrorCode = typeof API_ERROR_CODES[keyof typeof API_ERROR_CODES]

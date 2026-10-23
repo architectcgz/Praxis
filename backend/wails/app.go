@@ -179,7 +179,7 @@ func (a *App) BindingContext() (context.Context, bindings.Services, error) {
 	}
 	if closed || ctx == nil || service == nil {
 		a.logDebug("binding rejected: desktop context is not available")
-		return nil, bindings.Services{}, apperr.CodedError(apperr.ErrorCodeBindingUnavailable)
+		return nil, bindings.Services{}, apperr.PublicError(apperr.ErrBindingUnavailable)
 	}
 	return context.WithoutCancel(ctx), *service, nil
 }

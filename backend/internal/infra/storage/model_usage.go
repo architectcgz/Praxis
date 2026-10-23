@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	providerapi "praxis/internal/core/provider"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -17,7 +17,7 @@ func (r ModelUsageStore) Save(ctx context.Context, value providerapi.UsageRecord
 		previous, err := getLocked[providerapi.UsageRecord](r.Store, "usage", value.Key())
 		if err == nil {
 			if previous.SessionID != value.SessionID || previous.AgentID != value.AgentID || previous.Usage.InputTokens > value.Usage.InputTokens {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			for _, counts := range [][2]*int64{
 				{previous.Usage.OutputTokens, value.Usage.OutputTokens},
@@ -25,10 +25,10 @@ func (r ModelUsageStore) Save(ctx context.Context, value providerapi.UsageRecord
 				{previous.Usage.CacheCreationInputTokens, value.Usage.CacheCreationInputTokens},
 			} {
 				if counts[0] != nil && (counts[1] == nil || *counts[1] < *counts[0]) {
-					return fault.ErrRequestConflict
+					return errorcode.ErrRequestConflict
 				}
 			}
-		} else if !errors.Is(err, fault.ErrNotFound) {
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		return r.Store.appendLocked(ctx, value.SessionID, "usage", value.Key(), "usage.saved", value)

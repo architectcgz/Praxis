@@ -5,7 +5,7 @@ import (
 	"errors"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 )
@@ -24,14 +24,14 @@ func (s *Service) commitResult(ctx context.Context, call sessionentry.ToolCall, 
 			return err
 		}
 		if execution.AgentID != call.AgentID || execution.SessionID != call.SessionID || execution.RequestID.String() != call.RequestID || data.ExecutionID != execution.ID.String() || data.RequestID != call.RequestID || data.TurnID != call.TurnID.String() || data.Content[0].CallID != call.CallID || data.Content[0].Name != string(call.Name) {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		owner, err := s.deps.Agents.Get(txCtx, call.AgentID)
 		if err != nil {
 			return err
 		}
 		if owner.SessionID != call.SessionID {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		stored, inserted, err = s.deps.Entries.Append(txCtx, sessionentry.Record{Stream: agentservice.EntryStream(owner), AgentID: owner.ID, Data: data})
 		return err

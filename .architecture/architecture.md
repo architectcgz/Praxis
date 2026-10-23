@@ -37,7 +37,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/internal/infra/providers/` | 各模型 Provider 的协议实现 |
 | `backend/internal/infra/modelregistry/`、`infra/agentregistry/`、`infra/toolregistry/` | 模型、Agent 和工具的配置加载与注册 |
 | `backend/internal/infra/tools/`、`infra/filesystem/` | 具体工具和本地文件系统能力 |
-| `backend/internal/identity/`、`clock/`、`fault/` | 身份、时间和错误等基础能力 |
+| `backend/internal/identity/`、`clock/`、`errorcode/`、`fault/` | 身份、时间、稳定错误码和结构化错误等基础能力 |
 | `backend/internal/settings/`、`dataroot/`、`logging/` | 应用配置、数据目录和日志 |
 
 ## 整体调用关系

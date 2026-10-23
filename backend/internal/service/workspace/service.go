@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	projectservice "praxis/internal/service/project"
@@ -46,7 +46,7 @@ func NewService(deps Dependencies) (*Service, error) {
 
 func (s *Service) workspaceForSession(ctx context.Context, sessionID identity.SessionID) (workspacemodel.Workspace, error) {
 	if ctx == nil {
-		return workspacemodel.Workspace{}, fault.New(fault.InvalidRequest, "a valid session is required")
+		return workspacemodel.Workspace{}, fmt.Errorf("a valid session is required: %w", errorcode.ErrInvalidRequest)
 	}
 	if err := ctx.Err(); err != nil {
 		return workspacemodel.Workspace{}, err
@@ -60,7 +60,7 @@ func (s *Service) workspaceForSession(ctx context.Context, sessionID identity.Se
 		return workspacemodel.Workspace{}, err
 	}
 	if workspace.ProjectID != session.ProjectID || workspace.State != workspacemodel.WorkspaceReady {
-		return workspacemodel.Workspace{}, fault.New(projectservice.ProjectWorkspaceInvalid, "current session workspace is unavailable")
+		return workspacemodel.Workspace{}, fmt.Errorf("current session workspace is unavailable: %w", projectservice.ErrWorkspaceInvalid)
 	}
 	return workspace, nil
 }

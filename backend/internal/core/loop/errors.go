@@ -3,26 +3,20 @@ package loop
 import (
 	"errors"
 	"fmt"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 )
-
-// ErrorCode 是运行时失败的稳定业务分类，供编排与 app 层映射使用。
-type ErrorCode = fault.Code
 
 const (
-	ErrorBusy             ErrorCode = "execution.busy"
-	ErrorContract         ErrorCode = "execution.contract_error"
-	ErrorPolicyBlocked    ErrorCode = "execution.policy_blocked"
-	ErrorApprovalRequired ErrorCode = "execution.approval_required"
-	ErrorStorage          ErrorCode = "execution.storage_error"
-	ErrorProvider         ErrorCode = "execution.provider_error"
-	ErrorTool             ErrorCode = "execution.tool_error"
-	ErrorInterrupted      ErrorCode = "interrupted"
-	ErrorResourceLimit    ErrorCode = "execution.resource_limit"
+	ErrBusy             errorcode.Code = "execution.busy"
+	ErrContract         errorcode.Code = "execution.contract_error"
+	ErrPolicyBlocked    errorcode.Code = "execution.policy_blocked"
+	ErrApprovalRequired errorcode.Code = "execution.approval_required"
+	ErrStorage          errorcode.Code = "execution.storage_error"
+	ErrProvider         errorcode.Code = "execution.provider_error"
+	ErrTool             errorcode.Code = "execution.tool_error"
+	ErrInterrupted      errorcode.Code = "interrupted"
+	ErrResourceLimit    errorcode.Code = "execution.resource_limit"
 )
-
-// OperationError 复用业务错误载体，低敏感、可安全分类。
-type OperationError = fault.Error
 
 // Failure 携带引擎错误对应的持久化结束结果。
 // loopResult 在统一的 run 边界把它转换为返回值。
@@ -30,6 +24,7 @@ type Failure struct {
 	outcome EndReason
 	code    FailureCode
 	cause   error
+	message string
 }
 
 func (f *Failure) Error() string {
@@ -41,11 +36,12 @@ func (f *Failure) Error() string {
 
 func (f *Failure) Unwrap() error { return f.cause }
 
-func fail(code FailureCode, operationCode ErrorCode, message string) error {
+func fail(code FailureCode, operationCode errorcode.Code, message string) error {
 	return &Failure{
 		outcome: endFailed,
 		code:    code,
-		cause:   &OperationError{Code: operationCode, Message: message},
+		cause:   fmt.Errorf("%s: %w", message, operationCode),
+		message: message,
 	}
 }
 
@@ -61,7 +57,7 @@ func modelFailure(err error) error {
 	}
 	var windowErr *ContextWindowExceededError
 	if errors.As(err, &windowErr) {
-		return fail(FailureResourceLimit, ErrorResourceLimit, "model context window exceeded")
+		return fail(FailureResourceLimit, ErrResourceLimit, "model context window exceeded")
 	}
 	return failCause(FailureProvider, err)
 }

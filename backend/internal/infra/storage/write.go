@@ -9,7 +9,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/infra/jsonl"
 	"time"
 )
@@ -26,7 +26,7 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 			return err
 		}
 		if session.State != sessionmodel.SessionActive {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 	}
 	event := jsonl.Event{
@@ -94,14 +94,14 @@ func (s *Store) validateEvent(scope string, event jsonl.Event, entry stateEntry)
 			return err
 		}
 		if len(s.keys(lookupKey{kind: "active-session", owner: scope})) != 0 {
-			return agentmodel.ErrAgentExecuting
+			return agentmodel.ErrExecuting
 		}
 		return nil
 	}
 	key := eventKey(scope, event)
 	if prior, ok := s.entry(key); ok {
 		if prior.scope != scope {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		payload, err := s.payload(key)
 		if err != nil {
@@ -115,17 +115,17 @@ func (s *Store) validateEvent(scope string, event jsonl.Event, entry stateEntry)
 	}
 	if scope != "" && key.collection != "session" {
 		if _, ok := s.entry(entityKey{"session", scope}); !ok {
-			return fault.ErrNotFound
+			return errorcode.ErrNotFound
 		}
 	}
 	claimed := make(map[lookupKey]bool, len(entry.claims))
 	for _, claim := range entry.claims {
 		if claimed[claim] {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		claimed[claim] = true
 		if old, exists := s.state.unique[claim]; exists && old != key {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 	}
 	return s.validateRelations(key, entry)

@@ -8,7 +8,7 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"time"
 )
@@ -30,7 +30,7 @@ func (scope *Scope) authorize(ctx context.Context, call sessionentry.ToolCall, a
 				return err
 			}
 			if !task.Active() || task.AgentID != call.AgentID || task.SessionID != call.SessionID {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			facts, err := s.deps.Events.Read(txCtx, call.Key)
 			if err != nil {

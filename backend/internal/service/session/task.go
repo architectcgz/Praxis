@@ -5,7 +5,7 @@ import (
 	"errors"
 	"praxis/internal/core/hook"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"strings"
 )
@@ -57,7 +57,7 @@ func (s *Service) CancelTask(ctx context.Context, sessionID identity.SessionID, 
 	}
 	queue, ok := s.TaskQueue(sessionID)
 	if !ok {
-		return fault.ErrNotFound
+		return errorcode.ErrNotFound
 	}
 	return queue.Cancel(id)
 }

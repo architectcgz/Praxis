@@ -1,7 +1,5 @@
 package project
 
-import (
-	"praxis/internal/fault"
-)
+import "praxis/internal/errorcode"
 
-const ProjectWorkspaceInvalid fault.Code = "project.workspace_invalid"
+const ErrWorkspaceInvalid errorcode.Code = "project.workspace_invalid"

@@ -7,7 +7,7 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	agentservice "praxis/internal/service/agent"
@@ -48,7 +48,7 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 			return err
 		}
 		if !task.Active() || agent.CurrentExecutionID != task.ID {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		// 完成证据由仓储从最后一条 Assistant 派生；消息落盘后重启不再请求模型。
 		if task.Progress.FinalAssistantID != "" {

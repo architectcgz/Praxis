@@ -3,7 +3,7 @@ package execution
 import (
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -14,7 +14,7 @@ func (s *Service) NextRequestSequence(ctx context.Context, id identity.AgentExec
 		return 0, err
 	}
 	if !execution.Active() {
-		return 0, fault.ErrRequestConflict
+		return 0, errorcode.ErrRequestConflict
 	}
 	return max(uint64(1), execution.Progress.NextSequence), nil
 }
@@ -35,7 +35,7 @@ func (s *Service) update(ctx context.Context, id identity.AgentExecutionID, chan
 func (s *Service) RecordModelRequest(ctx context.Context, id identity.AgentExecutionID, sequence uint64, iteration bool) error {
 	return s.update(ctx, id, func(value *agentexecution.Execution) error {
 		if !value.Active() || sequence != max(uint64(1), value.Progress.NextSequence) {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if iteration {
 			value.Progress.Iterations++

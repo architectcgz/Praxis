@@ -2,6 +2,7 @@ package session
 
 import (
 	"math"
+	"praxis/internal/errorcode"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"slices"
@@ -70,11 +71,11 @@ func (q *TaskQueue) Cancel(id identity.TaskID) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.claimed != nil && q.claimed.ID == id {
-		return fault.ErrRequestConflict
+		return errorcode.ErrRequestConflict
 	}
 	index := slices.IndexFunc(q.pending, func(value Task) bool { return value.ID == id })
 	if index < 0 {
-		return fault.ErrNotFound
+		return errorcode.ErrNotFound
 	}
 	q.pending = slices.Delete(q.pending, index, index+1)
 	if len(q.pending) == 0 {

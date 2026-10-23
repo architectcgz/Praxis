@@ -6,7 +6,7 @@ import (
 	"errors"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -29,9 +29,9 @@ func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing
 				return nil
 			}
 			if old.Status != timing.Running {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
-		} else if !errors.Is(err, fault.ErrNotFound) {
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		execution, err := getLocked[agentexecution.Execution](r.s, "agent_execution", value.ExecutionID)

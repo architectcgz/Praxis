@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"slices"
 )
 
@@ -87,7 +87,7 @@ func (s *Store) keys(group lookupKey) []entityKey {
 func (s *Store) lookup(claim lookupKey) (entityKey, error) {
 	key, ok := s.state.unique[claim]
 	if !ok {
-		return entityKey{}, fault.ErrNotFound
+		return entityKey{}, errorcode.ErrNotFound
 	}
 	return key, nil
 }

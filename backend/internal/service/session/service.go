@@ -11,7 +11,7 @@ import (
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	projectservice "praxis/internal/service/project"
@@ -161,7 +161,7 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID identity.Session
 		return SessionView{}, fmt.Errorf("list agents in session %s: %w", sessionID, err)
 	}
 	if len(agents) == 0 {
-		return SessionView{}, fault.ErrNotFound
+		return SessionView{}, errorcode.ErrNotFound
 	}
 	return SessionView{
 		Session: session,
@@ -173,7 +173,7 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID identity.Session
 // ListSessionContext 按稳定时间和 ID 游标读取 SessionContext 条目。
 func (s *Service) ListSessionContext(ctx context.Context, sessionID identity.SessionID, afterID string, limit int) ([]sessionmodel.SharedFact, error) {
 	if ctx == nil {
-		return nil, fault.New(fault.InvalidRequest, "session context query is invalid")
+		return nil, fmt.Errorf("session context query is invalid: %w", errorcode.ErrInvalidRequest)
 	}
 	if _, err := s.sessions.Get(ctx, sessionID); err != nil {
 		return nil, err
@@ -208,16 +208,16 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 	}
 	definition, err := s.definitions(params.DefinitionID)
 	if err != nil {
-		return CreateResult{}, fault.New(fault.InvalidRequest, "")
+		return CreateResult{}, errorcode.ErrInvalidRequest
 	}
 	err = func(txCtx context.Context) error {
 		existing, err := s.sessions.Get(txCtx, params.SessionID)
 		if err == nil {
 			if existing.ProjectID != params.ProjectID || existing.WorkspaceID != params.WorkspaceID {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			agent, agentErr := s.agents.Get(txCtx, params.AgentID)
-			if errors.Is(agentErr, fault.ErrNotFound) {
+			if errors.Is(agentErr, errorcode.ErrNotFound) {
 				agent = agentmodel.NewAgent(params.AgentID, existing.ID, definition.ID, definition.Profile, existing.CreatedAt)
 				agentErr = s.agents.Save(txCtx, agent)
 			}
@@ -226,17 +226,17 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 			}
 			if existing.ProjectID != params.ProjectID || existing.WorkspaceID != params.WorkspaceID ||
 				agent.SessionID != params.SessionID || agent.DefinitionID != definition.ID || agent.Profile != definition.Profile {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			result = CreateResult{Session: existing, Agent: agent}
 			return nil
 		}
-		if !errors.Is(err, fault.ErrNotFound) {
+		if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		if _, err := s.agents.Get(txCtx, params.AgentID); err == nil {
-			return fault.ErrRequestConflict
-		} else if !errors.Is(err, fault.ErrNotFound) {
+			return errorcode.ErrRequestConflict
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		project, err := s.projects.Get(txCtx, params.ProjectID)
@@ -244,14 +244,14 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 			if err != nil {
 				return err
 			}
-			return fault.New(projectservice.ProjectWorkspaceInvalid, "")
+			return projectservice.ErrWorkspaceInvalid
 		}
 		workspace, err := s.workspaces.Get(txCtx, params.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		if workspace.ProjectID != project.ID || workspace.State != workspacemodel.WorkspaceReady {
-			return fault.New(projectservice.ProjectWorkspaceInvalid, "")
+			return projectservice.ErrWorkspaceInvalid
 		}
 		at := s.clock.Now().UTC()
 		session := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, at)
@@ -295,7 +295,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 	if err == nil {
 		return agent, nil
 	}
-	if !errors.Is(err, fault.ErrNotFound) {
+	if !errors.Is(err, errorcode.ErrNotFound) {
 		return agentmodel.Agent{}, err
 	}
 	initialized, err := s.agents.ListBySession(ctx, sessionID, 1)
@@ -303,7 +303,7 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 		return agentmodel.Agent{}, err
 	}
 	if len(initialized) == 0 {
-		return agentmodel.Agent{}, fault.ErrRequestConflict
+		return agentmodel.Agent{}, errorcode.ErrRequestConflict
 	}
 	definition, err := s.definitions(agentmodel.DefinitionPrimary)
 	if err != nil {
@@ -319,13 +319,13 @@ func (s *Service) GetOrCreatePrimaryAgent(ctx context.Context, sessionID identit
 			created = existing
 			return nil
 		}
-		if !errors.Is(err, fault.ErrNotFound) {
+		if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		at := s.clock.Now().UTC()
 		agent := agentmodel.NewAgent(identity.AgentID(s.ids.New("agent")), session.ID, definition.ID, definition.Profile, at)
 		if err := s.agents.Save(txCtx, agent); err != nil {
-			if errors.Is(err, fault.ErrRequestConflict) {
+			if errors.Is(err, errorcode.ErrRequestConflict) {
 				created, err = s.agents.GetBySessionAndDefinition(txCtx, sessionID, definition.ID)
 			}
 			return err
@@ -378,7 +378,7 @@ func (s *Service) AppendSessionContext(ctx context.Context, params AppendContext
 		if found {
 			if existing.SessionID != params.SessionID || existing.Kind != params.Kind ||
 				existing.SourceExecutionID != params.SourceExecutionID || existing.Content != entry.Content {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			result = AppendContextResult{Entry: existing, ExistingEntry: true}
 			return nil

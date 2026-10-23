@@ -9,7 +9,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	"strings"
@@ -45,7 +45,7 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 			candidate := value.Data
 			candidate.Sequence, candidate.CreatedAt = record.Data.Sequence, record.Data.CreatedAt
 			if record.AgentID != value.AgentID || !same(record.Data, candidate) {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			stored = record.Data
 			return nil
@@ -58,7 +58,7 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 				return err
 			}
 			if !execution.Active() || execution.Progress.FinalAssistantID != "" {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 		}
 		data := value.Data.Clone()
@@ -87,7 +87,7 @@ func (r EntryRepository) Get(ctx context.Context, stream sessionentry.StreamKey,
 	err = r.s.view(ctx, func() error {
 		value, ok := r.s.history(stream).Get(id)
 		if !ok {
-			return fault.ErrNotFound
+			return errorcode.ErrNotFound
 		}
 		result = value
 		return nil

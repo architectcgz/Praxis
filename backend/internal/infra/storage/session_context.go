@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -17,7 +17,7 @@ func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SharedFact
 		existing, err := getLocked[sessionmodel.SharedFact](r.s, "context", v.ID.String())
 		if err == nil {
 			v.CreatedAt = existing.CreatedAt
-		} else if !errors.Is(err, fault.ErrNotFound) {
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		return r.s.appendLocked(ctx, v.SessionID.String(), "context", v.ID.String(), "context.entry_appended", v)
@@ -27,7 +27,7 @@ func (r ContextRepository) Append(ctx context.Context, v sessionmodel.SharedFact
 // GetByID 读取指定记录，第二个返回值表示是否存在。
 func (r ContextRepository) GetByID(ctx context.Context, id identity.ContextEntryID) (sessionmodel.SharedFact, bool, error) {
 	v, e := get[sessionmodel.SharedFact](ctx, r.s, "context", id.String())
-	if errors.Is(e, fault.ErrNotFound) {
+	if errors.Is(e, errorcode.ErrNotFound) {
 		return v, false, nil
 	}
 	return v, e == nil, e

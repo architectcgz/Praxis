@@ -66,15 +66,12 @@ func (r *Runner) emitError(agentID identity.AgentID, executionID identity.AgentE
 		return
 	}
 	message := "input failed"
-	var operationErr *OperationError
-	if errors.As(err, &operationErr) && operationErr.Message != "" {
-		message = operationErr.Message
-	} else {
-		var failure *Failure
-		if errors.As(err, &failure) {
-			if detail := providerFailureMessage(failure.code, failure.cause); detail != "" {
-				message = detail
-			}
+	var failure *Failure
+	if errors.As(err, &failure) {
+		if failure.message != "" {
+			message = failure.message
+		} else if detail := providerFailureMessage(failure.code, failure.cause); detail != "" {
+			message = detail
 		}
 	}
 	r.emit(Event{

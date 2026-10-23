@@ -9,7 +9,7 @@ import (
 	taskmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	toolservice "praxis/internal/service/toolexecution"
@@ -64,7 +64,7 @@ func (r *Coordinator) run(
 	workspace, err := r.workspaces.Get(ctx, session.WorkspaceID)
 	if err != nil || workspace.ProjectID != session.ProjectID || workspace.State != workspacemodel.WorkspaceReady {
 		if err == nil {
-			err = fault.ErrRequestConflict
+			err = errorcode.ErrRequestConflict
 		}
 		r.logError(task, "resolve current workspace", err)
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)

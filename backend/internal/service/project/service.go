@@ -8,7 +8,7 @@ import (
 	"praxis/internal/clock"
 	projectmodel "praxis/internal/core/project"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
@@ -88,17 +88,17 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (Create
 			if existing.Name != params.Name || existing.Path != params.Path ||
 				existing.DefaultWorkspaceID != params.WorkspaceID ||
 				workspace.ProjectID != params.ProjectID || workspace.Path != params.Path {
-				return fault.ErrRequestConflict
+				return errorcode.ErrRequestConflict
 			}
 			result = CreateProjectResult{Project: existing, Workspace: workspace}
 			return nil
 		}
-		if !errors.Is(err, fault.ErrNotFound) {
+		if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		if _, err := s.workspaces.Get(txCtx, params.WorkspaceID); err == nil {
-			return fault.ErrRequestConflict
-		} else if !errors.Is(err, fault.ErrNotFound) {
+			return errorcode.ErrRequestConflict
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		at := s.clock.Now().UTC()

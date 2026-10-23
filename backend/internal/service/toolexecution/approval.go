@@ -9,7 +9,7 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -49,7 +49,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 			return err
 		}
 		if request.SessionID != "" && request.SessionID != call.SessionID || request.AgentID != "" && request.AgentID != call.AgentID {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		task, err = s.deps.Tasks.Get(txCtx, executionID)
 		if err != nil {
@@ -60,7 +60,7 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 			return err
 		}
 		if digest != facts.ArgumentsDigest {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if approve && facts.Approval.Source == executionmodel.ApprovalSourceUser && facts.Approval.ArgumentsDigest == digest {
 			return nil
@@ -69,12 +69,12 @@ func (s *Service) Decide(ctx context.Context, request ApprovalRequest, approve b
 			if !approve && len(result.Content) == 1 && result.Content[0].Text == tool.NewToolError("tool_approval_denied", "The user denied this tool call.").Payload {
 				return nil
 			}
-			return fault.ErrRequestConflict
-		} else if !errors.Is(err, fault.ErrNotFound) {
+			return errorcode.ErrRequestConflict
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		if !task.Active() || !facts.AwaitingApproval() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if !approve {
 			_, err := s.appendError(txCtx, call, "tool_approval_denied", "The user denied this tool call.")

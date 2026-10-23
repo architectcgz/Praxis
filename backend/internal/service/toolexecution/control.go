@@ -8,7 +8,7 @@ import (
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -27,7 +27,7 @@ func (s *Service) registerAndMarkStarted(ctx context.Context, call sessionentry.
 			return err
 		}
 		if !task.Active() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		facts, err := s.deps.Events.Read(txCtx, call.Key)
 		if err != nil {
@@ -92,7 +92,7 @@ func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task ag
 			return err
 		}
 		if request.SessionID != "" && request.SessionID != call.SessionID || request.AgentID != "" && request.AgentID != call.AgentID {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		task, err = s.deps.Tasks.Get(txCtx, key.ExecutionID)
 		if err != nil {
@@ -100,7 +100,7 @@ func (s *Service) StopCall(ctx context.Context, request ControlRequest) (task ag
 		}
 		if _, err := s.deps.Calls.GetResult(txCtx, key); err == nil {
 			return nil
-		} else if !errors.Is(err, fault.ErrNotFound) {
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		facts, err := s.deps.Events.Read(txCtx, key)

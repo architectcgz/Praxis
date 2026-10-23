@@ -28,10 +28,13 @@ export function readableError(error: unknown) {
 function readableApiError(code: string) {
     switch (code) {
         case API_ERROR_CODES.invalidRequest:
+        case API_ERROR_CODES.genericInvalidRequest:
             return '请求格式无效。'
         case API_ERROR_CODES.requestCanceled:
+        case API_ERROR_CODES.genericRequestCanceled:
             return '请求已取消。'
         case API_ERROR_CODES.requestTimeout:
+        case API_ERROR_CODES.genericRequestTimeout:
             return '请求超时，请稍后重试。'
         case API_ERROR_CODES.projectWorkspaceInvalid:
             return '项目名称不能包含路径分隔符。'
@@ -40,6 +43,7 @@ function readableApiError(code: string) {
         case API_ERROR_CODES.modelNotConfigured:
             return '发送前请先配置 Provider 和 Model。'
         case API_ERROR_CODES.validation:
+        case API_ERROR_CODES.validationError:
             return '请求参数无效。'
         case API_ERROR_CODES.invalidTransition:
             return '当前状态不允许执行此操作。'
@@ -59,27 +63,30 @@ function readableApiError(code: string) {
             return '找不到对应请求。'
         case API_ERROR_CODES.requestConflict:
             return '请求冲突，请刷新后重试。'
-        case API_ERROR_CODES.taskContract:
+        case API_ERROR_CODES.executionContract:
             return '执行契约无效。'
-        case API_ERROR_CODES.taskPolicyBlocked:
+        case API_ERROR_CODES.executionPolicyBlocked:
             return '请求被执行策略阻止。'
-        case API_ERROR_CODES.taskApprovalRequired:
+        case API_ERROR_CODES.executionApprovalRequired:
             return '此操作需要批准后才能继续。'
-        case API_ERROR_CODES.taskStorage:
+        case API_ERROR_CODES.executionStorage:
             return '执行状态保存失败。'
-        case API_ERROR_CODES.taskProvider:
+        case API_ERROR_CODES.executionProvider:
             return '模型 Provider 无法完成请求。'
-        case API_ERROR_CODES.taskTool:
+        case API_ERROR_CODES.executionTool:
             return '执行所需工具失败。'
-        case API_ERROR_CODES.taskResourceLimit:
+        case API_ERROR_CODES.executionResourceLimit:
             return '执行达到资源限制。'
-        case API_ERROR_CODES.taskBusy:
+        case API_ERROR_CODES.executionBusy:
             return '代理正忙，请稍后重试。'
-        case API_ERROR_CODES.taskInterrupted:
+        case API_ERROR_CODES.executionInterrupted:
             return '执行已中断。'
+        case API_ERROR_CODES.configuration:
+            return '配置无效，请检查后重试。'
         case API_ERROR_CODES.bindingUnavailable:
             return '请求的桌面能力不可用。'
         case API_ERROR_CODES.internal:
+        case API_ERROR_CODES.genericInternal:
             return 'Praxis 因内部错误无法完成操作。'
         default:
             return code

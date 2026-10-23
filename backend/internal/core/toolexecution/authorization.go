@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
+	"praxis/internal/errorcode"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"time"
@@ -93,47 +94,47 @@ func (f *Facts) Apply(e Event) error {
 	switch e.Kind {
 	case ApprovalRequired:
 		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		f.RequiredAt, f.ArgumentsDigest, f.Decision, f.Summary = e.At, e.ArgumentsDigest, e.Decision, e.Summary
 		f.Approval = ApprovalRecord{}
 	case Reviewed:
 		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() || e.Review == nil {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		f.Review = *e.Review
 	case Approved:
 		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if e.Source == ApprovalSourceUser && (!f.AwaitingApproval() || f.ArgumentsDigest != e.ArgumentsDigest) {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if e.Source == ApprovalSourceUser && e.Decision.Action == security.ApprovalAuto && f.Review.Assessment.Verdict != security.RiskUncertain {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if e.Source == ApprovalSourceYolo && e.Decision.Action != security.ApprovalYolo {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if e.Source != ApprovalSourceUser && e.Source != ApprovalSourceAuto && e.Source != ApprovalSourceYolo {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if e.Decision.Action == security.ApprovalDeny {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		if e.Source == ApprovalSourceAuto && (e.Decision.Action != security.ApprovalAuto || f.Review.ArgumentsDigest != e.ArgumentsDigest || f.Review.Assessment.Verdict != security.RiskSafe) {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		f.ArgumentsDigest, f.Decision, f.Summary = e.ArgumentsDigest, e.Decision, e.Summary
 		f.Approval = ApprovalRecord{Source: e.Source, ArgumentsDigest: e.ArgumentsDigest, ApprovedAt: e.At}
 	case Started:
 		if !f.StartedAt.IsZero() || !f.StopRequestedAt.IsZero() || f.Approval.ApprovedAt.IsZero() || f.Approval.ArgumentsDigest != e.ArgumentsDigest {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		f.StartedAt = e.At
 	case StopRequested:
 		if !f.StopRequestedAt.IsZero() {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		f.StopRequestedAt = e.At
 	default:

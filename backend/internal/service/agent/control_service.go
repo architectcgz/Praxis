@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -42,12 +42,12 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind ag
 		existing, err := s.controls.Get(txCtx, params.CommandID)
 		if err == nil {
 			if existing.AgentID != params.AgentID || existing.TargetExecutionID != params.TargetExecutionID || existing.Kind != kind {
-				return fault.New(fault.InvalidRequest, "")
+				return errorcode.ErrInvalidRequest
 			}
 			result = ControlResult{Command: existing, ExistingCommand: true}
 			return nil
 		}
-		if !errors.Is(err, fault.ErrNotFound) {
+		if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
 		agent, err := s.agents.Get(txCtx, params.AgentID)
@@ -59,12 +59,12 @@ func (s *Service) applyControl(ctx context.Context, params ControlInput, kind ag
 			return err
 		}
 		if task.AgentID != agent.ID {
-			return fault.New(fault.InvalidRequest, "")
+			return errorcode.ErrInvalidRequest
 		}
 		at := s.clock.Now()
 		control := agentmodel.NewAgentControlCommand(params.CommandID, agent.ID, task.ID, kind, at)
 		if task.Active() && (agent.CurrentExecutionID != task.ID || agent.State != agentmodel.AgentExecuting && agent.State != agentmodel.AgentPausing) {
-			return fault.New(agentmodel.UnavailableCode, "")
+			return agentmodel.ErrUnavailable
 		}
 		if err := s.controls.Save(txCtx, control); err != nil {
 			return err

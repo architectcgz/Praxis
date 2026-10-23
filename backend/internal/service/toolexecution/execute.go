@@ -11,7 +11,7 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"time"
 )
 
@@ -74,7 +74,7 @@ func (scope *Scope) execute(ctx context.Context, call sessionentry.ToolCall, arg
 			if err == nil {
 				return result, nil
 			}
-			if !errors.Is(err, fault.ErrNotFound) {
+			if !errors.Is(err, errorcode.ErrNotFound) {
 				return sessionentry.ContextEntry{}, err
 			}
 			continue

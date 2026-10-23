@@ -33,7 +33,7 @@ func (s *Service) SelectModel(ctx context.Context, sessionID identity.SessionID,
 		return nil
 	}
 	if choice.ProviderID == "" || choice.ModelID == "" {
-		return fault.New(modelconfig.ModelNotConfigured, "")
+		return modelconfig.ErrNotConfigured
 	}
 	config, err := s.modelConfigs.ModelConfig(choice.ProviderID, choice.ModelID, choice.ReasoningLevel)
 	if err != nil {

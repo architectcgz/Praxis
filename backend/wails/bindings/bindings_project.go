@@ -2,7 +2,6 @@ package bindings
 
 import (
 	"path/filepath"
-	"praxis/internal/fault"
 	"praxis/internal/identity"
 	projectservice "praxis/internal/service/project"
 	"praxis/wails/dto"
@@ -68,7 +67,7 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 	}
 	if params.Name == "" || strings.ContainsAny(params.Name, "\\/:*?\"<>|\x00\r\n") ||
 		params.Name == "." || params.Name == ".." || !filepath.IsAbs(params.Path) || strings.ContainsAny(params.Path, "\x00\r\n") {
-		err := fault.New(projectservice.ProjectWorkspaceInvalid, "")
+		err := projectservice.ErrWorkspaceInvalid
 		return dto.CreateProjectResponse{}, publicError(b.host, "ProjectBindings.CreateProject.request", err)
 	}
 	result, err := services.Projects.CreateProject(ctx, params)

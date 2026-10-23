@@ -4,6 +4,7 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
+	"praxis/internal/errorcode"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"sync"
@@ -47,7 +48,7 @@ func (e *ActiveTasks) Reserve(ctx context.Context, agentID identity.AgentID, exe
 		if active.ExecutionID == executionID {
 			return active.Context, false, nil
 		}
-		return nil, false, agentmodel.ErrAgentExecuting
+		return nil, false, agentmodel.ErrExecuting
 	}
 	if e.active == nil {
 		e.active = make(map[identity.AgentID]*ActiveTask)
@@ -69,7 +70,7 @@ func (e *ActiveTasks) Context(agentID identity.AgentID, executionID identity.Age
 	defer e.mu.Unlock()
 	active := e.active[agentID]
 	if active == nil || active.ExecutionID != executionID {
-		return nil, fault.ErrNotFound
+		return nil, errorcode.ErrNotFound
 	}
 	return active.Context, nil
 }
@@ -121,7 +122,7 @@ func (e *ActiveTasks) TryRun(agentID identity.AgentID, executionID identity.Agen
 	defer e.mu.Unlock()
 	active := e.active[agentID]
 	if active == nil || active.ExecutionID != executionID {
-		return nil, false, fault.ErrNotFound
+		return nil, false, errorcode.ErrNotFound
 	}
 	if active.running {
 		return active, false, nil

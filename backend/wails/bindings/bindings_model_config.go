@@ -103,10 +103,10 @@ var providerKeyIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 func (b *ModelBindings) SetProviderKey(providerID, value string) error {
 	providerID = strings.TrimSpace(providerID)
 	if !providerKeyIDPattern.MatchString(providerID) {
-		return fault.InvalidValue("providerId", "invalid provider id")
+		return publicError(b.host, "ModelBindings.SetProviderKey.request", fault.InvalidValue("providerId", "invalid provider id"))
 	}
 	if value != "" && strings.TrimSpace(value) == "" {
-		return fault.InvalidValue("key", "API key cannot contain only whitespace")
+		return publicError(b.host, "ModelBindings.SetProviderKey.request", fault.InvalidValue("key", "API key cannot contain only whitespace"))
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {

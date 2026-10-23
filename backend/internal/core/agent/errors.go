@@ -1,15 +1,8 @@
 package agent
 
-import (
-	"praxis/internal/fault"
-)
+import "praxis/internal/errorcode"
 
 const (
-	ExecutingCode   fault.Code = "agent.executing"
-	UnavailableCode fault.Code = "agent.unavailable"
-)
-
-var (
-	ErrAgentExecuting   = fault.New(ExecutingCode, "")
-	ErrAgentUnavailable = fault.New(UnavailableCode, "")
+	ErrExecuting   errorcode.Code = "agent.executing"
+	ErrUnavailable errorcode.Code = "agent.unavailable"
 )

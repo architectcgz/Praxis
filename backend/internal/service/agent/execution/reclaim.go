@@ -4,7 +4,7 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 )
 
 // ReclaimExecution 为同一个遗留 Execution 重新建立执行身份；冻结输入和已使用预算不变。
@@ -18,14 +18,14 @@ func (s *Service) ReclaimExecution(ctx context.Context, selected agentexecution.
 			return err
 		}
 		if !task.Active() || task.AgentID != selected.AgentID {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		agent, err := s.agents.Get(txCtx, task.AgentID)
 		if err != nil {
 			return err
 		}
 		if agent.CurrentExecutionID != task.ID {
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 		_, created, err = s.executions.Reserve(ctx, task.AgentID, task.ID)
 		if err != nil {

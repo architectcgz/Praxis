@@ -13,7 +13,7 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/repository"
 	agentservice "praxis/internal/service/agent"
 	"praxis/internal/utils/jsonutil"
@@ -72,7 +72,7 @@ func (r RiskReviewer) Review(ctx context.Context, task agentexecution.Execution,
 		return assessment, err
 	}
 	if owner.SessionID != task.SessionID || call.AgentID != owner.ID {
-		return assessment, fault.ErrRequestConflict
+		return assessment, errorcode.ErrRequestConflict
 	}
 	input, err := r.Entries.Get(ctx, agentservice.EntryStream(owner), task.InputEntryID)
 	if err != nil {

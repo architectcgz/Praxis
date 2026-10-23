@@ -6,7 +6,7 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"strings"
 	"time"
@@ -14,7 +14,7 @@ import (
 
 type SessionRepository struct{ s *Store }
 
-// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+// Get 读取指定对象，不存在时返回 errorcode.ErrNotFound。
 func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sessionmodel.Session, error) {
 	return get[sessionmodel.Session](ctx, r.s, "session", id.String())
 }
@@ -93,7 +93,7 @@ func (r SessionRepository) NameFromInput(ctx context.Context, id identity.Sessio
 func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, onlyEmpty bool) error {
 	return r.s.view(ctx, func() error {
 		if _, err := getLocked[sessionmodel.Session](r.s, "session", id.String()); err != nil {
-			if onlyEmpty && errors.Is(err, fault.ErrNotFound) {
+			if onlyEmpty && errors.Is(err, errorcode.ErrNotFound) {
 				return nil
 			}
 			return err
@@ -102,7 +102,7 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, on
 			return nil
 		}
 		if len(r.s.keys(lookupKey{kind: "active-session", owner: id.String()})) > 0 {
-			return agentmodel.ErrAgentExecuting
+			return agentmodel.ErrExecuting
 		}
 		return r.s.appendLocked(ctx, id.String(), "session", id.String(), "session.deleted", nil)
 	})

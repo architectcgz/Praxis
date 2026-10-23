@@ -9,7 +9,7 @@ import (
 
 type AgentExecutionRepository struct{ s *Store }
 
-// Get 读取指定对象，不存在时返回 fault.ErrNotFound。
+// Get 读取指定对象，不存在时返回 errorcode.ErrNotFound。
 func (r AgentExecutionRepository) Get(ctx context.Context, id identity.AgentExecutionID) (agentexecution.Execution, error) {
 	return get[agentexecution.Execution](ctx, r.s, "agent_execution", id.String())
 }
@@ -21,7 +21,7 @@ func (r AgentExecutionRepository) Save(ctx context.Context, v agentexecution.Exe
 	})
 }
 
-// FindByRequest 按 Agent 与请求身份查找，未找到时返回 fault.ErrNotFound。
+// FindByRequest 按 Agent 与请求身份查找，未找到时返回 errorcode.ErrNotFound。
 func (r AgentExecutionRepository) FindByRequest(ctx context.Context, id identity.AgentID, request identity.RequestID) (agentexecution.Execution, error) {
 	return getByClaim[agentexecution.Execution](ctx, r.s, lookupKey{kind: "execution-request", owner: id.String(), value: request.String()})
 }

@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	"praxis/internal/errorcode"
 	"time"
 
 	agentmodel "praxis/internal/core/agent"
@@ -29,7 +30,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 		case agentexecution.ExecutionRunning, agentexecution.ExecutionEnding:
 			return nil
 		default:
-			return fault.New(agentmodel.UnavailableCode, "")
+			return agentmodel.ErrUnavailable
 		}
 		return nil
 	})
@@ -181,7 +182,7 @@ func (s *Service) WaitForApproval(ctx context.Context, id identity.AgentExecutio
 		case agentexecution.ExecutionWaitingApproval:
 			return nil
 		default:
-			return fault.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
 	})
 }

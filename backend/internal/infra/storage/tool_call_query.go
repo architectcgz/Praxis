@@ -6,7 +6,7 @@ import (
 	"errors"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/toolexecution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
@@ -28,7 +28,7 @@ func (r ToolCallQueries) getCallLocked(callKey toolexecution.Key) (sessionentry.
 	}
 	entry, ok := r.s.entry(key)
 	if !ok {
-		return sessionentry.ToolCall{}, fault.ErrNotFound
+		return sessionentry.ToolCall{}, errorcode.ErrNotFound
 	}
 	record := entry.entryValue()
 	for _, value := range record.Data.ToolCalls(identity.SessionID(entry.scope), record.AgentID) {
@@ -36,7 +36,7 @@ func (r ToolCallQueries) getCallLocked(callKey toolexecution.Key) (sessionentry.
 			return value, nil
 		}
 	}
-	return sessionentry.ToolCall{}, fault.ErrNotFound
+	return sessionentry.ToolCall{}, errorcode.ErrNotFound
 }
 
 func (r ToolCallQueries) GetResult(ctx context.Context, key toolexecution.Key) (sessionentry.ContextEntry, error) {
@@ -56,7 +56,7 @@ func (r ToolCallQueries) ListMissingToolResults(ctx context.Context) ([]reposito
 					continue
 				}
 				_, err := r.s.lookup(lookupKey{kind: "tool-result", owner: record.Data.ExecutionID, value: block.CallID})
-				if errors.Is(err, fault.ErrNotFound) {
+				if errors.Is(err, errorcode.ErrNotFound) {
 					values = append(values, repository.MissingToolResult{
 						SessionID:   identity.SessionID(entry.scope),
 						AgentID:     record.AgentID,

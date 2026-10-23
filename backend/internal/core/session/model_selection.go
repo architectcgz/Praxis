@@ -3,7 +3,6 @@ package session
 import (
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
-	"praxis/internal/fault"
 )
 
 // ModelChoice 表达用户选择的模型和推理等级；全空表示尚未选择或清除选择。
@@ -33,7 +32,7 @@ func (s ModelSelection) Choice() ModelChoice {
 
 func (s ModelSelection) CurrentModelConfig() (modelapi.Config, error) {
 	if s.config.ProviderID == "" || s.config.ModelID == "" {
-		return modelapi.Config{}, fault.New(modelconfig.ModelNotConfigured, "")
+		return modelapi.Config{}, modelconfig.ErrNotConfigured
 	}
 	return s.config.Clone(), nil
 }

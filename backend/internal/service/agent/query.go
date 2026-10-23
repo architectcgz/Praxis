@@ -8,7 +8,7 @@ import (
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
@@ -86,7 +86,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID, li
 		return AgentView{}, err
 	}
 	active, err := s.executionRecords.GetActiveByAgent(ctx, agentID)
-	if errors.Is(err, fault.ErrNotFound) {
+	if errors.Is(err, errorcode.ErrNotFound) {
 		active = agentexecution.Execution{}
 	} else if err != nil {
 		return AgentView{}, fmt.Errorf("load active agent task: %w", err)

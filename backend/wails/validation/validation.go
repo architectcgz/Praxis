@@ -16,12 +16,15 @@ type Error struct {
 	Reason string
 }
 
-// ErrorCode 让 app 层把校验错误归类为 invalid_request。
-func (e *Error) ErrorCode() string { return string(apperr.ErrorCodeInvalidRequest) }
+// Unwrap 让标准库判断错误类别，边界从错误链提取稳定码。
+func (e *Error) Unwrap() error { return apperr.ErrInvalidRequest }
+
+// ValidationMessage 只公开当前字段的校验详情。
+func (e *Error) ValidationMessage() string { return e.detail() }
 
 // Error 返回 wire 信封 {"code","message"}，message 为具体字段/原因。
 func (e *Error) Error() string {
-	return apperr.Encode(e.ErrorCode(), e.detail())
+	return apperr.Encode(apperr.ErrInvalidRequest.ErrorCode(), e.detail())
 }
 
 func (e *Error) detail() string {

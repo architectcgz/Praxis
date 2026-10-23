@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	sessionmodel "praxis/internal/core/session"
+	"praxis/internal/errorcode"
 	"praxis/internal/fault"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
@@ -23,7 +24,7 @@ func (s *Store) SessionLogPath(ctx context.Context, sessionID identity.SessionID
 		var err error
 		path, err = s.log.ExistingPath(sessionID.String())
 		if errors.Is(err, os.ErrNotExist) {
-			return fault.ErrNotFound
+			return errorcode.ErrNotFound
 		}
 		return err
 	})

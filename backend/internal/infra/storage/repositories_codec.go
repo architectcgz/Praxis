@@ -6,7 +6,7 @@ import (
 	"errors"
 	projectmodel "praxis/internal/core/project"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/fault"
+	"praxis/internal/errorcode"
 	"praxis/internal/infra/jsonl"
 )
 
@@ -33,11 +33,11 @@ func (s *Store) payload(key entityKey) (json.RawMessage, error) {
 				}
 				return json.Marshal(workspacemodel.NewWorkspace(project.DefaultWorkspaceID, project.ID, workspacemodel.WorkspaceProjectRoot, project.Path, project.CreatedAt))
 			}
-			if err != nil && !errors.Is(err, fault.ErrNotFound) {
+			if err != nil && !errors.Is(err, errorcode.ErrNotFound) {
 				return nil, err
 			}
 		}
-		return nil, fault.ErrNotFound
+		return nil, errorcode.ErrNotFound
 	}
 	if entry.record != nil {
 		return json.Marshal(entry.entryValue())
