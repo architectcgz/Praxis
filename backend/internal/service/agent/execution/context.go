@@ -6,30 +6,14 @@ import (
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
-	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 )
 
-func (s *Service) loadContextEntries(ctx context.Context, sessionID identity.SessionID) ([]sessionmodel.SharedFact, error) {
-	var entries []sessionmodel.SharedFact
-	for afterID := ""; ; {
-		page, err := s.contexts.List(ctx, sessionID, afterID, 512)
-		if err != nil {
-			return nil, err
-		}
-		if len(page) == 0 {
-			return entries, nil
-		}
-		entries = append(entries, page...)
-		afterID = page[len(page)-1].ID.String()
-	}
-}
-
-// PrepareLoop 在工具回执补齐后校验当前执行归属、判断完成证据并构建 Session 内存上下文。
+// PrepareLoop 在工具回执补齐后校验执行归属，并从 Agent 自身历史构建本次唯一的模型上下文。
+// Session 直接使用 Main 的上下文；Subagent 使用自身历史，不额外加载 Session 内容。
 // completed 为 true 时由 Coordinator 直接结算，不能再次进入 Loop。
 func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExecutionID) (executionInput loop.Input, completed bool, err error) {
 	if ctx == nil {
@@ -55,18 +39,11 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 			completed = true
 			return nil
 		}
-		stream, err := s.entries.List(txCtx, repository.EntryQuery{Stream: agentservice.EntryStream(agent), ForContext: true})
+		page, err := s.entries.List(txCtx, repository.EntryQuery{AgentID: agent.ID, ForContext: true})
 		if err != nil {
 			return err
 		}
-		var shared []sessionmodel.SharedFact
-		if agent.CanReadSessionContext() {
-			shared, err = s.loadContextEntries(txCtx, agent.SessionID)
-			if err != nil {
-				return err
-			}
-		}
-		content, err := contextContent(task.Config.SystemPrompt, task.InputEntryID, shared, stream.Entries)
+		content, err := contextContent(task.Config.SystemPrompt, task.InputEntryID, page.Entries)
 		if err != nil {
 			return err
 		}
@@ -89,10 +66,6 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 		if err != nil {
 			return err
 		}
-		sessionContext, err := s.entries.SetContext(txCtx, agentservice.EntryStream(agent), built)
-		if err != nil {
-			return err
-		}
 		executionInput = loop.Input{
 			ID:           task.ID,
 			SourceTaskID: task.SourceTaskID,
@@ -100,7 +73,7 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 			AgentID:      task.AgentID,
 			RequestID:    task.RequestID,
 			Config:       loop.Config{Model: task.Config.Model.Clone()},
-			Context:      sessionContext,
+			Context:      &built,
 		}
 		return nil
 	}(ctx)

@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
@@ -12,29 +11,20 @@ import (
 	sessionservice "praxis/internal/service/session"
 )
 
-// EntryStream 是共享流与私有流的唯一业务选择规则；Agent 的 DefinitionID 不可变。
-func EntryStream(owner agentmodel.Agent) sessionentry.StreamKey {
-	stream := sessionentry.StreamKey{SessionID: owner.SessionID}
-	if !owner.CanReadSessionContext() {
-		stream.OwnerAgentID = owner.ID
-	}
-	return stream
-}
-
-// AppendEntry 追加非主 Agent 的私有输入；执行输出通过 Execution/ToolExecution 提交。
+// AppendEntry 向 Agent 自身追加输入；Main 与 Subagent 使用相同的消息存取规则。
 func (s *Service) AppendEntry(ctx context.Context, agentID identity.AgentID, data sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
 	err = func(txCtx context.Context) error {
 		owner, err := s.agents.Get(txCtx, agentID)
 		if err != nil {
 			return err
 		}
-		if owner.CanReadSessionContext() || data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
+		if data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
 			return errorcode.ErrRequestConflict
 		}
 		if err := sessionservice.RequireWritable(txCtx, s.sessions, owner.SessionID); err != nil {
 			return err
 		}
-		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{Stream: EntryStream(owner), AgentID: owner.ID, Data: data})
+		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{AgentID: owner.ID, Data: data})
 		return err
 	}(ctx)
 	if err != nil {
@@ -57,11 +47,11 @@ func (s *Service) ListAgentEntries(ctx context.Context, agentID identity.AgentID
 		if _, err := s.sessions.Get(ctx, agent.SessionID); err != nil {
 			return err
 		}
-		stream, err := s.entries.List(ctx, repository.EntryQuery{Stream: EntryStream(agent)})
+		page, err := s.entries.List(ctx, repository.EntryQuery{AgentID: agent.ID})
 		if err != nil {
 			return err
 		}
-		entries = stream.Entries
+		entries = page.Entries
 		return nil
 	}(ctx)
 	return entries, err

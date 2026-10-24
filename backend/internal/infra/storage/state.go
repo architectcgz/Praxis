@@ -97,7 +97,7 @@ func (s *Store) entry(key entityKey) (stateEntry, bool) {
 	return entry, ok
 }
 
-// entryValue 与 Session History 共享只读正文，索引不再持有另一份序列化正文。
+// entryValue 与 Agent History 共享只读正文，索引不持有另一份序列化正文。
 func (e stateEntry) entryValue() entryRecord {
-	return entryRecord{OwnerID: e.record.Stream.OwnerAgentID.String(), AgentID: e.record.AgentID, Data: e.record.Data}
+	return entryRecord{AgentID: e.record.AgentID, Data: e.record.Data}
 }

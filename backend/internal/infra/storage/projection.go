@@ -15,7 +15,6 @@ import (
 	"praxis/internal/core/toolexecution"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
-	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/workflow"
 	"reflect"
@@ -58,9 +57,9 @@ func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey
 	case agentmodel.Agent:
 		entityID, sessionID = v.ID.String(), v.SessionID.String()
 		group("agents-session", sessionID, "")
-		group("agents-definition", sessionID, v.DefinitionID.String())
-		if v.DefinitionID == agentmodel.DefinitionPrimary {
-			claim("primary-agent", sessionID, "")
+		if v.IsMain() {
+			group("agents-main", sessionID, "")
+			claim("main-agent", sessionID, "")
 		}
 		link("session", sessionID)
 	case agentexecution.Execution:
@@ -85,11 +84,6 @@ func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey
 		entityID, sessionID = fmt.Sprintf("%s@%d", v.Key, event.Sequence), v.SessionID.String()
 		group("tool-event-kind", v.Key.String(), string(v.Kind))
 		link("agent_execution", v.ExecutionID.String())
-	case sessionmodel.SharedFact:
-		entityID, sessionID = v.ID.String(), v.SessionID.String()
-		group("contexts-session", sessionID, "")
-		link("session", sessionID)
-		link("agent_execution", v.SourceExecutionID.String())
 	case agentmodel.AgentControlCommand:
 		entityID, sessionID = v.ID.String(), scope
 		group("controls-agent", v.AgentID.String(), "")
@@ -99,13 +93,12 @@ func (s *Store) describe(scope string, event jsonl.Event, object any) (entityKey
 		entityID, sessionID = v.ID.String(), scope
 		link("agent_execution", v.ExecutionID.String())
 	case entryRecord:
-		entry.record = &sessionentry.Record{Stream: sessionentry.StreamKey{SessionID: identity.SessionID(scope), OwnerAgentID: identity.AgentID(v.OwnerID)}, AgentID: v.AgentID, Data: v.Data}
-		entityID, sessionID = entryKey(v.OwnerID, v.Data.ID), scope
+		entry.record = &sessionentry.Record{AgentID: v.AgentID, Data: v.Data}
+		entityID, sessionID = entryKey(v.AgentID, v.Data.ID), scope
 		if v.Data.Sequence != event.Sequence {
 			return key, entry, errors.New("message sequence does not match event sequence")
 		}
 		group("entries-session", scope, "")
-		group("entries-stream", scope, v.OwnerID)
 		if v.Data.ExecutionID != "" {
 			group("entries-execution", v.Data.ExecutionID, "")
 		}
@@ -176,7 +169,6 @@ func (s *Store) restoreStateEntry(scope string, event jsonl.Event) (stateEntry, 
 		"agent_execution": "agent_execution.saved",
 		"wait":            "wait.saved",
 		"control":         "control.saved",
-		"context":         "context.entry_appended",
 		"entry":           "entry.appended",
 		"usage":           "usage.saved",
 	}
@@ -212,8 +204,6 @@ func (s *Store) restoreStateEntry(scope string, event jsonl.Event) (stateEntry, 
 		target = new(agentexecution.Execution)
 	case "tool_event":
 		target = new(toolexecution.Event)
-	case "context":
-		target = new(sessionmodel.SharedFact)
 	case "control":
 		target = new(agentmodel.AgentControlCommand)
 	case "wait":
@@ -242,8 +232,6 @@ func (s *Store) restoreStateEntry(scope string, event jsonl.Event) (stateEntry, 
 		err = validateAgentExecution(*value)
 	case *toolexecution.Event:
 		err = validateToolEvent(*value)
-	case *sessionmodel.SharedFact:
-		err = validateContextEntry(*value)
 	case *agentmodel.AgentControlCommand:
 		err = validateControlCommand(*value)
 	case *workflow.WaitCondition:

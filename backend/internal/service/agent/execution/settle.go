@@ -12,7 +12,6 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
 )
 
 // ConfirmRunning 区分首次启动与重复确认；审批等待不改变运行状态。
@@ -164,7 +163,7 @@ func (s *Service) nameSessionAfterAnswer(
 	if err != nil {
 		return err
 	}
-	message, err := s.entries.Get(ctx, agentservice.EntryStream(owner), task.InputEntryID)
+	message, err := s.entries.Get(ctx, owner.ID, task.InputEntryID)
 	if err != nil {
 		return err
 	}

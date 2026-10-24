@@ -47,7 +47,7 @@ export function AgentSessionPanel({ projectId, loading, agents, agent, history, 
         return <PrimaryAgentTaskInput input={input} setInput={setInput} busy={busy} onSend={onSend} commands={commands} onCommand={onCommand} />
     }
 
-    const hasDelegates = agents.some((item) => item.DefinitionID === 'delegate' || item.Profile === 'delegate')
+    const hasSubagents = agents.some((item) => item.Kind === 'subagent')
     return (
         <ModelUsageProvider key={agent.SessionID} sessionId={agent.SessionID}>
         <OperationTimingsProvider key={agent.SessionID} agentIds={agents.map((item) => item.ID)}>
@@ -56,7 +56,7 @@ export function AgentSessionPanel({ projectId, loading, agents, agent, history, 
             projectId={projectId}
             agent={agent}
             history={history}
-            collaboration={agent.DefinitionID === 'primary' && hasDelegates ? (
+            collaboration={agent.Kind === 'main' && hasSubagents ? (
                 <CollaborationViews
                     agents={agents}
                     histories={agentHistories}

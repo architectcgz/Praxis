@@ -42,7 +42,7 @@ type Block struct {
 	ReasoningState *ReasoningState `json:"reasoningState,omitempty"`
 }
 
-// ContextEntry 是 Session 历史、模型上下文和前端展示共用的有序记录。
+// ContextEntry 是 Agent 历史、模型上下文和前端展示共用的有序记录。
 type ContextEntry struct {
 	// Replaces 仅用于摘要，记录被替代的历史 Entry，不修改原始记录。
 	Replaces     []string   `json:"replaces,omitempty"`

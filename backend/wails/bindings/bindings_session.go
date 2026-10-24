@@ -94,7 +94,11 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 		})
 	}
 	for _, value := range view.Agents {
-		result.Agents = append(result.Agents, agentservice.DescribeAgent(value))
+		agent, err := services.Agents.DescribeAgent(value)
+		if err != nil {
+			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession.agent", err)
+		}
+		result.Agents = append(result.Agents, agent)
 	}
 	return result, nil
 }

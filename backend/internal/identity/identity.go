@@ -15,7 +15,6 @@ type (
 	RequestID             string
 	WaitConditionID       string
 	AgentControlCommandID string
-	ContextEntryID        string
 )
 
 func (id ProjectID) String() string         { return string(id) }
@@ -30,6 +29,4 @@ func (id WaitConditionID) String() string   { return string(id) }
 func (id AgentControlCommandID) String() string {
 	return string(id)
 }
-func (id ContextEntryID) String() string { return string(id) }
-
 func (id TaskID) String() string { return string(id) }

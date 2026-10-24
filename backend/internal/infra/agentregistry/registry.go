@@ -2,18 +2,17 @@
 package agentregistry
 
 import (
-	"bytes"
-	"encoding/json"
+	"cmp"
 	"errors"
 	"fmt"
-	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -73,52 +72,9 @@ func (r *Registry) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDe
 func (r *Registry) List() []agentmodel.AgentDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	definitions := make([]agentmodel.AgentDefinition, 0, len(r.definitions))
-	for _, definition := range r.definitions {
-		definitions = append(definitions, definition.Snapshot())
-	}
-	sort.Slice(definitions, func(i, j int) bool {
-		return definitions[i].ID < definitions[j].ID
+	return slices.SortedFunc(maps.Values(r.definitions), func(a, b agentmodel.AgentDefinition) int {
+		return cmp.Compare(a.ID, b.ID)
 	})
-	return definitions
-}
-
-func validateAgentConfig(config agentmodel.AgentConfig) error {
-	switch config.Profile {
-	case agentmodel.ProfilePrimary, agentmodel.ProfileDelegate, agentmodel.ProfileAdvisor, agentmodel.ProfileCurator:
-		return nil
-	default:
-		return fmt.Errorf("agentDefinition.profile: unknown agent profile: %w", errorcode.ErrInvalidValue)
-	}
-}
-
-func readAgentConfig(path string) (agentmodel.AgentConfig, error) {
-	encoded, err := os.ReadFile(path)
-	if err != nil {
-		return agentmodel.AgentConfig{}, fmt.Errorf("read agent config %q: %w", path, err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
-	var config agentmodel.AgentConfig
-	if err := decoder.Decode(&config); err != nil {
-		return agentmodel.AgentConfig{}, fmt.Errorf("agent config %q: invalid JSON: %w", path, err)
-	}
-	if err := rejectTrailingJSON(decoder); err != nil {
-		return agentmodel.AgentConfig{}, fmt.Errorf("agent config %q: invalid JSON: %w", path, err)
-	}
-	return config, nil
-}
-
-func rejectTrailingJSON(decoder *json.Decoder) error {
-	var extra any
-	err := decoder.Decode(&extra)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	if err == nil {
-		return errors.New("multiple JSON values are not allowed")
-	}
-	return err
 }
 
 func loadDefinitions(root string) (map[identity.AgentDefinitionID]agentmodel.AgentDefinition, error) {
@@ -142,26 +98,12 @@ func loadDefinitions(root string) (map[identity.AgentDefinitionID]agentmodel.Age
 			return nil, fmt.Errorf("agentDefinition.id: definition id is invalid: %w", errorcode.ErrInvalidValue)
 		}
 		directory := filepath.Join(root, entry.Name())
-		config, err := readAgentConfig(filepath.Join(directory, "agent.json"))
+		definition, err := readRole(filepath.Join(directory, "ROLE.md"))
 		if err != nil {
 			return nil, err
 		}
-		if err := validateAgentConfig(config); err != nil {
-			return nil, fmt.Errorf("agent definition %q: %w", id, err)
-		}
-		instructions, err := os.ReadFile(filepath.Join(directory, "AGENT.md"))
-		if err != nil {
-			return nil, fmt.Errorf("read agent definition %q AGENT.md: %w", id, err)
-		}
-		content := string(instructions)
-		if content == "" || content != strings.TrimSpace(content) {
-			return nil, fmt.Errorf("agent definition %q AGENT.md must be canonical and nonempty", id)
-		}
-		definitions[id] = agentmodel.AgentDefinition{
-			ID:           id,
-			Profile:      config.Profile,
-			Instructions: content,
-		}
+		definition.ID = id
+		definitions[id] = definition
 	}
 	return definitions, nil
 }

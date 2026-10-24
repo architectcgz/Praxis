@@ -9,20 +9,21 @@ import (
 	"praxis/internal/repository"
 )
 
-// AppendEntry 追加共享输入；绑定 Execution 的输入和输出由执行用例原子提交。
-func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, data sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
+// AppendEntry 将会话输入直接追加到 Main Agent，不维护另一份 Session 消息或上下文。
+// 绑定 Execution 的输入和输出由执行用例提交。
+func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID, data sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
 	err = func(txCtx context.Context) error {
 		if err := RequireWritable(txCtx, s.sessions, sessionID); err != nil {
 			return err
 		}
-		owner, err := s.agents.Get(txCtx, agentID)
+		owner, err := s.agents.GetMainBySession(txCtx, sessionID)
 		if err != nil {
 			return err
 		}
-		if owner.SessionID != sessionID || !owner.CanReadSessionContext() || data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
+		if data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
 			return errorcode.ErrRequestConflict
 		}
-		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{Stream: sessionentry.StreamKey{SessionID: sessionID}, AgentID: agentID, Data: data})
+		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{AgentID: owner.ID, Data: data})
 		return err
 	}(ctx)
 	if err != nil {
@@ -31,14 +32,17 @@ func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID,
 	return stored, inserted, nil
 }
 
-// ListEntries 只读取共享流，Session 全量消息索引不作为可见历史。
+// ListEntries 直接读取 Main Agent 的历史；Session 不聚合 Subagent 的私有消息。
 func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID) (page repository.EntryList, err error) {
 	err = func(txCtx context.Context) error {
 		if _, err := s.sessions.Get(txCtx, sessionID); err != nil {
 			return err
 		}
-		var err error
-		page, err = s.entries.List(txCtx, repository.EntryQuery{Stream: sessionentry.StreamKey{SessionID: sessionID}})
+		owner, err := s.agents.GetMainBySession(txCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		page, err = s.entries.List(txCtx, repository.EntryQuery{AgentID: owner.ID})
 		return err
 	}(ctx)
 	return page, err

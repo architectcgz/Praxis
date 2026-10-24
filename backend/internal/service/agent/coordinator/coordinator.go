@@ -24,7 +24,7 @@ type Config struct {
 	ToolRecords       *toolservice.Service
 	Sessions          repository.Session
 	Workspaces        repository.Workspace
-	PrimaryAgent      PrimaryAgentProvider
+	MainAgent         MainAgentProvider
 	SessionModels     SessionModels
 	Loop              *loop.Runner
 	ActiveTasks       *taskmodel.ActiveTasks
@@ -43,7 +43,7 @@ type Coordinator struct {
 	toolRecords       *toolservice.Service
 	sessions          repository.Session
 	workspaces        repository.Workspace
-	primary           PrimaryAgentProvider
+	mainAgent         MainAgentProvider
 	sessionModels     SessionModels
 	restored          bool
 	restoring         bool
@@ -65,8 +65,8 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.SessionTasks == nil || config.Tools == nil || config.ToolRecords == nil || config.Sessions == nil || config.Workspaces == nil {
 		return nil, errors.New("execution loop, active tasks, task operations, queue and tool services are required")
 	}
-	if config.PrimaryAgent == nil || config.SessionModels == nil || config.Recovery == nil {
-		return nil, errors.New("primary agent, session models and execution recovery source are required")
+	if config.MainAgent == nil || config.SessionModels == nil || config.Recovery == nil {
+		return nil, errors.New("main agent, session models and execution recovery source are required")
 	}
 	timeout := config.TransitionTimeout
 	if timeout <= 0 {
@@ -82,7 +82,7 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 		toolRecords:       config.ToolRecords,
 		sessions:          config.Sessions,
 		workspaces:        config.Workspaces,
-		primary:           config.PrimaryAgent,
+		mainAgent:         config.MainAgent,
 		sessionModels:     config.SessionModels,
 		loop:              config.Loop,
 		activeTasks:       config.ActiveTasks,

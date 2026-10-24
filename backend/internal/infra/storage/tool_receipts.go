@@ -23,7 +23,7 @@ func (s *Store) validateToolReceipts(entry stateEntry) error {
 			return errorcode.ErrNotFound
 		}
 		call := declared.entryValue()
-		if declared.scope != entry.scope || declared.eventSequence >= entry.eventSequence || call.OwnerID != result.OwnerID || call.AgentID != result.AgentID || call.Data.RequestID != result.Data.RequestID || call.Data.TurnID != result.Data.TurnID {
+		if declared.scope != entry.scope || declared.eventSequence >= entry.eventSequence || call.AgentID != result.AgentID || call.Data.RequestID != result.Data.RequestID || call.Data.TurnID != result.Data.TurnID {
 			return errors.New("tool receipt ownership or declaration order mismatch")
 		}
 		if !slices.ContainsFunc(call.Data.Content, func(candidate sessionentry.Block) bool {

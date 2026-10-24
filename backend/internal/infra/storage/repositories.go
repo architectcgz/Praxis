@@ -11,7 +11,6 @@ type Repositories struct {
 	Sessions       SessionRepository
 	Agents         AgentRepository
 	Executions     AgentExecutionRepository
-	Contexts       ContextRepository
 	ToolExecutions ToolExecutionRepository
 	Controls       ControlRepository
 	Entries        EntryRepository
@@ -27,7 +26,6 @@ func (s *Store) Repositories() Repositories {
 		Sessions:       SessionRepository{s},
 		Agents:         AgentRepository{s},
 		Executions:     AgentExecutionRepository{s},
-		Contexts:       ContextRepository{s},
 		ToolExecutions: ToolExecutionRepository{s},
 		Controls:       ControlRepository{s},
 		Entries:        EntryRepository{s},
@@ -43,7 +41,6 @@ var (
 	_ repository.Agent           = AgentRepository{}
 	_ repository.AgentExecution  = AgentExecutionRepository{}
 	_ repository.ToolExecution   = ToolExecutionRepository{}
-	_ repository.SessionFacts    = ContextRepository{}
 	_ repository.AgentControl    = ControlRepository{}
 	_ repository.Entries         = EntryRepository{}
 	_ repository.ToolCallQueries = ToolCallQueries{}

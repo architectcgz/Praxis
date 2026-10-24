@@ -27,11 +27,11 @@ export const PendingUserMessageView = memo(function PendingUserMessageView({ con
     )
 })
 
-export function PendingOutputView({ agentProfile, executionId }: { agentProfile: string; executionId: string }) {
+export function PendingOutputView({ agentName, executionId }: { agentName: string; executionId: string }) {
     return (
         <article className="message message-assistant message-pending" role="status">
             <div className="message-meta">
-                <strong>{agentProfile}</strong>
+                <strong>{agentName}</strong>
                 <AgentDuration executionId={executionId} />
             </div>
             <div className="message-pending-status">
@@ -52,8 +52,8 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, str
     )
 })
 
-export function StreamingTurnView({ agentProfile, events, executionId, turnId, active, continuation = false, hasContinuation = false }: {
-    agentProfile: string
+export function StreamingTurnView({ agentName, events, executionId, turnId, active, continuation = false, hasContinuation = false }: {
+    agentName: string
     events: AgentEvent[]
     executionId: string
     turnId: string
@@ -86,7 +86,7 @@ export function StreamingTurnView({ agentProfile, events, executionId, turnId, a
     return <div className={`streaming-turn${hasContinuation ? ' streaming-turn-continued' : ''}`}>
         {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">
-                <strong>{agentProfile}</strong>
+                <strong>{agentName}</strong>
                 <AgentDuration executionId={executionId} />
             </div>
         </div>}

@@ -8,7 +8,6 @@ import (
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/errorcode"
-	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 	"time"
 )
@@ -19,11 +18,7 @@ func (s *Service) commitResult(ctx context.Context, call sessionentry.ToolCall, 
 		if err := sessionservice.RequireWritable(txCtx, s.deps.Sessions, call.SessionID); err != nil {
 			return err
 		}
-		owner, err := s.deps.Agents.Get(txCtx, call.AgentID)
-		if err != nil {
-			return err
-		}
-		stored, inserted, err = s.deps.Entries.Append(txCtx, sessionentry.Record{Stream: agentservice.EntryStream(owner), AgentID: owner.ID, Data: data})
+		stored, inserted, err = s.deps.Entries.Append(txCtx, sessionentry.Record{AgentID: call.AgentID, Data: data})
 		return err
 	}(ctx)
 	if err != nil {

@@ -3,6 +3,7 @@ package bindings
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
 	modelconfig "praxis/internal/core/model/config"
@@ -47,6 +48,7 @@ type WorkspaceService interface {
 }
 
 type AgentService interface {
+	DescribeAgent(agentmodel.Agent) (agentservice.AgentView, error)
 	GetAgentView(context.Context, identity.AgentID) (agentservice.AgentView, error)
 	ListAgentEntries(context.Context, identity.AgentID) ([]sessionentry.ContextEntry, error)
 	PauseAgent(context.Context, agentservice.ControlInput) (agentservice.ControlResult, error)

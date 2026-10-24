@@ -9,7 +9,6 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
 	providerapi "praxis/internal/core/provider"
-	sessionmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/utils/pathutil"
@@ -17,7 +16,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode/utf8"
 )
 
 var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -81,10 +79,8 @@ func validateAgent(a agentmodel.Agent) error {
 	if !definitionIDPattern.MatchString(a.DefinitionID.String()) {
 		return fmt.Errorf("agent.definitionID: invalid agent definition identity: %w", errorcode.ErrInvalidValue)
 	}
-	switch a.Profile {
-	case agentmodel.ProfilePrimary, agentmodel.ProfileDelegate, agentmodel.ProfileAdvisor, agentmodel.ProfileCurator:
-	default:
-		return fmt.Errorf("agent.profile: unknown agent profile: %w", errorcode.ErrInvalidValue)
+	if a.Kind != agentmodel.KindMain && a.Kind != agentmodel.KindSubagent {
+		return fmt.Errorf("agent.kind: unknown agent kind: %w", errorcode.ErrInvalidValue)
 	}
 	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return fmt.Errorf("agent.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
@@ -280,30 +276,4 @@ func validateExecutionModel(s modelapi.Config) error {
 	}
 	_, err := modelconfig.ValidateModelProxyURL(s.ProxyURL)
 	return err
-}
-
-func validateContextEntry(e sessionmodel.SharedFact) error {
-	if e.SourceExecutionID.String() != strings.TrimSpace(e.SourceExecutionID.String()) {
-		return fmt.Errorf("sessionContext.sourceExecutionID: source task id must be canonical: %w", errorcode.ErrInvalidValue)
-	}
-	for _, id := range []string{e.ID.String(), e.SessionID.String()} {
-		if id == "" || id != strings.TrimSpace(id) {
-			return fmt.Errorf("sessionContext: entry id and session id must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
-		}
-	}
-	switch e.Kind {
-	case sessionmodel.SessionContextUserMessage, sessionmodel.SessionContextAcceptedConclusion, sessionmodel.SessionContextDecision, sessionmodel.SessionContextReference:
-	default:
-		return fmt.Errorf("sessionContext.kind: unknown context entry kind: %w", errorcode.ErrInvalidValue)
-	}
-	if e.Content == "" || e.Content != strings.TrimSpace(e.Content) || !utf8.ValidString(e.Content) || len(e.Content) > sessionmodel.MaxSharedFactContentBytes {
-		return fmt.Errorf("sessionContext.content: content must be canonical UTF-8 text within the size limit: %w", errorcode.ErrInvalidValue)
-	}
-	if e.ContentDigest != sessionmodel.ContentDigest(e.Content) {
-		return fmt.Errorf("sessionContext.contentDigest: content digest does not match content: %w", errorcode.ErrInvalidValue)
-	}
-	if e.CreatedAt.IsZero() {
-		return fmt.Errorf("sessionContext.createdAt: createdAt is required: %w", errorcode.ErrInvalidValue)
-	}
-	return nil
 }

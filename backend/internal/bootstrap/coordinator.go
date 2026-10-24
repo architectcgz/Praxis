@@ -26,7 +26,7 @@ type coordinatorDependencies struct {
 	Progress       loop.ExecutionProgress
 	Records        repository.AgentExecution
 	SessionTasks   execution.SessionTasks
-	PrimaryAgent   execution.PrimaryAgentProvider
+	MainAgent      execution.MainAgentProvider
 	SessionModels  execution.SessionModels
 	Recovery       repository.AgentExecution
 	ActiveTasks    *taskmodel.ActiveTasks
@@ -133,7 +133,7 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		ToolRecords:    records,
 		Sessions:       deps.Sessions,
 		Workspaces:     deps.Workspaces,
-		PrimaryAgent:   deps.PrimaryAgent,
+		MainAgent:      deps.MainAgent,
 		SessionModels:  deps.SessionModels,
 	})
 }

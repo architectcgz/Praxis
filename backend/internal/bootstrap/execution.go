@@ -31,7 +31,6 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		Executions:     active,
 		Entries:        repos.Entries,
 		Definitions:    config.agents,
-		Contexts:       repos.Contexts,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -48,7 +47,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		Progress:       tasks,
 		Records:        repos.Executions,
 		SessionTasks:   sessions,
-		PrimaryAgent:   sessions,
+		MainAgent:      sessions,
 		SessionModels:  sessions,
 		Recovery:       repos.Executions,
 		ActiveTasks:    active,

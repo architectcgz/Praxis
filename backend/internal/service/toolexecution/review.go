@@ -8,7 +8,6 @@ import (
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
 )
 
 // PrepareReview 在模型调用前读取输入、预留请求序号并保存用量归属。
@@ -20,11 +19,7 @@ func (s *Service) PrepareReview(ctx context.Context, call sessionentry.ToolCall,
 	if task.Status != agentexecution.ExecutionRunning {
 		return executionmodel.ReviewRequest{}, errorcode.ErrRequestConflict
 	}
-	owner, err := s.deps.Agents.Get(ctx, task.AgentID)
-	if err != nil {
-		return executionmodel.ReviewRequest{}, err
-	}
-	input, err := s.deps.Entries.Get(ctx, agentservice.EntryStream(owner), task.InputEntryID)
+	input, err := s.deps.Entries.Get(ctx, task.AgentID, task.InputEntryID)
 	if err != nil {
 		return executionmodel.ReviewRequest{}, err
 	}

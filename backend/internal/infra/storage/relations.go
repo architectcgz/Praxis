@@ -97,11 +97,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if agent.SessionID != v.SessionID {
 			return errors.New("execution does not match agent ownership")
 		}
-		owner := ""
-		if !agent.CanReadSessionContext() {
-			owner = agent.ID.String()
-		}
-		input, err := s.payload(entryEntityKey(scope, owner, v.InputEntryID))
+		input, err := s.payload(entryEntityKey(scope, v.AgentID, v.InputEntryID))
 		if err != nil {
 			return err
 		}
@@ -138,15 +134,6 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
-	case "context":
-		var v sessionmodel.SharedFact
-		_ = decodeJSON(data, &v)
-		if err := reference("session", scope); err != nil {
-			return err
-		}
-		if v.SourceExecutionID != "" {
-			return reference("agent_execution", v.SourceExecutionID.String())
-		}
 	case "control":
 		var v agentmodel.AgentControlCommand
 		_ = decodeJSON(data, &v)
@@ -176,8 +163,8 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if err != nil {
 			return err
 		}
-		if agent.SessionID.String() != scope || v.OwnerID != "" && v.OwnerID != v.AgentID.String() {
-			return errors.New("message agent does not match the stream ownership")
+		if agent.SessionID.String() != scope {
+			return errors.New("message agent does not belong to the event session")
 		}
 		if v.Data.IsSummary() {
 			seen := make(map[string]bool, len(v.Data.Replaces))
@@ -186,7 +173,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 					return errors.New("summary repeats a source entry")
 				}
 				seen[id] = true
-				prior, exists := s.entry(entryEntityKey(scope, v.OwnerID, id))
+				prior, exists := s.entry(entryEntityKey(scope, v.AgentID, id))
 				if !exists || prior.eventSequence >= entry.eventSequence {
 					return errors.New("summary source entry is missing or follows the summary")
 				}
@@ -239,7 +226,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			"ID",
 			"SessionID",
 			"DefinitionID",
-			"Profile",
+			"Kind",
 			"CreatedAt",
 		}
 	case "session":
@@ -280,7 +267,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return errorcode.ErrRequestConflict
 		}
 
-	case "context", "entry", "tool_event", "control":
+	case "entry", "tool_event", "control":
 		if !bytes.Equal(before, after) {
 			return errorcode.ErrRequestConflict
 		}

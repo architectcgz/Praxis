@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
-	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
@@ -18,33 +18,39 @@ import (
 
 // entryRecord 保存唯一 Entry 正文，Session 归属来自文件 Scope。
 type entryRecord struct {
-	OwnerID string                    `json:"owner_id,omitempty"`
 	AgentID identity.AgentID          `json:"agent_id"`
 	Data    sessionentry.ContextEntry `json:"entry"`
 }
 
 type EntryRepository struct{ s *Store }
 
-func entryKey(owner, id string) string { return fmt.Sprintf("%d:%s%s", len(owner), owner, id) }
-func entryEntityKey(scope, owner, id string) entityKey {
-	return entityKey{"entry", scope + "\x00" + entryKey(owner, id)}
+func entryKey(agentID identity.AgentID, id string) string {
+	return fmt.Sprintf("%d:%s%s", len(agentID), agentID, id)
+}
+func entryEntityKey(scope string, agentID identity.AgentID, id string) entityKey {
+	return entityKey{"entry", scope + "\x00" + entryKey(agentID, id)}
 }
 
 func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) (stored sessionentry.ContextEntry, inserted bool, err error) {
-	scope, owner := value.Stream.SessionID.String(), value.Stream.OwnerAgentID.String()
-	if scope == "" || value.AgentID == "" || owner != "" && owner != value.AgentID.String() {
-		return stored, false, errors.New("message stream ownership is required")
+	if value.AgentID == "" {
+		return stored, false, errors.New("message agent identity is required")
 	}
 	err = r.s.view(ctx, func() error {
 		if err := r.s.flushLocked(ctx); err != nil {
 			return err
 		}
-		key := entryEntityKey(scope, owner, value.Data.ID)
+		// 日志位置由 Agent 的持久化归属决定，调用方不再分别传入 Session 和消息流。
+		agent, err := getLocked[agentmodel.Agent](r.s, "agent", value.AgentID.String())
+		if err != nil {
+			return err
+		}
+		scope := agent.SessionID.String()
+		key := entryEntityKey(scope, value.AgentID, value.Data.ID)
 		if prior, exists := r.s.entry(key); exists {
 			record := prior.entryValue()
 			candidate := value.Data
 			candidate.Sequence, candidate.CreatedAt = record.Data.Sequence, record.Data.CreatedAt
-			if record.AgentID != value.AgentID || !same(record.Data, candidate) {
+			if !same(record.Data, candidate) {
 				return errorcode.ErrRequestConflict
 			}
 			stored = record.Data
@@ -66,14 +72,14 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 		if data.CreatedAt.IsZero() {
 			data.CreatedAt = time.Now().UTC()
 		}
-		record := entryRecord{OwnerID: owner, AgentID: value.AgentID, Data: data}
+		record := entryRecord{AgentID: value.AgentID, Data: data}
 		if err := record.Validate(); err != nil {
 			return err
 		}
-		if err := r.s.appendLocked(ctx, scope, "entry", entryKey(owner, data.ID), "entry.appended", record); err != nil {
+		if err := r.s.appendLocked(ctx, scope, "entry", entryKey(value.AgentID, data.ID), "entry.appended", record); err != nil {
 			return err
 		}
-		stored, _ = r.s.history(value.Stream).Get(data.ID)
+		stored, _ = r.s.history(value.AgentID).Get(data.ID)
 		inserted = true
 		return nil
 	})
@@ -83,9 +89,13 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 	return stored, inserted, nil
 }
 
-func (r EntryRepository) Get(ctx context.Context, stream sessionentry.StreamKey, id string) (result sessionentry.ContextEntry, err error) {
+func (r EntryRepository) Get(ctx context.Context, agentID identity.AgentID, id string) (result sessionentry.ContextEntry, err error) {
 	err = r.s.view(ctx, func() error {
-		value, ok := r.s.history(stream).Get(id)
+		history := r.s.histories[agentID]
+		if history == nil {
+			return errorcode.ErrNotFound
+		}
+		value, ok := history.Get(id)
 		if !ok {
 			return errorcode.ErrNotFound
 		}
@@ -98,9 +108,15 @@ func (r EntryRepository) Get(ctx context.Context, stream sessionentry.StreamKey,
 func (r EntryRepository) List(ctx context.Context, query repository.EntryQuery) (page repository.EntryList, err error) {
 	err = r.s.view(ctx, func() error {
 		page.Entries = make([]sessionentry.ContextEntry, 0)
-		values := r.s.history(query.Stream).List()
+		history := r.s.histories[query.AgentID]
+		if history == nil {
+			return nil
+		}
+		var values []sessionentry.ContextEntry
 		if query.ForContext {
-			values = r.s.history(query.Stream).ContextHistory()
+			values = history.ContextHistory()
+		} else {
+			values = history.List()
 		}
 		for _, value := range values {
 			if value.Role == role.User && !query.IncludeUnadmitted && value.ExecutionID != "" {
@@ -116,12 +132,7 @@ func (r EntryRepository) List(ctx context.Context, query repository.EntryQuery) 
 	return page, err
 }
 
-func (r EntryRepository) SetContext(ctx context.Context, stream sessionentry.StreamKey, value appcontext.ModelContext) (result *appcontext.ModelContext, err error) {
-	err = r.s.view(ctx, func() error { result = r.s.history(stream).SetContext(value); return nil })
-	return result, err
-}
-
-// Validate 只在磁盘读取入口检查消息结构和流身份。
+// Validate 在消息写入与磁盘恢复边界检查消息结构及 Agent 身份，不修正已提交内容。
 func (r entryRecord) Validate() error {
 	if r.AgentID == "" || r.AgentID.String() != strings.TrimSpace(r.AgentID.String()) || strings.ContainsAny(r.AgentID.String(), "\x00\r\n") {
 		return errors.New("message agent identity must be canonical and nonempty")

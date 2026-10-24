@@ -40,7 +40,7 @@ func (r *Coordinator) prepareNext(ctx context.Context, sessionID identity.Sessio
 	// 准入失败必须回到原队首；会话删除时 Clear 会让延迟 Retry 失效。
 	defer queue.Retry(input)
 	// owner 只在领取后确定，创建和排队阶段不绑定 Agent。
-	owner, err := r.primary.GetOrCreatePrimaryAgent(ctx, sessionID)
+	owner, err := r.mainAgent.GetOrCreateMainAgent(ctx, sessionID)
 	if err != nil {
 		return agentexecution.Execution{}, false, err
 	}

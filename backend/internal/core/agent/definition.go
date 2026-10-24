@@ -11,10 +11,11 @@ const (
 	DefinitionCurator  identity.AgentDefinitionID = "curator"
 )
 
-// AgentDefinition 描述可跨 Session 复用的 Agent 身份与默认指令。
+// AgentDefinition 描述可跨 Session 复用的角色定义；名称仅用于展示，角色与指令来自 ROLE.md。
 type AgentDefinition struct {
 	ID           identity.AgentDefinitionID
-	Profile      AgentProfile
+	Name         string
+	Role         AgentRole
 	Instructions string
 }
 

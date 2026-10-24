@@ -1,17 +1,15 @@
-package session
+package agent
 
 import (
-	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"slices"
 )
 
-// History 是一个 Session 消息流的内存状态；执行流由 Loop 单独提供。
-// 生命周期由应用管理，Entry 追加后不修改，读取不访问持久化介质。
+// History 是一个 Agent 的唯一消息历史；Session 对话直接使用 Main Agent 的历史。
+// 历史由存储层管理，Entry 追加后不修改，不持有执行期间的可变模型上下文。
 type History struct {
-	entries               []sessionentry.ContextEntry
-	byID                  map[string]int
-	SessionContextEntries *appcontext.ModelContext
+	entries []sessionentry.ContextEntry
+	byID    map[string]int
 }
 
 func (h *History) Append(value sessionentry.ContextEntry) {
@@ -33,11 +31,6 @@ func (h *History) Get(id string) (sessionentry.ContextEntry, bool) {
 		return sessionentry.ContextEntry{}, false
 	}
 	return h.entries[index], true
-}
-
-func (h *History) SetContext(value appcontext.ModelContext) *appcontext.ModelContext {
-	h.SessionContextEntries = &value
-	return h.SessionContextEntries
 }
 
 // ContextHistory 应用历史中的摘要替代范围，返回模型构建使用的有效历史。

@@ -31,20 +31,12 @@ func initializeDefaultFiles(ctx context.Context, root dataroot.DataRoot) error {
 			return err
 		}
 	}
-	instructions := defaultAgentInstructions()
-	for id, config := range defaultAgentConfigs() {
+	for id, role := range defaultAgentRoles() {
 		directory := filepath.Join(root.AgentDefinitions, id.String())
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			return err
 		}
-		encoded, err := json.MarshalIndent(config, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := createDefaultFile(ctx, filepath.Join(directory, "agent.json"), append(encoded, '\n')); err != nil {
-			return err
-		}
-		if err := createDefaultFile(ctx, filepath.Join(directory, "AGENT.md"), []byte(instructions[id])); err != nil {
+		if err := createDefaultFile(ctx, filepath.Join(directory, "ROLE.md"), []byte(role)); err != nil {
 			return err
 		}
 	}

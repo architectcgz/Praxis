@@ -7,6 +7,14 @@ import (
 
 type AgentState string
 
+// AgentKind 表示实例与 Session 的关系，与角色定义的职责无关。
+type AgentKind string
+
+const (
+	KindMain     AgentKind = "main"
+	KindSubagent AgentKind = "subagent"
+)
+
 const (
 	AgentIdle        AgentState = "idle"
 	AgentExecuting   AgentState = "executing"
@@ -22,7 +30,7 @@ type Agent struct {
 	ID           identity.AgentID
 	SessionID    identity.SessionID
 	DefinitionID identity.AgentDefinitionID
-	Profile      AgentProfile
+	Kind         AgentKind
 	// 执行状态由仓储根据 Execution 和控制命令派生，不写入 Agent 日志。
 	State              AgentState                `json:"-"`
 	CurrentExecutionID identity.AgentExecutionID `json:"-"`
@@ -40,18 +48,18 @@ func (s AgentState) Startable() bool {
 	}
 }
 
-// CanReadSessionContext 判断当前 Agent 是否属于可读取 Session 级上下文的主 Agent。
-func (a Agent) CanReadSessionContext() bool {
-	return a.DefinitionID == DefinitionPrimary
+// IsMain 判断实例是否拥有 Session 上下文；Subagent 使用隔离的私有上下文。
+func (a Agent) IsMain() bool {
+	return a.Kind == KindMain
 }
 
 // NewAgent 使用已校验的身份与 Agent 定义创建 idle 实例，不重复检查入口字段。
-func NewAgent(id identity.AgentID, sessionID identity.SessionID, definitionID identity.AgentDefinitionID, profile AgentProfile, at time.Time) Agent {
+func NewAgent(id identity.AgentID, sessionID identity.SessionID, definitionID identity.AgentDefinitionID, kind AgentKind, at time.Time) Agent {
 	return Agent{
 		ID:           id,
 		SessionID:    sessionID,
 		DefinitionID: definitionID,
-		Profile:      profile,
+		Kind:         kind,
 		State:        AgentIdle,
 		CreatedAt:    at.UTC(),
 		UpdatedAt:    at.UTC(),

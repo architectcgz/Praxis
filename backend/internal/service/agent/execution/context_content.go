@@ -2,31 +2,14 @@ package execution
 
 import (
 	"errors"
-	"fmt"
 	appcontext "praxis/internal/core/context"
-	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"slices"
-	"strings"
 )
 
-// contextContent 将已选业务数据转换为通用有序条目；当前输入和共享事实保留原文。
-func contextContent(systemPrompt, inputEntryID string, shared []sessionmodel.SharedFact, entries []sessionentry.ContextEntry) (appcontext.Content, error) {
+// contextContent 从 Agent 自身历史生成模型内容，当前输入保持受保护状态。
+func contextContent(systemPrompt, inputEntryID string, entries []sessionentry.ContextEntry) (appcontext.Content, error) {
 	content := appcontext.Content{SystemPrompt: systemPrompt}
-	shared = slices.Clone(shared)
-	slices.SortFunc(shared, func(a, b sessionmodel.SharedFact) int {
-		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
-			return order
-		}
-		return strings.Compare(a.ID.String(), b.ID.String())
-	})
-	for _, fact := range shared {
-		content.Entries = append(content.Entries, sessionentry.ContextEntry{
-			Role: role.User, Protected: true,
-			Content: []sessionentry.Block{{Kind: sessionentry.BlockText, Text: fmt.Sprintf("[Session context: %s]\n%s", fact.Kind, fact.Content)}},
-		})
-	}
 	selected := historyEntries(entries)
 	found := false
 	for index := range selected {

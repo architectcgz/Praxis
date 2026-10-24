@@ -29,7 +29,6 @@ type Dependencies struct {
 	Executions     *taskmodel.ActiveTasks
 	Entries        repository.Entries
 	Definitions    AgentDefinitionProvider
-	Contexts       repository.SessionFacts
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -46,7 +45,6 @@ type Service struct {
 	executions     *taskmodel.ActiveTasks
 	entries        repository.Entries
 	definitions    AgentDefinitionProvider
-	contexts       repository.SessionFacts
 	clock          clock.Clock
 	ids            identity.IDGenerator
 }
@@ -55,9 +53,6 @@ type Service struct {
 func NewService(deps Dependencies) (*Service, error) {
 	if deps.Executions == nil {
 		return nil, errors.New("task service executions are required")
-	}
-	if deps.Contexts == nil {
-		return nil, errors.New("task service contexts are required")
 	}
 	for name, value := range map[string]any{
 		"controls":    deps.Controls,
@@ -82,7 +77,6 @@ func NewService(deps Dependencies) (*Service, error) {
 		executions:     deps.Executions,
 		entries:        deps.Entries,
 		definitions:    deps.Definitions,
-		contexts:       deps.Contexts,
 		clock:          clock.ClockOrDefault(deps.Clock),
 		ids:            identity.IDsOrDefault(deps.IDs),
 	}, nil

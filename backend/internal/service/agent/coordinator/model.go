@@ -14,9 +14,9 @@ type SessionModels interface {
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
 }
 
-// PrimaryAgentProvider 解析直接输入所属会话的 main agent。
-type PrimaryAgentProvider interface {
-	GetOrCreatePrimaryAgent(context.Context, identity.SessionID) (agentmodel.Agent, error)
+// MainAgentProvider 解析直接输入所属会话的 Main Agent。
+type MainAgentProvider interface {
+	GetOrCreateMainAgent(context.Context, identity.SessionID) (agentmodel.Agent, error)
 }
 
 // SelectModel 委托会话服务更新选择，再尝试唤醒该会话的预约，不影响其他会话。

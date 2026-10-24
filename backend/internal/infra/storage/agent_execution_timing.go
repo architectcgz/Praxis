@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/errorcode"
@@ -11,7 +12,9 @@ import (
 )
 
 // timingKey 将一次操作尝试绑定到所属 Execution，开始和结束共用同一个键。
-func timingKey(executionID, operationID string) string { return entryKey(executionID, operationID) }
+func timingKey(executionID, operationID string) string {
+	return fmt.Sprintf("%d:%s%s", len(executionID), executionID, operationID)
+}
 
 // AppendTiming 只追加开始或结束事实，不保存整个 Execution；相同快照幂等。
 func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing.Record) error {

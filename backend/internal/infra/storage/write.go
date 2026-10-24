@@ -8,8 +8,8 @@ import (
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"time"
 )
@@ -134,12 +134,11 @@ func (s *Store) validateEvent(scope string, event jsonl.Event, entry stateEntry)
 func (s *Store) applyEvent(scope string, event jsonl.Event, entry stateEntry) {
 	s.sequences[scope] = event.Sequence
 	if event.Type == "session.deleted" {
-		s.state.removeScope(scope)
-		for stream := range s.histories {
-			if stream.SessionID.String() == scope {
-				delete(s.histories, stream)
-			}
+		// 在移除 Session 索引前释放所属 Agent 的历史，避免留下不可再访问的正文。
+		for agentKey := range s.state.groups[lookupKey{kind: "agents-session", owner: scope}] {
+			delete(s.histories, identity.AgentID(agentKey.id))
 		}
+		s.state.removeScope(scope)
 		return
 	}
 	key := eventKey(scope, event)
@@ -149,7 +148,7 @@ func (s *Store) applyEvent(scope string, event jsonl.Event, entry stateEntry) {
 	}
 	s.state.add(key, entry)
 	if entry.record != nil {
-		s.history(entry.record.Stream).Append(entry.record.Data)
+		s.history(entry.record.AgentID).Append(entry.record.Data)
 	}
 }
 
@@ -172,11 +171,11 @@ func (s *Store) flushLocked(ctx context.Context) error {
 	return nil
 }
 
-func (s *Store) history(stream sessionentry.StreamKey) *sessionmodel.History {
-	h := s.histories[stream]
+func (s *Store) history(agentID identity.AgentID) *agentmodel.History {
+	h := s.histories[agentID]
 	if h == nil {
-		h = &sessionmodel.History{}
-		s.histories[stream] = h
+		h = &agentmodel.History{}
+		s.histories[agentID] = h
 	}
 	return h
 }

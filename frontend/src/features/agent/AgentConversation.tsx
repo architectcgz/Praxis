@@ -141,7 +141,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                             }
                             const copyContent = visibleHistory.slice(start, index + 1).map((entry) => entry.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')).filter(Boolean).join('\n\n')
                             return <HistoryItemView
-                                agentProfile={agent.name}
+                                agentName={agent.name}
                                 item={item}
                                 continuation={continuation}
                                 hasContinuation={hasContinuation}
@@ -156,7 +156,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                     ))}
                     {visibleStreamingOutput?.turns.map((turn, index) => (
                         <StreamingTurnView
-                            agentProfile={agent.name}
+                            agentName={agent.name}
                             events={turn.events}
                             executionId={visibleStreamingOutput.executionId}
                             turnId={turn.turnId}
@@ -168,7 +168,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
                     ))}
                     {!visibleStreamingOutput && executionError && <AgentActivityView error={executionError} />}
                     {visibleStreamingOutput?.error && <AgentActivityView error={visibleStreamingOutput.error} />}
-                    {waitingForOutput && <PendingOutputView agentProfile={agent.name} executionId={agent.currentExecutionId} />}
+                    {waitingForOutput && <PendingOutputView agentName={agent.name} executionId={agent.currentExecutionId} />}
                 </div>
                 {showScrollButton && (
                     <button

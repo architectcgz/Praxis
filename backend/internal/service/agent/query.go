@@ -25,6 +25,7 @@ type Dependencies struct {
 	Executions       ExecutionControl
 	Sessions         repository.Session
 	Entries          repository.Entries
+	Definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 	Clock            clock.Clock
 }
 
@@ -35,6 +36,7 @@ type Service struct {
 	executions       ExecutionControl
 	sessions         repository.Session
 	entries          repository.Entries
+	definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 	clock            clock.Clock
 }
 
@@ -48,29 +50,25 @@ type AgentView struct {
 	LatestExecution    *agentexecution.Execution `json:"latestExecution"`
 }
 
-// DescribeAgent 组合目录展示信息；执行详情由 GetAgentView 查询。
-func DescribeAgent(value agentmodel.Agent) AgentView {
-	name := "Agent"
-	switch value.DefinitionID {
-	case agentmodel.DefinitionPrimary:
-		name = "Leader"
-	case agentmodel.DefinitionDelegate:
-		name = "Builder"
-	case agentmodel.DefinitionAdvisor:
-		name = "Scout"
-	case agentmodel.DefinitionCurator:
-		name = "Editor"
+// DescribeAgent 从已加载的角色定义读取展示名称；名称变化不改变持久化身份。
+func (s *Service) DescribeAgent(value agentmodel.Agent) (AgentView, error) {
+	definition, err := s.definitions(value.DefinitionID)
+	if err != nil {
+		return AgentView{}, fmt.Errorf("load agent definition for display: %w", err)
 	}
 	return AgentView{
 		Agent:              value,
-		Name:               name,
+		Name:               definition.Name,
 		State:              value.State,
 		CurrentExecutionID: value.CurrentExecutionID,
-	}
+	}, nil
 }
 
 // NewService 校验查询依赖并创建 Agent 查询服务；缺少仓储或消息读取函数时返回错误。
 func NewService(deps Dependencies) (*Service, error) {
+	if deps.Definitions == nil {
+		return nil, errors.New("agent service definitions are required")
+	}
 	for name, value := range map[string]any{
 		"sessions":         deps.Sessions,
 		"agents":           deps.Agents,
@@ -90,6 +88,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		controls:         deps.Controls,
 		executions:       deps.Executions,
 		entries:          deps.Entries,
+		definitions:      deps.Definitions,
 		sessions:         deps.Sessions,
 		clock:            clock.ClockOrDefault(deps.Clock),
 	}, nil
@@ -104,7 +103,10 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (A
 	if err != nil {
 		return AgentView{}, err
 	}
-	view := DescribeAgent(value)
+	view, err := s.DescribeAgent(value)
+	if err != nil {
+		return AgentView{}, err
+	}
 	latest, err := s.executionRecords.ListByAgent(ctx, agentID, 1)
 	if err != nil {
 		return AgentView{}, err

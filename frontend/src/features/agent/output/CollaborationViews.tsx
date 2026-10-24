@@ -16,9 +16,9 @@ type CollaborationViewsProps = {
 
 /** 展示同一会话的委派任务和并行分支；只以实际执行结算判断完成，不推测百分比。 */
 export function CollaborationViews({ agents, histories, historyErrors, streamingOutputs, onSelectAgent }: CollaborationViewsProps) {
-    const delegates = agents.filter((agent) => agent.DefinitionID === 'delegate' || agent.Profile === 'delegate')
-    if (delegates.length === 0) return null
-    const tasks = delegates.map((agent) => taskView(agent, histories[agent.ID] || [], streamingOutputs[agent.ID], historyErrors[agent.ID]))
+    const subagents = agents.filter((agent) => agent.Kind === 'subagent')
+    if (subagents.length === 0) return null
+    const tasks = subagents.map((agent) => taskView(agent, histories[agent.ID] || [], streamingOutputs[agent.ID], historyErrors[agent.ID]))
     const completed = tasks.filter((task) => task.status === 'completed').length
     const running = tasks.filter((task) => task.status === 'running').length
     const blocked = tasks.filter((task) => task.status === 'failed' || task.status === 'blocked' || task.status === 'cancelled').length

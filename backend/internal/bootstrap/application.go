@@ -102,6 +102,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		Controls:         repos.Controls,
 		Executions:       a.coordinator,
 		Entries:          repos.Entries,
+		Definitions:      config.agents.Definition,
 	})
 	if err != nil {
 		return nil, err

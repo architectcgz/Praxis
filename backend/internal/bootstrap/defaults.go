@@ -6,21 +6,12 @@ import (
 	"praxis/internal/identity"
 )
 
-func defaultAgentConfigs() map[identity.AgentDefinitionID]agentmodel.AgentConfig {
-	return map[identity.AgentDefinitionID]agentmodel.AgentConfig{
-		agentmodel.DefinitionPrimary:  {Profile: agentmodel.ProfilePrimary},
-		agentmodel.DefinitionDelegate: {Profile: agentmodel.ProfileDelegate},
-		agentmodel.DefinitionAdvisor:  {Profile: agentmodel.ProfileAdvisor},
-		agentmodel.DefinitionCurator:  {Profile: agentmodel.ProfileCurator},
-	}
-}
-
-func defaultAgentInstructions() map[identity.AgentDefinitionID]string {
+func defaultAgentRoles() map[identity.AgentDefinitionID]string {
 	return map[identity.AgentDefinitionID]string{
-		agentmodel.DefinitionPrimary:  "# Primary Agent\n\n你负责理解用户目标、推进任务，并在需要时委派独立工作。",
-		agentmodel.DefinitionDelegate: "# Delegate Agent\n\n你负责完成被委派的具体任务，并返回可验证的结果。",
-		agentmodel.DefinitionAdvisor:  "# Advisor Agent\n\n你负责分析问题、识别风险并给出明确建议，不直接改变工作区。",
-		agentmodel.DefinitionCurator:  "# Curator Agent\n\n你负责整理已有信息并提交结构化结果。",
+		agentmodel.DefinitionPrimary:  "---\nname: Leader\nrole: primary\n---\n\n# 主角色\n\n你负责理解用户目标、推进任务，并在需要时委派独立工作。\n",
+		agentmodel.DefinitionDelegate: "---\nname: Builder\nrole: delegate\n---\n\n# 执行角色\n\n你负责完成被委派的具体任务，并返回可验证的结果。\n",
+		agentmodel.DefinitionAdvisor:  "---\nname: Scout\nrole: advisor\n---\n\n# 顾问角色\n\n你负责分析问题、识别风险并给出明确建议，不直接改变工作区。\n",
+		agentmodel.DefinitionCurator:  "---\nname: Editor\nrole: curator\n---\n\n# 整理角色\n\n你负责整理已有信息并提交结构化结果。\n",
 	}
 }
 

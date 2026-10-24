@@ -29,16 +29,15 @@ func (r AgentRepository) ListBySession(ctx context.Context, id identity.SessionI
 	return capped(sorted(v, func(a, b agentmodel.Agent) int { return cmp.Compare(a.ID, b.ID) }), limit), e
 }
 
-// GetBySessionAndDefinition 按 Session 与 Agent 定义查找，未找到时返回 errorcode.ErrNotFound。
-func (r AgentRepository) GetBySessionAndDefinition(ctx context.Context, id identity.SessionID, definition identity.AgentDefinitionID) (agentmodel.Agent, error) {
-	v, e := listIndexed[agentmodel.Agent](ctx, r.s, lookupKey{kind: "agents-definition", owner: id.String(), value: definition.String()}, nil)
+// GetMainBySession 读取 Session 唯一的 Main 实例，不依赖角色定义或名称。
+func (r AgentRepository) GetMainBySession(ctx context.Context, id identity.SessionID) (agentmodel.Agent, error) {
+	v, e := listIndexed[agentmodel.Agent](ctx, r.s, lookupKey{kind: "agents-main", owner: id.String()}, nil)
 	if e != nil {
 		return agentmodel.Agent{}, e
 	}
 	if len(v) == 0 {
 		return agentmodel.Agent{}, errorcode.ErrNotFound
 	}
-	sorted(v, func(a, b agentmodel.Agent) int { return cmp.Compare(a.ID, b.ID) })
 	return v[0], nil
 }
 

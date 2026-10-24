@@ -11,7 +11,6 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 )
 
@@ -19,10 +18,10 @@ type assistantCommitter struct {
 	service     *Service
 	executionID identity.AgentExecutionID
 	agentID     identity.AgentID
-	stream      sessionentry.StreamKey
+	sessionID   identity.SessionID
 }
 
-// AssistantCommitter 校验归属并冻结本次输出流；返回的是业务提交能力。
+// AssistantCommitter 校验执行并绑定 Agent；后续输出与摘要都追加到该 Agent 的唯一历史。
 func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecutionID) (loop.AssistantCommitter, error) {
 	var committer assistantCommitter
 	err := func(txCtx context.Context) error {
@@ -44,7 +43,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 			service:     s,
 			executionID: id,
 			agentID:     owner.ID,
-			stream:      agentservice.EntryStream(owner),
+			sessionID:   execution.SessionID,
 		}
 		return nil
 	}(ctx)
@@ -60,24 +59,17 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, message session
 		return stored, false, errors.New("assistant ownership is required")
 	}
 	err = func(txCtx context.Context) error {
-		if err := sessionservice.RequireWritable(txCtx, w.service.sessions, w.stream.SessionID); err != nil {
+		if err := sessionservice.RequireWritable(txCtx, w.service.sessions, w.sessionID); err != nil {
 			return err
-		}
-		owner, err := w.service.agents.Get(txCtx, w.agentID)
-		if err != nil {
-			return err
-		}
-		if agentservice.EntryStream(owner) != w.stream {
-			return errorcode.ErrRequestConflict
 		}
 		execution, err := w.service.records.Get(txCtx, identity.AgentExecutionID(message.ExecutionID))
 		if err != nil {
 			return err
 		}
-		if execution.ID != w.executionID || execution.SessionID != w.stream.SessionID || execution.AgentID != w.agentID || message.RequestID != execution.RequestID.String() {
+		if execution.ID != w.executionID || execution.SessionID != w.sessionID || execution.AgentID != w.agentID || message.RequestID != execution.RequestID.String() {
 			return errorcode.ErrRequestConflict
 		}
-		stored, inserted, err = w.service.entries.Append(txCtx, sessionentry.Record{Stream: w.stream, AgentID: w.agentID, Data: message})
+		stored, inserted, err = w.service.entries.Append(txCtx, sessionentry.Record{AgentID: w.agentID, Data: message})
 		if err != nil {
 			return err
 		}
@@ -92,7 +84,7 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, message session
 	return stored, inserted, nil
 }
 
-// AppendSummary 只保存摘要及替代范围，完整构建结果留在 Session 内存。
+// AppendSummary 将摘要及替代范围写入同一 Agent 历史，模型上下文由本次 Loop 独占。
 func (w assistantCommitter) AppendSummary(ctx context.Context, value sessionentry.ContextEntry) (sessionentry.ContextEntry, error) {
 	if !value.IsSummary() {
 		return sessionentry.ContextEntry{}, errors.New("summary entry requires its replaced history")
@@ -115,6 +107,6 @@ func (w assistantCommitter) AppendSummary(ctx context.Context, value sessionentr
 	}
 	digest := sha256.Sum256(encoded)
 	value.ID = fmt.Sprintf("summary:%s:%x", w.executionID, digest[:12])
-	stored, _, err := w.service.entries.Append(ctx, sessionentry.Record{Stream: w.stream, AgentID: w.agentID, Data: value})
+	stored, _, err := w.service.entries.Append(ctx, sessionentry.Record{AgentID: w.agentID, Data: value})
 	return stored, err
 }

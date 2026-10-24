@@ -14,7 +14,6 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 )
 
@@ -39,7 +38,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	}
 	previous, err := s.records.FindByRequest(ctx, owner.ID, requestID)
 	if err == nil {
-		stored, err := s.entries.Get(ctx, agentservice.EntryStream(owner), previous.InputEntryID)
+		stored, err := s.entries.Get(ctx, owner.ID, previous.InputEntryID)
 		if err != nil {
 			return result, false, err
 		}
@@ -68,9 +67,6 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	if err != nil {
 		return result, false, err
 	}
-	if definition.Profile != owner.Profile {
-		return result, false, errorcode.ErrRequestConflict
-	}
 	config := agentexecution.ExecutionConfig{
 		AgentDefinitionID: definition.ID,
 		SystemPrompt:      definition.Instructions,
@@ -78,7 +74,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	}
 	at := s.clock.Now()
 	executionID := identity.AgentExecutionID(s.ids.New("execution"))
-	if previous, err := s.entries.Get(ctx, agentservice.EntryStream(owner), inputEntryID); err == nil {
+	if previous, err := s.entries.Get(ctx, owner.ID, inputEntryID); err == nil {
 		if previous.Role != role.User || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
 			return result, false, errorcode.ErrRequestConflict
 		}
@@ -99,7 +95,6 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		}
 	}()
 	stored, _, err := s.entries.Append(ctx, sessionentry.Record{
-		Stream:  agentservice.EntryStream(owner),
 		AgentID: owner.ID,
 		Data: sessionentry.ContextEntry{
 			ID:           inputEntryID,

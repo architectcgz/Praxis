@@ -4,8 +4,8 @@ package storage
 import (
 	"context"
 	"errors"
-	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
+	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"sync"
 )
@@ -14,7 +14,7 @@ type Store struct {
 	mu        sync.Mutex
 	log       *jsonl.Log
 	state     *state
-	histories map[sessionentry.StreamKey]*sessionmodel.History
+	histories map[identity.AgentID]*agentmodel.History
 	pending   []pendingEvent
 	sequences map[string]uint64
 }
@@ -25,7 +25,12 @@ func Open(ctx context.Context, root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{log: log, state: newState(), histories: make(map[sessionentry.StreamKey]*sessionmodel.History), sequences: make(map[string]uint64)}
+	s := &Store{
+		log:       log,
+		state:     newState(),
+		histories: make(map[identity.AgentID]*agentmodel.History),
+		sequences: make(map[string]uint64),
+	}
 	if err := s.replay(ctx, jsonl.Scope{}); err != nil {
 		_ = log.Close()
 		return nil, err
