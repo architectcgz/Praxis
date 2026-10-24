@@ -12,11 +12,11 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/toolexecution"
+	"praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
-	"praxis/internal/workflow"
 )
 
 // validateRelations 用候选实体检查已提交的引用、领取条件和消息配对。
