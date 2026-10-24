@@ -23,40 +23,21 @@ type Dependencies struct {
 	Tools          tool.ToolCatalog
 	Progress       ExecutionProgress
 	HookDispatcher *hook.Dispatcher
-	// CompressionStrategy 为空时使用完整远程压缩；其他策略通过依赖注入替换。
+	// CompressionStrategy 由装配层选择，运行期不补充默认策略。
 	CompressionStrategy contextcompress.Strategy
 	SummaryFormat       contextcompress.SummaryFormat
 	Emitter             *coreevent.Emitter
 	Logf                func(string, ...any)
 }
 
-// Runner 持有已校验的共享依赖，可供多次执行并发复用。
+// Runner 持有装配层提供的共享依赖，可供多次执行并发复用。
 type Runner struct {
 	Dependencies
 }
 
-// NewRunner 校验并冻结 loop 的执行依赖。缺少任一必要依赖时直接返回错误，
-// 使装配失败的执行器无法进入调度，而不是在每次执行时才发现。
-func NewRunner(deps Dependencies) (Runner, error) {
-	if deps.Provider == nil {
-		return Runner{}, errors.New("loop provider is required")
-	}
-	if deps.Tools == nil {
-		return Runner{}, errors.New("loop tool catalog is required")
-	}
-	if deps.Progress == nil {
-		return Runner{}, errors.New("loop execution progress is required")
-	}
-	if deps.Emitter == nil {
-		return Runner{}, errors.New("loop event emitter is required")
-	}
-	if deps.Logf == nil {
-		deps.Logf = func(string, ...any) {}
-	}
-	if deps.CompressionStrategy == nil {
-		deps.CompressionStrategy = contextcompress.FullStrategy{}
-	}
-	return Runner{Dependencies: deps}, nil
+// NewRunner 保存装配层提供的完整执行依赖。
+func NewRunner(deps Dependencies) Runner {
+	return Runner{Dependencies: deps}
 }
 
 // Run 使用已准备的执行数据和本次执行依赖运行模型与工具循环。

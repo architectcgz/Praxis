@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
@@ -32,19 +31,15 @@ func entryEntityKey(scope string, agentID identity.AgentID, id string) entityKey
 }
 
 func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) (stored sessionentry.ContextEntry, inserted bool, err error) {
-	if value.AgentID == "" {
-		return stored, false, errors.New("message agent identity is required")
+	if value.SessionID == "" || value.AgentID == "" {
+		return stored, false, errors.New("message session and agent identities are required")
 	}
 	err = r.s.view(ctx, func() error {
 		if err := r.s.flushLocked(ctx); err != nil {
 			return err
 		}
-		// 日志位置由 Agent 的持久化归属决定，调用方不再分别传入 Session 和消息流。
-		agent, err := getLocked[agentmodel.Agent](r.s, "agent", value.AgentID.String())
-		if err != nil {
-			return err
-		}
-		scope := agent.SessionID.String()
+		// 日志位置由调用方明确提供；归属与跨会话冲突由同一存储锁内的事实校验保证。
+		scope := value.SessionID.String()
 		key := entryEntityKey(scope, value.AgentID, value.Data.ID)
 		if prior, exists := r.s.entry(key); exists {
 			record := prior.entryValue()

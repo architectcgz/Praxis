@@ -1,0 +1,58 @@
+version: '3'
+
+vars:
+  APP_NAME: praxis
+  BIN_DIR: bin
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+  BUILD_TAGS: '{{if ne .DEV "true"}}production{{end}}'
+  BUILD_FLAGS: '{{if .BUILD_TAGS}}-tags {{.BUILD_TAGS}}{{end}}'
+  LINK_FLAGS: '{{if ne .DEV "true"}}-s -w{{if eq OS "windows"}} -H windowsgui{{end}}{{end}}'
+
+tasks:
+  build:
+    desc: 构建当前平台的桌面应用，不启动服务
+    cmds:
+      - task: frontend
+      - defer: node -e "require('node:fs').rmSync('wails_windows_{{ARCH}}.syso', {force:true})"
+      - cmd: wails3 generate syso -arch {{ARCH}} -icon build/windows/icon.ico -manifest build/windows/wails.exe.manifest -info build/windows/info.json -out wails_windows_{{ARCH}}.syso
+        platforms: [windows]
+      - go build {{.BUILD_FLAGS}} -trimpath -buildvcs=false -ldflags="{{.LINK_FLAGS}}" -o "{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}" .
+
+  bindings:
+    desc: 生成 Wails 3 TypeScript 接口及服务绑定
+    cmds:
+      - wails3 generate bindings -ts -i -f '{{.BUILD_FLAGS}}' -d ../frontend/bindings
+
+  frontend:install:
+    desc: 按锁文件安装前端依赖
+    dir: ../frontend
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/.package-lock.json
+    cmds:
+      - npm ci
+
+  frontend:
+    desc: 生成绑定并构建、同步嵌入资源
+    deps: [frontend:install, bindings]
+    dir: ../frontend
+    cmds:
+      - npm run build
+
+  common:dev:frontend:
+    desc: 启动前端开发服务，仅供明确授权后的开发使用
+    dir: ../frontend
+    cmds:
+      - npm run dev -- --port {{.VITE_PORT}} --strictPort
+
+  run:
+    desc: 运行已构建的桌面应用
+    cmds:
+      - './{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}'
+
+  dev:
+    desc: 启动桌面开发环境，仅在明确授权后使用
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}

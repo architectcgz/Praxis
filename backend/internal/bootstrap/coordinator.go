@@ -1,22 +1,25 @@
 package bootstrap
 
 import (
+	"context"
 	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	providerapi "praxis/internal/core/provider"
-	taskmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
+	"praxis/internal/identity"
 	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
-	execution "praxis/internal/service/agent/coordinator"
+	execution "praxis/internal/service/coordinator"
 	toolservice "praxis/internal/service/toolexecution"
 	"sync"
+	"time"
 )
 
 // coordinatorDependencies 装配业务用例、Core 内存队列与执行能力。
@@ -26,14 +29,13 @@ type coordinatorDependencies struct {
 	Progress       loop.ExecutionProgress
 	Records        repository.AgentExecution
 	SessionTasks   execution.SessionTasks
-	MainAgent      execution.MainAgentProvider
+	MainAgent      func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
 	SessionModels  execution.SessionModels
 	Recovery       repository.AgentExecution
-	ActiveTasks    *taskmodel.ActiveTasks
 	ToolExecutions repository.ToolExecution
 	Entries        repository.Entries
 	ToolCalls      repository.ToolCallQueries
-	Agents         repository.Agent
+	Agent          func(identity.AgentID) (*agentmodel.Agent, error)
 	Sessions       repository.Session
 	Workspaces     repository.Workspace
 	Provider       providerapi.Provider
@@ -49,7 +51,7 @@ type coordinatorDependencies struct {
 	Clock          clock.Clock
 }
 
-func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, error) {
+func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
 	if deps.ObserveUsage != nil {
 		// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
 		deps.Emitter.Subscribe(func(value coreevent.Event) {
@@ -70,21 +72,17 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		HookDispatcher: deps.HookDispatcher,
 		Emitter:        deps.Emitter,
 	}
-	records, err := toolservice.NewService(toolservice.Dependencies{
+	records := toolservice.NewService(toolservice.Dependencies{
 		Rules:    deps.Rules,
 		Tasks:    deps.Records,
 		Events:   deps.ToolExecutions,
 		Entries:  deps.Entries,
 		Calls:    deps.ToolCalls,
 		Sessions: deps.Sessions,
-		Agents:   deps.Agents,
 		Clock:    deps.Clock,
 	})
-	if err != nil {
-		return nil, err
-	}
 
-	executor, err := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
+	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
 		Catalog:        deps.Tools,
 		Operations:     records,
 		Reviewer:       reviewer,
@@ -94,11 +92,8 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		TimingRecorder: deps.TimingRecorder,
 		Emitter:        deps.Emitter,
 		Clock:          deps.Clock,
-		Logf:           logging.NewFactory().Ensure(deps.Logger).Errorf,
+		Logf:           deps.Logger.Errorf,
 	})
-	if err != nil {
-		return nil, err
-	}
 
 	runnerDeps := loop.Dependencies{
 		Provider:       deps.Provider,
@@ -106,34 +101,39 @@ func assembleCoordinator(deps coordinatorDependencies) (*execution.Coordinator, 
 		Tools:          deps.Tools,
 		HookDispatcher: deps.HookDispatcher,
 		Emitter:        deps.Emitter,
-		Logf:           logging.NewFactory().Ensure(deps.Logger).Infof,
+		Logf:           deps.Logger.Infof,
 	}
 	if deps.Runner != nil {
 		runnerDeps = deps.Runner.Dependencies
+	}
+	// 可选执行器的默认依赖统一在装配入口确定，业务构造器不再补齐。
+	if runnerDeps.Logf == nil {
+		runnerDeps.Logf = func(string, ...any) {}
+	}
+	if runnerDeps.CompressionStrategy == nil {
+		runnerDeps.CompressionStrategy = contextcompress.FullStrategy{}
 	}
 	// 执行进度始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
 	runnerDeps.Emitter = deps.Emitter
 	runnerDeps.Progress = deps.Progress
 	runnerDeps.TimingRecorder = deps.TimingRecorder
 	runnerDeps.HookDispatcher = deps.HookDispatcher
-	runner, err := loop.NewRunner(runnerDeps)
-	if err != nil {
-		return nil, err
-	}
+	runner := loop.NewRunner(runnerDeps)
 	return execution.NewCoordinator(execution.Config{
-		Loop:           &runner,
-		ActiveTasks:    deps.ActiveTasks,
-		Operations:     deps.Tasks,
-		SessionTasks:   deps.SessionTasks,
-		HookDispatcher: deps.HookDispatcher,
-		Logger:         deps.Logger,
-		ConfigMu:       deps.ConfigMu,
-		Recovery:       deps.Recovery,
-		Tools:          executor,
-		ToolRecords:    records,
-		Sessions:       deps.Sessions,
-		Workspaces:     deps.Workspaces,
-		MainAgent:      deps.MainAgent,
-		SessionModels:  deps.SessionModels,
+		Loop:              &runner,
+		Operations:        deps.Tasks,
+		SessionTasks:      deps.SessionTasks,
+		HookDispatcher:    deps.HookDispatcher,
+		Logger:            deps.Logger,
+		ConfigMu:          deps.ConfigMu,
+		Recovery:          deps.Recovery,
+		Tools:             executor,
+		ToolRecords:       records,
+		Sessions:          deps.Sessions,
+		Workspaces:        deps.Workspaces,
+		MainAgent:         deps.MainAgent,
+		Agent:             deps.Agent,
+		SessionModels:     deps.SessionModels,
+		TransitionTimeout: 30 * time.Second,
 	})
 }

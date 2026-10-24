@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	modelconfig "praxis/internal/core/model/config"
@@ -32,16 +31,13 @@ type Provider struct {
 	clients     map[string]*http.Client
 }
 
-// New 在装配时校验共享依赖；具体协议及凭据由每次请求的冻结配置确定。
-func New(deps Dependencies) (*Provider, error) {
-	if deps.Credentials == nil {
-		return nil, errors.New("provider credentials are required")
-	}
+// New 保存装配层提供的共享依赖；具体协议及凭据由每次请求的冻结配置确定。
+func New(deps Dependencies) *Provider {
 	return &Provider{
 		credentials: deps.Credentials,
-		client:      httpclient.RequestClient(deps.HTTPClient),
+		client:      deps.HTTPClient,
 		clients:     make(map[string]*http.Client),
-	}, nil
+	}
 }
 
 var _ providerapi.Provider = (*Provider)(nil)

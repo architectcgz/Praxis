@@ -1,5 +1,6 @@
-import type { agent, entry } from '../../wailsjs/go/models'
-import { EventsOn } from '../../wailsjs/runtime/runtime'
+import type { AgentView as GeneratedAgentView } from '../../bindings/praxis/internal/service/agent/models'
+import type { ContextEntry as GeneratedContextEntry, Block } from '../../bindings/praxis/internal/core/session/entry/models'
+import { Events } from '@wailsio/runtime'
 import { getAgentBinding, isBindingAvailable } from './bindings'
 import { normalizeOperationTiming, type OperationTiming } from './timings'
 
@@ -23,11 +24,11 @@ export type ExecutionFailureCode =
     | 'execution_failed'
     | 'execution_invalid_outcome'
     | 'unknown'
-export type ContextEntry = entry.ContextEntry
-export type EntryBlock = entry.Block
+export type ContextEntry = Omit<GeneratedContextEntry, 'content'> & { content: Block[] }
+export type EntryBlock = Block
 
-/** 查询结构直接沿用后端 Service；排除 Wails 生成类的转换方法。 */
-export type AgentView = Omit<agent.AgentView, 'convertValues'>
+/** 保留生成接口的字段，将枚举暴露为其字面量联合，允许前端表达乐观状态。 */
+export type AgentView = Omit<GeneratedAgentView, 'state'> & { state: `${GeneratedAgentView['state']}` }
 
 export type ModelUsage = {
     inputTokens: number
@@ -69,8 +70,8 @@ export function getAgent(agentID: string) {
     return getAgentBinding().GetAgent(agentID)
 }
 
-export function listAgentEntries(agentID: string): Promise<ContextEntry[]> {
-    return getAgentBinding().ListAgentEntries(agentID)
+export async function listAgentEntries(agentID: string): Promise<ContextEntry[]> {
+    return (await getAgentBinding().ListAgentEntries(agentID) ?? []).map(normalizeContextEntry)
 }
 
 export async function listSessionUsage(sessionId: string): Promise<ModelUsageRecord[]> {
@@ -98,8 +99,8 @@ export function subscribeAgentEvents(listener: (event: AgentEvent) => void) {
     if (!isBindingAvailable()) {
         return () => { }
     }
-    return EventsOn(AGENT_EVENT_NAME, (value: unknown) => {
-        const event = parseAgentEvent(value)
+    return Events.On(AGENT_EVENT_NAME, (notification) => {
+        const event = parseAgentEvent(notification.data)
         if (event) {
             listener(event)
         }
@@ -143,7 +144,7 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
     }
     return {
         kind: value.kind,
-        entries: value.entries as ContextEntry[] | undefined,
+        entries: Array.isArray(value.entries) ? (value.entries as GeneratedContextEntry[]).map(normalizeContextEntry) : undefined,
         outcome,
         failureCode,
         failureMessage: terminal && typeof value.failureMessage === 'string' ? value.failureMessage : undefined,
@@ -161,6 +162,11 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
         isError: typeof value.isError === 'boolean' ? value.isError : undefined,
         error: typeof value.error === 'string' ? value.error : undefined,
     }
+}
+
+// Go 的空切片可能编码为 null；只在 API 边界统一为可遍历的内容集合。
+function normalizeContextEntry(value: GeneratedContextEntry): ContextEntry {
+    return { ...value, content: value.content ?? [] }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

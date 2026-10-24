@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	execution "praxis/internal/service/agent/coordinator"
+	execution "praxis/internal/service/coordinator"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"

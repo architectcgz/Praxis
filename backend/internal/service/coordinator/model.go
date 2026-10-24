@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
 	modelapi "praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
@@ -12,11 +11,6 @@ import (
 type SessionModels interface {
 	CurrentModelConfig(context.Context, identity.SessionID) (modelapi.Config, error)
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
-}
-
-// MainAgentProvider 解析直接输入所属会话的 Main Agent。
-type MainAgentProvider interface {
-	GetOrCreateMainAgent(context.Context, identity.SessionID) (agentmodel.Agent, error)
 }
 
 // SelectModel 委托会话服务更新选择，再尝试唤醒该会话的预约，不影响其他会话。
@@ -31,7 +25,7 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 	if choice.ModelID == "" {
 		return nil
 	}
-	if _, err := s.StartNext(ctx, sessionID); err != nil {
+	if err := s.scheduleSession(ctx, sessionID, true); err != nil {
 		s.logger.Errorf("activate queued input after model selection session_id=%s error=%v", sessionID, err)
 	}
 	return nil

@@ -6,14 +6,15 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/wails/dto"
 
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const agentEventName = "praxis:agent-event"
 
 type Host interface {
 	BindingContext() (context.Context, Services, error)
-	EventContext() context.Context
+	EmitEvent(string, any)
+	SelectDirectory(string) (string, error)
 	LogError(string, ...any)
 }
 
@@ -37,17 +38,19 @@ func New(host Host) *Bindings {
 	}
 }
 
-func (b *Bindings) All() []any {
-	return []any{b.projects, b.sessions, b.agents, b.commands, b.models}
+func (b *Bindings) All() []application.Service {
+	return []application.Service{
+		application.NewService(b.projects),
+		application.NewService(b.sessions),
+		application.NewService(b.agents),
+		application.NewService(b.commands),
+		application.NewService(b.models),
+	}
 }
 
 // EmitAgentEvent 将 Core 业务通知转为前端协议；Entry 直接沿用核心类型。
 func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	if event.AgentID == "" || event.ExecutionID == "" {
-		return
-	}
-	ctx := b.host.EventContext()
-	if ctx == nil {
 		return
 	}
 	value := dto.AgentEvent{
@@ -76,5 +79,5 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		usage := publicUsage(*event.Usage)
 		value.Usage = &usage
 	}
-	wailsruntime.EventsEmit(ctx, agentEventName, value)
+	b.host.EmitEvent(agentEventName, value)
 }

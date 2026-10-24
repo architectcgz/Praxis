@@ -43,7 +43,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 	return err
 }
 
-// Settle 保存所属执行者确定的实际结果，不根据控制命令改写完成结果。
+// Settle 保存所属执行者确定的实际结果，不根据迟到的取消信号改写完成结果。
 // 写入失败由 Coordinator 保留占用和结果后重试；重复结算返回已有终态，不再次发布事件。
 func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutionID, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.Execution, err error) {
 	if ctx == nil {
@@ -52,6 +52,11 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 	endedExecution, err := s.records.Get(ctx, executionID)
 	if err != nil {
 		s.logger.Errorf("operation=execution_end execution_id=%s status=failed outcome=%s error=%v", executionID, outcome, err)
+		return agentexecution.Execution{}, err
+	}
+	// 在终态提交前持有实例引用，避免会话在提交后被删除导致状态收尾失去目标。
+	agent, err := s.agent(endedExecution.AgentID)
+	if err != nil {
 		return agentexecution.Execution{}, err
 	}
 	// Hook 在存储锁外观察本次结算；通知不能改变执行者已确定的结果。
@@ -101,6 +106,7 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 			s.logger.Errorf("name settled session execution_id=%s error=%v", endedExecution.ID, nameErr)
 		}
 	}()
+	agent.FinishExecution(endedExecution)
 	if !firstEnd {
 		return endedExecution, nil
 	}
@@ -159,11 +165,7 @@ func (s *Service) nameSessionAfterAnswer(
 	if outcome != agentexecution.ExecutionCompleted && outcome != agentexecution.ExecutionYielded {
 		return nil
 	}
-	owner, err := s.agents.Get(ctx, task.AgentID)
-	if err != nil {
-		return err
-	}
-	message, err := s.entries.Get(ctx, owner.ID, task.InputEntryID)
+	message, err := s.entries.Get(ctx, task.AgentID, task.InputEntryID)
 	if err != nil {
 		return err
 	}

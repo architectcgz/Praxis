@@ -2,7 +2,6 @@ package toolexecution
 
 import (
 	"context"
-	"errors"
 	"praxis/internal/clock"
 	agentexecution "praxis/internal/core/agent/execution"
 	sessionentry "praxis/internal/core/session/entry"
@@ -19,7 +18,6 @@ type Dependencies struct {
 	Entries  repository.Entries
 	Calls    repository.ToolCallQueries
 	Sessions repository.Session
-	Agents   repository.Agent
 	Clock    clock.Clock
 }
 
@@ -30,15 +28,12 @@ type Service struct {
 	clock clock.Clock
 }
 
-func NewService(deps Dependencies) (*Service, error) {
-	if deps.Rules.DefaultMode == nil || deps.Rules.Catalog == nil || deps.Tasks == nil || deps.Events == nil || deps.Entries == nil || deps.Calls == nil || deps.Sessions == nil || deps.Agents == nil {
-		return nil, errors.New("tool service dependencies are required")
-	}
+func NewService(deps Dependencies) *Service {
 	return &Service{
 		ToolExecution: deps.Events,
 		deps:          deps,
-		clock:         clock.ClockOrDefault(deps.Clock),
-	}, nil
+		clock:         deps.Clock,
+	}
 }
 
 func (s *Service) call(ctx context.Context, executionID identity.AgentExecutionID, callID string) (sessionentry.ToolCall, error) {

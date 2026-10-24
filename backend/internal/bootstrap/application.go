@@ -3,17 +3,20 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
+	"praxis/internal/identity"
 	fs "praxis/internal/infra/filesystem"
 	"praxis/internal/logging"
 	agentservice "praxis/internal/service/agent"
-	execution "praxis/internal/service/agent/coordinator"
 	approvalservice "praxis/internal/service/approval"
+	execution "praxis/internal/service/coordinator"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	workspaceservice "praxis/internal/service/workspace"
@@ -76,7 +79,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		return nil, err
 	}
 	repos := a.store.Repositories()
-	if err := agentservice.ValidateStoredDefinitions(ctx, config.agents.List(), repos.Sessions, repos.Agents); err != nil {
+	if err := agentservice.ValidateDefinitions(nil, config.agents.List()); err != nil {
 		return nil, err
 	}
 	emitter := coreevent.NewEmitter()
@@ -85,37 +88,30 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		return nil, err
 	}
 	configMu := &sync.RWMutex{}
-	a.sessions, err = buildSessions(resources, repos, config.agents, hooks, configMu, config.models)
-	if err != nil {
-		return nil, err
+	// 只在装配处绑定跨模块协作；业务入口在实例与执行恢复完成后才开放。
+	var agents *agentservice.Service
+	mainAgent := func(ctx context.Context, id identity.SessionID) (*agentmodel.Agent, error) {
+		return agents.GetOrCreateMainAgent(ctx, id)
 	}
-	models := buildModelService(root, config, a.logger, configMu)
-	coordinator, timings, err := buildExecution(resources, repos, config, a.sessions, hooks, emitter, configMu, options.Runner)
-	if err != nil {
-		return nil, err
-	}
-	a.coordinator = coordinator
-	agents, err := agentservice.NewService(agentservice.Dependencies{
-		Agents:           repos.Agents,
+	a.sessions = buildSessions(resources, repos, config.agents, hooks, configMu, config.models, mainAgent)
+	agents = agentservice.NewService(agentservice.Dependencies{
+		Agent:            a.sessions.GetAgent,
+		RegisterAgent:    a.sessions.RegisterAgent,
 		ExecutionRecords: repos.Executions,
 		Sessions:         repos.Sessions,
-		Controls:         repos.Controls,
-		Executions:       a.coordinator,
 		Entries:          repos.Entries,
 		Definitions:      config.agents.Definition,
 	})
-	if err != nil {
-		return nil, err
-	}
-	projects, err := projectservice.NewService(projectservice.Dependencies{
+	models := buildModelService(root, config, a.logger, configMu)
+	coordinator, timings := buildExecution(resources, repos, config, a.sessions, agents.GetOrCreateMainAgent, hooks, emitter, configMu, options.Runner)
+	a.coordinator = coordinator
+	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:   repos.Projects,
 		Workspaces: repos.Workspaces,
 		Directory:  fs.Filesystem{},
+		Clock:      clock.UTCClock{},
 	})
-	if err != nil {
-		return nil, err
-	}
-	approvals, err := approvalservice.NewService(approvalservice.Dependencies{
+	approvals := approvalservice.NewService(approvalservice.Dependencies{
 		ConfigMu: configMu,
 		GlobalApprovalMode: func() security.ApprovalMode {
 			configMu.RLock()
@@ -123,18 +119,13 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 			return config.settings.ApprovalMode
 		},
 		Projects: repos.Projects,
+		Clock:    clock.UTCClock{},
 	})
-	if err != nil {
-		return nil, err
-	}
-	workspaces, err := workspaceservice.NewService(workspaceservice.Dependencies{
+	workspaces := workspaceservice.NewService(workspaceservice.Dependencies{
 		Sessions:   repos.Sessions,
 		Workspaces: repos.Workspaces,
 		TextReader: fs.Filesystem{},
 	})
-	if err != nil {
-		return nil, err
-	}
 	a.frontend = bindings.Services{
 		Projects:       projects,
 		Approvals:      approvals,
@@ -148,6 +139,9 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		Timings:        timings,
 		Usages:         a.sessions,
 		SessionLogPath: a.store.SessionLogPath,
+	}
+	if err := agents.RestoreAgents(ctx); err != nil {
+		return nil, err
 	}
 	if err := a.coordinator.Restore(ctx); err != nil {
 		return nil, err

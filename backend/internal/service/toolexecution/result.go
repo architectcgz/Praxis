@@ -18,7 +18,7 @@ func (s *Service) commitResult(ctx context.Context, call sessionentry.ToolCall, 
 		if err := sessionservice.RequireWritable(txCtx, s.deps.Sessions, call.SessionID); err != nil {
 			return err
 		}
-		stored, inserted, err = s.deps.Entries.Append(txCtx, sessionentry.Record{AgentID: call.AgentID, Data: data})
+		stored, inserted, err = s.deps.Entries.Append(txCtx, sessionentry.Record{SessionID: call.SessionID, AgentID: call.AgentID, Data: data})
 		return err
 	}(ctx)
 	if err != nil {

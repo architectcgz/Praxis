@@ -3,7 +3,6 @@ package execution
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -18,7 +17,7 @@ import (
 )
 
 // PrepareTask 将内存 Task 准入为 Execution，开始时才保存用户消息并冻结上下文。
-// 返回值的 bool 表示重复请求；失败释放本次预留，队列是否重入由上层决定。
+// 调用方已标记 Agent 忙碌；返回值的 bool 表示重复请求，失败后的队列与忙闲状态由调度器处理。
 func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID identity.AgentID, modelConfig modelapi.Config) (result agentexecution.Execution, existing bool, err error) {
 	if ctx == nil {
 		return result, false, errors.New("task preparation context is required")
@@ -29,7 +28,7 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	// 请求身份只在调度准入时建立；由 Task ID 派生以保证准备重试使用同一身份。
 	requestID := identity.RequestID(input.ID)
 	inputEntryID := "input:" + requestID.String()
-	owner, err := s.agents.Get(ctx, agentID)
+	owner, err := s.agent(agentID)
 	if err != nil {
 		return result, false, err
 	}
@@ -45,6 +44,11 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 		if previous.SourceTaskID != input.ID || stored.Role != role.User || stored.TextContent() != input.Prompt {
 			return result, false, errorcode.ErrRequestConflict
 		}
+		if previous.Active() {
+			if err := owner.BeginExecution(previous); err != nil {
+				return result, false, err
+			}
+		}
 		return previous, true, nil
 	}
 	if !errors.Is(err, errorcode.ErrNotFound) {
@@ -52,16 +56,6 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	}
 	if err := sessionservice.RequireWritable(ctx, s.sessions, owner.SessionID); err != nil {
 		return result, false, err
-	}
-	if !owner.State.Startable() {
-		return result, false, agentmodel.ErrExecuting
-	}
-	count, err := s.records.CountActiveBySession(ctx, owner.SessionID)
-	if err != nil {
-		return result, false, err
-	}
-	if count != 0 {
-		return result, false, agentmodel.ErrExecuting
 	}
 	definition, err := s.definitions.Definition(owner.DefinitionID)
 	if err != nil {
@@ -82,20 +76,9 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return result, false, err
 	}
-	_, admitted, err := s.executions.Reserve(ctx, owner.ID, executionID)
-	if err != nil {
-		return result, false, err
-	}
-	if !admitted {
-		return result, false, errorcode.ErrRequestConflict
-	}
-	defer func() {
-		if err != nil {
-			s.executions.Release(owner.ID, executionID)
-		}
-	}()
 	stored, _, err := s.entries.Append(ctx, sessionentry.Record{
-		AgentID: owner.ID,
+		SessionID: owner.SessionID,
+		AgentID:   owner.ID,
 		Data: sessionentry.ContextEntry{
 			ID:           inputEntryID,
 			RequestID:    requestID.String(),
@@ -114,6 +97,9 @@ func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID
 	result.SourceTaskID = input.ID
 	if err = s.records.Save(ctx, result); err != nil {
 		return agentexecution.Execution{}, false, err
+	}
+	if err := owner.BeginExecution(result); err != nil {
+		return result, false, err
 	}
 	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。
 	if s.emitter != nil {

@@ -1,48 +1,43 @@
-// Package agent 提供 Agent 状态查询、消息查询和执行控制用例。
+// Package agent 提供 Agent 实例创建、启动恢复、状态查询和消息查询用例。
 package agent
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
+	"time"
 )
 
-// ExecutionControl 只在控制意图持久化成功后传递取消信号。
-type ExecutionControl interface {
-	Pause(identity.AgentID, identity.AgentExecutionID) bool
-	Stop(identity.AgentID, identity.AgentExecutionID) bool
-}
-
 type Dependencies struct {
-	Agents           repository.Agent
+	Agent            func(identity.AgentID) (*agentmodel.Agent, error)
+	RegisterAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	ExecutionRecords repository.AgentExecution
-	Controls         repository.AgentControl
-	Executions       ExecutionControl
 	Sessions         repository.Session
 	Entries          repository.Entries
 	Definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
-	Clock            clock.Clock
 }
 
 type Service struct {
-	agents           repository.Agent
+	agent            func(identity.AgentID) (*agentmodel.Agent, error)
+	registerAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	executionRecords repository.AgentExecution
-	controls         repository.AgentControl
-	executions       ExecutionControl
 	sessions         repository.Session
 	entries          repository.Entries
 	definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
-	clock            clock.Clock
 }
 
-// AgentView 直接组合 Agent 实体、派生运行状态和页面所需的执行信息。
+// AgentView 读取内存实例的状态并组合执行详情，不复制带锁的 Agent 实例。
 type AgentView struct {
-	agentmodel.Agent
+	ID                 identity.AgentID
+	SessionID          identity.SessionID
+	DefinitionID       identity.AgentDefinitionID
+	Kind               agentmodel.AgentKind
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 	Name               string                    `json:"name"`
 	State              agentmodel.AgentState     `json:"state"`
 	CurrentExecutionID identity.AgentExecutionID `json:"currentExecutionId"`
@@ -51,55 +46,43 @@ type AgentView struct {
 }
 
 // DescribeAgent 从已加载的角色定义读取展示名称；名称变化不改变持久化身份。
-func (s *Service) DescribeAgent(value agentmodel.Agent) (AgentView, error) {
+func (s *Service) DescribeAgent(value *agentmodel.Agent) (AgentView, error) {
 	definition, err := s.definitions(value.DefinitionID)
 	if err != nil {
 		return AgentView{}, fmt.Errorf("load agent definition for display: %w", err)
 	}
+	state, executionID, updatedAt := value.State()
 	return AgentView{
-		Agent:              value,
+		ID:                 value.ID,
+		SessionID:          value.SessionID,
+		DefinitionID:       value.DefinitionID,
+		Kind:               value.Kind,
+		CreatedAt:          value.CreatedAt,
+		UpdatedAt:          updatedAt,
 		Name:               definition.Name,
-		State:              value.State,
-		CurrentExecutionID: value.CurrentExecutionID,
+		State:              state,
+		CurrentExecutionID: executionID,
 	}, nil
 }
 
-// NewService 校验查询依赖并创建 Agent 查询服务；缺少仓储或消息读取函数时返回错误。
-func NewService(deps Dependencies) (*Service, error) {
-	if deps.Definitions == nil {
-		return nil, errors.New("agent service definitions are required")
-	}
-	for name, value := range map[string]any{
-		"sessions":         deps.Sessions,
-		"agents":           deps.Agents,
-		"executions":       deps.ExecutionRecords,
-		"control requests": deps.Controls,
-	} {
-		if value == nil {
-			return nil, fmt.Errorf("agent service %s is required", name)
-		}
-	}
-	if deps.Entries == nil || deps.Executions == nil {
-		return nil, errors.New("agent service entries and executions are required")
-	}
+// NewService 使用装配层提供的完整依赖创建 Agent 查询服务。
+func NewService(deps Dependencies) *Service {
 	return &Service{
-		agents:           deps.Agents,
+		agent:            deps.Agent,
+		registerAgent:    deps.RegisterAgent,
 		executionRecords: deps.ExecutionRecords,
-		controls:         deps.Controls,
-		executions:       deps.Executions,
 		entries:          deps.Entries,
 		definitions:      deps.Definitions,
 		sessions:         deps.Sessions,
-		clock:            clock.ClockOrDefault(deps.Clock),
-	}, nil
+	}
 }
 
-// GetAgentView 返回当前执行与最近一次执行，不返回执行历史和控制命令列表。
+// GetAgentView 返回 Agent 状态、当前执行与最近一次执行。
 func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (AgentView, error) {
 	if ctx == nil {
 		return AgentView{}, errors.New("agent query context is required")
 	}
-	value, err := s.agents.Get(ctx, agentID)
+	value, err := s.agent(agentID)
 	if err != nil {
 		return AgentView{}, err
 	}
@@ -114,11 +97,11 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (A
 	if len(latest) > 0 {
 		view.LatestExecution = &latest[0]
 	}
-	if value.CurrentExecutionID != "" {
-		if view.LatestExecution != nil && view.LatestExecution.ID == value.CurrentExecutionID {
+	if view.CurrentExecutionID != "" {
+		if view.LatestExecution != nil && view.LatestExecution.ID == view.CurrentExecutionID {
 			view.CurrentExecution = view.LatestExecution
 		} else {
-			current, err := s.executionRecords.Get(ctx, value.CurrentExecutionID)
+			current, err := s.executionRecords.Get(ctx, view.CurrentExecutionID)
 			if err != nil {
 				return AgentView{}, fmt.Errorf("load current agent execution: %w", err)
 			}

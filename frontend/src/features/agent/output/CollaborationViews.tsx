@@ -69,15 +69,18 @@ function taskView(agent: AgentView, history: ContextEntry[], streaming?: Streami
     if (live?.error) {
         status = 'failed'
         label = '失败'
-    } else if (agent.state === 'executing' || agent.state === 'pausing' || live) {
+    } else if (agent.state === 'paused' || agent.state === 'interrupted') {
+        status = 'cancelled'
+        label = agent.state === 'paused' ? '已暂停' : '已中断'
+    } else if (agent.state === 'executing' || live) {
         status = 'running'
-        label = agent.state === 'pausing' ? '暂停中' : '进行中'
+        label = '进行中'
     } else if (agent.state === 'failed' || task?.Outcome === 'failed') {
         status = 'failed'
         label = '失败'
-    } else if (agent.state === 'paused' || agent.state === 'interrupted' || task?.Outcome === 'paused' || task?.Outcome === 'interrupted') {
+    } else if (task?.Outcome === 'paused' || task?.Outcome === 'interrupted') {
         status = 'cancelled'
-        label = agent.state === 'paused' || task?.Outcome === 'paused' ? '已暂停' : '已中断'
+        label = task.Outcome === 'paused' ? '已暂停' : '已中断'
     } else if (agent.state === 'waiting' || task?.Outcome === 'yielded') {
         status = 'blocked'
         label = '等待输入'

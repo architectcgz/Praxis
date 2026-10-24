@@ -2,8 +2,9 @@ package entry
 
 import "praxis/internal/identity"
 
-// Record 以 AgentID 唯一确定消息归属；Session 由所属 Agent 决定。
+// Record 显式携带日志所属 Session 和消息所属 Agent，存储不依赖内存实例查询。
 type Record struct {
-	AgentID identity.AgentID
-	Data    ContextEntry
+	SessionID identity.SessionID
+	AgentID   identity.AgentID
+	Data      ContextEntry
 }

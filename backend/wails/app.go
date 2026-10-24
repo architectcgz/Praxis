@@ -9,10 +9,13 @@ import (
 	apperr "praxis/wails/error"
 	"sync"
 	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// App 持有 Wails context、前端服务集和关闭句柄，并实现 bindings.Host。
+// App 持有桌面应用、前端服务集和关闭句柄，并实现 bindings.Host。
 type App struct {
+	desktop     *application.App
 	mu          sync.RWMutex
 	ctx         context.Context
 	service     *bindings.Services
@@ -26,13 +29,14 @@ type App struct {
 	bindings *bindings.Bindings
 }
 
-func New(loggers ...*logging.Logger) *App {
+func New(desktop *application.App, loggers ...*logging.Logger) *App {
 	factory := logging.NewFactory()
 	logger := factory.Nop()
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = factory.Ensure(loggers[0])
 	}
 	instance := &App{
+		desktop:     desktop,
 		logger:      factory.Ensure(logger),
 		startupDone: make(chan struct{}),
 	}
@@ -41,7 +45,7 @@ func New(loggers ...*logging.Logger) *App {
 }
 
 // Bindings 返回完整的 Wails 暴露面。
-func (a *App) Bindings() []interface{} {
+func (a *App) Bindings() []application.Service {
 	return a.bindings.All()
 }
 
@@ -184,12 +188,24 @@ func (a *App) BindingContext() (context.Context, bindings.Services, error) {
 	return context.WithoutCancel(ctx), *service, nil
 }
 
-// EventContext 返回 Wails 事件发布使用的 context。
-func (a *App) EventContext() context.Context {
+// EmitEvent 仅在桌面宿主可用期间发布通知，关闭后忽略迟到事件。
+func (a *App) EmitEvent(name string, value any) {
 	a.mu.RLock()
-	ctx := a.ctx
+	available := !a.closed && a.ctx != nil
 	a.mu.RUnlock()
-	return ctx
+	if available {
+		a.desktop.Event.Emit(name, value)
+	}
+}
+
+// SelectDirectory 将系统对话框附着到当前窗口，取消时返回空路径。
+func (a *App) SelectDirectory(title string) (string, error) {
+	return a.desktop.Dialog.OpenFile().
+		SetTitle(title).
+		CanChooseFiles(false).
+		CanChooseDirectories(true).
+		AttachToWindow(a.desktop.Window.Current()).
+		PromptForSingleSelection()
 }
 
 // LogError 记录 binding 出口已经脱敏前的后端错误，供本地诊断使用。

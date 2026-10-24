@@ -38,7 +38,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
     const previousAgentIDRef = useRef('')
     const pendingRequestIDsRef = useRef<ReadonlySet<string>>(new Set())
     const [showScrollButton, setShowScrollButton] = useState(false)
-    const active = agent.state === 'executing' || agent.state === 'pausing'
+    const active = agent.state === 'executing'
     const waitingForOutput = awaitingOutput || (agent.state === 'executing' && !busy && !streamingOutput)
     const visibleStreamingOutput = streamingOutput
     const latestExecution = agent.latestExecution

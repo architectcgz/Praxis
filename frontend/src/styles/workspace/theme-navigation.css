@@ -57,8 +57,7 @@
 }
 
 .astate.run,
-.state-executing,
-.state-pausing {
+.state-executing {
     background: var(--live);
 }
 

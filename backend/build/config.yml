@@ -1,0 +1,39 @@
+version: '3'
+
+info:
+  companyName: DimisionReduction
+  productName: Praxis
+  productIdentifier: com.dimisionreduction.praxis
+  description: 多 Agent 编排桌面应用
+  copyright: DimisionReduction
+  comments: 本机运行的学习工作区
+  version: 0.1.0
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - frontend
+      - bin
+      - build
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - '*.syso'
+      - '*_test.go'
+    watched_extension:
+      - '*.go'
+    git_ignore: true
+  executes:
+    - cmd: wails3 build DEV=true
+      type: blocking
+    # 使用标准任务名，让 Wails 在前端端口就绪后再启动桌面应用。
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: wails3 task run
+      type: primary
+      exit_policy: shutdown

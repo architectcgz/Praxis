@@ -4,7 +4,6 @@ package project
 import (
 	"context"
 	"errors"
-	"fmt"
 	"praxis/internal/clock"
 	projectmodel "praxis/internal/core/project"
 	workspacemodel "praxis/internal/core/workspace"
@@ -50,22 +49,13 @@ type CreateProjectResult struct {
 }
 
 // NewService 创建 Project 业务服务。
-func NewService(deps Dependencies) (*Service, error) {
-	for name, value := range map[string]any{
-		"projects":            deps.Projects,
-		"workspaces":          deps.Workspaces,
-		"workspace directory": deps.Directory,
-	} {
-		if value == nil {
-			return nil, fmt.Errorf("project service %s is required", name)
-		}
-	}
+func NewService(deps Dependencies) *Service {
 	return &Service{
 		projects:   deps.Projects,
 		workspaces: deps.Workspaces,
-		clock:      clock.ClockOrDefault(deps.Clock),
+		clock:      deps.Clock,
 		directory:  deps.Directory,
-	}, nil
+	}
 }
 
 // CreateProject 保存单条 Project 创建事实，失败后保留已创建目录供重试。

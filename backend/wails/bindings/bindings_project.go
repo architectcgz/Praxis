@@ -7,8 +7,6 @@ import (
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type ProjectBindings struct {
@@ -17,11 +15,11 @@ type ProjectBindings struct {
 
 // SelectProjectPath 打开系统目录选择器并返回选中的项目路径；用户取消时返回空字符串。
 func (b *ProjectBindings) SelectProjectPath() (string, error) {
-	ctx, _, err := b.host.BindingContext()
+	_, _, err := b.host.BindingContext()
 	if err != nil {
 		return "", err
 	}
-	path, err := wailsruntime.OpenDirectoryDialog(ctx, wailsruntime.OpenDialogOptions{Title: "选择项目路径"})
+	path, err := b.host.SelectDirectory("选择项目路径")
 	if err != nil {
 		return "", publicError(b.host, "ProjectBindings.SelectProjectPath", err)
 	}

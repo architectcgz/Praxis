@@ -19,7 +19,7 @@ func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sess
 	return get[sessionmodel.Session](ctx, r.s, "session", id.String())
 }
 
-// Save 持锁保存单条会话事实，初始 Agent 由调用方独立保存。
+// Save 保存会话及主 Agent 的稳定身份引用，不保存内存实例或运行状态。
 func (r SessionRepository) Save(ctx context.Context, v sessionmodel.Session) error {
 	return save(ctx, r.s, v.ID.String(), "session", v.ID.String(), "session.saved", v)
 }
@@ -45,7 +45,7 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 		group = lookupKey{kind: "sessions-project", owner: project.String()}
 	}
 	v, e := listIndexed[sessionmodel.Session](ctx, r.s, group, func(v sessionmodel.Session) bool {
-		return len(r.s.keys(lookupKey{kind: "agents-session", owner: v.ID.String()})) > 0 && (project == "" || v.ProjectID == project) && strings.Contains(strings.ToLower(v.Title), title)
+		return (project == "" || v.ProjectID == project) && strings.Contains(strings.ToLower(v.Title), title)
 	})
 	return capped(sorted(v, func(a, b sessionmodel.Session) int {
 		return cmp.Or(b.UpdatedAt.Compare(a.UpdatedAt), cmp.Compare(a.ID, b.ID))

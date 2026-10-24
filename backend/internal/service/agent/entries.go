@@ -14,7 +14,7 @@ import (
 // AppendEntry 向 Agent 自身追加输入；Main 与 Subagent 使用相同的消息存取规则。
 func (s *Service) AppendEntry(ctx context.Context, agentID identity.AgentID, data sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
 	err = func(txCtx context.Context) error {
-		owner, err := s.agents.Get(txCtx, agentID)
+		owner, err := s.agent(agentID)
 		if err != nil {
 			return err
 		}
@@ -24,7 +24,7 @@ func (s *Service) AppendEntry(ctx context.Context, agentID identity.AgentID, dat
 		if err := sessionservice.RequireWritable(txCtx, s.sessions, owner.SessionID); err != nil {
 			return err
 		}
-		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{AgentID: owner.ID, Data: data})
+		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{SessionID: owner.SessionID, AgentID: owner.ID, Data: data})
 		return err
 	}(ctx)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *Service) ListAgentEntries(ctx context.Context, agentID identity.AgentID
 	}
 	var entries []sessionentry.ContextEntry
 	err := func(ctx context.Context) error {
-		agent, err := s.agents.Get(ctx, agentID)
+		agent, err := s.agent(agentID)
 		if err != nil {
 			return err
 		}

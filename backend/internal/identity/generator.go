@@ -21,11 +21,3 @@ func (SecureIDGenerator) New(prefix string) string {
 	}
 	return prefix + "_" + hex.EncodeToString(bytes[:])
 }
-
-// IDsOrDefault 在未注入生成器时返回生产环境使用的安全生成器。
-func IDsOrDefault(ids IDGenerator) IDGenerator {
-	if ids == nil {
-		return SecureIDGenerator{}
-	}
-	return ids
-}

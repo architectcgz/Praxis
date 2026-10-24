@@ -1,15 +1,12 @@
 import { getCommandBinding } from './bindings'
 
-export type PauseAgentRequest = { commandId: string; agentId: string; targetExecutionId: string }
+export type PauseAgentRequest = { agentId: string; targetExecutionId: string }
 export type StopAgentRequest = PauseAgentRequest
+/** applied 只表示进程内信号已接受，执行槽位由后端在收尾后释放。 */
 export type AgentControlResponse = {
-    commandId: string
-    agentId?: string
-    targetExecutionId?: string
-    kind?: string
-    status: string
-    existingCommand?: boolean
-    cancellationError?: string
+    agentId: string
+    targetExecutionId: string
+    applied: boolean
 }
 
 export function pauseAgent(request: PauseAgentRequest) {
@@ -38,7 +35,7 @@ export type ToolApproval = ToolDecisionRequest & {
     riskReason: string
 }
 export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
-    const values = await getCommandBinding().ListToolApprovals(agentId)
+    const values = await getCommandBinding().ListToolApprovals(agentId) ?? []
     return values.map((value) => ({ ...value, arguments: JSON.parse(value.arguments) as unknown }))
 }
 export function approveToolCall(request: ToolDecisionRequest) {

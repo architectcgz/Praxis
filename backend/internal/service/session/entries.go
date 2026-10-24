@@ -16,14 +16,14 @@ func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID,
 		if err := RequireWritable(txCtx, s.sessions, sessionID); err != nil {
 			return err
 		}
-		owner, err := s.agents.GetMainBySession(txCtx, sessionID)
+		owner, err := s.mainAgent(txCtx, sessionID)
 		if err != nil {
 			return err
 		}
 		if data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
 			return errorcode.ErrRequestConflict
 		}
-		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{AgentID: owner.ID, Data: data})
+		stored, inserted, err = s.entries.Append(txCtx, sessionentry.Record{SessionID: owner.SessionID, AgentID: owner.ID, Data: data})
 		return err
 	}(ctx)
 	if err != nil {
@@ -38,7 +38,7 @@ func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID)
 		if _, err := s.sessions.Get(txCtx, sessionID); err != nil {
 			return err
 		}
-		owner, err := s.agents.GetMainBySession(txCtx, sessionID)
+		owner, err := s.mainAgent(txCtx, sessionID)
 		if err != nil {
 			return err
 		}

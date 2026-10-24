@@ -16,7 +16,6 @@ type ExecutionOperations interface {
 	PrepareLoop(context.Context, identity.AgentExecutionID) (loop.Input, bool, error)
 	ConfirmRunning(context.Context, identity.AgentExecutionID) error
 	Settle(context.Context, identity.AgentExecutionID, agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) (agentexecution.Execution, error)
-	ReclaimExecution(context.Context, agentexecution.Execution) (agentexecution.Execution, error)
 	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, modelapi.Config) (agentexecution.Execution, bool, error)
 }
 

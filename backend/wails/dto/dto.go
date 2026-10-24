@@ -148,21 +148,17 @@ type CreateTaskResponse struct {
 }
 
 type PauseAgentRequest struct {
-	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
 	TargetExecutionID string `json:"targetExecutionId"`
 }
 
 type StopAgentRequest = PauseAgentRequest
 
+// AgentControlResponse 的 applied 表示信号已接受，不代表执行槽位已经释放。
 type AgentControlResponse struct {
-	CommandID         string `json:"commandId"`
 	AgentID           string `json:"agentId"`
-	TargetExecutionID string `json:"targetExecutionId,omitempty"`
-	Kind              string `json:"kind"`
-	Status            string `json:"status"`
-	ExistingCommand   bool   `json:"existingCommand"`
-	CancellationError string `json:"cancellationError,omitempty"`
+	TargetExecutionID string `json:"targetExecutionId"`
+	Applied           bool   `json:"applied"`
 }
 
 type CancelTaskRequest struct {

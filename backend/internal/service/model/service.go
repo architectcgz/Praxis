@@ -31,13 +31,10 @@ type ConfigSnapshot struct {
 }
 
 func NewService(deps Dependencies) *Service {
-	if deps.ConfigMu == nil {
-		deps.ConfigMu = &sync.RWMutex{}
-	}
 	return &Service{
 		models:       deps.Models,
 		reloadConfig: deps.ReloadConfig,
-		logger:       logging.NewFactory().Ensure(deps.Logger),
+		logger:       deps.Logger,
 		configMu:     deps.ConfigMu,
 	}
 }

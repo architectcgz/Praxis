@@ -4,12 +4,12 @@ package coordinator
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	taskmodel "praxis/internal/core/session"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
 	toolservice "praxis/internal/service/toolexecution"
@@ -24,10 +24,10 @@ type Config struct {
 	ToolRecords       *toolservice.Service
 	Sessions          repository.Session
 	Workspaces        repository.Workspace
-	MainAgent         MainAgentProvider
+	MainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
+	Agent             func(identity.AgentID) (*agentmodel.Agent, error)
 	SessionModels     SessionModels
 	Loop              *loop.Runner
-	ActiveTasks       *taskmodel.ActiveTasks
 	Operations        ExecutionOperations
 	SessionTasks      SessionTasks
 	HookDispatcher    *hook.Dispatcher
@@ -35,7 +35,7 @@ type Config struct {
 	TransitionTimeout time.Duration
 }
 
-// Coordinator 是进程级执行协调器；活动身份只保存在共享的 ActiveTasks 中。
+// Coordinator 统一拥有队列调度、执行忙闲状态和取消句柄。
 type Coordinator struct {
 	configMu          *sync.RWMutex
 	recovery          repository.AgentExecution
@@ -43,38 +43,48 @@ type Coordinator struct {
 	toolRecords       *toolservice.Service
 	sessions          repository.Session
 	workspaces        repository.Workspace
-	mainAgent         MainAgentProvider
+	mainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
+	agent             func(identity.AgentID) (*agentmodel.Agent, error)
 	sessionModels     SessionModels
 	restored          bool
 	restoring         bool
 	loop              *loop.Runner
-	activeTasks       *taskmodel.ActiveTasks
 	operations        ExecutionOperations
 	sessionTasks      SessionTasks
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
 
-	// 此锁仅协调关闭与后台工作的启动；存储和模型调用必须在锁外执行。
-	mu      sync.Mutex
-	closed  bool
-	running sync.WaitGroup
+	// 领取队首与标记忙碌在同一临界区完成；准备、存储和模型调用都在锁外执行。
+	mu         sync.Mutex
+	closed     bool
+	executions map[identity.AgentID]*activeExecution
+	running    sync.WaitGroup
 }
 
-func NewCoordinator(config Config) (*Coordinator, error) {
-	if config.Loop == nil || config.ActiveTasks == nil || config.Operations == nil || config.SessionTasks == nil || config.Tools == nil || config.ToolRecords == nil || config.Sessions == nil || config.Workspaces == nil {
-		return nil, errors.New("execution loop, active tasks, task operations, queue and tool services are required")
+// activeExecution 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
+type activeExecution struct {
+	executionID identity.AgentExecutionID
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+	ending      bool
+	// 控制后新提交的输入可请求收尾后重新调度，不把旧队列当作继续执行的意图。
+	resumeRequested  bool
+	ready            chan struct{}
+	toolApprovalWake chan struct{}
+}
+
+func newActiveExecution(ctx context.Context) *activeExecution {
+	executionCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	return &activeExecution{
+		ctx:              executionCtx,
+		cancel:           cancel,
+		ready:            make(chan struct{}),
+		toolApprovalWake: make(chan struct{}, 1),
 	}
-	if config.MainAgent == nil || config.SessionModels == nil || config.Recovery == nil {
-		return nil, errors.New("main agent, session models and execution recovery source are required")
-	}
-	timeout := config.TransitionTimeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	if config.ConfigMu == nil {
-		config.ConfigMu = &sync.RWMutex{}
-	}
+}
+
+func NewCoordinator(config Config) *Coordinator {
 	return &Coordinator{
 		configMu:          config.ConfigMu,
 		recovery:          config.Recovery,
@@ -83,15 +93,16 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 		sessions:          config.Sessions,
 		workspaces:        config.Workspaces,
 		mainAgent:         config.MainAgent,
+		agent:             config.Agent,
 		sessionModels:     config.SessionModels,
 		loop:              config.Loop,
-		activeTasks:       config.ActiveTasks,
+		executions:        make(map[identity.AgentID]*activeExecution),
 		operations:        config.Operations,
 		sessionTasks:      config.SessionTasks,
 		hookDispatcher:    config.HookDispatcher,
-		logger:            logging.NewFactory().Ensure(config.Logger),
-		transitionTimeout: timeout,
-	}, nil
+		logger:            config.Logger,
+		transitionTimeout: config.TransitionTimeout,
+	}
 }
 
 // enter 将前台恢复、队列准备也计入关闭等待，禁止关闭 Store 后继续写入。
@@ -102,55 +113,20 @@ func (r *Coordinator) enter(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return errors.New("execution coordinator is closed")
+		return errCoordinatorClosed
 	}
 	r.running.Add(1)
 	return nil
 }
 
-// Activate 接管已持久化的活动 Execution，重复调用只领取一次运行权。
-func (r *Coordinator) Activate(ctx context.Context, task agentexecution.Execution) error {
-	if err := r.enter(ctx); err != nil {
-		return err
-	}
-	defer r.running.Done()
-	if !task.Active() {
-		return nil
-	}
-	return r.activate(ctx, task)
-}
-
-func (r *Coordinator) activate(ctx context.Context, task agentexecution.Execution) error {
-	if _, err := r.activeTasks.Context(task.AgentID, task.ID); errors.Is(err, errorcode.ErrNotFound) {
-		reclaimed, err := r.operations.ReclaimExecution(ctx, task)
-		if err != nil {
-			return err
-		}
-		task = reclaimed
-	} else if err != nil {
-		return err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// launchLocked 只接收已由调度器标记忙碌的执行，不再竞争槽位；调用方持有 mu。
+func (r *Coordinator) launchLocked(task agentexecution.Execution, active *activeExecution) error {
 	if r.closed {
-		// 恢复可能在 Close 发送取消后才预留身份，补发取消但保留持久化恢复能力。
-		r.activeTasks.Stop(task.AgentID, task.ID)
-		return errors.New("execution coordinator is closed")
+		return errCoordinatorClosed
 	}
-	active, claimed, err := r.activeTasks.TryRun(task.AgentID, task.ID)
-	if err != nil || !claimed {
-		return err
-	}
-	r.running.Go(func() { r.run(active.Context, task, active) })
-	return nil
-}
-
-// ResumeApproved 在审批事实提交后唤醒同一执行；尚未建立协程时正常激活。
-func (r *Coordinator) ResumeApproved(ctx context.Context, task agentexecution.Execution) error {
-	if err := r.Activate(ctx, task); err != nil {
-		return err
-	}
-	r.activeTasks.Wake(task.AgentID, task.ID)
+	active.executionID = task.ID
+	close(active.ready)
+	r.running.Go(func() { r.run(active.ctx, task, active) })
 	return nil
 }
 
@@ -162,7 +138,9 @@ func (r *Coordinator) Close(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	r.closed = true
-	r.activeTasks.StopAll()
+	for _, active := range r.executions {
+		active.cancel(context.Canceled)
+	}
 	r.mu.Unlock()
 	done := make(chan struct{})
 	go func() { r.running.Wait(); close(done) }()

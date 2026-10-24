@@ -6,7 +6,6 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	taskmodel "praxis/internal/core/session"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -17,15 +16,9 @@ import (
 func (r *Coordinator) run(
 	ctx context.Context,
 	task agentexecution.Execution,
-	active *taskmodel.ActiveTask,
+	active *activeExecution,
 ) {
 	r.logEvent(task.ID, "task started")
-	defer r.activeTasks.RunReturned(task.AgentID, active)
-	if active.Result != nil {
-		r.endExecution(task, active, active.Result.Outcome, active.Result.Code, active.Result.Message)
-		return
-	}
-
 	if err := r.startExecution(task, ""); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
@@ -66,7 +59,7 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	// TryRun 已确认本次运行权唯一，旧 Loop 和工具已停止；恢复必须先于上下文读取。
+	// 调度器保证只有一个执行者，旧 Loop 和工具已停止；恢复必须先于上下文读取。
 	if err := r.toolRecords.RecoverExecution(ctx, task.ID); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
@@ -141,8 +134,7 @@ func (r *Coordinator) execute(
 			failureCode = loopFailureCode(err)
 		}
 	}
-	var hookErr *hook.Error
-	if errors.As(err, &hookErr) && loop.FailureClassification(err) == loop.FailureInternal {
+	if _, ok := errors.AsType[*hook.Error](err); ok && loop.FailureClassification(err) == loop.FailureInternal {
 		failureCode = agentexecution.ExecutionFailureInternal
 	}
 	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
@@ -166,10 +158,10 @@ func (r *Coordinator) executionResult(
 		outcome = agentexecution.ExecutionInterrupted
 		failureCode = agentexecution.ExecutionFailureCancelled
 		switch cause := context.Cause(ctx); {
-		case errors.Is(cause, taskmodel.ErrExecutionPaused):
+		case errors.Is(cause, errExecutionPaused):
 			outcome = agentexecution.ExecutionPaused
 			failureCode = agentexecution.ExecutionFailureRequestCanceled
-		case errors.Is(cause, taskmodel.ErrExecutionStopped):
+		case errors.Is(cause, errExecutionStopped):
 			failureCode = agentexecution.ExecutionFailureRequestCanceled
 		}
 		failureMessage = ""
@@ -187,18 +179,15 @@ func (r *Coordinator) executionResult(
 
 func (r *Coordinator) endExecution(
 	task agentexecution.Execution,
-	active *taskmodel.ActiveTask,
+	active *activeExecution,
 	outcome agentexecution.ExecutionOutcome,
 	failureCode agentexecution.ExecutionFailureCode,
 	failureMessage string,
 ) bool {
-	// 先保留结算结果与占用，失败后只重试结算。
-	active.Result = &taskmodel.ExecutionResult{
-		Outcome: outcome,
-		Code:    failureCode,
-		Message: failureMessage,
-	}
-	r.activeTasks.BeginEnding(task.AgentID, active.ExecutionID)
+	// 结果保留在本执行协程中；结算失败不退出、不释放忙碌，也不重新运行模型或工具。
+	r.mu.Lock()
+	active.ending = true
+	r.mu.Unlock()
 	var endedExecution agentexecution.Execution
 	retryDelay := 100 * time.Millisecond
 	for {
@@ -224,13 +213,19 @@ func (r *Coordinator) endExecution(
 		retryDelay = min(5*time.Second, retryDelay*2)
 	}
 
-	// 结算提交后才释放执行槽；入队唤醒不能在暂停或取消结算途中抢先续跑。
-	r.activeTasks.Release(task.AgentID, active.ExecutionID)
-	// 只有实际完成且已提交终态的执行允许续跑；迟到的控制命令不改写结果。
-	if endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded {
+	// 结算成功后才释放槽位；控制信号立即改变展示，但不会提前放行下一次执行。
+	r.mu.Lock()
+	cause := context.Cause(active.ctx)
+	controlled := errors.Is(cause, errExecutionPaused) || errors.Is(cause, errExecutionStopped)
+	resumeRequested := active.resumeRequested
+	delete(r.executions, task.AgentID)
+	active.cancel(nil)
+	r.mu.Unlock()
+	// 控制后只响应新的显式调度意图，不因旧执行恰好正常完成而自动领取队列。
+	if resumeRequested || !controlled && (endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded) {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
-		if _, err := r.StartNext(queueContext, task.SessionID); err != nil {
+		if err := r.scheduleSession(queueContext, task.SessionID, false); err != nil {
 			r.logError(task, "prepare next queued task", err)
 		}
 	}

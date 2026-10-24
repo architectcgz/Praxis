@@ -1,13 +1,10 @@
 package execution
 
 import (
-	"errors"
-	"fmt"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
-	taskmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
@@ -19,65 +16,44 @@ type AgentDefinitionProvider interface {
 }
 
 type Dependencies struct {
-	Controls       repository.AgentControl
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	Emitter        *coreevent.Emitter
 	Sessions       repository.Session
-	Agents         repository.Agent
+	Agent          func(identity.AgentID) (*agentmodel.Agent, error)
 	Records        repository.AgentExecution
-	Executions     *taskmodel.ActiveTasks
 	Entries        repository.Entries
 	Definitions    AgentDefinitionProvider
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
 
-// Service 负责 Execution 的创建、队列准备、上下文冻结、恢复、进度和结算，不持有单次执行的临时状态。
+// Service 负责 Execution 的创建、上下文冻结、进度和结算；调度与执行中的临时状态由 Coordinator 拥有。
 type Service struct {
-	controls       repository.AgentControl
 	hookDispatcher *hook.Dispatcher
 	logger         *logging.Logger
 	emitter        *coreevent.Emitter
 	sessions       repository.Session
-	agents         repository.Agent
+	agent          func(identity.AgentID) (*agentmodel.Agent, error)
 	records        repository.AgentExecution
-	executions     *taskmodel.ActiveTasks
 	entries        repository.Entries
 	definitions    AgentDefinitionProvider
 	clock          clock.Clock
 	ids            identity.IDGenerator
 }
 
-// NewService 检查 Execution 用例依赖；输入规范化由公开用例的输入边界负责。
-func NewService(deps Dependencies) (*Service, error) {
-	if deps.Executions == nil {
-		return nil, errors.New("task service executions are required")
-	}
-	for name, value := range map[string]any{
-		"controls":    deps.Controls,
-		"sessions":    deps.Sessions,
-		"agents":      deps.Agents,
-		"tasks":       deps.Records,
-		"entries":     deps.Entries,
-		"definitions": deps.Definitions,
-	} {
-		if value == nil {
-			return nil, fmt.Errorf("task service %s is required", name)
-		}
-	}
+// NewService 使用装配层提供的完整依赖创建 Execution 业务服务。
+func NewService(deps Dependencies) *Service {
 	return &Service{
-		controls:       deps.Controls,
 		hookDispatcher: deps.HookDispatcher,
-		logger:         logging.NewFactory().Ensure(deps.Logger),
+		logger:         deps.Logger,
 		emitter:        deps.Emitter,
 		sessions:       deps.Sessions,
-		agents:         deps.Agents,
+		agent:          deps.Agent,
 		records:        deps.Records,
-		executions:     deps.Executions,
 		entries:        deps.Entries,
 		definitions:    deps.Definitions,
-		clock:          clock.ClockOrDefault(deps.Clock),
-		ids:            identity.IDsOrDefault(deps.IDs),
-	}, nil
+		clock:          deps.Clock,
+		ids:            deps.IDs,
+	}
 }

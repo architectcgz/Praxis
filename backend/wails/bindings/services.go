@@ -14,8 +14,8 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
-	execution "praxis/internal/service/agent/coordinator"
 	approvalservice "praxis/internal/service/approval"
+	execution "praxis/internal/service/coordinator"
 	modelservice "praxis/internal/service/model"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
@@ -48,14 +48,14 @@ type WorkspaceService interface {
 }
 
 type AgentService interface {
-	DescribeAgent(agentmodel.Agent) (agentservice.AgentView, error)
+	DescribeAgent(*agentmodel.Agent) (agentservice.AgentView, error)
 	GetAgentView(context.Context, identity.AgentID) (agentservice.AgentView, error)
 	ListAgentEntries(context.Context, identity.AgentID) ([]sessionentry.ContextEntry, error)
-	PauseAgent(context.Context, agentservice.ControlInput) (agentservice.ControlResult, error)
-	StopAgent(context.Context, agentservice.ControlInput) (agentservice.ControlResult, error)
 }
 
 type AgentCommands interface {
+	PauseAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)
+	StopAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)
 	ListToolApprovals(context.Context, identity.AgentID) ([]toolservice.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error

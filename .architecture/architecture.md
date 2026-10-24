@@ -18,9 +18,9 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/main.go` | 桌面进程入口 |
 | `backend/wails/` | 桌面绑定、请求入口、DTO 和错误映射 |
 | `backend/internal/bootstrap/` | 应用装配、依赖连接和生命周期管理 |
-| `backend/internal/core/agent/` | Agent 实体、角色类型、定义、唯一消息历史和控制意图 |
+| `backend/internal/core/agent/` | Agent 内存实例、受锁保护的执行状态、角色定义和唯一消息历史 |
 | `backend/internal/core/agent/execution/` | Execution 实体、配置、进度、结果和执行计时能力 |
-| `backend/internal/core/session/` | 会话实体、模型选择、待办队列和执行占用 |
+| `backend/internal/core/session/` | 会话实体、模型选择和待办队列 |
 | `backend/internal/core/session/entry/` | Agent 消息、内容块和执行归属的共享值类型 |
 | `backend/internal/core/project/`、`core/workspace/` | 项目与工作区实体 |
 | `backend/internal/core/context/` | 模型上下文构建和压缩 |
@@ -32,7 +32,9 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/internal/repository/` | 统一持久化读写与查询契约 |
 | `backend/internal/service/` | 各业务用例及跨模块协作 |
 | `backend/internal/service/agent/execution/` | 执行准入、上下文准备、进度、结算和恢复 |
-| `backend/internal/service/agent/coordinator/` | Session FIFO 调度、ExecutionTools 绑定、审批唤醒和结算交接 |
+| `backend/internal/service/agent/` | Agent 实例查找、创建、状态查询和启动恢复 |
+| `backend/internal/service/session/` | 会话用例、Agent 实例引用持有、模型选择和输入队列 |
+| `backend/internal/service/coordinator/` | Session FIFO 调度、暂停停止、ExecutionTools 绑定、审批唤醒和结算交接 |
 | `backend/internal/service/toolexecution/` | 归属与规则读取、审核输入及预算准备、审批事实和工具回执持久化 |
 | `backend/internal/infra/storage/`、`infra/jsonl/` | 仓储实现、查询索引和 JSONL 日志存储 |
 | `backend/internal/infra/providers/` | 各模型 Provider 的协议实现 |
@@ -68,7 +70,9 @@ Coordinator 在领取 Session 队首输入并取得 AgentExecution 的唯一运�
 - Bootstrap 是统一装配入口，连接契约和具体实现。
 - 前端通过 API 模块访问 Wails，业务功能由应用和工作区层组合。
 
-Agent 详情由 Agent Service 返回 AgentView，直接组合 Core Agent、当前 Execution 和最近一次 Execution。Wails 直接返回查询结构，不复制 AgentSnapshot 或 ExecutionSnapshot；会话目录复用不含执行详情的 AgentView。前端沿用生成的查询类型，不扫描或排序执行历史列表来选择展示对象。
+Coordinator 与 Agent、Session 服务同级，负责跨模块执行编排；Agent 服务不依赖 Coordinator。暂停和停止直接接收 AgentID 与 ExecutionID，Coordinator 只控制当前身份匹配的 Execution，不匹配时正常跳过并返回 `Applied: false`，不保存控制命令。接受信号后取消执行 Context，并调用 Agent 自身的方法立即更新内存状态；当前执行身份保留到结算完成。原执行完成工具回执补齐和结果结算后才释放槽位，期间不能启动同一 Agent 的新执行；已接受控制的执行不自动领取后续输入，控制后新提交的输入或模型选择可以请求在收尾后重新调度。执行结果保存实际完成事实，结算后 Agent 以该结果更新状态，不以迟到信号覆盖完成事实。
+
+Agent 详情由 Agent Service 返回 AgentView，从内存实例一致读取状态，再组合身份信息、当前 Execution 和最近一次 Execution，不复制带锁实例，也不在查询时叠加控制状态。Wails 直接返回查询结构，不复制 AgentSnapshot 或 ExecutionSnapshot；会话目录复用不含执行详情的 AgentView。前端沿用生成的查询类型，不扫描或排序执行历史列表来选择展示对象。
 
 ## Agent 角色定义
 
@@ -99,13 +103,15 @@ role: advisor
 
 `agentregistry` 在配置输入边界解析 UTF-8 文件，支持 LF 和 CRLF 换行，拒绝未知或重复的元数据字段、非法角色、空名称和空正文。YAML 文件头不进入模型上下文，Markdown 正文作为 `AgentDefinition.Instructions`，执行准入时冻结到 `ExecutionConfig.SystemPrompt`。
 
-`AgentDefinition` 保存稳定 ID、展示名称、Role 和指令；Session 内的 Agent 实例只引用定义 ID，并保存实例类型 `Kind`，不复制定义中的 Role。`Kind` 由创建实例的业务流程明确指定，取值为 `main` 或 `subagent`，不从目录名、名称或 Role 推导。同一份角色定义可以用于不同类型的实例；`primary` 是默认定义 ID，不限制其他定义被用作 Main。
+`AgentDefinition` 保存稳定 ID、展示名称、Role 和指令；Session 内的 Agent 实例只引用定义 ID，并持有实例类型 `Kind`，不复制定义中的 Role。`Kind` 由创建实例的业务流程明确指定，取值为 `main` 或 `subagent`，不从目录名、名称或 Role 推导。同一份角色定义可以用于不同类型的实例；`primary` 是默认定义 ID，不限制其他定义被用作 Main。
 
 每个 Agent 都通过 AgentID 拥有唯一的消息历史，Main 与 Subagent 使用相同的读写规则。Session 的历史与上下文就是其 Main Agent 的历史与上下文：会话入口先找到 Main，再直接读取或追加该 Agent 的消息，不建立独立 Session 消息流、共享事实集合或模型上下文副本。需要长期保留的约束、决定和参考信息作为同一历史中的条目追加；必要时使用 `ContextEntry.Protected` 保留模型构建与压缩时必须保留的内容。
 
-Subagent 的消息按自身 AgentID 隔离，不自动读取 Main 或其他 Subagent 的历史，需要的信息由委派输入明确提供。模型构建统一读取本次执行所属 Agent 的有效历史，不按 Main/Subagent 分别拼接额外的 Session 上下文。Session 内最多存在一个 Main，仓储按实例类型建立查询索引和唯一约束，不通过定义 ID 查找主实例；实例类型创建后不可改变。
+Subagent 的消息按自身 AgentID 隔离，不自动读取 Main 或其他 Subagent 的历史，需要的信息由委派输入明确提供。模型构建统一读取本次执行所属 Agent 的有效历史，不按 Main/Subagent 分别拼接额外的 Session 上下文。Session 内最多存在一个 Main，由 Session 的 MainAgentID 明确引用，不通过定义 ID 查找主实例；实例类型创建后不可改变。
 
-消息仓储只接收 AgentID 与消息，不接收可独立指定的流归属或 SessionID；日志文件所属 Session 从 Agent 的持久化归属确定。消息存储不判断 Main/Subagent 类型。每个 Agent 的只读历史正文只保存一份，消息索引共享该正文；Session 全量消息索引仅服务消息存在性等聚合查询，不用于拼接 Main 上下文。
+Agent 对象和运行状态不持久化。Session 只保存主 Agent 的 MainAgentID 与 AgentDefinitionID，Execution 和消息保存各自的归属事实。Agent 服务负责主实例的查找、创建及启动恢复，Session 服务按会话持有同一批实例引用并在会话删除时释放；身份字段创建后不变，状态变更由 Agent 自身的锁保护。启动时先按 Session 重建主实例，再根据各 Agent 的当前或最近 Execution 初始化状态，并从执行事实重建 Subagent；完成后才启动 Coordinator 恢复活动执行，不恢复尚未开始的输入和进程内控制意图。
+
+消息仓储显式接收 SessionID、AgentID 与消息，SessionID 决定日志文件，AgentID 决定消息历史。存储校验 Session、Execution 与消息之间的归属一致性，同一 AgentID 不能出现在不同 Session 的事实中，不查询 Agent 对象或判断 Main/Subagent 类型。每个 Agent 的只读历史正文只保存一份，消息索引共享该正文；Session 全量消息索引仅服务消息存在性等聚合查询，不用于拼接 Main 上下文。
 
 一次执行从所属 Agent 的有效历史构建一份可变 `ModelContext`，通过指针交给 Loop，模型输出与工具回执持久化到同一 Agent 历史后追加到本次上下文。存储层和 History 不保存执行上下文，执行结束后释放；恢复时按同一 Agent 历史重建，压缩摘要也保存在该历史中。这样 Session 不持有另一份 Context，也不会把一次执行的模型上下文保留到进程结束。
 

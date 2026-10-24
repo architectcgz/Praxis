@@ -39,12 +39,8 @@ type Executor struct {
 	active map[Key]*Execution
 }
 
-func NewExecutor(deps ExecutorDependencies) (*Executor, error) {
-	if deps.Catalog == nil || deps.Operations == nil || deps.Reviewer == nil || deps.Reviewer.Provider == nil || deps.Prepare == nil || deps.Bind == nil || deps.Emitter == nil {
-		return nil, errors.New("tool executor dependencies are required")
-	}
-	deps.Clock = clock.ClockOrDefault(deps.Clock)
-	return &Executor{deps: deps, active: make(map[Key]*Execution)}, nil
+func NewExecutor(deps ExecutorDependencies) *Executor {
+	return &Executor{deps: deps, active: make(map[Key]*Execution)}
 }
 
 // ExecutionTools 只绑定本次已取得运行权的 AgentExecution 的环境。
@@ -120,7 +116,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 		}
 
 		if pending {
-			// 请求已可靠保存；通知和等待均在控制锁外，WakeSignal 保留提前到达的决定。
+			// 请求已可靠保存；通知和等待均在控制锁外，等待信号保留提前到达的审批决定或停止通知。
 			sourceTaskID, err := s.checkCall(ctx, call)
 			if err != nil {
 				return sessionentry.ContextEntry{}, err

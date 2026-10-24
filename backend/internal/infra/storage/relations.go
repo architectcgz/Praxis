@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	timingmodel "praxis/internal/core/agent/execution/timing"
 	providerapi "praxis/internal/core/provider"
@@ -85,17 +84,19 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if workspace.ProjectID != v.ProjectID {
 			return errors.New("session workspace ownership mismatch")
 		}
-	case "agent":
-		return reference("session", scope)
+		return s.validateAgentSession(scope, v.MainAgentID)
 	case "agent_execution":
 		var v agentexecution.Execution
 		_ = decodeJSON(data, &v)
-		agent, err := getLocked[agentmodel.Agent](s, "agent", v.AgentID.String())
+		if err := s.validateAgentSession(scope, v.AgentID); err != nil {
+			return err
+		}
+		session, err := getLocked[sessionmodel.Session](s, "session", scope)
 		if err != nil {
 			return err
 		}
-		if agent.SessionID != v.SessionID {
-			return errors.New("execution does not match agent ownership")
+		if v.AgentID == session.MainAgentID && v.Config.AgentDefinitionID != session.AgentDefinitionID {
+			return errors.New("execution does not match the main agent definition")
 		}
 		input, err := s.payload(entryEntityKey(scope, v.AgentID, v.InputEntryID))
 		if err != nil {
@@ -134,13 +135,6 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}
-	case "control":
-		var v agentmodel.AgentControlCommand
-		_ = decodeJSON(data, &v)
-		if err := reference("agent", v.AgentID.String()); err != nil {
-			return err
-		}
-		return taskOwner(v.TargetExecutionID, v.AgentID)
 	case "wait":
 		var v workflow.WaitCondition
 		_ = decodeJSON(data, &v)
@@ -159,12 +153,8 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 		if err := reference("session", scope); err != nil {
 			return err
 		}
-		agent, err := getLocked[agentmodel.Agent](s, "agent", v.AgentID.String())
-		if err != nil {
+		if err := s.validateAgentSession(scope, v.AgentID); err != nil {
 			return err
-		}
-		if agent.SessionID.String() != scope {
-			return errors.New("message agent does not belong to the event session")
 		}
 		if v.Data.IsSummary() {
 			seen := make(map[string]bool, len(v.Data.Replaces))
@@ -190,11 +180,7 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 			if err != nil {
 				return err
 			}
-			agent, err := getLocked[agentmodel.Agent](s, "agent", task.AgentID.String())
-			if err != nil {
-				return err
-			}
-			if agent.ID != v.AgentID || task.SessionID.String() != scope || v.Data.RequestID != task.RequestID.String() {
+			if task.AgentID != v.AgentID || task.SessionID.String() != scope || v.Data.RequestID != task.RequestID.String() {
 				return errors.New("message stream or request ownership mismatch")
 			}
 			if v.Data.Role == role.Assistant && (v.Data.AuthorID != task.AgentID.String() || !task.Active() || task.Progress.FinalAssistantID != "") {
@@ -205,6 +191,18 @@ func (s *Store) validateRelations(key entityKey, entry stateEntry) error {
 	}
 	return nil
 }
+
+// validateAgentSession 仅校验持久化引用的一致性，不保存或查询 Agent 对象。
+// 首条消息可先于 Execution 提交，但同一 AgentID 不能出现在两个 Session 的事实中。
+func (s *Store) validateAgentSession(scope string, id identity.AgentID) error {
+	for key := range s.state.groups[lookupKey{kind: "agent-records", owner: id.String()}] {
+		if s.state.entries[key].scope != scope {
+			return errorcode.ErrRequestConflict
+		}
+	}
+	return nil
+}
+
 func immutable(collection string, before, after json.RawMessage) error {
 	// Execution 由所属执行者串行修改，不重复比较内部生成的执行快照。
 	if collection == "agent_execution" {
@@ -221,16 +219,14 @@ func immutable(collection string, before, after json.RawMessage) error {
 	switch collection {
 	case "project":
 		fields = []string{"ID", "Name", "Path", "DefaultWorkspaceID", "CreatedAt"}
-	case "agent":
+	case "session":
 		fields = []string{
-			"ID",
-			"SessionID",
-			"DefinitionID",
-			"Kind",
+			"ProjectID",
+			"WorkspaceID",
+			"MainAgentID",
+			"AgentDefinitionID",
 			"CreatedAt",
 		}
-	case "session":
-		fields = []string{"ProjectID", "WorkspaceID", "CreatedAt"}
 	case "usage":
 		var prior, next providerapi.UsageRecord
 		if err := decodeJSON(before, &prior); err != nil {
@@ -267,7 +263,7 @@ func immutable(collection string, before, after json.RawMessage) error {
 			return errorcode.ErrRequestConflict
 		}
 
-	case "entry", "tool_event", "control":
+	case "entry", "tool_event":
 		if !bytes.Equal(before, after) {
 			return errorcode.ErrRequestConflict
 		}

@@ -3,7 +3,6 @@ package storage
 import (
 	"errors"
 	"fmt"
-	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
@@ -70,24 +69,6 @@ func validateWorkspace(w workspacemodel.Workspace) error {
 	return nil
 }
 
-func validateAgent(a agentmodel.Agent) error {
-	for _, id := range []string{a.ID.String(), a.SessionID.String()} {
-		if id == "" || id != strings.TrimSpace(id) {
-			return fmt.Errorf("agent: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
-		}
-	}
-	if !definitionIDPattern.MatchString(a.DefinitionID.String()) {
-		return fmt.Errorf("agent.definitionID: invalid agent definition identity: %w", errorcode.ErrInvalidValue)
-	}
-	if a.Kind != agentmodel.KindMain && a.Kind != agentmodel.KindSubagent {
-		return fmt.Errorf("agent.kind: unknown agent kind: %w", errorcode.ErrInvalidValue)
-	}
-	if a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
-		return fmt.Errorf("agent.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
-	}
-	return nil
-}
-
 func validateWaitCondition(w workflow.WaitCondition) error {
 	for _, id := range []string{w.ID.String(), w.AgentID.String(), w.ExecutionID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
@@ -141,21 +122,6 @@ func validateUsageRecord(r providerapi.UsageRecord) error {
 	}
 	if !r.Usage.Valid() {
 		return errors.New("invalid token usage counts")
-	}
-	return nil
-}
-
-func validateControlCommand(r agentmodel.AgentControlCommand) error {
-	for _, id := range []string{r.ID.String(), r.AgentID.String(), r.TargetExecutionID.String()} {
-		if id == "" || id != strings.TrimSpace(id) {
-			return fmt.Errorf("agentControlCommand: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
-		}
-	}
-	if r.Kind != agentmodel.AgentControlPause && r.Kind != agentmodel.AgentControlCancel {
-		return fmt.Errorf("agentControlCommand.kind: unknown control kind: %w", errorcode.ErrInvalidValue)
-	}
-	if r.CreatedAt.IsZero() {
-		return fmt.Errorf("agentControlCommand.createdAt: creation time is required: %w", errorcode.ErrInvalidValue)
 	}
 	return nil
 }

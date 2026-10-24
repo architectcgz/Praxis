@@ -11,10 +11,9 @@ import (
 	"praxis/internal/logging"
 	"praxis/wails"
 	"strings"
+	"sync"
 
-	wailslib "github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // 嵌入前端构建产物，使发布的二进制不依赖运行时文件。
@@ -67,7 +66,23 @@ func main() {
 	// 持有运行权直到 Wails 完成关闭；不删除文件，避免重建文件绕过已有锁。
 	defer instance.Close()
 
-	a := wails.New(logging.NewFactory().Console())
+	desktop := application.New(application.Options{
+		Name: "Praxis",
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
+		},
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
+		},
+	})
+	a := wails.New(desktop, logging.NewFactory().Console())
+	for _, service := range a.Bindings() {
+		desktop.RegisterService(service)
+	}
+	// Run 失败也必须关闭业务资源；正常退出时与 Wails 关闭回调共用一次清理。
+	shutdown := sync.OnceFunc(func() { a.Shutdown(desktop.Context()) })
+	desktop.OnShutdown(shutdown)
+	defer shutdown()
 	startup := func(ctx context.Context) {
 		a.Startup(ctx)
 		rootPath, err := startupDataRootPath()
@@ -93,17 +108,15 @@ func main() {
 		}
 	}
 
-	err = wailslib.Run(&options.App{
-		Title:       "Praxis",
-		Width:       1280,
-		Height:      800,
-		AssetServer: &assetserver.Options{Assets: assets},
-		OnStartup:   startup,
-		OnShutdown:  a.Shutdown,
-		Bind:        a.Bindings(),
+	startup(desktop.Context())
+	desktop.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:  "Praxis",
+		Width:  1280,
+		Height: 800,
+		URL:    "/",
 	})
 
-	if err != nil {
+	if err := desktop.Run(); err != nil {
 		println("fatal:", err.Error())
 	}
 }

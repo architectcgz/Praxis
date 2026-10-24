@@ -2,58 +2,55 @@ package bootstrap
 
 import (
 	"context"
+	"net/http"
+	"praxis/internal/clock"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/security"
-	taskmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/storage"
-	execution "praxis/internal/service/agent/coordinator"
 	executionservice "praxis/internal/service/agent/execution"
+	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 )
 
-func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, *executionservice.Service, error) {
-	active := &taskmodel.ActiveTasks{}
-	tasks, err := executionservice.NewService(executionservice.Dependencies{
-		Controls:       repos.Controls,
+func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, mainAgent func(context.Context, identity.SessionID) (*agentmodel.Agent, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, *executionservice.Service) {
+	tasks := executionservice.NewService(executionservice.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
 		Sessions:       repos.Sessions,
-		Agents:         repos.Agents,
+		Agent:          sessions.GetAgent,
 		Records:        repos.Executions,
-		Executions:     active,
 		Entries:        repos.Entries,
 		Definitions:    config.agents,
+		Clock:          clock.UTCClock{},
+		IDs:            identity.SecureIDGenerator{},
 	})
-	if err != nil {
-		return nil, nil, err
-	}
 
-	provider, err := providers.New(providers.Dependencies{Credentials: config.models})
-	if err != nil {
-		return nil, nil, err
-	}
+	provider := providers.New(providers.Dependencies{
+		Credentials: config.models,
+		HTTPClient:  http.DefaultClient,
+	})
 
-	coordinator, err := assembleCoordinator(coordinatorDependencies{
+	coordinator := assembleCoordinator(coordinatorDependencies{
 		TimingRecorder: timing.New(tasks.RecordTiming),
 		Tasks:          tasks,
 		Progress:       tasks,
 		Records:        repos.Executions,
 		SessionTasks:   sessions,
-		MainAgent:      sessions,
+		MainAgent:      mainAgent,
 		SessionModels:  sessions,
 		Recovery:       repos.Executions,
-		ActiveTasks:    active,
 		ToolExecutions: repos.ToolExecutions,
 		ToolCalls:      repos.ToolCalls,
-		Agents:         repos.Agents,
+		Agent:          sessions.GetAgent,
 		Entries:        repos.Entries,
 		Sessions:       repos.Sessions,
 		Workspaces:     repos.Workspaces,
@@ -81,6 +78,7 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		ObserveUsage:   usageObserver(repos.ModelUsage, resources.logger),
 		SummaryFormat:  defaultSummaryFormat(),
 		Runner:         runner,
+		Clock:          clock.UTCClock{},
 	})
-	return coordinator, tasks, err
+	return coordinator, tasks
 }

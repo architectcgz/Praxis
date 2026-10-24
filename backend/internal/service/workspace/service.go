@@ -27,21 +27,12 @@ type Service struct {
 }
 
 // NewService 创建工作区文件访问服务。
-func NewService(deps Dependencies) (*Service, error) {
-	for name, value := range map[string]any{
-		"sessions":    deps.Sessions,
-		"workspaces":  deps.Workspaces,
-		"text reader": deps.TextReader,
-	} {
-		if value == nil {
-			return nil, fmt.Errorf("workspace service %s is required", name)
-		}
-	}
+func NewService(deps Dependencies) *Service {
 	return &Service{
 		sessions:   deps.Sessions,
 		workspaces: deps.Workspaces,
 		textReader: deps.TextReader,
-	}, nil
+	}
 }
 
 func (s *Service) workspaceForSession(ctx context.Context, sessionID identity.SessionID) (workspacemodel.Workspace, error) {

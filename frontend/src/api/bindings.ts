@@ -1,14 +1,11 @@
-import type * as GeneratedAgentBinding from '../../wailsjs/go/bindings/AgentBindings'
-import type * as GeneratedCommandBinding from '../../wailsjs/go/bindings/CommandBindings'
-import type * as GeneratedModelBinding from '../../wailsjs/go/bindings/ModelBindings'
-import type * as GeneratedProjectBinding from '../../wailsjs/go/bindings/ProjectBindings'
-import type * as GeneratedSessionBinding from '../../wailsjs/go/bindings/SessionBindings'
-
-type ProjectBinding = typeof GeneratedProjectBinding
-type SessionBinding = typeof GeneratedSessionBinding
-type AgentBinding = typeof GeneratedAgentBinding
-type CommandBinding = typeof GeneratedCommandBinding
-type ModelBinding = typeof GeneratedModelBinding
+import { System } from '@wailsio/runtime'
+import {
+    AgentBindings,
+    CommandBindings,
+    ModelBindings,
+    ProjectBindings,
+    SessionBindings,
+} from '../../bindings/praxis/wails/bindings'
 
 export class BindingUnavailableError extends Error {
     constructor() {
@@ -17,62 +14,34 @@ export class BindingUnavailableError extends Error {
     }
 }
 
-type WailsBindings = {
-    ProjectBindings?: ProjectBinding
-    SessionBindings?: SessionBinding
-    AgentBindings?: AgentBinding
-    CommandBindings?: CommandBinding
-    ModelBindings?: ModelBinding
+export function isBindingAvailable() {
+    // 运行时模块也能被浏览器加载，不能仅凭全局命名空间存在就认定桌面桥可用。
+    return System.IsDesktop()
 }
 
-type WailsWindow = Window & {
-    go?: {
-        bindings?: WailsBindings
-    }
-}
-
-function bindingNamespace(): WailsBindings {
-    const bindings = (window as WailsWindow).go?.bindings
-    if (!bindings) {
-        throw new BindingUnavailableError()
-    }
-    return bindings
-}
-
-function requireBinding<T>(binding: T | undefined): T {
-    if (!binding) {
+function requireBinding<T>(binding: T): T {
+    if (!isBindingAvailable()) {
         throw new BindingUnavailableError()
     }
     return binding
 }
 
-export function isBindingAvailable() {
-    const bindings = (window as WailsWindow).go?.bindings
-    return Boolean(
-        bindings?.ProjectBindings &&
-        bindings.SessionBindings &&
-        bindings.AgentBindings &&
-        bindings.CommandBindings &&
-        bindings.ModelBindings,
-    )
-}
-
 export function getProjectBinding() {
-    return requireBinding(bindingNamespace().ProjectBindings)
+    return requireBinding(ProjectBindings)
 }
 
 export function getSessionBinding() {
-    return requireBinding(bindingNamespace().SessionBindings)
+    return requireBinding(SessionBindings)
 }
 
 export function getAgentBinding() {
-    return requireBinding(bindingNamespace().AgentBindings)
+    return requireBinding(AgentBindings)
 }
 
 export function getCommandBinding() {
-    return requireBinding(bindingNamespace().CommandBindings)
+    return requireBinding(CommandBindings)
 }
 
 export function getModelBinding() {
-    return requireBinding(bindingNamespace().ModelBindings)
+    return requireBinding(ModelBindings)
 }

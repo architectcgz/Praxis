@@ -80,7 +80,12 @@ export function createAgentStore() {
                 return
             }
             if (event.kind === 'turn_started') {
-                updateEntry(event.agentId, (entry) => ({ ...entry, agent: { ...entry.agent, state: entry.agent.state === 'pausing' ? 'pausing' : 'executing', currentExecutionId: event.executionId } }))
+                updateEntry(event.agentId, (entry) => {
+                    // 同一次执行收尾期间的迟到事件不能撤销已接受的暂停或停止。
+                    const controlled = entry.agent.currentExecutionId === event.executionId &&
+                        (entry.agent.state === 'paused' || entry.agent.state === 'interrupted')
+                    return { ...entry, agent: { ...entry.agent, state: controlled ? entry.agent.state : 'executing', currentExecutionId: event.executionId } }
+                })
                 return
             }
             const streamingOutputs = mergeStreamingEvent(output.streamingOutputs, event)

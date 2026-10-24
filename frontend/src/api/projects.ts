@@ -1,5 +1,5 @@
 import { getProjectBinding } from './bindings'
-import type { dto } from '../../wailsjs/go/models'
+import type { ProjectApprovalMode as GeneratedProjectApprovalMode } from '../../bindings/praxis/wails/dto/models'
 
 export type CreateProjectRequest = {
     projectId: string
@@ -17,8 +17,8 @@ export type ProjectSummary = {
     state: string
 }
 
-export function listProjects() {
-    return getProjectBinding().ListProjects()
+export async function listProjects() {
+    return await getProjectBinding().ListProjects() ?? []
 }
 
 export function createProject(request: CreateProjectRequest) {
@@ -42,7 +42,7 @@ function approvalMode(value: string): ApprovalMode {
     return value
 }
 
-function projectApprovalMode(value: dto.ProjectApprovalMode): ProjectApprovalMode {
+function projectApprovalMode(value: GeneratedProjectApprovalMode): ProjectApprovalMode {
     return {
         projectId: value.projectId,
         globalMode: approvalMode(value.globalMode),
@@ -58,5 +58,5 @@ export async function getProjectApprovalMode(projectId: string): Promise<Project
 
 /** 保存项目覆盖；null 恢复继承，只有后端提交成功才返回新选择。 */
 export async function setProjectApprovalMode(projectId: string, mode: ApprovalMode | null): Promise<ProjectApprovalMode> {
-    return projectApprovalMode(await getProjectBinding().SetProjectApprovalMode({ projectId, mode: mode ?? undefined }))
+    return projectApprovalMode(await getProjectBinding().SetProjectApprovalMode({ projectId, mode }))
 }

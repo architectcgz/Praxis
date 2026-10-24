@@ -6,7 +6,7 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
+	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -47,8 +47,8 @@ func (b *CommandBindings) PauseAgent(wire dto.PauseAgentRequest) (dto.AgentContr
 	if err := validation.ValidateAgentControl(wire); err != nil {
 		return dto.AgentControlResponse{}, publicInputError(b.host, "CommandBindings.PauseAgent.request", err)
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (agentservice.ControlResult, error) {
-		return services.Agents.PauseAgent(ctx, controlInput(wire))
+	return b.controlAgent(func(ctx context.Context, services Services) (execution.ControlResult, error) {
+		return services.Commands.PauseAgent(ctx, identity.AgentID(wire.AgentID), identity.AgentExecutionID(wire.TargetExecutionID))
 	})
 }
 
@@ -56,8 +56,8 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) (dto.AgentControl
 	if err := validation.ValidateAgentControl(wire); err != nil {
 		return dto.AgentControlResponse{}, publicInputError(b.host, "CommandBindings.StopAgent.request", err)
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (agentservice.ControlResult, error) {
-		return services.Agents.StopAgent(ctx, controlInput(wire))
+	return b.controlAgent(func(ctx context.Context, services Services) (execution.ControlResult, error) {
+		return services.Commands.StopAgent(ctx, identity.AgentID(wire.AgentID), identity.AgentExecutionID(wire.TargetExecutionID))
 	})
 }
 
@@ -76,15 +76,7 @@ func (b *CommandBindings) CancelTask(wire dto.CancelTaskRequest) error {
 	return publicError(b.host, "CommandBindings.CancelTask", services.Commands.CancelTask(ctx, identity.SessionID(wire.SessionID), identity.TaskID(wire.TaskID)))
 }
 
-func controlInput(wire dto.PauseAgentRequest) agentservice.ControlInput {
-	return agentservice.ControlInput{
-		CommandID:         identity.AgentControlCommandID(wire.CommandID),
-		AgentID:           identity.AgentID(wire.AgentID),
-		TargetExecutionID: identity.AgentExecutionID(wire.TargetExecutionID),
-	}
-}
-
-func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (agentservice.ControlResult, error)) (dto.AgentControlResponse, error) {
+func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (execution.ControlResult, error)) (dto.AgentControlResponse, error) {
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.AgentControlResponse{}, err
@@ -94,12 +86,8 @@ func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (ag
 		return dto.AgentControlResponse{}, publicError(b.host, "CommandBindings.controlAgent", err)
 	}
 	return dto.AgentControlResponse{
-		CommandID:         result.Command.ID.String(),
-		AgentID:           result.Command.AgentID.String(),
-		TargetExecutionID: result.Command.TargetExecutionID.String(),
-		Kind:              string(result.Command.Kind),
-		Status:            string(result.Command.Status),
-		ExistingCommand:   result.ExistingCommand,
-		CancellationError: result.CancellationError,
+		AgentID:           result.AgentID.String(),
+		TargetExecutionID: result.TargetExecutionID.String(),
+		Applied:           result.Applied,
 	}, nil
 }

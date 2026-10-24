@@ -39,10 +39,8 @@ export function useAgentCommands({
         setError('')
         setErrorCode(undefined)
         try {
-            const commandId = crypto.randomUUID()
             const apply = kind === 'pause' ? pauseAgent : stopAgent
-            const response = await apply({ commandId, agentId: agentID, targetExecutionId })
-            if (response.cancellationError) throw new Error('取消通知失败，请重试。')
+            await apply({ agentId: agentID, targetExecutionId })
             await refreshAgent(agentID)
         } catch (err) {
             if (isCurrentView()) {

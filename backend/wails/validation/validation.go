@@ -43,15 +43,12 @@ func ValidateProviderID(value string) error {
 	return requireID("providerId", value)
 }
 
-// ValidateAgentControl 校验暂停或取消请求的 commandId、agentId、targetTaskId 必填且已规范化。
+// ValidateAgentControl 校验暂停或停止请求的 agentId、targetExecutionId 必填且已规范化。
 func ValidateAgentControl(request dto.PauseAgentRequest) error {
-	if err := requireID("commandId", request.CommandID); err != nil {
-		return err
-	}
 	if err := requireID("agentId", request.AgentID); err != nil {
 		return err
 	}
-	return requireID("targetTaskId", request.TargetExecutionID)
+	return requireID("targetExecutionId", request.TargetExecutionID)
 }
 
 // ValidateCreateProject 校验建项目请求的必填字段。

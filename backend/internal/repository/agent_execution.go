@@ -17,6 +17,6 @@ type AgentExecution interface {
 	FindByRequest(context.Context, identity.AgentID, identity.RequestID) (agentexecution.Execution, error)
 	GetActiveByAgent(context.Context, identity.AgentID) (agentexecution.Execution, error)
 	ListActive(context.Context) ([]agentexecution.Execution, error)
+	ListBySession(context.Context, identity.SessionID) ([]agentexecution.Execution, error)
 	ListByAgent(context.Context, identity.AgentID, int) ([]agentexecution.Execution, error)
-	CountActiveBySession(context.Context, identity.SessionID) (int, error)
 }

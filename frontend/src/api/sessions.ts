@@ -1,5 +1,5 @@
 import { getSessionBinding } from './bindings'
-import { dto } from '../../wailsjs/go/models'
+import type { SessionSnapshot as GeneratedSessionSnapshot } from '../../bindings/praxis/wails/dto/models'
 import { normalizeModelUsageRecords, type AgentView, type ModelUsageRecord } from './agents'
 import { normalizeQueuedTasks, type QueuedTask } from './tasks'
 
@@ -40,8 +40,8 @@ export type CreateSessionRequest = {
     requestId: string
 }
 
-export function listSessions(projectID: string) {
-    return getSessionBinding().ListSessions(projectID)
+export async function listSessions(projectID: string) {
+    return await getSessionBinding().ListSessions(projectID) ?? []
 }
 
 export function createSession(request: CreateSessionRequest) {
@@ -52,7 +52,7 @@ export type ModelSelection = { providerId: string; modelId: string; reasoningLev
 
 /** 模型选择属于指定会话，不改变其他会话或已经创建的执行。 */
 export function selectSessionModel(sessionID: string, selection: ModelSelection) {
-    return getSessionBinding().SelectModel(new dto.SelectModelRequest({ sessionId: sessionID, ...selection }))
+    return getSessionBinding().SelectModel({ sessionId: sessionID, ...selection })
 }
 
 /** 读取后端保存的会话选择，不从本地全局偏好恢复。 */
@@ -102,7 +102,7 @@ export function revealSessionFile(sessionID: string) {
     return getSessionBinding().RevealSessionFile(sessionID)
 }
 
-function normalizeSessionSnapshot(value: dto.SessionSnapshot): SessionSnapshot {
+function normalizeSessionSnapshot(value: GeneratedSessionSnapshot): SessionSnapshot {
     if (!isRecord(value) || !Array.isArray(value.agents)) {
         throw new Error('Session 数据格式无效。')
     }

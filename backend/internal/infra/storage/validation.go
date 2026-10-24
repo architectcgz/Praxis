@@ -15,10 +15,18 @@ import (
 
 // validateSession 在磁盘输入边界拒绝非法会话，不修改持久化字段。
 func validateSession(value sessionmodel.Session) error {
-	for _, id := range []string{value.ID.String(), value.ProjectID.String(), value.WorkspaceID.String()} {
+	for _, id := range []string{
+		value.ID.String(),
+		value.ProjectID.String(),
+		value.WorkspaceID.String(),
+		value.MainAgentID.String(),
+	} {
 		if id == "" || id != strings.TrimSpace(id) {
 			return fmt.Errorf("session: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}
+	}
+	if !definitionIDPattern.MatchString(value.AgentDefinitionID.String()) {
+		return fmt.Errorf("session.agentDefinitionID: invalid agent definition identity: %w", errorcode.ErrInvalidValue)
 	}
 	if value.State != sessionmodel.SessionActive && value.State != sessionmodel.SessionArchived {
 		return fmt.Errorf("session.state: unknown session state: %w", errorcode.ErrInvalidValue)

@@ -1,5 +1,4 @@
 import { getModelBinding } from './bindings'
-import { dto } from '../../wailsjs/go/models'
 
 export type ModelOption = {
     providerId: string
@@ -63,11 +62,11 @@ export function getModelConfig() {
 }
 
 export function saveModelConfig(config: ModelConfigDocument) {
-    return getModelBinding().SaveModelConfig(new dto.SaveModelConfigRequest({
+    return getModelBinding().SaveModelConfig({
         groups: config.groups,
         providers: config.providers,
         models: config.models,
-    }))
+    })
 }
 
 export function listProviderModels(providerID: string) {

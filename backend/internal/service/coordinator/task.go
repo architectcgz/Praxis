@@ -24,7 +24,7 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input sessionservice.TaskI
 		return SubmitResult{}, err
 	}
 	result := SubmitResult{Task: task}
-	if _, err := s.StartNext(context.WithoutCancel(ctx), task.SessionID); err != nil {
+	if err := s.scheduleSession(context.WithoutCancel(ctx), task.SessionID, true); err != nil {
 		result.SchedulingError = err.Error()
 		s.logger.Errorf("schedule session input session_id=%s task_id=%s error=%v", task.SessionID, task.ID, err)
 	}

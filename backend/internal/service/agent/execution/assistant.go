@@ -29,11 +29,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 		if err != nil {
 			return err
 		}
-		owner, err := s.agents.Get(txCtx, execution.AgentID)
-		if err != nil {
-			return err
-		}
-		if !execution.Active() || owner.CurrentExecutionID != id || owner.SessionID != execution.SessionID {
+		if !execution.Active() {
 			return errorcode.ErrRequestConflict
 		}
 		if err := sessionservice.RequireWritable(txCtx, s.sessions, execution.SessionID); err != nil {
@@ -42,7 +38,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 		committer = assistantCommitter{
 			service:     s,
 			executionID: id,
-			agentID:     owner.ID,
+			agentID:     execution.AgentID,
 			sessionID:   execution.SessionID,
 		}
 		return nil
@@ -69,7 +65,7 @@ func (w assistantCommitter) AppendAssistant(ctx context.Context, message session
 		if execution.ID != w.executionID || execution.SessionID != w.sessionID || execution.AgentID != w.agentID || message.RequestID != execution.RequestID.String() {
 			return errorcode.ErrRequestConflict
 		}
-		stored, inserted, err = w.service.entries.Append(txCtx, sessionentry.Record{AgentID: w.agentID, Data: message})
+		stored, inserted, err = w.service.entries.Append(txCtx, sessionentry.Record{SessionID: w.sessionID, AgentID: w.agentID, Data: message})
 		if err != nil {
 			return err
 		}
@@ -107,6 +103,6 @@ func (w assistantCommitter) AppendSummary(ctx context.Context, value sessionentr
 	}
 	digest := sha256.Sum256(encoded)
 	value.ID = fmt.Sprintf("summary:%s:%x", w.executionID, digest[:12])
-	stored, _, err := w.service.entries.Append(ctx, sessionentry.Record{AgentID: w.agentID, Data: value})
+	stored, _, err := w.service.entries.Append(ctx, sessionentry.Record{SessionID: w.sessionID, AgentID: w.agentID, Data: value})
 	return stored, err
 }

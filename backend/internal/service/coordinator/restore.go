@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"praxis/internal/errorcode"
 )
 
 // Restore 必须在外部准入开放前调用，只恢复已开始并持久化的 Execution。
@@ -18,7 +19,7 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		s.mu.Unlock()
 		return nil
 	}
-	if s.restoring || s.activeTasks.HasActive() {
+	if s.restoring || len(s.executions) != 0 {
 		s.mu.Unlock()
 		return errors.New("execution recovery requires stopped executors")
 	}
@@ -40,7 +41,21 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		return fmt.Errorf("load active executions: %w", err)
 	}
 	for _, execution := range executions {
-		if err := s.Activate(ctx, execution); err != nil {
+		s.mu.Lock()
+		if s.executions[execution.AgentID] != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("multiple active executions for agent %s: %w", execution.AgentID, errorcode.ErrRequestConflict)
+		}
+		active := newActiveExecution(ctx)
+		s.executions[execution.AgentID] = active
+		err := s.launchLocked(execution, active)
+		if err != nil {
+			delete(s.executions, execution.AgentID)
+			close(active.ready)
+			active.cancel(nil)
+		}
+		s.mu.Unlock()
+		if err != nil {
 			return fmt.Errorf("restore execution: %w", err)
 		}
 	}

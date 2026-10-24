@@ -135,8 +135,8 @@ func (s *Store) applyEvent(scope string, event jsonl.Event, entry stateEntry) {
 	s.sequences[scope] = event.Sequence
 	if event.Type == "session.deleted" {
 		// 在移除 Session 索引前释放所属 Agent 的历史，避免留下不可再访问的正文。
-		for agentKey := range s.state.groups[lookupKey{kind: "agents-session", owner: scope}] {
-			delete(s.histories, identity.AgentID(agentKey.id))
+		for key := range s.state.groups[lookupKey{kind: "entries-session", owner: scope}] {
+			delete(s.histories, s.state.entries[key].record.AgentID)
 		}
 		s.state.removeScope(scope)
 		return

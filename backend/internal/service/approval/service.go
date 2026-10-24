@@ -3,8 +3,6 @@ package approval
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"praxis/internal/clock"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
@@ -30,26 +28,13 @@ type Service struct {
 }
 
 // NewService 创建审批模式业务服务。
-func NewService(deps Dependencies) (*Service, error) {
-	if deps.ConfigMu == nil {
-		deps.ConfigMu = &sync.RWMutex{}
-	}
-	if deps.GlobalApprovalMode == nil {
-		return nil, errors.New("approval service global approval mode is required")
-	}
-	for name, value := range map[string]any{
-		"projects": deps.Projects,
-	} {
-		if value == nil {
-			return nil, fmt.Errorf("approval service %s is required", name)
-		}
-	}
+func NewService(deps Dependencies) *Service {
 	return &Service{
 		configMu:           deps.ConfigMu,
 		projects:           deps.Projects,
-		clock:              clock.ClockOrDefault(deps.Clock),
+		clock:              deps.Clock,
 		globalApprovalMode: deps.GlobalApprovalMode,
-	}, nil
+	}
 }
 
 // ApprovalSettings 返回业务层解析的继承关系和有效模式，与工具启动使用相同规则。

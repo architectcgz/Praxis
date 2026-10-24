@@ -39,6 +39,14 @@ func (r AgentExecutionRepository) ListActive(ctx context.Context) ([]agentexecut
 	}), e
 }
 
+// ListBySession 按创建顺序返回执行事实，用于启动时重建会话所属 Agent 的状态。
+func (r AgentExecutionRepository) ListBySession(ctx context.Context, id identity.SessionID) ([]agentexecution.Execution, error) {
+	v, e := listIndexed[agentexecution.Execution](ctx, r.s, lookupKey{kind: "executions-session", owner: id.String()}, nil)
+	return sorted(v, func(a, b agentexecution.Execution) int {
+		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
+	}), e
+}
+
 // ListByAgent 返回指定 Agent 的对象副本；非正数 limit 返回全部任务。
 func (r AgentExecutionRepository) ListByAgent(ctx context.Context, id identity.AgentID, limit int) ([]agentexecution.Execution, error) {
 	v, e := listIndexed[agentexecution.Execution](ctx, r.s, lookupKey{kind: "executions-agent", owner: id.String()}, nil)
@@ -49,14 +57,4 @@ func (r AgentExecutionRepository) ListByAgent(ctx context.Context, id identity.A
 		v = capped(v, limit)
 	}
 	return v, e
-}
-
-// CountActiveBySession 返回 Session 内活动 Execution 的数量。
-func (r AgentExecutionRepository) CountActiveBySession(ctx context.Context, id identity.SessionID) (int, error) {
-	count := 0
-	err := r.s.view(ctx, func() error {
-		count = len(r.s.keys(lookupKey{kind: "active-session", owner: id.String()}))
-		return nil
-	})
-	return count, err
 }

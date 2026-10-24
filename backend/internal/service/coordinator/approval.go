@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	taskmodel "praxis/internal/core/session"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	toolservice "praxis/internal/service/toolexecution"
@@ -18,14 +17,18 @@ func (s *Coordinator) DenyToolCall(ctx context.Context, params ToolDecision) err
 	return s.decideToolCall(ctx, params, false)
 }
 
-// 审批事实由 Service 保存，Coordinator 只在提交后唤醒已有执行。
+// 审批事实由 Service 保存，提交后只通知等待者重新读取决定，不表示批准或重启执行。
 func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, approve bool) error {
+	if err := s.enter(ctx); err != nil {
+		return err
+	}
+	defer s.running.Done()
 	task, err := s.tools.DecideApproval(ctx, params, approve)
 	if err != nil {
 		return err
 	}
 	if task.Active() {
-		return s.ResumeApproved(context.WithoutCancel(ctx), task)
+		s.notifyToolApprovalWaiter(task.AgentID, task.ID)
 	}
 	return nil
 }
@@ -36,23 +39,39 @@ func (s *Coordinator) ListToolApprovals(ctx context.Context, agentID identity.Ag
 
 // StopToolCall 在控制事实提交后唤醒同一 Loop，待审批调用也能消费取消回执。
 func (s *Coordinator) StopToolCall(ctx context.Context, request ToolControl) error {
+	if err := s.enter(ctx); err != nil {
+		return err
+	}
+	defer s.running.Done()
 	task, err := s.tools.StopCall(ctx, request)
 	if err != nil {
 		return err
 	}
 	if task.Active() {
-		if err := s.Activate(context.WithoutCancel(ctx), task); err != nil {
-			return err
-		}
-		s.activeTasks.Wake(task.AgentID, task.ID)
+		s.notifyToolApprovalWaiter(task.AgentID, task.ID)
 	}
 	return nil
 }
 
-// waitForToolApproval 只等待当前 Loop 的唤醒，不重复启动或发布 ExecutionResumed。
-func (s *Coordinator) waitForToolApproval(ctx context.Context, active *taskmodel.ActiveTask) error {
+// notifyToolApprovalWaiter 通知等待者重新检查审批决定或停止回执，不承载决定本身。
+// 通道保留提前到达的通知；已有待处理通知时合并发送，避免持锁阻塞。
+func (s *Coordinator) notifyToolApprovalWaiter(agentID identity.AgentID, executionID identity.AgentExecutionID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active := s.executions[agentID]
+	if active == nil || active.executionID != executionID || active.ending {
+		return
+	}
 	select {
-	case <-active.WakeSignal():
+	case active.toolApprovalWake <- struct{}{}:
+	default:
+	}
+}
+
+// waitForToolApproval 等待审批决定或工具停止通知；取消执行时直接退出等待，不重启 Loop。
+func (s *Coordinator) waitForToolApproval(ctx context.Context, active *activeExecution) error {
+	select {
+	case <-active.toolApprovalWake:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

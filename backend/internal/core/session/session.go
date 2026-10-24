@@ -18,21 +18,26 @@ type Session struct {
 	ID          identity.SessionID
 	ProjectID   identity.ProjectID
 	WorkspaceID identity.WorkspaceID
-	Title       string
-	State       SessionState
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// 这里只保存主实例的稳定身份与定义引用，不保存 Agent 对象或运行状态。
+	MainAgentID       identity.AgentID
+	AgentDefinitionID identity.AgentDefinitionID
+	Title             string
+	State             SessionState
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // NewSession 使用入口已校验的身份创建 active 会话，初始标题为空。
-func NewSession(id identity.SessionID, projectID identity.ProjectID, workspaceID identity.WorkspaceID, at time.Time) Session {
+func NewSession(id identity.SessionID, projectID identity.ProjectID, workspaceID identity.WorkspaceID, agentID identity.AgentID, definitionID identity.AgentDefinitionID, at time.Time) Session {
 	return Session{
-		ID:          id,
-		ProjectID:   projectID,
-		WorkspaceID: workspaceID,
-		State:       SessionActive,
-		CreatedAt:   at.UTC(),
-		UpdatedAt:   at.UTC(),
+		ID:                id,
+		ProjectID:         projectID,
+		WorkspaceID:       workspaceID,
+		MainAgentID:       agentID,
+		AgentDefinitionID: definitionID,
+		State:             SessionActive,
+		CreatedAt:         at.UTC(),
+		UpdatedAt:         at.UTC(),
 	}
 }
 
