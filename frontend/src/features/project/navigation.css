@@ -16,6 +16,17 @@
     padding: 10px 10px 12px;
 }
 
+.projects-panel > .scroll-region:has(> .muted-copy) {
+    display: flex;
+    flex-direction: column;
+    scrollbar-gutter: auto;
+}
+
+.projects-panel > .scroll-region > .muted-copy {
+    margin: auto 0;
+    text-align: center;
+}
+
 .project-list {
     display: grid;
     gap: 8px;
