@@ -26,12 +26,12 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	defer s.running.Done()
 	s.mu.Lock()
 	parentActive := s.executions[parent.AgentID]
-	if s.closed || parentActive == nil || parentActive.executionID != parent.ExecutionID || parentActive.ending || parentActive.runtime == nil || s.executions[agentID] != nil {
+	if s.closed || parentActive == nil || parentActive.executionID != parent.ExecutionID || parentActive.ending || parentActive.run == nil || s.executions[agentID] != nil {
 		s.mu.Unlock()
 		return SubagentResult{}, errorcode.ErrRequestConflict
 	}
-	parentRuntime := parentActive.runtime
-	parentRecord := parentRuntime.Snapshot()
+	parentRun := parentActive.run
+	parentRecord := parentRun.Snapshot()
 	active := newActiveExecution(ctx)
 	s.executions[agentID] = active
 	s.mu.Unlock()
@@ -44,7 +44,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		SessionID: parentRecord.SessionID,
 		Prompt:    prompt,
 	}
-	runtime, _, err := s.operations.PrepareTask(active.ctx, task, agentID, parentRecord.Config.Model)
+	run, _, err := s.operations.PrepareTask(active.ctx, task, agentID, parentRecord.Config.Model)
 	if err != nil {
 		s.mu.Lock()
 		delete(s.executions, agentID)
@@ -54,25 +54,25 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		return SubagentResult{}, err
 	}
 	s.mu.Lock()
-	active.runtime, active.executionID = runtime, runtime.Snapshot().ID
+	active.run, active.executionID = run, run.Snapshot().ID
 	close(active.ready)
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		delete(s.executions, agentID)
-		active.runtime = nil
+		active.run = nil
 		active.cancel(nil)
 	}()
 	// 同步等待子路径和结算退出，调用方取消不能把结果交接变成脱离生命周期的后台提交。
-	s.run(active.ctx, runtime, active)
-	record := runtime.Snapshot()
+	s.run(active.ctx, run, active)
+	record := run.Snapshot()
 	result := SubagentResult{
 		ExecutionID: record.ID,
 		Outcome:     record.Outcome,
 		FailureCode: record.FailureCode,
 	}
-	if entry, found := runtime.Entry(record.Progress.FinalAssistantID); found {
+	if entry, found := run.Entry(record.Progress.FinalAssistantID); found {
 		result.Output = entry.TextContent()
 	}
 	if record.Status != agentexecution.ExecutionEnded {

@@ -11,29 +11,28 @@ import (
 	"sync"
 )
 
-// Dependencies 包含审批模式配置所需的持久化能力和全局默认值来源。
+// Dependencies 包含项目审批配置的持久化能力和只读配置快照来源。
 type Dependencies struct {
-	ConfigMu           *sync.RWMutex
-	Projects           repository.Project
-	Clock              clock.Clock
-	GlobalApprovalMode func() security.ApprovalMode
+	Config   ConfigSource
+	Projects repository.Project
+	Clock    clock.Clock
 }
 
-// Service 负责审批模式配置，与新 ToolCall 的规则读取共用配置锁。
+// Service 负责项目审批模式配置；配置同步由快照来源管理。
 type Service struct {
-	configMu           *sync.RWMutex
-	projects           repository.Project
-	clock              clock.Clock
-	globalApprovalMode func() security.ApprovalMode
+	config   ConfigSource
+	projects repository.Project
+	clock    clock.Clock
+	// updateMu 串行化本服务对项目审批模式的读改写，不影响配置快照的读取。
+	updateMu sync.Mutex
 }
 
 // NewService 创建审批模式业务服务。
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		configMu:           deps.ConfigMu,
-		projects:           deps.Projects,
-		clock:              deps.Clock,
-		globalApprovalMode: deps.GlobalApprovalMode,
+		config:   deps.Config,
+		projects: deps.Projects,
+		clock:    deps.Clock,
 	}
 }
 
@@ -62,7 +61,7 @@ func (s *Service) GetApprovalMode(ctx context.Context, projectID identity.Projec
 // SetApprovalMode 持久化项目覆盖并返回提交后的有效模式；写入失败不返回成功状态。
 func (s *Service) SetApprovalMode(ctx context.Context, projectID identity.ProjectID, mode *security.ApprovalMode) (ApprovalSettings, error) {
 	var updated projectmodel.Project
-	s.configMu.Lock()
+	s.updateMu.Lock()
 	err := func(txCtx context.Context) error {
 		project, err := s.projects.Get(txCtx, projectID)
 		if err != nil {
@@ -80,7 +79,7 @@ func (s *Service) SetApprovalMode(ctx context.Context, projectID identity.Projec
 		updated = project
 		return nil
 	}(ctx)
-	s.configMu.Unlock()
+	s.updateMu.Unlock()
 	if err != nil {
 		return ApprovalSettings{}, err
 	}
@@ -88,7 +87,7 @@ func (s *Service) SetApprovalMode(ctx context.Context, projectID identity.Projec
 }
 
 func (s *Service) approvalSettings(project projectmodel.Project) ApprovalSettings {
-	global := s.globalApprovalMode()
+	global := s.config.ApprovalConfig().GlobalMode
 	return ApprovalSettings{
 		ProjectID:     project.ID,
 		GlobalMode:    global,

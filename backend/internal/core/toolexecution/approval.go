@@ -1,8 +1,10 @@
 package toolexecution
 
 import (
+	"context"
 	"encoding/json"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"time"
 )
@@ -40,4 +42,36 @@ type ReviewRecord struct {
 	Arguments json.RawMessage
 	Decision  security.ApprovalDecision
 	RiskReview
+}
+
+// Approval 是当前活跃调用的审批信息，参数与内部状态共享底层数据，调用方只读；工具结束后不再提供查询。
+type Approval struct {
+	Call      sessionentry.ToolCall
+	Arguments json.RawMessage
+	Decision  security.ApprovalDecision
+	Review    RiskReview
+}
+
+func (e *Executor) ListApprovals(ctx context.Context, agentID identity.AgentID) ([]Approval, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	result := make([]Approval, 0)
+	for _, callState := range e.active {
+		if callState.call.AgentID != agentID || callState.stopped || callState.request == nil || callState.decision != nil || callState.tool != nil {
+			continue
+		}
+		value := Approval{
+			Call:      callState.call,
+			Arguments: callState.request.Arguments,
+			Decision:  callState.request.Decision,
+		}
+		if callState.review != nil {
+			value.Review = callState.review.RiskReview
+		}
+		result = append(result, value)
+	}
+	return result, nil
 }

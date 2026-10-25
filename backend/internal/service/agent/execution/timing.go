@@ -12,31 +12,31 @@ import (
 )
 
 // RecordTiming 是 Recorder 的记录回调；观测失败只记日志，不能重放业务操作。
-func (s *Service) RecordTiming(runtime *agentexecution.Runtime, record timing.Record) {
-	execution := runtime.Snapshot()
+func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
+	execution := run.Snapshot()
 	if execution.ID.String() != record.ExecutionID {
 		s.logger.Errorf("timing owner mismatch execution=%s", record.ExecutionID)
 		return
 	}
-	if runtime.Main() {
+	if run.Main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := s.records.AppendTiming(ctx, record); err != nil {
 			s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
 		}
 	} else {
-		runtime.RecordTiming(record)
+		run.RecordTiming(record)
 	}
 	s.publishTiming(operationTiming(execution, record))
 }
 
-func RuntimeTimings(runtime *agentexecution.Runtime) []timing.View {
-	execution := runtime.Snapshot()
+func RunTimings(run *agentexecution.Run) []timing.View {
+	execution := run.Snapshot()
 	result := make([]timing.View, 0)
 	if value := executionTiming(execution); value != nil {
 		result = append(result, *value)
 	}
-	for _, record := range runtime.Timings() {
+	for _, record := range run.Timings() {
 		result = append(result, operationTiming(execution, record))
 	}
 	return result

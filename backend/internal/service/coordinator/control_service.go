@@ -33,7 +33,7 @@ func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID
 		AgentID:           agentID,
 		TargetExecutionID: executionID,
 	}
-	agent, err := s.agent(agentID)
+	agent, err := s.sessions.GetAgent(agentID)
 	if err != nil {
 		return result, err
 	}

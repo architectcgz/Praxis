@@ -18,8 +18,8 @@ import (
 // DecideRule 为每次 ToolCall 读取一次当前内存规则，后续授权与启动沿用返回值。
 type Operations interface {
 	DecideRule(context.Context, sessionentry.ToolCall, json.RawMessage) (security.ApprovalDecision, error)
-	PrepareReview(context.Context, *agentexecution.Runtime, sessionentry.ToolCall, string) (ReviewRequest, error)
-	CommitResult(context.Context, *agentexecution.Runtime, sessionentry.ToolCall, tool.ToolResult) (sessionentry.ContextEntry, error)
+	PrepareReview(context.Context, *agentexecution.Run, sessionentry.ToolCall, string) (ReviewRequest, error)
+	CommitResult(context.Context, *agentexecution.Run, sessionentry.ToolCall, tool.ToolResult) (sessionentry.ContextEntry, error)
 }
 
 // ControlRequest 将审批和取消绑定到消息声明的归属。
@@ -32,7 +32,7 @@ type ControlRequest struct {
 
 // ReviewRequest 由业务服务预留模型请求预算，Core 调用 Provider 审核。
 type ReviewRequest struct {
-	Runtime       *agentexecution.Runtime
+	Run           *agentexecution.Run
 	Call          sessionentry.ToolCall
 	Arguments     json.RawMessage
 	Decision      security.ApprovalDecision
@@ -44,7 +44,7 @@ type ReviewRequest struct {
 
 type Reviewer struct {
 	Progress interface {
-		RecordModelOutput(context.Context, *agentexecution.Runtime, int) error
+		RecordModelOutput(context.Context, *agentexecution.Run, int) error
 	}
 	Provider       providerapi.Provider
 	HookDispatcher *hook.Dispatcher

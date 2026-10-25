@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 )
 
-// ToolResult 是工具执行后返回给 runtime 和模型调用服务的结果。
+// ToolResult 是工具执行后交给本次执行实例和模型调用服务的结果。
 // MaxInlineResultBytes 限制单次工具结果的内联字节数；工具在返回前完成截断。
 const MaxInlineResultBytes = 50 * 1024
 

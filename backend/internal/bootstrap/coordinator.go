@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"net/http"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	contextcompress "praxis/internal/core/context/compress"
@@ -9,101 +10,91 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	providerapi "praxis/internal/core/provider"
-	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
+	"praxis/internal/infra/providers"
+	"praxis/internal/infra/storage"
 	toolinfra "praxis/internal/infra/tools"
-	"praxis/internal/logging"
-	"praxis/internal/repository"
+	executionservice "praxis/internal/service/agent/execution"
 	execution "praxis/internal/service/coordinator"
+	sessionservice "praxis/internal/service/session"
 	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 	"time"
 )
 
-// coordinatorDependencies 装配业务用例、Core 内存队列与执行能力。
-type coordinatorDependencies struct {
-	Tasks          execution.ExecutionOperations
-	Progress       loop.ExecutionProgress
-	Records        repository.AgentExecution
-	SessionTasks   execution.SessionTasks
-	MainAgent      func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
-	SessionModels  execution.SessionModels
-	Recovery       repository.AgentExecution
-	Entries        repository.Entries
-	ToolCalls      repository.ToolCallQueries
-	Agent          func(identity.AgentID) (*agentmodel.Agent, error)
-	Sessions       repository.Session
-	Workspaces     repository.Workspace
-	Provider       providerapi.Provider
-	Tools          tool.ToolCatalog
-	Rules          toolservice.ApprovalRules
-	HookDispatcher *hook.Dispatcher
-	Logger         *logging.Logger
-	ConfigMu       *sync.RWMutex
-	Emitter        *coreevent.Emitter
-	ObserveUsage   func(providerapi.UsageRecord)
-	SummaryFormat  contextcompress.SummaryFormat
-	Runner         *loop.Runner
-	Clock          clock.Clock
-}
-
-func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
-	if deps.ObserveUsage != nil {
-		// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
-		deps.Emitter.Subscribe(func(value coreevent.Event) {
-			if value.Kind == coreevent.ModelUsage && value.Usage != nil {
-				owner, err := deps.Agent(value.AgentID)
-				if err != nil || !owner.IsMain() || value.Transient {
-					return
-				}
-				deps.ObserveUsage(providerapi.UsageRecord{
-					SessionID:   value.SessionID.String(),
-					AgentID:     value.AgentID.String(),
-					ExecutionID: value.ExecutionID.String(),
-					TurnID:      value.TurnID,
-					Usage:       *value.Usage,
-				})
-			}
-		})
-	}
-	reviewer := &executionmodel.Reviewer{
-		Progress:       deps.Progress,
-		Provider:       deps.Provider,
-		HookDispatcher: deps.HookDispatcher,
-		Emitter:        deps.Emitter,
-	}
-	records := toolservice.NewService(toolservice.Dependencies{
-		Rules:    deps.Rules,
-		Tasks:    deps.Records,
-		Entries:  deps.Entries,
-		Calls:    deps.ToolCalls,
-		Sessions: deps.Sessions,
-		Clock:    deps.Clock,
+func buildCoordinator(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, mainAgent func(context.Context, identity.SessionID) (*agentmodel.Agent, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
+	tasks := executionservice.NewService(executionservice.Dependencies{
+		HookDispatcher: hooks,
+		Logger:         resources.logger,
+		Emitter:        emitter,
+		Sessions:       repos.Sessions,
+		Agent:          sessions.GetAgent,
+		Records:        repos.Executions,
+		Entries:        repos.Entries,
+		Definitions:    config.agents,
+		Clock:          clock.UTCClock{},
+		IDs:            identity.SecureIDGenerator{},
+	})
+	provider := providers.New(providers.Dependencies{
+		Credentials: config.models,
+		HTTPClient:  http.DefaultClient,
 	})
 
+	observeUsage := usageObserver(repos.ModelUsage, resources.logger)
+	// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
+	emitter.Subscribe(func(value coreevent.Event) {
+		if value.Kind == coreevent.ModelUsage && value.Usage != nil {
+			owner, err := sessions.GetAgent(value.AgentID)
+			if err != nil || !owner.IsMain() || value.Transient {
+				return
+			}
+			observeUsage(providerapi.UsageRecord{
+				SessionID:   value.SessionID.String(),
+				AgentID:     value.AgentID.String(),
+				ExecutionID: value.ExecutionID.String(),
+				TurnID:      value.TurnID,
+				Usage:       *value.Usage,
+			})
+		}
+	})
+
+	reviewer := &executionmodel.Reviewer{
+		Progress:       tasks,
+		Provider:       provider,
+		HookDispatcher: hooks,
+		Emitter:        emitter,
+	}
+	records := toolservice.NewService(toolservice.Dependencies{
+		ApprovalConfig: config,
+		Tasks:          repos.Executions,
+		Entries:        repos.Entries,
+		Calls:          repos.ToolCalls,
+		Sessions:       repos.Sessions,
+		Projects:       repos.Projects,
+		Clock:          clock.UTCClock{},
+	})
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
-		Catalog:        deps.Tools,
+		Catalog:        config.tools,
 		Operations:     records,
 		Reviewer:       reviewer,
-		Prepare:        toolinfra.Prepare,
 		Bind:           toolinfra.Bind,
-		HookDispatcher: deps.HookDispatcher,
-		Emitter:        deps.Emitter,
-		Clock:          deps.Clock,
-		Logf:           deps.Logger.Errorf,
+		HookDispatcher: hooks,
+		Emitter:        emitter,
+		Clock:          clock.UTCClock{},
+		Logf:           resources.logger.Errorf,
 	})
 
 	runnerDeps := loop.Dependencies{
-		Provider:       deps.Provider,
-		SummaryFormat:  deps.SummaryFormat,
-		Tools:          deps.Tools,
-		HookDispatcher: deps.HookDispatcher,
-		Emitter:        deps.Emitter,
-		Logf:           deps.Logger.Infof,
+		Provider:       provider,
+		SummaryFormat:  defaultSummaryFormat(),
+		Tools:          config.tools,
+		HookDispatcher: hooks,
+		Emitter:        emitter,
+		Logf:           resources.logger.Infof,
 	}
-	if deps.Runner != nil {
-		runnerDeps = deps.Runner.Dependencies
+	if customRunner != nil {
+		runnerDeps = customRunner.Dependencies
 	}
 	// 可选执行器的默认依赖统一在装配入口确定，业务构造器不再补齐。
 	if runnerDeps.Logf == nil {
@@ -113,27 +104,25 @@ func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
 		runnerDeps.CompressionStrategy = contextcompress.FullStrategy{}
 	}
 	// 执行进度始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
-	runnerDeps.Emitter = deps.Emitter
-	runnerDeps.Progress = deps.Progress
-	runnerDeps.Entries = deps.Entries
-	runnerDeps.HookDispatcher = deps.HookDispatcher
+	runnerDeps.Emitter = emitter
+	runnerDeps.Progress = tasks
+	runnerDeps.Entries = repos.Entries
+	runnerDeps.HookDispatcher = hooks
 	runner := loop.NewRunner(runnerDeps)
 	return execution.NewCoordinator(execution.Config{
 		Loop:              &runner,
-		Operations:        deps.Tasks,
-		SessionTasks:      deps.SessionTasks,
-		HookDispatcher:    deps.HookDispatcher,
-		Logger:            deps.Logger,
-		ConfigMu:          deps.ConfigMu,
-		Recovery:          deps.Recovery,
+		Operations:        tasks,
+		Sessions:          sessions,
+		HookDispatcher:    hooks,
+		Logger:            resources.logger,
+		ConfigMu:          configMu,
+		Recovery:          repos.Executions,
 		Tools:             executor,
 		ToolRecords:       records,
-		Entries:           deps.Entries,
-		Sessions:          deps.Sessions,
-		Workspaces:        deps.Workspaces,
-		MainAgent:         deps.MainAgent,
-		Agent:             deps.Agent,
-		SessionModels:     deps.SessionModels,
+		Entries:           repos.Entries,
+		SessionRecords:    repos.Sessions,
+		Workspaces:        repos.Workspaces,
+		MainAgent:         mainAgent,
 		TransitionTimeout: 30 * time.Second,
 	})
 }

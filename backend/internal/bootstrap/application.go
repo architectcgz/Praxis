@@ -9,8 +9,6 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	"praxis/internal/core/security"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
 	"praxis/internal/identity"
@@ -23,7 +21,6 @@ import (
 	sessionservice "praxis/internal/service/session"
 	workspaceservice "praxis/internal/service/workspace"
 	"praxis/wails/bindings"
-	"sync"
 )
 
 // Application 拥有进程资源；业务状态与执行生命周期分别由业务能力和 Coordinator 管理。
@@ -50,9 +47,6 @@ type Options struct {
 
 // Open 只做高层装配；恢复完成前不把业务入口交给桌面宿主。
 func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Application, err error) {
-	if ctx == nil {
-		return nil, errors.New("application composition context is required")
-	}
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
 	}
@@ -91,7 +85,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	if err != nil {
 		return nil, err
 	}
-	configMu := &sync.RWMutex{}
+	configMu := &config.mu
 	// 只在装配处绑定跨模块协作；业务入口在实例与执行恢复完成后才开放。
 	var agents *agentservice.Service
 	mainAgent := func(ctx context.Context, id identity.SessionID) (*agentmodel.Agent, error) {
@@ -101,15 +95,13 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	agents = agentservice.NewService(agentservice.Dependencies{
 		Agent:            a.sessions.GetAgent,
 		ActiveExecution:  func(id identity.AgentID) (agentexecution.Execution, bool) { return a.coordinator.ActiveExecution(id) },
-		ActiveEntries:    func(id identity.AgentID) []sessionentry.ContextEntry { return a.coordinator.ActiveEntries(id) },
 		RegisterAgent:    a.sessions.RegisterAgent,
 		ExecutionRecords: repos.Executions,
 		Sessions:         repos.Sessions,
-		Entries:          repos.Entries,
 		Definitions:      config.agents.Definition,
 	})
-	models := buildModelService(root, config, a.logger, configMu)
-	coordinator := buildExecution(resources, repos, config, a.sessions, agents.GetOrCreateMainAgent, hooks, emitter, configMu, options.Runner)
+	models := buildModelService(root, config, a.logger)
+	coordinator := buildCoordinator(resources, repos, config, a.sessions, agents.GetOrCreateMainAgent, hooks, emitter, configMu, options.Runner)
 	a.coordinator = coordinator
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:   repos.Projects,
@@ -118,12 +110,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Clock:      clock.UTCClock{},
 	})
 	approvals := approvalservice.NewService(approvalservice.Dependencies{
-		ConfigMu: configMu,
-		GlobalApprovalMode: func() security.ApprovalMode {
-			configMu.RLock()
-			defer configMu.RUnlock()
-			return config.settings.ApprovalMode
-		},
+		Config:   config,
 		Projects: repos.Projects,
 		Clock:    clock.UTCClock{},
 	})
@@ -167,9 +154,6 @@ func (a *Application) ApplicationLogger() *logging.Logger {
 
 // Close 只有在全部执行退出后才关闭存储；超时保留资源供后续关闭重试。
 func (a *Application) Close(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("application close context is required")
-	}
 	logger := a.ApplicationLogger()
 	logger.Infof("application close started")
 	if err := a.coordinator.Close(ctx); err != nil {

@@ -70,7 +70,7 @@ func (r *Runner) compressContext(
 			continue
 		}
 		r.Emitter.Emit(coreevent.Event{
-			Transient:   !input.Runtime.Main(),
+			Transient:   !input.Run.Main(),
 			Kind:        coreevent.EntriesAppended,
 			SessionID:   input.SessionID,
 			AgentID:     input.AgentID,

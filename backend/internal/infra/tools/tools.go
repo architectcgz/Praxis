@@ -1,15 +1,12 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"praxis/internal/core/tool"
 	"praxis/internal/infra/tools/applypatch"
 	"praxis/internal/infra/tools/bash"
 	"praxis/internal/infra/tools/readfile"
-	"praxis/internal/utils/jsonutil"
 )
 
 type builtinTool struct {
@@ -21,6 +18,9 @@ type builtinTool struct {
 }
 
 func (t builtinTool) Definition() tool.ToolDefinition { return t.definition() }
+func (t builtinTool) Prepare(args json.RawMessage, workspacePath string) (json.RawMessage, error) {
+	return t.prepare(args, workspacePath)
+}
 func (t builtinTool) Call(ctx context.Context, args json.RawMessage) (tool.ToolResult, error) {
 	return t.call(ctx, args, t.workspacePath)
 }
@@ -39,20 +39,6 @@ func Bind(t tool.Tool, path string) tool.Tool {
 		return builtin
 	}
 	return t
-}
-
-// Prepare 使用注册工具自带的参数准备函数，扩展工具默认校验 JSON。
-func Prepare(t tool.Tool, args json.RawMessage, workspacePath string) (json.RawMessage, error) {
-	if builtin, ok := t.(builtinTool); ok {
-		return builtin.prepare(args, workspacePath)
-	}
-	if !json.Valid(args) {
-		return nil, errors.New("tool arguments must be valid JSON")
-	}
-	if err := jsonutil.RejectDuplicateFields(args); err != nil {
-		return nil, err
-	}
-	return bytes.Clone(args), nil
 }
 
 func NewRegistry(extensions []tool.Tool) (*tool.ToolRegistry, error) {

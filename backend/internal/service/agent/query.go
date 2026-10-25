@@ -1,4 +1,4 @@
-// Package agent 提供 Agent 实例创建、启动恢复、状态查询和消息查询用例。
+// Package agent 提供 Agent 实例创建、启动恢复和状态查询用例。
 package agent
 
 import (
@@ -6,7 +6,6 @@ import (
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	"time"
@@ -14,23 +13,19 @@ import (
 
 type Dependencies struct {
 	ActiveExecution  func(identity.AgentID) (agentexecution.Execution, bool)
-	ActiveEntries    func(identity.AgentID) []sessionentry.ContextEntry
 	Agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	RegisterAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	ExecutionRecords repository.AgentExecution
 	Sessions         repository.Session
-	Entries          repository.Entries
 	Definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
 type Service struct {
 	activeExecution  func(identity.AgentID) (agentexecution.Execution, bool)
-	activeEntries    func(identity.AgentID) []sessionentry.ContextEntry
 	agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	registerAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	executionRecords repository.AgentExecution
 	sessions         repository.Session
-	entries          repository.Entries
 	definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
@@ -73,11 +68,9 @@ func (s *Service) DescribeAgent(value *agentmodel.Agent) (AgentView, error) {
 func NewService(deps Dependencies) *Service {
 	return &Service{
 		activeExecution:  deps.ActiveExecution,
-		activeEntries:    deps.ActiveEntries,
 		agent:            deps.Agent,
 		registerAgent:    deps.RegisterAgent,
 		executionRecords: deps.ExecutionRecords,
-		entries:          deps.Entries,
 		definitions:      deps.Definitions,
 		sessions:         deps.Sessions,
 	}

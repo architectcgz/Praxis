@@ -23,12 +23,12 @@ func (e *Executor) unregister(key Key) {
 	delete(e.active, key)
 }
 
-func (e *Executor) resolveActive(request ControlRequest) (*activeCall, error) {
-	active := e.active[Key{ExecutionID: request.ExecutionID, CallID: request.CallID}]
-	if active == nil || request.SessionID != active.call.SessionID || request.AgentID != active.call.AgentID {
+func (e *Executor) resolveActive(request ControlRequest) (*callState, error) {
+	callState := e.active[Key{ExecutionID: request.ExecutionID, CallID: request.CallID}]
+	if callState == nil || request.SessionID != callState.call.SessionID || request.AgentID != callState.call.AgentID {
 		return nil, errorcode.ErrRequestConflict
 	}
-	return active, nil
+	return callState, nil
 }
 
 // StopCall 只提交停止信号；尚未启动的调用也由所属执行路径生成唯一回执。
@@ -38,15 +38,15 @@ func (e *Executor) StopCall(ctx context.Context, request ControlRequest) (agente
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	active, err := e.resolveActive(request)
+	callState, err := e.resolveActive(request)
 	if err != nil {
 		return agentexecution.Execution{}, err
 	}
-	active.stopped = true
-	if active.tool != nil {
-		active.tool.Stop()
+	callState.stopped = true
+	if callState.tool != nil {
+		callState.tool.Stop()
 	}
-	return active.owner, nil
+	return callState.owner, nil
 }
 
 // DecideApproval 只更新当前活跃调用，迟到决定不能恢复审批或作用于其他执行。
@@ -56,24 +56,24 @@ func (e *Executor) DecideApproval(ctx context.Context, request ControlRequest, a
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	active, err := e.resolveActive(request)
+	callState, err := e.resolveActive(request)
 	if err != nil {
 		return agentexecution.Execution{}, err
 	}
-	if active.stopped || active.request == nil || active.tool != nil {
-		return active.owner, errorcode.ErrRequestConflict
+	if callState.stopped || callState.request == nil || callState.tool != nil {
+		return callState.owner, errorcode.ErrRequestConflict
 	}
-	if active.decision != nil {
-		if active.decision.Approved != approve {
-			return active.owner, errorcode.ErrRequestConflict
+	if callState.decision != nil {
+		if callState.decision.Approved != approve {
+			return callState.owner, errorcode.ErrRequestConflict
 		}
-		return active.owner, nil
+		return callState.owner, nil
 	}
-	active.decision = &UserDecision{
-		Key:       active.call.Key,
-		SessionID: active.call.SessionID,
+	callState.decision = &UserDecision{
+		Key:       callState.call.Key,
+		SessionID: callState.call.SessionID,
 		Approved:  approve,
 		DecidedAt: e.deps.Clock.Now().UTC(),
 	}
-	return active.owner, nil
+	return callState.owner, nil
 }

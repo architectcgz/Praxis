@@ -1,7 +1,6 @@
 package toolexecution
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +20,7 @@ type authorizationResult struct {
 }
 
 // authorize 沿用本次 ToolCall 的规则决定；唤醒后只读取审批事实，模型审核在控制锁外执行。
+// args 由执行流程冻结，审批请求、审核输入和审核记录共享只读参数。
 func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, decision security.ApprovalDecision) (bool, *tool.ToolResult, error) {
 	e := t.executor
 	for {
@@ -54,7 +54,7 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 		record := ReviewRecord{
 			Key:        call.Key,
 			SessionID:  call.SessionID,
-			Arguments:  bytes.Clone(args),
+			Arguments:  args,
 			Decision:   request.Decision,
 			RiskReview: attempt,
 		}
@@ -77,17 +77,17 @@ func (t *ExecutionTools) authorizationStep(ctx context.Context, call sessionentr
 	if err := e.checkUnfinished(ctx, call); err != nil {
 		return authorizationResult{}, nil, err
 	}
-	active := e.active[call.Key]
-	result, err := e.evaluate(active, decision)
+	callState := e.active[call.Key]
+	result, err := e.evaluate(callState, decision)
 	if err != nil {
 		return result, nil, err
 	}
 	if result.pending {
-		if active.request == nil {
-			active.request = &ApprovalRequest{
+		if callState.request == nil {
+			callState.request = &ApprovalRequest{
 				Key:         call.Key,
 				SessionID:   call.SessionID,
-				Arguments:   bytes.Clone(args),
+				Arguments:   args,
 				Decision:    decision,
 				RequestedAt: e.deps.Clock.Now().UTC(),
 			}
@@ -97,16 +97,16 @@ func (t *ExecutionTools) authorizationStep(ctx context.Context, call sessionentr
 	if !result.review {
 		return result, nil, nil
 	}
-	request, err := e.deps.Operations.PrepareReview(ctx, t.runtime, call, t.workspacePath)
+	request, err := e.deps.Operations.PrepareReview(ctx, t.run, call, t.workspacePath)
 	if err != nil {
 		return result, nil, err
 	}
-	request.Call, request.Arguments, request.Decision = call, bytes.Clone(args), decision
+	request.Call, request.Arguments, request.Decision = call, args, decision
 	return result, &request, nil
 }
 
 // evaluate 只读取事实并作出瞬时结论，不保存工具执行状态或发起模型请求。
-func (e *Executor) evaluate(active *activeCall, decision security.ApprovalDecision) (authorizationResult, error) {
+func (e *Executor) evaluate(callState *callState, decision security.ApprovalDecision) (authorizationResult, error) {
 	deny := func(code, message string) authorizationResult {
 		result := tool.NewToolError(code, message)
 		return authorizationResult{denied: &result}
@@ -114,8 +114,8 @@ func (e *Executor) evaluate(active *activeCall, decision security.ApprovalDecisi
 	if decision.Action == security.ApprovalDeny {
 		return deny("tool_not_allowed", "The operation is prohibited by rule: "+decision.RuleID), nil
 	}
-	if active.decision != nil {
-		if !active.decision.Approved {
+	if callState.decision != nil {
+		if !callState.decision.Approved {
 			return deny("tool_approval_denied", "The user denied this tool call."), nil
 		}
 		return authorizationResult{}, nil
@@ -126,7 +126,7 @@ func (e *Executor) evaluate(active *activeCall, decision security.ApprovalDecisi
 	case security.ApprovalAsk:
 		return authorizationResult{pending: true}, nil
 	case security.ApprovalAuto:
-		review := active.review
+		review := callState.review
 		if review == nil {
 			return authorizationResult{review: true}, nil
 		}
@@ -147,14 +147,14 @@ func (e *Executor) checkUnfinished(ctx context.Context, call sessionentry.ToolCa
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	active := e.active[call.Key]
-	if active == nil {
+	callState := e.active[call.Key]
+	if callState == nil {
 		return errors.New("tool call is no longer active")
 	}
-	if _, found := active.runtime.Result(call.Key); found {
+	if _, found := callState.run.Result(call.Key); found {
 		return errResultAvailable
 	}
-	if active.stopped {
+	if callState.stopped {
 		return errCallStopped
 	}
 	return nil

@@ -10,7 +10,7 @@ import (
 
 // scheduleSession 是入队、模型选择与结算后的统一调度决策；调用方已计入关闭等待。
 func (r *Coordinator) scheduleSession(ctx context.Context, sessionID identity.SessionID, explicit bool) error {
-	queue, ok := r.sessionTasks.TaskQueue(sessionID)
+	queue, ok := r.sessions.TaskQueue(sessionID)
 	if !ok {
 		return nil
 	}
@@ -65,24 +65,24 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ow
 		close(active.ready)
 		active.cancel(nil)
 	}()
-	execution, err := r.prepareNext(prepareCtx, input, ownerID)
+	run, err := r.prepareNext(prepareCtx, input, ownerID)
 	if err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	queue.Complete(input)
-	return r.launchLocked(execution, active)
+	return r.launchLocked(run, active)
 }
 
-// prepareNext 只负责将已领取的队首准备为 Execution；忙闲状态归调用方所有。
-func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID) (*agentexecution.Runtime, error) {
+// prepareNext 只负责将已领取的队首准备为 Run；忙闲状态归调用方所有。
+func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID) (*agentexecution.Run, error) {
 	r.configMu.RLock()
 	defer r.configMu.RUnlock()
-	modelConfig, err := r.sessionModels.CurrentModelConfig(ctx, input.SessionID)
+	modelConfig, err := r.sessions.CurrentModelConfig(ctx, input.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	execution, _, err := r.operations.PrepareTask(ctx, input, ownerID, modelConfig)
-	return execution, err
+	run, _, err := r.operations.PrepareTask(ctx, input, ownerID, modelConfig)
+	return run, err
 }

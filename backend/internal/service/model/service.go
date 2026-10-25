@@ -80,13 +80,11 @@ func (s *Service) DiscoverProviderModels(ctx context.Context, providerID string)
 	return s.models.DiscoverProviderModels(ctx, providerID)
 }
 
-// ReloadConfig 串行替换配置目录，不修改会话选择；失败时保留原配置目录。
+// ReloadConfig 由配置持有者串行加载并发布新配置，不修改会话选择；失败时保留原配置。
 func (s *Service) ReloadConfig(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.configMu.Lock()
-	defer s.configMu.Unlock()
 	if err := s.reloadConfig(ctx); err != nil {
 		return err
 	}

@@ -15,12 +15,12 @@ import (
 
 func (r *Coordinator) run(
 	ctx context.Context,
-	runtime *agentexecution.Runtime,
+	run *agentexecution.Run,
 	active *activeExecution,
 ) {
-	task := runtime.Snapshot()
+	task := run.Snapshot()
 	r.logEvent(task.ID, "task started")
-	if err := r.startExecution(runtime, ""); err != nil {
+	if err := r.startExecution(run, ""); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
@@ -36,7 +36,7 @@ func (r *Coordinator) run(
 		return
 	}
 
-	session, err := r.sessions.Get(ctx, task.SessionID)
+	session, err := r.sessionRecords.Get(ctx, task.SessionID)
 	if err != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
@@ -52,21 +52,21 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForExecution(runtime, workspace.Path, func(waitCtx context.Context) error {
+	executor := r.tools.ForExecution(run, workspace.Path, func(waitCtx context.Context) error {
 		return r.waitForToolApproval(waitCtx, active)
 	})
-	outcome, failureCode, failureMessage := r.execute(ctx, runtime, executor)
+	outcome, failureCode, failureMessage := r.execute(ctx, run, executor)
 	if r.endExecution(task, active, outcome, failureCode, failureMessage) {
 		r.logEvent(task.ID, "task ended")
 	}
 
 }
 
-func (r *Coordinator) startExecution(runtime *agentexecution.Runtime, resumeReason string) error {
-	task := runtime.Snapshot()
+func (r *Coordinator) startExecution(run *agentexecution.Run, resumeReason string) error {
+	task := run.Snapshot()
 	startContext, cancelStart := r.transitionContext()
 	defer cancelStart()
-	if err := r.operations.ConfirmRunning(startContext, runtime); err != nil {
+	if err := r.operations.ConfirmRunning(startContext, run); err != nil {
 		r.logError(task, "start product task", err)
 		return err
 	}
@@ -96,17 +96,17 @@ func (r *Coordinator) startExecution(runtime *agentexecution.Runtime, resumeReas
 // loop 不拥有持久化生命周期，因此 context 取消后仍会交由业务服务保存结束状态。
 func (r *Coordinator) execute(
 	ctx context.Context,
-	runtime *agentexecution.Runtime,
+	run *agentexecution.Run,
 	executor loop.ToolExecutor,
 ) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
-	task := runtime.Snapshot()
+	task := run.Snapshot()
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
 		Kind:     hook.OperationAgent,
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
-	executionInput, completed, err := r.operations.PrepareLoop(ctx, runtime)
+	executionInput, completed, err := r.operations.PrepareLoop(ctx, run)
 	outcome, failureCode := agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage
 	if err == nil {
 		if !completed {
@@ -179,7 +179,7 @@ func (r *Coordinator) endExecution(
 	for {
 		endContext, cancelEnd := r.transitionContext()
 		var err error
-		endedExecution, err = r.operations.Settle(endContext, active.runtime, outcome, failureCode, failureMessage)
+		endedExecution, err = r.operations.Settle(endContext, active.run, outcome, failureCode, failureMessage)
 		cancelEnd()
 		if err == nil {
 			break
@@ -195,10 +195,10 @@ func (r *Coordinator) endExecution(
 	cause := context.Cause(active.ctx)
 	controlled := errors.Is(cause, errExecutionPaused) || errors.Is(cause, errExecutionStopped)
 	resumeRequested := active.resumeRequested
-	main := active.runtime.Main()
+	main := active.run.Main()
 	if main {
 		delete(r.executions, task.AgentID)
-		active.runtime = nil
+		active.run = nil
 		active.cancel(nil)
 	}
 	r.mu.Unlock()

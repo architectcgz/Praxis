@@ -84,7 +84,7 @@ func (r *Runner) run(
 			*modelContext = compressed
 			request.Context = modelContext.Clone()
 		}
-		sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.Runtime)
+		sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.Run)
 		if err != nil {
 			return loopResult(entryFailure(executionInput, err))
 		}

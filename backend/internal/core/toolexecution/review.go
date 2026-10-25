@@ -47,7 +47,7 @@ func (e *reviewProgressError) Unwrap() error { return e.error }
 func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessment security.RiskAssessment, err error) {
 	outputBytes := 0
 	defer func() {
-		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), request.Runtime, outputBytes); progressErr != nil {
+		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), request.Run, outputBytes); progressErr != nil {
 			err = &reviewProgressError{error: errors.Join(err, progressErr)}
 		}
 	}()
@@ -92,7 +92,7 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 	if err != nil {
 		return assessment, err
 	}
-	ctx, span := request.Runtime.Timing.Start(ctx, timing.Operation{
+	ctx, span := request.Run.Timing.Start(ctx, timing.Operation{
 		ExecutionID: call.ExecutionID.String(),
 		Kind:        timing.Provider,
 		Name:        model.ProviderID + "/" + model.ModelID,
@@ -141,7 +141,7 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 				if event.Usage != nil && event.Usage.Valid() {
 					r.Emitter.Emit(coreevent.Event{
 						Kind:        coreevent.ModelUsage,
-						Transient:   !request.Runtime.Main(),
+						Transient:   !request.Run.Main(),
 						SessionID:   call.SessionID,
 						AgentID:     call.AgentID,
 						ExecutionID: call.ExecutionID,

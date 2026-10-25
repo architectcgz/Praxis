@@ -15,8 +15,8 @@ import (
 // ConfirmRunning 区分首次启动与重复确认；审批等待不改变运行状态。
 // 首次启动记录开始时间，已结束的执行不能重新启动。
 // executionID 来自 Coordinator 准入时已校验的持久化 Execution。
-func (s *Service) ConfirmRunning(ctx context.Context, runtime *agentexecution.Runtime) error {
-	err := s.update(ctx, runtime, func(task *agentexecution.Execution) error {
+func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) error {
+	err := s.update(ctx, run, func(task *agentexecution.Execution) error {
 		switch task.Status {
 		case agentexecution.ExecutionStarting:
 			task.Start(s.clock.Now())
@@ -28,15 +28,15 @@ func (s *Service) ConfirmRunning(ctx context.Context, runtime *agentexecution.Ru
 		return nil
 	})
 	if err == nil {
-		s.publishExecutionTiming(runtime.Snapshot())
+		s.publishExecutionTiming(run.Snapshot())
 	}
 	return err
 }
 
 // Settle 保存所属执行者确定的实际结果，不根据迟到的取消信号改写完成结果。
 // 写入失败由 Coordinator 保留占用和结果后重试；重复结算返回已有终态，不再次发布事件。
-func (s *Service) Settle(ctx context.Context, runtime *agentexecution.Runtime, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.Execution, err error) {
-	endedExecution := runtime.Snapshot()
+func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.Execution, err error) {
+	endedExecution := run.Snapshot()
 	executionID := endedExecution.ID
 	// 在终态提交前持有实例引用，避免会话在提交后被删除导致状态收尾失去目标。
 	agent, err := s.agent(endedExecution.AgentID)
@@ -71,7 +71,7 @@ func (s *Service) Settle(ctx context.Context, runtime *agentexecution.Runtime, o
 		if outcome == agentexecution.ExecutionFailed {
 			endedExecution.FailureMessage = failureMessage
 		}
-		if runtime.Main() {
+		if run.Main() {
 			err = s.records.Save(ctx, endedExecution)
 		}
 		if err != nil {
@@ -87,15 +87,15 @@ func (s *Service) Settle(ctx context.Context, runtime *agentexecution.Runtime, o
 			return agentexecution.Execution{}, err
 		}
 	}
-	if err := runtime.Update(func(record *agentexecution.Execution) error { *record = endedExecution; return nil }); err != nil {
+	if err := run.Update(func(record *agentexecution.Execution) error { *record = endedExecution; return nil }); err != nil {
 		return agentexecution.Execution{}, err
 	}
 	// 终态已接纳；Main 命名只使用本次已持有的输入，子执行不修改会话名称。
 	defer func() {
-		if !runtime.Main() {
+		if !run.Main() {
 			return
 		}
-		if nameErr := s.nameSessionAfterAnswer(context.WithoutCancel(ctx), runtime, endedExecution, endedExecution.Outcome, endedExecution.EndedAt); nameErr != nil {
+		if nameErr := s.nameSessionAfterAnswer(context.WithoutCancel(ctx), run, endedExecution, endedExecution.Outcome, endedExecution.EndedAt); nameErr != nil {
 			s.logger.Errorf("name settled session execution_id=%s error=%v", endedExecution.ID, nameErr)
 		}
 	}()
@@ -151,7 +151,7 @@ func (s *Service) Settle(ctx context.Context, runtime *agentexecution.Runtime, o
 
 func (s *Service) nameSessionAfterAnswer(
 	ctx context.Context,
-	runtime *agentexecution.Runtime,
+	run *agentexecution.Run,
 	task agentexecution.Execution,
 	outcome agentexecution.ExecutionOutcome,
 	at time.Time,
@@ -159,7 +159,7 @@ func (s *Service) nameSessionAfterAnswer(
 	if outcome != agentexecution.ExecutionCompleted && outcome != agentexecution.ExecutionYielded {
 		return nil
 	}
-	message, found := runtime.Entry(task.InputEntryID)
+	message, found := run.Entry(task.InputEntryID)
 	if !found {
 		return errorcode.ErrNotFound
 	}

@@ -23,7 +23,6 @@ type ExecutorDependencies struct {
 	Catalog        tool.ToolCatalog
 	Operations     Operations
 	Reviewer       *Reviewer
-	Prepare        func(tool.Tool, json.RawMessage, string) (json.RawMessage, error)
 	Bind           func(tool.Tool, string) tool.Tool
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
@@ -35,11 +34,11 @@ type ExecutorDependencies struct {
 type Executor struct {
 	deps   ExecutorDependencies
 	mu     sync.Mutex
-	active map[Key]*activeCall
+	active map[Key]*callState
 }
 
-type activeCall struct {
-	runtime  *agentexecution.Runtime
+type callState struct {
+	run      *agentexecution.Run
 	call     sessionentry.ToolCall
 	owner    agentexecution.Execution
 	tool     *Execution
@@ -50,21 +49,21 @@ type activeCall struct {
 }
 
 func NewExecutor(deps ExecutorDependencies) *Executor {
-	return &Executor{deps: deps, active: make(map[Key]*activeCall)}
+	return &Executor{deps: deps, active: make(map[Key]*callState)}
 }
 
 // ExecutionTools 只绑定本次已取得运行权的 AgentExecution 的环境。
 type ExecutionTools struct {
-	runtime       *agentexecution.Runtime
+	run           *agentexecution.Run
 	executor      *Executor
 	workspacePath string
 	awaitApproval func(context.Context) error
 }
 
-func (e *Executor) ForExecution(runtime *agentexecution.Runtime, workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
+func (e *Executor) ForExecution(run *agentexecution.Run, workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
 	return &ExecutionTools{
 		executor:      e,
-		runtime:       runtime,
+		run:           run,
 		workspacePath: workspacePath,
 		awaitApproval: awaitApproval,
 	}
@@ -73,16 +72,16 @@ func (e *Executor) ForExecution(runtime *agentexecution.Runtime, workspacePath s
 // Execute 在同一次调用中准备参数、授权、等待审批、执行工具并提交回执。
 func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.ToolCall) (sessionentry.ContextEntry, error) {
 	s := tools.executor
-	owner := tools.runtime.Snapshot()
+	owner := tools.run.Snapshot()
 	s.mu.Lock()
 	if s.active[call.Key] != nil {
 		s.mu.Unlock()
 		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
 	}
-	s.active[call.Key] = &activeCall{call: call, owner: owner, runtime: tools.runtime}
+	s.active[call.Key] = &callState{call: call, owner: owner, run: tools.run}
 	s.mu.Unlock()
 	defer s.unregister(call.Key)
-	if stored, found := tools.runtime.Result(call.Key); found {
+	if stored, found := tools.run.Result(call.Key); found {
 		return stored, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -102,7 +101,7 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 		return s.appendError(ctx, call, "tool_interrupted", err.Error())
 	}
 	call.Arguments = bytes.Clone(modified)
-	args, err := s.deps.Prepare(t, call.Arguments, tools.workspacePath)
+	args, err := t.Prepare(call.Arguments, tools.workspacePath)
 	if err != nil {
 		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
 	}
@@ -119,7 +118,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 	s := tools.executor
 
 	for {
-		if stored, found := tools.runtime.Result(call.Key); found {
+		if stored, found := tools.run.Result(call.Key); found {
 			return stored, nil
 		}
 		pending, denied, err := tools.authorize(ctx, call, args, decision)
@@ -157,7 +156,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 
 		observed := observedTool{
 			Tool:     s.deps.Bind(t, tools.workspacePath),
-			recorder: tools.runtime.Timing,
+			recorder: tools.run.Timing,
 			hooks:    s.deps.HookDispatcher,
 			identity: hook.Identity{
 				OperationID: boundary.OperationID,
@@ -266,11 +265,11 @@ func (e *Executor) appendError(ctx context.Context, call sessionentry.ToolCall, 
 func (e *Executor) checkCall(ctx context.Context, call sessionentry.ToolCall) (identity.TaskID, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	active := e.active[call.Key]
-	if active == nil || active.owner.Status != agentexecution.ExecutionRunning {
+	callState := e.active[call.Key]
+	if callState == nil || callState.owner.Status != agentexecution.ExecutionRunning {
 		return "", errorcode.ErrRequestConflict
 	}
-	return active.owner.SourceTaskID, nil
+	return callState.owner.SourceTaskID, nil
 }
 
 func (e *Executor) notifyWaiting(ctx context.Context, value hook.ToolExecution) {
@@ -298,12 +297,12 @@ func (e *Executor) commitResult(ctx context.Context, call sessionentry.ToolCall,
 func (e *Executor) commitResultLocked(ctx context.Context, call sessionentry.ToolCall, result tool.ToolResult) (sessionentry.ContextEntry, error) {
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	active := e.active[call.Key]
-	if active == nil {
+	callState := e.active[call.Key]
+	if callState == nil {
 		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
 	}
-	if stored, found := active.runtime.Result(call.Key); found {
+	if stored, found := callState.run.Result(call.Key); found {
 		return stored, nil
 	}
-	return e.deps.Operations.CommitResult(commitCtx, active.runtime, call, result)
+	return e.deps.Operations.CommitResult(commitCtx, callState.run, call, result)
 }

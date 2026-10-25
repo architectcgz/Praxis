@@ -16,7 +16,7 @@ import (
 )
 
 // PrepareTask 根据业务实例和 Session 的 MainAgentID 决定保留边界，模型不能选择持久化路径。
-func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agentID identity.AgentID, model modelapi.Config) (*agentexecution.Runtime, bool, error) {
+func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agentID identity.AgentID, model modelapi.Config) (*agentexecution.Run, bool, error) {
 	owner, err := s.agent(agentID)
 	if err != nil {
 		return nil, false, err
@@ -33,8 +33,8 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 		if err != nil {
 			return nil, existing, err
 		}
-		runtime, err := s.RestoreRuntime(ctx, record)
-		return runtime, existing, err
+		run, err := s.RestoreRun(ctx, record)
+		return run, existing, err
 	}
 	if model.ProviderID == "" || model.ModelID == "" {
 		return nil, false, modelconfig.ErrNotConfigured
@@ -51,7 +51,7 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 		Model:             model.Clone(),
 	}, at)
 	record.SourceTaskID = input.ID
-	runtime, err := agentexecution.NewRuntime(record, false, []sessionentry.ContextEntry{{
+	run, err := agentexecution.NewRun(record, false, []sessionentry.ContextEntry{{
 		ID:          record.InputEntryID,
 		Sequence:    1,
 		CreatedAt:   at,
@@ -67,12 +67,12 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 	if err := owner.BeginExecution(record); err != nil {
 		return nil, false, err
 	}
-	s.bindTiming(runtime)
-	return runtime, false, nil
+	s.bindTiming(run)
+	return run, false, nil
 }
 
-// RestoreRuntime 只加载 Main 的已准入历史；输入必须在本次一致性读取内。
-func (s *Service) RestoreRuntime(ctx context.Context, record agentexecution.Execution) (*agentexecution.Runtime, error) {
+// RestoreRun 只加载 Main 的已准入历史；输入必须在本次一致性读取内。
+func (s *Service) RestoreRun(ctx context.Context, record agentexecution.Execution) (*agentexecution.Run, error) {
 	session, err := s.sessions.Get(ctx, record.SessionID)
 	if err != nil {
 		return nil, err
@@ -84,13 +84,13 @@ func (s *Service) RestoreRuntime(ctx context.Context, record agentexecution.Exec
 	if err != nil {
 		return nil, err
 	}
-	runtime, err := agentexecution.NewRuntime(record, true, page.Entries)
+	run, err := agentexecution.NewRun(record, true, page.Entries)
 	if err == nil {
-		s.bindTiming(runtime)
+		s.bindTiming(run)
 	}
-	return runtime, err
+	return run, err
 }
 
-func (s *Service) bindTiming(runtime *agentexecution.Runtime) {
-	runtime.Timing = timing.New(func(record timing.Record) { s.RecordTiming(runtime, record) })
+func (s *Service) bindTiming(run *agentexecution.Run) {
+	run.Timing = timing.New(func(record timing.Record) { s.RecordTiming(run, record) })
 }

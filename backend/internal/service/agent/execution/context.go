@@ -9,11 +9,11 @@ import (
 	"praxis/internal/errorcode"
 )
 
-// PrepareLoop 只使用本次 Runtime 构建模型投影，不重新读取持久化历史。
+// PrepareLoop 只使用本次 Run 构建模型投影，不重新读取持久化历史。
 // completed 为 true 时由 Coordinator 直接结算，不能再次进入 Loop。
-func (s *Service) PrepareLoop(ctx context.Context, runtime *agentexecution.Runtime) (executionInput loop.Input, completed bool, err error) {
+func (s *Service) PrepareLoop(ctx context.Context, run *agentexecution.Run) (executionInput loop.Input, completed bool, err error) {
 	err = func(txCtx context.Context) error {
-		task := runtime.Snapshot()
+		task := run.Snapshot()
 		if !task.Active() {
 			return errorcode.ErrRequestConflict
 		}
@@ -22,7 +22,7 @@ func (s *Service) PrepareLoop(ctx context.Context, runtime *agentexecution.Runti
 			completed = true
 			return nil
 		}
-		content, err := contextContent(task.Config.SystemPrompt, task.InputEntryID, runtime.ContextEntries())
+		content, err := contextContent(task.Config.SystemPrompt, task.InputEntryID, run.ContextEntries())
 		if err != nil {
 			return err
 		}
@@ -45,16 +45,16 @@ func (s *Service) PrepareLoop(ctx context.Context, runtime *agentexecution.Runti
 		if err != nil {
 			return err
 		}
-		runtime.Context = built
+		run.Context = built
 		executionInput = loop.Input{
-			Runtime:      runtime,
+			Run:          run,
 			ID:           task.ID,
 			SourceTaskID: task.SourceTaskID,
 			SessionID:    task.SessionID,
 			AgentID:      task.AgentID,
 			RequestID:    task.RequestID,
 			Config:       loop.Config{Model: task.Config.Model.Clone()},
-			Context:      &runtime.Context,
+			Context:      &run.Context,
 		}
 		return nil
 	}(ctx)

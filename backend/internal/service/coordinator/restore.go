@@ -47,7 +47,7 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		return fmt.Errorf("load active executions: %w", err)
 	}
 	for _, execution := range executions {
-		runtime, loadErr := s.operations.RestoreRuntime(ctx, execution)
+		run, loadErr := s.operations.RestoreRun(ctx, execution)
 		if loadErr != nil {
 			return loadErr
 		}
@@ -58,7 +58,7 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		}
 		active := newActiveExecution(ctx)
 		s.executions[execution.AgentID] = active
-		err := s.launchLocked(runtime, active)
+		err := s.launchLocked(run, active)
 		if err != nil {
 			delete(s.executions, execution.AgentID)
 			close(active.ready)

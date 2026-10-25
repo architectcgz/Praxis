@@ -7,40 +7,30 @@ import (
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/identity"
-	"sync"
 )
 
-type ApprovalRules struct {
-	ConfigMu    *sync.RWMutex
-	Catalog     executionmodel.ApprovalCatalog
-	DefaultMode func(context.Context, identity.SessionID) (security.ApprovalMode, error)
-}
-
-// decide 在一次配置读取中匹配当前内存规则。
-func (r ApprovalRules) decide(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
-	matched, err := executionmodel.MatchApprovalRule(r.Catalog, call.Name, args)
+// DecideRule 在每次 ToolCall 开始授权时，根据本次调用所属的 Session 和 Project 读取有效审批配置。
+// 全局模式和工具规则来自同一份只读快照；后续审批与启动沿用本次决定，不受配置变更影响。
+func (s *Service) DecideRule(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
+	config := s.deps.ApprovalConfig.ApprovalConfig()
+	matched, err := executionmodel.MatchApprovalRule(config.Tools, call.Name, args)
 	if err != nil {
 		return security.ApprovalDecision{}, err
 	}
 	if matched.Action == security.ApprovalDeny {
 		return matched, nil
 	}
-	mode, err := r.DefaultMode(ctx, call.SessionID)
+	session, err := s.deps.Sessions.Get(ctx, call.SessionID)
 	if err != nil {
 		return security.ApprovalDecision{}, err
 	}
+	project, err := s.deps.Projects.Get(ctx, session.ProjectID)
+	if err != nil {
+		return security.ApprovalDecision{}, err
+	}
+	mode := security.EffectiveApprovalMode(config.GlobalMode, project.ApprovalMode)
 	if !mode.ValidDefault() {
-		return security.ApprovalDecision{}, errors.New("default approval mode must be ask, auto or yolo")
+		return security.ApprovalDecision{}, errors.New("effective approval mode must be ask, auto or yolo")
 	}
 	return security.ResolveApprovalDecision(mode, matched), nil
-}
-
-// DecideRule 仅在 ToolCall 开始授权时读取一次规则。
-func (s *Service) DecideRule(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage) (security.ApprovalDecision, error) {
-	if mu := s.deps.Rules.ConfigMu; mu != nil {
-		mu.RLock()
-		defer mu.RUnlock()
-	}
-	return s.deps.Rules.decide(ctx, call, args)
 }

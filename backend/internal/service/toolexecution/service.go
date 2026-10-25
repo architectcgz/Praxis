@@ -3,15 +3,17 @@ package toolexecution
 import (
 	"praxis/internal/clock"
 	"praxis/internal/repository"
+	approvalservice "praxis/internal/service/approval"
 )
 
 type Dependencies struct {
-	Rules    ApprovalRules
-	Tasks    repository.AgentExecution
-	Entries  repository.Entries
-	Calls    repository.ToolCallQueries
-	Sessions repository.Session
-	Clock    clock.Clock
+	ApprovalConfig approvalservice.ConfigSource
+	Tasks          repository.AgentExecution
+	Entries        repository.Entries
+	Calls          repository.ToolCallQueries
+	Sessions       repository.Session
+	Projects       repository.Project
+	Clock          clock.Clock
 }
 
 // Service 准备审核输入、保存正常回执，并为恢复编排构造缺失的历史条目。

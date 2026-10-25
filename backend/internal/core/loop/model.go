@@ -70,7 +70,7 @@ func (r *Runner) callModel(
 	if err := ctx.Err(); err != nil {
 		return response, err
 	}
-	if err := r.Progress.RecordModelRequest(ctx, executionInput.Runtime, sequence, requestKind == hook.ModelRequestIteration); err != nil {
+	if err := r.Progress.RecordModelRequest(ctx, executionInput.Run, sequence, requestKind == hook.ModelRequestIteration); err != nil {
 		return response, entryFailure(executionInput, err)
 	}
 	boundary.Request = request.Clone()
@@ -82,7 +82,7 @@ func (r *Runner) callModel(
 	})
 	defer func() {
 		// 取消或断流也要将已收到的消耗接纳到内存进度，不依赖落盘完成。
-		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), executionInput.Runtime, response.textBytes); progressErr != nil {
+		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), executionInput.Run, response.textBytes); progressErr != nil {
 			err = entryFailure(executionInput, errors.Join(err, progressErr))
 		}
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
@@ -95,7 +95,7 @@ func (r *Runner) callModel(
 		}
 		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
 	}()
-	ctx, span := executionInput.Runtime.Timing.Start(ctx, timing.Operation{
+	ctx, span := executionInput.Run.Timing.Start(ctx, timing.Operation{
 		ExecutionID: executionInput.ID.String(),
 		Kind:        timing.Provider,
 		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,

@@ -19,7 +19,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/wails/` | 桌面绑定、请求入口、DTO 和错误映射 |
 | `backend/internal/bootstrap/` | 应用装配、依赖连接和生命周期管理 |
 | `backend/internal/core/agent/` | Agent 内存实例、受锁保护的执行状态和角色定义 |
-| `backend/internal/core/agent/execution/` | Execution 实体、本次 Runtime 与历史、配置、进度、结果和计时能力 |
+| `backend/internal/core/agent/execution/` | Execution 记录、本次执行实例 Run 与历史、配置、进度、结果和计时能力 |
 | `backend/internal/core/session/` | 会话实体、模型选择和待办队列 |
 | `backend/internal/core/session/entry/` | Agent 消息、内容块和执行归属的共享值类型 |
 | `backend/internal/core/project/`、`core/workspace/` | 项目与工作区实体 |
@@ -33,7 +33,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/internal/service/` | 各业务用例及跨模块协作 |
 | `backend/internal/service/agent/execution/` | 执行准入、上下文准备、进度、结算和恢复 |
 | `backend/internal/service/agent/` | Agent 实例查找、创建、状态查询和启动恢复 |
-| `backend/internal/service/session/` | 会话用例、Agent 实例引用持有、模型选择和输入队列 |
+| `backend/internal/service/session/` | 会话用例、Main 历史追加与查询、Agent 实例引用持有、模型选择和输入队列 |
 | `backend/internal/service/coordinator/` | Session FIFO 调度、暂停停止、ExecutionTools 绑定、审批唤醒和结算交接 |
 | `backend/internal/service/toolexecution/` | 归属与规则读取、审核输入及预算准备、Main 工具回执接纳和中断回执构造 |
 | `backend/internal/infra/storage/` | 完整内存记录、仓储查询和约束、有界后台保存队列及其生命周期 |
@@ -123,7 +123,7 @@ role: advisor
 
 `AgentDefinition` 保存稳定 ID、展示名称、Role 和指令；Session 内的 Agent 实例只引用定义 ID，并持有实例类型 `Kind`，不复制定义中的 Role。`Kind` 由创建实例的业务流程明确指定，取值为 `main` 或 `subagent`，不从目录名、名称或 Role 推导。同一份角色定义可以用于不同类型的实例；`primary` 是默认定义 ID，不限制其他定义被用作 Main。
 
-消息历史通过 AgentID 隔离。Main 的跨执行历史保留在共享内存仓储中，并尽力保存到 JSONL；Subagent 只持有本次 Runtime 的隔离历史。Session 对话直接使用 Main 的消息和当前执行上下文，不建立独立 Session 消息流或另一份长期模型上下文。需要保留的约束、决定和参考信息作为同一历史中的条目追加；必要时使用 `ContextEntry.Protected` 保留模型构建与压缩时必须保留的内容。
+消息历史通过 AgentID 隔离。Session Service 统一提供会话独立输入追加与历史查询，按 Session.MainAgentID 访问 Main 的唯一历史；Agent Service 不承担消息读写。面向 AgentID 的消息查询由 Coordinator 分派：Main 委托 Session Service，Subagent 读取当前 Run 的私有消息。执行中的输入、输出和工具回执仍由执行用例按 Execution 归属提交。Main 的跨执行历史保留在共享内存仓储中，并尽力保存到 JSONL；Subagent 只持有本次 Run 的隔离历史。Session 对话直接使用 Main 的消息和当前执行上下文，不建立独立 Session 消息流或另一份长期模型上下文。需要保留的约束、决定和参考信息作为同一历史中的条目追加；必要时使用 `ContextEntry.Protected` 保留模型构建与压缩时必须保留的内容。
 
 Subagent 的消息按自身 AgentID 隔离，不自动读取 Main 或其他 Subagent 的历史，需要的信息由委派输入明确提供。模型构建统一读取本次执行所属 Agent 的有效历史，不按 Main/Subagent 分别拼接额外的 Session 上下文。Session 内最多存在一个 Main，由 Session 的 MainAgentID 明确引用，不通过定义 ID 查找主实例；实例类型创建后不可改变。
 
@@ -131,7 +131,7 @@ Agent 对象和运行状态不持久化。Session 只保存主 Agent 的 MainAge
 
 消息仓储显式接收 SessionID、AgentID 与消息，SessionID 决定日志文件，AgentID 决定消息历史。仓储根据 Session.MainAgentID 只接纳 Main 的消息、执行、计时和用量，校验 Session、Execution 与消息之间的归属一致性，不依赖 Agent 对象。ToolCall 与 ToolResult 从内存 Entry 派生匹配，不建立独立工具调用实体或持久化状态；查询返回独立副本，不能修改仓储持有的正文。
 
-一次执行从本次 Runtime 的有效历史构建一份可变 `ModelContext`，通过指针交给 Loop。Main 的模型输出与工具回执先由共享内存仓储接纳，再合入 Runtime 和本次上下文；Subagent 直接接纳到本次历史。两者都不以落盘成功为推进条件。存储层不保存模型上下文，Runtime 和上下文在执行结束后释放；Main 重启时按实际落盘历史重建，压缩摘要也来自同一历史。
+一次执行从本次 Run 的有效历史构建一份可变 `ModelContext`，通过指针交给 Loop。Main 的模型输出与工具回执先由共享内存仓储接纳，再合入 Run 和本次上下文；Subagent 直接接纳到本次历史。两者都不以落盘成功为推进条件。存储层不保存模型上下文，Run 和上下文在执行结束后释放；Main 重启时按实际落盘历史重建，压缩摘要也来自同一历史。
 
 ```mermaid
 flowchart LR

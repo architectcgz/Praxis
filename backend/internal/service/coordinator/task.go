@@ -19,7 +19,7 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input sessionservice.TaskI
 		return SubmitResult{}, err
 	}
 	defer s.running.Done()
-	task, err := s.sessionTasks.CreateTask(ctx, input)
+	task, err := s.sessions.CreateTask(ctx, input)
 	if err != nil {
 		return SubmitResult{}, err
 	}
@@ -36,5 +36,5 @@ func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.Session
 		return err
 	}
 	defer s.running.Done()
-	return s.sessionTasks.CancelTask(ctx, sessionID, id)
+	return s.sessions.CancelTask(ctx, sessionID, id)
 }

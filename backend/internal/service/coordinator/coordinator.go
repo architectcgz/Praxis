@@ -11,6 +11,7 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
+	sessionservice "praxis/internal/service/session"
 	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 	"time"
@@ -22,14 +23,12 @@ type Config struct {
 	Tools             *executionmodel.Executor
 	ToolRecords       *toolservice.Service
 	Entries           repository.Entries
-	Sessions          repository.Session
+	Sessions          *sessionservice.Service
+	SessionRecords    repository.Session
 	Workspaces        repository.Workspace
 	MainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
-	Agent             func(identity.AgentID) (*agentmodel.Agent, error)
-	SessionModels     SessionModels
 	Loop              *loop.Runner
 	Operations        ExecutionOperations
-	SessionTasks      SessionTasks
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
@@ -42,16 +41,14 @@ type Coordinator struct {
 	tools             *executionmodel.Executor
 	toolRecords       *toolservice.Service
 	entries           repository.Entries
-	sessions          repository.Session
+	sessions          *sessionservice.Service
+	sessionRecords    repository.Session
 	workspaces        repository.Workspace
 	mainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
-	agent             func(identity.AgentID) (*agentmodel.Agent, error)
-	sessionModels     SessionModels
 	restored          bool
 	restoring         bool
 	loop              *loop.Runner
 	operations        ExecutionOperations
-	sessionTasks      SessionTasks
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
@@ -65,7 +62,7 @@ type Coordinator struct {
 
 // activeExecution 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
 type activeExecution struct {
-	runtime     *agentexecution.Runtime
+	run         *agentexecution.Run
 	executionID identity.AgentExecutionID
 	ctx         context.Context
 	cancel      context.CancelCauseFunc
@@ -94,14 +91,12 @@ func NewCoordinator(config Config) *Coordinator {
 		toolRecords:       config.ToolRecords,
 		entries:           config.Entries,
 		sessions:          config.Sessions,
+		sessionRecords:    config.SessionRecords,
 		workspaces:        config.Workspaces,
 		mainAgent:         config.MainAgent,
-		agent:             config.Agent,
-		sessionModels:     config.SessionModels,
 		loop:              config.Loop,
 		executions:        make(map[identity.AgentID]*activeExecution),
 		operations:        config.Operations,
-		sessionTasks:      config.SessionTasks,
 		hookDispatcher:    config.HookDispatcher,
 		logger:            config.Logger,
 		transitionTimeout: config.TransitionTimeout,
@@ -120,14 +115,14 @@ func (r *Coordinator) enter() error {
 }
 
 // launchLocked 只接收已由调度器标记忙碌的执行，不再竞争槽位；调用方持有 mu。
-func (r *Coordinator) launchLocked(runtime *agentexecution.Runtime, active *activeExecution) error {
+func (r *Coordinator) launchLocked(run *agentexecution.Run, active *activeExecution) error {
 	if r.closed {
 		return errCoordinatorClosed
 	}
-	active.runtime = runtime
-	active.executionID = runtime.Snapshot().ID
+	active.run = run
+	active.executionID = run.Snapshot().ID
 	close(active.ready)
-	r.running.Go(func() { r.run(active.ctx, runtime, active) })
+	r.running.Go(func() { r.run(active.ctx, run, active) })
 	return nil
 }
 

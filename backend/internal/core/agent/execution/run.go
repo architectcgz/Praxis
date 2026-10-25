@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// Runtime 由 Coordinator 独占生命周期；执行路径推进历史，查询方只取得独立快照。
+// Run 表示一次执行的内存实例，由 Coordinator 独占生命周期；执行路径推进历史，查询方只取得独立快照。
 // Main 加载跨执行历史；子执行只接收显式输入，不要求存在持久化 Execution。
-type Runtime struct {
+type Run struct {
 	mu       sync.RWMutex
 	main     bool
 	record   Execution
@@ -26,25 +26,25 @@ type Runtime struct {
 	timings  map[string]timing.Record
 }
 
-func NewRuntime(record Execution, main bool, entries []sessionentry.ContextEntry) (*Runtime, error) {
-	runtime := &Runtime{main: main, record: record}
-	runtime.record.Config = record.Config.Clone()
+func NewRun(record Execution, main bool, entries []sessionentry.ContextEntry) (*Run, error) {
+	run := &Run{main: main, record: record}
+	run.record.Config = record.Config.Clone()
 	for _, entry := range entries {
-		if _, err := runtime.history.Append(entry); err != nil {
+		if _, err := run.history.Append(entry); err != nil {
 			return nil, err
 		}
-		runtime.sequence = max(runtime.sequence, entry.Sequence)
+		run.sequence = max(run.sequence, entry.Sequence)
 	}
-	if _, ok := runtime.history.Get(record.InputEntryID); !ok {
+	if _, ok := run.history.Get(record.InputEntryID); !ok {
 		return nil, errors.New("execution input is missing from admitted history")
 	}
-	runtime.deriveProgress()
-	return runtime, nil
+	run.deriveProgress()
+	return run, nil
 }
 
-func (r *Runtime) Main() bool { return r.main }
+func (r *Run) Main() bool { return r.main }
 
-func (r *Runtime) RecordTiming(record timing.Record) {
+func (r *Run) RecordTiming(record timing.Record) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if record.DurationMS != nil {
@@ -59,7 +59,7 @@ func (r *Runtime) RecordTiming(record timing.Record) {
 	r.timings[record.ID] = record
 }
 
-func (r *Runtime) Timings() []timing.Record {
+func (r *Run) Timings() []timing.Record {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	result := make([]timing.Record, 0, len(r.timings))
@@ -75,7 +75,7 @@ func (r *Runtime) Timings() []timing.Record {
 	return result
 }
 
-func (r *Runtime) Snapshot() Execution {
+func (r *Run) Snapshot() Execution {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	value := r.record
@@ -83,8 +83,8 @@ func (r *Runtime) Snapshot() Execution {
 	return value
 }
 
-// Update 在仓储内存接纳变更后发布新进度，不等待落盘；回调不能调用 Runtime 的其他方法。
-func (r *Runtime) Update(change func(*Execution) error) error {
+// Update 在仓储内存接纳变更后发布新进度，不等待落盘；回调不能调用 Run 的其他方法。
+func (r *Run) Update(change func(*Execution) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	value := r.record
@@ -97,26 +97,26 @@ func (r *Runtime) Update(change func(*Execution) error) error {
 	return nil
 }
 
-func (r *Runtime) Entries() []sessionentry.ContextEntry {
+func (r *Run) Entries() []sessionentry.ContextEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.history.List()
 }
 
-func (r *Runtime) ContextEntries() []sessionentry.ContextEntry {
+func (r *Run) ContextEntries() []sessionentry.ContextEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.history.ContextHistory()
 }
 
-func (r *Runtime) Entry(id string) (sessionentry.ContextEntry, bool) {
+func (r *Run) Entry(id string) (sessionentry.ContextEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.history.Get(id)
 }
 
 // Accept 对 Main 使用仓储内存分配的序号和时间；子执行在本地分配，不占用会话序号。
-func (r *Runtime) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
+func (r *Run) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if prior, ok := r.history.Get(value.ID); ok {
@@ -148,13 +148,13 @@ func (r *Runtime) Accept(value sessionentry.ContextEntry) (sessionentry.ContextE
 	return value.Clone(), inserted, nil
 }
 
-func (r *Runtime) Call(key tool.CallKey) (sessionentry.ToolCall, bool) {
+func (r *Run) Call(key tool.CallKey) (sessionentry.ToolCall, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.call(key)
 }
 
-func (r *Runtime) call(key tool.CallKey) (sessionentry.ToolCall, bool) {
+func (r *Run) call(key tool.CallKey) (sessionentry.ToolCall, bool) {
 	for _, entry := range r.history.entries {
 		for _, call := range entry.ToolCalls(r.record.SessionID, r.record.AgentID) {
 			if call.Key == key {
@@ -165,13 +165,13 @@ func (r *Runtime) call(key tool.CallKey) (sessionentry.ToolCall, bool) {
 	return sessionentry.ToolCall{}, false
 }
 
-func (r *Runtime) Result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
+func (r *Run) Result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.result(key)
 }
 
-func (r *Runtime) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
+func (r *Run) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 	for _, entry := range r.history.entries {
 		if entry.ExecutionID != key.ExecutionID.String() {
 			continue
@@ -185,7 +185,7 @@ func (r *Runtime) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 	return sessionentry.ContextEntry{}, false
 }
 
-func (r *Runtime) deriveProgress() {
+func (r *Run) deriveProgress() {
 	progress := &r.record.Progress
 	progress.OutputBytes, progress.ToolCalls = progress.ModelOutputBytes, 0
 	progress.FinalAssistantID, progress.FinalStopReason = "", ""

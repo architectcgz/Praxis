@@ -23,11 +23,11 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// ExecutionProgress 在本次 Runtime 上预留请求；Main 先保存，子执行仅更新内存。
+// ExecutionProgress 在本次 Run 上预留请求；Main 先保存，子执行仅更新内存。
 type ExecutionProgress interface {
-	NextRequestSequence(context.Context, *agentexecution.Runtime) (uint64, error)
-	RecordModelRequest(context.Context, *agentexecution.Runtime, uint64, bool) error
-	RecordModelOutput(context.Context, *agentexecution.Runtime, int) error
+	NextRequestSequence(context.Context, *agentexecution.Run) (uint64, error)
+	RecordModelRequest(context.Context, *agentexecution.Run, uint64, bool) error
+	RecordModelOutput(context.Context, *agentexecution.Run, int) error
 }
 
 // EndReason 只描述 Loop 为什么返回，不表示业务持久化结果。
@@ -42,7 +42,7 @@ type Result struct{ Reason EndReason }
 
 // Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
 type Input struct {
-	Runtime      *agentexecution.Runtime
+	Run          *agentexecution.Run
 	ID           identity.AgentExecutionID
 	SourceTaskID identity.TaskID
 	SessionID    identity.SessionID
