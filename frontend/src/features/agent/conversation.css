@@ -1,4 +1,4 @@
-/* Agent 对话滚动容器：滚动条宽度与 --scroll-gutter 一致，滑块走全局令牌。 */
+/* Agent 对话滚动容器：使用细滚动条，滑块颜色走全局令牌。 */
 .message-thread-container {
     position: relative;
     display: flex;
@@ -36,6 +36,7 @@
     overflow: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
+    scrollbar-width: thin;
 }
 
 .message-thread.empty {
