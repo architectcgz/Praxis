@@ -15,11 +15,12 @@ import (
 
 func (r *Coordinator) run(
 	ctx context.Context,
-	task agentexecution.Execution,
+	runtime *agentexecution.Runtime,
 	active *activeExecution,
 ) {
+	task := runtime.Snapshot()
 	r.logEvent(task.ID, "task started")
-	if err := r.startExecution(task, ""); err != nil {
+	if err := r.startExecution(runtime, ""); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
@@ -31,14 +32,6 @@ func (r *Coordinator) run(
 	}
 	if ctx.Err() != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionInterrupted, agentexecution.ExecutionFailureCancelled, ctx.Err())
-		r.endExecution(task, active, outcome, code, message)
-		return
-	}
-
-	assistantCommitter, err := r.operations.AssistantCommitter(ctx, task.ID)
-	if err != nil {
-		r.logError(task, "resolve assistant committer", err)
-		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
@@ -59,27 +52,21 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	// 调度器保证只有一个执行者，旧 Loop 和工具已停止；恢复必须先于上下文读取。
-	if err := r.toolRecords.RecoverExecution(ctx, task.ID); err != nil {
-		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
-		r.endExecution(task, active, outcome, code, message)
-		return
-	}
-
-	executor := r.tools.ForExecution(workspace.Path, func(waitCtx context.Context) error {
+	executor := r.tools.ForExecution(runtime, workspace.Path, func(waitCtx context.Context) error {
 		return r.waitForToolApproval(waitCtx, active)
 	})
-	outcome, failureCode, failureMessage := r.execute(ctx, task, assistantCommitter, executor)
+	outcome, failureCode, failureMessage := r.execute(ctx, runtime, executor)
 	if r.endExecution(task, active, outcome, failureCode, failureMessage) {
 		r.logEvent(task.ID, "task ended")
 	}
 
 }
 
-func (r *Coordinator) startExecution(task agentexecution.Execution, resumeReason string) error {
+func (r *Coordinator) startExecution(runtime *agentexecution.Runtime, resumeReason string) error {
+	task := runtime.Snapshot()
 	startContext, cancelStart := r.transitionContext()
 	defer cancelStart()
-	if err := r.operations.ConfirmRunning(startContext, task.ID); err != nil {
+	if err := r.operations.ConfirmRunning(startContext, runtime); err != nil {
 		r.logError(task, "start product task", err)
 		return err
 	}
@@ -109,23 +96,22 @@ func (r *Coordinator) startExecution(task agentexecution.Execution, resumeReason
 // loop 不拥有持久化生命周期，因此 context 取消后仍会交由业务服务保存结束状态。
 func (r *Coordinator) execute(
 	ctx context.Context,
-	task agentexecution.Execution,
-	assistantCommitter loop.AssistantCommitter,
+	runtime *agentexecution.Runtime,
 	executor loop.ToolExecutor,
 ) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
+	task := runtime.Snapshot()
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
 		Kind:     hook.OperationAgent,
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
-	executionInput, completed, err := r.operations.PrepareLoop(ctx, task.ID)
+	executionInput, completed, err := r.operations.PrepareLoop(ctx, runtime)
 	outcome, failureCode := agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage
 	if err == nil {
 		if !completed {
 			_, err = r.loop.Run(ctx, executionInput, loop.ExecutionDependencies{
 				ToolExecutor: executor,
-				Assistant:    assistantCommitter,
 			})
 		}
 		outcome, failureCode = agentexecution.ExecutionCompleted, ""
@@ -193,21 +179,12 @@ func (r *Coordinator) endExecution(
 	for {
 		endContext, cancelEnd := r.transitionContext()
 		var err error
-		err = r.toolRecords.RecoverExecution(endContext, task.ID)
-		if err == nil {
-			endedExecution, err = r.operations.Settle(endContext, task.ID, outcome, failureCode, failureMessage)
-		}
+		endedExecution, err = r.operations.Settle(endContext, active.runtime, outcome, failureCode, failureMessage)
 		cancelEnd()
 		if err == nil {
 			break
 		}
 		r.logError(task, "settle execution", err)
-		r.mu.Lock()
-		closed := r.closed
-		r.mu.Unlock()
-		if closed {
-			return false
-		}
 		timer := time.NewTimer(retryDelay)
 		<-timer.C
 		retryDelay = min(5*time.Second, retryDelay*2)
@@ -218,11 +195,15 @@ func (r *Coordinator) endExecution(
 	cause := context.Cause(active.ctx)
 	controlled := errors.Is(cause, errExecutionPaused) || errors.Is(cause, errExecutionStopped)
 	resumeRequested := active.resumeRequested
-	delete(r.executions, task.AgentID)
-	active.cancel(nil)
+	main := active.runtime.Main()
+	if main {
+		delete(r.executions, task.AgentID)
+		active.runtime = nil
+		active.cancel(nil)
+	}
 	r.mu.Unlock()
 	// 控制后只响应新的显式调度意图，不因旧执行恰好正常完成而自动领取队列。
-	if resumeRequested || !controlled && (endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded) {
+	if main && (resumeRequested || !controlled && (endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded)) {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
 		if err := r.scheduleSession(queueContext, task.SessionID, false); err != nil {

@@ -6,12 +6,15 @@ import (
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	"time"
 )
 
 type Dependencies struct {
+	ActiveExecution  func(identity.AgentID) (agentexecution.Execution, bool)
+	ActiveEntries    func(identity.AgentID) []sessionentry.ContextEntry
 	Agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	RegisterAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	ExecutionRecords repository.AgentExecution
@@ -21,6 +24,8 @@ type Dependencies struct {
 }
 
 type Service struct {
+	activeExecution  func(identity.AgentID) (agentexecution.Execution, bool)
+	activeEntries    func(identity.AgentID) []sessionentry.ContextEntry
 	agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	registerAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	executionRecords repository.AgentExecution
@@ -67,6 +72,8 @@ func (s *Service) DescribeAgent(value *agentmodel.Agent) (AgentView, error) {
 // NewService 使用装配层提供的完整依赖创建 Agent 查询服务。
 func NewService(deps Dependencies) *Service {
 	return &Service{
+		activeExecution:  deps.ActiveExecution,
+		activeEntries:    deps.ActiveEntries,
 		agent:            deps.Agent,
 		registerAgent:    deps.RegisterAgent,
 		executionRecords: deps.ExecutionRecords,
@@ -89,6 +96,13 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (A
 	latest, err := s.executionRecords.ListByAgent(ctx, agentID, 1)
 	if err != nil {
 		return AgentView{}, err
+	}
+	if current, found := s.activeExecution(agentID); found {
+		view.CurrentExecution, view.LatestExecution = &current, &current
+		return view, nil
+	}
+	if !value.IsMain() {
+		return view, nil
 	}
 	if len(latest) > 0 {
 		view.LatestExecution = &latest[0]

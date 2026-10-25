@@ -3,33 +3,41 @@ package storage
 import (
 	"errors"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/errorcode"
-	"slices"
+	"praxis/internal/identity"
 )
 
-// validateToolReceipts 检查候选消息与已提交调用的配对、声明顺序和归属。
-func (s *Store) validateToolReceipts(entry stateEntry) error {
-	result := entry.entryValue()
-	for _, block := range result.Data.Content {
-		if block.Kind != sessionentry.BlockToolResult {
+func validateToolReceipts(records []logRecord, scope string, value entryRecord) error {
+	seen := make(map[string]bool)
+	for _, block := range value.Data.Content {
+		if block.Kind != sessionentry.BlockToolCall && block.Kind != sessionentry.BlockToolResult {
 			continue
 		}
-		declaration, err := s.lookup(lookupKey{kind: "tool-call", owner: result.Data.ExecutionID, value: block.CallID})
+		if value.Data.ExecutionID == "" || value.Data.TurnID == "" || seen[block.CallID] {
+			return errors.New("tool message ownership or call identity is invalid")
+		}
+		seen[block.CallID] = true
+		key := toolexecution.Key{ExecutionID: identity.AgentExecutionID(value.Data.ExecutionID), CallID: block.CallID}
+		if block.Kind == sessionentry.BlockToolCall {
+			if _, err := getCall(records, key); err == nil {
+				return errorcode.ErrRequestConflict
+			} else if !errors.Is(err, errorcode.ErrNotFound) {
+				return err
+			}
+			continue
+		}
+		if _, err := getResult(records, key); err == nil {
+			return errorcode.ErrRequestConflict
+		} else if !errors.Is(err, errorcode.ErrNotFound) {
+			return err
+		}
+		call, err := getCall(records, key)
 		if err != nil {
-			return errors.New("tool receipt has no matching call declaration")
+			return err
 		}
-		declared, ok := s.entry(declaration)
-		if !ok {
-			return errorcode.ErrNotFound
-		}
-		call := declared.entryValue()
-		if declared.scope != entry.scope || declared.eventSequence >= entry.eventSequence || call.AgentID != result.AgentID || call.Data.RequestID != result.Data.RequestID || call.Data.TurnID != result.Data.TurnID {
-			return errors.New("tool receipt ownership or declaration order mismatch")
-		}
-		if !slices.ContainsFunc(call.Data.Content, func(candidate sessionentry.Block) bool {
-			return candidate.Kind == sessionentry.BlockToolCall && candidate.CallID == block.CallID && candidate.Name == block.Name
-		}) {
-			return errors.New("tool receipt name does not match its call declaration")
+		if call.SessionID.String() != scope || call.AgentID != value.AgentID || call.RequestID != value.Data.RequestID || call.TurnID.String() != value.Data.TurnID || string(call.Name) != block.Name {
+			return errors.New("tool receipt ownership does not match its declaration")
 		}
 	}
 	return nil

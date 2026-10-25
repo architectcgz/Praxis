@@ -2,27 +2,18 @@ package execution
 
 import (
 	"context"
+	agentexecution "praxis/internal/core/agent/execution"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/errorcode"
-	"praxis/internal/identity"
-	"praxis/internal/repository"
-	sessionservice "praxis/internal/service/session"
 )
 
-// PrepareLoop 在工具回执补齐后，从 Execution 所属 Agent 的历史构建本次唯一的模型上下文。
-// Session 直接使用 Main 的上下文；Subagent 使用自身历史，不额外加载 Session 内容。
+// PrepareLoop 只使用本次 Runtime 构建模型投影，不重新读取持久化历史。
 // completed 为 true 时由 Coordinator 直接结算，不能再次进入 Loop。
-func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExecutionID) (executionInput loop.Input, completed bool, err error) {
+func (s *Service) PrepareLoop(ctx context.Context, runtime *agentexecution.Runtime) (executionInput loop.Input, completed bool, err error) {
 	err = func(txCtx context.Context) error {
-		task, err := s.records.Get(txCtx, executionID)
-		if err != nil {
-			return err
-		}
-		if err := sessionservice.RequireWritable(txCtx, s.sessions, task.SessionID); err != nil {
-			return err
-		}
+		task := runtime.Snapshot()
 		if !task.Active() {
 			return errorcode.ErrRequestConflict
 		}
@@ -31,11 +22,7 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 			completed = true
 			return nil
 		}
-		page, err := s.entries.List(txCtx, repository.EntryQuery{AgentID: task.AgentID, ForContext: true})
-		if err != nil {
-			return err
-		}
-		content, err := contextContent(task.Config.SystemPrompt, task.InputEntryID, page.Entries)
+		content, err := contextContent(task.Config.SystemPrompt, task.InputEntryID, runtime.ContextEntries())
 		if err != nil {
 			return err
 		}
@@ -58,14 +45,16 @@ func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExe
 		if err != nil {
 			return err
 		}
+		runtime.Context = built
 		executionInput = loop.Input{
+			Runtime:      runtime,
 			ID:           task.ID,
 			SourceTaskID: task.SourceTaskID,
 			SessionID:    task.SessionID,
 			AgentID:      task.AgentID,
 			RequestID:    task.RequestID,
 			Config:       loop.Config{Model: task.Config.Model.Clone()},
-			Context:      &built,
+			Context:      &runtime.Context,
 		}
 		return nil
 	}(ctx)

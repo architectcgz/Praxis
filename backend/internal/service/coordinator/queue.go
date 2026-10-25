@@ -76,12 +76,12 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ow
 }
 
 // prepareNext 只负责将已领取的队首准备为 Execution；忙闲状态归调用方所有。
-func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID) (agentexecution.Execution, error) {
+func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID) (*agentexecution.Runtime, error) {
 	r.configMu.RLock()
 	defer r.configMu.RUnlock()
 	modelConfig, err := r.sessionModels.CurrentModelConfig(ctx, input.SessionID)
 	if err != nil {
-		return agentexecution.Execution{}, err
+		return nil, err
 	}
 	execution, _, err := r.operations.PrepareTask(ctx, input, ownerID, modelConfig)
 	return execution, err

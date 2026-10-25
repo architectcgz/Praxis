@@ -4,7 +4,6 @@ import (
 	"context"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/core/agent/execution/timing"
 	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -24,7 +23,6 @@ import (
 
 // coordinatorDependencies 装配业务用例、Core 内存队列与执行能力。
 type coordinatorDependencies struct {
-	TimingRecorder *timing.Recorder
 	Tasks          execution.ExecutionOperations
 	Progress       loop.ExecutionProgress
 	Records        repository.AgentExecution
@@ -32,7 +30,6 @@ type coordinatorDependencies struct {
 	MainAgent      func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
 	SessionModels  execution.SessionModels
 	Recovery       repository.AgentExecution
-	ToolExecutions repository.ToolExecution
 	Entries        repository.Entries
 	ToolCalls      repository.ToolCallQueries
 	Agent          func(identity.AgentID) (*agentmodel.Agent, error)
@@ -56,6 +53,10 @@ func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
 		// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
 		deps.Emitter.Subscribe(func(value coreevent.Event) {
 			if value.Kind == coreevent.ModelUsage && value.Usage != nil {
+				owner, err := deps.Agent(value.AgentID)
+				if err != nil || !owner.IsMain() || value.Transient {
+					return
+				}
 				deps.ObserveUsage(providerapi.UsageRecord{
 					SessionID:   value.SessionID.String(),
 					AgentID:     value.AgentID.String(),
@@ -67,15 +68,14 @@ func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
 		})
 	}
 	reviewer := &executionmodel.Reviewer{
+		Progress:       deps.Progress,
 		Provider:       deps.Provider,
-		TimingRecorder: deps.TimingRecorder,
 		HookDispatcher: deps.HookDispatcher,
 		Emitter:        deps.Emitter,
 	}
 	records := toolservice.NewService(toolservice.Dependencies{
 		Rules:    deps.Rules,
 		Tasks:    deps.Records,
-		Events:   deps.ToolExecutions,
 		Entries:  deps.Entries,
 		Calls:    deps.ToolCalls,
 		Sessions: deps.Sessions,
@@ -89,7 +89,6 @@ func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
 		Prepare:        toolinfra.Prepare,
 		Bind:           toolinfra.Bind,
 		HookDispatcher: deps.HookDispatcher,
-		TimingRecorder: deps.TimingRecorder,
 		Emitter:        deps.Emitter,
 		Clock:          deps.Clock,
 		Logf:           deps.Logger.Errorf,
@@ -116,7 +115,7 @@ func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
 	// 执行进度始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
 	runnerDeps.Emitter = deps.Emitter
 	runnerDeps.Progress = deps.Progress
-	runnerDeps.TimingRecorder = deps.TimingRecorder
+	runnerDeps.Entries = deps.Entries
 	runnerDeps.HookDispatcher = deps.HookDispatcher
 	runner := loop.NewRunner(runnerDeps)
 	return execution.NewCoordinator(execution.Config{
@@ -129,6 +128,7 @@ func assembleCoordinator(deps coordinatorDependencies) *execution.Coordinator {
 		Recovery:          deps.Recovery,
 		Tools:             executor,
 		ToolRecords:       records,
+		Entries:           deps.Entries,
 		Sessions:          deps.Sessions,
 		Workspaces:        deps.Workspaces,
 		MainAgent:         deps.MainAgent,

@@ -4,29 +4,26 @@ import (
 	"praxis/internal/repository"
 )
 
-// Repositories 为所有业务仓储提供同一个单事件写入入口。
+// Repositories 组合共享同一内存状态与后台持久化生命周期的仓储。
 type Repositories struct {
-	Projects       ProjectRepository
-	Workspaces     WorkspaceRepository
-	Sessions       SessionRepository
-	Executions     AgentExecutionRepository
-	ToolExecutions ToolExecutionRepository
-	Entries        EntryRepository
-	ToolCalls      ToolCallQueries
-	ModelUsage     ModelUsageStore
+	Projects   ProjectRepository
+	Workspaces WorkspaceRepository
+	Sessions   SessionRepository
+	Executions AgentExecutionRepository
+	Entries    EntryRepository
+	ToolCalls  ToolCallQueries
+	ModelUsage ModelUsageRepository
 }
 
-// Repositories 返回共享进程内互斥锁与内存 State 的仓储集合。
-func (s *Store) Repositories() Repositories {
+func (s *Storage) Repositories() Repositories {
 	return Repositories{
-		Projects:       ProjectRepository{s},
-		Workspaces:     WorkspaceRepository{s},
-		Sessions:       SessionRepository{s},
-		Executions:     AgentExecutionRepository{s},
-		ToolExecutions: ToolExecutionRepository{s},
-		Entries:        EntryRepository{s},
-		ToolCalls:      ToolCallQueries{s},
-		ModelUsage:     ModelUsageStore{Store: s},
+		Projects:   ProjectRepository{storage: s},
+		Workspaces: WorkspaceRepository{storage: s},
+		Sessions:   SessionRepository{storage: s},
+		Executions: AgentExecutionRepository{storage: s},
+		Entries:    EntryRepository{storage: s},
+		ToolCalls:  ToolCallQueries{storage: s},
+		ModelUsage: ModelUsageRepository{storage: s},
 	}
 }
 
@@ -35,8 +32,7 @@ var (
 	_ repository.Workspace       = WorkspaceRepository{}
 	_ repository.Session         = SessionRepository{}
 	_ repository.AgentExecution  = AgentExecutionRepository{}
-	_ repository.ToolExecution   = ToolExecutionRepository{}
 	_ repository.Entries         = EntryRepository{}
 	_ repository.ToolCallQueries = ToolCallQueries{}
-	_ repository.ModelUsage      = ModelUsageStore{}
+	_ repository.ModelUsage      = ModelUsageRepository{}
 )

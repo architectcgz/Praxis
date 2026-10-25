@@ -6,8 +6,10 @@ import (
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"regexp"
+	"time"
 )
 
 var toolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
@@ -29,11 +31,10 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 	for _, call := range calls {
 		receipt, err := deps.ToolExecutor.Execute(ctx, call)
 		if err != nil && receipt.ID == "" {
-			var hookErr *hook.Error
-			if errors.As(err, &hookErr) {
+			if _, ok := errors.AsType[*hook.Error](err); ok {
 				return results, failCause(FailureInternal, err)
 			}
-			return results, failCause(FailureStorage, err)
+			return results, entryFailure(executionInput, err)
 		}
 		if len(receipt.Content) != 1 || receipt.Content[0].Kind != sessionentry.BlockToolResult {
 			return results, failCause(FailureContract, errors.New("tool executor returned an invalid committed receipt"))
@@ -46,6 +47,26 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 		}
 		if err := ctx.Err(); err != nil {
 			return results, err
+		}
+	}
+	return results, nil
+}
+
+// interruptToolCalls 只收尾本轮尚未返回回执的调用，不扫描整份历史，也不再执行工具。
+// 使用独立提交上下文处理取消后的消息收尾；中断回执不推断工具是否已产生副作用。
+func (r *Runner) interruptToolCalls(ctx context.Context, input Input, calls []sessionentry.ToolCall) ([]sessionentry.ContextEntry, error) {
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	results := make([]sessionentry.ContextEntry, 0, len(calls))
+	for _, call := range calls {
+		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available."))
+		stored, inserted, err := r.appendEntry(commitCtx, input, entry)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, stored)
+		if inserted {
+			r.emitToolResult(input.SessionID, input.AgentID, input.ID, call.TurnID, stored.Content[0])
 		}
 	}
 	return results, nil

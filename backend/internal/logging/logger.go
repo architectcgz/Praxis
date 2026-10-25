@@ -91,7 +91,8 @@ func (f Factory) Application(path string) (*Logger, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	result := newLogger(io.MultiWriter(os.Stderr, file))
+	// GUI 进程可能没有可用的 stderr，先落盘，避免控制台写入失败截断文件日志。
+	result := newLogger(io.MultiWriter(file, os.Stderr))
 	result.file = file
 	result.SetLevel(f.level)
 	return result, nil

@@ -2,71 +2,129 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
+	agentexecution "praxis/internal/core/agent/execution"
+	"praxis/internal/core/agent/execution/timing"
 	projectmodel "praxis/internal/core/project"
+	providerapi "praxis/internal/core/provider"
+	"praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/infra/jsonl"
+	"slices"
 )
 
 func decodeJSON(data []byte, target any) error { return jsonl.Decode(data, target) }
 
-func eventKey(scope string, event jsonl.Event) entityKey {
-	if event.Collection == "entry" {
-		return entityKey{event.Collection, scope + "\x00" + event.Key}
-	}
-	return entityKey{event.Collection, event.Key}
+// logRecord 保存已解码的业务值；event 仅保留元信息，不保留编码正文。
+type logRecord struct {
+	scope string
+	event jsonl.Event
+	value any
 }
 
-// payload 及 Locked 查询只供已持有 Store.mu 的代码使用，避免嵌套获取同一把锁。
-func (s *Store) payload(key entityKey) (json.RawMessage, error) {
-	entry, ok := s.entry(key)
-	if !ok {
-		if key.collection == "workspace" {
-			owner, err := s.lookup(lookupKey{kind: "workspace-id", owner: key.id})
-			if err == nil && owner.collection == "project" {
-				entry, _ := s.entry(owner)
-				var project projectmodel.Project
-				if err := decodeJSON(entry.payload, &project); err != nil {
-					return nil, err
+func findRecord(records []logRecord, collection, id string) (logRecord, error) {
+	for _, record := range records {
+		if record.event.Collection == collection && record.event.Key == id {
+			return record, nil
+		}
+	}
+	return logRecord{}, errorcode.ErrNotFound
+}
+
+// cloneRecordValue 隔离仓储返回值中的切片与指针，查询方不能修改存储持有的状态。
+func cloneRecordValue(value any) any {
+	switch v := value.(type) {
+	case projectmodel.Project:
+		if v.ApprovalMode != nil {
+			v.ApprovalMode = new(*v.ApprovalMode)
+		}
+		return v
+	case agentexecution.Execution:
+		v.Config = v.Config.Clone()
+		return v
+	case entryRecord:
+		v.Data = v.Data.Clone()
+		return v
+	case providerapi.UsageRecord:
+		if v.Usage.OutputTokens != nil {
+			v.Usage.OutputTokens = new(*v.Usage.OutputTokens)
+		}
+		if v.Usage.CacheReadInputTokens != nil {
+			v.Usage.CacheReadInputTokens = new(*v.Usage.CacheReadInputTokens)
+		}
+		if v.Usage.CacheCreationInputTokens != nil {
+			v.Usage.CacheCreationInputTokens = new(*v.Usage.CacheCreationInputTokens)
+		}
+		return v
+	case timing.Record:
+		if v.DurationMS != nil {
+			v.DurationMS = new(*v.DurationMS)
+		}
+		if v.FirstResponseMS != nil {
+			v.FirstResponseMS = new(*v.FirstResponseMS)
+		}
+		return v
+	case workflow.WaitCondition:
+		v.TargetIDs = slices.Clone(v.TargetIDs)
+		v.ResolvedTargetIDs = slices.Clone(v.ResolvedTargetIDs)
+		return v
+	default:
+		return value
+	}
+}
+
+func getRecord[T any](records []logRecord, collection, id string) (result T, err error) {
+	record, err := findRecord(records, collection, id)
+	if errors.Is(err, errorcode.ErrNotFound) && collection == "workspace" {
+		projects, readErr := listRecords[projectmodel.Project](records, "project", nil)
+		if readErr != nil {
+			return result, readErr
+		}
+		for _, project := range projects {
+			if project.DefaultWorkspaceID.String() == id {
+				value := workspacemodel.NewWorkspace(project.DefaultWorkspaceID, project.ID, workspacemodel.WorkspaceProjectRoot, project.Path, project.CreatedAt)
+				result, ok := any(value).(T)
+				if !ok {
+					return result, fmt.Errorf("unexpected value type for %s", collection)
 				}
-				return json.Marshal(workspacemodel.NewWorkspace(project.DefaultWorkspaceID, project.ID, workspacemodel.WorkspaceProjectRoot, project.Path, project.CreatedAt))
-			}
-			if err != nil && !errors.Is(err, errorcode.ErrNotFound) {
-				return nil, err
+				return result, nil
 			}
 		}
-		return nil, errorcode.ErrNotFound
 	}
-	if entry.record != nil {
-		return json.Marshal(entry.entryValue())
+	if err != nil {
+		return result, err
 	}
-	return entry.payload, nil
+	result, ok := cloneRecordValue(record.value).(T)
+	if !ok {
+		return result, fmt.Errorf("unexpected value type for %s", collection)
+	}
+	if err := projectRecord(records, &result); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
-func getLocked[T any](s *Store, collection, id string) (T, error) {
-	var result T
-	data, err := s.payload(entityKey{collection, id})
-	if err == nil {
-		err = s.decodeProjected(data, &result)
-	}
-	return result, err
-}
-
-func get[T any](ctx context.Context, s *Store, collection, id string) (result T, err error) {
-	err = s.view(ctx, func() error {
-		result, err = getLocked[T](s, collection, id)
+func get[T any](ctx context.Context, storage *Storage, collection, id string) (result T, err error) {
+	err = withState(ctx, storage, func(_ *Storage, records []logRecord) error {
+		result, err = getRecord[T](records, collection, id)
 		return err
 	})
 	return result, err
 }
 
-func listIndexedLocked[T any](s *Store, group lookupKey, filter func(T) bool) ([]T, error) {
+func listRecords[T any](records []logRecord, collection string, filter func(T) bool) ([]T, error) {
 	result := make([]T, 0)
-	for _, key := range s.keys(group) {
-		value, err := getLocked[T](s, key.collection, key.id)
-		if err != nil {
+	for _, record := range records {
+		if record.event.Collection != collection {
+			continue
+		}
+		value, ok := cloneRecordValue(record.value).(T)
+		if !ok {
+			return nil, fmt.Errorf("unexpected value type for %s", collection)
+		}
+		if err := projectRecord(records, &value); err != nil {
 			return nil, err
 		}
 		if filter == nil || filter(value) {
@@ -76,33 +134,16 @@ func listIndexedLocked[T any](s *Store, group lookupKey, filter func(T) bool) ([
 	return result, nil
 }
 
-func listIndexed[T any](ctx context.Context, s *Store, group lookupKey, filter func(T) bool) (result []T, err error) {
-	err = s.view(ctx, func() error {
-		result, err = listIndexedLocked(s, group, filter)
+func list[T any](ctx context.Context, storage *Storage, collection string, filter func(T) bool) (result []T, err error) {
+	err = withState(ctx, storage, func(_ *Storage, records []logRecord) error {
+		result, err = listRecords(records, collection, filter)
 		return err
 	})
 	return result, err
 }
 
-func getByClaimLocked[T any](s *Store, claim lookupKey) (T, error) {
-	key, err := s.lookup(claim)
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return getLocked[T](s, key.collection, key.id)
-}
-
-func getByClaim[T any](ctx context.Context, s *Store, claim lookupKey) (result T, err error) {
-	err = s.view(ctx, func() error {
-		result, err = getByClaimLocked[T](s, claim)
-		return err
-	})
-	return result, err
-}
-
-func save(ctx context.Context, s *Store, scope, collection, id, kind string, value any) error {
-	return s.view(ctx, func() error {
-		return s.appendLocked(ctx, scope, collection, id, kind, value)
+func save(ctx context.Context, storage *Storage, scope, collection, id, kind string, value any) error {
+	return withState(ctx, storage, func(state *Storage, records []logRecord) error {
+		return appendRecord(state, records, scope, collection, id, kind, value)
 	})
 }

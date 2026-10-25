@@ -12,6 +12,7 @@ import (
 )
 
 var errResultAvailable = errors.New("tool result is already committed")
+var errCallStopped = errors.New("tool call was stopped")
 
 type authorizationResult struct {
 	pending bool
@@ -36,6 +37,9 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 			reviewErr = reviewCtx.Err()
 		}
 		cancel()
+		if _, ok := errors.AsType[*reviewProgressError](reviewErr); ok {
+			return false, nil, reviewErr
+		}
 		if ctx.Err() != nil {
 			return false, nil, ctx.Err()
 		}
@@ -57,13 +61,7 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 		e.mu.Lock()
 		err = e.checkUnfinished(ctx, call)
 		if err == nil {
-			err = e.deps.Operations.SaveAuthorization(ctx, Event{
-				Key:       call.Key,
-				SessionID: call.SessionID,
-				Kind:      Reviewed,
-				At:        attempt.CompletedAt,
-				Review:    &record,
-			})
+			e.active[call.Key].review = &record
 		}
 		e.mu.Unlock()
 		if err != nil {
@@ -79,38 +77,27 @@ func (t *ExecutionTools) authorizationStep(ctx context.Context, call sessionentr
 	if err := e.checkUnfinished(ctx, call); err != nil {
 		return authorizationResult{}, nil, err
 	}
-	result, err := e.evaluate(ctx, call, decision)
+	active := e.active[call.Key]
+	result, err := e.evaluate(active, decision)
 	if err != nil {
 		return result, nil, err
 	}
 	if result.pending {
-		request, found, err := e.deps.Operations.GetApprovalRequest(ctx, call.Key)
-		if err != nil {
-			return result, nil, err
-		}
-		if !found {
-			at := e.deps.Clock.Now().UTC()
-			request = ApprovalRequest{
+		if active.request == nil {
+			active.request = &ApprovalRequest{
 				Key:         call.Key,
 				SessionID:   call.SessionID,
 				Arguments:   bytes.Clone(args),
 				Decision:    decision,
-				RequestedAt: at,
+				RequestedAt: e.deps.Clock.Now().UTC(),
 			}
-			err = e.deps.Operations.SaveAuthorization(ctx, Event{
-				Key:       call.Key,
-				SessionID: call.SessionID,
-				Kind:      ApprovalRequired,
-				At:        at,
-				Request:   &request,
-			})
 		}
-		return result, nil, err
+		return result, nil, nil
 	}
 	if !result.review {
 		return result, nil, nil
 	}
-	request, err := e.deps.Operations.PrepareReview(ctx, call, t.workspacePath)
+	request, err := e.deps.Operations.PrepareReview(ctx, t.runtime, call, t.workspacePath)
 	if err != nil {
 		return result, nil, err
 	}
@@ -119,7 +106,7 @@ func (t *ExecutionTools) authorizationStep(ctx context.Context, call sessionentr
 }
 
 // evaluate 只读取事实并作出瞬时结论，不保存工具执行状态或发起模型请求。
-func (e *Executor) evaluate(ctx context.Context, call sessionentry.ToolCall, decision security.ApprovalDecision) (authorizationResult, error) {
+func (e *Executor) evaluate(active *activeCall, decision security.ApprovalDecision) (authorizationResult, error) {
 	deny := func(code, message string) authorizationResult {
 		result := tool.NewToolError(code, message)
 		return authorizationResult{denied: &result}
@@ -127,12 +114,8 @@ func (e *Executor) evaluate(ctx context.Context, call sessionentry.ToolCall, dec
 	if decision.Action == security.ApprovalDeny {
 		return deny("tool_not_allowed", "The operation is prohibited by rule: "+decision.RuleID), nil
 	}
-	user, decided, err := e.deps.Operations.GetUserDecision(ctx, call.Key)
-	if err != nil {
-		return authorizationResult{}, err
-	}
-	if decided {
-		if !user.Approved {
+	if active.decision != nil {
+		if !active.decision.Approved {
 			return deny("tool_approval_denied", "The user denied this tool call."), nil
 		}
 		return authorizationResult{}, nil
@@ -143,11 +126,8 @@ func (e *Executor) evaluate(ctx context.Context, call sessionentry.ToolCall, dec
 	case security.ApprovalAsk:
 		return authorizationResult{pending: true}, nil
 	case security.ApprovalAuto:
-		review, found, err := e.deps.Operations.GetReview(ctx, call.Key)
-		if err != nil {
-			return authorizationResult{}, err
-		}
-		if !found {
+		review := active.review
+		if review == nil {
 			return authorizationResult{review: true}, nil
 		}
 		switch review.Assessment.Verdict {
@@ -167,11 +147,15 @@ func (e *Executor) checkUnfinished(ctx context.Context, call sessionentry.ToolCa
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if _, found, err := e.deps.Operations.GetResult(ctx, call.Key); err != nil {
-		return err
-	} else if found {
+	active := e.active[call.Key]
+	if active == nil {
+		return errors.New("tool call is no longer active")
+	}
+	if _, found := active.runtime.Result(call.Key); found {
 		return errResultAvailable
 	}
-	_, err := e.checkCall(ctx, call)
-	return err
+	if active.stopped {
+		return errCallStopped
+	}
+	return nil
 }

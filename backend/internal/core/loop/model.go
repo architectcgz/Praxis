@@ -70,8 +70,8 @@ func (r *Runner) callModel(
 	if err := ctx.Err(); err != nil {
 		return response, err
 	}
-	if err := r.Progress.RecordModelRequest(ctx, executionInput.ID, sequence, requestKind == hook.ModelRequestIteration); err != nil {
-		return response, failCause(FailureStorage, err)
+	if err := r.Progress.RecordModelRequest(ctx, executionInput.Runtime, sequence, requestKind == hook.ModelRequestIteration); err != nil {
+		return response, entryFailure(executionInput, err)
 	}
 	boundary.Request = request.Clone()
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
@@ -81,9 +81,9 @@ func (r *Runner) callModel(
 		ReferenceID: "assistant:" + request.TurnID.String(),
 	})
 	defer func() {
-		// 输出保存是原生可靠性步骤；取消或断流也不能遗漏已经收到的消耗。
-		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), executionInput.ID, response.textBytes); progressErr != nil {
-			err = failCause(FailureStorage, errors.Join(err, progressErr))
+		// 取消或断流也要将已收到的消耗接纳到内存进度，不依赖落盘完成。
+		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), executionInput.Runtime, response.textBytes); progressErr != nil {
+			err = entryFailure(executionInput, errors.Join(err, progressErr))
 		}
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
 			Request:     boundary,
@@ -95,7 +95,7 @@ func (r *Runner) callModel(
 		}
 		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
 	}()
-	ctx, span := r.TimingRecorder.Start(ctx, timing.Operation{
+	ctx, span := executionInput.Runtime.Timing.Start(ctx, timing.Operation{
 		ExecutionID: executionInput.ID.String(),
 		Kind:        timing.Provider,
 		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
@@ -229,7 +229,7 @@ func collectModelResponse(
 	}
 }
 
-// validateStopReason 在任何内容落库或工具执行前检查终态，摘要调用也遵守同一约束。
+// validateStopReason 在接纳内容或执行工具前检查终态，摘要调用也遵守同一约束。
 func (r modelResponse) validateStopReason() error {
 	toolCount := 0
 	for _, event := range r.events {

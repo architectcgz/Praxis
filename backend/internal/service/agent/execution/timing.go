@@ -12,18 +12,34 @@ import (
 )
 
 // RecordTiming 是 Recorder 的记录回调；观测失败只记日志，不能重放业务操作。
-func (s *Service) RecordTiming(record timing.Record) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := s.records.AppendTiming(ctx, record); err != nil {
-		s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
-	}
-	execution, err := s.records.Get(ctx, identity.AgentExecutionID(record.ExecutionID))
-	if err != nil {
-		s.logger.Errorf("execution timing owner lookup failed: %v", err)
+func (s *Service) RecordTiming(runtime *agentexecution.Runtime, record timing.Record) {
+	execution := runtime.Snapshot()
+	if execution.ID.String() != record.ExecutionID {
+		s.logger.Errorf("timing owner mismatch execution=%s", record.ExecutionID)
 		return
 	}
+	if runtime.Main() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.records.AppendTiming(ctx, record); err != nil {
+			s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
+		}
+	} else {
+		runtime.RecordTiming(record)
+	}
 	s.publishTiming(operationTiming(execution, record))
+}
+
+func RuntimeTimings(runtime *agentexecution.Runtime) []timing.View {
+	execution := runtime.Snapshot()
+	result := make([]timing.View, 0)
+	if value := executionTiming(execution); value != nil {
+		result = append(result, *value)
+	}
+	for _, record := range runtime.Timings() {
+		result = append(result, operationTiming(execution, record))
+	}
+	return result
 }
 
 // ListAgentTimings 从 Execution 仓储聚合操作记录，并派生执行本身的墙上时钟耗时。

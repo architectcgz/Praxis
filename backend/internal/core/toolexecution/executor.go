@@ -26,33 +26,45 @@ type ExecutorDependencies struct {
 	Prepare        func(tool.Tool, json.RawMessage, string) (json.RawMessage, error)
 	Bind           func(tool.Tool, string) tool.Tool
 	HookDispatcher *hook.Dispatcher
-	TimingRecorder *timing.Recorder
 	Emitter        *coreevent.Emitter
 	Clock          clock.Clock
 	Logf           func(string, ...any)
 }
 
-// Executor 复用工具能力，并同步工具启动、人工决定及取消；不保存审批状态机。
+// Executor 只定位活跃 ToolCall；调用退出后立即释放审批和工具控制状态。
 type Executor struct {
 	deps   ExecutorDependencies
 	mu     sync.Mutex
-	active map[Key]*Execution
+	active map[Key]*activeCall
+}
+
+type activeCall struct {
+	runtime  *agentexecution.Runtime
+	call     sessionentry.ToolCall
+	owner    agentexecution.Execution
+	tool     *Execution
+	request  *ApprovalRequest
+	decision *UserDecision
+	review   *ReviewRecord
+	stopped  bool
 }
 
 func NewExecutor(deps ExecutorDependencies) *Executor {
-	return &Executor{deps: deps, active: make(map[Key]*Execution)}
+	return &Executor{deps: deps, active: make(map[Key]*activeCall)}
 }
 
 // ExecutionTools 只绑定本次已取得运行权的 AgentExecution 的环境。
 type ExecutionTools struct {
+	runtime       *agentexecution.Runtime
 	executor      *Executor
 	workspacePath string
 	awaitApproval func(context.Context) error
 }
 
-func (e *Executor) ForExecution(workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
+func (e *Executor) ForExecution(runtime *agentexecution.Runtime, workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
 	return &ExecutionTools{
 		executor:      e,
+		runtime:       runtime,
 		workspacePath: workspacePath,
 		awaitApproval: awaitApproval,
 	}
@@ -61,8 +73,17 @@ func (e *Executor) ForExecution(workspacePath string, awaitApproval func(context
 // Execute 在同一次调用中准备参数、授权、等待审批、执行工具并提交回执。
 func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.ToolCall) (sessionentry.ContextEntry, error) {
 	s := tools.executor
-	if stored, found, err := s.deps.Operations.GetResult(ctx, call.Key); err != nil || found {
-		return stored, err
+	owner := tools.runtime.Snapshot()
+	s.mu.Lock()
+	if s.active[call.Key] != nil {
+		s.mu.Unlock()
+		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
+	}
+	s.active[call.Key] = &activeCall{call: call, owner: owner, runtime: tools.runtime}
+	s.mu.Unlock()
+	defer s.unregister(call.Key)
+	if stored, found := tools.runtime.Result(call.Key); found {
+		return stored, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return s.appendError(ctx, call, "tool_interrupted", err.Error())
@@ -98,10 +119,13 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 	s := tools.executor
 
 	for {
-		if stored, found, err := s.deps.Operations.GetResult(ctx, call.Key); err != nil || found {
-			return stored, err
+		if stored, found := tools.runtime.Result(call.Key); found {
+			return stored, nil
 		}
 		pending, denied, err := tools.authorize(ctx, call, args, decision)
+		if errors.Is(err, errCallStopped) {
+			return s.appendError(ctx, call, "tool_interrupted", err.Error())
+		}
 		if err != nil {
 			if errors.Is(err, errResultAvailable) {
 				continue
@@ -116,7 +140,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 		}
 
 		if pending {
-			// 请求已可靠保存；通知和等待均在控制锁外，等待信号保留提前到达的审批决定或停止通知。
+			// 请求仅属于活跃调用；等待信号保留提前到达的决定或停止通知。
 			sourceTaskID, err := s.checkCall(ctx, call)
 			if err != nil {
 				return sessionentry.ContextEntry{}, err
@@ -126,14 +150,14 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 			waiting.Call.Arguments = bytes.Clone(args)
 			s.notifyWaiting(ctx, waiting)
 			if err := tools.awaitApproval(ctx); err != nil {
-				return sessionentry.ContextEntry{}, err
+				return s.appendError(ctx, call, "tool_interrupted", err.Error())
 			}
 			continue
 		}
 
 		observed := observedTool{
 			Tool:     s.deps.Bind(t, tools.workspacePath),
-			recorder: s.deps.TimingRecorder,
+			recorder: tools.runtime.Timing,
 			hooks:    s.deps.HookDispatcher,
 			identity: hook.Identity{
 				OperationID: boundary.OperationID,
@@ -148,6 +172,9 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 		err = s.register(ctx, call, execution)
 		if err != nil {
 			execution.Stop()
+			if errors.Is(err, errCallStopped) {
+				return s.appendError(ctx, call, "tool_interrupted", err.Error())
+			}
 			if errors.Is(err, errResultAvailable) {
 				continue
 			}
@@ -157,8 +184,6 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 
 			return sessionentry.ContextEntry{}, err
 		}
-		// active 仅供 Stop 查找取消句柄；本次 Execute 返回时移除。
-		defer s.unregister(call.Key)
 		result := execution.Run()
 
 		value := result.ToolResult
@@ -239,19 +264,13 @@ func (e *Executor) appendError(ctx context.Context, call sessionentry.ToolCall, 
 }
 
 func (e *Executor) checkCall(ctx context.Context, call sessionentry.ToolCall) (identity.TaskID, error) {
-	_, execution, err := e.deps.Operations.ResolveCall(ctx, ControlRequest{
-		SessionID:   call.SessionID,
-		AgentID:     call.AgentID,
-		ExecutionID: call.ExecutionID,
-		CallID:      call.CallID,
-	})
-	if err != nil {
-		return "", err
-	}
-	if execution.Status != agentexecution.ExecutionRunning {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	active := e.active[call.Key]
+	if active == nil || active.owner.Status != agentexecution.ExecutionRunning {
 		return "", errorcode.ErrRequestConflict
 	}
-	return execution.SourceTaskID, nil
+	return active.owner.SourceTaskID, nil
 }
 
 func (e *Executor) notifyWaiting(ctx context.Context, value hook.ToolExecution) {
@@ -279,8 +298,12 @@ func (e *Executor) commitResult(ctx context.Context, call sessionentry.ToolCall,
 func (e *Executor) commitResultLocked(ctx context.Context, call sessionentry.ToolCall, result tool.ToolResult) (sessionentry.ContextEntry, error) {
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if stored, found, err := e.deps.Operations.GetResult(commitCtx, call.Key); err != nil || found {
-		return stored, err
+	active := e.active[call.Key]
+	if active == nil {
+		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
 	}
-	return e.deps.Operations.CommitResult(commitCtx, call, result)
+	if stored, found := active.runtime.Result(call.Key); found {
+		return stored, nil
+	}
+	return e.deps.Operations.CommitResult(commitCtx, active.runtime, call, result)
 }

@@ -13,22 +13,25 @@ import (
 )
 
 type storageResources struct {
-	store  *storage.Store
-	logger *logging.Logger
+	storage *storage.Storage
+	logger  *logging.Logger
 }
 
 func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
-	store, err := storage.Open(ctx, root.Root)
-	if err != nil {
-		return storageResources{}, fmt.Errorf("open storage: %w", err)
-	}
 	logger, err := logging.NewFactory().Application(filepath.Join(root.State, "praxis.log"))
 	if err != nil {
-		_ = store.Close(context.Background())
 		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
 	}
 	logger.Infof("application open started root=%s logs=%s", root.Root, root.State)
-	return storageResources{store: store, logger: logger}, nil
+	state, err := storage.Open(ctx, root.Root, func(err error) {
+		logger.Errorf("storage persistence degraded; runtime continues in memory: %v", err)
+	})
+	if err != nil {
+		logger.Errorf("open storage failed: %v", err)
+		_ = logger.Close()
+		return storageResources{}, fmt.Errorf("open storage: %w", err)
+	}
+	return storageResources{storage: state, logger: logger}, nil
 }
 
 func usageObserver(usages repository.ModelUsage, logger *logging.Logger) func(providerapi.UsageRecord) {

@@ -2,11 +2,15 @@ package loop
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 )
 
 // compressContext 包围策略检查与摘要保存；Changed 区分无需压缩和完整完成压缩。
@@ -14,7 +18,6 @@ import (
 func (r *Runner) compressContext(
 	ctx context.Context,
 	input Input,
-	assistant AssistantCommitter,
 	history appcontext.ModelContext,
 	options contextcompress.Options,
 ) (compressed appcontext.ModelContext, changed bool, err error) {
@@ -47,12 +50,27 @@ func (r *Runner) compressContext(
 		if !entry.IsSummary() || entry.ID != "" {
 			continue
 		}
-		stored, writeErr := assistant.AppendSummary(ctx, entry)
+		entry.Role, entry.AuthorKind = role.User, sessionentry.AuthorSystem
+		entry.AuthorID, entry.ExecutionID, entry.RequestID = input.AgentID.String(), input.ID.String(), input.RequestID.String()
+		encoded, encodeErr := json.Marshal(struct {
+			Content  []sessionentry.Block
+			Replaces []string
+		}{Content: entry.Content, Replaces: entry.Replaces})
+		if encodeErr != nil {
+			return compressed, false, failCause(FailureContract, encodeErr)
+		}
+		digest := sha256.Sum256(encoded)
+		entry.ID = fmt.Sprintf("summary:%s:%x", input.ID, digest[:12])
+		stored, inserted, writeErr := r.appendEntry(ctx, input, entry)
 		if writeErr != nil {
-			return compressed, false, failCause(FailureStorage, writeErr)
+			return compressed, false, entryFailure(input, writeErr)
 		}
 		compressed.Entries[index] = stored
+		if !inserted {
+			continue
+		}
 		r.Emitter.Emit(coreevent.Event{
+			Transient:   !input.Runtime.Main(),
 			Kind:        coreevent.EntriesAppended,
 			SessionID:   input.SessionID,
 			AgentID:     input.AgentID,

@@ -25,7 +25,7 @@ const (
 	ExecutionInterrupted ExecutionOutcome = "interrupted"
 )
 
-// ExecutionProgress 保存模型请求消耗；消息相关统计由仓储派生，重启不能重置预算。
+// ExecutionProgress 在内存中记录模型请求消耗；消息统计由历史派生，重启只能恢复已落盘的预算。
 type ExecutionProgress struct {
 	NextSequence     uint64
 	Iterations       uint64

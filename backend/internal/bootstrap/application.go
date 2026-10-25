@@ -5,10 +5,12 @@ import (
 	"errors"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/security"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
 	"praxis/internal/identity"
@@ -47,7 +49,7 @@ type Options struct {
 }
 
 // Open 只做高层装配；恢复完成前不把业务入口交给桌面宿主。
-func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Application, error) {
+func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Application, err error) {
 	if ctx == nil {
 		return nil, errors.New("application composition context is required")
 	}
@@ -67,18 +69,20 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		if ready {
 			return
 		}
+		// 关闭日志前保存启动失败原因，不能只依赖桌面宿主的控制台输出。
+		a.logger.Errorf("application open failed: %v", err)
 		// 装配失败也要先停止可能已恢复的执行，再关闭其依赖的日志资源。
 		if a.coordinator != nil {
 			_ = a.coordinator.Close(context.Background())
 		}
-		_ = a.store.Close(context.Background())
+		_ = a.storage.Close(context.Background())
 		_ = a.logger.Close()
 	}()
 	config, err := loadConfiguration(root, options.Tools)
 	if err != nil {
 		return nil, err
 	}
-	repos := a.store.Repositories()
+	repos := a.storage.Repositories()
 	if err := agentservice.ValidateDefinitions(nil, config.agents.List()); err != nil {
 		return nil, err
 	}
@@ -96,6 +100,8 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 	a.sessions = buildSessions(resources, repos, config.agents, hooks, configMu, config.models, mainAgent)
 	agents = agentservice.NewService(agentservice.Dependencies{
 		Agent:            a.sessions.GetAgent,
+		ActiveExecution:  func(id identity.AgentID) (agentexecution.Execution, bool) { return a.coordinator.ActiveExecution(id) },
+		ActiveEntries:    func(id identity.AgentID) []sessionentry.ContextEntry { return a.coordinator.ActiveEntries(id) },
 		RegisterAgent:    a.sessions.RegisterAgent,
 		ExecutionRecords: repos.Executions,
 		Sessions:         repos.Sessions,
@@ -103,7 +109,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		Definitions:      config.agents.Definition,
 	})
 	models := buildModelService(root, config, a.logger, configMu)
-	coordinator, timings := buildExecution(resources, repos, config, a.sessions, agents.GetOrCreateMainAgent, hooks, emitter, configMu, options.Runner)
+	coordinator := buildExecution(resources, repos, config, a.sessions, agents.GetOrCreateMainAgent, hooks, emitter, configMu, options.Runner)
 	a.coordinator = coordinator
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:   repos.Projects,
@@ -136,9 +142,9 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (*Applic
 		Models:         models,
 		ModelConfig:    models,
 		Emitter:        emitter,
-		Timings:        timings,
+		Timings:        coordinator,
 		Usages:         a.sessions,
-		SessionLogPath: a.store.SessionLogPath,
+		SessionLogPath: repos.Sessions.SessionLogPath,
 	}
 	if err := agents.RestoreAgents(ctx); err != nil {
 		return nil, err
@@ -171,11 +177,18 @@ func (a *Application) Close(ctx context.Context) error {
 		return err
 	}
 	sessionErr := a.sessions.CleanupEmptySessions(ctx)
-	storeErr := a.store.Close(ctx)
-	if sessionErr != nil || storeErr != nil {
-		logger.Errorf("application close encountered errors sessions=%v store=%v", sessionErr, storeErr)
+	if err := ctx.Err(); err != nil {
+		// 清理超时时保留可写存储，后续关闭仍能接纳尚未完成的会话删除。
+		return errors.Join(sessionErr, err)
+	}
+	storageErr := a.storage.Close(ctx)
+	if sessionErr != nil || storageErr != nil {
+		logger.Errorf("application close encountered errors sessions=%v storage=%v", sessionErr, storageErr)
 	} else {
 		logger.Infof("application close completed")
 	}
-	return errors.Join(sessionErr, storeErr, logger.Close())
+	if ctx.Err() != nil {
+		return errors.Join(sessionErr, storageErr)
+	}
+	return errors.Join(sessionErr, storageErr, logger.Close())
 }

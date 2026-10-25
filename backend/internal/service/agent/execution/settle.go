@@ -10,14 +10,13 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
-	"praxis/internal/identity"
 )
 
 // ConfirmRunning 区分首次启动与重复确认；审批等待不改变运行状态。
 // 首次启动记录开始时间，已结束的执行不能重新启动。
 // executionID 来自 Coordinator 准入时已校验的持久化 Execution。
-func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.AgentExecutionID) error {
-	err := s.update(ctx, executionID, func(task *agentexecution.Execution) error {
+func (s *Service) ConfirmRunning(ctx context.Context, runtime *agentexecution.Runtime) error {
+	err := s.update(ctx, runtime, func(task *agentexecution.Execution) error {
 		switch task.Status {
 		case agentexecution.ExecutionStarting:
 			task.Start(s.clock.Now())
@@ -29,24 +28,16 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 		return nil
 	})
 	if err == nil {
-		execution, readErr := s.records.Get(ctx, executionID)
-		if readErr != nil {
-			s.logger.Errorf("execution timing lookup failed: %v", readErr)
-		} else {
-			s.publishExecutionTiming(execution)
-		}
+		s.publishExecutionTiming(runtime.Snapshot())
 	}
 	return err
 }
 
 // Settle 保存所属执行者确定的实际结果，不根据迟到的取消信号改写完成结果。
 // 写入失败由 Coordinator 保留占用和结果后重试；重复结算返回已有终态，不再次发布事件。
-func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutionID, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.Execution, err error) {
-	endedExecution, err := s.records.Get(ctx, executionID)
-	if err != nil {
-		s.logger.Errorf("operation=execution_end execution_id=%s status=failed outcome=%s error=%v", executionID, outcome, err)
-		return agentexecution.Execution{}, err
-	}
+func (s *Service) Settle(ctx context.Context, runtime *agentexecution.Runtime, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.Execution, err error) {
+	endedExecution := runtime.Snapshot()
+	executionID := endedExecution.ID
 	// 在终态提交前持有实例引用，避免会话在提交后被删除导致状态收尾失去目标。
 	agent, err := s.agent(endedExecution.AgentID)
 	if err != nil {
@@ -80,7 +71,10 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 		if outcome == agentexecution.ExecutionFailed {
 			endedExecution.FailureMessage = failureMessage
 		}
-		if err = s.records.Save(ctx, endedExecution); err != nil {
+		if runtime.Main() {
+			err = s.records.Save(ctx, endedExecution)
+		}
+		if err != nil {
 			s.logger.Errorf(
 				"operation=execution_end request_id=%s session_id=%s agent_id=%s execution_id=%s status=failed outcome=%s error=%v",
 				endedExecution.RequestID,
@@ -93,9 +87,15 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 			return agentexecution.Execution{}, err
 		}
 	}
-	// 终态已提交，附属命名失败只记录日志；重复结算可以继续完成命名。
+	if err := runtime.Update(func(record *agentexecution.Execution) error { *record = endedExecution; return nil }); err != nil {
+		return agentexecution.Execution{}, err
+	}
+	// 终态已接纳；Main 命名只使用本次已持有的输入，子执行不修改会话名称。
 	defer func() {
-		if nameErr := s.nameSessionAfterAnswer(context.WithoutCancel(ctx), endedExecution, endedExecution.Outcome, endedExecution.EndedAt); nameErr != nil {
+		if !runtime.Main() {
+			return
+		}
+		if nameErr := s.nameSessionAfterAnswer(context.WithoutCancel(ctx), runtime, endedExecution, endedExecution.Outcome, endedExecution.EndedAt); nameErr != nil {
 			s.logger.Errorf("name settled session execution_id=%s error=%v", endedExecution.ID, nameErr)
 		}
 	}()
@@ -151,6 +151,7 @@ func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutio
 
 func (s *Service) nameSessionAfterAnswer(
 	ctx context.Context,
+	runtime *agentexecution.Runtime,
 	task agentexecution.Execution,
 	outcome agentexecution.ExecutionOutcome,
 	at time.Time,
@@ -158,9 +159,9 @@ func (s *Service) nameSessionAfterAnswer(
 	if outcome != agentexecution.ExecutionCompleted && outcome != agentexecution.ExecutionYielded {
 		return nil
 	}
-	message, err := s.entries.Get(ctx, task.AgentID, task.InputEntryID)
-	if err != nil {
-		return err
+	message, found := runtime.Entry(task.InputEntryID)
+	if !found {
+		return errorcode.ErrNotFound
 	}
 	return s.sessions.NameFromInput(ctx, task.SessionID, message.TextContent(), at)
 }

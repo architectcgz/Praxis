@@ -33,14 +33,24 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		}
 		s.mu.Unlock()
 	}()
-	if err := s.toolRecords.RecoverAll(ctx); err != nil {
-		return fmt.Errorf("reconcile tool results: %w", err)
+	history, err := s.toolRecords.RecoverAll(ctx)
+	if err != nil {
+		return fmt.Errorf("load missing tool history: %w", err)
+	}
+	for _, entry := range history {
+		if _, _, err := s.entries.Append(ctx, entry); err != nil {
+			return fmt.Errorf("save recovered tool history: %w", err)
+		}
 	}
 	executions, err := s.recovery.ListActive(ctx)
 	if err != nil {
 		return fmt.Errorf("load active executions: %w", err)
 	}
 	for _, execution := range executions {
+		runtime, loadErr := s.operations.RestoreRuntime(ctx, execution)
+		if loadErr != nil {
+			return loadErr
+		}
 		s.mu.Lock()
 		if s.executions[execution.AgentID] != nil {
 			s.mu.Unlock()
@@ -48,7 +58,7 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		}
 		active := newActiveExecution(ctx)
 		s.executions[execution.AgentID] = active
-		err := s.launchLocked(execution, active)
+		err := s.launchLocked(runtime, active)
 		if err != nil {
 			delete(s.executions, execution.AgentID)
 			close(active.ready)

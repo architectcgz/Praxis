@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
@@ -14,11 +13,12 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
+	"praxis/internal/repository"
 )
 
 // Dependencies 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Dependencies struct {
-	TimingRecorder *timing.Recorder
+	Entries        repository.Entries
 	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
 	Progress       ExecutionProgress
@@ -68,7 +68,7 @@ func (r *Runner) run(
 		if err != nil {
 			return loopResult(failCause(FailureContract, err))
 		}
-		compressed, changed, err := r.compressContext(ctx, executionInput, deps.Assistant, *modelContext, contextcompress.Options{
+		compressed, changed, err := r.compressContext(ctx, executionInput, *modelContext, contextcompress.Options{
 			SummaryFormat:   r.SummaryFormat,
 			ContextWindow:   executionInput.Config.Model.ContextWindow,
 			MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens,
@@ -84,9 +84,9 @@ func (r *Runner) run(
 			*modelContext = compressed
 			request.Context = modelContext.Clone()
 		}
-		sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.ID)
+		sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.Runtime)
 		if err != nil {
-			return loopResult(failCause(FailureStorage, err))
+			return loopResult(entryFailure(executionInput, err))
 		}
 		turnID := identity.NewTurnID(executionInput.ID, sequence)
 		request.TurnID = turnID
@@ -156,13 +156,13 @@ func (r *Runner) executeTurn(
 			if ctx.Err() != nil {
 				stopReason = "aborted"
 			}
-			stored, inserted, writeErr := deps.Assistant.AppendAssistant(context.WithoutCancel(ctx), sessionentry.ContextEntry{
+			stored, inserted, writeErr := r.appendEntry(context.WithoutCancel(ctx), executionInput, sessionentry.ContextEntry{
 				ID: "assistant:" + turnID.String(), RequestID: executionInput.RequestID.String(), ExecutionID: executionInput.ID.String(),
 				TurnID: turnID.String(), StopReason: stopReason, Role: role.Assistant, AuthorKind: sessionentry.AuthorAgent,
 				AuthorID: executionInput.AgentID.String(), Content: partial,
 			})
 			if writeErr != nil {
-				err = failCause(FailureStorage, errors.Join(err, writeErr))
+				err = entryFailure(executionInput, errors.Join(err, writeErr))
 			} else {
 				if inserted {
 					r.notifyAssistant(ctx, executionInput, stored)
@@ -200,10 +200,10 @@ func (r *Runner) executeTurn(
 			AuthorID:    executionInput.AgentID.String(),
 			Content:     assistant,
 		}
-		message, inserted, err := deps.Assistant.AppendAssistant(ctx, message)
+		message, inserted, err := r.appendEntry(ctx, executionInput, message)
 		if err != nil {
 			r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
-			outcome, code, cause := loopResult(failCause(FailureStorage, err))
+			outcome, code, cause := loopResult(entryFailure(executionInput, err))
 			return outcome, code, false, cause
 		}
 		committed = append(committed, message)
@@ -239,7 +239,18 @@ func (r *Runner) executeTurn(
 		return EndCompleted, "", true, nil
 	}
 	results, err := r.runToolCalls(ctx, executionInput, deps, calls, turnID)
+	if err != nil {
+		// 已返回的回执保持原样；当前失败调用和后续未执行调用由本轮退出分支统一收尾。
+		interrupted, closeErr := r.interruptToolCalls(ctx, executionInput, calls[len(results):])
+		results = append(results, interrupted...)
+		if closeErr != nil {
+			err = entryFailure(executionInput, errors.Join(err, closeErr))
+		}
+	}
 	committed = append(committed, results...)
+	for _, result := range results {
+		*modelContext = modelContext.Append(result)
+	}
 	if err != nil {
 		if len(committed) > 0 {
 			r.Emitter.Emit(coreevent.Event{
@@ -255,10 +266,6 @@ func (r *Runner) executeTurn(
 		outcome, code, cause := loopResult(err)
 		return outcome, code, false, cause
 	}
-	for _, result := range results {
-		*modelContext = modelContext.Append(result)
-	}
-
 	r.Emitter.Emit(coreevent.Event{
 		Kind:        coreevent.TurnCompleted,
 		Entries:     committed,

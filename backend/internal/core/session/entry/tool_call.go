@@ -3,6 +3,7 @@ package entry
 import (
 	"bytes"
 	"encoding/json"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"time"
@@ -42,4 +43,30 @@ func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.A
 		})
 	}
 	return calls
+}
+
+// ResultEntry 为正常结果和中断回执使用相同的确定性身份及调用归属，不分配历史序号或时间。
+func (c ToolCall) ResultEntry(result tool.ToolResult) ContextEntry {
+	if len(result.Payload) > tool.MaxInlineResultBytes {
+		result = tool.NewToolError("tool_execution_failed", "Tool result exceeds the inline size limit.")
+	}
+	if result.Payload == "" {
+		result.Payload = "(empty tool result)"
+	}
+	return ContextEntry{
+		ID:          "tool-result:" + c.ExecutionID.String() + ":" + c.CallID,
+		RequestID:   c.RequestID,
+		ExecutionID: c.ExecutionID.String(),
+		TurnID:      c.TurnID.String(),
+		Role:        role.Tool,
+		AuthorKind:  AuthorTool,
+		AuthorID:    string(c.Name),
+		Content: []Block{{
+			Kind:    BlockToolResult,
+			CallID:  c.CallID,
+			Name:    string(c.Name),
+			Text:    result.Payload,
+			IsError: result.ErrorClass != "",
+		}},
+	}
 }

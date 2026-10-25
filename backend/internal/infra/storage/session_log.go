@@ -11,25 +11,25 @@ import (
 	"praxis/internal/infra/jsonl"
 )
 
-// SessionLogPath 返回现存会话的 JSONL 绝对路径；非法 ID、已删除会话和缺失文件均返回错误。
-func (s *Store) SessionLogPath(ctx context.Context, sessionID identity.SessionID) (string, error) {
+// SessionLogPath 是显式文件访问，只返回已存在的日志路径，不等待待写队列。
+// 新会话尚未写盘或文件已删除时返回不存在；文件内容可能落后于内存。
+func (r SessionRepository) SessionLogPath(ctx context.Context, sessionID identity.SessionID) (path string, err error) {
 	if !jsonl.ValidScope(sessionID.String()) {
-		return "", fmt.Errorf("sessionId: session ID is not a valid file name: %w", errorcode.ErrInvalidValue)
+		return "", fmt.Errorf("sessionId: invalid log file name: %w", errorcode.ErrInvalidValue)
 	}
-	var path string
-	err := s.view(ctx, func() error {
-		if _, err := getLocked[sessionmodel.Session](s, "session", sessionID.String()); err != nil {
-			return err
-		}
-		var err error
-		path, err = s.log.ExistingPath(sessionID.String())
-		if errors.Is(err, os.ErrNotExist) {
-			return errorcode.ErrNotFound
-		}
+	err = withState(ctx, r.storage, func(_ *Storage, records []logRecord) error {
+		_, err := getRecord[sessionmodel.Session](records, "session", sessionID.String())
 		return err
 	})
 	if err != nil {
 		return "", err
 	}
-	return path, nil
+	err = r.storage.log.With(ctx, func(access *jsonl.Access) error {
+		path, err = access.ExistingPath(sessionID.String())
+		if errors.Is(err, os.ErrNotExist) {
+			return errorcode.ErrNotFound
+		}
+		return err
+	})
+	return path, err
 }

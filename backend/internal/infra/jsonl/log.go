@@ -1,4 +1,4 @@
-// Package jsonl 提供可靠追加、文件寻址和启动 Replay。
+// Package jsonl 提供顺序追加、文件寻址和启动重放，不持有业务状态。
 package jsonl
 
 import (
@@ -18,7 +18,6 @@ type Log struct {
 	root            string
 	projects        string
 	closed          bool
-	fault           error
 	sequences       map[string]uint64
 	lengths         map[string]int64
 	sessionProjects map[string]string
@@ -30,7 +29,7 @@ type Scope struct {
 }
 
 // Open 初始化日志资源；调用方必须在日志关闭前持续持有应用独占运行权。
-func Open(ctx context.Context, root string) (*Log, error) {
+func Open(ctx context.Context, root string, visit func(Scope, Event) error) (*Log, error) {
 	if !pathutil.IsAbsoluteNormalized(root) {
 		return nil, errors.New("canonical absolute log directory is required")
 	}
@@ -60,21 +59,27 @@ func Open(ctx context.Context, root string) (*Log, error) {
 	if err := writeNewFile(s.projectPath(), nil); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
-	if err := s.read(ctx, Scope{}, nil); err != nil {
+	apply := func(scope Scope) func(Event) error {
+		if visit == nil {
+			return nil
+		}
+		return func(event Event) error { return visit(scope, event) }
+	}
+	if err := s.read(ctx, Scope{}, apply(Scope{})); err != nil {
 		return nil, err
 	}
-	scopes, err := s.Scopes(ctx)
+	scopes, err := s.scopes(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, scope := range scopes {
-		if err := s.read(ctx, scope, nil); err != nil {
+		if err := s.read(ctx, scope, apply(scope)); err != nil {
 			return nil, err
 		}
 	}
 	return s, nil
 }
-func (s *Log) Scopes(ctx context.Context) ([]Scope, error) {
+func (s *Log) scopes(ctx context.Context) ([]Scope, error) {
 	result := make([]Scope, 0)
 	seen := make(map[string]bool)
 	projects, err := os.ReadDir(s.projects)
@@ -156,19 +161,20 @@ func (s *Log) sessionPath(sessionID, projectID string) (string, error) {
 	return filepath.Join(s.projects, projectID, "sessions", sessionID+".jsonl"), nil
 }
 
-func (s *Log) Sequence(sessionID string) uint64 { return s.sequences[sessionID] }
-func (s *Log) Project(sessionID string) string  { return s.sessionProjects[sessionID] }
-
 func (s *Log) Check() error {
 	if s.closed {
 		return errors.New("log is closed")
 	}
-	return s.fault
+	return nil
 }
 
 // ExistingPath 仅供显式导出日志的业务使用，普通实体查询不调用文件系统。
 func (s *Log) ExistingPath(sessionID string) (string, error) {
-	path, err := s.sessionPath(sessionID, "")
+	projectID, known := s.sessionProjects[sessionID]
+	if !known {
+		return "", os.ErrNotExist
+	}
+	path, err := s.sessionPath(sessionID, projectID)
 	if err != nil {
 		return "", err
 	}

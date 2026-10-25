@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -20,7 +19,7 @@ import (
 	"sync"
 )
 
-func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, mainAgent func(context.Context, identity.SessionID) (*agentmodel.Agent, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, runner *loop.Runner) (*execution.Coordinator, *executionservice.Service) {
+func buildExecution(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, mainAgent func(context.Context, identity.SessionID) (*agentmodel.Agent, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, runner *loop.Runner) *execution.Coordinator {
 	tasks := executionservice.NewService(executionservice.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
@@ -40,22 +39,20 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 	})
 
 	coordinator := assembleCoordinator(coordinatorDependencies{
-		TimingRecorder: timing.New(tasks.RecordTiming),
-		Tasks:          tasks,
-		Progress:       tasks,
-		Records:        repos.Executions,
-		SessionTasks:   sessions,
-		MainAgent:      mainAgent,
-		SessionModels:  sessions,
-		Recovery:       repos.Executions,
-		ToolExecutions: repos.ToolExecutions,
-		ToolCalls:      repos.ToolCalls,
-		Agent:          sessions.GetAgent,
-		Entries:        repos.Entries,
-		Sessions:       repos.Sessions,
-		Workspaces:     repos.Workspaces,
-		Provider:       provider,
-		Tools:          config.tools,
+		Tasks:         tasks,
+		Progress:      tasks,
+		Records:       repos.Executions,
+		SessionTasks:  sessions,
+		MainAgent:     mainAgent,
+		SessionModels: sessions,
+		Recovery:      repos.Executions,
+		ToolCalls:     repos.ToolCalls,
+		Agent:         sessions.GetAgent,
+		Entries:       repos.Entries,
+		Sessions:      repos.Sessions,
+		Workspaces:    repos.Workspaces,
+		Provider:      provider,
+		Tools:         config.tools,
 		Rules: toolservice.ApprovalRules{
 			ConfigMu: configMu,
 			Catalog:  config.tools,
@@ -80,5 +77,5 @@ func buildExecution(resources storageResources, repos storage.Repositories, conf
 		Runner:         runner,
 		Clock:          clock.UTCClock{},
 	})
-	return coordinator, tasks
+	return coordinator
 }

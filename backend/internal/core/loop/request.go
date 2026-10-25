@@ -21,7 +21,7 @@ func (r *Runner) summarizeContext(
 	history appcontext.ModelContext,
 	limit int,
 ) (string, error) {
-	sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.ID)
+	sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.Runtime)
 	if err != nil {
 		return "", failCause(FailureStorage, err)
 	}

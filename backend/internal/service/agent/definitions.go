@@ -53,7 +53,7 @@ func (s *Service) GetOrCreateMainAgent(ctx context.Context, sessionID identity.S
 	return s.registerAgent(ctx, agent)
 }
 
-// RestoreAgents 在 Coordinator 恢复执行前重建实例；执行事实仅用于这一次初始化。
+// RestoreAgents 只初始化 Session 的 Main 实例，不枚举或重建子执行实例。
 // 未开始的输入和进程内控制意图不恢复，恢复失败时不开放业务入口。
 func (s *Service) RestoreAgents(ctx context.Context) error {
 	sessions, err := s.sessions.List(ctx, 0)
@@ -71,6 +71,9 @@ func (s *Service) RestoreAgents(ctx context.Context) error {
 		// 每个实例只恢复一次；活动执行优先，避免同一时间戳的历史排序覆盖当前归属。
 		latest := make(map[identity.AgentID]agentexecution.Execution)
 		for _, execution := range executions {
+			if execution.AgentID != session.MainAgentID {
+				continue
+			}
 			previous, ok := latest[execution.AgentID]
 			if !ok || execution.Active() || !previous.Active() && cmp.Or(execution.CreatedAt.Compare(previous.CreatedAt), cmp.Compare(execution.ID, previous.ID)) > 0 {
 				latest[execution.AgentID] = execution
@@ -78,13 +81,6 @@ func (s *Service) RestoreAgents(ctx context.Context) error {
 		}
 		for execution := range maps.Values(latest) {
 			agent, err := s.agent(execution.AgentID)
-			if errors.Is(err, errorcode.ErrNotFound) {
-				if _, err := s.definitions(execution.Config.AgentDefinitionID); err != nil {
-					return err
-				}
-				agent = agentmodel.NewAgent(execution.AgentID, session.ID, execution.Config.AgentDefinitionID, agentmodel.KindSubagent, execution.CreatedAt)
-				agent, err = s.registerAgent(ctx, agent)
-			}
 			if err != nil {
 				return err
 			}

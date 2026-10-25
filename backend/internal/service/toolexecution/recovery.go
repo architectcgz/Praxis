@@ -2,60 +2,36 @@ package toolexecution
 
 import (
 	"context"
-	"errors"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/errorcode"
-	"praxis/internal/identity"
 )
 
-// Recover 仅由已确认旧 Loop 和工具终止的业务恢复编排调用。
-// 不读取审批事实判断重放，所有孤儿调用都补同一错误回执。
-func (s *Service) Recover(ctx context.Context, executionID identity.AgentExecutionID, callID string) (sessionentry.ContextEntry, error) {
-	key := executionmodel.Key{ExecutionID: executionID, CallID: callID}
-	var result sessionentry.ContextEntry
-	err := func(txCtx context.Context) error {
-		stored, err := s.deps.Calls.GetResult(txCtx, key)
-		if err == nil {
-			result = stored
-			return nil
-		}
-		if !errors.Is(err, errorcode.ErrNotFound) {
-			return err
-		}
-		call, err := s.call(txCtx, executionID, callID)
-		if err != nil {
-			return err
-		}
-		result, err = s.CommitResult(txCtx, call, tool.ToolResult{Payload: "No result provided", ErrorClass: "missing_tool_result"})
-		return err
-	}(ctx)
-	return result, err
-}
-
-// RecoverAll 只允许在准入开放前调用，此时上一进程的执行者已不存在。
-func (s *Service) RecoverAll(ctx context.Context) error {
-	return s.recoverMatching(ctx, "")
-}
-
-// RecoverExecution 的调用方必须已经持有唯一 Loop 运行权，且旧工具已返回。
-func (s *Service) RecoverExecution(ctx context.Context, id identity.AgentExecutionID) error {
-	return s.recoverMatching(ctx, id)
-}
-
-func (s *Service) recoverMatching(ctx context.Context, executionID identity.AgentExecutionID) error {
+// RecoverAll 在准入开放前读取未完成调用，返回待补齐的历史条目，不保存或恢复审批状态。
+// 调用方在旧执行者已停止的前提下负责提交，提交失败时可用相同条目重试。
+func (s *Service) RecoverAll(ctx context.Context) ([]sessionentry.Record, error) {
 	missing, err := s.deps.Calls.ListMissingToolResults(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	result := make([]sessionentry.Record, 0, len(missing))
 	for _, fact := range missing {
-		if executionID != "" && fact.ExecutionID != executionID {
-			continue
+		call := sessionentry.ToolCall{
+			Key: executionmodel.Key{
+				ExecutionID: fact.ExecutionID,
+				CallID:      fact.CallID,
+			},
+			SessionID: fact.SessionID,
+			AgentID:   fact.AgentID,
+			RequestID: fact.RequestID,
+			TurnID:    fact.TurnID,
+			Name:      tool.ToolName(fact.Name),
 		}
-		if _, err := s.Recover(ctx, fact.ExecutionID, fact.CallID); err != nil {
-			return err
-		}
+		result = append(result, sessionentry.Record{
+			SessionID: fact.SessionID,
+			AgentID:   fact.AgentID,
+			Data:      call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result.")),
+		})
 	}
-	return nil
+	return result, nil
 }

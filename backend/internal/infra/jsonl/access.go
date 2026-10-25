@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 )
 
 // Access 只在 With 回调内有效；其方法不重复获取文件锁，不得逃逸到后台任务。
@@ -13,7 +12,7 @@ type Access struct {
 	ctx context.Context
 }
 
-// With 将读取、条件检查和单事件提交置于同一文件锁内，覆盖跨 Repository 的竞争。
+// With 串行化后台文件操作和显式日志路径查询，不承担业务状态一致性。
 // 回调不能调用外部业务，也不能再次调用同一 Log 的 With 或 Close。
 func (s *Log) With(ctx context.Context, action func(*Access) error) error {
 	if err := ctx.Err(); err != nil {
@@ -30,24 +29,11 @@ func (s *Log) With(ctx context.Context, action func(*Access) error) error {
 	return action(&Access{log: s, ctx: ctx})
 }
 
-func (a *Access) Scopes() ([]Scope, error)                      { return a.log.Scopes(a.ctx) }
-func (a *Access) Sequence(sessionID string) uint64              { return a.log.Sequence(sessionID) }
-func (a *Access) Project(sessionID string) string               { return a.log.Project(sessionID) }
 func (a *Access) ExistingPath(sessionID string) (string, error) { return a.log.ExistingPath(sessionID) }
 
-// ReadSession 只生成调用方需要的临时结果，不在 Log 中缓存业务正文。
-func (a *Access) ReadSession(sessionID string, visit func(Event) error) error {
-	return a.log.read(a.ctx, Scope{ID: sessionID, ProjectID: a.log.Project(sessionID)}, visit)
-}
-
-func (a *Access) ReadProject(visit func(Event) error) error {
-	return a.log.read(a.ctx, Scope{}, visit)
-}
-
-// CreateSession 由会话创建用例显式调用，首条记录和文件一起可靠发布，不覆盖已有日志。
+// CreateSession 由顺序写入者调用，不覆盖已有日志，也不保证断电后已保存。
 func (a *Access) CreateSession(sessionID, projectID string, first Event) (Event, error) {
-	first, err := nextEvent(0, first)
-	if err != nil {
+	if err := validateNextEvent(0, first); err != nil {
 		return Event{}, err
 	}
 	if err := a.log.createSession(a.ctx, sessionID, projectID, first); err != nil {
@@ -63,8 +49,7 @@ func (a *Access) DeleteSession(sessionID string) error {
 
 // AppendSession 只追加已有会话日志，文件丢失时返回错误，不负责创建或补建。
 func (a *Access) AppendSession(sessionID, projectID string, event Event) (Event, error) {
-	event, err := nextEvent(a.log.Sequence(sessionID), event)
-	if err != nil {
+	if err := validateNextEvent(a.log.sequences[sessionID], event); err != nil {
 		return Event{}, err
 	}
 	if err := a.log.appendEvent(a.ctx, sessionID, projectID, event); err != nil {
@@ -75,8 +60,7 @@ func (a *Access) AppendSession(sessionID, projectID string, event Event) (Event,
 
 // AppendProject 追加在资源初始化阶段已经建立的项目汇总日志。
 func (a *Access) AppendProject(event Event) (Event, error) {
-	event, err := nextEvent(a.log.Sequence(""), event)
-	if err != nil {
+	if err := validateNextEvent(a.log.sequences[""], event); err != nil {
 		return Event{}, err
 	}
 	if err := a.log.appendProjectEvent(a.ctx, event); err != nil {
@@ -85,14 +69,13 @@ func (a *Access) AppendProject(event Event) (Event, error) {
 	return event, nil
 }
 
-func nextEvent(sequence uint64, event Event) (Event, error) {
+// validateNextEvent 不重新分配内存状态确定的序号；不连续时停止写入，而不是掩盖日志缺口。
+func validateNextEvent(sequence uint64, event Event) error {
 	if sequence == ^uint64(0) {
-		return Event{}, errors.New("log sequence exhausted")
+		return errors.New("log sequence exhausted")
 	}
-	event.Sequence = sequence + 1
-	event.ID = fmt.Sprintf("event:%d", event.Sequence)
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now().UTC()
+	if event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
+		return errors.New("invalid queued event identity or sequence")
 	}
-	return event, nil
+	return nil
 }

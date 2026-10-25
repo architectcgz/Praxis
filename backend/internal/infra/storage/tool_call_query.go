@@ -3,7 +3,6 @@ package storage
 import (
 	"cmp"
 	"context"
-	"errors"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/toolexecution"
 	"praxis/internal/errorcode"
@@ -11,67 +10,76 @@ import (
 	"praxis/internal/repository"
 )
 
-type ToolCallQueries struct{ s *Store }
+type ToolCallQueries struct{ storage *Storage }
 
-func (r ToolCallQueries) GetCall(ctx context.Context, callKey toolexecution.Key) (call sessionentry.ToolCall, err error) {
-	err = r.s.view(ctx, func() error {
-		call, err = r.getCallLocked(callKey)
-		return err
-	})
-	return call, err
-}
-
-func (r ToolCallQueries) getCallLocked(callKey toolexecution.Key) (sessionentry.ToolCall, error) {
-	key, err := r.s.lookup(lookupKey{kind: "tool-call", owner: callKey.ExecutionID.String(), value: callKey.CallID})
-	if err != nil {
-		return sessionentry.ToolCall{}, err
-	}
-	entry, ok := r.s.entry(key)
-	if !ok {
-		return sessionentry.ToolCall{}, errorcode.ErrNotFound
-	}
-	record := entry.entryValue()
-	for _, value := range record.Data.ToolCalls(identity.SessionID(entry.scope), record.AgentID) {
-		if value.Key == callKey {
-			return value, nil
+func getCall(records []logRecord, key toolexecution.Key) (sessionentry.ToolCall, error) {
+	for _, record := range records {
+		if record.event.Collection != "entry" {
+			continue
+		}
+		value := record.value.(entryRecord)
+		for _, call := range value.Data.ToolCalls(identity.SessionID(record.scope), value.AgentID) {
+			if call.Key == key {
+				return call, nil
+			}
 		}
 	}
 	return sessionentry.ToolCall{}, errorcode.ErrNotFound
 }
 
-func (r ToolCallQueries) GetResult(ctx context.Context, key toolexecution.Key) (sessionentry.ContextEntry, error) {
-	record, err := getByClaim[entryRecord](ctx, r.s, lookupKey{kind: "tool-result", owner: key.ExecutionID.String(), value: key.CallID})
-	return record.Data, err
+func getResult(records []logRecord, key toolexecution.Key) (sessionentry.ContextEntry, error) {
+	for _, record := range records {
+		if record.event.Collection != "entry" {
+			continue
+		}
+		value := record.value.(entryRecord)
+		if value.Data.ExecutionID != key.ExecutionID.String() {
+			continue
+		}
+		for _, block := range value.Data.Content {
+			if block.Kind == sessionentry.BlockToolResult && block.CallID == key.CallID {
+				return value.Data.Clone(), nil
+			}
+		}
+	}
+	return sessionentry.ContextEntry{}, errorcode.ErrNotFound
 }
 
-func (r ToolCallQueries) ListMissingToolResults(ctx context.Context) ([]repository.MissingToolResult, error) {
-	values := make([]repository.MissingToolResult, 0)
-	err := r.s.view(ctx, func() error {
-		for _, key := range r.s.keys(lookupKey{kind: "all-tool-call-entries"}) {
-			entry, _ := r.s.entry(key)
-			record := entry.entryValue()
-			callIndex := 0
-			for _, block := range record.Data.Content {
-				if block.Kind != sessionentry.BlockToolCall {
-					continue
+func (r ToolCallQueries) ListMissingToolResults(ctx context.Context) (values []repository.MissingToolResult, err error) {
+	values = make([]repository.MissingToolResult, 0)
+	err = withState(ctx, r.storage, func(_ *Storage, records []logRecord) error {
+		results := make(map[toolexecution.Key]bool)
+		var calls []repository.MissingToolResult
+		for _, record := range records {
+			if record.event.Collection != "entry" {
+				continue
+			}
+			value := record.value.(entryRecord)
+			index := 0
+			for _, block := range value.Data.Content {
+				key := toolexecution.Key{ExecutionID: identity.AgentExecutionID(value.Data.ExecutionID), CallID: block.CallID}
+				if block.Kind == sessionentry.BlockToolResult {
+					results[key] = true
 				}
-				_, err := r.s.lookup(lookupKey{kind: "tool-result", owner: record.Data.ExecutionID, value: block.CallID})
-				if errors.Is(err, errorcode.ErrNotFound) {
-					values = append(values, repository.MissingToolResult{
-						SessionID:   identity.SessionID(entry.scope),
-						AgentID:     record.AgentID,
-						ExecutionID: identity.AgentExecutionID(record.Data.ExecutionID),
-						CallID:      block.CallID,
-						RequestID:   record.Data.RequestID,
-						TurnID:      identity.TurnID(record.Data.TurnID),
+				if block.Kind == sessionentry.BlockToolCall {
+					calls = append(calls, repository.MissingToolResult{
+						SessionID:   identity.SessionID(record.scope),
+						AgentID:     value.AgentID,
+						ExecutionID: key.ExecutionID,
+						CallID:      key.CallID,
+						RequestID:   value.Data.RequestID,
+						TurnID:      identity.TurnID(value.Data.TurnID),
 						Name:        block.Name,
-						Sequence:    entry.eventSequence,
-						CallIndex:   callIndex,
+						Sequence:    value.Data.Sequence,
+						CallIndex:   index,
 					})
-				} else if err != nil {
-					return err
+					index++
 				}
-				callIndex++
+			}
+		}
+		for _, call := range calls {
+			if !results[toolexecution.Key{ExecutionID: call.ExecutionID, CallID: call.CallID}] {
+				values = append(values, call)
 			}
 		}
 		return nil

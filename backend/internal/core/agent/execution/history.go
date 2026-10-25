@@ -1,43 +1,55 @@
-package agent
+package execution
 
 import (
 	sessionentry "praxis/internal/core/session/entry"
-	"slices"
+	"praxis/internal/errorcode"
+	"reflect"
 )
 
-// History 是一个 Agent 的唯一消息历史；Session 对话直接使用 Main Agent 的历史。
-// 历史由存储层管理，Entry 追加后不修改，不持有执行期间的可变模型上下文。
+// History 只属于本次 Execution；正文追加后不可变，调用方取得独立副本。
 type History struct {
 	entries []sessionentry.ContextEntry
 	byID    map[string]int
 }
 
-func (h *History) Append(value sessionentry.ContextEntry) {
+func (h *History) Append(value sessionentry.ContextEntry) (bool, error) {
 	if h.byID == nil {
 		h.byID = make(map[string]int)
 	}
-	if _, exists := h.byID[value.ID]; exists {
-		return
+	if index, exists := h.byID[value.ID]; exists {
+		prior := h.entries[index]
+		value.Sequence, value.CreatedAt = prior.Sequence, prior.CreatedAt
+		if !reflect.DeepEqual(prior, value) {
+			return false, errorcode.ErrRequestConflict
+		}
+		return false, nil
 	}
 	h.byID[value.ID] = len(h.entries)
-	h.entries = append(h.entries, value)
+	h.entries = append(h.entries, value.Clone())
+	return true, nil
 }
 
-func (h *History) List() []sessionentry.ContextEntry { return slices.Clone(h.entries) }
+func (h *History) List() []sessionentry.ContextEntry {
+	values := make([]sessionentry.ContextEntry, len(h.entries))
+	for index, entry := range h.entries {
+		values[index] = entry.Clone()
+	}
+	return values
+}
 
 func (h *History) Get(id string) (sessionentry.ContextEntry, bool) {
 	index, ok := h.byID[id]
 	if !ok {
 		return sessionentry.ContextEntry{}, false
 	}
-	return h.entries[index], true
+	return h.entries[index].Clone(), true
 }
 
 // ContextHistory 应用历史中的摘要替代范围，返回模型构建使用的有效历史。
 // 摘要按被替代区段的位置插入，原始 List 始终保留完整记录。
 func (h *History) ContextHistory() []sessionentry.ContextEntry {
 	values := make([]sessionentry.ContextEntry, 0, len(h.entries))
-	for _, value := range h.entries {
+	for _, value := range h.List() {
 		if !value.IsSummary() {
 			values = append(values, value)
 			continue

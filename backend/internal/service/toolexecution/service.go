@@ -1,57 +1,28 @@
 package toolexecution
 
 import (
-	"context"
 	"praxis/internal/clock"
-	agentexecution "praxis/internal/core/agent/execution"
-	sessionentry "praxis/internal/core/session/entry"
-	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/errorcode"
-	"praxis/internal/identity"
 	"praxis/internal/repository"
 )
 
 type Dependencies struct {
 	Rules    ApprovalRules
 	Tasks    repository.AgentExecution
-	Events   repository.ToolExecution
 	Entries  repository.Entries
 	Calls    repository.ToolCallQueries
 	Sessions repository.Session
 	Clock    clock.Clock
 }
 
-// Service 读取工具归属、准备审核输入并可靠保存审批事实和回执。
+// Service 准备审核输入、保存正常回执，并为恢复编排构造缺失的历史条目。
 type Service struct {
-	repository.ToolExecution
 	deps  Dependencies
 	clock clock.Clock
 }
 
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		ToolExecution: deps.Events,
-		deps:          deps,
-		clock:         deps.Clock,
+		deps:  deps,
+		clock: deps.Clock,
 	}
-}
-
-func (s *Service) call(ctx context.Context, executionID identity.AgentExecutionID, callID string) (sessionentry.ToolCall, error) {
-	return s.deps.Calls.GetCall(ctx, executionmodel.Key{ExecutionID: executionID, CallID: callID})
-}
-
-// ResolveCall 对照已提交消息和 Execution 校验控制请求归属。
-func (s *Service) ResolveCall(ctx context.Context, request executionmodel.ControlRequest) (sessionentry.ToolCall, agentexecution.Execution, error) {
-	call, err := s.call(ctx, request.ExecutionID, request.CallID)
-	if err != nil {
-		return call, agentexecution.Execution{}, err
-	}
-	if request.SessionID != "" && request.SessionID != call.SessionID || request.AgentID != "" && request.AgentID != call.AgentID {
-		return call, agentexecution.Execution{}, errorcode.ErrRequestConflict
-	}
-	execution, err := s.deps.Tasks.Get(ctx, call.ExecutionID)
-	if err == nil && (execution.AgentID != call.AgentID || execution.SessionID != call.SessionID || execution.RequestID.String() != call.RequestID) {
-		err = errorcode.ErrRequestConflict
-	}
-	return call, execution, err
 }

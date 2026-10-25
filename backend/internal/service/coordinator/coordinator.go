@@ -21,6 +21,7 @@ type Config struct {
 	Recovery          repository.AgentExecution
 	Tools             *executionmodel.Executor
 	ToolRecords       *toolservice.Service
+	Entries           repository.Entries
 	Sessions          repository.Session
 	Workspaces        repository.Workspace
 	MainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
@@ -40,6 +41,7 @@ type Coordinator struct {
 	recovery          repository.AgentExecution
 	tools             *executionmodel.Executor
 	toolRecords       *toolservice.Service
+	entries           repository.Entries
 	sessions          repository.Session
 	workspaces        repository.Workspace
 	mainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
@@ -63,6 +65,7 @@ type Coordinator struct {
 
 // activeExecution 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
 type activeExecution struct {
+	runtime     *agentexecution.Runtime
 	executionID identity.AgentExecutionID
 	ctx         context.Context
 	cancel      context.CancelCauseFunc
@@ -89,6 +92,7 @@ func NewCoordinator(config Config) *Coordinator {
 		recovery:          config.Recovery,
 		tools:             config.Tools,
 		toolRecords:       config.ToolRecords,
+		entries:           config.Entries,
 		sessions:          config.Sessions,
 		workspaces:        config.Workspaces,
 		mainAgent:         config.MainAgent,
@@ -104,7 +108,7 @@ func NewCoordinator(config Config) *Coordinator {
 	}
 }
 
-// enter 将前台恢复、队列准备也计入关闭等待，禁止关闭 Store 后继续写入。
+// enter 将前台恢复和队列准备计入关闭等待，禁止关闭 JSONL 后继续写入。
 func (r *Coordinator) enter() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -116,13 +120,14 @@ func (r *Coordinator) enter() error {
 }
 
 // launchLocked 只接收已由调度器标记忙碌的执行，不再竞争槽位；调用方持有 mu。
-func (r *Coordinator) launchLocked(task agentexecution.Execution, active *activeExecution) error {
+func (r *Coordinator) launchLocked(runtime *agentexecution.Runtime, active *activeExecution) error {
 	if r.closed {
 		return errCoordinatorClosed
 	}
-	active.executionID = task.ID
+	active.runtime = runtime
+	active.executionID = runtime.Snapshot().ID
 	close(active.ready)
-	r.running.Go(func() { r.run(active.ctx, task, active) })
+	r.running.Go(func() { r.run(active.ctx, runtime, active) })
 	return nil
 }
 

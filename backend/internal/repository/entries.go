@@ -16,7 +16,6 @@ type EntryQuery struct {
 	AgentID identity.AgentID
 	// IncludeUnadmitted 供恢复查询；普通查询隐藏尚未建立 Execution 的输入。
 	IncludeUnadmitted bool
-	ForContext        bool
 }
 
 // Entries 按 AgentID 读取唯一历史并顺序追加 Entry，不保存执行上下文或更新 Execution。

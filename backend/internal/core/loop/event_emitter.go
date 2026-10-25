@@ -8,7 +8,7 @@ import (
 	"praxis/internal/identity"
 )
 
-// emitModelEvent 为实时模型事件补齐任务归属；工具事件需在 assistant 回执落库后发布。
+// emitModelEvent 为实时模型事件补齐归属；工具事件需在 Assistant 条目被内存接纳后发布。
 func (r *Runner) emitModelEvent(
 	sessionID identity.SessionID,
 	agentID identity.AgentID,

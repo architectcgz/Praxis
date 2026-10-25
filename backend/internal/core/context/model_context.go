@@ -4,6 +4,7 @@ import sessionentry "praxis/internal/core/session/entry"
 
 // Append 沿用唯一 Entry 类型；模型只选择非展示性思考内容，不改动历史。
 func (c ModelContext) Append(value sessionentry.ContextEntry) ModelContext {
+	value = value.Clone()
 	content := make([]sessionentry.Block, 0, len(value.Content))
 	for _, block := range value.Content {
 		if block.Kind != sessionentry.BlockThinking {

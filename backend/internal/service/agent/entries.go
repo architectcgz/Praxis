@@ -10,14 +10,14 @@ import (
 	sessionservice "praxis/internal/service/session"
 )
 
-// AppendEntry 向 Agent 自身追加输入；Main 与 Subagent 使用相同的消息存取规则。
+// AppendEntry 只追加 Main 的独立输入；子执行必须通过显式委派输入创建 Runtime。
 func (s *Service) AppendEntry(ctx context.Context, agentID identity.AgentID, data sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
 	err = func(txCtx context.Context) error {
 		owner, err := s.agent(agentID)
 		if err != nil {
 			return err
 		}
-		if data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
+		if !owner.IsMain() || data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
 			return errorcode.ErrRequestConflict
 		}
 		if err := sessionservice.RequireWritable(txCtx, s.sessions, owner.SessionID); err != nil {
@@ -32,7 +32,7 @@ func (s *Service) AppendEntry(ctx context.Context, agentID identity.AgentID, dat
 	return stored, inserted, nil
 }
 
-// ListAgentEntries 读取 Agent 自有消息流。
+// ListAgentEntries 查询 Main 的持久化历史或子执行的活跃内存快照。
 func (s *Service) ListAgentEntries(ctx context.Context, agentID identity.AgentID) ([]sessionentry.ContextEntry, error) {
 	var entries []sessionentry.ContextEntry
 	err := func(ctx context.Context) error {
@@ -42,6 +42,10 @@ func (s *Service) ListAgentEntries(ctx context.Context, agentID identity.AgentID
 		}
 		if _, err := s.sessions.Get(ctx, agent.SessionID); err != nil {
 			return err
+		}
+		if !agent.IsMain() {
+			entries = s.activeEntries(agentID)
+			return nil
 		}
 		page, err := s.entries.List(ctx, repository.EntryQuery{AgentID: agent.ID})
 		if err != nil {

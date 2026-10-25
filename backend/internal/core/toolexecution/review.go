@@ -39,8 +39,18 @@ const riskReviewSchema = `{
 	"additionalProperties": false
 }`
 
+type reviewProgressError struct{ error }
+
+func (e *reviewProgressError) Unwrap() error { return e.error }
+
 // review 直接调用 Provider 审核冻结操作，不读取仓储或调用 Service。
 func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessment security.RiskAssessment, err error) {
+	outputBytes := 0
+	defer func() {
+		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), request.Runtime, outputBytes); progressErr != nil {
+			err = &reviewProgressError{error: errors.Join(err, progressErr)}
+		}
+	}()
 	call, args, model := request.Call, request.Arguments, request.Model
 	attempt := request.Attempt
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
@@ -82,7 +92,7 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 	if err != nil {
 		return assessment, err
 	}
-	ctx, span := r.TimingRecorder.Start(ctx, timing.Operation{
+	ctx, span := request.Runtime.Timing.Start(ctx, timing.Operation{
 		ExecutionID: call.ExecutionID.String(),
 		Kind:        timing.Provider,
 		Name:        model.ProviderID + "/" + model.ModelID,
@@ -118,6 +128,7 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 				return assessment, errors.New("risk review ended without a terminal event")
 			}
 			if (event.Kind == providerapi.StreamTextDelta || event.Kind == providerapi.StreamThinkingDelta) && event.Text != "" {
+				outputBytes += len(event.Text)
 				span.FirstResponse()
 			}
 			switch event.Kind {
@@ -130,6 +141,7 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 				if event.Usage != nil && event.Usage.Valid() {
 					r.Emitter.Emit(coreevent.Event{
 						Kind:        coreevent.ModelUsage,
+						Transient:   !request.Runtime.Main(),
 						SessionID:   call.SessionID,
 						AgentID:     call.AgentID,
 						ExecutionID: call.ExecutionID,

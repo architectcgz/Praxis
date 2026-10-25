@@ -19,6 +19,9 @@ func executionIdentity(input Input, turnID identity.TurnID) hook.Identity {
 }
 
 func (r *Runner) notifyAssistant(ctx context.Context, input Input, entry sessionentry.ContextEntry) {
+	if !input.Runtime.Main() {
+		return
+	}
 	event := hook.EntryCommitted{Identity: executionIdentity(input, identity.TurnID(entry.TurnID)), Entry: entry}
 	ctx = context.WithoutCancel(ctx)
 	if err := r.HookDispatcher.AssistantCommitted(ctx, event); err != nil {
