@@ -4,13 +4,13 @@ vars:
   APP_NAME: praxis
   BIN_DIR: bin
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
-  BUILD_TAGS: '{{if ne .DEV "true"}}production{{end}}'
-  BUILD_FLAGS: '{{if .BUILD_TAGS}}-tags {{.BUILD_TAGS}}{{end}}'
-  LINK_FLAGS: '{{if ne .DEV "true"}}-s -w{{if eq OS "windows"}} -H windowsgui{{end}}{{end}}'
 
 tasks:
   build:
     desc: 构建当前平台的桌面应用，不启动服务
+    vars:
+      BUILD_FLAGS: '{{if ne .DEV "true"}}-tags production{{end}}'
+      LINK_FLAGS: '{{if ne .DEV "true"}}-s -w{{if eq OS "windows"}} -H windowsgui{{end}}{{end}}'
     cmds:
       - task: frontend
       - defer: node -e "require('node:fs').rmSync('wails_windows_{{ARCH}}.syso', {force:true})"
@@ -20,6 +20,8 @@ tasks:
 
   bindings:
     desc: 生成 Wails 3 TypeScript 接口及服务绑定
+    vars:
+      BUILD_FLAGS: '{{if ne .DEV "true"}}-tags production{{end}}'
     cmds:
       - wails3 generate bindings -ts -i -f '{{.BUILD_FLAGS}}' -d ../frontend/bindings
 

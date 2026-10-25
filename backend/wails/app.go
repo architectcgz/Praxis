@@ -200,12 +200,17 @@ func (a *App) EmitEvent(name string, value any) {
 
 // SelectDirectory 将系统对话框附着到当前窗口，取消时返回空路径。
 func (a *App) SelectDirectory(title string) (string, error) {
-	return a.desktop.Dialog.OpenFile().
+	path, err := a.desktop.Dialog.OpenFile().
 		SetTitle(title).
 		CanChooseFiles(false).
 		CanChooseDirectories(true).
 		AttachToWindow(a.desktop.Window.Current()).
 		PromptForSingleSelection()
+	// Wails 的 Windows 取消错误位于 internal 包，无法引用；仅精确匹配其错误文本，保留其他失败。
+	if err != nil && err.Error() == "cancelled by user" {
+		return "", nil
+	}
+	return path, err
 }
 
 // LogError 记录 binding 出口已经脱敏前的后端错误，供本地诊断使用。
