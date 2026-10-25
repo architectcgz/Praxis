@@ -55,9 +55,6 @@ func Resolve(root string) (DataRoot, error) {
 
 // Initialize 创建不含密钥的目录结构，仅允许所有者访问。
 func (d DataRoot) Initialize(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("data root initialization context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

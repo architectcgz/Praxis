@@ -3,11 +3,13 @@ package storage
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	"praxis/internal/infra/jsonl"
 	"strings"
 	"time"
 )
@@ -19,9 +21,45 @@ func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sess
 	return get[sessionmodel.Session](ctx, r.s, "session", id.String())
 }
 
-// Save 保存会话及主 Agent 的稳定身份引用，不保存内存实例或运行状态。
-func (r SessionRepository) Save(ctx context.Context, v sessionmodel.Session) error {
-	return save(ctx, r.s, v.ID.String(), "session", v.ID.String(), "session.saved", v)
+// Create 在会话创建用例中显式建立日志，首条会话事实可靠发布后才更新内存可见状态。
+func (r SessionRepository) Create(ctx context.Context, v sessionmodel.Session) error {
+	return r.s.view(ctx, func() error {
+		if err := r.s.flushLocked(ctx); err != nil {
+			return err
+		}
+		sessionID := v.ID.String()
+		if r.s.sequences[sessionID] != 0 {
+			return errorcode.ErrRequestConflict
+		}
+		payload, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		event := jsonl.Event{
+			Sequence:   1,
+			ID:         "event:1",
+			Type:       "session.saved",
+			Collection: "session",
+			Key:        sessionID,
+			CreatedAt:  time.Now().UTC(),
+			Payload:    payload,
+		}
+		_, entry, err := r.s.describe(sessionID, event, v)
+		if err != nil {
+			return err
+		}
+		if err := r.s.validateEvent(sessionID, event, entry); err != nil {
+			return err
+		}
+		if err := r.s.log.With(ctx, func(log *jsonl.Access) error {
+			_, err := log.CreateSession(sessionID, v.ProjectID.String(), event)
+			return err
+		}); err != nil {
+			return err
+		}
+		r.s.applyEvent(sessionID, event, entry)
+		return nil
+	})
 }
 
 // List 返回查询结果的独立副本，limit 为 0 时不限制。
@@ -89,7 +127,7 @@ func (r SessionRepository) NameFromInput(ctx context.Context, id identity.Sessio
 	})
 }
 
-// Delete 在删除标记写入锁内重新检查活动执行；onlyEmpty 用于退出时的空会话清理。
+// Delete 在同一锁内检查活动执行、删除日志并清理内存；onlyEmpty 用于退出时的空会话清理。
 func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, onlyEmpty bool) error {
 	return r.s.view(ctx, func() error {
 		if _, err := getLocked[sessionmodel.Session](r.s, "session", id.String()); err != nil {
@@ -104,6 +142,20 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, on
 		if len(r.s.keys(lookupKey{kind: "active-session", owner: id.String()})) > 0 {
 			return agentmodel.ErrExecuting
 		}
-		return r.s.appendLocked(ctx, id.String(), "session", id.String(), "session.deleted", nil)
+		if err := r.s.flushLocked(ctx); err != nil {
+			return err
+		}
+		if err := r.s.log.With(ctx, func(log *jsonl.Access) error {
+			return log.DeleteSession(id.String())
+		}); err != nil {
+			return err
+		}
+		// 日志删除成功后才释放历史和索引，文件操作失败时保留会话状态。
+		for key := range r.s.state.groups[lookupKey{kind: "entries-session", owner: id.String()}] {
+			delete(r.s.histories, r.s.state.entries[key].record.AgentID)
+		}
+		r.s.state.removeScope(id.String())
+		delete(r.s.sequences, id.String())
+		return nil
 	})
 }

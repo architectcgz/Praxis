@@ -17,7 +17,8 @@ func syncDirectory(path string) error {
 }
 
 func publishFile(from, to string) error {
-	if err := os.Rename(from, to); err != nil {
+	// 临时文件与目标位于同一目录；硬链接原子发布且拒绝覆盖已有日志。
+	if err := os.Link(from, to); err != nil {
 		return err
 	}
 	return syncDirectory(filepath.Dir(to))

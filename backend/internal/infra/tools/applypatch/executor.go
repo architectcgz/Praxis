@@ -38,9 +38,6 @@ type output struct {
 
 // Call 在 Workspace 内校验并应用完整补丁。
 func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
-	if ctx == nil {
-		return tool.ToolResult{}, errors.New("tool task context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}

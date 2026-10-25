@@ -44,9 +44,6 @@ func (w *outputWriter) Write(value []byte) (int, error) {
 
 // Call 在 Workspace 内的工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
 func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
-	if ctx == nil {
-		return tool.ToolResult{}, errors.New("tool task context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}

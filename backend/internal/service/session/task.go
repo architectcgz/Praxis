@@ -19,9 +19,6 @@ type TaskInput struct {
 // CreateTask 只创建 Session 输入并排队，不查询 Agent、解析模型或创建 Execution。
 // 与会话删除共享生命周期锁，避免删除成功后又把输入放回队列。
 func (s *Service) CreateTask(ctx context.Context, input TaskInput) (sessionmodel.Task, error) {
-	if ctx == nil {
-		return sessionmodel.Task{}, errors.New("create task context is required")
-	}
 	prompt, err := s.hookDispatcher.BeforeUserInput(ctx, hook.UserInput{SessionID: input.SessionID, Prompt: input.Prompt})
 	if err != nil {
 		return sessionmodel.Task{}, err
@@ -49,9 +46,6 @@ func (s *Service) CreateTask(ctx context.Context, input TaskInput) (sessionmodel
 
 // CancelTask 只移出尚未领取的输入，不改变当前 Execution 的状态。
 func (s *Service) CancelTask(ctx context.Context, sessionID identity.SessionID, id identity.TaskID) error {
-	if ctx == nil {
-		return errors.New("cancel task context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

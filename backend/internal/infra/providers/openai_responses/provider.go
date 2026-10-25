@@ -51,9 +51,6 @@ func (p *Provider) Stream(
 	ctx context.Context,
 	request providerapi.Request,
 ) (<-chan providerapi.Event, error) {
-	if ctx == nil {
-		return nil, errors.New("openai responses stream context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package execution
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"praxis/internal/errorcode"
 	"time"
@@ -18,9 +17,6 @@ import (
 // 首次启动记录开始时间，已结束的执行不能重新启动。
 // executionID 来自 Coordinator 准入时已校验的持久化 Execution。
 func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.AgentExecutionID) error {
-	if ctx == nil {
-		return errors.New("task start context is required")
-	}
 	err := s.update(ctx, executionID, func(task *agentexecution.Execution) error {
 		switch task.Status {
 		case agentexecution.ExecutionStarting:
@@ -46,9 +42,6 @@ func (s *Service) ConfirmRunning(ctx context.Context, executionID identity.Agent
 // Settle 保存所属执行者确定的实际结果，不根据迟到的取消信号改写完成结果。
 // 写入失败由 Coordinator 保留占用和结果后重试；重复结算返回已有终态，不再次发布事件。
 func (s *Service) Settle(ctx context.Context, executionID identity.AgentExecutionID, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.Execution, err error) {
-	if ctx == nil {
-		return agentexecution.Execution{}, errors.New("task end context is required")
-	}
 	endedExecution, err := s.records.Get(ctx, executionID)
 	if err != nil {
 		s.logger.Errorf("operation=execution_end execution_id=%s status=failed outcome=%s error=%v", executionID, outcome, err)

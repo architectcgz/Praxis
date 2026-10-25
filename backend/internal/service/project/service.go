@@ -60,9 +60,6 @@ func NewService(deps Dependencies) *Service {
 
 // CreateProject 保存单条 Project 创建事实，失败后保留已创建目录供重试。
 func (s *Service) CreateProject(ctx context.Context, params CreateInput) (CreateProjectResult, error) {
-	if ctx == nil {
-		return CreateProjectResult{}, errors.New("create project context is required")
-	}
 	_, err := s.directory.Ensure(ctx, params.Path)
 	if err != nil {
 		return CreateProjectResult{}, err
@@ -111,16 +108,10 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (Create
 
 // ListProjects 返回按索引查询的 Project 列表。
 func (s *Service) ListProjects(ctx context.Context, limit int) ([]projectmodel.Project, error) {
-	if ctx == nil {
-		return nil, errors.New("project catalog context is required")
-	}
 	return s.projects.List(ctx, limit)
 }
 
 // ListWorkspaces 返回指定 Project 下按索引查询的 Workspace 列表。
 func (s *Service) ListWorkspaces(ctx context.Context, projectID identity.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
-	if ctx == nil {
-		return nil, errors.New("workspace catalog context is required")
-	}
 	return s.workspaces.ListByProject(ctx, projectID, limit)
 }

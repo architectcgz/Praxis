@@ -21,9 +21,6 @@ type FilePreview struct {
 
 // PreviewFile 接收 canonical 会话身份和路径，在工作区授权后读取有界文本。
 func (s *Service) PreviewFile(ctx context.Context, sessionID identity.SessionID, path string) (FilePreview, error) {
-	if ctx == nil {
-		return FilePreview{}, fmt.Errorf("a valid session is required to preview files: %w", errorcode.ErrInvalidRequest)
-	}
 	if err := ctx.Err(); err != nil {
 		return FilePreview{}, err
 	}

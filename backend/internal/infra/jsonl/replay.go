@@ -10,60 +10,60 @@ import (
 	"os"
 )
 
-// Append 先完成可靠追加，再推进日志游标；实体发布由调用方完成。
-func (s *Log) Append(ctx context.Context, scope, projectID string, event Event) error {
-	if err := s.Check(); err != nil {
+// appendEvent 只追加已有会话日志；序号和身份已由持锁入口分配。
+func (s *Log) appendEvent(ctx context.Context, sessionID, projectID string, event Event) error {
+	path, err := s.sessionPath(sessionID, projectID)
+	if err != nil {
 		return err
 	}
+	if err := s.appendRecord(ctx, path, sessionID, event); err != nil {
+		return err
+	}
+	s.sessionProjects[sessionID] = projectID
+	return nil
+}
+
+func (s *Log) appendProjectEvent(ctx context.Context, event Event) error {
+	return s.appendRecord(ctx, s.projectPath(), "", event)
+}
+
+func (s *Log) appendRecord(ctx context.Context, path, fileKey string, event Event) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.validateSequence(scope, event); err != nil {
+	encoded, err := encodeEvent(event)
+	if err != nil {
 		return err
 	}
+	if err := s.appendExisting(path, s.lengths[fileKey], encoded); err != nil {
+		return err
+	}
+	s.advance(fileKey, event, int64(len(encoded)))
+	return nil
+}
+
+func encodeEvent(event Event) ([]byte, error) {
 	encoded, err := json.Marshal(event)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	encoded = append(encoded, '\n')
-	if err := s.append(ctx, scope, projectID, encoded); err != nil {
-		return err
-	}
-	s.advance(scope, projectID, event, int64(len(encoded)))
-	return nil
+	return append(encoded, '\n'), nil
 }
 
-func (s *Log) validateSequence(scope string, event Event) error {
-	sequence := s.sequences[scope]
-	if sequence == ^uint64(0) || event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
-		return errors.New("invalid event identity or sequence")
-	}
-	return nil
+func (s *Log) advance(fileKey string, event Event, length int64) {
+	s.sequences[fileKey] = event.Sequence
+	s.lengths[fileKey] += length
 }
 
-func (s *Log) advance(scope, projectID string, event Event, length int64) {
-	s.sequences[scope] = event.Sequence
-	s.lengths[scope] += length
-	if scope != "" && projectID != "" {
-		s.sessionProjects[scope] = projectID
-	}
-}
-
-// Replay 按行解码并调用投影函数；未完成的尾行备份并截断，完整坏行直接报错。
-func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Event) error) error {
-	path, err := s.Path(scope.ID, scope.ProjectID)
-	if err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("log must be a regular file: %s", path)
+// read 以调用内序号扫描日志，不持有解码结果；未完成尾行备份并截断，完整坏行报错。
+func (s *Log) read(ctx context.Context, scope Scope, apply func(Event) error) error {
+	path := s.projectPath()
+	if scope.ID != "" {
+		var err error
+		path, err = s.sessionPath(scope.ID, scope.ProjectID)
+		if err != nil {
+			return err
+		}
 	}
 	file, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if err != nil {
@@ -72,6 +72,14 @@ func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Event) error) 
 	defer file.Close()
 	reader := bufio.NewReader(file)
 	var offset int64
+	var sequence uint64
+	finish := func() {
+		s.sequences[scope.ID] = sequence
+		s.lengths[scope.ID] = offset
+		if scope.ID != "" {
+			s.sessionProjects[scope.ID] = scope.ProjectID
+		}
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -79,8 +87,11 @@ func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Event) error) 
 		line, readErr := reader.ReadBytes('\n')
 		if errors.Is(readErr, io.EOF) {
 			if len(line) > 0 {
-				return s.truncateTail(file, offset, line)
+				if err := s.truncateTail(file, offset, line); err != nil {
+					return err
+				}
 			}
+			finish()
 			return nil
 		}
 		if readErr != nil {
@@ -91,13 +102,15 @@ func (s *Log) Replay(ctx context.Context, scope Scope, apply func(Event) error) 
 		if err := Decode(line, &event); err != nil {
 			return fmt.Errorf("%s offset %d: expected a single JSONL event: %w", path, offset, err)
 		}
-		if err := s.validateSequence(scope.ID, event); err != nil {
-			return fmt.Errorf("%s offset %d: %w", path, offset, err)
+		if sequence == ^uint64(0) || event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
+			return fmt.Errorf("%s offset %d: invalid event identity or sequence", path, offset)
 		}
-		if err := apply(event); err != nil {
-			return fmt.Errorf("%s offset %d: %w", path, offset, err)
+		if apply != nil {
+			if err := apply(event); err != nil {
+				return fmt.Errorf("%s offset %d: %w", path, offset, err)
+			}
 		}
-		s.advance(scope.ID, scope.ProjectID, event, int64(len(line)))
+		sequence = event.Sequence
 		offset += int64(len(line))
 	}
 }

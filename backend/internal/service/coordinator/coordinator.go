@@ -3,7 +3,6 @@ package coordinator
 
 import (
 	"context"
-	"errors"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
@@ -106,10 +105,7 @@ func NewCoordinator(config Config) *Coordinator {
 }
 
 // enter 将前台恢复、队列准备也计入关闭等待，禁止关闭 Store 后继续写入。
-func (r *Coordinator) enter(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("execution context is required")
-	}
+func (r *Coordinator) enter() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -133,9 +129,6 @@ func (r *Coordinator) launchLocked(task agentexecution.Execution, active *active
 // Close 拒绝新任务，取消所有运行，并等待准备、恢复和结算操作退出。
 // 超时后资源仍由 Application 保留，后续 Close 可以继续等待。
 func (r *Coordinator) Close(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("execution close context is required")
-	}
 	r.mu.Lock()
 	r.closed = true
 	for _, active := range r.executions {

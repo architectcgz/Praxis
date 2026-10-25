@@ -35,9 +35,6 @@ func ValidateDefinitions(current, candidate []agentmodel.AgentDefinition) error 
 // GetOrCreateMainAgent 按 Session 的身份和定义引用查找或创建主实例，不持久化 Agent。
 // 并发创建由 Session 登记引用时合并，所有调用方最终取得同一指针。
 func (s *Service) GetOrCreateMainAgent(ctx context.Context, sessionID identity.SessionID) (*agentmodel.Agent, error) {
-	if ctx == nil {
-		return nil, errors.New("ensure main agent context is required")
-	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -59,9 +56,6 @@ func (s *Service) GetOrCreateMainAgent(ctx context.Context, sessionID identity.S
 // RestoreAgents 在 Coordinator 恢复执行前重建实例；执行事实仅用于这一次初始化。
 // 未开始的输入和进程内控制意图不恢复，恢复失败时不开放业务入口。
 func (s *Service) RestoreAgents(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("agent recovery context is required")
-	}
 	sessions, err := s.sessions.List(ctx, 0)
 	if err != nil {
 		return err

@@ -10,7 +10,7 @@ import (
 // Restore 必须在外部准入开放前调用，只恢复已开始并持久化的 Execution。
 // 未开始的输入只在内存中存在，不参与启动恢复。
 func (s *Coordinator) Restore(ctx context.Context) (err error) {
-	if err := s.enter(ctx); err != nil {
+	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()

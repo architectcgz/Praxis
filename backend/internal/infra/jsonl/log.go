@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"praxis/internal/utils/pathutil"
 	"strings"
+	"sync"
 )
 
-// Log 由 Storage 在进程内互斥锁下串行访问；只保存日志资源和文件游标。
+// Log 拥有共享文件锁和日志游标，不保存业务实体或查询投影。
 type Log struct {
+	mu              sync.Mutex
 	root            string
 	projects        string
 	closed          bool
@@ -29,8 +31,8 @@ type Scope struct {
 
 // Open 初始化日志资源；调用方必须在日志关闭前持续持有应用独占运行权。
 func Open(ctx context.Context, root string) (*Log, error) {
-	if ctx == nil || !pathutil.IsAbsoluteNormalized(root) {
-		return nil, errors.New("log context and canonical absolute directory are required")
+	if !pathutil.IsAbsoluteNormalized(root) {
+		return nil, errors.New("canonical absolute log directory is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -53,6 +55,22 @@ func Open(ctx context.Context, root string) (*Log, error) {
 		sequences:       make(map[string]uint64),
 		lengths:         make(map[string]int64),
 		sessionProjects: make(map[string]string),
+	}
+	// 项目汇总日志随资源初始化建立，追加路径不承担首次创建。
+	if err := writeNewFile(s.projectPath(), nil); err != nil && !errors.Is(err, os.ErrExist) {
+		return nil, err
+	}
+	if err := s.read(ctx, Scope{}, nil); err != nil {
+		return nil, err
+	}
+	scopes, err := s.Scopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, scope := range scopes {
+		if err := s.read(ctx, scope, nil); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -118,14 +136,15 @@ func ValidScope(scope string) bool {
 	return true
 }
 
-func (s *Log) Path(scope, projectID string) (string, error) {
-	if scope == "" {
-		return filepath.Join(s.root, "projects.jsonl"), nil
-	}
-	if !ValidScope(scope) {
+func (s *Log) projectPath() string {
+	return filepath.Join(s.root, "projects.jsonl")
+}
+
+func (s *Log) sessionPath(sessionID, projectID string) (string, error) {
+	if !ValidScope(sessionID) {
 		return "", errors.New("session ID is not a valid file name")
 	}
-	if known := s.sessionProjects[scope]; known != "" {
+	if known := s.sessionProjects[sessionID]; known != "" {
 		if projectID != "" && projectID != known {
 			return "", errors.New("log project ownership mismatch")
 		}
@@ -134,11 +153,11 @@ func (s *Log) Path(scope, projectID string) (string, error) {
 	if !ValidScope(projectID) {
 		return "", errors.New("session project ID is not a valid directory name")
 	}
-	return filepath.Join(s.projects, projectID, "sessions", scope+".jsonl"), nil
+	return filepath.Join(s.projects, projectID, "sessions", sessionID+".jsonl"), nil
 }
 
-func (s *Log) Sequence(scope string) uint64 { return s.sequences[scope] }
-func (s *Log) Project(scope string) string  { return s.sessionProjects[scope] }
+func (s *Log) Sequence(sessionID string) uint64 { return s.sequences[sessionID] }
+func (s *Log) Project(sessionID string) string  { return s.sessionProjects[sessionID] }
 
 func (s *Log) Check() error {
 	if s.closed {
@@ -148,8 +167,8 @@ func (s *Log) Check() error {
 }
 
 // ExistingPath 仅供显式导出日志的业务使用，普通实体查询不调用文件系统。
-func (s *Log) ExistingPath(scope string) (string, error) {
-	path, err := s.Path(scope, "")
+func (s *Log) ExistingPath(sessionID string) (string, error) {
+	path, err := s.sessionPath(sessionID, "")
 	if err != nil {
 		return "", err
 	}
@@ -164,6 +183,8 @@ func (s *Log) ExistingPath(scope string) (string, error) {
 }
 
 func (s *Log) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.closed = true
 	return nil
 }

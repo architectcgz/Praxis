@@ -94,9 +94,6 @@ func summaryEntry(format SummaryFormat, text string) sessionentry.ContextEntry {
 
 // compressHistory 将每个可移除的连续区段原位替换为摘要，保护条目之间的顺序不变。
 func compressHistory(ctx context.Context, value appcontext.ModelContext, options Options, summarize SummarizeFunc, partial bool) (appcontext.ModelContext, bool, error) {
-	if ctx == nil {
-		return appcontext.ModelContext{}, false, errors.New("context compression context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return appcontext.ModelContext{}, false, err
 	}

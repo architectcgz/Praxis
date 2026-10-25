@@ -52,9 +52,6 @@ func Open(ctx context.Context, root string) (*Store, error) {
 }
 
 func (s *Store) Close(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("close context is required")
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return errors.Join(s.flushLocked(ctx), s.log.Close())
@@ -62,9 +59,6 @@ func (s *Store) Close(ctx context.Context) error {
 
 // view 的回调只调用持锁内部函数；同一把锁覆盖条件检查、单事件落盘和索引更新。
 func (s *Store) view(ctx context.Context, fn func() error) error {
-	if ctx == nil {
-		return errors.New("storage context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

@@ -3,7 +3,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
@@ -79,9 +78,6 @@ func NewService(deps Dependencies) *Service {
 
 // GetAgentView 返回 Agent 状态、当前执行与最近一次执行。
 func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (AgentView, error) {
-	if ctx == nil {
-		return AgentView{}, errors.New("agent query context is required")
-	}
 	value, err := s.agent(agentID)
 	if err != nil {
 		return AgentView{}, err

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-// 新文件先完整同步，再原子发布，首次提交不会暴露半个目录项或标识文件。
+// 新文件先完整同步，再以不覆盖方式发布，首次提交不会暴露半条记录。
 func writeNewFile(path string, data []byte) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".commit-*")
 	if err != nil {
@@ -28,46 +28,69 @@ func writeNewFile(path string, data []byte) error {
 	return publishFile(tmp, path)
 }
 
-func (s *Log) append(ctx context.Context, scope, projectID string, data []byte) error {
-	path, err := s.Path(scope, projectID)
+// createSession 只用于显式创建，首条记录可靠发布后才登记文件游标。
+func (s *Log) createSession(ctx context.Context, sessionID, projectID string, first Event) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := s.sessionPath(sessionID, projectID)
 	if err != nil {
 		return err
 	}
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) && s.lengths[scope] == 0 {
-		if scope != "" {
-			// 项目和会话目录按首次有效提交创建，并同步父目录以保证发布可恢复。
-			for _, directory := range []string{filepath.Dir(filepath.Dir(path)), filepath.Dir(path)} {
-				if err := os.MkdirAll(directory, 0700); err != nil {
-					return err
-				}
-				if err := syncDirectory(filepath.Dir(directory)); err != nil {
-					return err
-				}
-			}
-		}
-		if err := writeNewFile(path, data); err != nil {
-			// 发布结果不明时停止写入，重启后以日志恢复 State。
-			if _, statErr := os.Lstat(path); statErr == nil {
-				s.fault = fmt.Errorf("initial log commit outcome is unknown; restart required: %w", err)
-			}
+	data, err := encodeEvent(first)
+	if err != nil {
+		return err
+	}
+	for _, directory := range []string{filepath.Dir(filepath.Dir(path)), filepath.Dir(path)} {
+		if err := os.MkdirAll(directory, 0700); err != nil {
 			return err
 		}
-		return nil
+		if err := syncDirectory(filepath.Dir(directory)); err != nil {
+			return err
+		}
 	}
+	if err := writeNewFile(path, data); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			// 发布结果可能不明，禁止继续追加；重开日志后确认实际结果。
+			s.fault = fmt.Errorf("initial log commit failed; restart required: %w", err)
+		}
+		return fmt.Errorf("create session log %s: %w", path, err)
+	}
+	s.advance(sessionID, first, int64(len(data)))
+	s.sessionProjects[sessionID] = projectID
+	return nil
+}
+
+// deleteSession 先删除并同步目录，再释放游标；结果不明时停止访问，重启后以文件恢复状态。
+func (s *Log) deleteSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := s.ExistingPath(sessionID)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() != s.lengths[scope] {
-		s.fault = errors.New("log file type or length changed externally; restart required for recovery")
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("delete session log %s: %w", path, err)
+	}
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		s.fault = fmt.Errorf("session log deletion outcome is unknown; restart required: %w", err)
 		return s.fault
 	}
+	delete(s.sequences, sessionID)
+	delete(s.lengths, sessionID)
+	delete(s.sessionProjects, sessionID)
+	return nil
+}
+
+// appendExisting 不创建文件，也不预查存在性；打开和写入错误直接返回调用方。
+func (s *Log) appendExisting(path string, offset int64, data []byte) error {
 	file, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if err != nil {
-		return err
+		return fmt.Errorf("open log %s: %w", path, err)
 	}
 	defer file.Close()
-	return s.appendTo(file, s.lengths[scope], data)
+	return s.appendTo(file, offset, data)
 }
 
 // logFile 仅描述可靠追加与回滚所需的文件操作，便于覆盖实际 I/O 失败边界。

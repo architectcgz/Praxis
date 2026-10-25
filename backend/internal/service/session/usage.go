@@ -27,9 +27,6 @@ func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.Sessi
 // GetSessionUsageSummary 查询会话全部最新用量记录，以 token 加权计算缓存率。
 // 读取失败、记录归属不一致或累计值溢出时返回错误，未知计数不补零。
 func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID identity.SessionID) (SessionUsageSummary, error) {
-	if ctx == nil {
-		return SessionUsageSummary{}, errors.New("session usage query context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return SessionUsageSummary{}, err
 	}

@@ -37,32 +37,29 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 		Key:        id,
 		CreatedAt:  time.Now().UTC(),
 	}
-	var entry stateEntry
-	if kind != "session.deleted" {
-		var err error
-		event.Payload, err = json.Marshal(object)
+	var err error
+	event.Payload, err = json.Marshal(object)
+	if err != nil {
+		return err
+	}
+	_, entry, err := s.describe(scope, event, object)
+	if err != nil {
+		return err
+	}
+	if prior, ok := s.entry(eventKey(scope, event)); ok && prior.scope == scope {
+		payload, err := s.payload(eventKey(scope, event))
 		if err != nil {
 			return err
 		}
-		_, entry, err = s.describe(scope, event, object)
-		if err != nil {
-			return err
-		}
-		if prior, ok := s.entry(eventKey(scope, event)); ok && prior.scope == scope {
-			payload, err := s.payload(eventKey(scope, event))
-			if err != nil {
-				return err
-			}
-			if bytes.Equal(payload, event.Payload) {
-				return nil
-			}
+		if bytes.Equal(payload, event.Payload) {
+			return nil
 		}
 	}
 	if err := s.validateEvent(scope, event, entry); err != nil {
 		return fmt.Errorf("%s/%s: %w", collection, id, err)
 	}
 	projectID := s.log.Project(scope)
-	if collection == "session" && kind != "session.deleted" {
+	if collection == "session" {
 		for _, group := range entry.groups {
 			if group.kind == "sessions-project" {
 				projectID = group.owner
@@ -74,7 +71,15 @@ func (s *Store) appendLocked(ctx context.Context, scope, collection, id, kind st
 		s.pending = append(s.pending, pendingEvent{scope: scope, projectID: projectID, event: event})
 		return s.flushLocked(ctx)
 	}
-	if err := s.log.Append(ctx, scope, projectID, event); err != nil {
+	if err := s.log.With(ctx, func(log *jsonl.Access) error {
+		var err error
+		if scope == "" {
+			_, err = log.AppendProject(event)
+		} else {
+			_, err = log.AppendSession(scope, projectID, event)
+		}
+		return err
+	}); err != nil {
 		return err
 	}
 	s.applyEvent(scope, event, entry)
@@ -110,7 +115,7 @@ func (s *Store) validateEvent(scope string, event jsonl.Event, entry stateEntry)
 		if err := immutable(key.collection, payload, event.Payload); err != nil {
 			return err
 		}
-	} else if key.collection == "session" && s.log.Sequence(scope) != 0 {
+	} else if key.collection == "session" && s.sequences[scope] != 0 {
 		return errors.New("session identity cannot be reused")
 	}
 	if scope != "" && key.collection != "session" {
@@ -162,7 +167,10 @@ type pendingEvent struct {
 func (s *Store) flushLocked(ctx context.Context) error {
 	for len(s.pending) > 0 {
 		next := s.pending[0]
-		if err := s.log.Append(ctx, next.scope, next.projectID, next.event); err != nil {
+		if err := s.log.With(ctx, func(log *jsonl.Access) error {
+			_, err := log.AppendSession(next.scope, next.projectID, next.event)
+			return err
+		}); err != nil {
 			return err
 		}
 		s.pending[0] = pendingEvent{}

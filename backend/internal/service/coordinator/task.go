@@ -15,7 +15,7 @@ type SubmitResult struct {
 // SubmitTask 先创建 Session 待办，再尝试唤醒调度；接受输入不依赖 Agent 是否空闲。
 // 入队后调度失败不撤销输入，由返回值说明，避免调用方误以为入队失败而重复提交。
 func (s *Coordinator) SubmitTask(ctx context.Context, input sessionservice.TaskInput) (SubmitResult, error) {
-	if err := s.enter(ctx); err != nil {
+	if err := s.enter(); err != nil {
 		return SubmitResult{}, err
 	}
 	defer s.running.Done()
@@ -32,7 +32,7 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input sessionservice.TaskI
 }
 
 func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.SessionID, id identity.TaskID) error {
-	if err := s.enter(ctx); err != nil {
+	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()

@@ -25,7 +25,7 @@ func (s *Coordinator) StopAgent(ctx context.Context, agentID identity.AgentID, e
 }
 
 func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID, state agentmodel.AgentState, cause error) (ControlResult, error) {
-	if err := s.enter(ctx); err != nil {
+	if err := s.enter(); err != nil {
 		return ControlResult{}, err
 	}
 	defer s.running.Done()

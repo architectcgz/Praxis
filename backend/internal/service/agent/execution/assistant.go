@@ -51,7 +51,7 @@ func (s *Service) AssistantCommitter(ctx context.Context, id identity.AgentExecu
 
 // AppendAssistant 保存 Assistant 消息；完成证据与工具调用计数由消息派生。
 func (w assistantCommitter) AppendAssistant(ctx context.Context, message sessionentry.ContextEntry) (stored sessionentry.ContextEntry, inserted bool, err error) {
-	if ctx == nil || message.Role != role.Assistant || message.AuthorKind != sessionentry.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
+	if message.Role != role.Assistant || message.AuthorKind != sessionentry.AuthorAgent || message.AuthorID != w.agentID.String() || message.TurnID == "" {
 		return stored, false, errors.New("assistant ownership is required")
 	}
 	err = func(txCtx context.Context) error {

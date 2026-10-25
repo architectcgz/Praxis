@@ -110,12 +110,6 @@ func orderModelOptions(options []modelconfig.Option, groups []modelconfig.Group)
 // DiscoverProviderModels 获取已配置的 OpenAI 兼容 Provider 公布的模型 ID。
 // 凭据仅在进程内解析，不返回给调用方。
 func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string) ([]string, error) {
-	if r == nil {
-		return nil, errors.New("model registry is not initialized")
-	}
-	if ctx == nil {
-		return nil, errors.New("provider model discovery context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

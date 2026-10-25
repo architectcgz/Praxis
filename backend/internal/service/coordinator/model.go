@@ -15,7 +15,7 @@ type SessionModels interface {
 
 // SelectModel 委托会话服务更新选择，再尝试唤醒该会话的预约，不影响其他会话。
 func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.SessionID, choice sessionmodel.ModelChoice) error {
-	if err := s.enter(ctx); err != nil {
+	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()

@@ -20,7 +20,7 @@ type parentOperation struct{ executionID, id string }
 // Start 为每次尝试创建新 ID。Context 只传递同一 Execution 的父操作标识。
 // nil Recorder 表示未启用计时；开始回调完成后才启动耗时测量，排除写入开销。
 func (r *Recorder) Start(ctx context.Context, operation Operation) (context.Context, *Span) {
-	if r == nil || ctx == nil {
+	if r == nil {
 		return ctx, nil
 	}
 	parentID := ""
@@ -56,7 +56,7 @@ func (r *Recorder) publish(record Record) {
 
 // ResultStatus 将调用错误映射为计时状态，取消和截止时间优先于普通失败。
 func ResultStatus(ctx context.Context, err error) Status {
-	if ctx != nil && ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return Cancelled
 	}
 	if err != nil {

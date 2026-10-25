@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
@@ -18,9 +17,6 @@ type ModelConfigResolver interface {
 
 // SelectModel 只更新指定会话的选择；解析失败时保留原选择，不修改已有执行。
 func (s *Service) SelectModel(ctx context.Context, sessionID identity.SessionID, choice sessionmodel.ModelChoice) error {
-	if ctx == nil {
-		return errors.New("model selection context is required")
-	}
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
 	s.selectionMu.Lock()
@@ -46,9 +42,6 @@ func (s *Service) SelectModel(ctx context.Context, sessionID identity.SessionID,
 
 // SelectedModel 返回界面可见的选择，不暴露完整配置；未选择时返回空值。
 func (s *Service) SelectedModel(ctx context.Context, sessionID identity.SessionID) (sessionmodel.ModelChoice, error) {
-	if ctx == nil {
-		return sessionmodel.ModelChoice{}, errors.New("selected model context is required")
-	}
 	s.selectionMu.RLock()
 	defer s.selectionMu.RUnlock()
 	if _, err := s.sessions.Get(ctx, sessionID); err != nil {
@@ -59,9 +52,6 @@ func (s *Service) SelectedModel(ctx context.Context, sessionID identity.SessionI
 
 // CurrentModelConfig 只复制指定会话的选择，不回退其他会话或默认模型。
 func (s *Service) CurrentModelConfig(ctx context.Context, sessionID identity.SessionID) (modelapi.Config, error) {
-	if ctx == nil {
-		return modelapi.Config{}, errors.New("session model configuration context is required")
-	}
 	s.selectionMu.RLock()
 	defer s.selectionMu.RUnlock()
 	if _, err := s.sessions.Get(ctx, sessionID); err != nil {

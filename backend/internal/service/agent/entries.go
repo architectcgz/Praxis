@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
@@ -35,9 +34,6 @@ func (s *Service) AppendEntry(ctx context.Context, agentID identity.AgentID, dat
 
 // ListAgentEntries 读取 Agent 自有消息流。
 func (s *Service) ListAgentEntries(ctx context.Context, agentID identity.AgentID) ([]sessionentry.ContextEntry, error) {
-	if ctx == nil {
-		return nil, errors.New("agent message context is required")
-	}
 	var entries []sessionentry.ContextEntry
 	err := func(ctx context.Context) error {
 		agent, err := s.agent(agentID)

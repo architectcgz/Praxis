@@ -10,7 +10,7 @@ import (
 func (s *Store) replay(ctx context.Context, scope jsonl.Scope) error {
 	// Open 尚未发布 Store，恢复过程独占 State；删除后不允许出现后续事件。
 	deleted := false
-	return s.log.Replay(ctx, scope, func(event jsonl.Event) error {
+	visit := func(event jsonl.Event) error {
 		if deleted {
 			return errors.New("events follow a deleted session")
 		}
@@ -48,5 +48,11 @@ func (s *Store) replay(ctx context.Context, scope jsonl.Scope) error {
 		s.applyEvent(scope.ID, event, entry)
 		deleted = event.Type == "session.deleted"
 		return nil
+	}
+	return s.log.With(ctx, func(log *jsonl.Access) error {
+		if scope.ID == "" {
+			return log.ReadProject(visit)
+		}
+		return log.ReadSession(scope.ID, visit)
 	})
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	projectservice "praxis/internal/service/project"
@@ -36,9 +35,6 @@ func NewService(deps Dependencies) *Service {
 }
 
 func (s *Service) workspaceForSession(ctx context.Context, sessionID identity.SessionID) (workspacemodel.Workspace, error) {
-	if ctx == nil {
-		return workspacemodel.Workspace{}, fmt.Errorf("a valid session is required: %w", errorcode.ErrInvalidRequest)
-	}
 	if err := ctx.Err(); err != nil {
 		return workspacemodel.Workspace{}, err
 	}

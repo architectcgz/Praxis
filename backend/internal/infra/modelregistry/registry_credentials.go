@@ -1,7 +1,6 @@
 package modelregistry
 
 import (
-	"errors"
 	"fmt"
 	modelconfig "praxis/internal/core/model/config"
 	"regexp"
@@ -34,9 +33,6 @@ func validateCredentials(document ProviderCredentials) (ProviderCredentials, err
 // SetProviderKey 保存或清除输入边界已校验的 Provider API 密钥。
 // 在锁内检查 Provider 是否仍存在；只写凭据文档，模型配置文档不包含密钥。
 func (r *Registry) SetProviderKey(providerID, value string) error {
-	if r == nil {
-		return errors.New("registry is not initialized")
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.providersByID[providerID]; !exists {
@@ -62,7 +58,7 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 
 // ProviderKey 返回已配置 Provider 保存的 API 密钥。
 func (r *Registry) ProviderKey(providerID string) string {
-	if r == nil || !idPattern.MatchString(providerID) {
+	if !idPattern.MatchString(providerID) {
 		return ""
 	}
 	r.mu.RLock()

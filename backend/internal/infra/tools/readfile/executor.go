@@ -23,9 +23,6 @@ type output struct {
 
 // Call 读取 Workspace 内的 UTF-8 普通文件并返回有界结果。
 func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
-	if ctx == nil {
-		return tool.ToolResult{}, errors.New("tool task context is required")
-	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}

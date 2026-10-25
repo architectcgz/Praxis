@@ -19,7 +19,7 @@ func (s *Coordinator) DenyToolCall(ctx context.Context, params ToolDecision) err
 
 // 审批事实由 Service 保存，提交后只通知等待者重新读取决定，不表示批准或重启执行。
 func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, approve bool) error {
-	if err := s.enter(ctx); err != nil {
+	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()
@@ -39,7 +39,7 @@ func (s *Coordinator) ListToolApprovals(ctx context.Context, agentID identity.Ag
 
 // StopToolCall 在控制事实提交后唤醒同一 Loop，待审批调用也能消费取消回执。
 func (s *Coordinator) StopToolCall(ctx context.Context, request ToolControl) error {
-	if err := s.enter(ctx); err != nil {
+	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()

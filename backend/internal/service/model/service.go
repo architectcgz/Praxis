@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	modelconfig "praxis/internal/core/model/config"
@@ -43,11 +42,9 @@ func (s *Service) Configuration() ConfigSnapshot {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
 	result := ConfigSnapshot{ProviderKeys: make(map[string]bool)}
-	if s.models != nil {
-		result.Config = s.models.Config()
-		for _, provider := range result.Config.Providers {
-			result.ProviderKeys[provider.ID] = s.models.HasProviderKey(provider.ID)
-		}
+	result.Config = s.models.Config()
+	for _, provider := range result.Config.Providers {
+		result.ProviderKeys[provider.ID] = s.models.HasProviderKey(provider.ID)
 	}
 	return result
 }
@@ -55,9 +52,6 @@ func (s *Service) Configuration() ConfigSnapshot {
 func (s *Service) ListModels() []modelconfig.Option {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
-	if s.models == nil {
-		return []modelconfig.Option{}
-	}
 	return s.models.ListModels()
 }
 
@@ -65,9 +59,6 @@ func (s *Service) ListModels() []modelconfig.Option {
 func (s *Service) SaveModelConfig(config modelconfig.Config) error {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
-	if s.models == nil {
-		return errors.New("model registry is not available")
-	}
 	if err := s.models.Save(config); err != nil {
 		return err
 	}
@@ -78,9 +69,6 @@ func (s *Service) SaveModelConfig(config modelconfig.Config) error {
 func (s *Service) SetProviderKey(providerID, key string) error {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
-	if s.models == nil {
-		return errors.New("model registry is not available")
-	}
 	if err := s.models.SetProviderKey(providerID, key); err != nil {
 		return err
 	}
@@ -89,9 +77,6 @@ func (s *Service) SetProviderKey(providerID, key string) error {
 }
 
 func (s *Service) DiscoverProviderModels(ctx context.Context, providerID string) ([]string, error) {
-	if s.models == nil {
-		return nil, errors.New("model registry is not available")
-	}
 	return s.models.DiscoverProviderModels(ctx, providerID)
 }
 
@@ -102,9 +87,6 @@ func (s *Service) ReloadConfig(ctx context.Context) error {
 	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
-	if s.reloadConfig == nil {
-		return errors.New("configuration reload is not available")
-	}
 	if err := s.reloadConfig(ctx); err != nil {
 		return err
 	}

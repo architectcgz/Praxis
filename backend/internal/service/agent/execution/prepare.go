@@ -19,9 +19,6 @@ import (
 // PrepareTask 将内存 Task 准入为 Execution，开始时才保存用户消息并冻结上下文。
 // 调用方已标记 Agent 忙碌；返回值的 bool 表示重复请求，失败后的队列与忙闲状态由调度器处理。
 func (s *Service) PrepareTask(ctx context.Context, input taskmodel.Task, agentID identity.AgentID, modelConfig modelapi.Config) (result agentexecution.Execution, existing bool, err error) {
-	if ctx == nil {
-		return result, false, errors.New("task preparation context is required")
-	}
 	if modelConfig.ProviderID == "" || modelConfig.ModelID == "" {
 		return result, false, modelconfig.ErrNotConfigured
 	}

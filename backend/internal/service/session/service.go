@@ -116,25 +116,16 @@ type SessionView struct {
 
 // ListSessionsByProject 返回指定 Project 下按索引查询的 Session 列表。
 func (s *Service) ListSessionsByProject(ctx context.Context, projectID identity.ProjectID, limit int) ([]sessionmodel.Session, error) {
-	if ctx == nil {
-		return nil, errors.New("project session catalog context is required")
-	}
 	return s.sessions.ListByProject(ctx, projectID, limit)
 }
 
 // ListSessions 返回持久化 Session 目录。
 func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.Session, error) {
-	if ctx == nil {
-		return nil, errors.New("session catalog context is required")
-	}
 	return s.sessions.List(ctx, limit)
 }
 
 // GetSessionView 返回 Session 及其持有的 Agent 实例列表。
 func (s *Service) GetSessionView(ctx context.Context, sessionID identity.SessionID, limit int) (SessionView, error) {
-	if ctx == nil {
-		return SessionView{}, errors.New("session query context is required")
-	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return SessionView{}, err
@@ -155,8 +146,8 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID identity.Session
 func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result CreateResult, err error) {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
-	if ctx == nil {
-		return CreateResult{}, errors.New("create session context is required")
+	if params.SessionID == "" {
+		return CreateResult{}, errorcode.ErrInvalidRequest
 	}
 	ctx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
@@ -209,7 +200,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 	}
 	at := s.clock.Now().UTC()
 	session := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, params.AgentID, definition.ID, at)
-	if err := s.sessions.Save(ctx, session); err != nil {
+	if err := s.sessions.Create(ctx, session); err != nil {
 		return CreateResult{}, err
 	}
 	s.createdSessions[params.SessionID] = struct{}{}
@@ -277,18 +268,12 @@ func (s *Service) ListAgents(sessionID identity.SessionID, limit int) []*agentmo
 
 // DeleteSession 删除没有活动执行的 Session。
 func (s *Service) DeleteSession(ctx context.Context, sessionID identity.SessionID) error {
-	if ctx == nil {
-		return errors.New("delete session context is required")
-	}
 	return s.deleteSession(ctx, sessionID, false)
 }
 
 // CleanupEmptySessions 清理本次运行新建且没有消息的会话，并拒绝后续创建。
 // 已删除的会话会被跳过；单个清理失败不影响其他会话，错误统一返回。
 func (s *Service) CleanupEmptySessions(ctx context.Context) error {
-	if ctx == nil {
-		return errors.New("empty session cleanup context is required")
-	}
 	s.createdSessionsMu.Lock()
 	defer s.createdSessionsMu.Unlock()
 	s.closing = true
@@ -337,8 +322,5 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 
 // RenameSession 接收已规范化标题，并刷新会话目录排序使用的更新时间。
 func (s *Service) RenameSession(ctx context.Context, sessionID identity.SessionID, title string) error {
-	if ctx == nil {
-		return errors.New("rename session context is required")
-	}
 	return s.sessions.Rename(ctx, sessionID, title, s.clock.Now())
 }

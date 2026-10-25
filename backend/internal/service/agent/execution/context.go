@@ -2,7 +2,6 @@ package execution
 
 import (
 	"context"
-	"errors"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -16,9 +15,6 @@ import (
 // Session 直接使用 Main 的上下文；Subagent 使用自身历史，不额外加载 Session 内容。
 // completed 为 true 时由 Coordinator 直接结算，不能再次进入 Loop。
 func (s *Service) PrepareLoop(ctx context.Context, executionID identity.AgentExecutionID) (executionInput loop.Input, completed bool, err error) {
-	if ctx == nil {
-		return loop.Input{}, false, errors.New("execution preparation context is required")
-	}
 	err = func(txCtx context.Context) error {
 		task, err := s.records.Get(txCtx, executionID)
 		if err != nil {
