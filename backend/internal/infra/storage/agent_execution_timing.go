@@ -15,9 +15,6 @@ func timingKey(executionID, operationID string) string {
 }
 
 func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing.Record) error {
-	if err := value.Validate(); err != nil {
-		return err
-	}
 	if value.Status == timing.Interrupted {
 		return errors.New("interrupted timing is a read projection")
 	}

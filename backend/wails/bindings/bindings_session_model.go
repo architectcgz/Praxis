@@ -10,7 +10,10 @@ import (
 
 // SelectModel 只更新指定会话的选择；队列唤醒由 Coordinator 编排。
 func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
-	if err := validation.ValidateSessionID(wire.SessionID); err != nil {
+	wire.ProviderID = strings.TrimSpace(wire.ProviderID)
+	wire.ModelID = strings.TrimSpace(wire.ModelID)
+	wire.ReasoningLevel = strings.TrimSpace(wire.ReasoningLevel)
+	if err := validation.Struct(wire); err != nil {
 		return publicInputError(b.host, "SessionBindings.SelectModel.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
@@ -18,9 +21,9 @@ func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
 		return err
 	}
 	choice := sessionmodel.ModelChoice{
-		ProviderID:     strings.TrimSpace(wire.ProviderID),
-		ModelID:        strings.TrimSpace(wire.ModelID),
-		ReasoningLevel: strings.TrimSpace(wire.ReasoningLevel),
+		ProviderID:     wire.ProviderID,
+		ModelID:        wire.ModelID,
+		ReasoningLevel: wire.ReasoningLevel,
 	}
 	if err := services.Commands.SelectModel(ctx, identity.SessionID(wire.SessionID), choice); err != nil {
 		return publicError(b.host, "SessionBindings.SelectModel", err)
@@ -30,7 +33,7 @@ func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
 
 // GetModelSelection 返回会话自身的选择；查询不会设置模型或唤醒预约。
 func (b *SessionBindings) GetModelSelection(sessionID string) (dto.ModelSelection, error) {
-	if err := validation.ValidateSessionID(sessionID); err != nil {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return dto.ModelSelection{}, publicInputError(b.host, "SessionBindings.GetModelSelection.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()

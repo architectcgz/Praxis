@@ -70,7 +70,7 @@ func recordKey(scope, collection, id string) string {
 	return scope + "\x00" + collection + "\x00" + id
 }
 
-// remember 只保存解码后的独立业务值，编码正文由待写队列持有，避免长期保留两份正文。
+// remember 只保存独立业务值，编码正文由待写队列持有，避免长期保留两份正文。
 func (s *Storage) remember(scope string, event jsonl.Event, value any) {
 	key := recordKey(scope, event.Collection, event.Key)
 	event.Payload = nil

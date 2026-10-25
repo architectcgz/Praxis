@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"praxis/internal/identity"
 	"praxis/internal/utils/pathutil"
 	"strings"
 	"sync"
@@ -93,7 +94,7 @@ func (s *Log) scopes(ctx context.Context) ([]Scope, error) {
 		if !project.IsDir() {
 			continue
 		}
-		if !ValidScope(project.Name()) {
+		if !identity.ProjectID(project.Name()).Valid() {
 			return nil, fmt.Errorf("invalid project directory name: %s", project.Name())
 		}
 		directory := filepath.Join(s.projects, project.Name(), "sessions")
@@ -116,7 +117,7 @@ func (s *Log) scopes(ctx context.Context) ([]Scope, error) {
 			if !ok {
 				continue
 			}
-			if !ValidScope(scope) {
+			if !identity.SessionID(scope).Valid() {
 				return nil, fmt.Errorf("invalid log file name: %s", entry.Name())
 			}
 			if seen[scope] {
@@ -129,34 +130,17 @@ func (s *Log) scopes(ctx context.Context) ([]Scope, error) {
 	return result, nil
 }
 
-func ValidScope(scope string) bool {
-	if scope == "" || len(scope) > 180 || !filepath.IsLocal(scope) {
-		return false
-	}
-	for _, c := range scope {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Log) projectPath() string {
 	return filepath.Join(s.root, "projects.jsonl")
 }
 
+// sessionPath 使用入口已确认可用的身份组装路径，只检查已有日志的项目归属。
 func (s *Log) sessionPath(sessionID, projectID string) (string, error) {
-	if !ValidScope(sessionID) {
-		return "", errors.New("session ID is not a valid file name")
-	}
 	if known := s.sessionProjects[sessionID]; known != "" {
 		if projectID != "" && projectID != known {
 			return "", errors.New("log project ownership mismatch")
 		}
 		projectID = known
-	}
-	if !ValidScope(projectID) {
-		return "", errors.New("session project ID is not a valid directory name")
 	}
 	return filepath.Join(s.projects, projectID, "sessions", sessionID+".jsonl"), nil
 }

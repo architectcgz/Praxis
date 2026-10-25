@@ -43,9 +43,6 @@ func findEntry(records []logRecord, agentID identity.AgentID, id string) (stored
 }
 
 func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) (stored sessionentry.ContextEntry, inserted bool, err error) {
-	if value.SessionID == "" || value.AgentID == "" {
-		return stored, false, errors.New("message session and agent identities are required")
-	}
 	err = withState(ctx, r.storage, func(state *Storage, records []logRecord) error {
 		scope := value.SessionID.String()
 		if err := requireMain(records, scope, value.AgentID); err != nil {
@@ -127,7 +124,7 @@ func (r EntryRepository) List(ctx context.Context, query repository.EntryQuery) 
 	return page, err
 }
 
-// Validate 在消息写入与磁盘恢复边界检查消息结构及 Agent 身份，不修正已提交内容。
+// Validate 只在磁盘恢复输入边界检查消息结构及 Agent 身份，不修正已提交内容。
 func (r entryRecord) Validate() error {
 	if r.AgentID == "" || r.AgentID.String() != strings.TrimSpace(r.AgentID.String()) || strings.ContainsAny(r.AgentID.String(), "\x00\r\n") {
 		return errors.New("message agent identity must be canonical and nonempty")

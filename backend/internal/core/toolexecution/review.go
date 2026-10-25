@@ -12,7 +12,6 @@ import (
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/utils/jsonutil"
 	"strings"
 	"unicode/utf8"
 )
@@ -173,9 +172,6 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 
 func parseRiskAssessment(text string) (security.RiskAssessment, error) {
 	data := []byte(text)
-	if err := jsonutil.RejectDuplicateFields(data); err != nil {
-		return security.RiskAssessment{}, err
-	}
 	// encoding/json 对 struct 字段名忽略大小写，因此先要求精确的两个键，避免重复别名覆盖结论。
 	var fields map[string]string
 	if err := json.Unmarshal(data, &fields); err != nil {

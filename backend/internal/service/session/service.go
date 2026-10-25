@@ -69,7 +69,7 @@ type Service struct {
 	closing           bool
 }
 
-// CreateInput 包含 Session 的持久化身份和已确定的 Agent 定义。
+// CreateInput 包含输入边界已校验的身份字段，Agent 定义由创建用例解析。
 type CreateInput struct {
 	RequestID    identity.RequestID
 	SessionID    identity.SessionID
@@ -146,9 +146,6 @@ func (s *Service) GetSessionView(ctx context.Context, sessionID identity.Session
 func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result CreateResult, err error) {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
-	if params.SessionID == "" {
-		return CreateResult{}, errorcode.ErrInvalidRequest
-	}
 	ctx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
 			SessionID: params.SessionID,

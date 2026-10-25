@@ -1,10 +1,10 @@
 package dto
 
 type ToolDecisionRequest struct {
-	SessionID   string `json:"sessionId"`
-	AgentID     string `json:"agentId"`
-	ExecutionID string `json:"executionId"`
-	CallID      string `json:"callId"`
+	SessionID   string `json:"sessionId" validate:"session_id"`
+	AgentID     string `json:"agentId" validate:"id"`
+	ExecutionID string `json:"executionId" validate:"id"`
+	CallID      string `json:"callId" validate:"id"`
 }
 type ToolApproval struct {
 	ToolDecisionRequest
@@ -17,8 +17,8 @@ type ToolApproval struct {
 }
 
 type ToolControlRequest struct {
-	SessionID   string `json:"sessionId"`
-	AgentID     string `json:"agentId"`
-	ExecutionID string `json:"executionId"`
-	CallID      string `json:"callId"`
+	SessionID   string `json:"sessionId" validate:"session_id"`
+	AgentID     string `json:"agentId" validate:"id"`
+	ExecutionID string `json:"executionId" validate:"id"`
+	CallID      string `json:"callId" validate:"id"`
 }

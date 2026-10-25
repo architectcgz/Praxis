@@ -9,18 +9,20 @@ import (
 	"unicode/utf8"
 )
 
-type operationKind uint8
+// OperationKind 表示补丁声明的文件变更，不包含文件系统状态。
+type OperationKind uint8
 
 const (
-	operationUpdate operationKind = iota + 1
-	operationAdd
-	operationDelete
+	Update OperationKind = iota + 1
+	Add
+	Delete
 )
 
-type operation struct {
-	kind    operationKind
-	path    string
-	moveTo  string
+// Operation 暴露资源定位信息，补丁内容和匹配算法由 Core 持有。
+type Operation struct {
+	Kind    OperationKind
+	Path    string
+	MoveTo  string
 	content []string
 	hunks   []hunk
 }
@@ -31,7 +33,8 @@ type hunk struct {
 	newLines []string
 }
 
-func parsePatch(patch string) ([]operation, error) {
+// Parse 校验补丁语法与相对路径，不读取或修改目标文件。
+func Parse(patch string) ([]Operation, error) {
 	if !utf8.ValidString(patch) {
 		return nil, errors.New("patch must be valid UTF-8")
 	}
@@ -55,7 +58,7 @@ func parsePatch(patch string) ([]operation, error) {
 		}
 	}
 
-	operations := make([]operation, 0)
+	operations := make([]Operation, 0)
 	for index := 1; index < end; {
 		line := lines[index]
 		switch {
@@ -68,7 +71,7 @@ func parsePatch(patch string) ([]operation, error) {
 			if err != nil {
 				return nil, fmt.Errorf("update file %q: %w", path, err)
 			}
-			value.path = path
+			value.Path = path
 			operations = append(operations, value)
 			index = next
 		case strings.HasPrefix(line, "*** Add File: "):
@@ -80,9 +83,9 @@ func parsePatch(patch string) ([]operation, error) {
 			if err != nil {
 				return nil, fmt.Errorf("add file %q: %w", path, err)
 			}
-			operations = append(operations, operation{
-				kind:    operationAdd,
-				path:    path,
+			operations = append(operations, Operation{
+				Kind:    Add,
+				Path:    path,
 				content: content,
 			})
 			index = next
@@ -91,7 +94,7 @@ func parsePatch(patch string) ([]operation, error) {
 			if err != nil {
 				return nil, err
 			}
-			operations = append(operations, operation{kind: operationDelete, path: path})
+			operations = append(operations, Operation{Kind: Delete, Path: path})
 			index++
 		default:
 			return nil, fmt.Errorf("unexpected patch line %q", line)
@@ -132,36 +135,36 @@ func parseAdd(lines []string, index, end int) ([]string, int, error) {
 	return content, index, nil
 }
 
-func parseUpdate(lines []string, index, end int) (operation, int, error) {
-	value := operation{kind: operationUpdate}
+func parseUpdate(lines []string, index, end int) (Operation, int, error) {
+	value := Operation{Kind: Update}
 	for index < end && !isOperationHeader(lines[index]) {
 		line := lines[index]
 		switch {
 		case strings.HasPrefix(line, "*** Move to: "):
-			if value.moveTo != "" {
-				return operation{}, index, errors.New("move target is specified more than once")
+			if value.MoveTo != "" {
+				return Operation{}, index, errors.New("move target is specified more than once")
 			}
 			path, err := parsePath(line, "*** Move to: ")
 			if err != nil {
-				return operation{}, index, err
+				return Operation{}, index, err
 			}
-			value.moveTo = path
+			value.MoveTo = path
 			index++
 		case line == "*** End of File":
 			index++
 		case strings.HasPrefix(line, "@@"):
 			valueHunk, next, err := parseHunk(lines, index, end)
 			if err != nil {
-				return operation{}, index, err
+				return Operation{}, index, err
 			}
 			value.hunks = append(value.hunks, valueHunk)
 			index = next
 		default:
-			return operation{}, index, fmt.Errorf("unexpected update line %q", line)
+			return Operation{}, index, fmt.Errorf("unexpected update line %q", line)
 		}
 	}
 	if len(value.hunks) == 0 {
-		return operation{}, index, errors.New("updated file requires at least one hunk")
+		return Operation{}, index, errors.New("updated file requires at least one hunk")
 	}
 	return value, index, nil
 }
@@ -207,9 +210,7 @@ func parseHunkStart(line string) (int, error) {
 		return 0, nil
 	}
 	rest := strings.TrimPrefix(line, "@@")
-	if marker := strings.Index(rest, "@@"); marker >= 0 {
-		rest = rest[:marker]
-	}
+	rest, _, _ = strings.Cut(rest, "@@")
 	fields := strings.Fields(rest)
 	if len(fields) == 0 {
 		return 0, nil
@@ -218,9 +219,7 @@ func parseHunkStart(line string) (int, error) {
 		return 0, errors.New("hunk header is missing the old file range")
 	}
 	oldRange := strings.TrimPrefix(fields[0], "-")
-	if comma := strings.IndexByte(oldRange, ','); comma >= 0 {
-		oldRange = oldRange[:comma]
-	}
+	oldRange, _, _ = strings.Cut(oldRange, ",")
 	start, err := strconv.Atoi(oldRange)
 	if err != nil || start < 0 {
 		return 0, errors.New("hunk header has an invalid old file range")

@@ -1,17 +1,14 @@
 package bindings
 
 import (
-	"fmt"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	execution "praxis/internal/service/coordinator"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
-	"strings"
 )
 
 func (b *CommandBindings) ListToolApprovals(agentID string) ([]dto.ToolApproval, error) {
-	if err := validation.ValidateAgentID(agentID); err != nil {
+	if err := validation.ID("agentId", agentID); err != nil {
 		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
@@ -52,6 +49,9 @@ func (b *CommandBindings) DenyToolCall(wire dto.ToolDecisionRequest) error {
 }
 
 func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve bool) error {
+	if err := validation.Struct(wire); err != nil {
+		return publicInputError(b.host, "CommandBindings.ToolDecision.request", err)
+	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
@@ -61,11 +61,7 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 		SessionID:   identity.SessionID(wire.SessionID),
 		AgentID:     identity.AgentID(wire.AgentID),
 		ExecutionID: identity.AgentExecutionID(wire.ExecutionID),
-		CallID:      strings.TrimSpace(wire.CallID),
-	}
-	if params.SessionID == "" || params.AgentID == "" || params.ExecutionID == "" || params.CallID == "" {
-		err := fmt.Errorf("tool approval identity is required: %w", errorcode.ErrInvalidRequest)
-		return publicInputError(b.host, "CommandBindings.ToolDecision.request", err)
+		CallID:      wire.CallID,
 	}
 	if approve {
 		err = services.Commands.ApproveToolCall(ctx, params)
@@ -79,18 +75,18 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 }
 
 func (b *CommandBindings) StopToolCall(wire dto.ToolControlRequest) error {
+	if err := validation.Struct(wire); err != nil {
+		return publicInputError(b.host, "CommandBindings.StopToolCall.request", err)
+	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
 	request := execution.ToolControl{
-		SessionID:   identity.SessionID(strings.TrimSpace(wire.SessionID)),
-		AgentID:     identity.AgentID(strings.TrimSpace(wire.AgentID)),
-		ExecutionID: identity.AgentExecutionID(strings.TrimSpace(wire.ExecutionID)),
-		CallID:      strings.TrimSpace(wire.CallID),
-	}
-	if request.SessionID == "" || request.AgentID == "" || request.ExecutionID == "" || request.CallID == "" {
-		return publicInputError(b.host, "CommandBindings.StopToolCall.request", fmt.Errorf("tool control identity is required: %w", errorcode.ErrInvalidRequest))
+		SessionID:   identity.SessionID(wire.SessionID),
+		AgentID:     identity.AgentID(wire.AgentID),
+		ExecutionID: identity.AgentExecutionID(wire.ExecutionID),
+		CallID:      wire.CallID,
 	}
 	return publicError(b.host, "CommandBindings.StopToolCall", services.Commands.StopToolCall(ctx, request))
 }

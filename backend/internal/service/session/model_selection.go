@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	modelapi "praxis/internal/core/model"
-	modelconfig "praxis/internal/core/model/config"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -28,9 +27,6 @@ func (s *Service) SelectModel(ctx context.Context, sessionID identity.SessionID,
 	if choice == (sessionmodel.ModelChoice{}) {
 		delete(s.modelSelections, sessionID)
 		return nil
-	}
-	if choice.ProviderID == "" || choice.ModelID == "" {
-		return modelconfig.ErrNotConfigured
 	}
 	config, err := s.modelConfigs.ModelConfig(choice.ProviderID, choice.ModelID, choice.ReasoningLevel)
 	if err != nil {

@@ -177,9 +177,6 @@ func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string
 // ModelConfig 返回显式选定模型的内存快照，只覆盖本次请求指定的推理等级。
 // 完整配置在加载或保存时构建；返回独立副本，避免单次执行修改注册表状态。
 func (r *Registry) ModelConfig(providerID, modelID, reasoningLevel string) (modelapi.Config, error) {
-	if providerID == "" || modelID == "" {
-		return modelapi.Config{}, errors.New("model provider ID and model ID are required")
-	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	config, ok := r.modelConfigs[modelKey{ProviderID: providerID, ModelID: modelID}]

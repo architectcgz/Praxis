@@ -5,16 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"praxis/internal/clock"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
-	"praxis/internal/identity"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,7 +24,6 @@ type ExecutorDependencies struct {
 	Catalog        tool.ToolCatalog
 	Operations     Operations
 	Reviewer       *Reviewer
-	Bind           func(tool.Tool, string) tool.Tool
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
 	Clock          clock.Clock
@@ -69,7 +69,7 @@ func (e *Executor) ForExecution(run *agentexecution.Run, workspacePath string, a
 	}
 }
 
-// Execute 在同一次调用中准备参数、授权、等待审批、执行工具并提交回执。
+// Execute 准备并冻结工具参数，取得最终授权后执行工具并提交回执；审核与审批等待由 authorize 调度。
 func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.ToolCall) (sessionentry.ContextEntry, error) {
 	s := tools.executor
 	owner := tools.run.Snapshot()
@@ -91,37 +91,64 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 	if !ok {
 		return s.appendError(ctx, call, "tool_not_allowed", "The requested tool is disabled or unregistered.")
 	}
-	boundary := toolHookEvent(call, call.Arguments)
-	boundary.OperationID = hook.NewOperationID()
-	modified, hookErr := s.deps.HookDispatcher.BeforeToolExecution(ctx, boundary)
+	operationID := hook.NewOperationID()
+	modified, hookErr := s.deps.HookDispatcher.BeforeToolExecution(ctx, toolHookEvent(call, call.Arguments, operationID))
 	if hookErr != nil {
 		return sessionentry.ContextEntry{}, hookErr
 	}
 	if err := ctx.Err(); err != nil {
 		return s.appendError(ctx, call, "tool_interrupted", err.Error())
 	}
-	call.Arguments = bytes.Clone(modified)
-	args, err := t.Prepare(call.Arguments, tools.workspacePath)
+	// JSON 只在编排边界解码；工具准备与实际执行都使用类型化参数。
+	arguments := t.NewArguments()
+	var path *string
+	var defaultPath string
+	if value, ok := arguments.(tool.PathArguments); ok {
+		path = value.PathArgument()
+		// 解码前保留业务默认路径，显式空值仍按该工具自己的缺省规则处理。
+		defaultPath = *path
+	}
+	decoder := json.NewDecoder(bytes.NewReader(modified))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(arguments); err != nil {
+		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
+	}
+	// 工作区根已由业务入口校验；模型路径只在此处解析，准备与授权均使用规范化后的同一值。
+	if path != nil {
+		if strings.TrimSpace(*path) == "" {
+			*path = defaultPath
+		}
+		if strings.TrimSpace(*path) == "" {
+			return s.appendError(ctx, call, "invalid_tool_call", "path is required")
+		}
+		if strings.ContainsAny(*path, "\x00\r\n") {
+			return s.appendError(ctx, call, "invalid_tool_call", "path contains control characters")
+		}
+		if !filepath.IsAbs(*path) {
+			*path = filepath.Join(tools.workspacePath, *path)
+		}
+		*path = filepath.Clean(*path)
+	}
+	prepared, err := t.Prepare(arguments, tools.workspacePath)
 	if err != nil {
 		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
 	}
-	boundary.Arguments = bytes.Clone(args)
-	// 每次 ToolCall 只读取一次内存规则，审批与启动均沿用本次决定。
-	decision, err := s.deps.Operations.DecideRule(ctx, call, args)
+	// 审批与 Hook 使用同一份只读 JSON，真实调用持有准备阶段绑定的参数，不反向解码。
+	args, err := json.Marshal(prepared.Arguments)
 	if err != nil {
-		return sessionentry.ContextEntry{}, err
+		return sessionentry.ContextEntry{}, fmt.Errorf("encode prepared tool arguments: %w", err)
 	}
-	return tools.execute(ctx, call, t, bytes.Clone(args), decision, boundary)
+	return tools.execute(ctx, call, prepared, args, operationID)
 }
 
-func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.ToolCall, t tool.Tool, args json.RawMessage, decision security.ApprovalDecision, boundary hook.ToolExecution) (sessionentry.ContextEntry, error) {
+func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (sessionentry.ContextEntry, error) {
 	s := tools.executor
 
 	for {
 		if stored, found := tools.run.Result(call.Key); found {
 			return stored, nil
 		}
-		pending, denied, err := tools.authorize(ctx, call, args, decision)
+		denied, err := tools.authorize(ctx, call, args, prepared.Command, operationID)
 		if errors.Is(err, errCallStopped) {
 			return s.appendError(ctx, call, "tool_interrupted", err.Error())
 		}
@@ -138,28 +165,13 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 			return s.commitResult(ctx, call, *denied)
 		}
 
-		if pending {
-			// 请求仅属于活跃调用；等待信号保留提前到达的决定或停止通知。
-			sourceTaskID, err := s.checkCall(ctx, call)
-			if err != nil {
-				return sessionentry.ContextEntry{}, err
-			}
-			waiting := boundary
-			waiting.SourceTaskID = sourceTaskID
-			waiting.Call.Arguments = bytes.Clone(args)
-			s.notifyWaiting(ctx, waiting)
-			if err := tools.awaitApproval(ctx); err != nil {
-				return s.appendError(ctx, call, "tool_interrupted", err.Error())
-			}
-			continue
-		}
-
-		observed := observedTool{
-			Tool:     s.deps.Bind(t, tools.workspacePath),
+		observed := observedCall{
+			call:     prepared.Call,
+			name:     call.Name,
 			recorder: tools.run.Timing,
 			hooks:    s.deps.HookDispatcher,
 			identity: hook.Identity{
-				OperationID: boundary.OperationID,
+				OperationID: operationID,
 				SessionID:   call.SessionID,
 				AgentID:     call.AgentID,
 				ExecutionID: call.ExecutionID,
@@ -167,7 +179,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 			},
 			callID: call.CallID,
 		}
-		execution := NewExecution(ctx, observed, args)
+		execution := NewExecution(ctx, observed.Call)
 		err = s.register(ctx, call, execution)
 		if err != nil {
 			execution.Stop()
@@ -198,7 +210,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 			}
 		}
 		modified, hookErr := s.deps.HookDispatcher.AfterToolExecution(context.WithoutCancel(ctx), hook.ToolExecutionResult{
-			ToolExecution: boundary,
+			ToolExecution: toolHookEvent(call, args, operationID),
 			Result:        value,
 			Err:           result.Err,
 		})
@@ -218,30 +230,31 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 	}
 }
 
-// observedTool 只观察真实调用，不参与授权或结果保存。
-type observedTool struct {
-	tool.Tool
+// observedCall 只观察已绑定参数的真实调用，不参与授权、参数准备或结果保存。
+type observedCall struct {
+	call     func(context.Context) (tool.ToolResult, error)
+	name     tool.ToolName
 	recorder *timing.Recorder
 	hooks    *hook.Dispatcher
 	identity hook.Identity
 	callID   string
 }
 
-func (t observedTool) Call(ctx context.Context, args json.RawMessage) (result tool.ToolResult, err error) {
+func (t observedCall) Call(ctx context.Context) (result tool.ToolResult, err error) {
 	ctx, scope := t.hooks.Start(ctx, hook.Operation{
 		Identity:    t.identity,
 		Kind:        hook.OperationTool,
-		Name:        string(t.Definition().Name),
+		Name:        string(t.name),
 		ReferenceID: t.callID,
 	})
 	defer func() { scope.End(hook.Result{Err: err, ToolErrorClass: result.ErrorClass}) }()
 	ctx, span := t.recorder.Start(ctx, timing.Operation{
 		ExecutionID: t.identity.ExecutionID.String(),
 		Kind:        timing.Tool,
-		Name:        string(t.Definition().Name),
+		Name:        string(t.name),
 		ReferenceID: t.callID,
 	})
-	result, err = t.Tool.Call(ctx, args)
+	result, err = t.call(ctx)
 	status := timing.ResultStatus(ctx, err)
 	if status == timing.Completed && result.ErrorClass != "" {
 		status = timing.Failed
@@ -250,41 +263,23 @@ func (t observedTool) Call(ctx context.Context, args json.RawMessage) (result to
 	return result, err
 }
 
-func toolHookEvent(call sessionentry.ToolCall, args json.RawMessage) hook.ToolExecution {
+// toolHookEvent 仅在分发边界构造事件，参数隔离由 HookDispatcher 负责。
+func toolHookEvent(call sessionentry.ToolCall, args json.RawMessage, operationID string) hook.ToolExecution {
 	return hook.ToolExecution{
-		Identity:  hook.Identity{SessionID: call.SessionID, AgentID: call.AgentID, ExecutionID: call.ExecutionID, TurnID: call.TurnID},
+		Identity: hook.Identity{
+			OperationID: operationID,
+			SessionID:   call.SessionID,
+			AgentID:     call.AgentID,
+			ExecutionID: call.ExecutionID,
+			TurnID:      call.TurnID,
+		},
 		Call:      call,
-		Arguments: bytes.Clone(args),
+		Arguments: args,
 	}
 }
 
 func (e *Executor) appendError(ctx context.Context, call sessionentry.ToolCall, code, message string) (sessionentry.ContextEntry, error) {
 	return e.commitResult(ctx, call, tool.NewToolError(code, message))
-}
-
-func (e *Executor) checkCall(ctx context.Context, call sessionentry.ToolCall) (identity.TaskID, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	callState := e.active[call.Key]
-	if callState == nil || callState.owner.Status != agentexecution.ExecutionRunning {
-		return "", errorcode.ErrRequestConflict
-	}
-	return callState.owner.SourceTaskID, nil
-}
-
-func (e *Executor) notifyWaiting(ctx context.Context, value hook.ToolExecution) {
-	if err := e.deps.HookDispatcher.ToolExecutionWaiting(context.WithoutCancel(ctx), value); err != nil && e.deps.Logf != nil {
-		e.deps.Logf("tool execution waiting hook failed: %v", err)
-	}
-	e.deps.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.ToolApprovalRequired,
-		SessionID:   value.SessionID,
-		AgentID:     value.AgentID,
-		ExecutionID: value.ExecutionID,
-		TurnID:      value.TurnID,
-		CallID:      value.Call.CallID,
-		Name:        string(value.Call.Name),
-	})
 }
 
 // commitResult 与 Stop 共享同步边界，迟到的控制请求不覆盖工具回执。

@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	agentexecution "praxis/internal/core/agent/execution"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
+	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"time"
 )
 
@@ -19,29 +23,72 @@ type authorizationResult struct {
 	review  bool
 }
 
-// authorize 沿用本次 ToolCall 的规则决定；唤醒后只读取审批事实，模型审核在控制锁外执行。
-// args 由执行流程冻结，审批请求、审核输入和审核记录共享只读参数。
-func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, decision security.ApprovalDecision) (bool, *tool.ToolResult, error) {
+// authorize 完整调度规则判断、模型审核和人工审批，只向工具执行层返回最终授权结果。
+// args 由执行流程冻结；规则只读取一次，审批唤醒后不重新匹配，审批与审核共享只读参数。
+func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, command string, operationID string) (*tool.ToolResult, error) {
 	e := t.executor
+	decision, err := e.deps.Operations.DecideRule(ctx, call, command)
+	if err != nil {
+		return nil, err
+	}
 	for {
-		result, request, err := t.authorizationStep(ctx, call, args, decision)
+		e.mu.Lock()
+		if err := e.checkUnfinished(ctx, call); err != nil {
+			e.mu.Unlock()
+			return nil, err
+		}
+		callState := e.active[call.Key]
+		result, err := e.evaluate(callState, decision)
 		if err != nil {
-			return false, nil, err
+			e.mu.Unlock()
+			return nil, err
 		}
-		if request == nil {
-			return result.pending, result.denied, nil
+		sourceTaskID := callState.owner.SourceTaskID
+		if result.pending {
+			if callState.owner.Status != agentexecution.ExecutionRunning {
+				e.mu.Unlock()
+				return nil, errorcode.ErrRequestConflict
+			}
+			// 判断与请求登记共享控制锁，通知前请求已可查询，不能与停止或用户决定交错修改。
+			if callState.request == nil {
+				callState.request = &ApprovalRequest{
+					Key:         call.Key,
+					SessionID:   call.SessionID,
+					Arguments:   args,
+					Decision:    decision,
+					RequestedAt: e.deps.Clock.Now().UTC(),
+				}
+			}
 		}
+		e.mu.Unlock()
+
+		// Hook、模型请求和人工等待均在控制锁外执行，控制入口只登记决定或停止并唤醒。
+		if result.pending {
+			e.notifyWaiting(ctx, call, args, operationID, sourceTaskID)
+			if err := t.awaitApproval(ctx); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if !result.review {
+			return result.denied, nil
+		}
+		request, err := e.deps.Operations.PrepareReview(ctx, t.run, call, t.workspacePath)
+		if err != nil {
+			return nil, err
+		}
+		request.Call, request.Arguments, request.Decision = call, args, decision
 		reviewCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		assessment, reviewErr := e.deps.Reviewer.review(reviewCtx, *request)
+		assessment, reviewErr := e.deps.Reviewer.review(reviewCtx, request)
 		if reviewErr == nil {
 			reviewErr = reviewCtx.Err()
 		}
 		cancel()
 		if _, ok := errors.AsType[*reviewProgressError](reviewErr); ok {
-			return false, nil, reviewErr
+			return nil, reviewErr
 		}
 		if ctx.Err() != nil {
-			return false, nil, ctx.Err()
+			return nil, ctx.Err()
 		}
 		if reviewErr != nil {
 			assessment = security.RiskAssessment{
@@ -65,44 +112,27 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 		}
 		e.mu.Unlock()
 		if err != nil {
-			return false, nil, err
+			return nil, err
 		}
 	}
 }
 
-func (t *ExecutionTools) authorizationStep(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, decision security.ApprovalDecision) (authorizationResult, *ReviewRequest, error) {
-	e := t.executor
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err := e.checkUnfinished(ctx, call); err != nil {
-		return authorizationResult{}, nil, err
+func (e *Executor) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string, sourceTaskID identity.TaskID) {
+	call.Arguments = args
+	value := toolHookEvent(call, args, operationID)
+	value.SourceTaskID = sourceTaskID
+	if err := e.deps.HookDispatcher.ToolExecutionWaiting(context.WithoutCancel(ctx), value); err != nil && e.deps.Logf != nil {
+		e.deps.Logf("tool execution waiting hook failed: %v", err)
 	}
-	callState := e.active[call.Key]
-	result, err := e.evaluate(callState, decision)
-	if err != nil {
-		return result, nil, err
-	}
-	if result.pending {
-		if callState.request == nil {
-			callState.request = &ApprovalRequest{
-				Key:         call.Key,
-				SessionID:   call.SessionID,
-				Arguments:   args,
-				Decision:    decision,
-				RequestedAt: e.deps.Clock.Now().UTC(),
-			}
-		}
-		return result, nil, nil
-	}
-	if !result.review {
-		return result, nil, nil
-	}
-	request, err := e.deps.Operations.PrepareReview(ctx, t.run, call, t.workspacePath)
-	if err != nil {
-		return result, nil, err
-	}
-	request.Call, request.Arguments, request.Decision = call, args, decision
-	return result, &request, nil
+	e.deps.Emitter.Emit(coreevent.Event{
+		Kind:        coreevent.ToolApprovalRequired,
+		SessionID:   call.SessionID,
+		AgentID:     call.AgentID,
+		ExecutionID: call.ExecutionID,
+		TurnID:      call.TurnID,
+		CallID:      call.CallID,
+		Name:        string(call.Name),
+	})
 }
 
 // evaluate 只读取事实并作出瞬时结论，不保存工具执行状态或发起模型请求。

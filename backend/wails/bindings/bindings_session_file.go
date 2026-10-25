@@ -7,7 +7,7 @@ import (
 
 // RevealSessionFile 打开系统文件管理器定位会话日志；非法 ID、文件缺失或启动失败时返回公开错误。
 func (b *SessionBindings) RevealSessionFile(sessionID string) error {
-	if err := validation.ValidateSessionID(sessionID); err != nil {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return publicInputError(b.host, "SessionBindings.RevealSessionFile.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()

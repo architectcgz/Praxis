@@ -7,7 +7,7 @@ import (
 )
 
 func (b *AgentBindings) ListAgentTimings(agentID string) ([]dto.OperationTiming, error) {
-	if err := validation.ValidateAgentID(agentID); err != nil {
+	if err := validation.ID("agentId", agentID); err != nil {
 		return nil, publicInputError(b.host, "AgentBindings.ListAgentTimings.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()

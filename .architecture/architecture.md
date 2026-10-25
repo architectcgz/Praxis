@@ -26,7 +26,8 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/internal/core/context/` | 模型上下文构建和压缩 |
 | `backend/internal/core/loop/` | 模型与工具的 ReAct 迭代 |
 | `backend/internal/core/model/`、`core/provider/` | 模型配置和 Provider 调用契约 |
-| `backend/internal/core/tool/`、`core/toolexecution/` | 工具契约、完整工具执行与授权流程、取消句柄和审批事实 |
+| `backend/internal/core/tool/` | 工具契约、内置工具定义、参数默认值与准备规则、补丁解析及内容匹配 |
+| `backend/internal/core/toolexecution/` | 工具调用与授权编排、取消句柄和审批事实 |
 | `backend/internal/core/security/` | 权限、审批和风险策略类型与规则 |
 | `backend/internal/core/hook/` | 业务扩展和执行观察机制 |
 | `backend/internal/repository/` | 统一持久化读写与查询契约 |
@@ -40,7 +41,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/internal/infra/jsonl/` | 启动日志重放、文件路径和顺序追加，不持有业务状态 |
 | `backend/internal/infra/providers/` | 各模型 Provider 的协议实现 |
 | `backend/internal/infra/modelregistry/`、`infra/agentregistry/`、`infra/toolregistry/` | 模型、Agent 和工具的配置加载与注册 |
-| `backend/internal/infra/tools/`、`infra/filesystem/` | 具体工具和本地文件系统能力 |
+| `backend/internal/infra/tools/`、`infra/filesystem/` | 使用明确参数执行文件读写与命令、检查实际资源边界，不决定工具默认值 |
 | `backend/internal/identity/`、`clock/`、`errorcode/`、`fault/` | 身份、时间、稳定错误码和结构化错误等基础能力 |
 | `backend/internal/settings/`、`dataroot/`、`logging/` | 应用配置、数据目录和日志 |
 
@@ -57,7 +58,13 @@ flowchart TD
     Bootstrap -.创建与注入.-> Infra
 ```
 
-Coordinator 在领取 Session 队首输入并取得 AgentExecution 的唯一运行权后，组织上下文、Loop 与本次 ExecutionTools。共享 Runner 执行一次逻辑上的 ReAct 过程，共享 ToolExecution Executor 负责单次工具调用的参数准备、授权、审核、等待、真实调用与回执提交。Core 通过注入的业务能力调用 Service，具体协议、文件系统与持久化实现由 Infra 提供。
+Coordinator 在领取 Session 队首输入并取得 AgentExecution 的唯一运行权后，组织上下文、Loop 与本次 ExecutionTools。共享 Runner 执行一次逻辑上的 ReAct 过程，ExecutionTools 准备并冻结单次工具调用的参数，调用 authorize 取得最终授权，再执行工具并提交回执。authorize 完整调度规则判断、模型审核、人工审批请求登记、通知与等待；auto 审核安全时允许执行，危险时拒绝，不确定或审核失败时转为人工审批，进度记录失败和执行取消直接传播。状态判断与审批请求登记处于同一控制锁内，模型请求、Hook 和人工等待在锁外执行。Core 通过注入的业务能力调用 Service，具体协议、文件系统与持久化实现由 Infra 提供。
+
+项目创建由 Project Service 统一清理名称、规范化工作区路径并校验业务约束，全部校验成功后才调用目录创建能力；Wails 只转换请求身份和 DTO。工具调用信任业务入口确定的工作区根，实际文件系统状态与访问范围仍在 Infra 的资源边界检查。
+
+工具原始调用与准备后的执行参数分别保留。工具定义和参数规则属于 Core，各工具在解码、准备与执行阶段使用同一种 Arguments。Core 的 NewArguments 提供默认值，Before Hook 修改后的 JSON 由 ExecutionTools 使用标准库解码首个 JSON 值到该参数对象，拒绝未知字段；缺省字段保留默认值，数值 null 遵循标准库行为并保留原值，显式零值由业务规则判断。带路径参数的工具通过 PathArguments 声明路径字段，ExecutionTools 在解码后统一处理空值默认路径、相对工作区的路径解析与规范化，再传给 Prepare；工具参数类型只提供字段访问，Prepare 不接收工作区，也不判断或改写路径，仅校验命令、读取范围和补丁格式等业务规则。Bootstrap 泛型适配器只连接这些规则与 Infra 执行能力，将确定参数和工作区绑定为 PreparedCall。Infra 的 Call 使用同一组类型化参数执行资源操作；补丁语法与内容匹配规则由 Core 提供，实际文件读取、权限检查和写入由 Infra 完成。准备后的参数只在审批和 Hook 边界序列化一次，命令规则直接使用准备阶段提取的命令。
+
+Before Hook 在参数准备和授权前修改输入，After Hook 在执行后、回执提交前处理输出，但不能改变错误分类与副作用事实。业务方法只传调用数据和本次操作关联标识，不传递 Hook 事件；事件在触发边界构造，参数隔离由 HookDispatcher 统一处理。Before、审批等待、实际调用的观测 Scope 和 After 共用同一本次操作标识；观测包装只覆盖真实工具调用，不接管授权或回执提交。
 
 审批等待期间 Execution 保持 running 并占用当前 Session，用户决定提交后只唤醒同一 Loop。后续 Task 保持排队，只有前一次 Execution 结算并释放归属，且结果允许继续派发，才领取下一项。ToolResult 是工具调用的唯一完成依据；审批请求、用户决定与审核状态只属于当前活跃调用，不做重启恢复。每次 ToolCall 开始授权时只读取一次内存规则，参数与规则决定在本次调用中固定，审批唤醒及工具启动不重新匹配规则；规则变更仅影响后续 ToolCall，每个调用最多产生一次人工审批请求。Coordinator 保证唯一 Loop，Loop 顺序执行各 ToolCall。回执由内存接纳后即可推进执行，不等待落盘；恢复只补缺失回执，不重新调用工具。Executor 的 active 索引用于当前调用的控制与审批查询，在本次 Execute 返回时移除。
 

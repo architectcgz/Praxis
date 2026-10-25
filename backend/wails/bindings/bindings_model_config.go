@@ -3,10 +3,8 @@ package bindings
 import (
 	"context"
 	"errors"
-	"fmt"
 	"praxis/internal/errorcode"
 	apperr "praxis/wails/error"
-	"regexp"
 	"strings"
 	"time"
 
@@ -85,22 +83,20 @@ func (b *ModelBindings) SaveModelConfig(wire dto.SaveModelConfigRequest) (dto.Sa
 }
 
 func validationResponse(err error) (dto.SaveModelConfigResponse, error) {
-	if errors.Is(err, errorcode.ErrInvalidValue) {
+	if errors.Is(err, errorcode.ErrInvalidValue) || errors.Is(err, apperr.ErrInvalidRequest) {
 		return dto.SaveModelConfigResponse{ValidationError: apperr.InputMessage(err)}, nil
 	}
 	return dto.SaveModelConfigResponse{}, apperr.PublicError(err)
 }
 
-var providerKeyIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-
 // SetProviderKey 在输入边界校验 Provider 身份；密钥原样保存，空字符串表示清除。
 func (b *ModelBindings) SetProviderKey(providerID, value string) error {
 	providerID = strings.TrimSpace(providerID)
-	if !providerKeyIDPattern.MatchString(providerID) {
-		return publicInputError(b.host, "ModelBindings.SetProviderKey.request", fmt.Errorf("providerId: invalid provider id: %w", errorcode.ErrInvalidValue))
+	if err := validation.Value("providerId", providerID, "config_id"); err != nil {
+		return publicInputError(b.host, "ModelBindings.SetProviderKey.request", err)
 	}
-	if value != "" && strings.TrimSpace(value) == "" {
-		return publicInputError(b.host, "ModelBindings.SetProviderKey.request", fmt.Errorf("key: API key cannot contain only whitespace: %w", errorcode.ErrInvalidValue))
+	if err := validation.Value("key", value, "omitempty,notblank"); err != nil {
+		return publicInputError(b.host, "ModelBindings.SetProviderKey.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
@@ -122,7 +118,7 @@ func (b *ModelBindings) ClearProviderKey(providerID string) error {
 
 // ListProviderModels 查询已保存 Provider 的远程模型目录。
 func (b *ModelBindings) ListProviderModels(providerID string) ([]string, error) {
-	if err := validation.ValidateProviderID(providerID); err != nil {
+	if err := validation.Value("providerId", providerID, "config_id"); err != nil {
 		return nil, publicInputError(b.host, "ModelBindings.ListProviderModels.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()

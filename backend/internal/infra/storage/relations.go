@@ -15,7 +15,6 @@ import (
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/infra/jsonl"
 )
 
 // requireMain 是所有 Agent 过程写入的共同边界，不依赖调用方提供的持久化开关。
@@ -93,7 +92,7 @@ func validateRelations(state *Storage, records []logRecord, scope, collection st
 			}
 		}
 	case sessionmodel.Session:
-		if !jsonl.ValidScope(v.ProjectID.String()) || state.projects[scope] != "" && state.projects[scope] != v.ProjectID.String() {
+		if state.projects[scope] != "" && state.projects[scope] != v.ProjectID.String() {
 			return errors.New("session project does not match log directory")
 		}
 		workspace, err := getRecord[workspacemodel.Workspace](records, "workspace", v.WorkspaceID.String())

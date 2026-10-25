@@ -26,11 +26,11 @@ type SessionSummary struct {
 }
 
 type CreateProjectRequest struct {
-	ProjectID   string `json:"projectId"`
-	WorkspaceID string `json:"workspaceId"`
-	ProjectName string `json:"projectName"`
-	Path        string `json:"path"`
-	RequestID   string `json:"requestId"`
+	ProjectID   string `json:"projectId" validate:"project_id"`
+	WorkspaceID string `json:"workspaceId" validate:"id"`
+	ProjectName string `json:"projectName" validate:"project_name"`
+	Path        string `json:"path" validate:"project_path"`
+	RequestID   string `json:"requestId" validate:"id"`
 }
 
 type CreateProjectResponse struct {
@@ -49,12 +49,12 @@ type ProjectSummary struct {
 }
 
 type CreateSessionRequest struct {
-	SessionID         string `json:"sessionId"`
-	AgentID           string `json:"agentId"`
-	ProjectID         string `json:"projectId"`
-	WorkspaceID       string `json:"workspaceId"`
-	AgentDefinitionID string `json:"agentDefinitionId"`
-	RequestID         string `json:"requestId"`
+	SessionID         string `json:"sessionId" validate:"session_id"`
+	AgentID           string `json:"agentId" validate:"id"`
+	ProjectID         string `json:"projectId" validate:"project_id"`
+	WorkspaceID       string `json:"workspaceId" validate:"id"`
+	AgentDefinitionID string `json:"agentDefinitionId" validate:"definition_id"`
+	RequestID         string `json:"requestId" validate:"id"`
 }
 
 type CreateSessionResponse struct {
@@ -76,29 +76,29 @@ type ModelOption struct {
 
 // ProviderConfigOption 携带可编辑的 Provider 元数据和密钥状态。
 type ProviderConfigOption struct {
-	ID           string `json:"id"`
-	ProviderName string `json:"providerName"`
-	BaseURL      string `json:"baseURL"`
-	ProxyURL     string `json:"proxyURL"`
+	ID           string `json:"id" validate:"config_id"`
+	ProviderName string `json:"providerName" validate:"required,notblank"`
+	BaseURL      string `json:"baseURL" validate:"required,model_base_url"`
+	ProxyURL     string `json:"proxyURL" validate:"omitempty,model_proxy_url"`
 	HasAPIKey    bool   `json:"hasAPIKey"`
 }
 
 type GroupConfigOption struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
+	ID          string `json:"id" validate:"config_id"`
+	DisplayName string `json:"displayName" validate:"required,notblank"`
 }
 
 // ModelConfigOption 携带设置界面编辑模型所需的全部字段。
 type ModelConfigOption struct {
-	ProviderID            string        `json:"providerId"`
-	ModelID               string        `json:"modelId"`
-	Label                 string        `json:"label"`
-	GroupID               string        `json:"groupId"`
-	APIFormat             string        `json:"apiFormat"`
-	ContextWindow         int           `json:"contextWindow"`
-	MaxOutputTokens       int           `json:"maxOutputTokens"`
-	ReasoningLevels       []string      `json:"reasoningLevels"`
-	DefaultReasoningLevel string        `json:"defaultReasoningLevel"`
+	ProviderID            string        `json:"providerId" validate:"config_id"`
+	ModelID               string        `json:"modelId" validate:"id"`
+	Label                 string        `json:"label" validate:"required,notblank"`
+	GroupID               string        `json:"groupId" validate:"config_id"`
+	APIFormat             string        `json:"apiFormat" validate:"oneof=anthropic_messages openai_responses openai_chat_completions"`
+	ContextWindow         int           `json:"contextWindow" validate:"gt=0"`
+	MaxOutputTokens       int           `json:"maxOutputTokens" validate:"gt=0,ltfield=ContextWindow"`
+	ReasoningLevels       []string      `json:"reasoningLevels" validate:"unique,dive,id"`
+	DefaultReasoningLevel string        `json:"defaultReasoningLevel" validate:"omitempty,id"`
 	Thinking              ModelThinking `json:"thinking,omitzero"`
 }
 
@@ -110,17 +110,17 @@ type ModelConfigDocument struct {
 }
 
 type SaveModelConfigRequest struct {
-	Groups    []GroupConfigOption    `json:"groups"`
-	Providers []ProviderConfigOption `json:"providers"`
-	Models    []ModelConfigOption    `json:"models"`
+	Groups    []GroupConfigOption    `json:"groups" validate:"dive"`
+	Providers []ProviderConfigOption `json:"providers" validate:"dive"`
+	Models    []ModelConfigOption    `json:"models" validate:"dive"`
 }
 
 // SelectModelRequest 更新指定会话的选择；模型字段全空表示清除该会话的选择。
 type SelectModelRequest struct {
-	SessionID      string `json:"sessionId"`
-	ProviderID     string `json:"providerId"`
-	ModelID        string `json:"modelId"`
-	ReasoningLevel string `json:"reasoningLevel"`
+	SessionID      string `json:"sessionId" validate:"session_id"`
+	ProviderID     string `json:"providerId" validate:"required_with=ModelID ReasoningLevel,omitempty,config_id"`
+	ModelID        string `json:"modelId" validate:"required_with=ProviderID ReasoningLevel,omitempty,id"`
+	ReasoningLevel string `json:"reasoningLevel" validate:"omitempty,id"`
 }
 
 // ModelSelection 只返回会话选择的公开字段，不包含完整模型配置。
@@ -138,8 +138,8 @@ type SaveModelConfigResponse struct {
 }
 
 type CreateTaskRequest struct {
-	SessionID string `json:"sessionId"`
-	Prompt    string `json:"prompt"`
+	SessionID string `json:"sessionId" validate:"session_id"`
+	Prompt    string `json:"prompt" validate:"task_prompt"`
 }
 
 type CreateTaskResponse struct {
@@ -148,8 +148,8 @@ type CreateTaskResponse struct {
 }
 
 type PauseAgentRequest struct {
-	AgentID           string `json:"agentId"`
-	TargetExecutionID string `json:"targetExecutionId"`
+	AgentID           string `json:"agentId" validate:"id"`
+	TargetExecutionID string `json:"targetExecutionId" validate:"id"`
 }
 
 type StopAgentRequest = PauseAgentRequest
@@ -162,8 +162,8 @@ type AgentControlResponse struct {
 }
 
 type CancelTaskRequest struct {
-	SessionID string `json:"sessionId"`
-	TaskID    string `json:"taskId"`
+	SessionID string `json:"sessionId" validate:"session_id"`
+	TaskID    string `json:"taskId" validate:"id"`
 }
 
 // QueuedTask 展示内存待办与正文，不携带执行终态。

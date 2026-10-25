@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"praxis/internal/core/tool"
+	bashtool "praxis/internal/core/tool/bash"
 	"praxis/internal/utils/pathutil"
 	"runtime"
 	"time"
@@ -43,7 +44,7 @@ func (w *outputWriter) Write(value []byte) (int, error) {
 }
 
 // Call 在 Workspace 内的工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
-func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
+func Call(ctx context.Context, toolArguments bashtool.Arguments, workspacePath string) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -51,11 +52,6 @@ func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
-	var toolArguments arguments
-	if err := json.Unmarshal(args, &toolArguments); err != nil {
-		return tool.ToolResult{}, fmt.Errorf("decode bash arguments: %w", err)
-	}
-
 	if !workspaceDirectory(toolArguments.Path, workspacePath) {
 		return tool.ToolResult{}, errors.New("bash working directory is outside the workspace")
 	}
@@ -80,15 +76,13 @@ func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool
 	}
 	if !toolOutput.TimedOut {
 		if err != nil {
-			var exitError *exec.ExitError
-			if !errors.As(err, &exitError) {
+			exitError, ok := errors.AsType[*exec.ExitError](err)
+			if !ok {
 				return tool.ToolResult{}, fmt.Errorf("start bash: %w", err)
 			}
-			code := exitError.ExitCode()
-			toolOutput.ExitCode = &code
+			toolOutput.ExitCode = new(exitError.ExitCode())
 		} else {
-			code := 0
-			toolOutput.ExitCode = &code
+			toolOutput.ExitCode = new(0)
 		}
 	}
 	encoded, truncated, err := encodeOutput(toolOutput)

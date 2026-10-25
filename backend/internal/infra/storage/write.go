@@ -13,9 +13,6 @@ import (
 
 // appendRecord 在内存锁内检查约束、发布新状态并排队保存；不等待磁盘，也不因持久化退化回滚。
 func appendRecord(state *Storage, records []logRecord, scope, collection, id, kind string, object any) error {
-	if scope != "" && !jsonl.ValidScope(scope) {
-		return errors.New("session ID is not a valid file name")
-	}
 	if scope != "" && collection != "session" {
 		session, err := getRecord[sessionmodel.Session](records, "session", scope)
 		if err != nil {
@@ -41,10 +38,8 @@ func appendRecord(state *Storage, records []logRecord, scope, collection, id, ki
 		CreatedAt:  time.Now().UTC(),
 		Payload:    payload,
 	}
-	value, err := decodeStoredEvent(scope, event)
-	if err != nil {
-		return err
-	}
+	// 写入值已在所属输入边界校验；只复制可变数据，不重新编码解码或执行恢复校验。
+	value := cloneRecordValue(object)
 	if err := validateRelations(state, records, scope, collection, value); err != nil {
 		return fmt.Errorf("%s/%s: %w", collection, id, err)
 	}

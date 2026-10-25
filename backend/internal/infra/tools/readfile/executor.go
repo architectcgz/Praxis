@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"praxis/internal/core/tool"
+	readtool "praxis/internal/core/tool/readfile"
 	"praxis/internal/utils/pathutil"
 	"unicode/utf8"
 )
@@ -22,17 +23,11 @@ type output struct {
 }
 
 // Call 读取 Workspace 内的 UTF-8 普通文件并返回有界结果。
-func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
+func Call(ctx context.Context, toolArguments readtool.Arguments, workspacePath string) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	var toolArguments arguments
-	if err := json.Unmarshal(args, &toolArguments); err != nil {
-		return tool.ToolResult{}, errors.New("read_file arguments are invalid")
-	}
-	if toolArguments.Offset < 0 ||
-		toolArguments.Limit < minLimit || toolArguments.Limit > maxLimit ||
-		!workspaceFile(toolArguments.Path, workspacePath) {
+	if !workspaceFile(toolArguments.Path, workspacePath) {
 		return tool.ToolResult{}, errors.New("read_file path is outside a workspace regular file")
 	}
 	file, err := os.Open(toolArguments.Path)
@@ -102,7 +97,7 @@ func contentEndAtLimit(content []byte, limit int) (int, error) {
 
 // encodeBoundedOutput 保留 JSON 输出不超过内联工具结果上限的最长 UTF-8 前缀。
 func encodeBoundedOutput(
-	toolArguments arguments,
+	toolArguments readtool.Arguments,
 	offset int,
 	fileSize int64,
 	content []byte,
@@ -143,15 +138,17 @@ func utf8RuneEnds(content []byte) []int {
 	return ends
 }
 
-func encodeOutput(toolArguments arguments, offset int, fileSize int64, content string) ([]byte, error) {
+func encodeOutput(toolArguments readtool.Arguments, offset int, fileSize int64, content string) ([]byte, error) {
 	contentEnd := offset + len([]byte(content))
 	toolOutput := output{
-		Path: toolArguments.Path, Offset: offset, Limit: toolArguments.Limit,
-		Size: fileSize, Content: content,
+		Path:    toolArguments.Path,
+		Offset:  offset,
+		Limit:   toolArguments.Limit,
+		Size:    fileSize,
+		Content: content,
 	}
 	if int64(contentEnd) < fileSize {
-		next := contentEnd
-		toolOutput.NextOffset = &next
+		toolOutput.NextOffset = new(contentEnd)
 	}
 	return json.Marshal(toolOutput)
 }

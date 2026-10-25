@@ -10,7 +10,7 @@ import (
 type AgentBindings struct{ host Host }
 
 func (b *AgentBindings) GetAgent(agentID string) (agentservice.AgentView, error) {
-	if err := validation.ValidateAgentID(agentID); err != nil {
+	if err := validation.ID("agentId", agentID); err != nil {
 		return agentservice.AgentView{}, publicInputError(b.host, "AgentBindings.GetAgent.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
@@ -23,7 +23,7 @@ func (b *AgentBindings) GetAgent(agentID string) (agentservice.AgentView, error)
 
 // ListAgentEntries 返回 Main 的会话历史或 Subagent 当前执行的私有消息，不包装展示 DTO、不分页。
 func (b *AgentBindings) ListAgentEntries(agentID string) ([]sessionentry.ContextEntry, error) {
-	if err := validation.ValidateAgentID(agentID); err != nil {
+	if err := validation.ID("agentId", agentID); err != nil {
 		return nil, publicInputError(b.host, "AgentBindings.ListAgentEntries.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()

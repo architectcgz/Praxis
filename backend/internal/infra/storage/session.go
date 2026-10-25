@@ -25,7 +25,7 @@ func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sess
 func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Session) error {
 	return withState(ctx, r.storage, func(state *Storage, records []logRecord) error {
 		id := value.ID.String()
-		if !jsonl.ValidScope(id) || state.sequences[id] != 0 {
+		if state.sequences[id] != 0 {
 			return errorcode.ErrRequestConflict
 		}
 		payload, err := json.Marshal(value)
@@ -41,14 +41,10 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 			CreatedAt:  time.Now().UTC(),
 			Payload:    payload,
 		}
-		stored, err := decodeStoredEvent(id, event)
-		if err != nil {
+		if err := validateRelations(state, records, id, "session", value); err != nil {
 			return err
 		}
-		if err := validateRelations(state, records, id, "session", stored); err != nil {
-			return err
-		}
-		state.remember(id, event, stored)
+		state.remember(id, event, value)
 		state.projects[id] = value.ProjectID.String()
 		state.enqueue(persistenceOperation{
 			kind:      persistCreateSession,

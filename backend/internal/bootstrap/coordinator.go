@@ -14,7 +14,6 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/storage"
-	toolinfra "praxis/internal/infra/tools"
 	executionservice "praxis/internal/service/agent/execution"
 	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
@@ -78,7 +77,6 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		Catalog:        config.tools,
 		Operations:     records,
 		Reviewer:       reviewer,
-		Bind:           toolinfra.Bind,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 		Clock:          clock.UTCClock{},

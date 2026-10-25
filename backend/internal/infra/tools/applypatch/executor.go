@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"praxis/internal/core/tool"
+	patchtool "praxis/internal/core/tool/applypatch"
 	"praxis/internal/utils/pathutil"
 	"runtime"
 	"strings"
@@ -37,16 +38,11 @@ type output struct {
 }
 
 // Call 在 Workspace 内校验并应用完整补丁。
-func Call(ctx context.Context, args json.RawMessage, workspacePath string) (tool.ToolResult, error) {
+func Call(ctx context.Context, toolArguments patchtool.Arguments, workspacePath string) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	var toolArguments arguments
-	if err := json.Unmarshal(args, &toolArguments); err != nil ||
-		toolArguments.Patch == "" {
-		return tool.ToolResult{}, errors.New("apply_patch arguments are invalid")
-	}
-	operations, err := parsePatch(toolArguments.Patch)
+	operations, err := patchtool.Parse(toolArguments.Patch)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -76,7 +72,7 @@ func prepareChanges(
 	ctx context.Context,
 	root string,
 	workspace string,
-	operations []operation,
+	operations []patchtool.Operation,
 ) ([]*fileChange, []fileResult, error) {
 	changes := make([]*fileChange, 0, len(operations)+1)
 	results := make([]fileResult, 0, len(operations))
@@ -85,26 +81,32 @@ func prepareChanges(
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		source, err := resolveTarget(root, operation.path)
+		source, err := resolveTarget(root, operation.Path)
 		if err != nil || !rememberPath(seen, source) {
-			return nil, nil, fmt.Errorf("patch target %q is duplicated or invalid", operation.path)
+			return nil, nil, fmt.Errorf("patch target %q is duplicated or invalid", operation.Path)
 		}
-		switch operation.kind {
-		case operationAdd:
+		switch operation.Kind {
+		case patchtool.Add:
 			if !workspaceWritePath(source, workspace, true) {
-				return nil, nil, fmt.Errorf("add target %q is outside the workspace", operation.path)
+				return nil, nil, fmt.Errorf("add target %q is outside the workspace", operation.Path)
 			}
 			if _, err := os.Lstat(source); !errors.Is(err, os.ErrNotExist) {
-				return nil, nil, fmt.Errorf("add target %q already exists", operation.path)
+				return nil, nil, fmt.Errorf("add target %q already exists", operation.Path)
+			}
+			content, err := operation.Apply(nil)
+			if err != nil {
+				return nil, nil, err
 			}
 			changes = append(changes, &fileChange{
-				path: source, content: addContent(operation.content), mode: 0o644,
+				path:    source,
+				content: content,
+				mode:    0o644,
 			})
-			results = append(results, fileResult{Path: operation.path, Action: "added"})
-		case operationDelete:
+			results = append(results, fileResult{Path: operation.Path, Action: "added"})
+		case patchtool.Delete:
 			mode, err := statWorkspaceFile(source, workspace)
 			if err != nil {
-				return nil, nil, fmt.Errorf("delete target %q: %w", operation.path, err)
+				return nil, nil, fmt.Errorf("delete target %q: %w", operation.Path, err)
 			}
 			changes = append(changes, &fileChange{
 				path:    source,
@@ -112,32 +114,32 @@ func prepareChanges(
 				delete:  true,
 				existed: true,
 			})
-			results = append(results, fileResult{Path: operation.path, Action: "deleted"})
-		case operationUpdate:
+			results = append(results, fileResult{Path: operation.Path, Action: "deleted"})
+		case patchtool.Update:
 			content, mode, err := readWorkspaceFile(source, workspace)
 			if err != nil {
-				return nil, nil, fmt.Errorf("update target %q: %w", operation.path, err)
+				return nil, nil, fmt.Errorf("update target %q: %w", operation.Path, err)
 			}
-			updated, err := applyHunks(content, operation.hunks)
+			updated, err := operation.Apply(content)
 			if err != nil {
-				return nil, nil, fmt.Errorf("update target %q: %w", operation.path, err)
+				return nil, nil, fmt.Errorf("update target %q: %w", operation.Path, err)
 			}
-			if operation.moveTo == "" {
+			if operation.MoveTo == "" {
 				changes = append(changes, &fileChange{
 					path:    source,
 					content: updated,
 					mode:    mode,
 					existed: true,
 				})
-				results = append(results, fileResult{Path: operation.path, Action: "updated"})
+				results = append(results, fileResult{Path: operation.Path, Action: "updated"})
 				continue
 			}
-			destination, err := resolveTarget(root, operation.moveTo)
+			destination, err := resolveTarget(root, operation.MoveTo)
 			if err != nil || !rememberPath(seen, destination) || !workspaceWritePath(destination, workspace, true) {
-				return nil, nil, fmt.Errorf("move target %q is duplicated, invalid, or outside the workspace", operation.moveTo)
+				return nil, nil, fmt.Errorf("move target %q is duplicated, invalid, or outside the workspace", operation.MoveTo)
 			}
 			if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
-				return nil, nil, fmt.Errorf("move target %q already exists", operation.moveTo)
+				return nil, nil, fmt.Errorf("move target %q already exists", operation.MoveTo)
 			}
 			changes = append(changes,
 				&fileChange{
@@ -148,19 +150,12 @@ func prepareChanges(
 				},
 				&fileChange{path: destination, content: updated, mode: mode},
 			)
-			results = append(results, fileResult{Path: operation.moveTo, From: operation.path, Action: "moved"})
+			results = append(results, fileResult{Path: operation.MoveTo, From: operation.Path, Action: "moved"})
 		default:
 			return nil, nil, errors.New("patch contains an unknown file operation")
 		}
 	}
 	return changes, results, nil
-}
-
-func addContent(lines []string) []byte {
-	if len(lines) == 0 {
-		return nil
-	}
-	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
 func resolveTarget(root, path string) (string, error) {
@@ -206,80 +201,6 @@ func statWorkspaceFile(path string, workspace string) (fs.FileMode, error) {
 		return 0, errors.New("file could not be read")
 	}
 	return info.Mode().Perm(), nil
-}
-
-func applyHunks(content []byte, hunks []hunk) ([]byte, error) {
-	if !utf8.Valid(content) {
-		return nil, errors.New("apply_patch supports UTF-8 text files only")
-	}
-	newline := "\n"
-	if strings.Contains(string(content), "\r\n") {
-		newline = "\r\n"
-	}
-	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
-	endsWithNewline := strings.HasSuffix(normalized, "\n")
-	if endsWithNewline {
-		normalized = strings.TrimSuffix(normalized, "\n")
-	}
-	lines := strings.Split(normalized, "\n")
-	if normalized == "" && !endsWithNewline {
-		lines = nil
-	}
-	cursor := 0
-	for _, value := range hunks {
-		index := findHunk(lines, value, cursor)
-		if index < 0 {
-			return nil, errors.New("hunk context does not match the file")
-		}
-		updated := make([]string, 0, len(lines)-len(value.oldLines)+len(value.newLines))
-		updated = append(updated, lines[:index]...)
-		updated = append(updated, value.newLines...)
-		updated = append(updated, lines[index+len(value.oldLines):]...)
-		lines = updated
-		cursor = index + len(value.newLines)
-	}
-	result := strings.Join(lines, "\n")
-	if endsWithNewline && len(lines) > 0 {
-		result += "\n"
-	}
-	if newline != "\n" {
-		result = strings.ReplaceAll(result, "\n", newline)
-	}
-	return []byte(result), nil
-}
-
-func findHunk(lines []string, value hunk, cursor int) int {
-	if len(value.oldLines) == 0 {
-		if value.oldStart > 0 {
-			return min(value.oldStart-1, len(lines))
-		}
-		return min(cursor, len(lines))
-	}
-	preferred := cursor
-	if value.oldStart > 0 {
-		preferred = value.oldStart - 1
-	}
-	if hunkMatches(lines, preferred, value.oldLines) {
-		return preferred
-	}
-	for index := max(0, cursor); index+len(value.oldLines) <= len(lines); index++ {
-		if hunkMatches(lines, index, value.oldLines) {
-			return index
-		}
-	}
-	return -1
-}
-
-func hunkMatches(lines []string, index int, expected []string) bool {
-	if index < 0 || index+len(expected) > len(lines) {
-		return false
-	}
-	for offset, line := range expected {
-		if lines[index+offset] != line {
-			return false
-		}
-	}
-	return true
 }
 
 func commitChanges(changes []*fileChange) error {

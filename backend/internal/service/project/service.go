@@ -33,7 +33,7 @@ type Service struct {
 	directory  WorkspaceDirectory
 }
 
-// CreateInput 包含新 Project 的持久化身份和规范化工作区数据。
+// CreateInput 包含输入边界已校验的身份及规范化后的项目名称、绝对路径。
 type CreateInput struct {
 	RequestID   identity.RequestID
 	ProjectID   identity.ProjectID
@@ -58,7 +58,7 @@ func NewService(deps Dependencies) *Service {
 	}
 }
 
-// CreateProject 保存单条 Project 创建事实，失败后保留已创建目录供重试。
+// CreateProject 使用已校验的输入创建目录并保存项目事实；后续失败保留已创建目录供重试。
 func (s *Service) CreateProject(ctx context.Context, params CreateInput) (CreateProjectResult, error) {
 	_, err := s.directory.Ensure(ctx, params.Path)
 	if err != nil {

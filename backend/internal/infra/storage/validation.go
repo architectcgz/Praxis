@@ -11,9 +11,10 @@ import (
 
 // validateSession 在磁盘输入边界拒绝非法会话，不修改持久化字段。
 func validateSession(value sessionmodel.Session) error {
+	if !value.ID.Valid() || !value.ProjectID.Valid() {
+		return fmt.Errorf("session: invalid session or project identity: %w", errorcode.ErrInvalidValue)
+	}
 	for _, id := range []string{
-		value.ID.String(),
-		value.ProjectID.String(),
 		value.WorkspaceID.String(),
 		value.MainAgentID.String(),
 	} {

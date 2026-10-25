@@ -58,9 +58,6 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 
 // ProviderKey 返回已配置 Provider 保存的 API 密钥。
 func (r *Registry) ProviderKey(providerID string) string {
-	if !idPattern.MatchString(providerID) {
-		return ""
-	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if _, exists := r.providersByID[providerID]; !exists {

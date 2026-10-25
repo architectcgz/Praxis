@@ -21,8 +21,8 @@ var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // 以下校验仅用于磁盘输入，拒绝非法字段，不清洗或修复持久化数据。
 func validateProject(p projectmodel.Project) error {
-	if p.ID == "" || p.ID.String() != strings.TrimSpace(p.ID.String()) {
-		return fmt.Errorf("project.id: id is required: %w", errorcode.ErrInvalidValue)
+	if !p.ID.Valid() {
+		return fmt.Errorf("project.id: invalid project identity: %w", errorcode.ErrInvalidValue)
 	}
 	if p.Name == "" || strings.ContainsAny(p.Name, "\x00\r\n") {
 		return fmt.Errorf("project.name: name is required and cannot contain control characters: %w", errorcode.ErrInvalidValue)
@@ -46,10 +46,11 @@ func validateProject(p projectmodel.Project) error {
 }
 
 func validateWorkspace(w workspacemodel.Workspace) error {
-	for _, id := range []string{w.ID.String(), w.ProjectID.String()} {
-		if id == "" || id != strings.TrimSpace(id) {
-			return fmt.Errorf("workspace: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
-		}
+	if !w.ProjectID.Valid() {
+		return fmt.Errorf("workspace.projectID: invalid project identity: %w", errorcode.ErrInvalidValue)
+	}
+	if w.ID == "" || w.ID.String() != strings.TrimSpace(w.ID.String()) {
+		return fmt.Errorf("workspace: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 	}
 	if w.Kind != workspacemodel.WorkspaceProjectRoot && w.Kind != workspacemodel.WorkspaceWorktree && w.Kind != workspacemodel.WorkspaceTemporary {
 		return fmt.Errorf("workspace.kind: unknown workspace kind: %w", errorcode.ErrInvalidValue)

@@ -15,9 +15,9 @@ import (
 )
 
 // Operations 提供归属检查、配置读取、审核输入准备和结果提交，不持有审批状态。
-// DecideRule 为每次 ToolCall 读取一次当前内存规则，后续授权与启动沿用返回值。
+// DecideRule 使用已准备操作的命令读取一次当前内存规则，后续授权与启动沿用返回值。
 type Operations interface {
-	DecideRule(context.Context, sessionentry.ToolCall, json.RawMessage) (security.ApprovalDecision, error)
+	DecideRule(context.Context, sessionentry.ToolCall, string) (security.ApprovalDecision, error)
 	PrepareReview(context.Context, *agentexecution.Run, sessionentry.ToolCall, string) (ReviewRequest, error)
 	CommitResult(context.Context, *agentexecution.Run, sessionentry.ToolCall, tool.ToolResult) (sessionentry.ContextEntry, error)
 }

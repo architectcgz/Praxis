@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-// decodeStoredEvent 在重放和写入边界校验并解码，内存只保存这份独立业务值。
+// decodeStoredEvent 只在磁盘恢复输入边界校验并解码，正常写入使用已校验的业务值。
 func decodeStoredEvent(scope string, event jsonl.Event) (any, error) {
 	if event.Key == "" || strings.TrimSpace(event.Key) != event.Key {
 		return nil, errors.New("invalid object key")

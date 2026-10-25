@@ -7,7 +7,6 @@ import (
 	"praxis/internal/infra/agentregistry"
 	modelregistry "praxis/internal/infra/modelregistry"
 	"praxis/internal/infra/toolregistry"
-	toolinfra "praxis/internal/infra/tools"
 	"praxis/internal/logging"
 	agentservice "praxis/internal/service/agent"
 	approvalservice "praxis/internal/service/approval"
@@ -35,7 +34,7 @@ func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configu
 	if err != nil {
 		return nil, err
 	}
-	registry, err := toolinfra.NewRegistry(extensions)
+	registry, err := buildToolRegistry(extensions)
 	if err != nil {
 		return nil, err
 	}

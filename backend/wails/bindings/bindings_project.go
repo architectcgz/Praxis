@@ -1,9 +1,9 @@
 package bindings
 
 import (
-	"path/filepath"
 	"praxis/internal/identity"
 	projectservice "praxis/internal/service/project"
+	"praxis/internal/utils/pathutil"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
@@ -49,7 +49,9 @@ func (b *ProjectBindings) ListProjects() ([]dto.ProjectSummary, error) {
 }
 
 func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.CreateProjectResponse, error) {
-	if err := validation.ValidateCreateProject(wire); err != nil {
+	wire.ProjectName = strings.TrimSpace(wire.ProjectName)
+	wire.Path = pathutil.NormalizeAbsolutePath(wire.Path)
+	if err := validation.Struct(wire); err != nil {
 		return dto.CreateProjectResponse{}, publicInputError(b.host, "ProjectBindings.CreateProject.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
@@ -59,14 +61,9 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 	params := projectservice.CreateInput{
 		ProjectID:   identity.ProjectID(wire.ProjectID),
 		WorkspaceID: identity.WorkspaceID(wire.WorkspaceID),
-		Name:        strings.TrimSpace(wire.ProjectName),
-		Path:        filepath.Clean(strings.TrimSpace(wire.Path)),
+		Name:        wire.ProjectName,
+		Path:        wire.Path,
 		RequestID:   identity.RequestID(wire.RequestID),
-	}
-	if params.Name == "" || strings.ContainsAny(params.Name, "\\/:*?\"<>|\x00\r\n") ||
-		params.Name == "." || params.Name == ".." || !filepath.IsAbs(params.Path) || strings.ContainsAny(params.Path, "\x00\r\n") {
-		err := projectservice.ErrWorkspaceInvalid
-		return dto.CreateProjectResponse{}, publicInputError(b.host, "ProjectBindings.CreateProject.request", err)
 	}
 	result, err := services.Projects.CreateProject(ctx, params)
 	if err != nil {
