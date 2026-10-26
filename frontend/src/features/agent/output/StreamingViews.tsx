@@ -75,11 +75,11 @@ export function StreamingTurnView({ agentName, events, executionId, turnId, acti
         }
         if (event.kind === 'provider_waiting' && active && index === events.length - 1) {
             segments.push(<AgentActivityView providerWaiting key={`provider-waiting-${index}`} />)
-        } else if (event.kind === 'thinking_delta' && event.text) {
+        } else if (event.kind === 'thinking_delta' && event.data.text) {
             // 只有当前末尾的思考仍在流式输出；工具或正文出现后，前一段思考结束并收起。
-            segments.push(<AgentActivityView thinking={event.text} streaming={active && index === events.length - 1} key={`thinking-${index}`} />)
-        } else if (event.kind === 'text_delta' && event.text) {
-            segments.push(<StreamingOutputView content={event.text} key={`text-${index}`} />)
+            segments.push(<AgentActivityView thinking={event.data.text} streaming={active && index === events.length - 1} key={`thinking-${index}`} />)
+        } else if (event.kind === 'text_delta' && event.data.text) {
+            segments.push(<StreamingOutputView content={event.data.text} key={`text-${index}`} />)
         }
     })
     if (tools.length > 0) segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${events.length}`} />)

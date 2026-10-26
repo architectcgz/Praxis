@@ -27,11 +27,13 @@ func (r *Runner) summarizeContext(
 	}
 	turnID := identity.NewTurnID(executionInput.ID, sequence)
 	r.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.TurnStarted,
-		SessionID:   executionInput.SessionID,
-		AgentID:     executionInput.AgentID,
-		ExecutionID: executionInput.ID,
-		TurnID:      turnID,
+		Scope: coreevent.Scope{
+			SessionID:   executionInput.SessionID,
+			AgentID:     executionInput.AgentID,
+			ExecutionID: executionInput.ID,
+			TurnID:      turnID,
+		},
+		Payload: coreevent.TurnStarted{},
 	})
 	request := providerapi.Request{
 		ExecutionID:     executionInput.ID,
@@ -60,14 +62,7 @@ func (r *Runner) summarizeContext(
 			text.WriteString(event.Text)
 		}
 	}
-	r.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.TurnCompleted,
-		SessionID:   executionInput.SessionID,
-		AgentID:     executionInput.AgentID,
-		ExecutionID: executionInput.ID,
-		TurnID:      turnID,
-		StopReason:  response.stopReason,
-	})
+	r.emitTurnCompletion(executionInput, turnID, nil, response.stopReason)
 	return strings.TrimSpace(text.String()), nil
 }
 

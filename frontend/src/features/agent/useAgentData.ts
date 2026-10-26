@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { getAgent, listAgentEntries, subscribeAgentEvents, type ContextEntry, type AgentView, type ApiErrorCode, type ModelOption } from '../../api'
+import { getAgent, listAgentEntries, subscribeAgentEvents, type Entry, type AgentView, type ApiErrorCode, type ModelOption } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import { createAgentStore } from './agentStore'
 import { useAgentTaskInput } from './useAgentTaskInput'
@@ -11,7 +11,7 @@ type AgentDataOptions = {
     setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>
     viewRequestRef: RefObject<number>
 }
-const emptyHistory: ContextEntry[] = []
+const emptyHistory: Entry[] = []
 
 /** 管理会话查询与选择；实时输出由对话区域直接订阅，不触发工作区重渲染。 */
 export function useAgentData({ sessionID, models, setError, setErrorCode, viewRequestRef }: AgentDataOptions) {

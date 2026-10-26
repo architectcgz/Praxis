@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from 'react'
-import type { ContextEntry, EntryBlock } from '../../../api'
+import type { Entry, EntryBlock } from '../../../api'
 import { CopyIconButton, MessageMarkdown } from './MarkdownViews'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock } from './ToolCallViews'
@@ -7,7 +7,7 @@ import { MessageTiming } from './MessageTiming'
 
 export const HistoryItemView = memo(function HistoryItemView({ agentName, item, toolResults, continuation = false, hasContinuation = false, copyContent }: {
     agentName: string
-    item: ContextEntry
+    item: Entry
     toolResults?: EntryBlock[]
     continuation?: boolean
     hasContinuation?: boolean
@@ -32,7 +32,7 @@ export const HistoryItemView = memo(function HistoryItemView({ agentName, item, 
     }
     const messageRole = message.role
     const messageClass = messageRole === 'assistant' || messageRole === 'user' ? messageRole : 'unknown'
-    const author = (message.replaces?.length ?? 0) > 0 ? '上下文摘要' : messageRole === 'assistant' ? agentName : messageRole === 'user' ? '你' : '未知来源'
+    const author = message.kind === 'summary' ? '上下文摘要' : messageRole === 'assistant' ? agentName : messageRole === 'user' ? '你' : '未知来源'
     const contentToCopy = copyContent ?? content
     const segments = messageRole === 'assistant' ? groupAssistantBlocks(messageBlocks) : []
     return (

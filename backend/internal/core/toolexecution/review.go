@@ -139,13 +139,13 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 			case providerapi.StreamUsage:
 				if event.Usage != nil && event.Usage.Valid() {
 					r.Emitter.Emit(coreevent.Event{
-						Kind:        coreevent.ModelUsage,
-						Transient:   !request.Run.Main(),
-						SessionID:   call.SessionID,
-						AgentID:     call.AgentID,
-						ExecutionID: call.ExecutionID,
-						TurnID:      attempt.TurnID,
-						Usage:       event.Usage,
+						Scope: coreevent.Scope{
+							SessionID:   call.SessionID,
+							AgentID:     call.AgentID,
+							ExecutionID: call.ExecutionID,
+							TurnID:      attempt.TurnID,
+						},
+						Payload: coreevent.ModelUsage{Usage: *event.Usage},
 					})
 				}
 			case providerapi.StreamThinkingDelta, providerapi.StreamReasoningState:

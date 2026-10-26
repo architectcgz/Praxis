@@ -1,4 +1,4 @@
-import type { AgentEvent, ContextEntry, AgentView } from '../../api'
+import type { AgentEvent, Entry, AgentView } from '../../api'
 
 /** 单次执行的临时输出，持久化历史回填后移除。 */
 export type StreamingOutput = {
@@ -25,7 +25,7 @@ export type AgentSessionSummary = { title: string; agents: AgentView[] }
 export type AgentsPanelProps = {
     loading: boolean
     session: AgentSessionSummary | null
-    histories: Record<string, ContextEntry[]>
+    histories: Record<string, Entry[]>
     selectedAgentID: string
     onSelectAgent: (id: string) => void
 }

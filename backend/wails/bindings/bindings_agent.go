@@ -1,9 +1,9 @@
 package bindings
 
 import (
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
+	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
@@ -21,8 +21,8 @@ func (b *AgentBindings) GetAgent(agentID string) (agentservice.AgentView, error)
 	return view, publicError(b.host, "AgentBindings.GetAgent", err)
 }
 
-// ListAgentEntries 返回 Main 的会话历史或 Subagent 当前执行的私有消息，不包装展示 DTO、不分页。
-func (b *AgentBindings) ListAgentEntries(agentID string) ([]sessionentry.ContextEntry, error) {
+// ListAgentEntries 返回 Main 历史或 Subagent 当前执行私有消息的展示 DTO，不分页。
+func (b *AgentBindings) ListAgentEntries(agentID string) ([]dto.Entry, error) {
 	if err := validation.ID("agentId", agentID); err != nil {
 		return nil, publicInputError(b.host, "AgentBindings.ListAgentEntries.request", err)
 	}
@@ -34,5 +34,5 @@ func (b *AgentBindings) ListAgentEntries(agentID string) ([]sessionentry.Context
 	if err != nil {
 		return nil, publicError(b.host, "AgentBindings.ListAgentEntries", err)
 	}
-	return entries, nil
+	return publicEntries(entries), nil
 }

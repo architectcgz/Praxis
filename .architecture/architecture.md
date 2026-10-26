@@ -82,6 +82,12 @@ Coordinator 与 Agent、Session 服务同级，负责跨模块执行编排；Age
 
 Agent 详情由 Agent Service 返回 AgentView，从内存实例一致读取状态，再组合身份信息、当前 Execution 和最近一次 Execution，不复制带锁实例，也不在查询时叠加控制状态。Wails 直接返回查询结构，不复制 AgentSnapshot 或 ExecutionSnapshot；会话目录复用不含执行详情的 AgentView。前端沿用生成的查询类型，不扫描或排序执行历史列表来选择展示对象。
 
+## 事件与消息传输边界
+
+Core 业务事件使用 `Event{Scope, Payload}`。Scope 标识 Session、Agent、Execution 和 Turn，Payload 是封闭的事件载荷，`Kind()` 由载荷类型派生。`EntriesAppended` 在 Core 内引用 `ContextEntry`，Transient 仅表示条目属于本次 Run；轮次结束前先发布条目追加事件，再发布 `TurnCompleted`，订阅者只读事件中的引用数据。
+
+Wails 将事件映射为 `kind`、作用域字段和 `data`，不直接序列化核心载荷。历史查询与追加事件共用 `dto.Entry`、`dto.EntryBlock` 及同一映射函数，只公开展示、消息分组和耗时关联需要的字段。Entry 的 `kind` 为 `message` 或 `summary`，摘要身份在历史查询中同样可见；内部替代范围、压缩保护规则、Provider 推理续传状态和未知内容块不进入协议。前端使用 DTO 生成的 Entry/EntryBlock 类型，不引用核心 ContextEntry/Block 类型。
+
 ## 内存状态与本地保存
 
 运行期间以 `infra/storage.Storage` 持有的完整内存记录为查询和约束检查的事实源。Bootstrap 创建存储时，只扫描一次项目日志和各会话日志，严格解码、归并最新记录；初始化完成后，普通仓储操作不再扫描文件。所有仓储共享内存锁，在同一受保护操作中校验引用、分配会话序号并接纳修改，磁盘操作不占用这把锁。

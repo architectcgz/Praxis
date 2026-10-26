@@ -70,12 +70,15 @@ func (r *Runner) compressContext(
 			continue
 		}
 		r.Emitter.Emit(coreevent.Event{
-			Transient:   !input.Run.Main(),
-			Kind:        coreevent.EntriesAppended,
-			SessionID:   input.SessionID,
-			AgentID:     input.AgentID,
-			ExecutionID: input.ID,
-			Entries:     []sessionentry.ContextEntry{stored},
+			Scope: coreevent.Scope{
+				SessionID:   input.SessionID,
+				AgentID:     input.AgentID,
+				ExecutionID: input.ID,
+			},
+			Payload: coreevent.EntriesAppended{
+				Entries:   []sessionentry.ContextEntry{stored},
+				Transient: !input.Run.Main(),
+			},
 		})
 	}
 	return compressed, changed, nil

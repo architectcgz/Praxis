@@ -11,13 +11,13 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
     return <div className="agent-activity output-activity"><div className="acts">
         {groupToolEvents(tools).map((activity) => <ToolCard
             key={activity.key}
-            name={activity.call?.name || activity.approval?.name || activity.result?.name || ''}
-            input={activity.call?.input}
-            result={activity.result?.result}
-            isError={activity.result?.isError}
+            name={activity.call?.data.name || activity.approval?.data.name || ''}
+            input={activity.approval?.data.input ?? activity.call?.data.input}
+            result={activity.result?.data.result}
+            isError={activity.result?.data.isError}
             pendingStatus={activity.approval ? 'awaiting_approval' : pendingStatus}
             executionId={activity.call?.executionId || activity.approval?.executionId || activity.result?.executionId || ''}
-            callId={activity.call?.callId || activity.approval?.callId || activity.result?.callId}
+            callId={activity.call?.data.callId || activity.approval?.data.callId || activity.result?.data.callId}
         />)}
     </div></div>
 }
@@ -75,14 +75,19 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     </ActivityItem>
 }
 
-type ToolActivity = { key: string; call?: AgentEvent; approval?: AgentEvent; result?: AgentEvent }
+type ToolActivity = {
+    key: string
+    call?: Extract<AgentEvent, { kind: 'tool_call' }>
+    approval?: Extract<AgentEvent, { kind: 'tool_approval_required' }>
+    result?: Extract<AgentEvent, { kind: 'tool_result' }>
+}
 
 function groupToolEvents(events: AgentEvent[]): ToolActivity[] {
     const activities: ToolActivity[] = []
     const byCallID = new Map<string, ToolActivity>()
     events.forEach((event, index) => {
         if (event.kind !== 'tool_call' && event.kind !== 'tool_approval_required' && event.kind !== 'tool_result') return
-        const key = `${event.executionId}:${event.turnId}:${event.callId || `tool-${index}`}`
+        const key = `${event.executionId}:${event.turnId}:${event.data.callId || `tool-${index}`}`
         let activity = byCallID.get(key)
         if (!activity) {
             activity = { key }

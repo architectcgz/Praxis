@@ -31,7 +31,10 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
         // 先订阅再查询，使用版本合并消除查询期间的事件竞争。
         const unsubscribe = subscribeAgentEvents((event) => {
             if (!ids.has(event.agentId)) return
-            if (event.kind === 'operation_timing' && event.timing) setRecords((current) => mergeTimings(current, [event.timing!]))
+            if (event.kind === 'operation_timing') {
+                const timing = event.data.timing
+                setRecords((current) => mergeTimings(current, [timing]))
+            }
             if (event.kind === 'execution_ended' || event.kind === 'request_canceled') void load(event.agentId)
         })
         for (const id of ids) void load(id)

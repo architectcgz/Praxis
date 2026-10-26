@@ -1,6 +1,6 @@
 import { useSyncExternalStore, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
-import type { ContextEntry, AgentView, ModelOption } from '../../api'
+import type { Entry, AgentView, ModelOption } from '../../api'
 import type { AgentOutputSource } from './agentStore'
 import { CollaborationViews } from './output/CollaborationViews'
 import { AgentConversation } from './AgentConversation'
@@ -14,8 +14,8 @@ type AgentSessionPanelProps = {
     loading: boolean
     agents: AgentView[]
     agent: AgentView | null
-    history: ContextEntry[]
-    agentHistories: Record<string, ContextEntry[]>
+    history: Entry[]
+    agentHistories: Record<string, Entry[]>
     agentHistoryErrors: Record<string, string>
     outputStore: AgentOutputSource
     onSelectAgent: (id: string) => void

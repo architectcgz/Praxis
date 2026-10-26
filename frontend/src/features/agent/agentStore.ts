@@ -1,10 +1,10 @@
-import type { AgentEvent, ContextEntry, AgentView } from '../../api'
+import type { AgentEvent, Entry, AgentView } from '../../api'
 import { mergeStreamingEvent } from './streaming'
 import type { PendingUserMessage, StreamingOutputs } from './types'
 
 export type AgentEntry = {
     agent: AgentView
-    history?: ContextEntry[]
+    history?: Entry[]
     loading: boolean
     error: string
 }
@@ -51,7 +51,7 @@ export function createAgentStore() {
             updateOutput({ ...output, awaitingAgentId: '' })
         },
         startLoading(id: string) { updateEntry(id, (entry) => ({ ...entry, loading: entry.history === undefined })) },
-        loaded(id: string, agent: AgentView, history?: ContextEntry[], error = '') {
+        loaded(id: string, agent: AgentView, history?: Entry[], error = '') {
             updateEntry(id, (entry) => ({ ...entry, agent, loading: false, error, history: history ?? entry.history }))
             // 完整历史加载成功后直接结束该执行的临时展示，不扫描正文做去重或修补。
             if (history) {
@@ -67,8 +67,9 @@ export function createAgentStore() {
         },
         receive(event: AgentEvent) {
             if (!data.byId[event.agentId]) return
-            if (event.entries?.length) {
-                updateEntry(event.agentId, (entry) => ({ ...entry, history: [...(entry.history || []), ...event.entries!] }))
+            if (event.kind === 'entries_appended' && event.data.entries.length) {
+                const entries = event.data.entries
+                updateEntry(event.agentId, (entry) => ({ ...entry, history: [...(entry.history || []), ...entries] }))
             }
             if (event.kind === 'turn_completed') {
                 const current = output.streamingOutputs[event.agentId]

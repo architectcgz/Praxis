@@ -24,7 +24,7 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
             const events = [...previousTurn.events]
             const last = events[events.length - 1]
             if ((event.kind === 'text_delta' || event.kind === 'thinking_delta') && last?.kind === event.kind) {
-                events[events.length - 1] = { ...last, text: (last.text || '') + (event.text || '') }
+                events[events.length - 1] = { ...event, data: { text: last.data.text + event.data.text } }
             } else {
                 events.push(event)
             }
@@ -58,7 +58,7 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
                 turns: output.turns.map((turn) => ({ ...turn, events: turn.events.filter((item) => (
                     item.kind !== 'provider_waiting' && item.kind !== 'tool_approval_required'
                 )) })),
-                error: event.kind === 'error' ? event.error || '' : output.error,
+                error: event.kind === 'error' ? event.data.message : output.error,
             } }
         default:
             return outputs

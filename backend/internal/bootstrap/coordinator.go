@@ -43,17 +43,17 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	observeUsage := usageObserver(repos.ModelUsage, resources.logger)
 	// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
 	emitter.Subscribe(func(value coreevent.Event) {
-		if value.Kind == coreevent.ModelUsage && value.Usage != nil {
-			owner, err := sessions.GetAgent(value.AgentID)
-			if err != nil || !owner.IsMain() || value.Transient {
+		if payload, ok := value.Payload.(coreevent.ModelUsage); ok {
+			owner, err := sessions.GetAgent(value.Scope.AgentID)
+			if err != nil || !owner.IsMain() {
 				return
 			}
 			observeUsage(providerapi.UsageRecord{
-				SessionID:   value.SessionID.String(),
-				AgentID:     value.AgentID.String(),
-				ExecutionID: value.ExecutionID.String(),
-				TurnID:      value.TurnID,
-				Usage:       *value.Usage,
+				SessionID:   value.Scope.SessionID.String(),
+				AgentID:     value.Scope.AgentID.String(),
+				ExecutionID: value.Scope.ExecutionID.String(),
+				TurnID:      value.Scope.TurnID,
+				Usage:       payload.Usage,
 			})
 		}
 	})

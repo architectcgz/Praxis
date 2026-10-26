@@ -37,8 +37,8 @@ export function ModelUsageProvider({ sessionId, children }: { sessionId: string;
         }
         const unsubscribe = subscribeAgentEvents((event) => {
             if (!active) return
-            if (event.kind === 'model_usage' && event.sessionId === sessionId && event.usage && event.turnId) {
-                const record = { sessionId, agentId: event.agentId, executionId: event.executionId, turnId: event.turnId, usage: event.usage }
+            if (event.kind === 'model_usage' && event.sessionId === sessionId && event.turnId) {
+                const record = { sessionId, agentId: event.agentId, executionId: event.executionId, turnId: event.turnId, usage: event.data.usage }
                 setRecords((current) => mergeModelUsageRecords(current, [record]))
                 // 后端在事件发布前尝试保存用量；保存失败的实时明细不计入持久化汇总。
                 void load()

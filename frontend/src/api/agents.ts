@@ -1,5 +1,5 @@
 import type { AgentView as GeneratedAgentView } from '../../bindings/praxis/internal/service/agent/models'
-import type { ContextEntry as GeneratedContextEntry, Block } from '../../bindings/praxis/internal/core/session/entry/models'
+import type { Entry as GeneratedEntry, EntryBlock } from '../../bindings/praxis/wails/dto/models'
 import { Events } from '@wailsio/runtime'
 import { getAgentBinding, isBindingAvailable } from './bindings'
 import { normalizeOperationTiming, type OperationTiming } from './timings'
@@ -24,8 +24,8 @@ export type ExecutionFailureCode =
     | 'execution_failed'
     | 'execution_invalid_outcome'
     | 'unknown'
-export type ContextEntry = Omit<GeneratedContextEntry, 'content'> & { content: Block[] }
-export type EntryBlock = Block
+export type Entry = Omit<GeneratedEntry, 'content'> & { content: EntryBlock[] }
+export type { EntryBlock }
 
 /** 保留生成接口的字段，将枚举暴露为其字面量联合，允许前端表达乐观状态。 */
 export type AgentView = Omit<GeneratedAgentView, 'state'> & { state: `${GeneratedAgentView['state']}` }
@@ -45,33 +45,41 @@ export type ModelUsageRecord = {
     usage: ModelUsage
 }
 
-export type AgentEvent = {
-    entries?: ContextEntry[]
-    kind: 'entries_appended' | 'turn_started' | 'provider_waiting' | 'text_delta' | 'thinking_delta' | 'tool_call' | 'tool_approval_required' | 'tool_result' | 'turn_completed' | 'model_usage' | 'request_canceled' | 'execution_ended' | 'error' | 'operation_timing'
-    outcome?: ExecutionOutcome
-    failureCode?: ExecutionFailureCode
-    failureMessage?: string
-    timing?: OperationTiming
-    usage?: ModelUsage
+type AgentEventData = {
+    entries_appended: { entries: Entry[]; transient: boolean }
+    turn_started: Record<string, never>
+    provider_waiting: Record<string, never>
+    text_delta: { text: string }
+    thinking_delta: { text: string }
+    tool_call: { callId: string; name: string; input: unknown }
+    tool_approval_required: { callId: string; name: string; input: unknown }
+    tool_result: { callId: string; result: string; isError: boolean }
+    turn_completed: { stopReason: string }
+    model_usage: { usage: ModelUsage }
+    request_canceled: Record<string, never>
+    execution_ended: { outcome: ExecutionOutcome; failureCode: ExecutionFailureCode; failureMessage?: string }
+    error: { message: string }
+    operation_timing: { timing: OperationTiming }
+}
+
+type AgentEventScope = {
     sessionId?: string
     agentId: string
     executionId: string
     turnId?: string
-    text?: string
-    callId?: string
-    name?: string
-    input?: unknown
-    result?: string
-    isError?: boolean
-    error?: string
 }
+
+/** kind 与 data 共同构成判别联合，消费端缩窄事件种类后才能读取对应载荷。 */
+export type AgentEvent = {
+    [K in keyof AgentEventData]: AgentEventScope & { kind: K; data: AgentEventData[K] }
+}[keyof AgentEventData]
 
 export function getAgent(agentID: string) {
     return getAgentBinding().GetAgent(agentID)
 }
 
-export async function listAgentEntries(agentID: string): Promise<ContextEntry[]> {
-    return (await getAgentBinding().ListAgentEntries(agentID) ?? []).map(normalizeContextEntry)
+export async function listAgentEntries(agentID: string): Promise<Entry[]> {
+    return (await getAgentBinding().ListAgentEntries(agentID) ?? []).map(normalizeEntry)
 }
 
 export async function listSessionUsage(sessionId: string): Promise<ModelUsageRecord[]> {
@@ -108,64 +116,78 @@ export function subscribeAgentEvents(listener: (event: AgentEvent) => void) {
 }
 
 function parseAgentEvent(value: unknown): AgentEvent | null {
-    if (!isRecord(value) || typeof value.agentId !== 'string' ||
-        typeof value.executionId !== 'string') {
-        return null
-    }
-    if (value.kind !== 'entries_appended' && value.kind !== 'turn_started' && value.kind !== 'provider_waiting' && value.kind !== 'text_delta' && value.kind !== 'thinking_delta' &&
-        value.kind !== 'tool_call' && value.kind !== 'tool_approval_required' && value.kind !== 'tool_result' && value.kind !== 'turn_completed' &&
-        value.kind !== 'model_usage' && value.kind !== 'request_canceled' && value.kind !== 'execution_ended' && value.kind !== 'error' && value.kind !== 'operation_timing') {
-        return null
-    }
-    if ((value.kind === 'text_delta' || value.kind === 'thinking_delta') && typeof value.text !== 'string') {
-        return null
-    }
-    if ((value.kind === 'tool_call' || value.kind === 'tool_approval_required' || value.kind === 'tool_result') &&
-        (typeof value.callId !== 'string' || typeof value.name !== 'string')) {
-        return null
-    }
-    const terminal = value.kind === 'execution_ended' || value.kind === 'request_canceled'
-    const outcome = terminal ? enumValue(value.outcome, executionOutcomes, 'unknown') : undefined
-    const failureCode = terminal ? failureCodeValue(value.failureCode) : undefined
-    if (terminal && (outcome === '' || outcome === 'unknown' || failureCode === 'unknown' ||
-        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.executionId)) return null
-    if (value.kind === 'request_canceled' && (failureCode !== 'request_canceled' || outcome !== 'paused' && outcome !== 'interrupted')) return null
-    const reportedUsage = value.kind === 'model_usage' ? normalizeModelUsage(value.usage) : undefined
-    if (value.kind === 'model_usage' && (!reportedUsage || typeof value.turnId !== 'string' || !value.turnId ||
-        typeof value.sessionId !== 'string' || !value.sessionId || !value.agentId || !value.executionId)) return null
-    let timing: OperationTiming | undefined
-    if (value.kind === 'operation_timing') {
-        try {
-            timing = normalizeOperationTiming(value.timing)
-            if (timing.agentId !== value.agentId || timing.executionId !== value.executionId) return null
-        } catch {
-            return null
-        }
-    }
-    return {
-        kind: value.kind,
-        entries: Array.isArray(value.entries) ? (value.entries as GeneratedContextEntry[]).map(normalizeContextEntry) : undefined,
-        outcome,
-        failureCode,
-        failureMessage: terminal && typeof value.failureMessage === 'string' ? value.failureMessage : undefined,
-        timing,
-        usage: reportedUsage ?? undefined,
+    if (!isRecord(value) || typeof value.agentId !== 'string' || !value.agentId ||
+        typeof value.executionId !== 'string' || !value.executionId || !isRecord(value.data)) return null
+    const scope: AgentEventScope = {
         sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined,
         agentId: value.agentId,
         executionId: value.executionId,
         turnId: typeof value.turnId === 'string' && value.turnId ? value.turnId : undefined,
-        text: typeof value.text === 'string' ? value.text : undefined,
-        callId: typeof value.callId === 'string' ? value.callId : undefined,
-        name: typeof value.name === 'string' ? value.name : undefined,
-        input: value.input,
-        result: typeof value.result === 'string' ? value.result : undefined,
-        isError: typeof value.isError === 'boolean' ? value.isError : undefined,
-        error: typeof value.error === 'string' ? value.error : undefined,
+    }
+    const data = value.data
+    switch (value.kind) {
+        case 'entries_appended': {
+            if (typeof data.transient !== 'boolean' || data.entries !== null &&
+                (!Array.isArray(data.entries) || !data.entries.every(isRecord))) return null
+            return { ...scope, kind: value.kind, data: {
+                entries: ((data.entries ?? []) as unknown as GeneratedEntry[]).map(normalizeEntry),
+                transient: data.transient,
+            } }
+        }
+        case 'turn_started':
+        case 'provider_waiting':
+            return { ...scope, kind: value.kind, data: {} }
+        case 'request_canceled':
+            if (!scope.sessionId) return null
+            return { ...scope, kind: value.kind, data: {} }
+        case 'text_delta':
+        case 'thinking_delta':
+            if (typeof data.text !== 'string') return null
+            return { ...scope, kind: value.kind, data: { text: data.text } }
+        case 'tool_call':
+        case 'tool_approval_required':
+            if (typeof data.callId !== 'string' || !data.callId || typeof data.name !== 'string' || !('input' in data)) return null
+            return { ...scope, kind: value.kind, data: { callId: data.callId, name: data.name, input: data.input } }
+        case 'tool_result':
+            if (typeof data.callId !== 'string' || !data.callId || typeof data.result !== 'string' || typeof data.isError !== 'boolean') return null
+            return { ...scope, kind: value.kind, data: { callId: data.callId, result: data.result, isError: data.isError } }
+        case 'turn_completed':
+            if (typeof data.stopReason !== 'string') return null
+            return { ...scope, kind: value.kind, data: { stopReason: data.stopReason } }
+        case 'model_usage': {
+            const usage = normalizeModelUsage(data.usage)
+            if (!usage || !scope.sessionId || !scope.turnId) return null
+            return { ...scope, kind: value.kind, data: { usage } }
+        }
+        case 'execution_ended': {
+            const outcome = enumValue(data.outcome, executionOutcomes, 'unknown')
+            const failureCode = failureCodeValue(data.failureCode)
+            if (!scope.sessionId || outcome === '' || outcome === 'unknown' || failureCode === 'unknown') return null
+            return { ...scope, kind: value.kind, data: {
+                outcome,
+                failureCode,
+                failureMessage: typeof data.failureMessage === 'string' ? data.failureMessage : undefined,
+            } }
+        }
+        case 'operation_timing': {
+            try {
+                const timing = normalizeOperationTiming(data.timing)
+                if (timing.agentId !== scope.agentId || timing.executionId !== scope.executionId) return null
+                return { ...scope, kind: value.kind, data: { timing } }
+            } catch {
+                return null
+            }
+        }
+        case 'error':
+            if (typeof data.message !== 'string') return null
+            return { ...scope, kind: value.kind, data: { message: data.message } }
+        default:
+            return null
     }
 }
 
 // Go 的空切片可能编码为 null；只在 API 边界统一为可遍历的内容集合。
-function normalizeContextEntry(value: GeneratedContextEntry): ContextEntry {
+function normalizeEntry(value: GeneratedEntry): Entry {
     return { ...value, content: value.content ?? [] }
 }
 

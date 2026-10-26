@@ -132,18 +132,21 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 	}
 	// 每轮仅发布一个终态事件；仅实际响应用户取消的执行发布取消通知。
 	if s.emitter != nil {
-		kind := coreevent.ExecutionEnded
-		if endedExecution.FailureCode == agentexecution.ExecutionFailureRequestCanceled {
-			kind = coreevent.RequestCanceled
-		}
-		s.emitter.Emit(coreevent.Event{
-			Kind:           kind,
-			SessionID:      endedExecution.SessionID,
-			AgentID:        endedExecution.AgentID,
-			ExecutionID:    endedExecution.ID,
+		var payload coreevent.Payload = coreevent.ExecutionEnded{
 			Outcome:        string(endedExecution.Outcome),
 			FailureCode:    string(endedExecution.FailureCode),
 			FailureMessage: endedExecution.FailureMessage,
+		}
+		if endedExecution.FailureCode == agentexecution.ExecutionFailureRequestCanceled {
+			payload = coreevent.RequestCanceled{}
+		}
+		s.emitter.Emit(coreevent.Event{
+			Scope: coreevent.Scope{
+				SessionID:   endedExecution.SessionID,
+				AgentID:     endedExecution.AgentID,
+				ExecutionID: endedExecution.ID,
+			},
+			Payload: payload,
 		})
 	}
 	return endedExecution, nil

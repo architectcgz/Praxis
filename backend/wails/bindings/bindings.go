@@ -48,36 +48,63 @@ func (b *Bindings) All() []application.Service {
 	}
 }
 
-// EmitAgentEvent 将 Core 业务通知转为前端协议；Entry 直接沿用核心类型。
+// EmitAgentEvent 显式映射核心载荷和条目，不向前端序列化领域对象。
 func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
-	if event.AgentID == "" || event.ExecutionID == "" {
+	var data any
+	switch payload := event.Payload.(type) {
+	case coreevent.EntriesAppended:
+		data = dto.AgentEntriesAppended{
+			Entries:   publicEntries(payload.Entries),
+			Transient: payload.Transient,
+		}
+	case coreevent.TurnStarted, coreevent.ProviderWaiting, coreevent.RequestCanceled:
+		data = struct{}{}
+	case coreevent.TextDelta:
+		data = dto.AgentTextDelta{Text: payload.Text}
+	case coreevent.ThinkingDelta:
+		data = dto.AgentThinkingDelta{Text: payload.Text}
+	case coreevent.ToolCall:
+		data = dto.AgentToolCall{
+			CallID: payload.CallID,
+			Name:   payload.Name,
+			Input:  bytes.Clone(payload.Input),
+		}
+	case coreevent.ToolApprovalRequired:
+		data = dto.AgentToolApprovalRequired{
+			CallID: payload.CallID,
+			Name:   payload.Name,
+			Input:  bytes.Clone(payload.Input),
+		}
+	case coreevent.ToolResult:
+		data = dto.AgentToolResult{
+			CallID:  payload.CallID,
+			Result:  payload.Result,
+			IsError: payload.IsError,
+		}
+	case coreevent.TurnCompleted:
+		data = dto.AgentTurnCompleted{StopReason: string(payload.StopReason)}
+	case coreevent.ModelUsage:
+		data = dto.AgentModelUsage{Usage: publicUsage(payload.Usage)}
+	case coreevent.ExecutionEnded:
+		data = dto.AgentExecutionEnded{
+			Outcome:        payload.Outcome,
+			FailureCode:    payload.FailureCode,
+			FailureMessage: payload.FailureMessage,
+		}
+	case coreevent.OperationTiming:
+		data = dto.AgentOperationTiming{Timing: operationTiming(payload.Timing)}
+	case coreevent.ErrorOccurred:
+		data = dto.AgentErrorOccurred{Message: payload.Message}
+	default:
+		b.host.LogError("unsupported agent event payload: %T", event.Payload)
 		return
 	}
-	value := dto.AgentEvent{
-		Kind:           string(event.Kind),
-		Entries:        event.Entries,
-		SessionID:      event.SessionID.String(),
-		AgentID:        event.AgentID.String(),
-		ExecutionID:    event.ExecutionID.String(),
-		Outcome:        event.Outcome,
-		FailureCode:    event.FailureCode,
-		FailureMessage: event.FailureMessage,
-		TurnID:         event.TurnID.String(),
-		Text:           event.Text,
-		CallID:         event.CallID,
-		Name:           event.Name,
-		Input:          bytes.Clone(event.Input),
-		Result:         event.Result,
-		IsError:        event.IsError,
-		Error:          event.Error,
-	}
-	if event.Timing != nil {
-		timing := operationTiming(*event.Timing)
-		value.Timing = &timing
-	}
-	if event.Usage != nil {
-		usage := publicUsage(*event.Usage)
-		value.Usage = &usage
-	}
-	b.host.EmitEvent(agentEventName, value)
+	b.host.EmitEvent(agentEventName, dto.AgentEvent{
+		Kind:        string(event.Kind()),
+		SessionID:   event.Scope.SessionID.String(),
+		AgentID:     event.Scope.AgentID.String(),
+		ExecutionID: event.Scope.ExecutionID.String(),
+		TurnID:      event.Scope.TurnID.String(),
+		Data:        data,
+	})
 }

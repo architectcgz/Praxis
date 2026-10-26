@@ -135,11 +135,12 @@ func executionTiming(execution agentexecution.Execution) *timing.View {
 func (s *Service) publishTiming(value timing.View) {
 	if s.emitter != nil {
 		s.emitter.Emit(coreevent.Event{
-			Kind:        coreevent.OperationTiming,
-			SessionID:   identity.SessionID(value.SessionID),
-			AgentID:     identity.AgentID(value.AgentID),
-			ExecutionID: identity.AgentExecutionID(value.ExecutionID),
-			Timing:      &value,
+			Scope: coreevent.Scope{
+				SessionID:   identity.SessionID(value.SessionID),
+				AgentID:     identity.AgentID(value.AgentID),
+				ExecutionID: identity.AgentExecutionID(value.ExecutionID),
+			},
+			Payload: coreevent.OperationTiming{Timing: value},
 		})
 	}
 }

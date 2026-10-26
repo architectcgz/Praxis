@@ -101,11 +101,12 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。
 	if s.emitter != nil {
 		s.emitter.Emit(coreevent.Event{
-			Kind:        coreevent.EntriesAppended,
-			SessionID:   result.SessionID,
-			AgentID:     result.AgentID,
-			ExecutionID: result.ID,
-			Entries:     []sessionentry.ContextEntry{stored},
+			Scope: coreevent.Scope{
+				SessionID:   result.SessionID,
+				AgentID:     result.AgentID,
+				ExecutionID: result.ID,
+			},
+			Payload: coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{stored}},
 		})
 	}
 	if hookErr := s.hookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{

@@ -1,5 +1,5 @@
 import { Bot, ChevronDown, ExternalLink, GitBranch } from 'lucide-react'
-import type { ContextEntry, AgentView } from '../../../api'
+import type { Entry, AgentView } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { OutputStatus } from './OutputStatus'
 import type { ToolStatus } from './toolPresentation'
@@ -8,7 +8,7 @@ import { OperationDuration } from '../../timing/OperationTimings'
 
 type CollaborationViewsProps = {
     agents: AgentView[]
-    histories: Record<string, ContextEntry[]>
+    histories: Record<string, Entry[]>
     historyErrors: Record<string, string>
     streamingOutputs: Record<string, StreamingOutput>
     onSelectAgent: (id: string) => void
@@ -55,15 +55,15 @@ export function CollaborationViews({ agents, histories, historyErrors, streaming
     </div>
 }
 
-function taskView(agent: AgentView, history: ContextEntry[], streaming?: StreamingOutput, historyError?: string) {
+function taskView(agent: AgentView, history: Entry[], streaming?: StreamingOutput, historyError?: string) {
     const task = agent.currentExecution || agent.latestExecution
     const live = streaming?.executionId === agent.currentExecutionId ? streaming : undefined
     const executionId = live?.executionId || task?.ID || ''
     const messages = history.filter((item) => !executionId || item.executionId === executionId)
-    const text = (item?: ContextEntry) => item?.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') || ''
+    const text = (item?: Entry) => item?.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') || ''
     const input = messages.find((item) => item.role === 'user')
     const reply = messages.findLast((item) => item.role === 'assistant' && text(item))
-    const result = live?.turns.flatMap((turn) => turn.events.filter((event) => event.kind === 'text_delta').map((event) => event.text || '')).join('') || text(reply)
+    const result = live?.turns.flatMap((turn) => turn.events.filter((event) => event.kind === 'text_delta').map((event) => event.data.text)).join('') || text(reply)
     let status: ToolStatus = 'queued'
     let label = '等待执行'
     if (live?.error) {

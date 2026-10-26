@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -124,20 +125,23 @@ func (r *Runner) executeTurn(
 		}
 	}()
 	r.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.TurnStarted,
-		SessionID:   executionInput.SessionID,
-		AgentID:     executionInput.AgentID,
-		ExecutionID: executionInput.ID,
-		TurnID:      turnID,
+		Scope: coreevent.Scope{
+			SessionID:   executionInput.SessionID,
+			AgentID:     executionInput.AgentID,
+			ExecutionID: executionInput.ID,
+			TurnID:      turnID,
+		},
+		Payload: coreevent.TurnStarted{},
 	})
 	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", executionInput.ID, executionInput.Config.Model.ModelID, len(modelContext.Entries), turnID)
 	r.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.ProviderWaiting,
-		SessionID:   executionInput.SessionID,
-		AgentID:     executionInput.AgentID,
-		ExecutionID: executionInput.ID,
-		TurnID:      turnID,
-		Name:        executionInput.Config.Model.ProviderID + "/" + executionInput.Config.Model.ModelID,
+		Scope: coreevent.Scope{
+			SessionID:   executionInput.SessionID,
+			AgentID:     executionInput.AgentID,
+			ExecutionID: executionInput.ID,
+			TurnID:      turnID,
+		},
+		Payload: coreevent.ProviderWaiting{},
 	})
 	response, err := r.callModel(ctx, executionInput, request, hook.ModelRequestIteration, sequence, func(event providerapi.Event) {
 		r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
@@ -168,14 +172,7 @@ func (r *Runner) executeTurn(
 					r.notifyAssistant(ctx, executionInput, stored)
 				}
 				*modelContext = modelContext.Append(stored)
-				r.Emitter.Emit(coreevent.Event{
-					Kind:        coreevent.TurnCompleted,
-					SessionID:   executionInput.SessionID,
-					AgentID:     executionInput.AgentID,
-					ExecutionID: executionInput.ID,
-					TurnID:      turnID,
-					Entries:     []sessionentry.ContextEntry{stored},
-				})
+				r.emitTurnCompletion(executionInput, turnID, []sessionentry.ContextEntry{stored}, providerapi.StopReason(stopReason))
 			}
 		}
 		err = modelFailure(err)
@@ -215,27 +212,22 @@ func (r *Runner) executeTurn(
 	}
 	for _, call := range calls {
 		r.Emitter.Emit(coreevent.Event{
-			Kind:        coreevent.ToolCall,
-			SessionID:   executionInput.SessionID,
-			AgentID:     executionInput.AgentID,
-			ExecutionID: executionInput.ID,
-			TurnID:      turnID,
-			CallID:      call.CallID,
-			Name:        string(call.Name),
-			Input:       append([]byte(nil), call.Arguments...),
+			Scope: coreevent.Scope{
+				SessionID:   executionInput.SessionID,
+				AgentID:     executionInput.AgentID,
+				ExecutionID: executionInput.ID,
+				TurnID:      turnID,
+			},
+			Payload: coreevent.ToolCall{
+				CallID: call.CallID,
+				Name:   string(call.Name),
+				Input:  bytes.Clone(call.Arguments),
+			},
 		})
 	}
 	if response.stopReason == providerapi.StopCompleted || response.stopReason == providerapi.StopSequence {
 
-		r.Emitter.Emit(coreevent.Event{
-			Kind:        coreevent.TurnCompleted,
-			Entries:     committed,
-			SessionID:   executionInput.SessionID,
-			AgentID:     executionInput.AgentID,
-			ExecutionID: executionInput.ID,
-			TurnID:      turnID,
-			StopReason:  response.stopReason,
-		})
+		r.emitTurnCompletion(executionInput, turnID, committed, response.stopReason)
 		return EndCompleted, "", true, nil
 	}
 	results, err := r.runToolCalls(ctx, executionInput, deps, calls, turnID)
@@ -253,27 +245,12 @@ func (r *Runner) executeTurn(
 	}
 	if err != nil {
 		if len(committed) > 0 {
-			r.Emitter.Emit(coreevent.Event{
-				Kind:        coreevent.TurnCompleted,
-				SessionID:   executionInput.SessionID,
-				AgentID:     executionInput.AgentID,
-				ExecutionID: executionInput.ID,
-				TurnID:      turnID,
-				Entries:     committed,
-			})
+			r.emitTurnCompletion(executionInput, turnID, committed, response.stopReason)
 		}
 		r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 		outcome, code, cause := loopResult(err)
 		return outcome, code, false, cause
 	}
-	r.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.TurnCompleted,
-		Entries:     committed,
-		SessionID:   executionInput.SessionID,
-		AgentID:     executionInput.AgentID,
-		ExecutionID: executionInput.ID,
-		TurnID:      turnID,
-		StopReason:  response.stopReason,
-	})
+	r.emitTurnCompletion(executionInput, turnID, committed, response.stopReason)
 	return EndCompleted, "", false, nil
 }

@@ -17,21 +17,23 @@ func (r *Runner) emitModelEvent(
 	event providerapi.Event,
 ) {
 	output := coreevent.Event{
-		AgentID:     agentID,
-		ExecutionID: executionID,
-		TurnID:      turnID,
-		SessionID:   sessionID,
+		Scope: coreevent.Scope{
+			SessionID:   sessionID,
+			AgentID:     agentID,
+			ExecutionID: executionID,
+			TurnID:      turnID,
+		},
 	}
 	switch event.Kind {
 	case providerapi.StreamTextDelta:
-		output.Kind = coreevent.TextDelta
-		output.Text = event.Text
+		output.Payload = coreevent.TextDelta{Text: event.Text}
 	case providerapi.StreamThinkingDelta:
-		output.Kind = coreevent.ThinkingDelta
-		output.Text = event.Text
+		output.Payload = coreevent.ThinkingDelta{Text: event.Text}
 	case providerapi.StreamUsage:
-		output.Kind = coreevent.ModelUsage
-		output.Usage = event.Usage
+		if event.Usage == nil || !event.Usage.Valid() {
+			return
+		}
+		output.Payload = coreevent.ModelUsage{Usage: *event.Usage}
 	default:
 		return
 	}
@@ -46,15 +48,40 @@ func (r *Runner) emitToolResult(
 	block sessionentry.Block,
 ) {
 	r.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.ToolResult,
-		SessionID:   sessionID,
-		AgentID:     agentID,
-		ExecutionID: executionID,
+		Scope: coreevent.Scope{
+			SessionID:   sessionID,
+			AgentID:     agentID,
+			ExecutionID: executionID,
+			TurnID:      turnID,
+		},
+		Payload: coreevent.ToolResult{
+			CallID:  block.CallID,
+			Result:  block.Text,
+			IsError: block.IsError,
+		},
+	})
+}
+
+// emitTurnCompletion 先发布本轮已接纳的条目，再结束实时展示，避免完成通知先清掉未回填的输出。
+func (r *Runner) emitTurnCompletion(input Input, turnID identity.TurnID, entries []sessionentry.ContextEntry, stopReason providerapi.StopReason) {
+	scope := coreevent.Scope{
+		SessionID:   input.SessionID,
+		AgentID:     input.AgentID,
+		ExecutionID: input.ID,
 		TurnID:      turnID,
-		CallID:      block.CallID,
-		Name:        block.Name,
-		Result:      block.Text,
-		IsError:     block.IsError,
+	}
+	if len(entries) > 0 {
+		r.Emitter.Emit(coreevent.Event{
+			Scope: scope,
+			Payload: coreevent.EntriesAppended{
+				Entries:   entries,
+				Transient: !input.Run.Main(),
+			},
+		})
+	}
+	r.Emitter.Emit(coreevent.Event{
+		Scope:   scope,
+		Payload: coreevent.TurnCompleted{StopReason: stopReason},
 	})
 }
 
@@ -63,8 +90,7 @@ func (r *Runner) emitError(agentID identity.AgentID, executionID identity.AgentE
 		return
 	}
 	message := "input failed"
-	var failure *Failure
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[*Failure](err); ok {
 		if failure.message != "" {
 			message = failure.message
 		} else if detail := providerFailureMessage(failure.code, failure.cause); detail != "" {
@@ -72,11 +98,12 @@ func (r *Runner) emitError(agentID identity.AgentID, executionID identity.AgentE
 		}
 	}
 	r.Emitter.Emit(coreevent.Event{
-		Kind:        coreevent.Error,
-		AgentID:     agentID,
-		ExecutionID: executionID,
-		TurnID:      turnID,
-		Error:       message,
+		Scope: coreevent.Scope{
+			AgentID:     agentID,
+			ExecutionID: executionID,
+			TurnID:      turnID,
+		},
+		Payload: coreevent.ErrorOccurred{Message: message},
 	})
 }
 

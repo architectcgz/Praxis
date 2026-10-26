@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, MessageSquare } from 'lucide-react'
-import type { ContextEntry, AgentView, ModelOption } from '../../api'
+import type { Entry, AgentView, ModelOption } from '../../api'
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
 import { ApprovalGate, ToolApprovalsProvider } from './ToolApprovals'
@@ -9,7 +9,7 @@ import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessa
 export type AgentConversationProps = {
     projectId: string
     agent: AgentView
-    history: ContextEntry[]
+    history: Entry[]
     collaboration?: ReactNode
     streamingOutput: StreamingOutput | null
     pendingUserMessages: PendingUserMessageItem[]
@@ -208,7 +208,7 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
 }
 
 /** 仅衔接同一次执行中相邻的助手消息；用户消息、错误和不同任务都保留独立边界。 */
-function sameAssistantTask(left?: ContextEntry, right?: ContextEntry): boolean {
+function sameAssistantTask(left?: Entry, right?: Entry): boolean {
     return left?.role === 'assistant' && right?.role === 'assistant' &&
         !!left.executionId && left.executionId === right.executionId
 }
