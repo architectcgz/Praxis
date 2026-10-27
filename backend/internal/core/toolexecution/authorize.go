@@ -74,37 +74,30 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 		if !result.review {
 			return result.denied, nil
 		}
-		request, err := e.deps.Operations.PrepareReview(ctx, t.run, call, t.workspacePath)
-		if err != nil {
-			return nil, err
-		}
-		request.Call, request.Arguments, request.Decision = call, args, decision
 		reviewCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		assessment, reviewErr := e.deps.Reviewer.review(reviewCtx, request)
+		review, reviewErr := t.review(reviewCtx, call, args, decision.RuleID)
 		if reviewErr == nil {
 			reviewErr = reviewCtx.Err()
 		}
 		cancel()
-		if _, ok := errors.AsType[*reviewProgressError](reviewErr); ok {
+		if _, ok := errors.AsType[*reviewExecutionError](reviewErr); ok {
 			return nil, reviewErr
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		if reviewErr != nil {
-			assessment = security.RiskAssessment{
+			review.Assessment = security.RiskAssessment{
 				Verdict: security.RiskUncertain,
 				Reason:  "Risk assessment failed or returned an invalid result; manual approval is required.",
 			}
 		}
-		attempt := request.Attempt
-		attempt.Assessment, attempt.CompletedAt = assessment, e.deps.Clock.Now().UTC()
 		record := ReviewRecord{
 			Key:        call.Key,
 			SessionID:  call.SessionID,
 			Arguments:  args,
-			Decision:   request.Decision,
-			RiskReview: attempt,
+			Decision:   decision,
+			RiskReview: review,
 		}
 		e.mu.Lock()
 		err = e.checkUnfinished(ctx, call)

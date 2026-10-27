@@ -65,12 +65,10 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	}
 	records := toolservice.NewService(toolservice.Dependencies{
 		ApprovalConfig: config,
-		Tasks:          repos.Executions,
 		AppendEntry:    sessions.AppendEntry,
 		Calls:          repos.ToolCalls,
 		Sessions:       repos.Sessions,
 		Projects:       repos.Projects,
-		Clock:          clock.UTCClock{},
 	})
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
 		Catalog:        config.tools,

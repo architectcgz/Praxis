@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	coreevent "praxis/internal/core/event"
@@ -12,6 +13,8 @@ import (
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
+	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"strings"
 	"unicode/utf8"
 )
@@ -38,32 +41,29 @@ const riskReviewSchema = `{
 	"additionalProperties": false
 }`
 
-type reviewProgressError struct{ error }
+// ReviewRequest 只包含审核内容与输出约束，不携带执行状态或模型配置。
+type ReviewRequest struct {
+	Content      appcontext.Content
+	OutputSchema providerapi.OutputSchema
+}
 
-func (e *reviewProgressError) Unwrap() error { return e.error }
+type Reviewer struct {
+	Progress interface {
+		RecordModelRequest(context.Context, *agentexecution.Run, uint64, bool) error
+		RecordModelOutput(context.Context, *agentexecution.Run, int) error
+	}
+	Provider       providerapi.Provider
+	HookDispatcher *hook.Dispatcher
+	Emitter        *coreevent.Emitter
+}
 
-// review 直接调用 Provider 审核冻结操作，不读取仓储或调用 Service。
-func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessment security.RiskAssessment, err error) {
-	outputBytes := 0
-	defer func() {
-		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), request.Run, outputBytes); progressErr != nil {
-			err = &reviewProgressError{error: errors.Join(err, progressErr)}
-		}
-	}()
-	call, args, model := request.Call, request.Arguments, request.Model
-	attempt := request.Attempt
-	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
-		Identity: hook.Identity{
-			SessionID:   call.SessionID,
-			AgentID:     call.AgentID,
-			ExecutionID: call.ExecutionID,
-			TurnID:      attempt.TurnID,
-		},
-		Kind:        hook.OperationProvider,
-		Name:        model.ProviderID + "/" + model.ModelID,
-		ReferenceID: "risk-review:" + attempt.TurnID.String(),
-	})
-	defer func() { scope.End(hook.Result{Err: err}) }()
+// reviewExecutionError 表示执行状态或进度记录失败，不能降级为人工审批。
+type reviewExecutionError struct{ error }
+
+func (e *reviewExecutionError) Unwrap() error { return e.error }
+
+// prepareReview 只组装冻结操作的审核内容，不读取执行状态或决定模型调用方式。
+func prepareReview(userTask, toolName string, args json.RawMessage, workspacePath, ruleID string) (ReviewRequest, error) {
 	data, err := json.Marshal(struct {
 		Task      string          `json:"task"`
 		Tool      string          `json:"tool"`
@@ -71,60 +71,119 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 		Workspace string          `json:"workspace"`
 		Rule      string          `json:"rule"`
 	}{
-		Task:      request.UserTask,
-		Tool:      string(call.Name),
+		Task:      userTask,
+		Tool:      toolName,
 		Arguments: args,
-		Workspace: request.WorkspacePath,
-		Rule:      request.Decision.RuleID,
+		Workspace: workspacePath,
+		Rule:      ruleID,
 	})
 	if err != nil {
-		return assessment, err
+		return ReviewRequest{}, err
 	}
-	history, err := appcontext.NewContextBuilder().Build(appcontext.Content{
-		SystemPrompt: riskReviewPrompt,
-		Entries: []sessionentry.ContextEntry{{
-			Protected: true,
-			Role:      role.User,
-			Content:   []sessionentry.Block{{Kind: sessionentry.BlockText, Text: string(data)}},
-		}},
-	}, appcontext.Limits{ContextWindow: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens})
+	return ReviewRequest{
+		Content: appcontext.Content{
+			SystemPrompt: riskReviewPrompt,
+			Entries: []sessionentry.ContextEntry{{
+				Protected: true,
+				Role:      role.User,
+				Content: []sessionentry.Block{{
+					Kind: sessionentry.BlockText,
+					Text: string(data),
+				}},
+			}},
+		},
+		OutputSchema: providerapi.OutputSchema{
+			Name:   "risk_assessment",
+			Schema: json.RawMessage(riskReviewSchema),
+		},
+	}, nil
+}
+
+// review 由执行调用方预留请求序号、应用模型限制并记录审核结果。
+func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string) (review RiskReview, err error) {
+	task := t.run.Snapshot()
+	if task.Status != agentexecution.ExecutionRunning || call.ExecutionID != task.ID {
+		return review, &reviewExecutionError{error: errorcode.ErrRequestConflict}
+	}
+	input, found := t.run.Entry(task.InputEntryID)
+	if !found || input.TextContent() == "" {
+		return review, &reviewExecutionError{error: errors.New("risk review cannot locate the task input")}
+	}
+	r := t.executor.deps.Reviewer
+	sequence := max(uint64(1), task.Progress.NextSequence)
+	// 与主模型、摘要共用序号和请求计数；进度接纳失败时不调用 Provider。
+	if err := r.Progress.RecordModelRequest(ctx, t.run, sequence, false); err != nil {
+		return review, &reviewExecutionError{error: err}
+	}
+	model := task.Config.Model
+	review = RiskReview{
+		TurnID:     identity.NewTurnID(task.ID, sequence),
+		ProviderID: model.ProviderID,
+		ModelID:    model.ModelID,
+		StartedAt:  t.executor.deps.Clock.Now().UTC(),
+	}
+	outputBytes := 0
+	defer func() {
+		review.CompletedAt = t.executor.deps.Clock.Now().UTC()
+		// 取消或断流也要记录已经收到的输出，进度失败不能按模型审核失败处理。
+		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), t.run, outputBytes); progressErr != nil {
+			err = &reviewExecutionError{error: errors.Join(err, progressErr)}
+		}
+	}()
+	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
+		Identity: hook.Identity{
+			SessionID:   call.SessionID,
+			AgentID:     call.AgentID,
+			ExecutionID: call.ExecutionID,
+			TurnID:      review.TurnID,
+		},
+		Kind:        hook.OperationProvider,
+		Name:        model.ProviderID + "/" + model.ModelID,
+		ReferenceID: "risk-review:" + review.TurnID.String(),
+	})
+	defer func() { scope.End(hook.Result{Err: err}) }()
+	request, err := prepareReview(input.TextContent(), string(call.Name), args, t.workspacePath, ruleID)
 	if err != nil {
-		return assessment, err
+		return review, err
 	}
-	ctx, span := request.Run.Timing.Start(ctx, timing.Operation{
+	history, err := appcontext.NewContextBuilder().Build(request.Content, appcontext.Limits{
+		ContextWindow:   model.ContextWindow,
+		MaxOutputTokens: model.MaxOutputTokens,
+	})
+	if err != nil {
+		return review, err
+	}
+	ctx, span := t.run.Timing.Start(ctx, timing.Operation{
 		ExecutionID: call.ExecutionID.String(),
 		Kind:        timing.Provider,
 		Name:        model.ProviderID + "/" + model.ModelID,
-		ReferenceID: "risk-review:" + attempt.TurnID.String(),
+		ReferenceID: "risk-review:" + review.TurnID.String(),
 	})
 	defer func() { span.End(timing.ResultStatus(ctx, err)) }()
 	stream, err := r.Provider.Stream(ctx, providerapi.Request{
 		ExecutionID:     call.ExecutionID,
 		PromptCacheKey:  call.SessionID.String(),
 		Context:         history,
-		Model:           model.Clone(),
+		Model:           model,
 		MaxOutputTokens: model.MaxOutputTokens,
-		TurnID:          attempt.TurnID,
-		OutputSchema: &providerapi.OutputSchema{
-			Name:   "risk_assessment",
-			Schema: json.RawMessage(riskReviewSchema),
-		},
+		TurnID:          review.TurnID,
+		OutputSchema:    &request.OutputSchema,
 		// Tools 保持为空，审核模型没有执行待审操作或调用其他工具的能力。
 	})
 	if err != nil {
-		return assessment, err
+		return review, err
 	}
 	if stream == nil {
-		return assessment, errors.New("risk review returned a nil stream")
+		return review, errors.New("risk review returned a nil stream")
 	}
 	var text strings.Builder
 	for {
 		select {
 		case <-ctx.Done():
-			return assessment, ctx.Err()
+			return review, ctx.Err()
 		case event, ok := <-stream:
 			if !ok {
-				return assessment, errors.New("risk review ended without a terminal event")
+				return review, errors.New("risk review ended without a terminal event")
 			}
 			if (event.Kind == providerapi.StreamTextDelta || event.Kind == providerapi.StreamThinkingDelta) && event.Text != "" {
 				outputBytes += len(event.Text)
@@ -133,7 +192,7 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 			switch event.Kind {
 			case providerapi.StreamTextDelta:
 				if text.Len()+len(event.Text) > 4096 {
-					return assessment, errors.New("risk review output exceeds 4096 bytes")
+					return review, errors.New("risk review output exceeds 4096 bytes")
 				}
 				text.WriteString(event.Text)
 			case providerapi.StreamUsage:
@@ -143,7 +202,7 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 							SessionID:   call.SessionID,
 							AgentID:     call.AgentID,
 							ExecutionID: call.ExecutionID,
-							TurnID:      attempt.TurnID,
+							TurnID:      review.TurnID,
 						},
 						Payload: coreevent.ModelUsage{Usage: *event.Usage},
 					})
@@ -152,19 +211,20 @@ func (r *Reviewer) review(ctx context.Context, request ReviewRequest) (assessmen
 				// 审核推理内容不进入用户会话或审计正文。
 			case providerapi.StreamComplete:
 				if ctx.Err() != nil {
-					return assessment, ctx.Err()
+					return review, ctx.Err()
 				}
 				if event.StopReason != providerapi.StopCompleted && event.StopReason != providerapi.StopSequence {
-					return assessment, errors.New("risk review did not complete normally")
+					return review, errors.New("risk review did not complete normally")
 				}
-				return parseRiskAssessment(text.String())
+				review.Assessment, err = parseRiskAssessment(text.String())
+				return review, err
 			case providerapi.StreamError:
 				if event.Err != nil {
-					return assessment, event.Err
+					return review, event.Err
 				}
-				return assessment, errors.New("risk review stream failed")
+				return review, errors.New("risk review stream failed")
 			default:
-				return assessment, errors.New("risk review emitted an unsupported event or tool call")
+				return review, errors.New("risk review emitted an unsupported event or tool call")
 			}
 		}
 	}
