@@ -34,7 +34,7 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 			if _, ok := errors.AsType[*hook.Error](err); ok {
 				return results, NewFailure(FailureInternal, err)
 			}
-			return results, deps.Execution.EntryFailure(err)
+			return results, deps.History.EntryFailure(err)
 		}
 		if len(receipt.Content) != 1 || receipt.Content[0].Kind != sessionentry.BlockToolResult {
 			return results, NewFailure(FailureContract, errors.New("tool executor returned an invalid committed receipt"))
@@ -60,7 +60,7 @@ func (r *Runner) interruptToolCalls(ctx context.Context, input Input, deps Execu
 	results := make([]sessionentry.ContextEntry, 0, len(calls))
 	for _, call := range calls {
 		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available."))
-		stored, inserted, err := deps.Execution.AppendEntry(commitCtx, entry)
+		stored, inserted, err := deps.History.AppendEntry(commitCtx, entry)
 		if err != nil {
 			return results, err
 		}

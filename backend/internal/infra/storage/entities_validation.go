@@ -128,7 +128,7 @@ func validateUsageRecord(r providerapi.UsageRecord) error {
 }
 
 // validateAgentExecution 仅在 JSONL 恢复时校验解码后的执行记录，不修复或补默认值。
-func validateAgentExecution(e agentexecution.Execution) error {
+func validateAgentExecution(e agentexecution.ExecutionRecord) error {
 	if e.Progress.ModelOutputBytes < 0 || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
 		return fmt.Errorf("execution.progress: usage counters or request sequence are invalid: %w", errorcode.ErrInvalidValue)
 	}

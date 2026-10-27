@@ -22,7 +22,6 @@ type Config struct {
 	Recovery          repository.AgentExecution
 	Tools             *executionmodel.Executor
 	ToolRecords       *toolservice.Service
-	Entries           repository.Entries
 	Sessions          *sessionservice.Service
 	SessionRecords    repository.Session
 	Workspaces        repository.Workspace
@@ -40,7 +39,6 @@ type Coordinator struct {
 	recovery          repository.AgentExecution
 	tools             *executionmodel.Executor
 	toolRecords       *toolservice.Service
-	entries           repository.Entries
 	sessions          *sessionservice.Service
 	sessionRecords    repository.Session
 	workspaces        repository.Workspace
@@ -89,7 +87,6 @@ func NewCoordinator(config Config) *Coordinator {
 		recovery:          config.Recovery,
 		tools:             config.Tools,
 		toolRecords:       config.ToolRecords,
-		entries:           config.Entries,
 		sessions:          config.Sessions,
 		sessionRecords:    config.SessionRecords,
 		workspaces:        config.Workspaces,

@@ -15,7 +15,7 @@ import (
 )
 
 // loopExecution 绑定一次 Loop 调用的执行归属；生命周期与该次调用相同，不在共享 Service 中保存。
-// Run 的历史由业务提交路径更新，Loop 只能取得独立的模型投影。
+// 主执行通过 Session 读写历史；Run 仅保留执行证据，Loop 取得独立模型投影。
 type loopExecution struct {
 	service *Service
 	run     *agentexecution.Run
@@ -26,6 +26,9 @@ func (e *loopExecution) NextContext(ctx context.Context) (appcontext.ModelContex
 	if err == nil {
 		return value, nil
 	}
+	if loop.FailureClassification(err) == loop.FailureStorage {
+		return appcontext.ModelContext{}, err
+	}
 	if _, ok := errors.AsType[*hook.Error](err); ok {
 		return appcontext.ModelContext{}, loop.NewFailure(loop.FailureInternal, err)
 	}
@@ -35,17 +38,13 @@ func (e *loopExecution) NextContext(ctx context.Context) (appcontext.ModelContex
 	return appcontext.ModelContext{}, loop.NewFailure(loop.FailureContract, err)
 }
 
-// AppendEntry 先由 Main 仓储接纳，再更新本次历史；子执行只写入本次历史。
+// AppendEntry 先向主会话追加条目，再记录本次执行证据；子执行只写入私有历史。
 // 提交后的 Hook 不改变已接纳结果，重复条目不重复触发通知。
 func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	inserted := false
 	if e.run.Main() {
 		task := e.run.Snapshot()
-		stored, added, err := e.service.entries.Append(ctx, sessionentry.Record{
-			SessionID: task.SessionID,
-			AgentID:   task.AgentID,
-			Data:      value,
-		})
+		stored, added, err := e.service.history.AppendEntry(ctx, task.SessionID, value)
 		if err != nil {
 			return sessionentry.ContextEntry{}, false, e.EntryFailure(err)
 		}
@@ -62,6 +61,29 @@ func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.Cont
 		e.notifyAssistant(ctx, accepted)
 	}
 	return accepted, inserted, nil
+}
+
+// ReplaceContext 在摘要已接纳后直接保存压缩结果，不进行前后差异合并。
+func (e *loopExecution) ReplaceContext(ctx context.Context, entries []sessionentry.ContextEntry) error {
+	task := e.run.Snapshot()
+	values := make([]sessionentry.ContextEntry, 0, len(entries))
+	for _, entry := range entries {
+		// 当前任务输入的保护只属于本轮，不能让它在后续任务中永久不可压缩。
+		if entry.ID == task.InputEntryID {
+			entry.Protected = false
+		}
+		values = append(values, entry)
+	}
+	var err error
+	if e.run.Main() {
+		err = e.service.history.ReplaceContext(ctx, task.SessionID, values)
+	} else {
+		err = e.run.ReplaceContext(values)
+	}
+	if err != nil {
+		return e.EntryFailure(err)
+	}
+	return nil
 }
 
 func (e *loopExecution) PublishEntries(turnID identity.TurnID, entries []sessionentry.ContextEntry) {

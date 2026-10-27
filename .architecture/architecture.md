@@ -2,7 +2,7 @@
 
 ## 架构概览
 
-Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展示，Wails 连接桌面入口与后端业务；后端按照业务概念和能力划分模块，由 Bootstrap 统一装配，Service 与 Coordinator 编排业务流程，Core 提供实体和执行能力，Repository 定义持久化契约，Infra 提供具体实现。
+Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展示，Wails 连接桌面入口与后端业务；后端按照业务概念和能力划分模块，由 Bootstrap 统一装配，Service 与 Coordinator 编排业务流程，Core 提供实体、执行能力和会话历史契约，Repository 定义其他持久化契约，Infra 提供具体实现。
 
 ## 目录与职责
 
@@ -19,22 +19,22 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/wails/` | 桌面绑定、请求入口、DTO 和错误映射 |
 | `backend/internal/bootstrap/` | 应用装配、依赖连接和生命周期管理 |
 | `backend/internal/core/agent/` | Agent 内存实例、受锁保护的执行状态和角色定义 |
-| `backend/internal/core/agent/execution/` | Execution 记录、本次执行实例 Run 与历史、配置、进度、结果和计时能力 |
-| `backend/internal/core/session/` | 会话实体、模型选择和待办队列 |
-| `backend/internal/core/session/entry/` | Agent 消息、内容块和执行归属的共享值类型 |
+| `backend/internal/core/agent/execution/` | ExecutionRecord 执行记录、Run 运行时实例与执行证据、子执行私有历史、配置、进度、结果和计时能力 |
+| `backend/internal/core/session/` | 会话实体、主会话历史能力、模型选择和待办队列 |
+| `backend/internal/core/session/entry/` | 消息、内容块、执行归属与 Entry 存储契约 |
 | `backend/internal/core/project/`、`core/workspace/` | 项目与工作区实体 |
-| `backend/internal/core/context/` | 模型上下文构建和压缩 |
-| `backend/internal/core/loop/` | 模型与工具的 ReAct 迭代 |
+| `backend/internal/core/context/` | Context 条目追加与直接替换、工具配对、本轮模型上下文构建和压缩 |
+| `backend/internal/core/loop/` | 模型与工具的 ReAct 迭代、上下文压缩和摘要请求编排 |
 | `backend/internal/core/model/`、`core/provider/` | 模型配置和 Provider 调用契约 |
 | `backend/internal/core/tool/` | 工具契约、内置工具定义、参数默认值与准备规则、补丁解析及内容匹配 |
 | `backend/internal/core/toolexecution/` | 工具调用与授权编排、取消句柄和审批事实 |
 | `backend/internal/core/security/` | 权限、审批和风险策略类型与规则 |
 | `backend/internal/core/hook/` | 业务扩展和执行观察机制 |
-| `backend/internal/repository/` | 统一持久化读写与查询契约 |
+| `backend/internal/repository/` | 项目、会话记录、执行、工具查询与用量等持久化契约 |
 | `backend/internal/service/` | 各业务用例及跨模块协作 |
 | `backend/internal/service/agent/execution/` | 执行准入、上下文准备、进度、结算和恢复 |
 | `backend/internal/service/agent/` | Agent 实例查找、创建、状态查询和启动恢复 |
-| `backend/internal/service/session/` | 会话用例、Main 历史追加与查询、Agent 实例引用持有、模型选择和输入队列 |
+| `backend/internal/service/session/` | 会话用例、主会话 Context 与历史读写、Agent 实例引用持有、模型选择和输入队列 |
 | `backend/internal/service/coordinator/` | Session FIFO 调度、暂停停止、ExecutionTools 绑定、审批唤醒和结算交接 |
 | `backend/internal/service/toolexecution/` | 归属与规则读取、审核输入及预算准备、Main 工具回执接纳和中断回执构造 |
 | `backend/internal/infra/storage/` | 完整内存记录、仓储查询和约束、有界后台保存队列及其生命周期 |
@@ -73,7 +73,7 @@ Before Hook 在参数准备和授权前修改输入，After Hook 在执行后、
 - Core 定义业务概念与核心能力，不依赖 Service、Repository、Infra 或 Wails。
 - Service 依赖 Core 与 Repository，负责业务流程；不直接依赖 Infra 的具体实现。
 - Repository 使用 Core 类型定义持久化契约，不包含业务编排。
-- Infra 实现 Repository 和外部能力契约，不依赖 Service。
+- Infra 实现 Repository、Core 的 Entry 存储契约和外部能力契约，不依赖 Service。
 - Wails 调用业务服务，负责桌面与业务之间的输入输出转换。
 - Bootstrap 是统一装配入口，连接契约和具体实现。
 - 前端通过 API 模块访问 Wails，业务功能由应用和工作区层组合。
@@ -136,23 +136,29 @@ role: advisor
 
 `AgentDefinition` 保存稳定 ID、展示名称、Role 和指令；Session 内的 Agent 实例只引用定义 ID，并持有实例类型 `Kind`，不复制定义中的 Role。`Kind` 由创建实例的业务流程明确指定，取值为 `main` 或 `subagent`，不从目录名、名称或 Role 推导。同一份角色定义可以用于不同类型的实例；`primary` 是默认定义 ID，不限制其他定义被用作 Main。
 
-消息历史通过 AgentID 隔离。Session Service 统一提供会话独立输入追加与历史查询，按 Session.MainAgentID 访问 Main 的唯一历史；Agent Service 不承担消息读写。面向 AgentID 的消息查询由 Coordinator 分派：Main 委托 Session Service，Subagent 读取当前 Run 的私有消息。执行中的输入、输出和工具回执仍由执行用例按 Execution 归属提交。Main 的跨执行历史保留在共享内存仓储中，并尽力保存到 JSONL；Subagent 只持有本次 Run 的隔离历史。Session 对话直接使用 Main 的消息和当前执行上下文，不建立独立 Session 消息流或另一份长期模型上下文。需要保留的约束、决定和参考信息作为同一历史中的条目追加；必要时使用 `ContextEntry.Protected` 保留模型构建与压缩时必须保留的内容。
+主执行的会话历史和 Context 归 Session 管理。Session Service 统一追加用户输入、模型回答、工具回执和压缩摘要；原始历史供展示、追溯和执行证据恢复，Context 持续保存后续请求实际使用的条目。普通条目被历史接纳后增量加入 Context，压缩结果确认后直接替换 Context 的整个条目列表，不进行前后差异合并或逐轮历史筛选。底层按 Session.MainAgentID 访问同一份原始 Entry。Agent Service 不承担消息读写，Execution 只保留本次执行的输入、工具回执和完成证据，不持有主会话 Context 或跨执行历史。面向 AgentID 的消息查询由 Coordinator 分派：Main 委托 Session Service，Subagent 读取当前 Run 的私有消息。主会话历史保留在共享内存存储中，并尽力保存到 JSONL；Subagent 历史不落盘。输入先进入 Session 内存队列，轮到执行准入时才追加为用户 Entry，不进入正在运行的任务上下文。需要保留的约束、决定和参考信息可作为同一历史中的条目追加，并用 `ContextEntry.Protected` 标记模型投影中必须保留的内容。
 
-Subagent 的消息按自身 AgentID 隔离，不自动读取 Main 或其他 Subagent 的历史，需要的信息由委派输入明确提供。模型构建统一读取本次执行所属 Agent 的有效历史，不按 Main/Subagent 分别拼接额外的 Session 上下文。Session 内最多存在一个 Main，由 Session 的 MainAgentID 明确引用，不通过定义 ID 查找主实例；实例类型创建后不可改变。
+Subagent 的消息按自身 AgentID 隔离，不自动读取 Main 或其他 Subagent 的历史，需要的信息由委派输入明确提供。主会话 Context 由 Session Service 持有到会话删除或服务释放，首次使用时从最近保存的 Context 及后续普通 Entry 初始化；子执行在本次 Run 中持有自己的 Context。构建本轮请求时，`core/context/builder.go` 中的 `ContentFromEntries` 读取当前条目并临时保护本次用户输入，`ContextBuilder.Build` 再结合冻结提示词和窗口限制生成独立请求视图，不重建完整历史。Session 内最多存在一个 Main，由 Session 的 MainAgentID 明确引用，不通过定义 ID 查找主实例；实例类型创建后不可改变。
 
 Agent 对象和运行状态不持久化。Session 只保存主 Agent 的 MainAgentID 与 AgentDefinitionID，Main Execution 和消息保存各自的归属事实。Agent 服务负责主实例的查找、创建及启动恢复，Session 服务按会话持有同一批实例引用并在会话删除时释放；身份字段创建后不变，状态变更由 Agent 自身的锁保护。启动时先全量重建存储内存状态，再按 Session 重建主实例并根据当前或最近 Execution 初始化状态；Coordinator 随后补齐中断回执并恢复活动 Main Execution。Subagent、尚未开始的输入、审批等待和进程内控制意图不参与恢复。
 
 消息仓储显式接收 SessionID、AgentID 与消息，SessionID 决定日志文件，AgentID 决定消息历史。仓储根据 Session.MainAgentID 只接纳 Main 的消息、执行、计时和用量，校验 Session、Execution 与消息之间的归属一致性，不依赖 Agent 对象。ToolCall 与 ToolResult 从内存 Entry 派生匹配，不建立独立工具调用实体或持久化状态；查询返回独立副本，不能修改仓储持有的正文。
 
-一次执行从本次 Run 的有效历史构建一份可变 `ModelContext`，通过指针交给 Loop。Main 的模型输出与工具回执先由共享内存仓储接纳，再合入 Run 和本次上下文；Subagent 直接接纳到本次历史。两者都不以落盘成功为推进条件。存储层不保存模型上下文，Run 和上下文在执行结束后释放；Main 重启时按实际落盘历史重建，压缩摘要也来自同一历史。
+每轮从已维护的 Context 构建独立 `ModelContext` 值交给 Loop。主执行产生的普通条目先经 Session 追加，增量更新会话 Context，再记录本次 Run 的执行证据；工具回执和启动恢复补写也经过同一会话入口。任务输入只有在 Execution 准入成功后才加入 Context，用户消息已追加但 Execution 保存失败时不会提前影响请求。子执行直接追加私有历史和私有 Context。两者都不以落盘成功为推进条件。本轮请求视图随轮次释放，Run 和子执行 Context 随执行释放；主会话 Context 跨执行保留。主执行重启时从原始历史恢复本次执行证据，最终回答和已有工具回执分别用于防止重复请求模型及重复执行工具。
+
+Loop 在模型请求前编排压缩及其 Hook，`core/context/compress.Compress` 决定具体精简方式。输入达到扣除输出与工具定义预留后的预算的 90% 时尝试压缩：只选择不跨越保护条目、不拆开工具配对的连续历史前缀，最多生成一条摘要；超长前缀可分片请求模型，但最终仍只有一个摘要 Entry。前缀之后的非保护模型交互可只保留工具调用与回执，以及协议重放必需的推理状态。工具结果超过 2048 个估算 token 或输入预算的八分之一时可省略正文；容量仍不足时按正文大小继续舍弃，但保留回执身份和错误标记。若仅精简工具交互已足够，则不请求摘要；必要原文、工具声明和回执结构仍超窗时，明确返回容量不足。
+
+摘要本身是普通 `ContextEntry`，主执行先将新摘要追加到原始历史，再以 `context.saved` 保存完整压缩后条目，包括摘要、保留的用户消息和工具交互，随后直接替换内存 Context。仅精简工具结果而没有新摘要时，也保存完整结果。每个会话在存储内存中只保留最近的 Context 记录，记录中的 `through_sequence` 标识其覆盖的事件边界；该值保证内容相同但后续条目被舍弃时仍会刷新恢复边界。当前输入的临时保护不会保存为后续任务的永久保护。子执行只替换私有 Context，不保存恢复记录。
+
+恢复直接读取最近一次 `context.saved` 的条目，再追加该事件之后已准入的普通 Entry，不重放摘要的 `Replaces`。摘要追加与 Context 保存之间若中断，未进入保存结果的摘要不参与恢复，原始条目仍然可用。压缩或 Context 保存失败时保留原内存 Context，不向模型发送未确认的压缩结果。完整原始历史不因摘要、结果正文舍弃或说明文本精简而删除或改写。
 
 ```mermaid
 flowchart LR
-    Session[Session 对话入口] --> Main[Main AgentID]
-    Main --> MainHistory[Main 唯一历史]
-    MainHistory --> MainContext[Main 本次执行上下文]
+    Session[Session 历史与上下文] --> MainHistory[主会话原始历史]
+    Session --> Context[持续维护的 Context]
+    Context --> MainContext[Main 本轮模型请求]
     Sub[SubagentID] --> SubHistory[Subagent 唯一历史]
-    SubHistory --> SubContext[Subagent 本次执行上下文]
+    SubHistory --> SubContext[Subagent 私有 Context]
 ```
 
 配置重载允许修改名称、Role 和指令，不允许删除已加载定义。展示名称在后续查询中生效，指令在后续执行准入时生效，已经开始的执行沿用冻结的提示词；角色属性变化不改变实例类型或上下文边界。候选定义校验全部成功后整体发布，失败时继续使用当前定义；需要回退角色属性或指令时，恢复相应 `ROLE.md` 内容并重新加载。

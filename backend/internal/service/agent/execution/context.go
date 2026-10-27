@@ -6,6 +6,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 )
 
@@ -33,24 +34,40 @@ func (s *Service) PrepareLoop(ctx context.Context, run *agentexecution.Run) (loo
 		Model:        task.Config.Model.Clone(),
 		Context:      built,
 	}
+	bound := &loopExecution{
+		service: s,
+		run:     run,
+	}
 	deps := loop.ExecutionDependencies{
-		Execution: &loopExecution{
-			service: s,
-			run:     run,
-		},
-		Timing: run.Timing,
+		Execution: bound,
+		History:   bound,
+		Timing:    run.Timing,
 	}
 	return input, deps, false, nil
 }
 
-// buildContext 以已接纳历史为唯一消息来源，每次投影都应用摘要替代、工具配对和构建 Hook。
-// 上下文只交给当前 Loop 使用，不挂回 Run，也不随历史追加进行双写。
+// buildContext 从会话或子执行已维护的上下文构建本轮模型请求。
+// 当前输入保护和提示词只属于本轮，不从完整历史重新筛选条目。
 func (s *Service) buildContext(ctx context.Context, run *agentexecution.Run) (appcontext.ModelContext, error) {
 	task := run.Snapshot()
 	if !task.Active() {
 		return appcontext.ModelContext{}, errorcode.ErrRequestConflict
 	}
-	content, err := contextContent(task.Config.SystemPrompt, task.InputEntryID, run.ContextEntries())
+	var entries []sessionentry.ContextEntry
+	if run.Main() {
+		value, err := s.history.ContextEntries(ctx, task.SessionID)
+		if err != nil {
+			return appcontext.ModelContext{}, loop.NewFailure(loop.FailureStorage, err)
+		}
+		entries = value
+	} else {
+		value, err := run.ContextEntries()
+		if err != nil {
+			return appcontext.ModelContext{}, loop.NewFailure(loop.FailureContract, err)
+		}
+		entries = value
+	}
+	content, err := appcontext.ContentFromEntries(task.Config.SystemPrompt, task.InputEntryID, entries)
 	if err != nil {
 		return appcontext.ModelContext{}, err
 	}

@@ -1,29 +1,9 @@
-package execution
+package context
 
 import (
-	"errors"
-	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 )
-
-// contextContent 从 Agent 自身历史生成模型内容，当前输入保持受保护状态。
-func contextContent(systemPrompt, inputEntryID string, entries []sessionentry.ContextEntry) (appcontext.Content, error) {
-	content := appcontext.Content{SystemPrompt: systemPrompt}
-	selected := historyEntries(entries)
-	found := false
-	for index := range selected {
-		if selected[index].ID == inputEntryID && selected[index].Role == role.User {
-			selected[index].Protected = true
-			found = true
-		}
-	}
-	if !found {
-		return appcontext.Content{}, errors.New("current input user entry is missing")
-	}
-	content.Entries = append(content.Entries, selected...)
-	return content, nil
-}
 
 // modelVisibleEntry 选择模型可见块，保留原 Entry 身份及执行归属。
 func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool) {
@@ -37,9 +17,9 @@ func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEnt
 	return value, len(content) > 0
 }
 
-// historyEntries 把回执关联到对应调用后，恢复补写和执行期间入队的用户消息不打断工具交互。
-// 只调整模型投影，不改写日志顺序；使用 Execution 和 call ID 避免跨任务误配同名调用。
-func historyEntries(entries []sessionentry.ContextEntry) []sessionentry.ContextEntry {
+// pairToolResults 把回执放到对应调用之后，恢复补写不打断工具交互的连续性。
+// 只调整上下文顺序，不改写原始历史；使用 Execution 和 call ID 避免跨任务误配同名调用。
+func pairToolResults(entries []sessionentry.ContextEntry) []sessionentry.ContextEntry {
 	type callKey struct{ executionID, callID string }
 	results := make(map[callKey]sessionentry.ContextEntry)
 	calls := make(map[callKey]bool)

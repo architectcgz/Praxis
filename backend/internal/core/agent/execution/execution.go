@@ -37,7 +37,8 @@ type ExecutionProgress struct {
 	FinalAssistantID string `json:"-"`
 }
 
-type Execution struct {
+// ExecutionRecord 保存一次执行的身份、配置、状态和进度，不持有运行时资源。
+type ExecutionRecord struct {
 	Progress       ExecutionProgress
 	ID             identity.AgentExecutionID
 	SessionID      identity.SessionID
@@ -55,8 +56,8 @@ type Execution struct {
 	FailureMessage string
 }
 
-// NewExecution 创建已准入的 Execution；模型上下文在执行准备阶段构建。
-func NewExecution(
+// NewExecutionRecord 创建已准入的执行记录；模型上下文在执行准备阶段构建。
+func NewExecutionRecord(
 	id identity.AgentExecutionID,
 	sessionID identity.SessionID,
 	agentID identity.AgentID,
@@ -64,8 +65,8 @@ func NewExecution(
 	inputMessageID string,
 	config ExecutionConfig,
 	at time.Time,
-) Execution {
-	return Execution{
+) ExecutionRecord {
+	return ExecutionRecord{
 		ID:           id,
 		SessionID:    sessionID,
 		AgentID:      agentID,
@@ -77,23 +78,23 @@ func NewExecution(
 	}
 }
 
-func (e Execution) Active() bool {
+func (e ExecutionRecord) Active() bool {
 	return e.Status == ExecutionStarting || e.Status == ExecutionRunning || e.Status == ExecutionEnding
 }
 
 // Start 记录首次启动状态和时间；调用方负责确认执行尚未启动。
-func (e *Execution) Start(at time.Time) {
+func (e *ExecutionRecord) Start(at time.Time) {
 	e.Status = ExecutionRunning
 	e.StartedAt = at.UTC()
 }
 
 // BeginEnding 标记执行已返回；调用方负责检查前置状态。
-func (e *Execution) BeginEnding() {
+func (e *ExecutionRecord) BeginEnding() {
 	e.Status = ExecutionEnding
 }
 
 // End 记录最终结果和结束时间；调用方负责前置状态、结果准入及重复结算处理。
-func (e *Execution) End(
+func (e *ExecutionRecord) End(
 	outcome ExecutionOutcome,
 	failureCode ExecutionFailureCode,
 	at time.Time,

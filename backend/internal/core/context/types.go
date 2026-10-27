@@ -7,8 +7,8 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 )
 
-// ModelContext 是执行层从已接纳历史准备的独立模型视图，Loop 只消费当前轮次的值。
-// 消息提交后由执行层准备下一轮视图，不作为 Run 或 Session 的另一份可变历史保存。
+// ModelContext 是从当前 Context 构建的本轮独立模型视图，包含本次执行的提示词。
+// 请求视图不直接共享 Session 或子执行持有的可变上下文条目。
 type ModelContext struct {
 	SystemPrompt string
 	Entries      []sessionentry.ContextEntry

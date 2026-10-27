@@ -93,8 +93,10 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	}
 	a.sessions = buildSessions(resources, repos, config.agents, hooks, configMu, config.models, mainAgent)
 	agents = agentservice.NewService(agentservice.Dependencies{
-		Agent:            a.sessions.GetAgent,
-		ActiveExecution:  func(id identity.AgentID) (agentexecution.Execution, bool) { return a.coordinator.ActiveExecution(id) },
+		Agent: a.sessions.GetAgent,
+		ActiveExecution: func(id identity.AgentID) (agentexecution.ExecutionRecord, bool) {
+			return a.coordinator.ActiveExecution(id)
+		},
 		RegisterAgent:    a.sessions.RegisterAgent,
 		ExecutionRecords: repos.Executions,
 		Sessions:         repos.Sessions,

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	appcontext "praxis/internal/core/context"
+	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -20,6 +20,7 @@ type Dependencies struct {
 	Tools          tool.ToolCatalog
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
+	SummaryFormat  contextcompress.SummaryFormat
 	Logf           func(string, ...any)
 }
 
@@ -33,16 +34,16 @@ func NewRunner(deps Dependencies) Runner {
 	return Runner{Dependencies: deps}
 }
 
-// Run 消费独立模型上下文，通过本次执行能力提交结果并取得下一轮上下文。
-// 恢复、完成证据、历史投影与容量准备由执行层负责；Loop 不持有运行实例或直接访问仓储。
+// Run 消费独立模型上下文，通过绑定的历史能力追加结果并取得下一轮上下文。
+// Loop 编排上下文压缩；恢复、执行证据和历史投影由业务层提供，不直接访问仓储。
 // Loop 不决定执行终态、释放归属或调度后续预约。
 func (r *Runner) Run(ctx context.Context, executionInput Input, deps ExecutionDependencies) (Result, error) {
 	reason, _, err := r.run(ctx, executionInput, deps)
 	return Result{Reason: reason}, err
 }
 
-// run 每轮使用准备好的上下文请求模型；确认自然完成时结束。
-// 工具回执全部提交成功后才取得下一轮上下文，任何提交或准备失败都会停止循环。
+// run 每轮使用按需压缩后的上下文请求模型；确认自然完成时结束。
+// 工具回执全部提交成功后才取得下一轮上下文，任何提交或压缩失败都会停止循环。
 func (r *Runner) run(
 	ctx context.Context,
 	executionInput Input,
@@ -52,9 +53,7 @@ func (r *Runner) run(
 
 	for {
 		tools := r.Tools.List()
-		prepared, err := deps.Execution.PrepareContext(ctx, modelContext, tools, func(summaryCtx context.Context, value appcontext.ModelContext, limit int) (string, error) {
-			return r.summarizeContext(summaryCtx, executionInput, deps, value, limit)
-		})
+		compressed, err := r.compressContext(ctx, executionInput, deps, modelContext, tools)
 		if err != nil {
 			err = modelFailure(err)
 			r.emitError(executionInput.AgentID, executionInput.ID, "", err)
@@ -68,7 +67,7 @@ func (r *Runner) run(
 			ExecutionID:     executionInput.ID,
 			PromptCacheKey:  executionInput.SessionID.String(),
 			Model:           executionInput.Model.Clone(),
-			Context:         prepared.Clone(),
+			Context:         compressed.Clone(),
 			Tools:           tools,
 			MaxOutputTokens: executionInput.Model.MaxOutputTokens,
 			TurnID:          identity.NewTurnID(executionInput.ID, sequence),
@@ -78,7 +77,7 @@ func (r *Runner) run(
 		if err != nil || outcome != EndCompleted || finished {
 			return outcome, failureCode, err
 		}
-		modelContext, err = deps.Execution.NextContext(ctx)
+		modelContext, err = deps.History.NextContext(ctx)
 		if err != nil {
 			err = modelFailure(err)
 			r.emitError(executionInput.AgentID, executionInput.ID, "", err)
@@ -147,7 +146,7 @@ func (r *Runner) executeTurn(
 			if ctx.Err() != nil {
 				stopReason = "aborted"
 			}
-			stored, _, writeErr := deps.Execution.AppendEntry(context.WithoutCancel(ctx), sessionentry.ContextEntry{
+			stored, _, writeErr := deps.History.AppendEntry(context.WithoutCancel(ctx), sessionentry.ContextEntry{
 				ID:          "assistant:" + turnID.String(),
 				RequestID:   executionInput.RequestID.String(),
 				ExecutionID: executionInput.ID.String(),
@@ -159,7 +158,7 @@ func (r *Runner) executeTurn(
 				Content:     partial,
 			})
 			if writeErr != nil {
-				err = deps.Execution.EntryFailure(errors.Join(err, writeErr))
+				err = deps.History.EntryFailure(errors.Join(err, writeErr))
 			} else {
 				r.emitTurnCompletion(executionInput, deps, turnID, []sessionentry.ContextEntry{stored}, providerapi.StopReason(stopReason))
 			}
@@ -186,7 +185,7 @@ func (r *Runner) executeTurn(
 			AuthorID:    executionInput.AgentID.String(),
 			Content:     assistant,
 		}
-		message, _, err := deps.Execution.AppendEntry(ctx, message)
+		message, _, err := deps.History.AppendEntry(ctx, message)
 		if err != nil {
 			r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 			outcome, code, cause := loopResult(err)
@@ -220,7 +219,7 @@ func (r *Runner) executeTurn(
 		interrupted, closeErr := r.interruptToolCalls(ctx, executionInput, deps, calls[len(results):])
 		results = append(results, interrupted...)
 		if closeErr != nil {
-			err = deps.Execution.EntryFailure(errors.Join(err, closeErr))
+			err = deps.History.EntryFailure(errors.Join(err, closeErr))
 		}
 	}
 	committed = append(committed, results...)

@@ -11,11 +11,7 @@ import (
 func (s *Service) CommitResult(ctx context.Context, run *agentexecution.Run, call sessionentry.ToolCall, result tool.ToolResult) (sessionentry.ContextEntry, error) {
 	value := call.ResultEntry(result)
 	if run.Main() {
-		stored, _, err := s.deps.Entries.Append(ctx, sessionentry.Record{
-			SessionID: call.SessionID,
-			AgentID:   call.AgentID,
-			Data:      value,
-		})
+		stored, _, err := s.deps.AppendEntry(ctx, call.SessionID, value)
 		if err != nil {
 			return sessionentry.ContextEntry{}, err
 		}

@@ -21,11 +21,11 @@ func (s *Coordinator) activeRun(agentID identity.AgentID) *agentexecution.Run {
 	return nil
 }
 
-func (s *Coordinator) ActiveExecution(agentID identity.AgentID) (agentexecution.Execution, bool) {
+func (s *Coordinator) ActiveExecution(agentID identity.AgentID) (agentexecution.ExecutionRecord, bool) {
 	if run := s.activeRun(agentID); run != nil {
 		return run.Snapshot(), true
 	}
-	return agentexecution.Execution{}, false
+	return agentexecution.ExecutionRecord{}, false
 }
 
 // ListAgentEntries 按实例类型分派查询；会话历史由 Session 读取，子执行只暴露当前 Run 的私有消息。

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/repository"
 )
 
@@ -32,7 +33,7 @@ var (
 	_ repository.Workspace       = WorkspaceRepository{}
 	_ repository.Session         = SessionRepository{}
 	_ repository.AgentExecution  = AgentExecutionRepository{}
-	_ repository.Entries         = EntryRepository{}
+	_ sessionentry.Store         = EntryRepository{}
 	_ repository.ToolCallQueries = ToolCallQueries{}
 	_ repository.ModelUsage      = ModelUsageRepository{}
 )

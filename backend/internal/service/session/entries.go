@@ -2,38 +2,61 @@ package session
 
 import (
 	"context"
+	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
 )
 
-// AppendEntry 将会话输入直接追加到 Main Agent，不维护另一份 Session 消息或上下文。
-// 绑定 Execution 的输入和输出由执行用例提交。
-func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID, data sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
-	if err := RequireWritable(ctx, s.sessions, sessionID); err != nil {
-		return sessionentry.ContextEntry{}, false, err
-	}
-	owner, err := s.mainAgent(ctx, sessionID)
-	if err != nil {
-		return sessionentry.ContextEntry{}, false, err
-	}
-	if data.Role != role.User || data.ExecutionID != "" || data.SourceTaskID != "" {
-		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
-	}
-	return s.entries.Append(ctx, sessionentry.Record{
-		SessionID: owner.SessionID,
-		AgentID:   owner.ID,
-		Data:      data,
-	})
-}
+var _ sessionmodel.History = (*Service)(nil)
 
-// ListEntries 按会话保存的 MainAgentID 读取唯一历史，不创建实例或聚合 Subagent 的私有消息。
-func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID) (repository.EntryList, error) {
+// AppendEntry 将输入、模型回答、工具回执或压缩摘要追加到主会话历史。
+// 执行归属、工具配对和摘要来源由存储在同一接纳边界内校验；子执行不能写入。
+func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID, data sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
+	s.contextMu.Lock()
+	defer s.contextMu.Unlock()
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return repository.EntryList{}, err
+		return sessionentry.ContextEntry{}, false, err
 	}
-	return s.entries.List(ctx, repository.EntryQuery{AgentID: session.MainAgentID})
+	if session.State != sessionmodel.SessionActive {
+		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
+	}
+	if data.ExecutionID == "" && (data.Role != role.User || data.SourceTaskID != "" || data.IsSummary()) {
+		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
+	}
+	stored, inserted, err := s.entries.Append(ctx, sessionentry.Record{
+		SessionID: session.ID,
+		AgentID:   session.MainAgentID,
+		Data:      data,
+	})
+	if err != nil {
+		return sessionentry.ContextEntry{}, false, err
+	}
+	// 任务输入等准入成功再追加；摘要等完整压缩结果保存后通过 ReplaceContext 替换。
+	if inserted && stored.SourceTaskID == "" && !stored.IsSummary() {
+		if value := s.contexts[sessionID]; value != nil {
+			value.Append(stored)
+		}
+	}
+	return stored, inserted, nil
+}
+
+// GetEntry 包含尚未完成执行准入的输入，供准入重试确认已接纳的消息身份。
+func (s *Service) GetEntry(ctx context.Context, sessionID identity.SessionID, id string) (sessionentry.ContextEntry, error) {
+	session, err := s.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	return s.entries.Get(ctx, session.MainAgentID, id)
+}
+
+// ListEntries 读取主会话的完整已准入历史，不聚合子执行的私有消息。
+func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID) (sessionentry.List, error) {
+	session, err := s.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return sessionentry.List{}, err
+	}
+	return s.entries.List(ctx, sessionentry.Query{AgentID: session.MainAgentID})
 }

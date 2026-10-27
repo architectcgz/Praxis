@@ -38,7 +38,7 @@ func (s *Coordinator) Restore(ctx context.Context) (err error) {
 		return fmt.Errorf("load missing tool history: %w", err)
 	}
 	for _, entry := range history {
-		if _, _, err := s.entries.Append(ctx, entry); err != nil {
+		if _, _, err := s.sessions.AppendEntry(ctx, entry.SessionID, entry.Data); err != nil {
 			return fmt.Errorf("save recovered tool history: %w", err)
 		}
 	}

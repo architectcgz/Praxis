@@ -15,7 +15,7 @@ const (
 	maxSummaryTokens          = 4096
 )
 
-func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, summaryLimit int, format SummaryFormat, summarize SummarizeFunc) (string, error) {
+func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, summaryLimit int, format SummaryFormat, requestSummary RequestSummaryFunc) (string, error) {
 	remaining := []rune(string(encoded))
 	summary := ""
 	for len(remaining) > 0 {
@@ -48,7 +48,7 @@ func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, sum
 				ContextWindow:        contextWindow,
 			}
 		}
-		text, err := summarize(ctx, summaryContext(format, summary, string(remaining[:low])), summaryLimit)
+		text, err := requestSummary(ctx, summaryContext(format, summary, string(remaining[:low])), summaryLimit)
 		if err != nil {
 			return "", fmt.Errorf("summarize context: %w", err)
 		}

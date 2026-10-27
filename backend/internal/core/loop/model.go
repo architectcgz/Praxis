@@ -84,7 +84,7 @@ func (r *Runner) callModel(
 	defer func() {
 		// 取消或断流也要将已收到的消耗接纳到内存进度，不依赖落盘完成。
 		if progressErr := deps.Execution.RecordModelOutput(context.WithoutCancel(ctx), response.textBytes); progressErr != nil {
-			err = deps.Execution.EntryFailure(errors.Join(err, progressErr))
+			err = NewFailure(FailureClassification(progressErr), errors.Join(err, progressErr))
 		}
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
 			Request:     boundary,

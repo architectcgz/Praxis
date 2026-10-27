@@ -163,7 +163,7 @@ func (r *Coordinator) executionResult(
 }
 
 func (r *Coordinator) endExecution(
-	task agentexecution.Execution,
+	task agentexecution.ExecutionRecord,
 	active *activeExecution,
 	outcome agentexecution.ExecutionOutcome,
 	failureCode agentexecution.ExecutionFailureCode,
@@ -173,7 +173,7 @@ func (r *Coordinator) endExecution(
 	r.mu.Lock()
 	active.ending = true
 	r.mu.Unlock()
-	var endedExecution agentexecution.Execution
+	var endedExecution agentexecution.ExecutionRecord
 	retryDelay := 100 * time.Millisecond
 	for {
 		endContext, cancelEnd := r.transitionContext()
@@ -212,7 +212,7 @@ func (r *Coordinator) endExecution(
 	return true
 }
 
-func (r *Coordinator) logError(task agentexecution.Execution, stage string, err error) {
+func (r *Coordinator) logError(task agentexecution.ExecutionRecord, stage string, err error) {
 	if err == nil {
 		return
 	}

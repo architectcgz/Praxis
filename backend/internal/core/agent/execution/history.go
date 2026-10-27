@@ -1,32 +1,21 @@
 package execution
 
-import (
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/errorcode"
-	"reflect"
-)
+import sessionentry "praxis/internal/core/session/entry"
 
-// History 只属于本次 Execution；正文追加后不可变，调用方取得独立副本。
+// History 保存本次执行的条目证据；子执行同时以它作为私有历史。
+// 主会话的跨执行历史由 Session 管理，正文追加后不可变。
 type History struct {
 	entries []sessionentry.ContextEntry
 	byID    map[string]int
 }
 
-func (h *History) Append(value sessionentry.ContextEntry) (bool, error) {
+// Append 追加条目；调用方负责保证 ID 唯一。
+func (h *History) Append(value sessionentry.ContextEntry) {
 	if h.byID == nil {
 		h.byID = make(map[string]int)
 	}
-	if index, exists := h.byID[value.ID]; exists {
-		prior := h.entries[index]
-		value.Sequence, value.CreatedAt = prior.Sequence, prior.CreatedAt
-		if !reflect.DeepEqual(prior, value) {
-			return false, errorcode.ErrRequestConflict
-		}
-		return false, nil
-	}
 	h.byID[value.ID] = len(h.entries)
 	h.entries = append(h.entries, value.Clone())
-	return true, nil
 }
 
 func (h *History) List() []sessionentry.ContextEntry {
@@ -43,37 +32,4 @@ func (h *History) Get(id string) (sessionentry.ContextEntry, bool) {
 		return sessionentry.ContextEntry{}, false
 	}
 	return h.entries[index].Clone(), true
-}
-
-// ContextHistory 应用历史中的摘要替代范围，返回模型构建使用的有效历史。
-// 摘要按被替代区段的位置插入，原始 List 始终保留完整记录。
-func (h *History) ContextHistory() []sessionentry.ContextEntry {
-	values := make([]sessionentry.ContextEntry, 0, len(h.entries))
-	for _, value := range h.List() {
-		if !value.IsSummary() {
-			values = append(values, value)
-			continue
-		}
-		replaced := make(map[string]bool, len(value.Replaces))
-		for _, id := range value.Replaces {
-			replaced[id] = true
-		}
-		next := make([]sessionentry.ContextEntry, 0, len(values)+1)
-		inserted := false
-		for _, prior := range values {
-			if !replaced[prior.ID] {
-				next = append(next, prior)
-				continue
-			}
-			if !inserted {
-				next = append(next, value)
-				inserted = true
-			}
-		}
-		if !inserted {
-			next = append(next, value)
-		}
-		values = next
-	}
-	return values
 }

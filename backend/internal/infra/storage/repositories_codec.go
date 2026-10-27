@@ -6,6 +6,7 @@ import (
 	"fmt"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
+	appcontext "praxis/internal/core/context"
 	projectmodel "praxis/internal/core/project"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/workflow"
@@ -41,11 +42,14 @@ func cloneRecordValue(value any) any {
 			v.ApprovalMode = new(*v.ApprovalMode)
 		}
 		return v
-	case agentexecution.Execution:
+	case agentexecution.ExecutionRecord:
 		v.Config = v.Config.Clone()
 		return v
 	case entryRecord:
 		v.Data = v.Data.Clone()
+		return v
+	case contextRecord:
+		v.Entries = (appcontext.ModelContext{Entries: v.Entries}).Clone().Entries
 		return v
 	case providerapi.UsageRecord:
 		if v.Usage.OutputTokens != nil {

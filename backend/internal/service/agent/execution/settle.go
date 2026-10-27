@@ -16,7 +16,7 @@ import (
 // 首次启动记录开始时间，已结束的执行不能重新启动。
 // executionID 来自 Coordinator 准入时已校验的持久化 Execution。
 func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) error {
-	err := s.update(ctx, run, func(task *agentexecution.Execution) error {
+	err := s.update(ctx, run, func(task *agentexecution.ExecutionRecord) error {
 		switch task.Status {
 		case agentexecution.ExecutionStarting:
 			task.Start(s.clock.Now())
@@ -35,13 +35,13 @@ func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) e
 
 // Settle 保存所属执行者确定的实际结果，不根据迟到的取消信号改写完成结果。
 // 写入失败由 Coordinator 保留占用和结果后重试；重复结算返回已有终态，不再次发布事件。
-func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.Execution, err error) {
+func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.ExecutionRecord, err error) {
 	endedExecution := run.Snapshot()
 	executionID := endedExecution.ID
 	// 在终态提交前持有实例引用，避免会话在提交后被删除导致状态收尾失去目标。
 	agent, err := s.agent(endedExecution.AgentID)
 	if err != nil {
-		return agentexecution.Execution{}, err
+		return agentexecution.ExecutionRecord{}, err
 	}
 	// Hook 在存储锁外观察本次结算；通知不能改变执行者已确定的结果。
 	ctx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
@@ -57,7 +57,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 	firstEnd := endedExecution.Status != agentexecution.ExecutionEnded
 	if firstEnd {
 		if !endedExecution.Active() {
-			return agentexecution.Execution{}, fmt.Errorf("task cannot transition from %q to %q: %w", endedExecution.Status, agentexecution.ExecutionEnded, errorcode.ErrInvalidTransition)
+			return agentexecution.ExecutionRecord{}, fmt.Errorf("task cannot transition from %q to %q: %w", endedExecution.Status, agentexecution.ExecutionEnded, errorcode.ErrInvalidTransition)
 		}
 		at := s.clock.Now()
 		if endedExecution.Status == agentexecution.ExecutionStarting {
@@ -84,11 +84,11 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 				outcome,
 				err,
 			)
-			return agentexecution.Execution{}, err
+			return agentexecution.ExecutionRecord{}, err
 		}
 	}
-	if err := run.Update(func(record *agentexecution.Execution) error { *record = endedExecution; return nil }); err != nil {
-		return agentexecution.Execution{}, err
+	if err := run.Update(func(record *agentexecution.ExecutionRecord) error { *record = endedExecution; return nil }); err != nil {
+		return agentexecution.ExecutionRecord{}, err
 	}
 	// 终态已接纳；Main 命名只使用本次已持有的输入，子执行不修改会话名称。
 	defer func() {
@@ -155,7 +155,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 func (s *Service) nameSessionAfterAnswer(
 	ctx context.Context,
 	run *agentexecution.Run,
-	task agentexecution.Execution,
+	task agentexecution.ExecutionRecord,
 	outcome agentexecution.ExecutionOutcome,
 	at time.Time,
 ) error {

@@ -9,9 +9,11 @@ import (
 	"maps"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
+	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -32,7 +34,7 @@ type Dependencies struct {
 	Projects       repository.Project
 	Workspaces     repository.Workspace
 	Sessions       repository.Session
-	Entries        repository.Entries
+	Entries        sessionentry.Store
 	MainAgent      func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
 	Definitions    AgentDefinitionFactory
 	UsageRecords   repository.ModelUsage
@@ -40,7 +42,7 @@ type Dependencies struct {
 	IDs            identity.IDGenerator
 }
 
-// Service 管理 Session 用例，并持有会话所属的 Agent 实例、模型选择和输入队列。
+// Service 管理 Session 用例，并持有主会话有效上下文、Agent 实例、模型选择和输入队列。
 type Service struct {
 	configMu       *sync.RWMutex
 	modelConfigs   ModelConfigResolver
@@ -48,7 +50,7 @@ type Service struct {
 	projects       repository.Project
 	workspaces     repository.Workspace
 	sessions       repository.Session
-	entries        repository.Entries
+	entries        sessionentry.Store
 	mainAgent      func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
 	definitions    AgentDefinitionFactory
 	usageRecords   repository.ModelUsage
@@ -63,6 +65,11 @@ type Service struct {
 	selectionMu     sync.RWMutex
 	modelSelections map[identity.SessionID]sessionmodel.ModelSelection
 	taskQueues      map[identity.SessionID]*sessionmodel.TaskQueue
+
+	// 有效上下文按会话首次使用时载入，持续维护到会话删除或服务释放；不逐轮重建。
+	// 此锁覆盖上下文读写与会话删除，持锁期间不调用模型、Hook 或执行实例。
+	contextMu sync.Mutex
+	contexts  map[identity.SessionID]*appcontext.Context
 
 	createdSessionsMu sync.Mutex
 	createdSessions   map[identity.SessionID]struct{}
@@ -91,6 +98,7 @@ func NewService(deps Dependencies) *Service {
 		modelConfigs:    deps.ModelConfigs,
 		modelSelections: make(map[identity.SessionID]sessionmodel.ModelSelection),
 		taskQueues:      make(map[identity.SessionID]*sessionmodel.TaskQueue),
+		contexts:        make(map[identity.SessionID]*appcontext.Context),
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		workspaces:      deps.Workspaces,
@@ -296,6 +304,8 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 	defer s.selectionMu.Unlock()
 	s.agentsMu.Lock()
 	defer s.agentsMu.Unlock()
+	s.contextMu.Lock()
+	defer s.contextMu.Unlock()
 	if err := s.sessions.Delete(ctx, sessionID, onlyEmpty); err != nil {
 		return err
 	}
@@ -309,6 +319,7 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 		delete(s.agents, id)
 	}
 	delete(s.agentsBySession, sessionID)
+	delete(s.contexts, sessionID)
 	delete(s.modelSelections, sessionID)
 	if queue := s.taskQueues[sessionID]; queue != nil {
 		queue.Clear()

@@ -70,7 +70,7 @@ func (r *Runner) emitTurnCompletion(input Input, deps ExecutionDependencies, tur
 		ExecutionID: input.ID,
 		TurnID:      turnID,
 	}
-	deps.Execution.PublishEntries(turnID, entries)
+	deps.History.PublishEntries(turnID, entries)
 	r.Emitter.Emit(coreevent.Event{
 		Scope:   scope,
 		Payload: coreevent.TurnCompleted{StopReason: stopReason},

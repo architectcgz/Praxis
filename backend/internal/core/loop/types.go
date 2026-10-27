@@ -4,7 +4,6 @@ import (
 	"context"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
-	contextcompress "praxis/internal/core/context/compress"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
@@ -24,17 +23,21 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// ExecutionOperations 已绑定本次执行；Loop 不接触历史、持久化方式或运行实例。
-// NextContext 只在本轮结果提交后调用；PrepareContext 负责将给定上下文准备到可请求状态。
-type ExecutionOperations interface {
+// HistoryOperations 绑定本轮所属的历史能力：主执行使用 Session，子执行使用私有历史。
+// NextContext 只在本轮条目追加后调用；Loop 不持有原始历史或存储实现。
+type HistoryOperations interface {
 	NextContext(context.Context) (appcontext.ModelContext, error)
-	PrepareContext(context.Context, appcontext.ModelContext, []ToolDefinition, contextcompress.SummarizeFunc) (appcontext.ModelContext, error)
 	AppendEntry(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error)
+	ReplaceContext(context.Context, []sessionentry.ContextEntry) error
 	PublishEntries(identity.TurnID, []sessionentry.ContextEntry)
+	EntryFailure(error) error
+}
+
+// ExecutionOperations 只记录本次执行的请求序号和模型消耗，不承担历史读写。
+type ExecutionOperations interface {
 	NextRequestSequence(context.Context) (uint64, error)
 	RecordModelRequest(context.Context, uint64, bool) error
 	RecordModelOutput(context.Context, int) error
-	EntryFailure(error) error
 }
 
 // EndReason 只描述 Loop 为什么返回，不表示业务持久化结果。
@@ -62,6 +65,7 @@ type Input struct {
 type ExecutionDependencies struct {
 	ToolExecutor ToolExecutor
 	Execution    ExecutionOperations
+	History      HistoryOperations
 	Timing       *timing.Recorder
 }
 

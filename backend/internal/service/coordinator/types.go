@@ -13,9 +13,9 @@ import (
 // ExecutionOperations 是 Coordinator 需要的执行准入、进度和结算能力。
 type ExecutionOperations interface {
 	ListAgentTimings(context.Context, string, int) ([]timing.View, error)
-	RestoreRun(context.Context, agentexecution.Execution) (*agentexecution.Run, error)
+	RestoreRun(context.Context, agentexecution.ExecutionRecord) (*agentexecution.Run, error)
 	PrepareLoop(context.Context, *agentexecution.Run) (loop.Input, loop.ExecutionDependencies, bool, error)
 	ConfirmRunning(context.Context, *agentexecution.Run) error
-	Settle(context.Context, *agentexecution.Run, agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) (agentexecution.Execution, error)
+	Settle(context.Context, *agentexecution.Run, agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) (agentexecution.ExecutionRecord, error)
 	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, modelapi.Config) (*agentexecution.Run, bool, error)
 }

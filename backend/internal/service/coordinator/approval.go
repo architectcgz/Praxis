@@ -23,13 +23,10 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, a
 		return err
 	}
 	defer s.running.Done()
-	task, err := s.tools.DecideApproval(ctx, params, approve)
-	if err != nil {
+	if err := s.tools.DecideApproval(ctx, params, approve); err != nil {
 		return err
 	}
-	if task.Active() {
-		s.notifyToolApprovalWaiter(task.AgentID, task.ID)
-	}
+	s.notifyToolApprovalWaiter(params.ExecutionID)
 	return nil
 }
 
@@ -48,23 +45,25 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request ToolControl) err
 		return err
 	}
 	if task.Active() {
-		s.notifyToolApprovalWaiter(task.AgentID, task.ID)
+		s.notifyToolApprovalWaiter(task.ID)
 	}
 	return nil
 }
 
-// notifyToolApprovalWaiter 通知等待者重新检查审批决定或停止回执，不承载决定本身。
+// notifyToolApprovalWaiter 按唯一执行标识通知等待者，不依赖请求声明的 Agent 归属，也不承载决定本身。
 // 通道保留提前到达的通知；已有待处理通知时合并发送，避免持锁阻塞。
-func (s *Coordinator) notifyToolApprovalWaiter(agentID identity.AgentID, executionID identity.AgentExecutionID) {
+func (s *Coordinator) notifyToolApprovalWaiter(executionID identity.AgentExecutionID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	active := s.executions[agentID]
-	if active == nil || active.executionID != executionID || active.ending {
+	for _, active := range s.executions {
+		if active.executionID != executionID || active.ending {
+			continue
+		}
+		select {
+		case active.toolApprovalWake <- struct{}{}:
+		default:
+		}
 		return
-	}
-	select {
-	case active.toolApprovalWake <- struct{}{}:
-	default:
 	}
 }
 

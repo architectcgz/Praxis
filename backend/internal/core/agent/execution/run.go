@@ -3,6 +3,7 @@ package execution
 import (
 	"errors"
 	"praxis/internal/core/agent/execution/timing"
+	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
@@ -12,29 +13,34 @@ import (
 	"time"
 )
 
-// Run 表示一次执行的内存实例，由 Coordinator 独占生命周期；执行路径推进历史，查询方只取得独立快照。
-// Main 加载跨执行历史；子执行只接收显式输入，不要求存在持久化 Execution。
+// Run 表示一次执行的内存实例，由 Coordinator 独占生命周期。
+// 主执行只保留本次执行证据，不作为会话上下文的数据源；子执行持有完整私有历史。
 type Run struct {
 	mu       sync.RWMutex
 	main     bool
-	record   Execution
+	record   ExecutionRecord
 	history  History
+	context  *appcontext.Context
 	sequence uint64
 	Timing   *timing.Recorder
 	timings  map[string]timing.Record
 }
 
-func NewRun(record Execution, main bool, entries []sessionentry.ContextEntry) (*Run, error) {
+func NewRun(record ExecutionRecord, main bool, entries []sessionentry.ContextEntry) (*Run, error) {
 	run := &Run{main: main, record: record}
 	run.record.Config = record.Config.Clone()
 	for _, entry := range entries {
-		if _, err := run.history.Append(entry); err != nil {
-			return nil, err
+		if main && (entry.ExecutionID != record.ID.String() || entry.IsSummary()) {
+			continue
 		}
+		run.history.Append(entry)
 		run.sequence = max(run.sequence, entry.Sequence)
 	}
 	if _, ok := run.history.Get(record.InputEntryID); !ok {
 		return nil, errors.New("execution input is missing from admitted history")
+	}
+	if !main {
+		run.context = appcontext.NewContext(entries)
 	}
 	run.deriveProgress()
 	return run, nil
@@ -73,7 +79,7 @@ func (r *Run) Timings() []timing.Record {
 	return result
 }
 
-func (r *Run) Snapshot() Execution {
+func (r *Run) Snapshot() ExecutionRecord {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	value := r.record
@@ -82,7 +88,7 @@ func (r *Run) Snapshot() Execution {
 }
 
 // Update 在仓储内存接纳变更后发布新进度，不等待落盘；回调不能调用 Run 的其他方法。
-func (r *Run) Update(change func(*Execution) error) error {
+func (r *Run) Update(change func(*ExecutionRecord) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	value := r.record
@@ -101,10 +107,25 @@ func (r *Run) Entries() []sessionentry.ContextEntry {
 	return r.history.List()
 }
 
-func (r *Run) ContextEntries() []sessionentry.ContextEntry {
+// ContextEntries 只读取子执行已经维护的上下文，不再从私有历史重建。
+func (r *Run) ContextEntries() ([]sessionentry.ContextEntry, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.history.ContextHistory()
+	if r.context == nil {
+		return nil, errors.New("main execution context belongs to the session")
+	}
+	return r.context.Entries(), nil
+}
+
+// ReplaceContext 直接替换子执行上下文；主执行必须通过 Session 更新。
+func (r *Run) ReplaceContext(entries []sessionentry.ContextEntry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.context == nil {
+		return errors.New("main execution context belongs to the session")
+	}
+	r.context.Replace(entries)
+	return nil
 }
 
 func (r *Run) Entry(id string) (sessionentry.ContextEntry, bool) {
@@ -113,10 +134,17 @@ func (r *Run) Entry(id string) (sessionentry.ContextEntry, bool) {
 	return r.history.Get(id)
 }
 
-// Accept 对 Main 使用仓储内存分配的序号和时间；子执行在本地分配，不占用会话序号。
+// Accept 记录本次执行证据；主执行使用 Session 分配的序号和时间。
+// 主执行摘要只属于会话历史，不重复保存在 Run；子执行在本地分配序号和时间。
 func (r *Run) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if value.ExecutionID != r.record.ID.String() {
+		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
+	}
+	if r.main && value.IsSummary() {
+		return value.Clone(), false, value.Validate()
+	}
 	if prior, ok := r.history.Get(value.ID); ok {
 		candidate := value.Clone()
 		candidate.Sequence, candidate.CreatedAt = prior.Sequence, prior.CreatedAt
@@ -137,13 +165,13 @@ func (r *Run) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry
 			return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 		}
 	}
-	inserted, err := r.history.Append(value)
-	if err != nil {
-		return sessionentry.ContextEntry{}, false, err
-	}
+	r.history.Append(value)
 	r.sequence = value.Sequence
+	if r.context != nil {
+		r.context.Append(value)
+	}
 	r.deriveProgress()
-	return value.Clone(), inserted, nil
+	return value.Clone(), true, nil
 }
 
 func (r *Run) Call(key tool.CallKey) (sessionentry.ToolCall, bool) {

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
-	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -24,18 +23,16 @@ import (
 
 func buildCoordinator(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, mainAgent func(context.Context, identity.SessionID) (*agentmodel.Agent, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
 	tasks := executionservice.NewService(executionservice.Dependencies{
-		HookDispatcher:      hooks,
-		Logger:              resources.logger,
-		Emitter:             emitter,
-		Sessions:            repos.Sessions,
-		Agent:               sessions.GetAgent,
-		Records:             repos.Executions,
-		Entries:             repos.Entries,
-		Definitions:         config.agents,
-		Clock:               clock.UTCClock{},
-		IDs:                 identity.SecureIDGenerator{},
-		CompressionStrategy: contextcompress.FullStrategy{},
-		SummaryFormat:       defaultSummaryFormat(),
+		HookDispatcher: hooks,
+		Logger:         resources.logger,
+		Emitter:        emitter,
+		Sessions:       repos.Sessions,
+		Agent:          sessions.GetAgent,
+		Records:        repos.Executions,
+		History:        sessions,
+		Definitions:    config.agents,
+		Clock:          clock.UTCClock{},
+		IDs:            identity.SecureIDGenerator{},
 	})
 	provider := providers.New(providers.Dependencies{
 		Credentials: config.models,
@@ -69,7 +66,7 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	records := toolservice.NewService(toolservice.Dependencies{
 		ApprovalConfig: config,
 		Tasks:          repos.Executions,
-		Entries:        repos.Entries,
+		AppendEntry:    sessions.AppendEntry,
 		Calls:          repos.ToolCalls,
 		Sessions:       repos.Sessions,
 		Projects:       repos.Projects,
@@ -102,6 +99,7 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	// 执行状态由业务服务按次绑定；复制共享依赖，不改写外部 Runner。
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
+	runnerDeps.SummaryFormat = defaultSummaryFormat()
 	runner := loop.NewRunner(runnerDeps)
 	return execution.NewCoordinator(execution.Config{
 		Loop:              &runner,
@@ -113,7 +111,6 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		Recovery:          repos.Executions,
 		Tools:             executor,
 		ToolRecords:       records,
-		Entries:           repos.Entries,
 		SessionRecords:    repos.Sessions,
 		Workspaces:        repos.Workspaces,
 		MainAgent:         mainAgent,

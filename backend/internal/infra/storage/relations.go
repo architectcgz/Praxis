@@ -31,7 +31,7 @@ func requireMain(records []logRecord, scope string, agentID identity.AgentID) er
 
 func validateRelations(state *Storage, records []logRecord, scope, collection string, object any) error {
 	executionOwner := func(id string, agentID identity.AgentID) error {
-		execution, err := getRecord[agentexecution.Execution](records, "agent_execution", id)
+		execution, err := getRecord[agentexecution.ExecutionRecord](records, "agent_execution", id)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func validateRelations(state *Storage, records []logRecord, scope, collection st
 				return errorcode.ErrRequestConflict
 			}
 		}
-	case agentexecution.Execution:
+	case agentexecution.ExecutionRecord:
 		if err := requireMain(records, scope, v.AgentID); err != nil {
 			return err
 		}
@@ -129,7 +129,7 @@ func validateRelations(state *Storage, records []logRecord, scope, collection st
 		if input.scope != scope || input.entry.Data.Role != role.User || input.entry.Data.RequestID != v.RequestID.String() || input.entry.Data.SourceTaskID != v.SourceTaskID.String() || input.entry.Data.ExecutionID != v.ID.String() {
 			return errorcode.ErrRequestConflict
 		}
-		values, err := listRecords[agentexecution.Execution](records, "agent_execution", nil)
+		values, err := listRecords[agentexecution.ExecutionRecord](records, "agent_execution", nil)
 		if err != nil {
 			return err
 		}
@@ -162,7 +162,7 @@ func validateRelations(state *Storage, records []logRecord, scope, collection st
 			}
 		}
 		if v.Data.ExecutionID != "" {
-			execution, err := getRecord[agentexecution.Execution](records, "agent_execution", v.Data.ExecutionID)
+			execution, err := getRecord[agentexecution.ExecutionRecord](records, "agent_execution", v.Data.ExecutionID)
 			if errors.Is(err, errorcode.ErrNotFound) && v.Data.Role == role.User && !v.Data.IsSummary() && v.Data.ID == "input:"+v.Data.RequestID {
 				return nil
 			}
@@ -174,6 +174,20 @@ func validateRelations(state *Storage, records []logRecord, scope, collection st
 			}
 		}
 		return validateToolReceipts(records, scope, v)
+	case contextRecord:
+		if err := requireMain(records, scope, v.AgentID); err != nil {
+			return err
+		}
+		for _, entry := range v.Entries {
+			prior, err := findEntry(records, v.AgentID, entry.ID)
+			if err != nil {
+				return err
+			}
+			original := prior.entry.Data
+			if prior.scope != scope || entry.Sequence != original.Sequence || entry.ExecutionID != original.ExecutionID || entry.RequestID != original.RequestID || entry.Role != original.Role {
+				return errorcode.ErrRequestConflict
+			}
+		}
 	case providerapi.UsageRecord:
 		return executionOwner(v.ExecutionID, identity.AgentID(v.AgentID))
 	case timing.Record:
@@ -200,6 +214,8 @@ func immutable(collection string, before, after json.RawMessage) error {
 		fields = []string{"ID", "Name", "Path", "DefaultWorkspaceID", "CreatedAt"}
 	case "session":
 		fields = []string{"ProjectID", "WorkspaceID", "MainAgentID", "AgentDefinitionID", "CreatedAt"}
+	case "context":
+		fields = []string{"agent_id"}
 	case "agent_execution":
 		fields = []string{"ID", "SessionID", "AgentID", "RequestID", "InputEntryID", "SourceTaskID", "Config", "CreatedAt"}
 	case "usage":

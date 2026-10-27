@@ -23,24 +23,16 @@ func (e *Executor) unregister(key Key) {
 	delete(e.active, key)
 }
 
-func (e *Executor) resolveActive(request ControlRequest) (*callState, error) {
-	callState := e.active[Key{ExecutionID: request.ExecutionID, CallID: request.CallID}]
-	if callState == nil || request.SessionID != callState.call.SessionID || request.AgentID != callState.call.AgentID {
-		return nil, errorcode.ErrRequestConflict
-	}
-	return callState, nil
-}
-
 // StopCall 只提交停止信号；尚未启动的调用也由所属执行路径生成唯一回执。
-func (e *Executor) StopCall(ctx context.Context, request ControlRequest) (agentexecution.Execution, error) {
+func (e *Executor) StopCall(ctx context.Context, request ControlRequest) (agentexecution.ExecutionRecord, error) {
 	if err := ctx.Err(); err != nil {
-		return agentexecution.Execution{}, err
+		return agentexecution.ExecutionRecord{}, err
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	callState, err := e.resolveActive(request)
-	if err != nil {
-		return agentexecution.Execution{}, err
+	callState := e.active[Key{ExecutionID: request.ExecutionID, CallID: request.CallID}]
+	if callState == nil {
+		return agentexecution.ExecutionRecord{}, errorcode.ErrRequestConflict
 	}
 	callState.stopped = true
 	if callState.tool != nil {
@@ -50,24 +42,24 @@ func (e *Executor) StopCall(ctx context.Context, request ControlRequest) (agente
 }
 
 // DecideApproval 只更新当前活跃调用，迟到决定不能恢复审批或作用于其他执行。
-func (e *Executor) DecideApproval(ctx context.Context, request ControlRequest, approve bool) (agentexecution.Execution, error) {
+func (e *Executor) DecideApproval(ctx context.Context, request ControlRequest, approve bool) error {
 	if err := ctx.Err(); err != nil {
-		return agentexecution.Execution{}, err
+		return err
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	callState, err := e.resolveActive(request)
-	if err != nil {
-		return agentexecution.Execution{}, err
+	callState := e.active[Key{ExecutionID: request.ExecutionID, CallID: request.CallID}]
+	if callState == nil {
+		return errorcode.ErrRequestConflict
 	}
 	if callState.stopped || callState.request == nil || callState.tool != nil {
-		return callState.owner, errorcode.ErrRequestConflict
+		return errorcode.ErrRequestConflict
 	}
 	if callState.decision != nil {
 		if callState.decision.Approved != approve {
-			return callState.owner, errorcode.ErrRequestConflict
+			return errorcode.ErrRequestConflict
 		}
-		return callState.owner, nil
+		return nil
 	}
 	callState.decision = &UserDecision{
 		Key:       callState.call.Key,
@@ -75,5 +67,5 @@ func (e *Executor) DecideApproval(ctx context.Context, request ControlRequest, a
 		Approved:  approve,
 		DecidedAt: e.deps.Clock.Now().UTC(),
 	}
-	return callState.owner, nil
+	return nil
 }

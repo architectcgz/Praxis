@@ -1,7 +1,10 @@
 package toolexecution
 
 import (
+	"context"
 	"praxis/internal/clock"
+	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/identity"
 	"praxis/internal/repository"
 	approvalservice "praxis/internal/service/approval"
 )
@@ -9,7 +12,7 @@ import (
 type Dependencies struct {
 	ApprovalConfig approvalservice.ConfigSource
 	Tasks          repository.AgentExecution
-	Entries        repository.Entries
+	AppendEntry    func(context.Context, identity.SessionID, sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error)
 	Calls          repository.ToolCallQueries
 	Sessions       repository.Session
 	Projects       repository.Project

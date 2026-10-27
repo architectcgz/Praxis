@@ -52,7 +52,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 	if err != nil {
 		return nil, err
 	}
-	owners := make(map[string]agentexecution.Execution, len(executions))
+	owners := make(map[string]agentexecution.ExecutionRecord, len(executions))
 	result := make([]timing.View, 0, len(records)+len(executions))
 	for _, execution := range executions {
 		owners[execution.ID.String()] = execution
@@ -80,7 +80,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 	return result, nil
 }
 
-func operationTiming(execution agentexecution.Execution, record timing.Record) timing.View {
+func operationTiming(execution agentexecution.ExecutionRecord, record timing.Record) timing.View {
 	revision := 1
 	if record.Status != timing.Running {
 		revision = 2
@@ -103,7 +103,7 @@ func operationTiming(execution agentexecution.Execution, record timing.Record) t
 	}
 }
 
-func executionTiming(execution agentexecution.Execution) *timing.View {
+func executionTiming(execution agentexecution.ExecutionRecord) *timing.View {
 	if execution.StartedAt.IsZero() {
 		return nil
 	}
@@ -145,7 +145,7 @@ func (s *Service) publishTiming(value timing.View) {
 	}
 }
 
-func (s *Service) publishExecutionTiming(execution agentexecution.Execution) {
+func (s *Service) publishExecutionTiming(execution agentexecution.ExecutionRecord) {
 	if value := executionTiming(execution); value != nil {
 		s.publishTiming(*value)
 	}

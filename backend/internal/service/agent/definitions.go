@@ -69,7 +69,7 @@ func (s *Service) RestoreAgents(ctx context.Context) error {
 			return err
 		}
 		// 每个实例只恢复一次；活动执行优先，避免同一时间戳的历史排序覆盖当前归属。
-		latest := make(map[identity.AgentID]agentexecution.Execution)
+		latest := make(map[identity.AgentID]agentexecution.ExecutionRecord)
 		for _, execution := range executions {
 			if execution.AgentID != session.MainAgentID {
 				continue

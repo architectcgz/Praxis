@@ -34,9 +34,11 @@ func decodeStoredEvent(scope string, event jsonl.Event) (any, error) {
 	case "session":
 		target, kind = new(sessionmodel.Session), "session.saved"
 	case "agent_execution":
-		target, kind = new(agentexecution.Execution), "agent_execution.saved"
+		target, kind = new(agentexecution.ExecutionRecord), "agent_execution.saved"
 	case "entry":
 		target, kind = new(entryRecord), "entry.appended"
+	case "context":
+		target, kind = new(contextRecord), "context.saved"
 	case "usage":
 		target, kind = new(providerapi.UsageRecord), "usage.saved"
 	case "wait":
@@ -69,7 +71,7 @@ func decodeStoredEvent(scope string, event jsonl.Event) (any, error) {
 	case *sessionmodel.Session:
 		value = *v
 		id, owner, err = v.ID.String(), v.ID.String(), validateSession(*v)
-	case *agentexecution.Execution:
+	case *agentexecution.ExecutionRecord:
 		value = *v
 		id, owner, err = v.ID.String(), v.SessionID.String(), validateAgentExecution(*v)
 	case *entryRecord:
@@ -77,6 +79,17 @@ func decodeStoredEvent(scope string, event jsonl.Event) (any, error) {
 		id, owner, err = entryKey(v.AgentID, v.Data.ID), scope, v.Validate()
 		if v.Data.Sequence != event.Sequence {
 			return nil, errors.New("message sequence does not match event sequence")
+		}
+	case *contextRecord:
+		value = *v
+		id, owner, err = scope, scope, v.Validate()
+		if v.ThroughSequence != event.Sequence-1 {
+			return nil, errors.New("saved context boundary does not match event sequence")
+		}
+		for _, entry := range v.Entries {
+			if entry.Sequence >= event.Sequence {
+				return nil, errors.New("saved context entry must precede its save event")
+			}
 		}
 	case *providerapi.UsageRecord:
 		value = *v
@@ -103,7 +116,7 @@ func decodeStoredEvent(scope string, event jsonl.Event) (any, error) {
 // projectRecord 从内存消息派生完成证据和统计，不修改保存的执行记录。
 func projectRecord(records []logRecord, target any) error {
 	switch value := target.(type) {
-	case *agentexecution.Execution:
+	case *agentexecution.ExecutionRecord:
 		value.Progress.OutputBytes = value.Progress.ModelOutputBytes
 		value.Progress.ToolCalls = 0
 		value.Progress.FinalAssistantID, value.Progress.FinalStopReason = "", ""
@@ -136,7 +149,7 @@ func projectRecord(records []logRecord, target any) error {
 		if value.Status != timing.Running {
 			return nil
 		}
-		execution, err := getRecord[agentexecution.Execution](records, "agent_execution", value.ExecutionID)
+		execution, err := getRecord[agentexecution.ExecutionRecord](records, "agent_execution", value.ExecutionID)
 		if err != nil {
 			return err
 		}

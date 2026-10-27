@@ -1,6 +1,32 @@
 package context
 
-import sessionentry "praxis/internal/core/session/entry"
+import (
+	"errors"
+	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
+)
+
+// ContentFromEntries 从已维护的有效条目构建本轮模型内容，只为当前输入添加临时保护。
+// 不扫描原始历史或重新应用摘要替代；当前输入没有可见正文时返回错误。
+func ContentFromEntries(systemPrompt, inputEntryID string, entries []sessionentry.ContextEntry) (Content, error) {
+	content := Content{SystemPrompt: systemPrompt}
+	found := false
+	for _, entry := range entries {
+		value, visible := modelVisibleEntry(entry.Clone())
+		if !visible {
+			continue
+		}
+		if value.ID == inputEntryID && value.Role == role.User {
+			value.Protected = true
+			found = true
+		}
+		content.Entries = append(content.Entries, value)
+	}
+	if !found {
+		return Content{}, errors.New("current input user entry is missing")
+	}
+	return content, nil
+}
 
 // ContextBuilder 复制通用内容、丢弃展示用思考块并保持顺序，拒绝连必要原文都无法容纳的窗口。
 // 输入内容的结构约束由调用方的输入边界保证，本包只做复制与容量检查。

@@ -12,7 +12,7 @@ import (
 )
 
 type Dependencies struct {
-	ActiveExecution  func(identity.AgentID) (agentexecution.Execution, bool)
+	ActiveExecution  func(identity.AgentID) (agentexecution.ExecutionRecord, bool)
 	Agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	RegisterAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	ExecutionRecords repository.AgentExecution
@@ -21,7 +21,7 @@ type Dependencies struct {
 }
 
 type Service struct {
-	activeExecution  func(identity.AgentID) (agentexecution.Execution, bool)
+	activeExecution  func(identity.AgentID) (agentexecution.ExecutionRecord, bool)
 	agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	registerAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
 	executionRecords repository.AgentExecution
@@ -37,11 +37,11 @@ type AgentView struct {
 	Kind               agentmodel.AgentKind
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	Name               string                    `json:"name"`
-	State              agentmodel.AgentState     `json:"state"`
-	CurrentExecutionID identity.AgentExecutionID `json:"currentExecutionId"`
-	CurrentExecution   *agentexecution.Execution `json:"currentExecution"`
-	LatestExecution    *agentexecution.Execution `json:"latestExecution"`
+	Name               string                          `json:"name"`
+	State              agentmodel.AgentState           `json:"state"`
+	CurrentExecutionID identity.AgentExecutionID       `json:"currentExecutionId"`
+	CurrentExecution   *agentexecution.ExecutionRecord `json:"currentExecution"`
+	LatestExecution    *agentexecution.ExecutionRecord `json:"latestExecution"`
 }
 
 // DescribeAgent 从已加载的角色定义读取展示名称；名称变化不改变持久化身份。

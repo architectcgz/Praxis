@@ -128,7 +128,7 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, on
 		if onlyEmpty && hasEntries(records, id.String()) {
 			return nil
 		}
-		active, err := listRecords(records, "agent_execution", func(value agentexecution.Execution) bool { return value.SessionID == id && value.Active() })
+		active, err := listRecords(records, "agent_execution", func(value agentexecution.ExecutionRecord) bool { return value.SessionID == id && value.Active() })
 		if err != nil {
 			return err
 		}

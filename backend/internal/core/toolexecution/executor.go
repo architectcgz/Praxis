@@ -40,7 +40,7 @@ type Executor struct {
 type callState struct {
 	run      *agentexecution.Run
 	call     sessionentry.ToolCall
-	owner    agentexecution.Execution
+	owner    agentexecution.ExecutionRecord
 	tool     *Execution
 	request  *ApprovalRequest
 	decision *UserDecision

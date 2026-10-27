@@ -19,7 +19,7 @@ func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing
 		return errors.New("interrupted timing is a read projection")
 	}
 	return withState(ctx, r.storage, func(state *Storage, records []logRecord) error {
-		execution, err := getRecord[agentexecution.Execution](records, "agent_execution", value.ExecutionID)
+		execution, err := getRecord[agentexecution.ExecutionRecord](records, "agent_execution", value.ExecutionID)
 		if err != nil {
 			return err
 		}
@@ -34,7 +34,7 @@ func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing
 func (r AgentExecutionRepository) ListTimings(ctx context.Context, id identity.AgentExecutionID) ([]timing.Record, error) {
 	var result []timing.Record
 	err := withState(ctx, r.storage, func(_ *Storage, records []logRecord) error {
-		if _, err := getRecord[agentexecution.Execution](records, "agent_execution", id.String()); err != nil {
+		if _, err := getRecord[agentexecution.ExecutionRecord](records, "agent_execution", id.String()); err != nil {
 			return err
 		}
 		var err error
@@ -47,7 +47,7 @@ func (r AgentExecutionRepository) ListTimings(ctx context.Context, id identity.A
 func (r AgentExecutionRepository) ListAgentTimings(ctx context.Context, id identity.AgentID, limit int) ([]timing.Record, error) {
 	var result []timing.Record
 	err := withState(ctx, r.storage, func(_ *Storage, records []logRecord) error {
-		executions, err := listRecords(records, "agent_execution", func(value agentexecution.Execution) bool { return value.AgentID == id })
+		executions, err := listRecords(records, "agent_execution", func(value agentexecution.ExecutionRecord) bool { return value.AgentID == id })
 		if err != nil {
 			return err
 		}

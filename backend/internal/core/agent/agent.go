@@ -77,7 +77,7 @@ func (a *Agent) State() (AgentState, identity.AgentExecutionID, time.Time) {
 }
 
 // BeginExecution 在执行事实提交后登记归属；重复确认不覆盖已接受的暂停或停止状态。
-func (a *Agent) BeginExecution(execution agentexecution.Execution) error {
+func (a *Agent) BeginExecution(execution agentexecution.ExecutionRecord) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if execution.AgentID != a.ID || execution.SessionID != a.SessionID || execution.Config.AgentDefinitionID != a.DefinitionID {
@@ -112,7 +112,7 @@ func (a *Agent) ApplyControl(id identity.AgentExecutionID, state AgentState, at 
 }
 
 // FinishExecution 在结算提交后释放归属，并以实际执行结果确定状态，不重放控制意图。
-func (a *Agent) FinishExecution(execution agentexecution.Execution) {
+func (a *Agent) FinishExecution(execution agentexecution.ExecutionRecord) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.currentExecutionID != execution.ID || execution.Active() {

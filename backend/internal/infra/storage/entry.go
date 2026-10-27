@@ -9,7 +9,6 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
 	"strings"
 	"time"
 )
@@ -94,7 +93,7 @@ func (r EntryRepository) Get(ctx context.Context, agentID identity.AgentID, id s
 	return result, err
 }
 
-func (r EntryRepository) List(ctx context.Context, query repository.EntryQuery) (page repository.EntryList, err error) {
+func (r EntryRepository) List(ctx context.Context, query sessionentry.Query) (page sessionentry.List, err error) {
 	err = withState(ctx, r.storage, func(state *Storage, records []logRecord) error {
 		page.Entries = make([]sessionentry.ContextEntry, 0)
 		for _, record := range records {

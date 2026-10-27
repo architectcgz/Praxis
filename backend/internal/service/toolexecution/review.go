@@ -21,7 +21,7 @@ func (s *Service) PrepareReview(ctx context.Context, run *agentexecution.Run, ca
 		return executionmodel.ReviewRequest{}, errors.New("risk review cannot locate the task input")
 	}
 	sequence := max(uint64(1), task.Progress.NextSequence)
-	if err := run.Update(func(record *agentexecution.Execution) error {
+	if err := run.Update(func(record *agentexecution.ExecutionRecord) error {
 		record.Progress.NextSequence, record.Progress.ModelRequests = sequence+1, record.Progress.ModelRequests+1
 		if run.Main() {
 			return s.deps.Tasks.Save(ctx, *record)
