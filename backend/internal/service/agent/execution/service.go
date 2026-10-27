@@ -3,6 +3,7 @@ package execution
 import (
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
+	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/identity"
@@ -26,34 +27,41 @@ type Dependencies struct {
 	Definitions    AgentDefinitionProvider
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
+	// 压缩依赖由装配层提供，业务服务不补充默认策略。
+	CompressionStrategy contextcompress.Strategy
+	SummaryFormat       contextcompress.SummaryFormat
 }
 
 // Service 负责 Execution 的创建、上下文冻结、进度和结算；调度与执行中的临时状态由 Coordinator 拥有。
 type Service struct {
-	hookDispatcher *hook.Dispatcher
-	logger         *logging.Logger
-	emitter        *coreevent.Emitter
-	sessions       repository.Session
-	agent          func(identity.AgentID) (*agentmodel.Agent, error)
-	records        repository.AgentExecution
-	entries        repository.Entries
-	definitions    AgentDefinitionProvider
-	clock          clock.Clock
-	ids            identity.IDGenerator
+	hookDispatcher      *hook.Dispatcher
+	logger              *logging.Logger
+	emitter             *coreevent.Emitter
+	sessions            repository.Session
+	agent               func(identity.AgentID) (*agentmodel.Agent, error)
+	records             repository.AgentExecution
+	entries             repository.Entries
+	definitions         AgentDefinitionProvider
+	clock               clock.Clock
+	ids                 identity.IDGenerator
+	compressionStrategy contextcompress.Strategy
+	summaryFormat       contextcompress.SummaryFormat
 }
 
 // NewService 使用装配层提供的完整依赖创建 Execution 业务服务。
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		hookDispatcher: deps.HookDispatcher,
-		logger:         deps.Logger,
-		emitter:        deps.Emitter,
-		sessions:       deps.Sessions,
-		agent:          deps.Agent,
-		records:        deps.Records,
-		entries:        deps.Entries,
-		definitions:    deps.Definitions,
-		clock:          deps.Clock,
-		ids:            deps.IDs,
+		hookDispatcher:      deps.HookDispatcher,
+		logger:              deps.Logger,
+		emitter:             deps.Emitter,
+		sessions:            deps.Sessions,
+		agent:               deps.Agent,
+		records:             deps.Records,
+		entries:             deps.Entries,
+		definitions:         deps.Definitions,
+		clock:               deps.Clock,
+		ids:                 deps.IDs,
+		compressionStrategy: deps.CompressionStrategy,
+		summaryFormat:       deps.SummaryFormat,
 	}
 }

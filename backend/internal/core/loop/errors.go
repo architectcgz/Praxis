@@ -45,26 +45,24 @@ func fail(code FailureCode, operationCode errorcode.Code, message string) error 
 	}
 }
 
-func failCause(code FailureCode, cause error) error {
+// NewFailure 为执行能力边界保留明确的失败分类，供 Loop 和上层结算统一处理。
+func NewFailure(code FailureCode, cause error) error {
 	return &Failure{outcome: endFailed, code: code, cause: cause}
 }
 
 // modelFailure 在 loop 编排边界分类模型和压缩失败；Provider 校验最终编码请求的窗口。
 func modelFailure(err error) error {
-	var failure *Failure
-	if errors.As(err, &failure) {
+	if _, ok := errors.AsType[*Failure](err); ok {
 		return err
 	}
-	var windowErr *ContextWindowExceededError
-	if errors.As(err, &windowErr) {
+	if _, ok := errors.AsType[*ContextWindowExceededError](err); ok {
 		return fail(FailureResourceLimit, ErrResourceLimit, "model context window exceeded")
 	}
-	return failCause(FailureProvider, err)
+	return NewFailure(FailureProvider, err)
 }
 
 func loopResult(err error) (EndReason, FailureCode, error) {
-	var failure *Failure
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[*Failure](err); ok {
 		return failure.outcome, failure.code, failure
 	}
 	return failedLoop(err)
@@ -79,8 +77,7 @@ func failedLoop(err error) (EndReason, FailureCode, error) {
 
 // FailureClassification 供业务结算边界读取错误分类。
 func FailureClassification(err error) FailureCode {
-	var f *Failure
-	if errors.As(err, &f) {
+	if f, ok := errors.AsType[*Failure](err); ok {
 		return f.code
 	}
 	return FailureInternal

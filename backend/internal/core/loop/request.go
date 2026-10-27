@@ -7,7 +7,6 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
-	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"strings"
 	"time"
@@ -18,12 +17,13 @@ import (
 func (r *Runner) summarizeContext(
 	ctx context.Context,
 	executionInput Input,
+	deps ExecutionDependencies,
 	history appcontext.ModelContext,
 	limit int,
 ) (string, error) {
-	sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.Run)
+	sequence, err := deps.Execution.NextRequestSequence(ctx)
 	if err != nil {
-		return "", failCause(FailureStorage, err)
+		return "", err
 	}
 	turnID := identity.NewTurnID(executionInput.ID, sequence)
 	r.Emitter.Emit(coreevent.Event{
@@ -39,13 +39,13 @@ func (r *Runner) summarizeContext(
 		ExecutionID:     executionInput.ID,
 		PromptCacheKey:  executionInput.SessionID.String(),
 		Context:         history,
-		Model:           executionInput.Config.Model,
+		Model:           executionInput.Model,
 		MaxOutputTokens: limit,
 		TurnID:          turnID,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := r.callModel(requestCtx, executionInput, request, hook.ModelRequestSummary, sequence, func(event providerapi.Event) {
+	response, err := r.callModel(requestCtx, executionInput, deps, request, hook.ModelRequestSummary, sequence, func(event providerapi.Event) {
 		if event.Kind == providerapi.StreamUsage {
 			r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 		}
@@ -62,18 +62,6 @@ func (r *Runner) summarizeContext(
 			text.WriteString(event.Text)
 		}
 	}
-	r.emitTurnCompletion(executionInput, turnID, nil, response.stopReason)
+	r.emitTurnCompletion(executionInput, deps, turnID, nil, response.stopReason)
 	return strings.TrimSpace(text.String()), nil
-}
-
-// buildModelRequest 在编排边界将任务快照映射为请求，模型调用只接收构造后的请求。
-func buildModelRequest(
-	request providerapi.Request,
-	modelContext appcontext.ModelContext,
-	catalog tool.ToolCatalog,
-) providerapi.Request {
-	request.Context = modelContext.Clone()
-	request.Model = request.Model.Clone()
-	request.Tools = catalog.List()
-	return request
 }

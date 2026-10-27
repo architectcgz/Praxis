@@ -14,7 +14,7 @@ import (
 type ExecutionOperations interface {
 	ListAgentTimings(context.Context, string, int) ([]timing.View, error)
 	RestoreRun(context.Context, agentexecution.Execution) (*agentexecution.Run, error)
-	PrepareLoop(context.Context, *agentexecution.Run) (loop.Input, bool, error)
+	PrepareLoop(context.Context, *agentexecution.Run) (loop.Input, loop.ExecutionDependencies, bool, error)
 	ConfirmRunning(context.Context, *agentexecution.Run) error
 	Settle(context.Context, *agentexecution.Run, agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) (agentexecution.Execution, error)
 	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, modelapi.Config) (*agentexecution.Run, bool, error)

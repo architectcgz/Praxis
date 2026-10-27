@@ -106,13 +106,12 @@ func (r *Coordinator) execute(
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
-	executionInput, completed, err := r.operations.PrepareLoop(ctx, run)
+	executionInput, deps, completed, err := r.operations.PrepareLoop(ctx, run)
 	outcome, failureCode := agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage
 	if err == nil {
 		if !completed {
-			_, err = r.loop.Run(ctx, executionInput, loop.ExecutionDependencies{
-				ToolExecutor: executor,
-			})
+			deps.ToolExecutor = executor
+			_, err = r.loop.Run(ctx, executionInput, deps)
 		}
 		outcome, failureCode = agentexecution.ExecutionCompleted, ""
 		if err != nil {

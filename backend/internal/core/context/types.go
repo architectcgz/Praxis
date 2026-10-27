@@ -7,8 +7,8 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 )
 
-// ModelContext 是一次 Agent 执行独占的派生上下文，Loop 在本次执行中更新它。
-// Session 使用 Main Agent 的上下文，不另存副本；执行结束后不在历史中保留此对象。
+// ModelContext 是执行层从已接纳历史准备的独立模型视图，Loop 只消费当前轮次的值。
+// 消息提交后由执行层准备下一轮视图，不作为 Run 或 Session 的另一份可变历史保存。
 type ModelContext struct {
 	SystemPrompt string
 	Entries      []sessionentry.ContextEntry

@@ -63,22 +63,14 @@ func (r *Runner) emitToolResult(
 }
 
 // emitTurnCompletion 先发布本轮已接纳的条目，再结束实时展示，避免完成通知先清掉未回填的输出。
-func (r *Runner) emitTurnCompletion(input Input, turnID identity.TurnID, entries []sessionentry.ContextEntry, stopReason providerapi.StopReason) {
+func (r *Runner) emitTurnCompletion(input Input, deps ExecutionDependencies, turnID identity.TurnID, entries []sessionentry.ContextEntry, stopReason providerapi.StopReason) {
 	scope := coreevent.Scope{
 		SessionID:   input.SessionID,
 		AgentID:     input.AgentID,
 		ExecutionID: input.ID,
 		TurnID:      turnID,
 	}
-	if len(entries) > 0 {
-		r.Emitter.Emit(coreevent.Event{
-			Scope: scope,
-			Payload: coreevent.EntriesAppended{
-				Entries:   entries,
-				Transient: !input.Run.Main(),
-			},
-		})
-	}
+	deps.Execution.PublishEntries(turnID, entries)
 	r.Emitter.Emit(coreevent.Event{
 		Scope:   scope,
 		Payload: coreevent.TurnCompleted{StopReason: stopReason},

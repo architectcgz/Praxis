@@ -24,16 +24,18 @@ import (
 
 func buildCoordinator(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, mainAgent func(context.Context, identity.SessionID) (*agentmodel.Agent, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
 	tasks := executionservice.NewService(executionservice.Dependencies{
-		HookDispatcher: hooks,
-		Logger:         resources.logger,
-		Emitter:        emitter,
-		Sessions:       repos.Sessions,
-		Agent:          sessions.GetAgent,
-		Records:        repos.Executions,
-		Entries:        repos.Entries,
-		Definitions:    config.agents,
-		Clock:          clock.UTCClock{},
-		IDs:            identity.SecureIDGenerator{},
+		HookDispatcher:      hooks,
+		Logger:              resources.logger,
+		Emitter:             emitter,
+		Sessions:            repos.Sessions,
+		Agent:               sessions.GetAgent,
+		Records:             repos.Executions,
+		Entries:             repos.Entries,
+		Definitions:         config.agents,
+		Clock:               clock.UTCClock{},
+		IDs:                 identity.SecureIDGenerator{},
+		CompressionStrategy: contextcompress.FullStrategy{},
+		SummaryFormat:       defaultSummaryFormat(),
 	})
 	provider := providers.New(providers.Dependencies{
 		Credentials: config.models,
@@ -85,7 +87,6 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 
 	runnerDeps := loop.Dependencies{
 		Provider:       provider,
-		SummaryFormat:  defaultSummaryFormat(),
 		Tools:          config.tools,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
@@ -98,13 +99,8 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	if runnerDeps.Logf == nil {
 		runnerDeps.Logf = func(string, ...any) {}
 	}
-	if runnerDeps.CompressionStrategy == nil {
-		runnerDeps.CompressionStrategy = contextcompress.FullStrategy{}
-	}
-	// 执行进度始终绑定同一个业务服务；复制依赖，不改写外部共享 Runner。
+	// 执行状态由业务服务按次绑定；复制共享依赖，不改写外部 Runner。
 	runnerDeps.Emitter = emitter
-	runnerDeps.Progress = tasks
-	runnerDeps.Entries = repos.Entries
 	runnerDeps.HookDispatcher = hooks
 	runner := loop.NewRunner(runnerDeps)
 	return execution.NewCoordinator(execution.Config{

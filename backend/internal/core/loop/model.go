@@ -47,6 +47,7 @@ func requestModel(
 func (r *Runner) callModel(
 	ctx context.Context,
 	executionInput Input,
+	deps ExecutionDependencies,
 	request providerapi.Request,
 	requestKind hook.ModelRequestKind,
 	sequence uint64,
@@ -61,17 +62,17 @@ func (r *Runner) callModel(
 	boundary.OperationID = hook.NewOperationID()
 	modified, hookErr := r.HookDispatcher.BeforeModelRequest(ctx, boundary)
 	if hookErr != nil {
-		return response, failCause(FailureInternal, hookErr)
+		return response, NewFailure(FailureInternal, hookErr)
 	}
 	if err := validateHookRequest(request, modified); err != nil {
-		return response, failCause(FailureContract, err)
+		return response, NewFailure(FailureContract, err)
 	}
 	request = modified
 	if err := ctx.Err(); err != nil {
 		return response, err
 	}
-	if err := r.Progress.RecordModelRequest(ctx, executionInput.Run, sequence, requestKind == hook.ModelRequestIteration); err != nil {
-		return response, entryFailure(executionInput, err)
+	if err := deps.Execution.RecordModelRequest(ctx, sequence, requestKind == hook.ModelRequestIteration); err != nil {
+		return response, err
 	}
 	boundary.Request = request.Clone()
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
@@ -82,8 +83,8 @@ func (r *Runner) callModel(
 	})
 	defer func() {
 		// 取消或断流也要将已收到的消耗接纳到内存进度，不依赖落盘完成。
-		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), executionInput.Run, response.textBytes); progressErr != nil {
-			err = entryFailure(executionInput, errors.Join(err, progressErr))
+		if progressErr := deps.Execution.RecordModelOutput(context.WithoutCancel(ctx), response.textBytes); progressErr != nil {
+			err = deps.Execution.EntryFailure(errors.Join(err, progressErr))
 		}
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
 			Request:     boundary,
@@ -95,7 +96,7 @@ func (r *Runner) callModel(
 		}
 		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
 	}()
-	ctx, span := executionInput.Run.Timing.Start(ctx, timing.Operation{
+	ctx, span := deps.Timing.Start(ctx, timing.Operation{
 		ExecutionID: executionInput.ID.String(),
 		Kind:        timing.Provider,
 		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,

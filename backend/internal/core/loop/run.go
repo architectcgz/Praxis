@@ -3,10 +3,8 @@ package loop
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	appcontext "praxis/internal/core/context"
-	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -14,21 +12,15 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
 )
 
 // Dependencies 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
 type Dependencies struct {
-	Entries        repository.Entries
 	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
-	Progress       ExecutionProgress
 	HookDispatcher *hook.Dispatcher
-	// CompressionStrategy 由装配层选择，运行期不补充默认策略。
-	CompressionStrategy contextcompress.Strategy
-	SummaryFormat       contextcompress.SummaryFormat
-	Emitter             *coreevent.Emitter
-	Logf                func(string, ...any)
+	Emitter        *coreevent.Emitter
+	Logf           func(string, ...any)
 }
 
 // Runner 持有装配层提供的共享依赖，可供多次执行并发复用。
@@ -41,16 +33,16 @@ func NewRunner(deps Dependencies) Runner {
 	return Runner{Dependencies: deps}
 }
 
-// Run 使用已准备的执行数据和本次执行依赖运行模型与工具循环。
-// 恢复、已完成判断和上下文数据加载由业务上层完成；请求和输出记录由 Execution Service 原生负责。
+// Run 消费独立模型上下文，通过本次执行能力提交结果并取得下一轮上下文。
+// 恢复、完成证据、历史投影与容量准备由执行层负责；Loop 不持有运行实例或直接访问仓储。
 // Loop 不决定执行终态、释放归属或调度后续预约。
 func (r *Runner) Run(ctx context.Context, executionInput Input, deps ExecutionDependencies) (Result, error) {
 	reason, _, err := r.run(ctx, executionInput, deps)
 	return Result{Reason: reason}, err
 }
 
-// run 根据本次执行输入运行迭代 loop。每轮只发起一次模型请求；确认自然完成时结束，
-// 否则必须先持久化每个工具调用结果，再构造下一次模型请求。
+// run 每轮使用准备好的上下文请求模型；确认自然完成时结束。
+// 工具回执全部提交成功后才取得下一轮上下文，任何提交或准备失败都会停止循环。
 func (r *Runner) run(
 	ctx context.Context,
 	executionInput Input,
@@ -59,42 +51,38 @@ func (r *Runner) run(
 	modelContext := executionInput.Context
 
 	for {
-		request := buildModelRequest(providerapi.Request{
-			ExecutionID:     executionInput.ID,
-			PromptCacheKey:  executionInput.SessionID.String(),
-			Model:           executionInput.Config.Model,
-			MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens,
-		}, *modelContext, r.Tools)
-		toolPayload, err := json.Marshal(request.Tools)
-		if err != nil {
-			return loopResult(failCause(FailureContract, err))
-		}
-		compressed, changed, err := r.compressContext(ctx, executionInput, *modelContext, contextcompress.Options{
-			SummaryFormat:   r.SummaryFormat,
-			ContextWindow:   executionInput.Config.Model.ContextWindow,
-			MaxOutputTokens: executionInput.Config.Model.MaxOutputTokens,
-			ReservedTokens:  appcontext.EstimateTokens(string(toolPayload)),
+		tools := r.Tools.List()
+		prepared, err := deps.Execution.PrepareContext(ctx, modelContext, tools, func(summaryCtx context.Context, value appcontext.ModelContext, limit int) (string, error) {
+			return r.summarizeContext(summaryCtx, executionInput, deps, value, limit)
 		})
 		if err != nil {
 			err = modelFailure(err)
 			r.emitError(executionInput.AgentID, executionInput.ID, "", err)
 			return loopResult(err)
 		}
-		if changed {
-			r.Logf("context compressed execution_id=%s entriesBefore=%d entriesAfter=%d", executionInput.ID, len(modelContext.Entries), len(compressed.Entries))
-			*modelContext = compressed
-			request.Context = modelContext.Clone()
-		}
-		sequence, err := r.Progress.NextRequestSequence(ctx, executionInput.Run)
+		sequence, err := deps.Execution.NextRequestSequence(ctx)
 		if err != nil {
-			return loopResult(entryFailure(executionInput, err))
+			return loopResult(err)
 		}
-		turnID := identity.NewTurnID(executionInput.ID, sequence)
-		request.TurnID = turnID
-		outcome, failureCode, finished, err := r.executeTurn(ctx, executionInput, deps, request, modelContext, sequence)
+		request := providerapi.Request{
+			ExecutionID:     executionInput.ID,
+			PromptCacheKey:  executionInput.SessionID.String(),
+			Model:           executionInput.Model.Clone(),
+			Context:         prepared.Clone(),
+			Tools:           tools,
+			MaxOutputTokens: executionInput.Model.MaxOutputTokens,
+			TurnID:          identity.NewTurnID(executionInput.ID, sequence),
+		}
+		outcome, failureCode, finished, err := r.executeTurn(ctx, executionInput, deps, request, sequence)
 
 		if err != nil || outcome != EndCompleted || finished {
 			return outcome, failureCode, err
+		}
+		modelContext, err = deps.Execution.NextContext(ctx)
+		if err != nil {
+			err = modelFailure(err)
+			r.emitError(executionInput.AgentID, executionInput.ID, "", err)
+			return loopResult(err)
 		}
 	}
 }
@@ -105,14 +93,13 @@ func (r *Runner) executeTurn(
 	executionInput Input,
 	deps ExecutionDependencies,
 	request providerapi.Request,
-	modelContext *appcontext.ModelContext,
 	sequence uint64,
 ) (outcome EndReason, failureCode FailureCode, finished bool, err error) {
 	turnID := request.TurnID
 	iteration := hook.Iteration{Identity: executionIdentity(executionInput, turnID), Sequence: sequence}
 	iteration.OperationID = hook.NewOperationID()
 	if hookErr := r.HookDispatcher.BeforeIteration(ctx, iteration); hookErr != nil {
-		return endFailed, FailureInternal, false, failCause(FailureInternal, hookErr)
+		return endFailed, FailureInternal, false, NewFailure(FailureInternal, hookErr)
 	}
 	var stopReason providerapi.StopReason
 	defer func() {
@@ -133,7 +120,7 @@ func (r *Runner) executeTurn(
 		},
 		Payload: coreevent.TurnStarted{},
 	})
-	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", executionInput.ID, executionInput.Config.Model.ModelID, len(modelContext.Entries), turnID)
+	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", executionInput.ID, executionInput.Model.ModelID, len(request.Context.Entries), turnID)
 	r.Emitter.Emit(coreevent.Event{
 		Scope: coreevent.Scope{
 			SessionID:   executionInput.SessionID,
@@ -143,7 +130,7 @@ func (r *Runner) executeTurn(
 		},
 		Payload: coreevent.ProviderWaiting{},
 	})
-	response, err := r.callModel(ctx, executionInput, request, hook.ModelRequestIteration, sequence, func(event providerapi.Event) {
+	response, err := r.callModel(ctx, executionInput, deps, request, hook.ModelRequestIteration, sequence, func(event providerapi.Event) {
 		r.emitModelEvent(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, event)
 	})
 	stopReason = response.stopReason
@@ -160,19 +147,21 @@ func (r *Runner) executeTurn(
 			if ctx.Err() != nil {
 				stopReason = "aborted"
 			}
-			stored, inserted, writeErr := r.appendEntry(context.WithoutCancel(ctx), executionInput, sessionentry.ContextEntry{
-				ID: "assistant:" + turnID.String(), RequestID: executionInput.RequestID.String(), ExecutionID: executionInput.ID.String(),
-				TurnID: turnID.String(), StopReason: stopReason, Role: role.Assistant, AuthorKind: sessionentry.AuthorAgent,
-				AuthorID: executionInput.AgentID.String(), Content: partial,
+			stored, _, writeErr := deps.Execution.AppendEntry(context.WithoutCancel(ctx), sessionentry.ContextEntry{
+				ID:          "assistant:" + turnID.String(),
+				RequestID:   executionInput.RequestID.String(),
+				ExecutionID: executionInput.ID.String(),
+				TurnID:      turnID.String(),
+				StopReason:  stopReason,
+				Role:        role.Assistant,
+				AuthorKind:  sessionentry.AuthorAgent,
+				AuthorID:    executionInput.AgentID.String(),
+				Content:     partial,
 			})
 			if writeErr != nil {
-				err = entryFailure(executionInput, errors.Join(err, writeErr))
+				err = deps.Execution.EntryFailure(errors.Join(err, writeErr))
 			} else {
-				if inserted {
-					r.notifyAssistant(ctx, executionInput, stored)
-				}
-				*modelContext = modelContext.Append(stored)
-				r.emitTurnCompletion(executionInput, turnID, []sessionentry.ContextEntry{stored}, providerapi.StopReason(stopReason))
+				r.emitTurnCompletion(executionInput, deps, turnID, []sessionentry.ContextEntry{stored}, providerapi.StopReason(stopReason))
 			}
 		}
 		err = modelFailure(err)
@@ -197,18 +186,14 @@ func (r *Runner) executeTurn(
 			AuthorID:    executionInput.AgentID.String(),
 			Content:     assistant,
 		}
-		message, inserted, err := r.appendEntry(ctx, executionInput, message)
+		message, _, err := deps.Execution.AppendEntry(ctx, message)
 		if err != nil {
 			r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
-			outcome, code, cause := loopResult(entryFailure(executionInput, err))
+			outcome, code, cause := loopResult(err)
 			return outcome, code, false, cause
 		}
 		committed = append(committed, message)
 		calls = message.ToolCalls(executionInput.SessionID, executionInput.AgentID)
-		*modelContext = modelContext.Append(message)
-		if inserted {
-			r.notifyAssistant(ctx, executionInput, message)
-		}
 	}
 	for _, call := range calls {
 		r.Emitter.Emit(coreevent.Event{
@@ -226,31 +211,27 @@ func (r *Runner) executeTurn(
 		})
 	}
 	if response.stopReason == providerapi.StopCompleted || response.stopReason == providerapi.StopSequence {
-
-		r.emitTurnCompletion(executionInput, turnID, committed, response.stopReason)
+		r.emitTurnCompletion(executionInput, deps, turnID, committed, response.stopReason)
 		return EndCompleted, "", true, nil
 	}
 	results, err := r.runToolCalls(ctx, executionInput, deps, calls, turnID)
 	if err != nil {
 		// 已返回的回执保持原样；当前失败调用和后续未执行调用由本轮退出分支统一收尾。
-		interrupted, closeErr := r.interruptToolCalls(ctx, executionInput, calls[len(results):])
+		interrupted, closeErr := r.interruptToolCalls(ctx, executionInput, deps, calls[len(results):])
 		results = append(results, interrupted...)
 		if closeErr != nil {
-			err = entryFailure(executionInput, errors.Join(err, closeErr))
+			err = deps.Execution.EntryFailure(errors.Join(err, closeErr))
 		}
 	}
 	committed = append(committed, results...)
-	for _, result := range results {
-		*modelContext = modelContext.Append(result)
-	}
 	if err != nil {
 		if len(committed) > 0 {
-			r.emitTurnCompletion(executionInput, turnID, committed, response.stopReason)
+			r.emitTurnCompletion(executionInput, deps, turnID, committed, response.stopReason)
 		}
 		r.emitError(executionInput.AgentID, executionInput.ID, turnID, err)
 		outcome, code, cause := loopResult(err)
 		return outcome, code, false, cause
 	}
-	r.emitTurnCompletion(executionInput, turnID, committed, response.stopReason)
+	r.emitTurnCompletion(executionInput, deps, turnID, committed, response.stopReason)
 	return EndCompleted, "", false, nil
 }

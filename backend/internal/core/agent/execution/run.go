@@ -3,7 +3,6 @@ package execution
 import (
 	"errors"
 	"praxis/internal/core/agent/execution/timing"
-	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
@@ -21,7 +20,6 @@ type Run struct {
 	record   Execution
 	history  History
 	sequence uint64
-	Context  appcontext.ModelContext
 	Timing   *timing.Recorder
 	timings  map[string]timing.Record
 }
