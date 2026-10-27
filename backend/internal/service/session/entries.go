@@ -43,6 +43,27 @@ func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID,
 	return stored, inserted, nil
 }
 
+// UpdateToolResult 先更新主会话历史，再同步当前上下文；存储失败时保留原回执。
+func (s *Service) UpdateToolResult(ctx context.Context, sessionID identity.SessionID, id, text string) (sessionentry.ContextEntry, error) {
+	s.contextMu.Lock()
+	defer s.contextMu.Unlock()
+	session, err := s.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	if session.State != sessionmodel.SessionActive {
+		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
+	}
+	stored, err := s.entries.UpdateToolResult(ctx, session.ID, session.MainAgentID, id, text)
+	if err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	if value := s.contexts[sessionID]; value != nil {
+		value.UpdateToolResult(id, text)
+	}
+	return stored, nil
+}
+
 // GetEntry 包含尚未完成执行准入的输入，供准入重试确认已接纳的消息身份。
 func (s *Service) GetEntry(ctx context.Context, sessionID identity.SessionID, id string) (sessionentry.ContextEntry, error) {
 	session, err := s.sessions.Get(ctx, sessionID)

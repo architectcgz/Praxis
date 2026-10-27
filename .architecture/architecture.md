@@ -36,7 +36,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/internal/service/agent/` | Agent 实例查找、创建、状态查询和启动恢复 |
 | `backend/internal/service/session/` | 会话用例、主会话 Context 与历史读写、Agent 实例引用持有、模型选择和输入队列 |
 | `backend/internal/service/coordinator/` | Session FIFO 调度、暂停停止、ExecutionTools 绑定、审批唤醒和结算交接 |
-| `backend/internal/service/toolexecution/` | 归属与规则读取、审核输入及预算准备、Main 工具回执接纳和中断回执构造 |
+| `backend/internal/service/toolexecution/` | 归属与规则读取、审核输入及预算准备和恢复中断回执构造 |
 | `backend/internal/infra/storage/` | 完整内存记录、仓储查询和约束、有界后台保存队列及其生命周期 |
 | `backend/internal/infra/jsonl/` | 启动日志重放、文件路径和顺序追加，不持有业务状态 |
 | `backend/internal/infra/providers/` | 各模型 Provider 的协议实现 |
@@ -58,13 +58,13 @@ flowchart TD
     Bootstrap -.创建与注入.-> Infra
 ```
 
-Coordinator 在领取 Session 队首输入并取得 AgentExecution 的唯一运行权后，组织上下文、Loop 与本次 ExecutionTools。共享 Runner 执行一次逻辑上的 ReAct 过程，ExecutionTools 准备并冻结单次工具调用的参数，调用 authorize 取得最终授权，再执行工具并提交回执。authorize 完整调度规则判断、模型审核、人工审批请求登记、通知与等待；auto 审核安全时允许执行，危险时拒绝，不确定或审核失败时转为人工审批，进度记录失败和执行取消直接传播。状态判断与审批请求登记处于同一控制锁内，模型请求、Hook 和人工等待在锁外执行。Core 通过注入的业务能力调用 Service，具体协议、文件系统与持久化实现由 Infra 提供。
+Coordinator 在领取 Session 队首输入并取得 AgentExecution 的唯一运行权后，组织上下文、Loop 与本次 ExecutionTools。共享 Runner 执行一次逻辑上的 ReAct 过程，ExecutionTools 准备并冻结单次工具调用的参数，调用 authorize 取得最终授权，再执行工具并将实际结果交给 Loop 立即转换、提交回执。authorize 完整调度规则判断、模型审核、人工审批请求登记、通知与等待；auto 审核安全时允许执行，危险时拒绝，不确定或审核失败时转为人工审批，进度记录失败和执行取消直接传播。状态判断与审批请求登记处于同一控制锁内，模型请求、Hook 和人工等待在锁外执行。Core 通过注入的业务能力调用 Service，具体协议、文件系统与持久化实现由 Infra 提供。
 
 项目创建由 Project Service 统一清理名称、规范化工作区路径并校验业务约束，全部校验成功后才调用目录创建能力；Wails 只转换请求身份和 DTO。工具调用信任业务入口确定的工作区根，实际文件系统状态与访问范围仍在 Infra 的资源边界检查。
 
 工具原始调用与准备后的执行参数分别保留。工具定义和参数规则属于 Core，各工具在解码、准备与执行阶段使用同一种 Arguments。Core 的 NewArguments 提供默认值，Before Hook 修改后的 JSON 由 ExecutionTools 使用标准库解码首个 JSON 值到该参数对象，拒绝未知字段；缺省字段保留默认值，数值 null 遵循标准库行为并保留原值，显式零值由业务规则判断。带路径参数的工具通过 PathArguments 声明路径字段，ExecutionTools 在解码后统一处理空值默认路径、相对工作区的路径解析与规范化，再传给 Prepare；工具参数类型只提供字段访问，Prepare 不接收工作区，也不判断或改写路径，仅校验命令、读取范围和补丁格式等业务规则。Bootstrap 泛型适配器只连接这些规则与 Infra 执行能力，将确定参数和工作区绑定为 PreparedCall。Infra 的 Call 使用同一组类型化参数执行资源操作；补丁语法与内容匹配规则由 Core 提供，实际文件读取、权限检查和写入由 Infra 完成。准备后的参数只在审批和 Hook 边界序列化一次，命令规则直接使用准备阶段提取的命令。
 
-Before Hook 在参数准备和授权前修改输入，After Hook 在执行后、回执提交前处理输出，但不能改变错误分类与副作用事实。业务方法只传调用数据和本次操作关联标识，不传递 Hook 事件；事件在触发边界构造，参数隔离由 HookDispatcher 统一处理。Before、审批等待、实际调用的观测 Scope 和 After 共用同一本次操作标识；观测包装只覆盖真实工具调用，不接管授权或回执提交。
+Before Hook 在参数准备和授权前修改输入。Loop 先提交实际工具回执，再调用 After Hook；Hook 成功修改正文时更新同一历史条目，同步会话 Context、Run 证据和进度，保留条目身份、原序号、创建时间、错误分类与副作用事实。Hook 失败、试图修改执行事实或输出超限时记录带 ExecutionID、CallID 的错误，保留实际回执并继续 Loop；历史追加或更新失败则停止循环，不重新执行工具。结果提交使用脱离执行取消信号的有限超时上下文。业务方法只传调用数据和本次操作关联标识，不传递 Hook 事件；事件在触发边界构造，参数隔离由 HookDispatcher 统一处理。Before、审批等待、实际调用的观测 Scope 和 After 共用同一本次操作标识；观测包装只覆盖真实工具调用，不接管授权或回执提交。
 
 审批等待期间 Execution 保持 running 并占用当前 Session，用户决定提交后只唤醒同一 Loop。后续 Task 保持排队，只有前一次 Execution 结算并释放归属，且结果允许继续派发，才领取下一项。ToolResult 是工具调用的唯一完成依据；审批请求、用户决定与审核状态只属于当前活跃调用，不做重启恢复。每次 ToolCall 开始授权时只读取一次内存规则，参数与规则决定在本次调用中固定，审批唤醒及工具启动不重新匹配规则；规则变更仅影响后续 ToolCall，每个调用最多产生一次人工审批请求。Coordinator 保证唯一 Loop，Loop 顺序执行各 ToolCall。回执由内存接纳后即可推进执行，不等待落盘；恢复只补缺失回执，不重新调用工具。Executor 的 active 索引用于当前调用的控制与审批查询，在本次 Execute 返回时移除。
 
@@ -103,7 +103,7 @@ Wails 将事件映射为 `kind`、作用域字段和 `data`，不直接序列化
 
 内存接纳不等于磁盘保存。强制退出、断电、队列满和文件失败均可能丢失最新修改，包括删除操作；重启只恢复实际存在的完整日志行，不承诺恢复所有已执行的外部副作用。未完成尾行备份后截断，完整坏行报错。工具恢复只匹配已恢复的 Entry，补齐缺失结果，不恢复审批，也不自动重跑工具。显式日志路径查询允许访问文件系统，文件可能落后于内存，新会话尚未保存时可以返回不存在。
 
-记录格式保持单 Event。发布与回滚保留匹配的程序和数据备份；人工验证使用独立数据目录，检查重启恢复、内存查询不依赖日志文件、持久化退化后业务可用以及关闭排空。常规验证仅运行构建和静态检查，不启动开发服务或执行自动化测试。
+记录格式保持单 Event。工具回执首次以 `entry.appended` 保存，正文修改以仅携带 `agent_id`、`entry_id` 和 `text` 的 `entry.updated` 保存；运行时更新入口也只接收条目 ID 和正文，由历史持有者修改已有条目，不传入或比较整条记录。更新事件占用新的事件序号，但条目保留原始序号，启动重放只允许修改工具回执正文。进程在 After Hook 返回或更新接纳前中断时，保留已接纳的实际回执，不重跑工具或补中断结果。发布与回滚保留匹配的程序和数据备份；人工验证使用独立数据目录，检查重启恢复、内存查询不依赖日志文件、持久化退化后业务可用以及关闭排空。常规验证仅运行构建和静态检查，不启动开发服务或执行自动化测试。
 
 ## Agent 角色定义
 
@@ -150,7 +150,7 @@ Loop 在模型请求前编排压缩及其 Hook，`core/context/compress.Compress
 
 摘要本身是普通 `ContextEntry`，主执行先将新摘要追加到原始历史，再以 `context.saved` 保存完整压缩后条目，包括摘要、保留的用户消息和工具交互，随后直接替换内存 Context。仅精简工具结果而没有新摘要时，也保存完整结果。每个会话在存储内存中只保留最近的 Context 记录，记录中的 `through_sequence` 标识其覆盖的事件边界；该值保证内容相同但后续条目被舍弃时仍会刷新恢复边界。当前输入的临时保护不会保存为后续任务的永久保护。子执行只替换私有 Context，不保存恢复记录。
 
-恢复直接读取最近一次 `context.saved` 的条目，再追加该事件之后已准入的普通 Entry，不重放摘要的 `Replaces`。摘要追加与 Context 保存之间若中断，未进入保存结果的摘要不参与恢复，原始条目仍然可用。压缩或 Context 保存失败时保留原内存 Context，不向模型发送未确认的压缩结果。完整原始历史不因摘要、结果正文舍弃或说明文本精简而删除或改写。
+恢复直接读取最近一次 `context.saved` 的条目，再按原始条目序号追加覆盖边界之后已准入的普通 Entry，不重放摘要的 `Replaces`。覆盖边界之后的工具回执更新只同步快照中仍存在的同一条目，不重复追加，也不恢复已被压缩掉的回执。摘要追加与 Context 保存之间若中断，未进入保存结果的摘要不参与恢复，原始条目仍然可用。压缩或 Context 保存失败时保留原内存 Context，不向模型发送未确认的压缩结果。完整原始历史不因摘要、结果正文舍弃或说明文本精简而删除或改写。
 
 ```mermaid
 flowchart LR

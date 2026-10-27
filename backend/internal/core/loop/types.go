@@ -8,12 +8,14 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 )
 
-// ToolExecutor 执行已提交的完整调用，完成授权、审批等待和执行后返回已提交回执。
+// ToolExecutor 完成授权、审批等待和执行，返回实际结果及后置 Hook 所需的调用信息。
+// 结果保存和后置 Hook 调度由 Loop 负责。
 type ToolExecutor interface {
-	Execute(context.Context, sessionentry.ToolCall) (sessionentry.ContextEntry, error)
+	Execute(context.Context, sessionentry.ToolCall) (toolexecution.CallResult, error)
 }
 
 type (
@@ -28,6 +30,7 @@ type (
 type HistoryOperations interface {
 	NextContext(context.Context) (appcontext.ModelContext, error)
 	AppendEntry(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error)
+	UpdateToolResult(context.Context, string, string) (sessionentry.ContextEntry, error)
 	ReplaceContext(context.Context, []sessionentry.ContextEntry) error
 	PublishEntries(identity.TurnID, []sessionentry.ContextEntry)
 	EntryFailure(error) error

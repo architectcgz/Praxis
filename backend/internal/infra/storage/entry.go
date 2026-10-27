@@ -7,6 +7,7 @@ import (
 	"fmt"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
+	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"strings"
@@ -17,6 +18,13 @@ import (
 type entryRecord struct {
 	AgentID identity.AgentID          `json:"agent_id"`
 	Data    sessionentry.ContextEntry `json:"entry"`
+}
+
+// toolResultUpdate 只保存回执身份和新正文，不携带可覆盖历史元数据的完整条目。
+type toolResultUpdate struct {
+	AgentID identity.AgentID `json:"agent_id"`
+	EntryID string           `json:"entry_id"`
+	Text    string           `json:"text"`
 }
 
 type EntryRepository struct{ storage *Storage }
@@ -76,6 +84,44 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 		return sessionentry.ContextEntry{}, false, err
 	}
 	return stored, inserted, nil
+}
+
+// UpdateToolResult 追加正文更新事件，保留原条目的历史位置；重复更新相同内容不产生新事件。
+func (r EntryRepository) UpdateToolResult(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, id, text string) (stored sessionentry.ContextEntry, err error) {
+	if len(text) > tool.MaxInlineResultBytes {
+		return sessionentry.ContextEntry{}, errorcode.ErrInvalidRequest
+	}
+	err = withState(ctx, r.storage, func(state *Storage, records []logRecord) error {
+		scope := sessionID.String()
+		if err := requireMain(records, scope, agentID); err != nil {
+			return err
+		}
+		prior, err := findEntry(records, agentID, id)
+		if err != nil {
+			return err
+		}
+		if prior.scope != scope {
+			return errorcode.ErrRequestConflict
+		}
+		record := prior.entry
+		if record.Data.Role != role.Tool || len(record.Data.Content) != 1 || record.Data.Content[0].Kind != sessionentry.BlockToolResult {
+			return errorcode.ErrRequestConflict
+		}
+		if record.Data.Content[0].Text == text {
+			stored = record.Data.Clone()
+			return nil
+		}
+		record.Data.Content[0].Text = text
+		if err := appendRecord(state, records, scope, "entry", entryKey(agentID, id), "entry.updated", record); err != nil {
+			return err
+		}
+		stored = record.Data.Clone()
+		return nil
+	})
+	if err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	return stored, nil
 }
 
 func (r EntryRepository) Get(ctx context.Context, agentID identity.AgentID, id string) (result sessionentry.ContextEntry, err error) {

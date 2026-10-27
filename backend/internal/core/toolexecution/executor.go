@@ -17,7 +17,6 @@ import (
 	"praxis/internal/errorcode"
 	"strings"
 	"sync"
-	"time"
 )
 
 type ExecutorDependencies struct {
@@ -60,6 +59,15 @@ type ExecutionTools struct {
 	awaitApproval func(context.Context) error
 }
 
+// CallResult 将实际结果交给 Loop 保存；仅执行路径携带 OperationID 和已准备参数。
+// Err 只供后置观察，工具执行失败已编码在 ToolResult 中，不作为编排错误返回。
+type CallResult struct {
+	ToolResult  tool.ToolResult
+	OperationID string
+	Arguments   json.RawMessage
+	Err         error
+}
+
 func (e *Executor) ForExecution(run *agentexecution.Run, workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
 	return &ExecutionTools{
 		executor:      e,
@@ -69,35 +77,35 @@ func (e *Executor) ForExecution(run *agentexecution.Run, workspacePath string, a
 	}
 }
 
-// Execute 准备并冻结工具参数，取得最终授权后执行工具并提交回执；审核与审批等待由 authorize 调度。
-func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.ToolCall) (sessionentry.ContextEntry, error) {
+// Execute 准备并冻结工具参数，取得最终授权后返回实际结果；不写历史或调用后置 Hook。
+func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.ToolCall) (CallResult, error) {
 	s := tools.executor
 	owner := tools.run.Snapshot()
 	s.mu.Lock()
 	if s.active[call.Key] != nil {
 		s.mu.Unlock()
-		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
+		return CallResult{}, errorcode.ErrRequestConflict
 	}
 	s.active[call.Key] = &callState{call: call, owner: owner, run: tools.run}
 	s.mu.Unlock()
 	defer s.unregister(call.Key)
 	if stored, found := tools.run.Result(call.Key); found {
-		return stored, nil
+		return existingResult(stored), nil
 	}
 	if err := ctx.Err(); err != nil {
-		return s.appendError(ctx, call, "tool_interrupted", err.Error())
+		return callError("tool_interrupted", err.Error()), nil
 	}
 	t, ok := s.deps.Catalog.Get(call.Name)
 	if !ok {
-		return s.appendError(ctx, call, "tool_not_allowed", "The requested tool is disabled or unregistered.")
+		return callError("tool_not_allowed", "The requested tool is disabled or unregistered."), nil
 	}
 	operationID := hook.NewOperationID()
 	modified, hookErr := s.deps.HookDispatcher.BeforeToolExecution(ctx, toolHookEvent(call, call.Arguments, operationID))
 	if hookErr != nil {
-		return sessionentry.ContextEntry{}, hookErr
+		return CallResult{}, hookErr
 	}
 	if err := ctx.Err(); err != nil {
-		return s.appendError(ctx, call, "tool_interrupted", err.Error())
+		return callError("tool_interrupted", err.Error()), nil
 	}
 	// JSON 只在编排边界解码；工具准备与实际执行都使用类型化参数。
 	arguments := t.NewArguments()
@@ -111,7 +119,7 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 	decoder := json.NewDecoder(bytes.NewReader(modified))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(arguments); err != nil {
-		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
+		return callError("invalid_tool_call", err.Error()), nil
 	}
 	// 工作区根已由业务入口校验；模型路径只在此处解析，准备与授权均使用规范化后的同一值。
 	if path != nil {
@@ -119,10 +127,10 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 			*path = defaultPath
 		}
 		if strings.TrimSpace(*path) == "" {
-			return s.appendError(ctx, call, "invalid_tool_call", "path is required")
+			return callError("invalid_tool_call", "path is required"), nil
 		}
 		if strings.ContainsAny(*path, "\x00\r\n") {
-			return s.appendError(ctx, call, "invalid_tool_call", "path contains control characters")
+			return callError("invalid_tool_call", "path contains control characters"), nil
 		}
 		if !filepath.IsAbs(*path) {
 			*path = filepath.Join(tools.workspacePath, *path)
@@ -131,38 +139,38 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 	}
 	prepared, err := t.Prepare(arguments, tools.workspacePath)
 	if err != nil {
-		return s.appendError(ctx, call, "invalid_tool_call", err.Error())
+		return callError("invalid_tool_call", err.Error()), nil
 	}
 	// 审批与 Hook 使用同一份只读 JSON，真实调用持有准备阶段绑定的参数，不反向解码。
 	args, err := json.Marshal(prepared.Arguments)
 	if err != nil {
-		return sessionentry.ContextEntry{}, fmt.Errorf("encode prepared tool arguments: %w", err)
+		return CallResult{}, fmt.Errorf("encode prepared tool arguments: %w", err)
 	}
 	return tools.execute(ctx, call, prepared, args, operationID)
 }
 
-func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (sessionentry.ContextEntry, error) {
+func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (CallResult, error) {
 	s := tools.executor
 
 	for {
 		if stored, found := tools.run.Result(call.Key); found {
-			return stored, nil
+			return existingResult(stored), nil
 		}
 		denied, err := tools.authorize(ctx, call, args, prepared.Command, operationID)
 		if errors.Is(err, errCallStopped) {
-			return s.appendError(ctx, call, "tool_interrupted", err.Error())
+			return callError("tool_interrupted", err.Error()), nil
 		}
 		if err != nil {
 			if errors.Is(err, errResultAvailable) {
 				continue
 			}
 			if ctx.Err() != nil {
-				return s.appendError(ctx, call, "tool_interrupted", ctx.Err().Error())
+				return callError("tool_interrupted", ctx.Err().Error()), nil
 			}
-			return sessionentry.ContextEntry{}, err
+			return CallResult{}, err
 		}
 		if denied != nil {
-			return s.commitResult(ctx, call, *denied)
+			return CallResult{ToolResult: *denied}, nil
 		}
 
 		observed := observedCall{
@@ -184,16 +192,15 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 		if err != nil {
 			execution.Stop()
 			if errors.Is(err, errCallStopped) {
-				return s.appendError(ctx, call, "tool_interrupted", err.Error())
+				return callError("tool_interrupted", err.Error()), nil
 			}
 			if errors.Is(err, errResultAvailable) {
 				continue
 			}
 			if ctx.Err() != nil {
-				return s.appendError(ctx, call, "tool_interrupted", ctx.Err().Error())
+				return callError("tool_interrupted", ctx.Err().Error()), nil
 			}
-
-			return sessionentry.ContextEntry{}, err
+			return CallResult{}, err
 		}
 		result := execution.Run()
 
@@ -209,24 +216,12 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 				value.ErrorClass = "tool_execution_failed"
 			}
 		}
-		modified, hookErr := s.deps.HookDispatcher.AfterToolExecution(context.WithoutCancel(ctx), hook.ToolExecutionResult{
-			ToolExecution: toolHookEvent(call, args, operationID),
-			Result:        value,
-			Err:           result.Err,
-		})
-		if hookErr == nil && (modified.ErrorClass != value.ErrorClass || modified.SideEffect != value.SideEffect) {
-			hookErr = &hook.Error{Point: "AfterToolExecution", Cause: errors.New("tool result hook cannot change execution error or side-effect facts")}
-		}
-		if hookErr == nil {
-			modified.Truncated = modified.Truncated || value.Truncated
-			value = modified
-		}
-		stored, writeErr := s.commitResult(ctx, call, value)
-		if writeErr != nil {
-			return stored, writeErr
-		}
-
-		return stored, hookErr
+		return CallResult{
+			ToolResult:  value,
+			OperationID: operationID,
+			Arguments:   args,
+			Err:         result.Err,
+		}, nil
 	}
 }
 
@@ -278,26 +273,16 @@ func toolHookEvent(call sessionentry.ToolCall, args json.RawMessage, operationID
 	}
 }
 
-func (e *Executor) appendError(ctx context.Context, call sessionentry.ToolCall, code, message string) (sessionentry.ContextEntry, error) {
-	return e.commitResult(ctx, call, tool.NewToolError(code, message))
+func callError(code, message string) CallResult {
+	return CallResult{ToolResult: tool.NewToolError(code, message)}
 }
 
-// commitResult 与 Stop 共享同步边界，迟到的控制请求不覆盖工具回执。
-func (e *Executor) commitResult(ctx context.Context, call sessionentry.ToolCall, result tool.ToolResult) (sessionentry.ContextEntry, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.commitResultLocked(ctx, call, result)
-}
-
-func (e *Executor) commitResultLocked(ctx context.Context, call sessionentry.ToolCall, result tool.ToolResult) (sessionentry.ContextEntry, error) {
-	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	callState := e.active[call.Key]
-	if callState == nil {
-		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
+// existingResult 只复用已接纳回执，不重复执行工具或后置 Hook。
+func existingResult(entry sessionentry.ContextEntry) CallResult {
+	block := entry.Content[0]
+	result := tool.ToolResult{Payload: block.Text}
+	if block.IsError {
+		result.ErrorClass = "tool_execution_failed"
 	}
-	if stored, found := callState.run.Result(call.Key); found {
-		return stored, nil
-	}
-	return e.deps.Operations.CommitResult(commitCtx, callState.run, call, result)
+	return CallResult{ToolResult: result}
 }

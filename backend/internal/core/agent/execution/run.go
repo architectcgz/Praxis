@@ -174,6 +174,28 @@ func (r *Run) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry
 	return value.Clone(), true, nil
 }
 
+// UpdateToolResult 在所属历史接纳修改后同步执行证据、子执行上下文和派生进度。
+func (r *Run) UpdateToolResult(id, text string) (sessionentry.ContextEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	prior, found := r.history.Get(id)
+	if !found {
+		return sessionentry.ContextEntry{}, errorcode.ErrNotFound
+	}
+	if prior.ExecutionID != r.record.ID.String() {
+		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
+	}
+	stored, err := r.history.UpdateToolResult(id, text)
+	if err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	if r.context != nil {
+		r.context.UpdateToolResult(id, text)
+	}
+	r.deriveProgress()
+	return stored, nil
+}
+
 func (r *Run) Call(key tool.CallKey) (sessionentry.ToolCall, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

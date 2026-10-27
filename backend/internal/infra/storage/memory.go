@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
 	"praxis/internal/infra/jsonl"
 	"slices"
 	"sync"
@@ -44,13 +46,24 @@ func Open(ctx context.Context, root string, report func(error)) (*Storage, error
 		}
 		key := recordKey(scope.ID, event.Collection, event.Key)
 		if index, ok := s.positions[key]; ok {
-			before, err := json.Marshal(s.records[index].value)
-			if err != nil {
-				return err
+			if update, ok := value.(toolResultUpdate); ok {
+				prior := cloneRecordValue(s.records[index].value).(entryRecord)
+				if prior.Data.Role != role.Tool || len(prior.Data.Content) != 1 || prior.Data.Content[0].Kind != sessionentry.BlockToolResult {
+					return errors.New("tool result update requires an existing tool receipt")
+				}
+				prior.Data.Content[0].Text = update.Text
+				value = prior
+			} else {
+				before, err := json.Marshal(s.records[index].value)
+				if err != nil {
+					return err
+				}
+				if err := immutable(event.Collection, before, event.Payload); err != nil {
+					return err
+				}
 			}
-			if err := immutable(event.Collection, before, event.Payload); err != nil {
-				return err
-			}
+		} else if event.Collection == "entry" && event.Type == "entry.updated" {
+			return errors.New("updated entry is missing its original append event")
 		}
 		s.remember(scope.ID, event, value)
 		if scope.ID != "" {

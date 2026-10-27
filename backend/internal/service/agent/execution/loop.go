@@ -11,6 +11,7 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -61,6 +62,28 @@ func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.Cont
 		e.notifyAssistant(ctx, accepted)
 	}
 	return accepted, inserted, nil
+}
+
+// UpdateToolResult 先更新主会话历史，再同步执行证据；子执行只更新私有历史和上下文。
+func (e *loopExecution) UpdateToolResult(ctx context.Context, id, text string) (sessionentry.ContextEntry, error) {
+	prior, found := e.run.Entry(id)
+	if !found {
+		return sessionentry.ContextEntry{}, e.EntryFailure(errorcode.ErrNotFound)
+	}
+	task := e.run.Snapshot()
+	if prior.ExecutionID != task.ID.String() {
+		return sessionentry.ContextEntry{}, e.EntryFailure(errorcode.ErrRequestConflict)
+	}
+	if e.run.Main() {
+		if _, err := e.service.history.UpdateToolResult(ctx, task.SessionID, id, text); err != nil {
+			return sessionentry.ContextEntry{}, e.EntryFailure(err)
+		}
+	}
+	stored, err := e.run.UpdateToolResult(id, text)
+	if err != nil {
+		return sessionentry.ContextEntry{}, e.EntryFailure(err)
+	}
+	return stored, nil
 }
 
 // ReplaceContext 在摘要已接纳后直接保存压缩结果，不进行前后差异合并。

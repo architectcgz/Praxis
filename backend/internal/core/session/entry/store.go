@@ -17,10 +17,11 @@ type Query struct {
 	IncludeUnadmitted bool
 }
 
-// Store 提供会话 Entry 的存储契约；实现负责顺序追加、归属校验和重复写入检查。
+// Store 提供会话 Entry 的存储契约；实现负责顺序追加、工具回执正文更新、归属校验和重复写入检查。
 // 追加成功表示存储已接纳，不额外承诺磁盘同步完成。
 type Store interface {
 	Append(context.Context, Record) (ContextEntry, bool, error)
+	UpdateToolResult(context.Context, identity.SessionID, identity.AgentID, string, string) (ContextEntry, error)
 	Get(context.Context, identity.AgentID, string) (ContextEntry, error)
 	List(context.Context, Query) (List, error)
 	LoadContext(context.Context, identity.SessionID, identity.AgentID) ([]ContextEntry, error)

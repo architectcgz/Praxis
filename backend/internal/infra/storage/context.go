@@ -75,6 +75,16 @@ func (r EntryRepository) LoadContext(ctx context.Context, sessionID identity.Ses
 			if value.AgentID != agentID || value.Data.IsSummary() {
 				continue
 			}
+			// 更新不改变原条目顺序；只覆盖快照中仍然存在的回执，不恢复被压缩掉的条目。
+			if value.Data.Sequence <= boundary {
+				for index, entry := range entries {
+					if entry.ID == value.Data.ID {
+						entries[index].Content = value.Data.Clone().Content
+						break
+					}
+				}
+				continue
+			}
 			if value.Data.Role == role.User && value.Data.ExecutionID != "" {
 				if _, err := findRecord(records, "agent_execution", value.Data.ExecutionID); errors.Is(err, errorcode.ErrNotFound) {
 					continue

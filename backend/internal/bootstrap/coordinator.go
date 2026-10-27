@@ -65,7 +65,6 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	}
 	records := toolservice.NewService(toolservice.Dependencies{
 		ApprovalConfig: config,
-		AppendEntry:    sessions.AppendEntry,
 		Calls:          repos.ToolCalls,
 		Sessions:       repos.Sessions,
 		Projects:       repos.Projects,

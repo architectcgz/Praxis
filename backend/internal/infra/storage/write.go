@@ -22,7 +22,17 @@ func appendRecord(state *Storage, records []logRecord, scope, collection, id, ki
 			return errorcode.ErrRequestConflict
 		}
 	}
-	payload, err := json.Marshal(object)
+	// 回执更新只持久化身份和正文，其他字段由已接纳的原条目保留。
+	payloadValue := object
+	if collection == "entry" && kind == "entry.updated" {
+		record := object.(entryRecord)
+		payloadValue = toolResultUpdate{
+			AgentID: record.AgentID,
+			EntryID: record.Data.ID,
+			Text:    record.Data.Content[0].Text,
+		}
+	}
+	payload, err := json.Marshal(payloadValue)
 	if err != nil {
 		return err
 	}
@@ -49,6 +59,9 @@ func appendRecord(state *Storage, records []logRecord, scope, collection, id, ki
 		}
 		if prior.scope != scope {
 			return errorcode.ErrRequestConflict
+		}
+		if collection == "entry" && kind == "entry.updated" {
+			continue
 		}
 		before, err := json.Marshal(prior.value)
 		if err != nil {

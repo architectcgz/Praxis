@@ -27,8 +27,10 @@ func validateToolReceipts(records []logRecord, scope string, value entryRecord) 
 			}
 			continue
 		}
-		if _, err := getResult(records, key); err == nil {
-			return errorcode.ErrRequestConflict
+		if prior, err := getResult(records, key); err == nil {
+			if prior.ID != value.Data.ID {
+				return errorcode.ErrRequestConflict
+			}
 		} else if !errors.Is(err, errorcode.ErrNotFound) {
 			return err
 		}

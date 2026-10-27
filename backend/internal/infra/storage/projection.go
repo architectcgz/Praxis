@@ -10,6 +10,7 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
+	"praxis/internal/core/tool"
 	"praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/infra/jsonl"
@@ -36,7 +37,15 @@ func decodeStoredEvent(scope string, event jsonl.Event) (any, error) {
 	case "agent_execution":
 		target, kind = new(agentexecution.ExecutionRecord), "agent_execution.saved"
 	case "entry":
-		target, kind = new(entryRecord), "entry.appended"
+		switch event.Type {
+		case "entry.appended":
+			target = new(entryRecord)
+		case "entry.updated":
+			target = new(toolResultUpdate)
+		default:
+			return nil, errors.New("unknown entry event")
+		}
+		kind = event.Type
 	case "context":
 		target, kind = new(contextRecord), "context.saved"
 	case "usage":
@@ -79,6 +88,17 @@ func decodeStoredEvent(scope string, event jsonl.Event) (any, error) {
 		id, owner, err = entryKey(v.AgentID, v.Data.ID), scope, v.Validate()
 		if v.Data.Sequence != event.Sequence {
 			return nil, errors.New("message sequence does not match event sequence")
+		}
+	case *toolResultUpdate:
+		value = *v
+		id, owner = entryKey(v.AgentID, v.EntryID), scope
+		for _, field := range []string{v.AgentID.String(), v.EntryID} {
+			if field == "" || field != strings.TrimSpace(field) || strings.ContainsAny(field, "\x00\r\n") {
+				return nil, errors.New("tool result update identity must be canonical and nonempty")
+			}
+		}
+		if len(v.Text) > tool.MaxInlineResultBytes {
+			return nil, errors.New("tool result update exceeds the inline size limit")
 		}
 	case *contextRecord:
 		value = *v

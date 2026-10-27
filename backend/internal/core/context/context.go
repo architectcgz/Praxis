@@ -37,6 +37,16 @@ func (c *Context) Append(entry sessionentry.ContextEntry) {
 	c.entries = pairToolResults(append(c.entries, value))
 }
 
+// UpdateToolResult 同步历史已接纳的工具正文；不恢复已被压缩或舍弃的回执。
+func (c *Context) UpdateToolResult(id, text string) {
+	for index, entry := range c.entries {
+		if entry.ID == id {
+			c.entries[index].Content[0].Text = text
+			return
+		}
+	}
+}
+
 // Replace 在压缩结果已确认后直接替换有效条目，释放被压缩原文和舍弃结果的引用。
 func (c *Context) Replace(entries []sessionentry.ContextEntry) {
 	values := make([]sessionentry.ContextEntry, len(entries))
