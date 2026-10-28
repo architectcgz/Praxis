@@ -1,9 +1,13 @@
 package session
 
 import (
-	"praxis/internal/identity"
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
+
+	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 )
 
 type SessionState string
@@ -57,3 +61,30 @@ func (s *Session) NameFromInput(content string, at time.Time) {
 	s.Title = string(words)
 	s.UpdatedAt = at.UTC()
 }
+
+// Validate 检查对象自身的完整性，不修改或修复输入。
+func (value Session) Validate() error {
+	if !value.ID.Valid() || !value.ProjectID.Valid() {
+		return fmt.Errorf("session: invalid session or project identity: %w", errorcode.ErrInvalidValue)
+	}
+	for _, id := range []string{
+		value.WorkspaceID.String(),
+		value.MainAgentID.String(),
+	} {
+		if id == "" || id != strings.TrimSpace(id) {
+			return fmt.Errorf("session: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
+		}
+	}
+	if !definitionIDPattern.MatchString(value.AgentDefinitionID.String()) {
+		return fmt.Errorf("session.agentDefinitionID: invalid agent definition identity: %w", errorcode.ErrInvalidValue)
+	}
+	if value.State != SessionActive && value.State != SessionArchived {
+		return fmt.Errorf("session.state: unknown session state: %w", errorcode.ErrInvalidValue)
+	}
+	if value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() || value.UpdatedAt.Before(value.CreatedAt) {
+		return fmt.Errorf("session.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
+	}
+	return nil
+}
+
+var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)

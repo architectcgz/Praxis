@@ -61,6 +61,13 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 	if err != nil {
 		return result, false, err
 	}
+	session, err := s.sessions.Get(ctx, owner.SessionID)
+	if err != nil {
+		return result, false, err
+	}
+	if session.MainAgentID != owner.ID || session.AgentDefinitionID != definition.ID {
+		return result, false, errorcode.ErrRequestConflict
+	}
 	config := agentexecution.ExecutionConfig{
 		AgentDefinitionID: definition.ID,
 		SystemPrompt:      definition.Instructions,
@@ -88,6 +95,9 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 	})
 	if err != nil {
 		return result, false, err
+	}
+	if stored.ExecutionID != executionID.String() || stored.RequestID != requestID.String() || stored.SourceTaskID != input.ID.String() || stored.Role != role.User {
+		return result, false, errorcode.ErrRequestConflict
 	}
 	result = agentexecution.NewExecutionRecord(executionID, owner.SessionID, owner.ID, requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID

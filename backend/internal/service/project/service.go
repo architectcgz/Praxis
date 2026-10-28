@@ -10,6 +10,7 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
+	"sync"
 )
 
 // WorkspaceDirectory 提供项目创建所需的目录操作能力。
@@ -27,6 +28,7 @@ type Dependencies struct {
 
 // Service 负责 Project 创建与查询，默认工作区由 Project 派生。
 type Service struct {
+	createMu   sync.Mutex
 	projects   repository.Project
 	workspaces repository.Workspace
 	clock      clock.Clock
@@ -60,7 +62,19 @@ func NewService(deps Dependencies) *Service {
 
 // CreateProject 使用已校验的输入创建目录并保存项目事实；后续失败保留已创建目录供重试。
 func (s *Service) CreateProject(ctx context.Context, params CreateInput) (CreateProjectResult, error) {
-	_, err := s.directory.Ensure(ctx, params.Path)
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+	projects, err := s.projects.List(ctx, 0)
+	if err != nil {
+		return CreateProjectResult{}, err
+	}
+	for _, existing := range projects {
+		if existing.ID != params.ProjectID && (existing.Path == params.Path || existing.DefaultWorkspaceID == params.WorkspaceID) {
+			return CreateProjectResult{}, errorcode.ErrRequestConflict
+		}
+	}
+
+	_, err = s.directory.Ensure(ctx, params.Path)
 	if err != nil {
 		return CreateProjectResult{}, err
 	}

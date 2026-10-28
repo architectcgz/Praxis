@@ -37,7 +37,7 @@ Praxis 是 Go + Wails + React 的本地桌面应用。前端负责交互与展�
 | `backend/internal/service/session/` | 会话用例、主会话 Context 与历史读写、Agent 实例引用持有、模型选择和输入队列 |
 | `backend/internal/service/coordinator/` | Session FIFO 调度、暂停停止、ExecutionTools 绑定、审批唤醒和结算交接 |
 | `backend/internal/service/toolexecution/` | 归属与规则读取、审核输入及预算准备和恢复中断回执构造 |
-| `backend/internal/infra/storage/` | 完整内存记录、仓储查询和约束、有界后台保存队列及其生命周期 |
+| `backend/internal/infra/storage/` | 类型化内存状态、启动重放、同步日志追加和仓储查询 |
 | `backend/internal/infra/jsonl/` | 启动日志重放、文件路径和顺序追加，不持有业务状态 |
 | `backend/internal/infra/providers/` | 各模型 Provider 的协议实现 |
 | `backend/internal/infra/modelregistry/`、`infra/agentregistry/`、`infra/toolregistry/` | 模型、Agent 和工具的配置加载与注册 |
@@ -66,7 +66,7 @@ Coordinator 在领取 Session 队首输入并取得 AgentExecution 的唯一运�
 
 Before Hook 在参数准备和授权前修改输入。Loop 先提交实际工具回执，再调用 After Hook；Hook 成功修改正文时更新同一历史条目，同步会话 Context、Run 证据和进度，保留条目身份、原序号、创建时间、错误分类与副作用事实。Hook 失败、试图修改执行事实或输出超限时记录带 ExecutionID、CallID 的错误，保留实际回执并继续 Loop；历史追加或更新失败则停止循环，不重新执行工具。结果提交使用脱离执行取消信号的有限超时上下文。业务方法只传调用数据和本次操作关联标识，不传递 Hook 事件；事件在触发边界构造，参数隔离由 HookDispatcher 统一处理。Before、审批等待、实际调用的观测 Scope 和 After 共用同一本次操作标识；观测包装只覆盖真实工具调用，不接管授权或回执提交。
 
-审批等待期间 Execution 保持 running 并占用当前 Session，用户决定提交后只唤醒同一 Loop。后续 Task 保持排队，只有前一次 Execution 结算并释放归属，且结果允许继续派发，才领取下一项。ToolResult 是工具调用的唯一完成依据；审批请求、用户决定与审核状态只属于当前活跃调用，不做重启恢复。每次 ToolCall 开始授权时只读取一次内存规则，参数与规则决定在本次调用中固定，审批唤醒及工具启动不重新匹配规则；规则变更仅影响后续 ToolCall，每个调用最多产生一次人工审批请求。Coordinator 保证唯一 Loop，Loop 顺序执行各 ToolCall。回执由内存接纳后即可推进执行，不等待落盘；恢复只补缺失回执，不重新调用工具。Executor 的 active 索引用于当前调用的控制与审批查询，在本次 Execute 返回时移除。
+审批等待期间 Execution 保持 running 并占用当前 Session，用户决定提交后只唤醒同一 Loop。后续 Task 保持排队，只有前一次 Execution 结算并释放归属，且结果允许继续派发，才领取下一项。ToolResult 是工具调用的唯一完成依据；审批请求、用户决定与审核状态只属于当前活跃调用，不做重启恢复。每次 ToolCall 开始授权时只读取一次内存规则，参数与规则决定在本次调用中固定，审批唤醒及工具启动不重新匹配规则；规则变更仅影响后续 ToolCall，每个调用最多产生一次人工审批请求。Coordinator 保证唯一 Loop，Loop 顺序执行各 ToolCall。主会话回执在日志写入成功后推进执行；恢复只补缺失回执，不重新调用工具。Executor 的 active 索引用于当前调用的控制与审批查询，在本次 Execute 返回时移除。
 
 ## 模块依赖方向
 
@@ -90,20 +90,28 @@ Wails 将事件映射为 `kind`、作用域字段和 `data`，不直接序列化
 
 ## 内存状态与本地保存
 
-运行期间以 `infra/storage.Storage` 持有的完整内存记录为查询和约束检查的事实源。Bootstrap 创建存储时，只扫描一次项目日志和各会话日志，严格解码、归并最新记录；初始化完成后，普通仓储操作不再扫描文件。所有仓储共享内存锁，在同一受保护操作中校验引用、分配会话序号并接纳修改，磁盘操作不占用这把锁。
+运行期间由 `infra/storage.Store` 持有 Project、Workspace、Session、Execution、Entry、Context、Usage 和 Timing 的类型化当前值。Entry 使用身份映射和每个会话的追加顺序；ToolResult 正文更新不改变原条目的历史位置。不保存通用 records、位置索引或额外的 ToolCall、Execution 查询索引。
 
 ```text
-启动：JSONL 全量重放 → 内存业务记录 → 实例及执行恢复 → 开放业务入口
-运行：内存校验与接纳 → 立即继续业务
-                      → 有界队列 → 唯一后台写入者 → JSONL
-关闭：停止执行 → 停止接纳修改 → 尽力排空队列 → 关闭日志资源
+启动：JSONL 重放 → 类型化内存状态 → 实例及执行恢复 → 开放业务入口
+写入：Service / Core 业务准入 → Repository 写锁 → 同步追加 JSONL → 内存赋值
+读取：Repository 读锁 → 类型化内存状态
+关闭：停止执行 → 关闭存储和日志资源
 ```
 
-后台队列最多保存 1024 项，按内存接纳顺序执行追加、会话文件创建和删除，不使用事务发布、失败回滚或逐条 fsync。队列满时业务不等待空位；首次文件操作失败后不自动重试结果不明的操作。两种情况都会记录持久化退化原因，`Storage.PersistenceError` 可读取该原因，关闭也会返回错误；内存业务继续运行，但本次进程不再接纳后续落盘操作，避免后续记录越过序号或依赖缺口。队列满前已经接纳的有序前缀仍尽力保存。关闭超时允许后续再次等待，不提前释放正在写入的资源。
+`infra/jsonl` 只负责物理日志、连续事件序号、文件创建和删除、追加、扫描及未完成尾行恢复，不依赖 Core、Repository 或 Service。`Log` 的公开方法内部加锁。普通仓储查询不访问文件；日志路径查询是显式文件访问。
 
-内存接纳不等于磁盘保存。强制退出、断电、队列满和文件失败均可能丢失最新修改，包括删除操作；重启只恢复实际存在的完整日志行，不承诺恢复所有已执行的外部副作用。未完成尾行备份后截断，完整坏行报错。工具恢复只匹配已恢复的 Entry，补齐缺失结果，不恢复审批，也不自动重跑工具。显式日志路径查询允许访问文件系统，文件可能落后于内存，新会话尚未保存时可以返回不存在。
+Repository 不重新执行业务准入，不维护事务、批次、后台写入队列或持久化降级状态。每次写入先追加一个 Event，成功后只更新对应的内存值；追加失败直接返回，内存保留原值。不逐条 fsync，也不提供断电后的强持久化保证。出现部分写入后，该文件长度与完整前缀不一致，后续追加报错，重启时备份并截断未完成尾行；完整坏行报错。
 
-记录格式保持单 Event。工具回执首次以 `entry.appended` 保存，正文修改以仅携带 `agent_id`、`entry_id` 和 `text` 的 `entry.updated` 保存；运行时更新入口也只接收条目 ID 和正文，由历史持有者修改已有条目，不传入或比较整条记录。更新事件占用新的事件序号，但条目保留原始序号，启动重放只允许修改工具回执正文。进程在 After Hook 返回或更新接纳前中断时，保留已接纳的实际回执，不重跑工具或补中断结果。发布与回滚保留匹配的程序和数据备份；人工验证使用独立数据目录，检查重启恢复、内存查询不依赖日志文件、持久化退化后业务可用以及关闭排空。常规验证仅运行构建和静态检查，不启动开发服务或执行自动化测试。
+单对象合法性由 Core 的只读 Validate 定义，跨对象关系和状态准入由 Service 负责。启动重放只检查记录自身、事件类型和序号、对象身份与文件作用域，不重新验证历史业务关系或状态转换。Entry 的幂等身份属于存储语义：同一身份、相同内容返回已有值，不同内容返回冲突。
+
+用户 Entry 和 Execution 保持顺序追加。只有建立 Execution 的输入才进入正常历史和 Context；准备阶段的输入可供重试复用 ExecutionID，不要求原子提交。Session 删除由业务层确认不存在活动执行，再删除日志文件，成功后移除对应的内存状态。
+
+工具回执首次以 `entry.appended` 保存，正文修改以仅携带 `agent_id`、`entry_id` 和 `text` 的 `entry.updated` 保存。更新占用新的事件序号，条目保留原始序号和创建时间；Context 恢复只覆盖快照之后更新且仍保留在快照中的回执，不恢复已压缩掉的条目。完整压缩结果以 `context.saved` 保存。
+
+Execution Repository 只返回真正保存的记录。工具数、输出字节和最终回答证据由业务查询组合历史派生；Run 使用同一领域计算规则恢复本次执行证据。Timing 的中断状态也只由业务展示层结合所属 Execution 派生。恢复先补齐缺失工具回执，再恢复执行；不恢复审批或自动重跑工具。
+
+验证使用构建和静态检查，不启动开发服务或执行自动化测试；需要人工数据验证时使用独立临时目录。
 
 ## Agent 角色定义
 
@@ -136,7 +144,7 @@ role: advisor
 
 `AgentDefinition` 保存稳定 ID、展示名称、Role 和指令；Session 内的 Agent 实例只引用定义 ID，并持有实例类型 `Kind`，不复制定义中的 Role。`Kind` 由创建实例的业务流程明确指定，取值为 `main` 或 `subagent`，不从目录名、名称或 Role 推导。同一份角色定义可以用于不同类型的实例；`primary` 是默认定义 ID，不限制其他定义被用作 Main。
 
-主执行的会话历史和 Context 归 Session 管理。Session Service 统一追加用户输入、模型回答、工具回执和压缩摘要；原始历史供展示、追溯和执行证据恢复，Context 持续保存后续请求实际使用的条目。普通条目被历史接纳后增量加入 Context，压缩结果确认后直接替换 Context 的整个条目列表，不进行前后差异合并或逐轮历史筛选。底层按 Session.MainAgentID 访问同一份原始 Entry。Agent Service 不承担消息读写，Execution 只保留本次执行的输入、工具回执和完成证据，不持有主会话 Context 或跨执行历史。面向 AgentID 的消息查询由 Coordinator 分派：Main 委托 Session Service，Subagent 读取当前 Run 的私有消息。主会话历史保留在共享内存存储中，并尽力保存到 JSONL；Subagent 历史不落盘。输入先进入 Session 内存队列，轮到执行准入时才追加为用户 Entry，不进入正在运行的任务上下文。需要保留的约束、决定和参考信息可作为同一历史中的条目追加，并用 `ContextEntry.Protected` 标记模型投影中必须保留的内容。
+主执行的会话历史和 Context 归 Session 管理。Session Service 统一追加用户输入、模型回答、工具回执和压缩摘要；原始历史供展示、追溯和执行证据恢复，Context 持续保存后续请求实际使用的条目。普通条目被历史接纳后增量加入 Context，压缩结果确认后直接替换 Context 的整个条目列表，不进行前后差异合并或逐轮历史筛选。底层按 Session.MainAgentID 访问同一份原始 Entry。Agent Service 不承担消息读写，Execution 只保留本次执行的输入、工具回执和完成证据，不持有主会话 Context 或跨执行历史。面向 AgentID 的消息查询由 Coordinator 分派：Main 委托 Session Service，Subagent 读取当前 Run 的私有消息。主会话历史保留在共享内存存储中，并同步追加到 JSONL；Subagent 历史不落盘。输入先进入 Session 内存队列，轮到执行准入时才追加为用户 Entry，不进入正在运行的任务上下文。需要保留的约束、决定和参考信息可作为同一历史中的条目追加，并用 `ContextEntry.Protected` 标记模型投影中必须保留的内容。
 
 Subagent 的消息按自身 AgentID 隔离，不自动读取 Main 或其他 Subagent 的历史，需要的信息由委派输入明确提供。主会话 Context 由 Session Service 持有到会话删除或服务释放，首次使用时从最近保存的 Context 及后续普通 Entry 初始化；子执行在本次 Run 中持有自己的 Context。构建本轮请求时，`core/context/builder.go` 中的 `ContentFromEntries` 读取当前条目并临时保护本次用户输入，`ContextBuilder.Build` 再结合冻结提示词和窗口限制生成独立请求视图，不重建完整历史。Session 内最多存在一个 Main，由 Session 的 MainAgentID 明确引用，不通过定义 ID 查找主实例；实例类型创建后不可改变。
 

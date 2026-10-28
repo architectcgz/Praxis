@@ -35,6 +35,7 @@ type Dependencies struct {
 	Workspaces     repository.Workspace
 	Sessions       repository.Session
 	Entries        sessionentry.Store
+	Executions     repository.AgentExecution
 	MainAgent      func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
 	Definitions    AgentDefinitionFactory
 	UsageRecords   repository.ModelUsage
@@ -51,6 +52,7 @@ type Service struct {
 	workspaces     repository.Workspace
 	sessions       repository.Session
 	entries        sessionentry.Store
+	executions     repository.AgentExecution
 	mainAgent      func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
 	definitions    AgentDefinitionFactory
 	usageRecords   repository.ModelUsage
@@ -104,6 +106,7 @@ func NewService(deps Dependencies) *Service {
 		workspaces:      deps.Workspaces,
 		sessions:        deps.Sessions,
 		entries:         deps.Entries,
+		executions:      deps.Executions,
 		mainAgent:       deps.MainAgent,
 		agents:          make(map[identity.AgentID]*agentmodel.Agent),
 		agentsBySession: make(map[identity.SessionID]map[identity.AgentID]*agentmodel.Agent),
@@ -202,6 +205,15 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 	}
 	if workspace.ProjectID != project.ID || workspace.State != workspacemodel.WorkspaceReady {
 		return CreateResult{}, projectservice.ErrWorkspaceInvalid
+	}
+	sessions, err := s.sessions.List(ctx, 0)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	for _, existing := range sessions {
+		if existing.MainAgentID == params.AgentID {
+			return CreateResult{}, errorcode.ErrRequestConflict
+		}
 	}
 	at := s.clock.Now().UTC()
 	session := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, params.AgentID, definition.ID, at)
@@ -306,6 +318,33 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 	defer s.agentsMu.Unlock()
 	s.contextMu.Lock()
 	defer s.contextMu.Unlock()
+	if onlyEmpty {
+		hasEntries, err := s.sessions.HasEntries(ctx, sessionID)
+		if errors.Is(err, errorcode.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if hasEntries {
+			return nil
+		}
+	}
+	for _, agent := range s.agentsBySession[sessionID] {
+		_, executionID, _ := agent.State()
+		if executionID != "" {
+			return agentmodel.ErrExecuting
+		}
+	}
+	executions, err := s.executions.ListBySession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, execution := range executions {
+		if execution.Active() {
+			return agentmodel.ErrExecuting
+		}
+	}
 	if err := s.sessions.Delete(ctx, sessionID, onlyEmpty); err != nil {
 		return err
 	}

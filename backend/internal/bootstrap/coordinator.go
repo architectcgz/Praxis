@@ -29,6 +29,7 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		Sessions:       repos.Sessions,
 		Agent:          sessions.GetAgent,
 		Records:        repos.Executions,
+		UsageRecords:   repos.ModelUsage,
 		History:        sessions,
 		Definitions:    config.agents,
 		Clock:          clock.UTCClock{},
@@ -39,7 +40,6 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		HTTPClient:  http.DefaultClient,
 	})
 
-	observeUsage := usageObserver(repos.ModelUsage, resources.logger)
 	// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
 	emitter.Subscribe(func(value coreevent.Event) {
 		if payload, ok := value.Payload.(coreevent.ModelUsage); ok {
@@ -47,7 +47,7 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 			if err != nil || !owner.IsMain() {
 				return
 			}
-			observeUsage(providerapi.UsageRecord{
+			tasks.RecordUsage(providerapi.UsageRecord{
 				SessionID:   value.Scope.SessionID.String(),
 				AgentID:     value.Scope.AgentID.String(),
 				ExecutionID: value.Scope.ExecutionID.String(),

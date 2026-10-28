@@ -81,6 +81,10 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 }
 
 func operationTiming(execution agentexecution.ExecutionRecord, record timing.Record) timing.View {
+	if record.Status == timing.Running && !execution.Active() {
+		record.Status = timing.Interrupted
+	}
+
 	revision := 1
 	if record.Status != timing.Running {
 		revision = 2

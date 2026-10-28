@@ -77,6 +77,11 @@ func Open(ctx context.Context, root string, visit func(Scope, Event) error) (*Lo
 		if err := s.read(ctx, scope, apply(scope)); err != nil {
 			return nil, err
 		}
+		if s.sequences[scope.ID] == 0 {
+			if err := s.deleteSession(ctx, scope.ID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return s, nil
 }
@@ -145,15 +150,15 @@ func (s *Log) sessionPath(sessionID, projectID string) (string, error) {
 	return filepath.Join(s.projects, projectID, "sessions", sessionID+".jsonl"), nil
 }
 
-func (s *Log) Check() error {
+func (s *Log) check() error {
 	if s.closed {
 		return errors.New("log is closed")
 	}
 	return nil
 }
 
-// ExistingPath 仅供显式导出日志的业务使用，普通实体查询不调用文件系统。
-func (s *Log) ExistingPath(sessionID string) (string, error) {
+// existingPath 在持有日志锁时检查已有文件。
+func (s *Log) existingPath(sessionID string) (string, error) {
 	projectID, known := s.sessionProjects[sessionID]
 	if !known {
 		return "", os.ErrNotExist
@@ -177,4 +182,94 @@ func (s *Log) Close() error {
 	defer s.mu.Unlock()
 	s.closed = true
 	return nil
+}
+
+// CreateSession 同步创建日志，不覆盖已有日志，也不保证断电后已保存。
+func (s *Log) CreateSession(ctx context.Context, sessionID, projectID string, first Event) (Event, error) {
+	if err := s.lock(ctx); err != nil {
+		return Event{}, err
+	}
+	defer s.mu.Unlock()
+	if err := validateNextEvent(0, first); err != nil {
+		return Event{}, err
+	}
+	if err := s.createSession(ctx, sessionID, projectID, first); err != nil {
+		return Event{}, err
+	}
+	return first, nil
+}
+
+// DeleteSession 删除会话日志并释放游标，调用方负责协调活动执行和业务状态。
+func (s *Log) DeleteSession(ctx context.Context, sessionID string) error {
+	if err := s.lock(ctx); err != nil {
+		return err
+	}
+	defer s.mu.Unlock()
+	return s.deleteSession(ctx, sessionID)
+}
+
+// AppendSession 只追加已有会话日志，文件丢失时返回错误，不负责创建或补建。
+func (s *Log) AppendSession(ctx context.Context, sessionID, projectID string, event Event) (Event, error) {
+	if err := s.lock(ctx); err != nil {
+		return Event{}, err
+	}
+	defer s.mu.Unlock()
+	if err := validateNextEvent(s.sequences[sessionID], event); err != nil {
+		return Event{}, err
+	}
+	if err := s.appendEvent(ctx, sessionID, projectID, event); err != nil {
+		return Event{}, err
+	}
+	return event, nil
+}
+
+// AppendProject 追加在资源初始化阶段已经建立的项目汇总日志。
+func (s *Log) AppendProject(ctx context.Context, event Event) (Event, error) {
+	if err := s.lock(ctx); err != nil {
+		return Event{}, err
+	}
+	defer s.mu.Unlock()
+	if err := validateNextEvent(s.sequences[""], event); err != nil {
+		return Event{}, err
+	}
+	if err := s.appendProjectEvent(ctx, event); err != nil {
+		return Event{}, err
+	}
+	return event, nil
+}
+
+// validateNextEvent 不重新分配内存状态确定的序号；不连续时停止写入，而不是掩盖日志缺口。
+func validateNextEvent(sequence uint64, event Event) error {
+	if sequence == ^uint64(0) {
+		return errors.New("log sequence exhausted")
+	}
+	if event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
+		return errors.New("invalid event identity or sequence")
+	}
+	return nil
+}
+
+func (s *Log) lock(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if err := s.check(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// ExistingPath 只供显式导出日志使用。
+func (s *Log) ExistingPath(ctx context.Context, sessionID string) (string, error) {
+	if err := s.lock(ctx); err != nil {
+		return "", err
+	}
+	defer s.mu.Unlock()
+	return s.existingPath(sessionID)
 }

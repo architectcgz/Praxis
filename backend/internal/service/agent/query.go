@@ -6,12 +6,14 @@ import (
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	"time"
 )
 
 type Dependencies struct {
+	History          sessionmodel.History
 	ActiveExecution  func(identity.AgentID) (agentexecution.ExecutionRecord, bool)
 	Agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	RegisterAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
@@ -21,6 +23,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	history          sessionmodel.History
 	activeExecution  func(identity.AgentID) (agentexecution.ExecutionRecord, bool)
 	agent            func(identity.AgentID) (*agentmodel.Agent, error)
 	registerAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
@@ -67,6 +70,7 @@ func (s *Service) DescribeAgent(value *agentmodel.Agent) (AgentView, error) {
 // NewService 使用装配层提供的完整依赖创建 Agent 查询服务。
 func NewService(deps Dependencies) *Service {
 	return &Service{
+		history:          deps.History,
 		activeExecution:  deps.ActiveExecution,
 		agent:            deps.Agent,
 		registerAgent:    deps.RegisterAgent,
@@ -97,7 +101,12 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (A
 	if !value.IsMain() {
 		return view, nil
 	}
+	page, err := s.history.ListEntries(ctx, value.SessionID)
+	if err != nil {
+		return AgentView{}, err
+	}
 	if len(latest) > 0 {
+		latest[0].Progress = latest[0].Progress.WithEntries(latest[0].ID.String(), page.Entries)
 		view.LatestExecution = &latest[0]
 	}
 	if view.CurrentExecutionID != "" {
@@ -108,6 +117,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (A
 			if err != nil {
 				return AgentView{}, fmt.Errorf("load current agent execution: %w", err)
 			}
+			current.Progress = current.Progress.WithEntries(current.ID.String(), page.Entries)
 			view.CurrentExecution = &current
 		}
 	}

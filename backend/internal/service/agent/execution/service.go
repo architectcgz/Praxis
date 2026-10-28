@@ -23,6 +23,7 @@ type Dependencies struct {
 	Sessions       repository.Session
 	Agent          func(identity.AgentID) (*agentmodel.Agent, error)
 	Records        repository.AgentExecution
+	UsageRecords   repository.ModelUsage
 	History        sessionmodel.History
 	Definitions    AgentDefinitionProvider
 	Clock          clock.Clock
@@ -37,6 +38,7 @@ type Service struct {
 	sessions       repository.Session
 	agent          func(identity.AgentID) (*agentmodel.Agent, error)
 	records        repository.AgentExecution
+	usageRecords   repository.ModelUsage
 	history        sessionmodel.History
 	definitions    AgentDefinitionProvider
 	clock          clock.Clock
@@ -52,6 +54,7 @@ func NewService(deps Dependencies) *Service {
 		sessions:       deps.Sessions,
 		agent:          deps.Agent,
 		records:        deps.Records,
+		usageRecords:   deps.UsageRecords,
 		history:        deps.History,
 		definitions:    deps.Definitions,
 		clock:          deps.Clock,

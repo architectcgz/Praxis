@@ -1,9 +1,14 @@
 package project
 
 import (
-	"praxis/internal/core/security"
-	"praxis/internal/identity"
+	"fmt"
+	"strings"
 	"time"
+
+	"praxis/internal/core/security"
+	"praxis/internal/errorcode"
+	"praxis/internal/identity"
+	"praxis/internal/utils/pathutil"
 )
 
 // ProjectState 表示用户项目的生命周期状态。
@@ -44,4 +49,30 @@ func NewProject(
 		CreatedAt:          at.UTC(),
 		UpdatedAt:          at.UTC(),
 	}
+}
+
+// Validate 检查对象自身的完整性，不修改或修复输入。
+func (p Project) Validate() error {
+	if !p.ID.Valid() {
+		return fmt.Errorf("project.id: invalid project identity: %w", errorcode.ErrInvalidValue)
+	}
+	if p.Name == "" || strings.ContainsAny(p.Name, "\x00\r\n") {
+		return fmt.Errorf("project.name: name is required and cannot contain control characters: %w", errorcode.ErrInvalidValue)
+	}
+	if !pathutil.IsAbsoluteNormalized(p.Path) {
+		return fmt.Errorf("project.path: path must be an absolute normalized path: %w", errorcode.ErrInvalidValue)
+	}
+	if p.DefaultWorkspaceID == "" || p.DefaultWorkspaceID.String() != strings.TrimSpace(p.DefaultWorkspaceID.String()) {
+		return fmt.Errorf("project.defaultWorkspaceID: default workspace id is required: %w", errorcode.ErrInvalidValue)
+	}
+	if p.State != ProjectActive && p.State != ProjectArchived {
+		return fmt.Errorf("project.state: unknown project state: %w", errorcode.ErrInvalidValue)
+	}
+	if p.ApprovalMode != nil && !p.ApprovalMode.ValidDefault() {
+		return fmt.Errorf("project.approvalMode: default approval mode must be ask, auto or yolo: %w", errorcode.ErrInvalidValue)
+	}
+	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
+		return fmt.Errorf("project.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
+	}
+	return nil
 }

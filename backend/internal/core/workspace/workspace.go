@@ -1,8 +1,13 @@
 package workspace
 
 import (
-	"praxis/internal/identity"
+	"fmt"
+	"strings"
 	"time"
+
+	"praxis/internal/errorcode"
+	"praxis/internal/identity"
+	"praxis/internal/utils/pathutil"
 )
 
 // WorkspaceKind 标识工作区目录的提供方式。
@@ -54,4 +59,30 @@ func NewWorkspace(
 		CreatedAt: at.UTC(),
 		UpdatedAt: at.UTC(),
 	}
+}
+
+// Validate 检查对象自身的完整性，不修改或修复输入。
+func (w Workspace) Validate() error {
+	if !w.ProjectID.Valid() {
+		return fmt.Errorf("workspace.projectID: invalid project identity: %w", errorcode.ErrInvalidValue)
+	}
+	if w.ID == "" || w.ID.String() != strings.TrimSpace(w.ID.String()) {
+		return fmt.Errorf("workspace: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
+	}
+	if w.Kind != WorkspaceProjectRoot && w.Kind != WorkspaceWorktree && w.Kind != WorkspaceTemporary {
+		return fmt.Errorf("workspace.kind: unknown workspace kind: %w", errorcode.ErrInvalidValue)
+	}
+	if !pathutil.IsAbsoluteNormalized(w.Path) {
+		return fmt.Errorf("workspace.path: path must be an absolute normalized path: %w", errorcode.ErrInvalidValue)
+	}
+	if w.State != WorkspaceReady && w.State != WorkspaceUnavailable && w.State != WorkspaceArchived {
+		return fmt.Errorf("workspace.state: unknown workspace state: %w", errorcode.ErrInvalidValue)
+	}
+	if w.Revision == 0 {
+		return fmt.Errorf("workspace.revision: revision must be positive: %w", errorcode.ErrInvalidValue)
+	}
+	if w.CreatedAt.IsZero() || w.UpdatedAt.IsZero() || w.UpdatedAt.Before(w.CreatedAt) {
+		return fmt.Errorf("workspace.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
+	}
+	return nil
 }

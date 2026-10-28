@@ -93,7 +93,8 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	}
 	a.sessions = buildSessions(resources, repos, config.agents, hooks, configMu, config.models, mainAgent)
 	agents = agentservice.NewService(agentservice.Dependencies{
-		Agent: a.sessions.GetAgent,
+		History: a.sessions,
+		Agent:   a.sessions.GetAgent,
 		ActiveExecution: func(id identity.AgentID) (agentexecution.ExecutionRecord, bool) {
 			return a.coordinator.ActiveExecution(id)
 		},
@@ -117,6 +118,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Clock:    clock.UTCClock{},
 	})
 	workspaces := workspaceservice.NewService(workspaceservice.Dependencies{
+		Projects:   repos.Projects,
 		Sessions:   repos.Sessions,
 		Workspaces: repos.Workspaces,
 		TextReader: fs.Filesystem{},

@@ -5,7 +5,7 @@ import (
 	"praxis/internal/repository"
 )
 
-// Repositories 组合共享同一内存状态与后台持久化生命周期的仓储。
+// Repositories 组合共享同一类型化内存状态与同步日志的仓储。
 type Repositories struct {
 	Projects   ProjectRepository
 	Workspaces WorkspaceRepository
@@ -16,7 +16,7 @@ type Repositories struct {
 	ModelUsage ModelUsageRepository
 }
 
-func (s *Storage) Repositories() Repositories {
+func (s *Store) Repositories() Repositories {
 	return Repositories{
 		Projects:   ProjectRepository{storage: s},
 		Workspaces: WorkspaceRepository{storage: s},

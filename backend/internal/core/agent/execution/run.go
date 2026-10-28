@@ -5,7 +5,6 @@ import (
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
 	"reflect"
@@ -87,7 +86,7 @@ func (r *Run) Snapshot() ExecutionRecord {
 	return value
 }
 
-// Update 在仓储内存接纳变更后发布新进度，不等待落盘；回调不能调用 Run 的其他方法。
+// Update 在仓储保存成功后发布新进度；回调不能调用 Run 的其他方法。
 func (r *Run) Update(change func(*ExecutionRecord) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -143,7 +142,7 @@ func (r *Run) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry
 		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 	}
 	if r.main && value.IsSummary() {
-		return value.Clone(), false, value.Validate()
+		return value.Clone(), false, nil
 	}
 	if prior, ok := r.history.Get(value.ID); ok {
 		candidate := value.Clone()
@@ -155,14 +154,14 @@ func (r *Run) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry
 	}
 	if !r.main {
 		value.Sequence, value.CreatedAt = r.sequence+1, time.Now().UTC()
-	}
-	if err := value.Validate(); err != nil {
-		return sessionentry.ContextEntry{}, false, err
-	}
-	// 模型可能在后续轮次重复生成调用标识，不能让新调用覆盖已有配对关系。
-	for _, call := range value.ToolCalls(r.record.SessionID, r.record.AgentID) {
-		if _, found := r.call(call.Key); found {
-			return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
+		if err := value.Validate(); err != nil {
+			return sessionentry.ContextEntry{}, false, err
+		}
+		// 子执行的调用标识只在私有历史中准入；Main 由 Session 在追加前检查。
+		for _, call := range value.ToolCalls(r.record.SessionID, r.record.AgentID) {
+			if _, found := r.call(call.Key); found {
+				return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
+			}
 		}
 	}
 	r.history.Append(value)
@@ -234,27 +233,5 @@ func (r *Run) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 }
 
 func (r *Run) deriveProgress() {
-	progress := &r.record.Progress
-	progress.OutputBytes, progress.ToolCalls = progress.ModelOutputBytes, 0
-	progress.FinalAssistantID, progress.FinalStopReason = "", ""
-	var last sessionentry.ContextEntry
-	for _, entry := range r.history.entries {
-		if entry.ExecutionID != r.record.ID.String() {
-			continue
-		}
-		if entry.Role == role.Assistant && entry.Sequence > last.Sequence {
-			last = entry
-		}
-		for _, block := range entry.Content {
-			if block.Kind == sessionentry.BlockToolCall {
-				progress.ToolCalls++
-			}
-			if block.Kind == sessionentry.BlockToolResult {
-				progress.OutputBytes += int64(len(block.Text))
-			}
-		}
-	}
-	if last.StopReason == "completed" || last.StopReason == "stop_sequence" {
-		progress.FinalAssistantID, progress.FinalStopReason = last.ID, last.StopReason
-	}
+	r.record.Progress = r.record.Progress.WithEntries(r.record.ID.String(), r.history.entries)
 }

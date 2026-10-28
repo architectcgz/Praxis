@@ -13,6 +13,14 @@ func (m ContextEntry) Validate() error {
 	if m.ID == "" || m.Sequence == 0 || m.CreatedAt.IsZero() {
 		return errors.New("message identity, sequence and creation time are required")
 	}
+	return m.ValidateContent()
+}
+
+// ValidateContent 校验追加前的条目内容；序号和创建时间由存储分配。
+func (m ContextEntry) ValidateContent() error {
+	if m.ID == "" {
+		return errors.New("message identity is required")
+	}
 	for _, value := range []string{m.ID, m.RequestID, m.SourceTaskID, m.HandoffID, m.ExecutionID, m.TurnID, m.AuthorID} {
 		if value != strings.TrimSpace(value) || strings.ContainsAny(value, "\x00\r\n") {
 			return errors.New("message identity fields must be canonical")
@@ -34,7 +42,18 @@ func (m ContextEntry) Validate() error {
 	if len(m.Content) == 0 && !(m.Role == role.Assistant && (m.StopReason == "completed" || m.StopReason == "stop_sequence")) {
 		return errors.New("message blocks are required")
 	}
+	if m.SourceTaskID != "" && (m.Role != role.User || m.ExecutionID == "") {
+		return errors.New("task input requires a user message and execution identity")
+	}
+	seen := make(map[string]bool)
 	for _, block := range m.Content {
+		if block.Kind == BlockToolCall || block.Kind == BlockToolResult {
+			if m.ExecutionID == "" || m.TurnID == "" || seen[block.CallID] {
+				return errors.New("tool message ownership or call identity is invalid")
+			}
+			seen[block.CallID] = true
+		}
+
 		if err := validateBlock(m.Role, block); err != nil {
 			return err
 		}

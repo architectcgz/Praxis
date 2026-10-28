@@ -1,8 +1,13 @@
 package execution
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
+	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/session/entry/role"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -103,4 +108,85 @@ func (e *ExecutionRecord) End(
 	e.Outcome = outcome
 	e.FailureCode = failureCode
 	e.EndedAt = at.UTC()
+}
+
+// Validate 检查对象自身的完整性，不修改或修复输入。
+func (e ExecutionRecord) Validate() error {
+	if e.Progress.ModelOutputBytes < 0 || e.Progress.Iterations > e.Progress.ModelRequests || e.Progress.ModelRequests > 0 && e.Progress.NextSequence != e.Progress.ModelRequests+1 {
+		return fmt.Errorf("execution.progress: usage counters or request sequence are invalid: %w", errorcode.ErrInvalidValue)
+	}
+	for _, id := range []string{
+		e.ID.String(),
+		e.SessionID.String(),
+		e.AgentID.String(),
+		e.RequestID.String(),
+		e.InputEntryID,
+	} {
+		if id == "" || id != strings.TrimSpace(id) {
+			return fmt.Errorf("agent_execution: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
+		}
+	}
+	switch e.Status {
+	case ExecutionStarting, ExecutionRunning, ExecutionEnding, ExecutionEnded:
+	default:
+		return fmt.Errorf("agent_execution: unknown status: %w", errorcode.ErrInvalidValue)
+	}
+	if err := e.Config.Validate(); err != nil {
+		return fmt.Errorf("execution.config: %w", err)
+	}
+
+	if e.CreatedAt.IsZero() || !e.StartedAt.IsZero() && e.StartedAt.Before(e.CreatedAt) || !e.EndedAt.IsZero() && e.EndedAt.Before(e.CreatedAt) {
+		return fmt.Errorf("execution.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)
+	}
+	if e.Status == ExecutionStarting && (!e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
+		return fmt.Errorf("agent_execution: starting execution has terminal fields: %w", errorcode.ErrInvalidValue)
+	}
+	if (e.Status == ExecutionRunning || e.Status == ExecutionEnding) && (e.StartedAt.IsZero() || !e.EndedAt.IsZero() || e.Outcome != "") {
+		return fmt.Errorf("agent_execution: active execution has invalid state timestamps: %w", errorcode.ErrInvalidValue)
+	}
+	if e.Status == ExecutionEnded {
+		if e.StartedAt.IsZero() || e.EndedAt.IsZero() || e.Outcome == ExecutionFailed && e.FailureCode == "" {
+			return fmt.Errorf("agent_execution: ended execution has invalid terminal fields: %w", errorcode.ErrInvalidValue)
+		}
+		switch e.Outcome {
+		case ExecutionCompleted, ExecutionYielded, ExecutionPaused,
+			ExecutionFailed, ExecutionInterrupted:
+		default:
+			return fmt.Errorf("agent_execution: ended execution has invalid terminal fields: %w", errorcode.ErrInvalidValue)
+		}
+	}
+	if e.FailureCode == ExecutionFailureRequestCanceled && e.Outcome != ExecutionPaused && e.Outcome != ExecutionInterrupted {
+		return fmt.Errorf("execution.failureCode: failure code does not match outcome: %w", errorcode.ErrInvalidValue)
+	}
+	if len([]rune(e.FailureMessage)) > MaxExecutionFailureMessageRunes || e.FailureMessage != "" && (e.Status != ExecutionEnded || e.Outcome != ExecutionFailed) {
+		return fmt.Errorf("execution.failureMessage: failure message is invalid: %w", errorcode.ErrInvalidValue)
+	}
+	return nil
+}
+
+// WithEntries 从所属执行的历史条目派生工具计数、输出字节和最终回答证据。
+func (progress ExecutionProgress) WithEntries(executionID string, entries []sessionentry.ContextEntry) ExecutionProgress {
+	progress.OutputBytes, progress.ToolCalls = progress.ModelOutputBytes, 0
+	progress.FinalAssistantID, progress.FinalStopReason = "", ""
+	var last sessionentry.ContextEntry
+	for _, entry := range entries {
+		if entry.ExecutionID != executionID {
+			continue
+		}
+		if entry.Role == role.Assistant && entry.Sequence > last.Sequence {
+			last = entry
+		}
+		for _, block := range entry.Content {
+			if block.Kind == sessionentry.BlockToolCall {
+				progress.ToolCalls++
+			}
+			if block.Kind == sessionentry.BlockToolResult {
+				progress.OutputBytes += int64(len(block.Text))
+			}
+		}
+	}
+	if last.StopReason == "completed" || last.StopReason == "stop_sequence" {
+		progress.FinalAssistantID, progress.FinalStopReason = last.ID, last.StopReason
+	}
+	return progress
 }

@@ -50,7 +50,7 @@ func (s *Log) deleteSession(ctx context.Context, sessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path, err := s.ExistingPath(sessionID)
+	path, err := s.existingPath(sessionID)
 	if err != nil {
 		return err
 	}
@@ -63,14 +63,21 @@ func (s *Log) deleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// appendExisting 只顺序追加，不回滚失败写入、不逐条 fsync。
-// 写入失败后调用方必须停止后续写入，避免越过不完整尾行继续生成日志。
-func (s *Log) appendExisting(path string, offset int64, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY, 0600)
+// appendExisting 只追加到已确认的完整前缀，不回滚失败写入、不逐条 fsync。
+// 部分写入后长度不再匹配，后续写入直接报错，由下次启动恢复未完成尾行。
+func (s *Log) appendExisting(path string, length int64, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("open log %s: %w", path, err)
 	}
-	n, writeErr := file.WriteAt(data, offset)
+	info, err := file.Stat()
+	if err != nil {
+		return errors.Join(err, file.Close())
+	}
+	if info.Size() != length {
+		return errors.Join(fmt.Errorf("log length mismatch for %s: expected %d, got %d", path, length, info.Size()), file.Close())
+	}
+	n, writeErr := file.Write(data)
 	if writeErr == nil && n != len(data) {
 		writeErr = io.ErrShortWrite
 	}

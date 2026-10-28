@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
@@ -40,6 +41,21 @@ func (s *Service) ReplaceContext(ctx context.Context, sessionID identity.Session
 	}
 	if session.State != sessionmodel.SessionActive {
 		return errorcode.ErrRequestConflict
+	}
+	if len(entries) == 0 {
+		return errors.New("saved context entries are required")
+	}
+	for _, entry := range entries {
+		if err := entry.Validate(); err != nil {
+			return err
+		}
+		prior, err := s.entries.Get(ctx, session.MainAgentID, entry.ID)
+		if err != nil {
+			return err
+		}
+		if entry.Sequence != prior.Sequence || entry.ExecutionID != prior.ExecutionID || entry.RequestID != prior.RequestID || entry.Role != prior.Role {
+			return errorcode.ErrRequestConflict
+		}
 	}
 	if err := s.entries.SaveContext(ctx, session.ID, session.MainAgentID, entries); err != nil {
 		return err
