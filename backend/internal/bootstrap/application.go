@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"praxis/internal/clock"
-	agentmodel "praxis/internal/core/agent"
-	agentexecution "praxis/internal/core/agent/execution"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	"praxis/internal/identity"
 	fs "praxis/internal/infra/filesystem"
 	"praxis/internal/logging"
 	agentservice "praxis/internal/service/agent"
@@ -45,7 +42,7 @@ type Options struct {
 	Hooks  []any
 }
 
-// Open 只做高层装配；恢复完成前不把业务入口交给桌面宿主。
+// Open 只做高层装配；会话 Context 按需恢复，启动不继续旧 Execution。
 func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Application, err error) {
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
@@ -65,7 +62,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		}
 		// 关闭日志前保存启动失败原因，不能只依赖桌面宿主的控制台输出。
 		a.logger.Errorf("application open failed: %v", err)
-		// 装配失败也要先停止可能已恢复的执行，再关闭其依赖的日志资源。
+		// 装配失败先关闭执行入口，再关闭存储与日志资源。
 		if a.coordinator != nil {
 			_ = a.coordinator.Close(context.Background())
 		}
@@ -86,26 +83,18 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		return nil, err
 	}
 	configMu := &config.mu
-	// 只在装配处绑定跨模块协作；业务入口在实例与执行恢复完成后才开放。
-	var agents *agentservice.Service
-	mainAgent := func(ctx context.Context, id identity.SessionID) (*agentmodel.Agent, error) {
-		return agents.GetOrCreateMainAgent(ctx, id)
-	}
-	a.sessions = buildSessions(resources, repos, config.agents, hooks, configMu, config.models, mainAgent)
-	agents = agentservice.NewService(agentservice.Dependencies{
-		History: a.sessions,
-		Agent:   a.sessions.GetAgent,
-		ActiveExecution: func(id identity.AgentID) (agentexecution.ExecutionRecord, bool) {
-			return a.coordinator.ActiveExecution(id)
-		},
-		RegisterAgent:    a.sessions.RegisterAgent,
+	a.sessions = buildSessions(repos, hooks, configMu, config.models)
+	coordinator := buildCoordinator(resources, repos, config, a.sessions, hooks, emitter, configMu, options.Runner)
+	a.coordinator = coordinator
+	agents := agentservice.NewService(agentservice.Dependencies{
+		History:          a.sessions,
+		ActiveRun:        coordinator.ActiveRun,
+		SessionRuns:      coordinator.SessionRuns,
 		ExecutionRecords: repos.Executions,
 		Sessions:         repos.Sessions,
 		Definitions:      config.agents.Definition,
 	})
 	models := buildModelService(root, config, a.logger)
-	coordinator := buildCoordinator(resources, repos, config, a.sessions, agents.GetOrCreateMainAgent, hooks, emitter, configMu, options.Runner)
-	a.coordinator = coordinator
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:   repos.Projects,
 		Workspaces: repos.Workspaces,
@@ -114,7 +103,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	})
 	approvals := approvalservice.NewService(approvalservice.Dependencies{
 		Config:   config,
-		Projects: repos.Projects,
+		Sessions: repos.Sessions,
 		Clock:    clock.UTCClock{},
 	})
 	workspaces := workspaceservice.NewService(workspaceservice.Dependencies{
@@ -136,12 +125,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Timings:        coordinator,
 		Usages:         a.sessions,
 		SessionLogPath: repos.Sessions.SessionLogPath,
-	}
-	if err := agents.RestoreAgents(ctx); err != nil {
-		return nil, err
-	}
-	if err := a.coordinator.Restore(ctx); err != nil {
-		return nil, err
 	}
 	a.logger.Infof("application open completed ready=true")
 	ready = true

@@ -7,12 +7,10 @@ import (
 
 type Dependencies struct {
 	ApprovalConfig approvalservice.ConfigSource
-	Calls          repository.ToolCallQueries
 	Sessions       repository.Session
-	Projects       repository.Project
 }
 
-// Service 判断审批规则，并为恢复编排构造缺失的历史条目。
+// Service 读取工具归属和审批规则，准备审核输入及预算。
 type Service struct {
 	deps Dependencies
 }

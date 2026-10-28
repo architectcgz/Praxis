@@ -27,18 +27,14 @@ type SessionSummary struct {
 }
 
 type CreateSessionRequest struct {
-	SessionID         string `json:"sessionId" validate:"session_id"`
-	AgentID           string `json:"agentId" validate:"id"`
-	ProjectID         string `json:"projectId" validate:"project_id"`
-	WorkspaceID       string `json:"workspaceId" validate:"id"`
-	AgentDefinitionID string `json:"agentDefinitionId" validate:"definition_id"`
-	RequestID         string `json:"requestId" validate:"id"`
+	SessionID   string `json:"sessionId" validate:"session_id"`
+	ProjectID   string `json:"projectId" validate:"project_id"`
+	WorkspaceID string `json:"workspaceId" validate:"id"`
+	RequestID   string `json:"requestId" validate:"id"`
 }
 
 type CreateSessionResponse struct {
-	SessionID         string `json:"sessionId"`
-	ProjectID         string `json:"projectId"`
-	WorkspaceID       string `json:"workspaceId"`
-	AgentID           string `json:"agentId"`
-	AgentDefinitionID string `json:"agentDefinitionId"`
+	SessionID   string `json:"sessionId"`
+	ProjectID   string `json:"projectId"`
+	WorkspaceID string `json:"workspaceId"`
 }

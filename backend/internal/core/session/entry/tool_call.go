@@ -24,7 +24,7 @@ type ToolCall struct {
 	CreatedAt time.Time
 }
 
-// ToolCalls 从已提交的 Assistant 提取调用，正常执行和派生查询共用此身份映射。
+// ToolCalls 从已提交的 Assistant 提取调用，正常执行和启动恢复共用此身份映射。
 func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
 	calls := make([]ToolCall, 0)
 	for _, block := range m.Content {

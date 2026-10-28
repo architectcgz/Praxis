@@ -34,7 +34,7 @@ func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID,
 	}
 	stored, inserted, err := s.entries.Append(ctx, sessionentry.Record{
 		SessionID: session.ID,
-		AgentID:   session.MainAgentID,
+		AgentID:   session.MainAgentID(),
 		Data:      data,
 	})
 	if err != nil {
@@ -60,7 +60,7 @@ func (s *Service) UpdateToolResult(ctx context.Context, sessionID identity.Sessi
 	if session.State != sessionmodel.SessionActive {
 		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
 	}
-	prior, err := s.entries.Get(ctx, session.MainAgentID, id)
+	prior, err := s.entries.Get(ctx, session.MainAgentID(), id)
 	if err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
@@ -70,7 +70,7 @@ func (s *Service) UpdateToolResult(ctx context.Context, sessionID identity.Sessi
 	if len(text) > tool.MaxInlineResultBytes {
 		return sessionentry.ContextEntry{}, errorcode.ErrInvalidRequest
 	}
-	stored, err := s.entries.UpdateToolResult(ctx, session.ID, session.MainAgentID, id, text)
+	stored, err := s.entries.UpdateToolResult(ctx, session.ID, session.MainAgentID(), id, text)
 	if err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
@@ -86,7 +86,7 @@ func (s *Service) GetEntry(ctx context.Context, sessionID identity.SessionID, id
 	if err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
-	return s.entries.Get(ctx, session.MainAgentID, id)
+	return s.entries.Get(ctx, session.MainAgentID(), id)
 }
 
 // ListEntries 读取主会话的完整已准入历史，不聚合子执行的私有消息。
@@ -95,24 +95,24 @@ func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID)
 	if err != nil {
 		return sessionentry.List{}, err
 	}
-	return s.entries.List(ctx, sessionentry.Query{AgentID: session.MainAgentID})
+	return s.entries.List(ctx, sessionentry.Query{AgentID: session.MainAgentID()})
 }
 
 func (s *Service) validateEntry(ctx context.Context, session sessionmodel.Session, data sessionentry.ContextEntry) error {
 	if err := data.ValidateContent(); err != nil {
 		return err
 	}
-	if data.Role == role.Assistant && (data.AuthorKind != sessionentry.AuthorAgent || data.AuthorID != session.MainAgentID.String()) {
+	if data.Role == role.Assistant && (data.AuthorKind != sessionentry.AuthorAgent || data.AuthorID != session.MainAgentID().String()) {
 		return errors.New("assistant author does not match the session main agent")
 	}
 	if data.ExecutionID != "" {
-		execution, err := s.executions.Get(ctx, identity.AgentExecutionID(data.ExecutionID))
+		execution, err := s.executions.Get(ctx, session.ID, identity.AgentExecutionID(data.ExecutionID))
 		preparing := errors.Is(err, errorcode.ErrNotFound) && data.Role == role.User && !data.IsSummary() && data.ID == "input:"+data.RequestID
 		if !preparing {
 			if err != nil {
 				return err
 			}
-			if execution.SessionID != session.ID || execution.AgentID != session.MainAgentID || execution.RequestID.String() != data.RequestID {
+			if execution.SessionID != session.ID || execution.AgentID != session.MainAgentID() || execution.RequestID.String() != data.RequestID {
 				return errorcode.ErrRequestConflict
 			}
 		}
@@ -126,12 +126,12 @@ func (s *Service) validateEntry(ctx context.Context, session sessionmodel.Sessio
 	if !needsHistory {
 		return nil
 	}
-	page, err := s.entries.List(ctx, sessionentry.Query{AgentID: session.MainAgentID, IncludeUnadmitted: true})
+	page, err := s.entries.List(ctx, sessionentry.Query{AgentID: session.MainAgentID(), IncludeUnadmitted: true})
 	if err != nil {
 		return err
 	}
 	if data.IsSummary() {
-		if data.AuthorID != session.MainAgentID.String() || data.ExecutionID == "" || data.RequestID == "" {
+		if data.AuthorID != session.MainAgentID().String() || data.ExecutionID == "" || data.RequestID == "" {
 			return errors.New("summary ownership is required")
 		}
 		seen := make(map[string]bool)

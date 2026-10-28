@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
@@ -14,7 +15,7 @@ func (r *Coordinator) scheduleSession(ctx context.Context, sessionID identity.Se
 	if !ok {
 		return nil
 	}
-	owner, err := r.mainAgent(ctx, sessionID)
+	session, err := r.sessionRecords.Get(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -23,7 +24,7 @@ func (r *Coordinator) scheduleSession(ctx context.Context, sessionID identity.Se
 		r.mu.Unlock()
 		return errCoordinatorClosed
 	}
-	if active := r.executions[owner.ID]; active != nil {
+	if active := r.executions[session.MainAgentID()]; active != nil {
 		// 暂停后显式提交输入或选择模型可重新唤醒队列，但必须等旧执行完全退出。
 		cause := context.Cause(active.ctx)
 		if explicit && (errors.Is(cause, errExecutionPaused) || errors.Is(cause, errExecutionStopped)) {
@@ -38,10 +39,10 @@ func (r *Coordinator) scheduleSession(ctx context.Context, sessionID identity.Se
 		r.mu.Unlock()
 		return nil
 	}
-	active := newActiveExecution(ctx)
-	r.executions[owner.ID] = active
+	active := newActiveExecution(ctx, sessionID)
+	r.executions[session.MainAgentID()] = active
 	r.mu.Unlock()
-	return r.startNext(ctx, input, owner.ID, queue, active)
+	return r.startNext(ctx, input, session.MainAgentID(), queue, active)
 }
 
 // startNext 的前置条件是调度器已在锁内领取队首并标记忙碌，不再判断或抢占运行权。
@@ -83,6 +84,6 @@ func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, 
 	if err != nil {
 		return nil, err
 	}
-	run, _, err := r.operations.PrepareTask(ctx, input, ownerID, modelConfig)
+	run, _, err := r.operations.PrepareTask(ctx, input, ownerID, agentmodel.DefinitionPrimary, modelConfig)
 	return run, err
 }

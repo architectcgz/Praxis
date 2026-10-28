@@ -10,7 +10,7 @@ import (
 	"praxis/internal/core/security"
 )
 
-// Config 保存全局授权配置，项目可以覆盖 ApprovalMode。
+// Config 保存全局授权配置，会话可以覆盖 ApprovalMode。
 type Config struct {
 	ApprovalMode security.ApprovalMode `json:"approvalMode"`
 }

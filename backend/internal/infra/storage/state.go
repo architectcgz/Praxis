@@ -28,7 +28,8 @@ type storedWait struct {
 	Value     workflow.WaitCondition
 }
 
-// state 只持有领域当前值；Entry 另外保存每个会话的追加顺序。
+// state 持有项目事实与已载入会话的历史；sessions 成员表示该会话已完成重放。
+// Session 元数据以 SQLite 为准，列表查询不依赖这里的按需缓存。
 type state struct {
 	sequences  map[string]uint64
 	projects   map[identity.ProjectID]projectmodel.Project

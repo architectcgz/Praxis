@@ -1,15 +1,20 @@
 package storage
 
 import (
-	"cmp"
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type SessionRepository struct{ storage *Store }
@@ -19,31 +24,34 @@ func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sess
 		return sessionmodel.Session{}, err
 	}
 	defer r.storage.mu.RUnlock()
-	value, ok := r.storage.state.sessions[id]
-	if !ok {
-		return sessionmodel.Session{}, errorcode.ErrNotFound
-	}
-	return value, nil
+	return r.storage.sessionRecord(ctx, id)
 }
 
-// Create 先创建会话日志并写入首条事实，成功后发布会话内存状态。
+// Create 先建立空历史文件，再提交 SQLite 元数据；数据库提交失败允许留下未被索引的空文件。
 func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Session) error {
 	if err := r.storage.lock(ctx); err != nil {
 		return err
 	}
 	defer r.storage.mu.Unlock()
-	if _, exists := r.storage.state.sessions[value.ID]; exists {
+	if _, err := r.storage.sessionRecord(ctx, value.ID); err == nil {
 		return errorcode.ErrRequestConflict
+	} else if !errors.Is(err, errorcode.ErrNotFound) {
+		return err
 	}
-	event, err := newEvent(1, "session.saved", "session", value.ID.String(), value)
+	path := r.storage.sessionLogPath(value.ID.String(), value.ProjectID.String())
+	if err := createLog(ctx, path); err != nil {
+		return err
+	}
+	_, err := r.storage.sessions.ExecContext(ctx, `
+		INSERT INTO sessions (id, project_id, workspace_id, title, state, created_at, updated_at, approval_mode)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID.String(), value.ProjectID.String(), value.WorkspaceID.String(), value.Title,
+		string(value.State), value.CreatedAt.UnixNano(), value.UpdatedAt.UnixNano(), value.ApprovalMode)
 	if err != nil {
-		return err
+		return fmt.Errorf("create session metadata: %w", err)
 	}
-	if _, err := r.storage.log.CreateSession(ctx, value.ID.String(), value.ProjectID.String(), event); err != nil {
-		return err
-	}
+	delete(r.storage.writeErrors, path)
 	r.storage.state.sessions[value.ID] = value
-	r.storage.state.sequences[value.ID.String()] = event.Sequence
 	return nil
 }
 
@@ -61,25 +69,36 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 		return nil, err
 	}
 	defer r.storage.mu.RUnlock()
+	rows, err := r.storage.sessions.QueryContext(ctx, `
+		SELECT id, project_id, workspace_id, title, state, created_at, updated_at, approval_mode
+		FROM sessions WHERE (? = '' OR project_id = ?)
+		ORDER BY updated_at DESC, id`, project.String(), project.String())
+	if err != nil {
+		return nil, fmt.Errorf("list session metadata: %w", err)
+	}
+	defer rows.Close()
 	values := make([]sessionmodel.Session, 0)
-	for _, value := range r.storage.state.sessions {
-		if (project == "" || value.ProjectID == project) && strings.Contains(strings.ToLower(value.Title), title) {
-			values = append(values, value)
+	for rows.Next() {
+		value, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.Contains(strings.ToLower(value.Title), title) {
+			continue
+		}
+		values = append(values, value)
+		if limit > 0 && len(values) == limit {
+			break
 		}
 	}
-	return capped(sorted(values, func(a, b sessionmodel.Session) int {
-		return cmp.Or(b.UpdatedAt.Compare(a.UpdatedAt), cmp.Compare(a.ID, b.ID))
-	}), limit), nil
+	return values, rows.Err()
 }
 
 func (r SessionRepository) HasEntries(ctx context.Context, id identity.SessionID) (bool, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, id); err != nil {
 		return false, err
 	}
-	defer r.storage.mu.RUnlock()
-	if _, ok := r.storage.state.sessions[id]; !ok {
-		return false, errorcode.ErrNotFound
-	}
+	defer r.storage.mu.Unlock()
 	return len(r.storage.state.entryOrder[id]) != 0, nil
 }
 func (r SessionRepository) Rename(ctx context.Context, id identity.SessionID, title string, at time.Time) error {
@@ -93,56 +112,160 @@ func (r SessionRepository) updateName(ctx context.Context, id identity.SessionID
 		return err
 	}
 	defer r.storage.mu.Unlock()
-	value, ok := r.storage.state.sessions[id]
-	if !ok {
-		return errorcode.ErrNotFound
+	value, err := r.storage.sessionRecord(ctx, id)
+	if err != nil {
+		return err
 	}
 	prior := value
 	update(&value)
 	if value == prior {
 		return nil
 	}
-	if err := r.storage.appendEventLocked(ctx, id, "session.saved", "session", id.String(), value); err != nil {
-		return err
+	if _, err := r.storage.sessions.ExecContext(ctx,
+		`UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?`,
+		value.Title, value.UpdatedAt.UnixNano(), id.String()); err != nil {
+		return fmt.Errorf("update session metadata: %w", err)
 	}
-	r.storage.state.sessions[id] = value
+	if _, loaded := r.storage.state.sessions[id]; loaded {
+		r.storage.state.sessions[id] = value
+	}
 	return nil
 }
 
-// Delete 先删除日志，再移除会话及其所有内存数据；业务层负责确认活动执行已经停止。
+// SetApprovalMode 只更新会话授权配置，不重放历史，也不覆盖并发的标题变更。
+func (r SessionRepository) SetApprovalMode(ctx context.Context, id identity.SessionID, mode *security.ApprovalMode, at time.Time) (sessionmodel.Session, error) {
+	if err := r.storage.lock(ctx); err != nil {
+		return sessionmodel.Session{}, err
+	}
+	defer r.storage.mu.Unlock()
+	value, err := r.storage.sessionRecord(ctx, id)
+	if err != nil {
+		return sessionmodel.Session{}, err
+	}
+	value.ApprovalMode = mode
+	value.UpdatedAt = at
+	if _, err := r.storage.sessions.ExecContext(ctx,
+		`UPDATE sessions SET approval_mode = ?, updated_at = ? WHERE id = ?`,
+		mode, at.UnixNano(), id.String()); err != nil {
+		return sessionmodel.Session{}, fmt.Errorf("update session approval mode: %w", err)
+	}
+	if _, loaded := r.storage.state.sessions[id]; loaded {
+		stored := value
+		if mode != nil {
+			stored.ApprovalMode = new(*mode)
+		}
+		r.storage.state.sessions[id] = stored
+	}
+	return value, nil
+}
+
+// Delete 以 SQLite 删除为提交点；失败不碰 JSONL，成功后尽力清理历史文件，允许留下孤儿文件。
 func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, onlyEmpty bool) error {
 	if err := r.storage.lock(ctx); err != nil {
 		return err
 	}
 	defer r.storage.mu.Unlock()
-	if _, ok := r.storage.state.sessions[id]; !ok {
-		if onlyEmpty {
+	value, err := r.storage.sessionRecord(ctx, id)
+	if err != nil {
+		if onlyEmpty && errors.Is(err, errorcode.ErrNotFound) {
 			return nil
 		}
-		return errorcode.ErrNotFound
-	}
-	if onlyEmpty && len(r.storage.state.entryOrder[id]) != 0 {
-		return nil
-	}
-	if err := r.storage.log.DeleteSession(ctx, id.String()); err != nil {
 		return err
 	}
+	if onlyEmpty {
+		if err := r.storage.loadSessionLocked(ctx, id); err != nil {
+			return err
+		}
+		if len(r.storage.state.entryOrder[id]) != 0 {
+			return nil
+		}
+	}
+	if _, err := r.storage.sessions.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id.String()); err != nil {
+		return fmt.Errorf("delete session metadata: %w", err)
+	}
+	path := r.storage.sessionLogPath(id.String(), value.ProjectID.String())
 	r.storage.state.removeSession(id)
+	delete(r.storage.writeErrors, path)
+	_ = os.Remove(path)
 	return nil
 }
 
-// SessionLogPath 是显式文件访问，普通仓储读取不访问日志。
+// SessionLogPath 显式访问文件，不触发历史重放。
 func (r SessionRepository) SessionLogPath(ctx context.Context, id identity.SessionID) (string, error) {
 	if err := r.storage.readLock(ctx); err != nil {
 		return "", err
 	}
 	defer r.storage.mu.RUnlock()
-	if _, ok := r.storage.state.sessions[id]; !ok {
-		return "", errorcode.ErrNotFound
+	value, err := r.storage.sessionRecord(ctx, id)
+	if err != nil {
+		return "", err
 	}
-	path, err := r.storage.log.ExistingPath(ctx, id.String())
-	if errors.Is(err, os.ErrNotExist) {
-		return "", errorcode.ErrNotFound
+	path := r.storage.sessionLogPath(id.String(), value.ProjectID.String())
+	if err := checkRegularFile(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errorcode.ErrNotFound
+		}
+		return "", err
 	}
-	return path, err
+	return path, nil
+}
+
+func openSessionDatabase(ctx context.Context, dataRoot string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", filepath.Join(dataRoot, "sessions.db"))
+	if err != nil {
+		return nil, fmt.Errorf("open session database: %w", err)
+	}
+	// Store 统一协调写入；单连接也避免 SQLite 连接间竞争写锁。
+	db.SetMaxOpenConns(1)
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			state TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			approval_mode TEXT CHECK (approval_mode IN ('ask', 'auto', 'yolo'))
+		);
+		CREATE INDEX IF NOT EXISTS sessions_project_updated ON sessions (project_id, updated_at DESC, id);
+	`)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("initialize session database: %w", err), db.Close())
+	}
+	var hasApprovalMode bool
+	err = db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'approval_mode')`).Scan(&hasApprovalMode)
+	if err == nil && !hasApprovalMode {
+		_, err = db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN approval_mode TEXT CHECK (approval_mode IN ('ask', 'auto', 'yolo'))`)
+	}
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("initialize session approval mode: %w", err), db.Close())
+	}
+	return db, nil
+}
+
+func (s *Store) sessionRecord(ctx context.Context, id identity.SessionID) (sessionmodel.Session, error) {
+	return scanSession(s.sessions.QueryRowContext(ctx, `
+		SELECT id, project_id, workspace_id, title, state, created_at, updated_at, approval_mode
+		FROM sessions WHERE id = ?`, id.String()))
+}
+
+func scanSession(row interface{ Scan(...any) error }) (sessionmodel.Session, error) {
+	var value sessionmodel.Session
+	var createdAt, updatedAt int64
+	var mode sql.NullString
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.WorkspaceID, &value.Title, &value.State, &createdAt, &updatedAt, &mode); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sessionmodel.Session{}, errorcode.ErrNotFound
+		}
+		return sessionmodel.Session{}, fmt.Errorf("read session metadata: %w", err)
+	}
+	value.CreatedAt, value.UpdatedAt = time.Unix(0, createdAt).UTC(), time.Unix(0, updatedAt).UTC()
+	if mode.Valid {
+		value.ApprovalMode = new(security.ApprovalMode(mode.String))
+	}
+	if err := value.Validate(); err != nil {
+		return sessionmodel.Session{}, err
+	}
+	return value, nil
 }

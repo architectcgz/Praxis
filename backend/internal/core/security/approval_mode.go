@@ -15,13 +15,13 @@ func (m ApprovalMode) Valid() bool {
 	return m == ApprovalAsk || m == ApprovalAuto || m == ApprovalYolo || m == ApprovalDeny
 }
 
-// ValidDefault 校验全局或项目默认动作；deny 只用于明确禁止的规则。
+// ValidDefault 校验全局或会话默认动作；deny 只用于明确禁止的规则。
 func (m ApprovalMode) ValidDefault() bool { return m.Valid() && m != ApprovalDeny }
 
-// EffectiveApprovalMode 优先采用项目覆盖，nil 表示继承全局默认动作。
-func EffectiveApprovalMode(global ApprovalMode, project *ApprovalMode) ApprovalMode {
-	if project != nil {
-		return *project
+// EffectiveApprovalMode 优先采用会话覆盖，nil 表示继承全局默认动作。
+func EffectiveApprovalMode(global ApprovalMode, session *ApprovalMode) ApprovalMode {
+	if session != nil {
+		return *session
 	}
 	return global
 }

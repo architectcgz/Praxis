@@ -10,7 +10,6 @@ import (
 	"praxis/internal/dataroot"
 	"praxis/internal/logging"
 	"praxis/wails"
-	"strings"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -21,14 +20,8 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-const dataRootEnvironment = "PRAXIS_DATA_ROOT"
-
-// startupDataRootPath 选择启动时使用的数据根目录。
+// startupDataRootPath 固定使用当前用户主目录下的 .praxis。
 func startupDataRootPath() (string, error) {
-	root := os.Getenv(dataRootEnvironment)
-	if strings.TrimSpace(root) != "" {
-		return root, nil
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve user home directory: %w", err)
@@ -36,7 +29,7 @@ func startupDataRootPath() (string, error) {
 	return filepath.Join(home, ".praxis"), nil
 }
 
-// acquireInstanceLock 使用固定的用户级路径，切换数据目录也不能绕过单实例约束。
+// acquireInstanceLock 在启动数据恢复前获取当前用户的独占运行权。
 func acquireInstanceLock() (*os.File, error) {
 	cache, err := os.UserCacheDir()
 	if err != nil {

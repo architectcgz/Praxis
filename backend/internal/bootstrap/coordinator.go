@@ -1,10 +1,8 @@
 package bootstrap
 
 import (
-	"context"
 	"net/http"
 	"praxis/internal/clock"
-	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -21,13 +19,12 @@ import (
 	"time"
 )
 
-func buildCoordinator(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, mainAgent func(context.Context, identity.SessionID) (*agentmodel.Agent, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
+func buildCoordinator(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
 	tasks := executionservice.NewService(executionservice.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
 		Sessions:       repos.Sessions,
-		Agent:          sessions.GetAgent,
 		Records:        repos.Executions,
 		UsageRecords:   repos.ModelUsage,
 		History:        sessions,
@@ -43,8 +40,7 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
 	emitter.Subscribe(func(value coreevent.Event) {
 		if payload, ok := value.Payload.(coreevent.ModelUsage); ok {
-			owner, err := sessions.GetAgent(value.Scope.AgentID)
-			if err != nil || !owner.IsMain() {
+			if value.Scope.AgentID != identity.AgentID(value.Scope.SessionID) {
 				return
 			}
 			tasks.RecordUsage(providerapi.UsageRecord{
@@ -63,15 +59,13 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 	}
-	records := toolservice.NewService(toolservice.Dependencies{
+	operations := toolservice.NewService(toolservice.Dependencies{
 		ApprovalConfig: config,
-		Calls:          repos.ToolCalls,
 		Sessions:       repos.Sessions,
-		Projects:       repos.Projects,
 	})
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
 		Catalog:        config.tools,
-		Operations:     records,
+		Operations:     operations,
 		Reviewer:       reviewer,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
@@ -105,12 +99,9 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		HookDispatcher:    hooks,
 		Logger:            resources.logger,
 		ConfigMu:          configMu,
-		Recovery:          repos.Executions,
 		Tools:             executor,
-		ToolRecords:       records,
 		SessionRecords:    repos.Sessions,
 		Workspaces:        repos.Workspaces,
-		MainAgent:         mainAgent,
 		TransitionTimeout: 30 * time.Second,
 	})
 }

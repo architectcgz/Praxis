@@ -3,7 +3,6 @@ package bindings
 import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -41,23 +40,19 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 		return dto.CreateSessionResponse{}, err
 	}
 	params := sessionservice.CreateInput{
-		SessionID:    identity.SessionID(wire.SessionID),
-		AgentID:      identity.AgentID(wire.AgentID),
-		RequestID:    identity.RequestID(wire.RequestID),
-		ProjectID:    identity.ProjectID(wire.ProjectID),
-		WorkspaceID:  identity.WorkspaceID(wire.WorkspaceID),
-		DefinitionID: identity.AgentDefinitionID(wire.AgentDefinitionID),
+		SessionID:   identity.SessionID(wire.SessionID),
+		RequestID:   identity.RequestID(wire.RequestID),
+		ProjectID:   identity.ProjectID(wire.ProjectID),
+		WorkspaceID: identity.WorkspaceID(wire.WorkspaceID),
 	}
 	result, err := services.Sessions.CreateSession(ctx, params)
 	if err != nil {
 		return dto.CreateSessionResponse{}, publicError(b.host, "SessionBindings.CreateSession", err)
 	}
 	return dto.CreateSessionResponse{
-		SessionID:         result.Session.ID.String(),
-		ProjectID:         result.Session.ProjectID.String(),
-		WorkspaceID:       result.Session.WorkspaceID.String(),
-		AgentID:           result.Agent.ID.String(),
-		AgentDefinitionID: result.Agent.DefinitionID.String(),
+		SessionID:   result.Session.ID.String(),
+		ProjectID:   result.Session.ProjectID.String(),
+		WorkspaceID: result.Session.WorkspaceID.String(),
 	}, nil
 }
 
@@ -73,6 +68,10 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession", err)
 	}
+	agents, err := services.Agents.ListSessionAgents(ctx, view.Session.ID, 100)
+	if err != nil {
+		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession.agents", err)
+	}
 	result := dto.SessionSnapshot{
 		ID:          view.Session.ID.String(),
 		ProjectID:   view.Session.ProjectID.String(),
@@ -80,7 +79,7 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 		Title:       view.Session.Title,
 		CreatedAt:   view.Session.CreatedAt,
 		UpdatedAt:   view.Session.UpdatedAt,
-		Agents:      make([]agentservice.AgentView, 0, len(view.Agents)),
+		Agents:      agents,
 		Tasks:       make([]dto.QueuedTask, 0, len(view.Tasks)),
 	}
 	for _, value := range view.Tasks {
@@ -90,13 +89,6 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 			Sequence:  value.Sequence,
 			CreatedAt: value.CreatedAt,
 		})
-	}
-	for _, value := range view.Agents {
-		agent, err := services.Agents.DescribeAgent(value)
-		if err != nil {
-			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession.agent", err)
-		}
-		result.Agents = append(result.Agents, agent)
 	}
 	return result, nil
 }
@@ -131,7 +123,7 @@ func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := services.Sessions.DeleteSession(ctx, identity.SessionID(sessionID)); err != nil {
+	if err := services.Commands.DeleteSession(ctx, identity.SessionID(sessionID)); err != nil {
 		return publicError(b.host, "SessionBindings.DeleteSession", err)
 	}
 	return nil

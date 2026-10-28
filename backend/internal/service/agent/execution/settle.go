@@ -38,11 +38,6 @@ func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) e
 func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.ExecutionRecord, err error) {
 	endedExecution := run.Snapshot()
 	executionID := endedExecution.ID
-	// 在终态提交前持有实例引用，避免会话在提交后被删除导致状态收尾失去目标。
-	agent, err := s.agent(endedExecution.AgentID)
-	if err != nil {
-		return agentexecution.ExecutionRecord{}, err
-	}
 	// Hook 在存储锁外观察本次结算；通知不能改变执行者已确定的结果。
 	ctx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
@@ -99,7 +94,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 			s.logger.Errorf("name settled session execution_id=%s error=%v", endedExecution.ID, nameErr)
 		}
 	}()
-	agent.FinishExecution(endedExecution)
+	run.Agent.FinishExecution(endedExecution.AgentState(), endedExecution.EndedAt)
 	if !firstEnd {
 		return endedExecution, nil
 	}

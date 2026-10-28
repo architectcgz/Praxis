@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	providerapi "praxis/internal/core/provider"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -23,7 +22,7 @@ func cloneUsage(value providerapi.UsageRecord) providerapi.UsageRecord {
 	return value
 }
 func (r ModelUsageRepository) Save(ctx context.Context, value providerapi.UsageRecord) error {
-	if err := r.storage.lock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, identity.SessionID(value.SessionID)); err != nil {
 		return err
 	}
 	defer r.storage.mu.Unlock()
@@ -35,13 +34,10 @@ func (r ModelUsageRepository) Save(ctx context.Context, value providerapi.UsageR
 	return nil
 }
 func (r ModelUsageRepository) ListSession(ctx context.Context, sessionID string) ([]providerapi.UsageRecord, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, identity.SessionID(sessionID)); err != nil {
 		return nil, err
 	}
-	defer r.storage.mu.RUnlock()
-	if _, ok := r.storage.state.sessions[identity.SessionID(sessionID)]; !ok {
-		return nil, errorcode.ErrNotFound
-	}
+	defer r.storage.mu.Unlock()
 	result := make([]providerapi.UsageRecord, 0)
 	for _, value := range r.storage.state.usage {
 		if value.SessionID == sessionID {

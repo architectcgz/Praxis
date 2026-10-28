@@ -18,7 +18,7 @@ func (s *Service) RecordUsage(record providerapi.UsageRecord) {
 }
 
 func (s *Service) saveUsage(ctx context.Context, record providerapi.UsageRecord) error {
-	execution, err := s.records.Get(ctx, identity.AgentExecutionID(record.ExecutionID))
+	execution, err := s.records.Get(ctx, identity.SessionID(record.SessionID), identity.AgentExecutionID(record.ExecutionID))
 	if err != nil {
 		return err
 	}
@@ -29,7 +29,7 @@ func (s *Service) saveUsage(ctx context.Context, record providerapi.UsageRecord)
 	if err != nil {
 		return err
 	}
-	if session.MainAgentID != execution.AgentID {
+	if session.MainAgentID() != execution.AgentID {
 		return errorcode.ErrRequestConflict
 	}
 	previous, err := s.usageRecords.ListSession(ctx, record.SessionID)

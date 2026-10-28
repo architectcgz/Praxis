@@ -3,7 +3,6 @@ package bindings
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
 	modelconfig "praxis/internal/core/model/config"
@@ -30,15 +29,14 @@ type ProjectService interface {
 }
 
 type ApprovalService interface {
-	GetApprovalMode(context.Context, identity.ProjectID) (approvalservice.ApprovalSettings, error)
-	SetApprovalMode(context.Context, identity.ProjectID, *security.ApprovalMode) (approvalservice.ApprovalSettings, error)
+	GetApprovalMode(context.Context, identity.SessionID) (approvalservice.ApprovalSettings, error)
+	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode) (approvalservice.ApprovalSettings, error)
 }
 
 type SessionService interface {
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.Session, error)
 	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
 	GetSessionView(context.Context, identity.SessionID, int) (sessionservice.SessionView, error)
-	DeleteSession(context.Context, identity.SessionID) error
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
 }
@@ -48,11 +46,12 @@ type WorkspaceService interface {
 }
 
 type AgentService interface {
-	DescribeAgent(*agentmodel.Agent) (agentservice.AgentView, error)
+	ListSessionAgents(context.Context, identity.SessionID, int) ([]agentservice.AgentView, error)
 	GetAgentView(context.Context, identity.AgentID) (agentservice.AgentView, error)
 }
 
 type AgentCommands interface {
+	DeleteSession(context.Context, identity.SessionID) error
 	ListAgentEntries(context.Context, identity.AgentID) ([]sessionentry.ContextEntry, error)
 	PauseAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)
 	StopAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)

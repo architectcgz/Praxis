@@ -224,7 +224,6 @@ export function ProjectWorkspace() {
                             >
                                 {workspace.session && (
                                     <AgentSessionPanel
-                                        projectId={workspace.session.projectId}
                                         loading={workspace.agentLoading}
                                         agents={workspace.agents}
                                         agent={workspace.agent}

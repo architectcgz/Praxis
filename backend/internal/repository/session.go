@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	"time"
@@ -15,6 +16,7 @@ type Session interface {
 	ListByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.Session, error)
 	HasEntries(context.Context, identity.SessionID) (bool, error)
 	Rename(context.Context, identity.SessionID, string, time.Time) error
+	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode, time.Time) (sessionmodel.Session, error)
 	NameFromInput(context.Context, identity.SessionID, string, time.Time) error
 	Delete(context.Context, identity.SessionID, bool) error
 }

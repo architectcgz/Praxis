@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
@@ -85,6 +86,25 @@ func NewExecutionRecord(
 
 func (e ExecutionRecord) Active() bool {
 	return e.Status == ExecutionStarting || e.Status == ExecutionRunning || e.Status == ExecutionEnding
+}
+
+// AgentState 从执行事实投影展示状态，不为历史记录创建 Agent 实例。
+func (e ExecutionRecord) AgentState() agentmodel.AgentState {
+	if e.Active() {
+		return agentmodel.AgentExecuting
+	}
+	switch e.Outcome {
+	case ExecutionYielded:
+		return agentmodel.AgentWaiting
+	case ExecutionPaused:
+		return agentmodel.AgentPaused
+	case ExecutionInterrupted:
+		return agentmodel.AgentInterrupted
+	case ExecutionFailed:
+		return agentmodel.AgentFailed
+	default:
+		return agentmodel.AgentIdle
+	}
 }
 
 // Start 记录首次启动状态和时间；调用方负责确认执行尚未启动。

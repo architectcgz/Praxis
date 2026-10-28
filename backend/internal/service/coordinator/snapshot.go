@@ -11,8 +11,8 @@ import (
 	"slices"
 )
 
-// activeRun 只借用既有生命周期槽位，不建立另一套 Run 注册表。
-func (s *Coordinator) activeRun(agentID identity.AgentID) *agentexecution.Run {
+// ActiveRun 只借用执行生命周期内的引用，不另建 Agent 注册表。
+func (s *Coordinator) ActiveRun(agentID identity.AgentID) *agentexecution.Run {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if active := s.executions[agentID]; active != nil {
@@ -21,52 +21,43 @@ func (s *Coordinator) activeRun(agentID identity.AgentID) *agentexecution.Run {
 	return nil
 }
 
-func (s *Coordinator) ActiveExecution(agentID identity.AgentID) (agentexecution.ExecutionRecord, bool) {
-	if run := s.activeRun(agentID); run != nil {
-		return run.Snapshot(), true
+func (s *Coordinator) SessionRuns(sessionID identity.SessionID) []*agentexecution.Run {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var runs []*agentexecution.Run
+	for _, active := range s.executions {
+		if active.sessionID == sessionID && active.run != nil {
+			runs = append(runs, active.run)
+		}
 	}
-	return agentexecution.ExecutionRecord{}, false
+	return runs
 }
 
-// ListAgentEntries 按实例类型分派查询；会话历史由 Session 读取，子执行只暴露当前 Run 的私有消息。
+// ListAgentEntries 按执行归属分派；主会话历史无需创建 Agent 实例即可查询。
 func (s *Coordinator) ListAgentEntries(ctx context.Context, agentID identity.AgentID) ([]sessionentry.ContextEntry, error) {
-	owner, err := s.sessions.GetAgent(agentID)
+	if run := s.ActiveRun(agentID); run != nil && !run.Main() {
+		return run.Entries(), ctx.Err()
+	}
+	page, err := s.sessions.ListEntries(ctx, identity.SessionID(agentID))
 	if err != nil {
 		return nil, err
 	}
-	if owner.IsMain() {
-		page, err := s.sessions.ListEntries(ctx, owner.SessionID)
-		if err != nil {
-			return nil, err
-		}
-		return page.Entries, nil
-	}
-	if _, err := s.sessionRecords.Get(ctx, owner.SessionID); err != nil {
-		return nil, err
-	}
-	if run := s.activeRun(agentID); run != nil {
-		return run.Entries(), nil
-	}
-	return []sessionentry.ContextEntry{}, nil
+	return page.Entries, nil
 }
 
 func (s *Coordinator) ListAgentTimings(ctx context.Context, agentID string, limit int) ([]timing.View, error) {
-	owner, err := s.sessions.GetAgent(identity.AgentID(agentID))
-	if err != nil {
+	if run := s.ActiveRun(identity.AgentID(agentID)); run != nil && !run.Main() {
+		values := executionservice.RunTimings(run)
+		slices.SortFunc(values, func(a, b timing.View) int {
+			return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
+		})
+		if limit > 0 {
+			values = values[:min(limit, len(values))]
+		}
+		return values, ctx.Err()
+	}
+	if _, err := s.sessionRecords.Get(ctx, identity.SessionID(agentID)); err != nil {
 		return nil, err
 	}
-	if owner.IsMain() {
-		return s.operations.ListAgentTimings(ctx, agentID, limit)
-	}
-	values := make([]timing.View, 0)
-	if run := s.activeRun(owner.ID); run != nil {
-		values = executionservice.RunTimings(run)
-	}
-	slices.SortFunc(values, func(a, b timing.View) int {
-		return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
-	})
-	if limit > 0 {
-		values = values[:min(limit, len(values))]
-	}
-	return values, ctx.Err()
+	return s.operations.ListAgentTimings(ctx, agentID, limit)
 }

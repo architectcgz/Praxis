@@ -1,5 +1,5 @@
 import { getSessionBinding } from './bindings'
-import type { SessionSnapshot as GeneratedSessionSnapshot } from '../../bindings/praxis/wails/dto/models'
+import type { SessionApprovalMode as GeneratedSessionApprovalMode, SessionSnapshot as GeneratedSessionSnapshot } from '../../bindings/praxis/wails/dto/models'
 import { normalizeModelUsageRecords, type AgentView, type ModelUsageRecord } from './agents'
 import { normalizeQueuedTasks, type QueuedTask } from './tasks'
 
@@ -33,10 +33,8 @@ export type SessionUsageSummary = {
 
 export type CreateSessionRequest = {
     sessionId: string
-    agentId: string
     projectId: string
     workspaceId: string
-    agentDefinitionId: string
     requestId: string
 }
 
@@ -46,6 +44,24 @@ export async function listSessions(projectID: string) {
 
 export function createSession(request: CreateSessionRequest) {
     return getSessionBinding().CreateSession(request)
+}
+
+export type ApprovalMode = 'ask' | 'auto' | 'yolo'
+export type SessionApprovalMode = {
+    sessionId: string
+    globalMode: ApprovalMode
+    sessionMode: ApprovalMode | null
+    effectiveMode: ApprovalMode
+}
+
+/** 读取后端解析的会话选择和有效模式，不在前端推断授权结果。 */
+export async function getSessionApprovalMode(sessionId: string): Promise<SessionApprovalMode> {
+    return sessionApprovalMode(await getSessionBinding().GetSessionApprovalMode(sessionId))
+}
+
+/** 保存会话覆盖；null 恢复继承，只有后端提交成功才返回新选择。 */
+export async function setSessionApprovalMode(sessionId: string, mode: ApprovalMode | null): Promise<SessionApprovalMode> {
+    return sessionApprovalMode(await getSessionBinding().SetSessionApprovalMode({ sessionId, mode }))
 }
 
 export type ModelSelection = { providerId: string; modelId: string; reasoningLevel: string }
@@ -100,6 +116,20 @@ export function renameSession(sessionID: string, title: string) {
 /** 在系统文件管理器中定位指定 Session 的 JSONL 文件；失败时拒绝 Promise。 */
 export function revealSessionFile(sessionID: string) {
     return getSessionBinding().RevealSessionFile(sessionID)
+}
+
+function approvalMode(value: string): ApprovalMode {
+    if (value !== 'ask' && value !== 'auto' && value !== 'yolo') throw new Error('后端返回了未知的审批模式')
+    return value
+}
+
+function sessionApprovalMode(value: GeneratedSessionApprovalMode): SessionApprovalMode {
+    return {
+        sessionId: value.sessionId,
+        globalMode: approvalMode(value.globalMode),
+        sessionMode: value.sessionMode == null ? null : approvalMode(value.sessionMode),
+        effectiveMode: approvalMode(value.effectiveMode),
+    }
 }
 
 function normalizeSessionSnapshot(value: GeneratedSessionSnapshot): SessionSnapshot {

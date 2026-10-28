@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"praxis/internal/core/security"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/utils/pathutil"
@@ -27,7 +26,6 @@ type Project struct {
 	Path               string
 	DefaultWorkspaceID identity.WorkspaceID
 	State              ProjectState
-	ApprovalMode       *security.ApprovalMode `json:",omitempty"`
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -67,9 +65,6 @@ func (p Project) Validate() error {
 	}
 	if p.State != ProjectActive && p.State != ProjectArchived {
 		return fmt.Errorf("project.state: unknown project state: %w", errorcode.ErrInvalidValue)
-	}
-	if p.ApprovalMode != nil && !p.ApprovalMode.ValidDefault() {
-		return fmt.Errorf("project.approvalMode: default approval mode must be ask, auto or yolo: %w", errorcode.ErrInvalidValue)
 	}
 	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
 		return fmt.Errorf("project.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)

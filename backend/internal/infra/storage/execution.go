@@ -3,6 +3,7 @@ package storage
 import (
 	"cmp"
 	"context"
+	"errors"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -15,19 +16,19 @@ func cloneExecution(value agentexecution.ExecutionRecord) agentexecution.Executi
 	return value
 }
 
-func (r AgentExecutionRepository) Get(ctx context.Context, id identity.AgentExecutionID) (agentexecution.ExecutionRecord, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+func (r AgentExecutionRepository) Get(ctx context.Context, sessionID identity.SessionID, id identity.AgentExecutionID) (agentexecution.ExecutionRecord, error) {
+	if err := r.storage.lockSession(ctx, sessionID); err != nil {
 		return agentexecution.ExecutionRecord{}, err
 	}
-	defer r.storage.mu.RUnlock()
+	defer r.storage.mu.Unlock()
 	value, ok := r.storage.state.executions[id]
-	if !ok {
+	if !ok || value.SessionID != sessionID {
 		return agentexecution.ExecutionRecord{}, errorcode.ErrNotFound
 	}
 	return cloneExecution(value), nil
 }
 func (r AgentExecutionRepository) Save(ctx context.Context, value agentexecution.ExecutionRecord) error {
-	if err := r.storage.lock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, value.SessionID); err != nil {
 		return err
 	}
 	defer r.storage.mu.Unlock()
@@ -42,15 +43,15 @@ func (r AgentExecutionRepository) Save(ctx context.Context, value agentexecution
 	return nil
 }
 func (r AgentExecutionRepository) FindByRequest(ctx context.Context, id identity.AgentID, request identity.RequestID) (agentexecution.ExecutionRecord, error) {
-	return r.find(ctx, func(value agentexecution.ExecutionRecord) bool {
+	return r.find(ctx, identity.SessionID(id), func(value agentexecution.ExecutionRecord) bool {
 		return value.AgentID == id && value.RequestID == request
 	})
 }
 func (r AgentExecutionRepository) GetActiveByAgent(ctx context.Context, id identity.AgentID) (agentexecution.ExecutionRecord, error) {
-	return r.find(ctx, func(value agentexecution.ExecutionRecord) bool { return value.AgentID == id && value.Active() })
+	return r.find(ctx, identity.SessionID(id), func(value agentexecution.ExecutionRecord) bool { return value.AgentID == id && value.Active() })
 }
-func (r AgentExecutionRepository) find(ctx context.Context, match func(agentexecution.ExecutionRecord) bool) (agentexecution.ExecutionRecord, error) {
-	values, err := r.list(ctx, match)
+func (r AgentExecutionRepository) find(ctx context.Context, sessionID identity.SessionID, match func(agentexecution.ExecutionRecord) bool) (agentexecution.ExecutionRecord, error) {
+	values, err := r.list(ctx, sessionID, match)
 	if err != nil {
 		return agentexecution.ExecutionRecord{}, err
 	}
@@ -62,29 +63,28 @@ func (r AgentExecutionRepository) find(ctx context.Context, match func(agentexec
 	}
 	return values[0], nil
 }
-func (r AgentExecutionRepository) list(ctx context.Context, match func(agentexecution.ExecutionRecord) bool) ([]agentexecution.ExecutionRecord, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+func (r AgentExecutionRepository) list(ctx context.Context, sessionID identity.SessionID, match func(agentexecution.ExecutionRecord) bool) ([]agentexecution.ExecutionRecord, error) {
+	if err := r.storage.lockSession(ctx, sessionID); err != nil {
+		if errors.Is(err, errorcode.ErrNotFound) {
+			return []agentexecution.ExecutionRecord{}, nil
+		}
 		return nil, err
 	}
-	defer r.storage.mu.RUnlock()
+	defer r.storage.mu.Unlock()
 	values := make([]agentexecution.ExecutionRecord, 0)
 	for _, value := range r.storage.state.executions {
-		if match(value) {
+		if value.SessionID == sessionID && match(value) {
 			values = append(values, cloneExecution(value))
 		}
 	}
 	return values, nil
 }
-func (r AgentExecutionRepository) ListActive(ctx context.Context) ([]agentexecution.ExecutionRecord, error) {
-	values, err := r.list(ctx, func(value agentexecution.ExecutionRecord) bool { return value.Active() })
-	return sorted(values, executionOrder), err
-}
 func (r AgentExecutionRepository) ListBySession(ctx context.Context, id identity.SessionID) ([]agentexecution.ExecutionRecord, error) {
-	values, err := r.list(ctx, func(value agentexecution.ExecutionRecord) bool { return value.SessionID == id })
+	values, err := r.list(ctx, id, func(agentexecution.ExecutionRecord) bool { return true })
 	return sorted(values, executionOrder), err
 }
 func (r AgentExecutionRepository) ListByAgent(ctx context.Context, id identity.AgentID, limit int) ([]agentexecution.ExecutionRecord, error) {
-	values, err := r.list(ctx, func(value agentexecution.ExecutionRecord) bool { return value.AgentID == id })
+	values, err := r.list(ctx, identity.SessionID(id), func(value agentexecution.ExecutionRecord) bool { return value.AgentID == id })
 	return capped(sorted(values, func(a, b agentexecution.ExecutionRecord) int { return -executionOrder(a, b) }), limit), err
 }
 func executionOrder(a, b agentexecution.ExecutionRecord) int {

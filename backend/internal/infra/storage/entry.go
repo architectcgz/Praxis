@@ -32,12 +32,17 @@ func encodedEntryKey(key entryKey) string {
 }
 
 func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) (sessionentry.ContextEntry, bool, error) {
-	if err := r.storage.lock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, value.SessionID); err != nil {
 		return sessionentry.ContextEntry{}, false, err
 	}
 	defer r.storage.mu.Unlock()
+	return r.storage.appendEntryLocked(ctx, value)
+}
+
+// appendEntryLocked 供正常追加和持锁重放修复共用，避免恢复期间再次获取 Store 锁。
+func (s *Store) appendEntryLocked(ctx context.Context, value sessionentry.Record) (sessionentry.ContextEntry, bool, error) {
 	key := entryKey{AgentID: value.AgentID, ID: value.Data.ID}
-	if prior, ok := r.storage.state.entries[key]; ok {
+	if prior, ok := s.state.entries[key]; ok {
 		candidate := value.Data.Clone()
 		candidate.Sequence, candidate.CreatedAt = prior.Record.Data.Sequence, prior.Record.Data.CreatedAt
 		if prior.SessionID != value.SessionID || !reflect.DeepEqual(prior.Record.Data, candidate) {
@@ -46,26 +51,26 @@ func (r EntryRepository) Append(ctx context.Context, value sessionentry.Record) 
 		return prior.Record.Data.Clone(), false, nil
 	}
 	data := value.Data.Clone()
-	data.Sequence = r.storage.state.sequences[value.SessionID.String()] + 1
+	data.Sequence = s.state.sequences[value.SessionID.String()] + 1
 	if data.CreatedAt.IsZero() {
 		data.CreatedAt = time.Now().UTC()
 	}
 	record := entryRecord{AgentID: value.AgentID, Data: data}
-	if err := r.storage.appendEventLocked(ctx, value.SessionID, "entry.appended", "entry", encodedEntryKey(key), record); err != nil {
+	if err := s.appendEventLocked(ctx, value.SessionID, "entry.appended", "entry", encodedEntryKey(key), record); err != nil {
 		return sessionentry.ContextEntry{}, false, err
 	}
-	r.storage.state.entries[key] = storedEntry{
+	s.state.entries[key] = storedEntry{
 		SessionID:       value.SessionID,
 		Record:          record,
 		UpdatedSequence: data.Sequence,
 	}
-	r.storage.state.entryOrder[value.SessionID] = append(r.storage.state.entryOrder[value.SessionID], key)
+	s.state.entryOrder[value.SessionID] = append(s.state.entryOrder[value.SessionID], key)
 	return data.Clone(), true, nil
 }
 
 // UpdateToolResult 只追加正文变更，原始条目在 entryOrder 中的位置不变。
 func (r EntryRepository) UpdateToolResult(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, id, text string) (sessionentry.ContextEntry, error) {
-	if err := r.storage.lock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, sessionID); err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
 	defer r.storage.mu.Unlock()
@@ -97,10 +102,10 @@ func (r EntryRepository) UpdateToolResult(ctx context.Context, sessionID identit
 }
 
 func (r EntryRepository) Get(ctx context.Context, agentID identity.AgentID, id string) (sessionentry.ContextEntry, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, identity.SessionID(agentID)); err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
-	defer r.storage.mu.RUnlock()
+	defer r.storage.mu.Unlock()
 	value, ok := r.storage.state.entries[entryKey{AgentID: agentID, ID: id}]
 	if !ok {
 		return sessionentry.ContextEntry{}, errorcode.ErrNotFound
@@ -109,10 +114,10 @@ func (r EntryRepository) Get(ctx context.Context, agentID identity.AgentID, id s
 }
 
 func (r EntryRepository) List(ctx context.Context, query sessionentry.Query) (sessionentry.List, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, identity.SessionID(query.AgentID)); err != nil {
 		return sessionentry.List{}, err
 	}
-	defer r.storage.mu.RUnlock()
+	defer r.storage.mu.Unlock()
 	page := sessionentry.List{Entries: make([]sessionentry.ContextEntry, 0)}
 	for sessionID, keys := range r.storage.state.entryOrder {
 		for _, key := range keys {
@@ -128,7 +133,7 @@ func (r EntryRepository) List(ctx context.Context, query sessionentry.Query) (se
 			page.Entries = append(page.Entries, value.Clone())
 		}
 		// 即使所有输入都处于准备阶段，查询边界仍来自同一次状态读取。
-		if session, ok := r.storage.state.sessions[sessionID]; ok && session.MainAgentID == query.AgentID {
+		if session, ok := r.storage.state.sessions[sessionID]; ok && session.MainAgentID() == query.AgentID {
 			page.SequenceBoundary = r.storage.state.sequences[sessionID.String()]
 		}
 	}

@@ -45,10 +45,8 @@ export function useSessionCommands({
         try {
             const created = await createSession({
                 sessionId: crypto.randomUUID(),
-                agentId: crypto.randomUUID(),
                 projectId: projectID,
                 workspaceId: workspaceID,
-                agentDefinitionId: 'primary',
                 requestId: crypto.randomUUID(),
             })
             await refreshCatalog()

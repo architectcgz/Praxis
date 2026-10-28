@@ -6,7 +6,6 @@ import { SessionTokenUsage } from './SessionTokenUsage'
 import { ApprovalModeSelect } from './ApprovalModeSelect'
 
 type AgentTaskInputProps = {
-    projectId: string
     sessionId: string
     active: boolean
     canQueue: boolean
@@ -25,7 +24,7 @@ type AgentTaskInputProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy)
     const providerPickerRef = useRef<HTMLDivElement>(null)
@@ -350,8 +349,8 @@ export function AgentTaskInput({ projectId, sessionId, active, canQueue, input, 
                         )}
                     </div>
                     <ApprovalModeSelect
-                        key={projectId}
-                        projectId={projectId}
+                        key={sessionId}
+                        sessionId={sessionId}
                         disabled={busy}
                         pickerRef={approvalPickerRef}
                         open={approvalPickerOpen}

@@ -21,7 +21,6 @@ type Dependencies struct {
 	Logger         *logging.Logger
 	Emitter        *coreevent.Emitter
 	Sessions       repository.Session
-	Agent          func(identity.AgentID) (*agentmodel.Agent, error)
 	Records        repository.AgentExecution
 	UsageRecords   repository.ModelUsage
 	History        sessionmodel.History
@@ -36,7 +35,6 @@ type Service struct {
 	logger         *logging.Logger
 	emitter        *coreevent.Emitter
 	sessions       repository.Session
-	agent          func(identity.AgentID) (*agentmodel.Agent, error)
 	records        repository.AgentExecution
 	usageRecords   repository.ModelUsage
 	history        sessionmodel.History
@@ -52,7 +50,6 @@ func NewService(deps Dependencies) *Service {
 		logger:         deps.Logger,
 		emitter:        deps.Emitter,
 		sessions:       deps.Sessions,
-		agent:          deps.Agent,
 		records:        deps.Records,
 		usageRecords:   deps.UsageRecords,
 		history:        deps.History,

@@ -10,13 +10,6 @@ import (
 
 type ProjectRepository struct{ storage *Store }
 
-func cloneProject(value projectmodel.Project) projectmodel.Project {
-	if value.ApprovalMode != nil {
-		value.ApprovalMode = new(*value.ApprovalMode)
-	}
-	return value
-}
-
 func (r ProjectRepository) Get(ctx context.Context, id identity.ProjectID) (projectmodel.Project, error) {
 	if err := r.storage.readLock(ctx); err != nil {
 		return projectmodel.Project{}, err
@@ -26,7 +19,7 @@ func (r ProjectRepository) Get(ctx context.Context, id identity.ProjectID) (proj
 	if !ok {
 		return projectmodel.Project{}, errorcode.ErrNotFound
 	}
-	return cloneProject(value), nil
+	return value, nil
 }
 
 // Save 保存项目事实，默认 Workspace 由该事实派生。
@@ -35,7 +28,6 @@ func (r ProjectRepository) Save(ctx context.Context, value projectmodel.Project)
 		return err
 	}
 	defer r.storage.mu.Unlock()
-	value = cloneProject(value)
 	if err := r.storage.appendEventLocked(ctx, "", "project.saved", "project", value.ID.String(), value); err != nil {
 		return err
 	}
@@ -50,7 +42,7 @@ func (r ProjectRepository) List(ctx context.Context, limit int) ([]projectmodel.
 	defer r.storage.mu.RUnlock()
 	values := make([]projectmodel.Project, 0, len(r.storage.state.projects))
 	for _, value := range r.storage.state.projects {
-		values = append(values, cloneProject(value))
+		values = append(values, value)
 	}
 	return capped(sorted(values, func(a, b projectmodel.Project) int {
 		return cmp.Or(b.UpdatedAt.Compare(a.UpdatedAt), cmp.Compare(a.ID, b.ID))

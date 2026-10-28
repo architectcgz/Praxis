@@ -17,9 +17,9 @@ type SubagentResult struct {
 	Output      string
 }
 
-// RunSubagent 由委派工具的业务装配调用；委派必须绑定仍活跃的父调用和已注册子实例。
+// RunSubagent 由委派工具的业务装配调用；子执行按指定角色创建并持有自己的 Agent，且绑定活跃父调用。
 // 返回值由父工具路径接纳，子执行不能直接修改父执行的历史或模型上下文。
-func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agentID identity.AgentID, prompt string) (SubagentResult, error) {
+func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agentID identity.AgentID, definitionID identity.AgentDefinitionID, prompt string) (SubagentResult, error) {
 	if err := s.enter(); err != nil {
 		return SubagentResult{}, err
 	}
@@ -32,7 +32,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	}
 	parentRun := parentActive.run
 	parentRecord := parentRun.Snapshot()
-	active := newActiveExecution(ctx)
+	active := newActiveExecution(ctx, parentRecord.SessionID)
 	s.executions[agentID] = active
 	s.mu.Unlock()
 	stopCaller := context.AfterFunc(ctx, func() { active.cancel(context.Cause(ctx)) })
@@ -44,7 +44,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		SessionID: parentRecord.SessionID,
 		Prompt:    prompt,
 	}
-	run, _, err := s.operations.PrepareTask(active.ctx, task, agentID, parentRecord.Config.Model)
+	run, _, err := s.operations.PrepareTask(active.ctx, task, agentID, definitionID, parentRecord.Config.Model)
 	if err != nil {
 		s.mu.Lock()
 		delete(s.executions, agentID)

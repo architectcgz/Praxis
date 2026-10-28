@@ -3,6 +3,7 @@ package storage
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/errorcode"
@@ -21,13 +22,13 @@ func cloneTiming(value timing.Record) timing.Record {
 	}
 	return value
 }
-func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing.Record) error {
-	if err := r.storage.lock(ctx); err != nil {
+func (r AgentExecutionRepository) AppendTiming(ctx context.Context, sessionID identity.SessionID, value timing.Record) error {
+	if err := r.storage.lockSession(ctx, sessionID); err != nil {
 		return err
 	}
 	defer r.storage.mu.Unlock()
 	execution, ok := r.storage.state.executions[identity.AgentExecutionID(value.ExecutionID)]
-	if !ok {
+	if !ok || execution.SessionID != sessionID {
 		return errorcode.ErrNotFound
 	}
 	kind := "agent_execution.timing_finished"
@@ -42,12 +43,12 @@ func (r AgentExecutionRepository) AppendTiming(ctx context.Context, value timing
 	r.storage.state.timings[key] = value
 	return nil
 }
-func (r AgentExecutionRepository) ListTimings(ctx context.Context, id identity.AgentExecutionID) ([]timing.Record, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+func (r AgentExecutionRepository) ListTimings(ctx context.Context, sessionID identity.SessionID, id identity.AgentExecutionID) ([]timing.Record, error) {
+	if err := r.storage.lockSession(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	defer r.storage.mu.RUnlock()
-	if _, ok := r.storage.state.executions[id]; !ok {
+	defer r.storage.mu.Unlock()
+	if execution, ok := r.storage.state.executions[id]; !ok || execution.SessionID != sessionID {
 		return nil, errorcode.ErrNotFound
 	}
 	result := make([]timing.Record, 0)
@@ -59,10 +60,13 @@ func (r AgentExecutionRepository) ListTimings(ctx context.Context, id identity.A
 	return sortTimings(result), nil
 }
 func (r AgentExecutionRepository) ListAgentTimings(ctx context.Context, id identity.AgentID, limit int) ([]timing.Record, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, identity.SessionID(id)); err != nil {
+		if errors.Is(err, errorcode.ErrNotFound) {
+			return []timing.Record{}, nil
+		}
 		return nil, err
 	}
-	defer r.storage.mu.RUnlock()
+	defer r.storage.mu.Unlock()
 	result := make([]timing.Record, 0)
 	for _, value := range r.storage.state.timings {
 		if execution, ok := r.storage.state.executions[identity.AgentExecutionID(value.ExecutionID)]; ok && execution.AgentID == id {

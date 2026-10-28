@@ -2,6 +2,7 @@ package execution
 
 import (
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
@@ -12,9 +13,10 @@ import (
 	"time"
 )
 
-// Run 表示一次执行的内存实例，由 Coordinator 独占生命周期。
+// Run 表示一次执行的内存实例，创建并持有专属 Agent，由 Coordinator 独占生命周期。
 // 主执行只保留本次执行证据，不作为会话上下文的数据源；子执行持有完整私有历史。
 type Run struct {
+	Agent    *agentmodel.Agent
 	mu       sync.RWMutex
 	main     bool
 	record   ExecutionRecord
@@ -41,6 +43,11 @@ func NewRun(record ExecutionRecord, main bool, entries []sessionentry.ContextEnt
 	if !main {
 		run.context = appcontext.NewContext(entries)
 	}
+	kind := agentmodel.KindSubagent
+	if main {
+		kind = agentmodel.KindMain
+	}
+	run.Agent = agentmodel.NewAgent(record.AgentID, record.SessionID, record.Config.AgentDefinitionID, kind, record.ID, record.CreatedAt)
 	run.deriveProgress()
 	return run, nil
 }

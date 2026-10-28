@@ -7,7 +7,6 @@ import { ApprovalGate, ToolApprovalsProvider } from './ToolApprovals'
 import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
 export type AgentConversationProps = {
-    projectId: string
     agent: AgentView
     history: Entry[]
     collaboration?: ReactNode
@@ -32,7 +31,7 @@ export type AgentConversationProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ projectId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -185,7 +184,6 @@ export function AgentConversation({ projectId, agent, history, collaboration, st
             <ApprovalGate />
             <div className="command-band agent-input-accessory">{beforeInput}</div>
             <AgentTaskInput
-                projectId={projectId}
                 sessionId={agent.SessionID}
                 active={active}
                 canQueue={canQueue}

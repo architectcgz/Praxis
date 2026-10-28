@@ -3,7 +3,6 @@ package coordinator
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -12,20 +11,16 @@ import (
 	"praxis/internal/logging"
 	"praxis/internal/repository"
 	sessionservice "praxis/internal/service/session"
-	toolservice "praxis/internal/service/toolexecution"
 	"sync"
 	"time"
 )
 
 type Config struct {
 	ConfigMu          *sync.RWMutex
-	Recovery          repository.AgentExecution
 	Tools             *executionmodel.Executor
-	ToolRecords       *toolservice.Service
 	Sessions          *sessionservice.Service
 	SessionRecords    repository.Session
 	Workspaces        repository.Workspace
-	MainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
 	Loop              *loop.Runner
 	Operations        ExecutionOperations
 	HookDispatcher    *hook.Dispatcher
@@ -36,15 +31,10 @@ type Config struct {
 // Coordinator 统一拥有队列调度、执行忙闲状态和取消句柄。
 type Coordinator struct {
 	configMu          *sync.RWMutex
-	recovery          repository.AgentExecution
 	tools             *executionmodel.Executor
-	toolRecords       *toolservice.Service
 	sessions          *sessionservice.Service
 	sessionRecords    repository.Session
 	workspaces        repository.Workspace
-	mainAgent         func(context.Context, identity.SessionID) (*agentmodel.Agent, error)
-	restored          bool
-	restoring         bool
 	loop              *loop.Runner
 	operations        ExecutionOperations
 	hookDispatcher    *hook.Dispatcher
@@ -60,6 +50,7 @@ type Coordinator struct {
 
 // activeExecution 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
 type activeExecution struct {
+	sessionID   identity.SessionID
 	run         *agentexecution.Run
 	executionID identity.AgentExecutionID
 	ctx         context.Context
@@ -71,9 +62,10 @@ type activeExecution struct {
 	toolApprovalWake chan struct{}
 }
 
-func newActiveExecution(ctx context.Context) *activeExecution {
+func newActiveExecution(ctx context.Context, sessionID identity.SessionID) *activeExecution {
 	executionCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
 	return &activeExecution{
+		sessionID:        sessionID,
 		ctx:              executionCtx,
 		cancel:           cancel,
 		ready:            make(chan struct{}),
@@ -84,13 +76,10 @@ func newActiveExecution(ctx context.Context) *activeExecution {
 func NewCoordinator(config Config) *Coordinator {
 	return &Coordinator{
 		configMu:          config.ConfigMu,
-		recovery:          config.Recovery,
 		tools:             config.Tools,
-		toolRecords:       config.ToolRecords,
 		sessions:          config.Sessions,
 		sessionRecords:    config.SessionRecords,
 		workspaces:        config.Workspaces,
-		mainAgent:         config.MainAgent,
 		loop:              config.Loop,
 		executions:        make(map[identity.AgentID]*activeExecution),
 		operations:        config.Operations,
@@ -100,7 +89,7 @@ func NewCoordinator(config Config) *Coordinator {
 	}
 }
 
-// enter 将前台恢复和队列准备计入关闭等待，禁止关闭 JSONL 后继续写入。
+// enter 将前台命令和队列准备计入关闭等待，禁止关闭存储后继续写入。
 func (r *Coordinator) enter() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -123,7 +112,7 @@ func (r *Coordinator) launchLocked(run *agentexecution.Run, active *activeExecut
 	return nil
 }
 
-// Close 拒绝新任务，取消所有运行，并等待准备、恢复和结算操作退出。
+// Close 拒绝新任务，取消所有运行，并等待准备和结算操作退出。
 // 超时后资源仍由 Application 保留，后续 Close 可以继续等待。
 func (r *Coordinator) Close(ctx context.Context) error {
 	r.mu.Lock()

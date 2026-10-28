@@ -33,13 +33,12 @@ func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID
 		AgentID:           agentID,
 		TargetExecutionID: executionID,
 	}
-	agent, err := s.sessions.GetAgent(agentID)
-	if err != nil {
-		return result, err
-	}
-	result.Applied, err = s.cancelExecution(ctx, agentID, executionID, cause)
-	if err == nil && result.Applied {
-		agent.ApplyControl(executionID, state, time.Now())
+	applied, err := s.cancelExecution(ctx, agentID, executionID, cause)
+	result.Applied = applied
+	if err == nil && applied {
+		if run := s.ActiveRun(agentID); run != nil {
+			run.Agent.ApplyControl(executionID, state, time.Now())
+		}
 	}
 	return result, err
 }

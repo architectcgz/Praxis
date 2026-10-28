@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	agentexecution "praxis/internal/core/agent/execution"
 	appcontext "praxis/internal/core/context"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
@@ -21,14 +22,41 @@ func (s *Service) ContextEntries(ctx context.Context, sessionID identity.Session
 	}
 	value := s.contexts[sessionID]
 	if value == nil {
-		entries, err := s.entries.LoadContext(ctx, session.ID, session.MainAgentID)
+		entries, err := s.entries.LoadContext(ctx, session.ID, session.MainAgentID())
 		if err != nil {
+			return nil, err
+		}
+		if err := s.interruptPreviousExecutions(ctx, sessionID); err != nil {
 			return nil, err
 		}
 		value = appcontext.NewContext(entries)
 		s.contexts[sessionID] = value
 	}
 	return value.Entries(), nil
+}
+
+// interruptPreviousExecutions 只在首次载入 Context 时收尾旧进程留下的执行，不创建 Run 或请求模型。
+// 调用方持有 contextMu；新的 Execution 必须在 Context 初始化成功后才准入。
+func (s *Service) interruptPreviousExecutions(ctx context.Context, sessionID identity.SessionID) error {
+	records, err := s.executions.ListBySession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if !record.Active() {
+			continue
+		}
+		at := s.clock.Now()
+		if record.Status == agentexecution.ExecutionStarting {
+			// 与正常执行的启动前结算约定一致，起止时间均记录为本次收尾时间。
+			record.Start(at)
+		}
+		record.End(agentexecution.ExecutionInterrupted, "", at)
+		if err := s.executions.Save(ctx, record); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReplaceContext 先保存完整压缩结果，再直接替换内存条目；失败时保留当前上下文。
@@ -49,7 +77,7 @@ func (s *Service) ReplaceContext(ctx context.Context, sessionID identity.Session
 		if err := entry.Validate(); err != nil {
 			return err
 		}
-		prior, err := s.entries.Get(ctx, session.MainAgentID, entry.ID)
+		prior, err := s.entries.Get(ctx, session.MainAgentID(), entry.ID)
 		if err != nil {
 			return err
 		}
@@ -57,7 +85,7 @@ func (s *Service) ReplaceContext(ctx context.Context, sessionID identity.Session
 			return errorcode.ErrRequestConflict
 		}
 	}
-	if err := s.entries.SaveContext(ctx, session.ID, session.MainAgentID, entries); err != nil {
+	if err := s.entries.SaveContext(ctx, session.ID, session.MainAgentID(), entries); err != nil {
 		return err
 	}
 	value := s.contexts[sessionID]

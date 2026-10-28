@@ -10,13 +10,12 @@ import (
 	"path/filepath"
 )
 
-// DataRoot 包含所有本地产品数据路径。配置、项目和运行状态在 Root 下分别管理。
+// DataRoot 包含本地产品数据路径；配置和会话按目录管理，应用级日志直接保存在 Root 下。
 // 此类型只解析路径；模型和凭据文件只由 Provider 注册表读写。
 type DataRoot struct {
 	Root                 string
 	Config               string
 	Projects             string
-	State                string
 	ModelProvidersConfig string
 	ModelCredentialsFile string
 	ToolConfig           string
@@ -39,12 +38,10 @@ func Resolve(root string) (DataRoot, error) {
 		return DataRoot{}, errors.New("data root cannot be the filesystem root")
 	}
 	config := filepath.Join(root, "config")
-	state := filepath.Join(root, "state")
 	return DataRoot{
 		Root:                 root,
 		Config:               config,
 		Projects:             filepath.Join(root, "projects"),
-		State:                state,
 		ModelProvidersConfig: filepath.Join(config, "models.json"),
 		ModelCredentialsFile: filepath.Join(config, "auth.json"),
 		ToolConfig:           filepath.Join(config, "tools.json"),
@@ -62,7 +59,6 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 		d.Root,
 		d.Config,
 		d.Projects,
-		d.State,
 		d.AgentDefinitions,
 	} {
 		if path == "" {

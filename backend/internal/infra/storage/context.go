@@ -6,7 +6,6 @@ import (
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -34,7 +33,7 @@ func cloneContext(value contextRecord) contextRecord {
 }
 
 func (r EntryRepository) SaveContext(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, entries []sessionentry.ContextEntry) error {
-	if err := r.storage.lock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, sessionID); err != nil {
 		return err
 	}
 	defer r.storage.mu.Unlock()
@@ -52,13 +51,10 @@ func (r EntryRepository) SaveContext(ctx context.Context, sessionID identity.Ses
 
 // LoadContext 读取快照和之后已准入的普通条目；只覆盖快照后修改且仍在快照中的回执。
 func (r EntryRepository) LoadContext(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]sessionentry.ContextEntry, error) {
-	if err := r.storage.readLock(ctx); err != nil {
+	if err := r.storage.lockSession(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	defer r.storage.mu.RUnlock()
-	if _, exists := r.storage.state.sessions[sessionID]; !exists {
-		return nil, errorcode.ErrNotFound
-	}
+	defer r.storage.mu.Unlock()
 	var entries []sessionentry.ContextEntry
 	var boundary uint64
 	if value, ok := r.storage.state.contexts[sessionID]; ok {

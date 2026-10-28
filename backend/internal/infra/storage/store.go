@@ -2,35 +2,57 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"errors"
-	"fmt"
+	"os"
+	"path/filepath"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/infra/jsonl"
 	"slices"
 	"sync"
-	"time"
 )
 
-// Store 先顺序写入日志，再发布内存状态；所有仓储共享同一把读写锁。
+// Store 持有会话元数据库与按需载入的历史；所有仓储共享同一把读写锁。
 type Store struct {
-	mu     sync.RWMutex
-	state  state
-	log    *jsonl.Log
-	closed bool
+	mu       sync.RWMutex
+	dataRoot string
+	sessions *sql.DB
+	state    state
+	closed   bool
+	// 由 mu 保护；追加失败的日志须重新打开存储并重放后才能继续写入。
+	writeErrors map[string]error
 }
 
-// Open 在开放仓储前完成日志重放；运行时查询只读取类型化内存状态。
-func Open(ctx context.Context, root string) (*Store, error) {
-	s := &Store{state: newState()}
-	log, err := jsonl.Open(ctx, root, func(scope jsonl.Scope, event jsonl.Event) error {
-		return replayEvent(&s.state, scope, event)
-	})
+// Open 初始化存储目录和项目日志，打开元数据库并恢复项目状态；会话历史在首次访问时载入。
+func Open(ctx context.Context, dataRoot string) (*Store, error) {
+	s := &Store{
+		dataRoot:    dataRoot,
+		state:       newState(),
+		writeErrors: make(map[string]error),
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Join(s.dataRoot, "projects"), 0700); err != nil {
+		return nil, err
+	}
+	// 项目汇总日志随存储初始化建立，普通追加不承担首次创建。
+	if err := checkRegularFile(s.projectLogPath()); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		if err := createLog(ctx, s.projectLogPath()); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.replayLog(ctx, s.projectLogPath(), logScope{}); err != nil {
+		return nil, err
+	}
+	db, err := openSessionDatabase(ctx, dataRoot)
 	if err != nil {
 		return nil, err
 	}
-	s.log = log
+	s.sessions = db
 	return s, nil
 }
 
@@ -40,6 +62,18 @@ func (s *Store) lock(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	if err := s.check(ctx); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// lockSession 在同一把写锁内完成首次重放，避免并发访问重复载入或看到半成品状态。
+func (s *Store) lockSession(ctx context.Context, id identity.SessionID) error {
+	if err := s.lock(ctx); err != nil {
+		return err
+	}
+	if err := s.loadSessionLocked(ctx, id); err != nil {
 		s.mu.Unlock()
 		return err
 	}
@@ -74,39 +108,23 @@ func (s *Store) appendEventLocked(ctx context.Context, scope identity.SessionID,
 	if err != nil {
 		return err
 	}
-	if scope == "" {
-		_, err = s.log.AppendProject(ctx, event)
-	} else {
+	data, err := encodeEvent(event)
+	if err != nil {
+		return err
+	}
+	path := s.projectLogPath()
+	if scope != "" {
 		session, ok := s.state.sessions[scope]
 		if !ok {
 			return errorcode.ErrNotFound
 		}
-		_, err = s.log.AppendSession(ctx, scope.String(), session.ProjectID.String(), event)
+		path = s.sessionLogPath(scope.String(), session.ProjectID.String())
 	}
-	if err != nil {
+	if err := s.appendLogLocked(ctx, path, data); err != nil {
 		return err
 	}
 	s.state.sequences[scope.String()] = event.Sequence
 	return nil
-}
-
-func newEvent(sequence uint64, typ, collection, key string, value any) (jsonl.Event, error) {
-	if sequence == 0 {
-		return jsonl.Event{}, errors.New("storage sequence exhausted")
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return jsonl.Event{}, err
-	}
-	return jsonl.Event{
-		Sequence:   sequence,
-		ID:         fmt.Sprintf("event:%d", sequence),
-		Type:       typ,
-		Collection: collection,
-		Key:        key,
-		CreatedAt:  time.Now().UTC(),
-		Payload:    data,
-	}, nil
 }
 
 func (s *Store) Close(ctx context.Context) error {
@@ -121,11 +139,8 @@ func (s *Store) Close(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.log.Close(); err != nil {
-		return err
-	}
 	s.closed = true
-	return nil
+	return s.sessions.Close()
 }
 
 func capped[T any](values []T, limit int) []T {

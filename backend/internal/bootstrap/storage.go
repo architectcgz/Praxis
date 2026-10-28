@@ -15,11 +15,11 @@ type storageResources struct {
 }
 
 func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
-	logger, err := logging.NewFactory().Application(filepath.Join(root.State, "praxis.log"))
+	logger, err := logging.NewFactory().Application(filepath.Join(root.Root, "praxis.log"))
 	if err != nil {
 		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
 	}
-	logger.Infof("application open started root=%s logs=%s", root.Root, root.State)
+	logger.Infof("application open started root=%s", root.Root)
 	state, err := storage.Open(ctx, root.Root)
 	if err != nil {
 		logger.Errorf("open storage failed: %v", err)

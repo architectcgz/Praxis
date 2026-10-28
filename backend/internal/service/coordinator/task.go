@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
@@ -29,6 +30,22 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input sessionservice.TaskI
 		s.logger.Errorf("schedule session input session_id=%s task_id=%s error=%v", task.SessionID, task.ID, err)
 	}
 	return result, nil
+}
+
+// DeleteSession 在执行生命周期锁内确认会话空闲，再交由 Session 删除元数据和上下文。
+func (s *Coordinator) DeleteSession(ctx context.Context, sessionID identity.SessionID) error {
+	if err := s.enter(); err != nil {
+		return err
+	}
+	defer s.running.Done()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, active := range s.executions {
+		if active.sessionID == sessionID {
+			return agentmodel.ErrExecuting
+		}
+	}
+	return s.sessions.DeleteSession(ctx, sessionID)
 }
 
 func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.SessionID, id identity.TaskID) error {

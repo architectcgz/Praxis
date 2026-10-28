@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -13,28 +14,20 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	sessionservice "praxis/internal/service/session"
 )
 
 // prepareMainTask 将内存 Task 准入为 Execution，开始时才向 Session 追加用户消息。
-// 调用方已标记 Agent 忙碌；返回值的 bool 表示重复请求，失败后的队列与忙闲状态由调度器处理。
-func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, agentID identity.AgentID, modelConfig modelapi.Config) (result agentexecution.ExecutionRecord, existing bool, err error) {
+// 调用方已保留执行槽位；返回值的 bool 表示重复请求，失败后的队列与忙闲状态由调度器处理。
+func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, session taskmodel.Session, modelConfig modelapi.Config) (result agentexecution.ExecutionRecord, existing bool, err error) {
 	if modelConfig.ProviderID == "" || modelConfig.ModelID == "" {
 		return result, false, modelconfig.ErrNotConfigured
 	}
 	// 请求身份只在调度准入时建立；由 Task ID 派生以保证准备重试使用同一身份。
 	requestID := identity.RequestID(input.ID)
 	inputEntryID := "input:" + requestID.String()
-	owner, err := s.agent(agentID)
-	if err != nil {
-		return result, false, err
-	}
-	if owner.SessionID != input.SessionID {
-		return result, false, errorcode.ErrRequestConflict
-	}
-	previous, err := s.records.FindByRequest(ctx, owner.ID, requestID)
+	previous, err := s.records.FindByRequest(ctx, session.MainAgentID(), requestID)
 	if err == nil {
-		stored, err := s.history.GetEntry(ctx, owner.SessionID, previous.InputEntryID)
+		stored, err := s.history.GetEntry(ctx, session.ID, previous.InputEntryID)
 		if err != nil {
 			return result, false, err
 		}
@@ -42,10 +35,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 			return result, false, errorcode.ErrRequestConflict
 		}
 		if previous.Active() {
-			if err := s.history.AdmitInput(ctx, owner.SessionID, previous.InputEntryID); err != nil {
-				return result, false, err
-			}
-			if err := owner.BeginExecution(previous); err != nil {
+			if err := s.history.AdmitInput(ctx, session.ID, previous.InputEntryID); err != nil {
 				return result, false, err
 			}
 		}
@@ -54,19 +44,9 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 	if !errors.Is(err, errorcode.ErrNotFound) {
 		return result, false, err
 	}
-	if err := sessionservice.RequireWritable(ctx, s.sessions, owner.SessionID); err != nil {
-		return result, false, err
-	}
-	definition, err := s.definitions.Definition(owner.DefinitionID)
+	definition, err := s.definitions.Definition(agentmodel.DefinitionPrimary)
 	if err != nil {
 		return result, false, err
-	}
-	session, err := s.sessions.Get(ctx, owner.SessionID)
-	if err != nil {
-		return result, false, err
-	}
-	if session.MainAgentID != owner.ID || session.AgentDefinitionID != definition.ID {
-		return result, false, errorcode.ErrRequestConflict
 	}
 	config := agentexecution.ExecutionConfig{
 		AgentDefinitionID: definition.ID,
@@ -75,7 +55,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 	}
 	at := s.clock.Now()
 	executionID := identity.AgentExecutionID(s.ids.New("execution"))
-	if previous, err := s.history.GetEntry(ctx, owner.SessionID, inputEntryID); err == nil {
+	if previous, err := s.history.GetEntry(ctx, session.ID, inputEntryID); err == nil {
 		if previous.Role != role.User || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
 			return result, false, errorcode.ErrRequestConflict
 		}
@@ -83,7 +63,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return result, false, err
 	}
-	stored, _, err := s.history.AppendEntry(ctx, owner.SessionID, sessionentry.ContextEntry{
+	stored, _, err := s.history.AppendEntry(ctx, session.ID, sessionentry.ContextEntry{
 		ID:           inputEntryID,
 		RequestID:    requestID.String(),
 		SourceTaskID: input.ID.String(),
@@ -99,15 +79,12 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, age
 	if stored.ExecutionID != executionID.String() || stored.RequestID != requestID.String() || stored.SourceTaskID != input.ID.String() || stored.Role != role.User {
 		return result, false, errorcode.ErrRequestConflict
 	}
-	result = agentexecution.NewExecutionRecord(executionID, owner.SessionID, owner.ID, requestID, inputEntryID, config, at)
+	result = agentexecution.NewExecutionRecord(executionID, session.ID, session.MainAgentID(), requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID
 	if err = s.records.Save(ctx, result); err != nil {
 		return agentexecution.ExecutionRecord{}, false, err
 	}
-	if err := s.history.AdmitInput(ctx, owner.SessionID, stored.ID); err != nil {
-		return result, false, err
-	}
-	if err := owner.BeginExecution(result); err != nil {
+	if err := s.history.AdmitInput(ctx, session.ID, stored.ID); err != nil {
 		return result, false, err
 	}
 	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。

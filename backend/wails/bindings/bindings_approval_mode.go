@@ -9,54 +9,53 @@ import (
 	"strings"
 )
 
-// GetProjectApprovalMode 读取项目授权选择；空或非 canonical 项目身份返回校验错误。
-func (b *ProjectBindings) GetProjectApprovalMode(projectID string) (dto.ProjectApprovalMode, error) {
-	if err := validation.Value("projectId", projectID, "project_id"); err != nil {
-		return dto.ProjectApprovalMode{}, publicInputError(b.host, "ProjectBindings.GetProjectApprovalMode.request", err)
+// GetSessionApprovalMode 读取会话授权选择；空或非 canonical 会话身份返回校验错误。
+func (b *SessionBindings) GetSessionApprovalMode(sessionID string) (dto.SessionApprovalMode, error) {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return dto.SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.GetSessionApprovalMode.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.ProjectApprovalMode{}, err
+		return dto.SessionApprovalMode{}, err
 	}
-	value, err := services.Approvals.GetApprovalMode(ctx, identity.ProjectID(projectID))
+	value, err := services.Approvals.GetApprovalMode(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.GetProjectApprovalMode", err)
+		return dto.SessionApprovalMode{}, publicError(b.host, "SessionBindings.GetSessionApprovalMode", err)
 	}
 	return approvalModeDTO(value), nil
 }
 
-// SetProjectApprovalMode 保存项目授权选择；null 恢复继承，不影响已经 Started 的工具。
-func (b *ProjectBindings) SetProjectApprovalMode(wire dto.SetProjectApprovalModeRequest) (dto.ProjectApprovalMode, error) {
+// SetSessionApprovalMode 保存会话授权选择；null 恢复继承，不影响已经开始的工具授权。
+func (b *SessionBindings) SetSessionApprovalMode(wire dto.SetSessionApprovalModeRequest) (dto.SessionApprovalMode, error) {
 	if wire.Mode != nil {
 		wire.Mode = new(strings.TrimSpace(*wire.Mode))
 	}
 	if err := validation.Struct(wire); err != nil {
-		return dto.ProjectApprovalMode{}, publicInputError(b.host, "ProjectBindings.SetProjectApprovalMode.request", err)
+		return dto.SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.SetSessionApprovalMode.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.ProjectApprovalMode{}, err
+		return dto.SessionApprovalMode{}, err
 	}
 	var mode *security.ApprovalMode
 	if wire.Mode != nil {
 		mode = new(security.ApprovalMode(*wire.Mode))
 	}
-	value, err := services.Approvals.SetApprovalMode(ctx, identity.ProjectID(wire.ProjectID), mode)
+	value, err := services.Approvals.SetApprovalMode(ctx, identity.SessionID(wire.SessionID), mode)
 	if err != nil {
-		return dto.ProjectApprovalMode{}, publicError(b.host, "ProjectBindings.SetProjectApprovalMode", err)
+		return dto.SessionApprovalMode{}, publicError(b.host, "SessionBindings.SetSessionApprovalMode", err)
 	}
 	return approvalModeDTO(value), nil
 }
 
-func approvalModeDTO(value approvalservice.ApprovalSettings) dto.ProjectApprovalMode {
-	result := dto.ProjectApprovalMode{
-		ProjectID:     value.ProjectID.String(),
+func approvalModeDTO(value approvalservice.ApprovalSettings) dto.SessionApprovalMode {
+	result := dto.SessionApprovalMode{
+		SessionID:     value.SessionID.String(),
 		GlobalMode:    string(value.GlobalMode),
 		EffectiveMode: string(value.EffectiveMode),
 	}
-	if value.ProjectMode != nil {
-		mode := string(*value.ProjectMode)
-		result.ProjectMode = &mode
+	if value.SessionMode != nil {
+		result.SessionMode = new(string(*value.SessionMode))
 	}
 	return result
 }

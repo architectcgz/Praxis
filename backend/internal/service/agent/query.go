@@ -1,4 +1,4 @@
-// Package agent 提供 Agent 实例创建、启动恢复和状态查询用例。
+// Package agent 提供执行所属 Agent 与主会话入口的只读展示查询。
 package agent
 
 import (
@@ -14,9 +14,8 @@ import (
 
 type Dependencies struct {
 	History          sessionmodel.History
-	ActiveExecution  func(identity.AgentID) (agentexecution.ExecutionRecord, bool)
-	Agent            func(identity.AgentID) (*agentmodel.Agent, error)
-	RegisterAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
+	ActiveRun        func(identity.AgentID) *agentexecution.Run
+	SessionRuns      func(identity.SessionID) []*agentexecution.Run
 	ExecutionRecords repository.AgentExecution
 	Sessions         repository.Session
 	Definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
@@ -24,15 +23,14 @@ type Dependencies struct {
 
 type Service struct {
 	history          sessionmodel.History
-	activeExecution  func(identity.AgentID) (agentexecution.ExecutionRecord, bool)
-	agent            func(identity.AgentID) (*agentmodel.Agent, error)
-	registerAgent    func(context.Context, *agentmodel.Agent) (*agentmodel.Agent, error)
+	activeRun        func(identity.AgentID) *agentexecution.Run
+	sessionRuns      func(identity.SessionID) []*agentexecution.Run
 	executionRecords repository.AgentExecution
 	sessions         repository.Session
 	definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
-// AgentView 读取内存实例的状态并组合执行详情，不复制带锁的 Agent 实例。
+// AgentView 是展示投影；没有活跃 Execution 时不需要对应的 Agent 实例。
 type AgentView struct {
 	ID                 identity.AgentID
 	SessionID          identity.SessionID
@@ -47,14 +45,91 @@ type AgentView struct {
 	LatestExecution    *agentexecution.ExecutionRecord `json:"latestExecution"`
 }
 
-// DescribeAgent 从已加载的角色定义读取展示名称；名称变化不改变持久化身份。
-func (s *Service) DescribeAgent(value *agentmodel.Agent) (AgentView, error) {
+func NewService(deps Dependencies) *Service {
+	return &Service{
+		history:          deps.History,
+		activeRun:        deps.ActiveRun,
+		sessionRuns:      deps.SessionRuns,
+		executionRecords: deps.ExecutionRecords,
+		definitions:      deps.Definitions,
+		sessions:         deps.Sessions,
+	}
+}
+
+// GetAgentView 优先读取活跃 Run；主会话空闲时从元数据和执行历史派生展示，不创建 Agent。
+func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (AgentView, error) {
+	if run := s.activeRun(agentID); run != nil {
+		return s.describeRun(run)
+	}
+	session, err := s.sessions.Get(ctx, identity.SessionID(agentID))
+	if err != nil {
+		return AgentView{}, err
+	}
+	if _, err := s.history.ContextEntries(ctx, session.ID); err != nil {
+		return AgentView{}, err
+	}
+	definition, err := s.definitions(agentmodel.DefinitionPrimary)
+	if err != nil {
+		return AgentView{}, err
+	}
+	view := AgentView{
+		ID:           session.MainAgentID(),
+		SessionID:    session.ID,
+		DefinitionID: definition.ID,
+		Kind:         agentmodel.KindMain,
+		CreatedAt:    session.CreatedAt,
+		UpdatedAt:    session.UpdatedAt,
+		Name:         definition.Name,
+		State:        agentmodel.AgentIdle,
+	}
+	latest, err := s.executionRecords.ListByAgent(ctx, agentID, 1)
+	if err != nil {
+		return AgentView{}, err
+	}
+	if len(latest) > 0 {
+		page, err := s.history.ListEntries(ctx, session.ID)
+		if err != nil {
+			return AgentView{}, err
+		}
+		latest[0].Progress = latest[0].Progress.WithEntries(latest[0].ID.String(), page.Entries)
+		view.LatestExecution = &latest[0]
+		view.State = latest[0].AgentState()
+		view.UpdatedAt = latest[0].EndedAt
+	}
+	return view, nil
+}
+
+func (s *Service) ListSessionAgents(ctx context.Context, sessionID identity.SessionID, limit int) ([]AgentView, error) {
+	main, err := s.GetAgentView(ctx, identity.AgentID(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	values := []AgentView{main}
+	for _, run := range s.sessionRuns(sessionID) {
+		if run.Main() {
+			continue
+		}
+		view, err := s.describeRun(run)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, view)
+	}
+	if limit > 0 {
+		values = values[:min(limit, len(values))]
+	}
+	return values, nil
+}
+
+func (s *Service) describeRun(run *agentexecution.Run) (AgentView, error) {
+	value := run.Agent
 	definition, err := s.definitions(value.DefinitionID)
 	if err != nil {
 		return AgentView{}, fmt.Errorf("load agent definition for display: %w", err)
 	}
 	state, executionID, updatedAt := value.State()
-	return AgentView{
+	record := run.Snapshot()
+	view := AgentView{
 		ID:                 value.ID,
 		SessionID:          value.SessionID,
 		DefinitionID:       value.DefinitionID,
@@ -64,62 +139,10 @@ func (s *Service) DescribeAgent(value *agentmodel.Agent) (AgentView, error) {
 		Name:               definition.Name,
 		State:              state,
 		CurrentExecutionID: executionID,
-	}, nil
-}
-
-// NewService 使用装配层提供的完整依赖创建 Agent 查询服务。
-func NewService(deps Dependencies) *Service {
-	return &Service{
-		history:          deps.History,
-		activeExecution:  deps.ActiveExecution,
-		agent:            deps.Agent,
-		registerAgent:    deps.RegisterAgent,
-		executionRecords: deps.ExecutionRecords,
-		definitions:      deps.Definitions,
-		sessions:         deps.Sessions,
+		LatestExecution:    &record,
 	}
-}
-
-// GetAgentView 返回 Agent 状态、当前执行与最近一次执行。
-func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (AgentView, error) {
-	value, err := s.agent(agentID)
-	if err != nil {
-		return AgentView{}, err
-	}
-	view, err := s.DescribeAgent(value)
-	if err != nil {
-		return AgentView{}, err
-	}
-	latest, err := s.executionRecords.ListByAgent(ctx, agentID, 1)
-	if err != nil {
-		return AgentView{}, err
-	}
-	if current, found := s.activeExecution(agentID); found {
-		view.CurrentExecution, view.LatestExecution = &current, &current
-		return view, nil
-	}
-	if !value.IsMain() {
-		return view, nil
-	}
-	page, err := s.history.ListEntries(ctx, value.SessionID)
-	if err != nil {
-		return AgentView{}, err
-	}
-	if len(latest) > 0 {
-		latest[0].Progress = latest[0].Progress.WithEntries(latest[0].ID.String(), page.Entries)
-		view.LatestExecution = &latest[0]
-	}
-	if view.CurrentExecutionID != "" {
-		if view.LatestExecution != nil && view.LatestExecution.ID == view.CurrentExecutionID {
-			view.CurrentExecution = view.LatestExecution
-		} else {
-			current, err := s.executionRecords.Get(ctx, view.CurrentExecutionID)
-			if err != nil {
-				return AgentView{}, fmt.Errorf("load current agent execution: %w", err)
-			}
-			current.Progress = current.Progress.WithEntries(current.ID.String(), page.Entries)
-			view.CurrentExecution = &current
-		}
+	if executionID != "" {
+		view.CurrentExecution = &record
 	}
 	return view, nil
 }

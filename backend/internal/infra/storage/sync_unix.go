@@ -1,6 +1,6 @@
 //go:build !windows
 
-package jsonl
+package storage
 
 import (
 	"errors"

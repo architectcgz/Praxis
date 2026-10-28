@@ -21,7 +21,7 @@ func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 	if run.Main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := s.records.AppendTiming(ctx, record); err != nil {
+		if err := s.records.AppendTiming(ctx, execution.SessionID, record); err != nil {
 			s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
 		}
 	} else {
@@ -63,7 +63,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 	for _, record := range records {
 		execution, ok := owners[record.ExecutionID]
 		if !ok {
-			execution, err = s.records.Get(ctx, identity.AgentExecutionID(record.ExecutionID))
+			execution, err = s.records.Get(ctx, identity.SessionID(agentID), identity.AgentExecutionID(record.ExecutionID))
 			if err != nil {
 				return nil, err
 			}
