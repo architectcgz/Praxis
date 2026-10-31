@@ -11,7 +11,6 @@ import (
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
-	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
@@ -25,7 +24,6 @@ type Dependencies struct {
 	ModelConfigs   ModelConfigResolver
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
-	Workspaces     repository.Workspace
 	Sessions       repository.Session
 	Entries        sessionentry.Store
 	Executions     repository.AgentExecution
@@ -40,7 +38,6 @@ type Service struct {
 	modelConfigs   ModelConfigResolver
 	hookDispatcher *hook.Dispatcher
 	projects       repository.Project
-	workspaces     repository.Workspace
 	sessions       repository.Session
 	entries        sessionentry.Store
 	executions     repository.AgentExecution
@@ -63,10 +60,9 @@ type Service struct {
 
 // CreateInput 只接收已校验的会话及归属身份，不接收 Agent 实例或角色定义。
 type CreateInput struct {
-	RequestID   identity.RequestID
-	SessionID   identity.SessionID
-	ProjectID   identity.ProjectID
-	WorkspaceID identity.WorkspaceID
+	RequestID identity.RequestID
+	SessionID identity.SessionID
+	ProjectID identity.ProjectID
 }
 
 type CreateResult struct {
@@ -82,7 +78,6 @@ func NewService(deps Dependencies) *Service {
 		contexts:        make(map[identity.SessionID]*appcontext.Context),
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
-		workspaces:      deps.Workspaces,
 		sessions:        deps.Sessions,
 		entries:         deps.Entries,
 		executions:      deps.Executions,
@@ -144,7 +139,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 	}
 	existing, err := s.sessions.Get(ctx, params.SessionID)
 	if err == nil {
-		if existing.ProjectID != params.ProjectID || existing.WorkspaceID != params.WorkspaceID {
+		if existing.ProjectID != params.ProjectID {
 			return CreateResult{}, errorcode.ErrRequestConflict
 		}
 		return CreateResult{Session: existing}, nil
@@ -157,16 +152,9 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 		return CreateResult{}, err
 	}
 	if project.State != projectmodel.ProjectActive {
-		return CreateResult{}, projectservice.ErrWorkspaceInvalid
+		return CreateResult{}, projectservice.ErrProjectInvalid
 	}
-	workspace, err := s.workspaces.Get(ctx, params.WorkspaceID)
-	if err != nil {
-		return CreateResult{}, err
-	}
-	if workspace.ProjectID != project.ID || workspace.State != workspacemodel.WorkspaceReady {
-		return CreateResult{}, projectservice.ErrWorkspaceInvalid
-	}
-	session := sessionmodel.NewSession(params.SessionID, project.ID, workspace.ID, s.clock.Now())
+	session := sessionmodel.NewSession(params.SessionID, project.ID, s.clock.Now())
 	if err := s.sessions.Create(ctx, session); err != nil {
 		return CreateResult{}, err
 	}

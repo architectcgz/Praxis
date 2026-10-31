@@ -37,8 +37,8 @@ type output struct {
 	Files []fileResult `json:"files"`
 }
 
-// Call 在 Workspace 内校验并应用完整补丁。
-func Call(ctx context.Context, toolArguments patchtool.Arguments, workspacePath string) (tool.ToolResult, error) {
+// Call 在项目目录内校验并应用完整补丁。
+func Call(ctx context.Context, toolArguments patchtool.Arguments, projectPath string) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -46,10 +46,10 @@ func Call(ctx context.Context, toolArguments patchtool.Arguments, workspacePath 
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
-	if !workspaceDirectory(toolArguments.Path, workspacePath) {
-		return tool.ToolResult{}, errors.New("apply_patch root is outside the workspace")
+	if !projectDirectory(toolArguments.Path, projectPath) {
+		return tool.ToolResult{}, errors.New("apply_patch root is outside the project")
 	}
-	changes, results, err := prepareChanges(ctx, toolArguments.Path, workspacePath, operations)
+	changes, results, err := prepareChanges(ctx, toolArguments.Path, projectPath, operations)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -71,7 +71,7 @@ func Call(ctx context.Context, toolArguments patchtool.Arguments, workspacePath 
 func prepareChanges(
 	ctx context.Context,
 	root string,
-	workspace string,
+	projectRoot string,
 	operations []patchtool.Operation,
 ) ([]*fileChange, []fileResult, error) {
 	changes := make([]*fileChange, 0, len(operations)+1)
@@ -87,8 +87,8 @@ func prepareChanges(
 		}
 		switch operation.Kind {
 		case patchtool.Add:
-			if !workspaceWritePath(source, workspace, true) {
-				return nil, nil, fmt.Errorf("add target %q is outside the workspace", operation.Path)
+			if !projectWritePath(source, projectRoot, true) {
+				return nil, nil, fmt.Errorf("add target %q is outside the project", operation.Path)
 			}
 			if _, err := os.Lstat(source); !errors.Is(err, os.ErrNotExist) {
 				return nil, nil, fmt.Errorf("add target %q already exists", operation.Path)
@@ -104,7 +104,7 @@ func prepareChanges(
 			})
 			results = append(results, fileResult{Path: operation.Path, Action: "added"})
 		case patchtool.Delete:
-			mode, err := statWorkspaceFile(source, workspace)
+			mode, err := statProjectFile(source, projectRoot)
 			if err != nil {
 				return nil, nil, fmt.Errorf("delete target %q: %w", operation.Path, err)
 			}
@@ -116,7 +116,7 @@ func prepareChanges(
 			})
 			results = append(results, fileResult{Path: operation.Path, Action: "deleted"})
 		case patchtool.Update:
-			content, mode, err := readWorkspaceFile(source, workspace)
+			content, mode, err := readProjectFile(source, projectRoot)
 			if err != nil {
 				return nil, nil, fmt.Errorf("update target %q: %w", operation.Path, err)
 			}
@@ -135,8 +135,8 @@ func prepareChanges(
 				continue
 			}
 			destination, err := resolveTarget(root, operation.MoveTo)
-			if err != nil || !rememberPath(seen, destination) || !workspaceWritePath(destination, workspace, true) {
-				return nil, nil, fmt.Errorf("move target %q is duplicated, invalid, or outside the workspace", operation.MoveTo)
+			if err != nil || !rememberPath(seen, destination) || !projectWritePath(destination, projectRoot, true) {
+				return nil, nil, fmt.Errorf("move target %q is duplicated, invalid, or outside the project", operation.MoveTo)
 			}
 			if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
 				return nil, nil, fmt.Errorf("move target %q already exists", operation.MoveTo)
@@ -177,8 +177,8 @@ func rememberPath(seen map[string]struct{}, path string) bool {
 	return true
 }
 
-func readWorkspaceFile(path string, workspace string) ([]byte, fs.FileMode, error) {
-	mode, err := statWorkspaceFile(path, workspace)
+func readProjectFile(path string, projectRoot string) ([]byte, fs.FileMode, error) {
+	mode, err := statProjectFile(path, projectRoot)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -192,9 +192,9 @@ func readWorkspaceFile(path string, workspace string) ([]byte, fs.FileMode, erro
 	return content, mode, nil
 }
 
-func statWorkspaceFile(path string, workspace string) (fs.FileMode, error) {
-	if !workspaceWritePath(path, workspace, false) {
-		return 0, errors.New("file is outside the workspace or is not a regular file")
+func statProjectFile(path string, projectRoot string) (fs.FileMode, error) {
+	if !projectWritePath(path, projectRoot, false) {
+		return 0, errors.New("file is outside the project or is not a regular file")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -290,8 +290,8 @@ func commitChanges(changes []*fileChange) error {
 	return nil
 }
 
-func workspaceDirectory(path, workspace string) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+func projectDirectory(path, projectRoot string) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
 	info, err := os.Lstat(path)
@@ -302,16 +302,16 @@ func workspaceDirectory(path, workspace string) bool {
 	if err != nil || !pathutil.SamePath(path, realPath) {
 		return false
 	}
-	realWorkspace, err := filepath.EvalSymlinks(workspace)
-	return err == nil && pathutil.SamePath(workspace, realWorkspace) && pathutil.IsWithin(realWorkspace, realPath)
+	realRoot, err := filepath.EvalSymlinks(projectRoot)
+	return err == nil && pathutil.SamePath(projectRoot, realRoot) && pathutil.IsWithin(realRoot, realPath)
 }
 
-func workspaceWritePath(path, workspace string, allowMissing bool) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+func projectWritePath(path, projectRoot string, allowMissing bool) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
-	realWorkspace, err := filepath.EvalSymlinks(workspace)
-	if err != nil || !pathutil.SamePath(workspace, realWorkspace) {
+	realRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil || !pathutil.SamePath(projectRoot, realRoot) {
 		return false
 	}
 	info, err := os.Lstat(path)
@@ -320,7 +320,7 @@ func workspaceWritePath(path, workspace string, allowMissing bool) bool {
 			return false
 		}
 		realPath, err := filepath.EvalSymlinks(path)
-		return err == nil && pathutil.SamePath(path, realPath) && pathutil.IsWithin(realWorkspace, realPath)
+		return err == nil && pathutil.SamePath(path, realPath) && pathutil.IsWithin(realRoot, realPath)
 	}
 	if !allowMissing || !errors.Is(err, os.ErrNotExist) {
 		return false
@@ -328,5 +328,5 @@ func workspaceWritePath(path, workspace string, allowMissing bool) bool {
 	parent := filepath.Dir(path)
 	parentInfo, parentErr := os.Stat(parent)
 	realParent, evalErr := filepath.EvalSymlinks(parent)
-	return parentErr == nil && parentInfo.IsDir() && evalErr == nil && pathutil.SamePath(parent, realParent) && pathutil.IsWithin(realWorkspace, realParent)
+	return parentErr == nil && parentInfo.IsDir() && evalErr == nil && pathutil.SamePath(parent, realParent) && pathutil.IsWithin(realRoot, realParent)
 }

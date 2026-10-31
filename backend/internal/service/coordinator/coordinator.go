@@ -20,7 +20,7 @@ type Config struct {
 	Tools             *executionmodel.Executor
 	Sessions          *sessionservice.Service
 	SessionRecords    repository.Session
-	Workspaces        repository.Workspace
+	Projects          repository.Project
 	Loop              *loop.Runner
 	Operations        ExecutionOperations
 	HookDispatcher    *hook.Dispatcher
@@ -34,7 +34,7 @@ type Coordinator struct {
 	tools             *executionmodel.Executor
 	sessions          *sessionservice.Service
 	sessionRecords    repository.Session
-	workspaces        repository.Workspace
+	projects          repository.Project
 	loop              *loop.Runner
 	operations        ExecutionOperations
 	hookDispatcher    *hook.Dispatcher
@@ -79,7 +79,7 @@ func NewCoordinator(config Config) *Coordinator {
 		tools:             config.Tools,
 		sessions:          config.Sessions,
 		sessionRecords:    config.SessionRecords,
-		workspaces:        config.Workspaces,
+		projects:          config.Projects,
 		loop:              config.Loop,
 		executions:        make(map[identity.AgentID]*activeExecution),
 		operations:        config.Operations,

@@ -6,7 +6,6 @@ export function groupSessions(items: SessionSummary[], projects: ProjectSummary[
     for (const project of projects) {
         groups.set(project.id, {
             id: project.id,
-            workspaceID: project.defaultWorkspaceId,
             name: project.name,
             path: project.path,
             sessions: [],
@@ -21,7 +20,6 @@ export function groupSessions(items: SessionSummary[], projects: ProjectSummary[
         }
         groups.set(id, {
             id,
-            workspaceID: item.workspaceId,
             name: '项目',
             path: '',
             sessions: [item],

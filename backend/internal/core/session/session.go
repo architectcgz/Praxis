@@ -21,7 +21,6 @@ const (
 type Session struct {
 	ID           identity.SessionID
 	ProjectID    identity.ProjectID
-	WorkspaceID  identity.WorkspaceID
 	Title        string
 	State        SessionState
 	ApprovalMode *security.ApprovalMode `json:",omitempty"`
@@ -30,14 +29,13 @@ type Session struct {
 }
 
 // NewSession 使用入口已校验的身份创建 active 会话，初始标题为空。
-func NewSession(id identity.SessionID, projectID identity.ProjectID, workspaceID identity.WorkspaceID, at time.Time) Session {
+func NewSession(id identity.SessionID, projectID identity.ProjectID, at time.Time) Session {
 	return Session{
-		ID:          id,
-		ProjectID:   projectID,
-		WorkspaceID: workspaceID,
-		State:       SessionActive,
-		CreatedAt:   at.UTC(),
-		UpdatedAt:   at.UTC(),
+		ID:        id,
+		ProjectID: projectID,
+		State:     SessionActive,
+		CreatedAt: at.UTC(),
+		UpdatedAt: at.UTC(),
 	}
 }
 
@@ -67,9 +65,6 @@ func (s *Session) NameFromInput(content string, at time.Time) {
 func (value Session) Validate() error {
 	if !value.ID.Valid() || !value.ProjectID.Valid() {
 		return fmt.Errorf("session: invalid session or project identity: %w", errorcode.ErrInvalidValue)
-	}
-	if value.WorkspaceID == "" || value.WorkspaceID.String() != strings.TrimSpace(value.WorkspaceID.String()) {
-		return fmt.Errorf("session.workspaceID: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 	}
 	if value.State != SessionActive && value.State != SessionArchived {
 		return fmt.Errorf("session.state: unknown session state: %w", errorcode.ErrInvalidValue)

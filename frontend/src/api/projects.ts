@@ -2,7 +2,6 @@ import { getProjectBinding } from './bindings'
 
 export type CreateProjectRequest = {
     projectId: string
-    workspaceId: string
     projectName: string
     path: string
     requestId: string
@@ -11,7 +10,6 @@ export type CreateProjectRequest = {
 export type ProjectSummary = {
     id: string
     name: string
-    defaultWorkspaceId: string
     path: string
     state: string
 }

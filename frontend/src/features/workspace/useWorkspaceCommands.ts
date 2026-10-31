@@ -11,7 +11,7 @@ type CommandContext = {
     session: SessionSnapshot | null
     bridgeAvailable: boolean
     busy: boolean
-    createNewSession: (projectID: string, workspaceID: string) => Promise<boolean>
+    createNewSession: (projectID: string) => Promise<boolean>
     refreshCatalog: (manual?: boolean, throwOnError?: boolean) => Promise<void>
     refreshModels: () => Promise<unknown>
     viewRequestRef: RefObject<number>
@@ -49,7 +49,7 @@ export function useWorkspaceCommands({ session, bridgeAvailable, busy, createNew
         setCommandNotice('')
         try {
             if (name === '/new') {
-                return await createNewSession(session.projectId, session.workspaceId)
+                return await createNewSession(session.projectId)
             }
             setBusy(true)
             setError('')

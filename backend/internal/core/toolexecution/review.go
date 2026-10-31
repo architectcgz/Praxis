@@ -63,19 +63,19 @@ type reviewExecutionError struct{ error }
 func (e *reviewExecutionError) Unwrap() error { return e.error }
 
 // prepareReview 只组装冻结操作的审核内容，不读取执行状态或决定模型调用方式。
-func prepareReview(userTask, toolName string, args json.RawMessage, workspacePath, ruleID string) (ReviewRequest, error) {
+func prepareReview(userTask, toolName string, args json.RawMessage, projectPath, ruleID string) (ReviewRequest, error) {
 	data, err := json.Marshal(struct {
-		Task      string          `json:"task"`
-		Tool      string          `json:"tool"`
-		Arguments json.RawMessage `json:"arguments"`
-		Workspace string          `json:"workspace"`
-		Rule      string          `json:"rule"`
+		Task        string          `json:"task"`
+		Tool        string          `json:"tool"`
+		Arguments   json.RawMessage `json:"arguments"`
+		ProjectPath string          `json:"project_path"`
+		Rule        string          `json:"rule"`
 	}{
-		Task:      userTask,
-		Tool:      toolName,
-		Arguments: args,
-		Workspace: workspacePath,
-		Rule:      ruleID,
+		Task:        userTask,
+		Tool:        toolName,
+		Arguments:   args,
+		ProjectPath: projectPath,
+		Rule:        ruleID,
 	})
 	if err != nil {
 		return ReviewRequest{}, err
@@ -142,7 +142,7 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 		ReferenceID: "risk-review:" + review.TurnID.String(),
 	})
 	defer func() { scope.End(hook.Result{Err: err}) }()
-	request, err := prepareReview(input.TextContent(), string(call.Name), args, t.workspacePath, ruleID)
+	request, err := prepareReview(input.TextContent(), string(call.Name), args, t.projectPath, ruleID)
 	if err != nil {
 		return review, err
 	}

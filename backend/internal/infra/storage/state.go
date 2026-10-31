@@ -3,11 +3,9 @@ package storage
 import (
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
-	projectmodel "praxis/internal/core/project"
 	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/workflow"
-	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/identity"
 )
 
@@ -28,12 +26,10 @@ type storedWait struct {
 	Value     workflow.WaitCondition
 }
 
-// state 持有项目事实与已载入会话的历史；sessions 成员表示该会话已完成重放。
-// Session 元数据以 SQLite 为准，列表查询不依赖这里的按需缓存。
+// state 只持有已载入会话的历史；sessions 成员表示该会话已完成重放。
+// Session 元数据以 SQLite 为准，Project 配置直接读取文件。
 type state struct {
 	sequences  map[string]uint64
-	projects   map[identity.ProjectID]projectmodel.Project
-	workspaces map[identity.WorkspaceID]workspacemodel.Workspace
 	sessions   map[identity.SessionID]sessionmodel.Session
 	executions map[identity.AgentExecutionID]agentexecution.ExecutionRecord
 	entries    map[entryKey]storedEntry
@@ -47,8 +43,6 @@ type state struct {
 func newState() state {
 	return state{
 		sequences:  make(map[string]uint64),
-		projects:   make(map[identity.ProjectID]projectmodel.Project),
-		workspaces: make(map[identity.WorkspaceID]workspacemodel.Workspace),
 		sessions:   make(map[identity.SessionID]sessionmodel.Session),
 		executions: make(map[identity.AgentExecutionID]agentexecution.ExecutionRecord),
 		entries:    make(map[entryKey]storedEntry),

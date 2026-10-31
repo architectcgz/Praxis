@@ -19,15 +19,14 @@ const (
 )
 
 // Project 保存用户项目的持久化身份和目录记录。
-// Workspace 和 Session 通过标识符关联，各自保持为独立聚合。
+// Session 通过 ProjectID 关联，工具执行与文件访问使用项目目录。
 type Project struct {
-	ID                 identity.ProjectID
-	Name               string
-	Path               string
-	DefaultWorkspaceID identity.WorkspaceID
-	State              ProjectState
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID        identity.ProjectID
+	Name      string
+	Path      string
+	State     ProjectState
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // NewProject 使用入口已校验的身份、名称和路径创建项目，初始状态为 active。
@@ -35,17 +34,15 @@ func NewProject(
 	id identity.ProjectID,
 	name string,
 	path string,
-	defaultWorkspaceID identity.WorkspaceID,
 	at time.Time,
 ) Project {
 	return Project{
-		ID:                 id,
-		Name:               name,
-		Path:               path,
-		DefaultWorkspaceID: defaultWorkspaceID,
-		State:              ProjectActive,
-		CreatedAt:          at.UTC(),
-		UpdatedAt:          at.UTC(),
+		ID:        id,
+		Name:      name,
+		Path:      path,
+		State:     ProjectActive,
+		CreatedAt: at.UTC(),
+		UpdatedAt: at.UTC(),
 	}
 }
 
@@ -59,9 +56,6 @@ func (p Project) Validate() error {
 	}
 	if !pathutil.IsAbsoluteNormalized(p.Path) {
 		return fmt.Errorf("project.path: path must be an absolute normalized path: %w", errorcode.ErrInvalidValue)
-	}
-	if p.DefaultWorkspaceID == "" || p.DefaultWorkspaceID.String() != strings.TrimSpace(p.DefaultWorkspaceID.String()) {
-		return fmt.Errorf("project.defaultWorkspaceID: default workspace id is required: %w", errorcode.ErrInvalidValue)
 	}
 	if p.State != ProjectActive && p.State != ProjectArchived {
 		return fmt.Errorf("project.state: unknown project state: %w", errorcode.ErrInvalidValue)

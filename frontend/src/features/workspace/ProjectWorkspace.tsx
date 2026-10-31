@@ -108,7 +108,7 @@ export function ProjectWorkspace() {
         workspace.clearError()
         setPage('session')
         setSelectedProjectID(project.id)
-        void workspace.createNewSession(project.id, project.workspaceID)
+        void workspace.createNewSession(project.id)
     }
 
     const selectProject = (project: ProjectGroup) => {
@@ -197,7 +197,7 @@ export function ProjectWorkspace() {
                         </Suspense>
                     ) : page === 'project' ? (
                         <ProjectOverview
-                            project={projectGroups.find((item) => item.id === selectedProjectID) || { id: selectedProjectID, workspaceID: '', name: '项目', path: '', sessions: [] }}
+                            project={projectGroups.find((item) => item.id === selectedProjectID) || { id: selectedProjectID, name: '项目', path: '', sessions: [] }}
                             selectedSessionID={workspace.selectedSessionID}
                             onSelectSession={selectSession}
                             onOpenSession={openSession}

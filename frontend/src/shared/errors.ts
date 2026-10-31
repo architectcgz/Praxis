@@ -36,10 +36,8 @@ function readableApiError(code: string) {
         case API_ERROR_CODES.requestTimeout:
         case API_ERROR_CODES.genericRequestTimeout:
             return '请求超时，请稍后重试。'
-        case API_ERROR_CODES.projectWorkspaceInvalid:
-            return '项目名称不能包含路径分隔符。'
-        case API_ERROR_CODES.workspaceConflict:
-            return '项目正被其他操作占用，请稍后重试。'
+        case API_ERROR_CODES.projectInvalid:
+            return '项目名称、目录或状态无效。'
         case API_ERROR_CODES.modelNotConfigured:
             return '发送前请先配置 Provider 和 Model。'
         case API_ERROR_CODES.validation:

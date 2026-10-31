@@ -10,7 +10,7 @@ var inputSchema = json.RawMessage(`{
   "properties": {
     "path": {
       "type": "string",
-      "description": "普通文件路径，可以是绝对路径或相对于执行工作区的路径"
+      "description": "普通文件路径，可以是绝对路径或相对于项目根目录的路径"
     },
     "offset": {
       "type": "integer",
@@ -32,8 +32,8 @@ var inputSchema = json.RawMessage(`{
 func Definition() tool.ToolDefinition {
 	return tool.ToolDefinition{
 		Name: "read_file",
-		Description: "在需要读取工作区内已知 UTF-8 普通文件内容时调用；不要用它列目录。" +
-			"输入 path，可选 offset 和 limit；相对路径按工作区解析。" +
+		Description: "在需要读取项目目录内已知 UTF-8 普通文件内容时调用；不要用它列目录。" +
+			"输入 path，可选 offset 和 limit；相对路径按项目根目录解析。" +
 			"返回包含文件定位信息和 content 的 JSON 对象；内容未读完时提供 nextOffset。" +
 			"仅支持已授权的普通文件，单次返回最多 50 KiB。",
 		InputSchema: append(json.RawMessage(nil), inputSchema...),

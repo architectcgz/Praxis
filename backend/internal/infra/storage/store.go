@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/infra/jsonl"
 	"slices"
 	"sync"
 )
@@ -22,7 +21,7 @@ type Store struct {
 	closed   bool
 }
 
-// Open 初始化存储目录和项目日志，打开元数据库并恢复项目状态；会话历史在首次访问时载入。
+// Open 初始化项目配置目录并打开会话元数据库；配置直接读文件，会话历史在首次访问时载入。
 func Open(ctx context.Context, dataRoot string) (*Store, error) {
 	s := &Store{
 		dataRoot: dataRoot,
@@ -32,19 +31,6 @@ func Open(ctx context.Context, dataRoot string) (*Store, error) {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Join(s.dataRoot, "projects"), 0700); err != nil {
-		return nil, err
-	}
-	// 项目汇总日志随存储初始化建立，普通追加不承担首次创建。
-	path := projectLogPath(dataRoot)
-	if err := jsonl.CheckRegularFile(path); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		if err := jsonl.Create(ctx, path); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.replayLog(ctx, path, ""); err != nil {
 		return nil, err
 	}
 	db, err := openSessionDatabase(ctx, dataRoot)
@@ -101,7 +87,7 @@ func (s *Store) check(ctx context.Context) error {
 	return nil
 }
 
-// appendEventLocked 的 sessionID 为空时写项目汇总日志；成功后仓储直接赋值对应的类型化状态。
+// appendEventLocked 只追加指定会话的历史；成功后仓储更新对应的内存状态。
 func (s *Store) appendEventLocked(ctx context.Context, sessionID identity.SessionID, typ, collection, key string, value any) error {
 	event, err := newEvent(s.state.sequences[sessionID.String()]+1, typ, collection, key, value)
 	if err != nil {
@@ -111,14 +97,11 @@ func (s *Store) appendEventLocked(ctx context.Context, sessionID identity.Sessio
 	if err != nil {
 		return err
 	}
-	path := projectLogPath(s.dataRoot)
-	if sessionID != "" {
-		session, ok := s.state.sessions[sessionID]
-		if !ok {
-			return errorcode.ErrNotFound
-		}
-		path = sessionLogPath(s.dataRoot, session.ProjectID, sessionID)
+	session, ok := s.state.sessions[sessionID]
+	if !ok {
+		return errorcode.ErrNotFound
 	}
+	path := sessionLogPath(s.dataRoot, session.ProjectID, sessionID)
 	if err := s.appendLogLocked(ctx, path, data); err != nil {
 		return err
 	}

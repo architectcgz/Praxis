@@ -6,10 +6,10 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	workspacemodel "praxis/internal/core/workspace"
-	"praxis/internal/errorcode"
+	projectmodel "praxis/internal/core/project"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
+	projectservice "praxis/internal/service/project"
 	"time"
 )
 
@@ -42,17 +42,17 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	workspace, err := r.workspaces.Get(ctx, session.WorkspaceID)
-	if err != nil || workspace.ProjectID != session.ProjectID || workspace.State != workspacemodel.WorkspaceReady {
+	project, err := r.projects.Get(ctx, session.ProjectID)
+	if err != nil || project.State != projectmodel.ProjectActive {
 		if err == nil {
-			err = errorcode.ErrRequestConflict
+			err = projectservice.ErrProjectInvalid
 		}
-		r.logError(task, "resolve current workspace", err)
+		r.logError(task, "resolve current project", err)
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForExecution(run, workspace.Path, func(waitCtx context.Context) error {
+	executor := r.tools.ForExecution(run, project.Path, func(waitCtx context.Context) error {
 		return r.waitForToolApproval(waitCtx, active)
 	})
 	outcome, failureCode, failureMessage := r.execute(ctx, run, executor)

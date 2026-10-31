@@ -40,19 +40,17 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 		return dto.CreateSessionResponse{}, err
 	}
 	params := sessionservice.CreateInput{
-		SessionID:   identity.SessionID(wire.SessionID),
-		RequestID:   identity.RequestID(wire.RequestID),
-		ProjectID:   identity.ProjectID(wire.ProjectID),
-		WorkspaceID: identity.WorkspaceID(wire.WorkspaceID),
+		SessionID: identity.SessionID(wire.SessionID),
+		RequestID: identity.RequestID(wire.RequestID),
+		ProjectID: identity.ProjectID(wire.ProjectID),
 	}
 	result, err := services.Sessions.CreateSession(ctx, params)
 	if err != nil {
 		return dto.CreateSessionResponse{}, publicError(b.host, "SessionBindings.CreateSession", err)
 	}
 	return dto.CreateSessionResponse{
-		SessionID:   result.Session.ID.String(),
-		ProjectID:   result.Session.ProjectID.String(),
-		WorkspaceID: result.Session.WorkspaceID.String(),
+		SessionID: result.Session.ID.String(),
+		ProjectID: result.Session.ProjectID.String(),
 	}, nil
 }
 
@@ -73,14 +71,13 @@ func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, err
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession.agents", err)
 	}
 	result := dto.SessionSnapshot{
-		ID:          view.Session.ID.String(),
-		ProjectID:   view.Session.ProjectID.String(),
-		WorkspaceID: view.Session.WorkspaceID.String(),
-		Title:       view.Session.Title,
-		CreatedAt:   view.Session.CreatedAt,
-		UpdatedAt:   view.Session.UpdatedAt,
-		Agents:      agents,
-		Tasks:       make([]dto.QueuedTask, 0, len(view.Tasks)),
+		ID:        view.Session.ID.String(),
+		ProjectID: view.Session.ProjectID.String(),
+		Title:     view.Session.Title,
+		CreatedAt: view.Session.CreatedAt,
+		UpdatedAt: view.Session.UpdatedAt,
+		Agents:    agents,
+		Tasks:     make([]dto.QueuedTask, 0, len(view.Tasks)),
 	}
 	for _, value := range view.Tasks {
 		result.Tasks = append(result.Tasks, dto.QueuedTask{
@@ -149,11 +146,10 @@ func (b *SessionBindings) RenameSession(sessionID, title string) error {
 
 func sessionSummary(value sessionmodel.Session) dto.SessionSummary {
 	return dto.SessionSummary{
-		ID:          value.ID.String(),
-		ProjectID:   value.ProjectID.String(),
-		WorkspaceID: value.WorkspaceID.String(),
-		Title:       value.Title,
-		CreatedAt:   value.CreatedAt,
-		UpdatedAt:   value.UpdatedAt,
+		ID:        value.ID.String(),
+		ProjectID: value.ProjectID.String(),
+		Title:     value.Title,
+		CreatedAt: value.CreatedAt,
+		UpdatedAt: value.UpdatedAt,
 	}
 }

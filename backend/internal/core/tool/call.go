@@ -8,11 +8,11 @@ type Tool interface {
 	Definition() ToolDefinition
 	// NewArguments 根据工具业务规则提供默认值，返回独立的非 nil 结构体指针，供编排层解码显式输入。
 	NewArguments() any
-	// Prepare 接收已解码且路径已规范化的参数，校验业务规则并绑定执行工作区；不得产生副作用或修改共享实例。
-	Prepare(arguments any, workspacePath string) (PreparedCall, error)
+	// Prepare 接收已解码且路径已规范化的参数，校验业务规则并绑定项目目录；不得产生副作用或修改共享实例。
+	Prepare(arguments any, projectPath string) (PreparedCall, error)
 }
 
-// PathArguments 声明需要按工作区解析的路径字段，具体解析和校验由调用编排负责。
+// PathArguments 声明需要按项目目录解析的路径字段，具体解析和校验由调用编排负责。
 // PathArgument 返回本次参数对象中路径字段的非 nil 指针，不返回共享工具状态。
 type PathArguments interface {
 	PathArgument() *string

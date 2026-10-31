@@ -55,7 +55,7 @@ func NewExecutor(deps ExecutorDependencies) *Executor {
 type ExecutionTools struct {
 	run           *agentexecution.Run
 	executor      *Executor
-	workspacePath string
+	projectPath   string
 	awaitApproval func(context.Context) error
 }
 
@@ -68,11 +68,11 @@ type CallResult struct {
 	Err         error
 }
 
-func (e *Executor) ForExecution(run *agentexecution.Run, workspacePath string, awaitApproval func(context.Context) error) *ExecutionTools {
+func (e *Executor) ForExecution(run *agentexecution.Run, projectPath string, awaitApproval func(context.Context) error) *ExecutionTools {
 	return &ExecutionTools{
 		executor:      e,
 		run:           run,
-		workspacePath: workspacePath,
+		projectPath:   projectPath,
 		awaitApproval: awaitApproval,
 	}
 }
@@ -121,7 +121,7 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 	if err := decoder.Decode(arguments); err != nil {
 		return callError("invalid_tool_call", err.Error()), nil
 	}
-	// 工作区根已由业务入口校验；模型路径只在此处解析，准备与授权均使用规范化后的同一值。
+	// 项目根目录已由业务入口校验；模型路径只在此处解析，准备与授权均使用规范化后的同一值。
 	if path != nil {
 		if strings.TrimSpace(*path) == "" {
 			*path = defaultPath
@@ -133,11 +133,11 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 			return callError("invalid_tool_call", "path contains control characters"), nil
 		}
 		if !filepath.IsAbs(*path) {
-			*path = filepath.Join(tools.workspacePath, *path)
+			*path = filepath.Join(tools.projectPath, *path)
 		}
 		*path = filepath.Clean(*path)
 	}
-	prepared, err := t.Prepare(arguments, tools.workspacePath)
+	prepared, err := t.Prepare(arguments, tools.projectPath)
 	if err != nil {
 		return callError("invalid_tool_call", err.Error()), nil
 	}

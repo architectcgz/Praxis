@@ -2,7 +2,7 @@ import { getSessionBinding } from './bindings'
 
 export type FilePreview = { path: string; content: string }
 
-/** 读取会话工作区中的文本文件；路径授权、文件类型和大小限制均由后端执行。 */
+/** 读取会话所属项目目录中的文本文件；路径授权、文件类型和大小限制均由后端执行。 */
 export async function previewFile(sessionId: string, path: string): Promise<FilePreview> {
     const value: unknown = await getSessionBinding().PreviewFile(sessionId, path)
     if (!value || typeof value !== 'object' || !('path' in value) || typeof value.path !== 'string' ||

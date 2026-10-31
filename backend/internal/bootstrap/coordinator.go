@@ -101,7 +101,7 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		ConfigMu:          configMu,
 		Tools:             executor,
 		SessionRecords:    repos.Sessions,
-		Workspaces:        repos.Workspaces,
+		Projects:          repos.Projects,
 		TransitionTimeout: 30 * time.Second,
 	})
 }

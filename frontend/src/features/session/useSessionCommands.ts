@@ -34,8 +34,8 @@ export function useSessionCommands({
     updateSessionTitle,
     viewRequestRef,
 }: SessionCommandContext) {
-    const createNewSession = useCallback(async (projectID: string, workspaceID: string) => {
-        if (busy || !projectID || !workspaceID || !bridgeAvailable) {
+    const createNewSession = useCallback(async (projectID: string) => {
+        if (busy || !projectID || !bridgeAvailable) {
             return false
         }
         const viewRequestID = viewRequestRef.current
@@ -46,7 +46,6 @@ export function useSessionCommands({
             const created = await createSession({
                 sessionId: crypto.randomUUID(),
                 projectId: projectID,
-                workspaceId: workspaceID,
                 requestId: crypto.randomUUID(),
             })
             await refreshCatalog()

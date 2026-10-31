@@ -18,7 +18,7 @@ var inputSchema = json.RawMessage(`{
     },
     "path": {
       "type": "string",
-      "description": "补丁工作区根目录，可以是绝对路径或相对于执行工作区的路径；省略时使用执行工作区"
+      "description": "补丁目标根目录，可以是绝对路径或相对于项目根目录的路径；省略时使用项目根目录"
     }
   },
   "required": ["patch"],
@@ -29,9 +29,9 @@ var inputSchema = json.RawMessage(`{
 func Definition() tool.ToolDefinition {
 	return tool.ToolDefinition{
 		Name: "apply_patch",
-		Description: "在已授权的工作区内应用一个或多个文件补丁。" +
+		Description: "在已授权的项目目录内应用一个或多个文件补丁。" +
 			"patch 必须使用 *** Begin Patch、*** Update File、*** Add File、*** Delete File 和 *** End Patch 格式；" +
-			"path 可选，省略时按执行工作区解析。所有目标文件会先完成格式、内容和写入范围校验，" +
+			"path 可选，省略时按项目根目录解析。所有目标文件会先完成格式、内容和写入范围校验，" +
 			"任一目标无效时不会写入文件。",
 		InputSchema: append(json.RawMessage(nil), inputSchema...),
 	}

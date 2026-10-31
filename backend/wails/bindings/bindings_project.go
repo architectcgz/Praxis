@@ -38,11 +38,10 @@ func (b *ProjectBindings) ListProjects() ([]dto.ProjectSummary, error) {
 	result := make([]dto.ProjectSummary, 0, len(projects))
 	for _, project := range projects {
 		result = append(result, dto.ProjectSummary{
-			ID:                 project.ID.String(),
-			Name:               project.Name,
-			DefaultWorkspaceID: project.DefaultWorkspaceID.String(),
-			Path:               project.Path,
-			State:              string(project.State),
+			ID:    project.ID.String(),
+			Name:  project.Name,
+			Path:  project.Path,
+			State: string(project.State),
 		})
 	}
 	return result, nil
@@ -59,20 +58,18 @@ func (b *ProjectBindings) CreateProject(wire dto.CreateProjectRequest) (dto.Crea
 		return dto.CreateProjectResponse{}, err
 	}
 	params := projectservice.CreateInput{
-		ProjectID:   identity.ProjectID(wire.ProjectID),
-		WorkspaceID: identity.WorkspaceID(wire.WorkspaceID),
-		Name:        wire.ProjectName,
-		Path:        wire.Path,
-		RequestID:   identity.RequestID(wire.RequestID),
+		ProjectID: identity.ProjectID(wire.ProjectID),
+		Name:      wire.ProjectName,
+		Path:      wire.Path,
+		RequestID: identity.RequestID(wire.RequestID),
 	}
 	result, err := services.Projects.CreateProject(ctx, params)
 	if err != nil {
 		return dto.CreateProjectResponse{}, publicError(b.host, "ProjectBindings.CreateProject", err)
 	}
 	return dto.CreateProjectResponse{
-		ProjectID:   result.Project.ID.String(),
-		Name:        result.Project.Name,
-		WorkspaceID: result.Workspace.ID.String(),
-		Path:        result.Workspace.Path,
+		ProjectID: result.ID.String(),
+		Name:      result.Name,
+		Path:      result.Path,
 	}, nil
 }

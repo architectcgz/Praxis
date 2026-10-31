@@ -16,7 +16,6 @@ import (
 	execution "praxis/internal/service/coordinator"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
-	workspaceservice "praxis/internal/service/workspace"
 	"praxis/wails/bindings"
 )
 
@@ -97,8 +96,9 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	models := buildModelService(root, config, a.logger)
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:   repos.Projects,
-		Workspaces: repos.Workspaces,
+		Sessions:   repos.Sessions,
 		Directory:  fs.Filesystem{},
+		TextReader: fs.Filesystem{},
 		Clock:      clock.UTCClock{},
 	})
 	approvals := approvalservice.NewService(approvalservice.Dependencies{
@@ -106,17 +106,10 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Sessions: repos.Sessions,
 		Clock:    clock.UTCClock{},
 	})
-	workspaces := workspaceservice.NewService(workspaceservice.Dependencies{
-		Projects:   repos.Projects,
-		Sessions:   repos.Sessions,
-		Workspaces: repos.Workspaces,
-		TextReader: fs.Filesystem{},
-	})
 	a.frontend = bindings.Services{
 		Projects:       projects,
 		Approvals:      approvals,
 		Sessions:       a.sessions,
-		Workspaces:     workspaces,
 		Agents:         agents,
 		Commands:       a.coordinator,
 		Models:         models,

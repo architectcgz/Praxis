@@ -5,7 +5,6 @@ package identity
 // 同时允许所有持久化格式继续使用字符串。
 type (
 	ProjectID         string
-	WorkspaceID       string
 	SessionID         string
 	AgentDefinitionID string
 	AgentID           string
@@ -17,7 +16,6 @@ type (
 )
 
 func (id ProjectID) String() string         { return string(id) }
-func (id WorkspaceID) String() string       { return string(id) }
 func (id SessionID) String() string         { return string(id) }
 func (id AgentDefinitionID) String() string { return string(id) }
 func (id AgentID) String() string           { return string(id) }

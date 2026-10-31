@@ -10,7 +10,7 @@ import (
 	"praxis/wails/validation"
 )
 
-// PreviewFile 预览会话工作区内的文本文件；业务层负责路径范围、类型和大小限制，失败返回可读错误。
+// PreviewFile 预览会话所属项目目录内的文本文件；业务层负责路径范围、类型和大小限制。
 func (b *SessionBindings) PreviewFile(sessionID, path string) (dto.FilePreview, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return dto.FilePreview{}, publicInputError(b.host, "SessionBindings.PreviewFile.request", err)
@@ -28,7 +28,7 @@ func (b *SessionBindings) PreviewFile(sessionID, path string) (dto.FilePreview, 
 		path = path[1:2] + ":" + path[2:]
 	}
 	path = filepath.Clean(filepath.FromSlash(path))
-	preview, err := service.Workspaces.PreviewFile(ctx, identity.SessionID(sessionID), path)
+	preview, err := service.Projects.PreviewFile(ctx, identity.SessionID(sessionID), path)
 	if err != nil {
 		return dto.FilePreview{}, publicError(b.host, "SessionBindings.PreviewFile", err)
 	}

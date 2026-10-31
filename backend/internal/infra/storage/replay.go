@@ -2,19 +2,16 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
-	projectmodel "praxis/internal/core/project"
 	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/core/workflow"
-	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"strings"
@@ -22,8 +19,7 @@ import (
 
 // logReplay 只在单个日志重放期间持有调用匹配状态，完成后即释放。
 type logReplay struct {
-	state *state
-	// 空值表示项目与 Workspace 汇总日志。
+	state       *state
 	sessionID   identity.SessionID
 	calls       []replayedToolCall
 	callIndexes map[sessionentry.Key]int
@@ -87,39 +83,7 @@ func (r *logReplay) apply(line []byte) error {
 	if event.Key == "" || strings.TrimSpace(event.Key) != event.Key {
 		return errors.New("invalid object key")
 	}
-	if (sessionID == "") != (event.Collection == "project" || event.Collection == "workspace") {
-		return errors.New("invalid event file ownership")
-	}
 	switch event.Collection {
-	case "project":
-		// 项目载荷中的审批字段仅接受读取，不参与配置恢复或授权决策。
-		var stored struct {
-			projectmodel.Project
-			ApprovalMode json.RawMessage
-		}
-		if err := decodeJSON(event.Payload, &stored); err != nil {
-			return err
-		}
-		value := stored.Project
-		if err := value.Validate(); err != nil {
-			return err
-		}
-		if err := eventIdentity(event, "project.saved", value.ID.String(), "", sessionKey); err != nil {
-			return err
-		}
-		state.projects[value.ID] = value
-	case "workspace":
-		var value workspacemodel.Workspace
-		if err := decodeJSON(event.Payload, &value); err != nil {
-			return err
-		}
-		if err := value.Validate(); err != nil {
-			return err
-		}
-		if err := eventIdentity(event, "workspace.saved", value.ID.String(), "", sessionKey); err != nil {
-			return err
-		}
-		state.workspaces[value.ID] = value
 	case "agent_execution":
 		var value agentexecution.ExecutionRecord
 		if err := decodeJSON(event.Payload, &value); err != nil {

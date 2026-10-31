@@ -44,9 +44,9 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 		return err
 	}
 	_, err := r.storage.sessions.ExecContext(ctx, `
-		INSERT INTO sessions (id, project_id, workspace_id, title, state, created_at, updated_at, approval_mode)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID.String(), value.ProjectID.String(), value.WorkspaceID.String(), value.Title,
+		INSERT INTO sessions (id, project_id, title, state, created_at, updated_at, approval_mode)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		value.ID.String(), value.ProjectID.String(), value.Title,
 		string(value.State), value.CreatedAt.UnixNano(), value.UpdatedAt.UnixNano(), value.ApprovalMode)
 	if err != nil {
 		return fmt.Errorf("create session metadata: %w", err)
@@ -70,7 +70,7 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 	}
 	defer r.storage.mu.RUnlock()
 	rows, err := r.storage.sessions.QueryContext(ctx, `
-		SELECT id, project_id, workspace_id, title, state, created_at, updated_at, approval_mode
+		SELECT id, project_id, title, state, created_at, updated_at, approval_mode
 		FROM sessions WHERE (? = '' OR project_id = ?)
 		ORDER BY updated_at DESC, id`, project.String(), project.String())
 	if err != nil {
@@ -224,7 +224,6 @@ func openSessionDatabase(ctx context.Context, dataRoot string) (*sql.DB, error) 
 		CREATE TABLE IF NOT EXISTS sessions (
 			id TEXT PRIMARY KEY,
 			project_id TEXT NOT NULL,
-			workspace_id TEXT NOT NULL,
 			title TEXT NOT NULL,
 			state TEXT NOT NULL,
 			created_at INTEGER NOT NULL,
@@ -244,12 +243,20 @@ func openSessionDatabase(ctx context.Context, dataRoot string) (*sql.DB, error) 
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("initialize session approval mode: %w", err), db.Close())
 	}
+	var hasWorkspaceID bool
+	err = db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'workspace_id')`).Scan(&hasWorkspaceID)
+	if err == nil && hasWorkspaceID {
+		_, err = db.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN workspace_id`)
+	}
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("initialize session project ownership: %w", err), db.Close())
+	}
 	return db, nil
 }
 
 func (s *Store) sessionRecord(ctx context.Context, id identity.SessionID) (sessionmodel.Session, error) {
 	return scanSession(s.sessions.QueryRowContext(ctx, `
-		SELECT id, project_id, workspace_id, title, state, created_at, updated_at, approval_mode
+		SELECT id, project_id, title, state, created_at, updated_at, approval_mode
 		FROM sessions WHERE id = ?`, id.String()))
 }
 
@@ -257,7 +264,7 @@ func scanSession(row interface{ Scan(...any) error }) (sessionmodel.Session, err
 	var value sessionmodel.Session
 	var createdAt, updatedAt int64
 	var mode sql.NullString
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.WorkspaceID, &value.Title, &value.State, &createdAt, &updatedAt, &mode); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.State, &createdAt, &updatedAt, &mode); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sessionmodel.Session{}, errorcode.ErrNotFound
 		}

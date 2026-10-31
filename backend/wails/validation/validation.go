@@ -132,13 +132,13 @@ func inputError(err error, field string) error {
 			field = path
 		}
 	}
-	// 保留身份、普通字段和项目工作区输入各自使用的公开错误码。
+	// 保留身份、普通字段和项目输入各自使用的公开错误码。
 	var code error = errorcode.ErrInvalidValue
 	switch failure.Tag() {
 	case "id", "project_id", "session_id", "definition_id", "required_with":
 		code = apperr.ErrInvalidRequest
 	case "project_name", "project_path":
-		code = projectservice.ErrWorkspaceInvalid
+		code = projectservice.ErrProjectInvalid
 	}
 	reason := "must satisfy " + failure.ActualTag()
 	switch failure.ActualTag() {

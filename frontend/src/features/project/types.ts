@@ -3,7 +3,6 @@ import { SessionSummary } from '../../api'
 
 export type ProjectGroup = {
     id: string
-    workspaceID: string
     name: string
     path: string
     sessions: SessionSummary[]

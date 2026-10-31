@@ -43,8 +43,8 @@ func (w *outputWriter) Write(value []byte) (int, error) {
 	return len(value), nil
 }
 
-// Call 在 Workspace 内的工作目录中运行 Bash，并将 stdout/stderr 合并为有界结果。
-func Call(ctx context.Context, toolArguments bashtool.Arguments, workspacePath string) (tool.ToolResult, error) {
+// Call 在项目目录内运行 Bash，并将 stdout/stderr 合并为有界结果。
+func Call(ctx context.Context, toolArguments bashtool.Arguments, projectPath string) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -52,8 +52,8 @@ func Call(ctx context.Context, toolArguments bashtool.Arguments, workspacePath s
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
-	if !workspaceDirectory(toolArguments.Path, workspacePath) {
-		return tool.ToolResult{}, errors.New("bash working directory is outside the workspace")
+	if !projectDirectory(toolArguments.Path, projectPath) {
+		return tool.ToolResult{}, errors.New("bash working directory is outside the project")
 	}
 
 	runContext, cancel := context.WithTimeout(ctx, time.Duration(toolArguments.Timeout*float64(time.Second)))
@@ -143,9 +143,9 @@ func encodeOutput(toolOutput output) ([]byte, bool, error) {
 	return best, true, nil
 }
 
-// workspaceDirectory 拒绝工作区外目录和符号链接路径；这不是 Bash 进程隔离。
-func workspaceDirectory(path, workspace string) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+// projectDirectory 拒绝项目外目录和符号链接路径；这不是 Bash 进程隔离。
+func projectDirectory(path, projectRoot string) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
 	realPath, err := filepath.EvalSymlinks(path)
@@ -156,6 +156,6 @@ func workspaceDirectory(path, workspace string) bool {
 	if err != nil || !info.IsDir() {
 		return false
 	}
-	realWorkspace, err := filepath.EvalSymlinks(workspace)
-	return err == nil && pathutil.SamePath(workspace, realWorkspace) && pathutil.IsWithin(realWorkspace, realPath)
+	realRoot, err := filepath.EvalSymlinks(projectRoot)
+	return err == nil && pathutil.SamePath(projectRoot, realRoot) && pathutil.IsWithin(realRoot, realPath)
 }

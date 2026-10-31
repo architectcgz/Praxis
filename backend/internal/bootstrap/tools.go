@@ -25,7 +25,7 @@ func (t builtinTool[Arguments]) Definition() tool.ToolDefinition { return t.defi
 
 func (t builtinTool[Arguments]) NewArguments() any { return new(t.arguments()) }
 
-func (t builtinTool[Arguments]) Prepare(arguments any, workspacePath string) (tool.PreparedCall, error) {
+func (t builtinTool[Arguments]) Prepare(arguments any, projectPath string) (tool.PreparedCall, error) {
 	args, ok := arguments.(*Arguments)
 	if !ok {
 		return tool.PreparedCall{}, errors.New("tool argument type does not match the registered arguments")
@@ -41,9 +41,9 @@ func (t builtinTool[Arguments]) Prepare(arguments any, workspacePath string) (to
 	return tool.PreparedCall{
 		Arguments: prepared,
 		Command:   command,
-		// 本次参数和工作区随调用存续，不回写注册表中的共享工具。
+		// 本次参数和项目目录随调用存续，不回写注册表中的共享工具。
 		Call: func(ctx context.Context) (tool.ToolResult, error) {
-			return t.call(ctx, prepared, workspacePath)
+			return t.call(ctx, prepared, projectPath)
 		},
 	}, nil
 }

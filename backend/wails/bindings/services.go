@@ -19,13 +19,13 @@ import (
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	toolservice "praxis/internal/service/toolexecution"
-	workspaceservice "praxis/internal/service/workspace"
 )
 
 // 接口只声明 Wails 实际消费的业务能力，协议投影留在 binding。
 type ProjectService interface {
 	ListProjects(context.Context, int) ([]projectmodel.Project, error)
-	CreateProject(context.Context, projectservice.CreateInput) (projectservice.CreateProjectResult, error)
+	CreateProject(context.Context, projectservice.CreateInput) (projectmodel.Project, error)
+	PreviewFile(context.Context, identity.SessionID, string) (projectservice.FilePreview, error)
 }
 
 type ApprovalService interface {
@@ -39,10 +39,6 @@ type SessionService interface {
 	GetSessionView(context.Context, identity.SessionID, int) (sessionservice.SessionView, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
-}
-
-type WorkspaceService interface {
-	PreviewFile(context.Context, identity.SessionID, string) (workspaceservice.FilePreview, error)
 }
 
 type AgentService interface {
@@ -90,7 +86,6 @@ type Services struct {
 	Projects       ProjectService
 	Approvals      ApprovalService
 	Sessions       SessionService
-	Workspaces     WorkspaceService
 	Agents         AgentService
 	Commands       AgentCommands
 	Models         ModelCatalog
@@ -107,7 +102,6 @@ func (s Services) Validate() error {
 		"projects":            s.Projects == nil,
 		"approvals":           s.Approvals == nil,
 		"sessions":            s.Sessions == nil,
-		"workspaces":          s.Workspaces == nil,
 		"agents":              s.Agents == nil,
 		"commands":            s.Commands == nil,
 		"models":              s.Models == nil,

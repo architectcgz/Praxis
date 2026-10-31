@@ -22,13 +22,13 @@ type output struct {
 	NextOffset *int   `json:"nextOffset,omitempty"`
 }
 
-// Call 读取 Workspace 内的 UTF-8 普通文件并返回有界结果。
-func Call(ctx context.Context, toolArguments readtool.Arguments, workspacePath string) (tool.ToolResult, error) {
+// Call 读取项目目录内的 UTF-8 普通文件并返回有界结果。
+func Call(ctx context.Context, toolArguments readtool.Arguments, projectPath string) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	if !workspaceFile(toolArguments.Path, workspacePath) {
-		return tool.ToolResult{}, errors.New("read_file path is outside a workspace regular file")
+	if !projectFile(toolArguments.Path, projectPath) {
+		return tool.ToolResult{}, errors.New("read_file requires a regular file within the project")
 	}
 	file, err := os.Open(toolArguments.Path)
 	if err != nil {
@@ -36,8 +36,8 @@ func Call(ctx context.Context, toolArguments readtool.Arguments, workspacePath s
 	}
 	defer file.Close()
 	fileInfo, err := file.Stat()
-	if err != nil || !fileInfo.Mode().IsRegular() || !workspaceFile(toolArguments.Path, workspacePath) {
-		return tool.ToolResult{}, errors.New("read_file path is outside a workspace regular file")
+	if err != nil || !fileInfo.Mode().IsRegular() || !projectFile(toolArguments.Path, projectPath) {
+		return tool.ToolResult{}, errors.New("read_file requires a regular file within the project")
 	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
@@ -153,9 +153,9 @@ func encodeOutput(toolArguments readtool.Arguments, offset int, fileSize int64, 
 	return json.Marshal(toolOutput)
 }
 
-// workspaceFile 保留普通文件和符号链接检查，读取范围由 Workspace 唯一确定。
-func workspaceFile(path, workspace string) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(workspace) || !pathutil.IsWithin(workspace, path) {
+// projectFile 保留普通文件和符号链接检查，读取范围由项目根目录确定。
+func projectFile(path, projectRoot string) bool {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
 	realPath, err := filepath.EvalSymlinks(path)
@@ -166,6 +166,6 @@ func workspaceFile(path, workspace string) bool {
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	realWorkspace, err := filepath.EvalSymlinks(workspace)
-	return err == nil && pathutil.SamePath(workspace, realWorkspace) && pathutil.IsWithin(realWorkspace, realPath)
+	realRoot, err := filepath.EvalSymlinks(projectRoot)
+	return err == nil && pathutil.SamePath(projectRoot, realRoot) && pathutil.IsWithin(realRoot, realPath)
 }

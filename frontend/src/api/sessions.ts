@@ -6,7 +6,6 @@ import { normalizeQueuedTasks, type QueuedTask } from './tasks'
 export type SessionSnapshot = {
     id: string
     projectId: string
-    workspaceId: string
     title: string
     createdAt: string
     updatedAt: string
@@ -17,7 +16,6 @@ export type SessionSnapshot = {
 export type SessionSummary = {
     id: string
     projectId: string
-    workspaceId: string
     title: string
     createdAt: string
     updatedAt: string
@@ -34,7 +32,6 @@ export type SessionUsageSummary = {
 export type CreateSessionRequest = {
     sessionId: string
     projectId: string
-    workspaceId: string
     requestId: string
 }
 
@@ -139,7 +136,6 @@ function normalizeSessionSnapshot(value: GeneratedSessionSnapshot): SessionSnaps
     return {
         id: requiredString(value.id),
         projectId: requiredString(value.projectId),
-        workspaceId: requiredString(value.workspaceId),
         title: requiredString(value.title),
         createdAt: requiredString(value.createdAt),
         updatedAt: requiredString(value.updatedAt),

@@ -8,7 +8,6 @@ import (
 // Repositories 组合共享 Store 生命周期的元数据库与按需历史仓储。
 type Repositories struct {
 	Projects   ProjectRepository
-	Workspaces WorkspaceRepository
 	Sessions   SessionRepository
 	Executions AgentExecutionRepository
 	Entries    EntryRepository
@@ -18,7 +17,6 @@ type Repositories struct {
 func (s *Store) Repositories() Repositories {
 	return Repositories{
 		Projects:   ProjectRepository{storage: s},
-		Workspaces: WorkspaceRepository{storage: s},
 		Sessions:   SessionRepository{storage: s},
 		Executions: AgentExecutionRepository{storage: s},
 		Entries:    EntryRepository{storage: s},
@@ -28,7 +26,6 @@ func (s *Store) Repositories() Repositories {
 
 var (
 	_ repository.Project        = ProjectRepository{}
-	_ repository.Workspace      = WorkspaceRepository{}
 	_ repository.Session        = SessionRepository{}
 	_ repository.AgentExecution = AgentExecutionRepository{}
 	_ sessionentry.Store        = EntryRepository{}

@@ -1,4 +1,4 @@
-// Package project 负责 Project 与初始 Workspace 的读取和写入用例。
+// Package project 负责项目创建、配置查询和项目目录内的文件预览。
 package project
 
 import (
@@ -6,126 +6,90 @@ import (
 	"errors"
 	"praxis/internal/clock"
 	projectmodel "praxis/internal/core/project"
-	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	"praxis/internal/projectfile"
 	"praxis/internal/repository"
 	"sync"
 )
 
-// WorkspaceDirectory 提供项目创建所需的目录操作能力。
-type WorkspaceDirectory interface {
+// Directory 提供项目创建所需的目录操作能力。
+type Directory interface {
 	Ensure(context.Context, string) (created bool, err error)
 }
 
-// Dependencies 包含创建 Project 持久化状态所需的依赖。
+// Dependencies 包含项目创建、配置查询和文件预览所需的依赖。
 type Dependencies struct {
 	Projects   repository.Project
-	Workspaces repository.Workspace
+	Sessions   repository.Session
 	Clock      clock.Clock
-	Directory  WorkspaceDirectory
+	Directory  Directory
+	TextReader projectfile.TextReader
 }
 
-// Service 负责 Project 创建与查询，默认工作区由 Project 派生。
+// Service 管理项目记录，并按会话所属项目限制文件访问范围。
 type Service struct {
 	createMu   sync.Mutex
 	projects   repository.Project
-	workspaces repository.Workspace
+	sessions   repository.Session
 	clock      clock.Clock
-	directory  WorkspaceDirectory
+	directory  Directory
+	textReader projectfile.TextReader
 }
 
 // CreateInput 包含输入边界已校验的身份及规范化后的项目名称、绝对路径。
 type CreateInput struct {
-	RequestID   identity.RequestID
-	ProjectID   identity.ProjectID
-	WorkspaceID identity.WorkspaceID
-	Name        string
-	Path        string
+	RequestID identity.RequestID
+	ProjectID identity.ProjectID
+	Name      string
+	Path      string
 }
 
-// CreateProjectResult 返回 Project 及其初始 Workspace。
-type CreateProjectResult struct {
-	Project   projectmodel.Project
-	Workspace workspacemodel.Workspace
-}
-
-// NewService 创建 Project 业务服务。
+// NewService 创建项目业务服务。
 func NewService(deps Dependencies) *Service {
 	return &Service{
 		projects:   deps.Projects,
-		workspaces: deps.Workspaces,
+		sessions:   deps.Sessions,
 		clock:      deps.Clock,
 		directory:  deps.Directory,
+		textReader: deps.TextReader,
 	}
 }
 
-// CreateProject 使用已校验的输入创建目录并保存项目事实；后续失败保留已创建目录供重试。
-func (s *Service) CreateProject(ctx context.Context, params CreateInput) (CreateProjectResult, error) {
+// CreateProject 创建目录并保存项目配置；后续失败保留已创建目录供重试。
+func (s *Service) CreateProject(ctx context.Context, params CreateInput) (projectmodel.Project, error) {
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
 	projects, err := s.projects.List(ctx, 0)
 	if err != nil {
-		return CreateProjectResult{}, err
+		return projectmodel.Project{}, err
 	}
 	for _, existing := range projects {
-		if existing.ID != params.ProjectID && (existing.Path == params.Path || existing.DefaultWorkspaceID == params.WorkspaceID) {
-			return CreateProjectResult{}, errorcode.ErrRequestConflict
+		if existing.ID != params.ProjectID && existing.Path == params.Path {
+			return projectmodel.Project{}, errorcode.ErrRequestConflict
 		}
 	}
-
-	_, err = s.directory.Ensure(ctx, params.Path)
-	if err != nil {
-		return CreateProjectResult{}, err
+	if _, err := s.directory.Ensure(ctx, params.Path); err != nil {
+		return projectmodel.Project{}, err
 	}
-	var result CreateProjectResult
-	err = func(txCtx context.Context) error {
-		existing, err := s.projects.Get(txCtx, params.ProjectID)
-		if err == nil {
-			workspace, workspaceErr := s.workspaces.Get(txCtx, params.WorkspaceID)
-			if workspaceErr != nil {
-				return workspaceErr
-			}
-			if existing.Name != params.Name || existing.Path != params.Path ||
-				existing.DefaultWorkspaceID != params.WorkspaceID ||
-				workspace.ProjectID != params.ProjectID || workspace.Path != params.Path {
-				return errorcode.ErrRequestConflict
-			}
-			result = CreateProjectResult{Project: existing, Workspace: workspace}
-			return nil
+	existing, err := s.projects.Get(ctx, params.ProjectID)
+	if err == nil {
+		if existing.Name != params.Name || existing.Path != params.Path {
+			return projectmodel.Project{}, errorcode.ErrRequestConflict
 		}
-		if !errors.Is(err, errorcode.ErrNotFound) {
-			return err
-		}
-		if _, err := s.workspaces.Get(txCtx, params.WorkspaceID); err == nil {
-			return errorcode.ErrRequestConflict
-		} else if !errors.Is(err, errorcode.ErrNotFound) {
-			return err
-		}
-		at := s.clock.Now().UTC()
-		workspace := workspacemodel.NewWorkspace(
-			params.WorkspaceID,
-			params.ProjectID,
-			workspacemodel.WorkspaceProjectRoot,
-			params.Path,
-			at,
-		)
-		project := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, workspace.ID, at)
-		if err := s.projects.Save(txCtx, project); err != nil {
-			return err
-		}
-		result = CreateProjectResult{Project: project, Workspace: workspace}
-		return nil
-	}(ctx)
-	return result, err
+		return existing, nil
+	}
+	if !errors.Is(err, errorcode.ErrNotFound) {
+		return projectmodel.Project{}, err
+	}
+	project := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, s.clock.Now())
+	if err := s.projects.Save(ctx, project); err != nil {
+		return projectmodel.Project{}, err
+	}
+	return project, nil
 }
 
-// ListProjects 返回按索引查询的 Project 列表。
+// ListProjects 返回按更新时间排序的项目列表。
 func (s *Service) ListProjects(ctx context.Context, limit int) ([]projectmodel.Project, error) {
 	return s.projects.List(ctx, limit)
-}
-
-// ListWorkspaces 返回指定 Project 下按索引查询的 Workspace 列表。
-func (s *Service) ListWorkspaces(ctx context.Context, projectID identity.ProjectID, limit int) ([]workspacemodel.Workspace, error) {
-	return s.workspaces.ListByProject(ctx, projectID, limit)
 }

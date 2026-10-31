@@ -56,7 +56,6 @@ export function NewProjectDialog({
         try {
             const created = await createProject({
                 projectId: crypto.randomUUID(),
-                workspaceId: crypto.randomUUID(),
                 projectName: name,
                 path,
                 requestId: crypto.randomUUID(),

@@ -15,7 +15,6 @@ func buildSessions(repos storage.Repositories, hooks *hook.Dispatcher, configMu 
 		ModelConfigs:   models,
 		HookDispatcher: hooks,
 		Projects:       repos.Projects,
-		Workspaces:     repos.Workspaces,
 		Sessions:       repos.Sessions,
 		Entries:        repos.Entries,
 		Executions:     repos.Executions,

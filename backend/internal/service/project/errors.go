@@ -2,4 +2,4 @@ package project
 
 import "praxis/internal/errorcode"
 
-const ErrWorkspaceInvalid errorcode.Code = "project.workspace_invalid"
+const ErrProjectInvalid errorcode.Code = "project.invalid"
