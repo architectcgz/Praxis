@@ -21,8 +21,8 @@ type Dependencies struct {
 	Logger         *logging.Logger
 	Emitter        *coreevent.Emitter
 	Sessions       repository.Session
-	Records        repository.AgentExecution
-	UsageRecords   repository.ModelUsage
+	Records        sessionmodel.ExecutionHistory
+	UsageRecords   sessionmodel.UsageHistory
 	History        sessionmodel.History
 	Definitions    AgentDefinitionProvider
 	Clock          clock.Clock
@@ -35,8 +35,8 @@ type Service struct {
 	logger         *logging.Logger
 	emitter        *coreevent.Emitter
 	sessions       repository.Session
-	records        repository.AgentExecution
-	usageRecords   repository.ModelUsage
+	records        sessionmodel.ExecutionHistory
+	usageRecords   sessionmodel.UsageHistory
 	history        sessionmodel.History
 	definitions    AgentDefinitionProvider
 	clock          clock.Clock

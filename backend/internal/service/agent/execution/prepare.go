@@ -25,7 +25,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	// 请求身份只在调度准入时建立；由 Task ID 派生以保证准备重试使用同一身份。
 	requestID := identity.RequestID(input.ID)
 	inputEntryID := "input:" + requestID.String()
-	previous, err := s.records.FindByRequest(ctx, session.MainAgentID(), requestID)
+	previous, err := s.records.FindExecutionByRequest(ctx, session.MainAgentID(), requestID)
 	if err == nil {
 		stored, err := s.history.GetEntry(ctx, session.ID, previous.InputEntryID)
 		if err != nil {
@@ -81,7 +81,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	}
 	result = agentexecution.NewExecutionRecord(executionID, session.ID, session.MainAgentID(), requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID
-	if err = s.records.Save(ctx, result); err != nil {
+	if err = s.records.SaveExecution(ctx, result); err != nil {
 		return agentexecution.ExecutionRecord{}, false, err
 	}
 	if err := s.history.AdmitInput(ctx, session.ID, stored.ID); err != nil {

@@ -16,7 +16,7 @@ type Dependencies struct {
 	History          sessionmodel.History
 	ActiveRun        func(identity.AgentID) *agentexecution.Run
 	SessionRuns      func(identity.SessionID) []*agentexecution.Run
-	ExecutionRecords repository.AgentExecution
+	ExecutionRecords sessionmodel.ExecutionHistory
 	Sessions         repository.Session
 	Definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
@@ -25,7 +25,7 @@ type Service struct {
 	history          sessionmodel.History
 	activeRun        func(identity.AgentID) *agentexecution.Run
 	sessionRuns      func(identity.SessionID) []*agentexecution.Run
-	executionRecords repository.AgentExecution
+	executionRecords sessionmodel.ExecutionHistory
 	sessions         repository.Session
 	definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
@@ -82,7 +82,7 @@ func (s *Service) GetAgentView(ctx context.Context, agentID identity.AgentID) (A
 		Name:         definition.Name,
 		State:        agentmodel.AgentIdle,
 	}
-	latest, err := s.executionRecords.ListByAgent(ctx, agentID, 1)
+	latest, err := s.executionRecords.ListAgentExecutions(ctx, agentID, 1)
 	if err != nil {
 		return AgentView{}, err
 	}

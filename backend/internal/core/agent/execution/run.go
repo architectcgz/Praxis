@@ -93,7 +93,7 @@ func (r *Run) Snapshot() ExecutionRecord {
 	return value
 }
 
-// Update 在仓储保存成功后发布新进度；回调不能调用 Run 的其他方法。
+// Update 在回调成功后发布新进度；回调不能调用 Run 的其他方法。
 func (r *Run) Update(change func(*ExecutionRecord) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

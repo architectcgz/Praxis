@@ -10,6 +10,7 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
+	sessionmodel "praxis/internal/core/session"
 )
 
 // ConfirmRunning 区分首次启动与重复确认；审批等待不改变运行状态。
@@ -38,7 +39,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) e
 func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.ExecutionRecord, err error) {
 	endedExecution := run.Snapshot()
 	executionID := endedExecution.ID
-	// Hook 在存储锁外观察本次结算；通知不能改变执行者已确定的结果。
+	// Hook 在会话锁外观察本次结算；通知不能改变执行者已确定的结果。
 	ctx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
 			SessionID:   endedExecution.SessionID,
@@ -67,7 +68,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 			endedExecution.FailureMessage = failureMessage
 		}
 		if run.Main() {
-			err = s.records.Save(ctx, endedExecution)
+			err = s.records.SaveExecution(ctx, endedExecution)
 		}
 		if err != nil {
 			s.logger.Errorf(
@@ -157,9 +158,20 @@ func (s *Service) nameSessionAfterAnswer(
 	if outcome != agentexecution.ExecutionCompleted && outcome != agentexecution.ExecutionYielded {
 		return nil
 	}
+	session, err := s.sessions.Get(ctx, task.SessionID)
+	if err != nil {
+		return err
+	}
+	if session.Title != "" {
+		return nil
+	}
 	message, found := run.Entry(task.InputEntryID)
 	if !found {
 		return errorcode.ErrNotFound
 	}
-	return s.sessions.NameFromInput(ctx, task.SessionID, message.TextContent(), at)
+	title := sessionmodel.TitleFromInput(message.TextContent())
+	if title == "" {
+		return nil
+	}
+	return s.sessions.UpdateTitle(ctx, task.SessionID, session.Title, title, at)
 }

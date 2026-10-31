@@ -10,7 +10,6 @@ import (
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/infra/providers"
-	"praxis/internal/infra/storage"
 	executionservice "praxis/internal/service/agent/execution"
 	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
@@ -19,14 +18,14 @@ import (
 	"time"
 )
 
-func buildCoordinator(resources storageResources, repos storage.Repositories, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
+func buildCoordinator(resources storageResources, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
 	tasks := executionservice.NewService(executionservice.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
-		Sessions:       repos.Sessions,
-		Records:        repos.Executions,
-		UsageRecords:   repos.ModelUsage,
+		Sessions:       resources.storage.Sessions,
+		Records:        sessions,
+		UsageRecords:   sessions,
 		History:        sessions,
 		Definitions:    config.agents,
 		Clock:          clock.UTCClock{},
@@ -61,7 +60,7 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 	}
 	operations := toolservice.NewService(toolservice.Dependencies{
 		ApprovalConfig: config,
-		Sessions:       repos.Sessions,
+		Sessions:       resources.storage.Sessions,
 	})
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
 		Catalog:        config.tools,
@@ -100,8 +99,8 @@ func buildCoordinator(resources storageResources, repos storage.Repositories, co
 		Logger:            resources.logger,
 		ConfigMu:          configMu,
 		Tools:             executor,
-		SessionRecords:    repos.Sessions,
-		Projects:          repos.Projects,
+		SessionRecords:    resources.storage.Sessions,
+		Projects:          resources.storage.Projects,
 		TransitionTimeout: 30 * time.Second,
 	})
 }

@@ -17,14 +17,14 @@ func (s *Service) NextRequestSequence(ctx context.Context, run *agentexecution.R
 	return max(uint64(1), record.Progress.NextSequence), nil
 }
 
-// update 不回读 Repository；Main 先保存快照，子执行只更新本次 Run。
+// update 不回读会话历史；Main 先保存执行事实，子执行只更新本次 Run。
 func (s *Service) update(ctx context.Context, run *agentexecution.Run, change func(*agentexecution.ExecutionRecord) error) error {
 	return run.Update(func(record *agentexecution.ExecutionRecord) error {
 		if err := change(record); err != nil {
 			return err
 		}
 		if run.Main() {
-			return s.records.Save(ctx, *record)
+			return s.records.SaveExecution(ctx, *record)
 		}
 		return ctx.Err()
 	})

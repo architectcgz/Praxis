@@ -1,4 +1,4 @@
-package storage
+package session
 
 import (
 	"context"
@@ -13,14 +13,12 @@ import (
 	"praxis/internal/core/tool"
 	"praxis/internal/core/workflow"
 	"praxis/internal/identity"
-	"praxis/internal/infra/jsonl"
 	"strings"
 )
 
-// logReplay 只在单个日志重放期间持有调用匹配状态，完成后即释放。
+// logReplay 只在单个日志重放期间持有调用匹配索引，完成后即释放。
 type logReplay struct {
-	state       *state
-	sessionID   identity.SessionID
+	state       *historyState
 	calls       []replayedToolCall
 	callIndexes map[sessionentry.Key]int
 }
@@ -30,54 +28,16 @@ type replayedToolCall struct {
 	completed bool
 }
 
-// loadSessionLocked 调用方持有 Store 写锁；失败时清除本次重放状态，不发布部分历史。
-func (s *Store) loadSessionLocked(ctx context.Context, id identity.SessionID) error {
-	if _, loaded := s.state.sessions[id]; loaded {
-		return nil
-	}
-	session, err := s.sessionRecord(ctx, id)
-	if err != nil {
-		return err
-	}
-	path := sessionLogPath(s.dataRoot, session.ProjectID, id)
-	if err := jsonl.CheckRegularFile(path); err != nil {
-		return err
-	}
-	s.state.sessions[id] = session
-	if err := s.replayLog(ctx, path, id); err != nil {
-		s.state.removeSession(id)
-		return err
-	}
-	return nil
-}
-
-// replayLog 逐行校验并恢复状态，读到末尾后修复缺失回执；会话失败只影响本次访问。
-func (s *Store) replayLog(ctx context.Context, path string, sessionID identity.SessionID) error {
-	replay := logReplay{
-		state:       &s.state,
-		sessionID:   sessionID,
-		callIndexes: make(map[sessionentry.Key]int),
-	}
-	if err := jsonl.Read(ctx, path, s.dataRoot, replay.apply); err != nil {
-		return err
-	}
-	if err := replay.repairToolResults(ctx, s); err != nil {
-		return fmt.Errorf("repair log %s: %w", path, err)
-	}
-	return nil
-}
-
-// apply 是日志格式到类型化状态的唯一转换边界，同时匹配当前日志中的工具调用与回执。
+// apply 是日志到业务状态的转换边界，发布状态前校验序号、身份与载荷。
 func (r *logReplay) apply(line []byte) error {
-	state, sessionID := r.state, r.sessionID
+	state := r.state
+	sessionID := state.session.ID
 	sessionKey := sessionID.String()
 	var event storedEvent
 	if err := decodeJSON(line, &event); err != nil {
 		return fmt.Errorf("expected a single storage event: %w", err)
 	}
-	// 磁盘记录不能视为可信输入，必须在发布状态前确认序号与事件身份。
-	sequence := state.sequences[sessionKey]
-	if sequence == ^uint64(0) || event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
+	if state.sequence == ^uint64(0) || event.Sequence != state.sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
 		return errors.New("invalid event identity or sequence")
 	}
 	if event.Key == "" || strings.TrimSpace(event.Key) != event.Key {
@@ -95,7 +55,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := eventIdentity(event, "agent_execution.saved", value.ID.String(), value.SessionID.String(), sessionKey); err != nil {
 			return err
 		}
-		state.executions[value.ID] = value
+		state.setExecution(value)
 	case "entry":
 		if event.Type == "entry.updated" {
 			var update toolResultUpdate
@@ -110,21 +70,20 @@ func (r *logReplay) apply(line []byte) error {
 			if len(update.Text) > tool.MaxInlineResultBytes {
 				return errors.New("tool result update exceeds the inline size limit")
 			}
-			key := entryKey{AgentID: update.AgentID, ID: update.EntryID}
-			if err := eventIdentity(event, "entry.updated", encodedEntryKey(key), sessionKey, sessionKey); err != nil {
+			if err := eventIdentity(event, "entry.updated", encodedEntryKey(update.AgentID, update.EntryID), sessionKey, sessionKey); err != nil {
 				return err
 			}
-			prior, ok := state.entries[key]
-			if !ok {
+			index := state.entryIndex(update.AgentID, update.EntryID)
+			if index < 0 {
 				return errors.New("updated entry is missing its original append event")
 			}
+			prior := &state.entries[index]
 			data := &prior.Record.Data
-			if prior.SessionID != sessionID || data.Role != role.Tool || len(data.Content) != 1 || data.Content[0].Kind != sessionentry.BlockToolResult {
+			if data.Role != role.Tool || len(data.Content) != 1 || data.Content[0].Kind != sessionentry.BlockToolResult {
 				return errors.New("tool result update requires an existing tool receipt in the same session")
 			}
 			data.Content[0].Text = update.Text
 			prior.UpdatedSequence = event.Sequence
-			state.entries[key] = prior
 		} else {
 			var value entryRecord
 			if err := decodeJSON(event.Payload, &value); err != nil {
@@ -133,25 +92,22 @@ func (r *logReplay) apply(line []byte) error {
 			if err := value.Validate(); err != nil {
 				return err
 			}
-			key := entryKey{AgentID: value.AgentID, ID: value.Data.ID}
-			if err := eventIdentity(event, "entry.appended", encodedEntryKey(key), sessionKey, sessionKey); err != nil {
+			if err := eventIdentity(event, "entry.appended", encodedEntryKey(value.AgentID, value.Data.ID), sessionKey, sessionKey); err != nil {
 				return err
 			}
 			if value.Data.Sequence != event.Sequence {
 				return errors.New("message sequence does not match event sequence")
 			}
-			if _, exists := state.entries[key]; exists {
+			if state.entryIndex(value.AgentID, value.Data.ID) >= 0 {
 				return errors.New("duplicate entry append identity")
 			}
 			if err := r.matchToolEntry(value); err != nil {
 				return err
 			}
-			state.entries[key] = storedEntry{
-				SessionID:       sessionID,
+			state.entries = append(state.entries, storedEntry{
 				Record:          value,
 				UpdatedSequence: event.Sequence,
-			}
-			state.entryOrder[sessionID] = append(state.entryOrder[sessionID], key)
+			})
 		}
 	case "context":
 		var value contextRecord
@@ -172,7 +128,7 @@ func (r *logReplay) apply(line []byte) error {
 				return errors.New("saved context entry must precede its save event")
 			}
 		}
-		state.contexts[sessionID] = value
+		state.context = &value
 	case "usage":
 		var value providerapi.UsageRecord
 		if err := decodeJSON(event.Payload, &value); err != nil {
@@ -184,7 +140,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := eventIdentity(event, "usage.saved", value.Key(), value.SessionID, sessionKey); err != nil {
 			return err
 		}
-		state.usage[value.Key()] = value
+		state.setUsage(value)
 	case "wait":
 		var value workflow.WaitCondition
 		if err := decodeJSON(event.Payload, &value); err != nil {
@@ -196,7 +152,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := eventIdentity(event, "wait.saved", value.ID.String(), sessionKey, sessionKey); err != nil {
 			return err
 		}
-		state.waits[value.ID] = storedWait{SessionID: sessionID, Value: value}
+		// 重启不恢复审批等待，只检查该记录没有破坏历史完整性。
 	case "agent_execution_timing":
 		var value timing.Record
 		if err := decodeJSON(event.Payload, &value); err != nil {
@@ -215,27 +171,30 @@ func (r *logReplay) apply(line []byte) error {
 		if err := eventIdentity(event, typ, timingKey(value.ExecutionID, value.ID), sessionKey, sessionKey); err != nil {
 			return err
 		}
-		state.timings[timingKey(value.ExecutionID, value.ID)] = value
+		state.setTiming(value)
 	default:
 		return fmt.Errorf("unknown stored collection %q", event.Collection)
 	}
-	state.sequences[sessionKey] = event.Sequence
+	state.sequence = event.Sequence
 	return nil
 }
 
-// matchToolEntry 只检查工具记录的身份关系，不重跑历史审批或执行状态准入。
+// matchToolEntry 只检查历史中的身份关系，不重新执行审批或准入。
 func (r *logReplay) matchToolEntry(value entryRecord) error {
-	sessionID := r.sessionID
-	calls := value.Data.ToolCalls(sessionID, value.AgentID)
+	session := r.state.session
+	calls := value.Data.ToolCalls(session.ID, value.AgentID)
 	if len(calls) == 0 && value.Data.Role != role.Tool {
 		return nil
 	}
-	session, ok := r.state.sessions[sessionID]
-	if !ok || session.MainAgentID() != value.AgentID {
+	if session.MainAgentID() != value.AgentID {
 		return errors.New("tool entry does not belong to the session main agent")
 	}
-	execution, ok := r.state.executions[identity.AgentExecutionID(value.Data.ExecutionID)]
-	if !ok || execution.SessionID != sessionID || execution.AgentID != value.AgentID || execution.RequestID.String() != value.Data.RequestID {
+	index := r.state.executionIndex(identity.AgentExecutionID(value.Data.ExecutionID))
+	if index < 0 {
+		return errors.New("tool entry execution is missing")
+	}
+	execution := r.state.executions[index]
+	if execution.AgentID != value.AgentID || execution.RequestID.String() != value.Data.RequestID {
 		return errors.New("tool entry execution ownership does not match its session, agent or request")
 	}
 	for _, call := range calls {
@@ -267,8 +226,8 @@ func (r *logReplay) matchToolEntry(value entryRecord) error {
 	return nil
 }
 
-// repairToolResults 读完日志才确认缺失；按调用顺序追加确定身份的中断回执，成功落盘后更新内存。
-func (r *logReplay) repairToolResults(ctx context.Context, storage *Store) error {
+// repairToolResults 由会话业务恢复流程决定补写中断回执，不恢复工具执行。
+func (r *logReplay) repairToolResults(ctx context.Context, h *sessionHistory) error {
 	for _, pending := range r.calls {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -277,13 +236,12 @@ func (r *logReplay) repairToolResults(ctx context.Context, storage *Store) error
 			continue
 		}
 		call := pending.call
-		if r.state.sessions[call.SessionID].State != sessionmodel.SessionActive {
+		if r.state.session.State != sessionmodel.SessionActive {
 			return fmt.Errorf("cannot repair tool call %s in inactive session %s", call.CallID, call.SessionID)
 		}
-		_, _, err := storage.appendEntryLocked(ctx, sessionentry.Record{
-			SessionID: call.SessionID,
-			AgentID:   call.AgentID,
-			Data:      call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result.")),
+		_, _, err := h.appendEntryLocked(ctx, entryRecord{
+			AgentID: call.AgentID,
+			Data:    call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result.")),
 		})
 		if err != nil {
 			return fmt.Errorf("save interrupted result for execution %s call %s: %w", call.ExecutionID, call.CallID, err)

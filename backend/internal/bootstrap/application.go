@@ -72,7 +72,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	if err != nil {
 		return nil, err
 	}
-	repos := a.storage.Repositories()
 	if err := agentservice.ValidateDefinitions(nil, config.agents.List()); err != nil {
 		return nil, err
 	}
@@ -82,28 +81,28 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		return nil, err
 	}
 	configMu := &config.mu
-	a.sessions = buildSessions(repos, hooks, configMu, config.models)
-	coordinator := buildCoordinator(resources, repos, config, a.sessions, hooks, emitter, configMu, options.Runner)
+	a.sessions = buildSessions(a.storage, hooks, configMu, config.models)
+	coordinator := buildCoordinator(resources, config, a.sessions, hooks, emitter, configMu, options.Runner)
 	a.coordinator = coordinator
 	agents := agentservice.NewService(agentservice.Dependencies{
 		History:          a.sessions,
 		ActiveRun:        coordinator.ActiveRun,
 		SessionRuns:      coordinator.SessionRuns,
-		ExecutionRecords: repos.Executions,
-		Sessions:         repos.Sessions,
+		ExecutionRecords: a.sessions,
+		Sessions:         a.storage.Sessions,
 		Definitions:      config.agents.Definition,
 	})
 	models := buildModelService(root, config, a.logger)
 	projects := projectservice.NewService(projectservice.Dependencies{
-		Projects:   repos.Projects,
-		Sessions:   repos.Sessions,
+		Projects:   a.storage.Projects,
+		Sessions:   a.storage.Sessions,
 		Directory:  fs.Filesystem{},
 		TextReader: fs.Filesystem{},
 		Clock:      clock.UTCClock{},
 	})
 	approvals := approvalservice.NewService(approvalservice.Dependencies{
 		Config:   config,
-		Sessions: repos.Sessions,
+		Sessions: a.storage.Sessions,
 		Clock:    clock.UTCClock{},
 	})
 	a.frontend = bindings.Services{
@@ -117,7 +116,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Emitter:        emitter,
 		Timings:        coordinator,
 		Usages:         a.sessions,
-		SessionLogPath: repos.Sessions.SessionLogPath,
+		SessionLogPath: a.storage.Sessions.SessionLogPath,
 	}
 	a.logger.Infof("application open completed ready=true")
 	ready = true

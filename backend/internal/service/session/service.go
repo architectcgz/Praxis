@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"praxis/internal/clock"
-	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/hook"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
@@ -25,23 +23,19 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
 	Sessions       repository.Session
-	Entries        sessionentry.Store
-	Executions     repository.AgentExecution
-	UsageRecords   repository.ModelUsage
+	HistoryLog     repository.SessionLog
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
 
-// Service 持有主会话 Context、模型选择和输入队列，不持有 Agent 或 Execution 实例。
+// Service 持有主会话历史、Context、模型选择和输入队列，不持有 Agent 或 Execution 运行实例。
 type Service struct {
 	configMu       *sync.RWMutex
 	modelConfigs   ModelConfigResolver
 	hookDispatcher *hook.Dispatcher
 	projects       repository.Project
 	sessions       repository.Session
-	entries        sessionentry.Store
-	executions     repository.AgentExecution
-	usageRecords   repository.ModelUsage
+	historyLog     repository.SessionLog
 	clock          clock.Clock
 	ids            identity.IDGenerator
 
@@ -49,9 +43,9 @@ type Service struct {
 	modelSelections map[identity.SessionID]sessionmodel.ModelSelection
 	taskQueues      map[identity.SessionID]*sessionmodel.TaskQueue
 
-	// Context 在会话首次打开时载入；此锁覆盖上下文读写和删除，持锁期间不调用模型或 Hook。
-	contextMu sync.Mutex
-	contexts  map[identity.SessionID]*appcontext.Context
+	// 注册表锁只负责定位会话，加载和读写由各会话自己的锁协调。
+	historiesMu sync.Mutex
+	histories   map[identity.SessionID]*sessionHistory
 
 	createdSessionsMu sync.Mutex
 	createdSessions   map[identity.SessionID]struct{}
@@ -75,13 +69,11 @@ func NewService(deps Dependencies) *Service {
 		modelConfigs:    deps.ModelConfigs,
 		modelSelections: make(map[identity.SessionID]sessionmodel.ModelSelection),
 		taskQueues:      make(map[identity.SessionID]*sessionmodel.TaskQueue),
-		contexts:        make(map[identity.SessionID]*appcontext.Context),
+		histories:       make(map[identity.SessionID]*sessionHistory),
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		sessions:        deps.Sessions,
-		entries:         deps.Entries,
-		executions:      deps.Executions,
-		usageRecords:    deps.UsageRecords,
+		historyLog:      deps.HistoryLog,
 		clock:           deps.Clock,
 		ids:             deps.IDs,
 		createdSessions: make(map[identity.SessionID]struct{}),
@@ -167,7 +159,7 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID identity.SessionI
 	return s.deleteSession(ctx, sessionID, false)
 }
 
-// CleanupEmptySessions 只在 Coordinator 停止后清理本次新建的空会话，并拒绝后续创建。
+// CleanupEmptySessions 在 Coordinator 停止后清理新建的空会话，释放历史状态并拒绝后续创建。
 func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 	s.createdSessionsMu.Lock()
 	defer s.createdSessionsMu.Unlock()
@@ -186,25 +178,38 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 	}
 	clear(s.taskQueues)
 	s.selectionMu.Unlock()
+	s.historiesMu.Lock()
+	clear(s.histories)
+	s.historiesMu.Unlock()
 	return cleanupErr
 }
 
 func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
-	s.contextMu.Lock()
-	defer s.contextMu.Unlock()
-	if err := s.sessions.Delete(ctx, sessionID, onlyEmpty); err != nil {
-		return err
-	}
+	h := s.historyFor(sessionID)
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if onlyEmpty {
-		if _, err := s.sessions.Get(ctx, sessionID); err == nil {
+		if h.state == nil {
+			if err := s.loadHistory(ctx, sessionID, h); err != nil {
+				if errors.Is(err, errorcode.ErrNotFound) {
+					return nil
+				}
+				return err
+			}
+		}
+		if len(h.state.entries) != 0 {
 			return nil
-		} else if !errors.Is(err, errorcode.ErrNotFound) {
-			return err
 		}
 	}
-	delete(s.contexts, sessionID)
+	if err := s.sessions.Delete(ctx, sessionID); err != nil {
+		return err
+	}
+	h.state, h.context = nil, nil
+	s.historiesMu.Lock()
+	delete(s.histories, sessionID)
+	s.historiesMu.Unlock()
 	delete(s.modelSelections, sessionID)
 	if queue := s.taskQueues[sessionID]; queue != nil {
 		queue.Clear()
@@ -214,5 +219,9 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 }
 
 func (s *Service) RenameSession(ctx context.Context, sessionID identity.SessionID, title string) error {
-	return s.sessions.Rename(ctx, sessionID, title, s.clock.Now())
+	session, err := s.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return s.sessions.UpdateTitle(ctx, sessionID, session.Title, title, s.clock.Now())
 }

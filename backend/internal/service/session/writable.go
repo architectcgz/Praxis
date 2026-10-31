@@ -8,7 +8,7 @@ import (
 	"praxis/internal/repository"
 )
 
-// RequireWritable 提前确认会话存在且处于 active 状态；仓储在实际写入锁内再次校验。
+// RequireWritable 提前确认会话存在且处于 active 状态；具体业务操作负责实际执行时的状态检查。
 func RequireWritable(ctx context.Context, sessions repository.Session, id identity.SessionID) error {
 	value, err := sessions.Get(ctx, id)
 	if err != nil {

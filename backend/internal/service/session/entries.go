@@ -14,91 +14,100 @@ import (
 
 var _ sessionmodel.History = (*Service)(nil)
 
-// AppendEntry 将输入、模型回答、工具回执或压缩摘要追加到主会话历史。
-// 执行归属、工具配对和摘要来源在会话锁内检查；仓储只保存已经准入的事实。
+// AppendEntry 在会话锁内检查准入和工具配对，追加完整记录后更新业务内存态。
 func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID, data sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
-	s.contextMu.Lock()
-	defer s.contextMu.Unlock()
-	session, err := s.sessions.Get(ctx, sessionID)
+	h, err := s.lockHistory(ctx, sessionID)
 	if err != nil {
 		return sessionentry.ContextEntry{}, false, err
 	}
-	if session.State != sessionmodel.SessionActive {
-		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
-	}
-	if data.ExecutionID == "" && (data.Role != role.User || data.SourceTaskID != "" || data.IsSummary()) {
-		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
-	}
-	if err := s.validateEntry(ctx, session, data); err != nil {
+	defer h.mu.Unlock()
+	if err := h.validateEntryLocked(data); err != nil {
 		return sessionentry.ContextEntry{}, false, err
 	}
-	stored, inserted, err := s.entries.Append(ctx, sessionentry.Record{
-		SessionID: session.ID,
-		AgentID:   session.MainAgentID(),
-		Data:      data,
+	stored, inserted, err := h.appendEntryLocked(ctx, entryRecord{
+		AgentID: h.state.session.MainAgentID(),
+		Data:    data,
 	})
 	if err != nil {
 		return sessionentry.ContextEntry{}, false, err
 	}
-	// 任务输入等准入成功再追加；摘要等完整压缩结果保存后通过 ReplaceContext 替换。
-	if inserted && stored.SourceTaskID == "" && !stored.IsSummary() {
-		if value := s.contexts[sessionID]; value != nil {
-			value.Append(stored)
-		}
+	// 任务输入等准入成功再追加；摘要通过完整压缩结果替换 Context。
+	if inserted && stored.SourceTaskID == "" && !stored.IsSummary() && h.context != nil {
+		h.context.Append(stored)
 	}
 	return stored, inserted, nil
 }
 
-// UpdateToolResult 先更新主会话历史，再同步当前上下文；存储失败时保留原回执。
+// UpdateToolResult 先追加正文变更，再更新历史与 Context，条目的原始位置不变。
 func (s *Service) UpdateToolResult(ctx context.Context, sessionID identity.SessionID, id, text string) (sessionentry.ContextEntry, error) {
-	s.contextMu.Lock()
-	defer s.contextMu.Unlock()
-	session, err := s.sessions.Get(ctx, sessionID)
+	h, err := s.lockHistory(ctx, sessionID)
 	if err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
-	if session.State != sessionmodel.SessionActive {
-		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
-	}
-	prior, err := s.entries.Get(ctx, session.MainAgentID(), id)
+	defer h.mu.Unlock()
+	prior, err := h.entryLocked(id)
 	if err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
-	if prior.Role != role.Tool || len(prior.Content) != 1 || prior.Content[0].Kind != sessionentry.BlockToolResult {
-		return sessionentry.ContextEntry{}, errorcode.ErrRequestConflict
-	}
-	if len(text) > tool.MaxInlineResultBytes {
-		return sessionentry.ContextEntry{}, errorcode.ErrInvalidRequest
-	}
-	stored, err := s.entries.UpdateToolResult(ctx, session.ID, session.MainAgentID(), id, text)
-	if err != nil {
+	if err := validateToolResultUpdate(h.state.session, prior, text); err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
-	if value := s.contexts[sessionID]; value != nil {
-		value.UpdateToolResult(id, text)
+	if prior.Content[0].Text == text {
+		return prior, nil
 	}
-	return stored, nil
+	update := toolResultUpdate{
+		AgentID: h.state.session.MainAgentID(),
+		EntryID: id,
+		Text:    text,
+	}
+	if err := h.appendEventLocked(ctx, "entry.updated", "entry", encodedEntryKey(update.AgentID, id), update); err != nil {
+		return sessionentry.ContextEntry{}, err
+	}
+	prior.Content[0].Text = text
+	index := h.state.entryIndex(update.AgentID, id)
+	h.state.entries[index].Record.Data = prior
+	h.state.entries[index].UpdatedSequence = h.state.sequence
+	if h.context != nil {
+		h.context.UpdateToolResult(id, text)
+	}
+	return prior.Clone(), nil
 }
 
-// GetEntry 包含尚未完成执行准入的输入，供准入重试确认已接纳的消息身份。
+// GetEntry 包含尚未完成执行准入的输入，供准入重试确认消息身份。
 func (s *Service) GetEntry(ctx context.Context, sessionID identity.SessionID, id string) (sessionentry.ContextEntry, error) {
-	session, err := s.sessions.Get(ctx, sessionID)
+	h, err := s.lockHistory(ctx, sessionID)
 	if err != nil {
 		return sessionentry.ContextEntry{}, err
 	}
-	return s.entries.Get(ctx, session.MainAgentID(), id)
+	defer h.mu.Unlock()
+	return h.entryLocked(id)
 }
 
-// ListEntries 读取主会话的完整已准入历史，不聚合子执行的私有消息。
+// ListEntries 返回主会话的完整已准入历史和同一次读取的事件边界。
 func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID) (sessionentry.List, error) {
-	session, err := s.sessions.Get(ctx, sessionID)
+	h, err := s.lockHistory(ctx, sessionID)
 	if err != nil {
 		return sessionentry.List{}, err
 	}
-	return s.entries.List(ctx, sessionentry.Query{AgentID: session.MainAgentID()})
+	defer h.mu.Unlock()
+	return h.listEntriesLocked(false), nil
 }
 
-func (s *Service) validateEntry(ctx context.Context, session sessionmodel.Session, data sessionentry.ContextEntry) error {
+func validateToolResultUpdate(session sessionmodel.Session, prior sessionentry.ContextEntry, text string) error {
+	if session.State != sessionmodel.SessionActive || prior.Role != role.Tool || len(prior.Content) != 1 || prior.Content[0].Kind != sessionentry.BlockToolResult {
+		return errorcode.ErrRequestConflict
+	}
+	if len(text) > tool.MaxInlineResultBytes {
+		return errorcode.ErrInvalidRequest
+	}
+	return nil
+}
+
+func (h *sessionHistory) validateEntryLocked(data sessionentry.ContextEntry) error {
+	session := h.state.session
+	if session.State != sessionmodel.SessionActive || data.ExecutionID == "" && (data.Role != role.User || data.SourceTaskID != "" || data.IsSummary()) {
+		return errorcode.ErrRequestConflict
+	}
 	if err := data.ValidateContent(); err != nil {
 		return err
 	}
@@ -106,13 +115,14 @@ func (s *Service) validateEntry(ctx context.Context, session sessionmodel.Sessio
 		return errors.New("assistant author does not match the session main agent")
 	}
 	if data.ExecutionID != "" {
-		execution, err := s.executions.Get(ctx, session.ID, identity.AgentExecutionID(data.ExecutionID))
-		preparing := errors.Is(err, errorcode.ErrNotFound) && data.Role == role.User && !data.IsSummary() && data.ID == "input:"+data.RequestID
+		index := h.state.executionIndex(identity.AgentExecutionID(data.ExecutionID))
+		preparing := index < 0 && data.Role == role.User && !data.IsSummary() && data.ID == "input:"+data.RequestID
 		if !preparing {
-			if err != nil {
-				return err
+			if index < 0 {
+				return errorcode.ErrNotFound
 			}
-			if execution.SessionID != session.ID || execution.AgentID != session.MainAgentID() || execution.RequestID.String() != data.RequestID {
+			execution := h.state.executions[index]
+			if execution.AgentID != session.MainAgentID() || execution.RequestID.String() != data.RequestID {
 				return errorcode.ErrRequestConflict
 			}
 		}
@@ -126,10 +136,7 @@ func (s *Service) validateEntry(ctx context.Context, session sessionmodel.Sessio
 	if !needsHistory {
 		return nil
 	}
-	page, err := s.entries.List(ctx, sessionentry.Query{AgentID: session.MainAgentID(), IncludeUnadmitted: true})
-	if err != nil {
-		return err
-	}
+	page := h.listEntriesLocked(true)
 	if data.IsSummary() {
 		if data.AuthorID != session.MainAgentID().String() || data.ExecutionID == "" || data.RequestID == "" {
 			return errors.New("summary ownership is required")
@@ -167,8 +174,7 @@ func (s *Service) validateEntry(ctx context.Context, session sessionmodel.Sessio
 					if block.Kind == sessionentry.BlockToolCall && entry.ID != data.ID {
 						return errorcode.ErrRequestConflict
 					}
-					copy := entry
-					declaration, declaredName = &copy, prior.Name
+					declaration, declaredName = new(entry), prior.Name
 				}
 				if block.Kind == sessionentry.BlockToolResult && prior.Kind == sessionentry.BlockToolResult && entry.ID != data.ID {
 					return errorcode.ErrRequestConflict

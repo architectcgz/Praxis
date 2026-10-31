@@ -42,13 +42,13 @@ func RunTimings(run *agentexecution.Run) []timing.View {
 	return result
 }
 
-// ListAgentTimings 从 Execution 仓储聚合操作记录，并派生执行本身的墙上时钟耗时。
+// ListAgentTimings 从会话历史聚合操作记录，并派生执行本身的墙上时钟耗时。
 func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit int) ([]timing.View, error) {
-	records, err := s.records.ListAgentTimings(ctx, identity.AgentID(agentID), limit)
+	records, err := s.records.ListAgentTimingRecords(ctx, identity.AgentID(agentID), limit)
 	if err != nil {
 		return nil, err
 	}
-	executions, err := s.records.ListByAgent(ctx, identity.AgentID(agentID), limit)
+	executions, err := s.records.ListAgentExecutions(ctx, identity.AgentID(agentID), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit in
 	for _, record := range records {
 		execution, ok := owners[record.ExecutionID]
 		if !ok {
-			execution, err = s.records.Get(ctx, identity.SessionID(agentID), identity.AgentExecutionID(record.ExecutionID))
+			execution, err = s.records.GetExecution(ctx, identity.SessionID(agentID), identity.AgentExecutionID(record.ExecutionID))
 			if err != nil {
 				return nil, err
 			}

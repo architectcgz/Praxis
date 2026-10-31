@@ -9,16 +9,14 @@ import (
 	"sync"
 )
 
-func buildSessions(repos storage.Repositories, hooks *hook.Dispatcher, configMu *sync.RWMutex, models sessionservice.ModelConfigResolver) *sessionservice.Service {
+func buildSessions(store *storage.Store, hooks *hook.Dispatcher, configMu *sync.RWMutex, models sessionservice.ModelConfigResolver) *sessionservice.Service {
 	return sessionservice.NewService(sessionservice.Dependencies{
 		ConfigMu:       configMu,
 		ModelConfigs:   models,
 		HookDispatcher: hooks,
-		Projects:       repos.Projects,
-		Sessions:       repos.Sessions,
-		Entries:        repos.Entries,
-		Executions:     repos.Executions,
-		UsageRecords:   repos.ModelUsage,
+		Projects:       store.Projects,
+		Sessions:       store.Sessions,
+		HistoryLog:     store.Logs,
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
 	})

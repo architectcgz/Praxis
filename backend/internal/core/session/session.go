@@ -44,21 +44,14 @@ func (s Session) MainAgentID() identity.AgentID {
 	return identity.AgentID(s.ID)
 }
 
-// NameFromInput 从首次成功回答对应的用户输入提取短标题；已有标题不会被后续输入覆盖。
+// TitleFromInput 合并输入中的空白并提取短标题；空白输入返回空字符串。
 // 截断以 Unicode 字符为单位，避免拆断多字节文本。
-func (s *Session) NameFromInput(content string, at time.Time) {
-	if s.Title != "" {
-		return
-	}
+func TitleFromInput(content string) string {
 	words := []rune(strings.Join(strings.Fields(content), " "))
-	if len(words) == 0 {
-		return
-	}
 	if len(words) > 40 {
 		words = words[:40]
 	}
-	s.Title = string(words)
-	s.UpdatedAt = at.UTC()
+	return string(words)
 }
 
 // Validate 检查对象自身的完整性，不修改或修复输入。
