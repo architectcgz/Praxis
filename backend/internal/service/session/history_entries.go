@@ -19,12 +19,6 @@ type entryRecord struct {
 	Data    sessionentry.ContextEntry `json:"entry"`
 }
 
-type toolResultUpdate struct {
-	AgentID identity.AgentID `json:"agent_id"`
-	EntryID string           `json:"entry_id"`
-	Text    string           `json:"text"`
-}
-
 // contextRecord 保存最近一次完整压缩结果及其覆盖的事件边界。
 type contextRecord struct {
 	AgentID         identity.AgentID            `json:"agent_id"`
@@ -39,7 +33,7 @@ func encodedEntryKey(agentID identity.AgentID, id string) string {
 // appendEntryLocked 供正常追加和持锁恢复修复共用，成功写入完整记录后才修改内存态。
 func (h *sessionHistory) appendEntryLocked(ctx context.Context, value entryRecord) (sessionentry.ContextEntry, bool, error) {
 	if index := h.state.entryIndex(value.AgentID, value.Data.ID); index >= 0 {
-		prior := h.state.entries[index].Record.Data
+		prior := h.state.entries[index].Data
 		candidate := value.Data.Clone()
 		candidate.Sequence, candidate.CreatedAt = prior.Sequence, prior.CreatedAt
 		if !reflect.DeepEqual(prior, candidate) {
@@ -56,10 +50,7 @@ func (h *sessionHistory) appendEntryLocked(ctx context.Context, value entryRecor
 	if err := h.appendEventLocked(ctx, "entry.appended", "entry", encodedEntryKey(value.AgentID, data.ID), record); err != nil {
 		return sessionentry.ContextEntry{}, false, err
 	}
-	h.state.entries = append(h.state.entries, storedEntry{
-		Record:          record,
-		UpdatedSequence: data.Sequence,
-	})
+	h.state.entries = append(h.state.entries, record)
 	return data.Clone(), true, nil
 }
 
@@ -68,7 +59,7 @@ func (h *sessionHistory) entryLocked(id string) (sessionentry.ContextEntry, erro
 	if index < 0 {
 		return sessionentry.ContextEntry{}, errorcode.ErrNotFound
 	}
-	return h.state.entries[index].Record.Data.Clone(), nil
+	return h.state.entries[index].Data.Clone(), nil
 }
 
 func (h *sessionHistory) listEntriesLocked(includeUnadmitted bool) sessionentry.List {
@@ -77,10 +68,10 @@ func (h *sessionHistory) listEntriesLocked(includeUnadmitted bool) sessionentry.
 		Entries:          make([]sessionentry.ContextEntry, 0, len(h.state.entries)),
 	}
 	for _, stored := range h.state.entries {
-		if stored.Record.AgentID != h.state.session.MainAgentID() {
+		if stored.AgentID != h.state.session.MainAgentID() {
 			continue
 		}
-		value := stored.Record.Data
+		value := stored.Data
 		if value.Role == role.User && !includeUnadmitted && value.ExecutionID != "" && h.state.executionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {
 			continue
 		}

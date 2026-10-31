@@ -36,8 +36,9 @@ type BeforeToolExecutionHook interface {
 	BeforeToolExecution(context.Context, ToolExecution) (json.RawMessage, error)
 }
 
+// AfterToolExecutionHook 观察已提交的执行结果，不能覆盖回执；通知失败不改变执行事实。
 type AfterToolExecutionHook interface {
-	AfterToolExecution(context.Context, ToolExecutionResult) (tool.ToolResult, error)
+	AfterToolExecution(context.Context, ToolExecutionResult) error
 }
 
 type ToolExecutionWaitingHook interface {

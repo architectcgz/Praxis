@@ -28,16 +28,10 @@ type historyState struct {
 	session    sessionmodel.Session
 	sequence   uint64
 	executions []agentexecution.ExecutionRecord
-	entries    []storedEntry
+	entries    []entryRecord
 	context    *contextRecord
 	usage      []providerapi.UsageRecord
 	timings    []timing.Record
-}
-
-type storedEntry struct {
-	Record entryRecord
-	// UpdatedSequence 区分原始历史位置和最近一次正文更新，供 Context 恢复使用。
-	UpdatedSequence uint64
 }
 
 func (s *Service) lockHistory(ctx context.Context, id identity.SessionID) (*sessionHistory, error) {
@@ -110,8 +104,8 @@ func (h *sessionHistory) appendEventLocked(ctx context.Context, typ, collection,
 }
 
 func (s *historyState) entryIndex(agentID identity.AgentID, id string) int {
-	return slices.IndexFunc(s.entries, func(value storedEntry) bool {
-		return value.Record.AgentID == agentID && value.Record.Data.ID == id
+	return slices.IndexFunc(s.entries, func(value entryRecord) bool {
+		return value.AgentID == agentID && value.Data.ID == id
 	})
 }
 

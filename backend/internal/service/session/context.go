@@ -118,19 +118,8 @@ func (h *sessionHistory) restoreContextLocked() []sessionentry.ContextEntry {
 		entries, boundary = cloned.Entries, cloned.ThroughSequence
 	}
 	for _, stored := range h.state.entries {
-		value := stored.Record.Data
-		if stored.Record.AgentID != h.state.session.MainAgentID() || value.IsSummary() {
-			continue
-		}
-		if value.Sequence <= boundary {
-			if stored.UpdatedSequence > boundary {
-				for index, entry := range entries {
-					if entry.ID == value.ID {
-						entries[index].Content = value.Clone().Content
-						break
-					}
-				}
-			}
+		value := stored.Data
+		if stored.AgentID != h.state.session.MainAgentID() || value.IsSummary() || value.Sequence <= boundary {
 			continue
 		}
 		if value.Role == role.User && value.ExecutionID != "" && h.state.executionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {

@@ -7,7 +7,6 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
@@ -38,41 +37,6 @@ func (s *Service) AppendEntry(ctx context.Context, sessionID identity.SessionID,
 	return stored, inserted, nil
 }
 
-// UpdateToolResult 先追加正文变更，再更新历史与 Context，条目的原始位置不变。
-func (s *Service) UpdateToolResult(ctx context.Context, sessionID identity.SessionID, id, text string) (sessionentry.ContextEntry, error) {
-	h, err := s.lockHistory(ctx, sessionID)
-	if err != nil {
-		return sessionentry.ContextEntry{}, err
-	}
-	defer h.mu.Unlock()
-	prior, err := h.entryLocked(id)
-	if err != nil {
-		return sessionentry.ContextEntry{}, err
-	}
-	if err := validateToolResultUpdate(h.state.session, prior, text); err != nil {
-		return sessionentry.ContextEntry{}, err
-	}
-	if prior.Content[0].Text == text {
-		return prior, nil
-	}
-	update := toolResultUpdate{
-		AgentID: h.state.session.MainAgentID(),
-		EntryID: id,
-		Text:    text,
-	}
-	if err := h.appendEventLocked(ctx, "entry.updated", "entry", encodedEntryKey(update.AgentID, id), update); err != nil {
-		return sessionentry.ContextEntry{}, err
-	}
-	prior.Content[0].Text = text
-	index := h.state.entryIndex(update.AgentID, id)
-	h.state.entries[index].Record.Data = prior
-	h.state.entries[index].UpdatedSequence = h.state.sequence
-	if h.context != nil {
-		h.context.UpdateToolResult(id, text)
-	}
-	return prior.Clone(), nil
-}
-
 // GetEntry 包含尚未完成执行准入的输入，供准入重试确认消息身份。
 func (s *Service) GetEntry(ctx context.Context, sessionID identity.SessionID, id string) (sessionentry.ContextEntry, error) {
 	h, err := s.lockHistory(ctx, sessionID)
@@ -91,16 +55,6 @@ func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID)
 	}
 	defer h.mu.Unlock()
 	return h.listEntriesLocked(false), nil
-}
-
-func validateToolResultUpdate(session sessionmodel.Session, prior sessionentry.ContextEntry, text string) error {
-	if session.State != sessionmodel.SessionActive || prior.Role != role.Tool || len(prior.Content) != 1 || prior.Content[0].Kind != sessionentry.BlockToolResult {
-		return errorcode.ErrRequestConflict
-	}
-	if len(text) > tool.MaxInlineResultBytes {
-		return errorcode.ErrInvalidRequest
-	}
-	return nil
 }
 
 func (h *sessionHistory) validateEntryLocked(data sessionentry.ContextEntry) error {

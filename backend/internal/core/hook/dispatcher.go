@@ -8,7 +8,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	providerapi "praxis/internal/core/provider"
-	"praxis/internal/core/tool"
 	"reflect"
 	"slices"
 )
@@ -146,22 +145,18 @@ func (d *Dispatcher) BeforeToolExecution(ctx context.Context, event ToolExecutio
 	return value, nil
 }
 
-func (d *Dispatcher) AfterToolExecution(ctx context.Context, event ToolExecutionResult) (tool.ToolResult, error) {
-	value := event.Result
+func (d *Dispatcher) AfterToolExecution(ctx context.Context, event ToolExecutionResult) error {
+	var errs []error
 	for _, registered := range d.registered() {
 		handler, ok := registered.(AfterToolExecutionHook)
 		if !ok {
 			continue
 		}
-		next, err := handler.AfterToolExecution(ctx, event.clone())
-		if err != nil {
-			var empty tool.ToolResult
-			return empty, &Error{Point: "AfterToolExecution", Cause: err}
+		if err := handler.AfterToolExecution(ctx, event.clone()); err != nil {
+			errs = append(errs, &Error{Point: "AfterToolExecution", Cause: err})
 		}
-		value = next
-		event.Result = next
 	}
-	return value, nil
+	return errors.Join(errs...)
 }
 
 func (d *Dispatcher) UserInputCommitted(ctx context.Context, event EntryCommitted) error {

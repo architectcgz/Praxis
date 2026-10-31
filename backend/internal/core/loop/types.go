@@ -26,11 +26,10 @@ type (
 )
 
 // HistoryOperations 绑定本轮所属的历史能力：主执行使用 Session，子执行使用私有历史。
-// NextContext 只在本轮条目追加后调用；Loop 不持有原始历史或存储实现。
+// NextContext 返回未经过 Hook 变换的基础上下文快照；Loop 不持有原始历史或存储实现。
 type HistoryOperations interface {
-	NextContext(context.Context) (appcontext.ModelContext, error)
+	NextContext(context.Context) (appcontext.Content, error)
 	AppendEntry(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error)
-	UpdateToolResult(context.Context, string, string) (sessionentry.ContextEntry, error)
 	ReplaceContext(context.Context, []sessionentry.ContextEntry) error
 	PublishEntries(identity.TurnID, []sessionentry.ContextEntry)
 	EntryFailure(error) error
@@ -54,6 +53,7 @@ const (
 type Result struct{ Reason EndReason }
 
 // Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
+// Context 是未经过 Hook 变换的基础上下文快照，Loop 压缩后再构建模型请求副本。
 type Input struct {
 	ID           identity.AgentExecutionID
 	SourceTaskID identity.TaskID
@@ -61,7 +61,7 @@ type Input struct {
 	AgentID      identity.AgentID
 	RequestID    identity.RequestID
 	Model        modelapi.Config
-	Context      appcontext.ModelContext
+	Context      appcontext.Content
 }
 
 // ExecutionDependencies 只在本次 Run 中使用；共享 Runner 不保存单次执行的环境或等待状态。

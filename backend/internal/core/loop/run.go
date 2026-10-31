@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -49,11 +50,21 @@ func (r *Runner) run(
 	executionInput Input,
 	deps ExecutionDependencies,
 ) (EndReason, FailureCode, error) {
-	modelContext := executionInput.Context
+	content := executionInput.Context
 
 	for {
 		tools := r.Tools.List()
-		compressed, err := r.compressContext(ctx, executionInput, deps, modelContext, tools)
+		base := appcontext.ModelContext{
+			SystemPrompt: content.SystemPrompt,
+			Entries:      content.Entries,
+		}
+		compressed, err := r.compressContext(ctx, executionInput, deps, base, tools)
+		if err != nil {
+			err = modelFailure(err)
+			r.emitError(executionInput.AgentID, executionInput.ID, "", err)
+			return loopResult(err)
+		}
+		modelContext, err := r.buildContext(ctx, executionInput, compressed)
 		if err != nil {
 			err = modelFailure(err)
 			r.emitError(executionInput.AgentID, executionInput.ID, "", err)
@@ -67,7 +78,7 @@ func (r *Runner) run(
 			ExecutionID:     executionInput.ID,
 			PromptCacheKey:  executionInput.SessionID.String(),
 			Model:           executionInput.Model.Clone(),
-			Context:         compressed.Clone(),
+			Context:         modelContext,
 			Tools:           tools,
 			MaxOutputTokens: executionInput.Model.MaxOutputTokens,
 			TurnID:          identity.NewTurnID(executionInput.ID, sequence),
@@ -77,7 +88,7 @@ func (r *Runner) run(
 		if err != nil || outcome != EndCompleted || finished {
 			return outcome, failureCode, err
 		}
-		modelContext, err = deps.History.NextContext(ctx)
+		content, err = deps.History.NextContext(ctx)
 		if err != nil {
 			err = modelFailure(err)
 			r.emitError(executionInput.AgentID, executionInput.ID, "", err)

@@ -4,13 +4,12 @@ import (
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
 	appcontext "praxis/internal/core/context"
-	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 )
 
-// PrepareLoop 检查完成证据，构建独立模型上下文，并绑定本次执行使用的业务能力。
+// PrepareLoop 检查完成证据，准备基础上下文副本，并绑定本次执行使用的业务能力。
 // completed 为 true 时由 Coordinator 直接结算，不能再次进入 Loop。
 func (s *Service) PrepareLoop(ctx context.Context, run *agentexecution.Run) (loop.Input, loop.ExecutionDependencies, bool, error) {
 	task := run.Snapshot()
@@ -21,7 +20,7 @@ func (s *Service) PrepareLoop(ctx context.Context, run *agentexecution.Run) (loo
 	if task.Progress.FinalAssistantID != "" {
 		return loop.Input{}, loop.ExecutionDependencies{}, true, nil
 	}
-	built, err := s.buildContext(ctx, run)
+	content, err := s.contextContent(ctx, run)
 	if err != nil {
 		return loop.Input{}, loop.ExecutionDependencies{}, false, err
 	}
@@ -32,7 +31,7 @@ func (s *Service) PrepareLoop(ctx context.Context, run *agentexecution.Run) (loo
 		AgentID:      task.AgentID,
 		RequestID:    task.RequestID,
 		Model:        task.Config.Model.Clone(),
-		Context:      built,
+		Context:      content,
 	}
 	bound := &loopExecution{
 		service: s,
@@ -46,57 +45,30 @@ func (s *Service) PrepareLoop(ctx context.Context, run *agentexecution.Run) (loo
 	return input, deps, false, nil
 }
 
-// buildContext 从会话或子执行已维护的上下文构建本轮模型请求。
-// 当前输入保护和提示词只属于本轮，不从完整历史重新筛选条目。
-func (s *Service) buildContext(ctx context.Context, run *agentexecution.Run) (appcontext.ModelContext, error) {
+// contextContent 从会话或子执行取得未经过 Hook 变换的基础上下文副本。
+// 当前输入保护和提示词只属于本轮；压缩和模型输入构建由 Loop 编排。
+func (s *Service) contextContent(ctx context.Context, run *agentexecution.Run) (appcontext.Content, error) {
 	task := run.Snapshot()
 	if !task.Active() {
-		return appcontext.ModelContext{}, errorcode.ErrRequestConflict
+		return appcontext.Content{}, loop.NewFailure(loop.FailureContract, errorcode.ErrRequestConflict)
 	}
 	var entries []sessionentry.ContextEntry
 	if run.Main() {
 		value, err := s.history.ContextEntries(ctx, task.SessionID)
 		if err != nil {
-			return appcontext.ModelContext{}, loop.NewFailure(loop.FailureStorage, err)
+			return appcontext.Content{}, loop.NewFailure(loop.FailureStorage, err)
 		}
 		entries = value
 	} else {
 		value, err := run.ContextEntries()
 		if err != nil {
-			return appcontext.ModelContext{}, loop.NewFailure(loop.FailureContract, err)
+			return appcontext.Content{}, loop.NewFailure(loop.FailureContract, err)
 		}
 		entries = value
 	}
 	content, err := appcontext.ContentFromEntries(task.Config.SystemPrompt, task.InputEntryID, entries)
 	if err != nil {
-		return appcontext.ModelContext{}, err
+		return appcontext.Content{}, loop.NewFailure(loop.FailureContract, err)
 	}
-	identity := hook.Identity{
-		OperationID:  hook.NewOperationID(),
-		SourceTaskID: task.SourceTaskID,
-		SessionID:    task.SessionID,
-		AgentID:      task.AgentID,
-		ExecutionID:  task.ID,
-	}
-	limits := appcontext.Limits{
-		ContextWindow:   task.Config.Model.ContextWindow,
-		MaxOutputTokens: task.Config.Model.MaxOutputTokens,
-	}
-	content, err = s.hookDispatcher.BeforeContextBuild(ctx, hook.ContextBuild{
-		Identity: identity,
-		Content:  content,
-		Limits:   limits,
-	})
-	if err != nil {
-		return appcontext.ModelContext{}, err
-	}
-	built, err := (appcontext.ContextBuilder{}).Build(content, limits)
-	if hookErr := s.hookDispatcher.AfterContextBuild(context.WithoutCancel(ctx), hook.ContextBuilt{
-		Identity: identity,
-		Context:  built,
-		Err:      err,
-	}); hookErr != nil {
-		s.logger.Errorf("after context build hook failed: %v", hookErr)
-	}
-	return built, err
+	return content, nil
 }

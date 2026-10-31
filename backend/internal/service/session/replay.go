@@ -57,58 +57,26 @@ func (r *logReplay) apply(line []byte) error {
 		}
 		state.setExecution(value)
 	case "entry":
-		if event.Type == "entry.updated" {
-			var update toolResultUpdate
-			if err := decodeJSON(event.Payload, &update); err != nil {
-				return err
-			}
-			for _, field := range []string{update.AgentID.String(), update.EntryID} {
-				if field == "" || field != strings.TrimSpace(field) || strings.ContainsAny(field, "\x00\r\n") {
-					return errors.New("tool result update identity must be canonical and nonempty")
-				}
-			}
-			if len(update.Text) > tool.MaxInlineResultBytes {
-				return errors.New("tool result update exceeds the inline size limit")
-			}
-			if err := eventIdentity(event, "entry.updated", encodedEntryKey(update.AgentID, update.EntryID), sessionKey, sessionKey); err != nil {
-				return err
-			}
-			index := state.entryIndex(update.AgentID, update.EntryID)
-			if index < 0 {
-				return errors.New("updated entry is missing its original append event")
-			}
-			prior := &state.entries[index]
-			data := &prior.Record.Data
-			if data.Role != role.Tool || len(data.Content) != 1 || data.Content[0].Kind != sessionentry.BlockToolResult {
-				return errors.New("tool result update requires an existing tool receipt in the same session")
-			}
-			data.Content[0].Text = update.Text
-			prior.UpdatedSequence = event.Sequence
-		} else {
-			var value entryRecord
-			if err := decodeJSON(event.Payload, &value); err != nil {
-				return err
-			}
-			if err := value.Validate(); err != nil {
-				return err
-			}
-			if err := eventIdentity(event, "entry.appended", encodedEntryKey(value.AgentID, value.Data.ID), sessionKey, sessionKey); err != nil {
-				return err
-			}
-			if value.Data.Sequence != event.Sequence {
-				return errors.New("message sequence does not match event sequence")
-			}
-			if state.entryIndex(value.AgentID, value.Data.ID) >= 0 {
-				return errors.New("duplicate entry append identity")
-			}
-			if err := r.matchToolEntry(value); err != nil {
-				return err
-			}
-			state.entries = append(state.entries, storedEntry{
-				Record:          value,
-				UpdatedSequence: event.Sequence,
-			})
+		var value entryRecord
+		if err := decodeJSON(event.Payload, &value); err != nil {
+			return err
 		}
+		if err := value.Validate(); err != nil {
+			return err
+		}
+		if err := eventIdentity(event, "entry.appended", encodedEntryKey(value.AgentID, value.Data.ID), sessionKey, sessionKey); err != nil {
+			return err
+		}
+		if value.Data.Sequence != event.Sequence {
+			return errors.New("message sequence does not match event sequence")
+		}
+		if state.entryIndex(value.AgentID, value.Data.ID) >= 0 {
+			return errors.New("duplicate entry append identity")
+		}
+		if err := r.matchToolEntry(value); err != nil {
+			return err
+		}
+		state.entries = append(state.entries, value)
 	case "context":
 		var value contextRecord
 		if err := decodeJSON(event.Payload, &value); err != nil {
