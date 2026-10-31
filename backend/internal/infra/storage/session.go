@@ -11,6 +11,7 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	"praxis/internal/infra/jsonl"
 	"strings"
 	"time"
 
@@ -38,8 +39,8 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return err
 	}
-	path := r.storage.sessionLogPath(value.ID.String(), value.ProjectID.String())
-	if err := createLog(ctx, path); err != nil {
+	path := sessionLogPath(r.storage.dataRoot, value.ProjectID, value.ID)
+	if err := jsonl.Create(ctx, path); err != nil {
 		return err
 	}
 	_, err := r.storage.sessions.ExecContext(ctx, `
@@ -50,7 +51,6 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 	if err != nil {
 		return fmt.Errorf("create session metadata: %w", err)
 	}
-	delete(r.storage.writeErrors, path)
 	r.storage.state.sessions[value.ID] = value
 	return nil
 }
@@ -183,9 +183,8 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID, on
 	if _, err := r.storage.sessions.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id.String()); err != nil {
 		return fmt.Errorf("delete session metadata: %w", err)
 	}
-	path := r.storage.sessionLogPath(id.String(), value.ProjectID.String())
+	path := sessionLogPath(r.storage.dataRoot, value.ProjectID, id)
 	r.storage.state.removeSession(id)
-	delete(r.storage.writeErrors, path)
 	_ = os.Remove(path)
 	return nil
 }
@@ -200,14 +199,18 @@ func (r SessionRepository) SessionLogPath(ctx context.Context, id identity.Sessi
 	if err != nil {
 		return "", err
 	}
-	path := r.storage.sessionLogPath(id.String(), value.ProjectID.String())
-	if err := checkRegularFile(path); err != nil {
+	path := sessionLogPath(r.storage.dataRoot, value.ProjectID, id)
+	if err := jsonl.CheckRegularFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", errorcode.ErrNotFound
 		}
 		return "", err
 	}
 	return path, nil
+}
+
+func sessionLogPath(dataRoot string, projectID identity.ProjectID, sessionID identity.SessionID) string {
+	return filepath.Join(dataRoot, "projects", projectID.String(), "sessions", sessionID.String()+".jsonl")
 }
 
 func openSessionDatabase(ctx context.Context, dataRoot string) (*sql.DB, error) {

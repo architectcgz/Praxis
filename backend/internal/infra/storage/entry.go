@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// entryRecord 保存唯一 Entry 正文，Session 归属来自文件 Scope。
+// entryRecord 保存唯一 Entry 正文，会话归属由所在日志文件确定。
 type entryRecord struct {
 	AgentID identity.AgentID          `json:"agent_id"`
 	Data    sessionentry.ContextEntry `json:"entry"`

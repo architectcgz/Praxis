@@ -1,13 +1,10 @@
 package storage
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	projectmodel "praxis/internal/core/project"
@@ -19,13 +16,15 @@ import (
 	"praxis/internal/core/workflow"
 	workspacemodel "praxis/internal/core/workspace"
 	"praxis/internal/identity"
+	"praxis/internal/infra/jsonl"
 	"strings"
 )
 
 // logReplay 只在单个日志重放期间持有调用匹配状态，完成后即释放。
 type logReplay struct {
-	state       *state
-	scope       logScope
+	state *state
+	// 空值表示项目与 Workspace 汇总日志。
+	sessionID   identity.SessionID
 	calls       []replayedToolCall
 	callIndexes map[sessionentry.Key]int
 }
@@ -44,12 +43,12 @@ func (s *Store) loadSessionLocked(ctx context.Context, id identity.SessionID) er
 	if err != nil {
 		return err
 	}
-	path := s.sessionLogPath(id.String(), session.ProjectID.String())
-	if err := checkRegularFile(path); err != nil {
+	path := sessionLogPath(s.dataRoot, session.ProjectID, id)
+	if err := jsonl.CheckRegularFile(path); err != nil {
 		return err
 	}
 	s.state.sessions[id] = session
-	if err := s.replayLog(ctx, path, logScope{ID: id.String()}); err != nil {
+	if err := s.replayLog(ctx, path, id); err != nil {
 		s.state.removeSession(id)
 		return err
 	}
@@ -57,41 +56,14 @@ func (s *Store) loadSessionLocked(ctx context.Context, id identity.SessionID) er
 }
 
 // replayLog 逐行校验并恢复状态，读到末尾后修复缺失回执；会话失败只影响本次访问。
-func (s *Store) replayLog(ctx context.Context, path string, scope logScope) (err error) {
-	file, err := os.OpenFile(path, os.O_RDWR, 0600)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err = errors.Join(err, file.Close())
-	}()
+func (s *Store) replayLog(ctx context.Context, path string, sessionID identity.SessionID) error {
 	replay := logReplay{
 		state:       &s.state,
-		scope:       scope,
+		sessionID:   sessionID,
 		callIndexes: make(map[sessionentry.Key]int),
 	}
-	reader := bufio.NewReader(file)
-	var offset int64
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		line, readErr := reader.ReadBytes('\n')
-		if errors.Is(readErr, io.EOF) {
-			if len(line) > 0 {
-				if err := s.truncateTail(file, offset, line); err != nil {
-					return fmt.Errorf("%s offset %d: %w", path, offset, err)
-				}
-			}
-			break
-		}
-		if readErr != nil {
-			return readErr
-		}
-		if err := replay.apply(line); err != nil {
-			return fmt.Errorf("%s offset %d: %w", path, offset, err)
-		}
-		offset += int64(len(line))
+	if err := jsonl.Read(ctx, path, s.dataRoot, replay.apply); err != nil {
+		return err
 	}
 	if err := replay.repairToolResults(ctx, s); err != nil {
 		return fmt.Errorf("repair log %s: %w", path, err)
@@ -101,23 +73,23 @@ func (s *Store) replayLog(ctx context.Context, path string, scope logScope) (err
 
 // apply 是日志格式到类型化状态的唯一转换边界，同时匹配当前日志中的工具调用与回执。
 func (r *logReplay) apply(line []byte) error {
-	state, scope := r.state, r.scope
+	state, sessionID := r.state, r.sessionID
+	sessionKey := sessionID.String()
 	var event storedEvent
 	if err := decodeJSON(line, &event); err != nil {
 		return fmt.Errorf("expected a single storage event: %w", err)
 	}
 	// 磁盘记录不能视为可信输入，必须在发布状态前确认序号与事件身份。
-	sequence := state.sequences[scope.ID]
+	sequence := state.sequences[sessionKey]
 	if sequence == ^uint64(0) || event.Sequence != sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
 		return errors.New("invalid event identity or sequence")
 	}
 	if event.Key == "" || strings.TrimSpace(event.Key) != event.Key {
 		return errors.New("invalid object key")
 	}
-	if (scope.ID == "") != (event.Collection == "project" || event.Collection == "workspace") {
+	if (sessionID == "") != (event.Collection == "project" || event.Collection == "workspace") {
 		return errors.New("invalid event file ownership")
 	}
-	sessionID := identity.SessionID(scope.ID)
 	switch event.Collection {
 	case "project":
 		// 项目载荷中的审批字段仅接受读取，不参与配置恢复或授权决策。
@@ -132,7 +104,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := value.Validate(); err != nil {
 			return err
 		}
-		if err := eventIdentity(event, "project.saved", value.ID.String(), "", scope.ID); err != nil {
+		if err := eventIdentity(event, "project.saved", value.ID.String(), "", sessionKey); err != nil {
 			return err
 		}
 		state.projects[value.ID] = value
@@ -144,7 +116,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := value.Validate(); err != nil {
 			return err
 		}
-		if err := eventIdentity(event, "workspace.saved", value.ID.String(), "", scope.ID); err != nil {
+		if err := eventIdentity(event, "workspace.saved", value.ID.String(), "", sessionKey); err != nil {
 			return err
 		}
 		state.workspaces[value.ID] = value
@@ -156,7 +128,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := value.Validate(); err != nil {
 			return err
 		}
-		if err := eventIdentity(event, "agent_execution.saved", value.ID.String(), value.SessionID.String(), scope.ID); err != nil {
+		if err := eventIdentity(event, "agent_execution.saved", value.ID.String(), value.SessionID.String(), sessionKey); err != nil {
 			return err
 		}
 		state.executions[value.ID] = value
@@ -175,7 +147,7 @@ func (r *logReplay) apply(line []byte) error {
 				return errors.New("tool result update exceeds the inline size limit")
 			}
 			key := entryKey{AgentID: update.AgentID, ID: update.EntryID}
-			if err := eventIdentity(event, "entry.updated", encodedEntryKey(key), scope.ID, scope.ID); err != nil {
+			if err := eventIdentity(event, "entry.updated", encodedEntryKey(key), sessionKey, sessionKey); err != nil {
 				return err
 			}
 			prior, ok := state.entries[key]
@@ -198,7 +170,7 @@ func (r *logReplay) apply(line []byte) error {
 				return err
 			}
 			key := entryKey{AgentID: value.AgentID, ID: value.Data.ID}
-			if err := eventIdentity(event, "entry.appended", encodedEntryKey(key), scope.ID, scope.ID); err != nil {
+			if err := eventIdentity(event, "entry.appended", encodedEntryKey(key), sessionKey, sessionKey); err != nil {
 				return err
 			}
 			if value.Data.Sequence != event.Sequence {
@@ -225,7 +197,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := value.Validate(); err != nil {
 			return err
 		}
-		if err := eventIdentity(event, "context.saved", scope.ID, scope.ID, scope.ID); err != nil {
+		if err := eventIdentity(event, "context.saved", sessionKey, sessionKey, sessionKey); err != nil {
 			return err
 		}
 		if value.ThroughSequence != event.Sequence-1 {
@@ -245,7 +217,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := value.Validate(); err != nil {
 			return err
 		}
-		if err := eventIdentity(event, "usage.saved", value.Key(), value.SessionID, scope.ID); err != nil {
+		if err := eventIdentity(event, "usage.saved", value.Key(), value.SessionID, sessionKey); err != nil {
 			return err
 		}
 		state.usage[value.Key()] = value
@@ -257,7 +229,7 @@ func (r *logReplay) apply(line []byte) error {
 		if err := value.Validate(); err != nil {
 			return err
 		}
-		if err := eventIdentity(event, "wait.saved", value.ID.String(), scope.ID, scope.ID); err != nil {
+		if err := eventIdentity(event, "wait.saved", value.ID.String(), sessionKey, sessionKey); err != nil {
 			return err
 		}
 		state.waits[value.ID] = storedWait{SessionID: sessionID, Value: value}
@@ -276,20 +248,20 @@ func (r *logReplay) apply(line []byte) error {
 		if value.Status == timing.Interrupted {
 			return errors.New("interrupted timing is a read projection")
 		}
-		if err := eventIdentity(event, typ, timingKey(value.ExecutionID, value.ID), scope.ID, scope.ID); err != nil {
+		if err := eventIdentity(event, typ, timingKey(value.ExecutionID, value.ID), sessionKey, sessionKey); err != nil {
 			return err
 		}
 		state.timings[timingKey(value.ExecutionID, value.ID)] = value
 	default:
 		return fmt.Errorf("unknown stored collection %q", event.Collection)
 	}
-	state.sequences[scope.ID] = event.Sequence
+	state.sequences[sessionKey] = event.Sequence
 	return nil
 }
 
 // matchToolEntry 只检查工具记录的身份关系，不重跑历史审批或执行状态准入。
 func (r *logReplay) matchToolEntry(value entryRecord) error {
-	sessionID := identity.SessionID(r.scope.ID)
+	sessionID := r.sessionID
 	calls := value.Data.ToolCalls(sessionID, value.AgentID)
 	if len(calls) == 0 && value.Data.Role != role.Tool {
 		return nil
@@ -356,31 +328,11 @@ func (r *logReplay) repairToolResults(ctx context.Context, storage *Store) error
 	return nil
 }
 
-// truncateTail 先同步尾行备份及其目录，再截断原日志，避免修复时丢失待检查的原始内容。
-func (s *Store) truncateTail(file *os.File, offset int64, tail []byte) error {
-	backup, err := os.CreateTemp(s.dataRoot, "incomplete-tail-*")
-	if err != nil {
-		return err
-	}
-	_, writeErr := backup.Write(tail)
-	err = errors.Join(writeErr, backup.Sync(), backup.Close())
-	if err != nil {
-		return err
-	}
-	if err := syncDirectory(s.dataRoot); err != nil {
-		return err
-	}
-	if err := file.Truncate(offset); err != nil {
-		return err
-	}
-	return file.Sync()
-}
-
-func eventIdentity(event storedEvent, typ, key, owner, scope string) error {
+func eventIdentity(event storedEvent, typ, key, owner, sessionID string) error {
 	if event.Type != typ {
 		return errors.New("unknown event type")
 	}
-	if event.Key != key || owner != scope {
+	if event.Key != key || owner != sessionID {
 		return errors.New("object identity or session ownership does not match event")
 	}
 	return nil

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	"praxis/internal/infra/jsonl"
 	"slices"
 	"sync"
 )
@@ -19,16 +20,13 @@ type Store struct {
 	sessions *sql.DB
 	state    state
 	closed   bool
-	// 由 mu 保护；追加失败的日志须重新打开存储并重放后才能继续写入。
-	writeErrors map[string]error
 }
 
 // Open 初始化存储目录和项目日志，打开元数据库并恢复项目状态；会话历史在首次访问时载入。
 func Open(ctx context.Context, dataRoot string) (*Store, error) {
 	s := &Store{
-		dataRoot:    dataRoot,
-		state:       newState(),
-		writeErrors: make(map[string]error),
+		dataRoot: dataRoot,
+		state:    newState(),
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -37,15 +35,16 @@ func Open(ctx context.Context, dataRoot string) (*Store, error) {
 		return nil, err
 	}
 	// 项目汇总日志随存储初始化建立，普通追加不承担首次创建。
-	if err := checkRegularFile(s.projectLogPath()); err != nil {
+	path := projectLogPath(dataRoot)
+	if err := jsonl.CheckRegularFile(path); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-		if err := createLog(ctx, s.projectLogPath()); err != nil {
+		if err := jsonl.Create(ctx, path); err != nil {
 			return nil, err
 		}
 	}
-	if err := s.replayLog(ctx, s.projectLogPath(), logScope{}); err != nil {
+	if err := s.replayLog(ctx, path, ""); err != nil {
 		return nil, err
 	}
 	db, err := openSessionDatabase(ctx, dataRoot)
@@ -102,9 +101,9 @@ func (s *Store) check(ctx context.Context) error {
 	return nil
 }
 
-// appendEventLocked 只在编码边界接收任意载荷；成功后仓储直接赋值对应的类型化状态。
-func (s *Store) appendEventLocked(ctx context.Context, scope identity.SessionID, typ, collection, key string, value any) error {
-	event, err := newEvent(s.state.sequences[scope.String()]+1, typ, collection, key, value)
+// appendEventLocked 的 sessionID 为空时写项目汇总日志；成功后仓储直接赋值对应的类型化状态。
+func (s *Store) appendEventLocked(ctx context.Context, sessionID identity.SessionID, typ, collection, key string, value any) error {
+	event, err := newEvent(s.state.sequences[sessionID.String()]+1, typ, collection, key, value)
 	if err != nil {
 		return err
 	}
@@ -112,18 +111,18 @@ func (s *Store) appendEventLocked(ctx context.Context, scope identity.SessionID,
 	if err != nil {
 		return err
 	}
-	path := s.projectLogPath()
-	if scope != "" {
-		session, ok := s.state.sessions[scope]
+	path := projectLogPath(s.dataRoot)
+	if sessionID != "" {
+		session, ok := s.state.sessions[sessionID]
 		if !ok {
 			return errorcode.ErrNotFound
 		}
-		path = s.sessionLogPath(scope.String(), session.ProjectID.String())
+		path = sessionLogPath(s.dataRoot, session.ProjectID, sessionID)
 	}
 	if err := s.appendLogLocked(ctx, path, data); err != nil {
 		return err
 	}
-	s.state.sequences[scope.String()] = event.Sequence
+	s.state.sequences[sessionID.String()] = event.Sequence
 	return nil
 }
 

@@ -3,6 +3,7 @@ package storage
 import (
 	"cmp"
 	"context"
+	"path/filepath"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -47,4 +48,8 @@ func (r ProjectRepository) List(ctx context.Context, limit int) ([]projectmodel.
 	return capped(sorted(values, func(a, b projectmodel.Project) int {
 		return cmp.Or(b.UpdatedAt.Compare(a.UpdatedAt), cmp.Compare(a.ID, b.ID))
 	}), limit), nil
+}
+
+func projectLogPath(dataRoot string) string {
+	return filepath.Join(dataRoot, "projects.jsonl")
 }
