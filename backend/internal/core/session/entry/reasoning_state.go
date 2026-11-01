@@ -8,7 +8,7 @@ import (
 const MaxReasoningStateBytes = 1024 * 1024
 
 // ReasoningState 保存模型生成的推理状态，仅供相同 Provider、协议与模型原样续传；不用于展示或转换为文本。
-// 此类型只承载数据；协议解析、来源绑定和持久化校验分别由对应边界负责。
+// 此类型只承载数据；协议解析和来源绑定由对应边界负责。
 type ReasoningState struct {
 	ProviderID string
 	Protocol   string

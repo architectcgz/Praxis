@@ -168,9 +168,6 @@ func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntr
 	}
 	if !r.main {
 		value.Sequence, value.CreatedAt = r.sequence+1, time.Now().UTC()
-		if err := value.Validate(); err != nil {
-			return sessionentry.ContextEntry{}, false, err
-		}
 		// 子执行的调用标识只在本次执行条目中准入；Main 由 Session 在追加前检查。
 		for _, call := range value.ToolCalls(r.record.SessionID, r.record.AgentID) {
 			if _, found := r.call(call.Key); found {

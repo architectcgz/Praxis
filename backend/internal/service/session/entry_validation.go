@@ -15,9 +15,6 @@ func validateEntry(owner *sessionmodel.Session, data sessionentry.ContextEntry) 
 	if current == nil || current.HeadEntryID != data.ParentID {
 		return errorcode.ErrRequestConflict
 	}
-	if err := data.ValidateContent(); err != nil {
-		return err
-	}
 	if data.Role == role.Assistant && (data.AuthorKind != sessionentry.AuthorAgent || data.AuthorID != owner.MainAgentID().String()) {
 		return errors.New("assistant author does not match the session main agent")
 	}
