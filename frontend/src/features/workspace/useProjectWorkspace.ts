@@ -1,102 +1,21 @@
 import { useState } from 'react'
-import { useAgentCommands } from '../agent/useAgentCommands'
 import { useSessionCommands } from '../session/useSessionCommands'
-import { useTaskSubmission } from '../task/useTaskSubmission'
 import { useWorkspaceData } from './useWorkspaceData'
-import { useWorkspaceCommands } from './useWorkspaceCommands'
-import { useBranchNavigation } from '../session/useBranchNavigation'
 
 export function useProjectWorkspace() {
-    const workspaceData = useWorkspaceData()
+    const data = useWorkspaceData()
     const [busy, setBusy] = useState(false)
-    const {
-        setError,
-        setErrorCode,
-        setInput,
-        viewRequestRef,
-        ...workspace
-    } = workspaceData
-    const branchNavigation = useBranchNavigation({ session: workspace.session, applySession: workspace.applySession })
-    const sessionCommands = useSessionCommands({
-        bridgeAvailable: workspace.bridgeAvailable,
+    const commands = useSessionCommands({
+        bridgeAvailable: data.bridgeAvailable,
         busy,
-        refreshCatalog: workspace.refreshCatalog,
-        clearSelectedSession: workspace.clearSelectedSession,
-        selectSession: workspace.selectSession,
+        refreshCatalog: data.refreshCatalog,
+        clearSelectedSession: data.clearSelectedSession,
+        selectSession: data.selectSession,
+        updateSessionTitle: data.updateSessionTitle,
         setBusy,
-        setError,
-        setErrorCode,
-        updateSessionTitle: workspace.updateSessionTitle,
-        viewRequestRef,
+        setError: data.setError,
+        setErrorCode: data.setErrorCode,
+        viewRequestRef: data.viewRequestRef,
     })
-    const agentCommands = useAgentCommands({
-        agent: workspace.agent,
-        busy,
-        refreshAgent: workspace.refreshAgent,
-        getSelectedAgentID: workspace.getSelectedAgentID,
-        inputActions: workspace.inputActions,
-        setBusy,
-        setError,
-        setErrorCode,
-        viewRequestRef,
-    })
-    const taskSubmission = useTaskSubmission({
-        agent: workspace.agent,
-        busy,
-        input: workspace.input,
-        refreshSession: workspace.refreshSession,
-        getSelectedAgentID: workspace.getSelectedAgentID,
-        sessionID: workspace.session?.id || '',
-        bindingID: workspace.session?.bindingId || '',
-        prepareSubmission: branchNavigation.prepareSubmission,
-        applySession: workspace.applySession,
-        setBusy,
-        setError,
-        setErrorCode,
-        setInput,
-        viewRequestRef,
-    })
-
-    const { runCommand, commandNotice, clearCommandNotice } = useWorkspaceCommands({
-        createBranch: branchNavigation.createBranch,
-        switchBranch: branchNavigation.switchBranch,
-        showBranches: branchNavigation.showBranches,
-        session: workspace.session,
-        bridgeAvailable: workspace.bridgeAvailable,
-        busy,
-        createNewSession: sessionCommands.createNewSession,
-        refreshCatalog: workspace.refreshCatalog,
-        refreshModels: workspace.refreshModels,
-        viewRequestRef,
-        selectedAgentID: workspace.selectedAgentID,
-        getSelectedAgentID: workspace.getSelectedAgentID,
-        setBusy,
-        setError,
-        setErrorCode,
-        setInput,
-    })
-
-    const submitInput = () => {
-        const content = workspace.input.trim()
-        if (content.startsWith('/')) {
-            void runCommand(content)
-        } else {
-            void taskSubmission.submitTask()
-        }
-    }
-
-    return {
-        ...workspace,
-        ...sessionCommands,
-        ...agentCommands,
-        ...branchNavigation,
-        canQueue: taskSubmission.canQueue,
-        cancelQueuedTask: taskSubmission.cancelQueuedTask,
-        submitInput,
-        runCommand,
-        commandNotice,
-        clearCommandNotice,
-        busy: busy || workspace.modelSelectionPending,
-        setInput,
-    }
+    return { ...data, ...commands, busy }
 }

@@ -12,11 +12,7 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 		return err
 	}
 	defer s.running.Done()
-	session, err := s.sessions.OpenedSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	if err := session.SelectModel(choice); err != nil {
+	if err := s.sessions.SelectModel(ctx, sessionID, choice); err != nil {
 		return err
 	}
 	s.mu.Lock()

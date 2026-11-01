@@ -6,7 +6,6 @@ import type { AgentStore } from './agentStore'
 type AgentCommandContext = {
     agent: AgentView | null
     busy: boolean
-    refreshAgent: (id: string) => Promise<void>
     getSelectedAgentID: () => string
     inputActions: Pick<AgentStore, 'stopAwaiting'>
     setBusy: Dispatch<SetStateAction<boolean>>
@@ -19,7 +18,6 @@ type AgentCommandContext = {
 export function useAgentCommands({
     agent,
     busy,
-    refreshAgent,
     getSelectedAgentID,
     inputActions,
     setBusy,
@@ -41,7 +39,6 @@ export function useAgentCommands({
         try {
             const apply = kind === 'pause' ? pauseAgent : stopAgent
             await apply({ agentId: agentID, targetExecutionId })
-            await refreshAgent(agentID)
         } catch (err) {
             if (isCurrentView()) {
                 setError(readableError(err))
@@ -50,7 +47,7 @@ export function useAgentCommands({
         } finally {
             setBusy(false)
         }
-    }, [agent, busy, refreshAgent, getSelectedAgentID, inputActions, viewRequestRef, setBusy, setError, setErrorCode])
+    }, [agent, busy, getSelectedAgentID, inputActions, viewRequestRef, setBusy, setError, setErrorCode])
 
     return { control }
 }

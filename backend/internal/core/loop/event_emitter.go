@@ -52,6 +52,8 @@ func (r *Runner) emitError(input Input, turnID identity.TurnID, err error) {
 	if failure, ok := errors.AsType[*Failure](err); ok {
 		if failure.message != "" {
 			message = failure.message
+		} else if failure.code == FailureStorage {
+			message = "Failed to save session history."
 		} else if detail := providerFailureMessage(failure.code, failure.cause); detail != "" {
 			message = detail
 		}

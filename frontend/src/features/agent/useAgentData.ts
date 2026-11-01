@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { getAgent, listAgentEntries, subscribeAgentEvents, type Entry, type ApiErrorCode, type ModelOption, type SessionSnapshot } from '../../api'
-import { apiErrorCode, readableError } from '../../shared/errors'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
+import { subscribeAgentEvents, type Entry, type ApiErrorCode, type ModelOption, type SessionSnapshot } from '../../api'
 import { createAgentStore } from './agentStore'
 import { useAgentTaskInput } from './useAgentTaskInput'
 
@@ -9,110 +8,46 @@ type AgentDataOptions = {
     models: ModelOption[]
     setError: Dispatch<SetStateAction<string>>
     setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>
-    viewRequestRef: RefObject<number>
 }
 const emptyHistory: Entry[] = []
 
-/** 管理会话查询与选择；实时输出由对话区域直接订阅，不触发工作区重渲染。 */
-export function useAgentData({ sessionID, models, setError, setErrorCode, viewRequestRef }: AgentDataOptions) {
+/** 页面首次接纳快照，之后由本页订阅持续更新；后台页面不停止接收事件。 */
+export function useAgentData({ sessionID, models, setError, setErrorCode }: AgentDataOptions) {
     const [store] = useState(createAgentStore)
     const data = useSyncExternalStore(store.subscribeData, store.getData)
     const selected = data.byId[data.selectedId]
-    const agent = selected?.agent || null
     const taskInput = useAgentTaskInput(sessionID, models, setError, setErrorCode)
     const { setInput } = taskInput
-    const generation = useRef(0)
-    const requests = useRef(new Map<string, number>())
 
-    const loadAgent = useCallback(async (id: string) => {
-        const entry = store.getData().byId[id]
-        if (!entry) return
-        const sessionRequest = generation.current
-        const request = (requests.current.get(id) || 0) + 1
-        const scope = store.getScope()
-        requests.current.set(id, request)
-        store.startLoading(id)
-        const agentResult = await getAgent(scope.sessionId, scope.branchId, id).then(
-            (value) => ({ status: 'fulfilled' as const, value }),
-            (reason: unknown) => ({ status: 'rejected' as const, reason }),
-        )
-        const historyResult = entry.history !== undefined
-            ? { status: 'fulfilled' as const, value: undefined }
-            : await listAgentEntries(scope.sessionId, scope.branchId, id).then(
-                (value) => ({ status: 'fulfilled' as const, value }),
-                (reason: unknown) => ({ status: 'rejected' as const, reason }),
-            )
-        if (generation.current !== sessionRequest || requests.current.get(id) !== request) return
-        const currentAgent = store.getData().byId[id].agent
-        // 查询期间新任务已开始时，保留事件确认的新任务身份。
-        const nextAgent = agentResult.status === 'fulfilled' && currentAgent.currentExecutionId === entry.agent.currentExecutionId ? agentResult.value : currentAgent
-        const error = agentResult.status === 'rejected' ? agentResult.reason : historyResult.status === 'rejected' ? historyResult.reason : undefined
-        store.loaded(id, nextAgent, historyResult.status === 'fulfilled' ? historyResult.value : undefined, error ? readableError(error) : '')
-        if (error && store.getSelectedAgentID() === id) {
-            setError(readableError(error))
-            setErrorCode(apiErrorCode(error))
-        }
-    }, [store, setError, setErrorCode])
-
-    const loadForSession = useCallback(async ({ agents, id, branch }: Pick<SessionSnapshot, 'agents' | 'id' | 'branch'>, requestID: number) => {
-        if (viewRequestRef.current !== requestID) return
-        generation.current += 1
-        requests.current.clear()
+    const loadForSession = useCallback(async ({ agents, id, branch, timings, histories }: SessionSnapshot) => {
         const scope = store.getScope()
         if (scope.sessionId !== id || scope.branchId !== branch.id) store.reset()
         store.setScope(id, branch.id)
         store.setRoster(agents)
-        await Promise.all(agents.map((item) => loadAgent(item.ID)))
-    }, [store, loadAgent, viewRequestRef])
+        store.setTimings(timings)
+        for (const agent of agents) store.loaded(agent.ID, agent, histories[agent.ID])
+    }, [store])
 
-    const resetForSessionChange = useCallback(() => {
-        generation.current += 1
-        requests.current.clear()
-        store.reset()
-        setInput('')
-    }, [store, setInput])
-
-    const selectAgent = useCallback(async (id: string) => {
-        const current = store.getData()
-        if (!current.byId[id]) return
-        if (current.selectedId !== id) {
-            store.select(id)
-            setInput('')
-        }
+    const selectAgent = useCallback((id: string) => {
+        if (!store.getData().byId[id]) return
+        if (store.getSelectedAgentID() !== id) { store.select(id); setInput('') }
         setError('')
         setErrorCode(undefined)
-        await loadAgent(id)
-    }, [store, loadAgent, setError, setErrorCode, setInput])
+    }, [store, setInput, setError, setErrorCode])
 
-    useEffect(() => {
-        const unsubscribe = subscribeAgentEvents((event) => {
-            const scope = store.getScope()
-            if (event.sessionId !== scope.sessionId || event.branchId !== scope.branchId) return
-            store.receive(event)
-            // 新执行领取队首后刷新队列；同一次执行的后续 turn 不重复查询。
-            if (event.kind === 'execution_ended' || event.kind === 'request_canceled') void loadAgent(event.agentId)
-        })
-        return () => { generation.current += 1; unsubscribe() }
-    }, [store, loadAgent])
-
+    useEffect(() => subscribeAgentEvents(store.receive), [store])
     const agents = useMemo(() => data.ids.map((id) => data.byId[id].agent), [data.ids, data.byId])
     const agentHistories = useMemo(() => Object.fromEntries(data.ids.map((id) => [id, data.byId[id].history || emptyHistory])), [data.ids, data.byId])
     const agentHistoryErrors = useMemo(() => Object.fromEntries(data.ids.filter((id) => data.byId[id].error).map((id) => [id, data.byId[id].error])), [data.ids, data.byId])
     const inputActions = useMemo(() => ({ beginInput: store.beginInput, acceptInput: store.acceptInput, rejectInput: store.rejectInput, stopAwaiting: store.stopAwaiting }), [store])
     const outputStore = useMemo(() => ({ subscribeOutput: store.subscribeOutput, getOutput: store.getOutput }), [store])
-
     return {
         ...taskInput,
-        agent, agents, agentHistories, agentHistoryErrors,
+        agent: selected?.agent || null, agents, agentHistories, agentHistoryErrors,
         agentLoading: selected?.loading ?? false,
         history: selected?.history || emptyHistory,
         historyError: selected?.error || '',
-        selectedAgentID: data.selectedId,
-        getSelectedAgentID: store.getSelectedAgentID,
-        outputStore,
-        inputActions,
-        clearSessionData: resetForSessionChange,
-        resetForSessionChange, loadForSession, selectAgent,
-        refreshAgent: loadAgent,
+        selectedAgentID: data.selectedId, getSelectedAgentID: store.getSelectedAgentID,
+        outputStore, inputActions, loadForSession, selectAgent,
     }
 }

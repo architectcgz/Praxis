@@ -30,12 +30,18 @@ func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) e
 	})
 	if err == nil {
 		s.publishExecutionTiming(run.Snapshot(), run)
+		if s.emitter != nil {
+			s.emitter.Emit(coreevent.Event{
+				Scope:   coreevent.ScopeForRun(run, ""),
+				Payload: coreevent.ExecutionStarted{Execution: run.Snapshot()},
+			})
+		}
 	}
 	return err
 }
 
 // Settle 保存所属执行者确定的实际结果，不根据迟到的取消信号改写完成结果。
-// 写入失败由 Coordinator 保留占用和结果后重试；重复结算返回已有终态，不再次发布事件。
+// 日志写入失败仍接纳并发布内存终态，同时返回结果和错误；重复结算不再次发布事件。
 func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome agentexecution.ExecutionOutcome, failureCode agentexecution.ExecutionFailureCode, failureMessage string) (result agentexecution.ExecutionRecord, err error) {
 	endedExecution := run.Snapshot()
 	executionID := endedExecution.ID
@@ -80,7 +86,6 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 				outcome,
 				err,
 			)
-			return agentexecution.ExecutionRecord{}, err
 		}
 	}
 	if err := run.Update(func(record *agentexecution.ExecutionRecord) error { *record = endedExecution; return nil }); err != nil {
@@ -101,7 +106,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 	}
 	s.publishExecutionTiming(endedExecution, run)
 	s.logger.Infof(
-		"operation=execution_end request_id=%s session_id=%s agent_id=%s execution_id=%s status=committed outcome=%s",
+		"operation=execution_end request_id=%s session_id=%s agent_id=%s execution_id=%s status=accepted outcome=%s",
 		endedExecution.RequestID,
 		endedExecution.SessionID,
 		endedExecution.AgentID,
@@ -128,13 +133,18 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 	}
 	// 每轮仅发布一个终态事件；仅实际响应用户取消的执行发布取消通知。
 	if s.emitter != nil {
+		entries := run.Entries()
 		var payload coreevent.Payload = coreevent.ExecutionEnded{
-			Outcome:        string(endedExecution.Outcome),
-			FailureCode:    string(endedExecution.FailureCode),
-			FailureMessage: endedExecution.FailureMessage,
+			Execution: endedExecution,
+			State:     endedExecution.AgentState(),
+			Entries:   entries,
 		}
 		if endedExecution.FailureCode == agentexecution.ExecutionFailureRequestCanceled {
-			payload = coreevent.RequestCanceled{}
+			payload = coreevent.RequestCanceled{
+				Execution: endedExecution,
+				State:     endedExecution.AgentState(),
+				Entries:   entries,
+			}
 		}
 		s.emitter.Emit(coreevent.Event{
 			Scope: coreevent.Scope{
@@ -147,7 +157,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 			Payload: payload,
 		})
 	}
-	return endedExecution, nil
+	return endedExecution, err
 }
 
 func (s *Service) nameSessionAfterAnswer(

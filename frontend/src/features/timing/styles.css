@@ -12,11 +12,6 @@
     overflow-wrap: anywhere;
 }
 
-.operation-timing-error {
-    color: var(--danger);
-    font-size: var(--font-size-meta);
-}
-
 @media (max-width: 460px) {
     .output-handoff-task > summary {
         flex-wrap: wrap;

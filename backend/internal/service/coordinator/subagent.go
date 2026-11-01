@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	agentexecution "praxis/internal/core/agent/execution"
+	coreevent "praxis/internal/core/event"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -69,12 +70,27 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	active.run, active.executionID = run, run.Snapshot().ID
 	close(active.ready)
 	s.mu.Unlock()
+	s.loop.Emitter.Emit(coreevent.Event{
+		Scope: coreevent.ScopeForRun(run, ""),
+		Payload: coreevent.SubagentStarted{
+			Name:              definition.Name,
+			Execution:         run.Snapshot(),
+			Entries:           run.Entries(),
+			ParentAgentID:     parent.AgentID,
+			ParentExecutionID: parent.ExecutionID,
+			CallID:            parent.CallID,
+		},
+	})
 	defer func() {
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		delete(s.executions, key)
 		active.run = nil
 		active.cancel(nil)
+		s.mu.Unlock()
+		s.loop.Emitter.Emit(coreevent.Event{
+			Scope:   coreevent.ScopeForRun(run, ""),
+			Payload: coreevent.SubagentReleased{},
+		})
 	}()
 	// 同步等待子路径和结算退出，调用方取消不能把结果交接变成脱离生命周期的后台提交。
 	s.run(active.ctx, run, active)

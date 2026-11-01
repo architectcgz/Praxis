@@ -48,21 +48,26 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ke
 			return
 		}
 		r.mu.Lock()
-		defer r.mu.Unlock()
 		binding.queue.Retry(input)
 		delete(r.executions, key)
 		close(active.ready)
 		active.cancel(nil)
+		notification := taskQueueEvent(binding)
+		r.mu.Unlock()
+		r.loop.Emitter.Emit(notification)
 	}()
 	run, config, err := r.prepareNext(prepareCtx, input, key.agentID, binding)
 	if err != nil {
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	binding.queue.Complete(input)
 	active.config = config
-	return r.launchLocked(run, active)
+	err = r.launchLocked(run, active)
+	notification := taskQueueEvent(binding)
+	r.mu.Unlock()
+	r.loop.Emitter.Emit(notification)
+	return err
 }
 func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID, binding *sessionBinding) (*agentexecution.Run, *sessionservice.Configuration, error) {
 	config, model, err := r.sessions.ExecutionConfiguration(ctx, input.SessionID)

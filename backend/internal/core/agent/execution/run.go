@@ -6,7 +6,6 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
-	coreevent "praxis/internal/core/event"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
@@ -61,18 +60,6 @@ func NewRun(record ExecutionRecord, main bool, entries []*sessionentry.ContextEn
 }
 
 func (r *Run) Main() bool { return r.main }
-
-func (r *Run) EventScope(turnID identity.TurnID) coreevent.Scope {
-	record := r.Snapshot()
-	return coreevent.Scope{
-		SessionID:   record.SessionID,
-		BranchID:    record.BranchID,
-		BindingID:   r.BindingID,
-		AgentID:     record.AgentID,
-		ExecutionID: record.ID,
-		TurnID:      turnID,
-	}
-}
 
 func (r *Run) RecordTiming(record timing.Record) {
 	r.mu.Lock()
@@ -240,4 +227,5 @@ func (r *Run) deriveProgress() {
 type SessionContext interface {
 	BranchEntries(context.Context, identity.BranchID) ([]*sessionentry.ContextEntry, error)
 	AppendEntry(context.Context, identity.BranchID, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
+	AppendTiming(context.Context, timing.Record) error
 }

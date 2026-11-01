@@ -3,7 +3,9 @@ package bindings
 import (
 	"bytes"
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
+	agentservice "praxis/internal/service/agent"
 	"praxis/wails/dto"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -60,8 +62,47 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 			Entries:   publicEntries(payload.Entries),
 			Transient: payload.Transient,
 		}
-	case coreevent.TurnStarted, coreevent.ProviderWaiting, coreevent.RequestCanceled:
+	case coreevent.TurnStarted, coreevent.ProviderWaiting, coreevent.SubagentReleased:
 		data = struct{}{}
+	case coreevent.ExecutionStarted:
+		data = dto.AgentExecutionStarted{Execution: payload.Execution}
+	case coreevent.ExecutionPauseRequested:
+		data = dto.AgentExecutionControl{AppliedAt: payload.AppliedAt}
+	case coreevent.ExecutionStopRequested:
+		data = dto.AgentExecutionControl{AppliedAt: payload.AppliedAt}
+	case coreevent.SubagentStarted:
+		record := payload.Execution
+		data = dto.AgentSubagentStarted{
+			Agent: agentservice.AgentView{
+				ID:                 record.AgentID,
+				SessionID:          record.SessionID,
+				BranchID:           record.BranchID,
+				DefinitionID:       record.Config.AgentDefinitionID,
+				Kind:               agentmodel.KindSubagent,
+				CreatedAt:          record.CreatedAt,
+				UpdatedAt:          record.CreatedAt,
+				Name:               payload.Name,
+				State:              record.AgentState(),
+				CurrentExecutionID: record.ID,
+				CurrentExecution:   &record,
+				LatestExecution:    &record,
+			},
+			Entries:           publicEntries(payload.Entries),
+			ParentAgentID:     payload.ParentAgentID.String(),
+			ParentExecutionID: payload.ParentExecutionID.String(),
+			CallID:            payload.CallID,
+		}
+	case coreevent.TaskQueueChanged:
+		tasks := make([]dto.QueuedTask, 0, len(payload.Tasks))
+		for _, task := range payload.Tasks {
+			tasks = append(tasks, dto.QueuedTask{
+				ID:        task.ID.String(),
+				Prompt:    task.Prompt,
+				Sequence:  task.Sequence,
+				CreatedAt: task.CreatedAt,
+			})
+		}
+		data = dto.AgentTaskQueueChanged{Tasks: tasks}
 	case coreevent.TextDelta:
 		data = dto.AgentTextDelta{Text: payload.Text}
 	case coreevent.ThinkingDelta:
@@ -90,9 +131,15 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		data = dto.AgentModelUsage{Usage: publicUsage(payload.Usage)}
 	case coreevent.ExecutionEnded:
 		data = dto.AgentExecutionEnded{
-			Outcome:        payload.Outcome,
-			FailureCode:    payload.FailureCode,
-			FailureMessage: payload.FailureMessage,
+			Execution: payload.Execution,
+			State:     payload.State,
+			Entries:   publicEntries(payload.Entries),
+		}
+	case coreevent.RequestCanceled:
+		data = dto.AgentExecutionEnded{
+			Execution: payload.Execution,
+			State:     payload.State,
+			Entries:   publicEntries(payload.Entries),
 		}
 	case coreevent.OperationTiming:
 		data = dto.AgentOperationTiming{Timing: operationTiming(payload.Timing)}
@@ -106,6 +153,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		Kind:        string(event.Kind()),
 		SessionID:   event.Scope.SessionID.String(),
 		BranchID:    event.Scope.BranchID.String(),
+		BindingID:   event.Scope.BindingID,
 		AgentID:     event.Scope.AgentID.String(),
 		ExecutionID: event.Scope.ExecutionID.String(),
 		TurnID:      event.Scope.TurnID.String(),

@@ -8,7 +8,6 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	projectmodel "praxis/internal/core/project"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	projectservice "praxis/internal/service/project"
@@ -189,7 +188,7 @@ func (r *Coordinator) endExecution(
 	failureCode agentexecution.ExecutionFailureCode,
 	failureMessage string,
 ) bool {
-	// 结果保留在本执行协程中；结算失败不退出、不释放忙碌，也不重新运行模型或工具。
+	// 仅在内存结算尚未完成时保留结果重试；日志失败不阻止已接纳终态释放占用。
 	r.mu.Lock()
 	active.ending = true
 	r.mu.Unlock()
@@ -203,43 +202,22 @@ func (r *Coordinator) endExecution(
 		if err == nil {
 			break
 		}
-		if errors.Is(err, errorcode.ErrLogUnavailable) {
-			// 不确定追加已封锁日志；释放执行不能以再次成功落盘为条件。
-			r.logError(task, "session log unavailable; restart required", err)
-			endedExecution = active.run.Snapshot()
-			at := time.Now().UTC()
-			if endedExecution.Status == agentexecution.ExecutionStarting {
-				endedExecution.Start(at)
-			}
-			endedExecution.End(agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, at)
-			_ = active.run.Update(func(value *agentexecution.ExecutionRecord) error { *value = endedExecution; return nil })
-			active.run.Agent.FinishExecution(endedExecution.AgentState(), at)
-			r.mu.Lock()
-			for _, other := range r.executions {
-				if other.sessionID == task.SessionID {
-					other.cancel(errorcode.ErrLogUnavailable)
-				}
-			}
-			r.mu.Unlock()
+		r.logError(task, "settle execution", err)
+		if endedExecution.Status == agentexecution.ExecutionEnded {
 			r.loop.Emitter.Emit(coreevent.Event{
-				Scope: coreevent.Scope{
-					SessionID:   task.SessionID,
-					BranchID:    task.BranchID,
-					BindingID:   active.bindingID,
-					AgentID:     task.AgentID,
-					ExecutionID: task.ID,
+				Scope: coreevent.ScopeForRun(active.run, ""),
+				Payload: coreevent.ErrorOccurred{
+					Message: "Failed to save session history. The result is kept in memory: " + err.Error(),
 				},
-				Payload: coreevent.ExecutionEnded{Outcome: string(agentexecution.ExecutionFailed), FailureCode: string(agentexecution.ExecutionFailureStorage), FailureMessage: "Session storage failed. Restart the application before continuing."},
 			})
 			break
 		}
-		r.logError(task, "settle execution", err)
 		timer := time.NewTimer(retryDelay)
 		<-timer.C
 		retryDelay = min(5*time.Second, retryDelay*2)
 	}
 
-	// 结算成功后才释放槽位；控制信号立即改变展示，但不会提前放行下一次执行。
+	// 内存终态接纳后释放槽位；日志失败已单独通知界面。
 	r.mu.Lock()
 	cause := context.Cause(active.ctx)
 	controlled := errors.Is(cause, errExecutionPaused) || errors.Is(cause, errExecutionStopped)

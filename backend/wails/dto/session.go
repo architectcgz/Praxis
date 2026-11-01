@@ -17,6 +17,8 @@ type SessionSnapshot struct {
 	UpdatedAt time.Time                `json:"updatedAt"`
 	Agents    []agentservice.AgentView `json:"agents"`
 	Tasks     []QueuedTask             `json:"tasks"`
+	Timings   []OperationTiming        `json:"timings"`
+	Histories map[string][]Entry       `json:"histories"`
 }
 
 type SessionSummary struct {

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// RecordTiming 是 Recorder 的记录回调；观测失败只记日志，不能重放业务操作。
+// RecordTiming 是 Recorder 的记录回调；保存失败记录日志并通知界面，不能重放业务操作。
 func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 	execution := run.Snapshot()
 	if execution.ID.String() != record.ExecutionID {
@@ -21,13 +21,19 @@ func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 	if run.Main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := s.records.AppendTiming(ctx, execution.SessionID, record); err != nil {
+		if err := run.Session.AppendTiming(ctx, record); err != nil {
 			s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
+			if s.emitter != nil {
+				s.emitter.Emit(coreevent.Event{
+					Scope:   coreevent.ScopeForRun(run, ""),
+					Payload: coreevent.ErrorOccurred{Message: "Failed to save operation timing: " + err.Error()},
+				})
+			}
 		}
 	} else {
 		run.RecordTiming(record)
 	}
-	s.publishTiming(operationTiming(execution, record), run.EventScope(""))
+	s.publishTiming(operationTiming(execution, record), coreevent.ScopeForRun(run, ""))
 }
 
 func RunTimings(run *agentexecution.Run) []timing.View {
@@ -147,6 +153,6 @@ func (s *Service) publishTiming(value timing.View, scope coreevent.Scope) {
 
 func (s *Service) publishExecutionTiming(execution agentexecution.ExecutionRecord, run *agentexecution.Run) {
 	if value := executionTiming(execution); value != nil {
-		s.publishTiming(*value, run.EventScope(""))
+		s.publishTiming(*value, coreevent.ScopeForRun(run, ""))
 	}
 }

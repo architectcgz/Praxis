@@ -35,7 +35,7 @@ func (c *Configuration) Definition(id identity.AgentDefinitionID) (agentmodel.Ag
 }
 
 func (s *Service) Configuration(ctx context.Context, id identity.SessionID) (*Configuration, error) {
-	owner, err := s.OpenedSession(ctx, id)
+	owner, err := s.openedSession(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (s *Service) Definition(ctx context.Context, id identity.SessionID, definit
 
 // ExecutionConfiguration 在同一配置读锁内取得配置和模型选择，执行期间不再读取全局目录。
 func (s *Service) ExecutionConfiguration(ctx context.Context, id identity.SessionID) (*Configuration, modelapi.Config, error) {
-	owner, err := s.OpenedSession(ctx, id)
+	owner, err := s.openedSession(ctx, id)
 	if err != nil {
 		return nil, modelapi.Config{}, err
 	}
@@ -74,7 +74,7 @@ func (s *Service) ExecutionConfiguration(ctx context.Context, id identity.Sessio
 
 // ReloadConfiguration 由 Coordinator 确认整个会话无活跃执行后调用；失败不发布任何候选内容。
 func (s *Service) ReloadConfiguration(ctx context.Context, id identity.SessionID) error {
-	owner, err := s.OpenedSession(ctx, id)
+	owner, err := s.openedSession(ctx, id)
 	if err != nil {
 		return err
 	}

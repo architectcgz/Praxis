@@ -8,7 +8,6 @@ import (
 	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
@@ -116,22 +115,6 @@ func (r *Coordinator) launchLocked(run *agentexecution.Run, active *activeExecut
 	active.run = run
 	active.executionID = run.Snapshot().ID
 	close(active.ready)
-	if run.Main() {
-		binding := r.bindings[active.bindingID]
-		r.running.Go(func() {
-			select {
-			case <-binding.session.Faulted():
-				r.mu.Lock()
-				for _, other := range r.executions {
-					if other.sessionID == active.sessionID {
-						other.cancel(errorcode.ErrLogUnavailable)
-					}
-				}
-				r.mu.Unlock()
-			case <-active.ctx.Done():
-			}
-		})
-	}
 	r.running.Go(func() { r.run(active.ctx, run, active) })
 	return nil
 }
@@ -179,7 +162,7 @@ type sessionBinding struct {
 	id        string
 	sessionID identity.SessionID
 	branchID  identity.BranchID
-	session   *sessionservice.Session
+	session   *sessionmodel.Session
 	queue     sessionmodel.TaskQueue
 	closing   bool
 }

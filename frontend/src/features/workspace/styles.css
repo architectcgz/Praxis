@@ -52,3 +52,77 @@
 .workspace-navigation-overlay .session-row-actions {
     flex-basis: 32px;
 }
+
+.session-workspace {
+    display: contents;
+}
+
+.session-workspace[hidden] {
+    display: none;
+}
+
+.session-tabs {
+    display: flex;
+    gap: 4px;
+    min-width: 0;
+    padding: 4px 8px;
+    overflow-x: auto;
+    background: var(--side);
+    border-bottom: 1px solid var(--line);
+}
+
+.session-tab {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    max-width: 240px;
+    border-radius: var(--radius-control);
+    color: var(--muted);
+}
+
+.session-tab[data-active='true'] {
+    background: var(--selected);
+    color: var(--ink);
+}
+
+.session-tab-select {
+    min-width: 0;
+    height: var(--control-height);
+    padding: 0 8px;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.session-tab-close {
+    flex: 0 0 auto;
+}
+
+.session-close-dialog {
+    width: min(420px, 100%);
+    padding: 24px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-float);
+    background: var(--paper-strong);
+    box-shadow: var(--shadow-modal);
+}
+
+.session-close-dialog h2 {
+    margin: 0 0 12px;
+    font-size: var(--font-size-heading);
+}
+
+.session-close-dialog p {
+    color: var(--muted);
+    line-height: var(--line-height-body);
+}
+
+.session-close-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+}

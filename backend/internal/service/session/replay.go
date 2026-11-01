@@ -25,48 +25,21 @@ type replayedToolCall struct {
 }
 
 // apply 按日志顺序还原已提交的会话事实。
-func (r *logReplay) apply(line []byte) error {
+func (r *logReplay) apply(event sessionmodel.Event) error {
 	owner := r.session
-	var event storedEvent
-	if err := decodeJSON(line, &event); err != nil {
-		return fmt.Errorf("expected a single storage event: %w", err)
-	}
 	switch event.Type {
-	case "branch.created":
-		var value sessionmodel.Branch
-		if err := decodeJSON(event.Payload, &value); err != nil {
-			return err
-		}
-		owner.AcceptBranch(value)
-	case "agent_execution.saved":
-		var value agentexecution.ExecutionRecord
-		if err := decodeJSON(event.Payload, &value); err != nil {
-			return err
-		}
-		owner.SetExecution(value)
-	case "entry.appended":
-		var value sessionentry.ContextEntry
-		if err := decodeJSON(event.Payload, &value); err != nil {
-			return err
-		}
+	case sessionmodel.EventBranchCreated:
+		owner.AcceptBranch(event.Payload.(sessionmodel.Branch))
+	case sessionmodel.EventExecutionSaved:
+		owner.SetExecution(event.Payload.(agentexecution.ExecutionRecord))
+	case sessionmodel.EventEntryAppended:
+		value := event.Payload.(sessionentry.ContextEntry)
 		r.trackToolEntry(value)
 		owner.AcceptEntry(value)
-	case "usage.saved":
-		var value providerapi.UsageRecord
-		if err := decodeJSON(event.Payload, &value); err != nil {
-			return err
-		}
-		owner.SetUsage(value)
-	case "wait.saved":
-		// 重启不恢复审批等待。
-	case "agent_execution.timing_started", "agent_execution.timing_finished":
-		var value timing.Record
-		if err := decodeJSON(event.Payload, &value); err != nil {
-			return err
-		}
-		owner.SetTiming(value)
-	default:
-		return fmt.Errorf("unknown stored event type %q", event.Type)
+	case sessionmodel.EventUsageSaved:
+		owner.SetUsage(event.Payload.(providerapi.UsageRecord))
+	case sessionmodel.EventTimingStarted, sessionmodel.EventTimingFinished:
+		owner.SetTiming(event.Payload.(timing.Record))
 	}
 	return nil
 }
@@ -90,7 +63,7 @@ func (r *logReplay) trackToolEntry(value sessionentry.ContextEntry) {
 }
 
 // repairToolResults 由会话业务恢复流程决定补写中断回执，不恢复工具执行。
-func (r *logReplay) repairToolResults(ctx context.Context, owner *Session, sessionState sessionmodel.SessionState) error {
+func (r *logReplay) repairToolResults(ctx context.Context, owner *sessionmodel.Session, sessionState sessionmodel.SessionState) error {
 	for _, pending := range r.calls {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -105,8 +78,7 @@ func (r *logReplay) repairToolResults(ctx context.Context, owner *Session, sessi
 		execution := r.session.Executions[r.session.ExecutionIndex(call.ExecutionID)]
 		branch := r.session.Branch(execution.BranchID)
 		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result."))
-		entry.BranchID, entry.ParentID = branch.ID, branch.HeadEntryID
-		_, _, err := owner.appendEntry(ctx, entry)
+		_, _, err := owner.AppendEntry(ctx, branch.ID, entry)
 		if err != nil {
 			return fmt.Errorf("save interrupted result for execution %s call %s: %w", call.ExecutionID, call.CallID, err)
 		}

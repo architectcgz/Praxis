@@ -1,49 +1,13 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { subscribeAgentEvents } from '../../api/agents'
-import { listAgentTimings, type OperationTiming } from '../../api/timings'
-import { readableError } from '../../shared/errors'
-import { findTiming, formatDuration, mergeTimings } from './timing'
+import type { OperationTiming } from '../../api/timings'
+import { findTiming, formatDuration } from './timing'
 import './styles.css'
 
 const TimingContext = createContext<OperationTiming[]>([])
 
-/** 独立加载计时与订阅变更；查询失败不阻断对话，切换会话后丢弃过期响应。 */
-export function OperationTimingsProvider({ agentIds, sessionId, branchId, children }: { agentIds: string[]; sessionId: string; branchId: string; children: ReactNode }) {
-    const [records, setRecords] = useState<OperationTiming[]>([])
-    const [errors, setErrors] = useState<Record<string, string>>({})
-    const key = JSON.stringify([...agentIds].sort())
-    useEffect(() => {
-        let active = true
-        const ids = new Set<string>(JSON.parse(key))
-        setRecords((current) => current.filter((record) => ids.has(record.agentId)))
-        setErrors({})
-        const load = async (agentId: string) => {
-            try {
-                const loaded = await listAgentTimings(sessionId, branchId, agentId)
-                if (active) {
-                    setRecords((current) => mergeTimings(current, loaded))
-                    setErrors((current) => { const next = { ...current }; delete next[agentId]; return next })
-                }
-            } catch (error) {
-                if (active) setErrors((current) => ({ ...current, [agentId]: readableError(error) }))
-            }
-        }
-        // 先订阅再查询，使用版本合并消除查询期间的事件竞争。
-        const unsubscribe = subscribeAgentEvents((event) => {
-            if (!ids.has(event.agentId) || event.sessionId !== sessionId || event.branchId !== branchId) return
-            if (event.kind === 'operation_timing') {
-                const timing = event.data.timing
-                setRecords((current) => mergeTimings(current, [timing]))
-            }
-            if (event.kind === 'execution_ended' || event.kind === 'request_canceled') void load(event.agentId)
-        })
-        for (const id of ids) void load(id)
-        return () => { active = false; unsubscribe() }
-    }, [key, sessionId, branchId])
-    return <TimingContext value={records}>
-        {Object.keys(errors).length > 0 && <p className="operation-timing-error" role="status">耗时记录加载失败：{Object.values(errors).join('；')}</p>}
-        {children}
-    </TimingContext>
+/** 展示层只消费会话快照与实时事件合并后的计时，不发起独立查询。 */
+export function OperationTimingsProvider({ records, children }: { records: OperationTiming[]; children: ReactNode }) {
+    return <TimingContext value={records}>{children}</TimingContext>
 }
 
 /** 查找关联操作的独立计时记录；没有记录时返回 undefined。 */

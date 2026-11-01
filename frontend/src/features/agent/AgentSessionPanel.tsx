@@ -39,7 +39,7 @@ type AgentSessionPanelProps = {
 
 /** 展示当前 Session 中选中的 Agent 对话和输入控件。 */
 export function AgentSessionPanel({ branchId, loading, agents, agent, history, agentHistories, agentHistoryErrors, outputStore, onSelectAgent, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
-    const { streamingOutputs, pendingUserMessages, awaitingAgentId } = useSyncExternalStore(outputStore.subscribeOutput, outputStore.getOutput)
+    const { streamingOutputs, pendingUserMessages, awaitingAgentId, timings } = useSyncExternalStore(outputStore.subscribeOutput, outputStore.getOutput)
     if (loading) {
         return <div className="agent-loading" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>加载对话中</span></div>
     }
@@ -50,7 +50,7 @@ export function AgentSessionPanel({ branchId, loading, agents, agent, history, a
     const hasSubagents = agents.some((item) => item.Kind === 'subagent')
     return (
         <ModelUsageProvider key={agent.SessionID} sessionId={agent.SessionID}>
-        <OperationTimingsProvider key={`${agent.SessionID}-${branchId}`} sessionId={agent.SessionID} branchId={branchId} agentIds={agents.map((item) => item.ID)}>
+        <OperationTimingsProvider records={timings}>
         <FilePreviewProvider sessionId={agent.SessionID}>
         <AgentConversation
             key={`${agent.SessionID}-${branchId}`}

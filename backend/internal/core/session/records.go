@@ -14,7 +14,6 @@ type ExecutionRecords interface {
 	SaveExecution(context.Context, agentexecution.ExecutionRecord) error
 	FindExecutionByRequest(context.Context, identity.AgentID, identity.RequestID) (agentexecution.ExecutionRecord, error)
 	ListAgentExecutions(context.Context, identity.AgentID, identity.BranchID, int) ([]agentexecution.ExecutionRecord, error)
-	AppendTiming(context.Context, identity.SessionID, timing.Record) error
 	ListAgentTimingRecords(context.Context, identity.AgentID, identity.BranchID, int) ([]timing.Record, error)
 }
 

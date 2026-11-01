@@ -10,7 +10,7 @@ type TaskSubmissionContext = {
     bindingID: string
     prepareSubmission: () => Promise<SessionSnapshot>
     applySession: (session: SessionSnapshot) => Promise<void>
-    refreshSession: () => Promise<void>
+    bindSubmission: (bindingID: string) => void
     getSelectedAgentID: () => string
     setBusy: Dispatch<SetStateAction<boolean>>
     setError: Dispatch<SetStateAction<string>>
@@ -28,7 +28,7 @@ export function useTaskSubmission({
     bindingID,
     prepareSubmission,
     applySession,
-    refreshSession,
+    bindSubmission,
     getSelectedAgentID,
     setBusy,
     setError,
@@ -53,9 +53,13 @@ export function useTaskSubmission({
             // 创建不要求模型已就绪，暂不能调度时输入仍保留在队列中。
             const response = await createTask({ sessionId: target.id, bindingId: submission.current.bindingId, branchId: target.branch.id, submissionId: submission.current.id, prompt: input })
             if (isCurrentView()) {
-                const next = await selectSession(target.id, response.branchId, response.bindingId)
-                if (!isCurrentView()) return
-                await applySession(next)
+                if (response.branchId !== target.branch.id) {
+                    const next = await selectSession(target.id, response.branchId, response.bindingId)
+                    if (!isCurrentView()) return
+                    await applySession(next)
+                } else {
+                    bindSubmission(response.bindingId)
+                }
                 submission.current = null
                 setInput('')
                 if (response.schedulingError) setError(`任务已加入队列，暂未开始执行：${response.schedulingError}`)
@@ -68,7 +72,7 @@ export function useTaskSubmission({
         } finally {
             setBusy(false)
         }
-    }, [busy, input, sessionID, prepareSubmission, applySession, getSelectedAgentID, viewRequestRef, setBusy, setError, setErrorCode, setInput])
+    }, [busy, input, sessionID, prepareSubmission, applySession, bindSubmission, getSelectedAgentID, viewRequestRef, setBusy, setError, setErrorCode, setInput])
 
     const cancelQueuedTask = useCallback(async (taskID: string) => {
         if (!sessionID || busy) return
@@ -80,7 +84,6 @@ export function useTaskSubmission({
         setErrorCode(undefined)
         try {
             await cancelTask(bindingID, taskID)
-            if (isCurrentView()) await refreshSession()
         } catch (err) {
             if (isCurrentView()) {
                 setError(readableError(err))
@@ -89,7 +92,7 @@ export function useTaskSubmission({
         } finally {
             setBusy(false)
         }
-    }, [busy, sessionID, bindingID, getSelectedAgentID, refreshSession, setBusy, setError, setErrorCode, viewRequestRef])
+    }, [busy, sessionID, bindingID, getSelectedAgentID, setBusy, setError, setErrorCode, viewRequestRef])
 
     return { canQueue: Boolean(bindingID) && agent?.state === 'executing', submitTask, cancelQueuedTask }
 }

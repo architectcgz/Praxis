@@ -1,9 +1,9 @@
 package bindings
 
 import (
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	coordinator "praxis/internal/service/coordinator"
-	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
@@ -32,7 +32,7 @@ func (b *SessionBindings) CreateBranch(wire dto.CreateBranchRequest) (dto.Sessio
 	if err != nil {
 		return dto.SessionSnapshot{}, err
 	}
-	view, err := services.Commands.CreateBranch(ctx, identity.SessionID(wire.SessionID), identity.BranchID(wire.BranchID), wire.BindingID, sessionservice.BranchInput{
+	view, err := services.Commands.CreateBranch(ctx, identity.SessionID(wire.SessionID), identity.BranchID(wire.BranchID), wire.BindingID, sessionmodel.BranchInput{
 		RequestID: wire.RequestID,
 		Name:      wire.Name,
 		EntryID:   wire.EntryID,
@@ -71,7 +71,7 @@ func (b *SessionBindings) ListBranches(sessionID, bindingID string) ([]coordinat
 	values, err := services.Commands.ListBranches(ctx, identity.SessionID(sessionID), bindingID)
 	return values, publicError(b.host, "ListBranches", err)
 }
-func (b *SessionBindings) GetHistoryTree(sessionID string) ([]sessionservice.TreeNode, error) {
+func (b *SessionBindings) GetHistoryTree(sessionID string) ([]sessionmodel.TreeNode, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return nil, publicInputError(b.host, "GetHistoryTree", err)
 	}

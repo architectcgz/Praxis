@@ -2,30 +2,40 @@ package event
 
 import (
 	"encoding/json"
+	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	providerapi "praxis/internal/core/provider"
+	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
+	"time"
 )
 
 type Kind string
 
 const (
-	KindSessionConfigReloaded Kind = "session_config_reloaded"
-	KindEntriesAppended       Kind = "entries_appended"
-	KindTurnStarted           Kind = "turn_started"
-	KindProviderWaiting       Kind = "provider_waiting"
-	KindTextDelta             Kind = "text_delta"
-	KindThinkingDelta         Kind = "thinking_delta"
-	KindToolCall              Kind = "tool_call"
-	KindToolApprovalRequired  Kind = "tool_approval_required"
-	KindToolResult            Kind = "tool_result"
-	KindTurnCompleted         Kind = "turn_completed"
-	KindModelUsage            Kind = "model_usage"
-	KindExecutionEnded        Kind = "execution_ended"
-	KindRequestCanceled       Kind = "request_canceled"
-	KindOperationTiming       Kind = "operation_timing"
-	KindError                 Kind = "error"
+	KindSessionConfigReloaded   Kind = "session_config_reloaded"
+	KindEntriesAppended         Kind = "entries_appended"
+	KindTurnStarted             Kind = "turn_started"
+	KindProviderWaiting         Kind = "provider_waiting"
+	KindTextDelta               Kind = "text_delta"
+	KindThinkingDelta           Kind = "thinking_delta"
+	KindToolCall                Kind = "tool_call"
+	KindToolApprovalRequired    Kind = "tool_approval_required"
+	KindToolResult              Kind = "tool_result"
+	KindTurnCompleted           Kind = "turn_completed"
+	KindModelUsage              Kind = "model_usage"
+	KindExecutionStarted        Kind = "execution_started"
+	KindExecutionPauseRequested Kind = "execution_pause_requested"
+	KindExecutionStopRequested  Kind = "execution_stop_requested"
+	KindExecutionEnded          Kind = "execution_ended"
+	KindSubagentStarted         Kind = "subagent_started"
+	KindSubagentReleased        Kind = "subagent_released"
+	KindTaskQueueChanged        Kind = "task_queue_changed"
+	KindRequestCanceled         Kind = "request_canceled"
+	KindOperationTiming         Kind = "operation_timing"
+	KindError                   Kind = "error"
 )
 
 // Scope 标识事件所属的会话、Agent、执行和模型轮次；不适用的标识留空。
@@ -36,6 +46,19 @@ type Scope struct {
 	AgentID     identity.AgentID
 	ExecutionID identity.AgentExecutionID
 	TurnID      identity.TurnID
+}
+
+// ScopeForRun 在事件发布边界读取执行归属，不让 Run 依赖通知协议。
+func ScopeForRun(run *agentexecution.Run, turnID identity.TurnID) Scope {
+	record := run.Snapshot()
+	return Scope{
+		SessionID:   record.SessionID,
+		BranchID:    record.BranchID,
+		BindingID:   run.BindingID,
+		AgentID:     record.AgentID,
+		ExecutionID: record.ID,
+		TurnID:      turnID,
+	}
 }
 
 // Event 是进程内业务通知，不表示已落盘；重新连接后应查询业务状态恢复视图。
@@ -132,16 +155,59 @@ type ModelUsage struct {
 func (ModelUsage) Kind() Kind { return KindModelUsage }
 func (ModelUsage) isPayload() {}
 
+type ExecutionStarted struct {
+	Execution agentexecution.ExecutionRecord
+}
+
+func (ExecutionStarted) Kind() Kind { return KindExecutionStarted }
+func (ExecutionStarted) isPayload() {}
+
+type ExecutionPauseRequested struct{ AppliedAt time.Time }
+
+func (ExecutionPauseRequested) Kind() Kind { return KindExecutionPauseRequested }
+func (ExecutionPauseRequested) isPayload() {}
+
+type ExecutionStopRequested struct{ AppliedAt time.Time }
+
+func (ExecutionStopRequested) Kind() Kind { return KindExecutionStopRequested }
+func (ExecutionStopRequested) isPayload() {}
+
 type ExecutionEnded struct {
-	Outcome        string
-	FailureCode    string
-	FailureMessage string
+	Execution agentexecution.ExecutionRecord
+	State     agentmodel.AgentState
+	Entries   []sessionentry.ContextEntry
 }
 
 func (ExecutionEnded) Kind() Kind { return KindExecutionEnded }
 func (ExecutionEnded) isPayload() {}
 
-type RequestCanceled struct{}
+type SubagentStarted struct {
+	Name              string
+	Execution         agentexecution.ExecutionRecord
+	Entries           []sessionentry.ContextEntry
+	ParentAgentID     identity.AgentID
+	ParentExecutionID identity.AgentExecutionID
+	CallID            string
+}
+
+func (SubagentStarted) Kind() Kind { return KindSubagentStarted }
+func (SubagentStarted) isPayload() {}
+
+type SubagentReleased struct{}
+
+func (SubagentReleased) Kind() Kind { return KindSubagentReleased }
+func (SubagentReleased) isPayload() {}
+
+type TaskQueueChanged struct{ Tasks []sessionmodel.Task }
+
+func (TaskQueueChanged) Kind() Kind { return KindTaskQueueChanged }
+func (TaskQueueChanged) isPayload() {}
+
+type RequestCanceled struct {
+	Execution agentexecution.ExecutionRecord
+	State     agentmodel.AgentState
+	Entries   []sessionentry.ContextEntry
+}
 
 func (RequestCanceled) Kind() Kind { return KindRequestCanceled }
 func (RequestCanceled) isPayload() {}

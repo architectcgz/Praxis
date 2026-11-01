@@ -1,6 +1,12 @@
 package dto
 
-import "encoding/json"
+import (
+	"encoding/json"
+	agentmodel "praxis/internal/core/agent"
+	agentexecution "praxis/internal/core/agent/execution"
+	agentservice "praxis/internal/service/agent"
+	"time"
+)
 
 type PauseAgentRequest struct {
 	AgentID           string `json:"agentId" validate:"id"`
@@ -19,6 +25,7 @@ type AgentControlResponse struct {
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
 type AgentEvent struct {
 	BranchID    string `json:"branchId"`
+	BindingID   string `json:"bindingId"`
 	Kind        string `json:"kind"`
 	SessionID   string `json:"sessionId,omitempty"`
 	AgentID     string `json:"agentId"`
@@ -66,10 +73,30 @@ type AgentModelUsage struct {
 	Usage ModelUsage `json:"usage"`
 }
 
+type AgentExecutionStarted struct {
+	Execution agentexecution.ExecutionRecord `json:"execution"`
+}
+
+type AgentExecutionControl struct {
+	AppliedAt time.Time `json:"appliedAt"`
+}
+
 type AgentExecutionEnded struct {
-	Outcome        string `json:"outcome"`
-	FailureCode    string `json:"failureCode,omitempty"`
-	FailureMessage string `json:"failureMessage,omitempty"`
+	Execution agentexecution.ExecutionRecord `json:"execution"`
+	State     agentmodel.AgentState          `json:"state"`
+	Entries   []Entry                        `json:"entries"`
+}
+
+type AgentSubagentStarted struct {
+	Agent             agentservice.AgentView `json:"agent"`
+	Entries           []Entry                `json:"entries"`
+	ParentAgentID     string                 `json:"parentAgentId"`
+	ParentExecutionID string                 `json:"parentExecutionId"`
+	CallID            string                 `json:"callId"`
+}
+
+type AgentTaskQueueChanged struct {
+	Tasks []QueuedTask `json:"tasks"`
 }
 
 type AgentOperationTiming struct {

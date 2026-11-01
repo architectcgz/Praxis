@@ -1,7 +1,7 @@
 import { getSessionBinding } from './bindings'
-import type { SessionApprovalMode as GeneratedSessionApprovalMode, SessionSnapshot as GeneratedSessionSnapshot } from '../../bindings/praxis/wails/dto/models'
-import { normalizeModelUsageRecords, type AgentView, type ModelUsageRecord } from './agents'
-import { normalizeQueuedTasks, type QueuedTask } from './tasks'
+import type { AgentView, Entry, ModelUsageRecord } from './agents'
+import type { QueuedTask } from './tasks'
+import type { OperationTiming } from './timings'
 import type { Branch } from '../../bindings/praxis/internal/core/session/models'
 export type { Branch }
 
@@ -15,6 +15,8 @@ export type SessionSnapshot = {
     updatedAt: string
     agents: AgentView[]
     tasks: QueuedTask[]
+    timings: OperationTiming[]
+    histories: Record<string, Entry[]>
 }
 
 export type SessionSummary = {
@@ -33,20 +35,7 @@ export type SessionUsageSummary = {
     cacheReadComplete: boolean
 }
 
-export type CreateSessionRequest = {
-    sessionId: string
-    projectId: string
-    requestId: string
-}
-
-export async function listSessions(projectID: string) {
-    return await getSessionBinding().ListSessions(projectID) ?? []
-}
-
-export function createSession(request: CreateSessionRequest) {
-    return getSessionBinding().CreateSession(request)
-}
-
+export type CreateSessionRequest = { sessionId: string; projectId: string; requestId: string }
 export type ApprovalMode = 'ask' | 'auto' | 'yolo'
 export type SessionApprovalMode = {
     sessionId: string
@@ -54,123 +43,57 @@ export type SessionApprovalMode = {
     sessionMode: ApprovalMode | null
     effectiveMode: ApprovalMode
 }
+export type ModelSelection = { providerId: string; modelId: string; reasoningLevel: string }
+
+export async function listSessions(projectID: string) {
+    return await getSessionBinding().ListSessions(projectID) ?? []
+}
+
+export function createSession(request: CreateSessionRequest) { return getSessionBinding().CreateSession(request) }
 
 /** 读取后端解析的会话选择和有效模式，不在前端推断授权结果。 */
-export async function getSessionApprovalMode(sessionId: string): Promise<SessionApprovalMode> {
-    return sessionApprovalMode(await getSessionBinding().GetSessionApprovalMode(sessionId))
+export function getSessionApprovalMode(sessionId: string) {
+    return getSessionBinding().GetSessionApprovalMode(sessionId) as Promise<SessionApprovalMode>
 }
 
 /** 保存会话覆盖；null 恢复继承，有效模式在显式 /reload 后更新。 */
-export async function setSessionApprovalMode(sessionId: string, mode: ApprovalMode | null): Promise<SessionApprovalMode> {
-    return sessionApprovalMode(await getSessionBinding().SetSessionApprovalMode({ sessionId, mode }))
+export function setSessionApprovalMode(sessionId: string, mode: ApprovalMode | null) {
+    return getSessionBinding().SetSessionApprovalMode({ sessionId, mode }) as Promise<SessionApprovalMode>
 }
 
-export type ModelSelection = { providerId: string; modelId: string; reasoningLevel: string }
-
-/** 模型选择属于指定会话，不改变其他会话或已经创建的执行。 */
 export function selectSessionModel(sessionID: string, selection: ModelSelection) {
     return getSessionBinding().SelectModel({ sessionId: sessionID, ...selection })
 }
 
-/** 读取后端保存的会话选择，不从本地全局偏好恢复。 */
-export async function getSessionModelSelection(sessionID: string): Promise<ModelSelection> {
-    const value: unknown = await getSessionBinding().GetModelSelection(sessionID)
-    if (!isRecord(value)) throw new Error('会话模型选择数据格式无效。')
-    return {
-        providerId: requiredString(value.providerId),
-        modelId: requiredString(value.modelId),
-        reasoningLevel: requiredString(value.reasoningLevel),
-    }
+export function getSessionModelSelection(sessionID: string): Promise<ModelSelection> {
+    return getSessionBinding().GetModelSelection(sessionID)
 }
 
-/** 选定会话并等待后端完成数据加载，成功后才能读取模型、Entry 和执行状态。 */
+/** 后端快照投影保证集合为数组；前端直接接纳，不重新校验内部协议。 */
 export function selectSession(sessionID: string, branchID = '', bindingID = '') {
-    return getSessionBinding().SelectSession(sessionID, branchID, bindingID).then(normalizeSessionSnapshot)
+    return getSessionBinding().SelectSession(sessionID, branchID, bindingID) as Promise<SessionSnapshot>
 }
 
 export function getSessionSummary(sessionID: string) { return getSessionBinding().GetSessionSummary(sessionID) }
 export function createBranch(session: SessionSnapshot, entryId: string, name = '', requestId: string = crypto.randomUUID()) {
-    return getSessionBinding().CreateBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, entryId, name, requestId }).then(normalizeSessionSnapshot)
+    return getSessionBinding().CreateBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, entryId, name, requestId }) as Promise<SessionSnapshot>
 }
 export function switchBranch(session: SessionSnapshot, name: string) {
-    return getSessionBinding().SwitchBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, name }).then(normalizeSessionSnapshot)
+    return getSessionBinding().SwitchBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, name }) as Promise<SessionSnapshot>
 }
 export async function listBranches(sessionId: string, bindingId: string) { return await getSessionBinding().ListBranches(sessionId, bindingId) ?? [] }
 export async function getHistoryTree(sessionId: string) { return await getSessionBinding().GetHistoryTree(sessionId) ?? [] }
 export async function getHistoryAt(sessionId: string, entryId: string) {
-    return (await getSessionBinding().GetHistoryAt(sessionId, entryId) ?? []).map((entry) => ({ ...entry, content: entry.content ?? [] }))
+    return (await getSessionBinding().GetHistoryAt(sessionId, entryId) ?? []) as Entry[]
 }
 
-/** 查询同一份持久化快照的明细与缓存率；未知比例保留为 null。 */
-export async function getSessionUsageSummary(sessionID: string): Promise<SessionUsageSummary> {
-    const value: unknown = await getSessionBinding().GetSessionUsageSummary(sessionID)
-    if (!isRecord(value) || !Number.isSafeInteger(value.inputTokens) || Number(value.inputTokens) < 0 ||
-        !Number.isSafeInteger(value.cacheReadInputTokens) || Number(value.cacheReadInputTokens) < 0 ||
-        Number(value.cacheReadInputTokens) > Number(value.inputTokens) || typeof value.cacheReadComplete !== 'boolean' ||
-        (value.cacheReadRatio !== null && (typeof value.cacheReadRatio !== 'number' || !Number.isFinite(value.cacheReadRatio) ||
-            value.cacheReadRatio < 0 || value.cacheReadRatio > 1 || !value.cacheReadComplete || value.inputTokens === 0))) {
-        throw new Error('会话用量汇总数据格式无效。')
-    }
-    return {
-        records: normalizeModelUsageRecords(value.records, sessionID),
-        inputTokens: value.inputTokens as number,
-        cacheReadInputTokens: value.cacheReadInputTokens as number,
-        cacheReadRatio: value.cacheReadRatio as number | null,
-        cacheReadComplete: value.cacheReadComplete,
-    }
+export function getSessionUsageSummary(sessionID: string) {
+    return getSessionBinding().GetSessionUsageSummary(sessionID) as Promise<SessionUsageSummary>
 }
 
-export function deleteSession(sessionID: string) {
-    return getSessionBinding().DeleteSession(sessionID)
-}
-
-export function renameSession(sessionID: string, title: string) {
-    return getSessionBinding().RenameSession(sessionID, title)
-}
+export function closeSession(bindingID: string) { return getSessionBinding().CloseSession(bindingID) }
+export function deleteSession(sessionID: string) { return getSessionBinding().DeleteSession(sessionID) }
+export function renameSession(sessionID: string, title: string) { return getSessionBinding().RenameSession(sessionID, title) }
 
 /** 在系统文件管理器中定位指定 Session 的 JSONL 文件；失败时拒绝 Promise。 */
-export function revealSessionFile(sessionID: string) {
-    return getSessionBinding().RevealSessionFile(sessionID)
-}
-
-function approvalMode(value: string): ApprovalMode {
-    if (value !== 'ask' && value !== 'auto' && value !== 'yolo') throw new Error('后端返回了未知的审批模式')
-    return value
-}
-
-function sessionApprovalMode(value: GeneratedSessionApprovalMode): SessionApprovalMode {
-    return {
-        sessionId: value.sessionId,
-        globalMode: approvalMode(value.globalMode),
-        sessionMode: value.sessionMode == null ? null : approvalMode(value.sessionMode),
-        effectiveMode: approvalMode(value.effectiveMode),
-    }
-}
-
-function normalizeSessionSnapshot(value: GeneratedSessionSnapshot): SessionSnapshot {
-    if (!isRecord(value) || !Array.isArray(value.agents)) {
-        throw new Error('Session 数据格式无效。')
-    }
-    return {
-        bindingId: requiredString(value.bindingId),
-        branch: value.branch,
-        id: requiredString(value.id),
-        projectId: requiredString(value.projectId),
-        title: requiredString(value.title),
-        createdAt: requiredString(value.createdAt),
-        updatedAt: requiredString(value.updatedAt),
-        agents: value.agents,
-        tasks: normalizeQueuedTasks(value.tasks),
-    }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null
-}
-
-function requiredString(value: unknown): string {
-    if (typeof value !== 'string') {
-        throw new Error('Session 数据格式无效。')
-    }
-    return value
-}
+export function revealSessionFile(sessionID: string) { return getSessionBinding().RevealSessionFile(sessionID) }

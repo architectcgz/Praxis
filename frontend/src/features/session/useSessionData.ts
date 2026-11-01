@@ -1,134 +1,69 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { selectSession, getSessionSummary, listSessions, type SessionSnapshot, type SessionSummary } from '../../api'
+import { selectSession, subscribeAgentEvents, type SessionSnapshot } from '../../api'
 
-/** Session 拥有目录、详情和摘要回填；工作区只负责选择与跨模块调用顺序。 */
-export function useSessionData() {
-    const [sessions, setSessions] = useState<SessionSummary[]>([])
+/** 每个页面持有一份会话选择；切换到其他页面不会销毁本 Hook。 */
+export function useSessionData(sessionID: string) {
     const [session, setSession] = useState<SessionSnapshot | null>(null)
-    const [catalogLoading, setCatalogLoading] = useState(false)
-    const [sessionLoading, setSessionLoading] = useState(false)
-    const [catalogError, setCatalogError] = useState<unknown>()
-    const [sessionError, setSessionError] = useState<unknown>()
-    const catalog = useRef<SessionSummary[]>([])
-    const catalogRequest = useRef(0)
-    const detailRequest = useRef(0)
-    const detailID = useRef('')
-    const metadataRequests = useRef(new Map<string, number>())
-    const selections = useRef(new Map<string, { branchID: string; bindingID: string }>())
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState<unknown>()
+    const request = useRef(0)
+    const selection = useRef({ branchID: '', bindingID: '' })
 
-    const getSessions = useCallback((): readonly SessionSummary[] => catalog.current, [])
-    const clearSession = useCallback(() => {
-        detailRequest.current += 1
-        detailID.current = ''
-        setSession(null)
-        setSessionLoading(false)
-        setSessionError(undefined)
-    }, [])
-
-    const refreshSessions = useCallback(async (projectIDs: readonly string[]) => {
-        const request = ++catalogRequest.current
-        setCatalogLoading(true)
+    const loadSession = useCallback(async () => {
+        const id = ++request.current
+        setLoading(true)
+        setError(undefined)
         try {
-            const pages = await Promise.all(projectIDs.map((id) => listSessions(id)))
-            if (catalogRequest.current !== request) return
-            const values = pages.flat().sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-            catalog.current = values
-            setSessions(values)
-            setCatalogError(undefined)
-            setSession((current) => {
-                const summary = values.find((item) => item.id === current?.id)
-                return current && summary ? { ...current, ...summary } : current
-            })
-            return values
-        } catch (reason) {
-            if (catalogRequest.current === request) setCatalogError(() => reason)
-            throw reason
-        } finally {
-            if (catalogRequest.current === request) setCatalogLoading(false)
-        }
-    }, [])
-
-    const loadSession = useCallback(async (id: string) => {
-        const request = ++detailRequest.current
-        detailID.current = id
-        setSessionLoading(true)
-        setSessionError(undefined)
-        try {
-            const selection = selections.current.get(id)
-            const value = await selectSession(id, selection?.branchID, selection?.bindingID)
-            if (detailRequest.current !== request) return
-            selections.current.set(id, { branchID: value.branch.id, bindingID: value.bindingId })
+            const current = selection.current
+            const value = await selectSession(sessionID, current.branchID, current.bindingID)
+            if (request.current !== id) return
+            selection.current = { branchID: value.branch.id, bindingID: value.bindingId }
             setSession(value)
             return value
         } catch (reason) {
-            if (detailRequest.current === request) {
-                setSession(null)
-                setSessionError(() => reason)
-            }
+            if (request.current === id) setError(() => reason)
             throw reason
         } finally {
-            if (detailRequest.current === request) setSessionLoading(false)
+            if (request.current === id) setLoading(false)
         }
-    }, [])
-
-    const refreshSummary = useCallback(async (id: string) => {
-        if (!catalog.current.some((item) => item.id === id)) return
-        const request = (metadataRequests.current.get(id) || 0) + 1
-        metadataRequests.current.set(id, request)
-        const catalogVersion = catalogRequest.current
-        const isCurrent = () => metadataRequests.current.get(id) === request && catalogRequest.current === catalogVersion
-        try {
-            const summary = await getSessionSummary(id)
-            if (!isCurrent() || !catalog.current.some((item) => item.id === id)) return
-            const values = catalog.current.map((item) => item.id === id ? {
-                ...item, title: summary.title, updatedAt: summary.updatedAt,
-            } : item).sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-            catalog.current = values
-            setSessions(values)
-            setSession((current) => current?.id === id ? { ...current, title: summary.title, updatedAt: summary.updatedAt } : current)
-        } catch (reason) {
-            if (isCurrent() && detailID.current === id) setSessionError(() => reason)
-        }
-    }, [])
-
-    const updateSessionTitle = useCallback((id: string, title: string) => {
-        // 用户确认的标题优先于此前启动的摘要请求。
-        metadataRequests.current.set(id, (metadataRequests.current.get(id) || 0) + 1)
-        setSession((current) => current?.id === id ? { ...current, title } : current)
-        const values = catalog.current.map((item) => item.id === id ? { ...item, title } : item)
-        catalog.current = values
-        setSessions(values)
-    }, [])
-
-    const resetSessions = useCallback(() => {
-        catalogRequest.current += 1
-        metadataRequests.current.clear()
-        catalog.current = []
-        setSessions([])
-        setCatalogLoading(false)
-        setCatalogError(undefined)
-        clearSession()
-    }, [clearSession])
+    }, [sessionID])
 
     const adoptSession = useCallback((value: SessionSnapshot) => {
-        selections.current.set(value.id, { branchID: value.branch.id, bindingID: value.bindingId })
-        if (detailID.current !== value.id) return
-        detailRequest.current += 1
+        request.current += 1
+        selection.current = { branchID: value.branch.id, bindingID: value.bindingId }
         setSession(value)
-        setSessionLoading(false)
-        setSessionError(undefined)
+        setLoading(false)
+        setError(undefined)
     }, [])
 
-    const forgetSession = useCallback((id: string) => { selections.current.delete(id) }, [])
-
-    useEffect(() => () => {
-        catalogRequest.current += 1
-        detailRequest.current += 1
-        metadataRequests.current.clear()
+    const bindSubmission = useCallback((bindingID: string) => {
+        selection.current = { ...selection.current, bindingID }
+        setSession((current) => current ? { ...current, bindingId: bindingID } : current)
     }, [])
 
-    return {
-        sessions, session, catalogLoading, sessionLoading, catalogError, sessionError,
-        getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions, adoptSession, forgetSession,
-    }
+    const updateTitle = useCallback((title: string) => {
+        setSession((current) => current ? { ...current, title } : current)
+    }, [])
+
+    useEffect(() => subscribeAgentEvents((event) => {
+        if (event.sessionId !== sessionID) return
+        if (event.kind === 'task_queue_changed') {
+            setSession((current) => current && current.branch.id === event.branchId &&
+                (!current.bindingId || current.bindingId === event.bindingId)
+                ? { ...current, tasks: event.data.tasks } : current)
+        }
+        if (event.kind === 'entries_appended' && !event.data.transient ||
+            event.kind === 'execution_ended' || event.kind === 'request_canceled') {
+            const last = event.data.entries.at(-1)
+            if (last && event.agentId === sessionID) {
+                setSession((current) => current && current.branch.id === event.branchId ? {
+                    ...current,
+                    branch: { ...current.branch, head_entry_id: last.id, updated_at: last.createdAt },
+                } : current)
+            }
+        }
+    }), [sessionID])
+
+    useEffect(() => () => { request.current += 1 }, [])
+    return { session, sessionLoading: loading, sessionError: error, loadSession, adoptSession, bindSubmission, updateTitle }
 }

@@ -37,7 +37,7 @@ type SessionService interface {
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
-	OpenedSession(context.Context, identity.SessionID) (*sessionservice.Session, error)
+	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
 	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
 }
 
@@ -50,10 +50,10 @@ type AgentCommands interface {
 	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
 	SelectSession(context.Context, identity.SessionID, identity.BranchID, string) (execution.BindingView, error)
 	CloseSession(context.Context, string) error
-	CreateBranch(context.Context, identity.SessionID, identity.BranchID, string, sessionservice.BranchInput) (execution.BindingView, error)
+	CreateBranch(context.Context, identity.SessionID, identity.BranchID, string, sessionmodel.BranchInput) (execution.BindingView, error)
 	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
 	ListBranches(context.Context, identity.SessionID, string) ([]execution.BranchView, error)
-	Tree(context.Context, identity.SessionID) ([]sessionservice.TreeNode, error)
+	Tree(context.Context, identity.SessionID) ([]sessionmodel.TreeNode, error)
 	HistoryAt(context.Context, identity.SessionID, string) ([]sessionentry.ContextEntry, error)
 	DeleteSession(context.Context, identity.SessionID) error
 	ListAgentEntries(context.Context, identity.AgentID, identity.BranchID) ([]sessionentry.ContextEntry, error)

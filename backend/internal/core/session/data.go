@@ -10,7 +10,7 @@ import (
 )
 
 // Data 拥有完整会话数据；分支选择和输入队列属于页面绑定。
-// 同一会话的数据由服务层读写锁保护；发布后的 Entry 及内部载荷不再修改。
+// 重放完成后由 Session 接管并通过读写锁保护；发布后的 Entry 及内部载荷不再修改。
 type Data struct {
 	ID           identity.SessionID
 	Entries      []*sessionentry.ContextEntry
@@ -39,7 +39,7 @@ func (s *Data) Entry(id string) (*sessionentry.ContextEntry, bool) {
 	return s.Entries[index], true
 }
 
-// AcceptEntry 只接收已经确认归属并成功提交的完整 Entry，不保存模型请求的精简副本。
+// AcceptEntry 只接收已经确认归属的完整 Entry，不保存模型请求的精简副本。
 func (s *Data) AcceptEntry(entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
 	stored := new(entry)
 	s.Entries = append(s.Entries, stored)

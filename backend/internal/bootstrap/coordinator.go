@@ -34,13 +34,18 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 			if value.Scope.AgentID != identity.AgentID(value.Scope.SessionID) {
 				return
 			}
-			tasks.RecordUsage(providerapi.UsageRecord{
+			if err := tasks.RecordUsage(providerapi.UsageRecord{
 				SessionID:   value.Scope.SessionID.String(),
 				AgentID:     value.Scope.AgentID.String(),
 				ExecutionID: value.Scope.ExecutionID.String(),
 				TurnID:      value.Scope.TurnID,
 				Usage:       payload.Usage,
-			})
+			}); err != nil {
+				emitter.Emit(coreevent.Event{
+					Scope:   value.Scope,
+					Payload: coreevent.ErrorOccurred{Message: "Failed to save model usage: " + err.Error()},
+				})
+			}
 		}
 	})
 

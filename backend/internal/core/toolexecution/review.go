@@ -197,7 +197,7 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 			case providerapi.StreamUsage:
 				if event.Usage != nil && event.Usage.Valid() {
 					r.Emitter.Emit(coreevent.Event{
-						Scope:   t.run.EventScope(review.TurnID),
+						Scope:   coreevent.ScopeForRun(t.run, review.TurnID),
 						Payload: coreevent.ModelUsage{Usage: *event.Usage},
 					})
 				}

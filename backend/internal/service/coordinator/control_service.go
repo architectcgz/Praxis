@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/identity"
 	"time"
 )
@@ -36,12 +37,25 @@ func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID
 	applied, err := s.cancelExecution(ctx, agentID, executionID, cause)
 	result.Applied = applied
 	if err == nil && applied {
+		var notification *coreevent.Event
 		s.mu.Lock()
 		active := s.activeExecutionLocked(agentID, executionID)
 		if active != nil && active.run != nil {
-			active.run.Agent.ApplyControl(executionID, state, time.Now())
+			at := time.Now().UTC()
+			active.run.Agent.ApplyControl(executionID, state, at)
+			var payload coreevent.Payload = coreevent.ExecutionStopRequested{AppliedAt: at}
+			if state == agentmodel.AgentPaused {
+				payload = coreevent.ExecutionPauseRequested{AppliedAt: at}
+			}
+			notification = &coreevent.Event{
+				Scope:   coreevent.ScopeForRun(active.run, ""),
+				Payload: payload,
+			}
 		}
 		s.mu.Unlock()
+		if notification != nil {
+			s.loop.Emitter.Emit(*notification)
+		}
 	}
 	return result, err
 }

@@ -61,7 +61,7 @@ func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID, 
 	return s.sessionView(ctx, id, branchID, bindingID)
 }
 
-func (s *Coordinator) CreateBranch(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID string, input sessionservice.BranchInput) (BindingView, error) {
+func (s *Coordinator) CreateBranch(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID string, input sessionmodel.BranchInput) (BindingView, error) {
 	if err := s.enter(); err != nil {
 		return BindingView{}, err
 	}
@@ -161,7 +161,7 @@ func (s *Coordinator) ListBranches(ctx context.Context, id identity.SessionID, b
 	return result, nil
 }
 
-func (s *Coordinator) Tree(ctx context.Context, id identity.SessionID) ([]sessionservice.TreeNode, error) {
+func (s *Coordinator) Tree(ctx context.Context, id identity.SessionID) ([]sessionmodel.TreeNode, error) {
 	return s.sessions.Tree(ctx, id)
 }
 
@@ -208,7 +208,7 @@ func (s *Coordinator) bindSubmission(ctx context.Context, input sessionservice.T
 		if err != nil {
 			return nil, err
 		}
-		branch, err := s.sessions.CreateBranch(ctx, input.SessionID, view.Branch, sessionservice.BranchInput{RequestID: input.BindingID, EntryID: head})
+		branch, err := s.sessions.CreateBranch(ctx, input.SessionID, view.Branch, sessionmodel.BranchInput{RequestID: input.BindingID, EntryID: head})
 		if err != nil {
 			return nil, err
 		}

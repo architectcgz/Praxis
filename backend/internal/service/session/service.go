@@ -1,4 +1,4 @@
-// Package session 负责 Session 初始化、会话模型选择、状态读取和上下文追加。
+// Package session 负责会话加载、配置管理、恢复流程和已加载实例定位。
 package session
 
 import (
@@ -26,7 +26,7 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
 	Sessions       repository.Session
-	Log            repository.SessionLog
+	Log            sessionmodel.EventLog
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -37,13 +37,13 @@ type Service struct {
 	hookDispatcher *hook.Dispatcher
 	projects       repository.Project
 	sessions       repository.Session
-	log            repository.SessionLog
+	log            sessionmodel.EventLog
 	clock          clock.Clock
 	ids            identity.IDGenerator
 
 	// openedMu 保护实例注册表与创建登记，不覆盖 Entry 操作。
 	openedMu        sync.Mutex
-	opened          map[identity.SessionID]*Session
+	opened          map[identity.SessionID]*openedSession
 	createdSessions map[identity.SessionID]struct{}
 }
 
@@ -61,7 +61,7 @@ type CreateResult struct {
 func NewService(deps Dependencies) *Service {
 	return &Service{
 		loadConfig:      deps.LoadConfig,
-		opened:          make(map[identity.SessionID]*Session),
+		opened:          make(map[identity.SessionID]*openedSession),
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		sessions:        deps.Sessions,
@@ -72,8 +72,16 @@ func NewService(deps Dependencies) *Service {
 	}
 }
 
-// OpenedSession 只定位已经加载的实例，不触发日志读取或恢复。
-func (s *Service) OpenedSession(ctx context.Context, id identity.SessionID) (*Session, error) {
+// OpenedSession 只定位已经加载的核心会话，不触发日志读取或恢复。
+func (s *Service) OpenedSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
+	owner, err := s.openedSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return owner.session, nil
+}
+
+func (s *Service) openedSession(ctx context.Context, id identity.SessionID) (*openedSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -87,11 +95,11 @@ func (s *Service) OpenedSession(ctx context.Context, id identity.SessionID) (*Se
 }
 
 // LoadSession 只由选择入口调用，完成日志重放、Entry 构建和中断收尾后才发布实例。
-func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*Session, error) {
+func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
 	s.openedMu.Lock()
 	defer s.openedMu.Unlock()
 	if owner := s.opened[id]; owner != nil {
-		return owner, nil
+		return owner.session, nil
 	}
 	info, err := s.sessions.Get(ctx, id)
 	if err != nil {
@@ -102,38 +110,21 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*Sess
 		return nil, err
 	}
 	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
-	owner := &Session{
-		config: config,
-		data:   sessionmodel.Open(info.ID),
-		log:    s.log,
-		failed: make(chan struct{}),
-	}
-	defer func() {
-		// 不确定写入后保留故障对象，后续会话数据操作只能返回故障，直到应用重启。
-		if owner.fault != nil {
-			s.opened[id] = owner
-		}
-	}()
-	replay := logReplay{session: owner.data, callIndexes: make(map[sessionentry.Key]int)}
-	if err := owner.log.Read(ctx, id, replay.apply); err != nil {
+	data := sessionmodel.Open(info.ID)
+	replay := logReplay{session: data, callIndexes: make(map[sessionentry.Key]int)}
+	if err := s.log.Read(ctx, id, replay.apply); err != nil {
 		return nil, err
 	}
-	if len(owner.data.Branches) == 0 {
-		branch := sessionmodel.Branch{
-			ID:        identity.BranchID(s.ids.New("branch")),
-			Name:      "main",
-			RequestID: "initial",
-			CreatedAt: s.clock.Now(),
-			UpdatedAt: s.clock.Now(),
-		}
-		if err := owner.createBranch(ctx, branch); err != nil {
+	owner := sessionmodel.New(data, s.log, s.clock, s.ids)
+	if len(data.Branches) == 0 {
+		if _, err := owner.CreateBranch(ctx, "", sessionmodel.BranchInput{RequestID: "initial", Name: "main"}); err != nil {
 			return nil, err
 		}
 	}
 	if err := replay.repairToolResults(ctx, owner, info.State); err != nil {
 		return nil, err
 	}
-	for _, record := range slices.Clone(owner.data.Executions) {
+	for _, record := range slices.Clone(data.Executions) {
 		if !record.Active() {
 			continue
 		}
@@ -142,11 +133,14 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*Sess
 			record.Start(at)
 		}
 		record.End(agentexecution.ExecutionInterrupted, "", at)
-		if err := owner.saveExecution(ctx, record); err != nil {
+		if err := owner.SaveExecution(ctx, record); err != nil {
 			return nil, err
 		}
 	}
-	s.opened[id] = owner
+	s.opened[id] = &openedSession{
+		session: owner,
+		config:  config,
+	}
 	return owner, nil
 }
 
@@ -218,9 +212,6 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 		delete(s.createdSessions, sessionID)
 	}
 	s.openedMu.Lock()
-	for _, owner := range s.opened {
-		owner.close()
-	}
 	clear(s.opened)
 	s.openedMu.Unlock()
 	return cleanupErr
@@ -231,19 +222,11 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 	defer s.openedMu.Unlock()
 	owner := s.opened[sessionID]
 	// 本进程新建但尚未加载的会话只有空日志，可以直接清理。
-	if onlyEmpty && owner != nil {
-		owner.mu.RLock()
-		empty := owner.checkState(ctx) == nil && len(owner.data.Entries) == 0
-		owner.mu.RUnlock()
-		if !empty {
-			return nil
-		}
+	if onlyEmpty && owner != nil && !owner.session.Empty() {
+		return nil
 	}
 	if err := s.sessions.Delete(ctx, sessionID); err != nil {
 		return err
-	}
-	if owner != nil {
-		owner.close()
 	}
 	delete(s.opened, sessionID)
 	delete(s.createdSessions, sessionID)

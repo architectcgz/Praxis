@@ -25,16 +25,18 @@ func (e *loopExecution) NextContext(ctx context.Context) (appcontext.Content, er
 }
 
 // AppendEntry 先向主会话追加条目，再记录本次执行证据；子执行只向本次 Run 接纳条目。
-// 提交后的 Hook 不改变已接纳结果，重复条目不重复触发通知。
+// 主会话已接纳但日志写入失败时，Run 仍保留同一条目并向上传递错误。
+// 接纳后的 Hook 不改变已有结果，重复条目不重复触发通知。
 func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	inserted := false
+	var writeErr error
 	entry := new(value)
 	if e.run.Main() {
 		stored, added, err := e.run.Session.AppendEntry(ctx, e.run.Snapshot().BranchID, value)
-		if err != nil {
+		if err != nil && !added {
 			return sessionentry.ContextEntry{}, false, e.EntryFailure(err)
 		}
-		entry, inserted = stored, added
+		entry, inserted, writeErr = stored, added, err
 	}
 	accepted, added, err := e.run.Accept(entry)
 	if err != nil {
@@ -45,6 +47,9 @@ func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.Cont
 	}
 	if inserted && accepted.Role == role.Assistant && e.run.Main() {
 		e.notifyAssistant(ctx, accepted)
+	}
+	if writeErr != nil {
+		return accepted, inserted, e.EntryFailure(writeErr)
 	}
 	return accepted, inserted, nil
 }

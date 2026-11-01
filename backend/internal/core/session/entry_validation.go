@@ -3,14 +3,13 @@ package session
 import (
 	"errors"
 	"fmt"
-	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
-func validateEntry(owner *sessionmodel.Data, data sessionentry.ContextEntry) error {
+func validateEntry(owner *Data, data sessionentry.ContextEntry) error {
 	current := owner.Branch(data.BranchID)
 	if current == nil || current.HeadEntryID != data.ParentID {
 		return errorcode.ErrRequestConflict

@@ -1,4 +1,6 @@
 import type { AgentEvent, Entry, AgentView } from '../../api'
+import type { OperationTiming } from '../../api/timings'
+import { mergeTimings } from '../timing/timing'
 import { mergeStreamingEvent } from './streaming'
 import type { PendingUserMessage, StreamingOutputs } from './types'
 
@@ -13,7 +15,7 @@ export type AgentEntry = {
 export function createAgentStore() {
     let scope = { sessionId: '', branchId: '' }
     let data = { selectedId: '', ids: [] as string[], byId: {} as Record<string, AgentEntry> }
-    let output = { streamingOutputs: {} as StreamingOutputs, pendingUserMessages: [] as PendingUserMessage[], awaitingAgentId: '' }
+    let output = { streamingOutputs: {} as StreamingOutputs, pendingUserMessages: [] as PendingUserMessage[], awaitingAgentId: '', timings: [] as OperationTiming[] }
     const dataListeners = new Set<() => void>()
     const outputListeners = new Set<() => void>()
     const emitData = () => dataListeners.forEach((listener) => listener())
@@ -36,7 +38,10 @@ export function createAgentStore() {
             scope = { sessionId: '', branchId: '' }
             data = { selectedId: '', ids: [], byId: {} }
             emitData()
-            updateOutput({ streamingOutputs: {}, pendingUserMessages: [], awaitingAgentId: '' })
+            updateOutput({ streamingOutputs: {}, pendingUserMessages: [], awaitingAgentId: '', timings: [] })
+        },
+        setTimings(records: OperationTiming[]) {
+            updateOutput({ ...output, timings: mergeTimings(output.timings, records) })
         },
         setRoster(agents: AgentView[]) {
             const ids = agents.map((agent) => agent.ID)
@@ -71,10 +76,65 @@ export function createAgentStore() {
         },
         receive(event: AgentEvent) {
             if (event.sessionId !== scope.sessionId || event.branchId !== scope.branchId) return
+            if (event.kind === 'operation_timing') {
+                updateOutput({ ...output, timings: mergeTimings(output.timings, [event.data.timing]) })
+                return
+            }
+            if (event.kind === 'subagent_started') {
+                const id = event.agentId
+                data = {
+                    ...data,
+                    ids: data.ids.includes(id) ? data.ids : [...data.ids, id],
+                    byId: { ...data.byId, [id]: { agent: event.data.agent, history: event.data.entries, loading: false, error: '' } },
+                }
+                emitData()
+                return
+            }
+            if (event.kind === 'subagent_released') {
+                const byId = { ...data.byId }
+                delete byId[event.agentId]
+                const ids = data.ids.filter((id) => id !== event.agentId)
+                data = { ids, byId, selectedId: data.selectedId === event.agentId ? ids[0] || '' : data.selectedId }
+                emitData()
+                const streamingOutputs = { ...output.streamingOutputs }
+                delete streamingOutputs[event.agentId]
+                updateOutput({ ...output, streamingOutputs, timings: output.timings.filter((item) => item.agentId !== event.agentId) })
+                return
+            }
             if (!data.byId[event.agentId]) return
+            if (event.kind === 'execution_started') {
+                const execution = event.data.execution
+                updateEntry(event.agentId, (entry) => ({ ...entry, agent: {
+                    ...entry.agent, state: 'executing', currentExecutionId: execution.ID,
+                    currentExecution: execution, latestExecution: execution, UpdatedAt: execution.StartedAt,
+                } }))
+                return
+            }
+            if (event.kind === 'execution_pause_requested' || event.kind === 'execution_stop_requested') {
+                const state = event.kind === 'execution_pause_requested' ? 'paused' : 'interrupted'
+                updateEntry(event.agentId, (entry) => entry.agent.currentExecutionId === event.executionId ? {
+                    ...entry, agent: { ...entry.agent, state, UpdatedAt: event.data.appliedAt },
+                } : entry)
+                return
+            }
+            if (event.kind === 'execution_ended' || event.kind === 'request_canceled') {
+                const { execution, state, entries } = event.data
+                updateEntry(event.agentId, (entry) => ({
+                    ...entry,
+                    history: mergeEntries(entry.history || [], entries),
+                    agent: entry.agent.currentExecutionId && entry.agent.currentExecutionId !== execution.ID ? entry.agent : {
+                        ...entry.agent, state, currentExecutionId: '', currentExecution: null,
+                        latestExecution: execution, UpdatedAt: execution.EndedAt,
+                    },
+                }))
+                const streamingOutputs = { ...output.streamingOutputs }
+                if (streamingOutputs[event.agentId]?.executionId === execution.ID) delete streamingOutputs[event.agentId]
+                updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === event.agentId ? '' : output.awaitingAgentId })
+                return
+            }
             if (event.kind === 'entries_appended' && event.data.entries.length) {
                 const entries = event.data.entries
-                updateEntry(event.agentId, (entry) => ({ ...entry, history: [...new Map([...(entry.history || []), ...entries].map((item) => [item.id, item])).values()] }))
+                updateEntry(event.agentId, (entry) => ({ ...entry, history: mergeEntries(entry.history || [], entries) }))
             }
             if (event.kind === 'turn_completed') {
                 const current = output.streamingOutputs[event.agentId]
@@ -113,6 +173,10 @@ export function createAgentStore() {
         },
         stopAwaiting() { updateOutput({ ...output, awaitingAgentId: '' }) },
     }
+}
+
+function mergeEntries(current: Entry[], incoming: Entry[]): Entry[] {
+    return [...new Map([...current, ...incoming].map((entry) => [entry.id, entry])).values()]
 }
 
 export type AgentStore = ReturnType<typeof createAgentStore>

@@ -1,200 +1,88 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { API_ERROR_CODES, isBindingAvailable, subscribeAgentEvents, subscribeSessionConfigReloaded, type ApiErrorCode, type SessionSnapshot } from '../../api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { isBindingAvailable, subscribeAgentEvents, type ApiErrorCode } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
-import { useAgentData } from '../agent/useAgentData'
 import { useProjectData } from '../project/useProjectData'
-import { useSessionData } from '../session/useSessionData'
-import { useModelCatalog } from '../setting/model-config/useModelCatalog'
+import { useSessionCatalog } from '../session/useSessionCatalog'
 import { readRememberedSession, rememberSelectedSession } from './sessionPreference'
 
-/** 工作区管理选择与视图生命周期，协调项目、会话、模型和 Agent 提供的数据能力。 */
+/** 工作区只持有目录和已打开页面；各页面自行持有会话数据与事件订阅。 */
 export function useWorkspaceData() {
     const [selectedSessionID, setSelectedSessionID] = useState(readRememberedSession)
+    const [openedSessionIDs, setOpenedSessionIDs] = useState<string[]>([])
+    const [catalogLoaded, setCatalogLoaded] = useState(false)
     const [error, setError] = useState('')
     const [errorCode, setErrorCode] = useState<ApiErrorCode | undefined>()
-    const [catalogLoaded, setCatalogLoaded] = useState(false)
+    const selectedID = useRef(selectedSessionID)
+    const openedIDs = useRef<string[]>([])
     const viewRequestRef = useRef(0)
-    const catalogRequestRef = useRef(0)
-    const selectedSessionIDRef = useRef(selectedSessionID)
-    const errorCodeRef = useRef<ApiErrorCode | undefined>(undefined)
-    const { projects, loading: projectsLoading, error: projectsError, refreshProjects, resetProjects } = useProjectData()
-    const {
-        sessions, session, catalogLoading, sessionLoading, catalogError, sessionError,
-        getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions, adoptSession, forgetSession,
-    } = useSessionData()
-    const loadedSessionID = session?.id === selectedSessionID ? session.id : ''
-    const { models, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog(loadedSessionID)
-    const { loadForSession, resetForSessionChange, ...agents } = useAgentData({ sessionID: loadedSessionID, models, setError, setErrorCode, viewRequestRef })
+    const catalogRequest = useRef(0)
+    const initialSelectionApplied = useRef(false)
+    const { projects, loading: projectsLoading, error: projectsError, refreshProjects } = useProjectData()
+    const { sessions, loading: sessionsLoading, error: sessionsError, refreshSessions, refreshSummary, updateSessionTitle } = useSessionCatalog()
 
-    useLayoutEffect(() => {
-        errorCodeRef.current = errorCode
-    }, [errorCode])
-
-    const clearError = useCallback(() => {
-        setError('')
-        setErrorCode(undefined)
-    }, [])
-
-    // 只有当前会话的选择已由后端确认，才清除尚未选择模型的错误。
-    useEffect(() => {
-        if (agents.modelSelectionReady && errorCodeRef.current === API_ERROR_CODES.modelNotConfigured) clearError()
-    }, [agents.modelSelectionReady, clearError])
-
-    const changeSelectedSession = useCallback((id: string) => {
+    const clearError = useCallback(() => { setError(''); setErrorCode(undefined) }, [])
+    const selectSession = useCallback((id: string) => {
         viewRequestRef.current += 1
-        selectedSessionIDRef.current = id
+        selectedID.current = id
         setSelectedSessionID(id)
-        clearSession()
-        resetForSessionChange()
+        if (id && !openedIDs.current.includes(id)) {
+            openedIDs.current = [...openedIDs.current, id]
+            setOpenedSessionIDs(openedIDs.current)
+        }
         clearError()
-    }, [clearSession, resetForSessionChange, clearError])
+    }, [clearError])
 
-    const loadSelectedSession = useCallback(async (id: string, requestID: number) => {
-        const isCurrent = () => viewRequestRef.current === requestID
-        if (!id) {
-            clearSession()
-            resetForSessionChange()
-            return
-        }
-        try {
-            const value = await loadSession(id)
-            if (isCurrent() && value) await loadForSession(value, requestID)
-        } catch {
-            if (!isCurrent()) return
-            const catalog = getSessions()
-            if (selectedSessionIDRef.current === id && !catalog.some((item) => item.id === id)) {
-                changeSelectedSession(catalog[0]?.id || '')
-            } else {
-                resetForSessionChange()
-            }
-        }
-    }, [loadSession, loadForSession, getSessions, changeSelectedSession, clearSession, resetForSessionChange])
+    const clearSelectedSession = useCallback((id: string) => {
+        const remaining = openedIDs.current.filter((item) => item !== id)
+        openedIDs.current = remaining
+        setOpenedSessionIDs(remaining)
+        if (selectedID.current === id) selectSession(remaining.at(-1) || '')
+    }, [selectSession])
 
     const refreshCatalog = useCallback(async (manual = false, throwOnError = false) => {
-        const requestID = ++catalogRequestRef.current
-        const isCurrent = () => catalogRequestRef.current === requestID
+        const requestID = ++catalogRequest.current
         if (!isBindingAvailable()) {
-            resetProjects()
-            resetSessions()
-            resetModels()
-            changeSelectedSession('')
+            if (manual) { setError('桌面连接不可用，请在桌面应用中刷新工作区。'); setErrorCode('binding_unavailable') }
             setCatalogLoaded(true)
-            if (manual) {
-                setError('桌面连接不可用，请在桌面应用中刷新工作区。')
-                setErrorCode('binding_unavailable')
-            }
             return
         }
         try {
-            const projectCatalog = await refreshProjects()
-            if (!isCurrent() || !projectCatalog) return
-            const catalog = await refreshSessions(projectCatalog.map((project) => project.id))
-            if (!isCurrent() || !catalog) return
-            const selectedID = selectedSessionIDRef.current
-            const nextID = catalog.some((item) => item.id === selectedID) ? selectedID : catalog[0]?.id || ''
-            if (nextID !== selectedID) changeSelectedSession(nextID)
-            if (errorCodeRef.current !== API_ERROR_CODES.modelNotConfigured) clearError()
+            const nextProjects = await refreshProjects()
+            if (catalogRequest.current !== requestID || !nextProjects) return
+            const values = await refreshSessions(nextProjects.map((item) => item.id))
+            if (catalogRequest.current !== requestID || !values) return
+            if (!initialSelectionApplied.current) {
+                initialSelectionApplied.current = true
+                const id = values.some((item) => item.id === selectedID.current) ? selectedID.current : values[0]?.id || ''
+                selectSession(id)
+            }
+            clearError()
         } catch (reason) {
-            // 查询错误由各模块独立保留；命令调用可要求传播失败以避免误报成功。
-            if (isCurrent() && throwOnError) throw reason
+            if (catalogRequest.current === requestID && throwOnError) throw reason
         } finally {
-            if (isCurrent()) setCatalogLoaded(true)
+            if (catalogRequest.current === requestID) setCatalogLoaded(true)
         }
-    }, [refreshProjects, refreshSessions, resetProjects, resetSessions, resetModels, changeSelectedSession, clearError])
-
-    const refreshSession = useCallback(async (invalidateView = true) => {
-        const requestID = invalidateView ? ++viewRequestRef.current : viewRequestRef.current
-        await loadSelectedSession(selectedSessionIDRef.current, requestID)
-    }, [loadSelectedSession])
-
-    const refresh = useCallback(async (manual = false) => {
-        const currentID = selectedSessionIDRef.current
-        const navigation = refreshCatalog(manual).then(() => {
-            if (isBindingAvailable() && selectedSessionIDRef.current === currentID) return refreshSession()
-        })
-        // 模型刷新与导航刷新独立完成；任一失败都不阻止另一条链路提交成功结果。
-        await Promise.allSettled([navigation, ...(isBindingAvailable() ? [refreshModels()] : [])])
-    }, [refreshCatalog, refreshSession, refreshModels])
+    }, [refreshProjects, refreshSessions, selectSession, clearError])
 
     useEffect(() => {
         void refreshCatalog()
-        return () => {
-            catalogRequestRef.current += 1
-            viewRequestRef.current += 1
-        }
+        return () => { catalogRequest.current += 1; viewRequestRef.current += 1 }
     }, [refreshCatalog])
-
-    useEffect(() => {
-        if (!catalogLoaded) return
-        const requestID = ++viewRequestRef.current
-        void loadSelectedSession(selectedSessionID, requestID)
-    }, [catalogLoaded, loadSelectedSession, selectedSessionID])
-
-    useEffect(() => {
-        rememberSelectedSession(selectedSessionID)
-    }, [selectedSessionID])
-
-    const selectSession = useCallback((id: string) => {
-        if (id === selectedSessionIDRef.current) {
-            if (error || sessionError) {
-                clearError()
-                void refreshSession()
-            }
-            return
-        }
-        changeSelectedSession(id)
-    }, [error, sessionError, clearError, refreshSession, changeSelectedSession])
-
-    const clearSelectedSession = useCallback((id: string) => {
-        forgetSession(id)
-        if (selectedSessionIDRef.current === id) changeSelectedSession('')
-    }, [changeSelectedSession, forgetSession])
-
-    const applySession = useCallback(async (value: SessionSnapshot) => {
-        adoptSession(value)
-        if (selectedSessionIDRef.current === value.id) await loadForSession(value, viewRequestRef.current)
-    }, [adoptSession, loadForSession])
-
+    useEffect(() => { rememberSelectedSession(selectedSessionID) }, [selectedSessionID])
     useEffect(() => subscribeAgentEvents((event) => {
-        if ((event.kind === 'turn_started' || event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId) {
+        if ((event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId === event.agentId) {
             void refreshSummary(event.sessionId)
         }
-        if ((event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId === session?.id && event.branchId === session?.branch.id) {
-            // 同分支的后台刷新不代表页面切换，不能丢弃正在提交的分叉结果。
-            void refreshSession(false)
-        }
-    }), [refreshSummary, refreshSession, session?.id, session?.branch.id])
+    }), [refreshSummary])
 
-    useEffect(() => subscribeSessionConfigReloaded((id) => {
-        if (id !== selectedSessionIDRef.current) return
-        void Promise.allSettled([refreshModels(), refreshSession(false)])
-    }), [refreshModels, refreshSession])
-
-    const dataError = sessionError ?? catalogError ?? projectsError ?? modelsError
+    const dataError = sessionsError ?? projectsError
     return {
-        ...agents,
-        bridgeAvailable: isBindingAvailable(),
-        clearError,
-        clearSelectedSession,
+        projects, sessions, selectedSessionID, openedSessionIDs,
+        selectSession, clearSelectedSession, updateSessionTitle, refreshCatalog,
+        bridgeAvailable: isBindingAvailable(), workspaceLoading: !catalogLoaded,
+        refreshing: projectsLoading || sessionsLoading,
         error: error || (dataError === undefined ? '' : readableError(dataError)),
         errorCode: error ? errorCode : apiErrorCode(dataError),
-        models,
-        projects,
-        refresh,
-        refreshCatalog,
-        refreshModels,
-        refreshSession,
-        refreshing: projectsLoading || catalogLoading || modelsLoading,
-        workspaceLoading: !catalogLoaded,
-        sessionLoading: sessionLoading || Boolean(catalogLoaded && selectedSessionID && !session && !sessionError),
-        selectedSessionID,
-        selectSession,
-        session,
-        applySession,
-        sessions,
-        updateSessionTitle,
-        setError,
-        setErrorCode,
-        viewRequestRef,
+        clearError, setError, setErrorCode, viewRequestRef,
     }
 }

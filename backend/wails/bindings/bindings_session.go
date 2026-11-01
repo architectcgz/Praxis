@@ -56,7 +56,7 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	}, nil
 }
 
-// SelectSession 成功返回前完成会话数据加载，后续命令直接使用已加载实例。
+// SelectSession 完成会话数据加载并返回当前分支的计时快照，后续命令直接使用已加载实例。
 func (b *SessionBindings) SelectSession(sessionID, branchID, bindingID string) (dto.SessionSnapshot, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
@@ -93,6 +93,22 @@ func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services
 		UpdatedAt: view.Session.UpdatedAt,
 		Agents:    agents,
 		Tasks:     make([]dto.QueuedTask, 0, len(view.Tasks)),
+		Timings:   make([]dto.OperationTiming, 0),
+		Histories: make(map[string][]dto.Entry, len(agents)),
+	}
+	for _, agent := range agents {
+		entries, err := services.Commands.ListAgentEntries(ctx, agent.ID, view.Branch.ID)
+		if err != nil {
+			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.entries", err)
+		}
+		result.Histories[agent.ID.String()] = publicEntries(entries)
+		records, err := services.Timings.ListAgentTimings(ctx, agent.ID.String(), view.Branch.ID, 0)
+		if err != nil {
+			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.timings", err)
+		}
+		for _, record := range records {
+			result.Timings = append(result.Timings, operationTiming(record))
+		}
 	}
 	for _, value := range view.Tasks {
 		result.Tasks = append(result.Tasks, dto.QueuedTask{

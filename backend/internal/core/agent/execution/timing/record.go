@@ -30,6 +30,7 @@ type Operation struct {
 }
 
 // Record 是 Execution 内一次操作的计时事实。DurationMS 为 nil 表示尚未结束或异常退出后无法确定耗时。
+// 发布后的记录及耗时指针只读；状态变化通过新的记录快照提交。
 type Record struct {
 	Operation
 	ID              string    `json:"id"`
