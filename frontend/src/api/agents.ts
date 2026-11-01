@@ -63,6 +63,7 @@ type AgentEventData = {
 }
 
 type AgentEventScope = {
+    branchId: string
     sessionId?: string
     agentId: string
     executionId: string
@@ -74,12 +75,12 @@ export type AgentEvent = {
     [K in keyof AgentEventData]: AgentEventScope & { kind: K; data: AgentEventData[K] }
 }[keyof AgentEventData]
 
-export function getAgent(agentID: string) {
-    return getAgentBinding().GetAgent(agentID)
+export function getAgent(sessionID: string, branchID: string, agentID: string) {
+    return getAgentBinding().GetAgent(sessionID, branchID, agentID)
 }
 
-export async function listAgentEntries(agentID: string): Promise<Entry[]> {
-    return (await getAgentBinding().ListAgentEntries(agentID) ?? []).map(normalizeEntry)
+export async function listAgentEntries(sessionID: string, branchID: string, agentID: string): Promise<Entry[]> {
+    return (await getAgentBinding().ListAgentEntries(sessionID, branchID, agentID) ?? []).map(normalizeEntry)
 }
 
 export async function listSessionUsage(sessionId: string): Promise<ModelUsageRecord[]> {
@@ -119,6 +120,7 @@ function parseAgentEvent(value: unknown): AgentEvent | null {
     if (!isRecord(value) || typeof value.agentId !== 'string' || !value.agentId ||
         typeof value.executionId !== 'string' || !value.executionId || !isRecord(value.data)) return null
     const scope: AgentEventScope = {
+        branchId: typeof value.branchId === 'string' ? value.branchId : '',
         sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined,
         agentId: value.agentId,
         executionId: value.executionId,

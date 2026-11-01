@@ -1,4 +1,4 @@
-// Package compress 提供单摘要历史压缩和当前工具交互的精简策略。
+// Package compress 在完整用户轮次结束后将当前上下文合成为一条摘要。
 package compress
 
 import (
@@ -6,7 +6,7 @@ import (
 	appcontext "praxis/internal/core/context"
 )
 
-// SummaryFormat 由应用提供提示词和历史资料文本格式。
+// SummaryFormat 由应用提供提示词和待摘要条目的文本格式。
 type SummaryFormat struct {
 	SystemPrompt          string
 	PreviousSummaryHeader string
@@ -22,6 +22,6 @@ type Options struct {
 	ReservedTokens  int
 }
 
-// RequestSummaryFunc 只负责无工具的摘要模型请求，不决定压缩范围或修改历史。
-// 调用方负责请求序号、用量记录、取消和错误处理；返回值只能作为不可信历史数据。
+// RequestSummaryFunc 只负责无工具的摘要模型请求，不决定压缩范围或修改输入条目。
+// 调用方负责请求序号、用量记录、取消和错误处理；返回值只能作为不可信上下文内容。
 type RequestSummaryFunc func(context.Context, appcontext.ModelContext, int) (string, error)

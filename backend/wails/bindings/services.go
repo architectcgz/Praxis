@@ -34,29 +34,36 @@ type ApprovalService interface {
 }
 
 type SessionService interface {
-	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.Session, error)
+	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
 	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
-	GetSessionView(context.Context, identity.SessionID, int) (sessionservice.SessionView, error)
+	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
 }
 
 type AgentService interface {
-	ListSessionAgents(context.Context, identity.SessionID, int) ([]agentservice.AgentView, error)
-	GetAgentView(context.Context, identity.AgentID) (agentservice.AgentView, error)
+	ListSessionAgents(context.Context, identity.SessionID, identity.BranchID, int) ([]agentservice.AgentView, error)
+	GetAgentView(context.Context, identity.SessionID, identity.AgentID, identity.BranchID) (agentservice.AgentView, error)
 }
 
 type AgentCommands interface {
+	OpenSession(context.Context, identity.SessionID, identity.BranchID, string) (execution.BindingView, error)
+	CloseSession(context.Context, string) error
+	CreateBranch(context.Context, identity.SessionID, identity.BranchID, string, sessionservice.BranchInput) (execution.BindingView, error)
+	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
+	ListBranches(context.Context, identity.SessionID, string) ([]execution.BranchView, error)
+	Tree(context.Context, identity.SessionID) ([]sessionservice.TreeNode, error)
+	HistoryAt(context.Context, identity.SessionID, string) ([]sessionentry.ContextEntry, error)
 	DeleteSession(context.Context, identity.SessionID) error
-	ListAgentEntries(context.Context, identity.AgentID) ([]sessionentry.ContextEntry, error)
+	ListAgentEntries(context.Context, identity.AgentID, identity.BranchID) ([]sessionentry.ContextEntry, error)
 	PauseAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)
 	StopAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)
-	ListToolApprovals(context.Context, identity.AgentID) ([]toolservice.Approval, error)
+	ListToolApprovals(context.Context, identity.AgentID, identity.BranchID) ([]toolservice.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
 	SubmitTask(context.Context, sessionservice.TaskInput) (execution.SubmitResult, error)
-	CancelTask(context.Context, identity.SessionID, identity.TaskID) error
+	CancelTask(context.Context, string, identity.TaskID) error
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
 }
 
@@ -73,7 +80,7 @@ type ModelConfigService interface {
 }
 
 type TimingService interface {
-	ListAgentTimings(context.Context, string, int) ([]timing.View, error)
+	ListAgentTimings(context.Context, string, identity.BranchID, int) ([]timing.View, error)
 }
 
 type UsageService interface {

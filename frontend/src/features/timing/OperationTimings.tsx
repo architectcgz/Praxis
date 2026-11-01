@@ -8,7 +8,7 @@ import './styles.css'
 const TimingContext = createContext<OperationTiming[]>([])
 
 /** 独立加载计时与订阅变更；查询失败不阻断对话，切换会话后丢弃过期响应。 */
-export function OperationTimingsProvider({ agentIds, children }: { agentIds: string[]; children: ReactNode }) {
+export function OperationTimingsProvider({ agentIds, sessionId, branchId, children }: { agentIds: string[]; sessionId: string; branchId: string; children: ReactNode }) {
     const [records, setRecords] = useState<OperationTiming[]>([])
     const [errors, setErrors] = useState<Record<string, string>>({})
     const key = JSON.stringify([...agentIds].sort())
@@ -19,7 +19,7 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
         setErrors({})
         const load = async (agentId: string) => {
             try {
-                const loaded = await listAgentTimings(agentId)
+                const loaded = await listAgentTimings(sessionId, branchId, agentId)
                 if (active) {
                     setRecords((current) => mergeTimings(current, loaded))
                     setErrors((current) => { const next = { ...current }; delete next[agentId]; return next })
@@ -30,7 +30,7 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
         }
         // 先订阅再查询，使用版本合并消除查询期间的事件竞争。
         const unsubscribe = subscribeAgentEvents((event) => {
-            if (!ids.has(event.agentId)) return
+            if (!ids.has(event.agentId) || event.sessionId !== sessionId || event.branchId !== branchId) return
             if (event.kind === 'operation_timing') {
                 const timing = event.data.timing
                 setRecords((current) => mergeTimings(current, [timing]))
@@ -39,7 +39,7 @@ export function OperationTimingsProvider({ agentIds, children }: { agentIds: str
         })
         for (const id of ids) void load(id)
         return () => { active = false; unsubscribe() }
-    }, [key])
+    }, [key, sessionId, branchId])
     return <TimingContext value={records}>
         {Object.keys(errors).length > 0 && <p className="operation-timing-error" role="status">耗时记录加载失败：{Object.values(errors).join('；')}</p>}
         {children}

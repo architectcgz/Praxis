@@ -27,7 +27,7 @@ func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 	} else {
 		run.RecordTiming(record)
 	}
-	s.publishTiming(operationTiming(execution, record))
+	s.publishTiming(operationTiming(execution, record), run.EventScope(""))
 }
 
 func RunTimings(run *agentexecution.Run) []timing.View {
@@ -43,12 +43,12 @@ func RunTimings(run *agentexecution.Run) []timing.View {
 }
 
 // ListAgentTimings 从会话历史聚合操作记录，并派生执行本身的墙上时钟耗时。
-func (s *Service) ListAgentTimings(ctx context.Context, agentID string, limit int) ([]timing.View, error) {
-	records, err := s.records.ListAgentTimingRecords(ctx, identity.AgentID(agentID), limit)
+func (s *Service) ListAgentTimings(ctx context.Context, agentID string, branchID identity.BranchID, limit int) ([]timing.View, error) {
+	records, err := s.records.ListAgentTimingRecords(ctx, identity.AgentID(agentID), branchID, limit)
 	if err != nil {
 		return nil, err
 	}
-	executions, err := s.records.ListAgentExecutions(ctx, identity.AgentID(agentID), limit)
+	executions, err := s.records.ListAgentExecutions(ctx, identity.AgentID(agentID), branchID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -136,21 +136,17 @@ func executionTiming(execution agentexecution.ExecutionRecord) *timing.View {
 	return value
 }
 
-func (s *Service) publishTiming(value timing.View) {
+func (s *Service) publishTiming(value timing.View, scope coreevent.Scope) {
 	if s.emitter != nil {
 		s.emitter.Emit(coreevent.Event{
-			Scope: coreevent.Scope{
-				SessionID:   identity.SessionID(value.SessionID),
-				AgentID:     identity.AgentID(value.AgentID),
-				ExecutionID: identity.AgentExecutionID(value.ExecutionID),
-			},
+			Scope:   scope,
 			Payload: coreevent.OperationTiming{Timing: value},
 		})
 	}
 }
 
-func (s *Service) publishExecutionTiming(execution agentexecution.ExecutionRecord) {
+func (s *Service) publishExecutionTiming(execution agentexecution.ExecutionRecord, run *agentexecution.Run) {
 	if value := executionTiming(execution); value != nil {
-		s.publishTiming(*value)
+		s.publishTiming(*value, run.EventScope(""))
 	}
 }

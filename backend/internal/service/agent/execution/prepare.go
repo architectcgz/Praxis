@@ -18,7 +18,7 @@ import (
 
 // prepareMainTask 将内存 Task 准入为 Execution，开始时才向 Session 追加用户消息。
 // 调用方已保留执行槽位；返回值的 bool 表示重复请求，失败后的队列与忙闲状态由调度器处理。
-func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, session taskmodel.Session, modelConfig modelapi.Config) (result agentexecution.ExecutionRecord, existing bool, err error) {
+func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, session taskmodel.SessionInfo, owner agentexecution.SessionContext, bindingID string, modelConfig modelapi.Config) (result agentexecution.ExecutionRecord, existing bool, err error) {
 	if modelConfig.ProviderID == "" || modelConfig.ModelID == "" {
 		return result, false, modelconfig.ErrNotConfigured
 	}
@@ -27,17 +27,8 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	inputEntryID := "input:" + requestID.String()
 	previous, err := s.records.FindExecutionByRequest(ctx, session.MainAgentID(), requestID)
 	if err == nil {
-		stored, err := s.history.GetEntry(ctx, session.ID, previous.InputEntryID)
-		if err != nil {
-			return result, false, err
-		}
-		if previous.SourceTaskID != input.ID || stored.Role != role.User || stored.TextContent() != input.Prompt {
+		if previous.SourceTaskID != input.ID || previous.BranchID != input.BranchID {
 			return result, false, errorcode.ErrRequestConflict
-		}
-		if previous.Active() {
-			if err := s.history.AdmitInput(ctx, session.ID, previous.InputEntryID); err != nil {
-				return result, false, err
-			}
 		}
 		return previous, true, nil
 	}
@@ -55,15 +46,20 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	}
 	at := s.clock.Now()
 	executionID := identity.AgentExecutionID(s.ids.New("execution"))
-	if previous, err := s.history.GetEntry(ctx, session.ID, inputEntryID); err == nil {
-		if previous.Role != role.User || previous.RequestID != requestID.String() || previous.SourceTaskID != input.ID.String() || previous.ExecutionID == "" || previous.TextContent() != input.Prompt {
+	entries, err := owner.BranchEntries(ctx, input.BranchID)
+	if err != nil {
+		return result, false, err
+	}
+	for _, previous := range entries {
+		if previous.ID != inputEntryID {
+			continue
+		}
+		if previous.TextContent() != input.Prompt {
 			return result, false, errorcode.ErrRequestConflict
 		}
 		executionID = identity.AgentExecutionID(previous.ExecutionID)
-	} else if !errors.Is(err, errorcode.ErrNotFound) {
-		return result, false, err
 	}
-	stored, _, err := s.history.AppendEntry(ctx, session.ID, sessionentry.ContextEntry{
+	stored, _, err := owner.AppendEntry(ctx, input.BranchID, sessionentry.ContextEntry{
 		ID:           inputEntryID,
 		RequestID:    requestID.String(),
 		SourceTaskID: input.ID.String(),
@@ -81,21 +77,21 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	}
 	result = agentexecution.NewExecutionRecord(executionID, session.ID, session.MainAgentID(), requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID
+	result.BranchID = input.BranchID
 	if err = s.records.SaveExecution(ctx, result); err != nil {
 		return agentexecution.ExecutionRecord{}, false, err
-	}
-	if err := s.history.AdmitInput(ctx, session.ID, stored.ID); err != nil {
-		return result, false, err
 	}
 	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。
 	if s.emitter != nil {
 		s.emitter.Emit(coreevent.Event{
 			Scope: coreevent.Scope{
 				SessionID:   result.SessionID,
+				BranchID:    result.BranchID,
+				BindingID:   bindingID,
 				AgentID:     result.AgentID,
 				ExecutionID: result.ID,
 			},
-			Payload: coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{stored}},
+			Payload: coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}},
 		})
 	}
 	if hookErr := s.hookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{
@@ -105,7 +101,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 			SourceTaskID: result.SourceTaskID,
 			ExecutionID:  result.ID,
 		},
-		Entry: stored,
+		Entry: *stored,
 	}); hookErr != nil {
 		s.logger.Errorf("user message committed hook failed: %v", hookErr)
 	}

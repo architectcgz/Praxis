@@ -4,6 +4,7 @@ import { useSessionCommands } from '../session/useSessionCommands'
 import { useTaskSubmission } from '../task/useTaskSubmission'
 import { useWorkspaceData } from './useWorkspaceData'
 import { useWorkspaceCommands } from './useWorkspaceCommands'
+import { useBranchNavigation } from '../session/useBranchNavigation'
 
 export function useProjectWorkspace() {
     const workspaceData = useWorkspaceData()
@@ -15,6 +16,7 @@ export function useProjectWorkspace() {
         viewRequestRef,
         ...workspace
     } = workspaceData
+    const branchNavigation = useBranchNavigation({ session: workspace.session, applySession: workspace.applySession })
     const sessionCommands = useSessionCommands({
         bridgeAvailable: workspace.bridgeAvailable,
         busy,
@@ -45,6 +47,9 @@ export function useProjectWorkspace() {
         refreshSession: workspace.refreshSession,
         getSelectedAgentID: workspace.getSelectedAgentID,
         sessionID: workspace.session?.id || '',
+        bindingID: workspace.session?.bindingId || '',
+        prepareSubmission: branchNavigation.prepareSubmission,
+        applySession: workspace.applySession,
         setBusy,
         setError,
         setErrorCode,
@@ -53,6 +58,9 @@ export function useProjectWorkspace() {
     })
 
     const { runCommand, commandNotice, clearCommandNotice } = useWorkspaceCommands({
+        createBranch: branchNavigation.createBranch,
+        switchBranch: branchNavigation.switchBranch,
+        showBranches: branchNavigation.showBranches,
         session: workspace.session,
         bridgeAvailable: workspace.bridgeAvailable,
         busy,
@@ -81,6 +89,7 @@ export function useProjectWorkspace() {
         ...workspace,
         ...sessionCommands,
         ...agentCommands,
+        ...branchNavigation,
         canQueue: taskSubmission.canQueue,
         cancelQueuedTask: taskSubmission.cancelQueuedTask,
         submitInput,

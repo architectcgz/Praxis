@@ -8,8 +8,14 @@ type Tool interface {
 	Definition() ToolDefinition
 	// NewArguments 根据工具业务规则提供默认值，返回独立的非 nil 结构体指针，供编排层解码显式输入。
 	NewArguments() any
-	// Prepare 接收已解码且路径已规范化的参数，校验业务规则并绑定项目目录；不得产生副作用或修改共享实例。
-	Prepare(arguments any, projectPath string) (PreparedCall, error)
+	// Prepare 接收已解码且路径已规范化的参数，校验业务规则并绑定文件访问范围；不得产生副作用或修改共享实例。
+	Prepare(arguments any, environment Environment) (PreparedCall, error)
+}
+
+// Environment 是本次工具执行的文件访问范围；临时输出目录只属于当前会话。
+type Environment struct {
+	ProjectPath     string
+	OutputDirectory string
 }
 
 // PathArguments 声明需要按项目目录解析的路径字段，具体解析和校验由调用编排负责。

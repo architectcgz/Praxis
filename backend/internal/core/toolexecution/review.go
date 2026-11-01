@@ -146,7 +146,7 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 	if err != nil {
 		return review, err
 	}
-	history, err := appcontext.NewContextBuilder().Build(request.Content, appcontext.Limits{
+	reviewContext, err := appcontext.NewContextBuilder().Build(request.Content, appcontext.Limits{
 		ContextWindow:   model.ContextWindow,
 		MaxOutputTokens: model.MaxOutputTokens,
 	})
@@ -163,7 +163,7 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 	stream, err := r.Provider.Stream(ctx, providerapi.Request{
 		ExecutionID:     call.ExecutionID,
 		PromptCacheKey:  call.SessionID.String(),
-		Context:         history,
+		Context:         reviewContext,
 		Model:           model,
 		MaxOutputTokens: model.MaxOutputTokens,
 		TurnID:          review.TurnID,
@@ -198,12 +198,7 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 			case providerapi.StreamUsage:
 				if event.Usage != nil && event.Usage.Valid() {
 					r.Emitter.Emit(coreevent.Event{
-						Scope: coreevent.Scope{
-							SessionID:   call.SessionID,
-							AgentID:     call.AgentID,
-							ExecutionID: call.ExecutionID,
-							TurnID:      review.TurnID,
-						},
+						Scope:   t.run.EventScope(review.TurnID),
 						Payload: coreevent.ModelUsage{Usage: *event.Usage},
 					})
 				}

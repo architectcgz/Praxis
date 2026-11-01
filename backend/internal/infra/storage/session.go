@@ -27,14 +27,14 @@ type SessionRepository struct {
 
 var _ repository.Session = SessionRepository{}
 
-func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sessionmodel.Session, error) {
+func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sessionmodel.SessionInfo, error) {
 	return scanSession(r.database.QueryRowContext(ctx, `
 		SELECT id, project_id, title, state, created_at, updated_at, approval_mode
 		FROM sessions WHERE id = ?`, id.String()))
 }
 
 // Create 先建立空历史文件，再提交 SQLite 元数据；数据库提交失败允许留下未被索引的空文件。
-func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Session) error {
+func (r SessionRepository) Create(ctx context.Context, value sessionmodel.SessionInfo) error {
 	if _, err := r.Get(ctx, value.ID); err == nil {
 		return errorcode.ErrRequestConflict
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
@@ -55,16 +55,16 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 	return nil
 }
 
-func (r SessionRepository) List(ctx context.Context, limit int) ([]sessionmodel.Session, error) {
+func (r SessionRepository) List(ctx context.Context, limit int) ([]sessionmodel.SessionInfo, error) {
 	return r.find(ctx, "", "", limit)
 }
-func (r SessionRepository) ListByProject(ctx context.Context, id identity.ProjectID, limit int) ([]sessionmodel.Session, error) {
+func (r SessionRepository) ListByProject(ctx context.Context, id identity.ProjectID, limit int) ([]sessionmodel.SessionInfo, error) {
 	return r.find(ctx, id, "", limit)
 }
-func (r SessionRepository) SearchTitle(ctx context.Context, title string, limit int) ([]sessionmodel.Session, error) {
+func (r SessionRepository) SearchTitle(ctx context.Context, title string, limit int) ([]sessionmodel.SessionInfo, error) {
 	return r.find(ctx, "", strings.ToLower(title), limit)
 }
-func (r SessionRepository) find(ctx context.Context, project identity.ProjectID, title string, limit int) ([]sessionmodel.Session, error) {
+func (r SessionRepository) find(ctx context.Context, project identity.ProjectID, title string, limit int) ([]sessionmodel.SessionInfo, error) {
 	rows, err := r.database.QueryContext(ctx, `
 		SELECT id, project_id, title, state, created_at, updated_at, approval_mode
 		FROM sessions WHERE (? = '' OR project_id = ?)
@@ -73,7 +73,7 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 		return nil, fmt.Errorf("list session metadata: %w", err)
 	}
 	defer rows.Close()
-	values := make([]sessionmodel.Session, 0)
+	values := make([]sessionmodel.SessionInfo, 0)
 	for rows.Next() {
 		value, err := scanSession(rows)
 		if err != nil {
@@ -109,13 +109,13 @@ func (r SessionRepository) UpdateTitle(ctx context.Context, id identity.SessionI
 }
 
 // SetApprovalMode 只更新会话授权配置，不重放历史，也不覆盖并发的标题变更。
-func (r SessionRepository) SetApprovalMode(ctx context.Context, id identity.SessionID, mode *security.ApprovalMode, at time.Time) (sessionmodel.Session, error) {
+func (r SessionRepository) SetApprovalMode(ctx context.Context, id identity.SessionID, mode *security.ApprovalMode, at time.Time) (sessionmodel.SessionInfo, error) {
 	value, err := scanSession(r.database.QueryRowContext(ctx, `
 		UPDATE sessions SET approval_mode = ?, updated_at = ? WHERE id = ?
 		RETURNING id, project_id, title, state, created_at, updated_at, approval_mode`,
 		mode, at.UnixNano(), id.String()))
 	if err != nil {
-		return sessionmodel.Session{}, fmt.Errorf("update session approval mode: %w", err)
+		return sessionmodel.SessionInfo{}, fmt.Errorf("update session approval mode: %w", err)
 	}
 	return value, nil
 }
@@ -178,22 +178,22 @@ func openSessionMetadataDatabase(ctx context.Context, dataRoot string) (*sql.DB,
 	return db, nil
 }
 
-func scanSession(row interface{ Scan(...any) error }) (sessionmodel.Session, error) {
-	var value sessionmodel.Session
+func scanSession(row interface{ Scan(...any) error }) (sessionmodel.SessionInfo, error) {
+	var value sessionmodel.SessionInfo
 	var createdAt, updatedAt int64
 	var mode sql.NullString
 	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.State, &createdAt, &updatedAt, &mode); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return sessionmodel.Session{}, errorcode.ErrNotFound
+			return sessionmodel.SessionInfo{}, errorcode.ErrNotFound
 		}
-		return sessionmodel.Session{}, fmt.Errorf("read session metadata: %w", err)
+		return sessionmodel.SessionInfo{}, fmt.Errorf("read session metadata: %w", err)
 	}
 	value.CreatedAt, value.UpdatedAt = time.Unix(0, createdAt).UTC(), time.Unix(0, updatedAt).UTC()
 	if mode.Valid {
 		value.ApprovalMode = new(security.ApprovalMode(mode.String))
 	}
 	if err := value.Validate(); err != nil {
-		return sessionmodel.Session{}, err
+		return sessionmodel.SessionInfo{}, err
 	}
 	return value, nil
 }

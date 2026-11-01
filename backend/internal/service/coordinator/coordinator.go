@@ -6,7 +6,9 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	sessionmodel "praxis/internal/core/session"
 	executionmodel "praxis/internal/core/toolexecution"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
@@ -42,15 +44,20 @@ type Coordinator struct {
 	transitionTimeout time.Duration
 
 	// 领取队首与标记忙碌在同一临界区完成；准备、存储和模型调用都在锁外执行。
-	mu         sync.Mutex
-	closed     bool
-	executions map[identity.AgentID]*activeExecution
-	running    sync.WaitGroup
+	mu            sync.Mutex
+	closed        bool
+	executions    map[executionKey]*activeExecution
+	bindings      map[string]*sessionBinding
+	branchOwners  map[branchKey]string
+	branchResults map[string]string
+	running       sync.WaitGroup
 }
 
 // activeExecution 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
 type activeExecution struct {
 	sessionID   identity.SessionID
+	branchID    identity.BranchID
+	bindingID   string
 	run         *agentexecution.Run
 	executionID identity.AgentExecutionID
 	ctx         context.Context
@@ -81,7 +88,10 @@ func NewCoordinator(config Config) *Coordinator {
 		sessionRecords:    config.SessionRecords,
 		projects:          config.Projects,
 		loop:              config.Loop,
-		executions:        make(map[identity.AgentID]*activeExecution),
+		executions:        make(map[executionKey]*activeExecution),
+		bindings:          make(map[string]*sessionBinding),
+		branchOwners:      make(map[branchKey]string),
+		branchResults:     make(map[string]string),
 		operations:        config.Operations,
 		hookDispatcher:    config.HookDispatcher,
 		logger:            config.Logger,
@@ -108,6 +118,22 @@ func (r *Coordinator) launchLocked(run *agentexecution.Run, active *activeExecut
 	active.run = run
 	active.executionID = run.Snapshot().ID
 	close(active.ready)
+	if run.Main() {
+		binding := r.bindings[active.bindingID]
+		r.running.Go(func() {
+			select {
+			case <-binding.session.Faulted():
+				r.mu.Lock()
+				for _, other := range r.executions {
+					if other.sessionID == active.sessionID {
+						other.cancel(errorcode.ErrLogUnavailable)
+					}
+				}
+				r.mu.Unlock()
+			case <-active.ctx.Done():
+			}
+		})
+	}
 	r.running.Go(func() { r.run(active.ctx, run, active) })
 	return nil
 }
@@ -125,6 +151,14 @@ func (r *Coordinator) Close(ctx context.Context) error {
 	go func() { r.running.Wait(); close(done) }()
 	select {
 	case <-done:
+		r.mu.Lock()
+		for _, binding := range r.bindings {
+			binding.queue.Clear()
+		}
+		clear(r.bindings)
+		clear(r.branchOwners)
+		clear(r.branchResults)
+		r.mu.Unlock()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -133,4 +167,21 @@ func (r *Coordinator) Close(ctx context.Context) error {
 
 func (r *Coordinator) transitionContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), r.transitionTimeout)
+}
+
+type executionKey struct {
+	agentID  identity.AgentID
+	branchID identity.BranchID
+}
+type branchKey struct {
+	sessionID identity.SessionID
+	branchID  identity.BranchID
+}
+type sessionBinding struct {
+	id        string
+	sessionID identity.SessionID
+	branchID  identity.BranchID
+	session   *sessionservice.Session
+	queue     sessionmodel.TaskQueue
+	closing   bool
 }

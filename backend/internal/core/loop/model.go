@@ -68,6 +68,12 @@ func (r *Runner) callModel(
 		return response, NewFailure(FailureContract, err)
 	}
 	request = modified
+	if requestKind == hook.ModelRequestIteration {
+		request, err = remindContextBudget(request)
+		if err != nil {
+			return response, NewFailure(FailureContract, err)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return response, err
 	}
@@ -207,7 +213,7 @@ func collectModelResponse(
 						return response, errors.New("provider emitted inconsistent output ordering")
 					}
 				}
-				// 输出块按协议顺序重放；工具事件可在流终态才发送，不改变块的历史位置。
+				// 输出块按协议顺序重放；工具事件可在流终态才发送，不改变它在 Entry 中的位置。
 				slices.SortStableFunc(response.events, func(a, b providerapi.Event) int {
 					if a.OutputIndex == nil || b.OutputIndex == nil {
 						return 0

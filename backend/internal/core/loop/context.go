@@ -6,7 +6,7 @@ import (
 	"praxis/internal/core/hook"
 )
 
-// buildContext 只变换压缩完成后的请求副本，不把 Hook 输出交给历史或 Context 保存流程。
+// buildContext 只变换本轮请求副本，不把 Hook 输出回写 Run Context 或 Session Entry。
 func (r *Runner) buildContext(ctx context.Context, input Input, base appcontext.ModelContext) (appcontext.ModelContext, error) {
 	value := base.Clone()
 	identity := executionIdentity(input, "")

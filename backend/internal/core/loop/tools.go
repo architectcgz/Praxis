@@ -35,10 +35,10 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 			if _, ok := errors.AsType[*hook.Error](err); ok {
 				return results, NewFailure(FailureInternal, err)
 			}
-			return results, deps.History.EntryFailure(err)
+			return results, deps.Entries.EntryFailure(err)
 		}
 		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		receipt, inserted, err := deps.History.AppendEntry(commitCtx, call.ResultEntry(outcome.ToolResult))
+		receipt, inserted, err := deps.Entries.AppendEntry(commitCtx, call.ResultEntry(outcome.ToolResult))
 		cancel()
 		if err != nil {
 			return results, err
@@ -59,7 +59,7 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 			}
 		}
 		block := receipt.Content[0]
-		r.emitToolResult(executionInput.SessionID, executionInput.AgentID, executionInput.ID, turnID, appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
+		r.emitToolResult(executionInput, turnID, appcontext.NewToolResultBlock(block.CallID, block.Name, block.Text, block.IsError))
 		results = append(results, receipt)
 		if err := ctx.Err(); err != nil {
 			return results, err
@@ -68,7 +68,7 @@ func (r *Runner) runToolCalls(ctx context.Context, executionInput Input, deps Ex
 	return results, nil
 }
 
-// interruptToolCalls 只收尾本轮尚未返回回执的调用，不扫描整份历史，也不再执行工具。
+// interruptToolCalls 只收尾本轮尚未返回回执的调用，不扫描完整 Entry 集合，也不再执行工具。
 // 使用独立提交上下文处理取消后的消息收尾；中断回执不推断工具是否已产生副作用。
 func (r *Runner) interruptToolCalls(ctx context.Context, input Input, deps ExecutionDependencies, calls []sessionentry.ToolCall) ([]sessionentry.ContextEntry, error) {
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -76,13 +76,13 @@ func (r *Runner) interruptToolCalls(ctx context.Context, input Input, deps Execu
 	results := make([]sessionentry.ContextEntry, 0, len(calls))
 	for _, call := range calls {
 		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available."))
-		stored, inserted, err := deps.History.AppendEntry(commitCtx, entry)
+		stored, inserted, err := deps.Entries.AppendEntry(commitCtx, entry)
 		if err != nil {
 			return results, err
 		}
 		results = append(results, stored)
 		if inserted {
-			r.emitToolResult(input.SessionID, input.AgentID, input.ID, call.TurnID, stored.Content[0])
+			r.emitToolResult(input, call.TurnID, stored.Content[0])
 		}
 	}
 	return results, nil

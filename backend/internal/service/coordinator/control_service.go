@@ -36,9 +36,12 @@ func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID
 	applied, err := s.cancelExecution(ctx, agentID, executionID, cause)
 	result.Applied = applied
 	if err == nil && applied {
-		if run := s.ActiveRun(agentID); run != nil {
-			run.Agent.ApplyControl(executionID, state, time.Now())
+		s.mu.Lock()
+		active := s.activeExecutionLocked(agentID, executionID)
+		if active != nil && active.run != nil {
+			active.run.Agent.ApplyControl(executionID, state, time.Now())
 		}
+		s.mu.Unlock()
 	}
 	return result, err
 }

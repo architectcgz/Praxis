@@ -176,7 +176,7 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
         }
     }, [busy, models.length, reasoningAvailable])
 
-    const sendDisabled = busy || !input.trim() || (active && !canQueue)
+    const sendDisabled = busy || !input.trim()
 
     const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
         if (slash.handleKeyDown(event) || event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return

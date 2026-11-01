@@ -2,6 +2,8 @@ package bootstrap
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"praxis/internal/clock"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -10,6 +12,7 @@ import (
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/infra/providers"
+	tooloutput "praxis/internal/infra/tools/output"
 	executionservice "praxis/internal/service/agent/execution"
 	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
@@ -26,7 +29,6 @@ func buildCoordinator(resources storageResources, config *configuration, session
 		Sessions:       resources.storage.Sessions,
 		Records:        sessions,
 		UsageRecords:   sessions,
-		History:        sessions,
 		Definitions:    config.agents,
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
@@ -70,6 +72,7 @@ func buildCoordinator(resources storageResources, config *configuration, session
 		Emitter:        emitter,
 		Clock:          clock.UTCClock{},
 		Logf:           resources.logger.Errorf,
+		Outputs:        tooloutput.Files{Root: filepath.Join(os.TempDir(), "praxis", "tool-output")},
 	})
 
 	runnerDeps := loop.Dependencies{

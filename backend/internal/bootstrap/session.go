@@ -16,7 +16,7 @@ func buildSessions(store *storage.Store, hooks *hook.Dispatcher, configMu *sync.
 		HookDispatcher: hooks,
 		Projects:       store.Projects,
 		Sessions:       store.Sessions,
-		HistoryLog:     store.Logs,
+		Log:            store.Logs,
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
 	})

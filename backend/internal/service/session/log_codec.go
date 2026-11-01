@@ -4,32 +4,24 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"time"
 )
 
 type storedEvent struct {
-	Sequence   uint64          `json:"seq"`
-	ID         string          `json:"event_id"`
 	Type       string          `json:"type"`
 	Collection string          `json:"collection"`
 	Key        string          `json:"key"`
 	CreatedAt  time.Time       `json:"created_at"`
-	Payload    json.RawMessage `json:"payload,omitempty"`
+	Payload    json.RawMessage `json:"payload"`
 }
 
-func newEvent(sequence uint64, typ, collection, key string, value any) (storedEvent, error) {
-	if sequence == 0 {
-		return storedEvent{}, errors.New("storage sequence exhausted")
-	}
+func newEvent(typ, collection, key string, value any) (storedEvent, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return storedEvent{}, err
 	}
 	return storedEvent{
-		Sequence:   sequence,
-		ID:         fmt.Sprintf("event:%d", sequence),
 		Type:       typ,
 		Collection: collection,
 		Key:        key,

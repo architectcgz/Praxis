@@ -18,7 +18,7 @@ func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEnt
 }
 
 // pairToolResults 把回执放到对应调用之后，恢复补写不打断工具交互的连续性。
-// 只调整上下文顺序，不改写原始历史；使用 Execution 和 call ID 避免跨任务误配同名调用。
+// 只调整上下文顺序，不修改原始 Entry；使用 Execution 和 call ID 避免跨任务误配同名调用。
 func pairToolResults(entries []sessionentry.ContextEntry) []sessionentry.ContextEntry {
 	type callKey struct{ executionID, callID string }
 	results := make(map[callKey]sessionentry.ContextEntry)

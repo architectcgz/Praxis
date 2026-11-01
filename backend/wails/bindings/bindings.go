@@ -102,6 +102,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	b.host.EmitEvent(agentEventName, dto.AgentEvent{
 		Kind:        string(event.Kind()),
 		SessionID:   event.Scope.SessionID.String(),
+		BranchID:    event.Scope.BranchID.String(),
 		AgentID:     event.Scope.AgentID.String(),
 		ExecutionID: event.Scope.ExecutionID.String(),
 		TurnID:      event.Scope.TurnID.String(),

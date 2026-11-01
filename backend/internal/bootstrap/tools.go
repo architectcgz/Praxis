@@ -17,7 +17,7 @@ type builtinTool[Arguments any] struct {
 	definition      func() tool.ToolDefinition
 	arguments       func() Arguments
 	prepare         func(Arguments) (Arguments, error)
-	call            func(context.Context, Arguments, string) (tool.ToolResult, error)
+	call            func(context.Context, Arguments, tool.Environment) (tool.ToolResult, error)
 	approvalCommand func(Arguments) string
 }
 
@@ -25,7 +25,7 @@ func (t builtinTool[Arguments]) Definition() tool.ToolDefinition { return t.defi
 
 func (t builtinTool[Arguments]) NewArguments() any { return new(t.arguments()) }
 
-func (t builtinTool[Arguments]) Prepare(arguments any, projectPath string) (tool.PreparedCall, error) {
+func (t builtinTool[Arguments]) Prepare(arguments any, environment tool.Environment) (tool.PreparedCall, error) {
 	args, ok := arguments.(*Arguments)
 	if !ok {
 		return tool.PreparedCall{}, errors.New("tool argument type does not match the registered arguments")
@@ -41,9 +41,9 @@ func (t builtinTool[Arguments]) Prepare(arguments any, projectPath string) (tool
 	return tool.PreparedCall{
 		Arguments: prepared,
 		Command:   command,
-		// 本次参数和项目目录随调用存续，不回写注册表中的共享工具。
+		// 本次参数和文件访问范围随调用存续，不回写注册表中的共享工具。
 		Call: func(ctx context.Context) (tool.ToolResult, error) {
-			return t.call(ctx, prepared, projectPath)
+			return t.call(ctx, prepared, environment)
 		},
 	}, nil
 }

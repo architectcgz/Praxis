@@ -18,8 +18,18 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 	if choice.ModelID == "" {
 		return nil
 	}
-	if err := s.scheduleSession(ctx, sessionID, true); err != nil {
-		s.logger.Errorf("activate queued input after model selection session_id=%s error=%v", sessionID, err)
+	s.mu.Lock()
+	var ids []string
+	for id, binding := range s.bindings {
+		if binding.sessionID == sessionID && !binding.closing {
+			ids = append(ids, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, id := range ids {
+		if err := s.scheduleBinding(ctx, id, true); err != nil {
+			s.logger.Errorf("activate queued input: %v", err)
+		}
 	}
 	return nil
 }

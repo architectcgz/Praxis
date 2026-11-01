@@ -14,7 +14,7 @@ import (
 )
 
 // loopExecution 绑定一次 Loop 调用的执行归属；生命周期与该次调用相同，不在共享 Service 中保存。
-// 主执行通过 Session 读写历史；Run 仅保留执行证据，Loop 取得独立模型投影。
+// 主执行先向 Session 提交，再将同一 Entry 引用交给 Run 的 Context 和执行证据。
 type loopExecution struct {
 	service *Service
 	run     *agentexecution.Run
@@ -24,19 +24,19 @@ func (e *loopExecution) NextContext(ctx context.Context) (appcontext.Content, er
 	return e.service.contextContent(ctx, e.run)
 }
 
-// AppendEntry 先向主会话追加条目，再记录本次执行证据；子执行只写入私有历史。
+// AppendEntry 先向主会话追加条目，再记录本次执行证据；子执行只向本次 Run 接纳条目。
 // 提交后的 Hook 不改变已接纳结果，重复条目不重复触发通知。
 func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	inserted := false
+	entry := new(value)
 	if e.run.Main() {
-		task := e.run.Snapshot()
-		stored, added, err := e.service.history.AppendEntry(ctx, task.SessionID, value)
+		stored, added, err := e.run.Session.AppendEntry(ctx, e.run.Snapshot().BranchID, value)
 		if err != nil {
 			return sessionentry.ContextEntry{}, false, e.EntryFailure(err)
 		}
-		value, inserted = stored, added
+		entry, inserted = stored, added
 	}
-	accepted, added, err := e.run.Accept(value)
+	accepted, added, err := e.run.Accept(entry)
 	if err != nil {
 		return sessionentry.ContextEntry{}, false, e.EntryFailure(err)
 	}
@@ -49,29 +49,6 @@ func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.Cont
 	return accepted, inserted, nil
 }
 
-// ReplaceContext 在摘要已接纳后直接保存压缩结果，不进行前后差异合并。
-func (e *loopExecution) ReplaceContext(ctx context.Context, entries []sessionentry.ContextEntry) error {
-	task := e.run.Snapshot()
-	values := make([]sessionentry.ContextEntry, 0, len(entries))
-	for _, entry := range entries {
-		// 当前任务输入的保护只属于本轮，不能让它在后续任务中永久不可压缩。
-		if entry.ID == task.InputEntryID {
-			entry.Protected = false
-		}
-		values = append(values, entry)
-	}
-	var err error
-	if e.run.Main() {
-		err = e.service.history.ReplaceContext(ctx, task.SessionID, values)
-	} else {
-		err = e.run.ReplaceContext(values)
-	}
-	if err != nil {
-		return e.EntryFailure(err)
-	}
-	return nil
-}
-
 func (e *loopExecution) PublishEntries(turnID identity.TurnID, entries []sessionentry.ContextEntry) {
 	if len(entries) == 0 || e.service.emitter == nil {
 		return
@@ -80,6 +57,8 @@ func (e *loopExecution) PublishEntries(turnID identity.TurnID, entries []session
 	e.service.emitter.Emit(coreevent.Event{
 		Scope: coreevent.Scope{
 			SessionID:   task.SessionID,
+			BranchID:    task.BranchID,
+			BindingID:   e.run.BindingID,
 			AgentID:     task.AgentID,
 			ExecutionID: task.ID,
 			TurnID:      turnID,

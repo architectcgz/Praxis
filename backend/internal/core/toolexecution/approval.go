@@ -52,7 +52,7 @@ type Approval struct {
 	Review    RiskReview
 }
 
-func (e *Executor) ListApprovals(ctx context.Context, agentID identity.AgentID) ([]Approval, error) {
+func (e *Executor) ListApprovals(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID) ([]Approval, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (e *Executor) ListApprovals(ctx context.Context, agentID identity.AgentID) 
 	defer e.mu.Unlock()
 	result := make([]Approval, 0)
 	for _, callState := range e.active {
-		if callState.call.AgentID != agentID || callState.stopped || callState.request == nil || callState.decision != nil || callState.tool != nil {
+		if callState.call.AgentID != agentID || callState.owner.BranchID != branchID || callState.stopped || callState.request == nil || callState.decision != nil || callState.tool != nil {
 			continue
 		}
 		value := Approval{

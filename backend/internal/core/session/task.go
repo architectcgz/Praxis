@@ -12,6 +12,7 @@ const MaxInputBytes = 32 * 1024
 type Task struct {
 	ID        identity.TaskID
 	SessionID identity.SessionID
+	BranchID  identity.BranchID
 	Prompt    string
 	Sequence  uint64
 	CreatedAt time.Time

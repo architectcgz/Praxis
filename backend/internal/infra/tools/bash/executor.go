@@ -1,7 +1,6 @@
 package bash
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,40 +10,23 @@ import (
 	"path/filepath"
 	"praxis/internal/core/tool"
 	bashtool "praxis/internal/core/tool/bash"
+	tooloutput "praxis/internal/infra/tools/output"
 	"praxis/internal/utils/pathutil"
 	"runtime"
 	"time"
 )
 
 type output struct {
-	Output    string `json:"output"`
-	ExitCode  *int   `json:"exitCode"`
-	TimedOut  bool   `json:"timedOut,omitzero"`
-	Truncated bool   `json:"truncated,omitzero"`
+	Output     string `json:"output,omitempty"`
+	OutputFile string `json:"outputFile,omitempty"`
+	Size       int64  `json:"size,omitzero"`
+	Message    string `json:"message,omitempty"`
+	ExitCode   *int   `json:"exitCode"`
+	TimedOut   bool   `json:"timedOut,omitzero"`
 }
 
-type outputWriter struct {
-	buffer    bytes.Buffer
-	truncated bool
-}
-
-func (w *outputWriter) Write(value []byte) (int, error) {
-	remaining := tool.MaxInlineResultBytes - w.buffer.Len()
-	if remaining <= 0 {
-		w.truncated = true
-		return len(value), nil
-	}
-	if len(value) > remaining {
-		_, _ = w.buffer.Write(value[:remaining])
-		w.truncated = true
-		return len(value), nil
-	}
-	_, _ = w.buffer.Write(value)
-	return len(value), nil
-}
-
-// Call 在项目目录内运行 Bash，并将 stdout/stderr 合并为有界结果。
-func Call(ctx context.Context, toolArguments bashtool.Arguments, projectPath string) (tool.ToolResult, error) {
+// Call 在项目目录内运行 Bash，超过内联限制的 stdout/stderr 合并后完整落盘。
+func Call(ctx context.Context, toolArguments bashtool.Arguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -52,7 +34,7 @@ func Call(ctx context.Context, toolArguments bashtool.Arguments, projectPath str
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
-	if !projectDirectory(toolArguments.Path, projectPath) {
+	if !projectDirectory(toolArguments.Path, environment.ProjectPath) {
 		return tool.ToolResult{}, errors.New("bash working directory is outside the project")
 	}
 
@@ -62,17 +44,27 @@ func Call(ctx context.Context, toolArguments bashtool.Arguments, projectPath str
 	command := exec.CommandContext(runContext, shell, "--noprofile", "--norc", "-c", toolArguments.Command)
 	command.Dir = toolArguments.Path
 	command.WaitDelay = time.Second
-	var outputBuffer outputWriter
-	command.Stdout = &outputBuffer
-	command.Stderr = &outputBuffer
+	outputBuffer := tooloutput.NewWriter(environment.OutputDirectory)
+	command.Stdout = outputBuffer
+	command.Stderr = outputBuffer
 	err = command.Run()
+	content, file, saveErr := outputBuffer.Finish()
+	if saveErr != nil {
+		result := tool.NewToolError("tool_output_save_failed", "The command has already run, but saving its output failed: "+saveErr.Error()+". Do not rerun the command solely to recover its output.")
+		result.SideEffect = true
+		return result, nil
+	}
 	if ctx.Err() != nil {
 		return tool.ToolResult{}, ctx.Err()
 	}
 	toolOutput := output{
-		Output:    outputBuffer.buffer.String(),
-		TimedOut:  errors.Is(runContext.Err(), context.DeadlineExceeded),
-		Truncated: outputBuffer.truncated,
+		Output:     content,
+		OutputFile: file.Path,
+		Size:       file.Size,
+		TimedOut:   errors.Is(runContext.Err(), context.DeadlineExceeded),
+	}
+	if file.Path != "" {
+		toolOutput.Message = "完整输出已保存到临时文件，请使用 read_file 按 offset 和 limit 分段读取；临时文件可能被系统清理。"
 	}
 	if !toolOutput.TimedOut {
 		if err != nil {
@@ -85,11 +77,13 @@ func Call(ctx context.Context, toolArguments bashtool.Arguments, projectPath str
 			toolOutput.ExitCode = new(0)
 		}
 	}
-	encoded, truncated, err := encodeOutput(toolOutput)
+	encoded, err := encodeOutput(toolOutput, environment.OutputDirectory)
 	if err != nil {
-		return tool.ToolResult{}, err
+		result := tool.NewToolError("tool_output_save_failed", "The command has already run, but saving its result failed: "+err.Error()+". Do not rerun the command solely to recover its output.")
+		result.SideEffect = true
+		return result, nil
 	}
-	result := tool.NewToolSuccess(string(encoded), truncated)
+	result := tool.NewToolSuccess(string(encoded), false)
 	result.SideEffect = true
 	return result, nil
 }
@@ -109,38 +103,23 @@ func resolveShell() (string, error) {
 	return "", errors.New("bash executable is not available")
 }
 
-func encodeOutput(toolOutput output) ([]byte, bool, error) {
+func encodeOutput(toolOutput output, directory string) ([]byte, error) {
 	encoded, err := json.Marshal(toolOutput)
 	if err != nil {
-		return nil, false, errors.New("bash could not encode its result")
+		return nil, err
 	}
 	if len(encoded) <= tool.MaxInlineResultBytes {
-		return encoded, toolOutput.Truncated, nil
+		return encoded, nil
 	}
-
-	raw := []byte(toolOutput.Output)
-	low, high := 0, len(raw)
-	best := []byte(nil)
-	for low <= high {
-		middle := low + (high-low)/2
-		candidate := toolOutput
-		candidate.Output = string(raw[:middle])
-		candidate.Truncated = true
-		encodedCandidate, marshalErr := json.Marshal(candidate)
-		if marshalErr != nil {
-			return nil, false, errors.New("bash could not encode its bounded result")
-		}
-		if len(encodedCandidate) <= tool.MaxInlineResultBytes {
-			best = encodedCandidate
-			low = middle + 1
-		} else {
-			high = middle - 1
-		}
+	// JSON 转义也可能使小正文超过内联上限，此时仍保存完整正文而不是截断。
+	file, err := tooloutput.Save(directory, toolOutput.Output)
+	if err != nil {
+		return nil, err
 	}
-	if best == nil {
-		return nil, false, errors.New("bash result metadata exceeds the size limit")
-	}
-	return best, true, nil
+	toolOutput.Output = ""
+	toolOutput.OutputFile, toolOutput.Size = file.Path, file.Size
+	toolOutput.Message = "完整输出已保存到临时文件，请使用 read_file 按 offset 和 limit 分段读取；临时文件可能被系统清理。"
+	return json.Marshal(toolOutput)
 }
 
 // projectDirectory 拒绝项目外目录和符号链接路径；这不是 Bash 进程隔离。

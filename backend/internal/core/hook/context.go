@@ -5,8 +5,8 @@ import (
 	appcontext "praxis/internal/core/context"
 )
 
-// ContextBuild 在基础上下文压缩保存后、纯 ContextBuilder 构建前提供本次请求副本。
-// 变换结果不回写历史或持久化 Context；每轮都从基础上下文重新变换。
+// ContextBuild 在纯 ContextBuilder 构建前提供本次请求副本。
+// 变换结果不回写历史或 Run Context；每轮都从基础上下文重新变换。
 type ContextBuild struct {
 	Identity
 	Content appcontext.Content

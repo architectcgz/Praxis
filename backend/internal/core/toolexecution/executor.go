@@ -15,6 +15,7 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"strings"
 	"sync"
 )
@@ -27,6 +28,13 @@ type ExecutorDependencies struct {
 	Emitter        *coreevent.Emitter
 	Clock          clock.Clock
 	Logf           func(string, ...any)
+	Outputs        OutputFiles
+}
+
+// OutputFiles 是工具结果的文件边界；临时目录解析与实际落盘由 Infra 提供。
+type OutputFiles interface {
+	Directory(identity.SessionID) string
+	Bound(identity.SessionID, tool.ToolResult) (tool.ToolResult, error)
 }
 
 // Executor 只定位活跃 ToolCall；调用退出后立即释放审批和工具控制状态。
@@ -137,7 +145,10 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 		}
 		*path = filepath.Clean(*path)
 	}
-	prepared, err := t.Prepare(arguments, tools.projectPath)
+	prepared, err := t.Prepare(arguments, tool.Environment{
+		ProjectPath:     tools.projectPath,
+		OutputDirectory: s.deps.Outputs.Directory(owner.SessionID),
+	})
 	if err != nil {
 		return callError("invalid_tool_call", err.Error()), nil
 	}
@@ -215,6 +226,15 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 			} else if value.ErrorClass == "" {
 				value.ErrorClass = "tool_execution_failed"
 			}
+		}
+		bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value)
+		if outputErr != nil {
+			sideEffect := value.SideEffect
+			value = tool.NewToolError("tool_output_save_failed", "The tool has already run, but saving its output failed: "+outputErr.Error()+". Do not rerun the operation solely to recover its output.")
+			value.SideEffect = sideEffect
+			result.Err = errors.Join(result.Err, outputErr)
+		} else {
+			value = bounded
 		}
 		return CallResult{
 			ToolResult:  value,

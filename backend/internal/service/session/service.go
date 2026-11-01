@@ -23,29 +23,28 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
 	Sessions       repository.Session
-	HistoryLog     repository.SessionLog
+	Log            repository.SessionLog
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
 
-// Service 持有主会话历史、Context、模型选择和输入队列，不持有 Agent 或 Execution 运行实例。
+// Service 打开并登记会话；页面的分支选择与输入队列由 Coordinator 持有。
 type Service struct {
 	configMu       *sync.RWMutex
 	modelConfigs   ModelConfigResolver
 	hookDispatcher *hook.Dispatcher
 	projects       repository.Project
 	sessions       repository.Session
-	historyLog     repository.SessionLog
+	log            repository.SessionLog
 	clock          clock.Clock
 	ids            identity.IDGenerator
 
 	selectionMu     sync.RWMutex
 	modelSelections map[identity.SessionID]sessionmodel.ModelSelection
-	taskQueues      map[identity.SessionID]*sessionmodel.TaskQueue
 
-	// 注册表锁只负责定位会话，加载和读写由各会话自己的锁协调。
-	historiesMu sync.Mutex
-	histories   map[identity.SessionID]*sessionHistory
+	// 注册表只保护会话的创建、查找和释放，不覆盖 Entry 操作。
+	openedMu sync.Mutex
+	opened   map[identity.SessionID]*Session
 
 	createdSessionsMu sync.Mutex
 	createdSessions   map[identity.SessionID]struct{}
@@ -60,7 +59,7 @@ type CreateInput struct {
 }
 
 type CreateResult struct {
-	Session sessionmodel.Session
+	Session sessionmodel.SessionInfo
 }
 
 func NewService(deps Dependencies) *Service {
@@ -68,45 +67,28 @@ func NewService(deps Dependencies) *Service {
 		configMu:        deps.ConfigMu,
 		modelConfigs:    deps.ModelConfigs,
 		modelSelections: make(map[identity.SessionID]sessionmodel.ModelSelection),
-		taskQueues:      make(map[identity.SessionID]*sessionmodel.TaskQueue),
-		histories:       make(map[identity.SessionID]*sessionHistory),
+		opened:          make(map[identity.SessionID]*Session),
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		sessions:        deps.Sessions,
-		historyLog:      deps.HistoryLog,
+		log:             deps.Log,
 		clock:           deps.Clock,
 		ids:             deps.IDs,
 		createdSessions: make(map[identity.SessionID]struct{}),
 	}
 }
 
-// SessionView 不包含运行实例；Agent 展示由执行查询服务投影。
-type SessionView struct {
-	Session sessionmodel.Session
-	Tasks   []sessionmodel.Task
-}
-
-func (s *Service) ListSessionsByProject(ctx context.Context, projectID identity.ProjectID, limit int) ([]sessionmodel.Session, error) {
+func (s *Service) ListSessionsByProject(ctx context.Context, projectID identity.ProjectID, limit int) ([]sessionmodel.SessionInfo, error) {
 	return s.sessions.ListByProject(ctx, projectID, limit)
 }
 
-func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.Session, error) {
+func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.SessionInfo, error) {
 	return s.sessions.List(ctx, limit)
 }
 
-// GetSessionView 打开会话并恢复 Context，不恢复旧 Execution 或创建 Agent。
-func (s *Service) GetSessionView(ctx context.Context, sessionID identity.SessionID, limit int) (SessionView, error) {
-	session, err := s.sessions.Get(ctx, sessionID)
-	if err != nil {
-		return SessionView{}, err
-	}
-	if _, err := s.ContextEntries(ctx, sessionID); err != nil {
-		return SessionView{}, err
-	}
-	return SessionView{
-		Session: session,
-		Tasks:   s.ListTasks(sessionID, limit),
-	}, nil
+// GetSessionInfo 是纯元数据查询，不打开页面或加载历史。
+func (s *Service) GetSessionInfo(ctx context.Context, sessionID identity.SessionID) (sessionmodel.SessionInfo, error) {
+	return s.sessions.Get(ctx, sessionID)
 }
 
 // CreateSession 保存元数据并建立空历史；重复请求复用会话，不创建运行实例。
@@ -134,6 +116,9 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 		if existing.ProjectID != params.ProjectID {
 			return CreateResult{}, errorcode.ErrRequestConflict
 		}
+		if _, err := s.openSession(ctx, params.SessionID); err != nil {
+			return CreateResult{}, err
+		}
 		return CreateResult{Session: existing}, nil
 	}
 	if !errors.Is(err, errorcode.ErrNotFound) {
@@ -146,11 +131,14 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 	if project.State != projectmodel.ProjectActive {
 		return CreateResult{}, projectservice.ErrProjectInvalid
 	}
-	session := sessionmodel.NewSession(params.SessionID, project.ID, s.clock.Now())
+	session := sessionmodel.NewSessionInfo(params.SessionID, project.ID, s.clock.Now())
 	if err := s.sessions.Create(ctx, session); err != nil {
 		return CreateResult{}, err
 	}
 	s.createdSessions[params.SessionID] = struct{}{}
+	if _, err := s.openSession(ctx, params.SessionID); err != nil {
+		return CreateResult{}, err
+	}
 	return CreateResult{Session: session}, nil
 }
 
@@ -172,49 +160,38 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 		}
 		delete(s.createdSessions, sessionID)
 	}
-	s.selectionMu.Lock()
-	for _, queue := range s.taskQueues {
-		queue.Clear()
+	s.openedMu.Lock()
+	for _, owner := range s.opened {
+		owner.close()
 	}
-	clear(s.taskQueues)
-	s.selectionMu.Unlock()
-	s.historiesMu.Lock()
-	clear(s.histories)
-	s.historiesMu.Unlock()
+	clear(s.opened)
+	s.openedMu.Unlock()
 	return cleanupErr
 }
 
 func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
-	h := s.historyFor(sessionID)
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	s.openedMu.Lock()
+	defer s.openedMu.Unlock()
+	owner := s.opened[sessionID]
 	if onlyEmpty {
-		if h.state == nil {
-			if err := s.loadHistory(ctx, sessionID, h); err != nil {
-				if errors.Is(err, errorcode.ErrNotFound) {
-					return nil
-				}
-				return err
-			}
+		if owner == nil {
+			return nil
 		}
-		if len(h.state.entries) != 0 {
+		empty := false
+		if err := owner.use(ctx, func() error { empty = len(owner.model.Entries) == 0; return nil }); err != nil || !empty {
 			return nil
 		}
 	}
 	if err := s.sessions.Delete(ctx, sessionID); err != nil {
 		return err
 	}
-	h.state, h.context = nil, nil
-	s.historiesMu.Lock()
-	delete(s.histories, sessionID)
-	s.historiesMu.Unlock()
-	delete(s.modelSelections, sessionID)
-	if queue := s.taskQueues[sessionID]; queue != nil {
-		queue.Clear()
-		delete(s.taskQueues, sessionID)
+	if owner != nil {
+		owner.close()
 	}
+	delete(s.opened, sessionID)
+	delete(s.modelSelections, sessionID)
 	return nil
 }
 

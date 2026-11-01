@@ -69,6 +69,8 @@ function readableApiError(code: string) {
             return '此操作需要批准后才能继续。'
         case API_ERROR_CODES.executionStorage:
             return '执行状态保存失败。'
+        case API_ERROR_CODES.sessionLogUnavailable:
+            return '会话日志写入失败，已停止该会话。请重启应用后再继续，勿重复执行工具。'
         case API_ERROR_CODES.executionProvider:
             return '模型 Provider 无法完成请求。'
         case API_ERROR_CODES.executionTool:

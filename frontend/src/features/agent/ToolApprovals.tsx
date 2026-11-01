@@ -15,7 +15,7 @@ type ApprovalState = {
 const ToolApprovalsContext = createContext<ApprovalState | null>(null)
 
 /** 会话内只查询和订阅一次审批状态，由审批闸口消费；重连后仍可审核同一个调用。 */
-export function ToolApprovalsProvider({ agentId, children }: { agentId: string; children: ReactNode }) {
+export function ToolApprovalsProvider({ agentId, sessionId, branchId, children }: { agentId: string; sessionId: string; branchId: string; children: ReactNode }) {
     const [pendingApprovals, setPendingApprovals] = useState<ToolApproval[]>([])
     const [busy, setBusy] = useState('')
     const [error, setError] = useState('')
@@ -23,7 +23,7 @@ export function ToolApprovalsProvider({ agentId, children }: { agentId: string; 
     const reload = useCallback(async () => {
         const current = ++requestGeneration.current
         try {
-            const values = await listToolApprovals(agentId)
+            const values = await listToolApprovals(sessionId, branchId, agentId)
             if (current === requestGeneration.current) {
                 setPendingApprovals(values)
                 setError('')
@@ -31,14 +31,14 @@ export function ToolApprovalsProvider({ agentId, children }: { agentId: string; 
         } catch (err) {
             if (current === requestGeneration.current) setError(readableError(err))
         }
-    }, [agentId])
+    }, [agentId, sessionId, branchId])
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents((event) => {
-            if (event.agentId === agentId && ['tool_approval_required', 'tool_result', 'execution_ended', 'request_canceled'].includes(event.kind)) void reload()
+            if (event.agentId === agentId && event.sessionId === sessionId && event.branchId === branchId && ['tool_approval_required', 'tool_result', 'execution_ended', 'request_canceled'].includes(event.kind)) void reload()
         })
         void reload()
         return () => { requestGeneration.current += 1; unsubscribe() }
-    }, [agentId, reload])
+    }, [agentId, sessionId, branchId, reload])
     const decide = async (pendingApproval: ToolApproval, approve: boolean) => {
         setBusy(pendingApproval.callId)
         setError('')

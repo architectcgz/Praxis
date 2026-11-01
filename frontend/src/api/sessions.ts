@@ -2,8 +2,12 @@ import { getSessionBinding } from './bindings'
 import type { SessionApprovalMode as GeneratedSessionApprovalMode, SessionSnapshot as GeneratedSessionSnapshot } from '../../bindings/praxis/wails/dto/models'
 import { normalizeModelUsageRecords, type AgentView, type ModelUsageRecord } from './agents'
 import { normalizeQueuedTasks, type QueuedTask } from './tasks'
+import type { Branch } from '../../bindings/praxis/internal/core/session/models'
+export type { Branch }
 
 export type SessionSnapshot = {
+    bindingId: string
+    branch: Branch
     id: string
     projectId: string
     title: string
@@ -79,8 +83,21 @@ export async function getSessionModelSelection(sessionID: string): Promise<Model
     }
 }
 
-export function getSession(sessionID: string) {
-    return getSessionBinding().GetSession(sessionID).then(normalizeSessionSnapshot)
+export function getSession(sessionID: string, branchID = '', bindingID = '') {
+    return getSessionBinding().GetSession(sessionID, branchID, bindingID).then(normalizeSessionSnapshot)
+}
+
+export function getSessionSummary(sessionID: string) { return getSessionBinding().GetSessionSummary(sessionID) }
+export function createBranch(session: SessionSnapshot, entryId: string, name = '', requestId: string = crypto.randomUUID()) {
+    return getSessionBinding().CreateBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, entryId, name, requestId }).then(normalizeSessionSnapshot)
+}
+export function switchBranch(session: SessionSnapshot, name: string) {
+    return getSessionBinding().SwitchBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, name }).then(normalizeSessionSnapshot)
+}
+export async function listBranches(sessionId: string, bindingId: string) { return await getSessionBinding().ListBranches(sessionId, bindingId) ?? [] }
+export async function getHistoryTree(sessionId: string) { return await getSessionBinding().GetHistoryTree(sessionId) ?? [] }
+export async function getHistoryAt(sessionId: string, entryId: string) {
+    return (await getSessionBinding().GetHistoryAt(sessionId, entryId) ?? []).map((entry) => ({ ...entry, content: entry.content ?? [] }))
 }
 
 /** 查询同一份持久化快照的明细与缓存率；未知比例保留为 null。 */
@@ -134,6 +151,8 @@ function normalizeSessionSnapshot(value: GeneratedSessionSnapshot): SessionSnaps
         throw new Error('Session 数据格式无效。')
     }
     return {
+        bindingId: requiredString(value.bindingId),
+        branch: value.branch,
         id: requiredString(value.id),
         projectId: requiredString(value.projectId),
         title: requiredString(value.title),

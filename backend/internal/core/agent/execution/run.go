@@ -1,47 +1,55 @@
 package execution
 
 import (
+	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
+	coreevent "praxis/internal/core/event"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"reflect"
 	"sync"
 	"time"
 )
 
 // Run 表示一次执行的内存实例，创建并持有专属 Agent，由 Coordinator 独占生命周期。
-// 主执行只保留本次执行证据，不作为会话上下文的数据源；子执行持有完整私有历史。
+// Context 与执行证据分别维护引用列表，共享只读 Entry；子执行的条目不写入 Session。
 type Run struct {
-	Agent    *agentmodel.Agent
-	mu       sync.RWMutex
-	main     bool
-	record   ExecutionRecord
-	history  History
-	context  *appcontext.Context
-	sequence uint64
-	Timing   *timing.Recorder
-	timings  map[string]timing.Record
+	Session      SessionContext
+	BindingID    string
+	Agent        *agentmodel.Agent
+	mu           sync.RWMutex
+	main         bool
+	record       ExecutionRecord
+	entries      []*sessionentry.ContextEntry
+	entryIndexes map[string]int
+	context      appcontext.Context
+	sequence     uint64
+	Timing       *timing.Recorder
+	timings      map[string]timing.Record
 }
 
-func NewRun(record ExecutionRecord, main bool, entries []sessionentry.ContextEntry) (*Run, error) {
-	run := &Run{main: main, record: record}
+func NewRun(record ExecutionRecord, main bool, entries []*sessionentry.ContextEntry) (*Run, error) {
+	run := &Run{
+		main:         main,
+		record:       record,
+		context:      appcontext.BuildContext(entries),
+		entryIndexes: make(map[string]int),
+	}
 	run.record.Config = record.Config.Clone()
 	for _, entry := range entries {
 		if main && (entry.ExecutionID != record.ID.String() || entry.IsSummary()) {
 			continue
 		}
-		run.history.Append(entry)
+		run.appendEntry(entry)
 		run.sequence = max(run.sequence, entry.Sequence)
 	}
-	if _, ok := run.history.Get(record.InputEntryID); !ok {
-		return nil, errors.New("execution input is missing from admitted history")
-	}
-	if !main {
-		run.context = appcontext.NewContext(entries)
+	if _, ok := run.entry(record.InputEntryID); !ok {
+		return nil, errors.New("execution input is missing from admitted entries")
 	}
 	kind := agentmodel.KindSubagent
 	if main {
@@ -53,6 +61,18 @@ func NewRun(record ExecutionRecord, main bool, entries []sessionentry.ContextEnt
 }
 
 func (r *Run) Main() bool { return r.main }
+
+func (r *Run) EventScope(turnID identity.TurnID) coreevent.Scope {
+	record := r.Snapshot()
+	return coreevent.Scope{
+		SessionID:   record.SessionID,
+		BranchID:    record.BranchID,
+		BindingID:   r.BindingID,
+		AgentID:     record.AgentID,
+		ExecutionID: record.ID,
+		TurnID:      turnID,
+	}
+}
 
 func (r *Run) RecordTiming(record timing.Record) {
 	r.mu.Lock()
@@ -110,74 +130,59 @@ func (r *Run) Update(change func(*ExecutionRecord) error) error {
 func (r *Run) Entries() []sessionentry.ContextEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.history.List()
+	return sessionentry.Values(r.entries)
 }
 
-// ContextEntries 只读取子执行已经维护的上下文，不再从私有历史重建。
-func (r *Run) ContextEntries() ([]sessionentry.ContextEntry, error) {
+// ContextEntries 只返回本次执行的引用列表快照，不回读 Session 或复制 Entry。
+func (r *Run) ContextEntries() []*sessionentry.ContextEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if r.context == nil {
-		return nil, errors.New("main execution context belongs to the session")
-	}
-	return r.context.Entries(), nil
-}
-
-// ReplaceContext 直接替换子执行上下文；主执行必须通过 Session 更新。
-func (r *Run) ReplaceContext(entries []sessionentry.ContextEntry) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.context == nil {
-		return errors.New("main execution context belongs to the session")
-	}
-	r.context.Replace(entries)
-	return nil
+	return r.context.Entries()
 }
 
 func (r *Run) Entry(id string) (sessionentry.ContextEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.history.Get(id)
+	entry, found := r.entry(id)
+	if !found {
+		return sessionentry.ContextEntry{}, false
+	}
+	return *entry, true
 }
 
 // Accept 记录本次执行证据；主执行使用 Session 分配的序号和时间。
-// 主执行摘要只属于会话历史，不重复保存在 Run；子执行在本地分配序号和时间。
-func (r *Run) Accept(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
+// 摘要只更新 Context，不改变此前的执行证据；子执行在发布引用前补齐序号和时间。
+func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if value.ExecutionID != r.record.ID.String() {
 		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 	}
-	if r.main && value.IsSummary() {
-		return value.Clone(), false, nil
-	}
-	if prior, ok := r.history.Get(value.ID); ok {
-		candidate := value.Clone()
+	if prior, ok := r.entry(value.ID); ok {
+		candidate := *value
 		candidate.Sequence, candidate.CreatedAt = prior.Sequence, prior.CreatedAt
-		if !reflect.DeepEqual(prior, candidate) {
+		if !reflect.DeepEqual(*prior, candidate) {
 			return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 		}
-		return prior, false, nil
+		return *prior, false, nil
 	}
 	if !r.main {
 		value.Sequence, value.CreatedAt = r.sequence+1, time.Now().UTC()
 		if err := value.Validate(); err != nil {
 			return sessionentry.ContextEntry{}, false, err
 		}
-		// 子执行的调用标识只在私有历史中准入；Main 由 Session 在追加前检查。
+		// 子执行的调用标识只在本次执行条目中准入；Main 由 Session 在追加前检查。
 		for _, call := range value.ToolCalls(r.record.SessionID, r.record.AgentID) {
 			if _, found := r.call(call.Key); found {
 				return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 			}
 		}
 	}
-	r.history.Append(value)
+	r.appendEntry(value)
+	r.context.Append(value)
 	r.sequence = value.Sequence
-	if r.context != nil {
-		r.context.Append(value)
-	}
 	r.deriveProgress()
-	return value.Clone(), true, nil
+	return *value, true, nil
 }
 
 func (r *Run) Call(key tool.CallKey) (sessionentry.ToolCall, bool) {
@@ -187,7 +192,7 @@ func (r *Run) Call(key tool.CallKey) (sessionentry.ToolCall, bool) {
 }
 
 func (r *Run) call(key tool.CallKey) (sessionentry.ToolCall, bool) {
-	for _, entry := range r.history.entries {
+	for _, entry := range r.entries {
 		for _, call := range entry.ToolCalls(r.record.SessionID, r.record.AgentID) {
 			if call.Key == key {
 				return call, true
@@ -204,19 +209,38 @@ func (r *Run) Result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 }
 
 func (r *Run) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
-	for _, entry := range r.history.entries {
+	for _, entry := range r.entries {
 		if entry.ExecutionID != key.ExecutionID.String() {
 			continue
 		}
 		for _, block := range entry.Content {
 			if block.Kind == sessionentry.BlockToolResult && block.CallID == key.CallID {
-				return entry.Clone(), true
+				return *entry, true
 			}
 		}
 	}
 	return sessionentry.ContextEntry{}, false
 }
 
+func (r *Run) entry(id string) (*sessionentry.ContextEntry, bool) {
+	index, found := r.entryIndexes[id]
+	if !found {
+		return nil, false
+	}
+	return r.entries[index], true
+}
+
+func (r *Run) appendEntry(entry *sessionentry.ContextEntry) {
+	r.entryIndexes[entry.ID] = len(r.entries)
+	r.entries = append(r.entries, entry)
+}
+
 func (r *Run) deriveProgress() {
-	r.record.Progress = r.record.Progress.WithEntries(r.record.ID.String(), r.history.entries)
+	r.record.Progress = r.record.Progress.WithEntries(r.record.ID.String(), r.entries)
+}
+
+// SessionContext 在执行准备时绑定，执行期间不再通过 SessionID 查找可变会话。
+type SessionContext interface {
+	BranchEntries(context.Context, identity.BranchID) ([]*sessionentry.ContextEntry, error)
+	AppendEntry(context.Context, identity.BranchID, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
 }

@@ -17,8 +17,8 @@ const (
 	SessionArchived SessionState = "archived"
 )
 
-// Session 是 Project 的持久化协作容器。
-type Session struct {
+// SessionInfo 是 Project 的持久化协作容器。
+type SessionInfo struct {
 	ID           identity.SessionID
 	ProjectID    identity.ProjectID
 	Title        string
@@ -29,8 +29,8 @@ type Session struct {
 }
 
 // NewSession 使用入口已校验的身份创建 active 会话，初始标题为空。
-func NewSession(id identity.SessionID, projectID identity.ProjectID, at time.Time) Session {
-	return Session{
+func NewSessionInfo(id identity.SessionID, projectID identity.ProjectID, at time.Time) SessionInfo {
+	return SessionInfo{
 		ID:        id,
 		ProjectID: projectID,
 		State:     SessionActive,
@@ -40,7 +40,7 @@ func NewSession(id identity.SessionID, projectID identity.ProjectID, at time.Tim
 }
 
 // MainAgentID 是主会话入口的稳定身份；运行实例由各次 Execution 分别创建和持有。
-func (s Session) MainAgentID() identity.AgentID {
+func (s SessionInfo) MainAgentID() identity.AgentID {
 	return identity.AgentID(s.ID)
 }
 
@@ -55,7 +55,7 @@ func TitleFromInput(content string) string {
 }
 
 // Validate 检查对象自身的完整性，不修改或修复输入。
-func (value Session) Validate() error {
+func (value SessionInfo) Validate() error {
 	if !value.ID.Valid() || !value.ProjectID.Valid() {
 		return fmt.Errorf("session: invalid session or project identity: %w", errorcode.ErrInvalidValue)
 	}

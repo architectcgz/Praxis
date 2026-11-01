@@ -22,13 +22,13 @@ type output struct {
 	NextOffset *int   `json:"nextOffset,omitempty"`
 }
 
-// Call 读取项目目录内的 UTF-8 普通文件并返回有界结果。
-func Call(ctx context.Context, toolArguments readtool.Arguments, projectPath string) (tool.ToolResult, error) {
+// Call 分段读取项目文件或当前会话的临时输出，不开放其他会话和整个临时目录。
+func Call(ctx context.Context, toolArguments readtool.Arguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	if !projectFile(toolArguments.Path, projectPath) {
-		return tool.ToolResult{}, errors.New("read_file requires a regular file within the project")
+	if !readableFile(toolArguments.Path, environment) {
+		return tool.ToolResult{}, errors.New("read_file requires a regular file within the project or current session output directory")
 	}
 	file, err := os.Open(toolArguments.Path)
 	if err != nil {
@@ -36,8 +36,8 @@ func Call(ctx context.Context, toolArguments readtool.Arguments, projectPath str
 	}
 	defer file.Close()
 	fileInfo, err := file.Stat()
-	if err != nil || !fileInfo.Mode().IsRegular() || !projectFile(toolArguments.Path, projectPath) {
-		return tool.ToolResult{}, errors.New("read_file requires a regular file within the project")
+	if err != nil || !fileInfo.Mode().IsRegular() || !readableFile(toolArguments.Path, environment) {
+		return tool.ToolResult{}, errors.New("read_file requires a regular file within the project or current session output directory")
 	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
@@ -168,4 +168,8 @@ func projectFile(path, projectRoot string) bool {
 	}
 	realRoot, err := filepath.EvalSymlinks(projectRoot)
 	return err == nil && pathutil.SamePath(projectRoot, realRoot) && pathutil.IsWithin(realRoot, realPath)
+}
+
+func readableFile(path string, environment tool.Environment) bool {
+	return projectFile(path, environment.ProjectPath) || projectFile(path, environment.OutputDirectory)
 }

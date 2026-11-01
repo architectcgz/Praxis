@@ -38,7 +38,7 @@ type output struct {
 }
 
 // Call 在项目目录内校验并应用完整补丁。
-func Call(ctx context.Context, toolArguments patchtool.Arguments, projectPath string) (tool.ToolResult, error) {
+func Call(ctx context.Context, toolArguments patchtool.Arguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -46,16 +46,16 @@ func Call(ctx context.Context, toolArguments patchtool.Arguments, projectPath st
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
-	if !projectDirectory(toolArguments.Path, projectPath) {
+	if !projectDirectory(toolArguments.Path, environment.ProjectPath) {
 		return tool.ToolResult{}, errors.New("apply_patch root is outside the project")
 	}
-	changes, results, err := prepareChanges(ctx, toolArguments.Path, projectPath, operations)
+	changes, results, err := prepareChanges(ctx, toolArguments.Path, environment.ProjectPath, operations)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
 	encoded, err := json.Marshal(output{Files: results})
-	if err != nil || len(encoded) > tool.MaxInlineResultBytes {
-		return tool.ToolResult{}, errors.New("apply_patch result exceeds the size limit")
+	if err != nil {
+		return tool.ToolResult{}, fmt.Errorf("encode apply_patch result: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err

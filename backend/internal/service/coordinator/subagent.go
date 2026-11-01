@@ -25,15 +25,21 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	}
 	defer s.running.Done()
 	s.mu.Lock()
-	parentActive := s.executions[parent.AgentID]
-	if s.closed || parentActive == nil || parentActive.executionID != parent.ExecutionID || parentActive.ending || parentActive.run == nil || s.executions[agentID] != nil {
+	parentActive := s.activeExecutionLocked(parent.AgentID, parent.ExecutionID)
+	if s.closed || parentActive == nil || parentActive.ending || parentActive.run == nil {
 		s.mu.Unlock()
 		return SubagentResult{}, errorcode.ErrRequestConflict
 	}
 	parentRun := parentActive.run
 	parentRecord := parentRun.Snapshot()
 	active := newActiveExecution(ctx, parentRecord.SessionID)
-	s.executions[agentID] = active
+	active.branchID, active.bindingID = parentRecord.BranchID, parentActive.bindingID
+	key := executionKey{agentID, parentRecord.BranchID}
+	if s.executions[key] != nil {
+		s.mu.Unlock()
+		return SubagentResult{}, errorcode.ErrRequestConflict
+	}
+	s.executions[key] = active
 	s.mu.Unlock()
 	stopCaller := context.AfterFunc(ctx, func() { active.cancel(context.Cause(ctx)) })
 	stopParent := context.AfterFunc(parentActive.ctx, func() { active.cancel(context.Cause(parentActive.ctx)) })
@@ -42,12 +48,13 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	task := sessionmodel.Task{
 		ID:        identity.TaskID((identity.SecureIDGenerator{}).New("task")),
 		SessionID: parentRecord.SessionID,
+		BranchID:  parentRecord.BranchID,
 		Prompt:    prompt,
 	}
-	run, _, err := s.operations.PrepareTask(active.ctx, task, agentID, definitionID, parentRecord.Config.Model)
+	run, _, err := s.operations.PrepareTask(active.ctx, task, agentID, definitionID, parentRecord.Config.Model, nil, parentActive.bindingID)
 	if err != nil {
 		s.mu.Lock()
-		delete(s.executions, agentID)
+		delete(s.executions, key)
 		close(active.ready)
 		active.cancel(nil)
 		s.mu.Unlock()
@@ -60,7 +67,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		delete(s.executions, agentID)
+		delete(s.executions, key)
 		active.run = nil
 		active.cancel(nil)
 	}()

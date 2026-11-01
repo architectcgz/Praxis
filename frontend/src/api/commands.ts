@@ -34,8 +34,8 @@ export type ToolApproval = ToolDecisionRequest & {
     riskVerdict: string
     riskReason: string
 }
-export async function listToolApprovals(agentId: string): Promise<ToolApproval[]> {
-    const values = await getCommandBinding().ListToolApprovals(agentId) ?? []
+export async function listToolApprovals(sessionId: string, branchId: string, agentId: string): Promise<ToolApproval[]> {
+    const values = await getCommandBinding().ListToolApprovals(sessionId, branchId, agentId) ?? []
     return values.map((value) => ({ ...value, arguments: JSON.parse(value.arguments) as unknown }))
 }
 export function approveToolCall(request: ToolDecisionRequest) {

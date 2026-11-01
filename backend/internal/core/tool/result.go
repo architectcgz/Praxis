@@ -6,7 +6,7 @@ import (
 )
 
 // ToolResult 是工具执行后交给本次执行实例和模型调用服务的结果。
-// MaxInlineResultBytes 限制单次工具结果的内联字节数；工具在返回前完成截断。
+// MaxInlineResultBytes 限制内联结果的 UTF-8 字节数，超出部分不能截断，完整结果转存临时文件。
 const MaxInlineResultBytes = 50 * 1024
 
 type ToolResult struct {

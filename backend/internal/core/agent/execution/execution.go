@@ -31,7 +31,7 @@ const (
 	ExecutionInterrupted ExecutionOutcome = "interrupted"
 )
 
-// ExecutionProgress 在内存中记录模型请求消耗；消息统计由历史派生，重启只能恢复已落盘的预算。
+// ExecutionProgress 在内存中记录模型请求消耗；消息统计由已接纳 Entry 派生，重启只能恢复已落盘的预算。
 type ExecutionProgress struct {
 	NextSequence     uint64
 	Iterations       uint64
@@ -48,6 +48,7 @@ type ExecutionRecord struct {
 	Progress       ExecutionProgress
 	ID             identity.AgentExecutionID
 	SessionID      identity.SessionID
+	BranchID       identity.BranchID
 	AgentID        identity.AgentID
 	RequestID      identity.RequestID
 	SourceTaskID   identity.TaskID
@@ -138,6 +139,7 @@ func (e ExecutionRecord) Validate() error {
 	for _, id := range []string{
 		e.ID.String(),
 		e.SessionID.String(),
+		e.BranchID.String(),
 		e.AgentID.String(),
 		e.RequestID.String(),
 		e.InputEntryID,
@@ -184,8 +186,8 @@ func (e ExecutionRecord) Validate() error {
 	return nil
 }
 
-// WithEntries 从所属执行的历史条目派生工具计数、输出字节和最终回答证据。
-func (progress ExecutionProgress) WithEntries(executionID string, entries []sessionentry.ContextEntry) ExecutionProgress {
+// WithEntries 从所属执行已接纳的 Entry 派生工具计数、输出字节和最终回答证据。
+func (progress ExecutionProgress) WithEntries(executionID string, entries []*sessionentry.ContextEntry) ExecutionProgress {
 	progress.OutputBytes, progress.ToolCalls = progress.ModelOutputBytes, 0
 	progress.FinalAssistantID, progress.FinalStopReason = "", ""
 	var last sessionentry.ContextEntry
@@ -194,7 +196,7 @@ func (progress ExecutionProgress) WithEntries(executionID string, entries []sess
 			continue
 		}
 		if entry.Role == role.Assistant && entry.Sequence > last.Sequence {
-			last = entry
+			last = *entry
 		}
 		for _, block := range entry.Content {
 			if block.Kind == sessionentry.BlockToolCall {

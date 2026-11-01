@@ -36,7 +36,8 @@ func Definition() tool.ToolDefinition {
 		Description: "在已授权的项目目录内执行 Bash 命令或多行脚本，返回合并后的 stdout 和 stderr。" +
 			"输入 command，可选 path 和 timeout（秒）；相对 path 按项目根目录解析。" +
 			"脚本在宿主机执行；只在用户显式授予命令权限时可用。" +
-			"脚本受当前 task 的取消、超时和输出大小限制；不适合启动长期进程。",
+			"输出超过 50 KiB 时完整写入当前会话的临时文件，返回 outputFile、size 和执行状态，可用 read_file 分段读取。" +
+			"脚本受当前 task 的取消和超时控制；不适合启动长期进程。",
 		InputSchema: append(json.RawMessage(nil), inputSchema...),
 	}
 }

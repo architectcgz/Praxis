@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	compressionTriggerPercent = 90
-	compressionTargetPercent  = 60
-	maxSummaryTokens          = 4096
+	compressionTargetPercent = 60
+	maxSummaryTokens         = 4096
 )
 
 func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, summaryLimit int, format SummaryFormat, requestSummary RequestSummaryFunc) (string, error) {
@@ -31,7 +30,7 @@ func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, sum
 			if err != nil {
 				return "", err
 			}
-			if tokens <= percent(contextWindow-summaryLimit, compressionTriggerPercent) {
+			if !appcontext.NearContextLimit(tokens, summaryLimit, contextWindow) {
 				low = middle
 			} else {
 				high = middle - 1

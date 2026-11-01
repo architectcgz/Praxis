@@ -10,4 +10,5 @@ const (
 	ErrRequestTimeout    Code = "generic.request_timeout"
 	ErrInternal          Code = "generic.internal_error"
 	ErrRequestConflict   Code = "request.conflict"
+	ErrLogUnavailable    Code = "session.log_unavailable"
 )

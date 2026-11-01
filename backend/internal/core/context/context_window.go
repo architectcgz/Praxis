@@ -77,3 +77,9 @@ func ExceedsContextWindow(payload []byte, maxOutputTokens, contextWindow int) er
 	}
 	return nil
 }
+
+// NearContextLimit 将输入与输出预留一起计入模型窗口，达到九成时只表示需要收尾。
+func NearContextLimit(inputTokens, maxOutputTokens, contextWindow int) bool {
+	threshold := contextWindow/100*90 + contextWindow%100*90/100
+	return inputTokens+maxOutputTokens >= threshold
+}

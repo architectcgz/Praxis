@@ -8,7 +8,7 @@ import (
 
 func (s *Coordinator) cancelExecution(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID, cause error) (bool, error) {
 	s.mu.Lock()
-	active := s.executions[agentID]
+	active := s.activeExecutionLocked(agentID, executionID)
 	s.mu.Unlock()
 	if active == nil {
 		return false, nil
@@ -22,7 +22,7 @@ func (s *Coordinator) cancelExecution(ctx context.Context, agentID identity.Agen
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.executions[agentID] != active || active.executionID != executionID {
+	if s.closed || s.activeExecutionLocked(agentID, executionID) != active {
 		return false, nil
 	}
 	if active.ctx.Err() != nil {
@@ -33,4 +33,13 @@ func (s *Coordinator) cancelExecution(ctx context.Context, agentID identity.Agen
 	}
 	active.cancel(cause)
 	return true, nil
+}
+
+func (s *Coordinator) activeExecutionLocked(agentID identity.AgentID, id identity.AgentExecutionID) *activeExecution {
+	for key, active := range s.executions {
+		if key.agentID == agentID && active.executionID == id {
+			return active
+		}
+	}
+	return nil
 }

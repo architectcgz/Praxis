@@ -10,6 +10,7 @@ import { FilePreviewProvider } from './output/FilePreview'
 import { ModelUsageProvider } from './SessionTokenUsage'
 
 type AgentSessionPanelProps = {
+    branchId: string
     loading: boolean
     agents: AgentView[]
     agent: AgentView | null
@@ -37,7 +38,7 @@ type AgentSessionPanelProps = {
 }
 
 /** 展示当前 Session 中选中的 Agent 对话和输入控件。 */
-export function AgentSessionPanel({ loading, agents, agent, history, agentHistories, agentHistoryErrors, outputStore, onSelectAgent, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
+export function AgentSessionPanel({ branchId, loading, agents, agent, history, agentHistories, agentHistoryErrors, outputStore, onSelectAgent, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
     const { streamingOutputs, pendingUserMessages, awaitingAgentId } = useSyncExternalStore(outputStore.subscribeOutput, outputStore.getOutput)
     if (loading) {
         return <div className="agent-loading" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>加载对话中</span></div>
@@ -49,9 +50,11 @@ export function AgentSessionPanel({ loading, agents, agent, history, agentHistor
     const hasSubagents = agents.some((item) => item.Kind === 'subagent')
     return (
         <ModelUsageProvider key={agent.SessionID} sessionId={agent.SessionID}>
-        <OperationTimingsProvider key={agent.SessionID} agentIds={agents.map((item) => item.ID)}>
+        <OperationTimingsProvider key={`${agent.SessionID}-${branchId}`} sessionId={agent.SessionID} branchId={branchId} agentIds={agents.map((item) => item.ID)}>
         <FilePreviewProvider sessionId={agent.SessionID}>
         <AgentConversation
+            key={`${agent.SessionID}-${branchId}`}
+            branchId={branchId}
             agent={agent}
             history={history}
             collaboration={agent.Kind === 'main' && hasSubagents ? (

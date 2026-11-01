@@ -3,57 +3,56 @@ package session
 import (
 	"cmp"
 	"context"
-	"errors"
-	"fmt"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
 func (s *Service) AppendTiming(ctx context.Context, sessionID identity.SessionID, value timing.Record) error {
-	h, err := s.lockHistory(ctx, sessionID)
+	owner, err := s.openedSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	defer h.mu.Unlock()
-	if h.state.executionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {
-		return errorcode.ErrNotFound
-	}
-	kind := "agent_execution.timing_finished"
-	if value.Status == timing.Running {
-		kind = "agent_execution.timing_started"
-	}
-	value = cloneTiming(value)
-	if err := h.appendEventLocked(ctx, kind, "agent_execution_timing", timingKey(value.ExecutionID, value.ID), value); err != nil {
-		return err
-	}
-	h.state.setTiming(value)
-	return nil
+	return owner.use(ctx, func() error {
+		if owner.model.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {
+			return errorcode.ErrNotFound
+		}
+		kind := "agent_execution.timing_finished"
+		if value.Status == timing.Running {
+			kind = "agent_execution.timing_started"
+		}
+		value = cloneTiming(value)
+		if err := owner.appendEvent(ctx, kind, "agent_execution_timing", timingKey(value.ExecutionID, value.ID), value); err != nil {
+			return err
+		}
+		owner.model.SetTiming(value)
+		return nil
+	})
 }
 
-func (s *Service) ListAgentTimingRecords(ctx context.Context, agentID identity.AgentID, limit int) ([]timing.Record, error) {
-	h, err := s.lockHistory(ctx, identity.SessionID(agentID))
+func (s *Service) ListAgentTimingRecords(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID, limit int) (records []timing.Record, err error) {
+	owner, err := s.openedSession(ctx, identity.SessionID(agentID))
 	if err != nil {
-		if errors.Is(err, errorcode.ErrNotFound) {
-			return []timing.Record{}, nil
-		}
 		return nil, err
 	}
-	defer h.mu.Unlock()
-	result := make([]timing.Record, 0)
-	for _, value := range h.state.timings {
-		index := h.state.executionIndex(identity.AgentExecutionID(value.ExecutionID))
-		if index >= 0 && h.state.executions[index].AgentID == agentID {
-			result = append(result, cloneTiming(value))
+	err = owner.use(ctx, func() error {
+		records = make([]timing.Record, 0)
+		for _, value := range owner.model.Timings {
+			index := owner.model.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID))
+			if index >= 0 && owner.model.Executions[index].AgentID == agentID && owner.model.Executions[index].BranchID == branchID {
+				records = append(records, cloneTiming(value))
+			}
 		}
-	}
-	return capped(sorted(result, func(a, b timing.Record) int {
-		return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
-	}), limit), nil
+		records = capped(sorted(records, func(a, b timing.Record) int {
+			return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
+		}), limit)
+		return nil
+	})
+	return
 }
 
 func timingKey(executionID, operationID string) string {
-	return fmt.Sprintf("%d:%s%s", len(executionID), executionID, operationID)
+	return executionID + ":" + operationID
 }
 
 func cloneTiming(value timing.Record) timing.Record {

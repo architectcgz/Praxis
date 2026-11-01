@@ -1,8 +1,10 @@
 package bindings
 
 import (
+	"context"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
+	coordinator "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -54,23 +56,35 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	}, nil
 }
 
-func (b *SessionBindings) GetSession(sessionID string) (dto.SessionSnapshot, error) {
+func (b *SessionBindings) GetSession(sessionID, branchID, bindingID string) (dto.SessionSnapshot, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.GetSession.request", err)
+	}
+	if err := validation.Value("branchId", branchID, "omitempty,id"); err != nil {
+		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.GetSession.request", err)
+	}
+	if err := validation.Value("bindingId", bindingID, "omitempty,id"); err != nil {
 		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.GetSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.SessionSnapshot{}, err
 	}
-	view, err := services.Sessions.GetSessionView(ctx, identity.SessionID(sessionID), 100)
+	view, err := services.Commands.OpenSession(ctx, identity.SessionID(sessionID), identity.BranchID(branchID), bindingID)
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession", err)
 	}
-	agents, err := services.Agents.ListSessionAgents(ctx, view.Session.ID, 100)
+	return b.sessionSnapshot(ctx, services, view)
+}
+
+func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services, view coordinator.BindingView) (dto.SessionSnapshot, error) {
+	agents, err := services.Agents.ListSessionAgents(ctx, view.Session.ID, view.Branch.ID, 100)
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.GetSession.agents", err)
 	}
 	result := dto.SessionSnapshot{
+		BindingID: view.BindingID,
+		Branch:    view.Branch,
 		ID:        view.Session.ID.String(),
 		ProjectID: view.Session.ProjectID.String(),
 		Title:     view.Session.Title,
@@ -144,7 +158,7 @@ func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	return nil
 }
 
-func sessionSummary(value sessionmodel.Session) dto.SessionSummary {
+func sessionSummary(value sessionmodel.SessionInfo) dto.SessionSummary {
 	return dto.SessionSummary{
 		ID:        value.ID.String(),
 		ProjectID: value.ProjectID.String(),

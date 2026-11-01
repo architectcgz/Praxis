@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { API_ERROR_CODES, isBindingAvailable, subscribeAgentEvents, type ApiErrorCode } from '../../api'
+import { API_ERROR_CODES, isBindingAvailable, subscribeAgentEvents, type ApiErrorCode, type SessionSnapshot } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import { useAgentData } from '../agent/useAgentData'
 import { useProjectData } from '../project/useProjectData'
@@ -20,7 +20,7 @@ export function useWorkspaceData() {
     const { projects, loading: projectsLoading, error: projectsError, refreshProjects, resetProjects } = useProjectData()
     const {
         sessions, session, catalogLoading, sessionLoading, catalogError, sessionError,
-        getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions,
+        getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions, adoptSession, forgetSession,
     } = useSessionData()
     const { models, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog()
     const { loadForSession, resetForSessionChange, ...agents } = useAgentData({ sessionID: selectedSessionID, models, setError, setErrorCode, viewRequestRef })
@@ -57,7 +57,7 @@ export function useWorkspaceData() {
         }
         try {
             const value = await loadSession(id)
-            if (isCurrent() && value) await loadForSession({ agents: value.agents }, requestID)
+            if (isCurrent() && value) await loadForSession(value, requestID)
         } catch {
             if (!isCurrent()) return
             const catalog = getSessions()
@@ -101,8 +101,8 @@ export function useWorkspaceData() {
         }
     }, [refreshProjects, refreshSessions, resetProjects, resetSessions, resetModels, changeSelectedSession, clearError])
 
-    const refreshSession = useCallback(async () => {
-        const requestID = ++viewRequestRef.current
+    const refreshSession = useCallback(async (invalidateView = true) => {
+        const requestID = invalidateView ? ++viewRequestRef.current : viewRequestRef.current
         await loadSelectedSession(selectedSessionIDRef.current, requestID)
     }, [loadSelectedSession])
 
@@ -145,14 +145,24 @@ export function useWorkspaceData() {
     }, [error, sessionError, clearError, refreshSession, changeSelectedSession])
 
     const clearSelectedSession = useCallback((id: string) => {
+        forgetSession(id)
         if (selectedSessionIDRef.current === id) changeSelectedSession('')
-    }, [changeSelectedSession])
+    }, [changeSelectedSession, forgetSession])
+
+    const applySession = useCallback(async (value: SessionSnapshot) => {
+        adoptSession(value)
+        if (selectedSessionIDRef.current === value.id) await loadForSession(value, viewRequestRef.current)
+    }, [adoptSession, loadForSession])
 
     useEffect(() => subscribeAgentEvents((event) => {
         if ((event.kind === 'turn_started' || event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId) {
             void refreshSummary(event.sessionId)
         }
-    }), [refreshSummary])
+        if ((event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId === session?.id && event.branchId === session?.branch.id) {
+            // 同分支的后台刷新不代表页面切换，不能丢弃正在提交的分叉结果。
+            void refreshSession(false)
+        }
+    }), [refreshSummary, refreshSession, session?.id, session?.branch.id])
 
     const dataError = sessionError ?? catalogError ?? projectsError ?? modelsError
     return {
@@ -174,6 +184,7 @@ export function useWorkspaceData() {
         selectedSessionID,
         selectSession,
         session,
+        applySession,
         sessions,
         updateSessionTitle,
         setError,

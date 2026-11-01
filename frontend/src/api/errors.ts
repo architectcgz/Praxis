@@ -33,6 +33,7 @@ export const API_ERROR_CODES = {
     executionPolicyBlocked: 'execution.policy_blocked',
     executionApprovalRequired: 'execution.approval_required',
     executionStorage: 'execution.storage_error',
+    sessionLogUnavailable: 'session.log_unavailable',
     executionProvider: 'execution.provider_error',
     executionTool: 'execution.tool_error',
     executionResourceLimit: 'execution.resource_limit',

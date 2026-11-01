@@ -17,6 +17,9 @@ export function normalizeQueuedTasks(value: unknown): QueuedTask[] {
 }
 
 export type CreateTaskRequest = {
+    bindingId: string
+    branchId: string
+    submissionId: string
     sessionId: string
     prompt: string
 }
@@ -26,6 +29,6 @@ export function createTask(request: CreateTaskRequest) {
     return getCommandBinding().CreateTask(request)
 }
 
-export function cancelTask(sessionId: string, taskId: string) {
-    return getCommandBinding().CancelTask({ sessionId, taskId })
+export function cancelTask(bindingId: string, taskId: string) {
+    return getCommandBinding().CancelTask({ bindingId, taskId })
 }

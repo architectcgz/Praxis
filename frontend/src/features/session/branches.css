@@ -1,0 +1,55 @@
+.session-branch-status {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-block: 4px;
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+}
+
+.session-branch-hint { color: var(--faint); }
+
+.session-branch-dialog {
+    display: flex;
+    flex-direction: column;
+    width: min(680px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    min-height: 0;
+    padding: 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-float);
+    background: var(--paper-strong);
+    box-shadow: var(--shadow-modal);
+}
+
+.session-branch-dialog header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.session-branch-dialog h2 { margin: 0; font-size: var(--font-size-heading); }
+.session-branch-description { color: var(--muted); font-size: var(--font-size-ui); }
+.session-branch-options { overflow: auto; min-height: 0; }
+
+.session-branch-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 12px;
+    text-align: start;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+}
+
+.session-branch-option:hover:not(:disabled) { background: var(--fill); }
+.session-branch-option:disabled { color: var(--faint); background: var(--fill-soft); }
+.session-branch-option > svg { flex: none; margin-top: 2px; }
+.session-branch-option > span { min-width: 0; overflow-wrap: anywhere; }
+.session-branch-option strong { display: block; font-weight: 600; font-size: var(--font-size-ui); }
+.session-branch-option small { display: block; color: var(--muted); font-size: var(--font-size-meta); line-height: var(--line-height-meta); }

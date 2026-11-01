@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getSession, listSessions, type SessionSnapshot, type SessionSummary } from '../../api'
+import { getSession, getSessionSummary, listSessions, type SessionSnapshot, type SessionSummary } from '../../api'
 
 /** Session 拥有目录、详情和摘要回填；工作区只负责选择与跨模块调用顺序。 */
 export function useSessionData() {
@@ -14,6 +14,7 @@ export function useSessionData() {
     const detailRequest = useRef(0)
     const detailID = useRef('')
     const metadataRequests = useRef(new Map<string, number>())
+    const selections = useRef(new Map<string, { branchID: string; bindingID: string }>())
 
     const getSessions = useCallback((): readonly SessionSummary[] => catalog.current, [])
     const clearSession = useCallback(() => {
@@ -53,8 +54,10 @@ export function useSessionData() {
         setSessionLoading(true)
         setSessionError(undefined)
         try {
-            const value = await getSession(id)
+            const selection = selections.current.get(id)
+            const value = await getSession(id, selection?.branchID, selection?.bindingID)
             if (detailRequest.current !== request) return
+            selections.current.set(id, { branchID: value.branch.id, bindingID: value.bindingId })
             setSession(value)
             return value
         } catch (reason) {
@@ -75,14 +78,14 @@ export function useSessionData() {
         const catalogVersion = catalogRequest.current
         const isCurrent = () => metadataRequests.current.get(id) === request && catalogRequest.current === catalogVersion
         try {
-            const summary = await getSession(id)
+            const summary = await getSessionSummary(id)
             if (!isCurrent() || !catalog.current.some((item) => item.id === id)) return
             const values = catalog.current.map((item) => item.id === id ? {
                 ...item, title: summary.title, updatedAt: summary.updatedAt,
             } : item).sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
             catalog.current = values
             setSessions(values)
-            setSession((current) => current?.id === id ? { ...current, title: summary.title, updatedAt: summary.updatedAt, tasks: summary.tasks } : current)
+            setSession((current) => current?.id === id ? { ...current, title: summary.title, updatedAt: summary.updatedAt } : current)
         } catch (reason) {
             if (isCurrent() && detailID.current === id) setSessionError(() => reason)
         }
@@ -107,6 +110,17 @@ export function useSessionData() {
         clearSession()
     }, [clearSession])
 
+    const adoptSession = useCallback((value: SessionSnapshot) => {
+        selections.current.set(value.id, { branchID: value.branch.id, bindingID: value.bindingId })
+        if (detailID.current !== value.id) return
+        detailRequest.current += 1
+        setSession(value)
+        setSessionLoading(false)
+        setSessionError(undefined)
+    }, [])
+
+    const forgetSession = useCallback((id: string) => { selections.current.delete(id) }, [])
+
     useEffect(() => () => {
         catalogRequest.current += 1
         detailRequest.current += 1
@@ -115,6 +129,6 @@ export function useSessionData() {
 
     return {
         sessions, session, catalogLoading, sessionLoading, catalogError, sessionError,
-        getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions,
+        getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions, adoptSession, forgetSession,
     }
 }

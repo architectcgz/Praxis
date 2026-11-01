@@ -85,7 +85,7 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	coordinator := buildCoordinator(resources, config, a.sessions, hooks, emitter, configMu, options.Runner)
 	a.coordinator = coordinator
 	agents := agentservice.NewService(agentservice.Dependencies{
-		History:          a.sessions,
+		Entries:          a.sessions,
 		ActiveRun:        coordinator.ActiveRun,
 		SessionRuns:      coordinator.SessionRuns,
 		ExecutionRecords: a.sessions,

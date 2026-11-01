@@ -14,8 +14,8 @@ import (
 	"praxis/internal/identity"
 )
 
-// PrepareTask 准入执行后创建 Run 及其专属 Agent；Session 只提供主会话历史与 Context。
-func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agentID identity.AgentID, definitionID identity.AgentDefinitionID, model modelapi.Config) (*agentexecution.Run, bool, error) {
+// PrepareTask 准入执行后创建 Run；主执行从分支路径共享 Entry，子执行使用私有输入。
+func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agentID identity.AgentID, definitionID identity.AgentDefinitionID, model modelapi.Config, owner agentexecution.SessionContext, bindingID string) (*agentexecution.Run, bool, error) {
 	session, err := s.sessions.Get(ctx, input.SessionID)
 	if err != nil {
 		return nil, false, err
@@ -27,19 +27,17 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 		if definitionID != agentmodel.DefinitionPrimary {
 			return nil, false, errorcode.ErrRequestConflict
 		}
-		if _, err := s.history.ContextEntries(ctx, session.ID); err != nil {
-			return nil, false, err
-		}
-		record, existing, err := s.prepareMainTask(ctx, input, session, model)
+		record, existing, err := s.prepareMainTask(ctx, input, session, owner, bindingID, model)
 		if err != nil {
 			return nil, existing, err
 		}
-		page, err := s.history.ListEntries(ctx, session.ID)
+		entries, err := owner.BranchEntries(ctx, input.BranchID)
 		if err != nil {
 			return nil, existing, err
 		}
-		run, err := agentexecution.NewRun(record, true, page.Entries)
+		run, err := agentexecution.NewRun(record, true, entries)
 		if err == nil {
+			run.Session, run.BindingID = owner, bindingID
 			s.bindTiming(run)
 		}
 		return run, existing, err
@@ -59,7 +57,8 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 		Model:             model.Clone(),
 	}, at)
 	record.SourceTaskID = input.ID
-	run, err := agentexecution.NewRun(record, false, []sessionentry.ContextEntry{{
+	record.BranchID = input.BranchID
+	run, err := agentexecution.NewRun(record, false, []*sessionentry.ContextEntry{{
 		ID:          record.InputEntryID,
 		Sequence:    1,
 		CreatedAt:   at,
@@ -73,6 +72,7 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 		return nil, false, err
 	}
 	s.bindTiming(run)
+	run.BindingID = bindingID
 	return run, false, nil
 }
 

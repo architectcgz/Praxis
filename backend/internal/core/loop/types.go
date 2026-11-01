@@ -25,17 +25,16 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// HistoryOperations 绑定本轮所属的历史能力：主执行使用 Session，子执行使用私有历史。
-// NextContext 返回未经过 Hook 变换的基础上下文快照；Loop 不持有原始历史或存储实现。
-type HistoryOperations interface {
+// EntryOperations 绑定本轮的提交能力与 Run Context，不向 Loop 暴露 Session 或存储实现。
+// NextContext 返回未经过 Hook 变换的请求投影，共享 Entry 始终只读。
+type EntryOperations interface {
 	NextContext(context.Context) (appcontext.Content, error)
 	AppendEntry(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error)
-	ReplaceContext(context.Context, []sessionentry.ContextEntry) error
 	PublishEntries(identity.TurnID, []sessionentry.ContextEntry)
 	EntryFailure(error) error
 }
 
-// ExecutionOperations 只记录本次执行的请求序号和模型消耗，不承担历史读写。
+// ExecutionOperations 只记录本次执行的请求序号和模型消耗，不承担 Entry 读写。
 type ExecutionOperations interface {
 	NextRequestSequence(context.Context) (uint64, error)
 	RecordModelRequest(context.Context, uint64, bool) error
@@ -53,11 +52,13 @@ const (
 type Result struct{ Reason EndReason }
 
 // Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
-// Context 是未经过 Hook 变换的基础上下文快照，Loop 压缩后再构建模型请求副本。
+// Context 是未经过 Hook 变换的请求投影，运行中不进行摘要压缩。
 type Input struct {
 	ID           identity.AgentExecutionID
 	SourceTaskID identity.TaskID
 	SessionID    identity.SessionID
+	BranchID     identity.BranchID
+	BindingID    string
 	AgentID      identity.AgentID
 	RequestID    identity.RequestID
 	Model        modelapi.Config
@@ -68,7 +69,7 @@ type Input struct {
 type ExecutionDependencies struct {
 	ToolExecutor ToolExecutor
 	Execution    ExecutionOperations
-	History      HistoryOperations
+	Entries      EntryOperations
 	Timing       *timing.Recorder
 }
 

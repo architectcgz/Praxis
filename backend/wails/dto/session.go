@@ -3,10 +3,13 @@ package dto
 import (
 	"time"
 
+	sessionmodel "praxis/internal/core/session"
 	agentservice "praxis/internal/service/agent"
 )
 
 type SessionSnapshot struct {
+	BindingID string                   `json:"bindingId"`
+	Branch    sessionmodel.Branch      `json:"branch"`
 	ID        string                   `json:"id"`
 	ProjectID string                   `json:"projectId"`
 	Title     string                   `json:"title"`

@@ -8,6 +8,7 @@ import { NewProjectDialog } from '../project/NewProjectDialog'
 import { ProjectsPanel } from '../project/ProjectsPanel'
 import { groupSessions } from '../project/projectGroups'
 import { SessionPanel } from '../session/SessionPanel'
+import { BranchDialog, BranchStatus } from '../session/BranchNavigation'
 import { TaskQueue } from '../task/TaskQueue'
 import { SettingsPanel } from '../setting/SettingsPanel'
 import { useProjectWorkspace } from './useProjectWorkspace'
@@ -224,10 +225,11 @@ export function ProjectWorkspace() {
                             >
                                 {workspace.session && (
                                     <AgentSessionPanel
+                                        branchId={workspace.session.branch.id}
                                         loading={workspace.agentLoading}
                                         agents={workspace.agents}
                                         agent={workspace.agent}
-                                        history={workspace.history}
+                                        history={workspace.browsing && workspace.agent?.Kind === 'main' ? workspace.browsing.entries : workspace.history}
                                         agentHistories={workspace.agentHistories}
                                         agentHistoryErrors={workspace.agentHistoryErrors}
                                         outputStore={workspace.outputStore}
@@ -241,7 +243,10 @@ export function ProjectWorkspace() {
                                         reasoning={workspace.reasoning}
                                         busy={workspace.busy}
                                         canQueue={workspace.canQueue}
-                                        beforeInput={workspace.session && <TaskQueue tasks={workspace.session.tasks} busy={workspace.busy} onCancel={workspace.cancelQueuedTask} />}
+                                        beforeInput={<>
+                                            <BranchStatus branch={workspace.session.branch} browsing={Boolean(workspace.browsing)} busy={workspace.busy} onReturn={workspace.returnToHead} />
+                                            <TaskQueue tasks={workspace.session.tasks} busy={workspace.busy} onCancel={workspace.cancelQueuedTask} />
+                                        </>}
                                         onSend={() => void workspace.submitInput()}
                                         onControl={(kind) => void workspace.control(kind)}
                                         onModelChange={workspace.selectModel}
@@ -268,6 +273,17 @@ export function ProjectWorkspace() {
             </div>
 
             <Toast message={workspace.error ? '' : workspace.commandNotice} onDismiss={workspace.clearCommandNotice} />
+
+            {workspace.branchDialog && workspace.session && <BranchDialog
+                key={`${workspace.session.id}-${workspace.session.branch.id}-${workspace.branchDialog}`}
+                kind={workspace.branchDialog}
+                branches={workspace.branches}
+                tree={workspace.tree}
+                currentBranchId={workspace.session.branch.id}
+                onSwitch={workspace.switchBranch}
+                onBrowse={workspace.browseHistory}
+                onClose={workspace.closeBranchDialog}
+            />}
 
             {projectOpen && (
                 <NewProjectDialog

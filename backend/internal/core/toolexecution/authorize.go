@@ -65,7 +65,7 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 
 		// Hook、模型请求和人工等待均在控制锁外执行，控制入口只登记决定或停止并唤醒。
 		if result.pending {
-			e.notifyWaiting(ctx, call, args, operationID, sourceTaskID)
+			t.notifyWaiting(ctx, call, args, operationID, sourceTaskID)
 			if err := t.awaitApproval(ctx); err != nil {
 				return nil, err
 			}
@@ -111,7 +111,8 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 	}
 }
 
-func (e *Executor) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string, sourceTaskID identity.TaskID) {
+func (t *ExecutionTools) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string, sourceTaskID identity.TaskID) {
+	e := t.executor
 	call.Arguments = args
 	value := toolHookEvent(call, args, operationID)
 	value.SourceTaskID = sourceTaskID
@@ -119,12 +120,7 @@ func (e *Executor) notifyWaiting(ctx context.Context, call sessionentry.ToolCall
 		e.deps.Logf("tool execution waiting hook failed: %v", err)
 	}
 	e.deps.Emitter.Emit(coreevent.Event{
-		Scope: coreevent.Scope{
-			SessionID:   call.SessionID,
-			AgentID:     call.AgentID,
-			ExecutionID: call.ExecutionID,
-			TurnID:      call.TurnID,
-		},
+		Scope: t.run.EventScope(call.TurnID),
 		Payload: coreevent.ToolApprovalRequired{
 			CallID: call.CallID,
 			Name:   string(call.Name),

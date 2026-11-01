@@ -18,8 +18,8 @@ export type OperationTiming = {
 }
 
 /** 查询 Execution 总耗时及其操作计时，不依赖消息正文；异常数据由 API 边界拒绝。 */
-export async function listAgentTimings(agentId: string): Promise<OperationTiming[]> {
-    const values: unknown = await getAgentBinding().ListAgentTimings(agentId)
+export async function listAgentTimings(sessionId: string, branchId: string, agentId: string): Promise<OperationTiming[]> {
+    const values: unknown = await getAgentBinding().ListAgentTimings(sessionId, branchId, agentId)
     if (!Array.isArray(values)) throw new Error('计时数据格式无效。')
     return values.map(normalizeOperationTiming)
 }

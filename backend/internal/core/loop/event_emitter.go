@@ -8,22 +8,18 @@ import (
 	"praxis/internal/identity"
 )
 
-// emitModelEvent 为实时模型事件补齐归属；工具事件需在 Assistant 条目被内存接纳后发布。
-func (r *Runner) emitModelEvent(
-	sessionID identity.SessionID,
-	agentID identity.AgentID,
-	executionID identity.AgentExecutionID,
-	turnID identity.TurnID,
-	event providerapi.Event,
-) {
-	output := coreevent.Event{
-		Scope: coreevent.Scope{
-			SessionID:   sessionID,
-			AgentID:     agentID,
-			ExecutionID: executionID,
-			TurnID:      turnID,
-		},
+func (input Input) scope(turnID identity.TurnID) coreevent.Scope {
+	return coreevent.Scope{
+		SessionID:   input.SessionID,
+		BranchID:    input.BranchID,
+		BindingID:   input.BindingID,
+		AgentID:     input.AgentID,
+		ExecutionID: input.ID,
+		TurnID:      turnID,
 	}
+}
+func (r *Runner) emitModelEvent(input Input, turnID identity.TurnID, event providerapi.Event) {
+	output := coreevent.Event{Scope: input.scope(turnID)}
 	switch event.Kind {
 	case providerapi.StreamTextDelta:
 		output.Payload = coreevent.TextDelta{Text: event.Text}
@@ -39,45 +35,16 @@ func (r *Runner) emitModelEvent(
 	}
 	r.Emitter.Emit(output)
 }
-
-func (r *Runner) emitToolResult(
-	sessionID identity.SessionID,
-	agentID identity.AgentID,
-	executionID identity.AgentExecutionID,
-	turnID identity.TurnID,
-	block sessionentry.Block,
-) {
-	r.Emitter.Emit(coreevent.Event{
-		Scope: coreevent.Scope{
-			SessionID:   sessionID,
-			AgentID:     agentID,
-			ExecutionID: executionID,
-			TurnID:      turnID,
-		},
-		Payload: coreevent.ToolResult{
-			CallID:  block.CallID,
-			Result:  block.Text,
-			IsError: block.IsError,
-		},
-	})
+func (r *Runner) emitToolResult(input Input, turnID identity.TurnID, block sessionentry.Block) {
+	r.Emitter.Emit(coreevent.Event{Scope: input.scope(turnID), Payload: coreevent.ToolResult{CallID: block.CallID, Result: block.Text, IsError: block.IsError}})
 }
 
-// emitTurnCompletion 先发布本轮已接纳的条目，再结束实时展示，避免完成通知先清掉未回填的输出。
+// emitTurnCompletion 先发布已接纳条目，再清理实时展示。
 func (r *Runner) emitTurnCompletion(input Input, deps ExecutionDependencies, turnID identity.TurnID, entries []sessionentry.ContextEntry, stopReason providerapi.StopReason) {
-	scope := coreevent.Scope{
-		SessionID:   input.SessionID,
-		AgentID:     input.AgentID,
-		ExecutionID: input.ID,
-		TurnID:      turnID,
-	}
-	deps.History.PublishEntries(turnID, entries)
-	r.Emitter.Emit(coreevent.Event{
-		Scope:   scope,
-		Payload: coreevent.TurnCompleted{StopReason: stopReason},
-	})
+	deps.Entries.PublishEntries(turnID, entries)
+	r.Emitter.Emit(coreevent.Event{Scope: input.scope(turnID), Payload: coreevent.TurnCompleted{StopReason: stopReason}})
 }
-
-func (r *Runner) emitError(agentID identity.AgentID, executionID identity.AgentExecutionID, turnID identity.TurnID, err error) {
+func (r *Runner) emitError(input Input, turnID identity.TurnID, err error) {
 	if err == nil {
 		return
 	}
@@ -89,16 +56,8 @@ func (r *Runner) emitError(agentID identity.AgentID, executionID identity.AgentE
 			message = detail
 		}
 	}
-	r.Emitter.Emit(coreevent.Event{
-		Scope: coreevent.Scope{
-			AgentID:     agentID,
-			ExecutionID: executionID,
-			TurnID:      turnID,
-		},
-		Payload: coreevent.ErrorOccurred{Message: message},
-	})
+	r.Emitter.Emit(coreevent.Event{Scope: input.scope(turnID), Payload: coreevent.ErrorOccurred{Message: message}})
 }
-
 func providerFailureMessage(code FailureCode, err error) string {
 	if code != FailureProvider || err == nil {
 		return ""

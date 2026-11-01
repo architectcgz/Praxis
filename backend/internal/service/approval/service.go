@@ -58,7 +58,7 @@ func (s *Service) SetApprovalMode(ctx context.Context, sessionID identity.Sessio
 	return s.approvalSettings(session), nil
 }
 
-func (s *Service) approvalSettings(session sessionmodel.Session) ApprovalSettings {
+func (s *Service) approvalSettings(session sessionmodel.SessionInfo) ApprovalSettings {
 	global := s.config.ApprovalConfig().GlobalMode
 	return ApprovalSettings{
 		SessionID:     session.ID,

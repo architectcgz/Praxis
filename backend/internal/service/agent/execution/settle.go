@@ -29,7 +29,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) e
 		return nil
 	})
 	if err == nil {
-		s.publishExecutionTiming(run.Snapshot())
+		s.publishExecutionTiming(run.Snapshot(), run)
 	}
 	return err
 }
@@ -99,7 +99,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 	if !firstEnd {
 		return endedExecution, nil
 	}
-	s.publishExecutionTiming(endedExecution)
+	s.publishExecutionTiming(endedExecution, run)
 	s.logger.Infof(
 		"operation=execution_end request_id=%s session_id=%s agent_id=%s execution_id=%s status=committed outcome=%s",
 		endedExecution.RequestID,
@@ -139,6 +139,8 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 		s.emitter.Emit(coreevent.Event{
 			Scope: coreevent.Scope{
 				SessionID:   endedExecution.SessionID,
+				BranchID:    endedExecution.BranchID,
+				BindingID:   run.BindingID,
 				AgentID:     endedExecution.AgentID,
 				ExecutionID: endedExecution.ID,
 			},

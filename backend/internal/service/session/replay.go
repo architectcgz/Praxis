@@ -18,7 +18,7 @@ import (
 
 // logReplay 只在单个日志重放期间持有调用匹配索引，完成后即释放。
 type logReplay struct {
-	state       *historyState
+	session     *sessionmodel.Session
 	calls       []replayedToolCall
 	callIndexes map[sessionentry.Key]int
 }
@@ -30,20 +30,32 @@ type replayedToolCall struct {
 
 // apply 是日志到业务状态的转换边界，发布状态前校验序号、身份与载荷。
 func (r *logReplay) apply(line []byte) error {
-	state := r.state
-	sessionID := state.session.ID
+	owner := r.session
+	sessionID := owner.ID
 	sessionKey := sessionID.String()
 	var event storedEvent
 	if err := decodeJSON(line, &event); err != nil {
 		return fmt.Errorf("expected a single storage event: %w", err)
 	}
-	if state.sequence == ^uint64(0) || event.Sequence != state.sequence+1 || event.ID != fmt.Sprintf("event:%d", event.Sequence) || event.CreatedAt.IsZero() {
-		return errors.New("invalid event identity or sequence")
+	if event.CreatedAt.IsZero() {
+		return errors.New("event creation time is required")
 	}
 	if event.Key == "" || strings.TrimSpace(event.Key) != event.Key {
 		return errors.New("invalid object key")
 	}
 	switch event.Collection {
+	case "branch":
+		var value sessionmodel.Branch
+		if err := decodeJSON(event.Payload, &value); err != nil {
+			return err
+		}
+		if err := eventIdentity(event, "branch.created", value.ID.String(), sessionKey, sessionKey); err != nil {
+			return err
+		}
+		if err := validateBranch(owner, value); err != nil {
+			return err
+		}
+		owner.AcceptBranch(value)
 	case "agent_execution":
 		var value agentexecution.ExecutionRecord
 		if err := decodeJSON(event.Payload, &value); err != nil {
@@ -55,48 +67,35 @@ func (r *logReplay) apply(line []byte) error {
 		if err := eventIdentity(event, "agent_execution.saved", value.ID.String(), value.SessionID.String(), sessionKey); err != nil {
 			return err
 		}
-		state.setExecution(value)
+		if err := validateExecutionOwnership(owner, value); err != nil {
+			return err
+		}
+		owner.SetExecution(value)
 	case "entry":
-		var value entryRecord
+		var value sessionentry.ContextEntry
 		if err := decodeJSON(event.Payload, &value); err != nil {
 			return err
 		}
-		if err := value.Validate(); err != nil {
+		if err := validateContextEntry(value); err != nil {
 			return err
 		}
-		if err := eventIdentity(event, "entry.appended", encodedEntryKey(value.AgentID, value.Data.ID), sessionKey, sessionKey); err != nil {
+		if err := eventIdentity(event, "entry.appended", value.ID, sessionKey, sessionKey); err != nil {
 			return err
 		}
-		if value.Data.Sequence != event.Sequence {
-			return errors.New("message sequence does not match event sequence")
-		}
-		if state.entryIndex(value.AgentID, value.Data.ID) >= 0 {
+		if _, found := owner.Entry(value.ID); found {
 			return errors.New("duplicate entry append identity")
+		}
+		branch := owner.Branch(value.BranchID)
+		if branch == nil || branch.HeadEntryID != value.ParentID {
+			return errors.New("entry does not advance its branch head")
+		}
+		if err := validateEntry(owner, value); err != nil {
+			return err
 		}
 		if err := r.matchToolEntry(value); err != nil {
 			return err
 		}
-		state.entries = append(state.entries, value)
-	case "context":
-		var value contextRecord
-		if err := decodeJSON(event.Payload, &value); err != nil {
-			return err
-		}
-		if err := value.Validate(); err != nil {
-			return err
-		}
-		if err := eventIdentity(event, "context.saved", sessionKey, sessionKey, sessionKey); err != nil {
-			return err
-		}
-		if value.ThroughSequence != event.Sequence-1 {
-			return errors.New("saved context boundary does not match event sequence")
-		}
-		for _, entry := range value.Entries {
-			if entry.Sequence >= event.Sequence {
-				return errors.New("saved context entry must precede its save event")
-			}
-		}
-		state.context = &value
+		owner.AcceptEntry(value)
 	case "usage":
 		var value providerapi.UsageRecord
 		if err := decodeJSON(event.Payload, &value); err != nil {
@@ -108,7 +107,10 @@ func (r *logReplay) apply(line []byte) error {
 		if err := eventIdentity(event, "usage.saved", value.Key(), value.SessionID, sessionKey); err != nil {
 			return err
 		}
-		state.setUsage(value)
+		if err := validateUsage(owner, value); err != nil {
+			return err
+		}
+		owner.SetUsage(value)
 	case "wait":
 		var value workflow.WaitCondition
 		if err := decodeJSON(event.Payload, &value); err != nil {
@@ -139,30 +141,30 @@ func (r *logReplay) apply(line []byte) error {
 		if err := eventIdentity(event, typ, timingKey(value.ExecutionID, value.ID), sessionKey, sessionKey); err != nil {
 			return err
 		}
-		state.setTiming(value)
+		if owner.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {
+			return errors.New("timing execution is missing")
+		}
+		owner.SetTiming(value)
 	default:
 		return fmt.Errorf("unknown stored collection %q", event.Collection)
 	}
-	state.sequence = event.Sequence
 	return nil
 }
 
 // matchToolEntry 只检查历史中的身份关系，不重新执行审批或准入。
-func (r *logReplay) matchToolEntry(value entryRecord) error {
-	session := r.state.session
-	calls := value.Data.ToolCalls(session.ID, value.AgentID)
-	if len(calls) == 0 && value.Data.Role != role.Tool {
+func (r *logReplay) matchToolEntry(value sessionentry.ContextEntry) error {
+	session := r.session
+	agentID := session.MainAgentID()
+	calls := value.ToolCalls(session.ID, agentID)
+	if len(calls) == 0 && value.Role != role.Tool {
 		return nil
 	}
-	if session.MainAgentID() != value.AgentID {
-		return errors.New("tool entry does not belong to the session main agent")
-	}
-	index := r.state.executionIndex(identity.AgentExecutionID(value.Data.ExecutionID))
+	index := r.session.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID))
 	if index < 0 {
 		return errors.New("tool entry execution is missing")
 	}
-	execution := r.state.executions[index]
-	if execution.AgentID != value.AgentID || execution.RequestID.String() != value.Data.RequestID {
+	execution := r.session.Executions[index]
+	if execution.AgentID != agentID || execution.RequestID.String() != value.RequestID {
 		return errors.New("tool entry execution ownership does not match its session, agent or request")
 	}
 	for _, call := range calls {
@@ -172,7 +174,7 @@ func (r *logReplay) matchToolEntry(value entryRecord) error {
 		r.callIndexes[call.Key] = len(r.calls)
 		r.calls = append(r.calls, replayedToolCall{call: call})
 	}
-	for _, block := range value.Data.Content {
+	for _, block := range value.Content {
 		if block.Kind != sessionentry.BlockToolResult {
 			continue
 		}
@@ -186,7 +188,7 @@ func (r *logReplay) matchToolEntry(value entryRecord) error {
 			return fmt.Errorf("duplicate tool result %s in execution %s", key.CallID, key.ExecutionID)
 		}
 		call := prior.call
-		if call.AgentID != value.AgentID || call.RequestID != value.Data.RequestID || call.TurnID.String() != value.Data.TurnID || string(call.Name) != block.Name {
+		if call.AgentID != agentID || call.RequestID != value.RequestID || call.TurnID.String() != value.TurnID || string(call.Name) != block.Name {
 			return fmt.Errorf("tool result %s ownership does not match its call in execution %s", key.CallID, key.ExecutionID)
 		}
 		prior.completed = true
@@ -195,7 +197,7 @@ func (r *logReplay) matchToolEntry(value entryRecord) error {
 }
 
 // repairToolResults 由会话业务恢复流程决定补写中断回执，不恢复工具执行。
-func (r *logReplay) repairToolResults(ctx context.Context, h *sessionHistory) error {
+func (r *logReplay) repairToolResults(ctx context.Context, owner *Session, sessionState sessionmodel.SessionState) error {
 	for _, pending := range r.calls {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -204,13 +206,14 @@ func (r *logReplay) repairToolResults(ctx context.Context, h *sessionHistory) er
 			continue
 		}
 		call := pending.call
-		if r.state.session.State != sessionmodel.SessionActive {
+		if sessionState != sessionmodel.SessionActive {
 			return fmt.Errorf("cannot repair tool call %s in inactive session %s", call.CallID, call.SessionID)
 		}
-		_, _, err := h.appendEntryLocked(ctx, entryRecord{
-			AgentID: call.AgentID,
-			Data:    call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result.")),
-		})
+		execution := r.session.Executions[r.session.ExecutionIndex(call.ExecutionID)]
+		branch := r.session.Branch(execution.BranchID)
+		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result."))
+		entry.BranchID, entry.ParentID = branch.ID, branch.HeadEntryID
+		_, _, err := owner.appendEntry(ctx, entry)
 		if err != nil {
 			return fmt.Errorf("save interrupted result for execution %s call %s: %w", call.ExecutionID, call.CallID, err)
 		}

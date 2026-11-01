@@ -30,6 +30,8 @@ const (
 // Scope 标识事件所属的会话、Agent、执行和模型轮次；不适用的标识留空。
 type Scope struct {
 	SessionID   identity.SessionID
+	BranchID    identity.BranchID
+	BindingID   string
 	AgentID     identity.AgentID
 	ExecutionID identity.AgentExecutionID
 	TurnID      identity.TurnID

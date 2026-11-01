@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { getAgent, listAgentEntries, subscribeAgentEvents, type Entry, type AgentView, type ApiErrorCode, type ModelOption } from '../../api'
+import { getAgent, listAgentEntries, subscribeAgentEvents, type Entry, type ApiErrorCode, type ModelOption, type SessionSnapshot } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import { createAgentStore } from './agentStore'
 import { useAgentTaskInput } from './useAgentTaskInput'
@@ -29,15 +29,16 @@ export function useAgentData({ sessionID, models, setError, setErrorCode, viewRe
         if (!entry) return
         const sessionRequest = generation.current
         const request = (requests.current.get(id) || 0) + 1
+        const scope = store.getScope()
         requests.current.set(id, request)
         store.startLoading(id)
-        const agentResult = await getAgent(id).then(
+        const agentResult = await getAgent(scope.sessionId, scope.branchId, id).then(
             (value) => ({ status: 'fulfilled' as const, value }),
             (reason: unknown) => ({ status: 'rejected' as const, reason }),
         )
         const historyResult = entry.history !== undefined
             ? { status: 'fulfilled' as const, value: undefined }
-            : await listAgentEntries(id).then(
+            : await listAgentEntries(scope.sessionId, scope.branchId, id).then(
                 (value) => ({ status: 'fulfilled' as const, value }),
                 (reason: unknown) => ({ status: 'rejected' as const, reason }),
             )
@@ -53,10 +54,13 @@ export function useAgentData({ sessionID, models, setError, setErrorCode, viewRe
         }
     }, [store, setError, setErrorCode])
 
-    const loadForSession = useCallback(async ({ agents }: { agents: AgentView[] }, requestID: number) => {
+    const loadForSession = useCallback(async ({ agents, id, branch }: Pick<SessionSnapshot, 'agents' | 'id' | 'branch'>, requestID: number) => {
         if (viewRequestRef.current !== requestID) return
         generation.current += 1
         requests.current.clear()
+        const scope = store.getScope()
+        if (scope.sessionId !== id || scope.branchId !== branch.id) store.reset()
+        store.setScope(id, branch.id)
         store.setRoster(agents)
         await Promise.all(agents.map((item) => loadAgent(item.ID)))
     }, [store, loadAgent, viewRequestRef])
@@ -82,6 +86,8 @@ export function useAgentData({ sessionID, models, setError, setErrorCode, viewRe
 
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents((event) => {
+            const scope = store.getScope()
+            if (event.sessionId !== scope.sessionId || event.branchId !== scope.branchId) return
             store.receive(event)
             // 新执行领取队首后刷新队列；同一次执行的后续 turn 不重复查询。
             if (event.kind === 'execution_ended' || event.kind === 'request_canceled') void loadAgent(event.agentId)

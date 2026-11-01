@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	agentexecution "praxis/internal/core/agent/execution"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	projectmodel "praxis/internal/core/project"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	projectservice "praxis/internal/service/project"
@@ -26,7 +28,14 @@ func (r *Coordinator) run(
 		return
 	}
 	if task.Progress.FinalAssistantID != "" {
-		// 已提交的完成证据不受恢复时重放的暂停信号影响，也不能再次请求模型。
+		// 完成证据优先于迟到的取消；这里只允许补做摘要，不能重跑用户任务。
+		input, deps, _, err := r.operations.PrepareLoop(ctx, run)
+		if err == nil {
+			err = r.loop.Compact(ctx, input, deps)
+		}
+		if err != nil {
+			r.logError(task, "compact completed context", err)
+		}
 		r.endExecution(task, active, agentexecution.ExecutionCompleted, "", "")
 		return
 	}
@@ -112,6 +121,9 @@ func (r *Coordinator) execute(
 		if !completed {
 			deps.ToolExecutor = executor
 			_, err = r.loop.Run(ctx, executionInput, deps)
+		} else if compressionErr := r.loop.Compact(ctx, executionInput, deps); compressionErr != nil {
+			// 重复准入只允许补做摘要，不能重跑已完成的模型和工具任务。
+			r.logError(task, "compact completed context", compressionErr)
 		}
 		outcome, failureCode = agentexecution.ExecutionCompleted, ""
 		if err != nil {
@@ -183,6 +195,36 @@ func (r *Coordinator) endExecution(
 		if err == nil {
 			break
 		}
+		if errors.Is(err, errorcode.ErrLogUnavailable) {
+			// 不确定追加已封锁日志；释放执行不能以再次成功落盘为条件。
+			r.logError(task, "session log unavailable; restart required", err)
+			endedExecution = active.run.Snapshot()
+			at := time.Now().UTC()
+			if endedExecution.Status == agentexecution.ExecutionStarting {
+				endedExecution.Start(at)
+			}
+			endedExecution.End(agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, at)
+			_ = active.run.Update(func(value *agentexecution.ExecutionRecord) error { *value = endedExecution; return nil })
+			active.run.Agent.FinishExecution(endedExecution.AgentState(), at)
+			r.mu.Lock()
+			for _, other := range r.executions {
+				if other.sessionID == task.SessionID {
+					other.cancel(errorcode.ErrLogUnavailable)
+				}
+			}
+			r.mu.Unlock()
+			r.loop.Emitter.Emit(coreevent.Event{
+				Scope: coreevent.Scope{
+					SessionID:   task.SessionID,
+					BranchID:    task.BranchID,
+					BindingID:   active.bindingID,
+					AgentID:     task.AgentID,
+					ExecutionID: task.ID,
+				},
+				Payload: coreevent.ExecutionEnded{Outcome: string(agentexecution.ExecutionFailed), FailureCode: string(agentexecution.ExecutionFailureStorage), FailureMessage: "Session storage failed. Restart the application before continuing."},
+			})
+			break
+		}
 		r.logError(task, "settle execution", err)
 		timer := time.NewTimer(retryDelay)
 		<-timer.C
@@ -196,7 +238,7 @@ func (r *Coordinator) endExecution(
 	resumeRequested := active.resumeRequested
 	main := active.run.Main()
 	if main {
-		delete(r.executions, task.AgentID)
+		delete(r.executions, executionKey{task.AgentID, task.BranchID})
 		active.run = nil
 		active.cancel(nil)
 	}
@@ -205,7 +247,7 @@ func (r *Coordinator) endExecution(
 	if main && (resumeRequested || !controlled && (endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded)) {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
-		if err := r.scheduleSession(queueContext, task.SessionID, false); err != nil {
+		if err := r.scheduleBinding(queueContext, active.bindingID, false); err != nil {
 			r.logError(task, "prepare next queued task", err)
 		}
 	}

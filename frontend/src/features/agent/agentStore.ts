@@ -11,6 +11,7 @@ export type AgentEntry = {
 
 /** 查询快照和高频输出分别通知订阅者，数据仍由同一个会话 store 拥有。 */
 export function createAgentStore() {
+    let scope = { sessionId: '', branchId: '' }
     let data = { selectedId: '', ids: [] as string[], byId: {} as Record<string, AgentEntry> }
     let output = { streamingOutputs: {} as StreamingOutputs, pendingUserMessages: [] as PendingUserMessage[], awaitingAgentId: '' }
     const dataListeners = new Set<() => void>()
@@ -24,15 +25,18 @@ export function createAgentStore() {
         emitData()
     }
     return {
+        getScope: () => scope,
+        setScope(sessionId: string, branchId: string) { scope = { sessionId, branchId } },
         getData: () => data,
         getOutput: () => output,
         getSelectedAgentID: () => data.selectedId,
         subscribeData: (listener: () => void) => { dataListeners.add(listener); return () => { dataListeners.delete(listener) } },
         subscribeOutput: (listener: () => void) => { outputListeners.add(listener); return () => { outputListeners.delete(listener) } },
         reset() {
+            scope = { sessionId: '', branchId: '' }
             data = { selectedId: '', ids: [], byId: {} }
             emitData()
-            updateOutput({ ...output, streamingOutputs: {}, awaitingAgentId: '' })
+            updateOutput({ streamingOutputs: {}, pendingUserMessages: [], awaitingAgentId: '' })
         },
         setRoster(agents: AgentView[]) {
             const ids = agents.map((agent) => agent.ID)
@@ -66,10 +70,11 @@ export function createAgentStore() {
             }
         },
         receive(event: AgentEvent) {
+            if (event.sessionId !== scope.sessionId || event.branchId !== scope.branchId) return
             if (!data.byId[event.agentId]) return
             if (event.kind === 'entries_appended' && event.data.entries.length) {
                 const entries = event.data.entries
-                updateEntry(event.agentId, (entry) => ({ ...entry, history: [...(entry.history || []), ...entries] }))
+                updateEntry(event.agentId, (entry) => ({ ...entry, history: [...new Map([...(entry.history || []), ...entries].map((item) => [item.id, item])).values()] }))
             }
             if (event.kind === 'turn_completed') {
                 const current = output.streamingOutputs[event.agentId]

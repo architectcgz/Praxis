@@ -30,8 +30,8 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, a
 	return nil
 }
 
-func (s *Coordinator) ListToolApprovals(ctx context.Context, agentID identity.AgentID) ([]toolservice.Approval, error) {
-	return s.tools.ListApprovals(ctx, agentID)
+func (s *Coordinator) ListToolApprovals(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID) ([]toolservice.Approval, error) {
+	return s.tools.ListApprovals(ctx, agentID, branchID)
 }
 
 // StopToolCall 只发送停止信号，回执由当前工具路径生成。

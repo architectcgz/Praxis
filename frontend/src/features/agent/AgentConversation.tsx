@@ -7,6 +7,7 @@ import { ApprovalGate, ToolApprovalsProvider } from './ToolApprovals'
 import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
 export type AgentConversationProps = {
+    branchId: string
     agent: AgentView
     history: Entry[]
     collaboration?: ReactNode
@@ -31,7 +32,7 @@ export type AgentConversationProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ branchId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -109,7 +110,7 @@ export function AgentConversation({ agent, history, collaboration, streamingOutp
         setShowScrollButton(false)
     }, [])
 
-    return <ToolApprovalsProvider key={agent.ID} agentId={agent.ID}>
+    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} sessionId={agent.SessionID} branchId={branchId}>
         <div className="agent-conversation">
             <div className="message-thread-container">
                 <div

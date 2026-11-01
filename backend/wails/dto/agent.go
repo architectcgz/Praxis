@@ -18,6 +18,7 @@ type AgentControlResponse struct {
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
 type AgentEvent struct {
+	BranchID    string `json:"branchId"`
 	Kind        string `json:"kind"`
 	SessionID   string `json:"sessionId,omitempty"`
 	AgentID     string `json:"agentId"`

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"praxis/internal/core/session/entry/role"
-	"slices"
+	"praxis/internal/identity"
 	"strings"
 	"time"
 )
@@ -44,8 +44,11 @@ type Block struct {
 
 // ContextEntry 是 Agent 历史与模型上下文共用的内部有序记录，不定义前端协议。
 type ContextEntry struct {
-	// Replaces 仅用于摘要，记录被替代的历史 Entry，不修改原始记录。
-	Replaces     []string   `json:"replaces,omitempty"`
+	// ParentID 和 BranchID 描述会话历史树；模型上下文构建不会依赖它们。
+	ParentID string            `json:"parentId,omitempty"`
+	BranchID identity.BranchID `json:"branchId,omitempty"`
+	// Summary 覆盖所在分支路径中此前的全部上下文，原始历史仍然保留。
+	Summary      bool       `json:"summary,omitzero"`
 	ID           string     `json:"id"`
 	Sequence     uint64     `json:"sequence"`
 	RequestID    string     `json:"requestId,omitempty"`
@@ -58,15 +61,15 @@ type ContextEntry struct {
 	AuthorID     string     `json:"authorId,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 
-	// Protected 要求压缩时保留原文；来源与保护策略由调用方决定。
+	// Protected 标记本轮请求必须容纳的原文，只用于必要输入的容量检查，不限制轮后摘要。
 	Protected bool      `json:"protected,omitempty"`
 	Role      role.Role `json:"role"`
 	Content   []Block   `json:"content"`
 }
 
-// IsSummary 根据历史替代范围识别压缩摘要。
+// IsSummary 识别覆盖此前上下文的摘要节点。
 func (e ContextEntry) IsSummary() bool {
-	return len(e.Replaces) > 0
+	return e.Summary
 }
 
 // Clone 返回 Block 的独立副本，避免跨边界修改共享输入。
@@ -78,7 +81,6 @@ func (b Block) Clone() Block {
 
 // Clone 返回 ContextEntry 的独立副本。
 func (e ContextEntry) Clone() ContextEntry {
-	e.Replaces = slices.Clone(e.Replaces)
 	if e.Content == nil {
 		return e
 	}
@@ -99,4 +101,13 @@ func (e ContextEntry) TextContent() string {
 		}
 	}
 	return text.String()
+}
+
+// Values 为请求或展示边界创建值列表，内部载荷仍按只读数据共享。
+func Values(entries []*ContextEntry) []ContextEntry {
+	values := make([]ContextEntry, len(entries))
+	for index, entry := range entries {
+		values[index] = *entry
+	}
+	return values
 }

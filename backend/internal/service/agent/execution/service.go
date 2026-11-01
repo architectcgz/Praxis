@@ -21,9 +21,8 @@ type Dependencies struct {
 	Logger         *logging.Logger
 	Emitter        *coreevent.Emitter
 	Sessions       repository.Session
-	Records        sessionmodel.ExecutionHistory
-	UsageRecords   sessionmodel.UsageHistory
-	History        sessionmodel.History
+	Records        sessionmodel.ExecutionRecords
+	UsageRecords   sessionmodel.UsageRecords
 	Definitions    AgentDefinitionProvider
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
@@ -35,9 +34,8 @@ type Service struct {
 	logger         *logging.Logger
 	emitter        *coreevent.Emitter
 	sessions       repository.Session
-	records        sessionmodel.ExecutionHistory
-	usageRecords   sessionmodel.UsageHistory
-	history        sessionmodel.History
+	records        sessionmodel.ExecutionRecords
+	usageRecords   sessionmodel.UsageRecords
 	definitions    AgentDefinitionProvider
 	clock          clock.Clock
 	ids            identity.IDGenerator
@@ -52,7 +50,6 @@ func NewService(deps Dependencies) *Service {
 		sessions:       deps.Sessions,
 		records:        deps.Records,
 		usageRecords:   deps.UsageRecords,
-		history:        deps.History,
 		definitions:    deps.Definitions,
 		clock:          deps.Clock,
 		ids:            deps.IDs,

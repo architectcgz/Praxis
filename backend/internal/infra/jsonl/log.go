@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"praxis/internal/errorcode"
 )
 
 func CheckRegularFile(path string) error {
@@ -50,7 +51,10 @@ func Append(path string, data []byte) error {
 	if writeErr == nil && n != len(data) {
 		writeErr = io.ErrShortWrite
 	}
-	return errors.Join(writeErr, file.Close())
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		return errors.Join(errorcode.ErrLogUnavailable, err)
+	}
+	return nil
 }
 
 // Read 向 apply 传递含换行符的完整记录；未换行的尾部备份后截断，调用方须排除并发读写。
