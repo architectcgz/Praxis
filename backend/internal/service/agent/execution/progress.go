@@ -6,6 +6,34 @@ import (
 	"praxis/internal/errorcode"
 )
 
+// modelProgress 仅绑定一次执行的模型计数，不提供 Entry 或上下文访问能力。
+type modelProgress struct {
+	service *Service
+	run     *agentexecution.Run
+}
+
+func (p *modelProgress) NextRequestSequence(ctx context.Context) (uint64, error) {
+	sequence, err := p.service.NextRequestSequence(ctx, p.run)
+	if err != nil {
+		return 0, entryFailure(p.run, err)
+	}
+	return sequence, nil
+}
+
+func (p *modelProgress) RecordModelRequest(ctx context.Context, sequence uint64, iteration bool) error {
+	if err := p.service.RecordModelRequest(ctx, p.run, sequence, iteration); err != nil {
+		return entryFailure(p.run, err)
+	}
+	return nil
+}
+
+func (p *modelProgress) RecordModelOutput(ctx context.Context, size int) error {
+	if err := p.service.RecordModelOutput(ctx, p.run, size); err != nil {
+		return entryFailure(p.run, err)
+	}
+	return nil
+}
+
 func (s *Service) NextRequestSequence(ctx context.Context, run *agentexecution.Run) (uint64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err

@@ -33,9 +33,12 @@ func (r *logReplay) apply(event sessionmodel.Event) error {
 	case sessionmodel.EventExecutionSaved:
 		owner.SetExecution(event.Payload.(agentexecution.ExecutionRecord))
 	case sessionmodel.EventEntryAppended:
+		if owner.Branch(event.BranchID) == nil {
+			return fmt.Errorf("entry event targets an unknown branch %q", event.BranchID)
+		}
 		value := event.Payload.(sessionentry.ContextEntry)
 		r.trackToolEntry(value)
-		owner.AcceptEntry(value)
+		owner.AcceptEntry(event.BranchID, value)
 	case sessionmodel.EventUsageSaved:
 		owner.SetUsage(event.Payload.(providerapi.UsageRecord))
 	case sessionmodel.EventTimingStarted, sessionmodel.EventTimingFinished:

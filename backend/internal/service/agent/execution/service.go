@@ -21,7 +21,7 @@ type Dependencies struct {
 	IDs            identity.IDGenerator
 }
 
-// Service 负责执行准入、上下文投影、进度和结算；主会话历史由 Session 提供。
+// Service 负责执行准入、模型与工具编排、Entry 记录、上下文投影、进度和结算。
 type Service struct {
 	hookDispatcher *hook.Dispatcher
 	logger         *logging.Logger

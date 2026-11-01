@@ -1,20 +1,14 @@
 package loop
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	appcontext "praxis/internal/core/context"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
-	"praxis/internal/identity"
 )
 
-// Dependencies 是 loop 的执行依赖；实际运行的副本绑定会话已冻结的 Provider 和工具目录。
+// Dependencies 保存模型请求能力；Provider 和工具目录在执行开始时绑定会话配置。
 type Dependencies struct {
 	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
@@ -23,220 +17,20 @@ type Dependencies struct {
 	Logf           func(string, ...any)
 }
 
-// Runner 持有装配层提供的共享依赖，可供多次执行并发复用。
+// Runner 提供上下文构建、模型请求和摘要生成能力，不持有 Run 或 Session。
 type Runner struct {
 	Dependencies
 }
 
-// NewRunner 保存共享基础依赖；执行入口在调用 Run 前绑定会话 Provider 和工具目录。
 func NewRunner(deps Dependencies) Runner {
 	return Runner{Dependencies: deps}
 }
 
-// Run 消费本轮模型投影，通过绑定的 Entry 提交能力追加结果并取得下一轮上下文。
-// 运行中只注入预算提醒，完整收尾后才尝试压缩；摘要失败不改变已完成的回答。
-// Loop 不决定执行终态、释放归属或调度后续预约。
-func (r *Runner) Run(ctx context.Context, executionInput Input, deps ExecutionDependencies) (Result, error) {
-	reason, _, err := r.run(ctx, executionInput, deps)
-	if err == nil && reason == EndCompleted {
-		if compressionErr := r.Compact(ctx, executionInput, deps); compressionErr != nil {
-			r.Logf("context compression failed execution=%s; completed answer preserved: %v", executionInput.ID, compressionErr)
+// Request 接收一次模型响应；断流时同时返回已收到的内容，交由执行服务决定如何记录。
+func (r *Runner) Request(ctx context.Context, execution ExecutionParams, deps ExecutionDependencies, request providerapi.Request, kind hook.ModelRequestKind, sequence uint64) (Response, error) {
+	return r.callModel(ctx, execution, deps, request, kind, sequence, func(event providerapi.Event) {
+		if kind == hook.ModelRequestIteration || event.Kind == providerapi.StreamUsage {
+			r.emitModelEvent(execution, request.TurnID, event)
 		}
-	}
-	return Result{Reason: reason}, err
-}
-
-// Compact 只供已经完成用户轮次的执行路径调用，失败时不修改原 Context。
-func (r *Runner) Compact(ctx context.Context, input Input, deps ExecutionDependencies) error {
-	content, err := deps.Entries.NextContext(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = r.compressContext(ctx, input, deps, appcontext.ModelContext{
-		SystemPrompt: content.SystemPrompt,
-		Entries:      content.Entries,
-	}, r.Tools.List())
-	return err
-}
-
-// run 每轮构建请求，工具回执全部提交成功后才取得下一轮上下文。
-// 预算提醒由最终模型请求边界注入，不在工具循环中压缩或裁剪已接纳的 Entry。
-func (r *Runner) run(
-	ctx context.Context,
-	executionInput Input,
-	deps ExecutionDependencies,
-) (EndReason, FailureCode, error) {
-	content := executionInput.Context
-
-	for {
-		tools := r.Tools.List()
-		base := appcontext.ModelContext{
-			SystemPrompt: content.SystemPrompt,
-			Entries:      content.Entries,
-		}
-		modelContext, err := r.buildContext(ctx, executionInput, base)
-		if err != nil {
-			err = modelFailure(err)
-			r.emitError(executionInput, "", err)
-			return loopResult(err)
-		}
-		sequence, err := deps.Execution.NextRequestSequence(ctx)
-		if err != nil {
-			return loopResult(err)
-		}
-		request := providerapi.Request{
-			ExecutionID:     executionInput.ID,
-			PromptCacheKey:  executionInput.SessionID.String(),
-			Model:           executionInput.Model.Clone(),
-			Context:         modelContext,
-			Tools:           tools,
-			MaxOutputTokens: executionInput.Model.MaxOutputTokens,
-			TurnID:          identity.NewTurnID(executionInput.ID, sequence),
-		}
-		outcome, failureCode, finished, err := r.executeTurn(ctx, executionInput, deps, request, sequence)
-
-		if err != nil || outcome != EndCompleted || finished {
-			return outcome, failureCode, err
-		}
-		content, err = deps.Entries.NextContext(ctx)
-		if err != nil {
-			err = modelFailure(err)
-			r.emitError(executionInput, "", err)
-			return loopResult(err)
-		}
-	}
-}
-
-// executeTurn 执行一轮模型、工具和回执业务，返回明确的继续/完成决策。
-func (r *Runner) executeTurn(
-	ctx context.Context,
-	executionInput Input,
-	deps ExecutionDependencies,
-	request providerapi.Request,
-	sequence uint64,
-) (outcome EndReason, failureCode FailureCode, finished bool, err error) {
-	turnID := request.TurnID
-	iteration := hook.Iteration{Identity: executionIdentity(executionInput, turnID), Sequence: sequence}
-	iteration.OperationID = hook.NewOperationID()
-	if hookErr := r.HookDispatcher.BeforeIteration(ctx, iteration); hookErr != nil {
-		return endFailed, FailureInternal, false, NewFailure(FailureInternal, hookErr)
-	}
-	var stopReason providerapi.StopReason
-	defer func() {
-		if hookErr := r.HookDispatcher.AfterIteration(context.WithoutCancel(ctx), hook.IterationResult{
-			Iteration:  iteration,
-			StopReason: stopReason,
-			Err:        err,
-		}); hookErr != nil {
-			r.Logf("after iteration hook failed: %v", hookErr)
-		}
-	}()
-	r.Emitter.Emit(coreevent.Event{
-		Scope:   executionInput.scope(turnID),
-		Payload: coreevent.TurnStarted{},
 	})
-	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", executionInput.ID, executionInput.Model.ModelID, len(request.Context.Entries), turnID)
-	r.Emitter.Emit(coreevent.Event{
-		Scope:   executionInput.scope(turnID),
-		Payload: coreevent.ProviderWaiting{},
-	})
-	response, err := r.callModel(ctx, executionInput, deps, request, hook.ModelRequestIteration, sequence, func(event providerapi.Event) {
-		r.emitModelEvent(executionInput, turnID, event)
-	})
-	stopReason = response.stopReason
-	if err != nil {
-		blocks := entryBlocksFromEvents(response.events)
-		partial := make([]sessionentry.Block, 0, len(blocks))
-		for _, block := range blocks {
-			if block.Kind == sessionentry.BlockText || block.Kind == sessionentry.BlockThinking {
-				partial = append(partial, block)
-			}
-		}
-		if len(partial) > 0 {
-			stopReason := "error"
-			if ctx.Err() != nil {
-				stopReason = "aborted"
-			}
-			stored, _, writeErr := deps.Entries.AppendEntry(context.WithoutCancel(ctx), sessionentry.ContextEntry{
-				ID:          "assistant:" + turnID.String(),
-				RequestID:   executionInput.RequestID.String(),
-				ExecutionID: executionInput.ID.String(),
-				TurnID:      turnID.String(),
-				StopReason:  stopReason,
-				Role:        role.Assistant,
-				AuthorKind:  sessionentry.AuthorAgent,
-				AuthorID:    executionInput.AgentID.String(),
-				Content:     partial,
-			})
-			if writeErr != nil {
-				err = deps.Entries.EntryFailure(errors.Join(err, writeErr))
-			} else {
-				r.emitTurnCompletion(executionInput, deps, turnID, []sessionentry.ContextEntry{stored}, providerapi.StopReason(stopReason))
-			}
-		}
-		err = modelFailure(err)
-		r.emitError(executionInput, turnID, err)
-		outcome, code, cause := loopResult(err)
-		return outcome, code, false, cause
-	}
-
-	assistant := entryBlocksFromEvents(response.events)
-	var calls []sessionentry.ToolCall
-	var committed []sessionentry.ContextEntry
-
-	{
-		message := sessionentry.ContextEntry{
-			ID:          "assistant:" + turnID.String(),
-			RequestID:   executionInput.RequestID.String(),
-			ExecutionID: executionInput.ID.String(),
-			TurnID:      turnID.String(),
-			StopReason:  string(response.stopReason),
-			Role:        role.Assistant,
-			AuthorKind:  sessionentry.AuthorAgent,
-			AuthorID:    executionInput.AgentID.String(),
-			Content:     assistant,
-		}
-		message, _, err := deps.Entries.AppendEntry(ctx, message)
-		if err != nil {
-			r.emitError(executionInput, turnID, err)
-			outcome, code, cause := loopResult(err)
-			return outcome, code, false, cause
-		}
-		committed = append(committed, message)
-		calls = message.ToolCalls(executionInput.SessionID, executionInput.AgentID)
-	}
-	for _, call := range calls {
-		r.Emitter.Emit(coreevent.Event{
-			Scope: executionInput.scope(turnID),
-			Payload: coreevent.ToolCall{
-				CallID: call.CallID,
-				Name:   string(call.Name),
-				Input:  bytes.Clone(call.Arguments),
-			},
-		})
-	}
-	if response.stopReason == providerapi.StopCompleted || response.stopReason == providerapi.StopSequence {
-		r.emitTurnCompletion(executionInput, deps, turnID, committed, response.stopReason)
-		return EndCompleted, "", true, nil
-	}
-	results, err := r.runToolCalls(ctx, executionInput, deps, calls, turnID)
-	if err != nil {
-		// 已返回的回执保持原样；当前失败调用和后续未执行调用由本轮退出分支统一收尾。
-		interrupted, closeErr := r.interruptToolCalls(ctx, executionInput, deps, calls[len(results):])
-		results = append(results, interrupted...)
-		if closeErr != nil {
-			err = deps.Entries.EntryFailure(errors.Join(err, closeErr))
-		}
-	}
-	committed = append(committed, results...)
-	if err != nil {
-		if len(committed) > 0 {
-			r.emitTurnCompletion(executionInput, deps, turnID, committed, response.stopReason)
-		}
-		r.emitError(executionInput, turnID, err)
-		outcome, code, cause := loopResult(err)
-		return outcome, code, false, cause
-	}
-	r.emitTurnCompletion(executionInput, deps, turnID, committed, response.stopReason)
-	return EndCompleted, "", false, nil
 }

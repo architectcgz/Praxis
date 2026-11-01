@@ -11,16 +11,21 @@ import (
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"reflect"
 	"slices"
 )
 
-// modelResponse 保存有序模型内容与原始文本字节数，不包含消息或上下文类型。
-type modelResponse struct {
+// Response 保存一次模型响应；内容块和工具调用都从同一份有序事件转换。
+type Response struct {
 	events     []providerapi.Event
 	textBytes  int
-	stopReason providerapi.StopReason
+	StopReason providerapi.StopReason
+}
+
+func (r Response) Blocks() []sessionentry.Block {
+	return entryBlocksFromEvents(r.events)
 }
 
 // requestModel 只发起请求和消费模型事件，不读取 Execution、不记录进度或触发 Hook。
@@ -29,12 +34,12 @@ func requestModel(
 	modelProvider providerapi.Provider,
 	request providerapi.Request,
 	onEvent func(providerapi.Event),
-) (modelResponse, error) {
+) (Response, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	input, err := modelProvider.Stream(streamCtx, request)
 	if err != nil {
-		return modelResponse{}, err
+		return Response{}, err
 	}
 	response, err := collectModelResponse(streamCtx, input, onEvent)
 	if err == nil {
@@ -46,15 +51,15 @@ func requestModel(
 // callModel 在固定位置执行数据扩展、原生进度记录与模型计时。
 func (r *Runner) callModel(
 	ctx context.Context,
-	executionInput Input,
+	execution ExecutionParams,
 	deps ExecutionDependencies,
 	request providerapi.Request,
 	requestKind hook.ModelRequestKind,
 	sequence uint64,
 	onEvent func(providerapi.Event),
-) (response modelResponse, err error) {
+) (response Response, err error) {
 	boundary := hook.ModelRequest{
-		Identity: executionIdentity(executionInput, request.TurnID),
+		Identity: executionIdentity(execution, request.TurnID),
 		Kind:     requestKind,
 		Sequence: sequence,
 		Request:  request,
@@ -95,15 +100,15 @@ func (r *Runner) callModel(
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
 			Request:     boundary,
 			OutputBytes: response.textBytes,
-			StopReason:  response.stopReason,
+			StopReason:  response.StopReason,
 			Err:         err,
 		}); hookErr != nil {
 			r.Logf("after model response hook failed: %v", hookErr)
 		}
-		scope.End(hook.Result{Err: err, StopReason: response.stopReason})
+		scope.End(hook.Result{Err: err, StopReason: response.StopReason})
 	}()
 	ctx, span := deps.Timing.Start(ctx, timing.Operation{
-		ExecutionID: executionInput.ID.String(),
+		ExecutionID: execution.ID.String(),
 		Kind:        timing.Provider,
 		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
 		ReferenceID: "assistant:" + request.TurnID.String(),
@@ -153,8 +158,8 @@ func collectModelResponse(
 	ctx context.Context,
 	stream <-chan providerapi.Event,
 	onEvent func(providerapi.Event),
-) (modelResponse, error) {
-	var response modelResponse
+) (Response, error) {
+	var response Response
 	if stream == nil {
 		return response, errors.New("provider returned a nil stream")
 	}
@@ -206,7 +211,7 @@ func collectModelResponse(
 				if err := ctx.Err(); err != nil {
 					return response, err
 				}
-				response.stopReason = event.StopReason
+				response.StopReason = event.StopReason
 				indexed := len(response.events) > 0 && response.events[0].OutputIndex != nil
 				for _, content := range response.events {
 					if (content.OutputIndex != nil) != indexed || content.OutputIndex != nil && *content.OutputIndex < 0 {
@@ -237,14 +242,14 @@ func collectModelResponse(
 }
 
 // validateStopReason 在接纳内容或执行工具前检查终态，摘要调用也遵守同一约束。
-func (r modelResponse) validateStopReason() error {
+func (r Response) validateStopReason() error {
 	toolCount := 0
 	for _, event := range r.events {
 		if event.Kind == providerapi.StreamToolCall {
 			toolCount++
 		}
 	}
-	switch r.stopReason {
+	switch r.StopReason {
 	case providerapi.StopCompleted, providerapi.StopSequence:
 		if toolCount != 0 {
 			return errors.New("provider completed with unexpected tool calls")
@@ -262,12 +267,12 @@ func (r modelResponse) validateStopReason() error {
 	case providerapi.StopPaused:
 		return errors.New("model paused the turn; continuation is not supported")
 	default:
-		return fmt.Errorf("provider returned an unknown stop reason %q", r.stopReason)
+		return fmt.Errorf("provider returned an unknown stop reason %q", r.StopReason)
 	}
-	return validateToolCalls(r.toolCalls())
+	return validateToolCalls(r.ToolCalls())
 }
 
-func (r modelResponse) toolCalls() []ToolCall {
+func (r Response) ToolCalls() []ToolCall {
 	calls := make([]ToolCall, 0)
 	for _, event := range r.events {
 		if event.Kind == providerapi.StreamToolCall {
@@ -292,7 +297,7 @@ func sameOutputIndex(a, b *int) bool {
 }
 
 // bindReasoningState 确认响应协议后绑定冻结的请求身份，不重复解析 Decoder 已处理的载荷。
-func (r *modelResponse) bindReasoningState(config modelapi.Config) error {
+func (r *Response) bindReasoningState(config modelapi.Config) error {
 	for _, event := range r.events {
 		if event.Kind != providerapi.StreamReasoningState {
 			continue

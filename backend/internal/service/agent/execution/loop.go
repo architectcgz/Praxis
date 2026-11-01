@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	agentexecution "praxis/internal/core/agent/execution"
 	appcontext "praxis/internal/core/context"
 	coreevent "praxis/internal/core/event"
@@ -10,123 +11,162 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
-// loopExecution 绑定一次 Loop 调用的执行归属；生命周期与该次调用相同，不在共享 Service 中保存。
-// 主执行先向 Session 提交，再将同一 Entry 引用交给 Run 的 Context 和执行证据。
-type loopExecution struct {
-	service *Service
-	run     *agentexecution.Run
-}
-
-func (e *loopExecution) NextContext(ctx context.Context) (appcontext.Content, error) {
-	return e.service.contextContent(ctx, e.run)
-}
-
-// AppendEntry 先向主会话追加条目，再记录本次执行证据；子执行只向本次 Run 接纳条目。
-// 主会话已接纳但日志写入失败时，Run 仍保留同一条目并向上传递错误。
-// 接纳后的 Hook 不改变已有结果，重复条目不重复触发通知。
-func (e *loopExecution) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
-	inserted := false
-	var writeErr error
-	entry := new(value)
-	if e.run.Main() {
-		stored, added, err := e.run.Session.AppendEntry(ctx, e.run.Snapshot().BranchID, value)
-		if err != nil && !added {
-			return sessionentry.ContextEntry{}, false, e.EntryFailure(err)
+// Execute 直接编排模型回合、Assistant 记录、逐个工具执行和回执记录。
+// 已有最终回答时只允许轮后摘要，不再请求模型执行用户任务。
+func (s *Service) Execute(ctx context.Context, run *agentexecution.Run, runner *loop.Runner, executor loop.ToolExecutor) (err error) {
+	var turnID identity.TurnID
+	defer func() {
+		if err != nil {
+			s.emitError(run, turnID, err)
 		}
-		entry, inserted, writeErr = stored, added, err
+	}()
+	if !run.Snapshot().Active() {
+		return loop.NewFailure(loop.FailureContract, errorcode.ErrRequestConflict)
 	}
-	accepted, added, err := e.run.Accept(entry)
-	if err != nil {
-		return sessionentry.ContextEntry{}, false, e.EntryFailure(err)
+	execution, deps := s.modelExecutionParams(run)
+	if run.Snapshot().Progress.FinalAssistantID == "" {
+		for {
+			content, contextErr := s.contextContent(ctx, run)
+			if contextErr != nil {
+				return modelFailure(contextErr)
+			}
+			modelContext, contextErr := runner.BuildContext(ctx, execution, appcontext.ModelContext{
+				SystemPrompt: content.SystemPrompt,
+				Entries:      content.Entries,
+			})
+			if contextErr != nil {
+				return modelFailure(contextErr)
+			}
+			sequence, sequenceErr := deps.Execution.NextRequestSequence(ctx)
+			if sequenceErr != nil {
+				return sequenceErr
+			}
+			turnID = identity.NewTurnID(execution.ID, sequence)
+			request := providerapi.Request{
+				ExecutionID:     execution.ID,
+				PromptCacheKey:  execution.SessionID.String(),
+				Model:           execution.Model.Clone(),
+				Context:         modelContext,
+				Tools:           runner.Tools.List(),
+				MaxOutputTokens: execution.Model.MaxOutputTokens,
+				TurnID:          turnID,
+			}
+			finished, turnErr := s.executeTurn(ctx, run, runner, executor, execution, deps, request, sequence)
+			if turnErr != nil {
+				return turnErr
+			}
+			if finished {
+				break
+			}
+		}
 	}
-	if !e.run.Main() {
-		inserted = added
-	}
-	if inserted && accepted.Role == role.Assistant && e.run.Main() {
-		e.notifyAssistant(ctx, accepted)
-	}
-	if writeErr != nil {
-		return accepted, inserted, e.EntryFailure(writeErr)
-	}
-	return accepted, inserted, nil
-}
-
-func (e *loopExecution) PublishEntries(turnID identity.TurnID, entries []sessionentry.ContextEntry) {
-	if len(entries) == 0 || e.service.emitter == nil {
-		return
-	}
-	task := e.run.Snapshot()
-	e.service.emitter.Emit(coreevent.Event{
-		Scope: coreevent.Scope{
-			SessionID:   task.SessionID,
-			BranchID:    task.BranchID,
-			BindingID:   e.run.BindingID,
-			AgentID:     task.AgentID,
-			ExecutionID: task.ID,
-			TurnID:      turnID,
-		},
-		Payload: coreevent.EntriesAppended{
-			Entries:   entries,
-			Transient: !e.run.Main(),
-		},
-	})
-}
-
-func (e *loopExecution) NextRequestSequence(ctx context.Context) (uint64, error) {
-	sequence, err := e.service.NextRequestSequence(ctx, e.run)
-	if err != nil {
-		return 0, e.EntryFailure(err)
-	}
-	return sequence, nil
-}
-
-func (e *loopExecution) RecordModelRequest(ctx context.Context, sequence uint64, iteration bool) error {
-	if err := e.service.RecordModelRequest(ctx, e.run, sequence, iteration); err != nil {
-		return e.EntryFailure(err)
+	if compressionErr := s.Compact(ctx, run, runner); compressionErr != nil {
+		s.logger.Errorf("context compression failed execution=%s; completed answer preserved: %v", execution.ID, compressionErr)
 	}
 	return nil
 }
 
-func (e *loopExecution) RecordModelOutput(ctx context.Context, size int) error {
-	if err := e.service.RecordModelOutput(ctx, e.run, size); err != nil {
-		return e.EntryFailure(err)
+func (s *Service) executeTurn(
+	ctx context.Context,
+	run *agentexecution.Run,
+	runner *loop.Runner,
+	executor loop.ToolExecutor,
+	execution loop.ExecutionParams,
+	deps loop.ExecutionDependencies,
+	request providerapi.Request,
+	sequence uint64,
+) (finished bool, err error) {
+	turnID := request.TurnID
+	iteration := hook.Iteration{Identity: executionIdentity(run, turnID), Sequence: sequence}
+	iteration.OperationID = hook.NewOperationID()
+	if hookErr := s.hookDispatcher.BeforeIteration(ctx, iteration); hookErr != nil {
+		return false, loop.NewFailure(loop.FailureInternal, hookErr)
 	}
-	return nil
-}
-
-func (e *loopExecution) EntryFailure(err error) error {
-	if e.run.Main() {
-		return loop.NewFailure(loop.FailureStorage, err)
-	}
-	return loop.NewFailure(loop.FailureContract, err)
-}
-
-func (e *loopExecution) identity(turnID identity.TurnID) hook.Identity {
-	task := e.run.Snapshot()
-	return hook.Identity{
-		SourceTaskID: task.SourceTaskID,
-		SessionID:    task.SessionID,
-		AgentID:      task.AgentID,
-		ExecutionID:  task.ID,
-		TurnID:       turnID,
-	}
-}
-
-func (e *loopExecution) notifyAssistant(ctx context.Context, entry sessionentry.ContextEntry) {
-	event := hook.EntryCommitted{
-		Identity: e.identity(identity.TurnID(entry.TurnID)),
-		Entry:    entry,
-	}
-	ctx = context.WithoutCancel(ctx)
-	if err := e.service.hookDispatcher.AssistantCommitted(ctx, event); err != nil {
-		e.service.logger.Errorf("assistant committed hook failed: %v", err)
-	}
-	if entry.StopReason == string(providerapi.StopCompleted) || entry.StopReason == string(providerapi.StopSequence) {
-		if err := e.service.hookDispatcher.FinalOutputCommitted(ctx, event); err != nil {
-			e.service.logger.Errorf("final output committed hook failed: %v", err)
+	var stopReason providerapi.StopReason
+	recorded := false
+	defer func() {
+		if recorded {
+			s.emitTurnCompletion(run, turnID, stopReason)
 		}
+		if hookErr := s.hookDispatcher.AfterIteration(context.WithoutCancel(ctx), hook.IterationResult{
+			Iteration:  iteration,
+			StopReason: stopReason,
+			Err:        err,
+		}); hookErr != nil {
+			s.logger.Errorf("after iteration hook failed: %v", hookErr)
+		}
+	}()
+	s.emitter.Emit(coreevent.Event{Source: coreevent.SourceForRun(run, turnID), Payload: coreevent.TurnStarted{}})
+	s.logger.Infof("provider request prepared id=%s model=%s contextEntries=%d turn=%s", execution.ID, execution.Model.ModelID, len(request.Context.Entries), turnID)
+	s.emitter.Emit(coreevent.Event{Source: coreevent.SourceForRun(run, turnID), Payload: coreevent.ProviderWaiting{}})
+	response, err := runner.Request(ctx, execution, deps, request, hook.ModelRequestIteration, sequence)
+	stopReason = response.StopReason
+	blocks := response.Blocks()
+	if err != nil {
+		partial := make([]sessionentry.Block, 0, len(blocks))
+		for _, block := range blocks {
+			if block.Kind == sessionentry.BlockText || block.Kind == sessionentry.BlockThinking {
+				partial = append(partial, block)
+			}
+		}
+		err = modelFailure(err)
+		if len(partial) > 0 {
+			stopReason = "error"
+			if ctx.Err() != nil {
+				stopReason = "aborted"
+			}
+			accepted, _, writeErr := s.appendEntry(context.WithoutCancel(ctx), run, assistantEntry(execution, turnID, stopReason, partial))
+			recorded = accepted.ID != ""
+			if writeErr != nil {
+				err = entryFailure(run, errors.Join(err, writeErr))
+			}
+		}
+		return false, err
+	}
+
+	calls := prepareToolCalls(execution, turnID, response.ToolCalls())
+	accepted, _, err := s.appendEntry(ctx, run, assistantEntry(execution, turnID, stopReason, blocks))
+	recorded = accepted.ID != ""
+	if err != nil {
+		return false, err
+	}
+	if stopReason == providerapi.StopCompleted || stopReason == providerapi.StopSequence {
+		return true, nil
+	}
+	for _, call := range calls {
+		s.emitter.Emit(coreevent.Event{
+			Source: coreevent.SourceForRun(run, turnID),
+			Payload: coreevent.ToolCall{
+				CallID: call.CallID,
+				Name:   string(call.Name),
+				Input:  call.Arguments,
+			},
+		})
+	}
+	completed, err := s.runToolCalls(ctx, run, executor, calls)
+	if err != nil {
+		// 已取得真实回执的调用即使保存失败也不改写；只收尾尚未取得回执的调用。
+		if closeErr := s.interruptToolCalls(ctx, run, calls[completed:]); closeErr != nil {
+			err = entryFailure(run, errors.Join(err, closeErr))
+		}
+	}
+	return false, err
+}
+
+func assistantEntry(execution loop.ExecutionParams, turnID identity.TurnID, stopReason providerapi.StopReason, blocks []sessionentry.Block) sessionentry.ContextEntry {
+	return sessionentry.ContextEntry{
+		ID:          "assistant:" + turnID.String(),
+		RequestID:   execution.RequestID.String(),
+		ExecutionID: execution.ID.String(),
+		TurnID:      turnID.String(),
+		StopReason:  string(stopReason),
+		Role:        role.Assistant,
+		AuthorKind:  sessionentry.AuthorAgent,
+		AuthorID:    execution.AgentID.String(),
+		Content:     blocks,
 	}
 }

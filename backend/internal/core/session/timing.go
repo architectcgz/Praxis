@@ -19,7 +19,12 @@ func (s *Session) AppendTiming(ctx context.Context, value timing.Record) error {
 		kind = EventTimingStarted
 	}
 	s.data.SetTiming(value)
-	return s.appendEvent(ctx, kind, "agent_execution_timing", value.ExecutionID+":"+value.ID, value)
+	return s.log.AppendEvent(ctx, s.data.ID, Event{
+		Type:      kind,
+		Key:       value.ExecutionID + ":" + value.ID,
+		CreatedAt: s.clock.Now(),
+		Payload:   value,
+	})
 }
 
 func (s *Session) ListAgentTimingRecords(agentID identity.AgentID, branchID identity.BranchID, limit int) []timing.Record {

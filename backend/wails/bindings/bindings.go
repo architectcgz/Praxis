@@ -55,7 +55,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	var data any
 	switch payload := event.Payload.(type) {
 	case coreevent.SessionConfigReloaded:
-		b.host.EmitEvent("praxis:session-config-reloaded", event.Scope.SessionID.String())
+		b.host.EmitEvent("praxis:session-config-reloaded", event.Source.SessionID.String())
 		return
 	case coreevent.EntriesAppended:
 		data = dto.AgentEntriesAppended{
@@ -151,12 +151,11 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	}
 	b.host.EmitEvent(agentEventName, dto.AgentEvent{
 		Kind:        string(event.Kind()),
-		SessionID:   event.Scope.SessionID.String(),
-		BranchID:    event.Scope.BranchID.String(),
-		BindingID:   event.Scope.BindingID,
-		AgentID:     event.Scope.AgentID.String(),
-		ExecutionID: event.Scope.ExecutionID.String(),
-		TurnID:      event.Scope.TurnID.String(),
+		SessionID:   event.Source.SessionID.String(),
+		BranchID:    event.Source.BranchID.String(),
+		BindingID:   event.Source.BindingID,
+		ExecutionID: event.Source.ExecutionID.String(),
+		TurnID:      event.Source.TurnID.String(),
 		Data:        data,
 	})
 }

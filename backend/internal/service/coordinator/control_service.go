@@ -48,7 +48,7 @@ func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID
 				payload = coreevent.ExecutionPauseRequested{AppliedAt: at}
 			}
 			notification = &coreevent.Event{
-				Scope:   coreevent.ScopeForRun(active.run, ""),
+				Source:  coreevent.SourceForRun(active.run, ""),
 				Payload: payload,
 			}
 		}

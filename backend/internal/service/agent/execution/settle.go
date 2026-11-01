@@ -32,7 +32,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, run *agentexecution.Run) e
 		s.publishExecutionTiming(run.Snapshot(), run)
 		if s.emitter != nil {
 			s.emitter.Emit(coreevent.Event{
-				Scope:   coreevent.ScopeForRun(run, ""),
+				Source:  coreevent.SourceForRun(run, ""),
 				Payload: coreevent.ExecutionStarted{Execution: run.Snapshot()},
 			})
 		}
@@ -147,11 +147,10 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 			}
 		}
 		s.emitter.Emit(coreevent.Event{
-			Scope: coreevent.Scope{
+			Source: coreevent.EventSource{
 				SessionID:   endedExecution.SessionID,
 				BranchID:    endedExecution.BranchID,
 				BindingID:   run.BindingID,
-				AgentID:     endedExecution.AgentID,
 				ExecutionID: endedExecution.ID,
 			},
 			Payload: payload,

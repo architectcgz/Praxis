@@ -18,14 +18,14 @@ const (
 // Event 是会话提交和恢复使用的业务记录，不是进程内通知。
 // Payload 按 Type 携带对应的 Branch、ExecutionRecord、ContextEntry、UsageRecord 或 timing.Record 值。
 type Event struct {
-	Type       string
-	Collection string
-	Key        string
-	CreatedAt  time.Time
-	Payload    any
+	Type      string
+	Key       string
+	BranchID  identity.BranchID
+	CreatedAt time.Time
+	Payload   any
 }
 
-// EventLog 同步追加业务记录并按顺序读取；编码和文件读写由实现方负责。
+// EventLog 同步追加业务记录并按顺序读取；会话服务负责事件编解码，存储只处理完整行。
 // 同一会话由 Session 串行追加；返回成功不承诺断电持久化。
 type EventLog interface {
 	Read(context.Context, identity.SessionID, func(Event) error) error

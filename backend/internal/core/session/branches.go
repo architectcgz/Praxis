@@ -18,11 +18,10 @@ type BranchInput struct {
 }
 
 type TreeNode struct {
-	ID       string            `json:"id"`
-	ParentID string            `json:"parentId"`
-	BranchID identity.BranchID `json:"branchId"`
-	Summary  string            `json:"summary"`
-	Safe     bool              `json:"safe"`
+	ID       string `json:"id"`
+	ParentID string `json:"parentId"`
+	Summary  string `json:"summary"`
+	Safe     bool   `json:"safe"`
 }
 
 func (s *Session) Prepare(branchID identity.BranchID) (Branch, error) {
@@ -69,7 +68,12 @@ func (s *Session) CreateBranch(ctx context.Context, sourceID identity.BranchID, 
 		return branch, err
 	}
 	s.data.AcceptBranch(branch)
-	return branch, s.appendEvent(ctx, EventBranchCreated, "branch", branch.ID.String(), branch)
+	return branch, s.log.AppendEvent(ctx, s.data.ID, Event{
+		Type:      EventBranchCreated,
+		Key:       branch.ID.String(),
+		CreatedAt: s.clock.Now(),
+		Payload:   branch,
+	})
 }
 
 func (s *Session) Branches() []Branch {
@@ -97,7 +101,6 @@ func (s *Session) Tree() []TreeNode {
 		nodes = append(nodes, TreeNode{
 			ID:       entry.ID,
 			ParentID: entry.ParentID,
-			BranchID: entry.BranchID,
 			Summary:  text,
 			Safe:     s.data.Safe(entry.ID),
 		})

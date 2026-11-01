@@ -70,7 +70,7 @@ export function useWorkspaceData() {
     }, [refreshCatalog])
     useEffect(() => { rememberSelectedSession(selectedSessionID) }, [selectedSessionID])
     useEffect(() => subscribeAgentEvents((event) => {
-        if ((event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId === event.agentId) {
+        if ((event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId === event.data.execution.AgentID) {
             void refreshSummary(event.sessionId)
         }
     }), [refreshSummary])

@@ -31,7 +31,12 @@ func (s *Session) SaveExecution(ctx context.Context, value agentexecution.Execut
 	value.Progress.OutputBytes, value.Progress.ToolCalls = 0, 0
 	value.Progress.FinalAssistantID, value.Progress.FinalStopReason = "", ""
 	s.data.SetExecution(value)
-	return s.appendEvent(ctx, EventExecutionSaved, "agent_execution", value.ID.String(), value)
+	return s.log.AppendEvent(ctx, s.data.ID, Event{
+		Type:      EventExecutionSaved,
+		Key:       value.ID.String(),
+		CreatedAt: s.clock.Now(),
+		Payload:   value,
+	})
 }
 
 func (s *Session) FindExecutionByRequest(agentID identity.AgentID, request identity.RequestID) (agentexecution.ExecutionRecord, error) {
@@ -65,7 +70,7 @@ func validateExecutionOwnership(owner *Data, value agentexecution.ExecutionRecor
 	if !found {
 		return errors.New("execution input is missing")
 	}
-	if input.BranchID != value.BranchID || input.ExecutionID != value.ID.String() || input.RequestID != value.RequestID.String() || input.SourceTaskID != value.SourceTaskID.String() {
+	if !owner.hasAncestor(owner.Branch(value.BranchID).HeadEntryID, input.ID) || input.ExecutionID != value.ID.String() || input.RequestID != value.RequestID.String() || input.SourceTaskID != value.SourceTaskID.String() {
 		return errors.New("execution input ownership mismatch")
 	}
 	if index := owner.ExecutionIndex(value.ID); index >= 0 {

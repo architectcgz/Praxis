@@ -142,11 +142,10 @@ func (s *Coordinator) CancelTask(ctx context.Context, bindingID string, id ident
 
 func taskQueueEvent(binding *sessionBinding) coreevent.Event {
 	return coreevent.Event{
-		Scope: coreevent.Scope{
+		Source: coreevent.EventSource{
 			SessionID: binding.sessionID,
 			BranchID:  binding.branchID,
 			BindingID: binding.id,
-			AgentID:   identity.AgentID(binding.sessionID),
 		},
 		Payload: coreevent.TaskQueueChanged{Tasks: binding.queue.List(0)},
 	}

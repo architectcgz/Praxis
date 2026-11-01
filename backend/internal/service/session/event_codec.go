@@ -1,22 +1,26 @@
-package storage
+package session
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/identity"
 	"time"
 )
 
 type storedEvent struct {
-	Type       string          `json:"type"`
-	Collection string          `json:"collection"`
-	Key        string          `json:"key"`
-	CreatedAt  time.Time       `json:"created_at"`
-	Payload    json.RawMessage `json:"payload"`
+	Type      string            `json:"type"`
+	Key       string            `json:"key"`
+	BranchID  identity.BranchID `json:"branch_id,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+	Payload   json.RawMessage   `json:"payload"`
 }
 
 func encodeEvent(event sessionmodel.Event) ([]byte, error) {
@@ -25,11 +29,11 @@ func encodeEvent(event sessionmodel.Event) ([]byte, error) {
 		return nil, err
 	}
 	encoded, err := json.Marshal(storedEvent{
-		Type:       event.Type,
-		Collection: event.Collection,
-		Key:        event.Key,
-		CreatedAt:  event.CreatedAt,
-		Payload:    payload,
+		Type:      event.Type,
+		Key:       event.Key,
+		BranchID:  event.BranchID,
+		CreatedAt: event.CreatedAt,
+		Payload:   payload,
 	})
 	if err != nil {
 		return nil, err
@@ -39,14 +43,14 @@ func encodeEvent(event sessionmodel.Event) ([]byte, error) {
 
 func decodeEvent(line []byte) (sessionmodel.Event, error) {
 	var stored storedEvent
-	if err := decodeJSON(line, &stored); err != nil {
-		return sessionmodel.Event{}, fmt.Errorf("expected a single storage event: %w", err)
+	if err := decodeEventJSON(line, &stored); err != nil {
+		return sessionmodel.Event{}, fmt.Errorf("expected a single session event: %w", err)
 	}
 	event := sessionmodel.Event{
-		Type:       stored.Type,
-		Collection: stored.Collection,
-		Key:        stored.Key,
-		CreatedAt:  stored.CreatedAt,
+		Type:      stored.Type,
+		Key:       stored.Key,
+		BranchID:  stored.BranchID,
+		CreatedAt: stored.CreatedAt,
 	}
 	var err error
 	switch stored.Type {
@@ -60,18 +64,28 @@ func decodeEvent(line []byte) (sessionmodel.Event, error) {
 		event.Payload, err = decodeEventPayload[providerapi.UsageRecord](stored.Payload)
 	case sessionmodel.EventTimingStarted, sessionmodel.EventTimingFinished:
 		event.Payload, err = decodeEventPayload[timing.Record](stored.Payload)
-	case "wait.saved":
-		// 审批等待不参与重启恢复。
 	default:
-		return sessionmodel.Event{}, fmt.Errorf("unknown stored event type %q", stored.Type)
+		return sessionmodel.Event{}, fmt.Errorf("unknown session event type %q", stored.Type)
 	}
 	return event, err
 }
 
 func decodeEventPayload[T any](data []byte) (any, error) {
 	var value T
-	if err := decodeJSON(data, &value); err != nil {
+	if err := decodeEventJSON(data, &value); err != nil {
 		return nil, err
 	}
 	return value, nil
+}
+
+func decodeEventJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return errors.New("unexpected trailing JSON data")
+	}
+	return nil
 }

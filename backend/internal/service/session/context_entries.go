@@ -6,15 +6,14 @@ import (
 	"praxis/internal/identity"
 )
 
-func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID, branchID identity.BranchID) (page sessionentry.List, err error) {
+func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID, branchID identity.BranchID) ([]sessionentry.ContextEntry, error) {
 	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
-		return page, err
+		return nil, err
 	}
 	entries, err := owner.BranchEntries(ctx, branchID)
 	if err != nil {
-		return page, err
+		return nil, err
 	}
-	page.Entries = sessionentry.Values(entries)
-	return page, nil
+	return sessionentry.Values(entries), nil
 }

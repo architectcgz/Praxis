@@ -14,35 +14,32 @@ import (
 func (s *Session) AppendEntry(ctx context.Context, branchID identity.BranchID, entry sessionentry.ContextEntry) (stored *sessionentry.ContextEntry, inserted bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if prior, found := s.data.Entry(entry.ID); found {
-		entry.BranchID, entry.ParentID = branchID, prior.ParentID
-		return s.appendEntry(ctx, entry)
-	}
 	branch := s.data.Branch(branchID)
 	if branch == nil {
 		return nil, false, errorcode.ErrNotFound
 	}
-	entry.BranchID, entry.ParentID = branch.ID, branch.HeadEntryID
-	if err := validateEntry(s.data, entry); err != nil {
-		return nil, false, err
-	}
-	return s.appendEntry(ctx, entry)
-}
-
-func (s *Session) appendEntry(ctx context.Context, entry sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
 	if prior, found := s.data.Entry(entry.ID); found {
-		entry.Sequence, entry.CreatedAt = prior.Sequence, prior.CreatedAt
-		if !reflect.DeepEqual(*prior, entry) {
+		entry.ParentID, entry.CreatedAt = prior.ParentID, prior.CreatedAt
+		if !reflect.DeepEqual(*prior, entry) || !s.data.hasAncestor(branch.HeadEntryID, prior.ID) {
+			return nil, false, errorcode.ErrRequestConflict
+		}
+		if index := s.data.ExecutionIndex(identity.AgentExecutionID(entry.ExecutionID)); index >= 0 && s.data.Executions[index].BranchID != branchID {
 			return nil, false, errorcode.ErrRequestConflict
 		}
 		return prior, false, nil
 	}
-	entry.Sequence = uint64(len(s.data.Entries)) + 1
+	entry.ParentID = branch.HeadEntryID
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = s.clock.Now()
 	}
-	stored := s.data.AcceptEntry(entry)
-	err := s.appendEvent(ctx, EventEntryAppended, "entry", entry.ID, entry)
+	stored = s.data.AcceptEntry(branchID, entry)
+	err = s.log.AppendEvent(ctx, s.data.ID, Event{
+		Type:      EventEntryAppended,
+		Key:       entry.ID,
+		BranchID:  branchID,
+		CreatedAt: s.clock.Now(),
+		Payload:   entry,
+	})
 	return stored, true, err
 }
 

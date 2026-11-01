@@ -94,13 +94,13 @@ func (s *Service) GetAgentView(ctx context.Context, sessionID identity.SessionID
 		return AgentView{}, err
 	}
 	if len(latest) > 0 {
-		page, err := s.entries.ListEntries(ctx, session.ID, branchID)
+		history, err := s.entries.ListEntries(ctx, session.ID, branchID)
 		if err != nil {
 			return AgentView{}, err
 		}
-		entries := make([]*sessionentry.ContextEntry, len(page.Entries))
-		for index := range page.Entries {
-			entries[index] = &page.Entries[index]
+		entries := make([]*sessionentry.ContextEntry, len(history))
+		for index := range history {
+			entries[index] = &history[index]
 		}
 		latest[0].Progress = latest[0].Progress.WithEntries(latest[0].ID.String(), entries)
 		view.LatestExecution = &latest[0]

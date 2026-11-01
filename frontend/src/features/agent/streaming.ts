@@ -5,8 +5,8 @@ import type { StreamingOutput, StreamingOutputs } from './types'
  * 按 Agent、task 和 turn 合并实时事件，不修改输入对象。
  * 仅相邻同类文本增量拼接；终态清除等待标记但保留尚未落盘的输出。
  */
-export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent): StreamingOutputs {
-    const previous = outputs[event.agentId]
+export function mergeStreamingEvent(outputs: StreamingOutputs, agentId: string, event: AgentEvent): StreamingOutputs {
+    const previous = outputs[agentId]
     const output: StreamingOutput = previous?.executionId === event.executionId
         ? previous
         : { executionId: event.executionId, turns: [], error: '' }
@@ -34,7 +34,7 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
             } else {
                 turns[index] = nextTurn
             }
-            return { ...outputs, [event.agentId]: { ...output, turns } }
+            return { ...outputs, [agentId]: { ...output, turns } }
         }
         case 'turn_completed': {
             const turnId = event.turnId || ''
@@ -47,13 +47,13 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, event: AgentEvent
                 ...turns[index],
                 events: turns[index].events.filter((item) => item.kind !== 'provider_waiting'),
             }
-            return { ...outputs, [event.agentId]: { ...output, turns } }
+            return { ...outputs, [agentId]: { ...output, turns } }
         }
         case 'request_canceled':
         case 'execution_ended':
         case 'error':
             if (event.kind !== 'error' && previous?.executionId !== event.executionId) return outputs
-            return { ...outputs, [event.agentId]: {
+            return { ...outputs, [agentId]: {
                 ...output,
                 turns: output.turns.map((turn) => ({ ...turn, events: turn.events.filter((item) => (
                     item.kind !== 'provider_waiting' && item.kind !== 'tool_approval_required'

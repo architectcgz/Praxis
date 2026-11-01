@@ -10,7 +10,7 @@ export function MessageTiming({ executionId, referenceId }: { executionId: strin
     const record = useOperationTiming(executionId, 'provider', referenceId)
     const { records, error } = useSessionModelUsage()
     if (!record) return null
-    const request = records.find((item) => item.sessionId === record.sessionId && item.agentId === record.agentId &&
+    const request = records.find((item) => item.sessionId === record.sessionId &&
         item.executionId === executionId && referenceId === `assistant:${item.turnId}`)
     const usage = request ? formatModelUsage(summarizeModelUsage([request])) : undefined
     const firstResponse = record.firstResponseMs === undefined ? [] : [`首响应：${formatDuration(record.firstResponseMs)}`]

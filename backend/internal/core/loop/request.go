@@ -15,7 +15,7 @@ import (
 // 请求和输出由 Execution Service 原生记录，不修改原始 Entry。
 func (r *Runner) summarizeContext(
 	ctx context.Context,
-	executionInput Input,
+	execution ExecutionParams,
 	deps ExecutionDependencies,
 	summaryInput appcontext.ModelContext,
 	limit int,
@@ -24,26 +24,22 @@ func (r *Runner) summarizeContext(
 	if err != nil {
 		return "", err
 	}
-	turnID := identity.NewTurnID(executionInput.ID, sequence)
+	turnID := identity.NewTurnID(execution.ID, sequence)
 	request := providerapi.Request{
-		ExecutionID:     executionInput.ID,
-		PromptCacheKey:  executionInput.SessionID.String(),
+		ExecutionID:     execution.ID,
+		PromptCacheKey:  execution.SessionID.String(),
 		Context:         summaryInput,
-		Model:           executionInput.Model,
+		Model:           execution.Model,
 		MaxOutputTokens: limit,
 		TurnID:          turnID,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := r.callModel(requestCtx, executionInput, deps, request, hook.ModelRequestSummary, sequence, func(event providerapi.Event) {
-		if event.Kind == providerapi.StreamUsage {
-			r.emitModelEvent(executionInput, turnID, event)
-		}
-	})
+	response, err := r.Request(requestCtx, execution, deps, request, hook.ModelRequestSummary, sequence)
 	if err != nil {
-		return "", modelFailure(err)
+		return "", err
 	}
-	if len(response.toolCalls()) != 0 {
+	if len(response.ToolCalls()) != 0 {
 		return "", errors.New("context summary returned a tool call")
 	}
 	var text strings.Builder

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/identity"
 	"strings"
 	"time"
 )
@@ -44,13 +43,11 @@ type Block struct {
 
 // ContextEntry 是 Agent 历史与模型上下文共用的内部有序记录，不定义前端协议。
 type ContextEntry struct {
-	// ParentID 和 BranchID 描述会话历史树；模型上下文构建不会依赖它们。
-	ParentID string            `json:"parentId,omitempty"`
-	BranchID identity.BranchID `json:"branchId,omitempty"`
+	// ParentID 连接会话历史节点；命名分支由提交目标和分支 Head 表达。
+	ParentID string `json:"parentId,omitempty"`
 	// Summary 覆盖所在分支路径中此前的全部上下文，原始历史仍然保留。
 	Summary      bool       `json:"summary,omitzero"`
 	ID           string     `json:"id"`
-	Sequence     uint64     `json:"sequence"`
 	RequestID    string     `json:"requestId,omitempty"`
 	HandoffID    string     `json:"handoffId,omitempty"`
 	ExecutionID  string     `json:"executionId,omitempty"`

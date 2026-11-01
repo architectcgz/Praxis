@@ -38,11 +38,7 @@ func (s *Coordinator) ListAgentEntries(ctx context.Context, agentID identity.Age
 	if run := s.ActiveRun(agentID, branchID); run != nil && !run.Main() {
 		return run.Entries(), ctx.Err()
 	}
-	page, err := s.sessions.ListEntries(ctx, identity.SessionID(agentID), branchID)
-	if err != nil {
-		return nil, err
-	}
-	return page.Entries, nil
+	return s.sessions.ListEntries(ctx, identity.SessionID(agentID), branchID)
 }
 
 func (s *Coordinator) ListAgentTimings(ctx context.Context, agentID string, branchID identity.BranchID, limit int) ([]timing.View, error) {

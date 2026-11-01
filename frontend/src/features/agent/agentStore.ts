@@ -81,7 +81,7 @@ export function createAgentStore() {
                 return
             }
             if (event.kind === 'subagent_started') {
-                const id = event.agentId
+                const id = event.data.agent.ID
                 data = {
                     ...data,
                     ids: data.ids.includes(id) ? data.ids : [...data.ids, id],
@@ -90,21 +90,22 @@ export function createAgentStore() {
                 emitData()
                 return
             }
+            const agentId = agentIDForEvent(event, data.byId)
+            if (!agentId || !data.byId[agentId]) return
             if (event.kind === 'subagent_released') {
                 const byId = { ...data.byId }
-                delete byId[event.agentId]
-                const ids = data.ids.filter((id) => id !== event.agentId)
-                data = { ids, byId, selectedId: data.selectedId === event.agentId ? ids[0] || '' : data.selectedId }
+                delete byId[agentId]
+                const ids = data.ids.filter((id) => id !== agentId)
+                data = { ids, byId, selectedId: data.selectedId === agentId ? ids[0] || '' : data.selectedId }
                 emitData()
                 const streamingOutputs = { ...output.streamingOutputs }
-                delete streamingOutputs[event.agentId]
-                updateOutput({ ...output, streamingOutputs, timings: output.timings.filter((item) => item.agentId !== event.agentId) })
+                delete streamingOutputs[agentId]
+                updateOutput({ ...output, streamingOutputs, timings: output.timings.filter((item) => item.agentId !== agentId) })
                 return
             }
-            if (!data.byId[event.agentId]) return
             if (event.kind === 'execution_started') {
                 const execution = event.data.execution
-                updateEntry(event.agentId, (entry) => ({ ...entry, agent: {
+                updateEntry(agentId, (entry) => ({ ...entry, agent: {
                     ...entry.agent, state: 'executing', currentExecutionId: execution.ID,
                     currentExecution: execution, latestExecution: execution, UpdatedAt: execution.StartedAt,
                 } }))
@@ -112,14 +113,14 @@ export function createAgentStore() {
             }
             if (event.kind === 'execution_pause_requested' || event.kind === 'execution_stop_requested') {
                 const state = event.kind === 'execution_pause_requested' ? 'paused' : 'interrupted'
-                updateEntry(event.agentId, (entry) => entry.agent.currentExecutionId === event.executionId ? {
+                updateEntry(agentId, (entry) => entry.agent.currentExecutionId === event.executionId ? {
                     ...entry, agent: { ...entry.agent, state, UpdatedAt: event.data.appliedAt },
                 } : entry)
                 return
             }
             if (event.kind === 'execution_ended' || event.kind === 'request_canceled') {
                 const { execution, state, entries } = event.data
-                updateEntry(event.agentId, (entry) => ({
+                updateEntry(agentId, (entry) => ({
                     ...entry,
                     history: mergeEntries(entry.history || [], entries),
                     agent: entry.agent.currentExecutionId && entry.agent.currentExecutionId !== execution.ID ? entry.agent : {
@@ -128,25 +129,25 @@ export function createAgentStore() {
                     },
                 }))
                 const streamingOutputs = { ...output.streamingOutputs }
-                if (streamingOutputs[event.agentId]?.executionId === execution.ID) delete streamingOutputs[event.agentId]
-                updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === event.agentId ? '' : output.awaitingAgentId })
+                if (streamingOutputs[agentId]?.executionId === execution.ID) delete streamingOutputs[agentId]
+                updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === agentId ? '' : output.awaitingAgentId })
                 return
             }
             if (event.kind === 'entries_appended' && event.data.entries.length) {
                 const entries = event.data.entries
-                updateEntry(event.agentId, (entry) => ({ ...entry, history: mergeEntries(entry.history || [], entries) }))
+                updateEntry(agentId, (entry) => ({ ...entry, history: mergeEntries(entry.history || [], entries) }))
             }
             if (event.kind === 'turn_completed') {
-                const current = output.streamingOutputs[event.agentId]
+                const current = output.streamingOutputs[agentId]
                 if (current?.executionId === event.executionId) {
-                    updateOutput({ ...output, streamingOutputs: { ...output.streamingOutputs, [event.agentId]: {
+                    updateOutput({ ...output, streamingOutputs: { ...output.streamingOutputs, [agentId]: {
                         ...current, turns: current.turns.filter((turn) => turn.turnId !== event.turnId),
                     } } })
                 }
                 return
             }
             if (event.kind === 'turn_started') {
-                updateEntry(event.agentId, (entry) => {
+                updateEntry(agentId, (entry) => {
                     // 同一次执行收尾期间的迟到事件不能撤销已接受的暂停或停止。
                     const controlled = entry.agent.currentExecutionId === event.executionId &&
                         (entry.agent.state === 'paused' || entry.agent.state === 'interrupted')
@@ -154,9 +155,9 @@ export function createAgentStore() {
                 })
                 return
             }
-            const streamingOutputs = mergeStreamingEvent(output.streamingOutputs, event)
+            const streamingOutputs = mergeStreamingEvent(output.streamingOutputs, agentId, event)
             if (streamingOutputs === output.streamingOutputs) return
-            updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === event.agentId ? '' : output.awaitingAgentId })
+            updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === agentId ? '' : output.awaitingAgentId })
         },
         beginInput({ requestId, sessionId, agentId, content }: Pick<PendingUserMessage, 'requestId' | 'sessionId' | 'agentId' | 'content'>) {
             const message: PendingUserMessage = { requestId, sessionId, agentId, content, executionId: '', at: new Date().toISOString() }
@@ -173,6 +174,22 @@ export function createAgentStore() {
         },
         stopAwaiting() { updateOutput({ ...output, awaitingAgentId: '' }) },
     }
+}
+
+function agentIDForEvent(event: AgentEvent, agents: Record<string, AgentEntry>): string | undefined {
+    switch (event.kind) {
+        case 'execution_started':
+        case 'execution_ended':
+        case 'request_canceled':
+            return event.data.execution.AgentID
+        case 'entries_appended':
+            // 持久化条目只属于主执行，用户输入可能先于 execution_started 发布。
+            if (!event.data.transient) return event.sessionId
+            break
+    }
+    return Object.values(agents).find(({ agent }) => (
+        agent.currentExecution?.ID === event.executionId || agent.latestExecution?.ID === event.executionId
+    ))?.agent.ID
 }
 
 function mergeEntries(current: Entry[], incoming: Entry[]): Entry[] {

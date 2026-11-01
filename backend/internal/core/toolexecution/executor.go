@@ -70,7 +70,7 @@ type ExecutionTools struct {
 	awaitApproval func(context.Context) error
 }
 
-// CallResult 将实际结果交给 Loop 保存；仅执行路径携带 OperationID 和已准备参数。
+// CallResult 将实际结果交给执行服务记录；仅执行路径携带 OperationID 和已准备参数。
 // Err 只供后置观察，工具执行失败已编码在 ToolResult 中，不作为编排错误返回。
 type CallResult struct {
 	ToolResult  tool.ToolResult

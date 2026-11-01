@@ -56,7 +56,6 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 	record.BranchID = input.BranchID
 	run, err := agentexecution.NewRun(record, false, []*sessionentry.ContextEntry{{
 		ID:          record.InputEntryID,
-		Sequence:    1,
 		CreatedAt:   at,
 		RequestID:   requestID.String(),
 		ExecutionID: record.ID.String(),

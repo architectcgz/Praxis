@@ -28,7 +28,6 @@ type AgentEvent struct {
 	BindingID   string `json:"bindingId"`
 	Kind        string `json:"kind"`
 	SessionID   string `json:"sessionId,omitempty"`
-	AgentID     string `json:"agentId"`
 	ExecutionID string `json:"executionId"`
 	TurnID      string `json:"turnId,omitempty"`
 	Data        any    `json:"data"`

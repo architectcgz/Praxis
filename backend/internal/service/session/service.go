@@ -26,7 +26,7 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
 	Sessions       repository.Session
-	Log            sessionmodel.EventLog
+	Log            LogStore
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -65,7 +65,7 @@ func NewService(deps Dependencies) *Service {
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		sessions:        deps.Sessions,
-		log:             deps.Log,
+		log:             eventLog{store: deps.Log},
 		clock:           deps.Clock,
 		ids:             deps.IDs,
 		createdSessions: make(map[identity.SessionID]struct{}),
@@ -154,9 +154,6 @@ func (s *Service) ReleaseSession(ctx context.Context, id identity.SessionID) err
 	owner := s.opened[id]
 	if owner == nil {
 		return nil
-	}
-	if err := owner.session.PersistenceError(); err != nil {
-		return fmt.Errorf("release session with unsaved history: %w: %w", sessionmodel.ErrUnsavedChanges, err)
 	}
 	// 非空事实不能依赖实例常驻，否则退出清理会把已释放的新会话当成空会话。
 	if !owner.session.Empty() {

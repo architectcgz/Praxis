@@ -40,14 +40,26 @@ func (s *Data) Entry(id string) (*sessionentry.ContextEntry, bool) {
 }
 
 // AcceptEntry 只接收已经确认归属的完整 Entry，不保存模型请求的精简副本。
-func (s *Data) AcceptEntry(entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
+func (s *Data) AcceptEntry(branchID identity.BranchID, entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
 	stored := new(entry)
 	s.Entries = append(s.Entries, stored)
 	s.entryIndexes[entry.ID] = len(s.Entries) - 1
-	branch := s.Branch(entry.BranchID)
+	branch := s.Branch(branchID)
 	branch.HeadEntryID, branch.UpdatedAt = entry.ID, entry.CreatedAt
 	s.RecentBranch = branch.ID
 	return stored
+}
+
+// hasAncestor 判断节点是否位于指定 Head 的历史路径上，包含 Head 自身。
+func (s *Data) hasAncestor(head, entryID string) bool {
+	for head != "" {
+		if head == entryID {
+			return true
+		}
+		entry, _ := s.Entry(head)
+		head = entry.ParentID
+	}
+	return false
 }
 
 func (s *Data) Branch(id identity.BranchID) *Branch {

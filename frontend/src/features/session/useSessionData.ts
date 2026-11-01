@@ -63,9 +63,9 @@ export function useSessionData(sessionID: string) {
                 ? { ...current, tasks: event.data.tasks } : current)
         }
         if (event.kind === 'entries_appended' && !event.data.transient ||
-            event.kind === 'execution_ended' || event.kind === 'request_canceled') {
+            (event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.data.execution.AgentID === sessionID) {
             const last = event.data.entries.at(-1)
-            if (last && event.agentId === sessionID) {
+            if (last) {
                 setSession((current) => current && current.branch.id === event.branchId ? {
                     ...current,
                     branch: { ...current.branch, head_entry_id: last.id, updated_at: last.createdAt },

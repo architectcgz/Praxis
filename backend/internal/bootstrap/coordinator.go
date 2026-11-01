@@ -28,27 +28,6 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
 	})
-	// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
-	emitter.Subscribe(func(value coreevent.Event) {
-		if payload, ok := value.Payload.(coreevent.ModelUsage); ok {
-			if value.Scope.AgentID != identity.AgentID(value.Scope.SessionID) {
-				return
-			}
-			if err := tasks.RecordUsage(providerapi.UsageRecord{
-				SessionID:   value.Scope.SessionID.String(),
-				AgentID:     value.Scope.AgentID.String(),
-				ExecutionID: value.Scope.ExecutionID.String(),
-				TurnID:      value.Scope.TurnID,
-				Usage:       payload.Usage,
-			}); err != nil {
-				emitter.Emit(coreevent.Event{
-					Scope:   value.Scope,
-					Payload: coreevent.ErrorOccurred{Message: "Failed to save model usage: " + err.Error()},
-				})
-			}
-		}
-	})
-
 	reviewer := &executionmodel.Reviewer{
 		Progress:       tasks,
 		HookDispatcher: hooks,
@@ -79,7 +58,7 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
 	runner := loop.NewRunner(runnerDeps)
-	return execution.NewCoordinator(execution.Config{
+	coordinator := execution.NewCoordinator(execution.Config{
 		Loop:              &runner,
 		Operations:        tasks,
 		Sessions:          sessions,
@@ -90,4 +69,30 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 		Projects:          resources.storage.Projects,
 		TransitionTimeout: 30 * time.Second,
 	})
+	// 先登记用量保存，再接入前端订阅；只有当前主执行的用量写入会话。
+	emitter.Subscribe(func(value coreevent.Event) {
+		if payload, ok := value.Payload.(coreevent.ModelUsage); ok {
+			run := coordinator.ActiveRun(identity.AgentID(value.Source.SessionID), value.Source.BranchID)
+			if run == nil {
+				return
+			}
+			record := run.Snapshot()
+			if record.ID != value.Source.ExecutionID {
+				return
+			}
+			if err := tasks.RecordUsage(providerapi.UsageRecord{
+				SessionID:   record.SessionID.String(),
+				AgentID:     record.AgentID.String(),
+				ExecutionID: record.ID.String(),
+				TurnID:      value.Source.TurnID,
+				Usage:       payload.Usage,
+			}); err != nil {
+				emitter.Emit(coreevent.Event{
+					Source:  value.Source,
+					Payload: coreevent.ErrorOccurred{Message: "Failed to save model usage: " + err.Error()},
+				})
+			}
+		}
+	})
+	return coordinator
 }

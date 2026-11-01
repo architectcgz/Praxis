@@ -26,7 +26,12 @@ func (s *Session) SaveUsage(ctx context.Context, record providerapi.UsageRecord)
 	}
 	record = cloneUsage(record)
 	s.data.SetUsage(record)
-	return s.appendEvent(ctx, EventUsageSaved, "usage", record.Key(), record)
+	return s.log.AppendEvent(ctx, s.data.ID, Event{
+		Type:      EventUsageSaved,
+		Key:       record.Key(),
+		CreatedAt: s.clock.Now(),
+		Payload:   record,
+	})
 }
 
 func validateUsage(owner *Data, record providerapi.UsageRecord) error {

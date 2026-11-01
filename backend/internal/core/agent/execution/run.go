@@ -27,7 +27,6 @@ type Run struct {
 	entries      []*sessionentry.ContextEntry
 	entryIndexes map[string]int
 	context      appcontext.Context
-	sequence     uint64
 	Timing       *timing.Recorder
 	timings      map[string]timing.Record
 }
@@ -45,7 +44,6 @@ func NewRun(record ExecutionRecord, main bool, entries []*sessionentry.ContextEn
 			continue
 		}
 		run.appendEntry(entry)
-		run.sequence = max(run.sequence, entry.Sequence)
 	}
 	if _, ok := run.entry(record.InputEntryID); !ok {
 		return nil, errors.New("execution input is missing from admitted entries")
@@ -137,8 +135,8 @@ func (r *Run) Entry(id string) (sessionentry.ContextEntry, bool) {
 	return *entry, true
 }
 
-// Accept 记录本次执行证据；主执行使用 Session 分配的序号和时间。
-// 摘要只更新 Context，不改变此前的执行证据；子执行在发布引用前补齐序号和时间。
+// Accept 按接纳顺序记录本次执行证据；主执行使用 Session 确定的时间。
+// 摘要只更新 Context，不改变此前的执行证据；子执行在发布引用前补齐时间。
 func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -147,15 +145,14 @@ func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntr
 	}
 	if prior, ok := r.entry(value.ID); ok {
 		candidate := *value
-		candidate.Sequence, candidate.CreatedAt = prior.Sequence, prior.CreatedAt
+		candidate.CreatedAt = prior.CreatedAt
 		if !reflect.DeepEqual(*prior, candidate) {
 			return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 		}
 		return *prior, false, nil
 	}
 	if !r.main {
-		value.Sequence, value.CreatedAt = r.sequence+1, time.Now().UTC()
-		// 子执行的调用标识只在本次执行条目中准入；Main 由 Session 在追加前检查。
+		value.CreatedAt = time.Now().UTC()
 		for _, call := range value.ToolCalls(r.record.SessionID, r.record.AgentID) {
 			if _, found := r.call(call.Key); found {
 				return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
@@ -164,7 +161,6 @@ func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntr
 	}
 	r.appendEntry(value)
 	r.context.Append(value)
-	r.sequence = value.Sequence
 	r.deriveProgress()
 	return *value, true, nil
 }

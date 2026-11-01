@@ -6,13 +6,12 @@ import (
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
-	"time"
 )
 
 // Key 复用工具契约的调用身份。
 type Key = tool.CallKey
 
-// ToolCall 是已提交 Assistant 中的完整调用及执行归属，不另行持久化。
+// ToolCall 是工具调用及执行归属的内存表示，调用信息随 Assistant Entry 持久化。
 type ToolCall struct {
 	Key
 	SessionID identity.SessionID
@@ -21,10 +20,9 @@ type ToolCall struct {
 	TurnID    identity.TurnID
 	Name      tool.ToolName
 	Arguments json.RawMessage
-	CreatedAt time.Time
 }
 
-// ToolCalls 从已提交的 Assistant 提取调用，正常执行和启动恢复共用此身份映射。
+// ToolCalls 从 Assistant Entry 取得调用，供执行查询与启动恢复使用。
 func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
 	calls := make([]ToolCall, 0)
 	for _, block := range m.Content {
@@ -39,7 +37,6 @@ func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.A
 			TurnID:    identity.TurnID(m.TurnID),
 			Name:      tool.ToolName(block.Name),
 			Arguments: bytes.Clone(block.Input),
-			CreatedAt: m.CreatedAt,
 		})
 	}
 	return calls

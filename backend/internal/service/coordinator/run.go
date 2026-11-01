@@ -35,11 +35,7 @@ func (r *Coordinator) run(
 	}
 	if task.Progress.FinalAssistantID != "" {
 		// 完成证据优先于迟到的取消；这里只允许补做摘要，不能重跑用户任务。
-		input, deps, _, err := r.operations.PrepareLoop(ctx, run)
-		if err == nil {
-			err = runner.Compact(ctx, input, deps)
-		}
-		if err != nil {
+		if err := r.operations.Compact(ctx, run, &runner); err != nil {
 			r.logError(task, "compact completed context", err)
 		}
 		r.endExecution(task, active, agentexecution.ExecutionCompleted, "", "")
@@ -107,8 +103,8 @@ func (r *Coordinator) startExecution(run *agentexecution.Run, resumeReason strin
 	return nil
 }
 
-// execute 运行 Provider/tool loop，并把取消转换为可持久化的结果。
-// loop 不拥有持久化生命周期，因此 context 取消后仍会交由业务服务保存结束状态。
+// execute 交给执行服务编排模型与工具，并把取消转换为可持久化的结果。
+// context 取消后仍由业务服务记录结束状态。
 func (r *Coordinator) execute(
 	ctx context.Context,
 	run *agentexecution.Run,
@@ -122,21 +118,11 @@ func (r *Coordinator) execute(
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
-	executionInput, deps, completed, err := r.operations.PrepareLoop(ctx, run)
-	outcome, failureCode := agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage
-	if err == nil {
-		if !completed {
-			deps.ToolExecutor = executor
-			_, err = runner.Run(ctx, executionInput, deps)
-		} else if compressionErr := runner.Compact(ctx, executionInput, deps); compressionErr != nil {
-			// 重复准入只允许补做摘要，不能重跑已完成的模型和工具任务。
-			r.logError(task, "compact completed context", compressionErr)
-		}
-		outcome, failureCode = agentexecution.ExecutionCompleted, ""
-		if err != nil {
-			outcome = agentexecution.ExecutionFailed
-			failureCode = loopFailureCode(err)
-		}
+	err := r.operations.Execute(ctx, run, runner, executor)
+	outcome := agentexecution.ExecutionCompleted
+	var failureCode agentexecution.ExecutionFailureCode
+	if err != nil {
+		outcome, failureCode = agentexecution.ExecutionFailed, loopFailureCode(err)
 	}
 	if _, ok := errors.AsType[*hook.Error](err); ok && loop.FailureClassification(err) == loop.FailureInternal {
 		failureCode = agentexecution.ExecutionFailureInternal
@@ -205,7 +191,7 @@ func (r *Coordinator) endExecution(
 		r.logError(task, "settle execution", err)
 		if endedExecution.Status == agentexecution.ExecutionEnded {
 			r.loop.Emitter.Emit(coreevent.Event{
-				Scope: coreevent.ScopeForRun(active.run, ""),
+				Source: coreevent.SourceForRun(active.run, ""),
 				Payload: coreevent.ErrorOccurred{
 					Message: "Failed to save session history. The result is kept in memory: " + err.Error(),
 				},

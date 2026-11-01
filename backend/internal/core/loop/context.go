@@ -6,14 +6,14 @@ import (
 	"praxis/internal/core/hook"
 )
 
-// buildContext 只变换本轮请求副本，不把 Hook 输出回写 Run Context 或 Session Entry。
-func (r *Runner) buildContext(ctx context.Context, input Input, base appcontext.ModelContext) (appcontext.ModelContext, error) {
+// BuildContext 只变换本轮请求副本，不把 Hook 输出回写 Run Context 或 Session Entry。
+func (r *Runner) BuildContext(ctx context.Context, execution ExecutionParams, base appcontext.ModelContext) (appcontext.ModelContext, error) {
 	value := base.Clone()
-	identity := executionIdentity(input, "")
+	identity := executionIdentity(execution, "")
 	identity.OperationID = hook.NewOperationID()
 	limits := appcontext.Limits{
-		ContextWindow:   input.Model.ContextWindow,
-		MaxOutputTokens: input.Model.MaxOutputTokens,
+		ContextWindow:   execution.Model.ContextWindow,
+		MaxOutputTokens: execution.Model.MaxOutputTokens,
 	}
 	content, err := r.HookDispatcher.BeforeContextBuild(ctx, hook.ContextBuild{
 		Identity: identity,
@@ -32,7 +32,7 @@ func (r *Runner) buildContext(ctx context.Context, input Input, base appcontext.
 		Context:  built,
 		Err:      err,
 	}); hookErr != nil {
-		r.Logf("after context build hook failed execution=%s: %v", input.ID, hookErr)
+		r.Logf("after context build hook failed execution=%s: %v", execution.ID, hookErr)
 	}
 	return built, err
 }

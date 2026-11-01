@@ -117,7 +117,7 @@ func (t *ExecutionTools) notifyWaiting(ctx context.Context, call sessionentry.To
 		e.deps.Logf("tool execution waiting hook failed: %v", err)
 	}
 	e.deps.Emitter.Emit(coreevent.Event{
-		Scope: coreevent.ScopeForRun(t.run, call.TurnID),
+		Source: coreevent.SourceForRun(t.run, call.TurnID),
 		Payload: coreevent.ToolApprovalRequired{
 			CallID: call.CallID,
 			Name:   string(call.Name),

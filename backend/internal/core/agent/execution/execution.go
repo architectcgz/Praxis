@@ -174,7 +174,7 @@ func (progress ExecutionProgress) WithEntries(executionID string, entries []*ses
 		if entry.ExecutionID != executionID {
 			continue
 		}
-		if entry.Role == role.Assistant && entry.Sequence > last.Sequence {
+		if entry.Role == role.Assistant {
 			last = *entry
 		}
 		for _, block := range entry.Content {

@@ -40,7 +40,13 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
     const [showScrollButton, setShowScrollButton] = useState(false)
     const active = agent.state === 'executing'
     const waitingForOutput = awaitingOutput || (agent.state === 'executing' && !busy && !streamingOutput)
-    const visibleStreamingOutput = streamingOutput
+    // Assistant 已按接纳边界进入历史，同一回合的流式展示由历史条目承接。
+    const visibleStreamingOutput = streamingOutput ? {
+        ...streamingOutput,
+        turns: streamingOutput.turns.filter((turn) => !history.some((entry) => (
+            entry.role === 'assistant' && entry.executionId === streamingOutput.executionId && entry.id === `assistant:${turn.turnId}`
+        ))),
+    } : null
     const latestExecution = agent.latestExecution
     const executionError = latestExecution?.Status === 'ended' && latestExecution.Outcome === 'failed'
         ? latestExecution.FailureMessage || `执行失败：${latestExecution.FailureCode}` : ''
@@ -110,7 +116,7 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
         setShowScrollButton(false)
     }, [])
 
-    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} sessionId={agent.SessionID} branchId={branchId}>
+    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} executionId={agent.currentExecutionId} sessionId={agent.SessionID} branchId={branchId}>
         <div className="agent-conversation">
             <div className="message-thread-container">
                 <div

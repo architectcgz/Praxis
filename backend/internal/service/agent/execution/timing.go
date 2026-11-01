@@ -25,7 +25,7 @@ func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 			s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
 			if s.emitter != nil {
 				s.emitter.Emit(coreevent.Event{
-					Scope:   coreevent.ScopeForRun(run, ""),
+					Source:  coreevent.SourceForRun(run, ""),
 					Payload: coreevent.ErrorOccurred{Message: "Failed to save operation timing: " + err.Error()},
 				})
 			}
@@ -33,7 +33,7 @@ func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 	} else {
 		run.RecordTiming(record)
 	}
-	s.publishTiming(operationTiming(execution, record), coreevent.ScopeForRun(run, ""))
+	s.publishTiming(operationTiming(execution, record), coreevent.SourceForRun(run, ""))
 }
 
 func RunTimings(run *agentexecution.Run) []timing.View {
@@ -142,10 +142,10 @@ func executionTiming(execution agentexecution.ExecutionRecord) *timing.View {
 	return value
 }
 
-func (s *Service) publishTiming(value timing.View, scope coreevent.Scope) {
+func (s *Service) publishTiming(value timing.View, source coreevent.EventSource) {
 	if s.emitter != nil {
 		s.emitter.Emit(coreevent.Event{
-			Scope:   scope,
+			Source:  source,
 			Payload: coreevent.OperationTiming{Timing: value},
 		})
 	}
@@ -153,6 +153,6 @@ func (s *Service) publishTiming(value timing.View, scope coreevent.Scope) {
 
 func (s *Service) publishExecutionTiming(execution agentexecution.ExecutionRecord, run *agentexecution.Run) {
 	if value := executionTiming(execution); value != nil {
-		s.publishTiming(*value, coreevent.ScopeForRun(run, ""))
+		s.publishTiming(*value, coreevent.SourceForRun(run, ""))
 	}
 }

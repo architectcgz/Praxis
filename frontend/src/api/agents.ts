@@ -24,7 +24,6 @@ export type ModelUsage = {
 
 export type ModelUsageRecord = {
     sessionId: string
-    agentId: string
     executionId: string
     turnId: string
     usage: ModelUsage
@@ -53,18 +52,17 @@ type AgentEventData = {
     operation_timing: { timing: OperationTiming }
 }
 
-type AgentEventScope = {
+type AgentEventSource = {
     bindingId: string
     branchId: string
     sessionId?: string
-    agentId: string
     executionId: string
     turnId?: string
 }
 
 /** kind 与 data 共同构成判别联合，消费端缩窄事件种类后才能读取对应载荷。 */
 export type AgentEvent = {
-    [K in keyof AgentEventData]: AgentEventScope & { kind: K; data: AgentEventData[K] }
+    [K in keyof AgentEventData]: AgentEventSource & { kind: K; data: AgentEventData[K] }
 }[keyof AgentEventData]
 
 export function getAgent(sessionID: string, branchID: string, agentID: string) {

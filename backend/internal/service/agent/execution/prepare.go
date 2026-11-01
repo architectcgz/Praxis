@@ -55,7 +55,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 		}
 		executionID = identity.AgentExecutionID(previous.ExecutionID)
 	}
-	stored, _, err := owner.AppendEntry(ctx, input.BranchID, sessionentry.ContextEntry{
+	stored, inserted, err := owner.AppendEntry(ctx, input.BranchID, sessionentry.ContextEntry{
 		ID:           inputEntryID,
 		RequestID:    requestID.String(),
 		SourceTaskID: input.ID.String(),
@@ -68,23 +68,22 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	if err != nil {
 		return result, false, err
 	}
-	if stored.ExecutionID != executionID.String() || stored.RequestID != requestID.String() || stored.SourceTaskID != input.ID.String() || stored.Role != role.User {
-		return result, false, errorcode.ErrRequestConflict
-	}
 	result = agentexecution.NewExecutionRecord(executionID, session.ID, session.MainAgentID(), requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID
 	result.BranchID = input.BranchID
 	if err = s.records.SaveExecution(ctx, result); err != nil {
 		return agentexecution.ExecutionRecord{}, false, err
 	}
+	if !inserted {
+		return result, false, nil
+	}
 	// Execution 保存成功后发布输入；通知独立于提交后 Hook，也不依赖 Loop 启动。
 	if s.emitter != nil {
 		s.emitter.Emit(coreevent.Event{
-			Scope: coreevent.Scope{
+			Source: coreevent.EventSource{
 				SessionID:   result.SessionID,
 				BranchID:    result.BranchID,
 				BindingID:   bindingID,
-				AgentID:     result.AgentID,
 				ExecutionID: result.ID,
 			},
 			Payload: coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}},

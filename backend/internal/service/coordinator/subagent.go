@@ -71,7 +71,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	close(active.ready)
 	s.mu.Unlock()
 	s.loop.Emitter.Emit(coreevent.Event{
-		Scope: coreevent.ScopeForRun(run, ""),
+		Source: coreevent.SourceForRun(run, ""),
 		Payload: coreevent.SubagentStarted{
 			Name:              definition.Name,
 			Execution:         run.Snapshot(),
@@ -88,7 +88,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		active.cancel(nil)
 		s.mu.Unlock()
 		s.loop.Emitter.Emit(coreevent.Event{
-			Scope:   coreevent.ScopeForRun(run, ""),
+			Source:  coreevent.SourceForRun(run, ""),
 			Payload: coreevent.SubagentReleased{},
 		})
 	}()

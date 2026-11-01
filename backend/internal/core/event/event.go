@@ -38,24 +38,23 @@ const (
 	KindError                   Kind = "error"
 )
 
-// Scope 标识事件所属的会话、Agent、执行和模型轮次；不适用的标识留空。
-type Scope struct {
-	SessionID   identity.SessionID
-	BranchID    identity.BranchID
+// EventSource 标识事件来源的会话、分支、执行和模型轮次；不适用的标识留空。
+type EventSource struct {
+	SessionID identity.SessionID
+	BranchID  identity.BranchID
+	// BindingID 标识页面的分支写入绑定，关联该绑定的队列和执行生命周期。
 	BindingID   string
-	AgentID     identity.AgentID
 	ExecutionID identity.AgentExecutionID
 	TurnID      identity.TurnID
 }
 
-// ScopeForRun 在事件发布边界读取执行归属，不让 Run 依赖通知协议。
-func ScopeForRun(run *agentexecution.Run, turnID identity.TurnID) Scope {
+// SourceForRun 在事件发布边界读取执行归属，不让 Run 依赖通知协议。
+func SourceForRun(run *agentexecution.Run, turnID identity.TurnID) EventSource {
 	record := run.Snapshot()
-	return Scope{
+	return EventSource{
 		SessionID:   record.SessionID,
 		BranchID:    record.BranchID,
 		BindingID:   run.BindingID,
-		AgentID:     record.AgentID,
 		ExecutionID: record.ID,
 		TurnID:      turnID,
 	}
@@ -64,7 +63,7 @@ func ScopeForRun(run *agentexecution.Run, turnID identity.TurnID) Scope {
 // Event 是进程内业务通知，不表示已落盘；重新连接后应查询业务状态恢复视图。
 // Payload 必须使用本包定义的非空值载荷；订阅者不得修改其中的切片与指针。
 type Event struct {
-	Scope   Scope
+	Source  EventSource
 	Payload Payload
 }
 

@@ -13,7 +13,7 @@ import (
 )
 
 // ToolExecutor 完成授权、审批等待和执行，返回实际结果及后置 Hook 所需的调用信息。
-// 结果保存和后置 Hook 调度由 Loop 负责。
+// 结果记录和后置 Hook 调度由执行服务负责。
 type ToolExecutor interface {
 	Execute(context.Context, sessionentry.ToolCall) (toolexecution.CallResult, error)
 }
@@ -25,15 +25,6 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// EntryOperations 绑定本轮的提交能力与 Run Context，不向 Loop 暴露 Session 或存储实现。
-// NextContext 返回未经过 Hook 变换的请求投影，共享 Entry 始终只读。
-type EntryOperations interface {
-	NextContext(context.Context) (appcontext.Content, error)
-	AppendEntry(context.Context, sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error)
-	PublishEntries(identity.TurnID, []sessionentry.ContextEntry)
-	EntryFailure(error) error
-}
-
 // ExecutionOperations 只记录本次执行的请求序号和模型消耗，不承担 Entry 读写。
 type ExecutionOperations interface {
 	NextRequestSequence(context.Context) (uint64, error)
@@ -41,19 +32,8 @@ type ExecutionOperations interface {
 	RecordModelOutput(context.Context, int) error
 }
 
-// EndReason 只描述 Loop 为什么返回，不表示业务持久化结果。
-type EndReason string
-
-const (
-	EndCompleted EndReason = "completed"
-	endFailed    EndReason = "failed"
-)
-
-type Result struct{ Reason EndReason }
-
-// Input 是业务上层准备好的本次执行数据，不携带服务、回调或持久化能力。
-// Context 是未经过 Hook 变换的请求投影，运行中不进行摘要压缩。
-type Input struct {
+// ExecutionParams 保存一次执行的身份和冻结模型配置，供各轮模型请求共用。
+type ExecutionParams struct {
 	ID           identity.AgentExecutionID
 	SourceTaskID identity.TaskID
 	SessionID    identity.SessionID
@@ -62,15 +42,12 @@ type Input struct {
 	AgentID      identity.AgentID
 	RequestID    identity.RequestID
 	Model        modelapi.Config
-	Context      appcontext.Content
 }
 
-// ExecutionDependencies 只在本次 Run 中使用；共享 Runner 不保存单次执行的环境或等待状态。
+// ExecutionDependencies 仅绑定本次执行的模型进度和计时能力。
 type ExecutionDependencies struct {
-	ToolExecutor ToolExecutor
-	Execution    ExecutionOperations
-	Entries      EntryOperations
-	Timing       *timing.Recorder
+	Execution ExecutionOperations
+	Timing    *timing.Recorder
 }
 
 type FailureCode string
