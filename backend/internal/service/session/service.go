@@ -144,6 +144,28 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sess
 	return owner, nil
 }
 
+// ReleaseSession 由 Coordinator 确认页面和执行均已退出后调用，不删除持久化记录。
+func (s *Service) ReleaseSession(ctx context.Context, id identity.SessionID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.openedMu.Lock()
+	defer s.openedMu.Unlock()
+	owner := s.opened[id]
+	if owner == nil {
+		return nil
+	}
+	if err := owner.session.PersistenceError(); err != nil {
+		return fmt.Errorf("release session with unsaved history: %w: %w", sessionmodel.ErrUnsavedChanges, err)
+	}
+	// 非空事实不能依赖实例常驻，否则退出清理会把已释放的新会话当成空会话。
+	if !owner.session.Empty() {
+		delete(s.createdSessions, id)
+	}
+	delete(s.opened, id)
+	return nil
+}
+
 func (s *Service) ListSessionsByProject(ctx context.Context, projectID identity.ProjectID, limit int) ([]sessionmodel.SessionInfo, error) {
 	return s.sessions.ListByProject(ctx, projectID, limit)
 }

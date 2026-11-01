@@ -44,6 +44,7 @@ type Coordinator struct {
 	mu            sync.Mutex
 	closed        bool
 	executions    map[executionKey]*activeExecution
+	pages         map[string]identity.SessionID
 	bindings      map[string]*sessionBinding
 	branchOwners  map[branchKey]string
 	branchResults map[string]string
@@ -86,6 +87,7 @@ func NewCoordinator(config Config) *Coordinator {
 		projects:          config.Projects,
 		loop:              config.Loop,
 		executions:        make(map[executionKey]*activeExecution),
+		pages:             make(map[string]identity.SessionID),
 		bindings:          make(map[string]*sessionBinding),
 		branchOwners:      make(map[branchKey]string),
 		branchResults:     make(map[string]string),
@@ -137,6 +139,7 @@ func (r *Coordinator) Close(ctx context.Context) error {
 			binding.queue.Clear()
 		}
 		clear(r.bindings)
+		clear(r.pages)
 		clear(r.branchOwners)
 		clear(r.branchResults)
 		r.mu.Unlock()

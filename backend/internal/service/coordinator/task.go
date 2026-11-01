@@ -3,12 +3,14 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"maps"
 	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
+	"strings"
 )
 
 type SubmitResult struct {
@@ -114,6 +116,8 @@ func (s *Coordinator) DeleteSession(ctx context.Context, id identity.SessionID) 
 			delete(s.branchOwners, branchKey{id, binding.branchID})
 		}
 	}
+	maps.DeleteFunc(s.pages, func(_ string, sessionID identity.SessionID) bool { return sessionID == id })
+	maps.DeleteFunc(s.branchResults, func(key, _ string) bool { return strings.HasPrefix(key, id.String()+":") })
 	return nil
 }
 func (s *Coordinator) CancelTask(ctx context.Context, bindingID string, id identity.TaskID) error {

@@ -2,12 +2,15 @@ package coordinator
 
 import (
 	"context"
+	"maps"
 	agentmodel "praxis/internal/core/agent"
+	coreevent "praxis/internal/core/event"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
+	"strings"
 	"time"
 )
 
@@ -33,8 +36,8 @@ func (s *Coordinator) CreateSession(ctx context.Context, input sessionservice.Cr
 	return s.sessions.CreateSession(ctx, input)
 }
 
-// SelectSession 先完成会话加载，再返回页面选择的分支；写入绑定由首次提交输入创建。
-func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID string) (BindingView, error) {
+// SelectSession 加载会话并登记页面使用期；写入绑定仍由首次提交输入创建。
+func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID, pageID string) (BindingView, error) {
 	if err := s.enter(); err != nil {
 		return BindingView{}, err
 	}
@@ -58,7 +61,12 @@ func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID, 
 		}
 		branchID = branch.ID
 	}
-	return s.sessionView(ctx, id, branchID, bindingID)
+	view, err := s.sessionView(ctx, id, branchID, bindingID)
+	if err != nil {
+		return BindingView{}, err
+	}
+	s.pages[pageID] = id
+	return view, nil
 }
 
 func (s *Coordinator) CreateBranch(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID string, input sessionmodel.BranchInput) (BindingView, error) {
@@ -249,39 +257,71 @@ func (s *Coordinator) navigationBinding(id identity.SessionID, branchID identity
 	return binding, nil
 }
 
-// CloseSession 先拒绝输入并取消执行，待执行者完成收尾后才释放写入权。
-func (s *Coordinator) CloseSession(ctx context.Context, id string) error {
+// CloseSession 等待本页执行收尾；最后一个页面关闭时才释放共享会话数据。
+func (s *Coordinator) CloseSession(ctx context.Context, pageID, bindingID string) error {
 	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()
 	s.mu.Lock()
-	binding := s.bindings[id]
-	if binding == nil {
+	id, opened := s.pages[pageID]
+	if !opened {
 		s.mu.Unlock()
 		return nil
 	}
-	binding.closing = true
-	for _, active := range s.executions {
-		if active.bindingID == id {
-			active.cancel(context.Canceled)
+	binding := s.bindings[bindingID]
+	var notification coreevent.Event
+	if binding != nil {
+		if binding.sessionID != id {
+			s.mu.Unlock()
+			return errorcode.ErrRequestConflict
 		}
+		binding.closing = true
+		for _, active := range s.executions {
+			if active.bindingID == bindingID {
+				active.cancel(context.Canceled)
+			}
+		}
+		binding.queue.Clear()
+		notification = taskQueueEvent(binding)
 	}
-	binding.queue.Clear()
 	s.mu.Unlock()
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
+	// 关闭失败时页面仍然保留，队列清空也必须同步到界面。
+	if binding != nil {
+		s.loop.Emitter.Emit(notification)
+	}
+	tick := time.Tick(20 * time.Millisecond)
 	for {
 		s.mu.Lock()
 		busy := false
 		for _, active := range s.executions {
-			if active.bindingID == id {
+			if binding != nil && active.bindingID == bindingID {
 				busy = true
 				break
 			}
 		}
 		if !busy {
-			s.releaseBinding(binding)
+			shared := false
+			for otherPage, sessionID := range s.pages {
+				if otherPage != pageID && sessionID == id {
+					shared = true
+					break
+				}
+			}
+			if !shared {
+				if err := s.sessions.ReleaseSession(ctx, id); err != nil {
+					if binding != nil {
+						binding.closing = false
+					}
+					s.mu.Unlock()
+					return err
+				}
+				maps.DeleteFunc(s.branchResults, func(key, _ string) bool { return strings.HasPrefix(key, id.String()+":") })
+			}
+			if binding != nil {
+				s.releaseBinding(binding)
+			}
+			delete(s.pages, pageID)
 			s.mu.Unlock()
 			return nil
 		}
@@ -289,7 +329,7 @@ func (s *Coordinator) CloseSession(ctx context.Context, id string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case <-tick:
 		}
 	}
 }

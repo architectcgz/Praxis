@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { selectSession, subscribeAgentEvents, type SessionSnapshot } from '../../api'
+import { closeSession, selectSession, subscribeAgentEvents, type SessionSnapshot } from '../../api'
 
 /** 每个页面持有一份会话选择；切换到其他页面不会销毁本 Hook。 */
 export function useSessionData(sessionID: string) {
+    const [pageID] = useState(() => crypto.randomUUID())
     const [session, setSession] = useState<SessionSnapshot | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<unknown>()
     const request = useRef(0)
     const selection = useRef({ branchID: '', bindingID: '' })
+    const pendingLoad = useRef<Promise<void> | null>(null)
 
     const loadSession = useCallback(async () => {
         const id = ++request.current
@@ -15,7 +17,9 @@ export function useSessionData(sessionID: string) {
         setError(undefined)
         try {
             const current = selection.current
-            const value = await selectSession(sessionID, current.branchID, current.bindingID)
+            const pending = selectSession(sessionID, pageID, current.branchID, current.bindingID)
+            pendingLoad.current = pending.then(() => undefined, () => undefined)
+            const value = await pending
             if (request.current !== id) return
             selection.current = { branchID: value.branch.id, bindingID: value.bindingId }
             setSession(value)
@@ -26,7 +30,13 @@ export function useSessionData(sessionID: string) {
         } finally {
             if (request.current === id) setLoading(false)
         }
-    }, [sessionID])
+    }, [sessionID, pageID])
+
+    const releaseSession = useCallback(async () => {
+        // 打开请求结束后再关闭，确保初始化失败或尚未发送消息的页面也能释放后端数据。
+        await pendingLoad.current
+        await closeSession(pageID, selection.current.bindingID)
+    }, [pageID])
 
     const adoptSession = useCallback((value: SessionSnapshot) => {
         request.current += 1
@@ -65,5 +75,5 @@ export function useSessionData(sessionID: string) {
     }), [sessionID])
 
     useEffect(() => () => { request.current += 1 }, [])
-    return { session, sessionLoading: loading, sessionError: error, loadSession, adoptSession, bindSubmission, updateTitle }
+    return { session, sessionLoading: loading, sessionError: error, loadSession, releaseSession, adoptSession, bindSubmission, updateTitle }
 }

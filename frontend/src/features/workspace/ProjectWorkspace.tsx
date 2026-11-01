@@ -145,7 +145,7 @@ export function ProjectWorkspace() {
         {closingPageID && <Overlay labelledBy="close-session-page-title" onClose={() => { if (!pageControls[closingPageID]?.busy) setClosingPageID('') }}>
             <section className="session-close-dialog">
                 <h2 id="close-session-page-title">关闭会话页？</h2>
-                <p>将停止此页面的执行并清空待办队列，未发送的草稿会丢失。会话历史仍然保留。</p>
+                <p>将停止此页面的执行并清空待办队列，未发送的草稿会丢失。已保存的会话历史仍然保留，重新打开时需重新选择模型。</p>
                 <div className="session-close-actions">
                     <button type="button" className="modal-secondary" disabled={pageControls[closingPageID]?.busy} onClick={() => setClosingPageID('')}>取消</button>
                     <button type="button" className="modal-primary modal-danger" disabled={pageControls[closingPageID]?.busy} onClick={() => void closePage()}>结束执行并关闭</button>

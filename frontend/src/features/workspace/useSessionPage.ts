@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { API_ERROR_CODES, closeSession, isBindingAvailable, subscribeAgentEvents, subscribeSessionConfigReloaded, type ApiErrorCode, type SessionSnapshot } from '../../api'
+import { API_ERROR_CODES, isBindingAvailable, subscribeAgentEvents, subscribeSessionConfigReloaded, type ApiErrorCode, type SessionSnapshot } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import { useAgentData } from '../agent/useAgentData'
 import { useAgentCommands } from '../agent/useAgentCommands'
@@ -22,7 +22,7 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
     const [error, setError] = useState('')
     const [errorCode, setErrorCode] = useState<ApiErrorCode | undefined>()
     const viewRequestRef = useRef(0)
-    const { session, sessionLoading, sessionError, loadSession, adoptSession, bindSubmission, updateTitle } = useSessionData(sessionID)
+    const { session, sessionLoading, sessionError, loadSession, releaseSession, adoptSession, bindSubmission, updateTitle } = useSessionData(sessionID)
     const { models, loading: modelsLoading, error: modelsError, refreshModels } = useModelCatalog(session?.id || '')
     const { loadForSession, ...agents } = useAgentData({ sessionID: session?.id || '', models, setError, setErrorCode })
 
@@ -86,13 +86,13 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
     const close = useCallback(async () => {
         setBusy(true)
         try {
-            if (session?.bindingId) await closeSession(session.bindingId)
+            await releaseSession()
             return true
         } catch (reason) {
             setError(readableError(reason)); setErrorCode(apiErrorCode(reason))
             return false
         } finally { setBusy(false) }
-    }, [session?.bindingId])
+    }, [releaseSession])
     const submitInput = () => {
         if (agents.input.trim().startsWith('/')) void commands.runCommand(agents.input.trim())
         else void submission.submitTask()

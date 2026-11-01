@@ -48,8 +48,8 @@ type AgentService interface {
 
 type AgentCommands interface {
 	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
-	SelectSession(context.Context, identity.SessionID, identity.BranchID, string) (execution.BindingView, error)
-	CloseSession(context.Context, string) error
+	SelectSession(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
+	CloseSession(context.Context, string, string) error
 	CreateBranch(context.Context, identity.SessionID, identity.BranchID, string, sessionmodel.BranchInput) (execution.BindingView, error)
 	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
 	ListBranches(context.Context, identity.SessionID, string) ([]execution.BranchView, error)

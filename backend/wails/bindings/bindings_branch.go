@@ -99,13 +99,16 @@ func (b *SessionBindings) GetHistoryAt(sessionID, entryID string) ([]dto.Entry, 
 	}
 	return publicEntries(values), nil
 }
-func (b *SessionBindings) CloseSession(bindingID string) error {
-	if err := validation.ID("bindingId", bindingID); err != nil {
+func (b *SessionBindings) CloseSession(pageID, bindingID string) error {
+	if err := validation.ID("pageId", pageID); err != nil {
+		return publicInputError(b.host, "CloseSession", err)
+	}
+	if err := validation.Value("bindingId", bindingID, "omitempty,id"); err != nil {
 		return publicInputError(b.host, "CloseSession", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CloseSession", services.Commands.CloseSession(ctx, bindingID))
+	return publicError(b.host, "CloseSession", services.Commands.CloseSession(ctx, pageID, bindingID))
 }

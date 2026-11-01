@@ -70,8 +70,8 @@ export function getSessionModelSelection(sessionID: string): Promise<ModelSelect
 }
 
 /** 后端快照投影保证集合为数组；前端直接接纳，不重新校验内部协议。 */
-export function selectSession(sessionID: string, branchID = '', bindingID = '') {
-    return getSessionBinding().SelectSession(sessionID, branchID, bindingID) as Promise<SessionSnapshot>
+export function selectSession(sessionID: string, pageID: string, branchID = '', bindingID = '') {
+    return getSessionBinding().SelectSession(sessionID, branchID, bindingID, pageID) as Promise<SessionSnapshot>
 }
 
 export function getSessionSummary(sessionID: string) { return getSessionBinding().GetSessionSummary(sessionID) }
@@ -91,7 +91,7 @@ export function getSessionUsageSummary(sessionID: string) {
     return getSessionBinding().GetSessionUsageSummary(sessionID) as Promise<SessionUsageSummary>
 }
 
-export function closeSession(bindingID: string) { return getSessionBinding().CloseSession(bindingID) }
+export function closeSession(pageID: string, bindingID: string) { return getSessionBinding().CloseSession(pageID, bindingID) }
 export function deleteSession(sessionID: string) { return getSessionBinding().DeleteSession(sessionID) }
 export function renameSession(sessionID: string, title: string) { return getSessionBinding().RenameSession(sessionID, title) }
 
