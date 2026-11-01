@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -79,11 +78,4 @@ func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID,
 		return nil
 	})
 	return
-}
-
-func validateContextEntry(entry sessionentry.ContextEntry) error {
-	if entry.BranchID == "" {
-		return errors.New("entry branch is required")
-	}
-	return entry.Validate()
 }
