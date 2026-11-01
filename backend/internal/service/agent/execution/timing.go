@@ -18,43 +18,27 @@ func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 		s.logger.Errorf("timing owner mismatch execution=%s", record.ExecutionID)
 		return
 	}
-	if run.Main() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := run.Session.AppendTiming(ctx, record); err != nil {
-			s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
-			if s.emitter != nil {
-				s.emitter.Emit(coreevent.Event{
-					Source:  coreevent.SourceForRun(run, ""),
-					Payload: coreevent.ErrorOccurred{Message: "Failed to save operation timing: " + err.Error()},
-				})
-			}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := run.Session.AppendTiming(ctx, record); err != nil {
+		s.logger.Errorf("execution timing save failed execution=%s operation=%s status=%s: %v", record.ExecutionID, record.ID, record.Status, err)
+		if s.emitter != nil {
+			s.emitter.Emit(coreevent.Event{
+				Source:  coreevent.SourceForRun(run, ""),
+				Payload: coreevent.ErrorOccurred{Message: "Failed to save operation timing: " + err.Error()},
+			})
 		}
-	} else {
-		run.RecordTiming(record)
 	}
 	s.publishTiming(operationTiming(execution, record), coreevent.SourceForRun(run, ""))
 }
 
-func RunTimings(run *agentexecution.Run) []timing.View {
-	execution := run.Snapshot()
-	result := make([]timing.View, 0)
-	if value := executionTiming(execution); value != nil {
-		result = append(result, *value)
-	}
-	for _, record := range run.Timings() {
-		result = append(result, operationTiming(execution, record))
-	}
-	return result
-}
-
 // ListAgentTimings 从会话历史聚合操作记录，并派生执行本身的墙上时钟耗时。
-func (s *Service) ListAgentTimings(ctx context.Context, agentID string, branchID identity.BranchID, limit int) ([]timing.View, error) {
-	records, err := s.records.ListAgentTimingRecords(ctx, identity.AgentID(agentID), branchID, limit)
+func (s *Service) ListAgentTimings(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID, limit int) ([]timing.View, error) {
+	records, err := s.records.ListAgentTimingRecords(ctx, sessionID, agentID, branchID, limit)
 	if err != nil {
 		return nil, err
 	}
-	executions, err := s.records.ListAgentExecutions(ctx, identity.AgentID(agentID), branchID, limit)
+	executions, err := s.records.ListAgentExecutions(ctx, sessionID, agentID, branchID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +53,7 @@ func (s *Service) ListAgentTimings(ctx context.Context, agentID string, branchID
 	for _, record := range records {
 		execution, ok := owners[record.ExecutionID]
 		if !ok {
-			execution, err = s.records.GetExecution(ctx, identity.SessionID(agentID), identity.AgentExecutionID(record.ExecutionID))
+			execution, err = s.records.GetExecution(ctx, sessionID, identity.AgentExecutionID(record.ExecutionID))
 			if err != nil {
 				return nil, err
 			}
@@ -135,7 +119,7 @@ func executionTiming(execution agentexecution.ExecutionRecord) *timing.View {
 		switch execution.Outcome {
 		case agentexecution.ExecutionFailed:
 			value.Status = string(timing.Failed)
-		case agentexecution.ExecutionInterrupted, agentexecution.ExecutionPaused:
+		case agentexecution.ExecutionInterrupted:
 			value.Status = string(timing.Cancelled)
 		}
 	}

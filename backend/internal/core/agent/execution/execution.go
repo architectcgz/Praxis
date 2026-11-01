@@ -26,13 +26,13 @@ type ExecutionOutcome string
 const (
 	ExecutionCompleted   ExecutionOutcome = "completed"
 	ExecutionYielded     ExecutionOutcome = "yielded"
-	ExecutionPaused      ExecutionOutcome = "paused"
 	ExecutionFailed      ExecutionOutcome = "failed"
 	ExecutionInterrupted ExecutionOutcome = "interrupted"
 )
 
 // ExecutionProgress 在内存中记录模型请求消耗；消息统计由已接纳 Entry 派生，重启只能恢复已落盘的预算。
 type ExecutionProgress struct {
+	Usage            UsageTotals
 	NextSequence     uint64
 	Iterations       uint64
 	ModelRequests    uint64
@@ -45,22 +45,25 @@ type ExecutionProgress struct {
 
 // ExecutionRecord 保存一次执行的身份、配置、状态和进度，不持有运行时资源。
 type ExecutionRecord struct {
-	Progress       ExecutionProgress
-	ID             identity.AgentExecutionID
-	SessionID      identity.SessionID
-	BranchID       identity.BranchID
-	AgentID        identity.AgentID
-	RequestID      identity.RequestID
-	SourceTaskID   identity.TaskID
-	Status         ExecutionStatus
-	InputEntryID   string
-	Config         ExecutionConfig
-	CreatedAt      time.Time
-	StartedAt      time.Time
-	EndedAt        time.Time
-	Outcome        ExecutionOutcome
-	FailureCode    ExecutionFailureCode
-	FailureMessage string
+	Progress          ExecutionProgress
+	ID                identity.AgentExecutionID
+	SessionID         identity.SessionID
+	BranchID          identity.BranchID
+	AgentID           identity.AgentID
+	AgentName         string
+	ParentExecutionID identity.AgentExecutionID
+	ParentCallID      string
+	RequestID         identity.RequestID
+	SourceTaskID      identity.TaskID
+	Status            ExecutionStatus
+	InputEntryID      string
+	Config            ExecutionConfig
+	CreatedAt         time.Time
+	StartedAt         time.Time
+	EndedAt           time.Time
+	Outcome           ExecutionOutcome
+	FailureCode       ExecutionFailureCode
+	FailureMessage    string
 }
 
 // NewExecutionRecord 创建已准入的执行记录；模型上下文在执行准备阶段构建。
@@ -97,8 +100,6 @@ func (e ExecutionRecord) AgentState() agentmodel.AgentState {
 	switch e.Outcome {
 	case ExecutionYielded:
 		return agentmodel.AgentWaiting
-	case ExecutionPaused:
-		return agentmodel.AgentPaused
 	case ExecutionInterrupted:
 		return agentmodel.AgentInterrupted
 	case ExecutionFailed:
@@ -156,8 +157,7 @@ func (e ExecutionRecord) Validate() error {
 
 	if e.Status == ExecutionEnded {
 		switch e.Outcome {
-		case ExecutionCompleted, ExecutionYielded, ExecutionPaused,
-			ExecutionFailed, ExecutionInterrupted:
+		case ExecutionCompleted, ExecutionYielded, ExecutionFailed, ExecutionInterrupted:
 		default:
 			return fmt.Errorf("agent_execution: unknown outcome: %w", errorcode.ErrInvalidValue)
 		}

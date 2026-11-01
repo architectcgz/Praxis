@@ -6,8 +6,8 @@ import (
 	"praxis/internal/identity"
 )
 
-func (s *Service) ListAgentTimingRecords(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID, limit int) ([]timing.Record, error) {
-	owner, err := s.OpenedSession(ctx, identity.SessionID(agentID))
+func (s *Service) ListAgentTimingRecords(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID, limit int) ([]timing.Record, error) {
+	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}

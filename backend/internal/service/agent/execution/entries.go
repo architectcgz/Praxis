@@ -11,25 +11,24 @@ import (
 	"praxis/internal/identity"
 )
 
-// appendEntry 由执行服务决定记录归属；主执行先更新 Session，再将同一引用交给 Run。
+// appendEntry 显式选择主分支或子历史，提交后将同一引用交给 Run。
 // 日志失败保留双方已接纳的内存事实；重复条目不再次发送 Hook 或条目通知。
 func (s *Service) appendEntry(ctx context.Context, run *agentexecution.Run, value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
-	entry := new(value)
-	inserted := false
+	record := run.Snapshot()
+	var entry *sessionentry.ContextEntry
+	var inserted bool
 	var writeErr error
 	if run.Main() {
-		stored, added, err := run.Session.AppendEntry(ctx, run.Snapshot().BranchID, value)
-		if err != nil && !added {
-			return sessionentry.ContextEntry{}, false, entryFailure(run, err)
-		}
-		entry, inserted, writeErr = stored, added, err
+		entry, inserted, writeErr = run.Session.AppendEntry(ctx, record.BranchID, value)
+	} else {
+		entry, inserted, writeErr = run.Session.AppendSubagentEntry(ctx, record.AgentID, record.BranchID, value)
 	}
-	accepted, added, err := run.Accept(entry)
+	if writeErr != nil && !inserted {
+		return sessionentry.ContextEntry{}, false, storageFailure(writeErr)
+	}
+	accepted, _, err := run.Accept(entry)
 	if err != nil {
-		return sessionentry.ContextEntry{}, false, entryFailure(run, err)
-	}
-	if !run.Main() {
-		inserted = added
+		return sessionentry.ContextEntry{}, false, storageFailure(err)
 	}
 	if inserted {
 		if accepted.Role == role.Assistant && run.Main() {
@@ -38,13 +37,12 @@ func (s *Service) appendEntry(ctx context.Context, run *agentexecution.Run, valu
 		s.emitter.Emit(coreevent.Event{
 			Source: coreevent.SourceForRun(run, identity.TurnID(accepted.TurnID)),
 			Payload: coreevent.EntriesAppended{
-				Entries:   []sessionentry.ContextEntry{accepted},
-				Transient: !run.Main(),
+				Entries: []sessionentry.ContextEntry{accepted},
 			},
 		})
 	}
 	if writeErr != nil {
-		return accepted, inserted, entryFailure(run, writeErr)
+		return accepted, inserted, storageFailure(writeErr)
 	}
 	return accepted, inserted, nil
 }

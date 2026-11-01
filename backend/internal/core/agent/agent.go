@@ -20,7 +20,6 @@ const (
 	AgentIdle        AgentState = "idle"
 	AgentExecuting   AgentState = "executing"
 	AgentWaiting     AgentState = "waiting"
-	AgentPaused      AgentState = "paused"
 	AgentInterrupted AgentState = "interrupted"
 	AgentFailed      AgentState = "failed"
 )
@@ -66,15 +65,15 @@ func (a *Agent) State() (AgentState, identity.AgentExecutionID, time.Time) {
 	return a.state, a.currentExecutionID, a.updatedAt
 }
 
-// ApplyControl 只更新已接受信号的目标执行；执行身份保留到结算完成，迟到信号不能影响新执行。
-func (a *Agent) ApplyControl(id identity.AgentExecutionID, state AgentState, at time.Time) {
+// ApplyInterrupt 只更新已接受中断信号的当前执行；执行身份保留到结算完成，迟到信号不能影响新执行。
+func (a *Agent) ApplyInterrupt(id identity.AgentExecutionID, at time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.currentExecutionID != id || id == "" || state != AgentPaused && state != AgentInterrupted {
+	if a.currentExecutionID != id || id == "" {
 		return
 	}
 	if a.state == AgentExecuting {
-		a.state = state
+		a.state = AgentInterrupted
 		a.updatedAt = at.UTC()
 	}
 }

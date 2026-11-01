@@ -17,14 +17,14 @@ type AgentTaskInputProps = {
     reasoning: string
     busy: boolean
     onSend: () => void
-    onControl: (kind: 'pause' | 'cancel') => void
+    onStop: () => void
     onModelChange: (providerId: string, modelId: string) => void
     onReasoningChange: (level: string) => void
     commands: readonly { name: string; description: string }[]
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy)
     const providerPickerRef = useRef<HTMLDivElement>(null)
@@ -370,7 +370,7 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                                 type="button"
                                 title="停止当前执行"
                                 aria-label="停止当前执行"
-                                onClick={() => onControl('cancel')}
+                                onClick={onStop}
                                 disabled={busy}
                             >
                                 <Square size={16} strokeWidth={2.1} aria-hidden="true" />

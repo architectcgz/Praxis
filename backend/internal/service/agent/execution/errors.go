@@ -3,16 +3,12 @@ package execution
 import (
 	"errors"
 	"fmt"
-	agentexecution "praxis/internal/core/agent/execution"
 	appcontext "praxis/internal/core/context"
 	"praxis/internal/core/loop"
 )
 
-func entryFailure(run *agentexecution.Run, err error) error {
-	if run.Main() {
-		return loop.NewFailure(loop.FailureStorage, err)
-	}
-	return loop.NewFailure(loop.FailureContract, err)
+func storageFailure(err error) error {
+	return loop.NewFailure(loop.FailureStorage, err)
 }
 
 func modelFailure(err error) error {

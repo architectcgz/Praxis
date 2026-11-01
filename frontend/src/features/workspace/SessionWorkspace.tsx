@@ -62,7 +62,7 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
                         <TaskQueue tasks={page.session.tasks} busy={page.busy} onCancel={page.cancelQueuedTask} />
                     </>}
                     onSend={page.submitInput}
-                    onControl={(kind) => void page.control(kind)}
+                    onStop={() => void page.stop()}
                     onModelChange={page.selectModel}
                     onReasoningChange={page.selectReasoning}
                     commands={WORKSPACE_COMMANDS}

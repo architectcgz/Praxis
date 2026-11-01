@@ -65,6 +65,9 @@ func (s *Service) Execute(ctx context.Context, run *agentexecution.Run, runner *
 		}
 	}
 	if compressionErr := s.Compact(ctx, run, runner); compressionErr != nil {
+		if loop.FailureClassification(compressionErr) == loop.FailureStorage {
+			return compressionErr
+		}
 		s.logger.Errorf("context compression failed execution=%s; completed answer preserved: %v", execution.ID, compressionErr)
 	}
 	return nil
@@ -122,7 +125,7 @@ func (s *Service) executeTurn(
 			accepted, _, writeErr := s.appendEntry(context.WithoutCancel(ctx), run, assistantEntry(execution, turnID, stopReason, partial))
 			recorded = accepted.ID != ""
 			if writeErr != nil {
-				err = entryFailure(run, errors.Join(err, writeErr))
+				err = storageFailure(errors.Join(err, writeErr))
 			}
 		}
 		return false, err
@@ -141,9 +144,9 @@ func (s *Service) executeTurn(
 		s.emitter.Emit(coreevent.Event{
 			Source: coreevent.SourceForRun(run, turnID),
 			Payload: coreevent.ToolCall{
-				CallID: call.CallID,
-				Name:   string(call.Name),
-				Input:  call.Arguments,
+				CallID:    call.CallID,
+				Name:      string(call.Name),
+				Arguments: call.Arguments,
 			},
 		})
 	}
@@ -151,7 +154,7 @@ func (s *Service) executeTurn(
 	if err != nil {
 		// 已取得真实回执的调用即使保存失败也不改写；只收尾尚未取得回执的调用。
 		if closeErr := s.interruptToolCalls(ctx, run, calls[completed:]); closeErr != nil {
-			err = entryFailure(run, errors.Join(err, closeErr))
+			err = storageFailure(errors.Join(err, closeErr))
 		}
 	}
 	return false, err

@@ -17,3 +17,15 @@ func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID,
 	}
 	return sessionentry.Values(entries), nil
 }
+
+func (s *Service) ListAgentEntries(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID) ([]sessionentry.ContextEntry, error) {
+	owner, err := s.OpenedSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := owner.AgentEntries(ctx, agentID, branchID)
+	if err != nil {
+		return nil, err
+	}
+	return sessionentry.Values(entries), nil
+}

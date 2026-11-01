@@ -8,9 +8,10 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	executionservice "praxis/internal/service/agent/execution"
 )
 
-// SubagentResult 只交接调用方需要的结果，不保存子执行的消息、计时或审核过程。
+// SubagentResult 只交接父调用需要的结果；完整执行事实保存在子代理日志。
 type SubagentResult struct {
 	ExecutionID identity.AgentExecutionID
 	Outcome     agentexecution.ExecutionOutcome
@@ -56,7 +57,16 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	definition, err := active.config.Definition(definitionID)
 	var run *agentexecution.Run
 	if err == nil {
-		run, _, err = s.operations.PrepareTask(active.ctx, task, agentID, definition, parentRecord.Config.Model, nil, parentActive.bindingID)
+		run, err = s.operations.PrepareSubagent(active.ctx, executionservice.SubagentInput{
+			Task:              task,
+			AgentID:           agentID,
+			ParentExecutionID: parent.ExecutionID,
+			ParentCallID:      parent.CallID,
+			Definition:        definition,
+			Model:             parentRecord.Config.Model,
+			Owner:             parentRun.Session,
+			BindingID:         parentActive.bindingID,
+		})
 	}
 	if err != nil {
 		s.mu.Lock()

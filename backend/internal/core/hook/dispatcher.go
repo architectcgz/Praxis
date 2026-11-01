@@ -40,7 +40,6 @@ func NewDispatcher(hooks ...any) (*Dispatcher, error) {
 			FinalOutputCommittedHook,
 			ExecutionStartedHook,
 			ExecutionResumedHook,
-			ExecutionPausedHook,
 			ExecutionCommittedHook,
 			AfterContextBuildHook,
 			BeforeContextCompressionHook,
@@ -224,20 +223,6 @@ func (d *Dispatcher) ExecutionResumed(ctx context.Context, event ExecutionEvent)
 		}
 		if err := handler.ExecutionResumed(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "ExecutionResumed", Cause: err})
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func (d *Dispatcher) ExecutionPaused(ctx context.Context, event ExecutionEvent) error {
-	var errs []error
-	for _, registered := range d.registered() {
-		handler, ok := registered.(ExecutionPausedHook)
-		if !ok {
-			continue
-		}
-		if err := handler.ExecutionPaused(ctx, event); err != nil {
-			errs = append(errs, &Error{Point: "ExecutionPaused", Cause: err})
 		}
 	}
 	return errors.Join(errs...)

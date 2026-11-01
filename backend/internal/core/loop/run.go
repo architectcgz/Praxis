@@ -29,7 +29,7 @@ func NewRunner(deps Dependencies) Runner {
 // Request 接收一次模型响应；断流时同时返回已收到的内容，交由执行服务决定如何记录。
 func (r *Runner) Request(ctx context.Context, execution ExecutionParams, deps ExecutionDependencies, request providerapi.Request, kind hook.ModelRequestKind, sequence uint64) (Response, error) {
 	return r.callModel(ctx, execution, deps, request, kind, sequence, func(event providerapi.Event) {
-		if kind == hook.ModelRequestIteration || event.Kind == providerapi.StreamUsage {
+		if kind == hook.ModelRequestIteration {
 			r.emitModelEvent(execution, request.TurnID, event)
 		}
 	})

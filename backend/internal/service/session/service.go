@@ -112,7 +112,20 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sess
 	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
 	data := sessionmodel.Open(info.ID)
 	replay := logReplay{session: data, callIndexes: make(map[sessionentry.Key]int)}
-	if err := s.log.Read(ctx, id, replay.apply); err != nil {
+	if err := s.log.Read(ctx, id, data.MainAgentID(), replay.apply); err != nil {
+		return nil, err
+	}
+	agents, err := s.log.Subagents(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, agentID := range agents {
+		data.SubagentEntries[agentID] = nil
+		if err := s.log.Read(ctx, id, agentID, replay.apply); err != nil {
+			return nil, err
+		}
+	}
+	if err := data.ValidateExecutions(); err != nil {
 		return nil, err
 	}
 	owner := sessionmodel.New(data, s.log, s.clock, s.ids)

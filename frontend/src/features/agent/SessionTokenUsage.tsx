@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { subscribeAgentEvents, type ModelUsageRecord } from '../../api/agents'
 import { getSessionUsageSummary, type SessionUsageSummary } from '../../api/sessions'
 import { readableError } from '../../shared/errors'
-import { formatModelUsage, mergeModelUsageRecords, summarizeModelUsage } from './modelUsage'
+import { formatModelUsage, mergeModelUsageRecords } from './modelUsage'
 
 type ModelUsageState = { records: ModelUsageRecord[]; summary: SessionUsageSummary | null; loading: boolean; error: string }
 const ModelUsageContext = createContext<ModelUsageState>({ records: [], summary: null, loading: false, error: '' })
@@ -40,7 +40,7 @@ export function ModelUsageProvider({ sessionId, children }: { sessionId: string;
             if (event.kind === 'model_usage' && event.sessionId === sessionId && event.turnId) {
                 const record = { sessionId, executionId: event.executionId, turnId: event.turnId, usage: event.data.usage }
                 setRecords((current) => mergeModelUsageRecords(current, [record]))
-                // 后端在事件发布前尝试保存用量；保存失败的实时明细不计入持久化汇总。
+                // 后端已接纳请求结果，重新查询同一业务快照的 Execution 汇总。
                 void load()
             }
             // 回合结束时重新查询，可恢复断线或未及时收到的用量事件。
@@ -67,15 +67,26 @@ const percent = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFracti
 /** 同一后端快照展示会话已上报的用量与缓存率；未上报项隐藏，零值保留。 */
 export function SessionTokenUsage() {
     const { summary, loading, error } = useSessionModelUsage()
-    const records = summary?.records ?? []
-    const usage = formatModelUsage(summarizeModelUsage(records))
+    const usage = summary ? formatModelUsage({
+        inputTokens: summary.inputTokens,
+        outputTokens: summary.outputTokens,
+        totalTokens: summary.inputTokens + summary.outputTokens,
+        cacheReadInputTokens: summary.cacheReadInputTokens,
+        cacheCreationInputTokens: summary.cacheCreationInputTokens,
+        hasOutput: summary.outputReports > 0,
+        missingOutput: summary.outputReports < summary.reportedRequests,
+        hasCacheRead: summary.cacheReadReports > 0,
+        hasCacheCreation: summary.cacheCreationReports > 0,
+        missingCacheRead: summary.cacheReadReports < summary.reportedRequests,
+        missingCacheCreation: summary.cacheCreationReports < summary.reportedRequests,
+    }) : undefined
     const ratio = summary?.cacheReadRatio
     const cacheLabels = ratio == null ? [] : [`缓存率 ${percent.format(ratio)}`]
     const cacheDetails = ratio == null ? [] : [`缓存率：${percent.format(ratio)}`]
-    if (records.length === 0 && !error) return null
+    if (!summary?.reportedRequests && !error) return null
     const title = error ? `Token 用量加载失败：${error}`
-        : ['会话累计（仅已保存的请求，包含所有 Agent）', usage.details, ...cacheDetails].join('\n')
+        : ['会话累计（已上报请求，包含所有 Agent）', usage?.details, ...cacheDetails].filter(Boolean).join('\n')
     return <span className="composer-token-usage" title={title} aria-label={title} aria-busy={loading}>
-        {error ? '用量不可用' : <TokenUsageBreakdown labels={[...usage.labels, ...cacheLabels]} />}
+        {error ? '用量不可用' : <TokenUsageBreakdown labels={[...(usage?.labels ?? []), ...cacheLabels]} />}
     </span>
 }

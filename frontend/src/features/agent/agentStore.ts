@@ -90,17 +90,12 @@ export function createAgentStore() {
                 emitData()
                 return
             }
-            const agentId = agentIDForEvent(event, data.byId)
+            const agentId = event.agentId
             if (!agentId || !data.byId[agentId]) return
             if (event.kind === 'subagent_released') {
-                const byId = { ...data.byId }
-                delete byId[agentId]
-                const ids = data.ids.filter((id) => id !== agentId)
-                data = { ids, byId, selectedId: data.selectedId === agentId ? ids[0] || '' : data.selectedId }
-                emitData()
                 const streamingOutputs = { ...output.streamingOutputs }
                 delete streamingOutputs[agentId]
-                updateOutput({ ...output, streamingOutputs, timings: output.timings.filter((item) => item.agentId !== agentId) })
+                updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === agentId ? '' : output.awaitingAgentId })
                 return
             }
             if (event.kind === 'execution_started') {
@@ -111,10 +106,9 @@ export function createAgentStore() {
                 } }))
                 return
             }
-            if (event.kind === 'execution_pause_requested' || event.kind === 'execution_stop_requested') {
-                const state = event.kind === 'execution_pause_requested' ? 'paused' : 'interrupted'
+            if (event.kind === 'execution_interrupt_requested') {
                 updateEntry(agentId, (entry) => entry.agent.currentExecutionId === event.executionId ? {
-                    ...entry, agent: { ...entry.agent, state, UpdatedAt: event.data.appliedAt },
+                    ...entry, agent: { ...entry.agent, state: 'interrupted', UpdatedAt: event.data.appliedAt },
                 } : entry)
                 return
             }
@@ -148,10 +142,9 @@ export function createAgentStore() {
             }
             if (event.kind === 'turn_started') {
                 updateEntry(agentId, (entry) => {
-                    // 同一次执行收尾期间的迟到事件不能撤销已接受的暂停或停止。
-                    const controlled = entry.agent.currentExecutionId === event.executionId &&
-                        (entry.agent.state === 'paused' || entry.agent.state === 'interrupted')
-                    return { ...entry, agent: { ...entry.agent, state: controlled ? entry.agent.state : 'executing', currentExecutionId: event.executionId } }
+                    // 同一次执行收尾期间的迟到事件不能撤销已接受的中断。
+                    const interrupted = entry.agent.currentExecutionId === event.executionId && entry.agent.state === 'interrupted'
+                    return { ...entry, agent: { ...entry.agent, state: interrupted ? entry.agent.state : 'executing', currentExecutionId: event.executionId } }
                 })
                 return
             }
@@ -174,22 +167,6 @@ export function createAgentStore() {
         },
         stopAwaiting() { updateOutput({ ...output, awaitingAgentId: '' }) },
     }
-}
-
-function agentIDForEvent(event: AgentEvent, agents: Record<string, AgentEntry>): string | undefined {
-    switch (event.kind) {
-        case 'execution_started':
-        case 'execution_ended':
-        case 'request_canceled':
-            return event.data.execution.AgentID
-        case 'entries_appended':
-            // 持久化条目只属于主执行，用户输入可能先于 execution_started 发布。
-            if (!event.data.transient) return event.sessionId
-            break
-    }
-    return Object.values(agents).find(({ agent }) => (
-        agent.currentExecution?.ID === event.executionId || agent.latestExecution?.ID === event.executionId
-    ))?.agent.ID
 }
 
 function mergeEntries(current: Entry[], incoming: Entry[]): Entry[] {

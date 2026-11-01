@@ -7,7 +7,6 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	providerapi "praxis/internal/core/provider"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	tooloutput "praxis/internal/infra/tools/output"
@@ -24,14 +23,12 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 		Emitter:        emitter,
 		Sessions:       resources.storage.Sessions,
 		Records:        sessions,
-		UsageRecords:   sessions,
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
 	})
 	reviewer := &executionmodel.Reviewer{
 		Progress:       tasks,
 		HookDispatcher: hooks,
-		Emitter:        emitter,
 	}
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
 		Reviewer:       reviewer,
@@ -68,31 +65,6 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 		SessionRecords:    resources.storage.Sessions,
 		Projects:          resources.storage.Projects,
 		TransitionTimeout: 30 * time.Second,
-	})
-	// 先登记用量保存，再接入前端订阅；只有当前主执行的用量写入会话。
-	emitter.Subscribe(func(value coreevent.Event) {
-		if payload, ok := value.Payload.(coreevent.ModelUsage); ok {
-			run := coordinator.ActiveRun(identity.AgentID(value.Source.SessionID), value.Source.BranchID)
-			if run == nil {
-				return
-			}
-			record := run.Snapshot()
-			if record.ID != value.Source.ExecutionID {
-				return
-			}
-			if err := tasks.RecordUsage(providerapi.UsageRecord{
-				SessionID:   record.SessionID.String(),
-				AgentID:     record.AgentID.String(),
-				ExecutionID: record.ID.String(),
-				TurnID:      value.Source.TurnID,
-				Usage:       payload.Usage,
-			}); err != nil {
-				emitter.Emit(coreevent.Event{
-					Source:  value.Source,
-					Payload: coreevent.ErrorOccurred{Message: "Failed to save model usage: " + err.Error()},
-				})
-			}
-		}
 	})
 	return coordinator
 }

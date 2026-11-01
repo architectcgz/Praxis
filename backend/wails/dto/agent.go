@@ -8,18 +8,8 @@ import (
 	"time"
 )
 
-type PauseAgentRequest struct {
-	AgentID           string `json:"agentId" validate:"id"`
-	TargetExecutionID string `json:"targetExecutionId" validate:"id"`
-}
-
-type StopAgentRequest = PauseAgentRequest
-
-// AgentControlResponse 的 applied 表示信号已接受，不代表执行槽位已经释放。
-type AgentControlResponse struct {
-	AgentID           string `json:"agentId"`
-	TargetExecutionID string `json:"targetExecutionId"`
-	Applied           bool   `json:"applied"`
+type StopAgentRequest struct {
+	AgentID string `json:"agentId" validate:"id"`
 }
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
@@ -28,14 +18,14 @@ type AgentEvent struct {
 	BindingID   string `json:"bindingId"`
 	Kind        string `json:"kind"`
 	SessionID   string `json:"sessionId,omitempty"`
+	AgentID     string `json:"agentId"`
 	ExecutionID string `json:"executionId"`
 	TurnID      string `json:"turnId,omitempty"`
 	Data        any    `json:"data"`
 }
 
 type AgentEntriesAppended struct {
-	Entries   []Entry `json:"entries"`
-	Transient bool    `json:"transient"`
+	Entries []Entry `json:"entries"`
 }
 
 type AgentTextDelta struct {
@@ -46,16 +36,16 @@ type AgentThinkingDelta struct {
 	Text string `json:"text"`
 }
 
+// AgentToolCall 的 Name 是工具注册键，Arguments 仅包含该工具定义的入参。
 type AgentToolCall struct {
-	CallID string          `json:"callId"`
-	Name   string          `json:"name"`
-	Input  json.RawMessage `json:"input"`
+	CallID    string          `json:"callId"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
+// AgentToolApprovalRequired 通过信封中的 executionId 与 callId 关联调用，审批详情由查询入口返回。
 type AgentToolApprovalRequired struct {
-	CallID string          `json:"callId"`
-	Name   string          `json:"name"`
-	Input  json.RawMessage `json:"input"`
+	CallID string `json:"callId"`
 }
 
 type AgentToolResult struct {

@@ -70,6 +70,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	}
 	result = agentexecution.NewExecutionRecord(executionID, session.ID, session.MainAgentID(), requestID, inputEntryID, config, at)
 	result.SourceTaskID = input.ID
+	result.AgentName = definition.Name
 	result.BranchID = input.BranchID
 	if err = s.records.SaveExecution(ctx, result); err != nil {
 		return agentexecution.ExecutionRecord{}, false, err
@@ -82,6 +83,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 		s.emitter.Emit(coreevent.Event{
 			Source: coreevent.EventSource{
 				SessionID:   result.SessionID,
+				AgentID:     result.AgentID,
 				BranchID:    result.BranchID,
 				BindingID:   bindingID,
 				ExecutionID: result.ID,

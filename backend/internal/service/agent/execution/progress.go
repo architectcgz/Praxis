@@ -15,23 +15,20 @@ type modelProgress struct {
 func (p *modelProgress) NextRequestSequence(ctx context.Context) (uint64, error) {
 	sequence, err := p.service.NextRequestSequence(ctx, p.run)
 	if err != nil {
-		return 0, entryFailure(p.run, err)
+		return 0, storageFailure(err)
 	}
 	return sequence, nil
 }
 
 func (p *modelProgress) RecordModelRequest(ctx context.Context, sequence uint64, iteration bool) error {
 	if err := p.service.RecordModelRequest(ctx, p.run, sequence, iteration); err != nil {
-		return entryFailure(p.run, err)
+		return storageFailure(err)
 	}
 	return nil
 }
 
-func (p *modelProgress) RecordModelOutput(ctx context.Context, size int) error {
-	if err := p.service.RecordModelOutput(ctx, p.run, size); err != nil {
-		return entryFailure(p.run, err)
-	}
-	return nil
+func (p *modelProgress) RecordModelResponse(ctx context.Context, request agentexecution.ModelRequestRecord) error {
+	return p.service.RecordModelResponse(ctx, p.run, request)
 }
 
 func (s *Service) NextRequestSequence(ctx context.Context, run *agentexecution.Run) (uint64, error) {
@@ -45,18 +42,15 @@ func (s *Service) NextRequestSequence(ctx context.Context, run *agentexecution.R
 	return max(uint64(1), record.Progress.NextSequence), nil
 }
 
-// update 不回读会话历史；Main 同步保存执行事实，写入失败不阻止 Run 接纳新进度。
+// update 不回读历史；主、子执行同步保存快照，写入失败不阻止 Run 接纳新进度。
 func (s *Service) update(ctx context.Context, run *agentexecution.Run, change func(*agentexecution.ExecutionRecord) error) error {
 	var writeErr error
 	err := run.Update(func(record *agentexecution.ExecutionRecord) error {
 		if err := change(record); err != nil {
 			return err
 		}
-		if run.Main() {
-			writeErr = s.records.SaveExecution(ctx, *record)
-			return nil
-		}
-		return ctx.Err()
+		writeErr = s.records.SaveExecution(ctx, *record)
+		return nil
 	})
 	if err != nil {
 		return err
@@ -74,16 +68,6 @@ func (s *Service) RecordModelRequest(ctx context.Context, run *agentexecution.Ru
 		}
 		record.Progress.NextSequence = sequence + 1
 		record.Progress.ModelRequests++
-		return nil
-	})
-}
-
-func (s *Service) RecordModelOutput(ctx context.Context, run *agentexecution.Run, outputBytes int) error {
-	if outputBytes == 0 {
-		return nil
-	}
-	return s.update(context.WithoutCancel(ctx), run, func(record *agentexecution.ExecutionRecord) error {
-		record.Progress.ModelOutputBytes += int64(outputBytes)
 		return nil
 	})
 }

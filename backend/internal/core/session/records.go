@@ -4,7 +4,7 @@ import (
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
-	providerapi "praxis/internal/core/provider"
+	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
 
@@ -12,13 +12,10 @@ import (
 type ExecutionRecords interface {
 	GetExecution(context.Context, identity.SessionID, identity.AgentExecutionID) (agentexecution.ExecutionRecord, error)
 	SaveExecution(context.Context, agentexecution.ExecutionRecord) error
+	SaveModelRequest(context.Context, agentexecution.ExecutionRecord, agentexecution.ModelRequestRecord) error
+	CreateSubagent(context.Context, agentexecution.ExecutionRecord, sessionentry.ContextEntry) (*sessionentry.ContextEntry, error)
 	FindExecutionByRequest(context.Context, identity.AgentID, identity.RequestID) (agentexecution.ExecutionRecord, error)
-	ListAgentExecutions(context.Context, identity.AgentID, identity.BranchID, int) ([]agentexecution.ExecutionRecord, error)
-	ListAgentTimingRecords(context.Context, identity.AgentID, identity.BranchID, int) ([]timing.Record, error)
-}
-
-// UsageRecords 保存并查询会话持有的模型用量事实。
-type UsageRecords interface {
-	SaveUsage(context.Context, providerapi.UsageRecord) error
-	ListSessionUsage(context.Context, identity.SessionID) ([]providerapi.UsageRecord, error)
+	ListAgentExecutions(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, int) ([]agentexecution.ExecutionRecord, error)
+	ListSessionExecutions(context.Context, identity.SessionID, identity.BranchID) ([]agentexecution.ExecutionRecord, error)
+	ListAgentTimingRecords(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, int) ([]timing.Record, error)
 }

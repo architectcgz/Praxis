@@ -3,7 +3,6 @@ package session
 import (
 	"praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
-	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"slices"
@@ -12,20 +11,22 @@ import (
 // Data 拥有完整会话数据；分支选择和输入队列属于页面绑定。
 // 重放完成后由 Session 接管并通过读写锁保护；发布后的 Entry 及内部载荷不再修改。
 type Data struct {
-	ID           identity.SessionID
-	Entries      []*sessionentry.ContextEntry
-	Branches     []Branch
-	RecentBranch identity.BranchID
-	Executions   []execution.ExecutionRecord
-	Usage        []providerapi.UsageRecord
-	Timings      []timing.Record
-	entryIndexes map[string]int
+	ID              identity.SessionID
+	Entries         []*sessionentry.ContextEntry
+	Branches        []Branch
+	RecentBranch    identity.BranchID
+	Executions      []execution.ExecutionRecord
+	ModelRequests   []execution.ModelRequestRecord
+	SubagentEntries map[identity.AgentID][]*sessionentry.ContextEntry
+	Timings         []timing.Record
+	entryIndexes    map[string]int
 }
 
 func Open(id identity.SessionID) *Data {
 	return &Data{
-		ID:           id,
-		entryIndexes: make(map[string]int),
+		ID:              id,
+		SubagentEntries: make(map[identity.AgentID][]*sessionentry.ContextEntry),
+		entryIndexes:    make(map[string]int),
 	}
 }
 
@@ -131,13 +132,28 @@ func (s *Data) SetExecution(value execution.ExecutionRecord) {
 	}
 }
 
-func (s *Data) SetUsage(value providerapi.UsageRecord) {
-	index := slices.IndexFunc(s.Usage, func(prior providerapi.UsageRecord) bool { return prior.Key() == value.Key() })
+func (s *Data) SetModelRequest(value execution.ModelRequestRecord) {
+	index := slices.IndexFunc(s.ModelRequests, func(prior execution.ModelRequestRecord) bool { return prior.TurnID == value.TurnID })
 	if index >= 0 {
-		s.Usage[index] = value
+		s.ModelRequests[index] = value
 	} else {
-		s.Usage = append(s.Usage, value)
+		s.ModelRequests = append(s.ModelRequests, value)
 	}
+}
+
+func (s *Data) SubagentEntry(agentID identity.AgentID, entryID string) (*sessionentry.ContextEntry, bool) {
+	for _, value := range s.SubagentEntries[agentID] {
+		if value.ID == entryID {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func (s *Data) AcceptSubagentEntry(agentID identity.AgentID, entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
+	stored := new(entry)
+	s.SubagentEntries[agentID] = append(s.SubagentEntries[agentID], stored)
+	return stored
 }
 
 func (s *Data) SetTiming(value timing.Record) {

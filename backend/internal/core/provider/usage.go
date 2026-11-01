@@ -1,9 +1,7 @@
 package provider
 
 import (
-	"errors"
 	"math"
-	"strings"
 
 	"praxis/internal/identity"
 )
@@ -35,7 +33,7 @@ func (u Usage) Valid() bool {
 	return read >= 0 && creation >= 0 && creation <= u.InputTokens && read <= u.InputTokens-creation
 }
 
-// UsageRecord 按 Turn 保存请求用量，同一请求的累计更新不重复计费。
+// UsageRecord 是按请求查询的已知用量投影，执行累计值由 Execution 保存。
 type UsageRecord struct {
 	SessionID   string          `json:"sessionId"`
 	AgentID     string          `json:"agentId"`
@@ -44,42 +42,15 @@ type UsageRecord struct {
 	Usage       Usage           `json:"usage"`
 }
 
-// Key 返回请求的稳定身份，供持久化和实时更新去重。
-func (r UsageRecord) Key() string {
-	return "usage:" + r.TurnID.String()
-}
-
-// Validate 检查对象自身的完整性，不修改或修复输入。
-func (r UsageRecord) Validate() error {
-	for _, id := range []string{
-		r.SessionID,
-		r.AgentID,
-		r.ExecutionID,
-		r.TurnID.String(),
-	} {
-		if id == "" || id != strings.TrimSpace(id) || strings.ContainsAny(id, "\x00\r\n") {
-			return errors.New("token usage identity must be a non-empty canonical string")
-		}
+func (u Usage) Clone() Usage {
+	if u.OutputTokens != nil {
+		u.OutputTokens = new(*u.OutputTokens)
 	}
-	if !r.Usage.Valid() {
-		return errors.New("invalid token usage counts")
+	if u.CacheReadInputTokens != nil {
+		u.CacheReadInputTokens = new(*u.CacheReadInputTokens)
 	}
-	return nil
-}
-
-// Includes 判断累计用量是否包含已保存的计数；已知计数不能丢失或倒退。
-func (u Usage) Includes(previous Usage) bool {
-	if u.InputTokens < previous.InputTokens {
-		return false
+	if u.CacheCreationInputTokens != nil {
+		u.CacheCreationInputTokens = new(*u.CacheCreationInputTokens)
 	}
-	for _, pair := range [][2]*int64{
-		{previous.OutputTokens, u.OutputTokens},
-		{previous.CacheReadInputTokens, u.CacheReadInputTokens},
-		{previous.CacheCreationInputTokens, u.CacheCreationInputTokens},
-	} {
-		if pair[0] != nil && (pair[1] == nil || *pair[1] < *pair[0]) {
-			return false
-		}
-	}
-	return true
+	return u
 }

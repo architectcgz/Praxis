@@ -2,54 +2,28 @@ package coordinator
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/identity"
 	"time"
 )
 
-// ControlResult 只说明本次进程是否接受信号，不代表底层执行已经退出。
-type ControlResult struct {
-	AgentID           identity.AgentID
-	TargetExecutionID identity.AgentExecutionID
-	Applied           bool
-}
-
-// PauseAgent 只暂停身份匹配的当前执行；不匹配时跳过，原执行在后台退出并结算。
-func (s *Coordinator) PauseAgent(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID) (ControlResult, error) {
-	return s.applyControl(ctx, agentID, executionID, agentmodel.AgentPaused, errExecutionPaused)
-}
-
-// StopAgent 中断明确指定的执行，保留尚未开始的输入。
-func (s *Coordinator) StopAgent(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID) (ControlResult, error) {
-	return s.applyControl(ctx, agentID, executionID, agentmodel.AgentInterrupted, errExecutionStopped)
-}
-
-func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID, executionID identity.AgentExecutionID, state agentmodel.AgentState, cause error) (ControlResult, error) {
+// StopAgent 中断 Agent 当前正在执行的任务，保留尚未开始的输入。
+func (s *Coordinator) StopAgent(ctx context.Context, agentID identity.AgentID) error {
 	if err := s.enter(); err != nil {
-		return ControlResult{}, err
+		return err
 	}
 	defer s.running.Done()
-	result := ControlResult{
-		AgentID:           agentID,
-		TargetExecutionID: executionID,
-	}
-	applied, err := s.cancelExecution(ctx, agentID, executionID, cause)
-	result.Applied = applied
+
+	active, applied, err := s.cancelCurrentExecution(ctx, agentID, errExecutionInterrupted)
 	if err == nil && applied {
 		var notification *coreevent.Event
 		s.mu.Lock()
-		active := s.activeExecutionLocked(agentID, executionID)
-		if active != nil && active.run != nil {
+		if active.run != nil {
 			at := time.Now().UTC()
-			active.run.Agent.ApplyControl(executionID, state, at)
-			var payload coreevent.Payload = coreevent.ExecutionStopRequested{AppliedAt: at}
-			if state == agentmodel.AgentPaused {
-				payload = coreevent.ExecutionPauseRequested{AppliedAt: at}
-			}
+			active.run.Agent.ApplyInterrupt(active.executionID, at)
 			notification = &coreevent.Event{
 				Source:  coreevent.SourceForRun(active.run, ""),
-				Payload: payload,
+				Payload: coreevent.ExecutionInterruptRequested{AppliedAt: at},
 			}
 		}
 		s.mu.Unlock()
@@ -57,5 +31,5 @@ func (s *Coordinator) applyControl(ctx context.Context, agentID identity.AgentID
 			s.loop.Emitter.Emit(*notification)
 		}
 	}
-	return result, err
+	return err
 }

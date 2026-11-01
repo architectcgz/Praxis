@@ -21,8 +21,8 @@ func (r *Coordinator) scheduleBinding(ctx context.Context, bindingID string, exp
 	key := executionKey{identity.AgentID(binding.sessionID), binding.branchID}
 	if active := r.executions[key]; active != nil {
 		cause := context.Cause(active.ctx)
-		if explicit && (errors.Is(cause, errExecutionPaused) || errors.Is(cause, errExecutionStopped)) {
-			active.resumeRequested = true
+		if explicit && errors.Is(cause, errExecutionInterrupted) {
+			active.scheduleRequested = true
 		}
 		r.mu.Unlock()
 		return nil

@@ -1,19 +1,8 @@
 import { getCommandBinding } from './bindings'
 
-export type PauseAgentRequest = { agentId: string; targetExecutionId: string }
-export type StopAgentRequest = PauseAgentRequest
-/** applied 只表示进程内信号已接受，执行槽位由后端在收尾后释放。 */
-export type AgentControlResponse = {
-    agentId: string
-    targetExecutionId: string
-    applied: boolean
-}
+export type StopAgentRequest = { agentId: string }
 
-export function pauseAgent(request: PauseAgentRequest) {
-    return getCommandBinding().PauseAgent(request)
-}
-
-/** 取消明确指定的回合；延迟到达的请求不会取消后续回合。 */
+/** 停止 Agent 当前执行；后端负责在内部定位并中断对应的 Execution。 */
 export function stopAgent(request: StopAgentRequest) {
     return getCommandBinding().StopAgent(request)
 }

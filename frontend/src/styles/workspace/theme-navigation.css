@@ -70,7 +70,6 @@
     background: var(--accent);
 }
 
-.state-paused,
 .state-interrupted,
 .state-failed {
     background: var(--danger);

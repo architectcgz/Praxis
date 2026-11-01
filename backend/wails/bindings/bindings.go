@@ -1,7 +1,6 @@
 package bindings
 
 import (
-	"bytes"
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
@@ -59,16 +58,13 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		return
 	case coreevent.EntriesAppended:
 		data = dto.AgentEntriesAppended{
-			Entries:   publicEntries(payload.Entries),
-			Transient: payload.Transient,
+			Entries: publicEntries(payload.Entries),
 		}
 	case coreevent.TurnStarted, coreevent.ProviderWaiting, coreevent.SubagentReleased:
 		data = struct{}{}
 	case coreevent.ExecutionStarted:
 		data = dto.AgentExecutionStarted{Execution: payload.Execution}
-	case coreevent.ExecutionPauseRequested:
-		data = dto.AgentExecutionControl{AppliedAt: payload.AppliedAt}
-	case coreevent.ExecutionStopRequested:
+	case coreevent.ExecutionInterruptRequested:
 		data = dto.AgentExecutionControl{AppliedAt: payload.AppliedAt}
 	case coreevent.SubagentStarted:
 		record := payload.Execution
@@ -109,16 +105,12 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		data = dto.AgentThinkingDelta{Text: payload.Text}
 	case coreevent.ToolCall:
 		data = dto.AgentToolCall{
-			CallID: payload.CallID,
-			Name:   payload.Name,
-			Input:  bytes.Clone(payload.Input),
+			CallID:    payload.CallID,
+			Name:      payload.Name,
+			Arguments: payload.Arguments,
 		}
 	case coreevent.ToolApprovalRequired:
-		data = dto.AgentToolApprovalRequired{
-			CallID: payload.CallID,
-			Name:   payload.Name,
-			Input:  bytes.Clone(payload.Input),
-		}
+		data = dto.AgentToolApprovalRequired{CallID: payload.CallID}
 	case coreevent.ToolResult:
 		data = dto.AgentToolResult{
 			CallID:  payload.CallID,
@@ -152,6 +144,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	b.host.EmitEvent(agentEventName, dto.AgentEvent{
 		Kind:        string(event.Kind()),
 		SessionID:   event.Source.SessionID.String(),
+		AgentID:     event.Source.AgentID.String(),
 		BranchID:    event.Source.BranchID.String(),
 		BindingID:   event.Source.BindingID,
 		ExecutionID: event.Source.ExecutionID.String(),

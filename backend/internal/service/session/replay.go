@@ -5,7 +5,6 @@ import (
 	"fmt"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
-	providerapi "praxis/internal/core/provider"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
@@ -37,10 +36,16 @@ func (r *logReplay) apply(event sessionmodel.Event) error {
 			return fmt.Errorf("entry event targets an unknown branch %q", event.BranchID)
 		}
 		value := event.Payload.(sessionentry.ContextEntry)
-		r.trackToolEntry(value)
-		owner.AcceptEntry(event.BranchID, value)
-	case sessionmodel.EventUsageSaved:
-		owner.SetUsage(event.Payload.(providerapi.UsageRecord))
+		r.trackToolEntry(value, event.AgentID)
+		if event.AgentID == owner.MainAgentID() {
+			owner.AcceptEntry(event.BranchID, value)
+		} else {
+			owner.AcceptSubagentEntry(event.AgentID, value)
+		}
+	case sessionmodel.EventModelRequestFinished:
+		value := event.Payload.(sessionmodel.ModelRequestFinished)
+		owner.SetModelRequest(value.Request)
+		owner.SetExecution(value.Execution)
 	case sessionmodel.EventTimingStarted, sessionmodel.EventTimingFinished:
 		owner.SetTiming(event.Payload.(timing.Record))
 	}
@@ -48,8 +53,8 @@ func (r *logReplay) apply(event sessionmodel.Event) error {
 }
 
 // trackToolEntry 记录调用完成情况，供日志加载后补写中断回执。
-func (r *logReplay) trackToolEntry(value sessionentry.ContextEntry) {
-	for _, call := range value.ToolCalls(r.session.ID, r.session.MainAgentID()) {
+func (r *logReplay) trackToolEntry(value sessionentry.ContextEntry, agentID identity.AgentID) {
+	for _, call := range value.ToolCalls(r.session.ID, agentID) {
 		r.callIndexes[call.Key] = len(r.calls)
 		r.calls = append(r.calls, replayedToolCall{call: call})
 	}
@@ -81,7 +86,12 @@ func (r *logReplay) repairToolResults(ctx context.Context, owner *sessionmodel.S
 		execution := r.session.Executions[r.session.ExecutionIndex(call.ExecutionID)]
 		branch := r.session.Branch(execution.BranchID)
 		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result."))
-		_, _, err := owner.AppendEntry(ctx, branch.ID, entry)
+		var err error
+		if call.AgentID == r.session.MainAgentID() {
+			_, _, err = owner.AppendEntry(ctx, branch.ID, entry)
+		} else {
+			_, _, err = owner.AppendSubagentEntry(ctx, call.AgentID, branch.ID, entry)
+		}
 		if err != nil {
 			return fmt.Errorf("save interrupted result for execution %s call %s: %w", call.ExecutionID, call.CallID, err)
 		}

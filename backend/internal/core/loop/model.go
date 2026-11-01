@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
@@ -22,6 +23,7 @@ type Response struct {
 	events     []providerapi.Event
 	textBytes  int
 	StopReason providerapi.StopReason
+	Usage      *providerapi.Usage
 }
 
 func (r Response) Blocks() []sessionentry.Block {
@@ -93,8 +95,16 @@ func (r *Runner) callModel(
 		ReferenceID: "assistant:" + request.TurnID.String(),
 	})
 	defer func() {
-		// 取消或断流也要将已收到的消耗接纳到内存进度，不依赖落盘完成。
-		if progressErr := deps.Execution.RecordModelOutput(context.WithoutCancel(ctx), response.textBytes); progressErr != nil {
+		// 取消或断流也保存已知请求事实，明细与累计快照使用同一次日志提交。
+		if progressErr := deps.Execution.RecordModelResponse(context.WithoutCancel(ctx), agentexecution.ModelRequestRecord{
+			ExecutionID: execution.ID,
+			TurnID:      request.TurnID,
+			Kind:        requestKind,
+			Status:      agentexecution.RequestStatus(ctx, err),
+			StopReason:  response.StopReason,
+			OutputBytes: response.textBytes,
+			Usage:       response.Usage,
+		}); progressErr != nil {
 			err = NewFailure(FailureClassification(progressErr), errors.Join(err, progressErr))
 		}
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
@@ -153,7 +163,7 @@ func validateHookRequest(original, modified providerapi.Request) error {
 }
 
 // collectModelResponse 只消费模型事件流；预算、任务失败分类和实时事件映射由调用方负责。
-// 相邻文本增量合并为一个内容事件，用量只实时转发；流失败时返回已收到的部分内容和错误。
+// 相邻文本增量合并为内容事件，用量保留最后累计快照；失败时返回已收到的内容和统计。
 func collectModelResponse(
 	ctx context.Context,
 	stream <-chan providerapi.Event,
@@ -207,6 +217,7 @@ func collectModelResponse(
 				if event.Usage == nil || !event.Usage.Valid() {
 					continue
 				}
+				response.Usage = new(event.Usage.Clone())
 			case providerapi.StreamComplete:
 				if err := ctx.Err(); err != nil {
 					return response, err

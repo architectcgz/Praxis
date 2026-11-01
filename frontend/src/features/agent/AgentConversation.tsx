@@ -25,14 +25,14 @@ export type AgentConversationProps = {
     canQueue: boolean
     beforeInput?: ReactNode
     onSend: () => void
-    onControl: (kind: 'pause' | 'cancel') => void
+    onStop: () => void
     onModelChange: (providerId: string, modelId: string) => void
     onReasoningChange: (level: string) => void
     commands: readonly { name: string; description: string }[]
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ branchId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onControl, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ branchId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -202,7 +202,7 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
                 reasoning={reasoning}
                 busy={busy}
                 onSend={onSend}
-                onControl={onControl}
+                onStop={onStop}
                 onModelChange={onModelChange}
                 onReasoningChange={onReasoningChange}
                 commands={commands}

@@ -18,7 +18,10 @@ func (s *Coordinator) ReloadSessionConfig(ctx context.Context, id identity.Sessi
 	}
 	s.logger.Infof("session configuration reloaded session=%s", id)
 	s.loop.Emitter.Emit(coreevent.Event{
-		Source:  coreevent.EventSource{SessionID: id},
+		Source: coreevent.EventSource{
+			SessionID: id,
+			AgentID:   identity.AgentID(id),
+		},
 		Payload: coreevent.SessionConfigReloaded{},
 	})
 	return nil

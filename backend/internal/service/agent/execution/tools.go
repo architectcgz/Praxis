@@ -41,7 +41,7 @@ func (s *Service) runToolCalls(ctx context.Context, run *agentexecution.Run, exe
 			if _, ok := errors.AsType[*hook.Error](err); ok {
 				return index, loop.NewFailure(loop.FailureInternal, err)
 			}
-			return index, entryFailure(run, err)
+			return index, storageFailure(err)
 		}
 		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		receipt, inserted, err := s.appendEntry(commitCtx, run, call.ResultEntry(outcome.ToolResult))

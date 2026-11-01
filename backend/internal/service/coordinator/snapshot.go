@@ -1,14 +1,11 @@
 package coordinator
 
 import (
-	"cmp"
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
-	executionservice "praxis/internal/service/agent/execution"
-	"slices"
 )
 
 // ActiveRun 只借用执行生命周期内的引用，不另建 Agent 注册表。
@@ -33,27 +30,11 @@ func (s *Coordinator) SessionRuns(sessionID identity.SessionID, branchID identit
 	return runs
 }
 
-// ListAgentEntries 按执行归属分派；主会话历史无需创建 Agent 实例即可查询。
-func (s *Coordinator) ListAgentEntries(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID) ([]sessionentry.ContextEntry, error) {
-	if run := s.ActiveRun(agentID, branchID); run != nil && !run.Main() {
-		return run.Entries(), ctx.Err()
-	}
-	return s.sessions.ListEntries(ctx, identity.SessionID(agentID), branchID)
+// ListAgentEntries 查询所属持久化历史，运行实例释放后仍能读取子代理记录。
+func (s *Coordinator) ListAgentEntries(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID) ([]sessionentry.ContextEntry, error) {
+	return s.sessions.ListAgentEntries(ctx, sessionID, agentID, branchID)
 }
 
-func (s *Coordinator) ListAgentTimings(ctx context.Context, agentID string, branchID identity.BranchID, limit int) ([]timing.View, error) {
-	if run := s.ActiveRun(identity.AgentID(agentID), branchID); run != nil && !run.Main() {
-		values := executionservice.RunTimings(run)
-		slices.SortFunc(values, func(a, b timing.View) int {
-			return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
-		})
-		if limit > 0 {
-			values = values[:min(limit, len(values))]
-		}
-		return values, ctx.Err()
-	}
-	if _, err := s.sessionRecords.Get(ctx, identity.SessionID(agentID)); err != nil {
-		return nil, err
-	}
-	return s.operations.ListAgentTimings(ctx, agentID, branchID, limit)
+func (s *Coordinator) ListAgentTimings(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID, limit int) ([]timing.View, error) {
+	return s.operations.ListAgentTimings(ctx, sessionID, agentID, branchID, limit)
 }

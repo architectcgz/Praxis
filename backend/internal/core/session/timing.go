@@ -11,7 +11,8 @@ import (
 func (s *Session) AppendTiming(ctx context.Context, value timing.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.data.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {
+	index := s.data.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID))
+	if index < 0 {
 		return errorcode.ErrNotFound
 	}
 	kind := EventTimingFinished
@@ -22,6 +23,7 @@ func (s *Session) AppendTiming(ctx context.Context, value timing.Record) error {
 	return s.log.AppendEvent(ctx, s.data.ID, Event{
 		Type:      kind,
 		Key:       value.ExecutionID + ":" + value.ID,
+		AgentID:   s.data.Executions[index].AgentID,
 		CreatedAt: s.clock.Now(),
 		Payload:   value,
 	})

@@ -7,7 +7,6 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
-	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
@@ -50,10 +49,9 @@ type ReviewRequest struct {
 type Reviewer struct {
 	Progress interface {
 		RecordModelRequest(context.Context, *agentexecution.Run, uint64, bool) error
-		RecordModelOutput(context.Context, *agentexecution.Run, int) error
+		RecordModelResponse(context.Context, *agentexecution.Run, agentexecution.ModelRequestRecord) error
 	}
 	HookDispatcher *hook.Dispatcher
-	Emitter        *coreevent.Emitter
 }
 
 // reviewExecutionError 表示执行状态或进度记录失败，不能降级为人工审批。
@@ -122,10 +120,20 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 		StartedAt:  t.executor.deps.Clock.Now().UTC(),
 	}
 	outputBytes := 0
+	var usage *providerapi.Usage
+	var stopReason providerapi.StopReason
 	defer func() {
 		review.CompletedAt = t.executor.deps.Clock.Now().UTC()
-		// 取消或断流也要记录已经收到的输出，进度失败不能按模型审核失败处理。
-		if progressErr := r.Progress.RecordModelOutput(context.WithoutCancel(ctx), t.run, outputBytes); progressErr != nil {
+		// 审核与普通请求共享结果保存边界，存储失败不能降级为人工审批。
+		if progressErr := r.Progress.RecordModelResponse(context.WithoutCancel(ctx), t.run, agentexecution.ModelRequestRecord{
+			ExecutionID: task.ID,
+			TurnID:      review.TurnID,
+			Kind:        agentexecution.ModelRequestRiskReview,
+			Status:      agentexecution.RequestStatus(ctx, err),
+			StopReason:  stopReason,
+			OutputBytes: outputBytes,
+			Usage:       usage,
+		}); progressErr != nil {
 			err = &reviewExecutionError{error: errors.Join(err, progressErr)}
 		}
 	}()
@@ -196,14 +204,12 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 				text.WriteString(event.Text)
 			case providerapi.StreamUsage:
 				if event.Usage != nil && event.Usage.Valid() {
-					r.Emitter.Emit(coreevent.Event{
-						Source:  coreevent.SourceForRun(t.run, review.TurnID),
-						Payload: coreevent.ModelUsage{Usage: *event.Usage},
-					})
+					usage = new(event.Usage.Clone())
 				}
 			case providerapi.StreamThinkingDelta, providerapi.StreamReasoningState:
 				// 审核推理内容不进入用户会话或审计正文。
 			case providerapi.StreamComplete:
+				stopReason = event.StopReason
 				if ctx.Err() != nil {
 					return review, ctx.Err()
 				}

@@ -15,32 +15,32 @@ import (
 type Kind string
 
 const (
-	KindSessionConfigReloaded   Kind = "session_config_reloaded"
-	KindEntriesAppended         Kind = "entries_appended"
-	KindTurnStarted             Kind = "turn_started"
-	KindProviderWaiting         Kind = "provider_waiting"
-	KindTextDelta               Kind = "text_delta"
-	KindThinkingDelta           Kind = "thinking_delta"
-	KindToolCall                Kind = "tool_call"
-	KindToolApprovalRequired    Kind = "tool_approval_required"
-	KindToolResult              Kind = "tool_result"
-	KindTurnCompleted           Kind = "turn_completed"
-	KindModelUsage              Kind = "model_usage"
-	KindExecutionStarted        Kind = "execution_started"
-	KindExecutionPauseRequested Kind = "execution_pause_requested"
-	KindExecutionStopRequested  Kind = "execution_stop_requested"
-	KindExecutionEnded          Kind = "execution_ended"
-	KindSubagentStarted         Kind = "subagent_started"
-	KindSubagentReleased        Kind = "subagent_released"
-	KindTaskQueueChanged        Kind = "task_queue_changed"
-	KindRequestCanceled         Kind = "request_canceled"
-	KindOperationTiming         Kind = "operation_timing"
-	KindError                   Kind = "error"
+	KindSessionConfigReloaded       Kind = "session_config_reloaded"
+	KindEntriesAppended             Kind = "entries_appended"
+	KindTurnStarted                 Kind = "turn_started"
+	KindProviderWaiting             Kind = "provider_waiting"
+	KindTextDelta                   Kind = "text_delta"
+	KindThinkingDelta               Kind = "thinking_delta"
+	KindToolCall                    Kind = "tool_call"
+	KindToolApprovalRequired        Kind = "tool_approval_required"
+	KindToolResult                  Kind = "tool_result"
+	KindTurnCompleted               Kind = "turn_completed"
+	KindModelUsage                  Kind = "model_usage"
+	KindExecutionStarted            Kind = "execution_started"
+	KindExecutionInterruptRequested Kind = "execution_interrupt_requested"
+	KindExecutionEnded              Kind = "execution_ended"
+	KindSubagentStarted             Kind = "subagent_started"
+	KindSubagentReleased            Kind = "subagent_released"
+	KindTaskQueueChanged            Kind = "task_queue_changed"
+	KindRequestCanceled             Kind = "request_canceled"
+	KindOperationTiming             Kind = "operation_timing"
+	KindError                       Kind = "error"
 )
 
 // EventSource 标识事件来源的会话、分支、执行和模型轮次；不适用的标识留空。
 type EventSource struct {
 	SessionID identity.SessionID
+	AgentID   identity.AgentID
 	BranchID  identity.BranchID
 	// BindingID 标识页面的分支写入绑定，关联该绑定的队列和执行生命周期。
 	BindingID   string
@@ -53,6 +53,7 @@ func SourceForRun(run *agentexecution.Run, turnID identity.TurnID) EventSource {
 	record := run.Snapshot()
 	return EventSource{
 		SessionID:   record.SessionID,
+		AgentID:     record.AgentID,
 		BranchID:    record.BranchID,
 		BindingID:   run.BindingID,
 		ExecutionID: record.ID,
@@ -77,8 +78,6 @@ type Payload interface {
 
 type EntriesAppended struct {
 	Entries []sessionentry.ContextEntry
-	// Transient 表示条目只属于当前 Run；无论取值如何，事件都不表示已落盘。
-	Transient bool
 }
 
 func (EntriesAppended) Kind() Kind { return KindEntriesAppended }
@@ -114,9 +113,9 @@ func (ThinkingDelta) Kind() Kind { return KindThinkingDelta }
 func (ThinkingDelta) isPayload() {}
 
 type ToolCall struct {
-	CallID string
-	Name   string
-	Input  json.RawMessage
+	CallID    string
+	Name      string
+	Arguments json.RawMessage
 }
 
 func (ToolCall) Kind() Kind { return KindToolCall }
@@ -124,8 +123,6 @@ func (ToolCall) isPayload() {}
 
 type ToolApprovalRequired struct {
 	CallID string
-	Name   string
-	Input  json.RawMessage
 }
 
 func (ToolApprovalRequired) Kind() Kind { return KindToolApprovalRequired }
@@ -161,15 +158,10 @@ type ExecutionStarted struct {
 func (ExecutionStarted) Kind() Kind { return KindExecutionStarted }
 func (ExecutionStarted) isPayload() {}
 
-type ExecutionPauseRequested struct{ AppliedAt time.Time }
+type ExecutionInterruptRequested struct{ AppliedAt time.Time }
 
-func (ExecutionPauseRequested) Kind() Kind { return KindExecutionPauseRequested }
-func (ExecutionPauseRequested) isPayload() {}
-
-type ExecutionStopRequested struct{ AppliedAt time.Time }
-
-func (ExecutionStopRequested) Kind() Kind { return KindExecutionStopRequested }
-func (ExecutionStopRequested) isPayload() {}
+func (ExecutionInterruptRequested) Kind() Kind { return KindExecutionInterruptRequested }
+func (ExecutionInterruptRequested) isPayload() {}
 
 type ExecutionEnded struct {
 	Execution agentexecution.ExecutionRecord

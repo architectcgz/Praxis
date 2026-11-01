@@ -30,7 +30,13 @@ export type SessionSummary = {
 export type SessionUsageSummary = {
     records: ModelUsageRecord[]
     inputTokens: number
+    outputTokens: number
     cacheReadInputTokens: number
+    cacheCreationInputTokens: number
+    reportedRequests: number
+    outputReports: number
+    cacheReadReports: number
+    cacheCreationReports: number
     cacheReadRatio: number | null
     cacheReadComplete: boolean
 }

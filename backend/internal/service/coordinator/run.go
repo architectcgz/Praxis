@@ -37,6 +37,10 @@ func (r *Coordinator) run(
 		// 完成证据优先于迟到的取消；这里只允许补做摘要，不能重跑用户任务。
 		if err := r.operations.Compact(ctx, run, &runner); err != nil {
 			r.logError(task, "compact completed context", err)
+			if loop.FailureClassification(err) == loop.FailureStorage {
+				r.endExecution(task, active, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, "")
+				return
+			}
 		}
 		r.endExecution(task, active, agentexecution.ExecutionCompleted, "", "")
 		return
@@ -136,7 +140,7 @@ func (r *Coordinator) execute(
 	return finalOutcome, finalCode, message
 }
 
-// executionResult 只将实际返回的取消错误映射为暂停或中断；正常完成不受迟到信号影响。
+// executionResult 保留存储失败；其他错误仅在实际返回取消时映射为中断。
 func (r *Coordinator) executionResult(
 	ctx context.Context,
 	outcome agentexecution.ExecutionOutcome,
@@ -144,14 +148,10 @@ func (r *Coordinator) executionResult(
 	err error,
 ) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
 	failureMessage := agentservice.ExecutionFailureMessage(failureCode, err)
-	if err != nil && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
+	if err != nil && failureCode != agentexecution.ExecutionFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
 		outcome = agentexecution.ExecutionInterrupted
 		failureCode = agentexecution.ExecutionFailureCancelled
-		switch cause := context.Cause(ctx); {
-		case errors.Is(cause, errExecutionPaused):
-			outcome = agentexecution.ExecutionPaused
-			failureCode = agentexecution.ExecutionFailureRequestCanceled
-		case errors.Is(cause, errExecutionStopped):
+		if errors.Is(context.Cause(ctx), errExecutionInterrupted) {
 			failureCode = agentexecution.ExecutionFailureRequestCanceled
 		}
 		failureMessage = ""
@@ -206,8 +206,8 @@ func (r *Coordinator) endExecution(
 	// 内存终态接纳后释放槽位；日志失败已单独通知界面。
 	r.mu.Lock()
 	cause := context.Cause(active.ctx)
-	controlled := errors.Is(cause, errExecutionPaused) || errors.Is(cause, errExecutionStopped)
-	resumeRequested := active.resumeRequested
+	interrupted := errors.Is(cause, errExecutionInterrupted)
+	scheduleRequested := active.scheduleRequested
 	main := active.run.Main()
 	if main {
 		delete(r.executions, executionKey{task.AgentID, task.BranchID})
@@ -215,8 +215,8 @@ func (r *Coordinator) endExecution(
 		active.cancel(nil)
 	}
 	r.mu.Unlock()
-	// 控制后只响应新的显式调度意图，不因旧执行恰好正常完成而自动领取队列。
-	if main && (resumeRequested || !controlled && (endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded)) {
+	// 中断后只响应新的显式调度意图，不因旧执行恰好正常完成而自动领取队列。
+	if main && (scheduleRequested || !interrupted && (endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded)) {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
 		if err := r.scheduleBinding(queueContext, active.bindingID, false); err != nil {

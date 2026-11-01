@@ -46,10 +46,6 @@ type ExecutionResumedHook interface {
 	ExecutionResumed(context.Context, ExecutionEvent) error
 }
 
-type ExecutionPausedHook interface {
-	ExecutionPaused(context.Context, ExecutionEvent) error
-}
-
 type ExecutionCommittedHook interface {
 	ExecutionCommitted(context.Context, ExecutionEvent) error
 }

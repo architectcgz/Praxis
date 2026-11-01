@@ -1,7 +1,6 @@
 package toolexecution
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -117,12 +116,8 @@ func (t *ExecutionTools) notifyWaiting(ctx context.Context, call sessionentry.To
 		e.deps.Logf("tool execution waiting hook failed: %v", err)
 	}
 	e.deps.Emitter.Emit(coreevent.Event{
-		Source: coreevent.SourceForRun(t.run, call.TurnID),
-		Payload: coreevent.ToolApprovalRequired{
-			CallID: call.CallID,
-			Name:   string(call.Name),
-			Input:  bytes.Clone(args),
-		},
+		Source:  coreevent.SourceForRun(t.run, call.TurnID),
+		Payload: coreevent.ToolApprovalRequired{CallID: call.CallID},
 	})
 }
 

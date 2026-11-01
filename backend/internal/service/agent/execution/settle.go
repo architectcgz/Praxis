@@ -73,9 +73,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 		if outcome == agentexecution.ExecutionFailed {
 			endedExecution.FailureMessage = failureMessage
 		}
-		if run.Main() {
-			err = s.records.SaveExecution(ctx, endedExecution)
-		}
+		err = s.records.SaveExecution(ctx, endedExecution)
 		if err != nil {
 			s.logger.Errorf(
 				"operation=execution_end request_id=%s session_id=%s agent_id=%s execution_id=%s status=failed outcome=%s error=%v",
@@ -123,11 +121,6 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 		Outcome:     string(endedExecution.Outcome),
 		FailureCode: string(endedExecution.FailureCode),
 	}
-	if endedExecution.Outcome == agentexecution.ExecutionPaused {
-		if hookErr := s.hookDispatcher.ExecutionPaused(context.WithoutCancel(ctx), event); hookErr != nil {
-			s.logger.Errorf("execution paused hook failed: %v", hookErr)
-		}
-	}
 	if hookErr := s.hookDispatcher.ExecutionCommitted(context.WithoutCancel(ctx), event); hookErr != nil {
 		s.logger.Errorf("execution committed hook failed: %v", hookErr)
 	}
@@ -149,6 +142,7 @@ func (s *Service) Settle(ctx context.Context, run *agentexecution.Run, outcome a
 		s.emitter.Emit(coreevent.Event{
 			Source: coreevent.EventSource{
 				SessionID:   endedExecution.SessionID,
+				AgentID:     endedExecution.AgentID,
 				BranchID:    endedExecution.BranchID,
 				BindingID:   run.BindingID,
 				ExecutionID: endedExecution.ID,

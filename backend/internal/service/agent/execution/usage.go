@@ -2,17 +2,34 @@ package execution
 
 import (
 	"context"
-	providerapi "praxis/internal/core/provider"
+	agentexecution "praxis/internal/core/agent/execution"
+	coreevent "praxis/internal/core/event"
 	"time"
 )
 
-// RecordUsage 将用量交给会话确认归属并保存；错误交由调用方提示，不改变模型响应。
-func (s *Service) RecordUsage(record providerapi.UsageRecord) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+// RecordModelResponse 在一次收尾中接纳请求明细、输出进度和累计值，保存失败仍保留内存事实。
+func (s *Service) RecordModelResponse(ctx context.Context, run *agentexecution.Run, request agentexecution.ModelRequestRecord) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	if err := s.usageRecords.SaveUsage(ctx, record); err != nil {
-		s.logger.Errorf("token usage save failed execution=%s turn=%s: %v", record.ExecutionID, record.TurnID, err)
+	var writeErr error
+	if err := run.Update(func(record *agentexecution.ExecutionRecord) error {
+		record.Progress.ModelOutputBytes += int64(request.OutputBytes)
+		if request.Usage != nil {
+			record.Progress.Usage.Add(*request.Usage)
+		}
+		writeErr = s.records.SaveModelRequest(ctx, *record, request)
+		return nil
+	}); err != nil {
 		return err
+	}
+	if request.Usage != nil {
+		s.emitter.Emit(coreevent.Event{
+			Source:  coreevent.SourceForRun(run, request.TurnID),
+			Payload: coreevent.ModelUsage{Usage: request.Usage.Clone()},
+		})
+	}
+	if writeErr != nil {
+		return storageFailure(writeErr)
 	}
 	return nil
 }

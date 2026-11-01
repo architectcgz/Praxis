@@ -1,5 +1,5 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { stopAgent, pauseAgent, type AgentView, type ApiErrorCode } from '../../api'
+import { stopAgent, type AgentView, type ApiErrorCode } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import type { AgentStore } from './agentStore'
 
@@ -14,7 +14,7 @@ type AgentCommandContext = {
     viewRequestRef: RefObject<number>
 }
 
-/** 控制 Agent 当前执行，并只更新仍然有效的工作区视图。 */
+/** 停止 Agent 当前执行，并只更新仍然有效的工作区视图。 */
 export function useAgentCommands({
     agent,
     busy,
@@ -25,10 +25,9 @@ export function useAgentCommands({
     setErrorCode,
     viewRequestRef,
 }: AgentCommandContext) {
-    const control = useCallback(async (kind: 'pause' | 'cancel') => {
+    const stop = useCallback(async () => {
         if (!agent?.currentExecutionId || busy) return
         const agentID = agent.ID
-        const targetExecutionId = agent.currentExecutionId
         const selectedAgentID = getSelectedAgentID()
         const viewRequestID = viewRequestRef.current
         const isCurrentView = () => viewRequestRef.current === viewRequestID && getSelectedAgentID() === selectedAgentID
@@ -37,8 +36,7 @@ export function useAgentCommands({
         setError('')
         setErrorCode(undefined)
         try {
-            const apply = kind === 'pause' ? pauseAgent : stopAgent
-            await apply({ agentId: agentID, targetExecutionId })
+            await stopAgent({ agentId: agentID })
         } catch (err) {
             if (isCurrentView()) {
                 setError(readableError(err))
@@ -49,5 +47,5 @@ export function useAgentCommands({
         }
     }, [agent, busy, getSelectedAgentID, inputActions, viewRequestRef, setBusy, setError, setErrorCode])
 
-    return { control }
+    return { stop }
 }

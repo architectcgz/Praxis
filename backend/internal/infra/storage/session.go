@@ -130,6 +130,7 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) er
 		return fmt.Errorf("delete session metadata: %w", err)
 	}
 	_ = os.Remove(sessionLogPath(r.dataRoot, value.ProjectID, id))
+	_ = os.RemoveAll(filepath.Join(r.dataRoot, "projects", value.ProjectID.String(), "sessions", id.String()))
 	return nil
 }
 

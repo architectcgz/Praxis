@@ -62,10 +62,10 @@ type activeExecution struct {
 	ctx         context.Context
 	cancel      context.CancelCauseFunc
 	ending      bool
-	// 控制后新提交的输入可请求收尾后重新调度，不把旧队列当作继续执行的意图。
-	resumeRequested  bool
-	ready            chan struct{}
-	toolApprovalWake chan struct{}
+	// 停止后新提交的输入可请求收尾后重新调度，不把旧队列当作继续执行的意图。
+	scheduleRequested bool
+	ready             chan struct{}
+	toolApprovalWake  chan struct{}
 }
 
 func newActiveExecution(ctx context.Context, sessionID identity.SessionID) *activeExecution {

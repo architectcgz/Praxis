@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
@@ -29,7 +30,7 @@ type (
 type ExecutionOperations interface {
 	NextRequestSequence(context.Context) (uint64, error)
 	RecordModelRequest(context.Context, uint64, bool) error
-	RecordModelOutput(context.Context, int) error
+	RecordModelResponse(context.Context, agentexecution.ModelRequestRecord) error
 }
 
 // ExecutionParams 保存一次执行的身份和冻结模型配置，供各轮模型请求共用。

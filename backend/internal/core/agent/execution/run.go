@@ -12,11 +12,10 @@ import (
 	"praxis/internal/identity"
 	"reflect"
 	"sync"
-	"time"
 )
 
 // Run 表示一次执行的内存实例，创建并持有专属 Agent，由 Coordinator 独占生命周期。
-// Context 与执行证据分别维护引用列表，共享只读 Entry；子执行的条目不写入 Session。
+// Context 与执行证据分别维护引用列表，共享 Session 已接纳的只读 Entry。
 type Run struct {
 	Session      SessionContext
 	BindingID    string
@@ -28,7 +27,6 @@ type Run struct {
 	entryIndexes map[string]int
 	context      appcontext.Context
 	Timing       *timing.Recorder
-	timings      map[string]timing.Record
 }
 
 func NewRun(record ExecutionRecord, main bool, entries []*sessionentry.ContextEntry) (*Run, error) {
@@ -58,37 +56,6 @@ func NewRun(record ExecutionRecord, main bool, entries []*sessionentry.ContextEn
 }
 
 func (r *Run) Main() bool { return r.main }
-
-func (r *Run) RecordTiming(record timing.Record) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if record.DurationMS != nil {
-		record.DurationMS = new(*record.DurationMS)
-	}
-	if record.FirstResponseMS != nil {
-		record.FirstResponseMS = new(*record.FirstResponseMS)
-	}
-	if r.timings == nil {
-		r.timings = make(map[string]timing.Record)
-	}
-	r.timings[record.ID] = record
-}
-
-func (r *Run) Timings() []timing.Record {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	result := make([]timing.Record, 0, len(r.timings))
-	for _, record := range r.timings {
-		if record.DurationMS != nil {
-			record.DurationMS = new(*record.DurationMS)
-		}
-		if record.FirstResponseMS != nil {
-			record.FirstResponseMS = new(*record.FirstResponseMS)
-		}
-		result = append(result, record)
-	}
-	return result
-}
 
 func (r *Run) Snapshot() ExecutionRecord {
 	r.mu.RLock()
@@ -135,8 +102,7 @@ func (r *Run) Entry(id string) (sessionentry.ContextEntry, bool) {
 	return *entry, true
 }
 
-// Accept 按接纳顺序记录本次执行证据；主执行使用 Session 确定的时间。
-// 摘要只更新 Context，不改变此前的执行证据；子执行在发布引用前补齐时间。
+// Accept 按接纳顺序记录 Session 确定的条目；摘要只更新 Context。
 func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -152,7 +118,6 @@ func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntr
 		return *prior, false, nil
 	}
 	if !r.main {
-		value.CreatedAt = time.Now().UTC()
 		for _, call := range value.ToolCalls(r.record.SessionID, r.record.AgentID) {
 			if _, found := r.call(call.Key); found {
 				return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
@@ -223,5 +188,6 @@ func (r *Run) deriveProgress() {
 type SessionContext interface {
 	BranchEntries(context.Context, identity.BranchID) ([]*sessionentry.ContextEntry, error)
 	AppendEntry(context.Context, identity.BranchID, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
+	AppendSubagentEntry(context.Context, identity.AgentID, identity.BranchID, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
 	AppendTiming(context.Context, timing.Record) error
 }

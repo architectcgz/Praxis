@@ -30,19 +30,18 @@ export type ModelUsageRecord = {
 }
 
 type AgentEventData = {
-    entries_appended: { entries: Entry[]; transient: boolean }
+    entries_appended: { entries: Entry[] }
     turn_started: Record<string, never>
     provider_waiting: Record<string, never>
     text_delta: { text: string }
     thinking_delta: { text: string }
-    tool_call: { callId: string; name: string; input: unknown }
-    tool_approval_required: { callId: string; name: string; input: unknown }
+    tool_call: { callId: string; name: string; arguments: unknown }
+    tool_approval_required: { callId: string }
     tool_result: { callId: string; result: string; isError: boolean }
     turn_completed: { stopReason: string }
     model_usage: { usage: ModelUsage }
     execution_started: { execution: ExecutionRecord }
-    execution_pause_requested: { appliedAt: string }
-    execution_stop_requested: { appliedAt: string }
+    execution_interrupt_requested: { appliedAt: string }
     request_canceled: { execution: ExecutionRecord; state: AgentView['state']; entries: Entry[] }
     execution_ended: { execution: ExecutionRecord; state: AgentView['state']; entries: Entry[] }
     subagent_started: { agent: AgentView; entries: Entry[]; parentAgentId: string; parentExecutionId: string; callId: string }
@@ -53,6 +52,7 @@ type AgentEventData = {
 }
 
 type AgentEventSource = {
+    agentId: string
     bindingId: string
     branchId: string
     sessionId?: string

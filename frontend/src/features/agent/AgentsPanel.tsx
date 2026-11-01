@@ -3,7 +3,7 @@ import type { Entry } from '../../api'
 import type { AgentsPanelProps } from './types'
 
 const stateLabels: Record<string, string> = {
-    idle: '空闲', executing: '执行中', waiting: '等待中', paused: '已暂停',
+    idle: '空闲', executing: '执行中', waiting: '等待中',
     interrupted: '已中断', failed: '失败', unknown: '未知',
 }
 

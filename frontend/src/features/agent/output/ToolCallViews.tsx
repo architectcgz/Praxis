@@ -11,8 +11,8 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
     return <div className="agent-activity output-activity"><div className="acts">
         {groupToolEvents(tools).map((activity) => <ToolCard
             key={activity.key}
-            name={activity.call?.data.name || activity.approval?.data.name || ''}
-            input={activity.approval?.data.input ?? activity.call?.data.input}
+            name={activity.call?.data.name || ''}
+            input={activity.call?.data.arguments}
             result={activity.result?.data.result}
             isError={activity.result?.data.isError}
             pendingStatus={activity.approval ? 'awaiting_approval' : pendingStatus}

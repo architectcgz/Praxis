@@ -1,9 +1,7 @@
 package bindings
 
 import (
-	"context"
 	"praxis/internal/identity"
-	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -41,22 +39,15 @@ func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTask
 	}, nil
 }
 
-func (b *CommandBindings) PauseAgent(wire dto.PauseAgentRequest) (dto.AgentControlResponse, error) {
+func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) error {
 	if err := validation.Struct(wire); err != nil {
-		return dto.AgentControlResponse{}, publicInputError(b.host, "CommandBindings.PauseAgent.request", err)
+		return publicInputError(b.host, "CommandBindings.StopAgent.request", err)
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (execution.ControlResult, error) {
-		return services.Commands.PauseAgent(ctx, identity.AgentID(wire.AgentID), identity.AgentExecutionID(wire.TargetExecutionID))
-	})
-}
-
-func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) (dto.AgentControlResponse, error) {
-	if err := validation.Struct(wire); err != nil {
-		return dto.AgentControlResponse{}, publicInputError(b.host, "CommandBindings.StopAgent.request", err)
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return err
 	}
-	return b.controlAgent(func(ctx context.Context, services Services) (execution.ControlResult, error) {
-		return services.Commands.StopAgent(ctx, identity.AgentID(wire.AgentID), identity.AgentExecutionID(wire.TargetExecutionID))
-	})
+	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, identity.AgentID(wire.AgentID)))
 }
 
 // CancelTask 只移除该 Session 尚未开始的输入，不影响当前 Loop。
@@ -69,20 +60,4 @@ func (b *CommandBindings) CancelTask(wire dto.CancelTaskRequest) error {
 		return err
 	}
 	return publicError(b.host, "CommandBindings.CancelTask", services.Commands.CancelTask(ctx, wire.BindingID, identity.TaskID(wire.TaskID)))
-}
-
-func (b *CommandBindings) controlAgent(apply func(context.Context, Services) (execution.ControlResult, error)) (dto.AgentControlResponse, error) {
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return dto.AgentControlResponse{}, err
-	}
-	result, err := apply(ctx, services)
-	if err != nil {
-		return dto.AgentControlResponse{}, publicError(b.host, "CommandBindings.controlAgent", err)
-	}
-	return dto.AgentControlResponse{
-		AgentID:           result.AgentID.String(),
-		TargetExecutionID: result.TargetExecutionID.String(),
-		Applied:           result.Applied,
-	}, nil
 }

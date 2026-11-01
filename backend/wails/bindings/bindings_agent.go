@@ -21,7 +21,7 @@ func (b *AgentBindings) GetAgent(sessionID, branchID, agentID string) (agentserv
 	return view, publicError(b.host, "AgentBindings.GetAgent", err)
 }
 
-// ListAgentEntries 返回 Main 历史或 Subagent 当前执行私有消息的展示 DTO，不分页。
+// ListAgentEntries 返回主分支或子代理持久化历史的展示 DTO，不分页。
 func (b *AgentBindings) ListAgentEntries(sessionID, branchID, agentID string) ([]dto.Entry, error) {
 	if err := validateAgentQuery(sessionID, branchID, agentID); err != nil {
 		return nil, publicInputError(b.host, "AgentBindings.ListAgentEntries.request", err)
@@ -33,7 +33,7 @@ func (b *AgentBindings) ListAgentEntries(sessionID, branchID, agentID string) ([
 	if _, err := services.Agents.GetAgentView(ctx, identity.SessionID(sessionID), identity.AgentID(agentID), identity.BranchID(branchID)); err != nil {
 		return nil, publicError(b.host, "ListAgentEntries.scope", err)
 	}
-	entries, err := services.Commands.ListAgentEntries(ctx, identity.AgentID(agentID), identity.BranchID(branchID))
+	entries, err := services.Commands.ListAgentEntries(ctx, identity.SessionID(sessionID), identity.AgentID(agentID), identity.BranchID(branchID))
 	if err != nil {
 		return nil, publicError(b.host, "AgentBindings.ListAgentEntries", err)
 	}

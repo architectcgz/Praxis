@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
@@ -11,6 +12,7 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
+	"slices"
 	"time"
 )
 
@@ -59,7 +61,7 @@ func NewService(deps Dependencies) *Service {
 	}
 }
 
-// GetAgentView 优先读取活跃 Run；主会话空闲时从元数据和执行历史派生展示，不创建 Agent。
+// GetAgentView 优先读取活跃 Run；主、子执行结束后从持久化历史派生展示。
 func (s *Service) GetAgentView(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID) (AgentView, error) {
 	if run := s.activeRun(agentID, branchID); run != nil {
 		if run.Snapshot().SessionID != sessionID {
@@ -67,34 +69,47 @@ func (s *Service) GetAgentView(ctx context.Context, sessionID identity.SessionID
 		}
 		return s.describeRun(ctx, run)
 	}
-	if agentID != identity.AgentID(sessionID) {
+	latest, err := s.executionRecords.ListAgentExecutions(ctx, sessionID, agentID, branchID, 1)
+	if err != nil {
+		return AgentView{}, err
+	}
+	main := agentID == identity.AgentID(sessionID)
+	if !main && len(latest) == 0 {
 		return AgentView{}, errorcode.ErrNotFound
 	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return AgentView{}, err
 	}
-	definition, err := s.definitions(ctx, sessionID, agentmodel.DefinitionPrimary)
-	if err != nil {
-		return AgentView{}, err
+	definitionID := agentmodel.DefinitionPrimary
+	kind := agentmodel.KindMain
+	createdAt := session.CreatedAt
+	name := ""
+	if !main {
+		definitionID = latest[0].Config.AgentDefinitionID
+		kind = agentmodel.KindSubagent
+		createdAt = latest[0].CreatedAt
+		name = latest[0].AgentName
+	} else {
+		definition, err := s.definitions(ctx, sessionID, definitionID)
+		if err != nil {
+			return AgentView{}, err
+		}
+		name = definition.Name
 	}
 	view := AgentView{
-		ID:           session.MainAgentID(),
+		ID:           agentID,
 		SessionID:    session.ID,
 		BranchID:     branchID,
-		DefinitionID: definition.ID,
-		Kind:         agentmodel.KindMain,
-		CreatedAt:    session.CreatedAt,
+		DefinitionID: definitionID,
+		Kind:         kind,
+		CreatedAt:    createdAt,
 		UpdatedAt:    session.UpdatedAt,
-		Name:         definition.Name,
+		Name:         name,
 		State:        agentmodel.AgentIdle,
 	}
-	latest, err := s.executionRecords.ListAgentExecutions(ctx, agentID, branchID, 1)
-	if err != nil {
-		return AgentView{}, err
-	}
 	if len(latest) > 0 {
-		history, err := s.entries.ListEntries(ctx, session.ID, branchID)
+		history, err := s.entries.ListAgentEntries(ctx, session.ID, agentID, branchID)
 		if err != nil {
 			return AgentView{}, err
 		}
@@ -116,6 +131,7 @@ func (s *Service) ListSessionAgents(ctx context.Context, sessionID identity.Sess
 		return nil, err
 	}
 	values := []AgentView{main}
+	seen := map[identity.AgentID]bool{main.ID: true}
 	for _, run := range s.sessionRuns(sessionID, branchID) {
 		if run.Main() {
 			continue
@@ -125,7 +141,26 @@ func (s *Service) ListSessionAgents(ctx context.Context, sessionID identity.Sess
 			return nil, err
 		}
 		values = append(values, view)
+		seen[view.ID] = true
 	}
+	executions, err := s.executionRecords.ListSessionExecutions(ctx, sessionID, branchID)
+	if err != nil {
+		return nil, err
+	}
+	for _, execution := range executions {
+		if seen[execution.AgentID] {
+			continue
+		}
+		view, err := s.GetAgentView(ctx, sessionID, execution.AgentID, branchID)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, view)
+		seen[view.ID] = true
+	}
+	slices.SortFunc(values[1:], func(a, b AgentView) int {
+		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
+	})
 	if limit > 0 {
 		values = values[:min(limit, len(values))]
 	}

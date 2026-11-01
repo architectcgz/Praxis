@@ -16,7 +16,6 @@ type Dependencies struct {
 	Emitter        *coreevent.Emitter
 	Sessions       repository.Session
 	Records        sessionmodel.ExecutionRecords
-	UsageRecords   sessionmodel.UsageRecords
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -28,7 +27,6 @@ type Service struct {
 	emitter        *coreevent.Emitter
 	sessions       repository.Session
 	records        sessionmodel.ExecutionRecords
-	usageRecords   sessionmodel.UsageRecords
 	clock          clock.Clock
 	ids            identity.IDGenerator
 }
@@ -41,7 +39,6 @@ func NewService(deps Dependencies) *Service {
 		emitter:        deps.Emitter,
 		sessions:       deps.Sessions,
 		records:        deps.Records,
-		usageRecords:   deps.UsageRecords,
 		clock:          deps.Clock,
 		ids:            deps.IDs,
 	}

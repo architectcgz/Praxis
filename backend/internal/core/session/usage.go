@@ -2,64 +2,31 @@ package session
 
 import (
 	"cmp"
-	"context"
+	agentexecution "praxis/internal/core/agent/execution"
 	providerapi "praxis/internal/core/provider"
-	"praxis/internal/errorcode"
-	"praxis/internal/identity"
 )
 
-func (s *Session) ListUsage() []providerapi.UsageRecord {
+// UsageSnapshot 在同一读锁下取得请求明细和各 Execution 的最新累计值。
+func (s *Session) UsageSnapshot() ([]providerapi.UsageRecord, agentexecution.UsageTotals) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]providerapi.UsageRecord, 0, len(s.data.Usage))
-	for _, value := range s.data.Usage {
-		values = append(values, cloneUsage(value))
+	records := make([]providerapi.UsageRecord, 0)
+	var totals agentexecution.UsageTotals
+	for _, execution := range s.data.Executions {
+		totals.Merge(execution.Progress.Usage)
 	}
-	return sorted(values, func(a, b providerapi.UsageRecord) int { return cmp.Compare(a.Key(), b.Key()) })
-}
-
-func (s *Session) SaveUsage(ctx context.Context, record providerapi.UsageRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := validateUsage(s.data, record); err != nil {
-		return err
-	}
-	record = cloneUsage(record)
-	s.data.SetUsage(record)
-	return s.log.AppendEvent(ctx, s.data.ID, Event{
-		Type:      EventUsageSaved,
-		Key:       record.Key(),
-		CreatedAt: s.clock.Now(),
-		Payload:   record,
-	})
-}
-
-func validateUsage(owner *Data, record providerapi.UsageRecord) error {
-	index := owner.ExecutionIndex(identity.AgentExecutionID(record.ExecutionID))
-	if index < 0 {
-		return errorcode.ErrNotFound
-	}
-	execution := owner.Executions[index]
-	if execution.AgentID.String() != record.AgentID || execution.AgentID != owner.MainAgentID() {
-		return errorcode.ErrRequestConflict
-	}
-	for _, prior := range owner.Usage {
-		if prior.Key() == record.Key() && (prior.AgentID != record.AgentID || prior.ExecutionID != record.ExecutionID || !record.Usage.Includes(prior.Usage)) {
-			return errorcode.ErrRequestConflict
+	for _, request := range s.data.ModelRequests {
+		if request.Usage == nil {
+			continue
 		}
+		execution := s.data.Executions[s.data.ExecutionIndex(request.ExecutionID)]
+		records = append(records, providerapi.UsageRecord{
+			SessionID:   execution.SessionID.String(),
+			AgentID:     execution.AgentID.String(),
+			ExecutionID: execution.ID.String(),
+			TurnID:      request.TurnID,
+			Usage:       request.Usage.Clone(),
+		})
 	}
-	return nil
-}
-
-func cloneUsage(value providerapi.UsageRecord) providerapi.UsageRecord {
-	if value.Usage.OutputTokens != nil {
-		value.Usage.OutputTokens = new(*value.Usage.OutputTokens)
-	}
-	if value.Usage.CacheReadInputTokens != nil {
-		value.Usage.CacheReadInputTokens = new(*value.Usage.CacheReadInputTokens)
-	}
-	if value.Usage.CacheCreationInputTokens != nil {
-		value.Usage.CacheCreationInputTokens = new(*value.Usage.CacheCreationInputTokens)
-	}
-	return value
+	return sorted(records, func(a, b providerapi.UsageRecord) int { return cmp.Compare(a.TurnID, b.TurnID) }), totals
 }

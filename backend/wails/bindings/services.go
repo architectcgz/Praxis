@@ -56,9 +56,8 @@ type AgentCommands interface {
 	Tree(context.Context, identity.SessionID) ([]sessionmodel.TreeNode, error)
 	HistoryAt(context.Context, identity.SessionID, string) ([]sessionentry.ContextEntry, error)
 	DeleteSession(context.Context, identity.SessionID) error
-	ListAgentEntries(context.Context, identity.AgentID, identity.BranchID) ([]sessionentry.ContextEntry, error)
-	PauseAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)
-	StopAgent(context.Context, identity.AgentID, identity.AgentExecutionID) (execution.ControlResult, error)
+	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, identity.BranchID) ([]sessionentry.ContextEntry, error)
+	StopAgent(context.Context, identity.AgentID) error
 	ListToolApprovals(context.Context, identity.AgentID, identity.BranchID) ([]toolservice.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
@@ -77,7 +76,7 @@ type ModelConfigService interface {
 }
 
 type TimingService interface {
-	ListAgentTimings(context.Context, string, identity.BranchID, int) ([]timing.View, error)
+	ListAgentTimings(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, int) ([]timing.View, error)
 }
 
 type UsageService interface {

@@ -19,9 +19,15 @@ type ModelUsageRecord struct {
 
 // SessionUsageSummary 返回同一快照的用量明细和加权缓存率；未知比例编码为 null。
 type SessionUsageSummary struct {
-	Records              []ModelUsageRecord `json:"records"`
-	InputTokens          int64              `json:"inputTokens"`
-	CacheReadInputTokens int64              `json:"cacheReadInputTokens"`
-	CacheReadRatio       *float64           `json:"cacheReadRatio"`
-	CacheReadComplete    bool               `json:"cacheReadComplete"`
+	Records                  []ModelUsageRecord `json:"records"`
+	InputTokens              int64              `json:"inputTokens"`
+	OutputTokens             int64              `json:"outputTokens"`
+	CacheReadInputTokens     int64              `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int64              `json:"cacheCreationInputTokens"`
+	ReportedRequests         uint64             `json:"reportedRequests"`
+	OutputReports            uint64             `json:"outputReports"`
+	CacheReadReports         uint64             `json:"cacheReadReports"`
+	CacheCreationReports     uint64             `json:"cacheCreationReports"`
+	CacheReadRatio           *float64           `json:"cacheReadRatio"`
+	CacheReadComplete        bool               `json:"cacheReadComplete"`
 }
