@@ -14,7 +14,7 @@ const (
 	maxSummaryTokens         = 4096
 )
 
-func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, summaryLimit int, format SummaryFormat, requestSummary RequestSummaryFunc) (string, error) {
+func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, summaryLimit int, requestSummary RequestSummaryFunc) (string, error) {
 	remaining := []rune(string(encoded))
 	summary := ""
 	for len(remaining) > 0 {
@@ -25,7 +25,7 @@ func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, sum
 		low, high := 0, len(remaining)
 		for low < high {
 			middle := low + (high-low+1)/2
-			part := summaryContext(format, summary, string(remaining[:middle]))
+			part := summaryContext(summary, string(remaining[:middle]))
 			tokens, err := part.EstimatedTokens()
 			if err != nil {
 				return "", err
@@ -37,7 +37,7 @@ func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, sum
 			}
 		}
 		if low == 0 {
-			tokens, err := summaryContext(format, summary, string(remaining[:1])).EstimatedTokens()
+			tokens, err := summaryContext(summary, string(remaining[:1])).EstimatedTokens()
 			if err != nil {
 				return "", err
 			}
@@ -47,7 +47,7 @@ func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, sum
 				ContextWindow:        contextWindow,
 			}
 		}
-		text, err := requestSummary(ctx, summaryContext(format, summary, string(remaining[:low])), summaryLimit)
+		text, err := requestSummary(ctx, summaryContext(summary, string(remaining[:low])), summaryLimit)
 		if err != nil {
 			return "", fmt.Errorf("summarize context: %w", err)
 		}
@@ -68,14 +68,14 @@ func percent(value, ratio int) int {
 	return value/100*ratio + value%100*ratio/100
 }
 
-func summaryContext(format SummaryFormat, previous, transcript string) appcontext.ModelContext {
+func summaryContext(previous, transcript string) appcontext.ModelContext {
 	return appcontext.ModelContext{
-		SystemPrompt: format.SystemPrompt,
+		SystemPrompt: summaryPrompt,
 		Entries: []sessionentry.ContextEntry{{
 			Role: role.User,
 			Content: []sessionentry.Block{{
 				Kind: sessionentry.BlockText,
-				Text: format.PreviousSummaryHeader + previous + format.TranscriptHeader + transcript,
+				Text: previousSummaryHeader + previous + transcriptHeader + transcript,
 			}},
 		}},
 	}

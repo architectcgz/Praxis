@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
@@ -28,15 +27,6 @@ func initializeDefaultFiles(ctx context.Context, root dataroot.DataRoot) error {
 			return err
 		}
 		if err := createDefaultFile(ctx, path, append(encoded, '\n')); err != nil {
-			return err
-		}
-	}
-	for id, role := range defaultAgentRoles() {
-		directory := filepath.Join(root.AgentDefinitions, id.String())
-		if err := os.MkdirAll(directory, 0700); err != nil {
-			return err
-		}
-		if err := createDefaultFile(ctx, filepath.Join(directory, "ROLE.md"), []byte(role)); err != nil {
 			return err
 		}
 	}

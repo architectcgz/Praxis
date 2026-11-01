@@ -92,7 +92,6 @@ func buildCoordinator(resources storageResources, config *configuration, session
 	// 执行状态由业务服务按次绑定；复制共享依赖，不改写外部 Runner。
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
-	runnerDeps.SummaryFormat = defaultSummaryFormat()
 	runner := loop.NewRunner(runnerDeps)
 	return execution.NewCoordinator(execution.Config{
 		Loop:              &runner,

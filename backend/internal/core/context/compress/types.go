@@ -6,17 +6,8 @@ import (
 	appcontext "praxis/internal/core/context"
 )
 
-// SummaryFormat 由应用提供提示词和待摘要条目的文本格式。
-type SummaryFormat struct {
-	SystemPrompt          string
-	PreviousSummaryHeader string
-	TranscriptHeader      string
-	ResultPrefix          string
-}
-
 // Options 使用调用方提供的模型窗口，ReservedTokens 为工具定义等请求开销。
 type Options struct {
-	SummaryFormat   SummaryFormat
 	ContextWindow   int
 	MaxOutputTokens int
 	ReservedTokens  int

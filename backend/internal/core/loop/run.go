@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	appcontext "praxis/internal/core/context"
-	contextcompress "praxis/internal/core/context/compress"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -21,7 +20,6 @@ type Dependencies struct {
 	Tools          tool.ToolCatalog
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
-	SummaryFormat  contextcompress.SummaryFormat
 	Logf           func(string, ...any)
 }
 

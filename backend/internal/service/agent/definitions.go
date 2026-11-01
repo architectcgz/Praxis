@@ -6,7 +6,7 @@ import (
 	"praxis/internal/identity"
 )
 
-// ValidateDefinitions 要求默认定义存在，并禁止移除已有定义；角色属性允许重载。
+// ValidateDefinitions 要求主入口定义存在，并禁止移除已有定义；角色属性允许重载。
 // 首次加载时 current 为空，只检查候选定义的业务约束。
 func ValidateDefinitions(current, candidate []agentmodel.AgentDefinition) error {
 	definitions := make(map[identity.AgentDefinitionID]agentmodel.AgentDefinition, len(candidate))

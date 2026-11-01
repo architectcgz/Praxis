@@ -48,7 +48,6 @@ func (r *Runner) compressContext(
 		}
 	}()
 	compressed, changed, err = contextcompress.Compress(ctx, value, contextcompress.Options{
-		SummaryFormat:   r.SummaryFormat,
 		ContextWindow:   input.Model.ContextWindow,
 		MaxOutputTokens: input.Model.MaxOutputTokens,
 		ReservedTokens:  reservedTokens,
