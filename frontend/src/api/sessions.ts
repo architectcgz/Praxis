@@ -83,8 +83,9 @@ export async function getSessionModelSelection(sessionID: string): Promise<Model
     }
 }
 
-export function getSession(sessionID: string, branchID = '', bindingID = '') {
-    return getSessionBinding().GetSession(sessionID, branchID, bindingID).then(normalizeSessionSnapshot)
+/** 选定会话并等待后端完成数据加载，成功后才能读取模型、Entry 和执行状态。 */
+export function selectSession(sessionID: string, branchID = '', bindingID = '') {
+    return getSessionBinding().SelectSession(sessionID, branchID, bindingID).then(normalizeSessionSnapshot)
 }
 
 export function getSessionSummary(sessionID: string) { return getSessionBinding().GetSessionSummary(sessionID) }

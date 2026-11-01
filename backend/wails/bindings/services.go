@@ -35,10 +35,9 @@ type ApprovalService interface {
 
 type SessionService interface {
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
-	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
-	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
+	OpenedSession(context.Context, identity.SessionID) (*sessionservice.Session, error)
 	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
 }
 
@@ -48,7 +47,8 @@ type AgentService interface {
 }
 
 type AgentCommands interface {
-	OpenSession(context.Context, identity.SessionID, identity.BranchID, string) (execution.BindingView, error)
+	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
+	SelectSession(context.Context, identity.SessionID, identity.BranchID, string) (execution.BindingView, error)
 	CloseSession(context.Context, string) error
 	CreateBranch(context.Context, identity.SessionID, identity.BranchID, string, sessionservice.BranchInput) (execution.BindingView, error)
 	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)

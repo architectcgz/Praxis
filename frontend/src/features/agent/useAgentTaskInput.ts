@@ -7,6 +7,7 @@ const emptySelection: ModelSelection = { providerId: '', modelId: '', reasoningL
 type SelectionState = {
     sessionID: string
     selection: ModelSelection
+    draftProviderID?: string
     confirmedKey: string
     failed: boolean
 }
@@ -28,6 +29,7 @@ export function useAgentTaskInput(
     const syncQueue = useRef<Promise<void>>(Promise.resolve())
     const generation = useRef(0)
     const selection = state.sessionID === sessionID ? state.selection : emptySelection
+    const draftProviderID = state.sessionID === sessionID ? state.draftProviderID : undefined
     const selectionKey = JSON.stringify(selection)
 
     useLayoutEffect(() => {
@@ -55,11 +57,7 @@ export function useAgentTaskInput(
         const request = ++generation.current
         setState({ sessionID, selection: next, confirmedKey: '', failed: false })
         // 请求携带固定会话身份；串行提交防止较早选择覆盖较新选择。
-        const sync = syncQueue.current.catch(() => undefined).then(() => selectSessionModel(sessionID, {
-            providerId: next.modelId ? next.providerId : '',
-            modelId: next.modelId,
-            reasoningLevel: next.reasoningLevel,
-        }))
+        const sync = syncQueue.current.catch(() => undefined).then(() => selectSessionModel(sessionID, next))
         syncQueue.current = sync
         void sync.then(() => {
             if (generation.current !== request) return
@@ -74,14 +72,15 @@ export function useAgentTaskInput(
 
     const selectModel = useCallback((providerId: string, modelId: string) => {
         if (!modelId) {
-            if (models.some((item) => item.providerId === providerId)) {
-                applySelection({ providerId, modelId: '', reasoningLevel: '' })
+            if (sessionID && models.some((item) => item.providerId === providerId)) {
+                // 切换 Provider 只更新界面草稿，选定完整模型前保留后端选择。
+                setState((current) => ({ ...current, draftProviderID: providerId }))
             }
             return
         }
         const model = models.find((item) => item.providerId === providerId && item.modelId === modelId)
         if (model) applySelection({ providerId, modelId, reasoningLevel: defaultReasoning(model) })
-    }, [applySelection, models])
+    }, [applySelection, models, sessionID])
 
     const selectReasoning = useCallback((level: string) => {
         const model = models.find((item) => item.providerId === selection.providerId && item.modelId === selection.modelId)
@@ -93,9 +92,9 @@ export function useAgentTaskInput(
     const confirmed = state.sessionID === sessionID && state.confirmedKey === selectionKey
     return {
         input, setInput, selectModel, selectReasoning,
-        selectedProviderID: selection.providerId,
-        selectedModelID: selection.modelId,
-        reasoning: selection.reasoningLevel,
+        selectedProviderID: draftProviderID ?? selection.providerId,
+        selectedModelID: draftProviderID === undefined ? selection.modelId : '',
+        reasoning: draftProviderID === undefined ? selection.reasoningLevel : '',
         modelSelectionPending: Boolean(sessionID) && isBindingAvailable() && !confirmed,
         modelSelectionReady: Boolean(sessionID) && confirmed && !state.failed && selection.modelId !== '',
     }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getSession, getSessionSummary, listSessions, type SessionSnapshot, type SessionSummary } from '../../api'
+import { selectSession, getSessionSummary, listSessions, type SessionSnapshot, type SessionSummary } from '../../api'
 
 /** Session 拥有目录、详情和摘要回填；工作区只负责选择与跨模块调用顺序。 */
 export function useSessionData() {
@@ -55,7 +55,7 @@ export function useSessionData() {
         setSessionError(undefined)
         try {
             const selection = selections.current.get(id)
-            const value = await getSession(id, selection?.branchID, selection?.bindingID)
+            const value = await selectSession(id, selection?.branchID, selection?.bindingID)
             if (detailRequest.current !== request) return
             selections.current.set(id, { branchID: value.branch.id, bindingID: value.bindingId })
             setSession(value)

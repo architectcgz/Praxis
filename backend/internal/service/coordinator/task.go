@@ -22,9 +22,6 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input sessionservice.TaskI
 		return SubmitResult{}, err
 	}
 	defer s.running.Done()
-	if err := s.sessions.CheckLog(ctx, input.SessionID); err != nil {
-		return SubmitResult{}, err
-	}
 	task, err := s.sessions.CreateTask(ctx, input)
 	if err != nil {
 		return SubmitResult{}, err

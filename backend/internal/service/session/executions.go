@@ -14,62 +14,70 @@ import (
 var _ sessionmodel.ExecutionRecords = (*Service)(nil)
 
 func (s *Service) GetExecution(ctx context.Context, sessionID identity.SessionID, id identity.AgentExecutionID) (record agentexecution.ExecutionRecord, err error) {
-	owner, err := s.openedSession(ctx, sessionID)
+	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
 		return record, err
 	}
-	err = owner.use(ctx, func() error {
-		index := owner.data.ExecutionIndex(id)
-		if index < 0 {
-			return errorcode.ErrNotFound
-		}
-		record = cloneExecution(owner.data.Executions[index])
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return record, err
+	}
+	index := owner.data.ExecutionIndex(id)
+	if index < 0 {
+		return record, errorcode.ErrNotFound
+	}
+	return cloneExecution(owner.data.Executions[index]), nil
 }
 
 func (s *Service) SaveExecution(ctx context.Context, value agentexecution.ExecutionRecord) error {
-	owner, err := s.openedSession(ctx, value.SessionID)
+	owner, err := s.OpenedSession(ctx, value.SessionID)
 	if err != nil {
 		return err
 	}
-	return owner.use(ctx, func() error { return owner.saveExecution(ctx, value) })
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if err := owner.checkState(ctx); err != nil {
+		return err
+	}
+	return owner.saveExecution(ctx, value)
 }
 
 func (s *Service) FindExecutionByRequest(ctx context.Context, agentID identity.AgentID, request identity.RequestID) (record agentexecution.ExecutionRecord, err error) {
-	owner, err := s.openedSession(ctx, identity.SessionID(agentID))
+	owner, err := s.OpenedSession(ctx, identity.SessionID(agentID))
 	if err != nil {
 		return record, err
 	}
-	err = owner.use(ctx, func() error {
-		for _, value := range owner.data.Executions {
-			if value.AgentID == agentID && value.RequestID == request {
-				record = cloneExecution(value)
-				return nil
-			}
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return record, err
+	}
+	for _, value := range owner.data.Executions {
+		if value.AgentID == agentID && value.RequestID == request {
+			return cloneExecution(value), nil
 		}
-		return errorcode.ErrNotFound
-	})
-	return
+	}
+	return record, errorcode.ErrNotFound
 }
 
 func (s *Service) ListAgentExecutions(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID, limit int) (values []agentexecution.ExecutionRecord, err error) {
-	owner, err := s.openedSession(ctx, identity.SessionID(agentID))
+	owner, err := s.OpenedSession(ctx, identity.SessionID(agentID))
 	if err != nil {
 		return nil, err
 	}
-	err = owner.use(ctx, func() error {
-		values = make([]agentexecution.ExecutionRecord, 0)
-		for _, value := range owner.data.Executions {
-			if value.AgentID == agentID && value.BranchID == branchID {
-				values = append(values, cloneExecution(value))
-			}
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return nil, err
+	}
+	values = make([]agentexecution.ExecutionRecord, 0)
+	for _, value := range owner.data.Executions {
+		if value.AgentID == agentID && value.BranchID == branchID {
+			values = append(values, cloneExecution(value))
 		}
-		values = capped(sorted(values, func(a, b agentexecution.ExecutionRecord) int { return -executionOrder(a, b) }), limit)
-		return nil
-	})
-	return
+	}
+	return capped(sorted(values, func(a, b agentexecution.ExecutionRecord) int { return -executionOrder(a, b) }), limit), nil
 }
 
 func (s *Session) saveExecution(ctx context.Context, value agentexecution.ExecutionRecord) error {

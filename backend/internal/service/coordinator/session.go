@@ -24,8 +24,17 @@ type BranchView struct {
 	Summary  string              `json:"summary"`
 }
 
-// OpenSession 只读取页面选择的分支；写入绑定由首次提交输入创建。
-func (s *Coordinator) OpenSession(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID string) (BindingView, error) {
+// CreateSession 将创建与 Hook 收尾纳入命令关闭等待，不在存储期间持有调度锁。
+func (s *Coordinator) CreateSession(ctx context.Context, input sessionservice.CreateInput) (sessionservice.CreateResult, error) {
+	if err := s.enter(); err != nil {
+		return sessionservice.CreateResult{}, err
+	}
+	defer s.running.Done()
+	return s.sessions.CreateSession(ctx, input)
+}
+
+// SelectSession 先完成会话加载，再返回页面选择的分支；写入绑定由首次提交输入创建。
+func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID string) (BindingView, error) {
 	if err := s.enter(); err != nil {
 		return BindingView{}, err
 	}
@@ -38,6 +47,9 @@ func (s *Coordinator) OpenSession(ctx context.Context, id identity.SessionID, br
 			return BindingView{}, errorcode.ErrRequestConflict
 		}
 		branchID = binding.branchID
+	}
+	if _, err := s.sessions.LoadSession(ctx, id); err != nil {
+		return BindingView{}, err
 	}
 	if branchID == "" {
 		branch, err := s.sessions.DefaultBranch(ctx, id)

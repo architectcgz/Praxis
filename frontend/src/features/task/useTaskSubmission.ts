@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { cancelTask, createTask, getSession, type AgentView, type ApiErrorCode, type SessionSnapshot } from '../../api'
+import { cancelTask, createTask, selectSession, type AgentView, type ApiErrorCode, type SessionSnapshot } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 
 type TaskSubmissionContext = {
@@ -53,7 +53,7 @@ export function useTaskSubmission({
             // 创建不要求模型已就绪，暂不能调度时输入仍保留在队列中。
             const response = await createTask({ sessionId: target.id, bindingId: submission.current.bindingId, branchId: target.branch.id, submissionId: submission.current.id, prompt: input })
             if (isCurrentView()) {
-                const next = await getSession(target.id, response.branchId, response.bindingId)
+                const next = await selectSession(target.id, response.branchId, response.bindingId)
                 if (!isCurrentView()) return
                 await applySession(next)
                 submission.current = null

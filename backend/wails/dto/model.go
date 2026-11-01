@@ -9,11 +9,11 @@ type ModelOption struct {
 	DefaultReasoningLevel string   `json:"defaultReasoningLevel"`
 }
 
-// SelectModelRequest 更新指定会话的选择；模型字段全空表示清除该会话的选择。
+// SelectModelRequest 只向指定会话提交完整的模型选择。
 type SelectModelRequest struct {
 	SessionID      string `json:"sessionId" validate:"session_id"`
-	ProviderID     string `json:"providerId" validate:"required_with=ModelID ReasoningLevel,omitempty,config_id"`
-	ModelID        string `json:"modelId" validate:"required_with=ProviderID ReasoningLevel,omitempty,id"`
+	ProviderID     string `json:"providerId" validate:"required,config_id"`
+	ModelID        string `json:"modelId" validate:"required,id"`
 	ReasoningLevel string `json:"reasoningLevel" validate:"omitempty,id"`
 }
 

@@ -5,7 +5,7 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 )
 
-// ModelChoice 表达用户选择的模型和推理等级；全空表示尚未选择或清除选择。
+// ModelChoice 表达用户选择的模型和推理等级；查询结果全空表示尚未选择。
 type ModelChoice struct {
 	ProviderID     string
 	ModelID        string

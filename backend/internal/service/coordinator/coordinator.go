@@ -136,7 +136,7 @@ func (r *Coordinator) launchLocked(run *agentexecution.Run, active *activeExecut
 	return nil
 }
 
-// Close 拒绝新任务，取消所有运行，并等待准备和结算操作退出。
+// Close 拒绝新命令，取消所有运行，并等待已接纳命令、准备和结算操作退出。
 // 超时后资源仍由 Application 保留，后续 Close 可以继续等待。
 func (r *Coordinator) Close(ctx context.Context) error {
 	r.mu.Lock()

@@ -10,7 +10,7 @@ import (
 )
 
 // Data 拥有完整会话数据；分支选择和输入队列属于页面绑定。
-// 同一会话的读取和变更由接纳入口顺序执行；发布后的 Entry 及内部载荷不再修改。
+// 同一会话的数据由服务层读写锁保护；发布后的 Entry 及内部载荷不再修改。
 type Data struct {
 	ID           identity.SessionID
 	Entries      []*sessionentry.ContextEntry

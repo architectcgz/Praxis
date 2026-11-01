@@ -22,8 +22,9 @@ export function useWorkspaceData() {
         sessions, session, catalogLoading, sessionLoading, catalogError, sessionError,
         getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions, adoptSession, forgetSession,
     } = useSessionData()
-    const { models, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog(selectedSessionID)
-    const { loadForSession, resetForSessionChange, ...agents } = useAgentData({ sessionID: selectedSessionID, models, setError, setErrorCode, viewRequestRef })
+    const loadedSessionID = session?.id === selectedSessionID ? session.id : ''
+    const { models, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog(loadedSessionID)
+    const { loadForSession, resetForSessionChange, ...agents } = useAgentData({ sessionID: loadedSessionID, models, setError, setErrorCode, viewRequestRef })
 
     useLayoutEffect(() => {
         errorCodeRef.current = errorCode
@@ -116,12 +117,12 @@ export function useWorkspaceData() {
     }, [refreshCatalog, refreshSession, refreshModels])
 
     useEffect(() => {
-        void Promise.allSettled([refreshCatalog(), ...(isBindingAvailable() ? [refreshModels()] : [])])
+        void refreshCatalog()
         return () => {
             catalogRequestRef.current += 1
             viewRequestRef.current += 1
         }
-    }, [refreshCatalog, refreshModels])
+    }, [refreshCatalog])
 
     useEffect(() => {
         if (!catalogLoaded) return

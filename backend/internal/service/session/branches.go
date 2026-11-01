@@ -27,139 +27,147 @@ type TreeNode struct {
 }
 
 func (s *Service) Prepare(ctx context.Context, id identity.SessionID, branchID identity.BranchID) (owner *Session, branch sessionmodel.Branch, err error) {
-	owner, err = s.openSession(ctx, id)
+	owner, err = s.OpenedSession(ctx, id)
 	if err != nil {
 		return
 	}
-	err = owner.use(ctx, func() error {
-		if branchID == "" {
-			branchID = owner.data.RecentBranch
-		}
-		selected := owner.data.Branch(branchID)
-		if selected == nil {
-			return errorcode.ErrNotFound
-		}
-		if !owner.data.Safe(selected.HeadEntryID) {
-			return sessionmodel.ErrUnsafeHistory
-		}
-		branch = *selected
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return owner, branch, err
+	}
+	if branchID == "" {
+		branchID = owner.data.RecentBranch
+	}
+	selected := owner.data.Branch(branchID)
+	if selected == nil {
+		return owner, branch, errorcode.ErrNotFound
+	}
+	if !owner.data.Safe(selected.HeadEntryID) {
+		return owner, branch, sessionmodel.ErrUnsafeHistory
+	}
+	return owner, *selected, nil
 }
 
 func (s *Service) CreateBranch(ctx context.Context, id identity.SessionID, source sessionmodel.Branch, input BranchInput) (branch sessionmodel.Branch, err error) {
-	owner, err := s.openedSession(ctx, id)
+	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {
 		return branch, err
 	}
-	err = owner.use(ctx, func() error {
-		if prior := owner.data.BranchByRequest(input.RequestID); prior != nil {
-			if prior.SourceBranchID != source.ID || prior.BaseEntryID != input.EntryID || input.Name != "" && prior.Name != input.Name {
-				return errorcode.ErrRequestConflict
-			}
-			branch = *prior
-			return nil
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if err := owner.checkState(ctx); err != nil {
+		return branch, err
+	}
+	if prior := owner.data.BranchByRequest(input.RequestID); prior != nil {
+		if prior.SourceBranchID != source.ID || prior.BaseEntryID != input.EntryID || input.Name != "" && prior.Name != input.Name {
+			return branch, errorcode.ErrRequestConflict
 		}
-		branchID := identity.BranchID(s.ids.New("branch"))
-		name := strings.TrimSpace(input.Name)
-		if name == "" {
-			name = "branch-" + branchID.String()[max(0, len(branchID.String())-8):]
-		}
-		branch = sessionmodel.Branch{
-			ID:             branchID,
-			Name:           name,
-			RequestID:      input.RequestID,
-			SourceBranchID: source.ID,
-			BaseEntryID:    input.EntryID,
-			HeadEntryID:    input.EntryID,
-			CreatedAt:      s.clock.Now(),
-			UpdatedAt:      s.clock.Now(),
-		}
-		return owner.createBranch(ctx, branch)
-	})
-	return
+		return *prior, nil
+	}
+	branchID := identity.BranchID(s.ids.New("branch"))
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = "branch-" + branchID.String()[max(0, len(branchID.String())-8):]
+	}
+	branch = sessionmodel.Branch{
+		ID:             branchID,
+		Name:           name,
+		RequestID:      input.RequestID,
+		SourceBranchID: source.ID,
+		BaseEntryID:    input.EntryID,
+		HeadEntryID:    input.EntryID,
+		CreatedAt:      s.clock.Now(),
+		UpdatedAt:      s.clock.Now(),
+	}
+	return branch, owner.createBranch(ctx, branch)
 }
 
 func (s *Service) Branches(ctx context.Context, id identity.SessionID) (branches []sessionmodel.Branch, err error) {
-	owner, err := s.openedSession(ctx, id)
+	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	err = owner.use(ctx, func() error {
-		branches = slices.Clone(owner.data.Branches)
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return nil, err
+	}
+	return slices.Clone(owner.data.Branches), nil
 }
 
 func (s *Service) Tree(ctx context.Context, id identity.SessionID) (nodes []TreeNode, err error) {
-	owner, err := s.openedSession(ctx, id)
+	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	err = owner.use(ctx, func() error {
-		nodes = make([]TreeNode, 0, len(owner.data.Entries))
-		for _, entry := range owner.data.Entries {
-			text := strings.Join(strings.Fields(entry.TextContent()), " ")
-			if entry.IsSummary() {
-				text = "上下文摘要"
-			}
-			if text == "" {
-				text = string(entry.Role)
-			}
-			runes := []rune(text)
-			if len(runes) > 100 {
-				text = string(runes[:100]) + "…"
-			}
-			nodes = append(nodes, TreeNode{
-				ID:       entry.ID,
-				ParentID: entry.ParentID,
-				BranchID: entry.BranchID,
-				Summary:  text,
-				Safe:     owner.data.Safe(entry.ID),
-			})
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return nil, err
+	}
+	nodes = make([]TreeNode, 0, len(owner.data.Entries))
+	for _, entry := range owner.data.Entries {
+		text := strings.Join(strings.Fields(entry.TextContent()), " ")
+		if entry.IsSummary() {
+			text = "上下文摘要"
 		}
-		return nil
-	})
-	return
+		if text == "" {
+			text = string(entry.Role)
+		}
+		runes := []rune(text)
+		if len(runes) > 100 {
+			text = string(runes[:100]) + "…"
+		}
+		nodes = append(nodes, TreeNode{
+			ID:       entry.ID,
+			ParentID: entry.ParentID,
+			BranchID: entry.BranchID,
+			Summary:  text,
+			Safe:     owner.data.Safe(entry.ID),
+		})
+	}
+	return nodes, nil
 }
 
 func (s *Service) Path(ctx context.Context, id identity.SessionID, head string) (entries []sessionentry.ContextEntry, err error) {
-	owner, err := s.openedSession(ctx, id)
+	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	err = owner.use(ctx, func() error {
-		if _, found := owner.data.Entry(head); head != "" && !found {
-			return errorcode.ErrNotFound
-		}
-		entries = sessionentry.Values(owner.data.Path(head))
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return nil, err
+	}
+	if _, found := owner.data.Entry(head); head != "" && !found {
+		return nil, errorcode.ErrNotFound
+	}
+	return sessionentry.Values(owner.data.Path(head)), nil
 }
 
 func (s *Service) SafeHead(ctx context.Context, id identity.SessionID, branchID identity.BranchID) (head string, err error) {
-	owner, err := s.openedSession(ctx, id)
+	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {
 		return "", err
 	}
-	err = owner.use(ctx, func() error {
-		branch := owner.data.Branch(branchID)
-		if branch == nil {
-			return errorcode.ErrNotFound
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return "", err
+	}
+	branch := owner.data.Branch(branchID)
+	if branch == nil {
+		return "", errorcode.ErrNotFound
+	}
+	for head = branch.HeadEntryID; head != ""; {
+		if owner.data.Safe(head) {
+			break
 		}
-		for head = branch.HeadEntryID; head != ""; {
-			if owner.data.Safe(head) {
-				break
-			}
-			entry, _ := owner.data.Entry(head)
-			head = entry.ParentID
-		}
-		return nil
-	})
-	return
+		entry, _ := owner.data.Entry(head)
+		head = entry.ParentID
+	}
+	return head, nil
 }
 
 func (s *Session) createBranch(ctx context.Context, branch sessionmodel.Branch) error {
@@ -204,29 +212,31 @@ func validateBranch(owner *sessionmodel.Data, branch sessionmodel.Branch) error 
 }
 
 func (s *Service) DefaultBranch(ctx context.Context, id identity.SessionID) (branch sessionmodel.Branch, err error) {
-	owner, err := s.openSession(ctx, id)
+	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {
 		return branch, err
 	}
-	err = owner.use(ctx, func() error {
-		branch = *owner.data.Branch(owner.data.RecentBranch)
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return branch, err
+	}
+	return *owner.data.Branch(owner.data.RecentBranch), nil
 }
 
 func (s *Service) ConfirmBranchRequest(ctx context.Context, id identity.SessionID, input BranchInput) (branch sessionmodel.Branch, err error) {
-	owner, err := s.openedSession(ctx, id)
+	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {
 		return branch, err
 	}
-	err = owner.use(ctx, func() error {
-		prior := owner.data.BranchByRequest(input.RequestID)
-		if prior == nil || prior.BaseEntryID != input.EntryID || input.Name != "" && prior.Name != input.Name {
-			return errorcode.ErrRequestConflict
-		}
-		branch = *prior
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return branch, err
+	}
+	prior := owner.data.BranchByRequest(input.RequestID)
+	if prior == nil || prior.BaseEntryID != input.EntryID || input.Name != "" && prior.Name != input.Name {
+		return branch, errorcode.ErrRequestConflict
+	}
+	return *prior, nil
 }

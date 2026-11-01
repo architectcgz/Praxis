@@ -26,19 +26,20 @@ type SessionUsageSummary struct {
 
 // ListSessionUsage 查询完整请求用量，不受消息分页影响。
 func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.SessionID) (values []providerapi.UsageRecord, err error) {
-	owner, err := s.openedSession(ctx, sessionID)
+	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	err = owner.use(ctx, func() error {
-		values = make([]providerapi.UsageRecord, 0, len(owner.data.Usage))
-		for _, value := range owner.data.Usage {
-			values = append(values, cloneUsage(value))
-		}
-		values = sorted(values, func(a, b providerapi.UsageRecord) int { return cmp.Compare(a.Key(), b.Key()) })
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return nil, err
+	}
+	values = make([]providerapi.UsageRecord, 0, len(owner.data.Usage))
+	for _, value := range owner.data.Usage {
+		values = append(values, cloneUsage(value))
+	}
+	return sorted(values, func(a, b providerapi.UsageRecord) int { return cmp.Compare(a.Key(), b.Key()) }), nil
 }
 
 // GetSessionUsageSummary 查询会话全部最新用量记录，以 token 加权计算缓存率。
@@ -79,23 +80,26 @@ func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID identity
 	return summary, nil
 }
 
-// SaveUsage 在会话接纳入口确认归属并保存请求用量。
+// SaveUsage 在会话数据写锁内确认归属并保存请求用量。
 func (s *Service) SaveUsage(ctx context.Context, record providerapi.UsageRecord) error {
-	owner, err := s.openedSession(ctx, identity.SessionID(record.SessionID))
+	owner, err := s.OpenedSession(ctx, identity.SessionID(record.SessionID))
 	if err != nil {
 		return err
 	}
-	return owner.use(ctx, func() error {
-		if err := validateUsage(owner.data, record); err != nil {
-			return err
-		}
-		record = cloneUsage(record)
-		if err := owner.appendEvent(ctx, "usage.saved", "usage", record.Key(), record); err != nil {
-			return err
-		}
-		owner.data.SetUsage(record)
-		return nil
-	})
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if err := owner.checkState(ctx); err != nil {
+		return err
+	}
+	if err := validateUsage(owner.data, record); err != nil {
+		return err
+	}
+	record = cloneUsage(record)
+	if err := owner.appendEvent(ctx, "usage.saved", "usage", record.Key(), record); err != nil {
+		return err
+	}
+	owner.data.SetUsage(record)
+	return nil
 }
 
 func validateUsage(owner *sessionmodel.Data, record providerapi.UsageRecord) error {

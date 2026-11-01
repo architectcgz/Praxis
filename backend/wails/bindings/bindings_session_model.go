@@ -40,10 +40,11 @@ func (b *SessionBindings) GetModelSelection(sessionID string) (dto.ModelSelectio
 	if err != nil {
 		return dto.ModelSelection{}, err
 	}
-	choice, err := services.Sessions.SelectedModel(ctx, identity.SessionID(sessionID))
+	session, err := services.Sessions.OpenedSession(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return dto.ModelSelection{}, publicError(b.host, "SessionBindings.GetModelSelection", err)
 	}
+	choice := session.SelectedModel()
 	return dto.ModelSelection{
 		ProviderID:     choice.ProviderID,
 		ModelID:        choice.ModelID,

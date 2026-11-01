@@ -11,26 +11,24 @@ import (
 
 // AppendEntry 接纳完整 Entry；模型请求的加工结果不经过此入口。
 func (s *Session) AppendEntry(ctx context.Context, branchID identity.BranchID, entry sessionentry.ContextEntry) (stored *sessionentry.ContextEntry, inserted bool, err error) {
-	err = s.use(ctx, func() error {
-		if prior, found := s.data.Entry(entry.ID); found {
-			entry.BranchID, entry.ParentID = branchID, prior.ParentID
-			var appendErr error
-			stored, inserted, appendErr = s.appendEntry(ctx, entry)
-			return appendErr
-		}
-		branch := s.data.Branch(branchID)
-		if branch == nil {
-			return errorcode.ErrNotFound
-		}
-		entry.BranchID, entry.ParentID = branch.ID, branch.HeadEntryID
-		if err := validateEntry(s.data, entry); err != nil {
-			return err
-		}
-		var appendErr error
-		stored, inserted, appendErr = s.appendEntry(ctx, entry)
-		return appendErr
-	})
-	return
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.checkState(ctx); err != nil {
+		return nil, false, err
+	}
+	if prior, found := s.data.Entry(entry.ID); found {
+		entry.BranchID, entry.ParentID = branchID, prior.ParentID
+		return s.appendEntry(ctx, entry)
+	}
+	branch := s.data.Branch(branchID)
+	if branch == nil {
+		return nil, false, errorcode.ErrNotFound
+	}
+	entry.BranchID, entry.ParentID = branch.ID, branch.HeadEntryID
+	if err := validateEntry(s.data, entry); err != nil {
+		return nil, false, err
+	}
+	return s.appendEntry(ctx, entry)
 }
 
 func (s *Session) appendEntry(ctx context.Context, entry sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
@@ -53,29 +51,32 @@ func (s *Session) appendEntry(ctx context.Context, entry sessionentry.ContextEnt
 
 // BranchEntries 返回已提交的完整分支路径；Run 据此构建 Context 和执行证据。
 func (s *Session) BranchEntries(ctx context.Context, branchID identity.BranchID) (entries []*sessionentry.ContextEntry, err error) {
-	err = s.use(ctx, func() error {
-		branch := s.data.Branch(branchID)
-		if branch == nil {
-			return errorcode.ErrNotFound
-		}
-		entries = s.data.Path(branch.HeadEntryID)
-		return nil
-	})
-	return
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.checkState(ctx); err != nil {
+		return nil, err
+	}
+	branch := s.data.Branch(branchID)
+	if branch == nil {
+		return nil, errorcode.ErrNotFound
+	}
+	return s.data.Path(branch.HeadEntryID), nil
 }
 
 func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID, branchID identity.BranchID) (page sessionentry.List, err error) {
-	owner, err := s.openedSession(ctx, sessionID)
+	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
 		return page, err
 	}
-	err = owner.use(ctx, func() error {
-		branch := owner.data.Branch(branchID)
-		if branch == nil {
-			return errorcode.ErrNotFound
-		}
-		page.Entries = sessionentry.Values(owner.data.Path(branch.HeadEntryID))
-		return nil
-	})
-	return
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if err := owner.checkState(ctx); err != nil {
+		return page, err
+	}
+	branch := owner.data.Branch(branchID)
+	if branch == nil {
+		return page, errorcode.ErrNotFound
+	}
+	page.Entries = sessionentry.Values(owner.data.Path(branch.HeadEntryID))
+	return page, nil
 }
