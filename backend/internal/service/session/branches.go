@@ -33,13 +33,13 @@ func (s *Service) Prepare(ctx context.Context, id identity.SessionID, branchID i
 	}
 	err = owner.use(ctx, func() error {
 		if branchID == "" {
-			branchID = owner.model.RecentBranch
+			branchID = owner.data.RecentBranch
 		}
-		selected := owner.model.Branch(branchID)
+		selected := owner.data.Branch(branchID)
 		if selected == nil {
 			return errorcode.ErrNotFound
 		}
-		if !owner.model.Safe(selected.HeadEntryID) {
+		if !owner.data.Safe(selected.HeadEntryID) {
 			return sessionmodel.ErrUnsafeHistory
 		}
 		branch = *selected
@@ -54,7 +54,7 @@ func (s *Service) CreateBranch(ctx context.Context, id identity.SessionID, sourc
 		return branch, err
 	}
 	err = owner.use(ctx, func() error {
-		if prior := owner.model.BranchByRequest(input.RequestID); prior != nil {
+		if prior := owner.data.BranchByRequest(input.RequestID); prior != nil {
 			if prior.SourceBranchID != source.ID || prior.BaseEntryID != input.EntryID || input.Name != "" && prior.Name != input.Name {
 				return errorcode.ErrRequestConflict
 			}
@@ -87,7 +87,7 @@ func (s *Service) Branches(ctx context.Context, id identity.SessionID) (branches
 		return nil, err
 	}
 	err = owner.use(ctx, func() error {
-		branches = slices.Clone(owner.model.Branches)
+		branches = slices.Clone(owner.data.Branches)
 		return nil
 	})
 	return
@@ -99,8 +99,8 @@ func (s *Service) Tree(ctx context.Context, id identity.SessionID) (nodes []Tree
 		return nil, err
 	}
 	err = owner.use(ctx, func() error {
-		nodes = make([]TreeNode, 0, len(owner.model.Entries))
-		for _, entry := range owner.model.Entries {
+		nodes = make([]TreeNode, 0, len(owner.data.Entries))
+		for _, entry := range owner.data.Entries {
 			text := strings.Join(strings.Fields(entry.TextContent()), " ")
 			if entry.IsSummary() {
 				text = "上下文摘要"
@@ -117,7 +117,7 @@ func (s *Service) Tree(ctx context.Context, id identity.SessionID) (nodes []Tree
 				ParentID: entry.ParentID,
 				BranchID: entry.BranchID,
 				Summary:  text,
-				Safe:     owner.model.Safe(entry.ID),
+				Safe:     owner.data.Safe(entry.ID),
 			})
 		}
 		return nil
@@ -131,10 +131,10 @@ func (s *Service) Path(ctx context.Context, id identity.SessionID, head string) 
 		return nil, err
 	}
 	err = owner.use(ctx, func() error {
-		if _, found := owner.model.Entry(head); head != "" && !found {
+		if _, found := owner.data.Entry(head); head != "" && !found {
 			return errorcode.ErrNotFound
 		}
-		entries = sessionentry.Values(owner.model.Path(head))
+		entries = sessionentry.Values(owner.data.Path(head))
 		return nil
 	})
 	return
@@ -146,15 +146,15 @@ func (s *Service) SafeHead(ctx context.Context, id identity.SessionID, branchID 
 		return "", err
 	}
 	err = owner.use(ctx, func() error {
-		branch := owner.model.Branch(branchID)
+		branch := owner.data.Branch(branchID)
 		if branch == nil {
 			return errorcode.ErrNotFound
 		}
 		for head = branch.HeadEntryID; head != ""; {
-			if owner.model.Safe(head) {
+			if owner.data.Safe(head) {
 				break
 			}
-			entry, _ := owner.model.Entry(head)
+			entry, _ := owner.data.Entry(head)
 			head = entry.ParentID
 		}
 		return nil
@@ -163,17 +163,17 @@ func (s *Service) SafeHead(ctx context.Context, id identity.SessionID, branchID 
 }
 
 func (s *Session) createBranch(ctx context.Context, branch sessionmodel.Branch) error {
-	if err := validateBranch(s.model, branch); err != nil {
+	if err := validateBranch(s.data, branch); err != nil {
 		return err
 	}
 	if err := s.appendEvent(ctx, "branch.created", "branch", branch.ID.String(), branch); err != nil {
 		return err
 	}
-	s.model.AcceptBranch(branch)
+	s.data.AcceptBranch(branch)
 	return nil
 }
 
-func validateBranch(owner *sessionmodel.Session, branch sessionmodel.Branch) error {
+func validateBranch(owner *sessionmodel.Data, branch sessionmodel.Branch) error {
 	if err := branch.Validate(); err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func (s *Service) DefaultBranch(ctx context.Context, id identity.SessionID) (bra
 		return branch, err
 	}
 	err = owner.use(ctx, func() error {
-		branch = *owner.model.Branch(owner.model.RecentBranch)
+		branch = *owner.data.Branch(owner.data.RecentBranch)
 		return nil
 	})
 	return
@@ -221,7 +221,7 @@ func (s *Service) ConfirmBranchRequest(ctx context.Context, id identity.SessionI
 		return branch, err
 	}
 	err = owner.use(ctx, func() error {
-		prior := owner.model.BranchByRequest(input.RequestID)
+		prior := owner.data.BranchByRequest(input.RequestID)
 		if prior == nil || prior.BaseEntryID != input.EntryID || input.Name != "" && prior.Name != input.Name {
 			return errorcode.ErrRequestConflict
 		}

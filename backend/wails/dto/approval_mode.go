@@ -6,7 +6,7 @@ type SetSessionApprovalModeRequest struct {
 	Mode      *string `json:"mode" validate:"omitempty,oneof=ask auto yolo"`
 }
 
-// SessionApprovalMode 同时返回配置来源和当前有效模式，由后端负责继承解析。
+// SessionApprovalMode 返回已保存的会话覆盖和当前已加载的有效模式；二者可在 reload 前不同。
 type SessionApprovalMode struct {
 	SessionID     string  `json:"sessionId"`
 	GlobalMode    string  `json:"globalMode"`

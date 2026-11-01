@@ -18,7 +18,7 @@ import (
 
 // prepareMainTask 将内存 Task 准入为 Execution，开始时才向 Session 追加用户消息。
 // 调用方已保留执行槽位；返回值的 bool 表示重复请求，失败后的队列与忙闲状态由调度器处理。
-func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, session taskmodel.SessionInfo, owner agentexecution.SessionContext, bindingID string, modelConfig modelapi.Config) (result agentexecution.ExecutionRecord, existing bool, err error) {
+func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, session taskmodel.SessionInfo, owner agentexecution.SessionContext, bindingID string, modelConfig modelapi.Config, definition agentmodel.AgentDefinition) (result agentexecution.ExecutionRecord, existing bool, err error) {
 	if modelConfig.ProviderID == "" || modelConfig.ModelID == "" {
 		return result, false, modelconfig.ErrNotConfigured
 	}
@@ -33,10 +33,6 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 		return previous, true, nil
 	}
 	if !errors.Is(err, errorcode.ErrNotFound) {
-		return result, false, err
-	}
-	definition, err := s.definitions.Definition(agentmodel.DefinitionPrimary)
-	if err != nil {
 		return result, false, err
 	}
 	config := agentexecution.ExecutionConfig{

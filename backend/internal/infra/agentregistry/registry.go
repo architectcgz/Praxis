@@ -14,7 +14,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 )
 
 var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -39,9 +38,8 @@ func (e *ConfigurationError) Unwrap() error {
 	return e.Err
 }
 
-// Registry 保存已加载并发布的 Agent 定义。
+// Registry 保存一次加载后只读的 Agent 定义。
 type Registry struct {
-	mu          sync.RWMutex
 	definitions map[identity.AgentDefinitionID]agentmodel.AgentDefinition
 }
 
@@ -59,8 +57,6 @@ func (r *Registry) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDe
 	if r == nil {
 		return agentmodel.AgentDefinition{}, errors.New("agent registry is not initialized")
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	definition, ok := r.definitions[id]
 	if !ok {
 		return agentmodel.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
@@ -70,8 +66,6 @@ func (r *Registry) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDe
 
 // List 按 ID 排序返回全部定义的独立快照。
 func (r *Registry) List() []agentmodel.AgentDefinition {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	return slices.SortedFunc(maps.Values(r.definitions), func(a, b agentmodel.AgentDefinition) int {
 		return cmp.Compare(a.ID, b.ID)
 	})
@@ -106,16 +100,4 @@ func loadDefinitions(root string) (map[identity.AgentDefinitionID]agentmodel.Age
 		definitions[id] = definition
 	}
 	return definitions, nil
-}
-
-// ReplaceFrom 复制候选快照并整体发布，不与候选 Registry 共享可变 Map。
-func (r *Registry) ReplaceFrom(candidate *Registry) {
-	definitions := candidate.List()
-	replacement := make(map[identity.AgentDefinitionID]agentmodel.AgentDefinition, len(definitions))
-	for _, definition := range definitions {
-		replacement[definition.ID] = definition
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.definitions = replacement
 }

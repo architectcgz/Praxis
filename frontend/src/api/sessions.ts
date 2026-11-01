@@ -60,7 +60,7 @@ export async function getSessionApprovalMode(sessionId: string): Promise<Session
     return sessionApprovalMode(await getSessionBinding().GetSessionApprovalMode(sessionId))
 }
 
-/** 保存会话覆盖；null 恢复继承，只有后端提交成功才返回新选择。 */
+/** 保存会话覆盖；null 恢复继承，有效模式在显式 /reload 后更新。 */
 export async function setSessionApprovalMode(sessionId: string, mode: ApprovalMode | null): Promise<SessionApprovalMode> {
     return sessionApprovalMode(await getSessionBinding().SetSessionApprovalMode({ sessionId, mode }))
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { ChevronDown, ShieldCheck } from 'lucide-react'
 import { getSessionApprovalMode, setSessionApprovalMode, type ApprovalMode, type SessionApprovalMode } from '../../api/sessions'
 import { readableError } from '../../shared/errors'
+import { subscribeSessionConfigReloaded } from '../../api/models'
 
 type ApprovalModeSelectProps = {
     sessionId: string
@@ -12,7 +13,7 @@ type ApprovalModeSelectProps = {
     onClose: () => void
 }
 
-/** 会话级授权选择：后端提交成功才更新，不影响其他会话。 */
+/** 保存会话审批选择；有效模式只在该会话显式 reload 后更新。 */
 export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onToggle, onClose }: ApprovalModeSelectProps) {
     const [settings, setSettings] = useState<SessionApprovalMode | null>(null)
     const [loading, setLoading] = useState(true)
@@ -35,6 +36,10 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
         return () => { active = false }
     }, [sessionId, retry])
 
+    useEffect(() => subscribeSessionConfigReloaded((id) => {
+        if (id === sessionId) setRetry((value) => value + 1)
+    }), [sessionId])
+
     const save = async (mode: ApprovalMode | null) => {
         if (savingRef.current || loading || !settings) return
         onClose()
@@ -51,8 +56,9 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
         }
     }
 
+    const pending = settings !== null && (settings.sessionMode ?? settings.globalMode) !== settings.effectiveMode
     const title = settings
-        ? `会话默认动作：${settings.effectiveMode}${settings.sessionMode === null ? '（继承全局）' : ''}。ask 询问用户；auto 由模型判断，危险拒绝、不确定询问；yolo 统一跳过审核，但不能覆盖 deny。具体规则优先于默认动作，已有人工等待不会静默执行。`
+        ? `当前会话已加载的审批模式：${settings.effectiveMode}。ask 询问用户；auto 由模型判断，危险拒绝、不确定询问；yolo 跳过审核，但不能使用已禁用工具。保存选择后需在会话空闲时执行 /reload 才生效。`
         : '正在读取会话审批模式'
     const unavailable = disabled || loading || saving || !settings
     const label = saving ? '保存中…' : loading ? '加载中…' : !settings ? '授权不可用'
@@ -95,6 +101,7 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
             </button>)}
         </div>}
         {saving && <span role="status" className="composer-approval-status">保存中…</span>}
+        {!saving && pending && <span role="status" className="composer-approval-status">已保存，/reload 后生效</span>}
         {error && <span role="alert" className="composer-approval-error">
             <span>{error}</span>
             <button type="button" disabled={disabled || loading || saving} onClick={() => setRetry((value) => value + 1)}>重新读取</button>

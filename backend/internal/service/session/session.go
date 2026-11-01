@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	agentexecution "praxis/internal/core/agent/execution"
+	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
@@ -13,16 +14,18 @@ import (
 	"slices"
 )
 
-// Session 将短读写交给单个接纳协程；完整数据只由 model 持有，没有另一份历史投影。
+// Session 将短读写交给单个接纳协程；完整数据只由 data 持有，没有另一份历史投影。
 // 页面与执行可并发提交操作，模型请求、工具执行和 Hook 均不在接纳协程内运行。
 type Session struct {
-	model      *sessionmodel.Session
-	log        repository.SessionLog
-	operations chan func()
-	stop       chan struct{}
-	done       chan struct{}
-	fault      error
-	failed     chan struct{}
+	config         *Configuration
+	modelSelection sessionmodel.ModelSelection
+	data           *sessionmodel.Data
+	log            repository.SessionLog
+	operations     chan func()
+	stop           chan struct{}
+	done           chan struct{}
+	fault          error
+	failed         chan struct{}
 }
 
 func (s *Session) serve() {
@@ -93,8 +96,14 @@ func (s *Service) openSession(ctx context.Context, id identity.SessionID) (*Sess
 	if err != nil {
 		return nil, err
 	}
+	config, err := s.loadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
 	owner := &Session{
-		model:      sessionmodel.Open(info.ID),
+		config:     config,
+		data:       sessionmodel.Open(info.ID),
 		log:        s.log,
 		operations: make(chan func()),
 		stop:       make(chan struct{}),
@@ -108,11 +117,11 @@ func (s *Service) openSession(ctx context.Context, id identity.SessionID) (*Sess
 			go owner.serve()
 		}
 	}()
-	replay := logReplay{session: owner.model, callIndexes: make(map[sessionentry.Key]int)}
+	replay := logReplay{session: owner.data, callIndexes: make(map[sessionentry.Key]int)}
 	if err := owner.log.Read(ctx, id, replay.apply); err != nil {
 		return nil, err
 	}
-	if len(owner.model.Branches) == 0 {
+	if len(owner.data.Branches) == 0 {
 		branch := sessionmodel.Branch{
 			ID:        identity.BranchID(s.ids.New("branch")),
 			Name:      "main",
@@ -127,7 +136,7 @@ func (s *Service) openSession(ctx context.Context, id identity.SessionID) (*Sess
 	if err := replay.repairToolResults(ctx, owner, info.State); err != nil {
 		return nil, err
 	}
-	for _, record := range slices.Clone(owner.model.Executions) {
+	for _, record := range slices.Clone(owner.data.Executions) {
 		if !record.Active() {
 			continue
 		}
@@ -157,7 +166,7 @@ func (s *Session) appendEvent(ctx context.Context, typ, collection, key string, 
 	if err != nil {
 		return err
 	}
-	if err := s.log.Append(ctx, s.model.ID, data); err != nil {
+	if err := s.log.Append(ctx, s.data.ID, data); err != nil {
 		if errors.Is(err, errorcode.ErrLogUnavailable) {
 			s.fault = fmt.Errorf("session log is unavailable until application restart: %w", err)
 			close(s.failed)

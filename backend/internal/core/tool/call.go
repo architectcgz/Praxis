@@ -24,12 +24,11 @@ type PathArguments interface {
 	PathArgument() *string
 }
 
-// PreparedCall 绑定本次已准备的参数、待匹配命令和实际调用，不保存共享工具状态。
+// PreparedCall 绑定本次已准备的参数和实际调用，不保存共享工具状态。
 // Arguments 必须可被 JSON 序列化，与 Call 捕获的参数一致且在准备后保持只读，仅供审批和 Hook 使用。
-// Command 为空表示不匹配命令规则；Call 必须非 nil，只能在授权通过后执行，不重新解码或准备参数。
+// Call 必须非 nil，只能在授权通过后执行，不重新解码或准备参数。
 type PreparedCall struct {
 	Arguments any
-	Command   string
 	Call      func(context.Context) (ToolResult, error)
 }
 

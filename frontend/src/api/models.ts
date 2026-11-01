@@ -1,4 +1,5 @@
-import { getModelBinding } from './bindings'
+import { Events } from '@wailsio/runtime'
+import { getModelBinding, getSessionBinding, isBindingAvailable } from './bindings'
 
 export type ModelOption = {
     providerId: string
@@ -49,12 +50,19 @@ export type ModelConfigDocument = {
     models: ModelConfigOption[]
 }
 
-export function listModels() {
-    return getModelBinding().ListModels().then(normalizeModelCatalog)
+export function listModels(sessionID: string) {
+    return getSessionBinding().ListModels(sessionID).then(normalizeModelCatalog)
 }
 
-export function reloadConfig() {
-    return getModelBinding().ReloadConfig()
+export function reloadConfig(sessionID: string) {
+    return getSessionBinding().ReloadConfig(sessionID)
+}
+
+export function subscribeSessionConfigReloaded(listener: (sessionID: string) => void) {
+    if (!isBindingAvailable()) return () => { }
+    return Events.On('praxis:session-config-reloaded', (event) => {
+        if (typeof event.data === 'string') listener(event.data)
+    })
 }
 
 export function getModelConfig() {

@@ -9,9 +9,9 @@ import (
 	"slices"
 )
 
-// Session 拥有完整会话数据；分支选择和输入队列属于页面绑定。
+// Data 拥有完整会话数据；分支选择和输入队列属于页面绑定。
 // 同一会话的读取和变更由接纳入口顺序执行；发布后的 Entry 及内部载荷不再修改。
-type Session struct {
+type Data struct {
 	ID           identity.SessionID
 	Entries      []*sessionentry.ContextEntry
 	Branches     []Branch
@@ -22,16 +22,16 @@ type Session struct {
 	entryIndexes map[string]int
 }
 
-func Open(id identity.SessionID) *Session {
-	return &Session{
+func Open(id identity.SessionID) *Data {
+	return &Data{
 		ID:           id,
 		entryIndexes: make(map[string]int),
 	}
 }
 
-func (s *Session) MainAgentID() identity.AgentID { return identity.AgentID(s.ID) }
+func (s *Data) MainAgentID() identity.AgentID { return identity.AgentID(s.ID) }
 
-func (s *Session) Entry(id string) (*sessionentry.ContextEntry, bool) {
+func (s *Data) Entry(id string) (*sessionentry.ContextEntry, bool) {
 	index, found := s.entryIndexes[id]
 	if !found {
 		return nil, false
@@ -40,7 +40,7 @@ func (s *Session) Entry(id string) (*sessionentry.ContextEntry, bool) {
 }
 
 // AcceptEntry 只接收已经确认归属并成功提交的完整 Entry，不保存模型请求的精简副本。
-func (s *Session) AcceptEntry(entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
+func (s *Data) AcceptEntry(entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
 	stored := new(entry)
 	s.Entries = append(s.Entries, stored)
 	s.entryIndexes[entry.ID] = len(s.Entries) - 1
@@ -50,7 +50,7 @@ func (s *Session) AcceptEntry(entry sessionentry.ContextEntry) *sessionentry.Con
 	return stored
 }
 
-func (s *Session) Branch(id identity.BranchID) *Branch {
+func (s *Data) Branch(id identity.BranchID) *Branch {
 	for index := range s.Branches {
 		if s.Branches[index].ID == id {
 			return &s.Branches[index]
@@ -59,7 +59,7 @@ func (s *Session) Branch(id identity.BranchID) *Branch {
 	return nil
 }
 
-func (s *Session) BranchByRequest(requestID string) *Branch {
+func (s *Data) BranchByRequest(requestID string) *Branch {
 	for index := range s.Branches {
 		if s.Branches[index].RequestID == requestID {
 			return &s.Branches[index]
@@ -68,13 +68,13 @@ func (s *Session) BranchByRequest(requestID string) *Branch {
 	return nil
 }
 
-func (s *Session) AcceptBranch(branch Branch) {
+func (s *Data) AcceptBranch(branch Branch) {
 	s.Branches = append(s.Branches, branch)
 	s.RecentBranch = branch.ID
 }
 
 // Path 按父节点回溯当前路径，共同祖先不需要复制到各分支。
-func (s *Session) Path(head string) []*sessionentry.ContextEntry {
+func (s *Data) Path(head string) []*sessionentry.ContextEntry {
 	entries := make([]*sessionentry.ContextEntry, 0)
 	for head != "" {
 		entry, found := s.Entry(head)
@@ -88,7 +88,7 @@ func (s *Session) Path(head string) []*sessionentry.ContextEntry {
 	return entries
 }
 
-func (s *Session) Safe(head string) bool {
+func (s *Data) Safe(head string) bool {
 	pending := make(map[sessionentry.Key]bool)
 	for _, entry := range s.Path(head) {
 		for _, block := range entry.Content {
@@ -107,11 +107,11 @@ func (s *Session) Safe(head string) bool {
 	return len(pending) == 0
 }
 
-func (s *Session) ExecutionIndex(id identity.AgentExecutionID) int {
+func (s *Data) ExecutionIndex(id identity.AgentExecutionID) int {
 	return slices.IndexFunc(s.Executions, func(value execution.ExecutionRecord) bool { return value.ID == id })
 }
 
-func (s *Session) SetExecution(value execution.ExecutionRecord) {
+func (s *Data) SetExecution(value execution.ExecutionRecord) {
 	if index := s.ExecutionIndex(value.ID); index >= 0 {
 		s.Executions[index] = value
 	} else {
@@ -119,7 +119,7 @@ func (s *Session) SetExecution(value execution.ExecutionRecord) {
 	}
 }
 
-func (s *Session) SetUsage(value providerapi.UsageRecord) {
+func (s *Data) SetUsage(value providerapi.UsageRecord) {
 	index := slices.IndexFunc(s.Usage, func(prior providerapi.UsageRecord) bool { return prior.Key() == value.Key() })
 	if index >= 0 {
 		s.Usage[index] = value
@@ -128,7 +128,7 @@ func (s *Session) SetUsage(value providerapi.UsageRecord) {
 	}
 }
 
-func (s *Session) SetTiming(value timing.Record) {
+func (s *Data) SetTiming(value timing.Record) {
 	index := slices.IndexFunc(s.Timings, func(prior timing.Record) bool { return prior.ExecutionID == value.ExecutionID && prior.ID == value.ID })
 	if index >= 0 {
 		s.Timings[index] = value

@@ -52,6 +52,9 @@ func (b *Bindings) All() []application.Service {
 func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	var data any
 	switch payload := event.Payload.(type) {
+	case coreevent.SessionConfigReloaded:
+		b.host.EmitEvent("praxis:session-config-reloaded", event.Scope.SessionID.String())
+		return
 	case coreevent.EntriesAppended:
 		data = dto.AgentEntriesAppended{
 			Entries:   publicEntries(payload.Entries),

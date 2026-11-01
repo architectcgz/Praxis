@@ -21,6 +21,13 @@ func (r *Coordinator) run(
 	active *activeExecution,
 ) {
 	task := run.Snapshot()
+	runner := *r.loop
+	if runner.Provider == nil {
+		runner.Provider = active.config.Provider
+	}
+	if runner.Tools == nil {
+		runner.Tools = active.config.Tools
+	}
 	r.logEvent(task.ID, "task started")
 	if err := r.startExecution(run, ""); err != nil {
 		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
@@ -31,7 +38,7 @@ func (r *Coordinator) run(
 		// 完成证据优先于迟到的取消；这里只允许补做摘要，不能重跑用户任务。
 		input, deps, _, err := r.operations.PrepareLoop(ctx, run)
 		if err == nil {
-			err = r.loop.Compact(ctx, input, deps)
+			err = runner.Compact(ctx, input, deps)
 		}
 		if err != nil {
 			r.logError(task, "compact completed context", err)
@@ -61,10 +68,10 @@ func (r *Coordinator) run(
 		r.endExecution(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForExecution(run, project.Path, func(waitCtx context.Context) error {
+	executor := r.tools.ForExecution(run, project.Path, active.config.Tools, active.config.ApprovalMode, runner.Provider, func(waitCtx context.Context) error {
 		return r.waitForToolApproval(waitCtx, active)
 	})
-	outcome, failureCode, failureMessage := r.execute(ctx, run, executor)
+	outcome, failureCode, failureMessage := r.execute(ctx, run, executor, &runner)
 	if r.endExecution(task, active, outcome, failureCode, failureMessage) {
 		r.logEvent(task.ID, "task ended")
 	}
@@ -107,6 +114,7 @@ func (r *Coordinator) execute(
 	ctx context.Context,
 	run *agentexecution.Run,
 	executor loop.ToolExecutor,
+	runner *loop.Runner,
 ) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
 	task := run.Snapshot()
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
@@ -120,8 +128,8 @@ func (r *Coordinator) execute(
 	if err == nil {
 		if !completed {
 			deps.ToolExecutor = executor
-			_, err = r.loop.Run(ctx, executionInput, deps)
-		} else if compressionErr := r.loop.Compact(ctx, executionInput, deps); compressionErr != nil {
+			_, err = runner.Run(ctx, executionInput, deps)
+		} else if compressionErr := runner.Compact(ctx, executionInput, deps); compressionErr != nil {
 			// 重复准入只允许补做摘要，不能重跑已完成的模型和工具任务。
 			r.logError(task, "compact completed context", compressionErr)
 		}

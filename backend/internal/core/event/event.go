@@ -11,20 +11,21 @@ import (
 type Kind string
 
 const (
-	KindEntriesAppended      Kind = "entries_appended"
-	KindTurnStarted          Kind = "turn_started"
-	KindProviderWaiting      Kind = "provider_waiting"
-	KindTextDelta            Kind = "text_delta"
-	KindThinkingDelta        Kind = "thinking_delta"
-	KindToolCall             Kind = "tool_call"
-	KindToolApprovalRequired Kind = "tool_approval_required"
-	KindToolResult           Kind = "tool_result"
-	KindTurnCompleted        Kind = "turn_completed"
-	KindModelUsage           Kind = "model_usage"
-	KindExecutionEnded       Kind = "execution_ended"
-	KindRequestCanceled      Kind = "request_canceled"
-	KindOperationTiming      Kind = "operation_timing"
-	KindError                Kind = "error"
+	KindSessionConfigReloaded Kind = "session_config_reloaded"
+	KindEntriesAppended       Kind = "entries_appended"
+	KindTurnStarted           Kind = "turn_started"
+	KindProviderWaiting       Kind = "provider_waiting"
+	KindTextDelta             Kind = "text_delta"
+	KindThinkingDelta         Kind = "thinking_delta"
+	KindToolCall              Kind = "tool_call"
+	KindToolApprovalRequired  Kind = "tool_approval_required"
+	KindToolResult            Kind = "tool_result"
+	KindTurnCompleted         Kind = "turn_completed"
+	KindModelUsage            Kind = "model_usage"
+	KindExecutionEnded        Kind = "execution_ended"
+	KindRequestCanceled       Kind = "request_canceled"
+	KindOperationTiming       Kind = "operation_timing"
+	KindError                 Kind = "error"
 )
 
 // Scope 标识事件所属的会话、Agent、执行和模型轮次；不适用的标识留空。
@@ -60,6 +61,11 @@ type EntriesAppended struct {
 
 func (EntriesAppended) Kind() Kind { return KindEntriesAppended }
 func (EntriesAppended) isPayload() {}
+
+type SessionConfigReloaded struct{}
+
+func (SessionConfigReloaded) Kind() Kind { return KindSessionConfigReloaded }
+func (SessionConfigReloaded) isPayload() {}
 
 type TurnStarted struct{}
 

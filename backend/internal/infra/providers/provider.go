@@ -13,7 +13,7 @@ import (
 	"sync"
 )
 
-// Credentials 在请求发起时读取当前凭据，不改变请求中已经冻结的模型配置。
+// Credentials 提供会话已冻结的凭据，不读取运行期间的配置编辑状态。
 type Credentials interface {
 	ProviderKey(string) string
 }
@@ -23,7 +23,7 @@ type Dependencies struct {
 	HTTPClient  *http.Client
 }
 
-// Provider 可由多次执行并发复用；只共享凭据来源和 HTTP 连接，不保存请求或解码状态。
+// Provider 在同一会话内并发复用；只共享固定凭据和 HTTP 连接，不保存请求或解码状态。
 type Provider struct {
 	credentials Credentials
 	client      *http.Client

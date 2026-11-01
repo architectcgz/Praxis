@@ -52,7 +52,6 @@ type Reviewer struct {
 		RecordModelRequest(context.Context, *agentexecution.Run, uint64, bool) error
 		RecordModelOutput(context.Context, *agentexecution.Run, int) error
 	}
-	Provider       providerapi.Provider
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
 }
@@ -160,7 +159,7 @@ func (t *ExecutionTools) review(ctx context.Context, call sessionentry.ToolCall,
 		ReferenceID: "risk-review:" + review.TurnID.String(),
 	})
 	defer func() { span.End(timing.ResultStatus(ctx, err)) }()
-	stream, err := r.Provider.Stream(ctx, providerapi.Request{
+	stream, err := t.provider.Stream(ctx, providerapi.Request{
 		ExecutionID:     call.ExecutionID,
 		PromptCacheKey:  call.SessionID.String(),
 		Context:         reviewContext,

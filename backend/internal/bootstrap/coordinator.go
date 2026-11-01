@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"net/http"
 	"os"
 	"path/filepath"
 	"praxis/internal/clock"
@@ -11,17 +10,14 @@ import (
 	providerapi "praxis/internal/core/provider"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
-	"praxis/internal/infra/providers"
 	tooloutput "praxis/internal/infra/tools/output"
 	executionservice "praxis/internal/service/agent/execution"
 	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
-	toolservice "praxis/internal/service/toolexecution"
-	"sync"
 	"time"
 )
 
-func buildCoordinator(resources storageResources, config *configuration, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, configMu *sync.RWMutex, customRunner *loop.Runner) *execution.Coordinator {
+func buildCoordinator(resources storageResources, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *execution.Coordinator {
 	tasks := executionservice.NewService(executionservice.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
@@ -29,15 +25,9 @@ func buildCoordinator(resources storageResources, config *configuration, session
 		Sessions:       resources.storage.Sessions,
 		Records:        sessions,
 		UsageRecords:   sessions,
-		Definitions:    config.agents,
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
 	})
-	provider := providers.New(providers.Dependencies{
-		Credentials: config.models,
-		HTTPClient:  http.DefaultClient,
-	})
-
 	// 先登记用量保存，再接入前端订阅，确保通知时用量已完成记录。
 	emitter.Subscribe(func(value coreevent.Event) {
 		if payload, ok := value.Payload.(coreevent.ModelUsage); ok {
@@ -56,17 +46,10 @@ func buildCoordinator(resources storageResources, config *configuration, session
 
 	reviewer := &executionmodel.Reviewer{
 		Progress:       tasks,
-		Provider:       provider,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 	}
-	operations := toolservice.NewService(toolservice.Dependencies{
-		ApprovalConfig: config,
-		Sessions:       resources.storage.Sessions,
-	})
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
-		Catalog:        config.tools,
-		Operations:     operations,
 		Reviewer:       reviewer,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
@@ -76,8 +59,6 @@ func buildCoordinator(resources storageResources, config *configuration, session
 	})
 
 	runnerDeps := loop.Dependencies{
-		Provider:       provider,
-		Tools:          config.tools,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 		Logf:           resources.logger.Infof,
@@ -85,7 +66,7 @@ func buildCoordinator(resources storageResources, config *configuration, session
 	if customRunner != nil {
 		runnerDeps = customRunner.Dependencies
 	}
-	// 可选执行器的默认依赖统一在装配入口确定，业务构造器不再补齐。
+	// 日志等共享能力在装配入口补齐，Provider 和工具目录在执行开始时绑定会话快照。
 	if runnerDeps.Logf == nil {
 		runnerDeps.Logf = func(string, ...any) {}
 	}
@@ -99,7 +80,6 @@ func buildCoordinator(resources storageResources, config *configuration, session
 		Sessions:          sessions,
 		HookDispatcher:    hooks,
 		Logger:            resources.logger,
-		ConfigMu:          configMu,
 		Tools:             executor,
 		SessionRecords:    resources.storage.Sessions,
 		Projects:          resources.storage.Projects,

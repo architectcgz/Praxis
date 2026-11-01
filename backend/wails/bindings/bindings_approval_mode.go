@@ -25,7 +25,7 @@ func (b *SessionBindings) GetSessionApprovalMode(sessionID string) (dto.SessionA
 	return approvalModeDTO(value), nil
 }
 
-// SetSessionApprovalMode 保存会话授权选择；null 恢复继承，不影响已经开始的工具授权。
+// SetSessionApprovalMode 保存会话授权选择；null 恢复继承，有效模式在会话显式 reload 后更新。
 func (b *SessionBindings) SetSessionApprovalMode(wire dto.SetSessionApprovalModeRequest) (dto.SessionApprovalMode, error) {
 	if wire.Mode != nil {
 		wire.Mode = new(strings.TrimSpace(*wire.Mode))

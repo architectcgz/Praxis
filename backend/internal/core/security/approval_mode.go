@@ -10,12 +10,12 @@ const (
 	ApprovalDeny ApprovalMode = "deny"
 )
 
-// Valid 校验规则动作，不接受旧的 allow。
+// Valid 校验审批动作，包括工具禁用时的 deny。
 func (m ApprovalMode) Valid() bool {
 	return m == ApprovalAsk || m == ApprovalAuto || m == ApprovalYolo || m == ApprovalDeny
 }
 
-// ValidDefault 校验全局或会话默认动作；deny 只用于明确禁止的规则。
+// ValidDefault 校验全局或会话默认动作；deny 用于工具禁用决定。
 func (m ApprovalMode) ValidDefault() bool { return m.Valid() && m != ApprovalDeny }
 
 // EffectiveApprovalMode 优先采用会话覆盖，nil 表示继承全局默认动作。
@@ -32,16 +32,10 @@ type ApprovalDecision struct {
 	RuleID string
 }
 
-// ResolveApprovalDecision 按硬性 deny、统一 yolo、具体规则、默认动作的顺序决策。
-func ResolveApprovalDecision(mode ApprovalMode, matched ApprovalDecision) ApprovalDecision {
-	if matched.Action == ApprovalDeny {
-		return matched
-	}
+// ResolveApprovalDecision 将有效审批模式转换为本次操作的决定。
+func ResolveApprovalDecision(mode ApprovalMode) ApprovalDecision {
 	if mode == ApprovalYolo {
 		return ApprovalDecision{Action: ApprovalYolo, RuleID: "yolo"}
-	}
-	if matched.Action != "" {
-		return matched
 	}
 	return ApprovalDecision{Action: mode, RuleID: "default"}
 }

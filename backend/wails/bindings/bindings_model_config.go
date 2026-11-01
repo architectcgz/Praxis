@@ -133,15 +133,3 @@ func (b *ModelBindings) ListProviderModels(providerID string) ([]string, error) 
 	}
 	return append([]string{}, models...), nil
 }
-
-// ReloadConfig 从磁盘重新读取配置；失败时保留当前运行时配置。
-func (b *ModelBindings) ReloadConfig() error {
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return err
-	}
-	if err := services.ModelConfig.ReloadConfig(ctx); err != nil {
-		return publicError(b.host, "ModelBindings.ReloadConfig", err)
-	}
-	return nil
-}

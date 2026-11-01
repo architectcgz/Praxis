@@ -3,13 +3,11 @@ package modelregistry
 import (
 	"fmt"
 	"net/http"
-	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers/httpclient"
-	"slices"
 )
 
-// Load 读取并校验模型配置与凭证文件，然后构造运行时注册表。
+// Load 读取并校验模型配置与凭据文件，然后构造管理端注册表。
 func Load(modelsPath, credentialsPath string, client *http.Client) (*Registry, error) {
 	config, err := readModelConfigFile(modelsPath)
 	if err != nil {
@@ -41,7 +39,6 @@ func newRegistry(
 	if err != nil {
 		return nil, err
 	}
-	providersByID, modelConfigs := buildIndexes(config.Providers)
 	return &Registry{
 		modelsPath:      modelsPath,
 		credentialsPath: credentialsPath,
@@ -49,8 +46,7 @@ func newRegistry(
 		credentials:     credentials,
 		client:          client,
 		providerClients: providerClients,
-		modelConfigs:    modelConfigs,
-		providersByID:   providersByID,
+		providersByID:   indexProviders(config.Providers),
 	}, nil
 }
 
@@ -66,27 +62,10 @@ func buildProviderClients(providers []modelconfig.Provider, base *http.Client) (
 	return clients, nil
 }
 
-// buildIndexes 在配置发布前建立查询索引和完整的执行配置，运行期不再逐字段组装。
-func buildIndexes(providers []modelconfig.Provider) (map[string]modelconfig.Provider, map[modelKey]modelapi.Config) {
-	providersByID := make(map[string]modelconfig.Provider, len(providers))
-	modelConfigs := make(map[modelKey]modelapi.Config)
+func indexProviders(providers []modelconfig.Provider) map[string]modelconfig.Provider {
+	indexed := make(map[string]modelconfig.Provider, len(providers))
 	for _, provider := range providers {
-		providersByID[provider.ID] = provider
-		for _, model := range provider.Models {
-			key := modelKey{ProviderID: provider.ID, ModelID: model.ID}
-			modelConfigs[key] = modelapi.Config{
-				ProviderID:      provider.ID,
-				ModelID:         model.ID,
-				ReasoningLevel:  model.DefaultReasoningLevel,
-				ReasoningLevels: slices.Clone(model.ReasoningLevels),
-				Thinking:        model.Thinking,
-				APIFormat:       string(model.APIFormat),
-				ContextWindow:   model.ContextWindow,
-				MaxOutputTokens: model.MaxOutputTokens,
-				BaseURL:         provider.BaseURL,
-				ProxyURL:        provider.ProxyURL,
-			}
-		}
+		indexed[provider.ID] = provider
 	}
-	return providersByID, modelConfigs
+	return indexed
 }

@@ -4,7 +4,7 @@ import { apiErrorCode, readableError } from '../../shared/errors'
 
 export const WORKSPACE_COMMANDS = [
     { name: '/new', description: '在当前项目中新建会话' },
-    { name: '/reload', description: '重新加载 Praxis 配置' },
+    { name: '/reload', description: '重新加载当前会话配置，需先结束执行' },
     { name: '/branch', description: '从当前位置创建并切换分支，可附名称' },
     { name: '/switch', description: '选择分支，可附分支名称' },
     { name: '/tree', description: '浏览历史树，从历史位置独立继续' },
@@ -75,11 +75,12 @@ export function useWorkspaceCommands({ createBranch, switchBranch, showBranches,
                     if (isCurrentView()) setInput('')
                     return true
                 }
-                await reloadConfig()
+                await reloadConfig(session.id)
+                if (!isCurrentView()) return true
                 await Promise.all([refreshCatalog(true, true), refreshModels()])
                 if (isCurrentView()) {
                     setInput('')
-                    setCommandNotice('Praxis 配置已重新加载')
+                    setCommandNotice('当前会话配置已重新加载，其他会话保持不变')
                 }
                 return true
             } catch (err) {

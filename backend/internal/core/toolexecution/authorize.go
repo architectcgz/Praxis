@@ -24,14 +24,11 @@ type authorizationResult struct {
 	review  bool
 }
 
-// authorize 完整调度规则判断、模型审核和人工审批，只向工具执行层返回最终授权结果。
-// args 由执行流程冻结；规则只读取一次，审批唤醒后不重新匹配，审批与审核共享只读参数。
-func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, command string, operationID string) (*tool.ToolResult, error) {
+// authorize 使用会话已冻结的审批模式调度模型审核和人工审批。
+// args 由执行流程冻结；授权过程中不读取全局配置，审批与审核共享只读参数。
+func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string) (*tool.ToolResult, error) {
 	e := t.executor
-	decision, err := e.deps.Operations.DecideRule(ctx, call, command)
-	if err != nil {
-		return nil, err
-	}
+	decision := security.ResolveApprovalDecision(t.mode)
 	for {
 		e.mu.Lock()
 		if err := e.checkUnfinished(ctx, call); err != nil {
@@ -136,7 +133,7 @@ func (e *Executor) evaluate(callState *callState, decision security.ApprovalDeci
 		return authorizationResult{denied: &result}
 	}
 	if decision.Action == security.ApprovalDeny {
-		return deny("tool_not_allowed", "The operation is prohibited by rule: "+decision.RuleID), nil
+		return deny("tool_not_allowed", "The requested tool is disabled or unregistered."), nil
 	}
 	if callState.decision != nil {
 		if !callState.decision.Approved {

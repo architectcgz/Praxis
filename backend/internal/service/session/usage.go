@@ -31,8 +31,8 @@ func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.Sessi
 		return nil, err
 	}
 	err = owner.use(ctx, func() error {
-		values = make([]providerapi.UsageRecord, 0, len(owner.model.Usage))
-		for _, value := range owner.model.Usage {
+		values = make([]providerapi.UsageRecord, 0, len(owner.data.Usage))
+		for _, value := range owner.data.Usage {
 			values = append(values, cloneUsage(value))
 		}
 		values = sorted(values, func(a, b providerapi.UsageRecord) int { return cmp.Compare(a.Key(), b.Key()) })
@@ -86,19 +86,19 @@ func (s *Service) SaveUsage(ctx context.Context, record providerapi.UsageRecord)
 		return err
 	}
 	return owner.use(ctx, func() error {
-		if err := validateUsage(owner.model, record); err != nil {
+		if err := validateUsage(owner.data, record); err != nil {
 			return err
 		}
 		record = cloneUsage(record)
 		if err := owner.appendEvent(ctx, "usage.saved", "usage", record.Key(), record); err != nil {
 			return err
 		}
-		owner.model.SetUsage(record)
+		owner.data.SetUsage(record)
 		return nil
 	})
 }
 
-func validateUsage(owner *sessionmodel.Session, record providerapi.UsageRecord) error {
+func validateUsage(owner *sessionmodel.Data, record providerapi.UsageRecord) error {
 	index := owner.ExecutionIndex(identity.AgentExecutionID(record.ExecutionID))
 	if index < 0 {
 		return errorcode.ErrNotFound

@@ -14,11 +14,10 @@ import (
 
 // builtinTool 只连接 Core 参数规则与 Infra 执行能力，不决定默认值或业务策略。
 type builtinTool[Arguments any] struct {
-	definition      func() tool.ToolDefinition
-	arguments       func() Arguments
-	prepare         func(Arguments) (Arguments, error)
-	call            func(context.Context, Arguments, tool.Environment) (tool.ToolResult, error)
-	approvalCommand func(Arguments) string
+	definition func() tool.ToolDefinition
+	arguments  func() Arguments
+	prepare    func(Arguments) (Arguments, error)
+	call       func(context.Context, Arguments, tool.Environment) (tool.ToolResult, error)
 }
 
 func (t builtinTool[Arguments]) Definition() tool.ToolDefinition { return t.definition() }
@@ -34,13 +33,8 @@ func (t builtinTool[Arguments]) Prepare(arguments any, environment tool.Environm
 	if err != nil {
 		return tool.PreparedCall{}, err
 	}
-	command := ""
-	if t.approvalCommand != nil {
-		command = t.approvalCommand(prepared)
-	}
 	return tool.PreparedCall{
 		Arguments: prepared,
-		Command:   command,
 		// 本次参数和文件访问范围随调用存续，不回写注册表中的共享工具。
 		Call: func(ctx context.Context) (tool.ToolResult, error) {
 			return t.call(ctx, prepared, environment)
@@ -58,11 +52,10 @@ func buildToolRegistry(extensions []tool.Tool) (*tool.ToolRegistry, error) {
 			call:       readinfra.Call,
 		},
 		builtinTool[bash.Arguments]{
-			definition:      bash.Definition,
-			arguments:       bash.NewArguments,
-			prepare:         bash.Prepare,
-			call:            bashinfra.Call,
-			approvalCommand: func(args bash.Arguments) string { return args.Command },
+			definition: bash.Definition,
+			arguments:  bash.NewArguments,
+			prepare:    bash.Prepare,
+			call:       bashinfra.Call,
 		},
 		builtinTool[applypatch.Arguments]{
 			definition: applypatch.Definition,

@@ -7,6 +7,7 @@ import (
 	agentexecution "praxis/internal/core/agent/execution"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
+	sessionservice "praxis/internal/service/session"
 )
 
 // scheduleBinding 在同一登记边界领取队首并交接 Session 所有权，模型和工具不持登记锁。
@@ -53,22 +54,25 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ke
 		close(active.ready)
 		active.cancel(nil)
 	}()
-	run, err := r.prepareNext(prepareCtx, input, key.agentID, binding)
+	run, config, err := r.prepareNext(prepareCtx, input, key.agentID, binding)
 	if err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	binding.queue.Complete(input)
+	active.config = config
 	return r.launchLocked(run, active)
 }
-func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID, binding *sessionBinding) (*agentexecution.Run, error) {
-	r.configMu.RLock()
-	defer r.configMu.RUnlock()
-	model, err := r.sessions.CurrentModelConfig(ctx, input.SessionID)
+func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID, binding *sessionBinding) (*agentexecution.Run, *sessionservice.Configuration, error) {
+	config, model, err := r.sessions.ExecutionConfiguration(ctx, input.SessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	run, _, err := r.operations.PrepareTask(ctx, input, ownerID, agentmodel.DefinitionPrimary, model, binding.session, binding.id)
-	return run, err
+	definition, err := config.Definition(agentmodel.DefinitionPrimary)
+	if err != nil {
+		return nil, nil, err
+	}
+	run, _, err := r.operations.PrepareTask(ctx, input, ownerID, definition, model, binding.session, binding.id)
+	return run, config, err
 }

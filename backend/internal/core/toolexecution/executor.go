@@ -12,6 +12,8 @@ import (
 	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
+	providerapi "praxis/internal/core/provider"
+	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
@@ -21,8 +23,6 @@ import (
 )
 
 type ExecutorDependencies struct {
-	Catalog        tool.ToolCatalog
-	Operations     Operations
 	Reviewer       *Reviewer
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
@@ -64,6 +64,9 @@ type ExecutionTools struct {
 	run           *agentexecution.Run
 	executor      *Executor
 	projectPath   string
+	catalog       tool.ToolCatalog
+	mode          security.ApprovalMode
+	provider      providerapi.Provider
 	awaitApproval func(context.Context) error
 }
 
@@ -76,11 +79,14 @@ type CallResult struct {
 	Err         error
 }
 
-func (e *Executor) ForExecution(run *agentexecution.Run, projectPath string, awaitApproval func(context.Context) error) *ExecutionTools {
+func (e *Executor) ForExecution(run *agentexecution.Run, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, awaitApproval func(context.Context) error) *ExecutionTools {
 	return &ExecutionTools{
 		executor:      e,
 		run:           run,
 		projectPath:   projectPath,
+		catalog:       catalog,
+		mode:          mode,
+		provider:      provider,
 		awaitApproval: awaitApproval,
 	}
 }
@@ -103,7 +109,7 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 	if err := ctx.Err(); err != nil {
 		return callError("tool_interrupted", err.Error()), nil
 	}
-	t, ok := s.deps.Catalog.Get(call.Name)
+	t, ok := tools.catalog.Get(call.Name)
 	if !ok {
 		return callError("tool_not_allowed", "The requested tool is disabled or unregistered."), nil
 	}
@@ -167,7 +173,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 		if stored, found := tools.run.Result(call.Key); found {
 			return existingResult(stored), nil
 		}
-		denied, err := tools.authorize(ctx, call, args, prepared.Command, operationID)
+		denied, err := tools.authorize(ctx, call, args, operationID)
 		if errors.Is(err, errCallStopped) {
 			return callError("tool_interrupted", err.Error()), nil
 		}

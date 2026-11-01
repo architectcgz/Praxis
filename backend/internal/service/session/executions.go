@@ -19,11 +19,11 @@ func (s *Service) GetExecution(ctx context.Context, sessionID identity.SessionID
 		return record, err
 	}
 	err = owner.use(ctx, func() error {
-		index := owner.model.ExecutionIndex(id)
+		index := owner.data.ExecutionIndex(id)
 		if index < 0 {
 			return errorcode.ErrNotFound
 		}
-		record = cloneExecution(owner.model.Executions[index])
+		record = cloneExecution(owner.data.Executions[index])
 		return nil
 	})
 	return
@@ -43,7 +43,7 @@ func (s *Service) FindExecutionByRequest(ctx context.Context, agentID identity.A
 		return record, err
 	}
 	err = owner.use(ctx, func() error {
-		for _, value := range owner.model.Executions {
+		for _, value := range owner.data.Executions {
 			if value.AgentID == agentID && value.RequestID == request {
 				record = cloneExecution(value)
 				return nil
@@ -61,7 +61,7 @@ func (s *Service) ListAgentExecutions(ctx context.Context, agentID identity.Agen
 	}
 	err = owner.use(ctx, func() error {
 		values = make([]agentexecution.ExecutionRecord, 0)
-		for _, value := range owner.model.Executions {
+		for _, value := range owner.data.Executions {
 			if value.AgentID == agentID && value.BranchID == branchID {
 				values = append(values, cloneExecution(value))
 			}
@@ -73,7 +73,7 @@ func (s *Service) ListAgentExecutions(ctx context.Context, agentID identity.Agen
 }
 
 func (s *Session) saveExecution(ctx context.Context, value agentexecution.ExecutionRecord) error {
-	if err := validateExecutionOwnership(s.model, value); err != nil {
+	if err := validateExecutionOwnership(s.data, value); err != nil {
 		return err
 	}
 	value = cloneExecution(value)
@@ -83,11 +83,11 @@ func (s *Session) saveExecution(ctx context.Context, value agentexecution.Execut
 	if err := s.appendEvent(ctx, "agent_execution.saved", "agent_execution", value.ID.String(), value); err != nil {
 		return err
 	}
-	s.model.SetExecution(value)
+	s.data.SetExecution(value)
 	return nil
 }
 
-func validateExecutionOwnership(owner *sessionmodel.Session, value agentexecution.ExecutionRecord) error {
+func validateExecutionOwnership(owner *sessionmodel.Data, value agentexecution.ExecutionRecord) error {
 	if value.SessionID != owner.ID || value.AgentID != owner.MainAgentID() || owner.Branch(value.BranchID) == nil {
 		return errors.New("execution ownership does not match its session or branch")
 	}

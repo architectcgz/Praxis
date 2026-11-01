@@ -11,7 +11,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/httpclient"
 	"praxis/internal/infra/providers/streaming"
-	"slices"
 	"strings"
 )
 
@@ -114,19 +113,11 @@ func buildPayload(request providerapi.Request) ([]byte, error) {
 	if request.Model.Thinking.Mode != "" {
 		body.Thinking = &anthropicThinking{Type: request.Model.Thinking.Mode, BudgetTokens: request.Model.Thinking.BudgetTokens}
 	}
+	// 推理等级已在模型加载时校验并固定，此处只映射协议字段。
 	if reasoning := request.Model.ReasoningLevel; reasoning != "" {
-		if !slices.Contains(request.Model.ReasoningLevels, reasoning) {
-			return nil, errors.New("anthropic effort is not supported by frozen model capabilities")
-		}
 		if reasoning == "off" {
-			if !request.Model.Thinking.SupportsDisabled {
-				return nil, errors.New("anthropic model does not support disabled thinking")
-			}
 			body.Thinking = &anthropicThinking{Type: "disabled"}
 		} else {
-			if !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, reasoning) {
-				return nil, errors.New("unsupported anthropic effort")
-			}
 			body.OutputConfig = &anthropicOutputConfig{Effort: reasoning}
 		}
 	}

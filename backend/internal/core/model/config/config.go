@@ -60,14 +60,8 @@ type Option struct {
 	DefaultReasoningLevel string
 }
 
-// Catalog 读取已确认的模型能力。
-type Catalog interface {
-	ListModels() []Option
-}
-
 // ConfigManager 管理模型配置、Provider 凭据和模型发现，不暴露具体存储格式。
 type ConfigManager interface {
-	Catalog
 	Config() Config
 	// Save 保存输入边界已准备的配置，不再次规范化或修改配置内容。
 	Save(Config) error

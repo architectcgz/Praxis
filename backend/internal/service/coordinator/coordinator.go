@@ -18,7 +18,6 @@ import (
 )
 
 type Config struct {
-	ConfigMu          *sync.RWMutex
 	Tools             *executionmodel.Executor
 	Sessions          *sessionservice.Service
 	SessionRecords    repository.Session
@@ -32,7 +31,6 @@ type Config struct {
 
 // Coordinator 统一拥有队列调度、执行忙闲状态和取消句柄。
 type Coordinator struct {
-	configMu          *sync.RWMutex
 	tools             *executionmodel.Executor
 	sessions          *sessionservice.Service
 	sessionRecords    repository.Session
@@ -59,6 +57,7 @@ type activeExecution struct {
 	branchID    identity.BranchID
 	bindingID   string
 	run         *agentexecution.Run
+	config      *sessionservice.Configuration
 	executionID identity.AgentExecutionID
 	ctx         context.Context
 	cancel      context.CancelCauseFunc
@@ -82,7 +81,6 @@ func newActiveExecution(ctx context.Context, sessionID identity.SessionID) *acti
 
 func NewCoordinator(config Config) *Coordinator {
 	return &Coordinator{
-		configMu:          config.ConfigMu,
 		tools:             config.Tools,
 		sessions:          config.Sessions,
 		sessionRecords:    config.SessionRecords,

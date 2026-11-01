@@ -18,8 +18,7 @@ import (
 
 // Dependencies 包含 Session 用例、会话模型选择与上下文读写所需的依赖。
 type Dependencies struct {
-	ConfigMu       *sync.RWMutex
-	ModelConfigs   ModelConfigResolver
+	LoadConfig     func(context.Context) (*Configuration, error)
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
 	Sessions       repository.Session
@@ -30,17 +29,13 @@ type Dependencies struct {
 
 // Service 打开并登记会话；页面的分支选择与输入队列由 Coordinator 持有。
 type Service struct {
-	configMu       *sync.RWMutex
-	modelConfigs   ModelConfigResolver
+	loadConfig     func(context.Context) (*Configuration, error)
 	hookDispatcher *hook.Dispatcher
 	projects       repository.Project
 	sessions       repository.Session
 	log            repository.SessionLog
 	clock          clock.Clock
 	ids            identity.IDGenerator
-
-	selectionMu     sync.RWMutex
-	modelSelections map[identity.SessionID]sessionmodel.ModelSelection
 
 	// 注册表只保护会话的创建、查找和释放，不覆盖 Entry 操作。
 	openedMu sync.Mutex
@@ -64,9 +59,7 @@ type CreateResult struct {
 
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		configMu:        deps.ConfigMu,
-		modelConfigs:    deps.ModelConfigs,
-		modelSelections: make(map[identity.SessionID]sessionmodel.ModelSelection),
+		loadConfig:      deps.LoadConfig,
 		opened:          make(map[identity.SessionID]*Session),
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
@@ -94,8 +87,6 @@ func (s *Service) GetSessionInfo(ctx context.Context, sessionID identity.Session
 // CreateSession 保存元数据并建立空历史；重复请求复用会话，不创建运行实例。
 // OperationHook 在创建锁之外观察提交结果。
 func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result CreateResult, err error) {
-	s.configMu.RLock()
-	defer s.configMu.RUnlock()
 	ctx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
 			SessionID: params.SessionID,
@@ -170,8 +161,6 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 }
 
 func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
-	s.selectionMu.Lock()
-	defer s.selectionMu.Unlock()
 	s.openedMu.Lock()
 	defer s.openedMu.Unlock()
 	owner := s.opened[sessionID]
@@ -180,7 +169,7 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 			return nil
 		}
 		empty := false
-		if err := owner.use(ctx, func() error { empty = len(owner.model.Entries) == 0; return nil }); err != nil || !empty {
+		if err := owner.use(ctx, func() error { empty = len(owner.data.Entries) == 0; return nil }); err != nil || !empty {
 			return nil
 		}
 	}
@@ -191,7 +180,6 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 		owner.close()
 	}
 	delete(s.opened, sessionID)
-	delete(s.modelSelections, sessionID)
 	return nil
 }
 

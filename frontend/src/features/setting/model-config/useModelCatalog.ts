@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { listModels, type ModelOption } from '../../../api'
 import { hasModels } from './modelConfigHelpers'
 
-/** 模型目录独立加载，配置查询失败不影响项目和会话数据。 */
-export function useModelCatalog() {
+/** 读取当前会话已冻结的模型目录，保存全局配置不会更新这份目录。 */
+export function useModelCatalog(sessionID: string) {
     const [models, setModels] = useState<ModelOption[]>([])
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<unknown>()
@@ -13,7 +13,7 @@ export function useModelCatalog() {
         const current = ++request.current
         setLoading(true)
         try {
-            const values = await listModels()
+            const values = sessionID ? await listModels(sessionID) : []
             if (request.current !== current) return
             setModels(values)
             setError(undefined)
@@ -24,7 +24,7 @@ export function useModelCatalog() {
         } finally {
             if (request.current === current) setLoading(false)
         }
-    }, [])
+    }, [sessionID])
 
     const resetModels = useCallback(() => {
         request.current += 1
@@ -33,7 +33,10 @@ export function useModelCatalog() {
         setError(undefined)
     }, [])
 
-    useEffect(() => () => { request.current += 1 }, [])
+    useEffect(() => {
+        resetModels()
+        return () => { request.current += 1 }
+    }, [sessionID, resetModels])
 
     return { models, modelsConfigured: hasModels(models), loading, error, refreshModels, resetModels }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { API_ERROR_CODES, isBindingAvailable, subscribeAgentEvents, type ApiErrorCode, type SessionSnapshot } from '../../api'
+import { API_ERROR_CODES, isBindingAvailable, subscribeAgentEvents, subscribeSessionConfigReloaded, type ApiErrorCode, type SessionSnapshot } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 import { useAgentData } from '../agent/useAgentData'
 import { useProjectData } from '../project/useProjectData'
@@ -22,7 +22,7 @@ export function useWorkspaceData() {
         sessions, session, catalogLoading, sessionLoading, catalogError, sessionError,
         getSessions, refreshSessions, loadSession, refreshSummary, updateSessionTitle, clearSession, resetSessions, adoptSession, forgetSession,
     } = useSessionData()
-    const { models, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog()
+    const { models, loading: modelsLoading, error: modelsError, refreshModels, resetModels } = useModelCatalog(selectedSessionID)
     const { loadForSession, resetForSessionChange, ...agents } = useAgentData({ sessionID: selectedSessionID, models, setError, setErrorCode, viewRequestRef })
 
     useLayoutEffect(() => {
@@ -163,6 +163,11 @@ export function useWorkspaceData() {
             void refreshSession(false)
         }
     }), [refreshSummary, refreshSession, session?.id, session?.branch.id])
+
+    useEffect(() => subscribeSessionConfigReloaded((id) => {
+        if (id !== selectedSessionIDRef.current) return
+        void Promise.allSettled([refreshModels(), refreshSession(false)])
+    }), [refreshModels, refreshSession])
 
     const dataError = sessionError ?? catalogError ?? projectsError ?? modelsError
     return {

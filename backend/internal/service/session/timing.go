@@ -14,7 +14,7 @@ func (s *Service) AppendTiming(ctx context.Context, sessionID identity.SessionID
 		return err
 	}
 	return owner.use(ctx, func() error {
-		if owner.model.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {
+		if owner.data.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID)) < 0 {
 			return errorcode.ErrNotFound
 		}
 		kind := "agent_execution.timing_finished"
@@ -25,7 +25,7 @@ func (s *Service) AppendTiming(ctx context.Context, sessionID identity.SessionID
 		if err := owner.appendEvent(ctx, kind, "agent_execution_timing", timingKey(value.ExecutionID, value.ID), value); err != nil {
 			return err
 		}
-		owner.model.SetTiming(value)
+		owner.data.SetTiming(value)
 		return nil
 	})
 }
@@ -37,9 +37,9 @@ func (s *Service) ListAgentTimingRecords(ctx context.Context, agentID identity.A
 	}
 	err = owner.use(ctx, func() error {
 		records = make([]timing.Record, 0)
-		for _, value := range owner.model.Timings {
-			index := owner.model.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID))
-			if index >= 0 && owner.model.Executions[index].AgentID == agentID && owner.model.Executions[index].BranchID == branchID {
+		for _, value := range owner.data.Timings {
+			index := owner.data.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID))
+			if index >= 0 && owner.data.Executions[index].AgentID == agentID && owner.data.Executions[index].BranchID == branchID {
 				records = append(records, cloneTiming(value))
 			}
 		}

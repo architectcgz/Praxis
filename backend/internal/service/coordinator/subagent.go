@@ -33,6 +33,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	parentRun := parentActive.run
 	parentRecord := parentRun.Snapshot()
 	active := newActiveExecution(ctx, parentRecord.SessionID)
+	active.config = parentActive.config
 	active.branchID, active.bindingID = parentRecord.BranchID, parentActive.bindingID
 	key := executionKey{agentID, parentRecord.BranchID}
 	if s.executions[key] != nil {
@@ -51,7 +52,11 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		BranchID:  parentRecord.BranchID,
 		Prompt:    prompt,
 	}
-	run, _, err := s.operations.PrepareTask(active.ctx, task, agentID, definitionID, parentRecord.Config.Model, nil, parentActive.bindingID)
+	definition, err := active.config.Definition(definitionID)
+	var run *agentexecution.Run
+	if err == nil {
+		run, _, err = s.operations.PrepareTask(active.ctx, task, agentID, definition, parentRecord.Config.Model, nil, parentActive.bindingID)
+	}
 	if err != nil {
 		s.mu.Lock()
 		delete(s.executions, key)

@@ -56,6 +56,25 @@ func (r *Registry) SetProviderKey(providerID, value string) error {
 	return nil
 }
 
+// CredentialSnapshot 只保存本次加载的凭据，不读取后续编辑状态。
+type CredentialSnapshot struct {
+	keys map[string]string
+}
+
+func (r *Registry) Credentials() CredentialSnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	keys := make(map[string]string, len(r.config.Providers))
+	for _, provider := range r.config.Providers {
+		keys[provider.ID] = r.credentialKeyLocked(provider.ID)
+	}
+	return CredentialSnapshot{keys: keys}
+}
+
+func (s CredentialSnapshot) ProviderKey(providerID string) string {
+	return s.keys[providerID]
+}
+
 // ProviderKey 返回已配置 Provider 保存的 API 密钥。
 func (r *Registry) ProviderKey(providerID string) string {
 	r.mu.RLock()
@@ -72,7 +91,7 @@ func (r *Registry) HasProviderKey(providerID string) bool {
 }
 
 // credentialKeyLocked 解析 Provider 当前有效的 API 密钥。
-// 调用方必须持有 r.mu；仅允许运行时解析路径读取密钥。
+// 调用方必须持有 r.mu；只供凭据快照、存在性查询和 Provider 发现使用。
 func (r *Registry) credentialKeyLocked(providerID string) string {
 	credential, exists := r.credentials[providerID]
 	if !exists || credential.Type != CredentialTypeAPIKey {

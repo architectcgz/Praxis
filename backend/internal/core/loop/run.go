@@ -14,7 +14,7 @@ import (
 	"praxis/internal/identity"
 )
 
-// Dependencies 是 loop 的执行依赖；由组合根装配，不包含跨次执行的可变状态。
+// Dependencies 是 loop 的执行依赖；实际运行的副本绑定会话已冻结的 Provider 和工具目录。
 type Dependencies struct {
 	Provider       providerapi.Provider
 	Tools          tool.ToolCatalog
@@ -28,7 +28,7 @@ type Runner struct {
 	Dependencies
 }
 
-// NewRunner 保存装配层提供的完整执行依赖。
+// NewRunner 保存共享基础依赖；执行入口在调用 Run 前绑定会话 Provider 和工具目录。
 func NewRunner(deps Dependencies) Runner {
 	return Runner{Dependencies: deps}
 }

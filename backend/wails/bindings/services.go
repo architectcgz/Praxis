@@ -39,6 +39,7 @@ type SessionService interface {
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
+	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
 }
 
 type AgentService interface {
@@ -65,16 +66,12 @@ type AgentCommands interface {
 	SubmitTask(context.Context, sessionservice.TaskInput) (execution.SubmitResult, error)
 	CancelTask(context.Context, string, identity.TaskID) error
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
-}
-
-type ModelCatalog interface {
-	ListModels() []modelconfig.Option
+	ReloadSessionConfig(context.Context, identity.SessionID) error
 }
 
 type ModelConfigService interface {
 	Configuration() modelservice.ConfigSnapshot
 	SaveModelConfig(modelconfig.Config) error
-	ReloadConfig(context.Context) error
 	SetProviderKey(string, string) error
 	DiscoverProviderModels(context.Context, string) ([]string, error)
 }
@@ -95,7 +92,6 @@ type Services struct {
 	Sessions       SessionService
 	Agents         AgentService
 	Commands       AgentCommands
-	Models         ModelCatalog
 	ModelConfig    ModelConfigService
 	Emitter        *coreevent.Emitter
 	Timings        TimingService
@@ -111,7 +107,6 @@ func (s Services) Validate() error {
 		"sessions":            s.Sessions == nil,
 		"agents":              s.Agents == nil,
 		"commands":            s.Commands == nil,
-		"models":              s.Models == nil,
 		"model configuration": s.ModelConfig == nil,
 		"event emitter":       s.Emitter == nil,
 		"timings":             s.Timings == nil,

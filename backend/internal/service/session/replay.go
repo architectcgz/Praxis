@@ -14,7 +14,7 @@ import (
 
 // logReplay 只在单个日志重放期间持有调用匹配索引，完成后即释放。
 type logReplay struct {
-	session     *sessionmodel.Session
+	session     *sessionmodel.Data
 	calls       []replayedToolCall
 	callIndexes map[sessionentry.Key]int
 }

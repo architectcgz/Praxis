@@ -10,7 +10,7 @@ import (
 	"praxis/internal/identity"
 )
 
-func validateEntry(owner *sessionmodel.Session, data sessionentry.ContextEntry) error {
+func validateEntry(owner *sessionmodel.Data, data sessionentry.ContextEntry) error {
 	current := owner.Branch(data.BranchID)
 	if current == nil || current.HeadEntryID != data.ParentID {
 		return errorcode.ErrRequestConflict

@@ -12,18 +12,18 @@ import (
 // AppendEntry 接纳完整 Entry；模型请求的加工结果不经过此入口。
 func (s *Session) AppendEntry(ctx context.Context, branchID identity.BranchID, entry sessionentry.ContextEntry) (stored *sessionentry.ContextEntry, inserted bool, err error) {
 	err = s.use(ctx, func() error {
-		if prior, found := s.model.Entry(entry.ID); found {
+		if prior, found := s.data.Entry(entry.ID); found {
 			entry.BranchID, entry.ParentID = branchID, prior.ParentID
 			var appendErr error
 			stored, inserted, appendErr = s.appendEntry(ctx, entry)
 			return appendErr
 		}
-		branch := s.model.Branch(branchID)
+		branch := s.data.Branch(branchID)
 		if branch == nil {
 			return errorcode.ErrNotFound
 		}
 		entry.BranchID, entry.ParentID = branch.ID, branch.HeadEntryID
-		if err := validateEntry(s.model, entry); err != nil {
+		if err := validateEntry(s.data, entry); err != nil {
 			return err
 		}
 		var appendErr error
@@ -34,31 +34,31 @@ func (s *Session) AppendEntry(ctx context.Context, branchID identity.BranchID, e
 }
 
 func (s *Session) appendEntry(ctx context.Context, entry sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
-	if prior, found := s.model.Entry(entry.ID); found {
+	if prior, found := s.data.Entry(entry.ID); found {
 		entry.Sequence, entry.CreatedAt = prior.Sequence, prior.CreatedAt
 		if !reflect.DeepEqual(*prior, entry) {
 			return nil, false, errorcode.ErrRequestConflict
 		}
 		return prior, false, nil
 	}
-	entry.Sequence = uint64(len(s.model.Entries)) + 1
+	entry.Sequence = uint64(len(s.data.Entries)) + 1
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now().UTC()
 	}
 	if err := s.appendEvent(ctx, "entry.appended", "entry", entry.ID, entry); err != nil {
 		return nil, false, err
 	}
-	return s.model.AcceptEntry(entry), true, nil
+	return s.data.AcceptEntry(entry), true, nil
 }
 
 // BranchEntries 返回已提交的完整分支路径；Run 据此构建 Context 和执行证据。
 func (s *Session) BranchEntries(ctx context.Context, branchID identity.BranchID) (entries []*sessionentry.ContextEntry, err error) {
 	err = s.use(ctx, func() error {
-		branch := s.model.Branch(branchID)
+		branch := s.data.Branch(branchID)
 		if branch == nil {
 			return errorcode.ErrNotFound
 		}
-		entries = s.model.Path(branch.HeadEntryID)
+		entries = s.data.Path(branch.HeadEntryID)
 		return nil
 	})
 	return
@@ -70,11 +70,11 @@ func (s *Service) ListEntries(ctx context.Context, sessionID identity.SessionID,
 		return page, err
 	}
 	err = owner.use(ctx, func() error {
-		branch := owner.model.Branch(branchID)
+		branch := owner.data.Branch(branchID)
 		if branch == nil {
 			return errorcode.ErrNotFound
 		}
-		page.Entries = sessionentry.Values(owner.model.Path(branch.HeadEntryID))
+		page.Entries = sessionentry.Values(owner.data.Path(branch.HeadEntryID))
 		return nil
 	})
 	return

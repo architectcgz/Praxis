@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/loop"
@@ -16,5 +17,5 @@ type ExecutionOperations interface {
 	PrepareLoop(context.Context, *agentexecution.Run) (loop.Input, loop.ExecutionDependencies, bool, error)
 	ConfirmRunning(context.Context, *agentexecution.Run) error
 	Settle(context.Context, *agentexecution.Run, agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) (agentexecution.ExecutionRecord, error)
-	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, identity.AgentDefinitionID, modelapi.Config, agentexecution.SessionContext, string) (*agentexecution.Run, bool, error)
+	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, agentmodel.AgentDefinition, modelapi.Config, agentexecution.SessionContext, string) (*agentexecution.Run, bool, error)
 }

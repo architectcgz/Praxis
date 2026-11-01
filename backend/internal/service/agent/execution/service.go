@@ -2,7 +2,6 @@ package execution
 
 import (
 	"praxis/internal/clock"
-	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	sessionmodel "praxis/internal/core/session"
@@ -11,11 +10,6 @@ import (
 	"praxis/internal/repository"
 )
 
-// AgentDefinitionProvider 提供已校验的 Agent 定义。
-type AgentDefinitionProvider interface {
-	Definition(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
-}
-
 type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
@@ -23,7 +17,6 @@ type Dependencies struct {
 	Sessions       repository.Session
 	Records        sessionmodel.ExecutionRecords
 	UsageRecords   sessionmodel.UsageRecords
-	Definitions    AgentDefinitionProvider
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -36,7 +29,6 @@ type Service struct {
 	sessions       repository.Session
 	records        sessionmodel.ExecutionRecords
 	usageRecords   sessionmodel.UsageRecords
-	definitions    AgentDefinitionProvider
 	clock          clock.Clock
 	ids            identity.IDGenerator
 }
@@ -50,7 +42,6 @@ func NewService(deps Dependencies) *Service {
 		sessions:       deps.Sessions,
 		records:        deps.Records,
 		usageRecords:   deps.UsageRecords,
-		definitions:    deps.Definitions,
 		clock:          deps.Clock,
 		ids:            deps.IDs,
 	}

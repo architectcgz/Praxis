@@ -72,17 +72,13 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	if err != nil {
 		return nil, err
 	}
-	if err := agentservice.ValidateDefinitions(nil, config.agents.List()); err != nil {
-		return nil, err
-	}
 	emitter := coreevent.NewEmitter()
 	hooks, err := hook.NewDispatcher(options.Hooks...)
 	if err != nil {
 		return nil, err
 	}
-	configMu := &config.mu
-	a.sessions = buildSessions(a.storage, hooks, configMu, config.models)
-	coordinator := buildCoordinator(resources, config, a.sessions, hooks, emitter, configMu, options.Runner)
+	a.sessions = buildSessions(a.storage, hooks, config, root)
+	coordinator := buildCoordinator(resources, a.sessions, hooks, emitter, options.Runner)
 	a.coordinator = coordinator
 	agents := agentservice.NewService(agentservice.Dependencies{
 		Entries:          a.sessions,
@@ -90,9 +86,9 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		SessionRuns:      coordinator.SessionRuns,
 		ExecutionRecords: a.sessions,
 		Sessions:         a.storage.Sessions,
-		Definitions:      config.agents.Definition,
+		Definitions:      a.sessions.Definition,
 	})
-	models := buildModelService(root, config, a.logger)
+	models := buildModelService(config, a.logger)
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:   a.storage.Projects,
 		Sessions:   a.storage.Sessions,
@@ -101,8 +97,8 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Clock:      clock.UTCClock{},
 	})
 	approvals := approvalservice.NewService(approvalservice.Dependencies{
-		Config:   config,
-		Sessions: a.storage.Sessions,
+		Sessions: a.sessions,
+		Records:  a.storage.Sessions,
 		Clock:    clock.UTCClock{},
 	})
 	a.frontend = bindings.Services{
@@ -111,7 +107,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Sessions:       a.sessions,
 		Agents:         agents,
 		Commands:       a.coordinator,
-		Models:         models,
 		ModelConfig:    models,
 		Emitter:        emitter,
 		Timings:        coordinator,

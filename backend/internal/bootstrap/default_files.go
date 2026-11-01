@@ -18,7 +18,7 @@ func initializeDefaultFiles(ctx context.Context, root dataroot.DataRoot) error {
 	files := map[string]any{
 		root.ModelProvidersConfig: modelconfig.Config{Groups: []modelconfig.Group{}, Providers: []modelconfig.Provider{}},
 		root.ModelCredentialsFile: map[string]any{},
-		root.ToolConfig:           tool.Config{Bash: security.CommandPolicy{Rules: []security.CommandRule{}}},
+		root.ToolConfig:           tool.Config{Tools: map[tool.ToolName]tool.ToolConfig{}},
 		root.SettingsFile:         settings.Config{ApprovalMode: security.ApprovalAsk},
 	}
 	for path, value := range files {

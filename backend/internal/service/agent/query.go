@@ -20,7 +20,7 @@ type Dependencies struct {
 	SessionRuns      func(identity.SessionID, identity.BranchID) []*agentexecution.Run
 	ExecutionRecords sessionmodel.ExecutionRecords
 	Sessions         repository.Session
-	Definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
+	Definitions      func(context.Context, identity.SessionID, identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
 type Service struct {
@@ -29,7 +29,7 @@ type Service struct {
 	sessionRuns      func(identity.SessionID, identity.BranchID) []*agentexecution.Run
 	executionRecords sessionmodel.ExecutionRecords
 	sessions         repository.Session
-	definitions      func(identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
+	definitions      func(context.Context, identity.SessionID, identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
 // AgentView 是展示投影；没有活跃 Execution 时不需要对应的 Agent 实例。
@@ -65,7 +65,7 @@ func (s *Service) GetAgentView(ctx context.Context, sessionID identity.SessionID
 		if run.Snapshot().SessionID != sessionID {
 			return AgentView{}, errorcode.ErrRequestConflict
 		}
-		return s.describeRun(run)
+		return s.describeRun(ctx, run)
 	}
 	if agentID != identity.AgentID(sessionID) {
 		return AgentView{}, errorcode.ErrNotFound
@@ -74,7 +74,7 @@ func (s *Service) GetAgentView(ctx context.Context, sessionID identity.SessionID
 	if err != nil {
 		return AgentView{}, err
 	}
-	definition, err := s.definitions(agentmodel.DefinitionPrimary)
+	definition, err := s.definitions(ctx, sessionID, agentmodel.DefinitionPrimary)
 	if err != nil {
 		return AgentView{}, err
 	}
@@ -120,7 +120,7 @@ func (s *Service) ListSessionAgents(ctx context.Context, sessionID identity.Sess
 		if run.Main() {
 			continue
 		}
-		view, err := s.describeRun(run)
+		view, err := s.describeRun(ctx, run)
 		if err != nil {
 			return nil, err
 		}
@@ -132,9 +132,9 @@ func (s *Service) ListSessionAgents(ctx context.Context, sessionID identity.Sess
 	return values, nil
 }
 
-func (s *Service) describeRun(run *agentexecution.Run) (AgentView, error) {
+func (s *Service) describeRun(ctx context.Context, run *agentexecution.Run) (AgentView, error) {
 	value := run.Agent
-	definition, err := s.definitions(value.DefinitionID)
+	definition, err := s.definitions(ctx, value.SessionID, value.DefinitionID)
 	if err != nil {
 		return AgentView{}, fmt.Errorf("load agent definition for display: %w", err)
 	}

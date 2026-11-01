@@ -15,7 +15,7 @@ import (
 )
 
 // PrepareTask 准入执行后创建 Run；主执行从分支路径共享 Entry，子执行使用私有输入。
-func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agentID identity.AgentID, definitionID identity.AgentDefinitionID, model modelapi.Config, owner agentexecution.SessionContext, bindingID string) (*agentexecution.Run, bool, error) {
+func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agentID identity.AgentID, definition agentmodel.AgentDefinition, model modelapi.Config, owner agentexecution.SessionContext, bindingID string) (*agentexecution.Run, bool, error) {
 	session, err := s.sessions.Get(ctx, input.SessionID)
 	if err != nil {
 		return nil, false, err
@@ -24,10 +24,10 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 		return nil, false, errorcode.ErrRequestConflict
 	}
 	if agentID == session.MainAgentID() {
-		if definitionID != agentmodel.DefinitionPrimary {
+		if definition.ID != agentmodel.DefinitionPrimary {
 			return nil, false, errorcode.ErrRequestConflict
 		}
-		record, existing, err := s.prepareMainTask(ctx, input, session, owner, bindingID, model)
+		record, existing, err := s.prepareMainTask(ctx, input, session, owner, bindingID, model, definition)
 		if err != nil {
 			return nil, existing, err
 		}
@@ -44,10 +44,6 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 	}
 	if model.ProviderID == "" || model.ModelID == "" {
 		return nil, false, modelconfig.ErrNotConfigured
-	}
-	definition, err := s.definitions.Definition(definitionID)
-	if err != nil {
-		return nil, false, err
 	}
 	at := s.clock.Now().UTC()
 	requestID := identity.RequestID(input.ID)
