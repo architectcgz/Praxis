@@ -4,7 +4,6 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/core/agent/execution/timing"
 	"praxis/internal/core/loop"
 	modelapi "praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
@@ -14,7 +13,6 @@ import (
 
 // ExecutionOperations 是 Coordinator 需要的执行准入、进度和结算能力。
 type ExecutionOperations interface {
-	ListAgentTimings(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, int) ([]timing.View, error)
 	Execute(context.Context, *agentexecution.Run, *loop.Runner, loop.ToolExecutor) error
 	Compact(context.Context, *agentexecution.Run, *loop.Runner) error
 	ConfirmRunning(context.Context, *agentexecution.Run) error

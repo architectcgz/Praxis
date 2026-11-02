@@ -6,6 +6,7 @@ import (
 	"time"
 
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/agent/execution/timing"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/errorcode"
@@ -163,6 +164,39 @@ func (e ExecutionRecord) Validate() error {
 		}
 	}
 	return nil
+}
+
+// TimingView 从 Execution 生命周期投影执行总耗时，操作 Span 由独立计时记录投影。
+func (e ExecutionRecord) TimingView() *timing.View {
+	if e.StartedAt.IsZero() {
+		return nil
+	}
+	value := &timing.View{
+		ID:          "execution:" + e.ID.String(),
+		SessionID:   e.SessionID.String(),
+		AgentID:     e.AgentID.String(),
+		ExecutionID: e.ID.String(),
+		Kind:        "agent",
+		Name:        e.Config.AgentDefinitionID.String(),
+		StartedAt:   e.StartedAt,
+		Status:      string(timing.Running),
+		Revision:    1,
+	}
+	if e.EndedAt.IsZero() {
+		return value
+	}
+	elapsed := e.EndedAt.Sub(e.StartedAt).Milliseconds()
+	value.DurationMS = new(elapsed)
+	value.FinishedAt = e.EndedAt
+	value.Revision = 2
+	value.Status = string(timing.Completed)
+	switch e.Outcome {
+	case ExecutionFailed:
+		value.Status = string(timing.Failed)
+	case ExecutionInterrupted:
+		value.Status = string(timing.Cancelled)
+	}
+	return value
 }
 
 // WithEntries 从所属执行已接纳的 Entry 派生工具计数、输出字节和最终回答证据。

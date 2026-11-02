@@ -11,13 +11,13 @@ import (
 	"praxis/internal/identity"
 	tooloutput "praxis/internal/infra/tools/output"
 	executionservice "praxis/internal/service/agent/execution"
-	execution "praxis/internal/service/coordinator"
+	"praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	"time"
 )
 
-func buildCoordinator(resources storageResources, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *execution.Coordinator {
-	tasks := executionservice.NewService(executionservice.Dependencies{
+func buildCoordinator(resources storageResources, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
+	executionService := executionservice.NewService(executionservice.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
@@ -27,7 +27,7 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 		IDs:            identity.SecureIDGenerator{},
 	})
 	reviewer := &executionmodel.Reviewer{
-		Progress:       tasks,
+		Progress:       executionService,
 		HookDispatcher: hooks,
 	}
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
@@ -55,9 +55,9 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
 	runner := loop.NewRunner(runnerDeps)
-	coordinator := execution.NewCoordinator(execution.Config{
+	return coordinator.NewCoordinator(coordinator.Config{
 		Loop:              &runner,
-		Operations:        tasks,
+		Operations:        executionService,
 		Sessions:          sessions,
 		HookDispatcher:    hooks,
 		Logger:            resources.logger,
@@ -66,5 +66,4 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 		Projects:          resources.storage.Projects,
 		TransitionTimeout: 30 * time.Second,
 	})
-	return coordinator
 }

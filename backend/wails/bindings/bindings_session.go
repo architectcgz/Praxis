@@ -105,7 +105,7 @@ func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services
 			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.entries", err)
 		}
 		result.Histories[agent.ID.String()] = publicEntries(entries)
-		records, err := services.Timings.ListAgentTimings(ctx, view.Session.ID, agent.ID, view.Branch.ID, 0)
+		records, err := services.Sessions.ListAgentTimings(ctx, view.Session.ID, agent.ID, view.Branch.ID, 0)
 		if err != nil {
 			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.timings", err)
 		}

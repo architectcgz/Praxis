@@ -13,7 +13,7 @@ import (
 	"praxis/internal/logging"
 	agentservice "praxis/internal/service/agent"
 	approvalservice "praxis/internal/service/approval"
-	execution "praxis/internal/service/coordinator"
+	"praxis/internal/service/coordinator"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/bindings"
@@ -24,7 +24,7 @@ type Application struct {
 	storageResources
 	frontend    bindings.Services
 	sessions    *sessionservice.Service
-	coordinator *execution.Coordinator
+	coordinator *coordinator.Coordinator
 }
 
 func (a *Application) Services() bindings.Services {
@@ -109,7 +109,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Commands:       a.coordinator,
 		ModelConfig:    models,
 		Emitter:        emitter,
-		Timings:        coordinator,
 		Usages:         a.sessions,
 		SessionLogPath: a.storage.Sessions.SessionLogPath,
 	}

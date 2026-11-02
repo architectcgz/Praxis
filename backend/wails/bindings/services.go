@@ -36,6 +36,7 @@ type ApprovalService interface {
 type SessionService interface {
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
+	ListAgentTimings(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, int) ([]timing.View, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
 	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
@@ -75,10 +76,6 @@ type ModelConfigService interface {
 	DiscoverProviderModels(context.Context, string) ([]string, error)
 }
 
-type TimingService interface {
-	ListAgentTimings(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, int) ([]timing.View, error)
-}
-
 type UsageService interface {
 	ListSessionUsage(context.Context, identity.SessionID) ([]providerapi.UsageRecord, error)
 	GetSessionUsageSummary(context.Context, identity.SessionID) (sessionservice.SessionUsageSummary, error)
@@ -93,7 +90,6 @@ type Services struct {
 	Commands       AgentCommands
 	ModelConfig    ModelConfigService
 	Emitter        *coreevent.Emitter
-	Timings        TimingService
 	Usages         UsageService
 	SessionLogPath func(context.Context, identity.SessionID) (string, error)
 }
@@ -108,7 +104,6 @@ func (s Services) Validate() error {
 		"commands":            s.Commands == nil,
 		"model configuration": s.ModelConfig == nil,
 		"event emitter":       s.Emitter == nil,
-		"timings":             s.Timings == nil,
 		"usages":              s.Usages == nil,
 		"session log path":    s.SessionLogPath == nil,
 	} {

@@ -1,13 +1,10 @@
 package execution
 
 import (
-	"cmp"
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
 	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
-	"praxis/internal/identity"
-	"slices"
 	"time"
 )
 
@@ -29,101 +26,7 @@ func (s *Service) RecordTiming(run *agentexecution.Run, record timing.Record) {
 			})
 		}
 	}
-	s.publishTiming(operationTiming(execution, record), coreevent.SourceForRun(run, ""))
-}
-
-// ListAgentTimings 从会话历史聚合操作记录，并派生执行本身的墙上时钟耗时。
-func (s *Service) ListAgentTimings(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID, limit int) ([]timing.View, error) {
-	records, err := s.records.ListAgentTimingRecords(ctx, sessionID, agentID, branchID, limit)
-	if err != nil {
-		return nil, err
-	}
-	executions, err := s.records.ListAgentExecutions(ctx, sessionID, agentID, branchID, limit)
-	if err != nil {
-		return nil, err
-	}
-	owners := make(map[string]agentexecution.ExecutionRecord, len(executions))
-	result := make([]timing.View, 0, len(records)+len(executions))
-	for _, execution := range executions {
-		owners[execution.ID.String()] = execution
-		if value := executionTiming(execution); value != nil {
-			result = append(result, *value)
-		}
-	}
-	for _, record := range records {
-		execution, ok := owners[record.ExecutionID]
-		if !ok {
-			execution, err = s.records.GetExecution(ctx, sessionID, identity.AgentExecutionID(record.ExecutionID))
-			if err != nil {
-				return nil, err
-			}
-			owners[record.ExecutionID] = execution
-		}
-		result = append(result, operationTiming(execution, record))
-	}
-	slices.SortFunc(result, func(a, b timing.View) int {
-		return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
-	})
-	if limit > 0 && len(result) > limit {
-		result = result[:limit]
-	}
-	return result, nil
-}
-
-func operationTiming(execution agentexecution.ExecutionRecord, record timing.Record) timing.View {
-	if record.Status == timing.Running && !execution.Active() {
-		record.Status = timing.Interrupted
-	}
-
-	revision := 1
-	if record.Status != timing.Running {
-		revision = 2
-	}
-	return timing.View{
-		ID:              record.ID,
-		ParentID:        record.ParentID,
-		SessionID:       execution.SessionID.String(),
-		AgentID:         execution.AgentID.String(),
-		ExecutionID:     record.ExecutionID,
-		Kind:            string(record.Kind),
-		Name:            record.Name,
-		ReferenceID:     record.ReferenceID,
-		StartedAt:       record.StartedAt,
-		FinishedAt:      record.FinishedAt,
-		DurationMS:      record.DurationMS,
-		FirstResponseMS: record.FirstResponseMS,
-		Status:          string(record.Status),
-		Revision:        revision,
-	}
-}
-
-func executionTiming(execution agentexecution.ExecutionRecord) *timing.View {
-	if execution.StartedAt.IsZero() {
-		return nil
-	}
-	value := &timing.View{
-		ID:          "execution:" + execution.ID.String(),
-		SessionID:   execution.SessionID.String(),
-		AgentID:     execution.AgentID.String(),
-		ExecutionID: execution.ID.String(),
-		Kind:        "agent",
-		Name:        execution.Config.AgentDefinitionID.String(),
-		StartedAt:   execution.StartedAt,
-		Status:      string(timing.Running),
-		Revision:    1,
-	}
-	if !execution.EndedAt.IsZero() {
-		elapsed := execution.EndedAt.Sub(execution.StartedAt).Milliseconds()
-		value.DurationMS, value.FinishedAt, value.Revision = &elapsed, execution.EndedAt, 2
-		value.Status = string(timing.Completed)
-		switch execution.Outcome {
-		case agentexecution.ExecutionFailed:
-			value.Status = string(timing.Failed)
-		case agentexecution.ExecutionInterrupted:
-			value.Status = string(timing.Cancelled)
-		}
-	}
-	return value
+	s.publishTiming(record.View(execution.SessionID.String(), execution.AgentID.String(), execution.Active()), coreevent.SourceForRun(run, ""))
 }
 
 func (s *Service) publishTiming(value timing.View, source coreevent.EventSource) {
@@ -136,7 +39,7 @@ func (s *Service) publishTiming(value timing.View, source coreevent.EventSource)
 }
 
 func (s *Service) publishExecutionTiming(execution agentexecution.ExecutionRecord, run *agentexecution.Run) {
-	if value := executionTiming(execution); value != nil {
+	if value := execution.TimingView(); value != nil {
 		s.publishTiming(*value, coreevent.SourceForRun(run, ""))
 	}
 }

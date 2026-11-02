@@ -3,7 +3,6 @@ package coordinator
 import (
 	"context"
 	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/core/agent/execution/timing"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
@@ -33,8 +32,4 @@ func (s *Coordinator) SessionRuns(sessionID identity.SessionID, branchID identit
 // ListAgentEntries 查询所属持久化历史，运行实例释放后仍能读取子代理记录。
 func (s *Coordinator) ListAgentEntries(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID) ([]sessionentry.ContextEntry, error) {
 	return s.sessions.ListAgentEntries(ctx, sessionID, agentID, branchID)
-}
-
-func (s *Coordinator) ListAgentTimings(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID, limit int) ([]timing.View, error) {
-	return s.operations.ListAgentTimings(ctx, sessionID, agentID, branchID, limit)
 }

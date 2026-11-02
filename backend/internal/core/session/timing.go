@@ -29,17 +29,29 @@ func (s *Session) AppendTiming(ctx context.Context, value timing.Record) error {
 	})
 }
 
-func (s *Session) ListAgentTimingRecords(agentID identity.AgentID, branchID identity.BranchID, limit int) []timing.Record {
+func (s *Session) ListAgentTimings(agentID identity.AgentID, branchID identity.BranchID, limit int) []timing.View {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	records := make([]timing.Record, 0)
-	for _, value := range s.data.Timings {
-		index := s.data.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID))
-		if index >= 0 && s.data.Executions[index].AgentID == agentID && s.data.Executions[index].BranchID == branchID {
-			records = append(records, value)
+	values := make([]timing.View, 0, len(s.data.Executions)+len(s.data.Timings))
+	for _, execution := range s.data.Executions {
+		if execution.AgentID != agentID || execution.BranchID != branchID {
+			continue
+		}
+		if value := execution.TimingView(); value != nil {
+			values = append(values, *value)
 		}
 	}
-	return capped(sorted(records, func(a, b timing.Record) int {
+	for _, value := range s.data.Timings {
+		index := s.data.ExecutionIndex(identity.AgentExecutionID(value.ExecutionID))
+		if index < 0 {
+			continue
+		}
+		execution := s.data.Executions[index]
+		if execution.AgentID == agentID && execution.BranchID == branchID {
+			values = append(values, value.View(execution.SessionID.String(), execution.AgentID.String(), execution.Active()))
+		}
+	}
+	return capped(sorted(values, func(a, b timing.View) int {
 		return cmp.Or(b.StartedAt.Compare(a.StartedAt), cmp.Compare(b.ID, a.ID))
 	}), limit)
 }
