@@ -1,26 +1,26 @@
-import { DurationLabel, useOperationTiming } from '../../timing/OperationTimings'
+import type { Timing } from '../../../api/timings'
+import { DurationLabel } from '../../timing/DurationLabel'
 import { formatDuration } from '../../timing/timing'
 import { TokenUsageBreakdown, useSessionModelUsage } from '../SessionTokenUsage'
 import { formatModelUsage, summarizeModelUsage } from '../modelUsage'
 
-const statusLabels = { running: '进行中', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' }
-
-/** 展示每轮已上报的耗时与分项用量；精确计数与首响应保留在悬浮提示中。 */
-export function MessageTiming({ executionId, referenceId }: { executionId: string; referenceId: string }) {
-    const record = useOperationTiming(executionId, 'provider', referenceId)
+/** 消费当前响应自身的耗时，已上报用量按请求身份关联。 */
+export function MessageTiming({ runId, turnId, record, running = false }: {
+    runId: string
+    turnId?: string
+    record?: Timing
+    running?: boolean
+}) {
     const { records, error } = useSessionModelUsage()
-    if (!record) return null
-    const request = records.find((item) => item.sessionId === record.sessionId &&
-        item.executionId === executionId && referenceId === `assistant:${item.turnId}`)
+    const request = records.find((item) => item.runId === runId && item.turnId === turnId)
     const usage = request ? formatModelUsage(summarizeModelUsage([request])) : undefined
-    const firstResponse = record.firstResponseMs === undefined ? [] : [`首响应：${formatDuration(record.firstResponseMs)}`]
+    const firstResponse = record?.firstResponseMs === undefined ? [] : [`首响应：${formatDuration(record.firstResponseMs)}`]
     const title = usage
         ? ['本次模型请求', usage.details, ...firstResponse].join('\n')
         : error ? `Token 用量加载失败：${error}` : ''
-    // 状态词只在非正常结束时出现；正常完成不占脚注的位置。
+    if (!record && !usage && !error) return null
     return <span className="message-timing">
-        {record.status !== 'completed' && <span className="message-timing-status" data-tone={record.status === 'failed' ? 'bad' : 'warn'}>{statusLabels[record.status]}</span>}
-        {(record.status === 'running' || record.durationMs !== undefined) && <DurationLabel record={record} label="" compact />}
+        <DurationLabel record={record} running={running} label="" compact />
         {(usage || error) && <span className="operation-token-usage" title={title} aria-label={title}>
             {usage ? <TokenUsageBreakdown labels={usage.labels} /> : '用量不可用'}
         </span>}

@@ -23,7 +23,7 @@ func (s *Session) AppendEntry(ctx context.Context, branchID identity.BranchID, e
 		if !reflect.DeepEqual(*prior, entry) || !s.data.hasAncestor(branch.HeadEntryID, prior.ID) {
 			return nil, false, errorcode.ErrRequestConflict
 		}
-		if index := s.data.ExecutionIndex(identity.AgentExecutionID(entry.ExecutionID)); index >= 0 && s.data.Executions[index].BranchID != branchID {
+		if index := s.data.RunIndex(identity.RunID(entry.RunID)); index >= 0 && s.data.Runs[index].BranchID != branchID {
 			return nil, false, errorcode.ErrRequestConflict
 		}
 		return prior, false, nil

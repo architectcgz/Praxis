@@ -5,7 +5,6 @@ import type { AgentOutputSource } from './agentStore'
 import { CollaborationViews } from './output/CollaborationViews'
 import { AgentConversation } from './AgentConversation'
 import { PrimaryAgentTaskInput } from './PrimaryAgentTaskInput'
-import { OperationTimingsProvider } from '../timing/OperationTimings'
 import { FilePreviewProvider } from './output/FilePreview'
 import { ModelUsageProvider } from './SessionTokenUsage'
 
@@ -14,12 +13,12 @@ type AgentSessionPanelProps = {
     loading: boolean
     agents: AgentView[]
     agent: AgentView | null
-    history: Entry[]
-    agentHistories: Record<string, Entry[]>
-    agentHistoryErrors: Record<string, string>
+    entries: Entry[]
+    agentEntries: Record<string, Entry[]>
+    agentEntriesErrors: Record<string, string>
     outputStore: AgentOutputSource
     onSelectAgent: (id: string) => void
-    historyError: string
+    entriesError: string
     input: string
     setInput: (value: string) => void
     models: ModelOption[]
@@ -38,8 +37,8 @@ type AgentSessionPanelProps = {
 }
 
 /** 展示当前 Session 中选中的 Agent 对话和输入控件。 */
-export function AgentSessionPanel({ branchId, loading, agents, agent, history, agentHistories, agentHistoryErrors, outputStore, onSelectAgent, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
-    const { streamingOutputs, pendingUserMessages, awaitingAgentId, timings } = useSyncExternalStore(outputStore.subscribeOutput, outputStore.getOutput)
+export function AgentSessionPanel({ branchId, loading, agents, agent, entries, agentEntries, agentEntriesErrors, outputStore, onSelectAgent, entriesError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
+    const { streamingOutputs, pendingUserMessages, awaitingAgentId } = useSyncExternalStore(outputStore.subscribeOutput, outputStore.getOutput)
     if (loading) {
         return <div className="agent-loading" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>加载对话中</span></div>
     }
@@ -50,18 +49,17 @@ export function AgentSessionPanel({ branchId, loading, agents, agent, history, a
     const hasSubagents = agents.some((item) => item.Kind === 'subagent')
     return (
         <ModelUsageProvider key={agent.SessionID} sessionId={agent.SessionID}>
-        <OperationTimingsProvider records={timings}>
         <FilePreviewProvider sessionId={agent.SessionID}>
         <AgentConversation
             key={`${agent.SessionID}-${branchId}`}
             branchId={branchId}
             agent={agent}
-            history={history}
+            entries={entries}
             collaboration={agent.Kind === 'main' && hasSubagents ? (
                 <CollaborationViews
                     agents={agents}
-                    histories={agentHistories}
-                    historyErrors={agentHistoryErrors}
+                    agentEntries={agentEntries}
+                    entriesErrors={agentEntriesErrors}
                     streamingOutputs={streamingOutputs}
                     onSelectAgent={onSelectAgent}
                 />
@@ -69,7 +67,7 @@ export function AgentSessionPanel({ branchId, loading, agents, agent, history, a
             streamingOutput={streamingOutputs[agent.ID] || null}
             pendingUserMessages={pendingUserMessages}
             awaitingOutput={awaitingAgentId === agent.ID}
-            historyError={historyError}
+            entriesError={entriesError}
             input={input}
             setInput={setInput}
             models={models}
@@ -87,7 +85,6 @@ export function AgentSessionPanel({ branchId, loading, agents, agent, history, a
             onCommand={onCommand}
         />
         </FilePreviewProvider>
-        </OperationTimingsProvider>
         </ModelUsageProvider>
     )
 }

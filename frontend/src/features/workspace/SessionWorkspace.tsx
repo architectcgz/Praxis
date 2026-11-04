@@ -43,12 +43,12 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
                     loading={page.agentLoading}
                     agents={page.agents}
                     agent={page.agent}
-                    history={page.browsing && page.agent?.Kind === 'main' ? page.browsing.entries : page.history}
-                    agentHistories={page.agentHistories}
-                    agentHistoryErrors={page.agentHistoryErrors}
+                    entries={page.browsing && page.agent?.Kind === 'main' ? page.browsing.entries : page.entries}
+                    agentEntries={page.agentEntries}
+                    agentEntriesErrors={page.agentEntriesErrors}
                     outputStore={page.outputStore}
                     onSelectAgent={page.selectAgent}
-                    historyError={page.historyError}
+                    entriesError={page.entriesError}
                     input={page.input}
                     setInput={page.setInput}
                     models={page.models}
@@ -73,7 +73,7 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
         <AgentsPanel
             loading={page.sessionLoading}
             session={page.session ? { title, agents: page.agents } : null}
-            histories={page.agentHistories}
+            agentEntries={page.agentEntries}
             selectedAgentID={page.selectedAgentID}
             onSelectAgent={page.selectAgent}
         />
@@ -85,7 +85,7 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
             tree={page.tree}
             currentBranchId={page.session.branch.id}
             onSwitch={page.switchBranch}
-            onBrowse={page.browseHistory}
+            onBrowse={page.browseEntries}
             onClose={page.closeBranchDialog}
         />}
     </div>

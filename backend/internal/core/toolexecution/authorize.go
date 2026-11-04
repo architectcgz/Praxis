@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
@@ -25,7 +25,7 @@ type authorizationResult struct {
 
 // authorize 使用会话已冻结的审批模式调度模型审核和人工审批。
 // args 由执行流程冻结；授权过程中不读取全局配置，审批与审核共享只读参数。
-func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string) (*tool.ToolResult, error) {
+func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string) (*tool.ToolResult, error) {
 	e := t.executor
 	decision := security.ResolveApprovalDecision(t.mode)
 	for {
@@ -42,7 +42,7 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 		}
 		sourceTaskID := callState.owner.SourceTaskID
 		if result.pending {
-			if callState.owner.Status != agentexecution.ExecutionRunning {
+			if callState.owner.Status != agentrun.RunRunning {
 				e.mu.Unlock()
 				return nil, errorcode.ErrRequestConflict
 			}
@@ -76,7 +76,7 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 			reviewErr = reviewCtx.Err()
 		}
 		cancel()
-		if _, ok := errors.AsType[*reviewExecutionError](reviewErr); ok {
+		if _, ok := errors.AsType[*reviewRunError](reviewErr); ok {
 			return nil, reviewErr
 		}
 		if ctx.Err() != nil {
@@ -107,7 +107,7 @@ func (t *ExecutionTools) authorize(ctx context.Context, call sessionentry.ToolCa
 	}
 }
 
-func (t *ExecutionTools) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string, sourceTaskID identity.TaskID) {
+func (t *RunTools) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string, sourceTaskID identity.TaskID) {
 	e := t.executor
 	call.Arguments = args
 	value := toolHookEvent(call, args, operationID)

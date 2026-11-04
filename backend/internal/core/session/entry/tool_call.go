@@ -30,7 +30,7 @@ func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.A
 			continue
 		}
 		calls = append(calls, ToolCall{
-			Key:       Key{ExecutionID: identity.AgentExecutionID(m.ExecutionID), CallID: block.CallID},
+			Key:       Key{RunID: identity.RunID(m.RunID), CallID: block.CallID},
 			SessionID: sessionID,
 			AgentID:   agentID,
 			RequestID: m.RequestID,
@@ -51,13 +51,13 @@ func (c ToolCall) ResultEntry(result tool.ToolResult) ContextEntry {
 		result.Payload = "(empty tool result)"
 	}
 	return ContextEntry{
-		ID:          "tool-result:" + c.ExecutionID.String() + ":" + c.CallID,
-		RequestID:   c.RequestID,
-		ExecutionID: c.ExecutionID.String(),
-		TurnID:      c.TurnID.String(),
-		Role:        role.Tool,
-		AuthorKind:  AuthorTool,
-		AuthorID:    string(c.Name),
+		ID:         "tool-result:" + c.RunID.String() + ":" + c.CallID,
+		RequestID:  c.RequestID,
+		RunID:      c.RunID.String(),
+		TurnID:     c.TurnID.String(),
+		Role:       role.Tool,
+		AuthorKind: AuthorTool,
+		AuthorID:   string(c.Name),
 		Content: []Block{{
 			Kind:    BlockToolResult,
 			CallID:  c.CallID,

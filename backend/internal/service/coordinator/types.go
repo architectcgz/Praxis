@@ -3,20 +3,20 @@ package coordinator
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/loop"
 	modelapi "praxis/internal/core/model"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	executionservice "praxis/internal/service/agent/execution"
+	runservice "praxis/internal/service/agent/run"
 )
 
-// ExecutionOperations 是 Coordinator 需要的执行准入、进度和结算能力。
-type ExecutionOperations interface {
-	Execute(context.Context, *agentexecution.Run, *loop.Runner, loop.ToolExecutor) error
-	Compact(context.Context, *agentexecution.Run, *loop.Runner) error
-	ConfirmRunning(context.Context, *agentexecution.Run) error
-	Settle(context.Context, *agentexecution.Run, agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) (agentexecution.ExecutionRecord, error)
-	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, agentmodel.AgentDefinition, modelapi.Config, agentexecution.SessionContext, string) (*agentexecution.Run, bool, error)
-	PrepareSubagent(context.Context, executionservice.SubagentInput) (*agentexecution.Run, error)
+// RunOperations 是 Coordinator 需要的执行准入、进度和结算能力。
+type RunOperations interface {
+	Execute(context.Context, *agentrun.Run, *loop.Runner, loop.ToolExecutor) error
+	Compact(context.Context, *agentrun.Run, *loop.Runner) error
+	ConfirmRunning(context.Context, *agentrun.Run) error
+	Settle(context.Context, *agentrun.Run, agentrun.RunOutcome, agentrun.RunFailureCode, string) (agentrun.RunRecord, error)
+	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, agentmodel.AgentDefinition, modelapi.Config, agentrun.SessionContext, string) (*agentrun.Run, bool, error)
+	PrepareSubagent(context.Context, runservice.SubagentInput) (*agentrun.Run, error)
 }

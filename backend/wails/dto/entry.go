@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"praxis/internal/core/agent/run/timing"
 	"time"
 )
 
@@ -15,12 +16,15 @@ const (
 // Entry 是前端会话记录，只包含展示、消息分组和耗时关联所需的数据。
 // Kind 取 message 或 summary，不公开内部替代范围、压缩保护规则或模型续传状态。
 type Entry struct {
-	ID          string       `json:"id"`
-	ExecutionID string       `json:"executionId,omitempty"`
-	CreatedAt   time.Time    `json:"createdAt"`
-	Role        string       `json:"role"`
-	Kind        EntryKind    `json:"kind"`
-	Content     []EntryBlock `json:"content"`
+	ID        string         `json:"id"`
+	RunID     string         `json:"runId,omitempty"`
+	TurnID    string         `json:"turnId,omitempty"`
+	CreatedAt time.Time      `json:"createdAt"`
+	Role      string         `json:"role"`
+	Kind      EntryKind      `json:"kind"`
+	Content   []EntryBlock   `json:"content"`
+	Error     string         `json:"error,omitempty"`
+	Timing    *timing.Record `json:"timing,omitempty"`
 }
 
 // EntryBlock 只承载可展示的正文、思考和工具活动；不包含 Provider 推理续传数据。

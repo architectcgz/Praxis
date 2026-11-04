@@ -6,8 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/core/agent/execution/timing"
+	agentrun "praxis/internal/core/agent/run"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
@@ -58,14 +57,12 @@ func decodeEvent(line []byte) (sessionmodel.Event, error) {
 	switch stored.Type {
 	case sessionmodel.EventBranchCreated:
 		event.Payload, err = decodeEventPayload[sessionmodel.Branch](stored.Payload)
-	case sessionmodel.EventExecutionSaved:
-		event.Payload, err = decodeEventPayload[agentexecution.ExecutionRecord](stored.Payload)
+	case sessionmodel.EventRunSaved:
+		event.Payload, err = decodeEventPayload[agentrun.RunRecord](stored.Payload)
 	case sessionmodel.EventEntryAppended:
 		event.Payload, err = decodeEventPayload[sessionentry.ContextEntry](stored.Payload)
-	case sessionmodel.EventModelRequestFinished:
-		event.Payload, err = decodeEventPayload[sessionmodel.ModelRequestFinished](stored.Payload)
-	case sessionmodel.EventTimingStarted, sessionmodel.EventTimingFinished:
-		event.Payload, err = decodeEventPayload[timing.Record](stored.Payload)
+	case sessionmodel.EventModelRequestStarted, sessionmodel.EventModelRequestFinished:
+		event.Payload, err = decodeEventPayload[sessionmodel.ModelRequestSaved](stored.Payload)
 	default:
 		return sessionmodel.Event{}, fmt.Errorf("unknown session event type %q", stored.Type)
 	}

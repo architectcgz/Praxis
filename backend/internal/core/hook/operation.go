@@ -15,7 +15,7 @@ type Identity struct {
 	SourceTaskID identity.TaskID
 	SessionID    identity.SessionID
 	AgentID      identity.AgentID
-	ExecutionID  identity.AgentExecutionID
+	RunID        identity.RunID
 	TurnID       identity.TurnID
 }
 
@@ -25,11 +25,11 @@ func NewOperationID() string { return rand.Text() }
 type OperationKind string
 
 const (
-	OperationAgent           OperationKind = "agent"
-	OperationProvider        OperationKind = "provider"
-	OperationTool            OperationKind = "tool"
-	OperationSessionCreate   OperationKind = "session_create"
-	OperationExecutionSettle OperationKind = "execution_settle"
+	OperationAgent         OperationKind = "agent"
+	OperationProvider      OperationKind = "provider"
+	OperationTool          OperationKind = "tool"
+	OperationSessionCreate OperationKind = "session_create"
+	OperationRunSettle     OperationKind = "run_settle"
 )
 
 // Operation 只携带标识与名称，不包含 Prompt、工具参数、响应正文或凭据。

@@ -1,7 +1,6 @@
 import { getSessionBinding } from './bindings'
 import type { AgentView, Entry, ModelUsageRecord } from './agents'
 import type { QueuedTask } from './tasks'
-import type { OperationTiming } from './timings'
 import type { Branch } from '../../bindings/praxis/internal/core/session/models'
 export type { Branch }
 
@@ -15,8 +14,7 @@ export type SessionSnapshot = {
     updatedAt: string
     agents: AgentView[]
     tasks: QueuedTask[]
-    timings: OperationTiming[]
-    histories: Record<string, Entry[]>
+    entries: Record<string, Entry[]>
 }
 
 export type SessionSummary = {
@@ -88,9 +86,9 @@ export function switchBranch(session: SessionSnapshot, name: string) {
     return getSessionBinding().SwitchBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, name }) as Promise<SessionSnapshot>
 }
 export async function listBranches(sessionId: string, bindingId: string) { return await getSessionBinding().ListBranches(sessionId, bindingId) ?? [] }
-export async function getHistoryTree(sessionId: string) { return await getSessionBinding().GetHistoryTree(sessionId) ?? [] }
-export async function getHistoryAt(sessionId: string, entryId: string) {
-    return (await getSessionBinding().GetHistoryAt(sessionId, entryId) ?? []) as Entry[]
+export async function getEntryTree(sessionId: string) { return await getSessionBinding().GetEntryTree(sessionId) ?? [] }
+export async function getEntriesAt(sessionId: string, entryId: string) {
+    return (await getSessionBinding().GetEntriesAt(sessionId, entryId) ?? []) as Entry[]
 }
 
 export function getSessionUsageSummary(sessionID: string) {

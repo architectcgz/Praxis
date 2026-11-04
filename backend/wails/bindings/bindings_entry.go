@@ -41,12 +41,15 @@ func publicEntries(values []sessionentry.ContextEntry) []dto.Entry {
 			kind = dto.EntrySummary
 		}
 		result = append(result, dto.Entry{
-			ID:          value.ID,
-			ExecutionID: value.ExecutionID,
-			CreatedAt:   value.CreatedAt,
-			Role:        string(value.Role),
-			Kind:        kind,
-			Content:     content,
+			ID:        value.ID,
+			RunID:     value.RunID,
+			TurnID:    value.TurnID,
+			CreatedAt: value.CreatedAt,
+			Role:      string(value.Role),
+			Kind:      kind,
+			Content:   content,
+			Error:     value.Error,
+			Timing:    value.Timing,
 		})
 	}
 	return result

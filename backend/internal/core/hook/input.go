@@ -5,7 +5,7 @@ import (
 	"praxis/internal/identity"
 )
 
-// UserInput 尚未入队，不存在 Execution；处理器只返回正文，不能更改目标 Session。
+// UserInput 尚未入队，不存在 Run；处理器只返回正文，不能更改目标 Session。
 type UserInput struct {
 	SessionID identity.SessionID
 	Prompt    string

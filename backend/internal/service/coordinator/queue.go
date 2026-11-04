@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
@@ -18,10 +18,10 @@ func (r *Coordinator) scheduleBinding(ctx context.Context, bindingID string, exp
 		r.mu.Unlock()
 		return errCoordinatorClosed
 	}
-	key := executionKey{identity.AgentID(binding.sessionID), binding.branchID}
-	if active := r.executions[key]; active != nil {
+	key := runKey{identity.AgentID(binding.sessionID), binding.branchID}
+	if active := r.runs[key]; active != nil {
 		cause := context.Cause(active.ctx)
-		if explicit && errors.Is(cause, errExecutionInterrupted) {
+		if explicit && errors.Is(cause, errRunInterrupted) {
 			active.scheduleRequested = true
 		}
 		r.mu.Unlock()
@@ -32,14 +32,14 @@ func (r *Coordinator) scheduleBinding(ctx context.Context, bindingID string, exp
 		r.mu.Unlock()
 		return nil
 	}
-	active := newActiveExecution(ctx, binding.sessionID)
+	active := newActiveRun(ctx, binding.sessionID)
 	active.branchID, active.bindingID = binding.branchID, bindingID
-	r.executions[key] = active
+	r.runs[key] = active
 	r.mu.Unlock()
 	return r.startNext(ctx, input, key, binding, active)
 }
 
-func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, key executionKey, binding *sessionBinding, active *activeExecution) (err error) {
+func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, key runKey, binding *sessionBinding, active *activeRun) (err error) {
 	prepareCtx, cancelPrepare := context.WithCancel(ctx)
 	stopCancellation := context.AfterFunc(active.ctx, cancelPrepare)
 	defer func() { stopCancellation(); cancelPrepare() }()
@@ -49,7 +49,7 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ke
 		}
 		r.mu.Lock()
 		binding.queue.Retry(input)
-		delete(r.executions, key)
+		delete(r.runs, key)
 		close(active.ready)
 		active.cancel(nil)
 		notification := taskQueueEvent(binding)
@@ -69,8 +69,8 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ke
 	r.loop.Emitter.Emit(notification)
 	return err
 }
-func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID, binding *sessionBinding) (*agentexecution.Run, *sessionservice.Configuration, error) {
-	config, model, err := r.sessions.ExecutionConfiguration(ctx, input.SessionID)
+func (r *Coordinator) prepareNext(ctx context.Context, input sessionmodel.Task, ownerID identity.AgentID, binding *sessionBinding) (*agentrun.Run, *sessionservice.Configuration, error) {
+	config, model, err := r.sessions.RunConfiguration(ctx, input.SessionID)
 	if err != nil {
 		return nil, nil, err
 	}

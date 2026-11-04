@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { AlertCircle, Check, LoaderCircle, ShieldAlert, X } from 'lucide-react'
 import { approveToolCall, denyToolCall, listToolApprovals, subscribeAgentEvents, type ToolApproval } from '../../api'
 import { readableError } from '../../shared/errors'
-import { presentTool } from './output/toolPresentation'
 
 type ApprovalState = {
     pendingApprovals: ToolApproval[]
@@ -15,7 +14,7 @@ type ApprovalState = {
 const ToolApprovalsContext = createContext<ApprovalState | null>(null)
 
 /** 会话内只查询和订阅一次审批状态，由审批闸口消费；重连后仍可审核同一个调用。 */
-export function ToolApprovalsProvider({ agentId, executionId, sessionId, branchId, children }: { agentId: string; executionId: string; sessionId: string; branchId: string; children: ReactNode }) {
+export function ToolApprovalsProvider({ agentId, runId, sessionId, branchId, children }: { agentId: string; runId: string; sessionId: string; branchId: string; children: ReactNode }) {
     const [pendingApprovals, setPendingApprovals] = useState<ToolApproval[]>([])
     const [busy, setBusy] = useState('')
     const [error, setError] = useState('')
@@ -34,11 +33,11 @@ export function ToolApprovalsProvider({ agentId, executionId, sessionId, branchI
     }, [agentId, sessionId, branchId])
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents((event) => {
-            if (event.executionId === executionId && event.sessionId === sessionId && event.branchId === branchId && ['tool_approval_required', 'tool_result', 'execution_ended', 'request_canceled'].includes(event.kind)) void reload()
+            if (event.runId === runId && event.sessionId === sessionId && event.branchId === branchId && ['tool_approval_required', 'tool_result', 'run_ended', 'request_canceled'].includes(event.kind)) void reload()
         })
         void reload()
         return () => { requestGeneration.current += 1; unsubscribe() }
-    }, [executionId, sessionId, branchId, reload])
+    }, [runId, sessionId, branchId, reload])
     const decide = async (pendingApproval: ToolApproval, approve: boolean) => {
         setBusy(pendingApproval.callId)
         setError('')
@@ -53,9 +52,9 @@ export function ToolApprovalsProvider({ agentId, executionId, sessionId, branchI
 }
 
 /** 按任务与调用身份关联审核，供活动账本读取后端冻结的参数。 */
-export function useToolApproval(executionId: string, callId?: string) {
+export function useToolApproval(runId: string, callId?: string) {
     const approvals = useContext(ToolApprovalsContext)
-    return approvals ? { ...approvals, pendingApproval: approvals.pendingApprovals.find((pendingApproval) => pendingApproval.executionId === executionId && pendingApproval.callId === callId) } : null
+    return approvals ? { ...approvals, pendingApproval: approvals.pendingApprovals.find((pendingApproval) => pendingApproval.runId === runId && pendingApproval.callId === callId) } : null
 }
 
 /**
@@ -70,9 +69,8 @@ export function ApprovalGate() {
     const total = approvals.pendingApprovals.length
     const busy = approvals.busy === pending.callId
     const disabled = approvals.busy !== ''
-    const presentation = presentTool(pending.name, pending.arguments)
-    const summary = presentation.summary
-    const path = typeof presentation.input.path === 'string' ? presentation.input.path : ''
+    const path = pending.arguments.path
+    const summary = pending.name === 'bash' ? pending.arguments.command : path
     return <section className="approval-gate" aria-label="待批准的操作" aria-busy={busy}>
         <div className="approval-gate-box">
             <div className="approval-gate-head">

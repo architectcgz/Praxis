@@ -7,6 +7,9 @@ import (
 
 // modelVisibleEntry 选择模型可见块，保留原 Entry 身份及执行归属。
 func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool) {
+	if value.Error != "" {
+		return value, false
+	}
 	content := make([]sessionentry.Block, 0, len(value.Content))
 	for _, block := range value.Content {
 		if block.Kind != sessionentry.BlockThinking {
@@ -18,21 +21,21 @@ func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEnt
 }
 
 // pairToolResults 把回执放到对应调用之后，恢复补写不打断工具交互的连续性。
-// 只调整上下文顺序，不修改原始 Entry；使用 Execution 和 call ID 避免跨任务误配同名调用。
+// 只调整上下文顺序，不修改原始 Entry；使用 Run 和 call ID 避免跨任务误配同名调用。
 func pairToolResults(entries []sessionentry.ContextEntry) []sessionentry.ContextEntry {
-	type callKey struct{ executionID, callID string }
+	type callKey struct{ runID, callID string }
 	results := make(map[callKey]sessionentry.ContextEntry)
 	calls := make(map[callKey]bool)
 	for _, message := range entries {
 		if entry, ok := modelVisibleEntry(message); ok {
 			for _, block := range entry.Content {
 				if block.Kind == sessionentry.BlockToolCall {
-					calls[callKey{message.ExecutionID, block.CallID}] = true
+					calls[callKey{message.RunID, block.CallID}] = true
 				}
 				if block.Kind == sessionentry.BlockToolResult {
 					result := entry
 					result.Content = []sessionentry.Block{block}
-					results[callKey{message.ExecutionID, block.CallID}] = result
+					results[callKey{message.RunID, block.CallID}] = result
 				}
 			}
 		}
@@ -46,7 +49,7 @@ func pairToolResults(entries []sessionentry.ContextEntry) []sessionentry.Context
 		if message.Role == role.Tool {
 			content := make([]sessionentry.Block, 0, len(entry.Content))
 			for _, block := range entry.Content {
-				if block.Kind != sessionentry.BlockToolResult || !calls[callKey{message.ExecutionID, block.CallID}] {
+				if block.Kind != sessionentry.BlockToolResult || !calls[callKey{message.RunID, block.CallID}] {
 					content = append(content, block)
 				}
 			}
@@ -60,7 +63,7 @@ func pairToolResults(entries []sessionentry.ContextEntry) []sessionentry.Context
 			if block.Kind != sessionentry.BlockToolCall {
 				continue
 			}
-			if result, ok := results[callKey{message.ExecutionID, block.CallID}]; ok {
+			if result, ok := results[callKey{message.RunID, block.CallID}]; ok {
 				selected = append(selected, result)
 			}
 		}

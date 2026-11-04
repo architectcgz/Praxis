@@ -10,11 +10,11 @@ type ModelUsage struct {
 
 // ModelUsageRecord 是一次模型请求的持久化用量。
 type ModelUsageRecord struct {
-	SessionID   string     `json:"sessionId"`
-	AgentID     string     `json:"agentId"`
-	ExecutionID string     `json:"executionId"`
-	TurnID      string     `json:"turnId"`
-	Usage       ModelUsage `json:"usage"`
+	SessionID string     `json:"sessionId"`
+	AgentID   string     `json:"agentId"`
+	RunID     string     `json:"runId"`
+	TurnID    string     `json:"turnId"`
+	Usage     ModelUsage `json:"usage"`
 }
 
 // SessionUsageSummary 返回同一快照的用量明细和加权缓存率；未知比例编码为 null。

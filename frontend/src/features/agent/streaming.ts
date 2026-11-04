@@ -7,14 +7,16 @@ import type { StreamingOutput, StreamingOutputs } from './types'
  */
 export function mergeStreamingEvent(outputs: StreamingOutputs, agentId: string, event: AgentEvent): StreamingOutputs {
     const previous = outputs[agentId]
-    const output: StreamingOutput = previous?.executionId === event.executionId
+    const output: StreamingOutput = previous?.runId === event.runId
         ? previous
-        : { executionId: event.executionId, turns: [], error: '' }
+        : { runId: event.runId, turns: [], error: '' }
     switch (event.kind) {
         case 'text_delta':
         case 'thinking_delta':
-        case 'provider_waiting':
+        case 'model_request_started':
+        case 'model_request_finished':
         case 'tool_call':
+        case 'tool_started':
         case 'tool_approval_required':
         case 'tool_result': {
             const turnId = event.turnId || ''
@@ -45,18 +47,18 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, agentId: string, 
             const turns = [...output.turns]
             turns[index] = {
                 ...turns[index],
-                events: turns[index].events.filter((item) => item.kind !== 'provider_waiting'),
+                events: turns[index].events.filter((item) => item.kind !== 'model_request_started'),
             }
             return { ...outputs, [agentId]: { ...output, turns } }
         }
         case 'request_canceled':
-        case 'execution_ended':
+        case 'run_ended':
         case 'error':
-            if (event.kind !== 'error' && previous?.executionId !== event.executionId) return outputs
+            if (event.kind !== 'error' && previous?.runId !== event.runId) return outputs
             return { ...outputs, [agentId]: {
                 ...output,
                 turns: output.turns.map((turn) => ({ ...turn, events: turn.events.filter((item) => (
-                    item.kind !== 'provider_waiting' && item.kind !== 'tool_approval_required'
+                    item.kind !== 'model_request_started' && item.kind !== 'tool_approval_required'
                 )) })),
                 error: event.kind === 'error' ? event.data.message : output.error,
             } }

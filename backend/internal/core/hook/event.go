@@ -29,8 +29,8 @@ type FinalOutputCommittedHook interface {
 	FinalOutputCommitted(context.Context, EntryCommitted) error
 }
 
-// ExecutionEvent 只暴露已经确定的执行事实，不提供可变业务实体或进度写入能力。
-type ExecutionEvent struct {
+// RunEvent 只暴露已经确定的执行事实，不提供可变业务实体或进度写入能力。
+type RunEvent struct {
 	Identity
 	Outcome     string
 	FailureCode string
@@ -38,14 +38,14 @@ type ExecutionEvent struct {
 	ResumeReason string
 }
 
-type ExecutionStartedHook interface {
-	ExecutionStarted(context.Context, ExecutionEvent) error
+type RunStartedHook interface {
+	RunStarted(context.Context, RunEvent) error
 }
 
-type ExecutionResumedHook interface {
-	ExecutionResumed(context.Context, ExecutionEvent) error
+type RunResumedHook interface {
+	RunResumed(context.Context, RunEvent) error
 }
 
-type ExecutionCommittedHook interface {
-	ExecutionCommitted(context.Context, ExecutionEvent) error
+type RunCommittedHook interface {
+	RunCommitted(context.Context, RunEvent) error
 }

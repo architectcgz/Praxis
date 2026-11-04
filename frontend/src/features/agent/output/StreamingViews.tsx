@@ -1,10 +1,10 @@
 import { memo, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
-import type { AgentEvent } from '../../../api'
+import type { AgentEvent, RunRecord } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { StreamingToolCallsView } from './ToolCallViews'
 import { ThinkingDetails } from './ThinkingDetails'
-import { AgentDuration } from '../../timing/OperationTimings'
+import { RunDuration } from '../../timing/DurationLabel'
 import { MessageTiming } from './MessageTiming'
 
 export const StreamingOutputView = memo(function StreamingOutputView({ content }: { content: string }) {
@@ -27,12 +27,12 @@ export const PendingUserMessageView = memo(function PendingUserMessageView({ con
     )
 })
 
-export function PendingOutputView({ agentName, executionId }: { agentName: string; executionId: string }) {
+export function PendingOutputView({ agentName, run }: { agentName: string; run?: RunRecord | null }) {
     return (
         <article className="message message-assistant message-pending" role="status">
             <div className="message-meta">
                 <strong>{agentName}</strong>
-                <AgentDuration executionId={executionId} />
+                <RunDuration run={run} label="运行中" activeOnly />
             </div>
             <div className="message-pending-status">
                 <LoaderCircle size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -52,20 +52,23 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, str
     )
 })
 
-export function StreamingTurnView({ agentName, events, executionId, turnId, active, continuation = false, hasContinuation = false }: {
+export function StreamingTurnView({ agentName, events, runId, run, turnId, active, continuation = false, hasContinuation = false }: {
     agentName: string
     events: AgentEvent[]
-    executionId: string
+    runId: string
+    run?: RunRecord | null
     turnId: string
     active: boolean
     continuation?: boolean
     hasContinuation?: boolean
 }) {
+    const started = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_started' }> => event.kind === 'model_request_started')
+    const finished = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_finished' }> => event.kind === 'model_request_finished')
     const segments: ReactNode[] = []
     const pendingStatus = active ? 'running' : 'unknown'
     let tools: AgentEvent[] = []
     events.forEach((event, index) => {
-        if (event.kind === 'tool_call' || event.kind === 'tool_approval_required' || event.kind === 'tool_result') {
+        if (event.kind === 'tool_call' || event.kind === 'tool_started' || event.kind === 'tool_approval_required' || event.kind === 'tool_result') {
             tools.push(event)
             return
         }
@@ -73,7 +76,7 @@ export function StreamingTurnView({ agentName, events, executionId, turnId, acti
             segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${index}`} />)
             tools = []
         }
-        if (event.kind === 'provider_waiting' && active && index === events.length - 1) {
+        if (event.kind === 'model_request_started' && active && index === events.length - 1) {
             segments.push(<AgentActivityView providerWaiting key={`provider-waiting-${index}`} />)
         } else if (event.kind === 'thinking_delta' && event.data.text) {
             // 只有当前末尾的思考仍在流式输出；工具或正文出现后，前一段思考结束并收起。
@@ -87,12 +90,12 @@ export function StreamingTurnView({ agentName, events, executionId, turnId, acti
         {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">
                 <strong>{agentName}</strong>
-                <AgentDuration executionId={executionId} />
+                <RunDuration run={run} label="运行中" activeOnly />
             </div>
         </div>}
         {segments}
         <div className="agent-activity turn-foot">
-            <MessageTiming executionId={executionId} referenceId={`assistant:${turnId}`} />
+            <MessageTiming runId={runId} turnId={turnId} record={finished?.data.timing || started?.data.timing} running={active && !finished} />
         </div>
     </div>
 }

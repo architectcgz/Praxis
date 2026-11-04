@@ -7,7 +7,7 @@ const stateLabels: Record<string, string> = {
     interrupted: '已中断', failed: '失败', unknown: '未知',
 }
 
-export function AgentsPanel({ loading, session, histories, selectedAgentID, onSelectAgent }: AgentsPanelProps) {
+export function AgentsPanel({ loading, session, agentEntries, selectedAgentID, onSelectAgent }: AgentsPanelProps) {
     const agents = session?.agents || []
     return (
         <aside className="sidebar side right agents-panel">
@@ -24,8 +24,8 @@ export function AgentsPanel({ loading, session, histories, selectedAgentID, onSe
                     <div className="scroll-region scroll">
                         <div className="agent-list">
                             {agents.map((item) => {
-                                const history = histories[item.ID] || []
-                                const stats = agentStats(history)
+                                const entries = agentEntries[item.ID] || []
+                                const stats = agentStats(entries)
                                 const state = stateLabels[item.state] || stateLabels.unknown
                                 return (
                                     <button
@@ -61,11 +61,11 @@ export function AgentsPanel({ loading, session, histories, selectedAgentID, onSe
     )
 }
 
-function agentStats(history: Entry[]) {
+function agentStats(entries: Entry[]) {
     let messages = 0
     let tools = 0
     let failures = 0
-    for (const item of history) {
+    for (const item of entries) {
         {
             messages++
             for (const block of item.content) {

@@ -1,16 +1,16 @@
-import type { ExecutionRecord } from '../../bindings/praxis/internal/core/agent/execution/models'
+import type { RunRecord } from '../../bindings/praxis/internal/core/agent/run/models'
 import type { QueuedTask } from './tasks'
 import type { AgentView as GeneratedAgentView } from '../../bindings/praxis/internal/service/agent/models'
 import type { Entry as GeneratedEntry, EntryBlock } from '../../bindings/praxis/wails/dto/models'
 import { Events } from '@wailsio/runtime'
 import { getAgentBinding, isBindingAvailable } from './bindings'
-import type { OperationTiming } from './timings'
+import type { Timing } from './timings'
 
 export const AGENT_EVENT_NAME = 'praxis:agent-event'
 
-// Go 的展示投影保证 content 为数组，边界类型据此收窄。
-export type Entry = Omit<GeneratedEntry, 'content'> & { content: EntryBlock[] }
-export type { EntryBlock, ExecutionRecord }
+// Go 的展示投影保证 content 为数组，缺失的 timing 字段直接省略，不编码为 null。
+export type Entry = Omit<GeneratedEntry, 'content' | 'timing'> & { content: EntryBlock[]; timing?: Timing }
+export type { EntryBlock, RunRecord }
 
 /** 保留生成接口的字段，将枚举暴露为其字面量联合，允许前端表达乐观状态。 */
 export type AgentView = Omit<GeneratedAgentView, 'state'> & { state: `${GeneratedAgentView['state']}` }
@@ -24,7 +24,7 @@ export type ModelUsage = {
 
 export type ModelUsageRecord = {
     sessionId: string
-    executionId: string
+    runId: string
     turnId: string
     usage: ModelUsage
 }
@@ -32,23 +32,23 @@ export type ModelUsageRecord = {
 type AgentEventData = {
     entries_appended: { entries: Entry[] }
     turn_started: Record<string, never>
-    provider_waiting: Record<string, never>
+    model_request_started: { requestKind: 'iteration' | 'summary' | 'risk_review'; timing?: Timing }
+    model_request_finished: { requestKind: 'iteration' | 'summary' | 'risk_review'; stopReason: string; usage?: ModelUsage; timing?: Timing }
     text_delta: { text: string }
     thinking_delta: { text: string }
     tool_call: { callId: string; name: string; arguments: unknown }
+    tool_started: { callId: string; timing?: Timing }
     tool_approval_required: { callId: string }
-    tool_result: { callId: string; result: string; isError: boolean }
+    tool_result: { callId: string; result: string; isError: boolean; timing?: Timing }
     turn_completed: { stopReason: string }
-    model_usage: { usage: ModelUsage }
-    execution_started: { execution: ExecutionRecord }
-    execution_interrupt_requested: { appliedAt: string }
-    request_canceled: { execution: ExecutionRecord; state: AgentView['state']; entries: Entry[] }
-    execution_ended: { execution: ExecutionRecord; state: AgentView['state']; entries: Entry[] }
-    subagent_started: { agent: AgentView; entries: Entry[]; parentAgentId: string; parentExecutionId: string; callId: string }
+    run_started: { run: RunRecord }
+    run_interrupt_requested: { appliedAt: string }
+    request_canceled: { run: RunRecord; state: AgentView['state']; entries: Entry[] }
+    run_ended: { run: RunRecord; state: AgentView['state']; entries: Entry[] }
+    subagent_started: { agent: AgentView; entries: Entry[]; parentAgentId: string; parentRunId: string; callId: string }
     subagent_released: Record<string, never>
     task_queue_changed: { tasks: QueuedTask[] }
     error: { message: string }
-    operation_timing: { timing: OperationTiming }
 }
 
 type AgentEventSource = {
@@ -56,7 +56,7 @@ type AgentEventSource = {
     bindingId: string
     branchId: string
     sessionId?: string
-    executionId: string
+    runId: string
     turnId?: string
 }
 

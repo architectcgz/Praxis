@@ -5,8 +5,8 @@ import (
 	"praxis/internal/core/session/entry/role"
 )
 
-// ContentFromEntries 从 Run 的只读引用构建模型投影，保护标记只属于本轮请求。
-// 执行输入的存在性已由 NewRun 检查，完整轮次压缩后 Context 可以只包含摘要。
+// ContentFromEntries 从已选择的只读条目构建模型投影，保护标记只属于本轮请求。
+// 执行输入的存在性已在准入时检查，完整执行压缩后上下文可以只包含摘要。
 func ContentFromEntries(systemPrompt, inputEntryID string, entries []*sessionentry.ContextEntry) Content {
 	content := Content{SystemPrompt: systemPrompt}
 	for _, entry := range ModelEntries(sessionentry.Values(entries)) {

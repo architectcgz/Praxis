@@ -3,6 +3,7 @@ package entry
 import (
 	"bytes"
 	"encoding/json"
+	"praxis/internal/core/agent/run/timing"
 	"praxis/internal/core/session/entry/role"
 	"strings"
 	"time"
@@ -41,22 +42,26 @@ type Block struct {
 	ReasoningState *ReasoningState `json:"reasoningState,omitempty"`
 }
 
-// ContextEntry 是 Agent 历史与模型上下文共用的内部有序记录，不定义前端协议。
+// ContextEntry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
 type ContextEntry struct {
 	// ParentID 连接会话历史节点；命名分支由提交目标和分支 Head 表达。
 	ParentID string `json:"parentId,omitempty"`
-	// Summary 覆盖所在分支路径中此前的全部上下文，原始历史仍然保留。
+	// Summary 覆盖所在分支路径中此前的全部上下文，原始 Entry 仍然保留。
 	Summary      bool       `json:"summary,omitzero"`
 	ID           string     `json:"id"`
 	RequestID    string     `json:"requestId,omitempty"`
 	HandoffID    string     `json:"handoffId,omitempty"`
-	ExecutionID  string     `json:"executionId,omitempty"`
+	RunID        string     `json:"executionId,omitempty"`
 	SourceTaskID string     `json:"sourceTaskId,omitempty"`
 	TurnID       string     `json:"turnId,omitempty"`
 	StopReason   string     `json:"stopReason,omitempty"`
 	AuthorKind   AuthorKind `json:"authorKind,omitempty"`
 	AuthorID     string     `json:"authorId,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
+	// Error 标记未取得完整模型响应的条目，不进入后续模型上下文。
+	Error string `json:"error,omitempty"`
+	// Timing 随响应、工具回执或摘要提交，不参与 Provider 的上下文编码。
+	Timing *timing.Record `json:"timing,omitempty"`
 
 	// Protected 标记本轮请求必须容纳的原文，只用于必要输入的容量检查，不限制轮后摘要。
 	Protected bool      `json:"protected,omitempty"`

@@ -2,26 +2,26 @@ package coordinator
 
 import (
 	"context"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 )
 
 // ActiveRun 只借用执行生命周期内的引用，不另建 Agent 注册表。
-func (s *Coordinator) ActiveRun(agentID identity.AgentID, branchID identity.BranchID) *agentexecution.Run {
+func (s *Coordinator) ActiveRun(agentID identity.AgentID, branchID identity.BranchID) *agentrun.Run {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if active := s.executions[executionKey{agentID, branchID}]; active != nil {
+	if active := s.runs[runKey{agentID, branchID}]; active != nil {
 		return active.run
 	}
 	return nil
 }
 
-func (s *Coordinator) SessionRuns(sessionID identity.SessionID, branchID identity.BranchID) []*agentexecution.Run {
+func (s *Coordinator) SessionRuns(sessionID identity.SessionID, branchID identity.BranchID) []*agentrun.Run {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var runs []*agentexecution.Run
-	for _, active := range s.executions {
+	var runs []*agentrun.Run
+	for _, active := range s.runs {
 		if active.sessionID == sessionID && active.branchID == branchID && active.run != nil {
 			runs = append(runs, active.run)
 		}

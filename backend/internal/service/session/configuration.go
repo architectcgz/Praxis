@@ -60,8 +60,8 @@ func (s *Service) Definition(ctx context.Context, id identity.SessionID, definit
 	return config.Definition(definitionID)
 }
 
-// ExecutionConfiguration 在同一配置读锁内取得配置和模型选择，执行期间不再读取全局目录。
-func (s *Service) ExecutionConfiguration(ctx context.Context, id identity.SessionID) (*Configuration, modelapi.Config, error) {
+// RunConfiguration 在同一配置读锁内取得配置和模型选择，执行期间不再读取全局目录。
+func (s *Service) RunConfiguration(ctx context.Context, id identity.SessionID) (*Configuration, modelapi.Config, error) {
 	owner, err := s.openedSession(ctx, id)
 	if err != nil {
 		return nil, modelapi.Config{}, err

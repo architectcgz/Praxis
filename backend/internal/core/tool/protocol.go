@@ -15,10 +15,10 @@ type ToolDefinition struct {
 
 // CallKey 用执行身份和 Provider 调用 ID 定位同一次工具调用。
 type CallKey struct {
-	ExecutionID identity.AgentExecutionID
-	CallID      string
+	RunID  identity.RunID
+	CallID string
 }
 
 func (k CallKey) String() string {
-	return fmt.Sprintf("%s:%d:%s", k.ExecutionID, len(k.CallID), k.CallID)
+	return fmt.Sprintf("%s:%d:%s", k.RunID, len(k.CallID), k.CallID)
 }

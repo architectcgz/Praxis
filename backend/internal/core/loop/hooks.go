@@ -5,12 +5,12 @@ import (
 	"praxis/internal/identity"
 )
 
-func executionIdentity(execution ExecutionParams, turnID identity.TurnID) hook.Identity {
+func runIdentity(params RunParams, turnID identity.TurnID) hook.Identity {
 	return hook.Identity{
-		SourceTaskID: execution.SourceTaskID,
-		SessionID:    execution.SessionID,
-		AgentID:      execution.AgentID,
-		ExecutionID:  execution.ID,
+		SourceTaskID: params.SourceTaskID,
+		SessionID:    params.SessionID,
+		AgentID:      params.AgentID,
+		RunID:        params.ID,
 		TurnID:       turnID,
 	}
 }

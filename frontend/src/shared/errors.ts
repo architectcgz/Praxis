@@ -61,25 +61,25 @@ function readableApiError(code: string) {
             return '找不到对应请求。'
         case API_ERROR_CODES.requestConflict:
             return '请求冲突，请刷新后重试。'
-        case API_ERROR_CODES.executionContract:
+        case API_ERROR_CODES.runContract:
             return '执行契约无效。'
-        case API_ERROR_CODES.executionPolicyBlocked:
+        case API_ERROR_CODES.runPolicyBlocked:
             return '请求被执行策略阻止。'
-        case API_ERROR_CODES.executionApprovalRequired:
+        case API_ERROR_CODES.runApprovalRequired:
             return '此操作需要批准后才能继续。'
-        case API_ERROR_CODES.executionStorage:
+        case API_ERROR_CODES.runStorage:
             return '执行状态保存失败。'
         case API_ERROR_CODES.sessionLogUnavailable:
             return '会话日志写入失败，已停止该会话。请重启应用后再继续，勿重复执行工具。'
-        case API_ERROR_CODES.executionProvider:
+        case API_ERROR_CODES.runProvider:
             return '模型 Provider 无法完成请求。'
-        case API_ERROR_CODES.executionTool:
+        case API_ERROR_CODES.runTool:
             return '执行所需工具失败。'
-        case API_ERROR_CODES.executionResourceLimit:
+        case API_ERROR_CODES.runResourceLimit:
             return '执行达到资源限制。'
-        case API_ERROR_CODES.executionBusy:
+        case API_ERROR_CODES.runBusy:
             return '代理正忙，请稍后重试。'
-        case API_ERROR_CODES.executionInterrupted:
+        case API_ERROR_CODES.runInterrupted:
             return '执行已中断。'
         case API_ERROR_CODES.configuration:
             return '配置无效，请检查后重试。'

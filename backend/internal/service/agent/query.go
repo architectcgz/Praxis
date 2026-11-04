@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
@@ -17,47 +17,47 @@ import (
 )
 
 type Dependencies struct {
-	Entries          sessionmodel.EntryReader
-	ActiveRun        func(identity.AgentID, identity.BranchID) *agentexecution.Run
-	SessionRuns      func(identity.SessionID, identity.BranchID) []*agentexecution.Run
-	ExecutionRecords sessionmodel.ExecutionRecords
-	Sessions         repository.Session
-	Definitions      func(context.Context, identity.SessionID, identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
+	Entries     sessionmodel.EntryReader
+	ActiveRun   func(identity.AgentID, identity.BranchID) *agentrun.Run
+	SessionRuns func(identity.SessionID, identity.BranchID) []*agentrun.Run
+	RunRecords  sessionmodel.RunRecords
+	Sessions    repository.Session
+	Definitions func(context.Context, identity.SessionID, identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
 type Service struct {
-	entries          sessionmodel.EntryReader
-	activeRun        func(identity.AgentID, identity.BranchID) *agentexecution.Run
-	sessionRuns      func(identity.SessionID, identity.BranchID) []*agentexecution.Run
-	executionRecords sessionmodel.ExecutionRecords
-	sessions         repository.Session
-	definitions      func(context.Context, identity.SessionID, identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
+	entries     sessionmodel.EntryReader
+	activeRun   func(identity.AgentID, identity.BranchID) *agentrun.Run
+	sessionRuns func(identity.SessionID, identity.BranchID) []*agentrun.Run
+	runRecords  sessionmodel.RunRecords
+	sessions    repository.Session
+	definitions func(context.Context, identity.SessionID, identity.AgentDefinitionID) (agentmodel.AgentDefinition, error)
 }
 
-// AgentView 是展示投影；没有活跃 Execution 时不需要对应的 Agent 实例。
+// AgentView 是展示投影；没有活跃 Run 时不需要对应的 Agent 实例。
 type AgentView struct {
-	ID                 identity.AgentID
-	SessionID          identity.SessionID
-	BranchID           identity.BranchID
-	DefinitionID       identity.AgentDefinitionID
-	Kind               agentmodel.AgentKind
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	Name               string                          `json:"name"`
-	State              agentmodel.AgentState           `json:"state"`
-	CurrentExecutionID identity.AgentExecutionID       `json:"currentExecutionId"`
-	CurrentExecution   *agentexecution.ExecutionRecord `json:"currentExecution"`
-	LatestExecution    *agentexecution.ExecutionRecord `json:"latestExecution"`
+	ID           identity.AgentID
+	SessionID    identity.SessionID
+	BranchID     identity.BranchID
+	DefinitionID identity.AgentDefinitionID
+	Kind         agentmodel.AgentKind
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Name         string                `json:"name"`
+	State        agentmodel.AgentState `json:"state"`
+	CurrentRunID identity.RunID        `json:"currentRunId"`
+	CurrentRun   *agentrun.RunRecord   `json:"currentRun"`
+	LatestRun    *agentrun.RunRecord   `json:"latestRun"`
 }
 
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		entries:          deps.Entries,
-		activeRun:        deps.ActiveRun,
-		sessionRuns:      deps.SessionRuns,
-		executionRecords: deps.ExecutionRecords,
-		definitions:      deps.Definitions,
-		sessions:         deps.Sessions,
+		entries:     deps.Entries,
+		activeRun:   deps.ActiveRun,
+		sessionRuns: deps.SessionRuns,
+		runRecords:  deps.RunRecords,
+		definitions: deps.Definitions,
+		sessions:    deps.Sessions,
 	}
 }
 
@@ -69,7 +69,7 @@ func (s *Service) GetAgentView(ctx context.Context, sessionID identity.SessionID
 		}
 		return s.describeRun(ctx, run)
 	}
-	latest, err := s.executionRecords.ListAgentExecutions(ctx, sessionID, agentID, branchID, 1)
+	latest, err := s.runRecords.ListAgentRuns(ctx, sessionID, agentID, branchID, 1)
 	if err != nil {
 		return AgentView{}, err
 	}
@@ -109,16 +109,16 @@ func (s *Service) GetAgentView(ctx context.Context, sessionID identity.SessionID
 		State:        agentmodel.AgentIdle,
 	}
 	if len(latest) > 0 {
-		history, err := s.entries.ListAgentEntries(ctx, session.ID, agentID, branchID)
+		values, err := s.entries.ListAgentEntries(ctx, session.ID, agentID, branchID)
 		if err != nil {
 			return AgentView{}, err
 		}
-		entries := make([]*sessionentry.ContextEntry, len(history))
-		for index := range history {
-			entries[index] = &history[index]
+		entries := make([]*sessionentry.ContextEntry, len(values))
+		for index := range values {
+			entries[index] = &values[index]
 		}
 		latest[0].Progress = latest[0].Progress.WithEntries(latest[0].ID.String(), entries)
-		view.LatestExecution = &latest[0]
+		view.LatestRun = &latest[0]
 		view.State = latest[0].AgentState()
 		view.UpdatedAt = latest[0].EndedAt
 	}
@@ -143,15 +143,15 @@ func (s *Service) ListSessionAgents(ctx context.Context, sessionID identity.Sess
 		values = append(values, view)
 		seen[view.ID] = true
 	}
-	executions, err := s.executionRecords.ListSessionExecutions(ctx, sessionID, branchID)
+	runs, err := s.runRecords.ListSessionRuns(ctx, sessionID, branchID)
 	if err != nil {
 		return nil, err
 	}
-	for _, execution := range executions {
-		if seen[execution.AgentID] {
+	for _, record := range runs {
+		if seen[record.AgentID] {
 			continue
 		}
-		view, err := s.GetAgentView(ctx, sessionID, execution.AgentID, branchID)
+		view, err := s.GetAgentView(ctx, sessionID, record.AgentID, branchID)
 		if err != nil {
 			return nil, err
 		}
@@ -167,29 +167,29 @@ func (s *Service) ListSessionAgents(ctx context.Context, sessionID identity.Sess
 	return values, nil
 }
 
-func (s *Service) describeRun(ctx context.Context, run *agentexecution.Run) (AgentView, error) {
+func (s *Service) describeRun(ctx context.Context, run *agentrun.Run) (AgentView, error) {
 	value := run.Agent
 	definition, err := s.definitions(ctx, value.SessionID, value.DefinitionID)
 	if err != nil {
 		return AgentView{}, fmt.Errorf("load agent definition for display: %w", err)
 	}
-	state, executionID, updatedAt := value.State()
+	state, runID, updatedAt := value.State()
 	record := run.Snapshot()
 	view := AgentView{
-		ID:                 value.ID,
-		SessionID:          value.SessionID,
-		BranchID:           record.BranchID,
-		DefinitionID:       value.DefinitionID,
-		Kind:               value.Kind,
-		CreatedAt:          value.CreatedAt,
-		UpdatedAt:          updatedAt,
-		Name:               definition.Name,
-		State:              state,
-		CurrentExecutionID: executionID,
-		LatestExecution:    &record,
+		ID:           value.ID,
+		SessionID:    value.SessionID,
+		BranchID:     record.BranchID,
+		DefinitionID: value.DefinitionID,
+		Kind:         value.Kind,
+		CreatedAt:    value.CreatedAt,
+		UpdatedAt:    updatedAt,
+		Name:         definition.Name,
+		State:        state,
+		CurrentRunID: runID,
+		LatestRun:    &record,
 	}
-	if executionID != "" {
-		view.CurrentExecution = &record
+	if runID != "" {
+		view.CurrentRun = &record
 	}
 	return view, nil
 }

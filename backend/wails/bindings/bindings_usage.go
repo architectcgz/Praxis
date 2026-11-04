@@ -30,11 +30,11 @@ func usageRecords(records []providerapi.UsageRecord) []dto.ModelUsageRecord {
 	result := make([]dto.ModelUsageRecord, 0, len(records))
 	for _, value := range records {
 		result = append(result, dto.ModelUsageRecord{
-			SessionID:   value.SessionID,
-			AgentID:     value.AgentID,
-			ExecutionID: value.ExecutionID,
-			TurnID:      value.TurnID.String(),
-			Usage:       publicUsage(value.Usage),
+			SessionID: value.SessionID,
+			AgentID:   value.AgentID,
+			RunID:     value.RunID,
+			TurnID:    value.TurnID.String(),
+			Usage:     publicUsage(value.Usage),
 		})
 	}
 	return result
@@ -43,8 +43,8 @@ func usageRecords(records []providerapi.UsageRecord) []dto.ModelUsageRecord {
 func publicUsage(value providerapi.Usage) dto.ModelUsage {
 	return dto.ModelUsage{
 		InputTokens:              value.InputTokens,
-		OutputTokens:             clonePointer(value.OutputTokens),
-		CacheReadInputTokens:     clonePointer(value.CacheReadInputTokens),
-		CacheCreationInputTokens: clonePointer(value.CacheCreationInputTokens),
+		OutputTokens:             value.OutputTokens,
+		CacheReadInputTokens:     value.CacheReadInputTokens,
+		CacheCreationInputTokens: value.CacheCreationInputTokens,
 	}
 }

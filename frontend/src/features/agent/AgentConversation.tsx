@@ -4,17 +4,17 @@ import type { Entry, AgentView, ModelOption } from '../../api'
 import type { StreamingOutput, PendingUserMessage as PendingUserMessageItem } from './types'
 import { AgentTaskInput } from './AgentTaskInput'
 import { ApprovalGate, ToolApprovalsProvider } from './ToolApprovals'
-import { AgentActivityView, HistoryItemView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
+import { AgentActivityView, EntryView, PendingOutputView, PendingUserMessageView, StreamingTurnView } from './output/MessageViews'
 
 export type AgentConversationProps = {
     branchId: string
     agent: AgentView
-    history: Entry[]
+    entries: Entry[]
     collaboration?: ReactNode
     streamingOutput: StreamingOutput | null
     pendingUserMessages: PendingUserMessageItem[]
     awaitingOutput: boolean
-    historyError: string
+    entriesError: string
     input: string
     setInput: (value: string) => void
     models: ModelOption[]
@@ -32,7 +32,7 @@ export type AgentConversationProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ branchId, agent, history, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, historyError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ branchId, agent, entries, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, entriesError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -40,24 +40,23 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
     const [showScrollButton, setShowScrollButton] = useState(false)
     const active = agent.state === 'executing'
     const waitingForOutput = awaitingOutput || (agent.state === 'executing' && !busy && !streamingOutput)
-    // Assistant 已按接纳边界进入历史，同一回合的流式展示由历史条目承接。
+    // Assistant Entry 接纳后承接同一回合的流式展示。
     const visibleStreamingOutput = streamingOutput ? {
         ...streamingOutput,
-        turns: streamingOutput.turns.filter((turn) => !history.some((entry) => (
-            entry.role === 'assistant' && entry.executionId === streamingOutput.executionId && entry.id === `assistant:${turn.turnId}`
+        turns: streamingOutput.turns.filter((turn) => !entries.some((entry) => (
+            entry.role === 'assistant' && entry.runId === streamingOutput.runId && entry.turnId === turn.turnId
         ))),
     } : null
-    const latestExecution = agent.latestExecution
-    const executionError = latestExecution?.Status === 'ended' && latestExecution.Outcome === 'failed'
-        ? latestExecution.FailureMessage || `执行失败：${latestExecution.FailureCode}` : ''
-    const orderedHistory = history
-    const visibleHistory = history
+    const latestRun = agent.latestRun
+    const runError = latestRun?.Status === 'ended' && latestRun.Outcome === 'failed' &&
+        !entries.some((entry) => entry.runId === latestRun.ID && entry.error)
+        ? latestRun.FailureMessage || `执行失败：${latestRun.FailureCode}` : ''
 
     // Pending messages belong to the agent that was active when they were sent.
     const visiblePendingMessages = useMemo(() => pendingUserMessages.filter((message) => (
         message.agentId ? message.agentId === agent.ID : message.sessionId === agent.SessionID
     )), [agent.ID, agent.SessionID, pendingUserMessages])
-    const threadEmpty = orderedHistory.length === 0 && visiblePendingMessages.length === 0 && !streamingOutput && !waitingForOutput && !collaboration
+    const threadEmpty = entries.length === 0 && visiblePendingMessages.length === 0 && !streamingOutput && !waitingForOutput && !collaboration
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
@@ -77,7 +76,7 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
         })
         followingOutputRef.current = true
         previousAgentIDRef.current = agent.ID
-    }, [agent.ID, orderedHistory, visiblePendingMessages, streamingOutput, waitingForOutput, collaboration])
+    }, [agent.ID, entries, visiblePendingMessages, streamingOutput, waitingForOutput, collaboration])
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
@@ -116,7 +115,7 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
         setShowScrollButton(false)
     }, [])
 
-    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} executionId={agent.currentExecutionId} sessionId={agent.SessionID} branchId={branchId}>
+    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} runId={agent.currentRunId} sessionId={agent.SessionID} branchId={branchId}>
         <div className="agent-conversation">
             <div className="message-thread-container">
                 <div
@@ -124,7 +123,7 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
                     ref={messageThreadRef}
                     onScroll={updateOutputFollowing}
                 >
-                    {historyError && <p role="alert">{historyError}</p>}
+                    {entriesError && <p role="alert">{entriesError}</p>}
                     {threadEmpty ? (
                         <div className="message-empty" role="status">
                             <div className="message-empty-content">
@@ -138,17 +137,18 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
                             </div>
                         </div>
                     ) : (
-                        visibleHistory.map((item, index) => {
-                            const continuation = sameAssistantTask(visibleHistory[index - 1], item)
-                            const hasContinuation = sameAssistantTask(item, visibleHistory[index + 1])
+                        entries.map((item, index) => {
+                            const continuation = sameAssistantTask(entries[index - 1], item)
+                            const hasContinuation = sameAssistantTask(item, entries[index + 1])
                             let start = index
                             if (!hasContinuation) {
-                                while (sameAssistantTask(visibleHistory[start - 1], item)) start -= 1
+                                while (sameAssistantTask(entries[start - 1], item)) start -= 1
                             }
-                            const copyContent = visibleHistory.slice(start, index + 1).map((entry) => entry.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')).filter(Boolean).join('\n\n')
-                            return <HistoryItemView
+                            const copyContent = entries.slice(start, index + 1).map((entry) => entry.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')).filter(Boolean).join('\n\n')
+                            return <EntryView
                                 agentName={agent.name}
                                 item={item}
+                                events={streamingOutput && streamingOutput.runId === item.runId ? streamingOutput.turns.find((turn) => turn.turnId === item.turnId)?.events : undefined}
                                 continuation={continuation}
                                 hasContinuation={hasContinuation}
                                 copyContent={copyContent}
@@ -164,17 +164,18 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
                         <StreamingTurnView
                             agentName={agent.name}
                             events={turn.events}
-                            executionId={visibleStreamingOutput.executionId}
+                            runId={visibleStreamingOutput.runId}
+                            run={agent.currentRun?.ID === visibleStreamingOutput.runId ? agent.currentRun : agent.latestRun}
                             turnId={turn.turnId}
                             active={active && index === visibleStreamingOutput.turns.length - 1 && !visibleStreamingOutput.error}
                             continuation={index > 0}
                             hasContinuation={index < visibleStreamingOutput.turns.length - 1}
-                            key={`${visibleStreamingOutput.executionId}-${turn.turnId}`}
+                            key={`${visibleStreamingOutput.runId}-${turn.turnId}`}
                         />
                     ))}
-                    {!visibleStreamingOutput && executionError && <AgentActivityView error={executionError} />}
-                    {visibleStreamingOutput?.error && <AgentActivityView error={visibleStreamingOutput.error} />}
-                    {waitingForOutput && <PendingOutputView agentName={agent.name} executionId={agent.currentExecutionId} />}
+                    {!visibleStreamingOutput && runError && <AgentActivityView error={runError} />}
+                    {visibleStreamingOutput?.error && !entries.some((entry) => entry.runId === visibleStreamingOutput.runId && entry.error) && <AgentActivityView error={visibleStreamingOutput.error} />}
+                    {waitingForOutput && <PendingOutputView agentName={agent.name} run={agent.currentRun} />}
                 </div>
                 {showScrollButton && (
                     <button
@@ -215,5 +216,5 @@ export function AgentConversation({ branchId, agent, history, collaboration, str
 /** 仅衔接同一次执行中相邻的助手消息；用户消息、错误和不同任务都保留独立边界。 */
 function sameAssistantTask(left?: Entry, right?: Entry): boolean {
     return left?.role === 'assistant' && right?.role === 'assistant' &&
-        !!left.executionId && left.executionId === right.executionId
+        !left.error && !right.error && !!left.runId && left.runId === right.runId
 }

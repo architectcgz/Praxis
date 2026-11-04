@@ -28,10 +28,10 @@ func (b *CommandBindings) ListToolApprovals(sessionID, branchID, agentID string)
 		review := value.Review
 		result = append(result, dto.ToolApproval{
 			ToolDecisionRequest: dto.ToolDecisionRequest{
-				SessionID:   value.Call.SessionID.String(),
-				AgentID:     value.Call.AgentID.String(),
-				ExecutionID: value.Call.ExecutionID.String(),
-				CallID:      value.Call.CallID,
+				SessionID: value.Call.SessionID.String(),
+				AgentID:   value.Call.AgentID.String(),
+				RunID:     value.Call.RunID.String(),
+				CallID:    value.Call.CallID,
 			},
 			Name:      string(value.Call.Name),
 			Arguments: string(value.Arguments),
@@ -62,10 +62,10 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 	}
 
 	params := execution.ToolDecision{
-		SessionID:   identity.SessionID(wire.SessionID),
-		AgentID:     identity.AgentID(wire.AgentID),
-		ExecutionID: identity.AgentExecutionID(wire.ExecutionID),
-		CallID:      wire.CallID,
+		SessionID: identity.SessionID(wire.SessionID),
+		AgentID:   identity.AgentID(wire.AgentID),
+		RunID:     identity.RunID(wire.RunID),
+		CallID:    wire.CallID,
 	}
 	if approve {
 		err = services.Commands.ApproveToolCall(ctx, params)
@@ -78,7 +78,7 @@ func (b *CommandBindings) decideToolCall(wire dto.ToolDecisionRequest, approve b
 	return nil
 }
 
-func (b *CommandBindings) StopToolCall(wire dto.ToolControlRequest) error {
+func (b *CommandBindings) StopToolCall(wire dto.ToolCancelRequest) error {
 	if err := validation.Struct(wire); err != nil {
 		return publicInputError(b.host, "CommandBindings.StopToolCall.request", err)
 	}
@@ -87,10 +87,10 @@ func (b *CommandBindings) StopToolCall(wire dto.ToolControlRequest) error {
 		return err
 	}
 	request := execution.ToolControl{
-		SessionID:   identity.SessionID(wire.SessionID),
-		AgentID:     identity.AgentID(wire.AgentID),
-		ExecutionID: identity.AgentExecutionID(wire.ExecutionID),
-		CallID:      wire.CallID,
+		SessionID: identity.SessionID(wire.SessionID),
+		AgentID:   identity.AgentID(wire.AgentID),
+		RunID:     identity.RunID(wire.RunID),
+		CallID:    wire.CallID,
 	}
 	return publicError(b.host, "CommandBindings.StopToolCall", services.Commands.StopToolCall(ctx, request))
 }

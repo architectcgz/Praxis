@@ -33,13 +33,13 @@ func (u Usage) Valid() bool {
 	return read >= 0 && creation >= 0 && creation <= u.InputTokens && read <= u.InputTokens-creation
 }
 
-// UsageRecord 是按请求查询的已知用量投影，执行累计值由 Execution 保存。
+// UsageRecord 是按请求查询的已知用量投影，执行累计值由 Run 保存。
 type UsageRecord struct {
-	SessionID   string          `json:"sessionId"`
-	AgentID     string          `json:"agentId"`
-	ExecutionID string          `json:"executionId"`
-	TurnID      identity.TurnID `json:"turnId"`
-	Usage       Usage           `json:"usage"`
+	SessionID string          `json:"sessionId"`
+	AgentID   string          `json:"agentId"`
+	RunID     string          `json:"runId"`
+	TurnID    identity.TurnID `json:"turnId"`
+	Usage     Usage           `json:"usage"`
 }
 
 func (u Usage) Clone() Usage {

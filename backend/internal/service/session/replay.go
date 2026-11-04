@@ -3,8 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
-	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/core/agent/execution/timing"
+	agentrun "praxis/internal/core/agent/run"
 	sessionmodel "praxis/internal/core/session"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
@@ -29,8 +28,8 @@ func (r *logReplay) apply(event sessionmodel.Event) error {
 	switch event.Type {
 	case sessionmodel.EventBranchCreated:
 		owner.AcceptBranch(event.Payload.(sessionmodel.Branch))
-	case sessionmodel.EventExecutionSaved:
-		owner.SetExecution(event.Payload.(agentexecution.ExecutionRecord))
+	case sessionmodel.EventRunSaved:
+		owner.SetRun(event.Payload.(agentrun.RunRecord))
 	case sessionmodel.EventEntryAppended:
 		if owner.Branch(event.BranchID) == nil {
 			return fmt.Errorf("entry event targets an unknown branch %q", event.BranchID)
@@ -42,12 +41,10 @@ func (r *logReplay) apply(event sessionmodel.Event) error {
 		} else {
 			owner.AcceptSubagentEntry(event.AgentID, value)
 		}
-	case sessionmodel.EventModelRequestFinished:
-		value := event.Payload.(sessionmodel.ModelRequestFinished)
+	case sessionmodel.EventModelRequestStarted, sessionmodel.EventModelRequestFinished:
+		value := event.Payload.(sessionmodel.ModelRequestSaved)
 		owner.SetModelRequest(value.Request)
-		owner.SetExecution(value.Execution)
-	case sessionmodel.EventTimingStarted, sessionmodel.EventTimingFinished:
-		owner.SetTiming(event.Payload.(timing.Record))
+		owner.SetRun(value.Run)
 	}
 	return nil
 }
@@ -63,8 +60,8 @@ func (r *logReplay) trackToolEntry(value sessionentry.ContextEntry, agentID iden
 			continue
 		}
 		key := sessionentry.Key{
-			ExecutionID: identity.AgentExecutionID(value.ExecutionID),
-			CallID:      block.CallID,
+			RunID:  identity.RunID(value.RunID),
+			CallID: block.CallID,
 		}
 		r.calls[r.callIndexes[key]].completed = true
 	}
@@ -83,8 +80,8 @@ func (r *logReplay) repairToolResults(ctx context.Context, owner *sessionmodel.S
 		if sessionState != sessionmodel.SessionActive {
 			return fmt.Errorf("cannot repair tool call %s in inactive session %s", call.CallID, call.SessionID)
 		}
-		execution := r.session.Executions[r.session.ExecutionIndex(call.ExecutionID)]
-		branch := r.session.Branch(execution.BranchID)
+		ownerRun := r.session.Runs[r.session.RunIndex(call.RunID)]
+		branch := r.session.Branch(ownerRun.BranchID)
 		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The previous executor exited without a reliable tool result."))
 		var err error
 		if call.AgentID == r.session.MainAgentID() {
@@ -93,7 +90,7 @@ func (r *logReplay) repairToolResults(ctx context.Context, owner *sessionmodel.S
 			_, _, err = owner.AppendSubagentEntry(ctx, call.AgentID, branch.ID, entry)
 		}
 		if err != nil {
-			return fmt.Errorf("save interrupted result for execution %s call %s: %w", call.ExecutionID, call.CallID, err)
+			return fmt.Errorf("save interrupted result for execution %s call %s: %w", call.RunID, call.CallID, err)
 		}
 	}
 	return nil

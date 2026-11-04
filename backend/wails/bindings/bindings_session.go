@@ -96,22 +96,14 @@ func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services
 		UpdatedAt: view.Session.UpdatedAt,
 		Agents:    agents,
 		Tasks:     make([]dto.QueuedTask, 0, len(view.Tasks)),
-		Timings:   make([]dto.OperationTiming, 0),
-		Histories: make(map[string][]dto.Entry, len(agents)),
+		Entries:   make(map[string][]dto.Entry, len(agents)),
 	}
 	for _, agent := range agents {
 		entries, err := services.Commands.ListAgentEntries(ctx, view.Session.ID, agent.ID, view.Branch.ID)
 		if err != nil {
 			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.entries", err)
 		}
-		result.Histories[agent.ID.String()] = publicEntries(entries)
-		records, err := services.Sessions.ListAgentTimings(ctx, view.Session.ID, agent.ID, view.Branch.ID, 0)
-		if err != nil {
-			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.timings", err)
-		}
-		for _, record := range records {
-			result.Timings = append(result.Timings, operationTiming(record))
-		}
+		result.Entries[agent.ID.String()] = publicEntries(entries)
 	}
 	for _, value := range view.Tasks {
 		result.Tasks = append(result.Tasks, dto.QueuedTask{
@@ -147,7 +139,7 @@ func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionU
 		OutputReports:            value.OutputReports,
 		CacheReadReports:         value.CacheReadReports,
 		CacheCreationReports:     value.CacheCreationReports,
-		CacheReadRatio:           clonePointer(value.CacheReadRatio),
+		CacheReadRatio:           value.CacheReadRatio,
 		CacheReadComplete:        value.CacheReadComplete,
 	}, nil
 }

@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
-import { createBranch, getHistoryAt, getHistoryTree, listBranches, switchBranch, type Entry, type SessionSnapshot } from '../../api'
+import { createBranch, getEntriesAt, getEntryTree, listBranches, switchBranch, type Entry, type SessionSnapshot } from '../../api'
 
 type BranchList = Awaited<ReturnType<typeof listBranches>>
-type HistoryTree = Awaited<ReturnType<typeof getHistoryTree>>
+type EntryTree = Awaited<ReturnType<typeof getEntryTree>>
 type Options = {
     session: SessionSnapshot | null
     applySession: (session: SessionSnapshot) => Promise<void>
@@ -13,7 +13,7 @@ export function useBranchNavigation({ session, applySession }: Options) {
     const scope = session ? JSON.stringify([session.id, session.branch.id]) : ''
     const [dialog, setDialog] = useState<{ scope: string; kind: 'branches' | 'tree' } | null>(null)
     const [branches, setBranches] = useState<BranchList>([])
-    const [tree, setTree] = useState<HistoryTree>([])
+    const [tree, setTree] = useState<EntryTree>([])
     const [preview, setPreview] = useState<{ scope: string; entryId: string; entries: Entry[] } | null>(null)
     const branchRequest = useRef<{ key: string; id: string } | null>(null)
     const browsing = preview?.scope === scope ? preview : null
@@ -43,7 +43,7 @@ export function useBranchNavigation({ session, applySession }: Options) {
         if (!session) throw new Error('当前会话不可用。')
         if (kind === 'branches') setBranches(await listBranches(session.id, session.bindingId))
         else {
-            const [branches, tree] = await Promise.all([listBranches(session.id, session.bindingId), getHistoryTree(session.id)])
+            const [branches, tree] = await Promise.all([listBranches(session.id, session.bindingId), getEntryTree(session.id)])
             setBranches(branches)
             setTree(tree)
         }
@@ -52,7 +52,7 @@ export function useBranchNavigation({ session, applySession }: Options) {
 
     const browse = useCallback(async (entryId: string) => {
         if (!session) throw new Error('当前会话不可用。')
-        const entries = await getHistoryAt(session.id, entryId)
+        const entries = await getEntriesAt(session.id, entryId)
         setPreview({ scope, entryId, entries })
         setDialog(null)
     }, [session, scope])
@@ -65,7 +65,7 @@ export function useBranchNavigation({ session, applySession }: Options) {
     return {
         branchDialog: dialog?.scope === scope ? dialog?.kind : undefined,
         branches, tree, browsing,
-        createBranch: create, switchBranch: switchTo, showBranches: show, browseHistory: browse, prepareSubmission,
+        createBranch: create, switchBranch: switchTo, showBranches: show, browseEntries: browse, prepareSubmission,
         closeBranchDialog: () => setDialog(null),
         returnToHead: () => setPreview(null),
     }

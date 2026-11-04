@@ -6,24 +6,25 @@ import (
 	"praxis/internal/identity"
 )
 
-func (r *Runner) emitModelEvent(execution ExecutionParams, turnID identity.TurnID, event providerapi.Event) {
-	output := coreevent.Event{
+func (r *Runner) emit(params RunParams, turnID identity.TurnID, payload coreevent.Payload) {
+	r.Emitter.Emit(coreevent.Event{
 		Source: coreevent.EventSource{
-			SessionID:   execution.SessionID,
-			AgentID:     execution.AgentID,
-			BranchID:    execution.BranchID,
-			BindingID:   execution.BindingID,
-			ExecutionID: execution.ID,
-			TurnID:      turnID,
+			SessionID: params.SessionID,
+			AgentID:   params.AgentID,
+			BranchID:  params.BranchID,
+			BindingID: params.BindingID,
+			RunID:     params.ID,
+			TurnID:    turnID,
 		},
-	}
+		Payload: payload,
+	})
+}
+
+func (r *Runner) emitModelEvent(params RunParams, turnID identity.TurnID, event providerapi.Event) {
 	switch event.Kind {
 	case providerapi.StreamTextDelta:
-		output.Payload = coreevent.TextDelta{Text: event.Text}
+		r.emit(params, turnID, coreevent.TextDelta{Text: event.Text})
 	case providerapi.StreamThinkingDelta:
-		output.Payload = coreevent.ThinkingDelta{Text: event.Text}
-	default:
-		return
+		r.emit(params, turnID, coreevent.ThinkingDelta{Text: event.Text})
 	}
-	r.Emitter.Emit(output)
 }

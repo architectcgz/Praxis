@@ -9,7 +9,7 @@ type (
 	BranchID          string
 	AgentDefinitionID string
 	AgentID           string
-	AgentExecutionID  string
+	RunID             string
 	TaskID            string
 	TurnID            string
 	RequestID         string
@@ -21,7 +21,7 @@ func (id SessionID) String() string         { return string(id) }
 func (id BranchID) String() string          { return string(id) }
 func (id AgentDefinitionID) String() string { return string(id) }
 func (id AgentID) String() string           { return string(id) }
-func (id AgentExecutionID) String() string  { return string(id) }
+func (id RunID) String() string             { return string(id) }
 func (id TurnID) String() string            { return string(id) }
 func (id RequestID) String() string         { return string(id) }
 func (id WaitConditionID) String() string   { return string(id) }

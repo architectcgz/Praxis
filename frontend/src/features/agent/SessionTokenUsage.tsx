@@ -37,14 +37,14 @@ export function ModelUsageProvider({ sessionId, children }: { sessionId: string;
         }
         const unsubscribe = subscribeAgentEvents((event) => {
             if (!active) return
-            if (event.kind === 'model_usage' && event.sessionId === sessionId && event.turnId) {
-                const record = { sessionId, executionId: event.executionId, turnId: event.turnId, usage: event.data.usage }
+            if (event.kind === 'model_request_finished' && event.data.usage && event.sessionId === sessionId && event.turnId) {
+                const record = { sessionId, runId: event.runId, turnId: event.turnId, usage: event.data.usage }
                 setRecords((current) => mergeModelUsageRecords(current, [record]))
-                // 后端已接纳请求结果，重新查询同一业务快照的 Execution 汇总。
+                // 后端已接纳请求结果，重新查询同一业务快照的 Run 汇总。
                 void load()
             }
             // 回合结束时重新查询，可恢复断线或未及时收到的用量事件。
-            if ((event.kind === 'execution_ended' || event.kind === 'request_canceled') && event.sessionId === sessionId) void load()
+            if ((event.kind === 'run_ended' || event.kind === 'request_canceled') && event.sessionId === sessionId) void load()
         })
         void load()
         return () => { active = false; unsubscribe() }

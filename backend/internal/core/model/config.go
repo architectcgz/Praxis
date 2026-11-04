@@ -9,7 +9,7 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 )
 
-// Config 保存 Execution 选定并持久化的模型配置。
+// Config 保存 Run 选定并持久化的模型配置。
 //
 // 这些字段不能在 task 运行期间从当前模型配置重新读取，否则修改配置
 // 会改变已经创建的 task 的请求协议和资源边界。

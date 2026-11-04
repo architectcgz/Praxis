@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"praxis/internal/clock"
-	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/core/agent/execution/timing"
+	agentrun "praxis/internal/core/agent/run"
+	"praxis/internal/core/agent/run/timing"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -45,9 +45,9 @@ type Executor struct {
 }
 
 type callState struct {
-	run      *agentexecution.Run
+	run      *agentrun.Run
 	call     sessionentry.ToolCall
-	owner    agentexecution.ExecutionRecord
+	owner    agentrun.RunRecord
 	tool     *Execution
 	request  *ApprovalRequest
 	decision *UserDecision
@@ -59,9 +59,9 @@ func NewExecutor(deps ExecutorDependencies) *Executor {
 	return &Executor{deps: deps, active: make(map[Key]*callState)}
 }
 
-// ExecutionTools 只绑定本次已取得运行权的 AgentExecution 的环境。
-type ExecutionTools struct {
-	run           *agentexecution.Run
+// RunTools 只绑定本次已取得运行权的 AgentRun 的环境。
+type RunTools struct {
+	run           *agentrun.Run
 	executor      *Executor
 	projectPath   string
 	catalog       tool.ToolCatalog
@@ -70,17 +70,18 @@ type ExecutionTools struct {
 	awaitApproval func(context.Context) error
 }
 
-// CallResult 将实际结果交给执行服务记录；仅执行路径携带 OperationID 和已准备参数。
+// CallResult 将实际结果和耗时交给调用方一起提交；仅执行路径携带 OperationID 和已准备参数。
 // Err 只供后置观察，工具执行失败已编码在 ToolResult 中，不作为编排错误返回。
 type CallResult struct {
 	ToolResult  tool.ToolResult
 	OperationID string
 	Arguments   json.RawMessage
+	Timing      *timing.Record
 	Err         error
 }
 
-func (e *Executor) ForExecution(run *agentexecution.Run, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, awaitApproval func(context.Context) error) *ExecutionTools {
-	return &ExecutionTools{
+func (e *Executor) ForRun(run *agentrun.Run, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, awaitApproval func(context.Context) error) *RunTools {
+	return &RunTools{
 		executor:      e,
 		run:           run,
 		projectPath:   projectPath,
@@ -92,7 +93,7 @@ func (e *Executor) ForExecution(run *agentexecution.Run, projectPath string, cat
 }
 
 // Execute 准备并冻结工具参数，取得最终授权后返回实际结果；不写历史或调用后置 Hook。
-func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.ToolCall) (CallResult, error) {
+func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) (CallResult, error) {
 	s := tools.executor
 	owner := tools.run.Snapshot()
 	s.mu.Lock()
@@ -166,7 +167,7 @@ func (tools *ExecutionTools) Execute(ctx context.Context, call sessionentry.Tool
 	return tools.execute(ctx, call, prepared, args, operationID)
 }
 
-func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (CallResult, error) {
+func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (CallResult, error) {
 	s := tools.executor
 
 	for {
@@ -191,15 +192,16 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 		}
 
 		observed := observedCall{
-			call:     prepared.Call,
-			name:     call.Name,
-			recorder: tools.run.Timing,
-			hooks:    s.deps.HookDispatcher,
+			call:    prepared.Call,
+			name:    call.Name,
+			run:     tools.run,
+			hooks:   s.deps.HookDispatcher,
+			emitter: s.deps.Emitter,
 			identity: hook.Identity{
 				OperationID: operationID,
 				SessionID:   call.SessionID,
 				AgentID:     call.AgentID,
-				ExecutionID: call.ExecutionID,
+				RunID:       call.RunID,
 				TurnID:      call.TurnID,
 			},
 			callID: call.CallID,
@@ -246,6 +248,7 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 			ToolResult:  value,
 			OperationID: operationID,
 			Arguments:   args,
+			Timing:      observed.timing,
 			Err:         result.Err,
 		}, nil
 	}
@@ -255,13 +258,15 @@ func (tools *ExecutionTools) execute(ctx context.Context, call sessionentry.Tool
 type observedCall struct {
 	call     func(context.Context) (tool.ToolResult, error)
 	name     tool.ToolName
-	recorder *timing.Recorder
+	timing   *timing.Record
+	run      *agentrun.Run
 	hooks    *hook.Dispatcher
+	emitter  *coreevent.Emitter
 	identity hook.Identity
 	callID   string
 }
 
-func (t observedCall) Call(ctx context.Context) (result tool.ToolResult, err error) {
+func (t *observedCall) Call(ctx context.Context) (result tool.ToolResult, err error) {
 	ctx, scope := t.hooks.Start(ctx, hook.Operation{
 		Identity:    t.identity,
 		Kind:        hook.OperationTool,
@@ -269,18 +274,17 @@ func (t observedCall) Call(ctx context.Context) (result tool.ToolResult, err err
 		ReferenceID: t.callID,
 	})
 	defer func() { scope.End(hook.Result{Err: err, ToolErrorClass: result.ErrorClass}) }()
-	ctx, span := t.recorder.Start(ctx, timing.Operation{
-		ExecutionID: t.identity.ExecutionID.String(),
-		Kind:        timing.Tool,
-		Name:        string(t.name),
-		ReferenceID: t.callID,
+	span := timing.NewSpan()
+	t.emitter.Emit(coreevent.Event{
+		Source: coreevent.SourceForRun(t.run, t.identity.TurnID),
+		Payload: coreevent.ToolStarted{
+			CallID: t.callID,
+			Timing: span.Snapshot(),
+		},
 	})
+	span.Start()
 	result, err = t.call(ctx)
-	status := timing.ResultStatus(ctx, err)
-	if status == timing.Completed && result.ErrorClass != "" {
-		status = timing.Failed
-	}
-	span.End(status)
+	t.timing = span.End()
 	return result, err
 }
 
@@ -291,7 +295,7 @@ func toolHookEvent(call sessionentry.ToolCall, args json.RawMessage, operationID
 			OperationID: operationID,
 			SessionID:   call.SessionID,
 			AgentID:     call.AgentID,
-			ExecutionID: call.ExecutionID,
+			RunID:       call.RunID,
 			TurnID:      call.TurnID,
 		},
 		Call:      call,
@@ -310,5 +314,5 @@ func existingResult(entry sessionentry.ContextEntry) CallResult {
 	if block.IsError {
 		result.ErrorClass = "tool_execution_failed"
 	}
-	return CallResult{ToolResult: result}
+	return CallResult{ToolResult: result, Timing: entry.Timing}
 }

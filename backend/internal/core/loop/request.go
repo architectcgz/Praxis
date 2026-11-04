@@ -12,30 +12,30 @@ import (
 )
 
 // summarizeContext 在真实模型请求边界执行摘要，不执行工具、不发布思考或回答文本。
-// 请求和输出由 Execution Service 原生记录，不修改原始 Entry。
+// 请求和输出由 Run Service 原生记录，不修改原始 Entry。
 func (r *Runner) summarizeContext(
 	ctx context.Context,
-	execution ExecutionParams,
-	deps ExecutionDependencies,
+	params RunParams,
+	deps RunDependencies,
 	summaryInput appcontext.ModelContext,
 	limit int,
 ) (string, error) {
-	sequence, err := deps.Execution.NextRequestSequence(ctx)
+	sequence, err := deps.Progress.NextRequestSequence(ctx)
 	if err != nil {
 		return "", err
 	}
-	turnID := identity.NewTurnID(execution.ID, sequence)
+	turnID := identity.NewTurnID(params.ID, sequence)
 	request := providerapi.Request{
-		ExecutionID:     execution.ID,
-		PromptCacheKey:  execution.SessionID.String(),
+		RunID:           params.ID,
+		PromptCacheKey:  params.SessionID.String(),
 		Context:         summaryInput,
-		Model:           execution.Model,
+		Model:           params.Model,
 		MaxOutputTokens: limit,
 		TurnID:          turnID,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := r.Request(requestCtx, execution, deps, request, hook.ModelRequestSummary, sequence)
+	response, err := r.Request(requestCtx, params, deps, request, hook.ModelRequestSummary, sequence)
 	if err != nil {
 		return "", err
 	}

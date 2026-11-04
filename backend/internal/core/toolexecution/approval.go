@@ -27,12 +27,10 @@ type UserDecision struct {
 }
 
 type RiskReview struct {
-	TurnID      identity.TurnID
-	ProviderID  string
-	ModelID     string
-	StartedAt   time.Time
-	CompletedAt time.Time
-	Assessment  security.RiskAssessment
+	TurnID     identity.TurnID
+	ProviderID string
+	ModelID    string
+	Assessment security.RiskAssessment
 }
 
 // ReviewRecord 将模型审核证据绑定到冻结操作与当时的规则。

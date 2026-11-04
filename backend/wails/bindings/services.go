@@ -3,7 +3,6 @@ package bindings
 import (
 	"context"
 	"errors"
-	"praxis/internal/core/agent/execution/timing"
 	coreevent "praxis/internal/core/event"
 	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
@@ -36,7 +35,6 @@ type ApprovalService interface {
 type SessionService interface {
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
-	ListAgentTimings(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, int) ([]timing.View, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
 	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
@@ -55,7 +53,7 @@ type AgentCommands interface {
 	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
 	ListBranches(context.Context, identity.SessionID, string) ([]execution.BranchView, error)
 	Tree(context.Context, identity.SessionID) ([]sessionmodel.TreeNode, error)
-	HistoryAt(context.Context, identity.SessionID, string) ([]sessionentry.ContextEntry, error)
+	EntriesAt(context.Context, identity.SessionID, string) ([]sessionentry.ContextEntry, error)
 	DeleteSession(context.Context, identity.SessionID) error
 	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, identity.BranchID) ([]sessionentry.ContextEntry, error)
 	StopAgent(context.Context, identity.AgentID) error

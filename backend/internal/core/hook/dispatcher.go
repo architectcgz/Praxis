@@ -12,7 +12,7 @@ import (
 	"slices"
 )
 
-// Dispatcher 冻结可选业务接口的注册顺序；回调同步执行，共享处理器应支持并发 Execution。
+// Dispatcher 冻结可选业务接口的注册顺序；回调同步执行，共享处理器应支持并发 Run。
 // 转换回调返回下一处理器的输入；通知回调的错误由业务调用方记录。
 type Dispatcher struct {
 	hooks []any
@@ -38,9 +38,9 @@ func NewDispatcher(hooks ...any) (*Dispatcher, error) {
 			UserInputCommittedHook,
 			AssistantCommittedHook,
 			FinalOutputCommittedHook,
-			ExecutionStartedHook,
-			ExecutionResumedHook,
-			ExecutionCommittedHook,
+			RunStartedHook,
+			RunResumedHook,
+			RunCommittedHook,
 			AfterContextBuildHook,
 			BeforeContextCompressionHook,
 			AfterContextCompressionHook,
@@ -200,43 +200,43 @@ func (d *Dispatcher) FinalOutputCommitted(ctx context.Context, event EntryCommit
 	return errors.Join(errs...)
 }
 
-func (d *Dispatcher) ExecutionStarted(ctx context.Context, event ExecutionEvent) error {
+func (d *Dispatcher) RunStarted(ctx context.Context, event RunEvent) error {
 	var errs []error
 	for _, registered := range d.registered() {
-		handler, ok := registered.(ExecutionStartedHook)
+		handler, ok := registered.(RunStartedHook)
 		if !ok {
 			continue
 		}
-		if err := handler.ExecutionStarted(ctx, event); err != nil {
-			errs = append(errs, &Error{Point: "ExecutionStarted", Cause: err})
+		if err := handler.RunStarted(ctx, event); err != nil {
+			errs = append(errs, &Error{Point: "RunStarted", Cause: err})
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (d *Dispatcher) ExecutionResumed(ctx context.Context, event ExecutionEvent) error {
+func (d *Dispatcher) RunResumed(ctx context.Context, event RunEvent) error {
 	var errs []error
 	for _, registered := range d.registered() {
-		handler, ok := registered.(ExecutionResumedHook)
+		handler, ok := registered.(RunResumedHook)
 		if !ok {
 			continue
 		}
-		if err := handler.ExecutionResumed(ctx, event); err != nil {
-			errs = append(errs, &Error{Point: "ExecutionResumed", Cause: err})
+		if err := handler.RunResumed(ctx, event); err != nil {
+			errs = append(errs, &Error{Point: "RunResumed", Cause: err})
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (d *Dispatcher) ExecutionCommitted(ctx context.Context, event ExecutionEvent) error {
+func (d *Dispatcher) RunCommitted(ctx context.Context, event RunEvent) error {
 	var errs []error
 	for _, registered := range d.registered() {
-		handler, ok := registered.(ExecutionCommittedHook)
+		handler, ok := registered.(RunCommittedHook)
 		if !ok {
 			continue
 		}
-		if err := handler.ExecutionCommitted(ctx, event); err != nil {
-			errs = append(errs, &Error{Point: "ExecutionCommitted", Cause: err})
+		if err := handler.RunCommitted(ctx, event); err != nil {
+			errs = append(errs, &Error{Point: "RunCommitted", Cause: err})
 		}
 	}
 	return errors.Join(errs...)

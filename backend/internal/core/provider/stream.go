@@ -20,7 +20,7 @@ const (
 	StreamError          EventKind = "error"
 )
 
-// StopReason 是单次模型生成的统一结束语义，不代表整个 Execution 已完成。
+// StopReason 是单次模型生成的统一结束语义，不代表整个 Run 已完成。
 type StopReason string
 
 const (

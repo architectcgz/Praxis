@@ -35,7 +35,7 @@ func (s *Session) Prepare(branchID identity.BranchID) (Branch, error) {
 		return Branch{}, errorcode.ErrNotFound
 	}
 	if !s.data.Safe(selected.HeadEntryID) {
-		return Branch{}, ErrUnsafeHistory
+		return Branch{}, ErrIncompleteToolCalls
 	}
 	return *selected, nil
 }
@@ -172,7 +172,7 @@ func validateBranch(owner *Data, branch Branch) error {
 		return errors.New("branch base is missing")
 	}
 	if !owner.Safe(branch.BaseEntryID) {
-		return ErrUnsafeHistory
+		return ErrIncompleteToolCalls
 	}
 	if branch.SourceBranchID != "" && owner.Branch(branch.SourceBranchID) == nil {
 		return errors.New("source branch is missing")

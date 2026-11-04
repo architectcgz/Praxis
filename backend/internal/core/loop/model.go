@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	agentexecution "praxis/internal/core/agent/execution"
-	"praxis/internal/core/agent/execution/timing"
+	agentrun "praxis/internal/core/agent/run"
+	"praxis/internal/core/agent/run/timing"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
@@ -24,13 +24,14 @@ type Response struct {
 	textBytes  int
 	StopReason providerapi.StopReason
 	Usage      *providerapi.Usage
+	Timing     *timing.Record
 }
 
 func (r Response) Blocks() []sessionentry.Block {
 	return entryBlocksFromEvents(r.events)
 }
 
-// requestModel 只发起请求和消费模型事件，不读取 Execution、不记录进度或触发 Hook。
+// requestModel 只发起请求和消费模型事件，不读取 Run、不记录进度或触发 Hook。
 func requestModel(
 	ctx context.Context,
 	modelProvider providerapi.Provider,
@@ -53,15 +54,15 @@ func requestModel(
 // callModel 在固定位置执行数据扩展、原生进度记录与模型计时。
 func (r *Runner) callModel(
 	ctx context.Context,
-	execution ExecutionParams,
-	deps ExecutionDependencies,
+	params RunParams,
+	deps RunDependencies,
 	request providerapi.Request,
 	requestKind hook.ModelRequestKind,
 	sequence uint64,
 	onEvent func(providerapi.Event),
 ) (response Response, err error) {
 	boundary := hook.ModelRequest{
-		Identity: executionIdentity(execution, request.TurnID),
+		Identity: runIdentity(params, request.TurnID),
 		Kind:     requestKind,
 		Sequence: sequence,
 		Request:  request,
@@ -84,7 +85,16 @@ func (r *Runner) callModel(
 	if err := ctx.Err(); err != nil {
 		return response, err
 	}
-	if err := deps.Execution.RecordModelRequest(ctx, sequence, requestKind == hook.ModelRequestIteration); err != nil {
+	var span *timing.Span
+	if requestKind == hook.ModelRequestIteration {
+		span = timing.NewSpan()
+	}
+	if err := deps.Progress.RecordModelRequest(ctx, sequence, agentrun.ModelRequestRecord{
+		RunID:  params.ID,
+		TurnID: request.TurnID,
+		Kind:   requestKind,
+		Status: agentrun.ModelRequestRunning,
+	}, span.Snapshot()); err != nil {
 		return response, err
 	}
 	boundary.Request = request.Clone()
@@ -96,15 +106,15 @@ func (r *Runner) callModel(
 	})
 	defer func() {
 		// 取消或断流也保存已知请求事实，明细与累计快照使用同一次日志提交。
-		if progressErr := deps.Execution.RecordModelResponse(context.WithoutCancel(ctx), agentexecution.ModelRequestRecord{
-			ExecutionID: execution.ID,
+		if progressErr := deps.Progress.RecordModelResponse(context.WithoutCancel(ctx), agentrun.ModelRequestRecord{
+			RunID:       params.ID,
 			TurnID:      request.TurnID,
 			Kind:        requestKind,
-			Status:      agentexecution.RequestStatus(ctx, err),
+			Status:      agentrun.RequestStatus(ctx, err),
 			StopReason:  response.StopReason,
 			OutputBytes: response.textBytes,
 			Usage:       response.Usage,
-		}); progressErr != nil {
+		}, response.Timing); progressErr != nil {
 			err = NewFailure(FailureClassification(progressErr), errors.Join(err, progressErr))
 		}
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
@@ -117,12 +127,7 @@ func (r *Runner) callModel(
 		}
 		scope.End(hook.Result{Err: err, StopReason: response.StopReason})
 	}()
-	ctx, span := deps.Timing.Start(ctx, timing.Operation{
-		ExecutionID: execution.ID.String(),
-		Kind:        timing.Provider,
-		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
-		ReferenceID: "assistant:" + request.TurnID.String(),
-	})
+	span.Start()
 	firstResponse := false
 	response, err = requestModel(ctx, r.Provider, request, func(event providerapi.Event) {
 		if !firstResponse && (event.Kind == providerapi.StreamTextDelta || event.Kind == providerapi.StreamThinkingDelta || event.Kind == providerapi.StreamToolCall) {
@@ -134,14 +139,14 @@ func (r *Runner) callModel(
 			onEvent(event)
 		}
 	})
-	span.End(timing.ResultStatus(ctx, err))
+	response.Timing = span.End()
 	return response, err
 }
 
 // validateHookRequest 保留冻结模型、归属及结构化输出约束；扩展只能缩小输出和工具范围。
 // 最终编码后的上下文窗口继续由 Provider 原生校验。
 func validateHookRequest(original, modified providerapi.Request) error {
-	if original.ExecutionID != modified.ExecutionID || original.TurnID != modified.TurnID || original.PromptCacheKey != modified.PromptCacheKey ||
+	if original.RunID != modified.RunID || original.TurnID != modified.TurnID || original.PromptCacheKey != modified.PromptCacheKey ||
 		!reflect.DeepEqual(original.Model, modified.Model) || !reflect.DeepEqual(original.OutputSchema, modified.OutputSchema) {
 		return errors.New("model request hook cannot change frozen configuration or identity")
 	}

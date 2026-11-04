@@ -7,16 +7,16 @@ import (
 )
 
 // Compress 生成轮后摘要的上下文结果；Entry 构造、记录和 Run 更新由执行服务负责。
-func (r *Runner) Compress(ctx context.Context, execution ExecutionParams, deps ExecutionDependencies, value appcontext.ModelContext) (appcontext.ModelContext, bool, error) {
+func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, value appcontext.ModelContext) (appcontext.ModelContext, bool, error) {
 	reservedTokens, err := estimateRequestOverhead(r.Tools.List(), nil)
 	if err != nil {
 		return value, false, NewFailure(FailureContract, err)
 	}
 	return contextcompress.Compress(ctx, value, contextcompress.Options{
-		ContextWindow:   execution.Model.ContextWindow,
-		MaxOutputTokens: execution.Model.MaxOutputTokens,
+		ContextWindow:   params.Model.ContextWindow,
+		MaxOutputTokens: params.Model.MaxOutputTokens,
 		ReservedTokens:  reservedTokens,
 	}, func(summaryCtx context.Context, summaryInput appcontext.ModelContext, limit int) (string, error) {
-		return r.summarizeContext(summaryCtx, execution, deps, summaryInput, limit)
+		return r.summarizeContext(summaryCtx, params, deps, summaryInput, limit)
 	})
 }

@@ -137,7 +137,7 @@ export function ProjectWorkspace() {
                     : page === 'project' ? <ProjectOverview project={projectGroups.find((item) => item.id === selectedProjectID) || { id: selectedProjectID, name: '项目', path: '', sessions: [] }} selectedSessionID={workspace.selectedSessionID} onSelectSession={selectSession} onOpenSession={openSession} />
                     : <SessionPanel loading={false} hasSession={false} sessionsCount={workspace.sessions.length} />}
                 </main>
-                <AgentsPanel loading={false} session={null} histories={{}} selectedAgentID="" onSelectAgent={() => { }} />
+                <AgentsPanel loading={false} session={null} agentEntries={{}} selectedAgentID="" onSelectAgent={() => { }} />
             </>}
         </div>
         {workspace.error && createPortal(<div className="error-banner" role="alert" aria-atomic="true"><span className="error-banner-message"><CircleAlert size={18} aria-hidden="true" /><span>{workspace.error}</span></span></div>, document.body)}

@@ -3,7 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -16,8 +16,8 @@ import (
 
 func (r *Coordinator) run(
 	ctx context.Context,
-	run *agentexecution.Run,
-	active *activeExecution,
+	run *agentrun.Run,
+	active *activeRun,
 ) {
 	task := run.Snapshot()
 	runner := *r.loop
@@ -28,9 +28,9 @@ func (r *Coordinator) run(
 		runner.Tools = active.config.Tools
 	}
 	r.logEvent(task.ID, "task started")
-	if err := r.startExecution(run, ""); err != nil {
-		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureInternal, err)
-		r.endExecution(task, active, outcome, code, message)
+	if err := r.startRun(run, ""); err != nil {
+		outcome, code, message := r.runResult(ctx, agentrun.RunFailed, agentrun.RunFailureInternal, err)
+		r.endRun(task, active, outcome, code, message)
 		return
 	}
 	if task.Progress.FinalAssistantID != "" {
@@ -38,23 +38,23 @@ func (r *Coordinator) run(
 		if err := r.operations.Compact(ctx, run, &runner); err != nil {
 			r.logError(task, "compact completed context", err)
 			if loop.FailureClassification(err) == loop.FailureStorage {
-				r.endExecution(task, active, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, "")
+				r.endRun(task, active, agentrun.RunFailed, agentrun.RunFailureStorage, "")
 				return
 			}
 		}
-		r.endExecution(task, active, agentexecution.ExecutionCompleted, "", "")
+		r.endRun(task, active, agentrun.RunCompleted, "", "")
 		return
 	}
 	if ctx.Err() != nil {
-		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionInterrupted, agentexecution.ExecutionFailureCancelled, ctx.Err())
-		r.endExecution(task, active, outcome, code, message)
+		outcome, code, message := r.runResult(ctx, agentrun.RunInterrupted, agentrun.RunFailureCancelled, ctx.Err())
+		r.endRun(task, active, outcome, code, message)
 		return
 	}
 
 	session, err := r.sessionRecords.Get(ctx, task.SessionID)
 	if err != nil {
-		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
-		r.endExecution(task, active, outcome, code, message)
+		outcome, code, message := r.runResult(ctx, agentrun.RunFailed, agentrun.RunFailureStorage, err)
+		r.endRun(task, active, outcome, code, message)
 		return
 	}
 	project, err := r.projects.Get(ctx, session.ProjectID)
@@ -63,21 +63,21 @@ func (r *Coordinator) run(
 			err = projectservice.ErrProjectInvalid
 		}
 		r.logError(task, "resolve current project", err)
-		outcome, code, message := r.executionResult(ctx, agentexecution.ExecutionFailed, agentexecution.ExecutionFailureStorage, err)
-		r.endExecution(task, active, outcome, code, message)
+		outcome, code, message := r.runResult(ctx, agentrun.RunFailed, agentrun.RunFailureStorage, err)
+		r.endRun(task, active, outcome, code, message)
 		return
 	}
-	executor := r.tools.ForExecution(run, project.Path, active.config.Tools, active.config.ApprovalMode, runner.Provider, func(waitCtx context.Context) error {
+	executor := r.tools.ForRun(run, project.Path, active.config.Tools, active.config.ApprovalMode, runner.Provider, func(waitCtx context.Context) error {
 		return r.waitForToolApproval(waitCtx, active)
 	})
 	outcome, failureCode, failureMessage := r.execute(ctx, run, executor, &runner)
-	if r.endExecution(task, active, outcome, failureCode, failureMessage) {
+	if r.endRun(task, active, outcome, failureCode, failureMessage) {
 		r.logEvent(task.ID, "task ended")
 	}
 
 }
 
-func (r *Coordinator) startExecution(run *agentexecution.Run, resumeReason string) error {
+func (r *Coordinator) startRun(run *agentrun.Run, resumeReason string) error {
 	task := run.Snapshot()
 	startContext, cancelStart := r.transitionContext()
 	defer cancelStart()
@@ -85,11 +85,11 @@ func (r *Coordinator) startExecution(run *agentexecution.Run, resumeReason strin
 		r.logError(task, "start product task", err)
 		return err
 	}
-	event := hook.ExecutionEvent{Identity: hook.Identity{
+	event := hook.RunEvent{Identity: hook.Identity{
 		SourceTaskID: task.SourceTaskID,
 		SessionID:    task.SessionID,
 		AgentID:      task.AgentID,
-		ExecutionID:  task.ID,
+		RunID:        task.ID,
 	}}
 	if resumeReason == "" && !task.StartedAt.IsZero() {
 		resumeReason = "recovery"
@@ -97,9 +97,9 @@ func (r *Coordinator) startExecution(run *agentexecution.Run, resumeReason strin
 	var hookErr error
 	if resumeReason != "" {
 		event.ResumeReason = resumeReason
-		hookErr = r.hookDispatcher.ExecutionResumed(context.WithoutCancel(startContext), event)
+		hookErr = r.hookDispatcher.RunResumed(context.WithoutCancel(startContext), event)
 	} else {
-		hookErr = r.hookDispatcher.ExecutionStarted(context.WithoutCancel(startContext), event)
+		hookErr = r.hookDispatcher.RunStarted(context.WithoutCancel(startContext), event)
 	}
 	if hookErr != nil {
 		r.logger.Errorf("execution start hook failed: %v", hookErr)
@@ -111,27 +111,27 @@ func (r *Coordinator) startExecution(run *agentexecution.Run, resumeReason strin
 // context 取消后仍由业务服务记录结束状态。
 func (r *Coordinator) execute(
 	ctx context.Context,
-	run *agentexecution.Run,
+	run *agentrun.Run,
 	executor loop.ToolExecutor,
 	runner *loop.Runner,
-) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
+) (agentrun.RunOutcome, agentrun.RunFailureCode, string) {
 	task := run.Snapshot()
 	ctx, scope := r.hookDispatcher.Start(ctx, hook.Operation{
-		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, ExecutionID: task.ID},
+		Identity: hook.Identity{SessionID: task.SessionID, AgentID: task.AgentID, RunID: task.ID},
 		Kind:     hook.OperationAgent,
 		Name:     task.Config.AgentDefinitionID.String(),
 	})
 
 	err := r.operations.Execute(ctx, run, runner, executor)
-	outcome := agentexecution.ExecutionCompleted
-	var failureCode agentexecution.ExecutionFailureCode
+	outcome := agentrun.RunCompleted
+	var failureCode agentrun.RunFailureCode
 	if err != nil {
-		outcome, failureCode = agentexecution.ExecutionFailed, loopFailureCode(err)
+		outcome, failureCode = agentrun.RunFailed, loopFailureCode(err)
 	}
 	if _, ok := errors.AsType[*hook.Error](err); ok && loop.FailureClassification(err) == loop.FailureInternal {
-		failureCode = agentexecution.ExecutionFailureInternal
+		failureCode = agentrun.RunFailureInternal
 	}
-	finalOutcome, finalCode, message := r.executionResult(ctx, outcome, failureCode, err)
+	finalOutcome, finalCode, message := r.runResult(ctx, outcome, failureCode, err)
 	scope.End(hook.Result{Outcome: string(finalOutcome), Err: err})
 	r.logEvent(task.ID, "provider completed")
 	if err != nil {
@@ -140,60 +140,60 @@ func (r *Coordinator) execute(
 	return finalOutcome, finalCode, message
 }
 
-// executionResult 保留存储失败；其他错误仅在实际返回取消时映射为中断。
-func (r *Coordinator) executionResult(
+// runResult 保留存储失败；其他错误仅在实际返回取消时映射为中断。
+func (r *Coordinator) runResult(
 	ctx context.Context,
-	outcome agentexecution.ExecutionOutcome,
-	failureCode agentexecution.ExecutionFailureCode,
+	outcome agentrun.RunOutcome,
+	failureCode agentrun.RunFailureCode,
 	err error,
-) (agentexecution.ExecutionOutcome, agentexecution.ExecutionFailureCode, string) {
-	failureMessage := agentservice.ExecutionFailureMessage(failureCode, err)
-	if err != nil && failureCode != agentexecution.ExecutionFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
-		outcome = agentexecution.ExecutionInterrupted
-		failureCode = agentexecution.ExecutionFailureCancelled
-		if errors.Is(context.Cause(ctx), errExecutionInterrupted) {
-			failureCode = agentexecution.ExecutionFailureRequestCanceled
+) (agentrun.RunOutcome, agentrun.RunFailureCode, string) {
+	failureMessage := agentservice.RunFailureMessage(failureCode, err)
+	if err != nil && failureCode != agentrun.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
+		outcome = agentrun.RunInterrupted
+		failureCode = agentrun.RunFailureCancelled
+		if errors.Is(context.Cause(ctx), errRunInterrupted) {
+			failureCode = agentrun.RunFailureRequestCanceled
 		}
 		failureMessage = ""
 	} else if err != nil {
-		outcome = agentexecution.ExecutionFailed
+		outcome = agentrun.RunFailed
 	}
-	if outcome == agentexecution.ExecutionFailed && failureCode == "" {
-		failureCode = agentexecution.ExecutionFailureInternal
+	if outcome == agentrun.RunFailed && failureCode == "" {
+		failureCode = agentrun.RunFailureInternal
 	}
-	if failureCode != agentexecution.ExecutionFailureProvider {
+	if failureCode != agentrun.RunFailureProvider {
 		failureMessage = ""
 	}
 	return outcome, failureCode, failureMessage
 }
 
-func (r *Coordinator) endExecution(
-	task agentexecution.ExecutionRecord,
-	active *activeExecution,
-	outcome agentexecution.ExecutionOutcome,
-	failureCode agentexecution.ExecutionFailureCode,
+func (r *Coordinator) endRun(
+	task agentrun.RunRecord,
+	active *activeRun,
+	outcome agentrun.RunOutcome,
+	failureCode agentrun.RunFailureCode,
 	failureMessage string,
 ) bool {
 	// 仅在内存结算尚未完成时保留结果重试；日志失败不阻止已接纳终态释放占用。
 	r.mu.Lock()
 	active.ending = true
 	r.mu.Unlock()
-	var endedExecution agentexecution.ExecutionRecord
+	var endedRun agentrun.RunRecord
 	retryDelay := 100 * time.Millisecond
 	for {
 		endContext, cancelEnd := r.transitionContext()
 		var err error
-		endedExecution, err = r.operations.Settle(endContext, active.run, outcome, failureCode, failureMessage)
+		endedRun, err = r.operations.Settle(endContext, active.run, outcome, failureCode, failureMessage)
 		cancelEnd()
 		if err == nil {
 			break
 		}
 		r.logError(task, "settle execution", err)
-		if endedExecution.Status == agentexecution.ExecutionEnded {
+		if endedRun.Status == agentrun.RunEnded {
 			r.loop.Emitter.Emit(coreevent.Event{
 				Source: coreevent.SourceForRun(active.run, ""),
 				Payload: coreevent.ErrorOccurred{
-					Message: "Failed to save session history. The result is kept in memory: " + err.Error(),
+					Message: "Failed to save session entries. The result is kept in memory: " + err.Error(),
 				},
 			})
 			break
@@ -206,17 +206,17 @@ func (r *Coordinator) endExecution(
 	// 内存终态接纳后释放槽位；日志失败已单独通知界面。
 	r.mu.Lock()
 	cause := context.Cause(active.ctx)
-	interrupted := errors.Is(cause, errExecutionInterrupted)
+	interrupted := errors.Is(cause, errRunInterrupted)
 	scheduleRequested := active.scheduleRequested
 	main := active.run.Main()
 	if main {
-		delete(r.executions, executionKey{task.AgentID, task.BranchID})
+		delete(r.runs, runKey{task.AgentID, task.BranchID})
 		active.run = nil
 		active.cancel(nil)
 	}
 	r.mu.Unlock()
 	// 中断后只响应新的显式调度意图，不因旧执行恰好正常完成而自动领取队列。
-	if main && (scheduleRequested || !interrupted && (endedExecution.Outcome == agentexecution.ExecutionCompleted || endedExecution.Outcome == agentexecution.ExecutionYielded)) {
+	if main && (scheduleRequested || !interrupted && (endedRun.Outcome == agentrun.RunCompleted || endedRun.Outcome == agentrun.RunYielded)) {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
 		if err := r.scheduleBinding(queueContext, active.bindingID, false); err != nil {
@@ -226,37 +226,37 @@ func (r *Coordinator) endExecution(
 	return true
 }
 
-func (r *Coordinator) logError(task agentexecution.ExecutionRecord, stage string, err error) {
+func (r *Coordinator) logError(task agentrun.RunRecord, stage string, err error) {
 	if err == nil {
 		return
 	}
 	r.logger.Errorf("task id=%s stage=%s failed: %v", task.ID, stage, err)
 }
 
-func (r *Coordinator) logEvent(executionID identity.AgentExecutionID, stage string) {
-	r.logger.Infof("task id=%s stage=%s", executionID, stage)
+func (r *Coordinator) logEvent(runID identity.RunID, stage string) {
+	r.logger.Infof("task id=%s stage=%s", runID, stage)
 }
 
 // loopFailureCode 在业务结算边界把 Loop 错误转换为执行失败码。
-func loopFailureCode(err error) agentexecution.ExecutionFailureCode {
+func loopFailureCode(err error) agentrun.RunFailureCode {
 	switch loop.FailureClassification(err) {
 	case loop.FailureProviderUnavailable:
-		return agentexecution.ExecutionFailureProviderUnavailable
+		return agentrun.RunFailureProviderUnavailable
 	case loop.FailureProvider:
-		return agentexecution.ExecutionFailureProvider
+		return agentrun.RunFailureProvider
 	case loop.FailureTool:
-		return agentexecution.ExecutionFailureTool
+		return agentrun.RunFailureTool
 	case loop.FailurePolicyBlocked:
-		return agentexecution.ExecutionFailurePolicyBlocked
+		return agentrun.RunFailurePolicyBlocked
 	case loop.FailureResourceLimit:
-		return agentexecution.ExecutionFailureResourceLimit
+		return agentrun.RunFailureResourceLimit
 	case loop.FailureStorage:
-		return agentexecution.ExecutionFailureStorage
+		return agentrun.RunFailureStorage
 	case loop.FailureContract:
-		return agentexecution.ExecutionFailureContract
+		return agentrun.RunFailureContract
 	case loop.FailureBusy:
-		return agentexecution.ExecutionFailureBusy
+		return agentrun.RunFailureBusy
 	default:
-		return agentexecution.ExecutionFailureInternal
+		return agentrun.RunFailureInternal
 	}
 }

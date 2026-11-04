@@ -3,6 +3,7 @@ package loop
 import (
 	"errors"
 	"fmt"
+	appcontext "praxis/internal/core/context"
 	"praxis/internal/errorcode"
 )
 
@@ -47,6 +48,17 @@ func fail(code FailureCode, operationCode errorcode.Code, message string) error 
 // NewFailure 为执行能力边界保留明确的失败分类，供 Loop 和上层结算统一处理。
 func NewFailure(code FailureCode, cause error) error {
 	return &Failure{code: code, cause: cause}
+}
+
+// NewModelFailure 保留已有失败分类，将上下文容量错误与模型依赖错误分开。
+func NewModelFailure(err error) error {
+	if _, ok := errors.AsType[*Failure](err); ok {
+		return err
+	}
+	if _, ok := errors.AsType[*appcontext.ContextWindowExceededError](err); ok {
+		return NewFailure(FailureResourceLimit, fmt.Errorf("model context window exceeded: %w", err))
+	}
+	return NewFailure(FailureProvider, err)
 }
 
 // FailureClassification 供业务结算边界读取错误分类。

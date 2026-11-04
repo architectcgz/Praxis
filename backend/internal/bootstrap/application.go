@@ -41,7 +41,7 @@ type Options struct {
 	Hooks  []any
 }
 
-// Open 只做高层装配；会话 Context 按需恢复，启动不继续旧 Execution。
+// Open 只做高层装配；会话 Context 按需恢复，启动不继续旧 Run。
 func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Application, err error) {
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
@@ -81,12 +81,12 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	coordinator := buildCoordinator(resources, a.sessions, hooks, emitter, options.Runner)
 	a.coordinator = coordinator
 	agents := agentservice.NewService(agentservice.Dependencies{
-		Entries:          a.sessions,
-		ActiveRun:        coordinator.ActiveRun,
-		SessionRuns:      coordinator.SessionRuns,
-		ExecutionRecords: a.sessions,
-		Sessions:         a.storage.Sessions,
-		Definitions:      a.sessions.Definition,
+		Entries:     a.sessions,
+		ActiveRun:   coordinator.ActiveRun,
+		SessionRuns: coordinator.SessionRuns,
+		RunRecords:  a.sessions,
+		Sessions:    a.storage.Sessions,
+		Definitions: a.sessions.Definition,
 	})
 	models := buildModelService(config, a.logger)
 	projects := projectservice.NewService(projectservice.Dependencies{

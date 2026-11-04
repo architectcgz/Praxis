@@ -3,19 +3,19 @@ package coordinator
 import (
 	"context"
 	"errors"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	coreevent "praxis/internal/core/event"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	executionservice "praxis/internal/service/agent/execution"
+	runservice "praxis/internal/service/agent/run"
 )
 
 // SubagentResult 只交接父调用需要的结果；完整执行事实保存在子代理日志。
 type SubagentResult struct {
-	ExecutionID identity.AgentExecutionID
-	Outcome     agentexecution.ExecutionOutcome
-	FailureCode agentexecution.ExecutionFailureCode
+	RunID       identity.RunID
+	Outcome     agentrun.RunOutcome
+	FailureCode agentrun.RunFailureCode
 	Output      string
 }
 
@@ -27,22 +27,22 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	}
 	defer s.running.Done()
 	s.mu.Lock()
-	parentActive := s.activeExecutionLocked(parent.AgentID, parent.ExecutionID)
+	parentActive := s.activeRunLocked(parent.AgentID, parent.RunID)
 	if s.closed || parentActive == nil || parentActive.ending || parentActive.run == nil {
 		s.mu.Unlock()
 		return SubagentResult{}, errorcode.ErrRequestConflict
 	}
 	parentRun := parentActive.run
 	parentRecord := parentRun.Snapshot()
-	active := newActiveExecution(ctx, parentRecord.SessionID)
+	active := newActiveRun(ctx, parentRecord.SessionID)
 	active.config = parentActive.config
 	active.branchID, active.bindingID = parentRecord.BranchID, parentActive.bindingID
-	key := executionKey{agentID, parentRecord.BranchID}
-	if s.executions[key] != nil {
+	key := runKey{agentID, parentRecord.BranchID}
+	if s.runs[key] != nil {
 		s.mu.Unlock()
 		return SubagentResult{}, errorcode.ErrRequestConflict
 	}
-	s.executions[key] = active
+	s.runs[key] = active
 	s.mu.Unlock()
 	stopCaller := context.AfterFunc(ctx, func() { active.cancel(context.Cause(ctx)) })
 	stopParent := context.AfterFunc(parentActive.ctx, func() { active.cancel(context.Cause(parentActive.ctx)) })
@@ -55,45 +55,45 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		Prompt:    prompt,
 	}
 	definition, err := active.config.Definition(definitionID)
-	var run *agentexecution.Run
+	var run *agentrun.Run
 	if err == nil {
-		run, err = s.operations.PrepareSubagent(active.ctx, executionservice.SubagentInput{
-			Task:              task,
-			AgentID:           agentID,
-			ParentExecutionID: parent.ExecutionID,
-			ParentCallID:      parent.CallID,
-			Definition:        definition,
-			Model:             parentRecord.Config.Model,
-			Owner:             parentRun.Session,
-			BindingID:         parentActive.bindingID,
+		run, err = s.operations.PrepareSubagent(active.ctx, runservice.SubagentInput{
+			Task:         task,
+			AgentID:      agentID,
+			ParentRunID:  parent.RunID,
+			ParentCallID: parent.CallID,
+			Definition:   definition,
+			Model:        parentRecord.Config.Model,
+			Owner:        parentRun.Session,
+			BindingID:    parentActive.bindingID,
 		})
 	}
 	if err != nil {
 		s.mu.Lock()
-		delete(s.executions, key)
+		delete(s.runs, key)
 		close(active.ready)
 		active.cancel(nil)
 		s.mu.Unlock()
 		return SubagentResult{}, err
 	}
 	s.mu.Lock()
-	active.run, active.executionID = run, run.Snapshot().ID
+	active.run, active.runID = run, run.Snapshot().ID
 	close(active.ready)
 	s.mu.Unlock()
 	s.loop.Emitter.Emit(coreevent.Event{
 		Source: coreevent.SourceForRun(run, ""),
 		Payload: coreevent.SubagentStarted{
-			Name:              definition.Name,
-			Execution:         run.Snapshot(),
-			Entries:           run.Entries(),
-			ParentAgentID:     parent.AgentID,
-			ParentExecutionID: parent.ExecutionID,
-			CallID:            parent.CallID,
+			Name:          definition.Name,
+			Run:           run.Snapshot(),
+			Entries:       run.Entries(),
+			ParentAgentID: parent.AgentID,
+			ParentRunID:   parent.RunID,
+			CallID:        parent.CallID,
 		},
 	})
 	defer func() {
 		s.mu.Lock()
-		delete(s.executions, key)
+		delete(s.runs, key)
 		active.run = nil
 		active.cancel(nil)
 		s.mu.Unlock()
@@ -106,14 +106,14 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	s.run(active.ctx, run, active)
 	record := run.Snapshot()
 	result := SubagentResult{
-		ExecutionID: record.ID,
+		RunID:       record.ID,
 		Outcome:     record.Outcome,
 		FailureCode: record.FailureCode,
 	}
 	if entry, found := run.Entry(record.Progress.FinalAssistantID); found {
 		result.Output = entry.TextContent()
 	}
-	if record.Status != agentexecution.ExecutionEnded {
+	if record.Status != agentrun.RunEnded {
 		return result, errors.New("subagent execution did not settle")
 	}
 	return result, nil

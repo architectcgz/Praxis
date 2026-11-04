@@ -71,31 +71,31 @@ func (b *SessionBindings) ListBranches(sessionID, bindingID string) ([]coordinat
 	values, err := services.Commands.ListBranches(ctx, identity.SessionID(sessionID), bindingID)
 	return values, publicError(b.host, "ListBranches", err)
 }
-func (b *SessionBindings) GetHistoryTree(sessionID string) ([]sessionmodel.TreeNode, error) {
+func (b *SessionBindings) GetEntryTree(sessionID string) ([]sessionmodel.TreeNode, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return nil, publicInputError(b.host, "GetHistoryTree", err)
+		return nil, publicInputError(b.host, "GetEntryTree", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
 	values, err := services.Commands.Tree(ctx, identity.SessionID(sessionID))
-	return values, publicError(b.host, "GetHistoryTree", err)
+	return values, publicError(b.host, "GetEntryTree", err)
 }
-func (b *SessionBindings) GetHistoryAt(sessionID, entryID string) ([]dto.Entry, error) {
+func (b *SessionBindings) GetEntriesAt(sessionID, entryID string) ([]dto.Entry, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return nil, publicInputError(b.host, "GetHistoryAt", err)
+		return nil, publicInputError(b.host, "GetEntriesAt", err)
 	}
 	if err := validation.Value("entryId", entryID, "omitempty,id"); err != nil {
-		return nil, publicInputError(b.host, "GetHistoryAt", err)
+		return nil, publicInputError(b.host, "GetEntriesAt", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
-	values, err := services.Commands.HistoryAt(ctx, identity.SessionID(sessionID), entryID)
+	values, err := services.Commands.EntriesAt(ctx, identity.SessionID(sessionID), entryID)
 	if err != nil {
-		return nil, publicError(b.host, "GetHistoryAt", err)
+		return nil, publicError(b.host, "GetEntriesAt", err)
 	}
 	return publicEntries(values), nil
 }

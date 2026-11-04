@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 )
@@ -32,16 +32,16 @@ func (l eventLog) Read(ctx context.Context, id identity.SessionID, agentID ident
 			return fmt.Errorf("event agent %q does not match log agent %q", event.AgentID, agentID)
 		}
 		switch payload := event.Payload.(type) {
-		case agentexecution.ExecutionRecord:
-			if err := validateStoredExecution(payload, id, agentID); err != nil {
+		case agentrun.RunRecord:
+			if err := validateStoredRun(payload, id, agentID); err != nil {
 				return err
 			}
-		case sessionmodel.ModelRequestFinished:
-			if err := validateStoredExecution(payload.Execution, id, agentID); err != nil {
+		case sessionmodel.ModelRequestSaved:
+			if err := validateStoredRun(payload.Run, id, agentID); err != nil {
 				return err
 			}
-			if payload.Request.ExecutionID != payload.Execution.ID {
-				return fmt.Errorf("model request %s execution does not match snapshot %s", payload.Request.TurnID, payload.Execution.ID)
+			if payload.Request.RunID != payload.Run.ID {
+				return fmt.Errorf("model request %s execution does not match snapshot %s", payload.Request.TurnID, payload.Run.ID)
 			}
 			if err := payload.Request.Validate(); err != nil {
 				return err
@@ -70,7 +70,7 @@ func (l eventLog) Subagents(ctx context.Context, id identity.SessionID) ([]ident
 	return l.store.Subagents(ctx, id)
 }
 
-func validateStoredExecution(record agentexecution.ExecutionRecord, sessionID identity.SessionID, agentID identity.AgentID) error {
+func validateStoredRun(record agentrun.RunRecord, sessionID identity.SessionID, agentID identity.AgentID) error {
 	if record.SessionID != sessionID || record.AgentID != agentID {
 		return fmt.Errorf("execution %s does not belong to its log", record.ID)
 	}

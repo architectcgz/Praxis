@@ -1,8 +1,7 @@
 package session
 
 import (
-	"praxis/internal/core/agent/execution"
-	"praxis/internal/core/agent/execution/timing"
+	agentrun "praxis/internal/core/agent/run"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"slices"
@@ -15,10 +14,9 @@ type Data struct {
 	Entries         []*sessionentry.ContextEntry
 	Branches        []Branch
 	RecentBranch    identity.BranchID
-	Executions      []execution.ExecutionRecord
-	ModelRequests   []execution.ModelRequestRecord
+	Runs            []agentrun.RunRecord
+	ModelRequests   []agentrun.ModelRequestRecord
 	SubagentEntries map[identity.AgentID][]*sessionentry.ContextEntry
-	Timings         []timing.Record
 	entryIndexes    map[string]int
 }
 
@@ -105,7 +103,7 @@ func (s *Data) Safe(head string) bool {
 	pending := make(map[sessionentry.Key]bool)
 	for _, entry := range s.Path(head) {
 		for _, block := range entry.Content {
-			key := sessionentry.Key{ExecutionID: identity.AgentExecutionID(entry.ExecutionID), CallID: block.CallID}
+			key := sessionentry.Key{RunID: identity.RunID(entry.RunID), CallID: block.CallID}
 			switch block.Kind {
 			case sessionentry.BlockToolCall:
 				pending[key] = true
@@ -120,20 +118,20 @@ func (s *Data) Safe(head string) bool {
 	return len(pending) == 0
 }
 
-func (s *Data) ExecutionIndex(id identity.AgentExecutionID) int {
-	return slices.IndexFunc(s.Executions, func(value execution.ExecutionRecord) bool { return value.ID == id })
+func (s *Data) RunIndex(id identity.RunID) int {
+	return slices.IndexFunc(s.Runs, func(value agentrun.RunRecord) bool { return value.ID == id })
 }
 
-func (s *Data) SetExecution(value execution.ExecutionRecord) {
-	if index := s.ExecutionIndex(value.ID); index >= 0 {
-		s.Executions[index] = value
+func (s *Data) SetRun(value agentrun.RunRecord) {
+	if index := s.RunIndex(value.ID); index >= 0 {
+		s.Runs[index] = value
 	} else {
-		s.Executions = append(s.Executions, value)
+		s.Runs = append(s.Runs, value)
 	}
 }
 
-func (s *Data) SetModelRequest(value execution.ModelRequestRecord) {
-	index := slices.IndexFunc(s.ModelRequests, func(prior execution.ModelRequestRecord) bool { return prior.TurnID == value.TurnID })
+func (s *Data) SetModelRequest(value agentrun.ModelRequestRecord) {
+	index := slices.IndexFunc(s.ModelRequests, func(prior agentrun.ModelRequestRecord) bool { return prior.TurnID == value.TurnID })
 	if index >= 0 {
 		s.ModelRequests[index] = value
 	} else {
@@ -154,13 +152,4 @@ func (s *Data) AcceptSubagentEntry(agentID identity.AgentID, entry sessionentry.
 	stored := new(entry)
 	s.SubagentEntries[agentID] = append(s.SubagentEntries[agentID], stored)
 	return stored
-}
-
-func (s *Data) SetTiming(value timing.Record) {
-	index := slices.IndexFunc(s.Timings, func(prior timing.Record) bool { return prior.ExecutionID == value.ExecutionID && prior.ID == value.ID })
-	if index >= 0 {
-		s.Timings[index] = value
-	} else {
-		s.Timings = append(s.Timings, value)
-	}
 }

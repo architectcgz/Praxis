@@ -2,15 +2,15 @@ package hook
 
 import (
 	"context"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	providerapi "praxis/internal/core/provider"
 )
 
-type ModelRequestKind = agentexecution.ModelRequestKind
+type ModelRequestKind = agentrun.ModelRequestKind
 
 const (
-	ModelRequestIteration = agentexecution.ModelRequestIteration
-	ModelRequestSummary   = agentexecution.ModelRequestSummary
+	ModelRequestIteration = agentrun.ModelRequestIteration
+	ModelRequestSummary   = agentrun.ModelRequestSummary
 )
 
 // ModelRequest 携带本次请求的只读归属；处理器只返回待发送的请求，不返回执行进度。

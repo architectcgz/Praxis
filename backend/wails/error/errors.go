@@ -1,3 +1,4 @@
+// Package apperr 定义 Wails 层自身的错误码和传输错误映射。
 package apperr
 
 import (
@@ -6,6 +7,16 @@ import (
 	"errors"
 	"praxis/internal/errorcode"
 	"strings"
+)
+
+const (
+	ErrInvalidRequest     errorcode.Code = "invalid_request"
+	ErrValidation         errorcode.Code = "validation_error"
+	ErrBindingUnavailable errorcode.Code = "binding_unavailable"
+	ErrConfiguration      errorcode.Code = "configuration_error"
+	ErrRequestCanceled    errorcode.Code = "request_canceled"
+	ErrRequestTimeout     errorcode.Code = "request_timeout"
+	ErrInternal           errorcode.Code = "internal_error"
 )
 
 // Coded 由携带稳定错误码的错误实现；Wails 边界据此透传，不依赖具体业务错误类型。

@@ -1,9 +1,9 @@
-// Package coordinator 协调进程内 Execution 执行、审批等待和内存输入队列交接。
+// Package coordinator 协调进程内 Run 执行、审批等待和内存输入队列交接。
 package coordinator
 
 import (
 	"context"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
@@ -22,7 +22,7 @@ type Config struct {
 	SessionRecords    repository.Session
 	Projects          repository.Project
 	Loop              *loop.Runner
-	Operations        ExecutionOperations
+	Operations        RunOperations
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
@@ -35,7 +35,7 @@ type Coordinator struct {
 	sessionRecords    repository.Session
 	projects          repository.Project
 	loop              *loop.Runner
-	operations        ExecutionOperations
+	operations        RunOperations
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
@@ -43,7 +43,7 @@ type Coordinator struct {
 	// 领取队首与标记忙碌在同一临界区完成；准备、存储和模型调用都在锁外执行。
 	mu            sync.Mutex
 	closed        bool
-	executions    map[executionKey]*activeExecution
+	runs          map[runKey]*activeRun
 	pages         map[string]identity.SessionID
 	bindings      map[string]*sessionBinding
 	branchOwners  map[branchKey]string
@@ -51,28 +51,28 @@ type Coordinator struct {
 	running       sync.WaitGroup
 }
 
-// activeExecution 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
-type activeExecution struct {
-	sessionID   identity.SessionID
-	branchID    identity.BranchID
-	bindingID   string
-	run         *agentexecution.Run
-	config      *sessionservice.Configuration
-	executionID identity.AgentExecutionID
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
-	ending      bool
+// activeRun 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
+type activeRun struct {
+	sessionID identity.SessionID
+	branchID  identity.BranchID
+	bindingID string
+	run       *agentrun.Run
+	config    *sessionservice.Configuration
+	runID     identity.RunID
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
+	ending    bool
 	// 停止后新提交的输入可请求收尾后重新调度，不把旧队列当作继续执行的意图。
 	scheduleRequested bool
 	ready             chan struct{}
 	toolApprovalWake  chan struct{}
 }
 
-func newActiveExecution(ctx context.Context, sessionID identity.SessionID) *activeExecution {
-	executionCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
-	return &activeExecution{
+func newActiveRun(ctx context.Context, sessionID identity.SessionID) *activeRun {
+	runCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	return &activeRun{
 		sessionID:        sessionID,
-		ctx:              executionCtx,
+		ctx:              runCtx,
 		cancel:           cancel,
 		ready:            make(chan struct{}),
 		toolApprovalWake: make(chan struct{}, 1),
@@ -86,7 +86,7 @@ func NewCoordinator(config Config) *Coordinator {
 		sessionRecords:    config.SessionRecords,
 		projects:          config.Projects,
 		loop:              config.Loop,
-		executions:        make(map[executionKey]*activeExecution),
+		runs:              make(map[runKey]*activeRun),
 		pages:             make(map[string]identity.SessionID),
 		bindings:          make(map[string]*sessionBinding),
 		branchOwners:      make(map[branchKey]string),
@@ -110,12 +110,12 @@ func (r *Coordinator) enter() error {
 }
 
 // launchLocked 只接收已由调度器标记忙碌的执行，不再竞争槽位；调用方持有 mu。
-func (r *Coordinator) launchLocked(run *agentexecution.Run, active *activeExecution) error {
+func (r *Coordinator) launchLocked(run *agentrun.Run, active *activeRun) error {
 	if r.closed {
 		return errCoordinatorClosed
 	}
 	active.run = run
-	active.executionID = run.Snapshot().ID
+	active.runID = run.Snapshot().ID
 	close(active.ready)
 	r.running.Go(func() { r.run(active.ctx, run, active) })
 	return nil
@@ -126,7 +126,7 @@ func (r *Coordinator) launchLocked(run *agentexecution.Run, active *activeExecut
 func (r *Coordinator) Close(ctx context.Context) error {
 	r.mu.Lock()
 	r.closed = true
-	for _, active := range r.executions {
+	for _, active := range r.runs {
 		active.cancel(context.Canceled)
 	}
 	r.mu.Unlock()
@@ -153,7 +153,7 @@ func (r *Coordinator) transitionContext() (context.Context, context.CancelFunc) 
 	return context.WithTimeout(context.Background(), r.transitionTimeout)
 }
 
-type executionKey struct {
+type runKey struct {
 	agentID  identity.AgentID
 	branchID identity.BranchID
 }

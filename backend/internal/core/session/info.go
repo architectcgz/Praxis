@@ -39,7 +39,7 @@ func NewSessionInfo(id identity.SessionID, projectID identity.ProjectID, at time
 	}
 }
 
-// MainAgentID 是主会话入口的稳定身份；运行实例由各次 Execution 分别创建和持有。
+// MainAgentID 是主会话入口的稳定身份；运行实例由各次 Run 分别创建和持有。
 func (s SessionInfo) MainAgentID() identity.AgentID {
 	return identity.AgentID(s.ID)
 }

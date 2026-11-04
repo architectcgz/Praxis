@@ -1,23 +1,22 @@
 import { getCommandBinding } from './bindings'
+import { parseToolCallInput, type ToolCallInput } from './tools'
 
 export type StopAgentRequest = { agentId: string }
 
-/** 停止 Agent 当前执行；后端负责在内部定位并中断对应的 Execution。 */
+/** 停止 Agent 当前执行；后端负责在内部定位并中断对应的 Run。 */
 export function stopAgent(request: StopAgentRequest) {
     return getCommandBinding().StopAgent(request)
 }
 
-export type ToolControlRequest = { sessionId: string; agentId: string; executionId: string; callId: string }
+export type ToolCancelRequest = { sessionId: string; agentId: string; runId: string; callId: string }
 
-export function stopToolCall({ sessionId, agentId, executionId, callId }: ToolControlRequest) {
-    return getCommandBinding().StopToolCall({ sessionId, agentId, executionId, callId })
+export function stopToolCall({ sessionId, agentId, runId, callId }: ToolCancelRequest) {
+    return getCommandBinding().StopToolCall({ sessionId, agentId, runId, callId })
 }
 
-export type ToolDecisionRequest = ToolControlRequest
+export type ToolDecisionRequest = { sessionId: string; agentId: string; runId: string; callId: string }
 /** 待授权记录携带完整冻结参数与审核结论，展示字段不随授权决策提交。 */
-export type ToolApproval = ToolDecisionRequest & {
-    name: string
-    arguments: unknown
+export type ToolApproval = ToolDecisionRequest & ToolCallInput & {
     ruleId: string
     action: string
     riskVerdict: string
@@ -25,7 +24,7 @@ export type ToolApproval = ToolDecisionRequest & {
 }
 export async function listToolApprovals(sessionId: string, branchId: string, agentId: string): Promise<ToolApproval[]> {
     const values = await getCommandBinding().ListToolApprovals(sessionId, branchId, agentId) ?? []
-    return values.map((value) => ({ ...value, arguments: JSON.parse(value.arguments) as unknown }))
+    return values.map((value) => ({ ...value, ...parseToolCallInput(value.name, value.arguments) }))
 }
 export function approveToolCall(request: ToolDecisionRequest) {
     return getCommandBinding().ApproveToolCall(toolDecisionRequest(request))
@@ -36,6 +35,6 @@ export function denyToolCall(request: ToolDecisionRequest) {
 }
 
 /** 审批只提交调用身份，展示字段不参与决策请求。 */
-function toolDecisionRequest({ sessionId, agentId, executionId, callId }: ToolDecisionRequest): ToolDecisionRequest {
-    return { sessionId, agentId, executionId, callId }
+function toolDecisionRequest({ sessionId, agentId, runId, callId }: ToolDecisionRequest): ToolDecisionRequest {
+    return { sessionId, agentId, runId, callId }
 }

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"praxis/internal/clock"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/hook"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
@@ -125,7 +125,7 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sess
 			return nil, err
 		}
 	}
-	if err := data.ValidateExecutions(); err != nil {
+	if err := data.ValidateRuns(); err != nil {
 		return nil, err
 	}
 	owner := sessionmodel.New(data, s.log, s.clock, s.ids)
@@ -137,16 +137,16 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sess
 	if err := replay.repairToolResults(ctx, owner, info.State); err != nil {
 		return nil, err
 	}
-	for _, record := range slices.Clone(data.Executions) {
+	for _, record := range slices.Clone(data.Runs) {
 		if !record.Active() {
 			continue
 		}
 		at := s.clock.Now()
-		if record.Status == agentexecution.ExecutionStarting {
+		if record.Status == agentrun.RunStarting {
 			record.Start(at)
 		}
-		record.End(agentexecution.ExecutionInterrupted, "", at)
-		if err := owner.SaveExecution(ctx, record); err != nil {
+		record.End(agentrun.RunInterrupted, "", at)
+		if err := owner.SaveRun(ctx, record); err != nil {
 			return nil, err
 		}
 	}

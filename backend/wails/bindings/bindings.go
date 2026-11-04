@@ -60,33 +60,50 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		data = dto.AgentEntriesAppended{
 			Entries: publicEntries(payload.Entries),
 		}
-	case coreevent.TurnStarted, coreevent.ProviderWaiting, coreevent.SubagentReleased:
+	case coreevent.TurnStarted, coreevent.SubagentReleased:
 		data = struct{}{}
-	case coreevent.ExecutionStarted:
-		data = dto.AgentExecutionStarted{Execution: payload.Execution}
-	case coreevent.ExecutionInterruptRequested:
-		data = dto.AgentExecutionControl{AppliedAt: payload.AppliedAt}
+	case coreevent.ModelRequestStarted:
+		data = dto.AgentModelRequestStarted{
+			RequestKind: string(payload.Request.Kind),
+			Timing:      payload.Timing,
+		}
+	case coreevent.ModelRequestFinished:
+		value := dto.AgentModelRequestFinished{
+			RequestKind: string(payload.Request.Kind),
+			StopReason:  string(payload.Request.StopReason),
+			Timing:      payload.Timing,
+		}
+		if payload.Request.Usage != nil {
+			value.Usage = new(publicUsage(*payload.Request.Usage))
+		}
+		data = value
+	case coreevent.RunStarted:
+		data = dto.AgentRunStarted{
+			Run: payload.Run,
+		}
+	case coreevent.RunInterruptRequested:
+		data = dto.AgentRunControl{AppliedAt: payload.AppliedAt}
 	case coreevent.SubagentStarted:
-		record := payload.Execution
+		record := payload.Run
 		data = dto.AgentSubagentStarted{
 			Agent: agentservice.AgentView{
-				ID:                 record.AgentID,
-				SessionID:          record.SessionID,
-				BranchID:           record.BranchID,
-				DefinitionID:       record.Config.AgentDefinitionID,
-				Kind:               agentmodel.KindSubagent,
-				CreatedAt:          record.CreatedAt,
-				UpdatedAt:          record.CreatedAt,
-				Name:               payload.Name,
-				State:              record.AgentState(),
-				CurrentExecutionID: record.ID,
-				CurrentExecution:   &record,
-				LatestExecution:    &record,
+				ID:           record.AgentID,
+				SessionID:    record.SessionID,
+				BranchID:     record.BranchID,
+				DefinitionID: record.Config.AgentDefinitionID,
+				Kind:         agentmodel.KindSubagent,
+				CreatedAt:    record.CreatedAt,
+				UpdatedAt:    record.CreatedAt,
+				Name:         payload.Name,
+				State:        record.AgentState(),
+				CurrentRunID: record.ID,
+				CurrentRun:   &record,
+				LatestRun:    &record,
 			},
-			Entries:           publicEntries(payload.Entries),
-			ParentAgentID:     payload.ParentAgentID.String(),
-			ParentExecutionID: payload.ParentExecutionID.String(),
-			CallID:            payload.CallID,
+			Entries:       publicEntries(payload.Entries),
+			ParentAgentID: payload.ParentAgentID.String(),
+			ParentRunID:   payload.ParentRunID.String(),
+			CallID:        payload.CallID,
 		}
 	case coreevent.TaskQueueChanged:
 		tasks := make([]dto.QueuedTask, 0, len(payload.Tasks))
@@ -111,30 +128,32 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		}
 	case coreevent.ToolApprovalRequired:
 		data = dto.AgentToolApprovalRequired{CallID: payload.CallID}
+	case coreevent.ToolStarted:
+		data = dto.AgentToolStarted{
+			CallID: payload.CallID,
+			Timing: payload.Timing,
+		}
 	case coreevent.ToolResult:
 		data = dto.AgentToolResult{
 			CallID:  payload.CallID,
 			Result:  payload.Result,
 			IsError: payload.IsError,
+			Timing:  payload.Timing,
 		}
 	case coreevent.TurnCompleted:
 		data = dto.AgentTurnCompleted{StopReason: string(payload.StopReason)}
-	case coreevent.ModelUsage:
-		data = dto.AgentModelUsage{Usage: publicUsage(payload.Usage)}
-	case coreevent.ExecutionEnded:
-		data = dto.AgentExecutionEnded{
-			Execution: payload.Execution,
-			State:     payload.State,
-			Entries:   publicEntries(payload.Entries),
+	case coreevent.RunEnded:
+		data = dto.AgentRunEnded{
+			Run:     payload.Run,
+			State:   payload.State,
+			Entries: publicEntries(payload.Entries),
 		}
 	case coreevent.RequestCanceled:
-		data = dto.AgentExecutionEnded{
-			Execution: payload.Execution,
-			State:     payload.State,
-			Entries:   publicEntries(payload.Entries),
+		data = dto.AgentRunEnded{
+			Run:     payload.Run,
+			State:   payload.State,
+			Entries: publicEntries(payload.Entries),
 		}
-	case coreevent.OperationTiming:
-		data = dto.AgentOperationTiming{Timing: operationTiming(payload.Timing)}
 	case coreevent.ErrorOccurred:
 		data = dto.AgentErrorOccurred{Message: payload.Message}
 	default:
@@ -142,13 +161,13 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		return
 	}
 	b.host.EmitEvent(agentEventName, dto.AgentEvent{
-		Kind:        string(event.Kind()),
-		SessionID:   event.Source.SessionID.String(),
-		AgentID:     event.Source.AgentID.String(),
-		BranchID:    event.Source.BranchID.String(),
-		BindingID:   event.Source.BindingID,
-		ExecutionID: event.Source.ExecutionID.String(),
-		TurnID:      event.Source.TurnID.String(),
-		Data:        data,
+		Kind:      string(event.Kind()),
+		SessionID: event.Source.SessionID.String(),
+		AgentID:   event.Source.AgentID.String(),
+		BranchID:  event.Source.BranchID.String(),
+		BindingID: event.Source.BindingID,
+		RunID:     event.Source.RunID.String(),
+		TurnID:    event.Source.TurnID.String(),
+		Data:      data,
 	})
 }

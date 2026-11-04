@@ -26,7 +26,7 @@ export function useAgentCommands({
     viewRequestRef,
 }: AgentCommandContext) {
     const stop = useCallback(async () => {
-        if (!agent?.currentExecutionId || busy) return
+        if (!agent?.currentRunId || busy) return
         const agentID = agent.ID
         const selectedAgentID = getSelectedAgentID()
         const viewRequestID = viewRequestRef.current

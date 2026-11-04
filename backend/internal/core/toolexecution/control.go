@@ -2,7 +2,7 @@ package toolexecution
 
 import (
 	"context"
-	agentexecution "praxis/internal/core/agent/execution"
+	agentrun "praxis/internal/core/agent/run"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 )
@@ -24,15 +24,15 @@ func (e *Executor) unregister(key Key) {
 }
 
 // StopCall 只提交停止信号；尚未启动的调用也由所属执行路径生成唯一回执。
-func (e *Executor) StopCall(ctx context.Context, request ControlRequest) (agentexecution.ExecutionRecord, error) {
+func (e *Executor) StopCall(ctx context.Context, request ControlRequest) (agentrun.RunRecord, error) {
 	if err := ctx.Err(); err != nil {
-		return agentexecution.ExecutionRecord{}, err
+		return agentrun.RunRecord{}, err
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	callState := e.active[Key{ExecutionID: request.ExecutionID, CallID: request.CallID}]
+	callState := e.active[Key{RunID: request.RunID, CallID: request.CallID}]
 	if callState == nil {
-		return agentexecution.ExecutionRecord{}, errorcode.ErrRequestConflict
+		return agentrun.RunRecord{}, errorcode.ErrRequestConflict
 	}
 	callState.stopped = true
 	if callState.tool != nil {
@@ -48,7 +48,7 @@ func (e *Executor) DecideApproval(ctx context.Context, request ControlRequest, a
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	callState := e.active[Key{ExecutionID: request.ExecutionID, CallID: request.CallID}]
+	callState := e.active[Key{RunID: request.RunID, CallID: request.CallID}]
 	if callState == nil {
 		return errorcode.ErrRequestConflict
 	}

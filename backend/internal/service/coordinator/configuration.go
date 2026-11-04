@@ -30,7 +30,7 @@ func (s *Coordinator) ReloadSessionConfig(ctx context.Context, id identity.Sessi
 func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.SessionID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, active := range s.executions {
+	for _, active := range s.runs {
 		if active.sessionID == id {
 			return agentmodel.ErrExecuting
 		}

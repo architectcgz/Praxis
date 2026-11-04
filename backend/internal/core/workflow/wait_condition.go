@@ -36,7 +36,7 @@ const (
 type WaitCondition struct {
 	ID                identity.WaitConditionID
 	AgentID           identity.AgentID
-	ExecutionID       identity.AgentExecutionID
+	RunID             identity.RunID
 	Kind              WaitConditionKind
 	Mode              WaitConditionMode
 	TargetIDs         []string
@@ -57,7 +57,7 @@ func (w *WaitCondition) Cancel(at time.Time) error {
 
 // Validate 检查对象自身的完整性，不修改或修复输入。
 func (w WaitCondition) Validate() error {
-	for _, id := range []string{w.ID.String(), w.AgentID.String(), w.ExecutionID.String()} {
+	for _, id := range []string{w.ID.String(), w.AgentID.String(), w.RunID.String()} {
 		if id == "" || id != strings.TrimSpace(id) {
 			return fmt.Errorf("waitCondition: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
 		}

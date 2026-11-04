@@ -48,7 +48,7 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input sessionservice.TaskI
 		BranchID:  binding.branchID,
 	}
 	// 自动分叉后的重试仍可携带来源分支，先确认已提交身份，再校验新输入的分支。
-	if prior, err := s.sessions.FindExecutionByRequest(ctx, identity.AgentID(input.SessionID), identity.RequestID(task.ID)); err == nil {
+	if prior, err := s.sessions.FindRunByRequest(ctx, identity.AgentID(input.SessionID), identity.RequestID(task.ID)); err == nil {
 		if prior.BranchID != binding.branchID {
 			s.mu.Unlock()
 			return SubmitResult{}, errorcode.ErrRequestConflict
@@ -101,7 +101,7 @@ func (s *Coordinator) DeleteSession(ctx context.Context, id identity.SessionID) 
 	defer s.running.Done()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, active := range s.executions {
+	for _, active := range s.runs {
 		if active.sessionID == id {
 			return agentmodel.ErrExecuting
 		}

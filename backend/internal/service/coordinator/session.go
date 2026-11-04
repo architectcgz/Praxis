@@ -173,7 +173,7 @@ func (s *Coordinator) Tree(ctx context.Context, id identity.SessionID) ([]sessio
 	return s.sessions.Tree(ctx, id)
 }
 
-func (s *Coordinator) HistoryAt(ctx context.Context, id identity.SessionID, head string) ([]sessionentry.ContextEntry, error) {
+func (s *Coordinator) EntriesAt(ctx context.Context, id identity.SessionID, head string) ([]sessionentry.ContextEntry, error) {
 	return s.sessions.Path(ctx, id, head)
 }
 
@@ -251,7 +251,7 @@ func (s *Coordinator) navigationBinding(id identity.SessionID, branchID identity
 	if binding == nil || binding.sessionID != id || binding.branchID != branchID || binding.closing {
 		return nil, errorcode.ErrRequestConflict
 	}
-	if s.executions[executionKey{identity.AgentID(binding.sessionID), binding.branchID}] != nil || len(binding.queue.List(0)) > 0 {
+	if s.runs[runKey{identity.AgentID(binding.sessionID), binding.branchID}] != nil || len(binding.queue.List(0)) > 0 {
 		return nil, agentmodel.ErrExecuting
 	}
 	return binding, nil
@@ -277,7 +277,7 @@ func (s *Coordinator) CloseSession(ctx context.Context, pageID, bindingID string
 			return errorcode.ErrRequestConflict
 		}
 		binding.closing = true
-		for _, active := range s.executions {
+		for _, active := range s.runs {
 			if active.bindingID == bindingID {
 				active.cancel(context.Canceled)
 			}
@@ -294,7 +294,7 @@ func (s *Coordinator) CloseSession(ctx context.Context, pageID, bindingID string
 	for {
 		s.mu.Lock()
 		busy := false
-		for _, active := range s.executions {
+		for _, active := range s.runs {
 			if binding != nil && active.bindingID == bindingID {
 				busy = true
 				break

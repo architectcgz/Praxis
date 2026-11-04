@@ -10,7 +10,7 @@ import (
 )
 
 // TaskQueue 属于单个 Session，待办只驻留内存；零值可用。
-// 同时最多领取一项，准备失败 Retry，保存 Execution 后 Complete。
+// 同时最多领取一项，准备失败 Retry，保存 Run 后 Complete。
 type TaskQueue struct {
 	mu       sync.Mutex
 	pending  []Task
@@ -57,7 +57,7 @@ func (q *TaskQueue) Retry(value Task) {
 	}
 }
 
-// Complete 只在 Execution 保存成功后释放领取，正文随之退出内存队列。
+// Complete 只在 Run 保存成功后释放领取，正文随之退出内存队列。
 func (q *TaskQueue) Complete(value Task) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -66,7 +66,7 @@ func (q *TaskQueue) Complete(value Task) {
 	}
 }
 
-// Cancel 只移除未领取输入，不取消当前 Execution，也不保留取消墓碑。
+// Cancel 只移除未领取输入，不取消当前 Run，也不保留取消墓碑。
 func (q *TaskQueue) Cancel(id identity.TaskID) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -93,7 +93,7 @@ func (q *TaskQueue) Clear() {
 	q.sequence = 0
 }
 
-// List 返回待办快照，包含尚未保存 Execution 的已领取队首。
+// List 返回待办快照，包含尚未保存 Run 的已领取队首。
 func (q *TaskQueue) List(limit int) []Task {
 	q.mu.Lock()
 	defer q.mu.Unlock()

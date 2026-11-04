@@ -26,7 +26,7 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, a
 	if err := s.tools.DecideApproval(ctx, params, approve); err != nil {
 		return err
 	}
-	s.notifyToolApprovalWaiter(params.ExecutionID)
+	s.notifyToolApprovalWaiter(params.RunID)
 	return nil
 }
 
@@ -52,11 +52,11 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request ToolControl) err
 
 // notifyToolApprovalWaiter 按唯一执行标识通知等待者，不依赖请求声明的 Agent 归属，也不承载决定本身。
 // 通道保留提前到达的通知；已有待处理通知时合并发送，避免持锁阻塞。
-func (s *Coordinator) notifyToolApprovalWaiter(executionID identity.AgentExecutionID) {
+func (s *Coordinator) notifyToolApprovalWaiter(runID identity.RunID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, active := range s.executions {
-		if active.executionID != executionID || active.ending {
+	for _, active := range s.runs {
+		if active.runID != runID || active.ending {
 			continue
 		}
 		select {
@@ -68,7 +68,7 @@ func (s *Coordinator) notifyToolApprovalWaiter(executionID identity.AgentExecuti
 }
 
 // waitForToolApproval 等待审批决定或工具停止通知；取消执行时直接退出等待，不重启 Loop。
-func (s *Coordinator) waitForToolApproval(ctx context.Context, active *activeExecution) error {
+func (s *Coordinator) waitForToolApproval(ctx context.Context, active *activeRun) error {
 	select {
 	case <-active.toolApprovalWake:
 		return nil

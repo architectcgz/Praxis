@@ -10,14 +10,14 @@ import (
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	tooloutput "praxis/internal/infra/tools/output"
-	executionservice "praxis/internal/service/agent/execution"
+	runservice "praxis/internal/service/agent/run"
 	"praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	"time"
 )
 
 func buildCoordinator(resources storageResources, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
-	executionService := executionservice.NewService(executionservice.Dependencies{
+	runService := runservice.NewService(runservice.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
@@ -27,7 +27,7 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 		IDs:            identity.SecureIDGenerator{},
 	})
 	reviewer := &executionmodel.Reviewer{
-		Progress:       executionService,
+		Progress:       runService,
 		HookDispatcher: hooks,
 	}
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
@@ -57,7 +57,7 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 	runner := loop.NewRunner(runnerDeps)
 	return coordinator.NewCoordinator(coordinator.Config{
 		Loop:              &runner,
-		Operations:        executionService,
+		Operations:        runService,
 		Sessions:          sessions,
 		HookDispatcher:    hooks,
 		Logger:            resources.logger,
