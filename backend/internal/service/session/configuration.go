@@ -72,7 +72,8 @@ func (s *Service) RunConfiguration(ctx context.Context, id identity.SessionID) (
 	return owner.config, model, err
 }
 
-// ReloadConfiguration 由 Coordinator 确认整个会话无活跃执行后调用；失败不发布任何候选内容。
+// ReloadConfiguration 由 Coordinator 持有会话命令锁并确认整个会话无活跃执行后调用。
+// 加载失败不发布任何候选内容。
 func (s *Service) ReloadConfiguration(ctx context.Context, id identity.SessionID) error {
 	owner, err := s.openedSession(ctx, id)
 	if err != nil {

@@ -56,12 +56,13 @@ func (r *logReplay) trackToolEntry(value sessionentry.ContextEntry, agentID iden
 		r.calls = append(r.calls, replayedToolCall{call: call})
 	}
 	for _, block := range value.Content {
-		if block.Kind != sessionentry.BlockToolResult {
+		result, ok := block.(sessionentry.ToolResultBlock)
+		if !ok {
 			continue
 		}
 		key := sessionentry.Key{
 			RunID:  identity.RunID(value.RunID),
-			CallID: block.CallID,
+			CallID: result.CallID,
 		}
 		r.calls[r.callIndexes[key]].completed = true
 	}

@@ -8,7 +8,7 @@ import (
 	"praxis/internal/core/tool"
 )
 
-// remindContextBudget 在 Hook 变换后的请求上估算预算，提醒不回写 Loop 上下文或 Session Entry。
+// remindContextBudget 在待发送的请求上估算预算，提醒不回写 Loop 上下文或 Session Entry。
 // 具体协议的编码差异仍由 Provider 在发送前进行硬校验。
 func remindContextBudget(request providerapi.Request) (providerapi.Request, error) {
 	tokens, err := request.Context.EstimatedTokens()

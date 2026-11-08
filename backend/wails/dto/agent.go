@@ -1,7 +1,6 @@
 package dto
 
 import (
-	"encoding/json"
 	agentmodel "praxis/internal/core/agent"
 	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/agent/run/timing"
@@ -49,11 +48,11 @@ type AgentModelRequestFinished struct {
 	Timing      *timing.Record `json:"timing,omitempty"`
 }
 
-// AgentToolCall 的 Name 是工具注册键，Arguments 仅包含该工具定义的入参。
+// AgentToolCall 的 Name 是工具注册键，Arguments 保留模型返回的参数原文。
 type AgentToolCall struct {
-	CallID    string          `json:"callId"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	CallID    string `json:"callId"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // AgentToolApprovalRequired 通过信封中的 runId 与 callId 关联调用，审批详情由查询入口返回。

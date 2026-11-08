@@ -71,7 +71,7 @@ func (s *Service) PrepareSubagent(ctx context.Context, input SubagentInput) (*ag
 		RunID:        record.ID.String(),
 		Role:         role.User,
 		AuthorKind:   sessionentry.AuthorUser,
-		Content:      []sessionentry.Block{{Kind: sessionentry.BlockText, Text: input.Task.Prompt}},
+		Content:      []sessionentry.ContentBlock{sessionentry.TextBlock{Text: input.Task.Prompt}},
 	})
 	if err != nil {
 		return nil, err

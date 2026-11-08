@@ -10,6 +10,7 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
 )
 
@@ -220,9 +221,6 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					if seen[block.ID] {
 						return "", errors.New("anthropic duplicate tool_use ID")
 					}
-					if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.ID, Name: block.Name, Arguments: state.Arguments}); err != nil {
-						return "", err
-					}
 					seen[block.ID] = true
 					toolCount++
 				}
@@ -239,7 +237,15 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					}
 				}
 				if block, ok := state.Block.(*toolUseBlock); ok {
-					if err := streaming.EmitTool(func(event providerapi.Event) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: block.ID, Name: block.Name, Arguments: state.Arguments}); err != nil {
+					if err := emit(providerapi.Event{
+						Kind: providerapi.StreamToolCall,
+						ToolCall: providerapi.ToolCall{
+							ID:        block.ID,
+							Name:      tool.ToolName(block.Name),
+							Arguments: state.Arguments,
+						},
+						OutputIndex: &index,
+					}); err != nil {
 						return "", err
 					}
 				}

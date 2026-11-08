@@ -103,11 +103,11 @@ func (s *Data) Safe(head string) bool {
 	pending := make(map[sessionentry.Key]bool)
 	for _, entry := range s.Path(head) {
 		for _, block := range entry.Content {
-			key := sessionentry.Key{RunID: identity.RunID(entry.RunID), CallID: block.CallID}
-			switch block.Kind {
-			case sessionentry.BlockToolCall:
-				pending[key] = true
-			case sessionentry.BlockToolResult:
+			switch value := block.(type) {
+			case sessionentry.ToolCallBlock:
+				pending[sessionentry.Key{RunID: identity.RunID(entry.RunID), CallID: value.CallID}] = true
+			case sessionentry.ToolResultBlock:
+				key := sessionentry.Key{RunID: identity.RunID(entry.RunID), CallID: value.CallID}
 				if !pending[key] {
 					return false
 				}

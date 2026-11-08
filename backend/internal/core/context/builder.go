@@ -10,14 +10,10 @@ import (
 func ContentFromEntries(systemPrompt, inputEntryID string, entries []*sessionentry.ContextEntry) Content {
 	content := Content{SystemPrompt: systemPrompt}
 	for _, entry := range ModelEntries(sessionentry.Values(entries)) {
-		value, visible := modelVisibleEntry(entry)
-		if !visible {
-			continue
+		if entry.ID == inputEntryID && entry.Role == role.User {
+			entry.Protected = true
 		}
-		if value.ID == inputEntryID && value.Role == role.User {
-			value.Protected = true
-		}
-		content.Entries = append(content.Entries, value)
+		content.Entries = append(content.Entries, entry)
 	}
 	return content
 }
@@ -36,14 +32,8 @@ func (ContextBuilder) Build(content Content, limits Limits) (ModelContext, error
 	value := ModelContext{SystemPrompt: content.SystemPrompt}
 	minimum := ModelContext{SystemPrompt: content.SystemPrompt}
 	for _, entry := range content.Entries {
-		copy := entry
-		copy.Content = nil
-		for _, block := range entry.Content {
-			if block.Kind != sessionentry.BlockThinking {
-				copy.Content = append(copy.Content, block)
-			}
-		}
-		if len(copy.Content) == 0 {
+		copy, visible := modelVisibleEntry(entry)
+		if !visible {
 			continue
 		}
 		value.Entries = append(value.Entries, copy)
@@ -59,4 +49,16 @@ func (ContextBuilder) Build(content Content, limits Limits) (ModelContext, error
 		return ModelContext{}, &ContextWindowExceededError{EstimatedInputTokens: tokens, MaxOutputTokens: limits.MaxOutputTokens, ContextWindow: limits.ContextWindow}
 	}
 	return value, nil
+}
+
+// modelVisibleEntry 移除展示用思考；推理状态由 Provider 按目标模型决定是否重放。
+func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool) {
+	content := make([]sessionentry.ContentBlock, 0, len(value.Content))
+	for _, block := range value.Content {
+		if _, thinking := block.(sessionentry.ThinkingBlock); !thinking {
+			content = append(content, block)
+		}
+	}
+	value.Content = content
+	return value, len(content) > 0
 }

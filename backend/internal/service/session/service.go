@@ -16,7 +16,6 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	projectservice "praxis/internal/service/project"
-	"slices"
 	"sync"
 )
 
@@ -41,7 +40,7 @@ type Service struct {
 	clock          clock.Clock
 	ids            identity.IDGenerator
 
-	// openedMu 保护实例注册表与创建登记，不覆盖 Entry 操作。
+	// openedMu 只保护实例注册表与创建登记；同会话的生命周期命令由 Coordinator 串行化。
 	openedMu        sync.Mutex
 	opened          map[identity.SessionID]*openedSession
 	createdSessions map[identity.SessionID]struct{}
@@ -94,12 +93,13 @@ func (s *Service) openedSession(ctx context.Context, id identity.SessionID) (*op
 	return owner, nil
 }
 
-// LoadSession 只由选择入口调用，完成日志重放、Entry 构建和中断收尾后才发布实例。
+// LoadSession 由持有会话命令锁的选择入口调用，完成恢复后才发布实例。
 func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
 	s.openedMu.Lock()
-	defer s.openedMu.Unlock()
-	if owner := s.opened[id]; owner != nil {
-		return owner.session, nil
+	loaded := s.opened[id]
+	s.openedMu.Unlock()
+	if loaded != nil {
+		return loaded.session, nil
 	}
 	info, err := s.sessions.Get(ctx, id)
 	if err != nil {
@@ -137,39 +137,41 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sess
 	if err := replay.repairToolResults(ctx, owner, info.State); err != nil {
 		return nil, err
 	}
-	for _, record := range slices.Clone(data.Runs) {
+	for _, record := range data.Runs {
 		if !record.Active() {
 			continue
 		}
-		at := s.clock.Now()
-		if record.Status == agentrun.RunStarting {
-			record.Start(at)
-		}
-		record.End(agentrun.RunInterrupted, "", at)
+		record.End(agentrun.RunInterrupted, "", s.clock.Now())
 		if err := owner.SaveRun(ctx, record); err != nil {
 			return nil, err
 		}
 	}
+	s.openedMu.Lock()
 	s.opened[id] = &openedSession{
 		session: owner,
 		config:  config,
 	}
+	s.openedMu.Unlock()
 	return owner, nil
 }
 
-// ReleaseSession 由 Coordinator 确认页面和执行均已退出后调用，不删除持久化记录。
+// ReleaseSession 由 Coordinator 持有会话命令锁并确认页面和执行均已退出后调用。
+// 只释放已加载实例，不删除持久化记录。
 func (s *Service) ReleaseSession(ctx context.Context, id identity.SessionID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.openedMu.Lock()
-	defer s.openedMu.Unlock()
 	owner := s.opened[id]
+	s.openedMu.Unlock()
 	if owner == nil {
 		return nil
 	}
+	empty := owner.session.Empty()
+	s.openedMu.Lock()
+	defer s.openedMu.Unlock()
 	// 非空事实不能依赖实例常驻，否则退出清理会把已释放的新会话当成空会话。
-	if !owner.session.Empty() {
+	if !empty {
 		delete(s.createdSessions, id)
 	}
 	delete(s.opened, id)
@@ -190,7 +192,7 @@ func (s *Service) GetSessionInfo(ctx context.Context, sessionID identity.Session
 }
 
 // CreateSession 保存元数据与空日志；会话数据在选定后加载，重复请求复用原会话。
-// 由 Coordinator 接纳后调用，创建和 Hook 收尾均计入关闭等待。
+// 由 Coordinator 持有会话命令锁调用，创建和 Hook 收尾均计入关闭等待。
 func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result CreateResult, err error) {
 	ctx, scope := s.hookDispatcher.Start(ctx, hook.Operation{
 		Identity: hook.Identity{
@@ -228,7 +230,7 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 	return CreateResult{Session: session}, nil
 }
 
-// DeleteSession 由 Coordinator 确认会话没有活动执行后调用。
+// DeleteSession 由 Coordinator 持有会话命令锁并确认没有活动执行后调用。
 func (s *Service) DeleteSession(ctx context.Context, sessionID identity.SessionID) error {
 	return s.deleteSession(ctx, sessionID, false)
 }
@@ -251,8 +253,8 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 
 func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionID, onlyEmpty bool) error {
 	s.openedMu.Lock()
-	defer s.openedMu.Unlock()
 	owner := s.opened[sessionID]
+	s.openedMu.Unlock()
 	// 本进程新建但尚未加载的会话只有空日志，可以直接清理。
 	if onlyEmpty && owner != nil && !owner.session.Empty() {
 		return nil
@@ -260,6 +262,8 @@ func (s *Service) deleteSession(ctx context.Context, sessionID identity.SessionI
 	if err := s.sessions.Delete(ctx, sessionID); err != nil {
 		return err
 	}
+	s.openedMu.Lock()
+	defer s.openedMu.Unlock()
 	delete(s.opened, sessionID)
 	delete(s.createdSessions, sessionID)
 	return nil

@@ -1,7 +1,6 @@
 package bindings
 
 import (
-	"bytes"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/wails/dto"
 )
@@ -13,25 +12,30 @@ func publicEntries(values []sessionentry.ContextEntry) []dto.Entry {
 	for _, value := range values {
 		content := make([]dto.EntryBlock, 0, len(value.Content))
 		for _, block := range value.Content {
-			switch block.Kind {
-			case sessionentry.BlockText, sessionentry.BlockThinking:
+			switch block := block.(type) {
+			case sessionentry.TextBlock:
 				content = append(content, dto.EntryBlock{
-					Kind: string(block.Kind),
+					Kind: "text",
 					Text: block.Text,
 				})
-			case sessionentry.BlockToolCall:
+			case sessionentry.ThinkingBlock:
 				content = append(content, dto.EntryBlock{
-					Kind:   string(block.Kind),
-					CallID: block.CallID,
-					Name:   block.Name,
-					Input:  bytes.Clone(block.Input),
+					Kind: "thinking",
+					Text: block.Text,
 				})
-			case sessionentry.BlockToolResult:
+			case sessionentry.ToolCallBlock:
 				content = append(content, dto.EntryBlock{
-					Kind:    string(block.Kind),
+					Kind:   "tool_call",
+					CallID: block.CallID,
+					Name:   string(block.Name),
+					Input:  block.Arguments,
+				})
+			case sessionentry.ToolResultBlock:
+				content = append(content, dto.EntryBlock{
+					Kind:    "tool_result",
 					Text:    block.Text,
 					CallID:  block.CallID,
-					Name:    block.Name,
+					Name:    string(block.Name),
 					IsError: block.IsError,
 				})
 			}

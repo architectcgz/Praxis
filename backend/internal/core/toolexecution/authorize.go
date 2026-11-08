@@ -109,8 +109,8 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 
 func (t *RunTools) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string, sourceTaskID identity.TaskID) {
 	e := t.executor
-	call.Arguments = args
-	value := toolHookEvent(call, args, operationID)
+	call.Arguments = string(args)
+	value := toolHookEvent(call, string(args), operationID)
 	value.SourceTaskID = sourceTaskID
 	if err := e.deps.HookDispatcher.ToolExecutionWaiting(context.WithoutCancel(ctx), value); err != nil && e.deps.Logf != nil {
 		e.deps.Logf("tool execution waiting hook failed: %v", err)

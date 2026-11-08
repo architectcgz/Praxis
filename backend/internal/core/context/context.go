@@ -34,7 +34,16 @@ func (c *Context) Append(entry *sessionentry.ContextEntry) {
 	c.entries = append(c.entries, entry)
 }
 
-// ModelEntries 只调整请求的块列表和顺序，不修改共享参数或推理载荷。
+// ModelEntries 选择模型可见内容并调整工具结果顺序，不修改共享参数或推理载荷。
 func ModelEntries(entries []sessionentry.ContextEntry) []sessionentry.ContextEntry {
-	return pairToolResults(entries)
+	selected := make([]sessionentry.ContextEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Error != "" {
+			continue
+		}
+		if value, visible := modelVisibleEntry(entry); visible {
+			selected = append(selected, value)
+		}
+	}
+	return pairToolResults(selected)
 }

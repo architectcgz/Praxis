@@ -12,7 +12,9 @@ func summaryEntries(entries []sessionentry.ContextEntry) []sessionentry.ContextE
 		copy := entry
 		copy.Content = nil
 		for _, block := range entry.Content {
-			if block.Kind != sessionentry.BlockReasoningState && block.Kind != sessionentry.BlockThinking {
+			switch block.(type) {
+			case sessionentry.ReasoningStateBlock, sessionentry.ThinkingBlock:
+			default:
 				copy.Content = append(copy.Content, block)
 			}
 		}

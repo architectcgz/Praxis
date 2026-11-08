@@ -13,7 +13,7 @@ const (
 	ModelRequestSummary   = agentrun.ModelRequestSummary
 )
 
-// ModelRequest 携带本次请求的只读归属；处理器只返回待发送的请求，不返回执行进度。
+// ModelRequest 携带本次请求的只读快照，处理器不返回修改后的请求。
 type ModelRequest struct {
 	Identity
 	Kind     ModelRequestKind
@@ -40,7 +40,7 @@ func (e ModelResponse) clone() ModelResponse {
 }
 
 type BeforeModelRequestHook interface {
-	BeforeModelRequest(context.Context, ModelRequest) (providerapi.Request, error)
+	BeforeModelRequest(context.Context, ModelRequest) error
 }
 
 type AfterModelResponseHook interface {

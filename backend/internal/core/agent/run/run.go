@@ -146,7 +146,7 @@ func (r *Run) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 			continue
 		}
 		for _, block := range entry.Content {
-			if block.Kind == sessionentry.BlockToolResult && block.CallID == key.CallID {
+			if result, ok := block.(sessionentry.ToolResultBlock); ok && result.CallID == key.CallID {
 				return *entry, true
 			}
 		}

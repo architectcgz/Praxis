@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	providerapi "praxis/internal/core/provider"
+	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
 	"slices"
 	"strings"
@@ -17,7 +18,7 @@ type decoder struct{}
 
 // Decode 只支持 choice 0；finish_reason 后继续读取 Usage，必须收到 [DONE] 才成功。
 func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (providerapi.StopReason, error) {
-	calls := map[int]*streaming.ToolAccumulator{}
+	calls := map[int]*providerapi.ToolCall{}
 	stopReason, refused, usageSeen := "", false, false
 	var identity *chatCompletionChunk
 	for {
@@ -55,13 +56,13 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					if position != index || seen[call.ID] {
 						return "", errors.New("openai chat invalid tool index or duplicate ID")
 					}
-					if err := streaming.ValidateToolCall(call); err != nil {
-						return "", err
-					}
 					seen[call.ID] = true
 				}
 				for _, index := range indices {
-					if err := streaming.EmitTool(emit, calls[index]); err != nil {
+					if err := emit(providerapi.Event{
+						Kind:     providerapi.StreamToolCall,
+						ToolCall: *calls[index],
+					}); err != nil {
 						return "", err
 					}
 				}
@@ -111,7 +112,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		for _, delta := range choice.Delta.ToolCalls {
 			call := calls[*delta.Index]
 			if call == nil {
-				call = &streaming.ToolAccumulator{}
+				call = &providerapi.ToolCall{}
 				calls[*delta.Index] = call
 			}
 			if delta.ID != nil {
@@ -122,7 +123,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			}
 			if delta.Function != nil {
 				if delta.Function.Name != nil {
-					call.Name += *delta.Function.Name
+					call.Name += tool.ToolName(*delta.Function.Name)
 				}
 				if delta.Function.Arguments != nil {
 					call.Arguments += *delta.Function.Arguments

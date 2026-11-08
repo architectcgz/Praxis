@@ -10,7 +10,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/infra/providers/streaming"
 )
 
 type anthropicContext struct {
@@ -63,26 +62,23 @@ func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Conf
 		messageRole := string(entry.Role)
 		var content any
 		var raw json.RawMessage
-		switch block.Kind {
-		case sessionentry.BlockText:
+		switch block := block.(type) {
+		case sessionentry.TextBlock:
 			if entry.Role == role.Tool {
 				return nil, errors.New("anthropic tool role requires tool results")
 			}
 			content = requestTextBlock{Type: "text", Text: block.Text}
-		case sessionentry.BlockToolCall:
+		case sessionentry.ToolCallBlock:
 			if entry.Role != role.Assistant {
 				return nil, errors.New("anthropic tool_use requires assistant role")
-			}
-			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
-				return nil, err
 			}
 			content = requestToolUseBlock{
 				Type:  "tool_use",
 				ID:    ids[block.CallID],
-				Name:  block.Name,
-				Input: block.Input,
+				Name:  string(block.Name),
+				Input: json.RawMessage(block.Arguments),
 			}
-		case sessionentry.BlockToolResult:
+		case sessionentry.ToolResultBlock:
 			messageRole = "user"
 			content = requestToolResultBlock{
 				Type:      "tool_result",
@@ -90,14 +86,14 @@ func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Conf
 				Content:   block.Text,
 				IsError:   block.IsError,
 			}
-		case sessionentry.BlockReasoningState:
-			state := block.ReasoningState
+		case sessionentry.ReasoningStateBlock:
+			state := block.State
 			if !config.CanReplayReasoningState(state) {
 				continue
 			}
 			raw = bytes.Clone(state.Payload)
 		default:
-			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
+			return nil, fmt.Errorf("context block %d has unsupported type %T", index, block)
 		}
 		if messageRole != "user" && messageRole != "assistant" {
 			return nil, errors.New("anthropic unsupported message role")
@@ -123,14 +119,15 @@ func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 	var values []string
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.ReasoningState == nil {
+			state, ok := block.(sessionentry.ReasoningStateBlock)
+			if !ok {
 				continue
 			}
 			var content struct {
 				Signature string `json:"signature"`
 				Data      string `json:"data"`
 			}
-			if json.Unmarshal(block.ReasoningState.Payload, &content) == nil {
+			if json.Unmarshal(state.State.Payload, &content) == nil {
 				values = append(values, content.Signature, content.Data)
 			}
 		}

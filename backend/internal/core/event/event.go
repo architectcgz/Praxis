@@ -1,7 +1,6 @@
 package event
 
 import (
-	"encoding/json"
 	agentmodel "praxis/internal/core/agent"
 	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/agent/run/timing"
@@ -126,7 +125,7 @@ func (ThinkingDelta) isPayload() {}
 type ToolCall struct {
 	CallID    string
 	Name      string
-	Arguments json.RawMessage
+	Arguments string
 }
 
 func (ToolCall) Kind() Kind { return KindToolCall }

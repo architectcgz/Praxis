@@ -40,15 +40,17 @@ type Coordinator struct {
 	logger            *logging.Logger
 	transitionTimeout time.Duration
 
-	// 领取队首与标记忙碌在同一临界区完成；准备、存储和模型调用都在锁外执行。
-	mu            sync.Mutex
-	closed        bool
-	runs          map[runKey]*activeRun
-	pages         map[string]identity.SessionID
-	bindings      map[string]*sessionBinding
-	branchOwners  map[branchKey]string
-	branchResults map[string]string
-	running       sync.WaitGroup
+	// mu 只保护共享登记；会话命令先取得 sessionCommand，再短暂持有 mu。
+	// 存储、会话数据访问和 Run 快照均不持有 mu。
+	mu              sync.Mutex
+	closed          bool
+	sessionCommands map[identity.SessionID]*sessionCommand
+	runs            map[runKey]*activeRun
+	pages           map[string]identity.SessionID
+	bindings        map[string]*sessionBinding
+	branchOwners    map[branchKey]string
+	branchResults   map[string]string
+	running         sync.WaitGroup
 }
 
 // activeRun 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
@@ -86,6 +88,7 @@ func NewCoordinator(config Config) *Coordinator {
 		sessionRecords:    config.SessionRecords,
 		projects:          config.Projects,
 		loop:              config.Loop,
+		sessionCommands:   make(map[identity.SessionID]*sessionCommand),
 		runs:              make(map[runKey]*activeRun),
 		pages:             make(map[string]identity.SessionID),
 		bindings:          make(map[string]*sessionBinding),
@@ -110,12 +113,12 @@ func (r *Coordinator) enter() error {
 }
 
 // launchLocked 只接收已由调度器标记忙碌的执行，不再竞争槽位；调用方持有 mu。
-func (r *Coordinator) launchLocked(run *agentrun.Run, active *activeRun) error {
+func (r *Coordinator) launchLocked(run *agentrun.Run, runID identity.RunID, active *activeRun) error {
 	if r.closed {
 		return errCoordinatorClosed
 	}
 	active.run = run
-	active.runID = run.Snapshot().ID
+	active.runID = runID
 	close(active.ready)
 	r.running.Go(func() { r.run(active.ctx, run, active) })
 	return nil

@@ -10,6 +10,7 @@ import (
 	modelconfig "praxis/internal/core/model/config"
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
 )
@@ -474,9 +475,6 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if item.Status != nil && *item.Status != "completed" {
 				return "", errors.New("responses completed with incomplete function")
 			}
-			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: item.CallID, Name: item.Name, Arguments: item.Arguments}); err != nil {
-				return "", err
-			}
 			if seenCalls[item.CallID] {
 				return "", errors.New("responses duplicate call_id")
 			}
@@ -513,7 +511,15 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 				return "", err
 			}
 		case *responseFunctionCallOutput:
-			if err := streaming.EmitTool(func(event providerapi.Event) error { event.OutputIndex = &index; return emit(event) }, &streaming.ToolAccumulator{ID: item.CallID, Name: item.Name, Arguments: item.Arguments}); err != nil {
+			if err := emit(providerapi.Event{
+				Kind: providerapi.StreamToolCall,
+				ToolCall: providerapi.ToolCall{
+					ID:        item.CallID,
+					Name:      tool.ToolName(item.Name),
+					Arguments: item.Arguments,
+				},
+				OutputIndex: &index,
+			}); err != nil {
 				return "", err
 			}
 		}

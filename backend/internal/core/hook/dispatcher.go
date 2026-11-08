@@ -1,13 +1,10 @@
 package hook
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	appcontext "praxis/internal/core/context"
-	providerapi "praxis/internal/core/provider"
 	"reflect"
 	"slices"
 )
@@ -108,37 +105,31 @@ func (d *Dispatcher) BeforeContextBuild(ctx context.Context, event ContextBuild)
 	return value, nil
 }
 
-func (d *Dispatcher) BeforeModelRequest(ctx context.Context, event ModelRequest) (providerapi.Request, error) {
-	value := event.Request
+func (d *Dispatcher) BeforeModelRequest(ctx context.Context, event ModelRequest) error {
 	for _, registered := range d.registered() {
 		handler, ok := registered.(BeforeModelRequestHook)
 		if !ok {
 			continue
 		}
-		next, err := handler.BeforeModelRequest(ctx, event.clone())
-		if err != nil {
-			var empty providerapi.Request
-			return empty, &Error{Point: "BeforeModelRequest", Cause: err}
+		if err := handler.BeforeModelRequest(ctx, event.clone()); err != nil {
+			return &Error{Point: "BeforeModelRequest", Cause: err}
 		}
-		value = next.Clone()
-		event.Request = value
 	}
-	return value, nil
+	return nil
 }
 
-func (d *Dispatcher) BeforeToolExecution(ctx context.Context, event ToolExecution) (json.RawMessage, error) {
-	value := bytes.Clone(event.Arguments)
+func (d *Dispatcher) BeforeToolExecution(ctx context.Context, event ToolExecution) (string, error) {
+	value := event.Arguments
 	for _, registered := range d.registered() {
 		handler, ok := registered.(BeforeToolExecutionHook)
 		if !ok {
 			continue
 		}
-		next, err := handler.BeforeToolExecution(ctx, event.clone())
+		next, err := handler.BeforeToolExecution(ctx, event)
 		if err != nil {
-			var empty json.RawMessage
-			return empty, &Error{Point: "BeforeToolExecution", Cause: err}
+			return "", &Error{Point: "BeforeToolExecution", Cause: err}
 		}
-		value = bytes.Clone(next)
+		value = next
 		event.Arguments = value
 	}
 	return value, nil
@@ -151,7 +142,7 @@ func (d *Dispatcher) AfterToolExecution(ctx context.Context, event ToolExecution
 		if !ok {
 			continue
 		}
-		if err := handler.AfterToolExecution(ctx, event.clone()); err != nil {
+		if err := handler.AfterToolExecution(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "AfterToolExecution", Cause: err})
 		}
 	}
@@ -331,7 +322,7 @@ func (d *Dispatcher) ToolExecutionWaiting(ctx context.Context, event ToolExecuti
 		if !ok {
 			continue
 		}
-		if err := handler.ToolExecutionWaiting(ctx, event.clone()); err != nil {
+		if err := handler.ToolExecutionWaiting(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "ToolExecutionWaiting", Cause: err})
 		}
 	}

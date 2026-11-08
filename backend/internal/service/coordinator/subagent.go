@@ -33,11 +33,10 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		return SubagentResult{}, errorcode.ErrRequestConflict
 	}
 	parentRun := parentActive.run
-	parentRecord := parentRun.Snapshot()
-	active := newActiveRun(ctx, parentRecord.SessionID)
+	active := newActiveRun(ctx, parentActive.sessionID)
 	active.config = parentActive.config
-	active.branchID, active.bindingID = parentRecord.BranchID, parentActive.bindingID
-	key := runKey{agentID, parentRecord.BranchID}
+	active.branchID, active.bindingID = parentActive.branchID, parentActive.bindingID
+	key := runKey{agentID, parentActive.branchID}
 	if s.runs[key] != nil {
 		s.mu.Unlock()
 		return SubagentResult{}, errorcode.ErrRequestConflict
@@ -48,6 +47,7 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	stopParent := context.AfterFunc(parentActive.ctx, func() { active.cancel(context.Cause(parentActive.ctx)) })
 	defer stopCaller()
 	defer stopParent()
+	parentRecord := parentRun.Snapshot()
 	task := sessionmodel.Task{
 		ID:        identity.TaskID((identity.SecureIDGenerator{}).New("task")),
 		SessionID: parentRecord.SessionID,
@@ -76,8 +76,9 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		s.mu.Unlock()
 		return SubagentResult{}, err
 	}
+	runID := run.Snapshot().ID
 	s.mu.Lock()
-	active.run, active.runID = run, run.Snapshot().ID
+	active.run, active.runID = run, runID
 	close(active.ready)
 	s.mu.Unlock()
 	s.loop.Emitter.Emit(coreevent.Event{

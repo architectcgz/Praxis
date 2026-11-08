@@ -51,6 +51,7 @@ type Event struct {
 // Provider 适配器实现此接口，不向调用方暴露协议细节。
 type Provider interface {
 	// Stream 发起模型请求并返回事件通道；请求无效或连接失败时返回错误。
+	// 返回 nil 错误时，事件通道必须非 nil。
 	// 调用方提前停止消费时必须取消 context，以释放 Provider 流资源。
 	Stream(context.Context, Request) (<-chan Event, error)
 }

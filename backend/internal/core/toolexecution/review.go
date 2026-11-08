@@ -83,10 +83,9 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 			Entries: []sessionentry.ContextEntry{{
 				Protected: true,
 				Role:      role.User,
-				Content: []sessionentry.Block{{
-					Kind: sessionentry.BlockText,
-					Text: string(data),
-				}},
+				Content: []sessionentry.ContentBlock{
+					sessionentry.TextBlock{Text: string(data)},
+				},
 			}},
 		},
 		OutputSchema: providerapi.OutputSchema{

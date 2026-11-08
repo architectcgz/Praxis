@@ -1,7 +1,6 @@
 package entry
 
 import (
-	"bytes"
 	"encoding/json"
 	"praxis/internal/core/agent/run/timing"
 	"praxis/internal/core/session/entry/role"
@@ -17,30 +16,6 @@ const (
 	AuthorTool   AuthorKind = "tool"
 	AuthorSystem AuthorKind = "system"
 )
-
-// BlockKind 表示上下文条目中的语义内容。
-type BlockKind string
-
-const (
-	BlockText           BlockKind = "text"
-	BlockThinking       BlockKind = "thinking"
-	BlockReasoningState BlockKind = "reasoning_state"
-	BlockToolCall       BlockKind = "tool_call"
-	BlockToolResult     BlockKind = "tool_result"
-	BlockMCPCall        BlockKind = "mcp_call"
-	BlockMCPResult      BlockKind = "mcp_result"
-)
-
-// Block 是 Provider 无关的上下文内容；协议 adapter 负责把它编码成具体格式。
-type Block struct {
-	Kind           BlockKind       `json:"kind"`
-	Text           string          `json:"text,omitempty"`
-	CallID         string          `json:"callId,omitempty"`
-	Name           string          `json:"name,omitempty"`
-	Input          json.RawMessage `json:"input,omitempty"`
-	IsError        bool            `json:"isError,omitempty"`
-	ReasoningState *ReasoningState `json:"reasoningState,omitempty"`
-}
 
 // ContextEntry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
 type ContextEntry struct {
@@ -64,9 +39,9 @@ type ContextEntry struct {
 	Timing *timing.Record `json:"timing,omitempty"`
 
 	// Protected 标记本轮请求必须容纳的原文，只用于必要输入的容量检查，不限制轮后摘要。
-	Protected bool      `json:"protected,omitempty"`
-	Role      role.Role `json:"role"`
-	Content   []Block   `json:"content"`
+	Protected bool           `json:"protected,omitempty"`
+	Role      role.Role      `json:"role"`
+	Content   []ContentBlock `json:"content"`
 }
 
 // IsSummary 识别覆盖此前上下文的摘要节点。
@@ -74,11 +49,25 @@ func (e ContextEntry) IsSummary() bool {
 	return e.Summary
 }
 
-// Clone 返回 Block 的独立副本，避免跨边界修改共享输入。
-func (b Block) Clone() Block {
-	b.Input = json.RawMessage(bytes.Clone(b.Input))
-	b.ReasoningState = b.ReasoningState.Clone()
-	return b
+// UnmarshalJSON 在持久化读取入口按 kind 解码内容，内部直接使用具体类型。
+func (e *ContextEntry) UnmarshalJSON(data []byte) error {
+	type entry ContextEntry
+	decoded := struct {
+		*entry
+		RawContent []json.RawMessage `json:"content"`
+	}{entry: (*entry)(e)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	e.Content = make([]ContentBlock, len(decoded.RawContent))
+	for index, raw := range decoded.RawContent {
+		block, err := decodeContentBlock(raw)
+		if err != nil {
+			return err
+		}
+		e.Content[index] = block
+	}
+	return nil
 }
 
 // Clone 返回 ContextEntry 的独立副本。
@@ -86,9 +75,13 @@ func (e ContextEntry) Clone() ContextEntry {
 	if e.Content == nil {
 		return e
 	}
-	content := make([]Block, len(e.Content))
+	content := make([]ContentBlock, len(e.Content))
 	for index, block := range e.Content {
-		content[index] = block.Clone()
+		if state, ok := block.(ReasoningStateBlock); ok {
+			state.State = state.State.Clone()
+			block = state
+		}
+		content[index] = block
 	}
 	e.Content = content
 	return e
@@ -98,8 +91,8 @@ func (e ContextEntry) Clone() ContextEntry {
 func (e ContextEntry) TextContent() string {
 	var text strings.Builder
 	for _, block := range e.Content {
-		if block.Kind == BlockText {
-			text.WriteString(block.Text)
+		if value, ok := block.(TextBlock); ok {
+			text.WriteString(value.Text)
 		}
 	}
 	return text.String()

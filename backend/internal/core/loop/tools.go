@@ -9,22 +9,8 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
-	"regexp"
 	"time"
 )
-
-var toolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,63}$`)
-
-func validateToolCalls(calls []ToolCall) error {
-	seen := map[string]bool{}
-	for _, call := range calls {
-		if seen[call.ID] || !toolNamePattern.MatchString(string(call.Name)) {
-			return fail(FailureContract, ErrContract, "provider emitted an invalid tool call")
-		}
-		seen[call.ID] = true
-	}
-	return nil
-}
 
 func prepareToolCalls(params RunParams, turnID identity.TurnID, values []providerapi.ToolCall) []sessionentry.ToolCall {
 	calls := make([]sessionentry.ToolCall, 0, len(values))
@@ -57,7 +43,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, appendEntry
 		}
 		entry := call.ResultEntry(outcome.ToolResult)
 		entry.Timing = outcome.Timing
-		block := entry.Content[0]
+		block := entry.Content[0].(sessionentry.ToolResultBlock)
 		r.emit(params, call.TurnID, coreevent.ToolResult{
 			CallID:  block.CallID,
 			Result:  block.Text,
@@ -77,7 +63,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, appendEntry
 				ToolExecution: hook.ToolExecution{
 					Identity:  identity,
 					Call:      call,
-					Arguments: outcome.Arguments,
+					Arguments: string(outcome.Arguments),
 				},
 				Result: outcome.ToolResult,
 				Err:    outcome.Err,

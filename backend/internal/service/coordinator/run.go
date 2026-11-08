@@ -219,7 +219,7 @@ func (r *Coordinator) endRun(
 	if main && (scheduleRequested || !interrupted && (endedRun.Outcome == agentrun.RunCompleted || endedRun.Outcome == agentrun.RunYielded)) {
 		queueContext, cancelQueue := r.transitionContext()
 		defer cancelQueue()
-		if err := r.scheduleBinding(queueContext, active.bindingID, false); err != nil {
+		if err := r.scheduleBinding(queueContext, task.SessionID, active.bindingID, false); err != nil {
 			r.logError(task, "prepare next queued task", err)
 		}
 	}

@@ -1,7 +1,6 @@
 package dto
 
 import (
-	"encoding/json"
 	"praxis/internal/core/agent/run/timing"
 	"time"
 )
@@ -29,10 +28,10 @@ type Entry struct {
 
 // EntryBlock 只承载可展示的正文、思考和工具活动；不包含 Provider 推理续传数据。
 type EntryBlock struct {
-	Kind    string          `json:"kind"`
-	Text    string          `json:"text,omitempty"`
-	CallID  string          `json:"callId,omitempty"`
-	Name    string          `json:"name,omitempty"`
-	Input   json.RawMessage `json:"input,omitempty"`
-	IsError bool            `json:"isError,omitzero"`
+	Kind    string `json:"kind"`
+	Text    string `json:"text,omitempty"`
+	CallID  string `json:"callId,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Input   string `json:"input,omitempty"`
+	IsError bool   `json:"isError,omitzero"`
 }

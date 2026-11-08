@@ -26,7 +26,7 @@ func EstimateTokens(text string) int {
 func (c ModelContext) EstimatedTokens() (int, error) {
 	type modelEntry struct {
 		Role    role.Role
-		Content []sessionentry.Block
+		Content []sessionentry.ContentBlock
 	}
 	values := make([]modelEntry, 0, len(c.Entries))
 	for _, entry := range c.Entries {

@@ -31,5 +31,14 @@ func (s *Coordinator) SessionRuns(sessionID identity.SessionID, branchID identit
 
 // ListAgentEntries 查询所属持久化历史，运行实例释放后仍能读取子代理记录。
 func (s *Coordinator) ListAgentEntries(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID, branchID identity.BranchID) ([]sessionentry.ContextEntry, error) {
+	if err := s.enter(); err != nil {
+		return nil, err
+	}
+	defer s.running.Done()
+	unlock, err := s.lockSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	return s.sessions.ListAgentEntries(ctx, sessionID, agentID, branchID)
 }

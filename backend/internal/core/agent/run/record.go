@@ -179,11 +179,11 @@ func (progress RunProgress) WithEntries(runID string, entries []*sessionentry.Co
 			last = *entry
 		}
 		for _, block := range entry.Content {
-			if block.Kind == sessionentry.BlockToolCall {
+			switch value := block.(type) {
+			case sessionentry.ToolCallBlock:
 				progress.ToolCalls++
-			}
-			if block.Kind == sessionentry.BlockToolResult {
-				progress.OutputBytes += int64(len(block.Text))
+			case sessionentry.ToolResultBlock:
+				progress.OutputBytes += int64(len(value.Text))
 			}
 		}
 	}

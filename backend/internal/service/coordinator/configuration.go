@@ -28,12 +28,18 @@ func (s *Coordinator) ReloadSessionConfig(ctx context.Context, id identity.Sessi
 }
 
 func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.SessionID) error {
+	unlock, err := s.lockSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, active := range s.runs {
 		if active.sessionID == id {
+			s.mu.Unlock()
 			return agentmodel.ErrExecuting
 		}
 	}
+	s.mu.Unlock()
 	return s.sessions.ReloadConfiguration(ctx, id)
 }

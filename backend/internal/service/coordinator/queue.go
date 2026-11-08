@@ -10,13 +10,28 @@ import (
 	sessionservice "praxis/internal/service/session"
 )
 
-// scheduleBinding 在同一登记边界领取队首并交接 Session 所有权，模型和工具不持登记锁。
-func (r *Coordinator) scheduleBinding(ctx context.Context, bindingID string, explicit bool) error {
+// scheduleBinding 先在会话命令边界领取队首，再在锁外准备执行。
+// 活动登记覆盖准备期，阻止会话在准备、执行和结算期间被释放或删除。
+func (r *Coordinator) scheduleBinding(ctx context.Context, sessionID identity.SessionID, bindingID string, explicit bool) error {
+	input, binding, active, err := r.claimTask(ctx, sessionID, bindingID, explicit)
+	if err != nil || active == nil {
+		return err
+	}
+	key := runKey{identity.AgentID(binding.sessionID), binding.branchID}
+	return r.startNext(ctx, input, key, binding, active)
+}
+
+func (r *Coordinator) claimTask(ctx context.Context, sessionID identity.SessionID, bindingID string, explicit bool) (sessionmodel.Task, *sessionBinding, *activeRun, error) {
+	unlock, err := r.lockSession(ctx, sessionID)
+	if err != nil {
+		return sessionmodel.Task{}, nil, nil, err
+	}
+	defer unlock()
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	binding := r.bindings[bindingID]
-	if r.closed || binding == nil || binding.closing {
-		r.mu.Unlock()
-		return errCoordinatorClosed
+	if r.closed || binding == nil || binding.sessionID != sessionID || binding.closing {
+		return sessionmodel.Task{}, nil, nil, errCoordinatorClosed
 	}
 	key := runKey{identity.AgentID(binding.sessionID), binding.branchID}
 	if active := r.runs[key]; active != nil {
@@ -24,19 +39,16 @@ func (r *Coordinator) scheduleBinding(ctx context.Context, bindingID string, exp
 		if explicit && errors.Is(cause, errRunInterrupted) {
 			active.scheduleRequested = true
 		}
-		r.mu.Unlock()
-		return nil
+		return sessionmodel.Task{}, nil, nil, nil
 	}
 	input, ok := binding.queue.Next()
 	if !ok {
-		r.mu.Unlock()
-		return nil
+		return sessionmodel.Task{}, nil, nil, nil
 	}
 	active := newActiveRun(ctx, binding.sessionID)
 	active.branchID, active.bindingID = binding.branchID, bindingID
 	r.runs[key] = active
-	r.mu.Unlock()
-	return r.startNext(ctx, input, key, binding, active)
+	return input, binding, active, nil
 }
 
 func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, key runKey, binding *sessionBinding, active *activeRun) (err error) {
@@ -47,6 +59,8 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ke
 		if err == nil {
 			return
 		}
+		// 已接纳准备操作后，队首交接与清理不能再被调用方取消打断。
+		unlock, _ := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
 		r.mu.Lock()
 		binding.queue.Retry(input)
 		delete(r.runs, key)
@@ -54,18 +68,23 @@ func (r *Coordinator) startNext(ctx context.Context, input sessionmodel.Task, ke
 		active.cancel(nil)
 		notification := taskQueueEvent(binding)
 		r.mu.Unlock()
+		unlock()
 		r.loop.Emitter.Emit(notification)
 	}()
 	run, config, err := r.prepareNext(prepareCtx, input, key.agentID, binding)
 	if err != nil {
 		return err
 	}
+	runID := run.Snapshot().ID
+	// 与入队去重串行交接，避免准备中的请求同时从历史查询和队列中消失。
+	unlock, _ := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
 	r.mu.Lock()
 	binding.queue.Complete(input)
 	active.config = config
-	err = r.launchLocked(run, active)
+	err = r.launchLocked(run, runID, active)
 	notification := taskQueueEvent(binding)
 	r.mu.Unlock()
+	unlock()
 	r.loop.Emitter.Emit(notification)
 	return err
 }

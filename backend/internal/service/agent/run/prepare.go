@@ -62,7 +62,7 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 		RunID:        runID.String(),
 		Role:         role.User,
 		AuthorKind:   sessionentry.AuthorUser,
-		Content:      []sessionentry.Block{{Kind: sessionentry.BlockText, Text: input.Prompt}},
+		Content:      []sessionentry.ContentBlock{sessionentry.TextBlock{Text: input.Prompt}},
 		CreatedAt:    at,
 	})
 	if err != nil {

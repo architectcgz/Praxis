@@ -73,10 +73,9 @@ func summaryContext(previous, transcript string) appcontext.ModelContext {
 		SystemPrompt: summaryPrompt,
 		Entries: []sessionentry.ContextEntry{{
 			Role: role.User,
-			Content: []sessionentry.Block{{
-				Kind: sessionentry.BlockText,
-				Text: previousSummaryHeader + previous + transcriptHeader + transcript,
-			}},
+			Content: []sessionentry.ContentBlock{
+				sessionentry.TextBlock{Text: previousSummaryHeader + previous + transcriptHeader + transcript},
+			},
 		}},
 	}
 }

@@ -16,19 +16,20 @@ func BuildToolCallIDMap(ctx appcontext.ModelContext) map[string]string {
 	used := make(map[string]bool)
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.Kind == sessionentry.BlockToolCall || block.Kind == sessionentry.BlockToolResult {
-				ids[block.CallID] = block.CallID
-				used[block.CallID] = true
+			if callID, ok := toolCallID(block); ok {
+				ids[callID] = callID
+				used[callID] = true
 			}
 		}
 	}
 	sequence := 1
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.Kind != sessionentry.BlockToolCall && block.Kind != sessionentry.BlockToolResult {
+			callID, ok := toolCallID(block)
+			if !ok {
 				continue
 			}
-			if ids[block.CallID] != block.CallID || portableToolCallID.MatchString(block.CallID) {
+			if ids[callID] != callID || portableToolCallID.MatchString(callID) {
 				continue
 			}
 			for {
@@ -37,11 +38,22 @@ func BuildToolCallIDMap(ctx appcontext.ModelContext) map[string]string {
 				if used[encoded] {
 					continue
 				}
-				ids[block.CallID] = encoded
+				ids[callID] = encoded
 				used[encoded] = true
 				break
 			}
 		}
 	}
 	return ids
+}
+
+func toolCallID(block sessionentry.ContentBlock) (string, bool) {
+	switch value := block.(type) {
+	case sessionentry.ToolCallBlock:
+		return value.CallID, true
+	case sessionentry.ToolResultBlock:
+		return value.CallID, true
+	default:
+		return "", false
+	}
 }

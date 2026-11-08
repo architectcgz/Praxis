@@ -10,7 +10,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/infra/providers/streaming"
 	"strings"
 )
 
@@ -57,33 +56,30 @@ func responseItems(entry sessionentry.ContextEntry, config modelapi.Config, ids 
 		return err
 	}
 	for index, block := range entry.Content {
-		if block.Kind != sessionentry.BlockText {
+		if _, isText := block.(sessionentry.TextBlock); !isText {
 			if err := flushText(); err != nil {
 				return nil, err
 			}
 		}
-		switch block.Kind {
-		case sessionentry.BlockText:
+		switch block := block.(type) {
+		case sessionentry.TextBlock:
 			if entry.Role == role.Tool {
 				return nil, errors.New("responses tool role requires tool results")
 			}
 			text.WriteString(block.Text)
-		case sessionentry.BlockToolCall:
+		case sessionentry.ToolCallBlock:
 			if entry.Role != role.Assistant {
 				return nil, errors.New("responses function call requires assistant role")
-			}
-			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
-				return nil, err
 			}
 			if err := appendItem(inputFunctionCall{
 				Type:      "function_call",
 				CallID:    ids[block.CallID],
-				Name:      block.Name,
-				Arguments: string(block.Input),
+				Name:      string(block.Name),
+				Arguments: block.Arguments,
 			}); err != nil {
 				return nil, err
 			}
-		case sessionentry.BlockToolResult:
+		case sessionentry.ToolResultBlock:
 			if err := appendItem(inputFunctionOutput{
 				Type:   "function_call_output",
 				CallID: ids[block.CallID],
@@ -91,14 +87,14 @@ func responseItems(entry sessionentry.ContextEntry, config modelapi.Config, ids 
 			}); err != nil {
 				return nil, err
 			}
-		case sessionentry.BlockReasoningState:
-			state := block.ReasoningState
+		case sessionentry.ReasoningStateBlock:
+			state := block.State
 			if !config.CanReplayReasoningState(state) {
 				continue
 			}
 			items = append(items, bytes.Clone(state.Payload))
 		default:
-			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
+			return nil, fmt.Errorf("context block %d has unsupported type %T", index, block)
 		}
 	}
 	if err := flushText(); err != nil {
@@ -111,13 +107,14 @@ func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 	var values []string
 	for _, entry := range ctx.Entries {
 		for _, block := range entry.Content {
-			if block.ReasoningState == nil {
+			state, ok := block.(sessionentry.ReasoningStateBlock)
+			if !ok {
 				continue
 			}
 			var item struct {
 				EncryptedContent string `json:"encrypted_content"`
 			}
-			if json.Unmarshal(block.ReasoningState.Payload, &item) == nil && item.EncryptedContent != "" {
+			if json.Unmarshal(state.State.Payload, &item) == nil && item.EncryptedContent != "" {
 				values = append(values, item.EncryptedContent)
 			}
 		}

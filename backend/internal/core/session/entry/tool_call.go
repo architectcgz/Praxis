@@ -1,8 +1,6 @@
 package entry
 
 import (
-	"bytes"
-	"encoding/json"
 	"praxis/internal/core/session/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
@@ -19,24 +17,25 @@ type ToolCall struct {
 	RequestID string
 	TurnID    identity.TurnID
 	Name      tool.ToolName
-	Arguments json.RawMessage
+	Arguments string
 }
 
 // ToolCalls 从 Assistant Entry 取得调用，供执行查询与启动恢复使用。
 func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
 	calls := make([]ToolCall, 0)
 	for _, block := range m.Content {
-		if block.Kind != BlockToolCall {
+		call, ok := block.(ToolCallBlock)
+		if !ok {
 			continue
 		}
 		calls = append(calls, ToolCall{
-			Key:       Key{RunID: identity.RunID(m.RunID), CallID: block.CallID},
+			Key:       Key{RunID: identity.RunID(m.RunID), CallID: call.CallID},
 			SessionID: sessionID,
 			AgentID:   agentID,
 			RequestID: m.RequestID,
 			TurnID:    identity.TurnID(m.TurnID),
-			Name:      tool.ToolName(block.Name),
-			Arguments: bytes.Clone(block.Input),
+			Name:      call.Name,
+			Arguments: call.Arguments,
 		})
 	}
 	return calls
@@ -58,12 +57,13 @@ func (c ToolCall) ResultEntry(result tool.ToolResult) ContextEntry {
 		Role:       role.Tool,
 		AuthorKind: AuthorTool,
 		AuthorID:   string(c.Name),
-		Content: []Block{{
-			Kind:    BlockToolResult,
-			CallID:  c.CallID,
-			Name:    string(c.Name),
-			Text:    result.Payload,
-			IsError: result.ErrorClass != "",
-		}},
+		Content: []ContentBlock{
+			ToolResultBlock{
+				CallID:  c.CallID,
+				Name:    c.Name,
+				Text:    result.Payload,
+				IsError: result.ErrorClass != "",
+			},
+		},
 	}
 }

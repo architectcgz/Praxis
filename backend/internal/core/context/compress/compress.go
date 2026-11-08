@@ -55,10 +55,9 @@ func Compress(ctx context.Context, value appcontext.ModelContext, options Option
 			Summary:    true,
 			Role:       role.User,
 			AuthorKind: sessionentry.AuthorSystem,
-			Content: []sessionentry.Block{{
-				Kind: sessionentry.BlockText,
-				Text: summaryResultPrefix + text,
-			}},
+			Content: []sessionentry.ContentBlock{
+				sessionentry.TextBlock{Text: summaryResultPrefix + text},
+			},
 		}},
 	}
 	after, err := compressed.EstimatedTokens()

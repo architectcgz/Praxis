@@ -1,11 +1,11 @@
 package toolexecution
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"praxis/internal/clock"
 	agentrun "praxis/internal/core/agent/run"
@@ -131,9 +131,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 		// 解码前保留业务默认路径，显式空值仍按该工具自己的缺省规则处理。
 		defaultPath = *path
 	}
-	decoder := json.NewDecoder(bytes.NewReader(modified))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(arguments); err != nil {
+	if err := decodeToolArguments(modified, arguments); err != nil {
 		return callError("invalid_tool_call", err.Error()), nil
 	}
 	// 项目根目录已由业务入口校验；模型路径只在此处解析，准备与授权均使用规范化后的同一值。
@@ -165,6 +163,27 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 		return CallResult{}, fmt.Errorf("encode prepared tool arguments: %w", err)
 	}
 	return tools.execute(ctx, call, prepared, args, operationID)
+}
+
+// decodeToolArguments 只接受单个 JSON 对象，不修复原文，也不忽略对象后的多余内容。
+func decodeToolArguments(raw string, target any) error {
+	input := strings.TrimSpace(raw)
+	if len(input) == 0 || input[0] != '{' {
+		return errors.New("tool arguments must be a JSON object")
+	}
+	decoder := json.NewDecoder(strings.NewReader(input))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return err
+		}
+		return errors.New("tool arguments must contain a single JSON object")
+	}
+	return nil
 }
 
 func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (CallResult, error) {
@@ -288,8 +307,8 @@ func (t *observedCall) Call(ctx context.Context) (result tool.ToolResult, err er
 	return result, err
 }
 
-// toolHookEvent 仅在分发边界构造事件，参数隔离由 HookDispatcher 负责。
-func toolHookEvent(call sessionentry.ToolCall, args json.RawMessage, operationID string) hook.ToolExecution {
+// toolHookEvent 仅在分发边界构造事件，参数以不可变字符串传递。
+func toolHookEvent(call sessionentry.ToolCall, args string, operationID string) hook.ToolExecution {
 	return hook.ToolExecution{
 		Identity: hook.Identity{
 			OperationID: operationID,
@@ -309,7 +328,7 @@ func callError(code, message string) CallResult {
 
 // existingResult 只复用已接纳回执，不重复执行工具或后置 Hook。
 func existingResult(entry sessionentry.ContextEntry) CallResult {
-	block := entry.Content[0]
+	block := entry.Content[0].(sessionentry.ToolResultBlock)
 	result := tool.ToolResult{Payload: block.Text}
 	if block.IsError {
 		result.ErrorClass = "tool_execution_failed"

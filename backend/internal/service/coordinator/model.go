@@ -12,7 +12,12 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 		return err
 	}
 	defer s.running.Done()
+	unlock, err := s.lockSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
 	if err := s.sessions.SelectModel(ctx, sessionID, choice); err != nil {
+		unlock()
 		return err
 	}
 	s.mu.Lock()
@@ -23,8 +28,9 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 		}
 	}
 	s.mu.Unlock()
+	unlock()
 	for _, id := range ids {
-		if err := s.scheduleBinding(ctx, id, true); err != nil {
+		if err := s.scheduleBinding(ctx, sessionID, id, true); err != nil {
 			s.logger.Errorf("activate queued input: %v", err)
 		}
 	}

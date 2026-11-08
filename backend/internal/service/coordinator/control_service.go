@@ -18,15 +18,16 @@ func (s *Coordinator) StopAgent(ctx context.Context, agentID identity.AgentID) e
 	if err == nil && applied {
 		var notification *coreevent.Event
 		s.mu.Lock()
-		if active.run != nil {
+		run, runID := active.run, active.runID
+		s.mu.Unlock()
+		if run != nil {
 			at := time.Now().UTC()
-			active.run.Agent.ApplyInterrupt(active.runID, at)
+			run.Agent.ApplyInterrupt(runID, at)
 			notification = &coreevent.Event{
-				Source:  coreevent.SourceForRun(active.run, ""),
+				Source:  coreevent.SourceForRun(run, ""),
 				Payload: coreevent.RunInterruptRequested{AppliedAt: at},
 			}
 		}
-		s.mu.Unlock()
 		if notification != nil {
 			s.loop.Emitter.Emit(*notification)
 		}

@@ -6,7 +6,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/infra/providers/streaming"
 )
 
 // encodeContext 编码官方文本与工具消息；不支持续传的推理状态只在本次请求中忽略。
@@ -37,37 +36,32 @@ func chatMessagesFromContext(entry sessionentry.ContextEntry, ids map[string]str
 		}
 	}
 	for index, block := range entry.Content {
-		switch block.Kind {
-		case sessionentry.BlockText:
+		switch block := block.(type) {
+		case sessionentry.TextBlock:
 			if entry.Role == role.Tool {
 				return nil, fmt.Errorf("tool role requires tool results")
 			}
 			if result.Content == nil {
-				text := block.Text
-				result.Content = &text
+				result.Content = new(block.Text)
 			} else {
 				*result.Content += block.Text
 			}
-		case sessionentry.BlockToolCall:
+		case sessionentry.ToolCallBlock:
 			if entry.Role != role.Assistant {
 				return nil, fmt.Errorf("tool call requires assistant role")
-			}
-			if err := streaming.ValidateToolCall(&streaming.ToolAccumulator{ID: block.CallID, Name: block.Name, Arguments: string(block.Input)}); err != nil {
-				return nil, err
 			}
 			result.ToolCalls = append(result.ToolCalls, chatToolCall{
 				ID:       ids[block.CallID],
 				Type:     "function",
-				Function: chatFunctionCall{Name: block.Name, Arguments: string(block.Input)},
+				Function: chatFunctionCall{Name: string(block.Name), Arguments: block.Arguments},
 			})
-		case sessionentry.BlockToolResult:
+		case sessionentry.ToolResultBlock:
 			flush()
-			text := block.Text
-			messages = append(messages, chatMessage{Role: "tool", ToolCallID: ids[block.CallID], Content: &text})
-		case sessionentry.BlockReasoningState:
+			messages = append(messages, chatMessage{Role: "tool", ToolCallID: ids[block.CallID], Content: new(block.Text)})
+		case sessionentry.ReasoningStateBlock:
 			continue
 		default:
-			return nil, fmt.Errorf("context block %d has unsupported kind %q", index, block.Kind)
+			return nil, fmt.Errorf("context block %d has unsupported type %T", index, block)
 		}
 	}
 	flush()

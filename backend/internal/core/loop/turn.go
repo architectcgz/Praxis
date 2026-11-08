@@ -47,9 +47,10 @@ func (r *Runner) runTurn(
 	entry := assistantEntry(params, turnID, stopReason, blocks)
 	entry.Timing = response.Timing
 	if err != nil {
-		partial := make([]sessionentry.Block, 0, len(blocks))
+		partial := make([]sessionentry.ContentBlock, 0, len(blocks))
 		for _, block := range blocks {
-			if block.Kind == sessionentry.BlockText || block.Kind == sessionentry.BlockThinking {
+			switch block.(type) {
+			case sessionentry.TextBlock, sessionentry.ThinkingBlock:
 				partial = append(partial, block)
 			}
 		}
@@ -93,7 +94,7 @@ func (r *Runner) runTurn(
 	return false, err
 }
 
-func assistantEntry(params RunParams, turnID identity.TurnID, stopReason providerapi.StopReason, blocks []sessionentry.Block) sessionentry.ContextEntry {
+func assistantEntry(params RunParams, turnID identity.TurnID, stopReason providerapi.StopReason, blocks []sessionentry.ContentBlock) sessionentry.ContextEntry {
 	return sessionentry.ContextEntry{
 		ID:         "assistant:" + turnID.String(),
 		RequestID:  params.RequestID.String(),
