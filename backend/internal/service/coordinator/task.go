@@ -14,7 +14,6 @@ import (
 type SubmitResult struct {
 	Task            sessionmodel.Task
 	BindingID       string
-	BranchID        identity.BranchID
 	SchedulingError string
 }
 
@@ -45,14 +44,13 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input sessionservice.Task
 	}
 	defer unlock()
 	s.mu.Lock()
-	binding := s.bindings[input.BindingID]
-	created := binding == nil
-	valid := created || !binding.closing && binding.sessionID == input.SessionID
+	binding := s.bindings[input.SessionID]
+	valid := binding == nil || !binding.closing && binding.id == input.BindingID && binding.branchID == input.BranchID
 	s.mu.Unlock()
 	if !valid {
 		return SubmitResult{}, nil, errorcode.ErrRequestConflict
 	}
-	if created {
+	if binding == nil {
 		binding, err = s.bindSubmission(ctx, input)
 		if err != nil {
 			return SubmitResult{}, nil, err
@@ -61,9 +59,7 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input sessionservice.Task
 	result := SubmitResult{
 		Task:      task,
 		BindingID: binding.id,
-		BranchID:  binding.branchID,
 	}
-	// 自动分叉后的重试仍可携带来源分支，先确认已提交身份，再校验新输入的分支。
 	if prior, err := s.sessions.FindRunByRequest(ctx, identity.AgentID(input.SessionID), identity.RequestID(task.ID)); err == nil {
 		if prior.BranchID != binding.branchID {
 			return SubmitResult{}, nil, errorcode.ErrRequestConflict
@@ -90,10 +86,6 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input sessionservice.Task
 			return result, nil, nil
 		}
 	}
-	if !created && binding.branchID != input.BranchID {
-		return SubmitResult{}, nil, errorcode.ErrRequestConflict
-	}
-	task.BranchID = binding.branchID
 	task, err = binding.queue.Enqueue(task)
 	if err != nil {
 		return SubmitResult{}, nil, err
@@ -129,23 +121,18 @@ func (s *Coordinator) DeleteSession(ctx context.Context, id identity.SessionID) 
 	return nil
 }
 
-func (s *Coordinator) CancelTask(ctx context.Context, bindingID string, id identity.TaskID) error {
+func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.SessionID, bindingID string, id identity.TaskID) error {
 	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()
-	s.mu.Lock()
-	binding := s.bindings[bindingID]
-	s.mu.Unlock()
-	if binding == nil {
-		return errorcode.ErrRequestConflict
-	}
-	unlock, err := s.lockSession(ctx, binding.sessionID)
+	unlock, err := s.lockSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
-	if s.bindings[bindingID] != binding || binding.closing {
+	binding := s.bindings[sessionID]
+	if binding == nil || binding.id != bindingID || binding.closing {
 		s.mu.Unlock()
 		unlock()
 		return errorcode.ErrRequestConflict

@@ -47,11 +47,11 @@ type AgentService interface {
 
 type AgentCommands interface {
 	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
-	SelectSession(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
-	CloseSession(context.Context, string, string) error
+	SelectSession(context.Context, identity.SessionID, identity.BranchID) (execution.BindingView, error)
+	CloseSession(context.Context, identity.SessionID) error
 	CreateBranch(context.Context, identity.SessionID, identity.BranchID, string, sessionmodel.BranchInput) (execution.BindingView, error)
 	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
-	ListBranches(context.Context, identity.SessionID, string) ([]execution.BranchView, error)
+	ListBranches(context.Context, identity.SessionID) ([]execution.BranchView, error)
 	Tree(context.Context, identity.SessionID) ([]sessionmodel.TreeNode, error)
 	EntriesAt(context.Context, identity.SessionID, string) ([]sessionentry.ContextEntry, error)
 	DeleteSession(context.Context, identity.SessionID) error
@@ -62,7 +62,7 @@ type AgentCommands interface {
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
 	SubmitTask(context.Context, sessionservice.TaskInput) (execution.SubmitResult, error)
-	CancelTask(context.Context, string, identity.TaskID) error
+	CancelTask(context.Context, identity.SessionID, string, identity.TaskID) error
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
 	ReloadSessionConfig(context.Context, identity.SessionID) error
 }

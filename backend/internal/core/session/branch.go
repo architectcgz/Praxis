@@ -12,7 +12,6 @@ import (
 const (
 	ErrIncompleteToolCalls errorcode.Code = "session.incomplete_tool_calls"
 	ErrBranchNameConflict  errorcode.Code = "session.branch_name_conflict"
-	ErrBranchOccupied      errorcode.Code = "session.branch_occupied"
 )
 
 // Branch 保存命名路径的位置，不拥有 Entry 或页面身份。

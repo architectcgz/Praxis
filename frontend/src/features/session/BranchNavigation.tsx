@@ -51,10 +51,10 @@ export function BranchDialog({ kind, branches, tree, currentBranchId, onSwitch, 
             <p className="session-branch-description">{kind === 'branches' ? '切换后回到该分支的最新位置。' : '选择条目查看对应路径；从非最新条目发送消息会自动创建新分支。分支不隔离项目文件。'}</p>
             {error && <p className="inline-error" role="alert">{error}</p>}
             <div className="session-branch-options">
-                {kind === 'branches' ? branches.map(({ branch, occupied, summary }) => (
+                {kind === 'branches' ? branches.map(({ branch, summary }) => (
                     <button type="button" className="session-branch-option" disabled={pending} key={branch.id} onClick={() => void select(() => onSwitch(branch.name))}>
                         <GitBranch size={16} aria-hidden="true" />
-                        <span><strong>{branch.name}{branch.id === currentBranchId ? '（当前）' : ''}{occupied ? '（发送时新建分支）' : ''}</strong><small>{summary || '暂无消息'}</small><small>{new Date(branch.updated_at).toLocaleString()}</small></span>
+                        <span><strong>{branch.name}{branch.id === currentBranchId ? '（当前）' : ''}</strong><small>{summary || '暂无消息'}</small><small>{new Date(branch.updated_at).toLocaleString()}</small></span>
                     </button>
                 )) : <>
                     <button type="button" className="session-branch-option" disabled={pending} onClick={() => void select(() => onBrowse(''))}><GitFork size={16} aria-hidden="true" /><span>条目起点</span></button>

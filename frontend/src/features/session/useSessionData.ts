@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { closeSession, selectSession, subscribeAgentEvents, type SessionSnapshot } from '../../api'
 
-/** 每个页面持有一份会话选择；切换到其他页面不会销毁本 Hook。 */
+/** 工作区按 SessionID 保留唯一会话页；切换显示不改变会话数据的生命周期。 */
 export function useSessionData(sessionID: string) {
-    const [pageID] = useState(() => crypto.randomUUID())
     const [session, setSession] = useState<SessionSnapshot | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<unknown>()
     const request = useRef(0)
-    const selection = useRef({ branchID: '', bindingID: '' })
+    const selectedBranchID = useRef('')
     const pendingLoad = useRef<Promise<void> | null>(null)
 
     const loadSession = useCallback(async () => {
@@ -16,12 +15,11 @@ export function useSessionData(sessionID: string) {
         setLoading(true)
         setError(undefined)
         try {
-            const current = selection.current
-            const pending = selectSession(sessionID, pageID, current.branchID, current.bindingID)
+            const pending = selectSession(sessionID, selectedBranchID.current)
             pendingLoad.current = pending.then(() => undefined, () => undefined)
             const value = await pending
             if (request.current !== id) return
-            selection.current = { branchID: value.branch.id, bindingID: value.bindingId }
+            selectedBranchID.current = value.branch.id
             setSession(value)
             return value
         } catch (reason) {
@@ -30,24 +28,23 @@ export function useSessionData(sessionID: string) {
         } finally {
             if (request.current === id) setLoading(false)
         }
-    }, [sessionID, pageID])
+    }, [sessionID])
 
     const releaseSession = useCallback(async () => {
         // 打开请求结束后再关闭，确保初始化失败或尚未发送消息的页面也能释放后端数据。
         await pendingLoad.current
-        await closeSession(pageID, selection.current.bindingID)
-    }, [pageID])
+        await closeSession(sessionID)
+    }, [sessionID])
 
     const adoptSession = useCallback((value: SessionSnapshot) => {
         request.current += 1
-        selection.current = { branchID: value.branch.id, bindingID: value.bindingId }
+        selectedBranchID.current = value.branch.id
         setSession(value)
         setLoading(false)
         setError(undefined)
     }, [])
 
     const bindSubmission = useCallback((bindingID: string) => {
-        selection.current = { ...selection.current, bindingID }
         setSession((current) => current ? { ...current, bindingId: bindingID } : current)
     }, [])
 

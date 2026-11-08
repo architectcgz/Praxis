@@ -48,14 +48,6 @@ func (s *Service) Path(ctx context.Context, id identity.SessionID, head string) 
 	return owner.Path(head)
 }
 
-func (s *Service) SafeHead(ctx context.Context, id identity.SessionID, branchID identity.BranchID) (string, error) {
-	owner, err := s.OpenedSession(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	return owner.SafeHead(branchID)
-}
-
 func (s *Service) DefaultBranch(ctx context.Context, id identity.SessionID) (branch sessionmodel.Branch, err error) {
 	owner, err := s.OpenedSession(ctx, id)
 	if err != nil {

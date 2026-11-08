@@ -54,7 +54,7 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
     const submission = useTaskSubmission({
         agent: agents.agent, busy, input: agents.input,
         sessionID, bindingID: session?.bindingId || '',
-        prepareSubmission: branch.prepareSubmission, applySession, bindSubmission,
+        prepareSubmission: branch.prepareSubmission, bindSubmission,
         getSelectedAgentID: agents.getSelectedAgentID,
         setBusy, setError, setErrorCode, setInput: agents.setInput, viewRequestRef,
     })

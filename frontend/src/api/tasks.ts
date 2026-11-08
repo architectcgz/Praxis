@@ -12,4 +12,4 @@ export type CreateTaskRequest = {
 
 /** 创建 Session 输入并排队，Agent 与请求身份由后端调度时分配。 */
 export function createTask(request: CreateTaskRequest) { return getCommandBinding().CreateTask(request) }
-export function cancelTask(bindingId: string, taskId: string) { return getCommandBinding().CancelTask({ bindingId, taskId }) }
+export function cancelTask(sessionId: string, bindingId: string, taskId: string) { return getCommandBinding().CancelTask({ sessionId, bindingId, taskId }) }

@@ -57,24 +57,18 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 }
 
 // SelectSession 完成会话数据加载并返回当前分支的计时快照，后续命令直接使用已加载实例。
-func (b *SessionBindings) SelectSession(sessionID, branchID, bindingID, pageID string) (dto.SessionSnapshot, error) {
+func (b *SessionBindings) SelectSession(sessionID, branchID string) (dto.SessionSnapshot, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
 	}
 	if err := validation.Value("branchId", branchID, "omitempty,id"); err != nil {
 		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
 	}
-	if err := validation.Value("bindingId", bindingID, "omitempty,id"); err != nil {
-		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
-	}
-	if err := validation.ID("pageId", pageID); err != nil {
-		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
-	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.SessionSnapshot{}, err
 	}
-	view, err := services.Commands.SelectSession(ctx, identity.SessionID(sessionID), identity.BranchID(branchID), bindingID, pageID)
+	view, err := services.Commands.SelectSession(ctx, identity.SessionID(sessionID), identity.BranchID(branchID))
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession", err)
 	}

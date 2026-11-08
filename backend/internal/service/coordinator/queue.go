@@ -29,8 +29,8 @@ func (r *Coordinator) claimTask(ctx context.Context, sessionID identity.SessionI
 	defer unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	binding := r.bindings[bindingID]
-	if r.closed || binding == nil || binding.sessionID != sessionID || binding.closing {
+	binding := r.bindings[sessionID]
+	if r.closed || binding == nil || binding.id != bindingID || binding.closing {
 		return sessionmodel.Task{}, nil, nil, errCoordinatorClosed
 	}
 	key := runKey{identity.AgentID(binding.sessionID), binding.branchID}

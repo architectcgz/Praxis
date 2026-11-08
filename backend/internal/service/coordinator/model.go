@@ -21,16 +21,14 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 		return err
 	}
 	s.mu.Lock()
-	var ids []string
-	for id, binding := range s.bindings {
-		if binding.sessionID == sessionID && !binding.closing {
-			ids = append(ids, id)
-		}
+	bindingID := ""
+	if binding := s.bindings[sessionID]; binding != nil && !binding.closing {
+		bindingID = binding.id
 	}
 	s.mu.Unlock()
 	unlock()
-	for _, id := range ids {
-		if err := s.scheduleBinding(ctx, sessionID, id, true); err != nil {
+	if bindingID != "" {
+		if err := s.scheduleBinding(ctx, sessionID, bindingID, true); err != nil {
 			s.logger.Errorf("activate queued input: %v", err)
 		}
 	}

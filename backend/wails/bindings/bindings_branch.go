@@ -57,18 +57,15 @@ func (b *SessionBindings) SwitchBranch(wire dto.SwitchBranchRequest) (dto.Sessio
 	}
 	return b.sessionSnapshot(ctx, services, view)
 }
-func (b *SessionBindings) ListBranches(sessionID, bindingID string) ([]coordinator.BranchView, error) {
+func (b *SessionBindings) ListBranches(sessionID string) ([]coordinator.BranchView, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return nil, publicInputError(b.host, "ListBranches", err)
-	}
-	if err := validation.Value("bindingId", bindingID, "omitempty,id"); err != nil {
 		return nil, publicInputError(b.host, "ListBranches", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
-	values, err := services.Commands.ListBranches(ctx, identity.SessionID(sessionID), bindingID)
+	values, err := services.Commands.ListBranches(ctx, identity.SessionID(sessionID))
 	return values, publicError(b.host, "ListBranches", err)
 }
 func (b *SessionBindings) GetEntryTree(sessionID string) ([]sessionmodel.TreeNode, error) {
@@ -99,16 +96,13 @@ func (b *SessionBindings) GetEntriesAt(sessionID, entryID string) ([]dto.Entry, 
 	}
 	return publicEntries(values), nil
 }
-func (b *SessionBindings) CloseSession(pageID, bindingID string) error {
-	if err := validation.ID("pageId", pageID); err != nil {
-		return publicInputError(b.host, "CloseSession", err)
-	}
-	if err := validation.Value("bindingId", bindingID, "omitempty,id"); err != nil {
+func (b *SessionBindings) CloseSession(sessionID string) error {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return publicInputError(b.host, "CloseSession", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CloseSession", services.Commands.CloseSession(ctx, pageID, bindingID))
+	return publicError(b.host, "CloseSession", services.Commands.CloseSession(ctx, identity.SessionID(sessionID)))
 }

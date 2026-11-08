@@ -13,11 +13,11 @@ type CreateTaskRequest struct {
 type CreateTaskResponse struct {
 	TaskID          string `json:"taskId"`
 	BindingID       string `json:"bindingId"`
-	BranchID        string `json:"branchId"`
 	SchedulingError string `json:"schedulingError,omitempty"`
 }
 
 type CancelTaskRequest struct {
+	SessionID string `json:"sessionId" validate:"session_id"`
 	BindingID string `json:"bindingId" validate:"id"`
 	TaskID    string `json:"taskId" validate:"id"`
 }

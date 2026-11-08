@@ -35,7 +35,7 @@ Agent（长期运行）
 | ToolExecution | 单个工具的授权与执行 | 单次工具执行 |
 | Session | 组织会话历史、分支和持久化事实 | 会话生命周期 |
 | RunService | 协调 Run、Loop 与 Session | 服务生命周期 |
-| Coordinator | Agent 注册、页面绑定与跨 Agent 协调 | 应用生命周期 |
+| Coordinator | Agent 注册、会话写入绑定与跨 Agent 协调 | 应用生命周期 |
 
 同一 Run 可以包含多个 Turn。单个 Turn 完成不代表 Run 已结束。模型请求的 `stopReason` 描述本次模型响应；最终 Run outcome 由执行服务在业务结束边界确定。
 
@@ -45,7 +45,7 @@ Agent（长期运行）
 Application
   └── Coordinator
         ├── Agent Registry
-        ├── Session Page Bindings
+        ├── Session Write Bindings
         └── Main Agent
               ├── Branch A
               │     ├── TaskQueue
@@ -64,7 +64,7 @@ TaskQueue 和 CurrentRun 归 Agent 的对应 Branch 管理。相同 Main Agent �
 
 ### 2.1 长期 Agent 身份
 
-Main Agent 的逻辑生命周期绑定 Session，不绑定单次 Run 或页面 Binding。Agent 由所属运行管理流程建立，Run 的创建不重新创建 Main Agent。
+Main Agent 的逻辑生命周期绑定 Session，不绑定单次 Run 或写入 Binding。Agent 由所属运行管理流程建立，Run 的创建不重新创建 Main Agent。
 
 Agent 负责：
 
@@ -93,7 +93,7 @@ Main Agent
 
 队列、活动句柄、停止目标和运行展示均按 AgentID＋BranchID 定位。不能仅用 AgentID 确定同一 Main Agent 的停止目标。
 
-关闭页面只解除 Binding；不能直接据此删除 Agent、队列或执行历史。页面关闭是否触发停止，由明确的业务策略决定，不交给事件订阅者处理。
+前端工作区按 SessionID 持有唯一会话页。关闭会话页时，前端按 SessionID 请求停止该会话的全部执行并清空待办；后端等待执行收尾后释放写入绑定与会话内存，不删除持久化执行历史。核心流程直接处理关闭，不交给事件订阅者推进。
 
 ### 2.3 Agent 状态与 Run 结果
 
@@ -399,7 +399,8 @@ Closed 只表示子运行资源释放，不删除 RunRecord、工具记录或历
 | 职责 | 所有者 |
 | --- | --- |
 | Agent 注册、查找与跨 Agent 协调 | Coordinator |
-| Session 页面 Binding、Branch 所有权协调 | Coordinator |
+| 已打开会话集合、唯一会话页及分支选择 | 前端工作区 |
+| Session 写入 Binding 与执行生命周期协调 | Coordinator |
 | TaskQueue、下一任务领取、当前执行句柄 | Agent 对应 Branch |
 | 单次执行的生命周期、取消和审批唤醒状态 | run.Run |
 | Run、Loop 和 Session 之间的业务编排 | RunService |
@@ -411,16 +412,17 @@ Coordinator 路由命令到目标 Agent／Branch／Run，不额外保存一份�
 ### 7.2 Binding 与 Agent 生命周期
 
 ```text
+前端工作区
+  └── SessionID → 唯一会话页
+
 Session
   ├── Main Agent
   │     ├── Branch A → TaskQueue + CurrentRun
   │     └── Branch B → TaskQueue + CurrentRun
-  └── Page Bindings
-        ├── Binding 1 → Branch A
-        └── Binding 2 → Branch B
+  └── Write Binding → 当前 Branch
 ```
 
-页面 Binding 只表示访问关系。多个页面可以展示同一分支的队列和执行；关闭某页不删除共享队列。
+前端维护会话页的打开、选择和关闭，后端按 SessionID 定位会话实例与写入绑定，不登记页面身份。首次提交输入时建立写入 Binding；切换分支前，当前绑定必须没有活动执行和待办。关闭会话时停止全部所属执行，等待收尾后释放绑定与会话内存；其他会话继续执行。
 
 应用退出可以释放内存运行资源；再次打开 Session 时，根据持久化历史恢复逻辑身份和展示事实。历史恢复不等于自动恢复模型请求、工具执行或进程内待办队列。
 
@@ -552,10 +554,10 @@ Session 保存或组织以下持久化事实：
 
 - Main Agent 使用长期身份，不由 run.Run 创建。
 - Agent 持有所属 Branch 的队列和活动运行句柄。
-- TaskQueue 与页面 Binding 分离，保留 FIFO 和显式恢复调度规则。
+- TaskQueue 的生命周期由后端执行流程管理，不依赖前端组件是否显示，保留 FIFO 和显式恢复调度规则。
 - Agent 展示状态从活动执行事实派生。
 
-验收：同一 Main Agent 连续完成多个 Run；分支并发、页面关闭和队列消费互不串扰。
+验收：同一 Main Agent 连续完成多个 Run；分支隔离、会话关闭和队列消费遵守同一生命周期边界，关闭一个会话不影响其他会话。
 
 ### 10.3 收敛运行控制
 

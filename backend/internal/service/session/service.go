@@ -30,7 +30,7 @@ type Dependencies struct {
 	IDs            identity.IDGenerator
 }
 
-// Service 在选择入口加载并登记会话；页面的分支选择与输入队列由 Coordinator 持有。
+// Service 在选择入口加载并登记会话；输入队列与执行生命周期由 Coordinator 持有。
 type Service struct {
 	loadConfig     func(context.Context) (*Configuration, error)
 	hookDispatcher *hook.Dispatcher
@@ -155,7 +155,7 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sess
 	return owner, nil
 }
 
-// ReleaseSession 由 Coordinator 持有会话命令锁并确认页面和执行均已退出后调用。
+// ReleaseSession 由 Coordinator 持有会话命令锁并确认全部执行已退出后调用。
 // 只释放已加载实例，不删除持久化记录。
 func (s *Service) ReleaseSession(ctx context.Context, id identity.SessionID) error {
 	if err := ctx.Err(); err != nil {

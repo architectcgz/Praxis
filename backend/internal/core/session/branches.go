@@ -117,23 +117,6 @@ func (s *Session) Path(head string) ([]sessionentry.ContextEntry, error) {
 	return sessionentry.Values(s.data.Path(head)), nil
 }
 
-func (s *Session) SafeHead(branchID identity.BranchID) (head string, err error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	branch := s.data.Branch(branchID)
-	if branch == nil {
-		return "", errorcode.ErrNotFound
-	}
-	for head = branch.HeadEntryID; head != ""; {
-		if s.data.Safe(head) {
-			break
-		}
-		entry, _ := s.data.Entry(head)
-		head = entry.ParentID
-	}
-	return head, nil
-}
-
 func (s *Session) DefaultBranch() Branch {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

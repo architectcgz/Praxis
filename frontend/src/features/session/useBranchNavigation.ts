@@ -41,9 +41,9 @@ export function useBranchNavigation({ session, applySession }: Options) {
 
     const show = useCallback(async (kind: 'branches' | 'tree') => {
         if (!session) throw new Error('当前会话不可用。')
-        if (kind === 'branches') setBranches(await listBranches(session.id, session.bindingId))
+        if (kind === 'branches') setBranches(await listBranches(session.id))
         else {
-            const [branches, tree] = await Promise.all([listBranches(session.id, session.bindingId), getEntryTree(session.id)])
+            const [branches, tree] = await Promise.all([listBranches(session.id), getEntryTree(session.id)])
             setBranches(branches)
             setTree(tree)
         }

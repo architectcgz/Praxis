@@ -46,9 +46,7 @@ type Coordinator struct {
 	closed          bool
 	sessionCommands map[identity.SessionID]*sessionCommand
 	runs            map[runKey]*activeRun
-	pages           map[string]identity.SessionID
-	bindings        map[string]*sessionBinding
-	branchOwners    map[branchKey]string
+	bindings        map[identity.SessionID]*sessionBinding
 	branchResults   map[string]string
 	running         sync.WaitGroup
 }
@@ -90,9 +88,7 @@ func NewCoordinator(config Config) *Coordinator {
 		loop:              config.Loop,
 		sessionCommands:   make(map[identity.SessionID]*sessionCommand),
 		runs:              make(map[runKey]*activeRun),
-		pages:             make(map[string]identity.SessionID),
-		bindings:          make(map[string]*sessionBinding),
-		branchOwners:      make(map[branchKey]string),
+		bindings:          make(map[identity.SessionID]*sessionBinding),
 		branchResults:     make(map[string]string),
 		operations:        config.Operations,
 		hookDispatcher:    config.HookDispatcher,
@@ -142,8 +138,6 @@ func (r *Coordinator) Close(ctx context.Context) error {
 			binding.queue.Clear()
 		}
 		clear(r.bindings)
-		clear(r.pages)
-		clear(r.branchOwners)
 		clear(r.branchResults)
 		r.mu.Unlock()
 		return nil
@@ -159,10 +153,6 @@ func (r *Coordinator) transitionContext() (context.Context, context.CancelFunc) 
 type runKey struct {
 	agentID  identity.AgentID
 	branchID identity.BranchID
-}
-type branchKey struct {
-	sessionID identity.SessionID
-	branchID  identity.BranchID
 }
 type sessionBinding struct {
 	id        string

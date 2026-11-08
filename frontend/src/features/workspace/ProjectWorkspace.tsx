@@ -27,7 +27,7 @@ export function ProjectWorkspace() {
     const [page, setPage] = useState<'project' | 'session' | 'settings' | 'models'>('session')
     const [selectedProjectID, setSelectedProjectID] = useState('')
     const [pageControls, setPageControls] = useState<Record<string, SessionPageControls>>({})
-    const [closingPageID, setClosingPageID] = useState('')
+    const [closingSessionID, setClosingSessionID] = useState('')
     const settingsOpen = page === 'settings' || page === 'models'
     const activePage = pageControls[workspace.selectedSessionID]
     const projectGroups = useMemo(() => groupSessions(workspace.sessions, workspace.projects), [workspace.sessions, workspace.projects])
@@ -75,12 +75,12 @@ export function ProjectWorkspace() {
     }
     const refresh = async () => { await Promise.all([workspace.refreshCatalog(true), activePage?.refresh()]) }
     const closePage = async () => {
-        const id = closingPageID
+        const id = closingSessionID
         const controls = pageControls[id]
-        if (controls && !await controls.close()) { selectSession(id); setClosingPageID(''); return }
+        if (controls && !await controls.close()) { selectSession(id); setClosingSessionID(''); return }
         workspace.clearSelectedSession(id)
         setPageControls((current) => { const next = { ...current }; delete next[id]; return next })
-        setClosingPageID('')
+        setClosingSessionID('')
     }
     const deleteSession = async (id: string) => {
         const removed = await workspace.deleteSession(id)
@@ -117,7 +117,7 @@ export function ProjectWorkspace() {
                 const title = pageControls[id]?.title || workspace.sessions.find((item) => item.id === id)?.title || '未命名会话'
                 return <div className="session-tab" key={id} data-active={page === 'session' && workspace.selectedSessionID === id}>
                     <button type="button" className="session-tab-select" aria-current={page === 'session' && workspace.selectedSessionID === id ? 'page' : undefined} onClick={() => selectSession(id)} title={title}>{title}</button>
-                    <button type="button" className="icon-button session-tab-close" disabled={pageControls[id]?.busy} onClick={() => setClosingPageID(id)} aria-label={`关闭会话页：${title}`} title="关闭会话页"><X size={13} aria-hidden="true" /></button>
+                    <button type="button" className="icon-button session-tab-close" disabled={pageControls[id]?.busy} onClick={() => setClosingSessionID(id)} aria-label={`关闭会话页：${title}`} title="关闭会话页"><X size={13} aria-hidden="true" /></button>
                 </div>
             })}
         </nav>}
@@ -126,7 +126,7 @@ export function ProjectWorkspace() {
             {workspace.openedSessionIDs.map((id) => <SessionWorkspace
                 key={id} sessionID={id} title={workspace.sessions.find((item) => item.id === id)?.title}
                 active={page === 'session' && workspace.selectedSessionID === id}
-                sessionsCount={workspace.sessions.length} modalOpen={navigationOpen || projectOpen || Boolean(closingPageID)}
+                sessionsCount={workspace.sessions.length} modalOpen={navigationOpen || projectOpen || Boolean(closingSessionID)}
                 createNewSession={workspace.createNewSession} refreshCatalog={workspace.refreshCatalog}
                 onOpenSettings={openSettings} onStateChange={onPageState}
             />)}
@@ -142,13 +142,13 @@ export function ProjectWorkspace() {
         </div>
         {workspace.error && createPortal(<div className="error-banner" role="alert" aria-atomic="true"><span className="error-banner-message"><CircleAlert size={18} aria-hidden="true" /><span>{workspace.error}</span></span></div>, document.body)}
         {projectOpen && <NewProjectDialog bridgeAvailable={workspace.bridgeAvailable} onCreated={(id) => { void workspace.refreshCatalog(true); setSelectedProjectID(id); setPage('project') }} onClose={() => setProjectOpen(false)} />}
-        {closingPageID && <Overlay labelledBy="close-session-page-title" onClose={() => { if (!pageControls[closingPageID]?.busy) setClosingPageID('') }}>
+        {closingSessionID && <Overlay labelledBy="close-session-page-title" onClose={() => { if (!pageControls[closingSessionID]?.busy) setClosingSessionID('') }}>
             <section className="session-close-dialog">
                 <h2 id="close-session-page-title">关闭会话页？</h2>
-                <p>将停止此页面的执行并清空待办队列，未发送的草稿会丢失。已保存的会话历史仍然保留，重新打开时需重新选择模型。</p>
+                <p>将停止此会话的全部执行并清空待办队列，未发送的草稿会丢失。已保存的会话历史仍然保留，重新打开时需重新选择模型。</p>
                 <div className="session-close-actions">
-                    <button type="button" className="modal-secondary" disabled={pageControls[closingPageID]?.busy} onClick={() => setClosingPageID('')}>取消</button>
-                    <button type="button" className="modal-primary modal-danger" disabled={pageControls[closingPageID]?.busy} onClick={() => void closePage()}>结束执行并关闭</button>
+                    <button type="button" className="modal-secondary" disabled={pageControls[closingSessionID]?.busy} onClick={() => setClosingSessionID('')}>取消</button>
+                    <button type="button" className="modal-primary modal-danger" disabled={pageControls[closingSessionID]?.busy} onClick={() => void closePage()}>结束执行并关闭</button>
                 </div>
             </section>
         </Overlay>}

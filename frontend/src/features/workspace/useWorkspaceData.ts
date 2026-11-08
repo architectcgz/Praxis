@@ -5,7 +5,7 @@ import { useProjectData } from '../project/useProjectData'
 import { useSessionCatalog } from '../session/useSessionCatalog'
 import { readRememberedSession, rememberSelectedSession } from './sessionPreference'
 
-/** 工作区只持有目录和已打开页面；各页面自行持有会话数据与事件订阅。 */
+/** 工作区按 SessionID 维护唯一已打开会话；各会话页持有自己的数据与事件订阅。 */
 export function useWorkspaceData() {
     const [selectedSessionID, setSelectedSessionID] = useState(readRememberedSession)
     const [openedSessionIDs, setOpenedSessionIDs] = useState<string[]>([])
