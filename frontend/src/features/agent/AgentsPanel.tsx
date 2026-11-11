@@ -1,5 +1,4 @@
 import { Bot, Check, CircleAlert, Wrench } from 'lucide-react'
-import type { Entry } from '../../api'
 import type { AgentsPanelProps } from './types'
 
 const stateLabels: Record<string, string> = {
@@ -7,7 +6,7 @@ const stateLabels: Record<string, string> = {
     interrupted: '已中断', failed: '失败', unknown: '未知',
 }
 
-export function AgentsPanel({ loading, session, agentEntries, selectedAgentID, onSelectAgent }: AgentsPanelProps) {
+export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }: AgentsPanelProps) {
     const agents = session?.agents || []
     return (
         <aside className="sidebar side right agents-panel">
@@ -24,8 +23,7 @@ export function AgentsPanel({ loading, session, agentEntries, selectedAgentID, o
                     <div className="scroll-region scroll">
                         <div className="agent-list">
                             {agents.map((item) => {
-                                const entries = agentEntries[item.ID] || []
-                                const stats = agentStats(entries)
+                                const run = item.currentRun || item.latestRun
                                 const state = stateLabels[item.state] || stateLabels.unknown
                                 return (
                                     <button
@@ -39,9 +37,9 @@ export function AgentsPanel({ loading, session, agentEntries, selectedAgentID, o
                                         <span className="agent-row-copy">
                                             <strong className="nm">{item.name}</strong>
                                             <span className="agent-row-metrics">
-                                                <span><Check size={11} aria-hidden="true" />{stats.messages}</span>
-                                                <span><Wrench size={11} aria-hidden="true" />{stats.tools}</span>
-                                                {stats.failures > 0 && <span className="agent-metric-danger"><CircleAlert size={11} aria-hidden="true" />{stats.failures}</span>}
+                                                <span title="最近执行的模型迭代数"><Check size={11} aria-hidden="true" />{run?.Iterations ?? 0}</span>
+                                                <span title="最近执行的工具调用数"><Wrench size={11} aria-hidden="true" />{run?.ToolCalls ?? 0}</span>
+                                                {run?.Outcome === 'failed' && <span className="agent-metric-danger" title="最近执行失败"><CircleAlert size={11} aria-hidden="true" /></span>}
                                             </span>
                                         </span>
                                         <span className="state-text st">{state}</span>
@@ -59,20 +57,4 @@ export function AgentsPanel({ loading, session, agentEntries, selectedAgentID, o
             )}
         </aside>
     )
-}
-
-function agentStats(entries: Entry[]) {
-    let messages = 0
-    let tools = 0
-    let failures = 0
-    for (const item of entries) {
-        {
-            messages++
-            for (const block of item.content) {
-                if (block.kind === 'tool_call') tools++
-                if (block.kind === 'tool_result' && block.isError) failures++
-            }
-        }
-    }
-    return { messages, tools, failures }
 }

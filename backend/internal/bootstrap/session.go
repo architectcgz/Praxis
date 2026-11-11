@@ -18,8 +18,10 @@ func buildSessions(store *storage.Store, hooks *hook.Dispatcher, config *configu
 		HookDispatcher: hooks,
 		Projects:       store.Projects,
 		Sessions:       store.Sessions,
-		Log:            store.Logs,
-		Clock:          clock.UTCClock{},
-		IDs:            identity.SecureIDGenerator{},
+		OpenLog: func(ctx context.Context, id identity.SessionID) (sessionservice.LogStore, error) {
+			return store.Sessions.OpenLog(ctx, id)
+		},
+		Clock: clock.UTCClock{},
+		IDs:   identity.SecureIDGenerator{},
 	})
 }

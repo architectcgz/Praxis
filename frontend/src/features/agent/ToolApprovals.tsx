@@ -14,7 +14,7 @@ type ApprovalState = {
 const ToolApprovalsContext = createContext<ApprovalState | null>(null)
 
 /** 会话内只查询和订阅一次审批状态，由审批闸口消费；重连后仍可审核同一个调用。 */
-export function ToolApprovalsProvider({ agentId, runId, sessionId, branchId, children }: { agentId: string; runId: string; sessionId: string; branchId: string; children: ReactNode }) {
+export function ToolApprovalsProvider({ agentId, runId, sessionId, children }: { agentId: string; runId: string; sessionId: string; children: ReactNode }) {
     const [pendingApprovals, setPendingApprovals] = useState<ToolApproval[]>([])
     const [busy, setBusy] = useState('')
     const [error, setError] = useState('')
@@ -22,7 +22,7 @@ export function ToolApprovalsProvider({ agentId, runId, sessionId, branchId, chi
     const reload = useCallback(async () => {
         const current = ++requestGeneration.current
         try {
-            const values = await listToolApprovals(sessionId, branchId, agentId)
+            const values = await listToolApprovals(sessionId, agentId)
             if (current === requestGeneration.current) {
                 setPendingApprovals(values)
                 setError('')
@@ -30,14 +30,14 @@ export function ToolApprovalsProvider({ agentId, runId, sessionId, branchId, chi
         } catch (err) {
             if (current === requestGeneration.current) setError(readableError(err))
         }
-    }, [agentId, sessionId, branchId])
+    }, [agentId, sessionId])
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents((event) => {
-            if (event.runId === runId && event.sessionId === sessionId && event.branchId === branchId && ['tool_approval_required', 'tool_result', 'run_ended', 'request_canceled'].includes(event.kind)) void reload()
+            if (event.runId === runId && event.sessionId === sessionId && ['tool_approval_required', 'tool_result', 'run_ended', 'request_canceled'].includes(event.kind)) void reload()
         })
         void reload()
         return () => { requestGeneration.current += 1; unsubscribe() }
-    }, [runId, sessionId, branchId, reload])
+    }, [runId, sessionId, reload])
     const decide = async (pendingApproval: ToolApproval, approve: boolean) => {
         setBusy(pendingApproval.callId)
         setError('')

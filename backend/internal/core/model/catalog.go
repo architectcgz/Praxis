@@ -9,7 +9,7 @@ import (
 
 // Catalog 保存加载后的只读模型目录，不包含凭据或存储能力。
 // 只接收输入边界已校验的配置，加载时准备各个已配置推理等级的完整选项。
-// 查询只返回已准备选项的独立副本，不重新校验或覆盖参数。
+// 模型配置查询直接返回已准备的只读配置，不重新校验或覆盖参数。
 type Catalog struct {
 	options []modelconfig.Option
 	models  map[modelKey]Config
@@ -80,7 +80,7 @@ func (c *Catalog) Get(providerID, modelID, reasoningLevel string) (Config, error
 	if !ok {
 		return Config{}, fmt.Errorf("model %q for provider %q with reasoning level %q is not configured", modelID, providerID, reasoningLevel)
 	}
-	return config.Clone(), nil
+	return config, nil
 }
 
 func orderModelOptions(options []modelconfig.Option, groups []modelconfig.Group) {

@@ -15,6 +15,10 @@ export type AgentConversationProps = {
     pendingUserMessages: PendingUserMessageItem[]
     awaitingOutput: boolean
     entriesError: string
+    hasEarlier: boolean
+    historyLoading: boolean
+    onLoadEarlier: () => Promise<void>
+    onRetryHistory: () => Promise<void>
     input: string
     setInput: (value: string) => void
     models: ModelOption[]
@@ -32,7 +36,7 @@ export type AgentConversationProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentConversation({ branchId, agent, entries, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, entriesError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
+export function AgentConversation({ branchId, agent, entries, collaboration, streamingOutput, pendingUserMessages, awaitingOutput, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousAgentIDRef = useRef('')
@@ -48,15 +52,15 @@ export function AgentConversation({ branchId, agent, entries, collaboration, str
         ))),
     } : null
     const latestRun = agent.latestRun
-    const runError = latestRun?.Status === 'ended' && latestRun.Outcome === 'failed' &&
+    const runError = !agent.currentRunId && latestRun?.Status === 'ended' && latestRun.Outcome === 'failed' &&
         !entries.some((entry) => entry.runId === latestRun.ID && entry.error)
         ? latestRun.FailureMessage || `执行失败：${latestRun.FailureCode}` : ''
 
-    // Pending messages belong to the agent that was active when they were sent.
+    // 乐观消息只展示在提交时所属的 Agent 中。
     const visiblePendingMessages = useMemo(() => pendingUserMessages.filter((message) => (
         message.agentId ? message.agentId === agent.ID : message.sessionId === agent.SessionID
     )), [agent.ID, agent.SessionID, pendingUserMessages])
-    const threadEmpty = entries.length === 0 && visiblePendingMessages.length === 0 && !streamingOutput && !waitingForOutput && !collaboration
+    const threadEmpty = entries.length === 0 && visiblePendingMessages.length === 0 && !streamingOutput && !waitingForOutput && !collaboration && !entriesError
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
@@ -115,7 +119,7 @@ export function AgentConversation({ branchId, agent, entries, collaboration, str
         setShowScrollButton(false)
     }, [])
 
-    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} runId={agent.currentRunId} sessionId={agent.SessionID} branchId={branchId}>
+    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} runId={agent.currentRunId} sessionId={agent.SessionID}>
         <div className="agent-conversation">
             <div className="message-thread-container">
                 <div
@@ -123,7 +127,8 @@ export function AgentConversation({ branchId, agent, entries, collaboration, str
                     ref={messageThreadRef}
                     onScroll={updateOutputFollowing}
                 >
-                    {entriesError && <p role="alert">{entriesError}</p>}
+                    {hasEarlier && <button className="quiet-button" type="button" disabled={historyLoading} onClick={() => { followingOutputRef.current = false; void onLoadEarlier() }} aria-busy={historyLoading}>{historyLoading ? '正在加载历史…' : '加载更早的历史'}</button>}
+                    {entriesError && <p role="alert">{entriesError} <button className="quiet-button" type="button" disabled={historyLoading} onClick={() => void onRetryHistory()}>重试加载</button></p>}
                     {threadEmpty ? (
                         <div className="message-empty" role="status">
                             <div className="message-empty-content">

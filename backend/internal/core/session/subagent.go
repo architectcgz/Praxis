@@ -6,74 +6,51 @@ import (
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"reflect"
 )
 
-func (s *Session) CreateSubagent(ctx context.Context, record agentrun.RunRecord, input sessionentry.ContextEntry) (*sessionentry.ContextEntry, error) {
-	s.mu.Lock()
-	if _, exists := s.data.SubagentEntries[record.AgentID]; !exists {
-		if err := s.log.CreateSubagent(ctx, s.data.ID, record.AgentID); err != nil {
-			s.mu.Unlock()
+func (s *Session) CreateSubagent(ctx context.Context, branchID identity.BranchID, record agentrun.RunRecord, input sessionentry.ContextEntry) (*sessionentry.ContextEntry, error) {
+	s.commitMu.Lock()
+	s.mu.RLock()
+	_, exists := s.data.AgentHistories[record.AgentID]
+	s.mu.RUnlock()
+	if !exists {
+		if err := s.log.CreateSubagent(ctx, branchID, record.AgentID); err != nil {
+			s.commitMu.Unlock()
 			return nil, err
 		}
-		s.data.SubagentEntries[record.AgentID] = nil
+		s.mu.Lock()
+		s.data.AgentHistories[record.AgentID] = AgentHistory{BranchID: branchID}
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
-	stored, _, err := s.AppendSubagentEntry(ctx, record.AgentID, record.BranchID, input)
+	s.commitMu.Unlock()
+	stored, _, err := s.AppendSubagentEntry(ctx, record.AgentID, input)
 	if err != nil {
 		return stored, err
 	}
-	return stored, s.SaveRun(ctx, record)
+	_, err = s.SaveRun(ctx, record)
+	return stored, err
 }
 
-// AppendSubagentEntry 只连接子历史中的父节点，不推进主会话分支 Head。
-func (s *Session) AppendSubagentEntry(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID, entry sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.data.Branch(branchID) == nil {
+func (s *Session) AppendSubagentEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+	s.mu.RLock()
+	history, exists := s.data.AgentHistories[agentID]
+	s.mu.RUnlock()
+	if !exists {
 		return nil, false, errorcode.ErrNotFound
 	}
-	if prior, found := s.data.SubagentEntry(agentID, entry.ID); found {
-		entry.ParentID, entry.CreatedAt = prior.ParentID, prior.CreatedAt
-		if !reflect.DeepEqual(*prior, entry) {
-			return nil, false, errorcode.ErrRequestConflict
-		}
-		return prior, false, nil
-	}
-	entries := s.data.SubagentEntries[agentID]
-	for index := len(entries) - 1; index >= 0; index-- {
-		if entries[index].RunID == entry.RunID {
-			entry.ParentID = entries[index].ID
-			break
-		}
-	}
-	if entry.CreatedAt.IsZero() {
-		entry.CreatedAt = s.clock.Now()
-	}
-	stored := s.data.AcceptSubagentEntry(agentID, entry)
-	err := s.log.AppendEvent(ctx, s.data.ID, Event{
-		Type:      EventEntryAppended,
-		Key:       entry.ID,
-		AgentID:   agentID,
-		BranchID:  branchID,
-		CreatedAt: s.clock.Now(),
-		Payload:   entry,
-	})
-	return stored, true, err
+	return s.appendEntry(ctx, history.BranchID, agentID, value)
 }
 
-func (s *Session) AgentEntries(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID) ([]*sessionentry.ContextEntry, error) {
-	if agentID == s.data.MainAgentID() {
-		return s.BranchEntries(ctx, branchID)
-	}
+func (s *Session) SubagentEntries(ctx context.Context, agentID identity.AgentID) ([]*sessionentry.ContextEntry, error) {
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	entries := make([]*sessionentry.ContextEntry, 0)
-	for _, entry := range s.data.SubagentEntries[agentID] {
-		index := s.data.RunIndex(identity.RunID(entry.RunID))
-		if index >= 0 && s.data.Runs[index].BranchID == branchID {
-			entries = append(entries, entry)
-		}
+	history, exists := s.data.AgentHistories[agentID]
+	s.mu.RUnlock()
+	if !exists {
+		return nil, errorcode.ErrNotFound
 	}
-	return entries, nil
+	return s.contextEntries(ctx, history.HeadEntryID)
 }

@@ -2,7 +2,6 @@ package streaming
 
 import (
 	"encoding/json"
-	providerapi "praxis/internal/core/provider"
 	"praxis/internal/logging"
 )
 
@@ -16,15 +15,6 @@ func DecodeUsage(data *json.RawMessage, target any, protocol string) bool {
 	}
 	if err := json.Unmarshal(*data, target); err != nil {
 		usageLogger.Warnf("ignoring invalid model usage protocol=%s reason=invalid_schema", protocol)
-		return false
-	}
-	return true
-}
-
-// ValidUsage 校验转换后的实际统计字段；无效或不完整计数只记诊断，不应更新统计。
-func ValidUsage(protocol string, usage *providerapi.Usage) bool {
-	if usage == nil || !usage.Valid() {
-		usageLogger.Warnf("ignoring invalid model usage protocol=%s reason=invalid_counts", protocol)
 		return false
 	}
 	return true

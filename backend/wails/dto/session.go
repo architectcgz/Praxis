@@ -4,20 +4,20 @@ import (
 	"time"
 
 	sessionmodel "praxis/internal/core/session"
-	agentservice "praxis/internal/service/agent"
+	sessionservice "praxis/internal/service/session"
 )
 
 type SessionSnapshot struct {
-	BindingID string                   `json:"bindingId"`
-	Branch    sessionmodel.Branch      `json:"branch"`
-	ID        string                   `json:"id"`
-	ProjectID string                   `json:"projectId"`
-	Title     string                   `json:"title"`
-	CreatedAt time.Time                `json:"createdAt"`
-	UpdatedAt time.Time                `json:"updatedAt"`
-	Agents    []agentservice.AgentView `json:"agents"`
-	Tasks     []QueuedTask             `json:"tasks"`
-	Entries   map[string][]Entry       `json:"entries"`
+	BindingID string                     `json:"bindingId"`
+	Branch    sessionmodel.Branch        `json:"branch"`
+	ID        string                     `json:"id"`
+	ProjectID string                     `json:"projectId"`
+	Title     string                     `json:"title"`
+	CreatedAt time.Time                  `json:"createdAt"`
+	UpdatedAt time.Time                  `json:"updatedAt"`
+	Agents    []sessionservice.AgentView `json:"agents"`
+	Tasks     []QueuedTask               `json:"tasks"`
+	Entries   map[string]HistoryPage     `json:"entries"`
 }
 
 type SessionSummary struct {

@@ -17,6 +17,7 @@ type Identity struct {
 	AgentID      identity.AgentID
 	RunID        identity.RunID
 	TurnID       identity.TurnID
+	RequestID    identity.ModelRequestID
 }
 
 // NewOperationID 为一次操作尝试生成关联标识，Before、After 和 Scope 共用该值。

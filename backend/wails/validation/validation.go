@@ -53,6 +53,7 @@ func newValidator() *validator.Validate {
 		"session_identity": func(field validator.FieldLevel) bool {
 			return identity.SessionID(field.Field().String()).Valid()
 		},
+		"branch_identity": func(field validator.FieldLevel) bool { return identity.BranchID(field.Field().String()).Valid() },
 		"config_id_format": func(field validator.FieldLevel) bool {
 			return configIDPattern.MatchString(field.Field().String())
 		},
@@ -92,6 +93,7 @@ func newValidator() *validator.Validate {
 	v.RegisterAlias("id", "required,notblank,normalized,no_control")
 	v.RegisterAlias("project_id", "required,project_identity")
 	v.RegisterAlias("session_id", "required,session_identity")
+	v.RegisterAlias("branch_id", "required,branch_identity")
 	v.RegisterAlias("config_id", "required,normalized,config_id_format")
 	v.RegisterAlias("definition_id", "required,normalized,definition_id_format")
 	v.RegisterAlias("project_name", "required,notblank,project_name_format")
@@ -135,7 +137,7 @@ func inputError(err error, field string) error {
 	// 保留身份、普通字段和项目输入各自使用的公开错误码。
 	var code error = errorcode.ErrInvalidValue
 	switch failure.Tag() {
-	case "id", "project_id", "session_id", "definition_id", "required_with":
+	case "id", "project_id", "session_id", "branch_id", "definition_id", "required_with":
 		code = apperr.ErrInvalidRequest
 	case "project_name", "project_path":
 		code = projectservice.ErrProjectInvalid
@@ -148,7 +150,7 @@ func inputError(err error, field string) error {
 		reason = "must be normalized"
 	case "no_control":
 		reason = "must not contain control characters"
-	case "project_identity", "session_identity":
+	case "project_identity", "session_identity", "branch_identity":
 		reason = "must be a valid resource identity of at most 180 characters"
 	case "config_id_format", "definition_id_format":
 		reason = "invalid identity format"

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	modelconfig "praxis/internal/core/model/config"
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
@@ -262,7 +261,7 @@ func activeContentBlock(blocks map[int]*contentBlockState, index *int) (*content
 	return blocks[*index], *index, nil
 }
 
-// updateMessageUsage 仅在本次计数完整有效时更新累计值；异常统计不污染后续增量。
+// updateMessageUsage 合并协议分批提供的计数；未提供的分项沿用此前值。
 func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit streaming.EmitFunc) (*tokenCounts, error) {
 	var delta tokenCounts
 	if !streaming.DecodeUsage(raw, &delta, string(modelconfig.APIFormatAnthropicMessages)) {
@@ -289,12 +288,9 @@ func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit stream
 			*targets[index] = value
 		}
 	}
-	var usage *providerapi.Usage
-	if delta.OutputTokens != nil {
-		usage = normalizeMessageUsage(&next)
-	}
-	if !streaming.ValidUsage(string(modelconfig.APIFormatAnthropicMessages), usage) {
-		return previous, nil
+	usage := normalizeMessageUsage(&next)
+	if usage == nil {
+		return &next, nil
 	}
 	if err := emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage}); err != nil {
 		return previous, err
@@ -302,31 +298,21 @@ func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit stream
 	return &next, nil
 }
 func normalizeMessageUsage(reported *tokenCounts) *providerapi.Usage {
-	if reported == nil || reported.InputTokens == nil || *reported.InputTokens < 0 {
+	if reported == nil || reported.InputTokens == nil {
 		return nil
 	}
 	total := *reported.InputTokens
 	for _, count := range []*int64{reported.CacheReadInputTokens, reported.CacheCreationInputTokens} {
 		if count != nil {
-			if *count < 0 || *count > math.MaxInt64-total {
-				return nil
-			}
 			total += *count
 		}
 	}
-	// 用量事件不共享后续可变计数器，缓存计数计入统一输入分母。
-	copyCount := func(value *int64) *int64 {
-		if value == nil {
-			return nil
-		}
-		copy := *value
-		return &copy
-	}
+	// 协议计数按只读值共享；缓存计数计入统一输入分母。
 	usage := &providerapi.Usage{
 		InputTokens:              total,
-		OutputTokens:             copyCount(reported.OutputTokens),
-		CacheReadInputTokens:     copyCount(reported.CacheReadInputTokens),
-		CacheCreationInputTokens: copyCount(reported.CacheCreationInputTokens),
+		OutputTokens:             reported.OutputTokens,
+		CacheReadInputTokens:     reported.CacheReadInputTokens,
+		CacheCreationInputTokens: reported.CacheCreationInputTokens,
 	}
 	return usage
 }

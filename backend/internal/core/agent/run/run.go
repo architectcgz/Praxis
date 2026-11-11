@@ -3,22 +3,19 @@ package run
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"reflect"
-	"sync"
 )
 
-// Run 表示一次执行的内存实例，创建并持有专属 Agent，由 Coordinator 独占生命周期。
-// 执行证据共享 Session 已接纳的只读 Entry；模型上下文由 Loop 独立维护。
+// Run 表示一次执行的内存实例，由 Coordinator 独占生命周期，Agent 身份及配置保存在执行记录中。
+// 记录与执行证据仅由所属执行路径串行访问；查询读取 Session 已接纳的值，控制入口只提交控制意图。
+// 执行证据共享 Session 已接纳的只读 Entry；Loop 按轮读取 Session 历史构建模型请求。
 type Run struct {
 	Session      SessionContext
 	BindingID    string
-	Agent        *agentmodel.Agent
-	mu           sync.RWMutex
 	main         bool
 	record       RunRecord
 	entries      []*sessionentry.ContextEntry
@@ -31,73 +28,43 @@ func NewRun(record RunRecord, main bool, entries []*sessionentry.ContextEntry) (
 		record:       record,
 		entryIndexes: make(map[string]int),
 	}
-	run.record.Config = record.Config.Clone()
 	for _, entry := range entries {
-		if main && (entry.RunID != record.ID.String() || entry.IsSummary()) {
+		if entry.RunID != record.ID.String() {
 			continue
 		}
 		run.appendEntry(entry)
 	}
-	if _, ok := run.entry(record.InputEntryID); !ok {
+	if _, ok := run.Entry(record.InputEntryID); !ok {
 		return nil, errors.New("execution input is missing from admitted entries")
 	}
-	kind := agentmodel.KindSubagent
-	if main {
-		kind = agentmodel.KindMain
-	}
-	run.Agent = agentmodel.NewAgent(record.AgentID, record.SessionID, record.Config.AgentDefinitionID, kind, record.ID, record.CreatedAt)
-	run.deriveProgress()
+	run.record.Progress = run.record.Progress.RebuildEntryStats(record.ID.String(), run.entries)
 	return run, nil
 }
 
 func (r *Run) Main() bool { return r.main }
 
-func (r *Run) Snapshot() RunRecord {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	value := r.record
-	value.Config = value.Config.Clone()
-	return value
-}
+func (r *Run) Snapshot() RunRecord { return r.record }
 
-// Update 在回调成功后发布新进度；回调不能调用 Run 的其他方法。
+// Update 由所属执行路径推进状态和进度，不读取历史或重新计算条目统计。
 func (r *Run) Update(change func(*RunRecord) error) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	value := r.record
-	value.Config = value.Config.Clone()
 	if err := change(&value); err != nil {
 		return err
 	}
 	r.record = value
-	r.deriveProgress()
 	return nil
 }
 
 func (r *Run) Entries() []sessionentry.ContextEntry {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	return sessionentry.Values(r.entries)
-}
-
-func (r *Run) Entry(id string) (sessionentry.ContextEntry, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	entry, found := r.entry(id)
-	if !found {
-		return sessionentry.ContextEntry{}, false
-	}
-	return *entry, true
 }
 
 // Accept 按接纳顺序记录 Session 确定的执行条目，不维护模型上下文。
 func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntry, bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if value.RunID != r.record.ID.String() {
 		return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 	}
-	if prior, ok := r.entry(value.ID); ok {
+	if prior, ok := r.Entry(value.ID); ok {
 		candidate := *value
 		candidate.CreatedAt = prior.CreatedAt
 		if !reflect.DeepEqual(*prior, candidate) {
@@ -107,23 +74,17 @@ func (r *Run) Accept(value *sessionentry.ContextEntry) (sessionentry.ContextEntr
 	}
 	if !r.main {
 		for _, call := range value.ToolCalls(r.record.SessionID, r.record.AgentID) {
-			if _, found := r.call(call.Key); found {
+			if _, found := r.Call(call.Key); found {
 				return sessionentry.ContextEntry{}, false, errorcode.ErrRequestConflict
 			}
 		}
 	}
 	r.appendEntry(value)
-	r.deriveProgress()
+	r.record.Progress.AcceptEntry(value)
 	return *value, true, nil
 }
 
 func (r *Run) Call(key tool.CallKey) (sessionentry.ToolCall, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.call(key)
-}
-
-func (r *Run) call(key tool.CallKey) (sessionentry.ToolCall, bool) {
 	for _, entry := range r.entries {
 		for _, call := range entry.ToolCalls(r.record.SessionID, r.record.AgentID) {
 			if call.Key == key {
@@ -135,12 +96,6 @@ func (r *Run) call(key tool.CallKey) (sessionentry.ToolCall, bool) {
 }
 
 func (r *Run) Result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.result(key)
-}
-
-func (r *Run) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 	for _, entry := range r.entries {
 		if entry.RunID != key.RunID.String() {
 			continue
@@ -154,7 +109,8 @@ func (r *Run) result(key tool.CallKey) (sessionentry.ContextEntry, bool) {
 	return sessionentry.ContextEntry{}, false
 }
 
-func (r *Run) entry(id string) (*sessionentry.ContextEntry, bool) {
+// Entry 返回 Session 已接纳的同一条目，调用方只读使用。
+func (r *Run) Entry(id string) (*sessionentry.ContextEntry, bool) {
 	index, found := r.entryIndexes[id]
 	if !found {
 		return nil, false
@@ -167,14 +123,11 @@ func (r *Run) appendEntry(entry *sessionentry.ContextEntry) {
 	r.entries = append(r.entries, entry)
 }
 
-func (r *Run) deriveProgress() {
-	r.record.Progress = r.record.Progress.WithEntries(r.record.ID.String(), r.entries)
-}
-
 // SessionContext 在执行准备时绑定，执行期间不再通过 SessionID 查找可变会话。
 type SessionContext interface {
+	Entry(context.Context, string) (*sessionentry.ContextEntry, error)
 	BranchEntries(context.Context, identity.BranchID) ([]*sessionentry.ContextEntry, error)
-	AgentEntries(context.Context, identity.AgentID, identity.BranchID) ([]*sessionentry.ContextEntry, error)
+	SubagentEntries(context.Context, identity.AgentID) ([]*sessionentry.ContextEntry, error)
 	AppendEntry(context.Context, identity.BranchID, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
-	AppendSubagentEntry(context.Context, identity.AgentID, identity.BranchID, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
+	AppendSubagentEntry(context.Context, identity.AgentID, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
 }

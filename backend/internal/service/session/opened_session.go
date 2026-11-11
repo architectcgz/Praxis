@@ -9,6 +9,7 @@ import (
 // configMu 保护只读配置的整体替换和模型选择。
 type openedSession struct {
 	session        *sessionmodel.Session
+	log            *eventLog
 	configMu       sync.RWMutex
 	config         *Configuration
 	modelSelection sessionmodel.ModelSelection

@@ -1,64 +1,34 @@
 package context
 
-import (
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
-)
+import sessionentry "praxis/internal/core/session/entry"
 
-// ContentFromEntries 从已选择的只读条目构建模型投影，保护标记只属于本轮请求。
-// 执行输入的存在性已在准入时检查，完整执行压缩后上下文可以只包含摘要。
-func ContentFromEntries(systemPrompt, inputEntryID string, entries []*sessionentry.ContextEntry) Content {
-	content := Content{SystemPrompt: systemPrompt}
-	for _, entry := range ModelEntries(sessionentry.Values(entries)) {
-		if entry.ID == inputEntryID && entry.Role == role.User {
-			entry.Protected = true
-		}
-		content.Entries = append(content.Entries, entry)
+// ModelContextFromEntries 选择最近摘要、保留原文和后续历史，只建立只读 Entry 引用列表。
+func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.ContextEntry) ModelContext {
+	return ModelContext{
+		SystemPrompt: systemPrompt,
+		Entries:      ModelEntries(entriesFromSummary(entries)),
 	}
-	return content
 }
 
-// ContextBuilder 复制通用内容、丢弃展示用思考块并保持顺序，拒绝连必要原文都无法容纳的窗口。
-// 输入内容的结构约束由调用方的输入边界保证，本包只做复制与容量检查。
-// 此处不触发压缩，完整请求的窗口硬上限由 Provider 在编码后检查。
-type ContextBuilder struct{}
-
-func NewContextBuilder() ContextBuilder { return ContextBuilder{} }
-
-// Build 返回去掉思考内容的模型上下文，并按 Protected 原文估算必要容量。
-// 全部内容均为思考块的条目会被跳过；服务入口已保证当前输入存在模型可见内容，
-// 因此调用方不会拿到空条目上下文，本方法不再单独检查。
-func (ContextBuilder) Build(content Content, limits Limits) (ModelContext, error) {
-	value := ModelContext{SystemPrompt: content.SystemPrompt}
-	minimum := ModelContext{SystemPrompt: content.SystemPrompt}
-	for _, entry := range content.Entries {
-		copy, visible := modelVisibleEntry(entry)
-		if !visible {
+// entriesFromSummary 恢复摘要之前仍需保留的原文；摘要追加到历史末尾，不改变原文位置。
+func entriesFromSummary(entries []*sessionentry.ContextEntry) []*sessionentry.ContextEntry {
+	for index := len(entries) - 1; index >= 0; index-- {
+		summary := entries[index]
+		if !summary.IsSummary() {
 			continue
 		}
-		value.Entries = append(value.Entries, copy)
-		if copy.Protected {
-			minimum.Entries = append(minimum.Entries, copy)
+		ids := make(map[string]bool, len(summary.Compression.RetainedEntryIDs))
+		for _, id := range summary.Compression.RetainedEntryIDs {
+			ids[id] = true
 		}
-	}
-	tokens, err := minimum.EstimatedTokens()
-	if err != nil {
-		return ModelContext{}, err
-	}
-	if tokens > limits.ContextWindow-limits.MaxOutputTokens {
-		return ModelContext{}, &ContextWindowExceededError{EstimatedInputTokens: tokens, MaxOutputTokens: limits.MaxOutputTokens, ContextWindow: limits.ContextWindow}
-	}
-	return value, nil
-}
-
-// modelVisibleEntry 移除展示用思考；推理状态由 Provider 按目标模型决定是否重放。
-func modelVisibleEntry(value sessionentry.ContextEntry) (sessionentry.ContextEntry, bool) {
-	content := make([]sessionentry.ContentBlock, 0, len(value.Content))
-	for _, block := range value.Content {
-		if _, thinking := block.(sessionentry.ThinkingBlock); !thinking {
-			content = append(content, block)
+		selected := make([]*sessionentry.ContextEntry, 0, len(ids)+len(entries)-index)
+		selected = append(selected, summary)
+		for _, entry := range entries[:index] {
+			if ids[entry.ID] {
+				selected = append(selected, entry)
+			}
 		}
+		return append(selected, entries[index+1:]...)
 	}
-	value.Content = content
-	return value, len(content) > 0
+	return entries
 }

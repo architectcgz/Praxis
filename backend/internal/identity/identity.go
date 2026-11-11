@@ -13,6 +13,7 @@ type (
 	TaskID            string
 	TurnID            string
 	RequestID         string
+	ModelRequestID    string
 	WaitConditionID   string
 )
 
@@ -24,5 +25,6 @@ func (id AgentID) String() string           { return string(id) }
 func (id RunID) String() string             { return string(id) }
 func (id TurnID) String() string            { return string(id) }
 func (id RequestID) String() string         { return string(id) }
+func (id ModelRequestID) String() string    { return string(id) }
 func (id WaitConditionID) String() string   { return string(id) }
 func (id TaskID) String() string            { return string(id) }

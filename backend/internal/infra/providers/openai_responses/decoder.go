@@ -533,7 +533,7 @@ func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 		return nil
 	}
 	var usage *providerapi.Usage
-	if reported.InputTokens != nil && reported.OutputTokens != nil {
+	if reported.InputTokens != nil {
 		usage = &providerapi.Usage{
 			InputTokens:  *reported.InputTokens,
 			OutputTokens: reported.OutputTokens,
@@ -542,7 +542,7 @@ func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 			usage.CacheReadInputTokens = reported.InputTokensDetails.CachedTokens
 		}
 	}
-	if !streaming.ValidUsage(string(modelconfig.APIFormatOpenAIResponses), usage) {
+	if usage == nil {
 		return nil
 	}
 	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage})

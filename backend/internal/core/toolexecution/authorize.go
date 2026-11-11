@@ -4,17 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentrun "praxis/internal/core/agent/run"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/security"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"time"
 )
 
-var errResultAvailable = errors.New("tool result is already committed")
 var errCallStopped = errors.New("tool call was stopped")
 
 type authorizationResult struct {
@@ -40,12 +37,8 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 			e.mu.Unlock()
 			return nil, err
 		}
-		sourceTaskID := callState.owner.SourceTaskID
+		sourceTaskID := callState.sourceTaskID
 		if result.pending {
-			if callState.owner.Status != agentrun.RunRunning {
-				e.mu.Unlock()
-				return nil, errorcode.ErrRequestConflict
-			}
 			// 判断与请求登记共享控制锁，通知前请求已可查询，不能与停止或用户决定交错修改。
 			if callState.request == nil {
 				callState.request = &ApprovalRequest{
@@ -166,9 +159,6 @@ func (e *Executor) checkUnfinished(ctx context.Context, call sessionentry.ToolCa
 	callState := e.active[call.Key]
 	if callState == nil {
 		return errors.New("tool call is no longer active")
-	}
-	if _, found := callState.run.Result(call.Key); found {
-		return errResultAvailable
 	}
 	if callState.stopped {
 		return errCallStopped

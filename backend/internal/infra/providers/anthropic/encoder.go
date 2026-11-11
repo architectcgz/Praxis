@@ -56,13 +56,15 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthrop
 	return result, nil
 }
 
-func anthropicContextEntry(entry sessionentry.ContextEntry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
+func anthropicContextEntry(entry *sessionentry.ContextEntry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
 	var messages []anthropicMessage
 	for index, block := range entry.Content {
 		messageRole := string(entry.Role)
 		var content any
 		var raw json.RawMessage
 		switch block := block.(type) {
+		case sessionentry.ThinkingBlock:
+			continue
 		case sessionentry.TextBlock:
 			if entry.Role == role.Tool {
 				return nil, errors.New("anthropic tool role requires tool results")

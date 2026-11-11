@@ -2,6 +2,7 @@ package bindings
 
 import (
 	"praxis/internal/identity"
+	execution "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -46,7 +47,12 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, identity.AgentID(wire.AgentID)))
+	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, execution.RunControl{
+		SessionID: identity.SessionID(wire.SessionID),
+		BranchID:  identity.BranchID(wire.BranchID),
+		AgentID:   identity.AgentID(wire.AgentID),
+		RunID:     identity.RunID(wire.RunID),
+	}))
 }
 
 // CancelTask 只移除该 Session 尚未开始的输入，不影响当前 Loop。

@@ -8,8 +8,8 @@ import (
 	"praxis/internal/identity"
 )
 
-// Execute 准备初始历史和事实提交入口，再交给 Loop 完成多轮模型与工具迭代。
-// 已有最终回答时只允许轮后摘要，不再请求模型执行用户任务。
+// Execute 绑定历史读取和事实提交入口，再交给 Loop 完成多轮模型与工具迭代。
+// 已有最终回答时直接返回，不再请求模型执行用户任务。
 func (s *Service) Execute(ctx context.Context, run *agentrun.Run, runner *loop.Runner, executor loop.ToolExecutor) (err error) {
 	var turnID identity.TurnID
 	defer func() {
@@ -21,22 +21,11 @@ func (s *Service) Execute(ctx context.Context, run *agentrun.Run, runner *loop.R
 	if !record.Active() {
 		return loop.NewFailure(loop.FailureContract, errorcode.ErrRequestConflict)
 	}
-	if record.Progress.FinalAssistantID == "" {
-		input, inputErr := s.loopInput(ctx, run)
-		if inputErr != nil {
-			return inputErr
-		}
-		params, deps := s.modelRunParams(run)
-		turnID, err = runner.Run(ctx, params, deps, input, executor)
-		if err != nil {
-			return err
-		}
+	if record.Progress.FinalAssistantID != "" {
+		return nil
 	}
-	if compressionErr := s.Compact(ctx, run, runner); compressionErr != nil {
-		if loop.FailureClassification(compressionErr) == loop.FailureStorage {
-			return compressionErr
-		}
-		s.logger.Errorf("context compression failed run=%s; completed answer preserved: %v", record.ID, compressionErr)
-	}
-	return nil
+	input, _ := run.Entry(record.InputEntryID)
+	params, deps := s.modelRunParams(run)
+	turnID, err = runner.Run(ctx, params, deps, input, executor)
+	return err
 }

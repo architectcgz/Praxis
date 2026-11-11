@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 
 // Request 是发送给 Provider 的一次完整模型上下文请求，不包含凭据字段。
 type Request struct {
+	ID    identity.ModelRequestID
 	RunID identity.RunID
 	// PromptCacheKey 用于 Provider 的 Prompt Cache 路由，留空时不发送。
 	PromptCacheKey  string
@@ -50,24 +50,4 @@ func (s OutputSchema) Validate() error {
 		return errors.New("output schema must have an object root")
 	}
 	return nil
-}
-
-// Clone 深拷贝请求内容，调用方、扩展和 Provider 不共享可变上下文、Schema 或工具定义。
-func (r Request) Clone() Request {
-	r.Context = r.Context.Clone()
-	r.Model = r.Model.Clone()
-	if r.Tools != nil {
-		tools := make([]tool.ToolDefinition, len(r.Tools))
-		for index, definition := range r.Tools {
-			definition.InputSchema = bytes.Clone(definition.InputSchema)
-			tools[index] = definition
-		}
-		r.Tools = tools
-	}
-	if r.OutputSchema != nil {
-		schema := *r.OutputSchema
-		schema.Schema = bytes.Clone(schema.Schema)
-		r.OutputSchema = &schema
-	}
-	return r
 }

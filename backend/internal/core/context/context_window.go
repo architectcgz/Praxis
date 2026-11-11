@@ -30,7 +30,15 @@ func (c ModelContext) EstimatedTokens() (int, error) {
 	}
 	values := make([]modelEntry, 0, len(c.Entries))
 	for _, entry := range c.Entries {
-		values = append(values, modelEntry{Role: entry.Role, Content: entry.Content})
+		value := modelEntry{Role: entry.Role}
+		for _, block := range entry.Content {
+			if _, thinking := block.(sessionentry.ThinkingBlock); !thinking {
+				value.Content = append(value.Content, block)
+			}
+		}
+		if len(value.Content) > 0 {
+			values = append(values, value)
+		}
 	}
 	payload, err := json.Marshal(struct {
 		SystemPrompt string
@@ -43,7 +51,7 @@ func (c ModelContext) EstimatedTokens() (int, error) {
 }
 
 // ContextWindowExceededError 表示一次请求连同输出预留会超出模型的上下文窗口。
-// 构建、压缩或 Provider 在无法容纳必要内容时返回它，loop 据此分类为资源上限失败。
+// 请求前容量评估或 Provider 在无法容纳必要内容时返回它，loop 据此分类为资源上限失败。
 type ContextWindowExceededError struct {
 	EstimatedInputTokens int
 	MaxOutputTokens      int
@@ -78,7 +86,7 @@ func ExceedsContextWindow(payload []byte, maxOutputTokens, contextWindow int) er
 	return nil
 }
 
-// NearContextLimit 将输入与输出预留一起计入模型窗口，达到九成时只表示需要收尾。
+// NearContextLimit 将输入与输出预留一起计入模型窗口，达到九成时触发压缩评估或收尾提醒。
 func NearContextLimit(inputTokens, maxOutputTokens, contextWindow int) bool {
 	threshold := contextWindow/100*90 + contextWindow%100*90/100
 	return inputTokens+maxOutputTokens >= threshold

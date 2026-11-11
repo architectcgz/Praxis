@@ -14,6 +14,7 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
     hasContinuation?: boolean
     copyContent?: string
 }) {
+    if (item.kind === 'run') return null
     const message = item
     const content = message.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')
     const messageBlocks = message.content

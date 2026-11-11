@@ -14,7 +14,7 @@ type AgentCommandContext = {
     viewRequestRef: RefObject<number>
 }
 
-/** 停止 Agent 当前执行，并只更新仍然有效的工作区视图。 */
+/** 中断已选择的 Run，并只更新仍然有效的工作区视图。 */
 export function useAgentCommands({
     agent,
     busy,
@@ -36,7 +36,7 @@ export function useAgentCommands({
         setError('')
         setErrorCode(undefined)
         try {
-            await stopAgent({ agentId: agentID })
+            await stopAgent({ sessionId: agent.SessionID, branchId: agent.BranchID, agentId: agentID, runId: agent.currentRunId })
         } catch (err) {
             if (isCurrentView()) {
                 setError(readableError(err))

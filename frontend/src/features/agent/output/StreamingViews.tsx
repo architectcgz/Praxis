@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
-import type { AgentEvent, RunRecord } from '../../../api'
+import type { AgentEvent, RunSnapshot } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { StreamingToolCallsView } from './ToolCallViews'
 import { ThinkingDetails } from './ThinkingDetails'
@@ -27,7 +27,7 @@ export const PendingUserMessageView = memo(function PendingUserMessageView({ con
     )
 })
 
-export function PendingOutputView({ agentName, run }: { agentName: string; run?: RunRecord | null }) {
+export function PendingOutputView({ agentName, run }: { agentName: string; run?: RunSnapshot | null }) {
     return (
         <article className="message message-assistant message-pending" role="status">
             <div className="message-meta">
@@ -56,7 +56,7 @@ export function StreamingTurnView({ agentName, events, runId, run, turnId, activ
     agentName: string
     events: AgentEvent[]
     runId: string
-    run?: RunRecord | null
+    run?: RunSnapshot | null
     turnId: string
     active: boolean
     continuation?: boolean

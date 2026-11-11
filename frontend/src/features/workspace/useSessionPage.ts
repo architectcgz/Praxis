@@ -46,7 +46,7 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
         adoptSession(value)
         await loadForSession(value)
     }, [adoptSession, loadForSession])
-    const branch = useBranchNavigation({ session, applySession })
+    const branch = useBranchNavigation({ session, applySession, setError })
     const controls = useAgentCommands({
         agent: agents.agent, busy, getSelectedAgentID: agents.getSelectedAgentID,
         inputActions: agents.inputActions, setBusy, setError, setErrorCode, viewRequestRef,

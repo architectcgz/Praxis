@@ -26,7 +26,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	return messages, nil
 }
 
-func chatMessagesFromContext(entry sessionentry.ContextEntry, ids map[string]string) ([]chatMessage, error) {
+func chatMessagesFromContext(entry *sessionentry.ContextEntry, ids map[string]string) ([]chatMessage, error) {
 	var messages []chatMessage
 	result := chatMessage{Role: string(entry.Role)}
 	flush := func() {
@@ -58,7 +58,7 @@ func chatMessagesFromContext(entry sessionentry.ContextEntry, ids map[string]str
 		case sessionentry.ToolResultBlock:
 			flush()
 			messages = append(messages, chatMessage{Role: "tool", ToolCallID: ids[block.CallID], Content: new(block.Text)})
-		case sessionentry.ReasoningStateBlock:
+		case sessionentry.ThinkingBlock, sessionentry.ReasoningStateBlock:
 			continue
 		default:
 			return nil, fmt.Errorf("context block %d has unsupported type %T", index, block)

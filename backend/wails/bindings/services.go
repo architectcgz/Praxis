@@ -9,9 +9,7 @@ import (
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
 	approvalservice "praxis/internal/service/approval"
 	execution "praxis/internal/service/coordinator"
 	modelservice "praxis/internal/service/model"
@@ -34,15 +32,11 @@ type ApprovalService interface {
 
 type SessionService interface {
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
+	ListSessionAgents(context.Context, identity.SessionID, identity.BranchID, int) ([]sessionservice.AgentView, error)
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
 	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
-}
-
-type AgentService interface {
-	ListSessionAgents(context.Context, identity.SessionID, identity.BranchID, int) ([]agentservice.AgentView, error)
-	GetAgentView(context.Context, identity.SessionID, identity.AgentID, identity.BranchID) (agentservice.AgentView, error)
 }
 
 type AgentCommands interface {
@@ -53,11 +47,13 @@ type AgentCommands interface {
 	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
 	ListBranches(context.Context, identity.SessionID) ([]execution.BranchView, error)
 	Tree(context.Context, identity.SessionID) ([]sessionmodel.TreeNode, error)
-	EntriesAt(context.Context, identity.SessionID, string) ([]sessionentry.ContextEntry, error)
+	EntriesAt(context.Context, identity.SessionID, string, string, int) (sessionmodel.HistoryPage, error)
+	SessionContent(context.Context, identity.SessionID, identity.BranchID) (execution.SessionContent, error)
+	DeleteBranch(context.Context, identity.SessionID, identity.BranchID, identity.BranchID, string) (execution.BranchDeletion, error)
 	DeleteSession(context.Context, identity.SessionID) error
-	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, identity.BranchID) ([]sessionentry.ContextEntry, error)
-	StopAgent(context.Context, identity.AgentID) error
-	ListToolApprovals(context.Context, identity.AgentID, identity.BranchID) ([]toolservice.Approval, error)
+	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, string, string, int) (sessionmodel.HistoryPage, error)
+	StopAgent(context.Context, execution.RunControl) error
+	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]toolservice.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
@@ -75,7 +71,7 @@ type ModelConfigService interface {
 }
 
 type UsageService interface {
-	ListSessionUsage(context.Context, identity.SessionID) ([]providerapi.UsageRecord, error)
+	ListSessionUsage(context.Context, identity.SessionID, []identity.TurnID) ([]providerapi.UsageRecord, error)
 	GetSessionUsageSummary(context.Context, identity.SessionID) (sessionservice.SessionUsageSummary, error)
 }
 
@@ -84,7 +80,6 @@ type Services struct {
 	Projects       ProjectService
 	Approvals      ApprovalService
 	Sessions       SessionService
-	Agents         AgentService
 	Commands       AgentCommands
 	ModelConfig    ModelConfigService
 	Emitter        *coreevent.Emitter
@@ -98,7 +93,6 @@ func (s Services) Validate() error {
 		"projects":            s.Projects == nil,
 		"approvals":           s.Approvals == nil,
 		"sessions":            s.Sessions == nil,
-		"agents":              s.Agents == nil,
 		"commands":            s.Commands == nil,
 		"model configuration": s.ModelConfig == nil,
 		"event emitter":       s.Emitter == nil,

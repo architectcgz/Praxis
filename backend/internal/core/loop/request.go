@@ -11,42 +11,39 @@ import (
 	"time"
 )
 
-// summarizeContext 在真实模型请求边界执行摘要，不执行工具、不发布思考或回答文本。
-// 请求和输出由 Run Service 原生记录，不修改原始 Entry。
-func (r *Runner) summarizeContext(
-	ctx context.Context,
-	params RunParams,
-	deps RunDependencies,
-	summaryInput appcontext.ModelContext,
-	limit int,
-) (string, error) {
-	sequence, err := deps.Progress.NextRequestSequence(ctx)
-	if err != nil {
-		return "", err
+// summarizeContext 在独立 Turn 中生成摘要，不执行工具或发布回答文本。
+func (r *Runner) summarizeContext(ctx context.Context, params RunParams, deps RunDependencies, input appcontext.ModelContext, limit int) (string, identity.ModelRequestID, identity.TurnID, error) {
+	if err := deps.Recorder.EndTurn(ctx); err != nil {
+		return "", "", "", err
 	}
-	turnID := identity.NewTurnID(params.ID, sequence)
+	turnID, err := deps.Recorder.BeginTurn(ctx)
+	if err != nil {
+		return "", "", "", err
+	}
+	requestID := identity.NewModelRequestID()
 	request := providerapi.Request{
+		ID:              requestID,
+		TurnID:          turnID,
 		RunID:           params.ID,
 		PromptCacheKey:  params.SessionID.String(),
-		Context:         summaryInput,
+		Context:         input,
 		Model:           params.Model,
 		MaxOutputTokens: limit,
-		TurnID:          turnID,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := r.Request(requestCtx, params, deps, request, hook.ModelRequestSummary, sequence)
+	response, err := r.Request(requestCtx, params, deps, request, hook.ModelRequestSummary)
 	if err != nil {
-		return "", err
+		return "", requestID, turnID, err
 	}
 	if len(response.ToolCalls()) != 0 {
-		return "", errors.New("context summary returned a tool call")
+		return "", requestID, turnID, errors.New("context summary returned a tool call")
 	}
-	var text strings.Builder
+	var output strings.Builder
 	for _, event := range response.events {
 		if event.Kind == providerapi.StreamTextDelta {
-			text.WriteString(event.Text)
+			output.WriteString(event.Text)
 		}
 	}
-	return strings.TrimSpace(text.String()), nil
+	return strings.TrimSpace(output.String()), requestID, turnID, nil
 }

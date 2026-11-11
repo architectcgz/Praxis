@@ -27,7 +27,7 @@ type UserDecision struct {
 }
 
 type RiskReview struct {
-	TurnID     identity.TurnID
+	RequestID  identity.ModelRequestID
 	ProviderID string
 	ModelID    string
 	Assessment security.RiskAssessment
@@ -50,7 +50,7 @@ type Approval struct {
 	Review    RiskReview
 }
 
-func (e *Executor) ListApprovals(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID) ([]Approval, error) {
+func (e *Executor) ListApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]Approval, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -58,7 +58,10 @@ func (e *Executor) ListApprovals(ctx context.Context, agentID identity.AgentID, 
 	defer e.mu.Unlock()
 	result := make([]Approval, 0)
 	for _, callState := range e.active {
-		if callState.call.AgentID != agentID || callState.owner.BranchID != branchID || callState.stopped || callState.request == nil || callState.decision != nil || callState.tool != nil {
+		if callState.call.SessionID != sessionID || callState.call.AgentID != agentID {
+			continue
+		}
+		if callState.request == nil || callState.decision != nil || callState.stopped {
 			continue
 		}
 		value := Approval{

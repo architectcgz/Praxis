@@ -8,6 +8,7 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	projectmodel "praxis/internal/core/project"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	agentservice "praxis/internal/service/agent"
 	projectservice "praxis/internal/service/project"
@@ -34,14 +35,7 @@ func (r *Coordinator) run(
 		return
 	}
 	if task.Progress.FinalAssistantID != "" {
-		// 完成证据优先于迟到的取消；这里只允许补做摘要，不能重跑用户任务。
-		if err := r.operations.Compact(ctx, run, &runner); err != nil {
-			r.logError(task, "compact completed context", err)
-			if loop.FailureClassification(err) == loop.FailureStorage {
-				r.endRun(task, active, agentrun.RunFailed, agentrun.RunFailureStorage, "")
-				return
-			}
-		}
+		// 完成证据优先于迟到的取消，不再发起任何模型请求。
 		r.endRun(task, active, agentrun.RunCompleted, "", "")
 		return
 	}
@@ -203,25 +197,33 @@ func (r *Coordinator) endRun(
 		retryDelay = min(5*time.Second, retryDelay*2)
 	}
 
-	// 内存终态接纳后释放槽位；日志失败已单独通知界面。
-	r.mu.Lock()
-	cause := context.Cause(active.ctx)
-	interrupted := errors.Is(cause, errRunInterrupted)
-	scheduleRequested := active.scheduleRequested
-	main := active.run.Main()
-	if main {
-		delete(r.runs, runKey{task.AgentID, task.BranchID})
-		active.run = nil
-		active.cancel(nil)
+	if !active.run.Main() {
+		return true
 	}
+	// 释放执行槽与领取下一项在同一会话命令内完成，分支操作不能插入两者之间。
+	queueContext, cancelQueue := r.transitionContext()
+	defer cancelQueue()
+	unlock, _ := r.lockSession(context.Background(), task.SessionID)
+	interrupted := errors.Is(context.Cause(active.ctx), errRunInterrupted)
+	r.mu.Lock()
+	scheduleRequested := active.scheduleRequested
+	delete(r.runs, runKey{task.AgentID, task.BranchID})
+	active.run = nil
 	r.mu.Unlock()
-	// 中断后只响应新的显式调度意图，不因旧执行恰好正常完成而自动领取队列。
-	if main && (scheduleRequested || !interrupted && (endedRun.Outcome == agentrun.RunCompleted || endedRun.Outcome == agentrun.RunYielded)) {
-		queueContext, cancelQueue := r.transitionContext()
-		defer cancelQueue()
-		if err := r.scheduleBinding(queueContext, task.SessionID, active.bindingID, false); err != nil {
-			r.logError(task, "prepare next queued task", err)
-		}
+	var next *activeRun
+	var binding *sessionBinding
+	var input sessionmodel.Task
+	var schedulingErr error
+	if scheduleRequested || !interrupted && (endedRun.Outcome == agentrun.RunCompleted || endedRun.Outcome == agentrun.RunYielded) {
+		input, binding, next, schedulingErr = r.claimTaskLocked(queueContext, task.SessionID, active.bindingID, false)
+	}
+	unlock()
+	active.cancel(nil)
+	if next != nil {
+		schedulingErr = r.startNext(queueContext, input, runKey{task.AgentID, binding.branchID}, binding, next)
+	}
+	if schedulingErr != nil {
+		r.logError(task, "prepare next queued task", schedulingErr)
 	}
 	return true
 }

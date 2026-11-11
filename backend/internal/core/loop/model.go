@@ -55,16 +55,15 @@ func (r *Runner) callModel(
 	deps RunDependencies,
 	request providerapi.Request,
 	requestKind hook.ModelRequestKind,
-	sequence uint64,
 	onEvent func(providerapi.Event),
 ) (response Response, err error) {
 	boundary := hook.ModelRequest{
 		Identity: runIdentity(params, request.TurnID),
 		Kind:     requestKind,
-		Sequence: sequence,
 		Request:  request,
 	}
 	boundary.OperationID = hook.NewOperationID()
+	boundary.Identity.RequestID = request.ID
 	if hookErr := r.HookDispatcher.BeforeModelRequest(ctx, boundary); hookErr != nil {
 		return response, NewFailure(FailureInternal, hookErr)
 	}
@@ -81,7 +80,8 @@ func (r *Runner) callModel(
 	if requestKind == hook.ModelRequestIteration {
 		span = timing.NewSpan()
 	}
-	if err := deps.Progress.RecordModelRequest(ctx, sequence, agentrun.ModelRequestRecord{
+	if err := deps.Recorder.RecordModelRequest(ctx, agentrun.ModelRequestRecord{
+		ID:     request.ID,
 		RunID:  params.ID,
 		TurnID: request.TurnID,
 		Kind:   requestKind,
@@ -89,16 +89,17 @@ func (r *Runner) callModel(
 	}, span.Snapshot()); err != nil {
 		return response, err
 	}
-	boundary.Request = request.Clone()
+	boundary.Request = request
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
 		Identity:    boundary.Identity,
 		Kind:        hook.OperationProvider,
 		Name:        request.Model.ProviderID + "/" + request.Model.ModelID,
-		ReferenceID: "assistant:" + request.TurnID.String(),
+		ReferenceID: request.ID.String(),
 	})
 	defer func() {
 		// 取消或断流也保存已知请求事实，明细与累计快照使用同一次日志提交。
-		if progressErr := deps.Progress.RecordModelResponse(context.WithoutCancel(ctx), agentrun.ModelRequestRecord{
+		if progressErr := deps.Recorder.RecordModelResponse(context.WithoutCancel(ctx), agentrun.ModelRequestRecord{
+			ID:          request.ID,
 			RunID:       params.ID,
 			TurnID:      request.TurnID,
 			Kind:        requestKind,

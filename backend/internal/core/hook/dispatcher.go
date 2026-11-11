@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	appcontext "praxis/internal/core/context"
 	"reflect"
 	"slices"
 )
@@ -28,7 +27,6 @@ func NewDispatcher(hooks ...any) (*Dispatcher, error) {
 		switch registered.(type) {
 		case OperationHook,
 			BeforeUserInputHook,
-			BeforeContextBuildHook,
 			BeforeModelRequestHook,
 			BeforeToolExecutionHook,
 			AfterToolExecutionHook,
@@ -87,31 +85,13 @@ func (d *Dispatcher) BeforeUserInput(ctx context.Context, event UserInput) (stri
 	return value, nil
 }
 
-func (d *Dispatcher) BeforeContextBuild(ctx context.Context, event ContextBuild) (appcontext.Content, error) {
-	value := event.Content
-	for _, registered := range d.registered() {
-		handler, ok := registered.(BeforeContextBuildHook)
-		if !ok {
-			continue
-		}
-		next, err := handler.BeforeContextBuild(ctx, event.clone())
-		if err != nil {
-			var empty appcontext.Content
-			return empty, &Error{Point: "BeforeContextBuild", Cause: err}
-		}
-		value = cloneContent(next)
-		event.Content = value
-	}
-	return value, nil
-}
-
 func (d *Dispatcher) BeforeModelRequest(ctx context.Context, event ModelRequest) error {
 	for _, registered := range d.registered() {
 		handler, ok := registered.(BeforeModelRequestHook)
 		if !ok {
 			continue
 		}
-		if err := handler.BeforeModelRequest(ctx, event.clone()); err != nil {
+		if err := handler.BeforeModelRequest(ctx, event); err != nil {
 			return &Error{Point: "BeforeModelRequest", Cause: err}
 		}
 	}
@@ -156,7 +136,7 @@ func (d *Dispatcher) UserInputCommitted(ctx context.Context, event EntryCommitte
 		if !ok {
 			continue
 		}
-		if err := handler.UserInputCommitted(ctx, event.clone()); err != nil {
+		if err := handler.UserInputCommitted(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "UserInputCommitted", Cause: err})
 		}
 	}
@@ -170,7 +150,7 @@ func (d *Dispatcher) AssistantCommitted(ctx context.Context, event EntryCommitte
 		if !ok {
 			continue
 		}
-		if err := handler.AssistantCommitted(ctx, event.clone()); err != nil {
+		if err := handler.AssistantCommitted(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "AssistantCommitted", Cause: err})
 		}
 	}
@@ -184,7 +164,7 @@ func (d *Dispatcher) FinalOutputCommitted(ctx context.Context, event EntryCommit
 		if !ok {
 			continue
 		}
-		if err := handler.FinalOutputCommitted(ctx, event.clone()); err != nil {
+		if err := handler.FinalOutputCommitted(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "FinalOutputCommitted", Cause: err})
 		}
 	}
@@ -240,7 +220,7 @@ func (d *Dispatcher) AfterContextBuild(ctx context.Context, event ContextBuilt) 
 		if !ok {
 			continue
 		}
-		if err := handler.AfterContextBuild(ctx, event.clone()); err != nil {
+		if err := handler.AfterContextBuild(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "AfterContextBuild", Cause: err})
 		}
 	}
@@ -253,7 +233,7 @@ func (d *Dispatcher) BeforeContextCompression(ctx context.Context, event Context
 		if !ok {
 			continue
 		}
-		if err := handler.BeforeContextCompression(ctx, event.clone()); err != nil {
+		if err := handler.BeforeContextCompression(ctx, event); err != nil {
 			return &Error{Point: "BeforeContextCompression", Cause: err}
 		}
 	}
@@ -267,7 +247,7 @@ func (d *Dispatcher) AfterContextCompression(ctx context.Context, event ContextC
 		if !ok {
 			continue
 		}
-		if err := handler.AfterContextCompression(ctx, event.clone()); err != nil {
+		if err := handler.AfterContextCompression(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "AfterContextCompression", Cause: err})
 		}
 	}
@@ -308,7 +288,7 @@ func (d *Dispatcher) AfterModelResponse(ctx context.Context, event ModelResponse
 		if !ok {
 			continue
 		}
-		if err := handler.AfterModelResponse(ctx, event.clone()); err != nil {
+		if err := handler.AfterModelResponse(ctx, event); err != nil {
 			errs = append(errs, &Error{Point: "AfterModelResponse", Cause: err})
 		}
 	}

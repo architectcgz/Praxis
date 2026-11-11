@@ -38,7 +38,7 @@ export function summarizeModelUsage(records: ModelUsageRecord[]) {
         missingCacheRead ||= usage.cacheReadInputTokens === undefined
         missingCacheCreation ||= usage.cacheCreationInputTokens === undefined
     }
-    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, cacheReadInputTokens, cacheCreationInputTokens, hasOutput, missingOutput, hasCacheRead, hasCacheCreation, missingCacheRead, missingCacheCreation }
+    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, cacheReadInputTokens, cacheCreationInputTokens, hasOutput, missingInput: false, missingOutput, hasCacheRead, hasCacheCreation, missingCacheRead, missingCacheCreation }
 }
 
 const compactCount = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
@@ -53,15 +53,15 @@ export function formatModelUsage(usage: ReturnType<typeof summarizeModelUsage>) 
     const exact = (value: number, missing = false) => `${exactCount.format(value)} tokens${missing ? '（部分计数未上报）' : ''}`
     return {
         labels: [
-            `总计 ${compact(usage.totalTokens, usage.missingOutput)} tokens`,
-            `输入 ${compact(usage.inputTokens)}`,
+            `总计 ${compact(usage.totalTokens, usage.missingInput || usage.missingOutput)} tokens`,
+            `输入 ${compact(usage.inputTokens, usage.missingInput)}`,
             usage.hasOutput ? `输出 ${compact(usage.outputTokens, usage.missingOutput)}` : undefined,
             usage.hasCacheRead ? `缓存读取 ${compact(usage.cacheReadInputTokens, usage.missingCacheRead)}` : undefined,
             usage.hasCacheCreation ? `缓存写入 ${compact(usage.cacheCreationInputTokens, usage.missingCacheCreation)}` : undefined,
         ].filter((label) => label !== undefined),
         details: [
-            `总计：${exact(usage.totalTokens, usage.missingOutput)}`,
-            `输入：${exact(usage.inputTokens)}（含缓存）`,
+            `总计：${exact(usage.totalTokens, usage.missingInput || usage.missingOutput)}`,
+            `输入：${exact(usage.inputTokens, usage.missingInput)}（含缓存）`,
             usage.hasOutput ? `输出：${exact(usage.outputTokens, usage.missingOutput)}` : undefined,
             hasCache ? `缓存：${exact(cacheTokens, missingCache)}` : undefined,
             usage.hasCacheRead ? `缓存读取：${exact(usage.cacheReadInputTokens, usage.missingCacheRead)}` : undefined,

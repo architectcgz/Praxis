@@ -40,15 +40,16 @@ const riskReviewSchema = `{
 	"additionalProperties": false
 }`
 
-// ReviewRequest 只包含审核内容与输出约束，不携带执行状态或模型配置。
+// ReviewRequest 只包含审核模型上下文与输出约束，不携带执行状态或模型配置。
 type ReviewRequest struct {
-	Content      appcontext.Content
+	Context      appcontext.ModelContext
 	OutputSchema providerapi.OutputSchema
 }
 
 type Reviewer struct {
 	Progress interface {
-		RecordModelRequest(context.Context, *agentrun.Run, uint64, agentrun.ModelRequestRecord, *timing.Record) error
+		BeginRequestTurn(context.Context, *agentrun.Run) (identity.TurnID, error)
+		RecordModelRequest(context.Context, *agentrun.Run, agentrun.ModelRequestRecord, *timing.Record) error
 		RecordModelResponse(context.Context, *agentrun.Run, agentrun.ModelRequestRecord, *timing.Record) error
 	}
 	HookDispatcher *hook.Dispatcher
@@ -78,11 +79,10 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 		return ReviewRequest{}, err
 	}
 	return ReviewRequest{
-		Content: appcontext.Content{
+		Context: appcontext.ModelContext{
 			SystemPrompt: riskReviewPrompt,
-			Entries: []sessionentry.ContextEntry{{
-				Protected: true,
-				Role:      role.User,
+			Entries: []*sessionentry.ContextEntry{{
+				Role: role.User,
 				Content: []sessionentry.ContentBlock{
 					sessionentry.TextBlock{Text: string(data)},
 				},
@@ -95,7 +95,7 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 	}, nil
 }
 
-// review 由执行调用方预留请求序号、应用模型限制并记录审核结果。
+// review 由执行调用方生成请求身份、应用模型限制并记录审核结果。
 func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string) (review RiskReview, err error) {
 	task := t.run.Snapshot()
 	if task.Status != agentrun.RunRunning || call.RunID != task.ID {
@@ -106,28 +106,26 @@ func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args 
 		return review, &reviewRunError{error: errors.New("risk review cannot locate the task input")}
 	}
 	r := t.executor.deps.Reviewer
-	sequence := max(uint64(1), task.Progress.NextSequence)
 	model := task.Config.Model
 	request, err := prepareReview(input.TextContent(), string(call.Name), args, t.projectPath, ruleID)
 	if err != nil {
 		return review, err
 	}
-	reviewContext, err := appcontext.NewContextBuilder().Build(request.Content, appcontext.Limits{
-		ContextWindow:   model.ContextWindow,
-		MaxOutputTokens: model.MaxOutputTokens,
-	})
-	if err != nil {
-		return review, err
-	}
 	review = RiskReview{
-		TurnID:     identity.NewTurnID(task.ID, sequence),
+		RequestID:  identity.NewModelRequestID(),
 		ProviderID: model.ProviderID,
 		ModelID:    model.ModelID,
 	}
-	// 与主模型、摘要共用序号和请求计数；进度接纳失败时不调用 Provider。
-	if err := r.Progress.RecordModelRequest(ctx, t.run, sequence, agentrun.ModelRequestRecord{
+	turnID, err := r.Progress.BeginRequestTurn(ctx, t.run)
+	if err != nil {
+		return review, &reviewRunError{error: err}
+	}
+	// 与普通请求、摘要共用 Turn 序号；进度接纳失败时不调用 Provider。
+	if err := r.Progress.RecordModelRequest(ctx, t.run, agentrun.ModelRequestRecord{
+		ID:     review.RequestID,
 		RunID:  task.ID,
-		TurnID: review.TurnID,
+		TurnID: turnID,
+		CallID: call.CallID,
 		Kind:   agentrun.ModelRequestRiskReview,
 		Status: agentrun.ModelRequestRunning,
 	}, nil); err != nil {
@@ -139,8 +137,10 @@ func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args 
 	defer func() {
 		// 审核与普通请求共享结果保存边界，存储失败不能降级为人工审批。
 		if progressErr := r.Progress.RecordModelResponse(context.WithoutCancel(ctx), t.run, agentrun.ModelRequestRecord{
+			ID:          review.RequestID,
 			RunID:       task.ID,
-			TurnID:      review.TurnID,
+			TurnID:      turnID,
+			CallID:      call.CallID,
 			Kind:        agentrun.ModelRequestRiskReview,
 			Status:      agentrun.RequestStatus(ctx, err),
 			StopReason:  stopReason,
@@ -155,20 +155,21 @@ func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args 
 			SessionID: call.SessionID,
 			AgentID:   call.AgentID,
 			RunID:     call.RunID,
-			TurnID:    review.TurnID,
+			RequestID: review.RequestID,
 		},
 		Kind:        hook.OperationProvider,
 		Name:        model.ProviderID + "/" + model.ModelID,
-		ReferenceID: "risk-review:" + review.TurnID.String(),
+		ReferenceID: review.RequestID.String(),
 	})
 	defer func() { scope.End(hook.Result{Err: err}) }()
 	stream, err := t.provider.Stream(ctx, providerapi.Request{
 		RunID:           call.RunID,
 		PromptCacheKey:  call.SessionID.String(),
-		Context:         reviewContext,
+		Context:         request.Context,
 		Model:           model,
 		MaxOutputTokens: model.MaxOutputTokens,
-		TurnID:          review.TurnID,
+		ID:              review.RequestID,
+		TurnID:          turnID,
 		OutputSchema:    &request.OutputSchema,
 		// Tools 保持为空，审核模型没有执行待审操作或调用其他工具的能力。
 	})
@@ -197,9 +198,7 @@ func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args 
 				}
 				text.WriteString(event.Text)
 			case providerapi.StreamUsage:
-				if event.Usage != nil && event.Usage.Valid() {
-					usage = new(event.Usage.Clone())
-				}
+				usage = event.Usage
 			case providerapi.StreamThinkingDelta, providerapi.StreamReasoningState:
 				// 审核推理内容不进入用户会话或审计正文。
 			case providerapi.StreamComplete:

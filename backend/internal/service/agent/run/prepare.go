@@ -22,10 +22,8 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	if modelConfig.ProviderID == "" || modelConfig.ModelID == "" {
 		return result, false, modelconfig.ErrNotConfigured
 	}
-	// 请求身份只在调度准入时建立；由 Task ID 派生以保证准备重试使用同一身份。
-	requestID := identity.RequestID(input.ID)
-	inputEntryID := "input:" + requestID.String()
-	previous, err := s.records.FindRunByRequest(ctx, session.MainAgentID(), requestID)
+	inputEntryID := "input:" + input.ID.String()
+	previous, err := s.records.FindRunByTask(ctx, session.MainAgentID(), input.ID)
 	if err == nil {
 		if previous.SourceTaskID != input.ID || previous.BranchID != input.BranchID {
 			return result, false, errorcode.ErrRequestConflict
@@ -42,37 +40,31 @@ func (s *Service) prepareMainTask(ctx context.Context, input taskmodel.Task, ses
 	}
 	at := s.clock.Now()
 	runID := identity.RunID(s.ids.New("execution"))
-	entries, err := owner.BranchEntries(ctx, input.BranchID)
-	if err != nil {
-		return result, false, err
-	}
-	for _, previous := range entries {
-		if previous.ID != inputEntryID {
-			continue
-		}
-		if previous.TextContent() != input.Prompt {
+	previousInput, err := owner.Entry(ctx, inputEntryID)
+	if err == nil {
+		if previousInput.TextContent() != input.Prompt {
 			return result, false, errorcode.ErrRequestConflict
 		}
-		runID = identity.RunID(previous.RunID)
+		runID = identity.RunID(previousInput.RunID)
+	} else if !errors.Is(err, errorcode.ErrNotFound) {
+		return result, false, err
 	}
 	stored, inserted, err := owner.AppendEntry(ctx, input.BranchID, sessionentry.ContextEntry{
-		ID:           inputEntryID,
-		RequestID:    requestID.String(),
-		SourceTaskID: input.ID.String(),
-		RunID:        runID.String(),
-		Role:         role.User,
-		AuthorKind:   sessionentry.AuthorUser,
-		Content:      []sessionentry.ContentBlock{sessionentry.TextBlock{Text: input.Prompt}},
-		CreatedAt:    at,
+		ID:         inputEntryID,
+		RunID:      runID.String(),
+		TurnID:     identity.NewTurnID(runID, 1).String(),
+		Role:       role.User,
+		AuthorKind: sessionentry.AuthorUser,
+		Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: input.Prompt}},
+		CreatedAt:  at,
 	})
 	if err != nil {
 		return result, false, err
 	}
-	result = agentrun.NewRunRecord(runID, session.ID, session.MainAgentID(), requestID, inputEntryID, config, at)
-	result.SourceTaskID = input.ID
+	result = agentrun.NewRunRecord(runID, session.ID, session.MainAgentID(), input.ID, inputEntryID, config, at)
 	result.AgentName = definition.Name
 	result.BranchID = input.BranchID
-	if err = s.records.SaveRun(ctx, result); err != nil {
+	if _, err = s.records.SaveRun(ctx, result); err != nil {
 		return agentrun.RunRecord{}, false, err
 	}
 	if !inserted {

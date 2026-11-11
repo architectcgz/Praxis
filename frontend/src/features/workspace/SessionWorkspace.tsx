@@ -40,6 +40,7 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
             <SessionPanel loading={page.sessionLoading} hasSession={Boolean(page.session)} sessionsCount={sessionsCount}>
                 {page.session && <AgentSessionPanel
                     branchId={page.session.branch.id}
+                    usageRevision={page.usageRevision}
                     loading={page.agentLoading}
                     agents={page.agents}
                     agent={page.agent}
@@ -49,6 +50,10 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
                     outputStore={page.outputStore}
                     onSelectAgent={page.selectAgent}
                     entriesError={page.entriesError}
+                    hasEarlier={page.browsing && page.agent?.Kind === 'main' ? page.browsing.page.hasMore : page.hasEarlier}
+                    historyLoading={page.browsing && page.agent?.Kind === 'main' ? page.previewHistoryLoading : page.historyLoading}
+                    onLoadEarlier={page.browsing && page.agent?.Kind === 'main' ? page.loadEarlierPreview : page.loadEarlier}
+                    onRetryHistory={page.retryHistory}
                     input={page.input}
                     setInput={page.setInput}
                     models={page.models}
@@ -58,7 +63,7 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
                     busy={page.busy}
                     canQueue={page.canQueue}
                     beforeInput={<>
-                        <BranchStatus branch={page.session.branch} browsing={Boolean(page.browsing)} busy={page.busy} onReturn={page.returnToHead} />
+                        <BranchStatus branch={page.session.branch} browsing={Boolean(page.browsing)} busy={page.busy} onReturn={page.returnToHead} cleanupPending={Boolean(page.cleanupTarget)} onRetryCleanup={() => void page.retryCleanup()} />
                         <TaskQueue tasks={page.session.tasks} busy={page.busy} onCancel={page.cancelQueuedTask} />
                     </>}
                     onSend={page.submitInput}
@@ -86,6 +91,7 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
             currentBranchId={page.session.branch.id}
             onSwitch={page.switchBranch}
             onBrowse={page.browseEntries}
+            onDelete={page.deleteBranch}
             onClose={page.closeBranchDialog}
         />}
     </div>

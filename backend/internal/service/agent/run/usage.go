@@ -15,14 +15,17 @@ func (s *Service) RecordModelResponse(ctx context.Context, run *agentrun.Run, re
 	var owner agentrun.RunRecord
 	if err := run.Update(func(record *agentrun.RunRecord) error {
 		record.Progress.ModelOutputBytes += int64(request.OutputBytes)
+		record.Progress.OutputBytes += int64(request.OutputBytes)
 		if request.Usage != nil {
-			record.Progress.Usage.Add(*request.Usage)
+			usage := request.Usage
+			record.Progress.Usage.Add(usage.InputTokens, usage.OutputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
 		}
 		owner = *record
 		return nil
 	}); err != nil {
 		return err
 	}
+	writeErr := s.records.SaveModelRequest(ctx, owner, request)
 	s.emitter.Emit(coreevent.Event{
 		Source: coreevent.SourceForRun(run, request.TurnID),
 		Payload: coreevent.ModelRequestFinished{
@@ -30,8 +33,8 @@ func (s *Service) RecordModelResponse(ctx context.Context, run *agentrun.Run, re
 			Timing:  measured,
 		},
 	})
-	if err := s.records.SaveModelRequest(ctx, owner, request); err != nil {
-		return storageFailure(err)
+	if writeErr != nil {
+		return storageFailure(writeErr)
 	}
 	return nil
 }

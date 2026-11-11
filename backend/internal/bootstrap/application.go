@@ -11,7 +11,6 @@ import (
 	"praxis/internal/dataroot"
 	fs "praxis/internal/infra/filesystem"
 	"praxis/internal/logging"
-	agentservice "praxis/internal/service/agent"
 	approvalservice "praxis/internal/service/approval"
 	"praxis/internal/service/coordinator"
 	projectservice "praxis/internal/service/project"
@@ -80,14 +79,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	a.sessions = buildSessions(a.storage, hooks, config, root)
 	coordinator := buildCoordinator(resources, a.sessions, hooks, emitter, options.Runner)
 	a.coordinator = coordinator
-	agents := agentservice.NewService(agentservice.Dependencies{
-		Entries:     a.sessions,
-		ActiveRun:   coordinator.ActiveRun,
-		SessionRuns: coordinator.SessionRuns,
-		RunRecords:  a.sessions,
-		Sessions:    a.storage.Sessions,
-		Definitions: a.sessions.Definition,
-	})
 	models := buildModelService(config, a.logger)
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:   a.storage.Projects,
@@ -105,11 +96,10 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Projects:       projects,
 		Approvals:      approvals,
 		Sessions:       a.sessions,
-		Agents:         agents,
 		Commands:       a.coordinator,
 		ModelConfig:    models,
 		Emitter:        emitter,
-		Usages:         a.sessions,
+		Usages:         a.coordinator,
 		SessionLogPath: a.storage.Sessions.SessionLogPath,
 	}
 	a.logger.Infof("application open completed ready=true")

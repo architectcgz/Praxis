@@ -60,23 +60,21 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input sessionservice.Task
 		Task:      task,
 		BindingID: binding.id,
 	}
-	if prior, err := s.sessions.FindRunByRequest(ctx, identity.AgentID(input.SessionID), identity.RequestID(task.ID)); err == nil {
+	if prior, err := s.sessions.FindRunByTask(ctx, identity.AgentID(input.SessionID), task.ID); err == nil {
 		if prior.BranchID != binding.branchID {
 			return SubmitResult{}, nil, errorcode.ErrRequestConflict
 		}
-		path, err := s.sessions.Path(ctx, input.SessionID, prior.InputEntryID)
+		entry, err := s.sessions.Entry(ctx, input.SessionID, prior.InputEntryID)
 		if err != nil {
 			return SubmitResult{}, nil, err
 		}
-		if len(path) == 0 || path[len(path)-1].TextContent() != task.Prompt {
+		if entry.TextContent() != task.Prompt {
 			return SubmitResult{}, nil, errorcode.ErrRequestConflict
 		}
 		return result, nil, nil
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return SubmitResult{}, nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, prior := range binding.queue.List(0) {
 		if prior.ID == task.ID {
 			if prior.Prompt != task.Prompt {
@@ -115,9 +113,7 @@ func (s *Coordinator) DeleteSession(ctx context.Context, id identity.SessionID) 
 	if err := s.sessions.DeleteSession(ctx, id); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.releaseSessionStateLocked(id)
-	s.mu.Unlock()
+	s.releaseSessionState(id)
 	return nil
 }
 
@@ -132,14 +128,14 @@ func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.Session
 	}
 	s.mu.Lock()
 	binding := s.bindings[sessionID]
-	if binding == nil || binding.id != bindingID || binding.closing {
-		s.mu.Unlock()
+	valid := binding != nil && binding.id == bindingID && !binding.closing
+	s.mu.Unlock()
+	if !valid {
 		unlock()
 		return errorcode.ErrRequestConflict
 	}
 	err = binding.queue.Cancel(id)
 	notification := taskQueueEvent(binding)
-	s.mu.Unlock()
 	unlock()
 	if err == nil {
 		s.loop.Emitter.Emit(notification)

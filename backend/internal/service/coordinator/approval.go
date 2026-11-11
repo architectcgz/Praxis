@@ -30,8 +30,12 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, a
 	return nil
 }
 
-func (s *Coordinator) ListToolApprovals(ctx context.Context, agentID identity.AgentID, branchID identity.BranchID) ([]toolservice.Approval, error) {
-	return s.tools.ListApprovals(ctx, agentID, branchID)
+func (s *Coordinator) ListToolApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]toolservice.Approval, error) {
+	if err := s.enter(); err != nil {
+		return nil, err
+	}
+	defer s.running.Done()
+	return s.tools.ListApprovals(ctx, sessionID, agentID)
 }
 
 // StopToolCall 只发送停止信号，回执由当前工具路径生成。
@@ -40,13 +44,10 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request ToolControl) err
 		return err
 	}
 	defer s.running.Done()
-	task, err := s.tools.StopCall(ctx, request)
-	if err != nil {
+	if err := s.tools.StopCall(ctx, request); err != nil {
 		return err
 	}
-	if task.Active() {
-		s.notifyToolApprovalWaiter(task.ID)
-	}
+	s.notifyToolApprovalWaiter(request.RunID)
 	return nil
 }
 

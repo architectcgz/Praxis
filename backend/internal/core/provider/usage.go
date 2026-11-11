@@ -1,10 +1,6 @@
 package provider
 
-import (
-	"math"
-
-	"praxis/internal/identity"
-)
+import "praxis/internal/identity"
 
 // Usage 记录一次模型请求的累计 token 用量；InputTokens 包含缓存读取和写入部分。
 // 可选计数为 nil 表示 Provider 未提供该值，不能当作零用量。
@@ -15,42 +11,12 @@ type Usage struct {
 	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
-// Valid 校验 Provider 返回的计数；无效计数不应影响模型响应，只是不参与统计。
-func (u Usage) Valid() bool {
-	if u.InputTokens < 0 {
-		return false
-	}
-	if u.OutputTokens != nil && (*u.OutputTokens < 0 || *u.OutputTokens > math.MaxInt64-u.InputTokens) {
-		return false
-	}
-	var read, creation int64
-	if u.CacheReadInputTokens != nil {
-		read = *u.CacheReadInputTokens
-	}
-	if u.CacheCreationInputTokens != nil {
-		creation = *u.CacheCreationInputTokens
-	}
-	return read >= 0 && creation >= 0 && creation <= u.InputTokens && read <= u.InputTokens-creation
-}
-
 // UsageRecord 是按请求查询的已知用量投影，执行累计值由 Run 保存。
 type UsageRecord struct {
-	SessionID string          `json:"sessionId"`
-	AgentID   string          `json:"agentId"`
-	RunID     string          `json:"runId"`
-	TurnID    identity.TurnID `json:"turnId"`
-	Usage     Usage           `json:"usage"`
-}
-
-func (u Usage) Clone() Usage {
-	if u.OutputTokens != nil {
-		u.OutputTokens = new(*u.OutputTokens)
-	}
-	if u.CacheReadInputTokens != nil {
-		u.CacheReadInputTokens = new(*u.CacheReadInputTokens)
-	}
-	if u.CacheCreationInputTokens != nil {
-		u.CacheCreationInputTokens = new(*u.CacheCreationInputTokens)
-	}
-	return u
+	SessionID string                  `json:"sessionId"`
+	AgentID   string                  `json:"agentId"`
+	RunID     string                  `json:"runId"`
+	RequestID identity.ModelRequestID `json:"requestId"`
+	TurnID    identity.TurnID         `json:"turnId,omitempty"`
+	Usage     Usage                   `json:"usage"`
 }

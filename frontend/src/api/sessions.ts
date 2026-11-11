@@ -1,5 +1,5 @@
 import { getSessionBinding } from './bindings'
-import type { AgentView, Entry, ModelUsageRecord } from './agents'
+import type { AgentView, HistoryPage } from './agents'
 import type { QueuedTask } from './tasks'
 import type { Branch } from '../../bindings/praxis/internal/core/session/models'
 export type { Branch }
@@ -14,7 +14,7 @@ export type SessionSnapshot = {
     updatedAt: string
     agents: AgentView[]
     tasks: QueuedTask[]
-    entries: Record<string, Entry[]>
+    entries: Record<string, HistoryPage>
 }
 
 export type SessionSummary = {
@@ -26,7 +26,7 @@ export type SessionSummary = {
 }
 
 export type SessionUsageSummary = {
-    records: ModelUsageRecord[]
+    totalRequests: number
     inputTokens: number
     outputTokens: number
     cacheReadInputTokens: number
@@ -87,8 +87,11 @@ export function switchBranch(session: SessionSnapshot, name: string) {
 }
 export async function listBranches(sessionId: string) { return await getSessionBinding().ListBranches(sessionId) ?? [] }
 export async function getEntryTree(sessionId: string) { return await getSessionBinding().GetEntryTree(sessionId) ?? [] }
-export async function getEntriesAt(sessionId: string, entryId: string) {
-    return (await getSessionBinding().GetEntriesAt(sessionId, entryId) ?? []) as Entry[]
+export function getEntriesAt(sessionId: string, entryId: string, before = '') {
+    return getSessionBinding().GetEntriesAt({ sessionId, headEntryId: entryId, beforeEntryId: before, limit: 50 }) as Promise<HistoryPage>
+}
+export function deleteBranch(session: SessionSnapshot, targetBranchId: string) {
+    return getSessionBinding().DeleteBranch({ sessionId: session.id, branchId: session.branch.id, targetBranchId, bindingId: session.bindingId })
 }
 
 export function getSessionUsageSummary(sessionID: string) {

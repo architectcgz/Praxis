@@ -3,12 +3,22 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
-func (s *Coordinator) cancelCurrentRun(ctx context.Context, agentID identity.AgentID, cause error) (*activeRun, bool, error) {
+// RunControl 定位用户选择的执行，不以命令到达时的当前执行替换目标。
+type RunControl struct {
+	SessionID identity.SessionID
+	BranchID  identity.BranchID
+	AgentID   identity.AgentID
+	RunID     identity.RunID
+}
+
+func (s *Coordinator) cancelRun(ctx context.Context, request RunControl, cause error) (*activeRun, bool, error) {
+	key := runKey{request.AgentID, request.BranchID}
 	s.mu.Lock()
-	key, active := s.currentRunLocked(agentID)
+	active := s.runs[key]
 	s.mu.Unlock()
 	if active == nil {
 		return nil, false, nil
@@ -21,27 +31,24 @@ func (s *Coordinator) cancelCurrentRun(ctx context.Context, agentID identity.Age
 		return nil, false, ctx.Err()
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed || s.runs[key] != active {
+		s.mu.Unlock()
 		return nil, false, nil
 	}
+	if active.sessionID != request.SessionID || active.runID != request.RunID {
+		s.mu.Unlock()
+		return nil, false, errorcode.ErrRequestConflict
+	}
+	ending := active.ending
+	s.mu.Unlock()
 	if active.ctx.Err() != nil {
 		return active, errors.Is(context.Cause(active.ctx), cause), nil
 	}
-	if active.ending {
+	if ending {
 		return nil, false, nil
 	}
 	active.cancel(cause)
 	return active, true, nil
-}
-
-func (s *Coordinator) currentRunLocked(agentID identity.AgentID) (runKey, *activeRun) {
-	for key, active := range s.runs {
-		if key.agentID == agentID {
-			return key, active
-		}
-	}
-	return runKey{}, nil
 }
 
 func (s *Coordinator) activeRunLocked(agentID identity.AgentID, id identity.RunID) *activeRun {

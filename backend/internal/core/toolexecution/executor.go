@@ -45,14 +45,13 @@ type Executor struct {
 }
 
 type callState struct {
-	run      *agentrun.Run
-	call     sessionentry.ToolCall
-	owner    agentrun.RunRecord
-	tool     *Execution
-	request  *ApprovalRequest
-	decision *UserDecision
-	review   *ReviewRecord
-	stopped  bool
+	call         sessionentry.ToolCall
+	sourceTaskID identity.TaskID
+	tool         *Execution
+	request      *ApprovalRequest
+	decision     *UserDecision
+	review       *ReviewRecord
+	stopped      bool
 }
 
 func NewExecutor(deps ExecutorDependencies) *Executor {
@@ -101,7 +100,10 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 		s.mu.Unlock()
 		return CallResult{}, errorcode.ErrRequestConflict
 	}
-	s.active[call.Key] = &callState{call: call, owner: owner, run: tools.run}
+	s.active[call.Key] = &callState{
+		call:         call,
+		sourceTaskID: owner.SourceTaskID,
+	}
 	s.mu.Unlock()
 	defer s.unregister(call.Key)
 	if stored, found := tools.run.Result(call.Key); found {
@@ -188,89 +190,76 @@ func decodeToolArguments(raw string, target any) error {
 
 func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (CallResult, error) {
 	s := tools.executor
-
-	for {
-		if stored, found := tools.run.Result(call.Key); found {
-			return existingResult(stored), nil
+	denied, err := tools.authorize(ctx, call, args, operationID)
+	if errors.Is(err, errCallStopped) {
+		return callError("tool_interrupted", err.Error()), nil
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return callError("tool_interrupted", ctx.Err().Error()), nil
 		}
-		denied, err := tools.authorize(ctx, call, args, operationID)
+		return CallResult{}, err
+	}
+	if denied != nil {
+		return CallResult{ToolResult: *denied}, nil
+	}
+
+	observed := observedCall{
+		call:    prepared.Call,
+		name:    call.Name,
+		run:     tools.run,
+		hooks:   s.deps.HookDispatcher,
+		emitter: s.deps.Emitter,
+		identity: hook.Identity{
+			OperationID: operationID,
+			SessionID:   call.SessionID,
+			AgentID:     call.AgentID,
+			RunID:       call.RunID,
+			TurnID:      call.TurnID,
+		},
+		callID: call.CallID,
+	}
+	execution := NewExecution(ctx, observed.Call)
+	if err := s.register(ctx, call, execution); err != nil {
+		execution.Stop()
 		if errors.Is(err, errCallStopped) {
 			return callError("tool_interrupted", err.Error()), nil
 		}
-		if err != nil {
-			if errors.Is(err, errResultAvailable) {
-				continue
-			}
-			if ctx.Err() != nil {
-				return callError("tool_interrupted", ctx.Err().Error()), nil
-			}
-			return CallResult{}, err
+		if ctx.Err() != nil {
+			return callError("tool_interrupted", ctx.Err().Error()), nil
 		}
-		if denied != nil {
-			return CallResult{ToolResult: *denied}, nil
-		}
-
-		observed := observedCall{
-			call:    prepared.Call,
-			name:    call.Name,
-			run:     tools.run,
-			hooks:   s.deps.HookDispatcher,
-			emitter: s.deps.Emitter,
-			identity: hook.Identity{
-				OperationID: operationID,
-				SessionID:   call.SessionID,
-				AgentID:     call.AgentID,
-				RunID:       call.RunID,
-				TurnID:      call.TurnID,
-			},
-			callID: call.CallID,
-		}
-		execution := NewExecution(ctx, observed.Call)
-		err = s.register(ctx, call, execution)
-		if err != nil {
-			execution.Stop()
-			if errors.Is(err, errCallStopped) {
-				return callError("tool_interrupted", err.Error()), nil
-			}
-			if errors.Is(err, errResultAvailable) {
-				continue
-			}
-			if ctx.Err() != nil {
-				return callError("tool_interrupted", ctx.Err().Error()), nil
-			}
-			return CallResult{}, err
-		}
-		result := execution.Run()
-
-		value := result.ToolResult
-		if result.Err != nil {
-			if value.Payload == "" {
-				code := "tool_execution_failed"
-				if errors.Is(result.Err, context.Canceled) || errors.Is(result.Err, context.DeadlineExceeded) {
-					code = "tool_interrupted"
-				}
-				value = tool.NewToolError(code, result.Err.Error())
-			} else if value.ErrorClass == "" {
-				value.ErrorClass = "tool_execution_failed"
-			}
-		}
-		bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value)
-		if outputErr != nil {
-			sideEffect := value.SideEffect
-			value = tool.NewToolError("tool_output_save_failed", "The tool has already run, but saving its output failed: "+outputErr.Error()+". Do not rerun the operation solely to recover its output.")
-			value.SideEffect = sideEffect
-			result.Err = errors.Join(result.Err, outputErr)
-		} else {
-			value = bounded
-		}
-		return CallResult{
-			ToolResult:  value,
-			OperationID: operationID,
-			Arguments:   args,
-			Timing:      observed.timing,
-			Err:         result.Err,
-		}, nil
+		return CallResult{}, err
 	}
+	result := execution.Run()
+
+	value := result.ToolResult
+	if result.Err != nil {
+		if value.Payload == "" {
+			code := "tool_execution_failed"
+			if errors.Is(result.Err, context.Canceled) || errors.Is(result.Err, context.DeadlineExceeded) {
+				code = "tool_interrupted"
+			}
+			value = tool.NewToolError(code, result.Err.Error())
+		} else if value.ErrorClass == "" {
+			value.ErrorClass = "tool_execution_failed"
+		}
+	}
+	bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value)
+	if outputErr != nil {
+		sideEffect := value.SideEffect
+		value = tool.NewToolError("tool_output_save_failed", "The tool has already run, but saving its output failed: "+outputErr.Error()+". Do not rerun the operation solely to recover its output.")
+		value.SideEffect = sideEffect
+		result.Err = errors.Join(result.Err, outputErr)
+	} else {
+		value = bounded
+	}
+	return CallResult{
+		ToolResult:  value,
+		OperationID: operationID,
+		Arguments:   args,
+		Timing:      observed.timing,
+		Err:         result.Err,
+	}, nil
 }
 
 // observedCall 只观察已绑定参数的真实调用，不参与授权、参数准备或结果保存。
@@ -333,5 +322,5 @@ func existingResult(entry sessionentry.ContextEntry) CallResult {
 	if block.IsError {
 		result.ErrorClass = "tool_execution_failed"
 	}
-	return CallResult{ToolResult: result, Timing: entry.Timing}
+	return CallResult{ToolResult: result, Timing: block.Timing}
 }

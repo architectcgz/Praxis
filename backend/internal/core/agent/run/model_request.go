@@ -24,22 +24,17 @@ const (
 	ModelRequestCancelled ModelRequestStatus = "cancelled"
 )
 
-// ModelRequestRecord 保存请求开始或收尾时已知的用量与状态；展示耗时由对应 Entry 持有。
+// ModelRequestRecord 保存一次实际模型请求的状态与用量，普通请求、摘要和审核各有独立 Turn。
 type ModelRequestRecord struct {
-	RunID       identity.RunID         `json:"executionId"`
-	TurnID      identity.TurnID        `json:"turnId"`
-	Kind        ModelRequestKind       `json:"kind"`
-	Status      ModelRequestStatus     `json:"status"`
-	StopReason  providerapi.StopReason `json:"stopReason,omitempty"`
-	OutputBytes int                    `json:"outputBytes"`
-	Usage       *providerapi.Usage     `json:"usage,omitempty"`
-}
-
-func (r ModelRequestRecord) Clone() ModelRequestRecord {
-	if r.Usage != nil {
-		r.Usage = new(r.Usage.Clone())
-	}
-	return r
+	ID          identity.ModelRequestID `json:"id"`
+	RunID       identity.RunID          `json:"executionId"`
+	TurnID      identity.TurnID         `json:"turnId,omitempty"`
+	CallID      string                  `json:"callId,omitempty"`
+	Kind        ModelRequestKind        `json:"kind"`
+	Status      ModelRequestStatus      `json:"status"`
+	StopReason  providerapi.StopReason  `json:"stopReason,omitempty"`
+	OutputBytes int                     `json:"outputBytes"`
+	Usage       *providerapi.Usage      `json:"usage,omitempty"`
 }
 
 func RequestStatus(ctx context.Context, err error) ModelRequestStatus {
@@ -54,11 +49,15 @@ func RequestStatus(ctx context.Context, err error) ModelRequestStatus {
 
 // Validate 仅在日志读取边界校验请求事实，运行流程使用已确定的内部值。
 func (r ModelRequestRecord) Validate() error {
-	if r.RunID == "" || r.TurnID == "" || r.OutputBytes < 0 {
+	if r.ID == "" || r.RunID == "" || r.TurnID == "" || r.OutputBytes < 0 {
 		return errors.New("invalid model request identity or output size")
 	}
 	switch r.Kind {
-	case ModelRequestIteration, ModelRequestSummary, ModelRequestRiskReview:
+	case ModelRequestIteration:
+		if r.TurnID == "" || r.CallID != "" {
+			return errors.New("iteration request requires a turn and no review call")
+		}
+	case ModelRequestSummary, ModelRequestRiskReview:
 	default:
 		return errors.New("unknown model request kind")
 	}
@@ -66,9 +65,6 @@ func (r ModelRequestRecord) Validate() error {
 	case ModelRequestRunning, ModelRequestCompleted, ModelRequestFailed, ModelRequestCancelled:
 	default:
 		return errors.New("unknown model request status")
-	}
-	if r.Usage != nil && !r.Usage.Valid() {
-		return errors.New("invalid model request usage")
 	}
 	return nil
 }

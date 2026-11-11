@@ -8,7 +8,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/identity"
 )
 
 func (r *Runner) runTurn(
@@ -17,10 +16,9 @@ func (r *Runner) runTurn(
 	deps RunDependencies,
 	executor ToolExecutor,
 	request providerapi.Request,
-	sequence uint64,
 ) (finished bool, err error) {
 	turnID := request.TurnID
-	iteration := hook.Iteration{Identity: runIdentity(params, turnID), Sequence: sequence}
+	iteration := hook.Iteration{Identity: runIdentity(params, turnID)}
 	iteration.OperationID = hook.NewOperationID()
 	if hookErr := r.HookDispatcher.BeforeIteration(ctx, iteration); hookErr != nil {
 		return false, NewFailure(FailureInternal, hookErr)
@@ -41,11 +39,11 @@ func (r *Runner) runTurn(
 	}()
 	r.emit(params, turnID, coreevent.TurnStarted{})
 	r.Logf("provider request prepared id=%s model=%s contextEntries=%d turn=%s", params.ID, params.Model.ModelID, len(request.Context.Entries), turnID)
-	response, err := r.Request(ctx, params, deps, request, hook.ModelRequestIteration, sequence)
+	response, err := r.Request(ctx, params, deps, request, hook.ModelRequestIteration)
 	stopReason = response.StopReason
 	blocks := response.Blocks()
-	entry := assistantEntry(params, turnID, stopReason, blocks)
-	entry.Timing = response.Timing
+	entry := assistantEntry(params, request, stopReason, blocks)
+	entry.Response.Timing = response.Timing
 	if err != nil {
 		partial := make([]sessionentry.ContentBlock, 0, len(blocks))
 		for _, block := range blocks {
@@ -58,7 +56,8 @@ func (r *Runner) runTurn(
 		if ctx.Err() != nil {
 			stopReason = "aborted"
 		}
-		entry.Content, entry.StopReason, entry.Error = partial, string(stopReason), err.Error()
+		entry.Content = partial
+		entry.Response.StopReason, entry.Response.Error = string(stopReason), err.Error()
 		err = NewModelFailure(err)
 		accepted, _, writeErr := deps.AppendEntry(context.WithoutCancel(ctx), entry)
 		recorded = accepted != nil
@@ -94,13 +93,15 @@ func (r *Runner) runTurn(
 	return false, err
 }
 
-func assistantEntry(params RunParams, turnID identity.TurnID, stopReason providerapi.StopReason, blocks []sessionentry.ContentBlock) sessionentry.ContextEntry {
+func assistantEntry(params RunParams, request providerapi.Request, stopReason providerapi.StopReason, blocks []sessionentry.ContentBlock) sessionentry.ContextEntry {
 	return sessionentry.ContextEntry{
-		ID:         "assistant:" + turnID.String(),
-		RequestID:  params.RequestID.String(),
-		RunID:      params.ID.String(),
-		TurnID:     turnID.String(),
-		StopReason: string(stopReason),
+		ID:     "assistant:" + request.ID.String(),
+		RunID:  params.ID.String(),
+		TurnID: request.TurnID.String(),
+		Response: &sessionentry.ModelResponse{
+			RequestID:  request.ID,
+			StopReason: string(stopReason),
+		},
 		Role:       role.Assistant,
 		AuthorKind: sessionentry.AuthorAgent,
 		AuthorID:   params.AgentID.String(),

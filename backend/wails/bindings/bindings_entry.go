@@ -10,6 +10,14 @@ import (
 func publicEntries(values []sessionentry.ContextEntry) []dto.Entry {
 	result := make([]dto.Entry, 0, len(values))
 	for _, value := range values {
+		projected := dto.Entry{}
+		if value.Response != nil {
+			projected.RequestID = value.Response.RequestID.String()
+			projected.Error = value.Response.Error
+			projected.Timing = value.Response.Timing
+		} else if value.Compression != nil {
+			projected.Timing = value.Compression.Timing
+		}
 		content := make([]dto.EntryBlock, 0, len(value.Content))
 		for _, block := range value.Content {
 			switch block := block.(type) {
@@ -31,6 +39,7 @@ func publicEntries(values []sessionentry.ContextEntry) []dto.Entry {
 					Input:  block.Arguments,
 				})
 			case sessionentry.ToolResultBlock:
+				projected.Timing = block.Timing
 				content = append(content, dto.EntryBlock{
 					Kind:    "tool_result",
 					Text:    block.Text,
@@ -43,6 +52,8 @@ func publicEntries(values []sessionentry.ContextEntry) []dto.Entry {
 		kind := dto.EntryMessage
 		if value.IsSummary() {
 			kind = dto.EntrySummary
+		} else if value.IsRun() {
+			kind = dto.EntryRun
 		}
 		result = append(result, dto.Entry{
 			ID:        value.ID,
@@ -52,8 +63,9 @@ func publicEntries(values []sessionentry.ContextEntry) []dto.Entry {
 			Role:      string(value.Role),
 			Kind:      kind,
 			Content:   content,
-			Error:     value.Error,
-			Timing:    value.Timing,
+			RequestID: projected.RequestID,
+			Error:     projected.Error,
+			Timing:    projected.Timing,
 		})
 	}
 	return result

@@ -15,14 +15,15 @@ import (
 
 // SubagentInput 表达委派准入所需的父调用、冻结配置及历史归属，不进入主会话输入队列。
 type SubagentInput struct {
-	Task         sessionmodel.Task
-	AgentID      identity.AgentID
-	ParentRunID  identity.RunID
-	ParentCallID string
-	Definition   agentmodel.AgentDefinition
-	Model        modelapi.Config
-	Owner        agentrun.SessionContext
-	BindingID    string
+	Task           sessionmodel.Task
+	AgentID        identity.AgentID
+	ParentRunID    identity.RunID
+	ParentCallID   string
+	Definition     agentmodel.AgentDefinition
+	Model          modelapi.Config
+	Owner          agentrun.SessionContext
+	BindingID      string
+	SourceBranchID identity.BranchID
 }
 
 func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agentID identity.AgentID, definition agentmodel.AgentDefinition, model modelapi.Config, owner agentrun.SessionContext, bindingID string) (*agentrun.Run, bool, error) {
@@ -37,11 +38,11 @@ func (s *Service) PrepareTask(ctx context.Context, input sessionmodel.Task, agen
 	if err != nil {
 		return nil, existing, err
 	}
-	entries, err := owner.BranchEntries(ctx, input.BranchID)
+	entry, err := owner.Entry(ctx, record.InputEntryID)
 	if err != nil {
 		return nil, existing, err
 	}
-	run, err := agentrun.NewRun(record, true, entries)
+	run, err := agentrun.NewRun(record, true, []*sessionentry.ContextEntry{entry})
 	if err == nil {
 		run.Session, run.BindingID = owner, bindingID
 	}
@@ -53,25 +54,22 @@ func (s *Service) PrepareSubagent(ctx context.Context, input SubagentInput) (*ag
 		return nil, modelconfig.ErrNotConfigured
 	}
 	at := s.clock.Now().UTC()
-	requestID := identity.RequestID(input.Task.ID)
-	record := agentrun.NewRunRecord(identity.RunID(s.ids.New("execution")), input.Task.SessionID, input.AgentID, requestID, "input:"+requestID.String(), agentrun.RunConfig{
+	record := agentrun.NewRunRecord(identity.RunID(s.ids.New("execution")), input.Task.SessionID, input.AgentID, input.Task.ID, "input:"+input.Task.ID.String(), agentrun.RunConfig{
 		AgentDefinitionID: input.Definition.ID,
 		SystemPrompt:      input.Definition.Instructions,
-		Model:             input.Model.Clone(),
+		Model:             input.Model,
 	}, at)
-	record.SourceTaskID = input.Task.ID
 	record.AgentName = input.Definition.Name
-	record.BranchID = input.Task.BranchID
+	record.BranchID = input.SourceBranchID
 	record.ParentRunID, record.ParentCallID = input.ParentRunID, input.ParentCallID
-	stored, err := s.records.CreateSubagent(ctx, record, sessionentry.ContextEntry{
-		ID:           record.InputEntryID,
-		CreatedAt:    at,
-		RequestID:    requestID.String(),
-		SourceTaskID: input.Task.ID.String(),
-		RunID:        record.ID.String(),
-		Role:         role.User,
-		AuthorKind:   sessionentry.AuthorUser,
-		Content:      []sessionentry.ContentBlock{sessionentry.TextBlock{Text: input.Task.Prompt}},
+	stored, err := s.records.CreateSubagent(ctx, input.SourceBranchID, record, sessionentry.ContextEntry{
+		ID:         record.InputEntryID,
+		CreatedAt:  at,
+		RunID:      record.ID.String(),
+		TurnID:     record.CurrentTurn.ID.String(),
+		Role:       role.User,
+		AuthorKind: sessionentry.AuthorUser,
+		Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: input.Task.Prompt}},
 	})
 	if err != nil {
 		return nil, err

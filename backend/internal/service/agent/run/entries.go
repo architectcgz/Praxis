@@ -21,7 +21,7 @@ func (s *Service) appendEntry(ctx context.Context, run *agentrun.Run, value sess
 	if run.Main() {
 		entry, inserted, writeErr = run.Session.AppendEntry(ctx, record.BranchID, value)
 	} else {
-		entry, inserted, writeErr = run.Session.AppendSubagentEntry(ctx, record.AgentID, record.BranchID, value)
+		entry, inserted, writeErr = run.Session.AppendSubagentEntry(ctx, record.AgentID, value)
 	}
 	if writeErr != nil && !inserted {
 		return nil, false, storageFailure(writeErr)
@@ -56,7 +56,7 @@ func (s *Service) notifyAssistant(ctx context.Context, run *agentrun.Run, entry 
 	if err := s.hookDispatcher.AssistantCommitted(ctx, event); err != nil {
 		s.logger.Errorf("assistant committed hook failed: %v", err)
 	}
-	if entry.StopReason == string(providerapi.StopCompleted) || entry.StopReason == string(providerapi.StopSequence) {
+	if entry.Response != nil && (entry.Response.StopReason == string(providerapi.StopCompleted) || entry.Response.StopReason == string(providerapi.StopSequence)) {
 		if err := s.hookDispatcher.FinalOutputCommitted(ctx, event); err != nil {
 			s.logger.Errorf("final output committed hook failed: %v", err)
 		}

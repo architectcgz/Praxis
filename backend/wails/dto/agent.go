@@ -4,12 +4,15 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/agent/run/timing"
-	agentservice "praxis/internal/service/agent"
+	sessionservice "praxis/internal/service/session"
 	"time"
 )
 
 type StopAgentRequest struct {
-	AgentID string `json:"agentId" validate:"id"`
+	SessionID string `json:"sessionId" validate:"session_id"`
+	BranchID  string `json:"branchId" validate:"id"`
+	AgentID   string `json:"agentId" validate:"id"`
+	RunID     string `json:"runId" validate:"id"`
 }
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
@@ -37,11 +40,13 @@ type AgentThinkingDelta struct {
 }
 
 type AgentModelRequestStarted struct {
+	RequestID   string         `json:"requestId"`
 	RequestKind string         `json:"requestKind"`
 	Timing      *timing.Record `json:"timing,omitempty"`
 }
 
 type AgentModelRequestFinished struct {
+	RequestID   string         `json:"requestId"`
 	RequestKind string         `json:"requestKind"`
 	StopReason  string         `json:"stopReason"`
 	Usage       *ModelUsage    `json:"usage,omitempty"`
@@ -72,7 +77,7 @@ type AgentTurnCompleted struct {
 }
 
 type AgentRunStarted struct {
-	Run agentrun.RunRecord `json:"run"`
+	Run agentrun.Snapshot `json:"run"`
 }
 
 type AgentRunControl struct {
@@ -80,17 +85,17 @@ type AgentRunControl struct {
 }
 
 type AgentRunEnded struct {
-	Run     agentrun.RunRecord    `json:"run"`
+	Run     agentrun.Snapshot     `json:"run"`
 	State   agentmodel.AgentState `json:"state"`
 	Entries []Entry               `json:"entries"`
 }
 
 type AgentSubagentStarted struct {
-	Agent         agentservice.AgentView `json:"agent"`
-	Entries       []Entry                `json:"entries"`
-	ParentAgentID string                 `json:"parentAgentId"`
-	ParentRunID   string                 `json:"parentRunId"`
-	CallID        string                 `json:"callId"`
+	Agent         sessionservice.AgentView `json:"agent"`
+	Entries       []Entry                  `json:"entries"`
+	ParentAgentID string                   `json:"parentAgentId"`
+	ParentRunID   string                   `json:"parentRunId"`
+	CallID        string                   `json:"callId"`
 }
 
 type AgentTaskQueueChanged struct {

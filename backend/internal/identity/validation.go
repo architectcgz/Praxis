@@ -6,7 +6,10 @@ func (id ProjectID) Valid() bool { return validResourceID(string(id)) }
 // Valid 判断会话身份是否满足统一身份契约，不执行规范化。
 func (id SessionID) Valid() bool { return validResourceID(string(id)) }
 
-// Project、Session 身份由外部生成，须能在所有支持的平台上直接作为资源名称使用。
+// Valid 判断分支身份是否可作为资源目录名，删除入口也使用相同契约。
+func (id BranchID) Valid() bool { return validResourceID(string(id)) }
+
+// 资源身份须能在所有支持的平台上直接作为资源名称使用。
 // 统一限制字符、长度和保留名称，避免入口通过后在文件操作阶段才发现身份不可用。
 func validResourceID(value string) bool {
 	if len(value) == 0 || len(value) > 180 {

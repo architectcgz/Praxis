@@ -11,7 +11,7 @@ export function MessageTiming({ runId, turnId, record, running = false }: {
     record?: Timing
     running?: boolean
 }) {
-    const { records, error } = useSessionModelUsage()
+    const { records, recordsError: error } = useSessionModelUsage()
     const request = records.find((item) => item.runId === runId && item.turnId === turnId)
     const usage = request ? formatModelUsage(summarizeModelUsage([request])) : undefined
     const firstResponse = record?.firstResponseMs === undefined ? [] : [`首响应：${formatDuration(record.firstResponseMs)}`]

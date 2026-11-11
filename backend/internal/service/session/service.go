@@ -6,12 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"praxis/internal/clock"
-	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/hook"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
@@ -25,7 +23,7 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Projects       repository.Project
 	Sessions       repository.Session
-	Log            LogStore
+	OpenLog        func(context.Context, identity.SessionID) (LogStore, error)
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
@@ -36,7 +34,7 @@ type Service struct {
 	hookDispatcher *hook.Dispatcher
 	projects       repository.Project
 	sessions       repository.Session
-	log            sessionmodel.EventLog
+	openLog        func(context.Context, identity.SessionID) (LogStore, error)
 	clock          clock.Clock
 	ids            identity.IDGenerator
 
@@ -64,7 +62,7 @@ func NewService(deps Dependencies) *Service {
 		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		sessions:        deps.Sessions,
-		log:             eventLog{store: deps.Log},
+		openLog:         deps.OpenLog,
 		clock:           deps.Clock,
 		ids:             deps.IDs,
 		createdSessions: make(map[identity.SessionID]struct{}),
@@ -110,45 +108,52 @@ func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sess
 		return nil, err
 	}
 	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
-	data := sessionmodel.Open(info.ID)
-	replay := logReplay{session: data, callIndexes: make(map[sessionentry.Key]int)}
-	if err := s.log.Read(ctx, id, data.MainAgentID(), replay.apply); err != nil {
-		return nil, err
-	}
-	agents, err := s.log.Subagents(ctx, id)
+	catalog, err := s.sessions.BranchCatalog(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	for _, agentID := range agents {
-		data.SubagentEntries[agentID] = nil
-		if err := s.log.Read(ctx, id, agentID, replay.apply); err != nil {
-			return nil, err
-		}
-	}
-	if err := data.ValidateRuns(); err != nil {
+	store, err := s.openLog(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	owner := sessionmodel.New(data, s.log, s.clock, s.ids)
-	if len(data.Branches) == 0 {
-		if _, err := owner.CreateBranch(ctx, "", sessionmodel.BranchInput{RequestID: "initial", Name: "main"}); err != nil {
-			return nil, err
-		}
-	}
-	if err := replay.repairToolResults(ctx, owner, info.State); err != nil {
+	log := &eventLog{sessionID: id, store: store, dirty: make(map[logKey]struct{})}
+	if err := log.initialize(ctx, catalog.Branches); err != nil {
 		return nil, err
 	}
-	for _, record := range data.Runs {
-		if !record.Active() {
-			continue
+	catalog, err = s.sessions.BranchCatalog(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCatalog(ctx, catalog, log); err != nil {
+		return nil, err
+	}
+	locations, err := store.Runs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	heads, err := store.AgentHeads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	data := sessionmodel.Open(info.ID)
+	data.Branches, data.RootBranchID, data.RecentBranch = catalog.Branches, catalog.RootBranchID, catalog.DefaultBranchID
+	for _, location := range locations {
+		data.SetRun(location.Record)
+		if location.EndEntryID != "" {
+			data.RunEndEntries[location.Record.ID] = location.EndEntryID
 		}
-		record.End(agentrun.RunInterrupted, "", s.clock.Now())
-		if err := owner.SaveRun(ctx, record); err != nil {
-			return nil, err
-		}
+	}
+	for _, head := range heads {
+		data.AgentHistories[head.AgentID] = sessionmodel.AgentHistory{BranchID: head.BranchID, HeadEntryID: head.EntryID}
+	}
+	owner := sessionmodel.New(data, log, s.clock, s.ids)
+	if err := s.recoverRuns(ctx, owner, log, locations, info.State); err != nil {
+		return nil, err
 	}
 	s.openedMu.Lock()
 	s.opened[id] = &openedSession{
 		session: owner,
+		log:     log,
 		config:  config,
 	}
 	s.openedMu.Unlock()
@@ -221,7 +226,14 @@ func (s *Service) CreateSession(ctx context.Context, params CreateInput) (result
 		return CreateResult{}, projectservice.ErrProjectInvalid
 	}
 	session := sessionmodel.NewSessionInfo(params.SessionID, project.ID, s.clock.Now())
-	if err := s.sessions.Create(ctx, session); err != nil {
+	root := sessionmodel.Branch{
+		ID:        identity.BranchID(s.ids.New("branch")),
+		Name:      "main",
+		RequestID: "initial",
+		CreatedAt: session.CreatedAt,
+		UpdatedAt: session.CreatedAt,
+	}
+	if err := s.sessions.Create(ctx, session, root); err != nil {
 		return CreateResult{}, err
 	}
 	s.openedMu.Lock()

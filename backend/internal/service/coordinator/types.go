@@ -14,7 +14,6 @@ import (
 // RunOperations 是 Coordinator 需要的执行准入、进度和结算能力。
 type RunOperations interface {
 	Execute(context.Context, *agentrun.Run, *loop.Runner, loop.ToolExecutor) error
-	Compact(context.Context, *agentrun.Run, *loop.Runner) error
 	ConfirmRunning(context.Context, *agentrun.Run) error
 	Settle(context.Context, *agentrun.Run, agentrun.RunOutcome, agentrun.RunFailureCode, string) (agentrun.RunRecord, error)
 	PrepareTask(context.Context, sessionmodel.Task, identity.AgentID, agentmodel.AgentDefinition, modelapi.Config, agentrun.SessionContext, string) (*agentrun.Run, bool, error)

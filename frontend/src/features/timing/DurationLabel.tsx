@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { RunRecord } from '../../api'
+import type { RunSnapshot } from '../../api'
 import type { Timing } from '../../api/timings'
 import { formatDuration } from './timing'
 import './styles.css'
@@ -22,7 +22,7 @@ export function DurationLabel({ record, running = false, label = '耗时', compa
 }
 
 /** Run 总耗时直接读取其生命周期，不构造独立计时记录。 */
-export function RunDuration({ run, label = '耗时', activeOnly = false }: { run?: RunRecord | null; label?: string; activeOnly?: boolean }) {
+export function RunDuration({ run, label = '耗时', activeOnly = false }: { run?: RunSnapshot | null; label?: string; activeOnly?: boolean }) {
     const running = run?.Status === 'running' || run?.Status === 'ending'
     const duration = run?.Status === 'ended' ? Math.max(0, Date.parse(run.EndedAt) - Date.parse(run.StartedAt)) : undefined
     const elapsed = useElapsed(run?.StartedAt, running, duration)

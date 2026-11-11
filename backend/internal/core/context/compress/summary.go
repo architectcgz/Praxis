@@ -71,7 +71,7 @@ func percent(value, ratio int) int {
 func summaryContext(previous, transcript string) appcontext.ModelContext {
 	return appcontext.ModelContext{
 		SystemPrompt: summaryPrompt,
-		Entries: []sessionentry.ContextEntry{{
+		Entries: []*sessionentry.ContextEntry{{
 			Role: role.User,
 			Content: []sessionentry.ContentBlock{
 				sessionentry.TextBlock{Text: previousSummaryHeader + previous + transcriptHeader + transcript},

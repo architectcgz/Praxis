@@ -79,22 +79,37 @@ func (b *SessionBindings) GetEntryTree(sessionID string) ([]sessionmodel.TreeNod
 	values, err := services.Commands.Tree(ctx, identity.SessionID(sessionID))
 	return values, publicError(b.host, "GetEntryTree", err)
 }
-func (b *SessionBindings) GetEntriesAt(sessionID, entryID string) ([]dto.Entry, error) {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return nil, publicInputError(b.host, "GetEntriesAt", err)
+func (b *SessionBindings) GetEntriesAt(request dto.EntryHistoryRequest) (dto.HistoryPage, error) {
+	if request.Limit == 0 {
+		request.Limit = 50
 	}
-	if err := validation.Value("entryId", entryID, "omitempty,id"); err != nil {
-		return nil, publicInputError(b.host, "GetEntriesAt", err)
+	if err := validation.Struct(request); err != nil {
+		return dto.HistoryPage{}, publicInputError(b.host, "GetEntriesAt", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return nil, err
+		return dto.HistoryPage{}, err
 	}
-	values, err := services.Commands.EntriesAt(ctx, identity.SessionID(sessionID), entryID)
+	page, err := services.Commands.EntriesAt(ctx, identity.SessionID(request.SessionID), request.HeadEntryID, request.BeforeEntryID, request.Limit)
 	if err != nil {
-		return nil, publicError(b.host, "GetEntriesAt", err)
+		return dto.HistoryPage{}, publicError(b.host, "GetEntriesAt", err)
 	}
-	return publicEntries(values), nil
+	return publicHistoryPage(page), nil
+}
+
+func (b *SessionBindings) DeleteBranch(request dto.DeleteBranchRequest) (dto.DeleteBranchResponse, error) {
+	if err := validation.Struct(request); err != nil {
+		return dto.DeleteBranchResponse{}, publicInputError(b.host, "DeleteBranch", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return dto.DeleteBranchResponse{}, err
+	}
+	result, err := services.Commands.DeleteBranch(ctx, identity.SessionID(request.SessionID), identity.BranchID(request.BranchID), identity.BranchID(request.TargetBranchID), request.BindingID)
+	if err != nil {
+		return dto.DeleteBranchResponse{}, publicError(b.host, "DeleteBranch", err)
+	}
+	return dto.DeleteBranchResponse{Branch: result.Branch, BindingID: result.BindingID, CleanupError: result.CleanupError}, nil
 }
 func (b *SessionBindings) CloseSession(sessionID string) error {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {

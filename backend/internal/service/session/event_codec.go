@@ -55,10 +55,10 @@ func decodeEvent(line []byte) (sessionmodel.Event, error) {
 	}
 	var err error
 	switch stored.Type {
-	case sessionmodel.EventBranchCreated:
-		event.Payload, err = decodeEventPayload[sessionmodel.Branch](stored.Payload)
 	case sessionmodel.EventRunSaved:
 		event.Payload, err = decodeEventPayload[agentrun.RunRecord](stored.Payload)
+	case sessionmodel.EventRunEnded:
+		event.Payload, err = decodeEventPayload[sessionmodel.RunEnded](stored.Payload)
 	case sessionmodel.EventEntryAppended:
 		event.Payload, err = decodeEventPayload[sessionentry.ContextEntry](stored.Payload)
 	case sessionmodel.EventModelRequestStarted, sessionmodel.EventModelRequestFinished:

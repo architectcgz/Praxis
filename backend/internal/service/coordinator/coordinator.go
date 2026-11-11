@@ -125,18 +125,19 @@ func (r *Coordinator) launchLocked(run *agentrun.Run, runID identity.RunID, acti
 func (r *Coordinator) Close(ctx context.Context) error {
 	r.mu.Lock()
 	r.closed = true
+	executions := make([]*activeRun, 0, len(r.runs))
 	for _, active := range r.runs {
-		active.cancel(context.Canceled)
+		executions = append(executions, active)
 	}
 	r.mu.Unlock()
+	for _, active := range executions {
+		active.cancel(context.Canceled)
+	}
 	done := make(chan struct{})
 	go func() { r.running.Wait(); close(done) }()
 	select {
 	case <-done:
 		r.mu.Lock()
-		for _, binding := range r.bindings {
-			binding.queue.Clear()
-		}
 		clear(r.bindings)
 		clear(r.branchResults)
 		r.mu.Unlock()

@@ -1,4 +1,4 @@
-// Package compress 在完整用户轮次结束后将当前上下文合成为一条摘要。
+// Package compress 在模型请求前压缩较早历史，保留当前输入与最近完整工具交互。
 package compress
 
 import (
@@ -14,5 +14,5 @@ type Options struct {
 }
 
 // RequestSummaryFunc 只负责无工具的摘要模型请求，不决定压缩范围或修改输入条目。
-// 调用方负责请求序号、用量记录、取消和错误处理；返回值只能作为不可信上下文内容。
+// 调用方负责请求身份、用量记录、取消和错误处理；返回值只能作为不可信上下文内容。
 type RequestSummaryFunc func(context.Context, appcontext.ModelContext, int) (string, error)

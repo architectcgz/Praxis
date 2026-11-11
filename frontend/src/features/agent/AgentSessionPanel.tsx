@@ -10,6 +10,7 @@ import { ModelUsageProvider } from './SessionTokenUsage'
 
 type AgentSessionPanelProps = {
     branchId: string
+    usageRevision: number
     loading: boolean
     agents: AgentView[]
     agent: AgentView | null
@@ -19,6 +20,10 @@ type AgentSessionPanelProps = {
     outputStore: AgentOutputSource
     onSelectAgent: (id: string) => void
     entriesError: string
+    hasEarlier: boolean
+    historyLoading: boolean
+    onLoadEarlier: () => Promise<void>
+    onRetryHistory: () => Promise<void>
     input: string
     setInput: (value: string) => void
     models: ModelOption[]
@@ -37,7 +42,7 @@ type AgentSessionPanelProps = {
 }
 
 /** 展示当前 Session 中选中的 Agent 对话和输入控件。 */
-export function AgentSessionPanel({ branchId, loading, agents, agent, entries, agentEntries, agentEntriesErrors, outputStore, onSelectAgent, entriesError, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
+export function AgentSessionPanel({ branchId, usageRevision, loading, agents, agent, entries, agentEntries, agentEntriesErrors, outputStore, onSelectAgent, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, canQueue, beforeInput, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentSessionPanelProps) {
     const { streamingOutputs, pendingUserMessages, awaitingAgentId } = useSyncExternalStore(outputStore.subscribeOutput, outputStore.getOutput)
     if (loading) {
         return <div className="agent-loading" aria-busy="true"><LoaderCircle size={18} className="is-spinning" aria-hidden="true" /><span>加载对话中</span></div>
@@ -48,7 +53,7 @@ export function AgentSessionPanel({ branchId, loading, agents, agent, entries, a
 
     const hasSubagents = agents.some((item) => item.Kind === 'subagent')
     return (
-        <ModelUsageProvider key={agent.SessionID} sessionId={agent.SessionID}>
+        <ModelUsageProvider key={`${agent.SessionID}-${branchId}`} sessionId={agent.SessionID} revision={usageRevision} entries={entries}>
         <FilePreviewProvider sessionId={agent.SessionID}>
         <AgentConversation
             key={`${agent.SessionID}-${branchId}`}
@@ -68,6 +73,7 @@ export function AgentSessionPanel({ branchId, loading, agents, agent, entries, a
             pendingUserMessages={pendingUserMessages}
             awaitingOutput={awaitingAgentId === agent.ID}
             entriesError={entriesError}
+            hasEarlier={hasEarlier} historyLoading={historyLoading} onLoadEarlier={onLoadEarlier} onRetryHistory={onRetryHistory}
             input={input}
             setInput={setInput}
             models={models}

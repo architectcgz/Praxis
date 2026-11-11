@@ -3,6 +3,7 @@ package entry
 import (
 	"encoding/json"
 	"fmt"
+	"praxis/internal/core/agent/run/timing"
 	"praxis/internal/core/tool"
 )
 
@@ -26,10 +27,11 @@ type ToolCallBlock struct {
 }
 
 type ToolResultBlock struct {
-	CallID  string        `json:"callId"`
-	Name    tool.ToolName `json:"name"`
-	Text    string        `json:"text"`
-	IsError bool          `json:"isError,omitzero"`
+	CallID  string         `json:"callId"`
+	Name    tool.ToolName  `json:"name"`
+	Text    string         `json:"text"`
+	IsError bool           `json:"isError,omitzero"`
+	Timing  *timing.Record `json:"timing,omitempty"`
 }
 
 type ReasoningStateBlock struct {

@@ -7,19 +7,18 @@ import (
 	"praxis/wails/validation"
 )
 
-func (b *CommandBindings) ListToolApprovals(sessionID, branchID, agentID string) ([]dto.ToolApproval, error) {
-	if err := validateAgentQuery(sessionID, branchID, agentID); err != nil {
+func (b *CommandBindings) ListToolApprovals(sessionID, agentID string) ([]dto.ToolApproval, error) {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
+	}
+	if err := validation.Value("agentId", agentID, "id"); err != nil {
 		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return nil, err
 	}
-	_, err = services.Agents.GetAgentView(ctx, identity.SessionID(sessionID), identity.AgentID(agentID), identity.BranchID(branchID))
-	if err != nil {
-		return nil, publicError(b.host, "ListToolApprovals.scope", err)
-	}
-	values, err := services.Commands.ListToolApprovals(ctx, identity.AgentID(agentID), identity.BranchID(branchID))
+	values, err := services.Commands.ListToolApprovals(ctx, identity.SessionID(sessionID), identity.AgentID(agentID))
 	if err != nil {
 		return nil, publicError(b.host, "CommandBindings.ListToolApprovals", err)
 	}

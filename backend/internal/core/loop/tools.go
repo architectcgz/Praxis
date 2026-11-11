@@ -22,7 +22,6 @@ func prepareToolCalls(params RunParams, turnID identity.TurnID, values []provide
 			},
 			SessionID: params.SessionID,
 			AgentID:   params.AgentID,
-			RequestID: params.RequestID.String(),
 			TurnID:    turnID,
 			Name:      call.Name,
 			Arguments: call.Arguments,
@@ -42,8 +41,9 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, appendEntry
 			return index, NewFailure(FailureStorage, err)
 		}
 		entry := call.ResultEntry(outcome.ToolResult)
-		entry.Timing = outcome.Timing
 		block := entry.Content[0].(sessionentry.ToolResultBlock)
+		block.Timing = outcome.Timing
+		entry.Content[0] = block
 		r.emit(params, call.TurnID, coreevent.ToolResult{
 			CallID:  block.CallID,
 			Result:  block.Text,

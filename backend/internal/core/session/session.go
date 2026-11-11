@@ -7,18 +7,19 @@ import (
 	"sync"
 )
 
-// Session 持有完整会话数据；写锁覆盖内存更新与随后的同步日志追加。
+// Session 持有会话数据；提交锁保证接纳与同步追加顺序，数据锁只保护内存。
 // 日志写入失败不撤销内存更新；发布后的 Entry 及其内部载荷只读。
 // 模型请求、工具执行和 Hook 不持有会话锁。
 type Session struct {
-	mu    sync.RWMutex
-	data  *Data
-	log   EventLog
-	clock clock.Clock
-	ids   identity.IDGenerator
+	commitMu sync.Mutex
+	mu       sync.RWMutex
+	data     *Data
+	log      EventLog
+	clock    clock.Clock
+	ids      identity.IDGenerator
 }
 
-// New 接管已完成日志重放的数据；调用方发布实例后不再直接修改 data。
+// New 接管完成索引与必要恢复的数据；发布实例后不再直接修改 data。
 func New(data *Data, log EventLog, clock clock.Clock, ids identity.IDGenerator) *Session {
 	return &Session{
 		data:  data,
@@ -31,7 +32,12 @@ func New(data *Data, log EventLog, clock clock.Clock, ids identity.IDGenerator) 
 func (s *Session) Empty() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return len(s.data.Entries) == 0
+	for _, branch := range s.data.Branches {
+		if branch.HeadEntryID != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func capped[T any](values []T, limit int) []T {

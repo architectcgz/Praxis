@@ -164,7 +164,7 @@ func (TurnCompleted) Kind() Kind { return KindTurnCompleted }
 func (TurnCompleted) isPayload() {}
 
 type RunStarted struct {
-	Run agentrun.RunRecord
+	Run agentrun.Snapshot
 }
 
 func (RunStarted) Kind() Kind { return KindRunStarted }
@@ -176,7 +176,7 @@ func (RunInterruptRequested) Kind() Kind { return KindRunInterruptRequested }
 func (RunInterruptRequested) isPayload() {}
 
 type RunEnded struct {
-	Run     agentrun.RunRecord
+	Run     agentrun.Snapshot
 	State   agentmodel.AgentState
 	Entries []sessionentry.ContextEntry
 }
@@ -186,7 +186,9 @@ func (RunEnded) isPayload() {}
 
 type SubagentStarted struct {
 	Name          string
-	Run           agentrun.RunRecord
+	DefinitionID  identity.AgentDefinitionID
+	CreatedAt     time.Time
+	Run           agentrun.Snapshot
 	Entries       []sessionentry.ContextEntry
 	ParentAgentID identity.AgentID
 	ParentRunID   identity.RunID
@@ -207,7 +209,7 @@ func (TaskQueueChanged) Kind() Kind { return KindTaskQueueChanged }
 func (TaskQueueChanged) isPayload() {}
 
 type RequestCanceled struct {
-	Run     agentrun.RunRecord
+	Run     agentrun.Snapshot
 	State   agentmodel.AgentState
 	Entries []sessionentry.ContextEntry
 }

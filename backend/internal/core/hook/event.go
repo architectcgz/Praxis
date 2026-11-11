@@ -12,11 +12,6 @@ type EntryCommitted struct {
 	Entry sessionentry.ContextEntry
 }
 
-func (e EntryCommitted) clone() EntryCommitted {
-	e.Entry = e.Entry.Clone()
-	return e
-}
-
 type UserInputCommittedHook interface {
 	UserInputCommitted(context.Context, EntryCommitted) error
 }

@@ -26,14 +26,15 @@ type (
 	ContextWindowExceededError = appcontext.ContextWindowExceededError
 )
 
-// ModelProgress 提供请求序号、模型消耗和计时记录，不暴露执行生命周期或完整记录。
-type ModelProgress interface {
-	NextRequestSequence(context.Context) (uint64, error)
-	RecordModelRequest(context.Context, uint64, agentrun.ModelRequestRecord, *timing.Record) error
+// RunRecorder 记录本次执行的轮次边界、模型请求、用量和计时，不暴露完整执行记录。
+type RunRecorder interface {
+	BeginTurn(context.Context) (identity.TurnID, error)
+	EndTurn(context.Context) error
+	RecordModelRequest(context.Context, agentrun.ModelRequestRecord, *timing.Record) error
 	RecordModelResponse(context.Context, agentrun.ModelRequestRecord, *timing.Record) error
 }
 
-// RunParams 保存一次执行的身份和冻结模型配置，供各轮模型请求共用。
+// RunParams 保存一次执行的身份、系统提示词和冻结模型配置，供各轮模型请求共用。
 type RunParams struct {
 	ID           identity.RunID
 	SourceTaskID identity.TaskID
@@ -41,24 +42,18 @@ type RunParams struct {
 	BranchID     identity.BranchID
 	BindingID    string
 	AgentID      identity.AgentID
-	RequestID    identity.RequestID
-	Model        modelapi.Config
-}
-
-// Input 提供本次 Loop 的初始历史与提示词，条目内容由 Session 按只读值共享。
-type Input struct {
 	SystemPrompt string
-	InputEntryID string
-	Entries      []*sessionentry.ContextEntry
+	Model        modelapi.Config
 }
 
 // AppendEntry 同步提交条目，返回已接纳的只读引用、是否新增及保存错误。
 // 保存失败仍可能返回已接纳条目，Loop 不因此重新执行已有副作用的工具。
 type AppendEntry func(context.Context, sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error)
 
-// RunDependencies 绑定本次 Loop 的事实提交和计时能力，不持有执行或会话对象。
+// RunDependencies 绑定本次 Loop 的历史读取、事实提交和计时能力，不持有执行或会话对象。
 type RunDependencies struct {
-	Progress    ModelProgress
+	Recorder    RunRecorder
+	ReadEntries func(context.Context) ([]*sessionentry.ContextEntry, error)
 	AppendEntry AppendEntry
 }
 

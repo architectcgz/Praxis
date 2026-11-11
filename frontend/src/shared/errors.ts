@@ -71,6 +71,14 @@ function readableApiError(code: string) {
             return '执行状态保存失败。'
         case API_ERROR_CODES.sessionLogUnavailable:
             return '会话日志写入失败，已停止该会话。请重启应用后再继续，勿重复执行工具。'
+        case API_ERROR_CODES.invalidForkPoint:
+            return '只能从主会话已结束执行的末尾创建分支。'
+        case API_ERROR_CODES.branchNameConflict:
+            return '分支名称已存在，请使用其他名称。'
+        case API_ERROR_CODES.rootBranch:
+            return '根分支不可删除。'
+        case API_ERROR_CODES.branchHasChildren:
+            return '该分支仍有子分支，请先删除子分支。'
         case API_ERROR_CODES.runProvider:
             return '模型 Provider 无法完成请求。'
         case API_ERROR_CODES.runTool:

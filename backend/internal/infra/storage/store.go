@@ -10,7 +10,6 @@ import (
 type Store struct {
 	Projects ProjectRepository
 	Sessions SessionRepository
-	Logs     SessionLog
 }
 
 // Open 初始化项目配置目录并打开会话元数据库，不加载会话历史。
@@ -32,7 +31,6 @@ func Open(ctx context.Context, dataRoot string) (*Store, error) {
 	return &Store{
 		Projects: ProjectRepository{dataRoot: dataRoot},
 		Sessions: sessions,
-		Logs:     SessionLog{sessions: sessions},
 	}, nil
 }
 

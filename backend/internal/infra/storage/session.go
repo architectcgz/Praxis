@@ -33,18 +33,28 @@ func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sess
 		FROM sessions WHERE id = ?`, id.String()))
 }
 
-// Create 先建立空历史文件，再提交 SQLite 元数据；数据库提交失败允许留下未被索引的空文件。
-func (r SessionRepository) Create(ctx context.Context, value sessionmodel.SessionInfo) error {
+// Create 将会话、唯一根分支与默认选择放入同一个 SQLite 事务。
+func (r SessionRepository) Create(ctx context.Context, value sessionmodel.SessionInfo, root sessionmodel.Branch) (err error) {
 	if _, err := r.Get(ctx, value.ID); err == nil {
 		return errorcode.ErrRequestConflict
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return err
 	}
-	path := sessionLogPath(r.dataRoot, value.ProjectID, value.ID)
-	if err := jsonl.Create(ctx, path); err != nil {
+	dir := branchPath(r.dataRoot, value.ProjectID, value.ID, root.ID)
+	if err := createBranchLog(ctx, dir); err != nil {
 		return err
 	}
-	_, err := r.database.ExecContext(ctx, `
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, os.RemoveAll(dir))
+		}
+	}()
+	tx, err := r.database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO sessions (id, project_id, title, state, created_at, updated_at, approval_mode)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		value.ID.String(), value.ProjectID.String(), value.Title,
@@ -52,7 +62,15 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 	if err != nil {
 		return fmt.Errorf("create session metadata: %w", err)
 	}
-	return nil
+	if err := insertBranch(ctx, tx, value.ID, root); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO session_defaults (session_id, root_branch_id, branch_id) VALUES (?, ?, ?)`,
+		value.ID.String(), root.ID.String(), root.ID.String()); err != nil {
+		return fmt.Errorf("create session branch selection: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (r SessionRepository) List(ctx context.Context, limit int) ([]sessionmodel.SessionInfo, error) {
@@ -129,8 +147,7 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) er
 	if err != nil {
 		return fmt.Errorf("delete session metadata: %w", err)
 	}
-	_ = os.Remove(sessionLogPath(r.dataRoot, value.ProjectID, id))
-	_ = os.RemoveAll(filepath.Join(r.dataRoot, "projects", value.ProjectID.String(), "sessions", id.String()))
+	_ = os.RemoveAll(sessionPath(r.dataRoot, value.ProjectID, id))
 	return nil
 }
 
@@ -140,7 +157,11 @@ func (r SessionRepository) SessionLogPath(ctx context.Context, id identity.Sessi
 	if err != nil {
 		return "", err
 	}
-	path := sessionLogPath(r.dataRoot, value.ProjectID, id)
+	var branchID identity.BranchID
+	if err := r.database.QueryRowContext(ctx, `SELECT branch_id FROM session_defaults WHERE session_id = ?`, id.String()).Scan(&branchID); err != nil {
+		return "", fmt.Errorf("read default branch: %w", err)
+	}
+	path := filepath.Join(branchPath(r.dataRoot, value.ProjectID, id, branchID), "main.jsonl")
 	if err := jsonl.CheckRegularFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", errorcode.ErrNotFound
@@ -150,18 +171,15 @@ func (r SessionRepository) SessionLogPath(ctx context.Context, id identity.Sessi
 	return path, nil
 }
 
-func sessionLogPath(dataRoot string, projectID identity.ProjectID, sessionID identity.SessionID) string {
-	return filepath.Join(dataRoot, "projects", projectID.String(), "sessions", sessionID.String()+".jsonl")
-}
-
 func openSessionMetadataDatabase(ctx context.Context, dataRoot string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", filepath.Join(dataRoot, "sessions.db"))
 	if err != nil {
 		return nil, fmt.Errorf("open session database: %w", err)
 	}
-	// 单连接避免 SQLite 连接间竞争写锁，元数据更新由单条 SQL 保证原子性。
+	// 单连接避免 SQLite 连接间竞争写锁，结构变更由事务保证原子性。
 	db.SetMaxOpenConns(1)
 	_, err = db.ExecContext(ctx, `
+		PRAGMA foreign_keys = ON;
 		CREATE TABLE IF NOT EXISTS sessions (
 			id TEXT PRIMARY KEY,
 			project_id TEXT NOT NULL,
@@ -172,7 +190,30 @@ func openSessionMetadataDatabase(ctx context.Context, dataRoot string) (*sql.DB,
 			approval_mode TEXT CHECK (approval_mode IN ('ask', 'auto', 'yolo'))
 		);
 		CREATE INDEX IF NOT EXISTS sessions_project_updated ON sessions (project_id, updated_at DESC, id);
-	`)
+		CREATE TABLE IF NOT EXISTS session_branches (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			request_id TEXT NOT NULL,
+			source_branch_id TEXT,
+			base_entry_id TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			PRIMARY KEY (session_id, id),
+			UNIQUE (session_id, name),
+			UNIQUE (session_id, request_id),
+			FOREIGN KEY (session_id, source_branch_id) REFERENCES session_branches(session_id, id),
+			CHECK ((source_branch_id IS NULL AND base_entry_id = '') OR (source_branch_id IS NOT NULL AND base_entry_id <> ''))
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS session_branch_root ON session_branches(session_id) WHERE source_branch_id IS NULL;
+		CREATE INDEX IF NOT EXISTS session_branch_parent ON session_branches(session_id, source_branch_id);
+		CREATE TABLE IF NOT EXISTS session_defaults (
+			session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+			root_branch_id TEXT NOT NULL,
+			branch_id TEXT NOT NULL,
+			FOREIGN KEY (session_id, root_branch_id) REFERENCES session_branches(session_id, id),
+			FOREIGN KEY (session_id, branch_id) REFERENCES session_branches(session_id, id)
+		);
+	`+historySchema)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("initialize session database: %w", err), db.Close())
 	}

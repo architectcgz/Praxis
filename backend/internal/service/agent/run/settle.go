@@ -11,6 +11,7 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	sessionmodel "praxis/internal/core/session"
+	sessionentry "praxis/internal/core/session/entry"
 )
 
 // ConfirmRunning 区分首次启动与重复确认；审批等待不改变运行状态。
@@ -32,7 +33,7 @@ func (s *Service) ConfirmRunning(ctx context.Context, run *agentrun.Run) error {
 		if s.emitter != nil {
 			s.emitter.Emit(coreevent.Event{
 				Source:  coreevent.SourceForRun(run, ""),
-				Payload: coreevent.RunStarted{Run: run.Snapshot()},
+				Payload: coreevent.RunStarted{Run: run.Snapshot().Snapshot()},
 			})
 		}
 	}
@@ -72,11 +73,17 @@ func (s *Service) Settle(ctx context.Context, run *agentrun.Run, outcome agentru
 		if outcome == agentrun.RunFailed {
 			endedRun.FailureMessage = failureMessage
 		}
-		err = s.records.SaveRun(ctx, endedRun)
+		var end *sessionentry.ContextEntry
+		end, err = s.records.SaveRun(ctx, endedRun)
+		if end != nil {
+			if _, _, acceptErr := run.Accept(end); acceptErr != nil {
+				return agentrun.RunRecord{}, acceptErr
+			}
+		}
 		if err != nil {
 			s.logger.Errorf(
-				"operation=run_end request_id=%s session_id=%s agent_id=%s run_id=%s status=failed outcome=%s error=%v",
-				endedRun.RequestID,
+				"operation=run_end task_id=%s session_id=%s agent_id=%s run_id=%s status=failed outcome=%s error=%v",
+				endedRun.SourceTaskID,
 				endedRun.SessionID,
 				endedRun.AgentID,
 				runID,
@@ -97,13 +104,12 @@ func (s *Service) Settle(ctx context.Context, run *agentrun.Run, outcome agentru
 			s.logger.Errorf("name settled session run_id=%s error=%v", endedRun.ID, nameErr)
 		}
 	}()
-	run.Agent.FinishRun(endedRun.AgentState(), endedRun.EndedAt)
 	if !firstEnd {
 		return endedRun, nil
 	}
 	s.logger.Infof(
-		"operation=run_end request_id=%s session_id=%s agent_id=%s run_id=%s status=accepted outcome=%s",
-		endedRun.RequestID,
+		"operation=run_end task_id=%s session_id=%s agent_id=%s run_id=%s status=accepted outcome=%s",
+		endedRun.SourceTaskID,
 		endedRun.SessionID,
 		endedRun.AgentID,
 		runID,
@@ -126,13 +132,13 @@ func (s *Service) Settle(ctx context.Context, run *agentrun.Run, outcome agentru
 	if s.emitter != nil {
 		entries := run.Entries()
 		var payload coreevent.Payload = coreevent.RunEnded{
-			Run:     endedRun,
+			Run:     endedRun.Snapshot(),
 			State:   endedRun.AgentState(),
 			Entries: entries,
 		}
 		if endedRun.FailureCode == agentrun.RunFailureRequestCanceled {
 			payload = coreevent.RequestCanceled{
-				Run:     endedRun,
+				Run:     endedRun.Snapshot(),
 				State:   endedRun.AgentState(),
 				Entries: entries,
 			}

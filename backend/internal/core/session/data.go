@@ -1,65 +1,52 @@
 package session
 
 import (
+	"maps"
 	agentrun "praxis/internal/core/agent/run"
+	modelusage "praxis/internal/core/model/usage"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"slices"
 )
 
-// Data 拥有完整会话数据；分支选择和输入队列属于页面绑定。
-// 重放完成后由 Session 接管并通过读写锁保护；发布后的 Entry 及内部载荷不再修改。
+type AgentHistory struct {
+	BranchID    identity.BranchID
+	HeadEntryID string
+}
+
+// Data 只持有结构、执行展示投影和未完整落盘的接纳结果。
+// 已持久化正文由当前页面、Run 或 Loop 按自身生命周期持有，不在会话中缓存。
 type Data struct {
-	ID              identity.SessionID
-	Entries         []*sessionentry.ContextEntry
-	Branches        []Branch
-	RecentBranch    identity.BranchID
-	Runs            []agentrun.RunRecord
-	ModelRequests   []agentrun.ModelRequestRecord
-	SubagentEntries map[identity.AgentID][]*sessionentry.ContextEntry
-	entryIndexes    map[string]int
+	ID             identity.SessionID
+	RootBranchID   identity.BranchID
+	Branches       []Branch
+	RecentBranch   identity.BranchID
+	Runs           []agentrun.HistorySummary
+	Usage          modelusage.Totals
+	TotalRequests  uint64
+	RunEndEntries  map[identity.RunID]string
+	AgentHistories map[identity.AgentID]AgentHistory
+	PendingEntries map[string]*sessionentry.ContextEntry
+	PendingNodes   map[string]sessionentry.Node
+	ModelRequests  map[identity.ModelRequestID]agentrun.ModelRequestRecord
+	PendingRuns    map[identity.RunID]agentrun.RunRecord
+	runIndexes     map[identity.RunID]int
 }
 
 func Open(id identity.SessionID) *Data {
 	return &Data{
-		ID:              id,
-		SubagentEntries: make(map[identity.AgentID][]*sessionentry.ContextEntry),
-		entryIndexes:    make(map[string]int),
+		ID:             id,
+		RunEndEntries:  make(map[identity.RunID]string),
+		AgentHistories: make(map[identity.AgentID]AgentHistory),
+		PendingEntries: make(map[string]*sessionentry.ContextEntry),
+		PendingNodes:   make(map[string]sessionentry.Node),
+		ModelRequests:  make(map[identity.ModelRequestID]agentrun.ModelRequestRecord),
+		runIndexes:     make(map[identity.RunID]int),
+		PendingRuns:    make(map[identity.RunID]agentrun.RunRecord),
 	}
 }
 
 func (s *Data) MainAgentID() identity.AgentID { return identity.AgentID(s.ID) }
-
-func (s *Data) Entry(id string) (*sessionentry.ContextEntry, bool) {
-	index, found := s.entryIndexes[id]
-	if !found {
-		return nil, false
-	}
-	return s.Entries[index], true
-}
-
-// AcceptEntry 只接收已经确认归属的完整 Entry，不保存模型请求的精简副本。
-func (s *Data) AcceptEntry(branchID identity.BranchID, entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
-	stored := new(entry)
-	s.Entries = append(s.Entries, stored)
-	s.entryIndexes[entry.ID] = len(s.Entries) - 1
-	branch := s.Branch(branchID)
-	branch.HeadEntryID, branch.UpdatedAt = entry.ID, entry.CreatedAt
-	s.RecentBranch = branch.ID
-	return stored
-}
-
-// hasAncestor 判断节点是否位于指定 Head 的历史路径上，包含 Head 自身。
-func (s *Data) hasAncestor(head, entryID string) bool {
-	for head != "" {
-		if head == entryID {
-			return true
-		}
-		entry, _ := s.Entry(head)
-		head = entry.ParentID
-	}
-	return false
-}
 
 func (s *Data) Branch(id identity.BranchID) *Branch {
 	for index := range s.Branches {
@@ -84,72 +71,70 @@ func (s *Data) AcceptBranch(branch Branch) {
 	s.RecentBranch = branch.ID
 }
 
-// Path 按父节点回溯当前路径，共同祖先不需要复制到各分支。
-func (s *Data) Path(head string) []*sessionentry.ContextEntry {
-	entries := make([]*sessionentry.ContextEntry, 0)
-	for head != "" {
-		entry, found := s.Entry(head)
-		if !found {
-			break
-		}
-		entries = append(entries, entry)
-		head = entry.ParentID
+func (s *Data) acceptEntry(branchID identity.BranchID, agentID identity.AgentID, value sessionentry.ContextEntry) *sessionentry.ContextEntry {
+	stored := new(value)
+	s.PendingEntries[value.ID] = stored
+	s.PendingNodes[value.ID] = sessionentry.NewNode(branchID, agentID, value)
+	if value.IsRun() {
+		s.RunEndEntries[identity.RunID(value.RunID)] = value.ID
 	}
-	slices.Reverse(entries)
-	return entries
+	if agentID == s.MainAgentID() {
+		branch := s.Branch(branchID)
+		branch.HeadEntryID, branch.UpdatedAt = value.ID, value.CreatedAt
+	} else {
+		s.AgentHistories[agentID] = AgentHistory{BranchID: branchID, HeadEntryID: value.ID}
+	}
+	return stored
 }
 
-func (s *Data) Safe(head string) bool {
-	pending := make(map[sessionentry.Key]bool)
-	for _, entry := range s.Path(head) {
-		for _, block := range entry.Content {
-			switch value := block.(type) {
-			case sessionentry.ToolCallBlock:
-				pending[sessionentry.Key{RunID: identity.RunID(entry.RunID), CallID: value.CallID}] = true
-			case sessionentry.ToolResultBlock:
-				key := sessionentry.Key{RunID: identity.RunID(entry.RunID), CallID: value.CallID}
-				if !pending[key] {
-					return false
-				}
-				delete(pending, key)
-			}
-		}
-	}
-	return len(pending) == 0
+func (s *Data) releaseEntry(id string) {
+	delete(s.PendingEntries, id)
+	delete(s.PendingNodes, id)
 }
 
 func (s *Data) RunIndex(id identity.RunID) int {
-	return slices.IndexFunc(s.Runs, func(value agentrun.RunRecord) bool { return value.ID == id })
+	if index, found := s.runIndexes[id]; found {
+		return index
+	}
+	return -1
 }
 
-func (s *Data) SetRun(value agentrun.RunRecord) {
+func (s *Data) SetRun(value agentrun.HistorySummary) {
 	if index := s.RunIndex(value.ID); index >= 0 {
+		s.Usage.Subtract(s.Runs[index].Usage)
+		s.TotalRequests -= s.Runs[index].ModelRequests
 		s.Runs[index] = value
 	} else {
+		s.runIndexes[value.ID] = len(s.Runs)
 		s.Runs = append(s.Runs, value)
 	}
+	s.Usage.Merge(value.Usage)
+	s.TotalRequests += value.ModelRequests
 }
 
-func (s *Data) SetModelRequest(value agentrun.ModelRequestRecord) {
-	index := slices.IndexFunc(s.ModelRequests, func(prior agentrun.ModelRequestRecord) bool { return prior.TurnID == value.TurnID })
-	if index >= 0 {
-		s.ModelRequests[index] = value
-	} else {
-		s.ModelRequests = append(s.ModelRequests, value)
+func (s *Data) RemoveBranch(id identity.BranchID) {
+	s.Branches = slices.DeleteFunc(s.Branches, func(branch Branch) bool { return branch.ID == id })
+	s.Runs = slices.DeleteFunc(s.Runs, func(run agentrun.HistorySummary) bool {
+		if run.BranchID != id {
+			return false
+		}
+		s.Usage.Subtract(run.Usage)
+		s.TotalRequests -= run.ModelRequests
+		delete(s.RunEndEntries, run.ID)
+		delete(s.PendingRuns, run.ID)
+		return true
+	})
+	clear(s.runIndexes)
+	for index, run := range s.Runs {
+		s.runIndexes[run.ID] = index
 	}
-}
-
-func (s *Data) SubagentEntry(agentID identity.AgentID, entryID string) (*sessionentry.ContextEntry, bool) {
-	for _, value := range s.SubagentEntries[agentID] {
-		if value.ID == entryID {
-			return value, true
+	maps.DeleteFunc(s.AgentHistories, func(_ identity.AgentID, history AgentHistory) bool { return history.BranchID == id })
+	for entryID, node := range s.PendingNodes {
+		if node.BranchID == id {
+			s.releaseEntry(entryID)
 		}
 	}
-	return nil, false
-}
-
-func (s *Data) AcceptSubagentEntry(agentID identity.AgentID, entry sessionentry.ContextEntry) *sessionentry.ContextEntry {
-	stored := new(entry)
-	s.SubagentEntries[agentID] = append(s.SubagentEntries[agentID], stored)
-	return stored
+	maps.DeleteFunc(s.ModelRequests, func(_ identity.ModelRequestID, request agentrun.ModelRequestRecord) bool {
+		return s.RunIndex(request.RunID) < 0
+	})
 }

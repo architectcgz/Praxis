@@ -4,7 +4,7 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
-	agentservice "praxis/internal/service/agent"
+	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -64,11 +64,13 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		data = struct{}{}
 	case coreevent.ModelRequestStarted:
 		data = dto.AgentModelRequestStarted{
+			RequestID:   payload.Request.ID.String(),
 			RequestKind: string(payload.Request.Kind),
 			Timing:      payload.Timing,
 		}
 	case coreevent.ModelRequestFinished:
 		value := dto.AgentModelRequestFinished{
+			RequestID:   payload.Request.ID.String(),
 			RequestKind: string(payload.Request.Kind),
 			StopReason:  string(payload.Request.StopReason),
 			Timing:      payload.Timing,
@@ -86,19 +88,18 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	case coreevent.SubagentStarted:
 		record := payload.Run
 		data = dto.AgentSubagentStarted{
-			Agent: agentservice.AgentView{
-				ID:           record.AgentID,
-				SessionID:    record.SessionID,
-				BranchID:     record.BranchID,
-				DefinitionID: record.Config.AgentDefinitionID,
+			Agent: sessionservice.AgentView{
+				ID:           event.Source.AgentID,
+				SessionID:    event.Source.SessionID,
+				BranchID:     event.Source.BranchID,
+				DefinitionID: payload.DefinitionID,
 				Kind:         agentmodel.KindSubagent,
-				CreatedAt:    record.CreatedAt,
-				UpdatedAt:    record.CreatedAt,
+				CreatedAt:    payload.CreatedAt,
+				UpdatedAt:    payload.CreatedAt,
 				Name:         payload.Name,
-				State:        record.AgentState(),
+				State:        agentmodel.AgentExecuting,
 				CurrentRunID: record.ID,
 				CurrentRun:   &record,
-				LatestRun:    &record,
 			},
 			Entries:       publicEntries(payload.Entries),
 			ParentAgentID: payload.ParentAgentID.String(),

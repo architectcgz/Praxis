@@ -13,13 +13,13 @@ type ModelChoice struct {
 }
 
 // ModelSelection 保存一个会话已解析的模型配置，不属于持久化 Session 资料。
-// 配置只通过副本进出，切换选择不会修改已冻结的执行配置。
+// 选择与执行共享只读模型配置，切换时替换选择，不修改已发布配置。
 type ModelSelection struct {
 	config modelapi.Config
 }
 
 func NewModelSelection(config modelapi.Config) ModelSelection {
-	return ModelSelection{config: config.Clone()}
+	return ModelSelection{config: config}
 }
 
 func (s ModelSelection) Choice() ModelChoice {
@@ -34,5 +34,5 @@ func (s ModelSelection) CurrentModelConfig() (modelapi.Config, error) {
 	if s.config.ProviderID == "" || s.config.ModelID == "" {
 		return modelapi.Config{}, modelconfig.ErrNotConfigured
 	}
-	return s.config.Clone(), nil
+	return s.config, nil
 }

@@ -18,7 +18,7 @@ type CollaborationViewsProps = {
 export function CollaborationViews({ agents, agentEntries, entriesErrors, streamingOutputs, onSelectAgent }: CollaborationViewsProps) {
     const subagents = agents.filter((agent) => agent.Kind === 'subagent')
     if (subagents.length === 0) return null
-    const tasks = subagents.map((agent) => taskView(agent, agentEntries[agent.ID] || [], streamingOutputs[agent.ID], entriesErrors[agent.ID]))
+    const tasks = subagents.map((agent) => taskView(agent, agentEntries[agent.ID], streamingOutputs[agent.ID], entriesErrors[agent.ID]))
     const completed = tasks.filter((task) => task.status === 'completed').length
     const running = tasks.filter((task) => task.status === 'running').length
     const blocked = tasks.filter((task) => task.status === 'failed' || task.status === 'blocked' || task.status === 'cancelled').length
@@ -55,11 +55,11 @@ export function CollaborationViews({ agents, agentEntries, entriesErrors, stream
     </div>
 }
 
-function taskView(agent: AgentView, entries: Entry[], streaming?: StreamingOutput, entriesError?: string) {
+function taskView(agent: AgentView, entries?: Entry[], streaming?: StreamingOutput, entriesError?: string) {
     const task = agent.currentRun || agent.latestRun
     const live = streaming?.runId === agent.currentRunId ? streaming : undefined
     const runId = live?.runId || task?.ID || ''
-    const messages = entries.filter((item) => !runId || item.runId === runId)
+    const messages = (entries || []).filter((item) => !runId || item.runId === runId)
     const text = (item?: Entry) => item?.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') || ''
     const input = messages.find((item) => item.role === 'user')
     const reply = messages.findLast((item) => item.role === 'assistant' && text(item))
@@ -88,5 +88,5 @@ function taskView(agent: AgentView, entries: Entry[], streaming?: StreamingOutpu
         status = 'completed'
         label = '已完成'
     }
-    return { agent, runId, run: task, task: text(input), result, status, label, error: entriesError ? `条目加载失败：${entriesError}` : live?.error || task?.FailureCode || '' }
+    return { agent, runId, run: task, task: entries ? text(input) : '选择该 Agent 后加载任务历史', result, status, label, error: entriesError ? `条目加载失败：${entriesError}` : live?.error || task?.FailureCode || '' }
 }

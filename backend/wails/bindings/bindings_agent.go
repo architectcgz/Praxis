@@ -1,43 +1,40 @@
 package bindings
 
 import (
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	agentservice "praxis/internal/service/agent"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )
 
 type AgentBindings struct{ host Host }
 
-func (b *AgentBindings) GetAgent(sessionID, branchID, agentID string) (agentservice.AgentView, error) {
-	if err := validateAgentQuery(sessionID, branchID, agentID); err != nil {
-		return agentservice.AgentView{}, publicInputError(b.host, "AgentBindings.GetAgent.request", err)
+// ListAgentEntries 固定目标 Head，以稳定 EntryID 向前分页。
+func (b *AgentBindings) ListAgentEntries(request dto.AgentHistoryRequest) (dto.HistoryPage, error) {
+	if request.Limit == 0 {
+		request.Limit = 50
+	}
+	if err := validation.Struct(request); err != nil {
+		return dto.HistoryPage{}, publicInputError(b.host, "ListAgentEntries.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return agentservice.AgentView{}, err
+		return dto.HistoryPage{}, err
 	}
-	view, err := services.Agents.GetAgentView(ctx, identity.SessionID(sessionID), identity.AgentID(agentID), identity.BranchID(branchID))
-	return view, publicError(b.host, "AgentBindings.GetAgent", err)
+	page, err := services.Commands.ListAgentEntries(ctx, identity.SessionID(request.SessionID), identity.AgentID(request.AgentID), identity.BranchID(request.BranchID), request.HeadEntryID, request.BeforeEntryID, request.Limit)
+	if err != nil {
+		return dto.HistoryPage{}, publicError(b.host, "ListAgentEntries", err)
+	}
+	return publicHistoryPage(page), nil
 }
 
-// ListAgentEntries 返回主分支或子代理持久化历史的展示 DTO，不分页。
-func (b *AgentBindings) ListAgentEntries(sessionID, branchID, agentID string) ([]dto.Entry, error) {
-	if err := validateAgentQuery(sessionID, branchID, agentID); err != nil {
-		return nil, publicInputError(b.host, "AgentBindings.ListAgentEntries.request", err)
+func publicHistoryPage(page sessionmodel.HistoryPage) dto.HistoryPage {
+	return dto.HistoryPage{
+		HeadEntryID: page.HeadEntryID,
+		Entries:     publicEntries(page.Entries),
+		HasMore:     page.HasMore,
+		NextCursor:  page.NextCursor,
 	}
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return nil, err
-	}
-	if _, err := services.Agents.GetAgentView(ctx, identity.SessionID(sessionID), identity.AgentID(agentID), identity.BranchID(branchID)); err != nil {
-		return nil, publicError(b.host, "ListAgentEntries.scope", err)
-	}
-	entries, err := services.Commands.ListAgentEntries(ctx, identity.SessionID(sessionID), identity.AgentID(agentID), identity.BranchID(branchID))
-	if err != nil {
-		return nil, publicError(b.host, "AgentBindings.ListAgentEntries", err)
-	}
-	return publicEntries(entries), nil
 }
 
 func validateAgentQuery(sessionID, branchID, agentID string) error {

@@ -14,7 +14,6 @@ type ToolCall struct {
 	Key
 	SessionID identity.SessionID
 	AgentID   identity.AgentID
-	RequestID string
 	TurnID    identity.TurnID
 	Name      tool.ToolName
 	Arguments string
@@ -32,7 +31,6 @@ func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.A
 			Key:       Key{RunID: identity.RunID(m.RunID), CallID: call.CallID},
 			SessionID: sessionID,
 			AgentID:   agentID,
-			RequestID: m.RequestID,
 			TurnID:    identity.TurnID(m.TurnID),
 			Name:      call.Name,
 			Arguments: call.Arguments,
@@ -51,7 +49,6 @@ func (c ToolCall) ResultEntry(result tool.ToolResult) ContextEntry {
 	}
 	return ContextEntry{
 		ID:         "tool-result:" + c.RunID.String() + ":" + c.CallID,
-		RequestID:  c.RequestID,
 		RunID:      c.RunID.String(),
 		TurnID:     c.TurnID.String(),
 		Role:       role.Tool,

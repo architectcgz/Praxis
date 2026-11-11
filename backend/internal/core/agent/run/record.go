@@ -1,14 +1,12 @@
 package run
 
 import (
-	"fmt"
-	"strings"
 	"time"
 
 	agentmodel "praxis/internal/core/agent"
+	modelusage "praxis/internal/core/model/usage"
 	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/session/entry/role"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -30,31 +28,31 @@ const (
 	RunInterrupted RunOutcome = "interrupted"
 )
 
-// RunProgress 在内存中记录模型请求消耗；消息统计由已接纳 Entry 派生，重启只能恢复已落盘的预算。
+// RunProgress 记录本次执行累计；结束时将消息统计与用量一并固化。
 type RunProgress struct {
-	Usage            UsageTotals
-	NextSequence     uint64
+	Usage            modelusage.Totals
 	Iterations       uint64
 	ModelRequests    uint64
 	ModelOutputBytes int64
-	OutputBytes      int64  `json:"-"`
-	ToolCalls        int    `json:"-"`
-	FinalStopReason  string `json:"-"`
-	FinalAssistantID string `json:"-"`
+	OutputBytes      int64
+	ToolCalls        int
+	FinalStopReason  string
+	FinalAssistantID string
 }
 
 // RunRecord 保存一次执行的身份、配置、状态和进度，不持有运行时资源。
 type RunRecord struct {
-	Progress  RunProgress
-	ID        identity.RunID
-	SessionID identity.SessionID
-	BranchID  identity.BranchID
+	Progress    RunProgress
+	CurrentTurn TurnRecord
+	ID          identity.RunID
+	SessionID   identity.SessionID
+	// BranchID 在准入时确定主、子执行的物理归属；父执行关系由 ParentRunID 表达。
+	BranchID  identity.BranchID `json:"BranchID,omitempty"`
 	AgentID   identity.AgentID
 	AgentName string
 	// 父运行关联的日志字段名属于持久化契约，不随运行模型的命名调整。
 	ParentRunID    identity.RunID `json:"ParentExecutionID"`
 	ParentCallID   string
-	RequestID      identity.RequestID
 	SourceTaskID   identity.TaskID
 	Status         RunStatus
 	InputEntryID   string
@@ -72,7 +70,7 @@ func NewRunRecord(
 	id identity.RunID,
 	sessionID identity.SessionID,
 	agentID identity.AgentID,
-	requestID identity.RequestID,
+	taskID identity.TaskID,
 	inputMessageID string,
 	config RunConfig,
 	at time.Time,
@@ -81,10 +79,11 @@ func NewRunRecord(
 		ID:           id,
 		SessionID:    sessionID,
 		AgentID:      agentID,
-		RequestID:    requestID,
+		SourceTaskID: taskID,
+		CurrentTurn:  newTurn(id, 1, at),
 		Status:       RunStarting,
 		InputEntryID: inputMessageID,
-		Config:       config.Clone(),
+		Config:       config,
 		CreatedAt:    at.UTC(),
 	}
 }
@@ -95,19 +94,7 @@ func (e RunRecord) Active() bool {
 
 // AgentState 从执行事实投影展示状态，不为历史记录创建 Agent 实例。
 func (e RunRecord) AgentState() agentmodel.AgentState {
-	if e.Active() {
-		return agentmodel.AgentExecuting
-	}
-	switch e.Outcome {
-	case RunYielded:
-		return agentmodel.AgentWaiting
-	case RunInterrupted:
-		return agentmodel.AgentInterrupted
-	case RunFailed:
-		return agentmodel.AgentFailed
-	default:
-		return agentmodel.AgentIdle
-	}
+	return e.Snapshot().AgentState()
 }
 
 // Start 记录首次启动状态和时间；调用方负责确认执行尚未启动。
@@ -131,64 +118,36 @@ func (e *RunRecord) End(
 	e.Outcome = outcome
 	e.FailureCode = failureCode
 	e.EndedAt = at.UTC()
+	e.EndTurn(at)
 }
 
-// Validate 在日志读取边界检查必需引用、枚举值和配置格式。
-func (e RunRecord) Validate() error {
-	for _, id := range []string{
-		e.ID.String(),
-		e.SessionID.String(),
-		e.BranchID.String(),
-		e.AgentID.String(),
-		e.RequestID.String(),
-		e.InputEntryID,
-	} {
-		if id == "" || id != strings.TrimSpace(id) {
-			return fmt.Errorf("agent_execution: required reference must be canonical and nonempty: %w", errorcode.ErrInvalidValue)
-		}
-	}
-	switch e.Status {
-	case RunStarting, RunRunning, RunEnding, RunEnded:
-	default:
-		return fmt.Errorf("agent_execution: unknown status: %w", errorcode.ErrInvalidValue)
-	}
-	if err := e.Config.Validate(); err != nil {
-		return fmt.Errorf("execution.config: %w", err)
-	}
-
-	if e.Status == RunEnded {
-		switch e.Outcome {
-		case RunCompleted, RunYielded, RunFailed, RunInterrupted:
-		default:
-			return fmt.Errorf("agent_execution: unknown outcome: %w", errorcode.ErrInvalidValue)
-		}
-	}
-	return nil
-}
-
-// WithEntries 从所属执行已接纳的 Entry 派生工具计数、输出字节和最终回答证据。
-func (progress RunProgress) WithEntries(runID string, entries []*sessionentry.ContextEntry) RunProgress {
+// RebuildEntryStats 仅在准入和必要恢复时从执行证据重建统计，运行中按新增条目增量推进。
+func (progress RunProgress) RebuildEntryStats(runID string, entries []*sessionentry.ContextEntry) RunProgress {
 	progress.OutputBytes, progress.ToolCalls = progress.ModelOutputBytes, 0
 	progress.FinalAssistantID, progress.FinalStopReason = "", ""
-	var last sessionentry.ContextEntry
 	for _, entry := range entries {
 		if entry.RunID != runID {
 			continue
 		}
-		if entry.Role == role.Assistant {
-			last = *entry
-		}
-		for _, block := range entry.Content {
-			switch value := block.(type) {
-			case sessionentry.ToolCallBlock:
-				progress.ToolCalls++
-			case sessionentry.ToolResultBlock:
-				progress.OutputBytes += int64(len(value.Text))
-			}
-		}
-	}
-	if last.StopReason == "completed" || last.StopReason == "stop_sequence" {
-		progress.FinalAssistantID, progress.FinalStopReason = last.ID, last.StopReason
+		progress.AcceptEntry(entry)
 	}
 	return progress
+}
+
+// AcceptEntry 只接收首次接纳的所属条目；去重由 Run 的条目接纳入口完成。
+func (progress *RunProgress) AcceptEntry(entry *sessionentry.ContextEntry) {
+	if entry.Role == role.Assistant {
+		progress.FinalAssistantID, progress.FinalStopReason = "", ""
+		if entry.Response != nil && (entry.Response.StopReason == "completed" || entry.Response.StopReason == "stop_sequence") {
+			progress.FinalAssistantID, progress.FinalStopReason = entry.ID, entry.Response.StopReason
+		}
+	}
+	for _, block := range entry.Content {
+		switch value := block.(type) {
+		case sessionentry.ToolCallBlock:
+			progress.ToolCalls++
+		case sessionentry.ToolResultBlock:
+			progress.OutputBytes += int64(len(value.Text))
+		}
+	}
 }

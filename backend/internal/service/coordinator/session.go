@@ -6,7 +6,6 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
 	sessionmodel "praxis/internal/core/session"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
@@ -72,6 +71,9 @@ func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID, 
 		}
 		branchID = branch.ID
 	}
+	if err := s.sessions.SelectBranch(ctx, id, branchID); err != nil {
+		return BindingView{}, err
+	}
 	return s.sessionView(ctx, id, branchID, bindingID)
 }
 
@@ -93,6 +95,9 @@ func (s *Coordinator) CreateBranch(ctx context.Context, id identity.SessionID, b
 		if _, err := s.sessions.ConfirmBranchRequest(ctx, id, input); err != nil {
 			return BindingView{}, err
 		}
+		if err := s.sessions.SelectBranch(ctx, id, identity.BranchID(result)); err != nil {
+			return BindingView{}, err
+		}
 		return s.sessionView(ctx, id, identity.BranchID(result), "")
 	}
 	binding, err := s.navigationBinding(id, branchID, bindingID)
@@ -107,10 +112,10 @@ func (s *Coordinator) CreateBranch(ctx context.Context, id identity.SessionID, b
 	if err != nil {
 		return BindingView{}, err
 	}
-	s.mu.Lock()
 	if binding != nil {
-		s.releaseBindingLocked(binding)
+		s.releaseBinding(binding)
 	}
+	s.mu.Lock()
 	s.branchResults[requestKey] = branch.ID.String()
 	s.mu.Unlock()
 	return s.sessionView(ctx, id, branch.ID, "")
@@ -145,10 +150,11 @@ func (s *Coordinator) SwitchBranch(ctx context.Context, id identity.SessionID, b
 		if err != nil {
 			return BindingView{}, err
 		}
+		if err := s.sessions.SelectBranch(ctx, id, branch.ID); err != nil {
+			return BindingView{}, err
+		}
 		if binding != nil {
-			s.mu.Lock()
-			s.releaseBindingLocked(binding)
-			s.mu.Unlock()
+			s.releaseBinding(binding)
 		}
 		return view, nil
 	}
@@ -169,26 +175,19 @@ func (s *Coordinator) ListBranches(ctx context.Context, id identity.SessionID) (
 	if err != nil {
 		return nil, err
 	}
+	heads := make([]string, 0, len(branches))
+	for _, branch := range branches {
+		if branch.HeadEntryID != "" {
+			heads = append(heads, branch.HeadEntryID)
+		}
+	}
+	previews, err := s.sessions.Previews(ctx, id, heads)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]BranchView, 0, len(branches))
 	for _, branch := range branches {
-		summary := ""
-		if branch.HeadEntryID != "" {
-			path, err := s.sessions.Path(ctx, id, branch.HeadEntryID)
-			if err != nil {
-				return nil, err
-			}
-			if len(path) > 0 {
-				summary = path[len(path)-1].TextContent()
-				runes := []rune(summary)
-				if len(runes) > 100 {
-					summary = string(runes[:100]) + "…"
-				}
-			}
-		}
-		result = append(result, BranchView{
-			Branch:  branch,
-			Summary: summary,
-		})
+		result = append(result, BranchView{Branch: branch, Summary: previews[branch.HeadEntryID]})
 	}
 	return result, nil
 }
@@ -206,17 +205,53 @@ func (s *Coordinator) Tree(ctx context.Context, id identity.SessionID) ([]sessio
 	return s.sessions.Tree(ctx, id)
 }
 
-func (s *Coordinator) EntriesAt(ctx context.Context, id identity.SessionID, head string) ([]sessionentry.ContextEntry, error) {
+func (s *Coordinator) EntriesAt(ctx context.Context, id identity.SessionID, head, before string, limit int) (sessionmodel.HistoryPage, error) {
 	if err := s.enter(); err != nil {
-		return nil, err
+		return sessionmodel.HistoryPage{}, err
 	}
 	defer s.running.Done()
 	unlock, err := s.lockSession(ctx, id)
 	if err != nil {
-		return nil, err
+		return sessionmodel.HistoryPage{}, err
 	}
 	defer unlock()
-	return s.sessions.Path(ctx, id, head)
+	return s.sessions.Path(ctx, id, head, before, limit)
+}
+
+type BranchDeletion struct {
+	Branch       sessionmodel.Branch
+	BindingID    string
+	CleanupError string
+}
+
+func (s *Coordinator) DeleteBranch(ctx context.Context, id identity.SessionID, current, target identity.BranchID, bindingID string) (BranchDeletion, error) {
+	if err := s.enter(); err != nil {
+		return BranchDeletion{}, err
+	}
+	defer s.running.Done()
+	unlock, err := s.lockSession(ctx, id)
+	if err != nil {
+		return BranchDeletion{}, err
+	}
+	defer unlock()
+	binding, err := s.navigationBinding(id, current, bindingID)
+	if err != nil {
+		return BranchDeletion{}, err
+	}
+	result, err := s.sessions.DeleteBranch(ctx, id, target)
+	if err != nil {
+		return BranchDeletion{}, err
+	}
+	if binding != nil && binding.branchID == target {
+		s.releaseBinding(binding)
+		bindingID = ""
+	}
+	s.mu.Lock()
+	maps.DeleteFunc(s.branchResults, func(key, value string) bool {
+		return strings.HasPrefix(key, id.String()+":") && (strings.HasPrefix(key, id.String()+":"+target.String()+":") || value == target.String())
+	})
+	s.mu.Unlock()
+	return BranchDeletion{Branch: result.Branch, BindingID: bindingID, CleanupError: result.CleanupError}, nil
 }
 
 func (s *Coordinator) sessionView(ctx context.Context, id identity.SessionID, branchID identity.BranchID, bindingID string) (BindingView, error) {
@@ -238,10 +273,11 @@ func (s *Coordinator) sessionView(ctx context.Context, id identity.SessionID, br
 			Branch:    branch,
 		}
 		s.mu.Lock()
-		if binding := s.bindings[id]; binding != nil && binding.id == bindingID {
+		binding := s.bindings[id]
+		s.mu.Unlock()
+		if binding != nil && binding.id == bindingID {
 			view.Tasks = binding.queue.List(0)
 		}
-		s.mu.Unlock()
 		return view, nil
 	}
 	return BindingView{}, errorcode.ErrNotFound
@@ -265,29 +301,36 @@ func (s *Coordinator) bindSubmission(ctx context.Context, input sessionservice.T
 	return binding, nil
 }
 
-func (s *Coordinator) releaseBindingLocked(binding *sessionBinding) {
+func (s *Coordinator) releaseBinding(binding *sessionBinding) {
+	s.mu.Lock()
 	delete(s.bindings, binding.sessionID)
+	s.mu.Unlock()
 	binding.queue.Clear()
 }
 
-func (s *Coordinator) releaseSessionStateLocked(id identity.SessionID) {
-	if binding := s.bindings[id]; binding != nil {
-		s.releaseBindingLocked(binding)
-	}
+func (s *Coordinator) releaseSessionState(id identity.SessionID) {
+	s.mu.Lock()
+	binding := s.bindings[id]
+	delete(s.bindings, id)
 	maps.DeleteFunc(s.branchResults, func(key, _ string) bool { return strings.HasPrefix(key, id.String()+":") })
+	s.mu.Unlock()
+	if binding != nil {
+		binding.queue.Clear()
+	}
 }
 
 func (s *Coordinator) navigationBinding(id identity.SessionID, branchID identity.BranchID, bindingID string) (*sessionBinding, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	binding := s.bindings[id]
+	active := s.runs[runKey{identity.AgentID(id), branchID}] != nil
+	s.mu.Unlock()
 	if binding == nil && bindingID == "" {
 		return nil, nil
 	}
 	if binding == nil || binding.id != bindingID || binding.branchID != branchID || binding.closing {
 		return nil, errorcode.ErrRequestConflict
 	}
-	if s.runs[runKey{identity.AgentID(binding.sessionID), binding.branchID}] != nil || len(binding.queue.List(0)) > 0 {
+	if active || len(binding.queue.List(0)) > 0 {
 		return nil, agentmodel.ErrExecuting
 	}
 	return binding, nil
@@ -337,17 +380,23 @@ func (s *Coordinator) beginSessionClose(ctx context.Context, id identity.Session
 	}
 	defer unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var executions []*activeRun
 	for _, active := range s.runs {
 		if active.sessionID == id {
-			active.cancel(context.Canceled)
+			executions = append(executions, active)
 		}
 	}
 	binding := s.bindings[id]
+	if binding != nil {
+		binding.closing = true
+	}
+	s.mu.Unlock()
+	for _, active := range executions {
+		active.cancel(context.Canceled)
+	}
 	if binding == nil {
 		return nil, nil, nil
 	}
-	binding.closing = true
 	binding.queue.Clear()
 	return binding, new(taskQueueEvent(binding)), nil
 }
@@ -369,8 +418,6 @@ func (s *Coordinator) finishSessionClose(ctx context.Context, id identity.Sessio
 	if err := s.sessions.ReleaseSession(ctx, id); err != nil {
 		return false, err
 	}
-	s.mu.Lock()
-	s.releaseSessionStateLocked(id)
-	s.mu.Unlock()
+	s.releaseSessionState(id)
 	return true, nil
 }

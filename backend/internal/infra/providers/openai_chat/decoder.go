@@ -142,7 +142,7 @@ func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 		return nil
 	}
 	var usage *providerapi.Usage
-	if reported.PromptTokens != nil && reported.CompletionTokens != nil {
+	if reported.PromptTokens != nil {
 		usage = &providerapi.Usage{
 			InputTokens:  *reported.PromptTokens,
 			OutputTokens: reported.CompletionTokens,
@@ -151,7 +151,7 @@ func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 			usage.CacheReadInputTokens = reported.PromptTokensDetails.CachedTokens
 		}
 	}
-	if !streaming.ValidUsage("openai_chat", usage) {
+	if usage == nil {
 		return nil
 	}
 	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage})

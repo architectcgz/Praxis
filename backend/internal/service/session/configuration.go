@@ -88,13 +88,14 @@ func (s *Service) ReloadConfiguration(ctx context.Context, id identity.SessionID
 		return err
 	}
 	next.ApprovalMode = security.EffectiveApprovalMode(next.GlobalApprovalMode, info.ApprovalMode)
-	owner.configMu.Lock()
-	defer owner.configMu.Unlock()
-	if err := agentservice.ValidateDefinitions(owner.config.Definitions, next.Definitions); err != nil {
+	owner.configMu.RLock()
+	previous := owner.config
+	choice := owner.modelSelection.Choice()
+	owner.configMu.RUnlock()
+	if err := agentservice.ValidateDefinitions(previous.Definitions, next.Definitions); err != nil {
 		return err
 	}
 	selection := sessionmodel.ModelSelection{}
-	choice := owner.modelSelection.Choice()
 	if choice.ModelID != "" {
 		model, err := next.Models.Get(choice.ProviderID, choice.ModelID, choice.ReasoningLevel)
 		if err != nil {
@@ -102,6 +103,8 @@ func (s *Service) ReloadConfiguration(ctx context.Context, id identity.SessionID
 		}
 		selection = sessionmodel.NewModelSelection(model)
 	}
+	owner.configMu.Lock()
 	owner.config, owner.modelSelection = next, selection
+	owner.configMu.Unlock()
 	return nil
 }

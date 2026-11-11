@@ -3,34 +3,32 @@ package coordinator
 import (
 	"context"
 	coreevent "praxis/internal/core/event"
-	"praxis/internal/identity"
 	"time"
 )
 
-// StopAgent 中断 Agent 当前正在执行的任务，保留尚未开始的输入。
-func (s *Coordinator) StopAgent(ctx context.Context, agentID identity.AgentID) error {
+// StopAgent 中断请求指定的 Run，保留尚未开始的输入。
+func (s *Coordinator) StopAgent(ctx context.Context, request RunControl) error {
 	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()
 
-	active, applied, err := s.cancelCurrentRun(ctx, agentID, errRunInterrupted)
-	if err == nil && applied {
-		var notification *coreevent.Event
-		s.mu.Lock()
-		run, runID := active.run, active.runID
-		s.mu.Unlock()
-		if run != nil {
-			at := time.Now().UTC()
-			run.Agent.ApplyInterrupt(runID, at)
-			notification = &coreevent.Event{
-				Source:  coreevent.SourceForRun(run, ""),
-				Payload: coreevent.RunInterruptRequested{AppliedAt: at},
-			}
-		}
-		if notification != nil {
-			s.loop.Emitter.Emit(*notification)
-		}
+	active, applied, err := s.cancelRun(ctx, request, errRunInterrupted)
+	if err != nil || !applied {
+		return err
 	}
-	return err
+	s.mu.Lock()
+	source := coreevent.EventSource{
+		SessionID: active.sessionID,
+		BranchID:  active.branchID,
+		BindingID: active.bindingID,
+		AgentID:   request.AgentID,
+		RunID:     active.runID,
+	}
+	s.mu.Unlock()
+	s.loop.Emitter.Emit(coreevent.Event{
+		Source:  source,
+		Payload: coreevent.RunInterruptRequested{AppliedAt: time.Now().UTC()},
+	})
+	return nil
 }

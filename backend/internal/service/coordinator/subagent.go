@@ -51,32 +51,33 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 	task := sessionmodel.Task{
 		ID:        identity.TaskID((identity.SecureIDGenerator{}).New("task")),
 		SessionID: parentRecord.SessionID,
-		BranchID:  parentRecord.BranchID,
 		Prompt:    prompt,
 	}
 	definition, err := active.config.Definition(definitionID)
 	var run *agentrun.Run
 	if err == nil {
 		run, err = s.operations.PrepareSubagent(active.ctx, runservice.SubagentInput{
-			Task:         task,
-			AgentID:      agentID,
-			ParentRunID:  parent.RunID,
-			ParentCallID: parent.CallID,
-			Definition:   definition,
-			Model:        parentRecord.Config.Model,
-			Owner:        parentRun.Session,
-			BindingID:    parentActive.bindingID,
+			Task:           task,
+			AgentID:        agentID,
+			ParentRunID:    parent.RunID,
+			ParentCallID:   parent.CallID,
+			Definition:     definition,
+			Model:          parentRecord.Config.Model,
+			Owner:          parentRun.Session,
+			BindingID:      parentActive.bindingID,
+			SourceBranchID: parentActive.branchID,
 		})
 	}
 	if err != nil {
 		s.mu.Lock()
 		delete(s.runs, key)
 		close(active.ready)
-		active.cancel(nil)
 		s.mu.Unlock()
+		active.cancel(nil)
 		return SubagentResult{}, err
 	}
-	runID := run.Snapshot().ID
+	started := run.Snapshot()
+	runID := started.ID
 	s.mu.Lock()
 	active.run, active.runID = run, runID
 	close(active.ready)
@@ -85,7 +86,9 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		Source: coreevent.SourceForRun(run, ""),
 		Payload: coreevent.SubagentStarted{
 			Name:          definition.Name,
-			Run:           run.Snapshot(),
+			DefinitionID:  definition.ID,
+			CreatedAt:     started.CreatedAt,
+			Run:           started.Snapshot(),
 			Entries:       run.Entries(),
 			ParentAgentID: parent.AgentID,
 			ParentRunID:   parent.RunID,
@@ -96,8 +99,8 @@ func (s *Coordinator) RunSubagent(ctx context.Context, parent ToolControl, agent
 		s.mu.Lock()
 		delete(s.runs, key)
 		active.run = nil
-		active.cancel(nil)
 		s.mu.Unlock()
+		active.cancel(nil)
 		s.loop.Emitter.Emit(coreevent.Event{
 			Source:  coreevent.SourceForRun(run, ""),
 			Payload: coreevent.SubagentReleased{},

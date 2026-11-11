@@ -76,7 +76,8 @@ func (b *SessionBindings) SelectSession(sessionID, branchID string) (dto.Session
 }
 
 func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services, view coordinator.BindingView) (dto.SessionSnapshot, error) {
-	agents, err := services.Agents.ListSessionAgents(ctx, view.Session.ID, view.Branch.ID, 100)
+	content, err := services.Commands.SessionContent(ctx, view.Session.ID, view.Branch.ID)
+	agents := content.Agents
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.agents", err)
 	}
@@ -90,14 +91,7 @@ func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services
 		UpdatedAt: view.Session.UpdatedAt,
 		Agents:    agents,
 		Tasks:     make([]dto.QueuedTask, 0, len(view.Tasks)),
-		Entries:   make(map[string][]dto.Entry, len(agents)),
-	}
-	for _, agent := range agents {
-		entries, err := services.Commands.ListAgentEntries(ctx, view.Session.ID, agent.ID, view.Branch.ID)
-		if err != nil {
-			return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.entries", err)
-		}
-		result.Entries[agent.ID.String()] = publicEntries(entries)
+		Entries:   map[string]dto.HistoryPage{view.Session.ID.String(): publicHistoryPage(content.Page)},
 	}
 	for _, value := range view.Tasks {
 		result.Tasks = append(result.Tasks, dto.QueuedTask{
@@ -124,7 +118,7 @@ func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionU
 		return dto.SessionUsageSummary{}, publicError(b.host, "SessionBindings.GetSessionUsageSummary", err)
 	}
 	return dto.SessionUsageSummary{
-		Records:                  usageRecords(value.Records),
+		TotalRequests:            value.TotalRequests,
 		InputTokens:              value.InputTokens,
 		OutputTokens:             value.OutputTokens,
 		CacheReadInputTokens:     value.CacheReadInputTokens,

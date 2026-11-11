@@ -16,14 +16,8 @@ const (
 // ModelRequest 携带本次请求的只读快照，处理器不返回修改后的请求。
 type ModelRequest struct {
 	Identity
-	Kind     ModelRequestKind
-	Sequence uint64
-	Request  providerapi.Request
-}
-
-func (e ModelRequest) clone() ModelRequest {
-	e.Request = e.Request.Clone()
-	return e
+	Kind    ModelRequestKind
+	Request providerapi.Request
 }
 
 // ModelResponse 在流消费结束后通知，包括断流和取消时已经收到的输出量。
@@ -32,11 +26,6 @@ type ModelResponse struct {
 	OutputBytes int
 	StopReason  providerapi.StopReason
 	Err         error
-}
-
-func (e ModelResponse) clone() ModelResponse {
-	e.Request = e.Request.clone()
-	return e
 }
 
 type BeforeModelRequestHook interface {

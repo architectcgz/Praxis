@@ -9,6 +9,11 @@
 }
 
 .session-branch-hint { color: var(--faint); }
+.session-branch-row { display: flex; align-items: center; gap: 8px; }
+.session-branch-row .session-branch-option { flex: 1; min-width: 0; }
+.session-branch-delete { color: var(--danger); flex: none; }
+.session-branch-confirm { padding: 12px; color: var(--danger-ink); background: var(--danger-soft); border: 1px solid var(--danger-line); border-radius: var(--radius-control); }
+.session-branch-confirm p { margin-block: 0 10px; }
 
 .session-branch-dialog {
     display: flex;
