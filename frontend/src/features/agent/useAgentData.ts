@@ -79,7 +79,6 @@ export function useAgentData({ sessionID, models, setError, setErrorCode }: Agen
     const agents = useMemo(() => data.ids.map((id) => data.byId[id].agent), [data.ids, data.byId])
     const agentEntries = useMemo(() => Object.fromEntries(data.ids.filter((id) => data.byId[id].entries !== undefined).map((id) => [id, data.byId[id].entries!])), [data.ids, data.byId])
     const agentEntriesErrors = useMemo(() => Object.fromEntries(data.ids.filter((id) => data.byId[id].error).map((id) => [id, data.byId[id].error])), [data.ids, data.byId])
-    const inputActions = useMemo(() => ({ beginInput: store.beginInput, acceptInput: store.acceptInput, rejectInput: store.rejectInput, stopAwaiting: store.stopAwaiting }), [store])
     const outputStore = useMemo(() => ({ subscribeOutput: store.subscribeOutput, getOutput: store.getOutput }), [store])
     return {
         ...taskInput,
@@ -88,6 +87,6 @@ export function useAgentData({ sessionID, models, setError, setErrorCode }: Agen
         historyLoading: selected?.loading ?? false, hasEarlier: selected?.page?.hasMore ?? false,
         entries: selected?.entries || emptyEntries, entriesError: selected?.error || '',
         selectedAgentID: data.selectedId, getSelectedAgentID: store.getSelectedAgentID,
-        outputStore, inputActions, loadForSession, selectAgent, loadEarlier, retryHistory,
+        outputStore, loadForSession, selectAgent, loadEarlier, retryHistory,
     }
 }

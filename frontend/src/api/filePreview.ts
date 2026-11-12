@@ -1,4 +1,5 @@
-import { getSessionBinding } from './bindings'
+import { Browser } from '@wailsio/runtime'
+import { getSessionBinding, isBindingAvailable } from './bindings'
 
 export type FilePreview = { path: string; content: string }
 
@@ -11,9 +12,8 @@ export async function previewFile(sessionId: string, path: string): Promise<File
 }
 
 /** 网页链接交给系统浏览器；非桌面环境使用新标签页，始终不替换当前会话页面。 */
-export function openExternalURL(url: string): void {
+export async function openExternalURL(url: string): Promise<void> {
     if (!/^https?:\/\//i.test(url)) return
-    const runtime = (window as Window & { runtime?: { BrowserOpenURL?: (url: string) => void } }).runtime
-    if (runtime?.BrowserOpenURL) runtime.BrowserOpenURL(url)
+    if (isBindingAvailable()) await Browser.OpenURL(url)
     else window.open(url, '_blank', 'noopener,noreferrer')
 }

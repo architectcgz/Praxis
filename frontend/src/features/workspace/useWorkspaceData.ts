@@ -11,6 +11,7 @@ export function useWorkspaceData() {
     const [openedSessionIDs, setOpenedSessionIDs] = useState<string[]>([])
     const [catalogLoaded, setCatalogLoaded] = useState(false)
     const [error, setError] = useState('')
+    const [catalogError, setCatalogError] = useState('')
     const [errorCode, setErrorCode] = useState<ApiErrorCode | undefined>()
     const selectedID = useRef(selectedSessionID)
     const openedIDs = useRef<string[]>([])
@@ -42,7 +43,7 @@ export function useWorkspaceData() {
     const refreshCatalog = useCallback(async (manual = false, throwOnError = false) => {
         const requestID = ++catalogRequest.current
         if (!isBindingAvailable()) {
-            if (manual) { setError('桌面连接不可用，请在桌面应用中刷新工作区。'); setErrorCode('binding_unavailable') }
+            if (manual) setCatalogError('桌面连接不可用，请在桌面应用中刷新工作区。')
             setCatalogLoaded(true)
             return
         }
@@ -56,13 +57,13 @@ export function useWorkspaceData() {
                 const id = values.some((item) => item.id === selectedID.current) ? selectedID.current : values[0]?.id || ''
                 selectSession(id)
             }
-            clearError()
+            setCatalogError('')
         } catch (reason) {
             if (catalogRequest.current === requestID && throwOnError) throw reason
         } finally {
             if (catalogRequest.current === requestID) setCatalogLoaded(true)
         }
-    }, [refreshProjects, refreshSessions, selectSession, clearError])
+    }, [refreshProjects, refreshSessions, selectSession])
 
     useEffect(() => {
         void refreshCatalog()
@@ -81,8 +82,8 @@ export function useWorkspaceData() {
         selectSession, clearSelectedSession, updateSessionTitle, refreshCatalog,
         bridgeAvailable: isBindingAvailable(), workspaceLoading: !catalogLoaded,
         refreshing: projectsLoading || sessionsLoading,
-        error: error || (dataError === undefined ? '' : readableError(dataError)),
-        errorCode: error ? errorCode : apiErrorCode(dataError),
+        error: error || catalogError || (dataError === undefined ? '' : readableError(dataError)),
+        errorCode: error ? errorCode : catalogError ? 'binding_unavailable' : apiErrorCode(dataError),
         clearError, setError, setErrorCode, viewRequestRef,
     }
 }

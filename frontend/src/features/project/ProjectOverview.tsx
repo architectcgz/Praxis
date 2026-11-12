@@ -1,5 +1,5 @@
 import { CalendarClock, FolderOpen, MessageSquare, MessageSquarePlus } from 'lucide-react'
-import { ProjectGroup } from './types'
+import type { ProjectGroup } from './types'
 
 type ProjectOverviewProps = {
     project: ProjectGroup

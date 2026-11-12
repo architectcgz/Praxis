@@ -1,5 +1,5 @@
 import type { SubmitEvent } from 'react'
-import { SessionSummary } from '../../api'
+import type { SessionSummary } from '../../api'
 
 export type ProjectGroup = {
     id: string

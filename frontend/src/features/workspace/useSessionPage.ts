@@ -19,6 +19,7 @@ export type SessionPageOptions = {
 /** 页面实例拥有会话状态和订阅，是否显示不改变其生命周期。 */
 export function useSessionPage({ sessionID, title, createNewSession, refreshCatalog }: SessionPageOptions) {
     const [busy, setBusy] = useState(false)
+    const [submissionRevision, setSubmissionRevision] = useState(0)
     const [error, setError] = useState('')
     const [errorCode, setErrorCode] = useState<ApiErrorCode | undefined>()
     const viewRequestRef = useRef(0)
@@ -49,7 +50,7 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
     const branch = useBranchNavigation({ session, applySession, setError })
     const controls = useAgentCommands({
         agent: agents.agent, busy, getSelectedAgentID: agents.getSelectedAgentID,
-        inputActions: agents.inputActions, setBusy, setError, setErrorCode, viewRequestRef,
+        setBusy, setError, setErrorCode, viewRequestRef,
     })
     const submission = useTaskSubmission({
         agent: agents.agent, busy, input: agents.input,
@@ -73,7 +74,7 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
         }
     }), [sessionID, session?.branch.id])
     useEffect(() => subscribeSessionConfigReloaded((id) => {
-        if (id === sessionID) void refreshModels()
+        if (id === sessionID) void refreshModels(false)
     }), [sessionID, refreshModels])
     useEffect(() => {
         if (agents.modelSelectionReady && errorCode === API_ERROR_CODES.modelNotConfigured) { setError(''); setErrorCode(undefined) }
@@ -81,7 +82,7 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
 
     const refresh = useCallback(async () => {
         if (!session) { await initialize(); return }
-        await refreshModels()
+        await refreshModels(false)
     }, [session, initialize, refreshModels])
     const close = useCallback(async () => {
         setBusy(true)
@@ -93,9 +94,13 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
             return false
         } finally { setBusy(false) }
     }, [releaseSession])
-    const submitInput = () => {
-        if (agents.input.trim().startsWith('/')) void commands.runCommand(agents.input.trim())
-        else void submission.submitTask()
+    const submitInput = async () => {
+        if (agents.input.trim().startsWith('/')) {
+            await commands.runCommand(agents.input.trim())
+        } else if (await submission.submitTask()) {
+            branch.returnToHead()
+            setSubmissionRevision((value) => value + 1)
+        }
     }
     const dataError = sessionError ?? modelsError
     return {
@@ -104,7 +109,7 @@ export function useSessionPage({ sessionID, title, createNewSession, refreshCata
         busy: busy || agents.modelSelectionPending, refreshing: modelsLoading,
         error: error || (dataError === undefined ? '' : readableError(dataError)),
         errorCode: error ? errorCode : apiErrorCode(dataError),
-        submitInput, canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask,
+        submitInput, submissionRevision, canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask,
         refresh, close,
     }
 }

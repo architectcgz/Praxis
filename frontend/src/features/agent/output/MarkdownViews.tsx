@@ -1,9 +1,11 @@
-import { Children, createContext, isValidElement, memo, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
-import { Check, ChevronDown, Copy } from 'lucide-react'
+import { Children, createContext, isValidElement, memo, useContext, useDeferredValue, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { openExternalURL } from '../../../api/filePreview'
+import { readableError } from '../../../shared/errors'
 import { parseMessageLink } from './messageLinks'
+import { CopyIconButton } from './CopyIconButton'
 
 /** 由会话预览容器提供打开文件的动作；预览内的相对链接以当前文件为基准。 */
 export const FilePreviewContext = createContext<{ openFile: (path: string) => void; basePath?: string } | null>(null)
@@ -60,14 +62,25 @@ const MarkdownContent = memo(function MarkdownContent({ content, streaming }: { 
 
 function MessageLink({ href = '', children, title }: ComponentPropsWithoutRef<'a'>) {
     const preview = useContext(FilePreviewContext)
+    const [error, setError] = useState('')
     const link = parseMessageLink(href, preview?.basePath)
+    const openExternal = async (url: string) => {
+        setError('')
+        try {
+            await openExternalURL(url)
+        } catch (reason) {
+            setError(`打开链接失败：${readableError(reason)}`)
+        }
+    }
     if (link.kind === 'file') {
         return <button className="message-file-link" type="button" disabled={!preview}
             onClick={() => preview?.openFile(link.path)}>{children}</button>
     }
     if (link.kind === 'external') {
-        return <a href={link.url} target="_blank" rel="noopener noreferrer" title={title || '在浏览器中打开'}
-            onClick={(event) => { event.preventDefault(); openExternalURL(link.url) }}>{children}</a>
+        return <><a href={link.url} target="_blank" rel="noopener noreferrer" title={title || '在浏览器中打开'}
+            onClick={(event) => { event.preventDefault(); void openExternal(link.url) }}>{children}</a>
+            {error && <span role="alert">（{error}，可再次点击链接重试）</span>}
+        </>
     }
     return <span>{children}</span>
 }
@@ -98,7 +111,7 @@ function MarkdownCodeBlock({ children, streaming }: ComponentPropsWithoutRef<'pr
                 className="markdown-code-copy-button"
                 copiedLabel={`${language} 代码已复制`}
                 label={`复制 ${language} 代码`}
-                onCopy={() => copyText(content)}
+                getText={() => content}
             />
         </div>
     )
@@ -166,7 +179,7 @@ function MarkdownTable({ children }: ComponentPropsWithoutRef<'table'>) {
                     className="markdown-table-copy-button"
                     copiedLabel="表格已复制"
                     label="复制表格为制表符分隔文本"
-                    onCopy={() => copyText(tableText(tableRef.current))}
+                    getText={() => tableText(tableRef.current)}
                 />
             </div>
             <div className="markdown-table-scroll">
@@ -180,49 +193,6 @@ function codeLanguageLabel(className: string | undefined) {
     const language = className?.match(/language-([a-z0-9+-]+)/i)?.[1]?.toLowerCase()
     if (!language) return '纯文本'
     return codeLanguageLabels[language] || language.toUpperCase()
-}
-
-export type CopyIconButtonProps = {
-    className: string
-    copiedLabel: string
-    label: string
-    onCopy: () => Promise<void>
-}
-
-export function CopyIconButton({ className, copiedLabel, label, onCopy }: CopyIconButtonProps) {
-    const [copied, setCopied] = useState(false)
-
-    useEffect(() => {
-        if (!copied) return
-        const timer = window.setTimeout(() => setCopied(false), 1600)
-        return () => window.clearTimeout(timer)
-    }, [copied])
-
-    const copy = async () => {
-        try {
-            await onCopy()
-            setCopied(true)
-        } catch {
-            setCopied(false)
-        }
-    }
-
-    return (
-        <button
-            className={`${className} ${copied ? 'copied' : ''}`}
-            type="button"
-            title={copied ? copiedLabel : label}
-            aria-label={copied ? copiedLabel : label}
-            onClick={() => void copy()}
-        >
-            {copied ? <Check size={15} strokeWidth={2} aria-hidden="true" /> : <Copy size={15} strokeWidth={1.8} aria-hidden="true" />}
-        </button>
-    )
-}
-
-async function copyText(content: string) {
-    if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable')
-    await navigator.clipboard.writeText(content)
 }
 
 function tableText(table: HTMLTableElement | null) {

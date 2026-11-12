@@ -12,7 +12,6 @@
 
 /* 项目主操作是主色实心按钮，与全局主操作一致。 */
 .project-overview-action {
-    padding: 0 11px;
     border: 1px solid var(--accent);
     border-radius: var(--radius-control);
     background: var(--accent);

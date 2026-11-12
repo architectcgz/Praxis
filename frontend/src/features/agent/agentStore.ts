@@ -1,7 +1,7 @@
 import type { AgentEvent, Entry, AgentView } from '../../api'
 import type { HistoryPage } from '../../api/agents'
 import { mergeStreamingEvent } from './streaming'
-import type { PendingUserMessage, StreamingOutputs } from './types'
+import type { StreamingOutputs } from './types'
 
 export type AgentEntry = {
     agent: AgentView
@@ -15,11 +15,14 @@ export type AgentEntry = {
 export function createAgentStore() {
     let scope = { sessionId: '', branchId: '' }
     let data = { selectedId: '', ids: [] as string[], byId: {} as Record<string, AgentEntry> }
-    let output = { streamingOutputs: {} as StreamingOutputs, pendingUserMessages: [] as PendingUserMessage[], awaitingAgentId: '' }
+    let output = { streamingOutputs: {} as StreamingOutputs }
     const dataListeners = new Set<() => void>()
     const outputListeners = new Set<() => void>()
     const emitData = () => dataListeners.forEach((listener) => listener())
-    const updateOutput = (next: typeof output) => { output = next; outputListeners.forEach((listener) => listener()) }
+    const updateOutput = (streamingOutputs: StreamingOutputs) => {
+        output = { streamingOutputs }
+        outputListeners.forEach((listener) => listener())
+    }
     const updateEntry = (id: string, update: (entry: AgentEntry) => AgentEntry) => {
         const current = data.byId[id]
         if (!current) return
@@ -28,17 +31,25 @@ export function createAgentStore() {
     }
     return {
         getScope: () => scope,
-        setScope(sessionId: string, branchId: string) { if (scope.sessionId !== sessionId || scope.branchId !== branchId) scope = { sessionId, branchId } },
+        setScope(sessionId: string, branchId: string) {
+            if (scope.sessionId !== sessionId || scope.branchId !== branchId) scope = { sessionId, branchId }
+        },
         getData: () => data,
         getOutput: () => output,
         getSelectedAgentID: () => data.selectedId,
-        subscribeData: (listener: () => void) => { dataListeners.add(listener); return () => { dataListeners.delete(listener) } },
-        subscribeOutput: (listener: () => void) => { outputListeners.add(listener); return () => { outputListeners.delete(listener) } },
+        subscribeData: (listener: () => void) => {
+            dataListeners.add(listener)
+            return () => { dataListeners.delete(listener) }
+        },
+        subscribeOutput: (listener: () => void) => {
+            outputListeners.add(listener)
+            return () => { outputListeners.delete(listener) }
+        },
         reset() {
             scope = { sessionId: '', branchId: '' }
             data = { selectedId: '', ids: [], byId: {} }
             emitData()
-            updateOutput({ streamingOutputs: {}, pendingUserMessages: [], awaitingAgentId: '' })
+            updateOutput({})
         },
         setRoster(agents: AgentView[]) {
             const ids = agents.map((agent) => agent.ID)
@@ -48,7 +59,8 @@ export function createAgentStore() {
                     agent, loading: false, error: '',
                 }]
             }))
-            data = { ids, byId, selectedId: ids.includes(data.selectedId) ? data.selectedId : ids[0] || '' }
+            const selectedId = ids.includes(data.selectedId) ? data.selectedId : ids[0] || ''
+            data = { ids, byId, selectedId }
             emitData()
         },
         select(id: string) {
@@ -60,27 +72,32 @@ export function createAgentStore() {
             }
             data = { ...data, byId, selectedId: id }
             emitData()
-            updateOutput({ ...output, awaitingAgentId: '' })
         },
         startLoading(id: string) { updateEntry(id, (entry) => ({ ...entry, loading: true, error: '' })) },
         failed(id: string, error: string) { updateEntry(id, (entry) => ({ ...entry, loading: false, error })) },
         loaded(id: string, agent: AgentView, page?: HistoryPage, older = false) {
-            const entries = page?.entries
-            const pagination = page ? { headEntryId: page.headEntryId, hasMore: page.hasMore, nextCursor: page.nextCursor } : undefined
-            updateEntry(id, (entry) => ({ ...entry, agent, loading: false, error: '',
-                entries: entries ? older ? mergeEntries(entries, entry.entries || []) : mergeEntries(entry.entries || [], entries) : entry.entries,
-                page: pagination ? older || !entry.page ? pagination : { ...pagination, hasMore: entry.page.hasMore, nextCursor: entry.page.nextCursor } : entry.page,
-            }))
-            // 完整条目加载成功后直接结束该执行的临时展示，不扫描正文做去重或修补。
-            if (entries) {
+            updateEntry(id, (entry) => {
+                let entries = entry.entries
+                let pagination = entry.page
+                if (page) {
+                    const loadedEntries = entry.entries || []
+                    entries = older ? mergeEntries(page.entries, loadedEntries) : mergeEntries(loadedEntries, page.entries)
+                    const cursorPage = !older && entry.page ? entry.page : page
+                    pagination = {
+                        headEntryId: page.headEntryId,
+                        hasMore: cursorPage.hasMore,
+                        nextCursor: cursorPage.nextCursor,
+                    }
+                }
+                return { ...entry, agent, entries, page: pagination, loading: false, error: '' }
+            })
+            // 正文接纳后清理已结束执行的临时输出；分页更新不改变仍在运行的输出。
+            if (page) {
                 const current = output.streamingOutputs[id]
                 const ended = current && agent.currentRunId !== current.runId
                 const streamingOutputs = { ...output.streamingOutputs }
                 if (ended) delete streamingOutputs[id]
-                updateOutput({ ...output, streamingOutputs,
-                    pendingUserMessages: output.pendingUserMessages.filter((message) => message.agentId !== id),
-                    awaitingAgentId: output.awaitingAgentId === id && agent.state !== 'executing' ? '' : output.awaitingAgentId,
-                })
+                updateOutput(streamingOutputs)
             }
         },
         receive(event: AgentEvent) {
@@ -102,50 +119,68 @@ export function createAgentStore() {
             if (event.kind === 'subagent_released') {
                 const streamingOutputs = { ...output.streamingOutputs }
                 delete streamingOutputs[agentId]
-                updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === agentId ? '' : output.awaitingAgentId })
+                updateOutput(streamingOutputs)
                 if (data.selectedId !== agentId) updateEntry(agentId, (entry) => ({ ...entry, entries: undefined, page: undefined }))
                 return
             }
             if (event.kind === 'run_started') {
                 const run = event.data.run
-                updateEntry(agentId, (entry) => ({ ...entry, agent: {
-                    ...entry.agent, state: 'executing', currentRunId: run.ID,
-                    currentRun: run, UpdatedAt: run.StartedAt,
-                } }))
+                updateEntry(agentId, (entry) => ({
+                    ...entry,
+                    agent: {
+                        ...entry.agent,
+                        state: 'executing',
+                        currentRunId: run.ID,
+                        currentRun: run,
+                        UpdatedAt: run.StartedAt,
+                    },
+                }))
                 return
             }
             if (event.kind === 'run_interrupt_requested') {
-                updateEntry(agentId, (entry) => entry.agent.currentRunId === event.runId ? {
-                    ...entry, agent: { ...entry.agent, state: 'interrupted', UpdatedAt: event.data.appliedAt },
-                } : entry)
+                updateEntry(agentId, (entry) => {
+                    if (entry.agent.currentRunId !== event.runId) return entry
+                    return { ...entry, agent: { ...entry.agent, state: 'interrupted', UpdatedAt: event.data.appliedAt } }
+                })
                 return
             }
             if (event.kind === 'run_ended' || event.kind === 'request_canceled') {
                 const { run, state, entries } = event.data
-                updateEntry(agentId, (entry) => ({
-                    ...entry,
-                    entries: entry.agent.Kind === 'main' || data.selectedId === agentId ? mergeEntries(entry.entries || [], entries) : undefined,
-                    page: entry.agent.Kind === 'main' || data.selectedId === agentId ? entry.page : undefined,
-                    agent: entry.agent.currentRunId && entry.agent.currentRunId !== run.ID ? entry.agent : {
-                        ...entry.agent, state, currentRunId: '', currentRun: null,
-                        latestRun: run, UpdatedAt: run.EndedAt,
-                    },
-                }))
+                updateEntry(agentId, (entry) => {
+                    const retainHistory = entry.agent.Kind === 'main' || data.selectedId === agentId
+                    const hasNewerRun = entry.agent.currentRunId && entry.agent.currentRunId !== run.ID
+                    const agent = hasNewerRun ? entry.agent : {
+                        ...entry.agent,
+                        state,
+                        currentRunId: '',
+                        currentRun: null,
+                        latestRun: run,
+                        UpdatedAt: run.EndedAt,
+                    }
+                    return {
+                        ...entry,
+                        entries: retainHistory ? mergeEntries(entry.entries || [], entries) : undefined,
+                        page: retainHistory ? entry.page : undefined,
+                        agent,
+                    }
+                })
                 const streamingOutputs = { ...output.streamingOutputs }
                 if (streamingOutputs[agentId]?.runId === run.ID) delete streamingOutputs[agentId]
-                updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === agentId ? '' : output.awaitingAgentId })
+                updateOutput(streamingOutputs)
                 return
             }
             if (event.kind === 'entries_appended' && event.data.entries.length) {
-                const entries = event.data.entries
-                updateEntry(agentId, (entry) => ({ ...entry, entries: entry.agent.currentRunId || entry.agent.Kind === 'main' || data.selectedId === agentId ? mergeEntries(entry.entries || [], entries) : undefined }))
+                updateEntry(agentId, (entry) => {
+                    const retainHistory = entry.agent.currentRunId || entry.agent.Kind === 'main' || data.selectedId === agentId
+                    const entries = retainHistory ? mergeEntries(entry.entries || [], event.data.entries) : undefined
+                    return { ...entry, entries }
+                })
             }
             if (event.kind === 'turn_completed') {
                 const current = output.streamingOutputs[agentId]
                 if (current?.runId === event.runId) {
-                    updateOutput({ ...output, streamingOutputs: { ...output.streamingOutputs, [agentId]: {
-                        ...current, turns: current.turns.filter((turn) => turn.turnId !== event.turnId),
-                    } } })
+                    const turns = current.turns.filter((turn) => turn.turnId !== event.turnId)
+                    updateOutput({ ...output.streamingOutputs, [agentId]: { ...current, turns } })
                 }
                 return
             }
@@ -158,23 +193,8 @@ export function createAgentStore() {
                 return
             }
             const streamingOutputs = mergeStreamingEvent(output.streamingOutputs, agentId, event)
-            if (streamingOutputs === output.streamingOutputs) return
-            updateOutput({ ...output, streamingOutputs, awaitingAgentId: output.awaitingAgentId === agentId ? '' : output.awaitingAgentId })
+            if (streamingOutputs !== output.streamingOutputs) updateOutput(streamingOutputs)
         },
-        beginInput({ requestId, sessionId, agentId, content }: Pick<PendingUserMessage, 'requestId' | 'sessionId' | 'agentId' | 'content'>) {
-            const message: PendingUserMessage = { requestId, sessionId, agentId, content, runId: '', at: new Date().toISOString() }
-            // 运行中提交的是后续任务，不给当前回合额外显示等待响应。
-            const awaitingAgentId = data.byId[agentId]?.agent.state === 'executing' ? output.awaitingAgentId : agentId
-            updateOutput({ ...output, pendingUserMessages: [...output.pendingUserMessages, message], awaitingAgentId })
-        },
-        acceptInput(requestId: string, runId: string) {
-            updateOutput({ ...output, pendingUserMessages: output.pendingUserMessages.map((message) => message.requestId === requestId ? { ...message, runId } : message) })
-        },
-        rejectInput(requestId: string) {
-            const message = output.pendingUserMessages.find((item) => item.requestId === requestId)
-            updateOutput({ ...output, pendingUserMessages: output.pendingUserMessages.filter((item) => item.requestId !== requestId), awaitingAgentId: output.awaitingAgentId === message?.agentId ? '' : output.awaitingAgentId })
-        },
-        stopAwaiting() { updateOutput({ ...output, awaitingAgentId: '' }) },
     }
 }
 
@@ -182,5 +202,4 @@ function mergeEntries(current: Entry[], incoming: Entry[]): Entry[] {
     return [...new Map([...current, ...incoming].map((entry) => [entry.id, entry])).values()]
 }
 
-export type AgentStore = ReturnType<typeof createAgentStore>
-export type AgentOutputSource = Pick<AgentStore, 'getOutput' | 'subscribeOutput'>
+export type AgentOutputSource = Pick<ReturnType<typeof createAgentStore>, 'getOutput' | 'subscribeOutput'>

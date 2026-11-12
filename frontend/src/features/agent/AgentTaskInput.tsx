@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, type CSSProperties, type KeyboardEvent, type RefObject } from 'react'
 import { Brain, ChevronDown, Cpu, Plus, Send, Server, Square } from 'lucide-react'
 import type { ModelOption } from '../../api'
 import { useSlashCommandMenu } from './SlashCommandMenu'
 import { SessionTokenUsage } from './SessionTokenUsage'
 import { ApprovalModeSelect } from './ApprovalModeSelect'
+import { useInputPickers } from './useInputPickers'
 
 type AgentTaskInputProps = {
+    inputRef: RefObject<HTMLTextAreaElement | null>
     sessionId: string
     active: boolean
     canQueue: boolean
@@ -24,17 +26,13 @@ type AgentTaskInputProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
-    const inputRef = useRef<HTMLTextAreaElement>(null)
-    const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy)
-    const providerPickerRef = useRef<HTMLDivElement>(null)
-    const modelPickerRef = useRef<HTMLDivElement>(null)
-    const reasoningPickerRef = useRef<HTMLDivElement>(null)
-    const approvalPickerRef = useRef<HTMLDivElement>(null)
-    const [providerPickerOpen, setProviderPickerOpen] = useState(false)
-    const [modelPickerOpen, setModelPickerOpen] = useState(false)
-    const [reasoningPickerOpen, setReasoningPickerOpen] = useState(false)
-    const [approvalPickerOpen, setApprovalPickerOpen] = useState(false)
+export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+    const inputID = useId()
+    const providerMenuID = useId()
+    const modelMenuID = useId()
+    const reasoningPickerID = useId()
+    const reasoningSliderID = useId()
+    const slash = useSlashCommandMenu(input, setInput, commands, onCommand, busy, inputRef)
     const providerOptions = Array.from(new Map(models.map((model) => [model.providerId, model])).values())
     const providerModels = models.filter((model) => !selectedProviderID || model.providerId === selectedProviderID)
     const selectedProvider = providerOptions.find((provider) => provider.providerId === selectedProviderID)
@@ -46,19 +44,18 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
     const reasoningProgress = reasoningLevels.length > 1
         ? `${(selectedReasoningIndex / (reasoningLevels.length - 1)) * 100}%`
         : '100%'
-    const closePickers = useCallback(() => {
-        setProviderPickerOpen(false)
-        setModelPickerOpen(false)
-        setReasoningPickerOpen(false)
-        setApprovalPickerOpen(false)
-    }, [])
+    const { openPicker, togglePicker, closePickers, providerPickerRef, modelPickerRef, reasoningPickerRef, approvalPickerRef } = useInputPickers({ busy, hasModels: models.length > 0, reasoningAvailable })
+    const providerPickerOpen = openPicker === 'provider'
+    const modelPickerOpen = openPicker === 'model'
+    const reasoningPickerOpen = openPicker === 'reasoning'
+    const approvalPickerOpen = openPicker === 'approval'
 
     useEffect(() => {
         // 解除禁用后恢复输入；用户已聚焦其他控件时不抢焦点。
-        if (!busy && document.activeElement === document.body) {
-            inputRef.current?.focus({ preventScroll: true })
+        if (!busy && inputRef.current?.getClientRects().length && document.activeElement === document.body) {
+            inputRef.current.focus({ preventScroll: true })
         }
-    }, [busy])
+    }, [busy, inputRef])
 
     useLayoutEffect(() => {
         const textarea = inputRef.current
@@ -69,112 +66,7 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
         const contentHeight = textarea.scrollHeight
         textarea.style.height = `${contentHeight}px`
         textarea.style.overflowY = 'auto'
-    }, [input])
-
-    useLayoutEffect(() => {
-        if (!providerPickerOpen && !modelPickerOpen && !reasoningPickerOpen && !approvalPickerOpen) {
-            return
-        }
-
-        const picker = providerPickerOpen ? providerPickerRef.current : modelPickerOpen ? modelPickerRef.current
-            : reasoningPickerOpen ? reasoningPickerRef.current : approvalPickerRef.current
-        const popup = picker?.querySelector<HTMLElement>('.model-picker-menu, .thinking-intensity-picker')
-        const trigger = picker?.querySelector<HTMLButtonElement>('button')
-        const region = picker?.closest<HTMLElement>('.main-panel')
-        if (!picker || !popup || !trigger) return
-
-        const updatePlacement = () => {
-            const bounds = region?.getBoundingClientRect()
-            const anchor = trigger.getBoundingClientRect()
-            const left = Math.max(8, bounds?.left ?? 0) + 4
-            const right = Math.min(window.innerWidth - 8, bounds?.right ?? window.innerWidth) - 4
-            const top = Math.max(8, bounds?.top ?? 0) + 4
-            const bottom = Math.min(window.innerHeight - 8, bounds?.bottom ?? window.innerHeight) - 4
-            const above = Math.max(0, anchor.top - top - 8)
-            const below = Math.max(0, bottom - anchor.bottom - 8)
-            if (right <= left || anchor.bottom <= top || anchor.top >= bottom || Math.max(above, below) < 40) {
-                closePickers()
-                return
-            }
-            popup.style.maxWidth = `${right - left}px`
-            const height = Math.min(300, popup.scrollHeight + popup.offsetHeight - popup.clientHeight)
-            const upward = above >= height || above >= below
-            popup.style.maxHeight = `${Math.min(300, upward ? above : below)}px`
-            popup.style.top = upward ? 'auto' : 'calc(100% + 8px)'
-            popup.style.bottom = upward ? 'calc(100% + 8px)' : 'auto'
-            const x = Math.max(left, Math.min(anchor.left + (anchor.width - popup.offsetWidth) / 2, right - popup.offsetWidth))
-            popup.style.left = `${x - picker.getBoundingClientRect().left}px`
-            popup.style.visibility = 'visible'
-        }
-        // 在首次绘制前约束到所属 Region，避免祖先裁剪或跨栏遮挡。
-        updatePlacement()
-        const selected = popup.querySelector<HTMLElement>('[aria-current="true"]') || popup.querySelector<HTMLElement>('input, button')
-        selected?.focus()
-
-        const closeOnOutsidePress = (event: PointerEvent) => {
-            const target = event.target
-            if (target instanceof Node && !picker.contains(target)) {
-                closePickers()
-            }
-        }
-        const onKeyDown = (event: globalThis.KeyboardEvent) => {
-            if (event.key === 'Escape' || event.key === 'Tab') {
-                if (event.key === 'Escape') {
-                    event.preventDefault()
-                    event.stopPropagation()
-                }
-                trigger.focus({ preventScroll: true })
-                closePickers()
-                return
-            }
-            if (reasoningPickerOpen || !popup.contains(document.activeElement)) return
-            const items = Array.from(popup.querySelectorAll<HTMLButtonElement>('button'))
-            const index = items.indexOf(document.activeElement as HTMLButtonElement)
-            const next = event.key === 'ArrowDown' ? (index + 1) % items.length
-                : event.key === 'ArrowUp' ? (index - 1 + items.length) % items.length
-                : event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : -1
-            if (next >= 0) {
-                event.preventDefault()
-                items[next]?.focus()
-            }
-        }
-        const closeOnFocusExit = (event: FocusEvent) => {
-            if (event.target instanceof Node && !picker.contains(event.target)) closePickers()
-        }
-        const closeOnScroll = (event: Event) => {
-            if (event.target instanceof Node && popup.contains(event.target)) return
-            if (popup.contains(document.activeElement)) trigger.focus({ preventScroll: true })
-            closePickers()
-        }
-        const observer = new ResizeObserver(updatePlacement)
-        observer.observe(picker)
-        if (region) observer.observe(region)
-
-        window.addEventListener('resize', updatePlacement)
-        document.addEventListener('pointerdown', closeOnOutsidePress, true)
-        document.addEventListener('keydown', onKeyDown)
-        document.addEventListener('focusin', closeOnFocusExit)
-        document.addEventListener('scroll', closeOnScroll, true)
-        return () => {
-            observer.disconnect()
-            window.removeEventListener('resize', updatePlacement)
-            document.removeEventListener('pointerdown', closeOnOutsidePress, true)
-            document.removeEventListener('keydown', onKeyDown)
-            document.removeEventListener('focusin', closeOnFocusExit)
-            document.removeEventListener('scroll', closeOnScroll, true)
-        }
-    }, [approvalPickerOpen, closePickers, modelPickerOpen, providerPickerOpen, reasoningPickerOpen])
-
-    useEffect(() => {
-        if (busy) setApprovalPickerOpen(false)
-        if (busy || models.length === 0) {
-            setProviderPickerOpen(false)
-            setModelPickerOpen(false)
-        }
-        if (busy || !reasoningAvailable) {
-            setReasoningPickerOpen(false)
-        }
-    }, [busy, models.length, reasoningAvailable])
+    }, [input, inputRef])
 
     const sendDisabled = busy || !input.trim()
 
@@ -200,11 +92,11 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                 </button>
                 <textarea
                     className="composer-textarea"
-                    id="agent-input"
+                    id={inputID}
                     aria-label="执行输入"
                     role="combobox"
                     aria-autocomplete="list"
-                    aria-controls={slash.menuOpen ? 'slash-command-menu' : undefined}
+                    aria-controls={slash.menuOpen ? slash.menuID : undefined}
                     aria-expanded={slash.menuOpen}
                     aria-activedescendant={slash.selectedOptionID}
                     ref={inputRef}
@@ -225,11 +117,8 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                             aria-label={selectedProvider ? `Provider: ${selectedProvider.providerName}` : '请选择 Provider'}
                             aria-expanded={providerPickerOpen}
                             aria-haspopup="menu"
-                            aria-controls="provider-picker-menu"
-                            onClick={() => {
-                                closePickers()
-                                setProviderPickerOpen(!providerPickerOpen)
-                            }}
+                            aria-controls={providerPickerOpen ? providerMenuID : undefined}
+                            onClick={() => togglePicker('provider')}
                             disabled={busy || models.length === 0}
                         >
                             <Server size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -237,7 +126,7 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                             <ChevronDown className={`composer-select-chevron ${providerPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {providerPickerOpen && (
-                            <div className="model-picker-menu" id="provider-picker-menu" role="menu" aria-label="Provider 选择">
+                            <div className="model-picker-menu" id={providerMenuID} role="menu" aria-label="Provider 选择">
                                 {providerOptions.map((provider) => (
                                     <button
                                         className={`model-picker-option ${provider.providerId === selectedProviderID ? 'is-selected' : ''}`}
@@ -250,7 +139,7 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                                             if (provider.providerId !== selectedProviderID) {
                                                 onModelChange(provider.providerId, '')
                                             }
-                                            setProviderPickerOpen(false)
+                                            closePickers()
                                             providerPickerRef.current?.querySelector('button')?.focus({ preventScroll: true })
                                         }}
                                     >
@@ -269,11 +158,8 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                             aria-label={selectedModel ? `模型: ${selectedModel.label}` : '请选择模型'}
                             aria-expanded={modelPickerOpen}
                             aria-haspopup="menu"
-                            aria-controls="model-picker-menu"
-                            onClick={() => {
-                                closePickers()
-                                setModelPickerOpen(!modelPickerOpen)
-                            }}
+                            aria-controls={modelPickerOpen ? modelMenuID : undefined}
+                            onClick={() => togglePicker('model')}
                             disabled={busy || models.length === 0}
                         >
                             <Cpu size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -281,7 +167,7 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                             <ChevronDown className={`composer-select-chevron ${modelPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {modelPickerOpen && (
-                            <div className="model-picker-menu" id="model-picker-menu" role="menu" aria-label="模型选择">
+                            <div className="model-picker-menu" id={modelMenuID} role="menu" aria-label="模型选择">
                                 {providerModels.map((model) => (
                                     <button
                                         className={`model-picker-option ${model.providerId === selectedProviderID && model.modelId === selectedModelID ? 'is-selected' : ''}`}
@@ -294,7 +180,7 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                                         title={`${model.label} 通过 ${model.providerName}`}
                                         onClick={() => {
                                             onModelChange(model.providerId, model.modelId)
-                                            setModelPickerOpen(false)
+                                            closePickers()
                                             modelPickerRef.current?.querySelector('button')?.focus({ preventScroll: true })
                                         }}
                                     >
@@ -312,11 +198,8 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                             title={reasoningAvailable ? `思考强度: ${selectedReasoning}` : '此模型不支持思考强度'}
                             aria-label={reasoningAvailable ? `思考强度: ${selectedReasoning}` : '此模型不支持思考强度'}
                             aria-expanded={reasoningPickerOpen}
-                            aria-controls="thinking-intensity-picker"
-                            onClick={() => {
-                                closePickers()
-                                setReasoningPickerOpen(!reasoningPickerOpen)
-                            }}
+                            aria-controls={reasoningPickerOpen ? reasoningPickerID : undefined}
+                            onClick={() => togglePicker('reasoning')}
                             disabled={busy || !reasoningAvailable}
                         >
                             <Brain size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -324,11 +207,11 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                             <ChevronDown className={`composer-select-chevron ${reasoningPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {reasoningPickerOpen && (
-                            <div className="thinking-intensity-picker" id="thinking-intensity-picker" role="group" aria-label="思考强度">
-                                <output htmlFor="thinking-intensity-slider">{selectedReasoning}</output>
+                            <div className="thinking-intensity-picker" id={reasoningPickerID} role="group" aria-label="思考强度">
+                                <output htmlFor={reasoningSliderID}>{selectedReasoning}</output>
                                 <input
                                     className="thinking-intensity-slider"
-                                    id="thinking-intensity-slider"
+                                    id={reasoningSliderID}
                                     type="range"
                                     min="0"
                                     max={Math.max(0, reasoningLevels.length - 1)}
@@ -354,12 +237,9 @@ export function AgentTaskInput({ sessionId, active, canQueue, input, setInput, m
                         disabled={busy}
                         pickerRef={approvalPickerRef}
                         open={approvalPickerOpen}
-                        onToggle={() => {
-                            closePickers()
-                            setApprovalPickerOpen(!approvalPickerOpen)
-                        }}
+                        onToggle={() => togglePicker('approval')}
                         onClose={() => {
-                            setApprovalPickerOpen(false)
+                            closePickers()
                             approvalPickerRef.current?.querySelector('button')?.focus({ preventScroll: true })
                         }}
                     />

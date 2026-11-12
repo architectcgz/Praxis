@@ -41,7 +41,9 @@ export function useWorkspaceCommands({ createBranch, switchBranch, showBranches,
         const parsed = name.trim().match(/^(\/\S+)(?:\s+([\s\S]*))?$/)
         const command = parsed?.[1] || ''
         const argument = parsed?.[2]?.trim() || ''
-        if (!WORKSPACE_COMMANDS.some((item) => item.name === command) || argument && command !== '/branch' && command !== '/switch') {
+        const knownCommand = WORKSPACE_COMMANDS.some((item) => item.name === command)
+        const acceptsArgument = command === '/branch' || command === '/switch'
+        if (!knownCommand || (argument && !acceptsArgument)) {
             setError(`未知命令：${name}`)
             setErrorCode(undefined)
             return false
@@ -57,42 +59,45 @@ export function useWorkspaceCommands({ createBranch, switchBranch, showBranches,
         const isCurrentView = () => viewRequestRef.current === viewID && getSelectedAgentID() === agentID
         setCommandNotice('')
         try {
-            if (command === '/new') {
-                return await createNewSession(session.projectId)
-            }
+            if (command === '/new') return await createNewSession(session.projectId)
+
             setBusy(true)
             setError('')
             setErrorCode(undefined)
-            try {
-                if (command === '/branch') {
-                    const next = await createBranch(argument)
-                    if (isCurrentView()) { setInput(''); setCommandNotice(`已切换到分支 ${next.branch.name}`) }
-                    return true
-                }
-                if (command === '/switch' || command === '/tree') {
-                    if (command === '/switch' && argument) await switchBranch(argument)
-                    else await showBranches(command === '/tree' ? 'tree' : 'branches')
-                    if (isCurrentView()) setInput('')
-                    return true
-                }
-                await reloadConfig(session.id)
-                if (!isCurrentView()) return true
-                await Promise.all([refreshCatalog(true, true), refreshModels()])
+            if (command === '/branch') {
+                const next = await createBranch(argument)
                 if (isCurrentView()) {
                     setInput('')
-                    setCommandNotice('当前会话配置已重新加载，其他会话保持不变')
+                    setCommandNotice(`已切换到分支 ${next.branch.name}`)
                 }
                 return true
-            } catch (err) {
-                if (isCurrentView()) {
-                    setError(readableError(err))
-                    setErrorCode(apiErrorCode(err))
-                }
-                return false
-            } finally {
-                setBusy(false)
             }
+            if (command === '/switch' || command === '/tree') {
+                if (command === '/switch' && argument) {
+                    await switchBranch(argument)
+                } else {
+                    await showBranches(command === '/tree' ? 'tree' : 'branches')
+                }
+                if (isCurrentView()) setInput('')
+                return true
+            }
+            await reloadConfig(session.id)
+            if (!isCurrentView()) return true
+            await Promise.all([refreshCatalog(true, true), refreshModels()])
+            if (isCurrentView()) {
+                setInput('')
+                setCommandNotice('当前会话配置已重新加载，其他会话保持不变')
+            }
+            return true
+        } catch (err) {
+            if (isCurrentView()) {
+                setError(readableError(err))
+                setErrorCode(apiErrorCode(err))
+            }
+            return false
         } finally {
+            // 新建会话由工作区命令持有 busy，其余命令由当前页面持有。
+            if (command !== '/new') setBusy(false)
             running.current = false
         }
     }, [bridgeAvailable, busy, createNewSession, createBranch, switchBranch, showBranches, refreshCatalog, refreshModels, session, viewRequestRef, getSelectedAgentID, setBusy, setError, setErrorCode, setInput])

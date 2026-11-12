@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { FileText, LoaderCircle, X } from 'lucide-react'
 import { previewFile, type FilePreview as FilePreviewData } from '../../../api/filePreview'
 import { Overlay } from '../../../components/ui'
@@ -9,7 +9,8 @@ import './file-preview.css'
 /** 为当前会话的所有输出提供文件预览；切换会话时由 key 卸载，避免展示其他会话的文件。 */
 export function FilePreviewProvider({ sessionId, children }: { sessionId: string; children: ReactNode }) {
     const [path, setPath] = useState<string | null>(null)
-    return <FilePreviewContext value={{ openFile: setPath }}>
+    const value = useMemo(() => ({ openFile: setPath }), [setPath])
+    return <FilePreviewContext value={value}>
         {children}
         {path !== null && <FilePreviewDialog key={path} sessionId={sessionId} path={path} onOpen={setPath} onClose={() => setPath(null)} />}
     </FilePreviewContext>
@@ -24,6 +25,7 @@ function FilePreviewDialog({ sessionId, path, onOpen, onClose }: {
     const titleId = useId()
     const [file, setFile] = useState<FilePreviewData | null>(null)
     const [error, setError] = useState('')
+    const previewContext = useMemo(() => ({ openFile: onOpen, basePath: file?.path }), [onOpen, file?.path])
     useEffect(() => {
         let active = true
         void previewFile(sessionId, path).then(
@@ -43,7 +45,7 @@ function FilePreviewDialog({ sessionId, path, onOpen, onClose }: {
                 {error ? <p className="file-preview-error" role="alert">{error}</p> : !file ? (
                     <p className="file-preview-loading" role="status"><LoaderCircle size={16} className="is-spinning" aria-hidden="true" />正在读取文件…</p>
                 ) : !file.content ? <p className="file-preview-empty">文件为空。</p> : /\.(md|markdown|mdown)$/i.test(file.path) ? (
-                    <FilePreviewContext value={{ openFile: onOpen, basePath: file.path }}><MessageMarkdown content={file.content} /></FilePreviewContext>
+                    <FilePreviewContext value={previewContext}><MessageMarkdown content={file.content} /></FilePreviewContext>
                 ) : <pre className="file-preview-text">{file.content}</pre>}
             </div>
         </section>

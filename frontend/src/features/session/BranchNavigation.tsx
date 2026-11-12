@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState, type RefObject } from 'react'
 import { GitBranch, GitFork, Trash2, X } from 'lucide-react'
 import { Overlay } from '../../components/ui'
 import type { Branch, getEntryTree, listBranches } from '../../api'
@@ -8,15 +8,17 @@ import './branches.css'
 type BranchList = Awaited<ReturnType<typeof listBranches>>
 type EntryTree = Awaited<ReturnType<typeof getEntryTree>>
 
-export function BranchStatus({ branch, browsing, busy, onReturn, cleanupPending, onRetryCleanup }: { branch: Branch; browsing: boolean; busy: boolean; onReturn: () => void; cleanupPending: boolean; onRetryCleanup: () => void }) {
+export function BranchStatus({ branch, browsing, busy, onReturn, cleanupPending, cleanupLoading, cleanupError, onRetryCleanup }: { branch: Branch; browsing: boolean; busy: boolean; onReturn: () => void; cleanupPending: boolean; cleanupLoading: boolean; cleanupError: string; onRetryCleanup: () => void }) {
     return <div className="session-branch-status">
         <GitBranch size={14} aria-hidden="true" /><span>{branch.name}</span>
-        {cleanupPending && <button type="button" className="quiet-button" disabled={busy} onClick={onRetryCleanup}>重试目录清理</button>}
+        {cleanupPending && <button type="button" className="quiet-button" disabled={busy || cleanupLoading} aria-busy={cleanupLoading} onClick={onRetryCleanup}>{cleanupLoading ? '正在清理目录…' : '重试目录清理'}</button>}
+        {cleanupError && <span role="alert">{cleanupError}</span>}
         {browsing && <><span className="session-branch-hint">历史浏览，仅执行结束位置允许分叉</span><button type="button" className="quiet-button" disabled={busy} onClick={onReturn}>返回最新位置</button></>}
     </div>
 }
 
 type DialogProps = {
+    returnFocusRef: RefObject<HTMLTextAreaElement | null>
     kind: 'branches' | 'tree'
     branches: BranchList
     tree: EntryTree
@@ -28,7 +30,8 @@ type DialogProps = {
 }
 
 /** 选择节点只改变展示；模型 Context 在真正创建分支时恢复。 */
-export function BranchDialog({ kind, branches, tree, currentBranchId, onSwitch, onBrowse, onDelete, onClose }: DialogProps) {
+export function BranchDialog({ returnFocusRef, kind, branches, tree, currentBranchId, onSwitch, onBrowse, onDelete, onClose }: DialogProps) {
+    const titleID = useId()
     const [pending, setPending] = useState(false)
     const [error, setError] = useState('')
     const [deleteTarget, setDeleteTarget] = useState('')
@@ -44,11 +47,11 @@ export function BranchDialog({ kind, branches, tree, currentBranchId, onSwitch, 
         depths.set(node.id, depth)
         return { ...node, depth }
     })
-    const close = () => { if (!pending) { onClose(); document.getElementById('agent-input')?.focus() } }
-    return <Overlay labelledBy="session-branch-dialog-title" onClose={close}>
+    const close = () => { if (!pending) onClose() }
+    return <Overlay labelledBy={titleID} onClose={close} returnFocusRef={returnFocusRef}>
         <section className="session-branch-dialog" aria-busy={pending}>
             <header>
-                <h2 id="session-branch-dialog-title">{kind === 'branches' ? '切换分支' : '条目树'}</h2>
+                <h2 id={titleID}>{kind === 'branches' ? '切换分支' : '条目树'}</h2>
                 <button className="icon-button" type="button" aria-label="关闭" disabled={pending} onClick={close}><X size={18} /></button>
             </header>
             <p className="session-branch-description">{kind === 'branches' ? '切换后回到该分支的最新位置。' : '任意条目均可浏览；只有主会话执行结束位置允许分叉，其他条目仅可查看。分支不隔离项目文件。'}</p>

@@ -1,13 +1,11 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { stopAgent, type AgentView, type ApiErrorCode } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
-import type { AgentStore } from './agentStore'
 
 type AgentCommandContext = {
     agent: AgentView | null
     busy: boolean
     getSelectedAgentID: () => string
-    inputActions: Pick<AgentStore, 'stopAwaiting'>
     setBusy: Dispatch<SetStateAction<boolean>>
     setError: Dispatch<SetStateAction<string>>
     setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>
@@ -19,7 +17,6 @@ export function useAgentCommands({
     agent,
     busy,
     getSelectedAgentID,
-    inputActions,
     setBusy,
     setError,
     setErrorCode,
@@ -32,7 +29,6 @@ export function useAgentCommands({
         const viewRequestID = viewRequestRef.current
         const isCurrentView = () => viewRequestRef.current === viewRequestID && getSelectedAgentID() === selectedAgentID
         setBusy(true)
-        inputActions.stopAwaiting()
         setError('')
         setErrorCode(undefined)
         try {
@@ -45,7 +41,7 @@ export function useAgentCommands({
         } finally {
             setBusy(false)
         }
-    }, [agent, busy, getSelectedAgentID, inputActions, viewRequestRef, setBusy, setError, setErrorCode])
+    }, [agent, busy, getSelectedAgentID, viewRequestRef, setBusy, setError, setErrorCode])
 
     return { stop }
 }

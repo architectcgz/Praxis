@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 
 type OverlayProps = {
@@ -6,16 +6,22 @@ type OverlayProps = {
     onClose: () => void
     children: ReactNode
     className?: string
+    returnFocusRef?: RefObject<HTMLElement | null>
 }
 
 const openOverlays = new Set<HTMLElement>()
 let bodyOverflow = ''
 
-export function Overlay({ labelledBy, onClose, children, className = '' }: OverlayProps) {
+export function Overlay({ labelledBy, onClose, children, className = '', returnFocusRef }: OverlayProps) {
     const closeOnEscape = useEffectEvent(onClose)
     const backdropRef = useRef<HTMLDivElement>(null)
     // 在子元素 autoFocus 执行前记录触发器，关闭后才能恢复到页面内的真实入口。
     const [previousActiveElement] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    const restoreFocus = useEffectEvent(() => {
+        // 分支切换可能重建输入区，关闭时恢复到入口当前持有的节点。
+        const target = returnFocusRef?.current ?? previousActiveElement
+        if (target?.isConnected) target.focus({ preventScroll: true })
+    })
 
     useEffect(() => {
         const backdrop = backdropRef.current
@@ -91,9 +97,9 @@ export function Overlay({ labelledBy, onClose, children, className = '' }: Overl
             if (openOverlays.size === 0) document.body.style.overflow = bodyOverflow
             const focusInAnotherOverlay = Array.from(document.querySelectorAll('#overlay-root > .modal-backdrop'))
                 .some((overlay) => overlay !== backdrop && overlay.contains(document.activeElement))
-            if (!focusInAnotherOverlay && previousActiveElement?.isConnected) previousActiveElement.focus({ preventScroll: true })
+            if (!focusInAnotherOverlay) restoreFocus()
         }
-    }, [previousActiveElement])
+    }, [])
 
     const host = document.getElementById('overlay-root')
     if (!host) {

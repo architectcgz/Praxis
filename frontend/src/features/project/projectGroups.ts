@@ -1,5 +1,5 @@
-import { ProjectSummary, SessionSummary } from '../../api'
-import { ProjectGroup } from './types'
+import type { ProjectSummary, SessionSummary } from '../../api'
+import type { ProjectGroup } from './types'
 
 export function groupSessions(items: SessionSummary[], projects: ProjectSummary[] = []): ProjectGroup[] {
     const groups = new Map<string, ProjectGroup>()

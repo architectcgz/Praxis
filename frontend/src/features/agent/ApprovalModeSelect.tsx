@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { ChevronDown, ShieldCheck } from 'lucide-react'
 import { getSessionApprovalMode, setSessionApprovalMode, type ApprovalMode, type SessionApprovalMode } from '../../api/sessions'
 import { readableError } from '../../shared/errors'
@@ -15,6 +15,7 @@ type ApprovalModeSelectProps = {
 
 /** 保存会话审批选择；有效模式只在该会话显式 reload 后更新。 */
 export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onToggle, onClose }: ApprovalModeSelectProps) {
+    const menuID = useId()
     const [settings, setSettings] = useState<SessionApprovalMode | null>(null)
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -78,7 +79,7 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
             aria-busy={loading || saving}
             aria-expanded={open}
             aria-haspopup="menu"
-            aria-controls="approval-mode-picker-menu"
+            aria-controls={open ? menuID : undefined}
             disabled={unavailable}
             onClick={onToggle}
         >
@@ -86,7 +87,7 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
             <span>{label}</span>
             <ChevronDown className={`composer-select-chevron ${open ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
         </button>
-        {open && settings && <div className="model-picker-menu" id="approval-mode-picker-menu" role="menu" aria-label="Approval mode 选择">
+        {open && settings && <div className="model-picker-menu" id={menuID} role="menu" aria-label="Approval mode 选择">
             {options.map((option) => <button
                 className={`model-picker-option ${settings.sessionMode === option.mode ? 'is-selected' : ''}`}
                 type="button"

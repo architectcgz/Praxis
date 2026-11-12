@@ -2,8 +2,8 @@ import type { AgentEvent } from '../../api'
 import type { StreamingOutput, StreamingOutputs } from './types'
 
 /**
- * 按 Agent、task 和 turn 合并实时事件，不修改输入对象。
- * 仅相邻同类文本增量拼接；终态清除等待标记但保留尚未落盘的输出。
+ * 按 Agent、Run 和 Turn 合并实时事件，不修改输入对象。
+ * 仅相邻同类文本增量拼接；回合与执行终态由 store 接纳正文并清理输出。
  */
 export function mergeStreamingEvent(outputs: StreamingOutputs, agentId: string, event: AgentEvent): StreamingOutputs {
     const previous = outputs[agentId]
@@ -38,29 +38,13 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, agentId: string, 
             }
             return { ...outputs, [agentId]: { ...output, turns } }
         }
-        case 'turn_completed': {
-            const turnId = event.turnId || ''
-            const index = output.turns.findIndex((item) => item.turnId === turnId)
-            if (index < 0) {
-                return outputs
-            }
-            const turns = [...output.turns]
-            turns[index] = {
-                ...turns[index],
-                events: turns[index].events.filter((item) => item.kind !== 'model_request_started'),
-            }
-            return { ...outputs, [agentId]: { ...output, turns } }
-        }
-        case 'request_canceled':
-        case 'run_ended':
         case 'error':
-            if (event.kind !== 'error' && previous?.runId !== event.runId) return outputs
             return { ...outputs, [agentId]: {
                 ...output,
                 turns: output.turns.map((turn) => ({ ...turn, events: turn.events.filter((item) => (
                     item.kind !== 'model_request_started' && item.kind !== 'tool_approval_required'
                 )) })),
-                error: event.kind === 'error' ? event.data.message : output.error,
+                error: event.data.message,
             } }
         default:
             return outputs

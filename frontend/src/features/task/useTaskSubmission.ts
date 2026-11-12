@@ -35,8 +35,8 @@ export function useTaskSubmission({
     viewRequestRef,
 }: TaskSubmissionContext) {
     const submission = useRef<{ key: string; id: string; bindingId: string } | null>(null)
-    const submitTask = useCallback(async () => {
-        if (!sessionID || !input.trim() || busy) return
+    const submitTask = useCallback(async (): Promise<boolean> => {
+        if (!sessionID || !input.trim() || busy) return false
         const selectedAgentID = getSelectedAgentID()
         const viewRequestID = viewRequestRef.current
         const isCurrentView = () => viewRequestRef.current === viewRequestID && getSelectedAgentID() === selectedAgentID
@@ -45,7 +45,7 @@ export function useTaskSubmission({
         setErrorCode(undefined)
         try {
             const target = await prepareSubmission()
-            if (!isCurrentView()) return
+            if (!isCurrentView()) return false
             const key = JSON.stringify([target.id, target.branch.id, input])
             if (submission.current?.key !== key) submission.current = { key, id: crypto.randomUUID(), bindingId: target.bindingId || crypto.randomUUID() }
             // 创建不要求模型已就绪，暂不能调度时输入仍保留在队列中。
@@ -55,7 +55,9 @@ export function useTaskSubmission({
                 submission.current = null
                 setInput('')
                 if (response.schedulingError) setError(`任务已加入队列，暂未开始执行：${response.schedulingError}`)
+                return true
             }
+            return false
         } catch (err) {
             if (isCurrentView()) {
                 setError(readableError(err))
@@ -64,6 +66,7 @@ export function useTaskSubmission({
         } finally {
             setBusy(false)
         }
+        return false
     }, [busy, input, sessionID, prepareSubmission, bindSubmission, getSelectedAgentID, viewRequestRef, setBusy, setError, setErrorCode, setInput])
 
     const cancelQueuedTask = useCallback(async (taskID: string) => {

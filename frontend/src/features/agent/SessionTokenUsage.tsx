@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { listSessionUsage, subscribeAgentEvents, type Entry, type ModelUsageRecord } from '../../api/agents'
 import { getSessionUsageSummary, type SessionUsageSummary } from '../../api/sessions'
 import { readableError } from '../../shared/errors'
@@ -46,7 +46,7 @@ export function ModelUsageProvider({ sessionId, revision, entries, children }: {
         void load()
         return () => { active = false; unsubscribe() }
     }, [sessionId, revision])
-    const turnKey = JSON.stringify([...new Set(entries.map((entry) => entry.turnId).filter(Boolean))].sort())
+    const turnKey = useMemo(() => JSON.stringify([...new Set(entries.map((entry) => entry.turnId).filter(Boolean))].sort()), [entries])
     useEffect(() => {
         let active = true
         const turnIds = JSON.parse(turnKey) as string[]
@@ -69,7 +69,8 @@ export function ModelUsageProvider({ sessionId, revision, entries, children }: {
         void load()
         return () => { active = false; unsubscribe() }
     }, [sessionId, turnKey])
-    return <ModelUsageContext value={{ records, summary, loading, error, recordsError }}>{children}</ModelUsageContext>
+    const value = useMemo(() => ({ records, summary, loading, error, recordsError }), [records, summary, loading, error, recordsError])
+    return <ModelUsageContext value={value}>{children}</ModelUsageContext>
 }
 
 /** 读取当前会话的用量快照；没有 Provider 时视为尚无上报记录。 */

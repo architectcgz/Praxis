@@ -626,6 +626,19 @@
     justify-content: flex-end;
 }
 
+.message-copy-error {
+    min-width: 0;
+    color: var(--danger);
+    font-size: var(--font-size-meta);
+    line-height: var(--line-height-meta);
+    overflow-wrap: anywhere;
+}
+
+.markdown-code-block > .message-copy-error {
+    display: block;
+    padding: 4px 8px;
+}
+
 .message-copy-button,
 .markdown-code-copy-button,
 .markdown-table-copy-button {

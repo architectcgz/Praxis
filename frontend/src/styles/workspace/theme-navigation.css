@@ -89,7 +89,6 @@
 
 .agent .sub,
 .agent-row-copy small {
-    margin-top: 3px;
     color: var(--faint);
     font-family: var(--mono);
     font-size: var(--font-size-meta);

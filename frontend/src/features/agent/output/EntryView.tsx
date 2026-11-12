@@ -1,7 +1,8 @@
 import { memo, type ReactNode } from 'react'
 import type { AgentEvent, Entry, EntryBlock } from '../../../api'
 import { DurationLabel } from '../../timing/DurationLabel'
-import { CopyIconButton, MessageMarkdown } from './MarkdownViews'
+import { MessageMarkdown } from './MarkdownViews'
+import { CopyIconButton } from './CopyIconButton'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock } from './ToolCallViews'
 import { MessageTiming } from './MessageTiming'
@@ -106,15 +107,10 @@ function MessageActions({ content, children }: { content: string; children?: Rea
                 className="message-copy-button"
                 copiedLabel="消息已复制"
                 label="复制消息"
-                onCopy={() => copyText(content)}
+                getText={() => content}
             />}
         </div>
     )
-}
-
-async function copyText(content: string) {
-    if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable')
-    await navigator.clipboard.writeText(content)
 }
 
 let dateFormatter: Intl.DateTimeFormat | null = null

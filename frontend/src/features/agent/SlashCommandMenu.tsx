@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 
 type SlashCommand = { name: string; description: string }
 
@@ -9,7 +9,9 @@ export function useSlashCommandMenu(
     commands: readonly SlashCommand[],
     onCommand: (name: string) => Promise<boolean>,
     disabled: boolean,
+    inputRef: RefObject<HTMLTextAreaElement | null>,
 ) {
+    const menuID = useId()
     const menuRef = useRef<HTMLDivElement>(null)
     const [dismissed, setDismissed] = useState('')
     const [selected, setSelected] = useState(0)
@@ -41,13 +43,13 @@ export function useSlashCommandMenu(
         if (!open) return
         const closeOutside = (event: PointerEvent) => {
             if (event.target instanceof Node && !menuRef.current?.contains(event.target) &&
-                !(event.target instanceof HTMLTextAreaElement && event.target.id === 'agent-input')) {
+                event.target !== inputRef.current) {
                 setDismissed(input)
             }
         }
         const closeOnFocusExit = (event: FocusEvent) => {
             if (event.target instanceof Node && !menuRef.current?.contains(event.target) &&
-                !(event.target instanceof HTMLTextAreaElement && event.target.id === 'agent-input')) setDismissed(input)
+                event.target !== inputRef.current) setDismissed(input)
         }
         document.addEventListener('pointerdown', closeOutside)
         document.addEventListener('focusin', closeOnFocusExit)
@@ -55,10 +57,11 @@ export function useSlashCommandMenu(
             document.removeEventListener('pointerdown', closeOutside)
             document.removeEventListener('focusin', closeOnFocusExit)
         }
-    }, [input, open])
+    }, [input, open, inputRef])
 
     const pick = (name: string) => {
         setDismissed(input)
+        inputRef.current?.focus({ preventScroll: true })
         void onCommand(name)
     }
 
@@ -97,11 +100,11 @@ export function useSlashCommandMenu(
     const menu = (
         <>
             {open && (
-                <div className="slash-command-menu" id="slash-command-menu" role="listbox" aria-label="工作区命令" ref={menuRef} onKeyDown={(event) => {
+                <div className="slash-command-menu" id={menuID} role="listbox" aria-label="工作区命令" ref={menuRef} onKeyDown={(event) => {
                     if (event.key === 'Escape') {
                         event.preventDefault()
                         setDismissed(input)
-                        document.getElementById('agent-input')?.focus()
+                        inputRef.current?.focus()
                     }
                 }}>
                     {options.map((command, index) => (
@@ -109,7 +112,7 @@ export function useSlashCommandMenu(
                             className={`slash-command-option ${index === active ? 'is-selected' : ''}`}
                             type="button"
                             role="option"
-                            id={`slash-command-option-${index}`}
+                            id={`${menuID}-option-${index}`}
                             aria-selected={index === active}
                             key={command.name}
                             onMouseDown={(event) => event.preventDefault()}
@@ -129,6 +132,7 @@ export function useSlashCommandMenu(
         changeInput,
         handleKeyDown,
         menuOpen: open,
-        selectedOptionID: open ? `slash-command-option-${active}` : undefined,
+        menuID,
+        selectedOptionID: open ? `${menuID}-option-${active}` : undefined,
     }
 }

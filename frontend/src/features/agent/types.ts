@@ -9,16 +9,6 @@ export type StreamingOutput = {
 
 export type StreamingOutputs = Record<string, StreamingOutput>
 
-/** 发送中的用户消息，保留发送时的归属，避免切换视图后串到其他对话。 */
-export type PendingUserMessage = {
-    requestId: string
-    runId: string
-    sessionId: string
-    agentId: string
-    content: string
-    at: string
-}
-
 /** Agent 侧栏展示所需的最小 Session 摘要。 */
 export type AgentSessionSummary = { title: string; agents: AgentView[] }
 

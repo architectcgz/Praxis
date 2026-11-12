@@ -9,7 +9,8 @@ export function useModelCatalog(sessionID: string) {
     const [error, setError] = useState<unknown>()
     const request = useRef(0)
 
-    const refreshModels = useCallback(async () => {
+    // 后台通知和页面刷新由本 Hook 展示错误；命令流程可要求抛错以中止后续步骤。
+    const refreshModels = useCallback(async (throwOnError = true) => {
         const current = ++request.current
         setLoading(true)
         try {
@@ -20,7 +21,7 @@ export function useModelCatalog(sessionID: string) {
             return values
         } catch (reason) {
             if (request.current === current) setError(() => reason)
-            throw reason
+            if (throwOnError) throw reason
         } finally {
             if (request.current === current) setLoading(false)
         }
@@ -35,7 +36,7 @@ export function useModelCatalog(sessionID: string) {
 
     useEffect(() => {
         resetModels()
-        if (sessionID) void refreshModels().catch(() => undefined)
+        if (sessionID) void refreshModels(false)
         return () => { request.current += 1 }
     }, [sessionID, refreshModels, resetModels])
 

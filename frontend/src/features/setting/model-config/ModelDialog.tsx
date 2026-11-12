@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type SubmitEvent } from 'react'
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction, type SubmitEvent } from 'react'
 import {
     AlertCircle,
     ChevronRight,
@@ -18,6 +18,8 @@ import { readableError } from '../../../shared/errors'
 import { modelDraftWithID, providerDisplayName } from './modelConfigHelpers'
 import { DialogActions, Field } from './ModelConfigDialogParts'
 import type { ModelDraft } from './modelConfigTypes'
+
+type ModelValidationError = { field: keyof ModelDraft; message: string }
 
 type ModelDialogProps = {
     model: ModelConfigOption | null
@@ -59,7 +61,7 @@ export function ModelDialog({
     const [providerModelsLoading, setProviderModelsLoading] = useState(false)
     const [providerModelsError, setProviderModelsError] = useState('')
     const [confirmDelete, setConfirmDelete] = useState(false)
-    const [validationError, setValidationError] = useState('')
+    const [validationError, setValidationError] = useState<ModelValidationError | null>(null)
     const [reasoningLevelsText, setReasoningLevelsText] = useState(() => draft.reasoningLevels.join(', '))
 
     const loadProviderModels = useCallback(async () => {
@@ -84,48 +86,15 @@ export function ModelDialog({
         void loadProviderModels()
     }, [loadProviderModels])
 
-    const submit = (event: SubmitEvent) => {
+    const clearValidationError = (field: keyof ModelDraft) => {
+        setValidationError((current) => current?.field === field ? null : current)
+    }
+    const submit = (event: SubmitEvent<HTMLFormElement>) => {
         event.preventDefault()
-        setValidationError('')
-
-        if (!draft.label.trim()) {
-            setValidationError('请填写显示名称')
-            return
-        }
-        if (!draft.modelId.trim()) {
-            setValidationError('请填写 Model ID')
-            return
-        }
-        if (!draft.groupId.trim()) {
-            setValidationError('请选择 Model 分组')
-            return
-        }
-        const apiFormat = draft.apiFormat
-        if (!apiFormat) {
-            setValidationError('请选择 API Format')
-            return
-        }
-        if (draft.contextWindow < 2) {
-            setValidationError('Context Window 必须大于等于 2')
-            return
-        }
-        if (draft.maxOutputTokens < 1) {
-            setValidationError('最大输出 Tokens 必须大于等于 1')
-            return
-        }
-
-        const reasoningLevels = parseReasoningLevels(reasoningLevelsText)
-        void onSave({
-            ...draft,
-            apiFormat,
-            providerId: draft.providerId.trim(),
-            modelId: draft.modelId.trim(),
-            label: draft.label.trim(),
-            reasoningLevels,
-            defaultReasoningLevel: reasoningLevels.includes(draft.defaultReasoningLevel)
-                ? draft.defaultReasoningLevel
-                : reasoningLevels[0] || '',
-        })
+        const result = prepareModel(draft, reasoningLevelsText)
+        setValidationError(result.error)
+        if (result.error) return
+        void onSave(result.model)
     }
 
     return (
@@ -166,7 +135,7 @@ export function ModelDialog({
                 {validationError && (
                     <div className="management-error" role="alert">
                         <AlertCircle size={17} aria-hidden="true" />
-                        <span>{validationError}</span>
+                        <span>{validationError.message}</span>
                     </div>
                 )}
                 <form className="config-form" onSubmit={submit}>
@@ -176,15 +145,14 @@ export function ModelDialog({
                                 value={draft.label}
                                 onChange={(event) => {
                                     setDraft({ ...draft, label: event.target.value })
-                                    if (validationError && event.target.value.trim()) {
-                                        setValidationError('')
-                                    }
+                                    clearValidationError('label')
                                 }}
                                 placeholder="GPT-5"
-                                className={validationError === '请填写显示名称' ? 'has-error' : ''}
+                                className={validationError?.field === 'label' ? 'has-error' : ''}
+                                aria-invalid={validationError?.field === 'label'}
                             />
-                            {validationError === '请填写显示名称' && (
-                                <span className="config-field-error">{validationError}</span>
+                            {validationError?.field === 'label' && (
+                                <span className="config-field-error">{validationError.message}</span>
                             )}
                         </Field>
                     </div>
@@ -192,25 +160,30 @@ export function ModelDialog({
                         <select
                             required
                             value={draft.groupId}
-                            onChange={(event) => setDraft({ ...draft, groupId: event.target.value })}
+                            onChange={(event) => {
+                                setDraft({ ...draft, groupId: event.target.value })
+                                clearValidationError('groupId')
+                            }}
+                            className={validationError?.field === 'groupId' ? 'has-error' : ''}
+                            aria-invalid={validationError?.field === 'groupId'}
                         >
                             <option value="">选择分组</option>
                             {groups.map((group) => (
                                 <option value={group.id} key={group.id}>{group.displayName}</option>
                             ))}
                         </select>
+                        {validationError?.field === 'groupId' && <span className="config-field-error">{validationError.message}</span>}
                     </Field>
                     <Field label="API Format">
                         <select
                             required
                             value={draft.apiFormat}
-                            onChange={(event) =>
-                                setDraft({
-                                    ...draft,
-                                    apiFormat: event.target.value as ModelAPIFormat | '',
-                                })
-                            }
-                            className={validationError === '请选择 API Format' ? 'has-error' : ''}
+                            onChange={(event) => {
+                                setDraft({ ...draft, apiFormat: event.target.value as ModelAPIFormat | '' })
+                                clearValidationError('apiFormat')
+                            }}
+                            className={validationError?.field === 'apiFormat' ? 'has-error' : ''}
+                            aria-invalid={validationError?.field === 'apiFormat'}
                         >
                             <option value="">选择 API Format</option>
                             <option value="anthropic_messages">Anthropic Messages</option>
@@ -219,8 +192,8 @@ export function ModelDialog({
                                 OpenAI Chat Completions
                             </option>
                         </select>
-                        {validationError === '请选择 API Format' && (
-                            <span className="config-field-error">{validationError}</span>
+                        {validationError?.field === 'apiFormat' && (
+                            <span className="config-field-error">{validationError.message}</span>
                         )}
                     </Field>
                     <Field label="Model ID">
@@ -230,11 +203,10 @@ export function ModelDialog({
                                     value={draft.modelId}
                                     onChange={(event) => {
                                         setDraft((current) => modelDraftWithID(current, event.target.value))
-                                        if (validationError && event.target.value.trim()) {
-                                            setValidationError('')
-                                        }
+                                        clearValidationError('modelId')
                                     }}
-                                    className={validationError === '请填写 Model ID' ? 'has-error' : ''}
+                                    className={validationError?.field === 'modelId' ? 'has-error' : ''}
+                                    aria-invalid={validationError?.field === 'modelId'}
                                 >
                                     {!providerModels.includes(draft.modelId) && draft.modelId && (
                                         <option value={draft.modelId}>{draft.modelId}</option>
@@ -250,12 +222,11 @@ export function ModelDialog({
                                     onChange={(event) => {
                                         const modelId = event.target.value
                                         setDraft((current) => modelDraftWithID(current, modelId))
-                                        if (validationError && modelId.trim()) {
-                                            setValidationError('')
-                                        }
+                                        clearValidationError('modelId')
                                     }}
                                     placeholder="gpt-5"
-                                    className={validationError === '请填写 Model ID' ? 'has-error' : ''}
+                                    className={validationError?.field === 'modelId' ? 'has-error' : ''}
+                                    aria-invalid={validationError?.field === 'modelId'}
                                 />
                             )}
                             <button
@@ -273,8 +244,8 @@ export function ModelDialog({
                                 />
                             </button>
                         </div>
-                        {validationError === '请填写 Model ID' && (
-                            <span className="config-field-error">{validationError}</span>
+                        {validationError?.field === 'modelId' && (
+                            <span className="config-field-error">{validationError.message}</span>
                         )}
                         {provider.hasAPIKey && (
                             <span className="config-field-status" role="status">
@@ -289,6 +260,8 @@ export function ModelDialog({
                         setDraft={setDraft}
                         reasoningLevelsText={reasoningLevelsText}
                         setReasoningLevelsText={setReasoningLevelsText}
+                        validationError={validationError}
+                        clearValidationError={clearValidationError}
                     />
                     <DialogActions
                         saving={saving}
@@ -309,13 +282,18 @@ function AdvancedOptions({
     setDraft,
     reasoningLevelsText,
     setReasoningLevelsText,
+    validationError,
+    clearValidationError,
 }: {
     draft: ModelDraft
-    setDraft: React.Dispatch<React.SetStateAction<ModelDraft>>
+    setDraft: Dispatch<SetStateAction<ModelDraft>>
     reasoningLevelsText: string
     setReasoningLevelsText: (value: string) => void
+    validationError: ModelValidationError | null
+    clearValidationError: (field: keyof ModelDraft) => void
 }) {
     const [isExpanded, setIsExpanded] = useState(false)
+    const expanded = isExpanded || validationError?.field === 'contextWindow' || validationError?.field === 'maxOutputTokens'
     const reasoningLevels = parseReasoningLevels(reasoningLevelsText)
     const defaultReasoningLevel = reasoningLevels.includes(draft.defaultReasoningLevel)
         ? draft.defaultReasoningLevel
@@ -326,17 +304,18 @@ function AdvancedOptions({
             <button
                 className="config-advanced-toggle"
                 type="button"
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={() => setIsExpanded(!expanded)}
+                aria-expanded={expanded}
             >
                 <Settings size={16} aria-hidden="true" />
                 <span>高级选项</span>
                 <ChevronRight
                     size={16}
                     aria-hidden="true"
-                    className={isExpanded ? 'is-expanded' : ''}
+                    className={expanded ? 'is-expanded' : ''}
                 />
             </button>
-            {isExpanded && (
+            {expanded && (
                 <div className="config-advanced-content">
                     <div className="config-form-grid">
                         <Field label="Context Window">
@@ -345,13 +324,15 @@ function AdvancedOptions({
                                 min="2"
                                 type="number"
                                 value={draft.contextWindow}
-                                onChange={(event) =>
-                                    setDraft({
-                                        ...draft,
-                                        contextWindow: Number(event.target.value),
-                                    })
-                                }
+                                onChange={(event) => {
+                                    setDraft({ ...draft, contextWindow: Number(event.target.value) })
+                                    setIsExpanded(true)
+                                    clearValidationError('contextWindow')
+                                }}
+                                className={validationError?.field === 'contextWindow' ? 'has-error' : ''}
+                                aria-invalid={validationError?.field === 'contextWindow'}
                             />
+                            {validationError?.field === 'contextWindow' && <span className="config-field-error">{validationError.message}</span>}
                         </Field>
                         <Field label="最大输出 Tokens">
                             <input
@@ -359,13 +340,15 @@ function AdvancedOptions({
                                 min="1"
                                 type="number"
                                 value={draft.maxOutputTokens}
-                                onChange={(event) =>
-                                    setDraft({
-                                        ...draft,
-                                        maxOutputTokens: Number(event.target.value),
-                                    })
-                                }
+                                onChange={(event) => {
+                                    setDraft({ ...draft, maxOutputTokens: Number(event.target.value) })
+                                    setIsExpanded(true)
+                                    clearValidationError('maxOutputTokens')
+                                }}
+                                className={validationError?.field === 'maxOutputTokens' ? 'has-error' : ''}
+                                aria-invalid={validationError?.field === 'maxOutputTokens'}
                             />
+                            {validationError?.field === 'maxOutputTokens' && <span className="config-field-error">{validationError.message}</span>}
                         </Field>
                     </div>
                     <Field label="Reasoning 级别">
@@ -399,6 +382,34 @@ function AdvancedOptions({
             )}
         </div>
     )
+}
+
+function prepareModel(draft: ModelDraft, reasoningLevelsText: string):
+    | { model: ModelConfigOption; error: null }
+    | { model: null; error: ModelValidationError } {
+    if (!draft.label.trim()) return { model: null, error: { field: 'label', message: '请填写显示名称' } }
+    if (!draft.modelId.trim()) return { model: null, error: { field: 'modelId', message: '请填写 Model ID' } }
+    if (!draft.groupId.trim()) return { model: null, error: { field: 'groupId', message: '请选择 Model 分组' } }
+    const apiFormat = draft.apiFormat
+    if (!apiFormat) return { model: null, error: { field: 'apiFormat', message: '请选择 API Format' } }
+    if (draft.contextWindow < 2) return { model: null, error: { field: 'contextWindow', message: 'Context Window 必须大于等于 2' } }
+    if (draft.maxOutputTokens < 1) return { model: null, error: { field: 'maxOutputTokens', message: '最大输出 Tokens 必须大于等于 1' } }
+
+    const reasoningLevels = parseReasoningLevels(reasoningLevelsText)
+    return {
+        model: {
+            ...draft,
+            apiFormat,
+            providerId: draft.providerId.trim(),
+            modelId: draft.modelId.trim(),
+            label: draft.label.trim(),
+            reasoningLevels,
+            defaultReasoningLevel: reasoningLevels.includes(draft.defaultReasoningLevel)
+                ? draft.defaultReasoningLevel
+                : reasoningLevels[0] || '',
+        },
+        error: null,
+    }
 }
 
 function parseReasoningLevels(value: string) {

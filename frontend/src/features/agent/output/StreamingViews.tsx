@@ -15,18 +15,6 @@ export const StreamingOutputView = memo(function StreamingOutputView({ content }
     )
 })
 
-export const PendingUserMessageView = memo(function PendingUserMessageView({ content, at }: { content: string; at: string }) {
-    return (
-        <article className="message message-user">
-            <div className="message-meta">
-                <strong>你</strong>
-                <time dateTime={at} title={at}>{formatMessageTime(at)}</time>
-            </div>
-            <p>{content}</p>
-        </article>
-    )
-})
-
 export function PendingOutputView({ agentName, run }: { agentName: string; run?: RunSnapshot | null }) {
     return (
         <article className="message message-assistant message-pending" role="status">
@@ -98,24 +86,4 @@ export function StreamingTurnView({ agentName, events, runId, run, turnId, activ
             <MessageTiming runId={runId} turnId={turnId} record={finished?.data.timing || started?.data.timing} running={active && !finished} />
         </div>
     </div>
-}
-
-let dateFormatter: Intl.DateTimeFormat | null = null
-
-function formatMessageTime(value: string) {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) {
-        return '未知时间'
-    }
-    if (!dateFormatter) {
-        dateFormatter = new Intl.DateTimeFormat(undefined, {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-        })
-    }
-    return dateFormatter.format(date)
 }
