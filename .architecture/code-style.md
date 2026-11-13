@@ -1,19 +1,19 @@
 # Praxis 代码实现约定
 
 > **状态：代码风格与实现边界的讨论结果，作为后续实施依据。**
-> 本文描述目标职责和编码约定，不表示相关代码已经完成。业务行为以 [architecture.md](architecture.md) 为准，现有实现问题参见 [current.md](current.md)。目录和类型围绕明确职责组织，不要求为每项职责创建独立类型或文件。
+> 本文描述目标职责和编码约定，不表示相关代码已经完成。业务行为以 [architecture.md](architecture.md) 为准，实施核对与待办参见 [current.md](current.md)。目录和类型围绕明确职责组织，不要求为每项职责创建独立类型或文件。
 
 ## 1. 背景与目标
 
-Praxis 的 Agent、Run、Turn、Branch、Task Queue 和 Subagent 已有业务架构共识。代码设计需要进一步明确：规则在哪里实现，状态由谁修改，执行资源由谁释放，以及各对象如何协作。
+Praxis 的执行与历史按 Session、Run、Turn 和 Entry 组织，Task Queue 和 Subagent 围绕这套归属协作。代码设计需要进一步明确：规则在哪里实现，状态由谁修改，执行资源由谁释放，以及各对象如何协作。
 
 目标是让调用关系可以直接追踪，让状态和资源具有明确的所有者，同时控制抽象、类型数量和改动范围。
 
 基本方向：
 
 - Core 拥有领域规则、核心执行流程，以及相应的进程内状态和控制资源。
-- Coordinator 位于 `core/coordinator`，统一协调已加载会话的管理、输入路由、分支队列与活动 Run 的交接。
-- Branch 模块负责分支创建、删除、查询、列表及关系规则；队列按 Branch 隔离，由 Coordinator 管理调度。
+- Coordinator 位于 `core/coordinator`，统一协调已加载会话的管理、输入路由、Session 队列与活动 Run 的交接。
+- Session 组织连续主历史、模型选择和会话规则；队列与 Main Run 占用按 Session 隔离，由 Coordinator 管理调度。
 - TaskQueue 封装队列行为，Run 统一拥有单次执行的信息和行为，并通过 `Execute` 直接调用 Loop；活动 Run 控制对象持有取消与完成等资源。
 - Entry、模型请求等共享事实类型位于 Core 公共模块，Run、Loop、Session 使用同一套记录类型。
 - Service 组织应用用例、配置协作和必要保存，通过 Core 的公开入口取得会话及控制执行。
@@ -26,21 +26,21 @@ Praxis 的 Agent、Run、Turn、Branch、Task Queue 和 Subagent 已有业务架
 
 | 位置 | 应承担的职责 | 责任边界 |
 | --- | --- | --- |
-| `core/session` | Session、Branch、历史关系、模型选择等领域模型及规则 | Branch 父子关系、删除约束、历史 Head 推进由核心对象维护 |
+| `core/session` | Session、连续历史、模型选择等领域模型及规则 | 历史归属、读取范围和会话规则由核心对象维护 |
 | `core/task` | Task 数据，以及 FIFO、领取、暂停和恢复等队列行为 | Task 不保存执行配置；队列不推进 Run 状态或自行启动执行 |
-| `core/coordinator` | 会话加载与定位、输入路由、按 Branch 隔离的队列调度、活动 Run 登记及控制交接 | 调用队列和 Run 的明确行为，不复制其状态规则，不展开模型、工具和存储实现细节 |
+| `core/coordinator` | 会话加载与定位、输入路由、按 Session 隔离的队列调度、活动 Run 登记及控制交接 | 调用队列和 Run 的明确行为，不复制其状态规则，不展开模型、工具和存储实现细节 |
 | `core/entry` | Entry、内容块、Turn 和模型请求等共享事实类型 | 只表达事实数据和身份关联，不引用 Run、Loop 或 Session 执行对象 |
 | `core/timing` | 通用计时记录与测量能力 | 供模型、工具和执行流程共享，不依附于 Run 模块 |
 | `core/event` | 公共通知数据、订阅分发及作用域绑定 | 不反向引用 Run 等执行对象，不承担事实持久化或业务推进 |
 | `core/agent/run` | 单次执行的身份、配置、状态、结果、统计、执行证据和完整执行入口 | Run 自身提供 `Execute`，组织准备、Loop 调用和收尾；不领取下一项 Task |
 | `core/loop` | ReAct 多 Turn 推进、模型请求、工具调用及执行输入边界 | 通过所需接口协作，不依赖完整 Service 或 Coordinator |
 | `core/toolexecution` 等核心模块 | 工具授权、审批和执行控制的核心规则 | 具体文件操作、进程启动和外部协议由对应实现完成 |
-| `service/session` | Session / Branch 应用用例、配置协作和必要保存 | 通过 Core 入口取得会话，不持有会话注册表，不显式组织内部恢复，不替代核心分支规则 |
+| `service/session` | Session 应用用例、配置协作和必要保存 | 通过 Core 入口取得会话，不持有会话注册表，不显式组织内部恢复，不替代核心会话规则 |
 | `repository` / `infra` | 存储契约及其实现、Provider、文件系统和具体工具 | Session 加载成功后返回可用对象；不决定 Task 调度、Run 完成条件或父子执行关系 |
 | `bootstrap` | 创建共享依赖、选择实现并完成应用装配 | 将 Repo 加载、Provider、工具、事实提交和通知能力提供给 Core，不承载执行期间的业务决策 |
 | `wails` | 外部请求、已有接口返回、错误转换和前端通知适配 | 使用所需事件载荷与返回字段，不复制核心规则和执行调度流程 |
 
-分层依据是实际职责。分支串行执行、输入排队和正常结束后的任务交接属于 Core 的执行规则；配置加载、应用用例中的外部能力协作可以由 Service 组织。状态转移、分支关系和队列行为仍由各自核心对象维护。
+分层依据是实际职责。同一 Session 内的 Main Run 串行执行、输入排队和正常结束后的任务交接属于 Core 的执行规则；配置加载、应用用例中的外部能力协作可以由 Service 组织。状态转移、会话历史和队列行为仍由各自核心对象维护。
 
 ### 2.2 对外入口与核心调用
 
@@ -48,7 +48,7 @@ Praxis 的 Agent、Run、Turn、Branch、Task Queue 和 Subagent 已有业务架
 | --- | --- |
 | 加载、定位或关闭 Session | Service 调用 Core Coordinator 的会话入口 |
 | 提交消息、Task 排队及执行控制 | 应用入口调用 Core Coordinator，再由其协调队列与 Run |
-| 分支创建、删除、查询和列表 | Session 应用服务通过 Core 获取会话，再调用核心分支管理行为并协调保存 |
+| 会话创建、删除、查询和列表 | Session 应用服务协调保存，涉及已加载对象时通过 Core 入口取得会话 |
 | Session 实际加载 | Core Coordinator 调用装配时提供的 Repo 加载能力，取得可用 Session 后登记 |
 | 单次 Run 的准备和执行 | Core Coordinator 从 Task 创建 Run 并提供本次依赖，调用 Run 的 `Execute` |
 | ReAct 执行 | Run 的 `Execute` 直接调用 Loop，Loop 在各轮请求前调用 ContextBuilder |
@@ -71,34 +71,31 @@ Core 内的依赖方向是 Run 调用 Loop，Run、Loop 和 Session 共同使用
 
 | 目录 | 主要文件或内容 |
 | --- | --- |
-| `core/session/` | `session.go`、`branch.go`、`branches.go` 等会话、分支及历史规则 |
+| `core/session/` | `session.go`、历史读取和模型选择等会话规则 |
 | `core/task/` | `task.go`、`queue.go`，分别表达待执行输入和队列行为 |
 | `core/coordinator/` | 会话定位、输入接纳、任务调度和活动 Run 控制交接 |
 | `core/entry/` | Entry、内容块、Turn 边界、模型请求和其他共享事实的数据类型 |
 | `core/timing/` | 通用计时记录与测量能力 |
 | `core/agent/run/` | Run 的信息、状态规则、`Execute`、输入与结果接收，以及本次执行的收尾 |
 | `core/loop/` | ReAct、模型请求、工具调用和上下文构建的核心流程 |
-| `service/session/` | 会话和分支应用用例、配置加载与保存协作 |
+| `service/session/` | 会话应用用例、配置加载与保存协作 |
 | `repository/`、`infra/` | 存储契约、可用对象的加载实现及具体外部能力 |
 | `bootstrap/` | 依赖创建与能力绑定 |
 
-分支管理用例位于 `service/session/branches.go`，核心规则位于 `core/session`。队列类型位于 `core/task`，其进程内实例由 Core Coordinator 按 Branch 管理；分支领域对象不因此承担队列调度。
+会话应用用例位于 `service/session`，核心规则位于 `core/session`。队列类型位于 `core/task`，其进程内实例由 Core Coordinator 按 Session 管理；会话领域对象不因此承担队列调度。
 
 ### 2.4 前端目录按功能语义组织
 
-目录按功能语义划分，状态实例和事件订阅按 Session、Branch 隔离。分支内使用某项能力，不要求将该能力的实现放到 Branch 目录。下列路径以 `frontend/src/` 为根，文件按实际复杂度收敛。
+目录按功能语义划分，状态实例和事件订阅按 Session 隔离。会话内使用某项能力，不要求将该能力的实现全部放到 Session 目录。下列路径以 `frontend/src/` 为根，文件按实际复杂度收敛。
 
 | 位置 | 职责 |
 | --- | --- |
-| `api/events.ts` | 事件类型、通道命名，以及按会话、分支订阅通知 |
+| `api/events.ts` | 事件类型、通道命名，以及按会话订阅通知 |
 | `api/sessions.ts`、`api/tasks.ts` 等 | 调用现有后端入口，按业务对象组织请求 |
-| `features/session/SessionPage.tsx` | 会话页面与当前分支的选择 |
-| `features/session/sessionStore.ts` | 会话信息、分支目录和各 branchStore 的引用 |
+| `features/session/SessionPage.tsx` | 装配会话内的 Agent、对话、任务和运行展示 |
+| `features/session/sessionStore.ts` | 固定会话作用域的数据容器，保存会话、运行和历史数据并通知界面更新 |
+| `features/session/applySessionEvent.ts` | 将通知中的明确信息应用到状态，不推断后端执行规则 |
 | `features/session/useSessionData.ts` | 会话加载与关闭，作用域订阅的建立和释放 |
-| `features/branch/BranchPanel.tsx` | 装配分支内的 Agent、对话、任务和运行展示 |
-| `features/branch/branchStore.ts` | 固定分支作用域的数据容器，保存数据并通知界面更新 |
-| `features/branch/applyBranchEvent.ts` | 将通知中的明确信息应用到状态，不推断后端执行规则 |
-| `features/branch/useBranches.ts` | 创建、删除、查询和切换分支的界面操作 |
 | `features/agent/AgentsPanel.tsx`、`AgentConversation.tsx` | 代理列表、选择状态和对话展示 |
 | `features/agent/history/` | 历史分页加载、过期请求处理、缓存策略，以及 Entry 合并等纯函数 |
 | `features/agent/output/` | 文本、思考、工具和协作卡片等展示组件 |
@@ -108,63 +105,58 @@ Core 内的依赖方向是 Run 调用 Loop，Run、Loop 和 Session 共同使用
 | `features/task/useTaskSubmission.ts` | 任务提交请求、提交中状态与错误反馈 |
 | `features/task/TaskQueue.tsx`、`useTaskQueue.ts` | 队列展示，以及暂停、恢复和取消待办等操作 |
 
-Agent 信息、Run 控制、任务提交和分支管理按各自语义命名。子代理的补充指令按具体行为组织，与普通 Task 提交分别表达。Branch 的装配和状态容器使用 Agent、Run、Task 模块提供的能力，这些模块不反向依赖 branchStore。
+Agent 信息、Run 控制和任务提交按各自语义命名。子代理的补充指令按具体行为组织，与普通 Task 提交分别表达。会话装配使用 Agent、Run、Task 模块提供的能力；共享数据通过必要参数传入，不让功能模块依赖整个页面状态对象。
 
-## 3. Session、Branch 与执行资源的所有权
+## 3. Session 与执行资源的所有权
 
-### 3.1 Branch 属于 Core
+### 3.1 Session 属于 Core
 
-Branch 的持久身份、祖先关系、历史 Head、Main Agent 身份和当前模型选择属于核心模型。Session 中涉及多个 Branch 的规则，由掌握这些关系的核心对象处理。
+Session 的持久身份、主 Agent 身份、当前模型选择和连续历史属于核心模型。多个 Run 依次追加到同一主历史，子代理的独立历史关联所属父 Run。
 
-例如：
+历史顺序由各自日志的追加位置确定，不为 Entry 定义通用的 `ParentID`，也不要求每条执行事实具有独立的历史节点 ID。请求、工具调用、报告和消息等确有引用需要的标识放入对应 Payload；Session 和所属 Run 的存储归属由绑定提交入口及必要存储元数据保留。
 
-- 有子 Branch 的 Branch 不允许删除。
-- 分叉复用祖先历史引用，并继承源 Branch 当前模型选择。
-- 每个 Branch 拥有独立持久的 MainAgentID，不能从 SessionID 推导。
-- Entry 接纳时，所属 Branch 的历史关系由历史拥有者更新。
-
-分支管理的公开用例包括创建、删除、查询和列表。Service 通过 Core 取得会话，调用核心规则，并协调必要保存和通知。涉及活动执行的删除操作，先通过 Coordinator 完成停止与等待，再执行核心删除规则。多个 Service 入口不分别修改 Branch 集合、推导删除条件或推进历史 Head。
+Service 通过 Core 取得会话，调用核心规则，并协调必要保存和通知。涉及活动执行的关闭或删除操作，先通过 Coordinator 完成停止与等待。多个 Service 入口不分别维护会话集合、活动执行状态或另一份历史顺序。
 
 ### 3.2 持久化数据与进程资源分别表达
 
 | 内容 | 所有权 |
 | --- | --- |
-| Session / Branch 身份、分叉关系、历史引用 | 核心会话模型 |
-| Branch 当前模型选择 | Branch 领域模型，按架构共识持久化 |
+| Session 身份、主 Agent 身份和连续历史 | 核心会话模型 |
+| 当前模型选择 | Session 领域模型，按架构共识持久化 |
 | 已加载 Session 的唯一定位索引 | Core Coordinator 内的 `sessionRegistry` |
-| 按 Branch 使用的已加载只读配置引用 | Core 协调范围内按 Branch 保存，由配置用例提供和更新 |
-| Task Queue、主动暂停 | 队列封装对应行为，Core Coordinator 按 Branch 管理实例并协调调度 |
+| 已加载只读配置引用 | Core 协调范围内按 Session 保存，由配置用例提供和更新 |
+| Task Queue、主动暂停 | 队列封装对应行为，Core Coordinator 按 Session 管理实例并协调调度 |
 | 模型失效造成的启动阻塞 | Core Coordinator 的调度准入边界，与主动暂停分别表达 |
-| 当前 Main Run 的占用与调度 | Core Coordinator 按 Branch 维护 |
+| 当前 Main Run 的占用与调度 | Core Coordinator 按 Session 维护 |
 | Run 身份、配置、状态、执行结果、时间和统计 | Run 统一维护，持久化事实通过 Entry 表达 |
 | 单次执行的取消、完成信号、审批唤醒 | 该次 `activeRun` 等明确的控制对象 |
 | 运行中输入、子代理结果接收和等待 | 所属 Run 的明确接收与控制边界 |
 | Subagent 执行句柄与取消收尾 | 创建它们的具体父 Run |
-| Subagent 并发名额 | Core Coordinator 按 Branch 协调预留和释放，收尾完成后释放 |
+| Subagent 并发名额 | Core Coordinator 按 Session 协调预留和释放，收尾完成后释放 |
 
 区分持久化与运行状态，不等于必须各建一套同形模型。`context`、锁、channel 是资源和并发实现手段，不能仅凭使用这些类型就决定包归属；它们不进入持久化记录，具体放置位置由职责、生命周期和依赖方向决定。
 
-队列与配置引用的生命周期不依赖前端当前显示哪个 Branch。切换 Branch 只改变视图，其他 Branch 继续执行。关闭 Session 时，Core Coordinator 协调其全部活动执行收尾，再释放登记和相应调度资源。
+队列与配置引用的生命周期不依赖前端当前显示哪个 Session。切换查看对象只改变视图，后台 Session 继续执行。关闭 Session 时，Core Coordinator 协调其全部活动执行收尾，再释放登记和相应调度资源。
 
 ### 3.3 配置引用
 
-已加载配置按只读引用共享，Core 协调范围内按 Branch 定位当前使用的引用。Run 启动时取得本次使用的引用，后续 Turn 保持稳定。Task 只保存待执行输入，不冻结另一份配置。分支独立选择模型不要求复制整份配置目录和凭据。
+已加载配置按只读引用共享，Core 协调范围内按 Session 定位当前使用的引用。Run 启动时取得本次使用的引用，后续 Turn 保持稳定。Task 只保存待执行输入，不冻结另一份配置。不同 Session 使用独立模型选择，不要求复制整份配置目录和凭据。
 
-Reload 的用例流程由应用层协调：调用 Core 暂停目标 Branch 的队列，停止并等待其活动执行收尾，加载新配置，再通过明确入口更新目标 Branch 使用的配置引用。Core 维护相应调度准入和引用替换的并发边界，具体配置加载由外层提供。配置对象不原地修改，其他 Branch 保持原引用。模型选择失效与用户主动暂停分别表达。
+Reload 的用例流程由应用层协调：调用 Core 暂停目标 Session 的队列，停止并等待其活动执行收尾，加载新配置，再通过明确入口更新目标 Session 使用的配置引用。Core 维护相应调度准入和引用替换的并发边界，具体配置加载由外层提供。配置对象不原地修改，其他 Session 保持原引用。模型选择失效与用户主动暂停分别表达。
 
 ## 4. Coordinator、会话加载与调度边界
 
 ### 4.1 Coordinator 属于 Core
 
-Coordinator 位于 `core/coordinator`，集中实现会话定位、输入路由、分支串行执行及队列交接等核心规则。它按 `SessionID`、`BranchID` 和 `RunID` 定位目标，调用队列、Run 和装配时提供的能力完成协调。
+Coordinator 位于 `core/coordinator`，集中实现会话定位、输入路由、同一 Session 内 Main Run 串行执行及队列交接等核心规则。它按 `SessionID` 和具体 `RunID` 定位目标，调用队列、Run 和装配时提供的能力完成协调。
 
 职责分配：
 
-- Coordinator：统一已加载会话入口，接纳消息与调度命令，管理按 Branch 隔离的队列和当前 Main Run 占用，协调停止与关闭。
+- Coordinator：统一已加载会话入口，接纳消息与调度命令，管理按 Session 隔离的队列和当前 Main Run 占用，协调停止与关闭。
 - TaskQueue：维护 FIFO、领取、取消待办、主动暂停和恢复等队列行为。
 - 活动 Run 控制对象：持有一次执行的 Run 引用、取消资源、就绪与完成信号等控制资源。
 - Run：统一维护本次执行的信息和状态，准备执行，直接调用 Loop，完成必要收尾与终态提交。
-- Session、Branch 和 Run 核心对象：维护所属领域规则、状态推进和领域事实。
+- Session 和 Run 核心对象：维护所属领域规则、状态推进和领域事实。
 - 父 Run：拥有其创建的子执行句柄、结果接收和收尾边界。
 
 Coordinator 可以持有上述调度资源及引用，但不重复保存 Run 的状态、结果、统计或历史正文。队列和单次执行通过自己的行为入口协作，模型输出处理、工具细节和历史写入不集中到 Coordinator。
@@ -191,7 +183,7 @@ Repo 加载方法由 `bootstrap` 绑定给 Core。并发加载、登记和释放
 
 ### 4.3 Main Run 与队列的交接
 
-队列按 `(SessionID, BranchID)` 定位。调度有两个主要触发入口：
+队列按 `SessionID` 定位。调度有两个主要触发入口：
 
 1. Task 入队后，没有当前 Main Run 且队列允许领取时，预留执行位置并启动一项。
 2. 当前 Main Run 正常结束并完成必要收尾后，释放占用，再按队列状态决定是否领取下一项。
@@ -225,18 +217,18 @@ Run 的 `Execute` 以本次执行及必要收尾为返回边界。正常返回�
 
 | 名称 | 适用职责 | 使用限制 |
 | --- | --- | --- |
-| `Session` / `Branch` | 会话与分支的领域模型 | 分支管理维护创建、删除、查询、列表及关系规则 |
+| `Session` | 会话的领域模型 | 维护身份、模型选择、连续历史及会话规则 |
 | `Coordinator` | Core 中的会话管理与执行调度协调 | 通过核心行为和绑定能力协作，不集中实现全部业务细节 |
 | `Run` | 一次执行的身份、配置、状态、结果、统计、执行证据及行为 | 作为唯一核心执行实体，通过 `Execute` 调用 Loop；持久化使用 Entry，控制资源由明确拥有者持有 |
 | `TaskQueue` | FIFO 待办、领取与队列控制 | 不表示 Run 的执行状态或自行推进执行 |
 | `sessionRegistry` | 已加载 Session 的定位索引 | 归 Core，仅维护登记引用，不展开加载、恢复或执行流程 |
 | `activeRun` | 从准备占用到完整收尾的一次活动执行控制 | 可以在 Run 尚未准备完成时存在；状态和结果仍由 Run 维护 |
-| `SessionBinding` | 外部调用与目标 Session / Branch 的绑定关系 | 不持有队列、配置或执行资源的生命周期 |
+| `SessionBinding` | 外部调用与目标 Session 的必要绑定关系 | 不持有队列、配置或执行资源的生命周期；已有 SessionID 足以定位时不新增绑定对象 |
 | `RunHandle` | 外部只需停止、等待或定位执行时的窄句柄 | 不另持有一份执行状态；不强制设计为接口 |
 | `childRuns` | 父 Run 拥有的子执行集合及其收尾 | 集合复杂度需要封装时再抽取 |
-| `SubagentQuota` | Branch 范围内的执行名额 | 简单计数可以留在协调边界内部，不额外建立全局服务 |
+| `SubagentQuota` | Session 范围内的执行名额 | 简单计数可以留在协调边界内部，不额外建立全局服务 |
 
-`Controller` 适合确实存在的控制入口，`Scheduler` 适合独立的调度职责，`State` 适合状态值或投影，`Worker` 适合实际存在的工作执行者。按 Branch 隔离队列不要求为 Branch 另建控制器或调度器，名称也不应暗示尚未采用的并发模型。
+`Controller` 适合确实存在的控制入口，`Scheduler` 适合独立的调度职责，`State` 适合状态值或投影，`Worker` 适合实际存在的工作执行者。按 Session 隔离队列不要求为每个会话另建控制器或调度器，名称也不应暗示尚未采用的并发模型。
 
 如果某类型确实表达一个完整且清晰的运行环境，`Runtime` 可以保留；不为替换后缀引入更模糊的名称。
 
@@ -275,19 +267,19 @@ starting / running / ending → interrupted
 
 外部消息、子代理回调通过明确的接收入口提交数据和唤醒信号，不直接并发修改 Loop 上下文，不分别启动新的 Loop。
 
-已接纳输入与执行完成使用同一个明确的并发边界：完成前处理已接纳的待交付指令，终结后拒绝对子代理继续输入。Main 的普通任务输入遵守业务架构的排队规则：执行中提交的输入进入目标 Branch 的后续队列，不注入当前 Run。已接收的排队输入和子代理指令均不能丢弃。
+已接纳输入与执行完成使用同一个明确的并发边界：完成前处理已接纳的待交付指令，终结后拒绝对子代理继续输入。Main 的普通任务输入遵守业务架构的排队规则：执行中提交的输入进入目标 Session 的后续队列，不注入当前 Run。已接收的排队输入和子代理指令均不能丢弃。
 
 输入用明确的业务类型表达，不建立承载全部业务的通用事件总线。是否共用一个输入结构，以实际消费和持久化语义为依据。
 
 ### 6.3 锁与资源靠近拥有者
 
 - Coordinator 的索引锁只保护查找、登记和释放，不包住模型、工具、存储、Hook 或回调调用。
-- Coordinator 按 Branch 维护单 Main Run 占用，从准备阶段开始，必要收尾完成后才释放。
-- 同一 Branch 的空闲检查与位置预留必须在同一并发边界内完成。
+- Coordinator 按 Session 维护单 Main Run 占用，从准备阶段开始，必要收尾完成后才释放。
+- 同一 Session 的空闲检查与位置预留必须在同一并发边界内完成。
 - Subagent 名额检查与预留原子完成；取消已接收不等于名额已经释放。
 - `Locked` 后缀方法明确注明调用方应持有哪一把锁；不同锁的顺序必须清楚。
 - 需要串行提交的历史写入由历史拥有者处理，不借用全局索引锁串行化全部 I/O。
-- 外部停止命令定位明确的 RunID，不能在等待后改为停止 Branch 的另一条执行。
+- 外部停止命令定位明确的 RunID，不能在等待后改为停止 Session 的另一条执行。
 
 Context 用于取消、超时和请求范围，不承载业务状态。创建取消资源的执行管理流程负责取消和释放；完成信号必须覆盖必要收尾。子代理完成回调由外层执行流程发起，不依赖已经取消的子执行 Context。
 
@@ -295,7 +287,7 @@ Context 用于取消、超时和请求范围，不承载业务状态。创建取
 
 ### 7.1 Main Run 的职责交接
 
-1. 外部消息或调度命令进入 Core Coordinator，定位 Session 和目标 Branch。
+1. 外部消息或调度命令进入 Core Coordinator，定位目标 Session。
 2. Coordinator 按业务输入规则接纳消息或入队，并在允许启动时领取 Task、预留 Main Run 位置。
 3. 从 Task 创建 Run，固定本次配置并绑定所需能力，由 Run 提交用户输入和初始执行事实。
 4. Run 的 `Execute` 直接调用 Loop；Loop 每轮读取已接纳历史，经 ContextBuilder 构建上下文，必要时压缩，再推进模型请求和工具执行，通过同一 `AppendEntry` 提交本轮事实。
@@ -303,7 +295,7 @@ Context 用于取消、超时和请求范围，不承载业务状态。创建取
 6. Run 通过 `AppendEntry` 保存本次执行终态，完成必要收尾后返回。
 7. Coordinator 接收完成结果，释放占用并按队列状态决定下一项。
 
-分支管理负责分支身份和关系规则；TaskQueue 封装待办行为；Run 完成本次执行；后续调度由 Core Coordinator 直接推进。Loop 不领取 Task，Coordinator 不逐条处理模型输出或维护 Turn 内部状态。Run 和 Loop 分别发布自身的运行通知，通知与事实提交保持独立。
+Session 管理会话身份、模型选择和连续历史；TaskQueue 封装待办行为；Run 完成本次执行；后续调度由 Core Coordinator 直接推进。Loop 不领取 Task，Coordinator 不逐条处理模型输出或维护 Turn 内部状态。Run 和 Loop 分别发布自身的运行通知，通知与事实提交保持独立。
 
 ### 7.2 子代理归属与完成回调
 
@@ -316,11 +308,11 @@ Subagent 严格属于创建它的 Main Run。原生工具通过已绑定父 Run 
 3. 父 Run 接收并保存报告或结束信息。
 4. 保存成功后唤醒等待或供后续上下文构建消费。
 
-完成结果关联子执行身份、ParentRunID 和原始 ParentCallID。绑定父对象后，回调不再按 Branch 的“当前 Run”重新查找接收者。
+完成结果关联子执行身份、ParentRunID 和原始 ParentCallID。绑定父对象后，回调不再按 Session 的“当前 Run”重新查找接收者。
 
 父 Run 接收入口只提交结果和信号，模型推进仍由父执行路径完成。父 Run 收尾时保留必要结果并结束等待，不因通知再次调用模型。
 
-并发限制按 Branch 计算，每个 Branch 最多 10 个子代理执行名额。子执行和取消收尾期间持续占用名额，不建立额外 Subagent 等待队列。
+并发限制按 Session 计算，每个 Session 最多 10 个子代理执行名额。子执行和取消收尾期间持续占用名额，不建立额外 Subagent 等待队列。
 
 ### 7.3 原生等待与授权
 
@@ -343,7 +335,7 @@ Loop 和 Run 需要持久保存的执行事实，统一通过 `AppendEntry` 提�
 
 事实使用 `core/entry` 中明确的公共类型表达，消息正文和执行元数据分别表达。ContextBuilder 和历史查询按业务语义选择所需内容，执行元数据不直接作为消息正文交给模型。Run 的状态、请求列表、统计和查询索引基于已接纳的事实维护，不各自形成另一条执行事实写入通道。
 
-主分支或子代理历史的归属在绑定提交入口时确定。Loop 和 Run 调用同一 `AppendEntry` 能力，底层按归属和事实类型选择对应日志。Session 确定历史关系，Run 使用已接纳的只读 Entry 引用记录执行证据。
+Session 主历史或子代理独立历史的归属在绑定提交入口时确定。Loop 和 Run 调用同一 `AppendEntry` 能力，底层按归属和事实类型选择对应日志。Session 确定历史范围与追加顺序，Run 使用已接纳的只读 Entry 引用记录执行证据。
 
 `AppendEntry` 保留明确的同步结果和错误，执行流程能够知道是否保存成功。一次事实只提交一次；正常执行和加载恢复使用同一事实语义，不重复持久化同一份内容或统计。
 
@@ -353,7 +345,7 @@ Loop 和 Run 需要持久保存的执行事实，统一通过 `AppendEntry` 提�
 
 Turn 开始和结束等运行通知由 Loop 的明确执行出口发布，依据实际执行结果，与持久化调用解耦。模型文本增量、工具进度等实时通知可以直接发布，完整内容形成 Entry 后再保存，不逐 Token 写入 JSONL。
 
-运行结束通知表达执行结果，保存成功通知依据保存结果。前端收到运行结束通知不等于相关历史已经保存成功；分叉资格由 Core 已确认的历史边界决定，不由通知反推。
+运行结束通知表达执行结果，保存成功通知依据保存结果。前端收到运行结束通知不等于相关历史已经保存成功，不能用通知替代提交结果。
 
 持久化事实、内存已接纳结果和 UI 展示状态分别表达。写入失败不能显示为已成功保存，也不能因为内存还保留内容就继续正常执行。已经发生的文件修改或工具副作用不因日志失败重放。
 
@@ -373,32 +365,31 @@ Turn 开始和结束等运行通知由 Loop 的明确执行出口发布，依据
 
 ### 8.4 前端边界
 
-业务事件使用 RunID 和具体 Payload 表达通知，种类由 Payload 决定。队列等分支级事件不要求 RunID。事件定义只使用公共数据类型，发布者自行提供身份与结果，不由公共事件包读取完整 Run 对象。
+业务事件使用 RunID 和具体 Payload 表达通知，种类由 Payload 决定。队列等 Session 级事件不要求 RunID。事件定义只使用公共数据类型，发布者自行提供身份与结果，不由公共事件包读取完整 Run 对象。
 
-SessionID、BranchID 在发布函数与订阅通道上绑定。Coordinator 取得对应分支的发布函数，Run 再绑定自身 RunID，并将同一通知能力交给 Loop。Run 和 Loop 发布具体变化时，不反复组装完整归属信息。
+SessionID 在发布函数与订阅通道上绑定。Coordinator 取得对应 Session 的发布函数，Run 再绑定自身 RunID，并将同一通知能力交给 Loop。Run 和 Loop 发布具体变化时，不反复组装完整归属信息。
 
-Emitter 保持共享的进程内分发能力。其与 Wails 适配层之间保留选择通道所需的会话、分支路由信息；作用域绑定使用函数即可，不要求为每个分支创建独立 Emitter 或运行管理对象。
+Emitter 保持共享的进程内分发能力。其与 Wails 适配层之间保留选择通道所需的会话路由信息；作用域绑定使用函数即可，不要求为每个 Session 创建独立 Emitter 或运行管理对象。
 
 | 通知范围 | 通道 |
 | --- | --- |
-| Session 级变化 | `praxis:session:<sessionId>` |
-| 分支内的 Run、工具、历史和队列变化 | `praxis:session:<sessionId>:branch:<branchId>` |
+| Session 内的 Run、工具、历史、配置和队列变化 | `praxis:session:<sessionId>` |
 
-Wails 根据作用域选择通道，统一传递 `kind`、可选的 `runId` 和 `data`。SessionID、BranchID 由通道表达；事件载荷承担前端所需的数据传递职责，不另建同形的 Run 展示或查询模型，也不按事件种类逐个复制同形的传输类型。必要的展示字段筛选在明确边界完成，内部配置、控制资源和非展示内容不直接传给前端。
+Wails 根据作用域选择通道，统一传递 `kind`、可选的 `runId` 和 `data`。SessionID 由通道表达；事件载荷承担前端所需的数据传递职责，不另建同形的 Run 展示或查询模型，也不按事件种类逐个复制同形的传输类型。必要的展示字段筛选在明确边界完成，内部配置、控制资源和非展示内容不直接传给前端。
 
 运行内定位信息按事件需要保留。例如 Run 开始时提供 Agent 关联和开始信息，后续 Run 事件通过 RunID 定位；Turn 事件和按轮次展示的文本增量保留 TurnID，模型请求保留 RequestID，工具调用保留 CallID。Agent 和父子 Run 的关联在初始化或创建通知中提供，不要求所有通知重复携带。页面写入绑定不作为运行通知的定位维度。
 
 首次打开或刷新时，前端先绑定作用域订阅，再取得并接纳当前完整状态，保留加载期间已经收到的新变化。初始状态可复用现有加载响应或使用初始化事件，具体初始化载荷、合并边界和事件清单按实际语义继续收敛。
 
-过期响应不能覆盖新的查询结果；后台 Branch 的有效事件仍更新其所属状态。前端不根据零散布尔事件重新实现后端 Run 状态机、队列调度或 Reload 规则。
+过期响应不能覆盖新的查询结果；后台 Session 的有效事件仍更新其所属状态。前端不根据零散布尔事件重新实现后端 Run 状态机、队列调度或 Reload 规则。
 
 对外只传递接口和事件所需的数据，不直接暴露包含内部依赖及控制资源的完整 Run。生成的 Wails 绑定通过工具重新生成，不手工修改。
 
 ### 8.5 前端 Store 与展示职责
 
-每个已加载分支持有固定作用域的 branchStore。sessionStore 保存会话信息、分支目录和子 Store 引用，不复制各分支内部数据。切换分支选择展示哪个 Store，不重置或复用另一个分支的状态容器。
+每个已加载 Session 持有固定作用域的 sessionStore，保存会话信息及其所需的执行和历史展示数据。切换会话选择展示哪个 Store，不重置或复用另一个会话的状态容器。
 
-| 数据 | branchStore 中的职责 |
+| 数据 | sessionStore 中的职责 |
 | --- | --- |
 | Agent 信息 | 身份、名称、顺序和所关联的 RunID |
 | Run 展示信息 | 接纳后端明确给出的状态和结果，按 RunID 组织 |
@@ -412,7 +403,7 @@ Store 负责保存、读取和变更通知，事件处理函数负责接纳事�
 
 运行状态以后端 Run 通知为依据。Turn 开始不自行推导另一份 Agent 执行状态；请求停止和 Run 最终中断分别表达。流式展示可以筛选普通迭代请求，但统一接收入口不因展示筛选而丢弃摘要、审核等模型请求和用量变化。
 
-订阅跟随已加载会话和分支的数据生命周期管理，当前页面只选择展示对象。后台分支继续更新必要的运行、队列和用量信息；历史正文按需读取。会话用量观察所属分支的更新，不依赖当前可见分支。
+订阅跟随已加载会话的数据生命周期管理，当前页面只选择展示对象。后台会话继续更新必要的运行、队列和用量信息；历史正文按需读取。会话用量接纳所属 Run 的更新，不依赖当前可见 Agent 或历史页。
 
 ## 9. 函数、类型和注释风格
 
@@ -421,7 +412,7 @@ Store 负责保存、读取和变更通知，事件处理函数负责接纳事�
 - 外部数据在相应入口校验，内部传递已确定类型的值，不反复检查同一输入。
 - 运行中的状态变化和权限使用在拥有者边界处理，不与重复参数校验混为一谈。
 - 类型归属于拥有其语义和生命周期的位置；正常跨模块引用无需通过复制模型消除。
-- 前端目录按任务、运行、代理和分支等业务语义命名；Session、Branch 作用域用于创建数据实例和绑定订阅，不作为收纳全部相关实现的目录模板。
+- 前端目录按任务、运行、代理和历史等业务语义命名；Session 作用域用于创建数据实例和绑定订阅，不作为收纳全部相关实现的目录模板。
 - 配置按只读引用共享，短期执行数据不随意存入长期共享服务。
 - 不为假设的罕见竞态增加复杂恢复体系；发现真实错误先修复产生错误的位置。
 - 注释和项目文档使用中文，Praxis 自身错误信息遵守后端约定使用英文。
@@ -435,11 +426,11 @@ Store 负责保存、读取和变更通知，事件处理函数负责接纳事�
 1. 根据真实调用梳理每个字段、规则和资源的拥有者，明确 Core、Service 和存储实现的依赖方向。
 2. 将 Coordinator 和唯一的 `sessionRegistry` 收敛到 Core；Service 通过 Core 加载和取得会话。
 3. 明确 Repo 加载成功即返回可用 Session 的契约，将内部记录读取、重建和恢复封装在加载实现内。
-4. 将 Task 和队列行为组织到 `core/task`，由 Coordinator 按 Branch 管理队列和 Main Run 占用。
+4. 将 Task 和队列行为组织到 `core/task`，由 Coordinator 按 Session 管理队列和 Main Run 占用。
 5. 将共享事实和通用计时放到 `core/entry`、`core/timing`，确保公共模块不反向依赖 Run 或 Loop。
 6. 将本次执行的信息和行为统一到 Run，由 `Run.Execute` 直接调用 Loop，明确 Run 收尾与 Coordinator 后续调度的交接边界。
 7. 将 Loop 和 Run 的执行事实提交收敛到唯一的 `AppendEntry`，统一 Turn、模型请求、用量、计时和 Run 终态的保存语义，分别组织记录与通知调用。
-8. 将通知作用域绑定到发布函数与前端通道，前端按分支持有固定作用域 Store，按业务语义组织任务提交、运行控制、历史和流式处理模块。
+8. 将通知作用域绑定到发布函数与前端通道，前端按 Session 持有固定作用域 Store，按业务语义组织任务提交、运行控制、历史和流式处理模块。
 9. 核对完成回调、输入接纳、历史提交、配置更新、前端初始化及队列调度的直接调用关系，再按实际复杂度拆分文件。
 
 `activeRun`、窄句柄和子执行集合按实际需要使用；目录和文件划分服务于明确的状态、资源及调用边界，不要求建立完整的对象层级。
@@ -462,5 +453,5 @@ Store 负责保存、读取和变更通知，事件处理函数负责接纳事�
 - 不自动启动开发服务；人工回归使用已有服务，必要的新服务启动按仓库授权规则处理。
 - 核对 Loop 和 Run 的执行事实均通过 `AppendEntry` 保存，通知不由记录入口隐式触发，Turn、请求、用量、计时和结束结果能够按统一事实语义加载和查询。
 - 核对 Run 与 Loop 的依赖方向、公共事实类型的位置，以及历史 Run 加载和前端初始化均不创建或启动活动执行资源。
-- 核对作用域发布与订阅、RunID 定位、前端多分支状态隔离、普通数据与流式输出订阅，以及展示筛选不影响会话用量接纳。
-- 重点核对 Core 会话登记唯一、Repo 加载成功即返回可用对象、GetSession 不隐式加载、恢复封装于加载内部，以及 Branch 并行执行、停止后新 Run、队列独立暂停、Reload 隔离、子代理完成回调和 Session 全部执行收尾。
+- 核对作用域发布与订阅、RunID 定位、前端多会话状态隔离、普通数据与流式输出订阅，以及展示筛选不影响会话用量接纳。
+- 重点核对 Core 会话登记唯一、Repo 加载成功即返回可用对象、GetSession 不隐式加载、恢复封装于加载内部，以及 Session 并行执行、同一 Session 的 Main Run 串行、停止后新 Run、队列独立暂停、Reload 隔离、子代理完成回调和 Session 全部执行收尾。

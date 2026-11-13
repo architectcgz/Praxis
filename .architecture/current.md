@@ -1,187 +1,113 @@
-# 代码实现梳理与待办
+# 代码实施核对与待办
 
-## 一、背景与目标
+## 一、目标与范围
 
-业务语义和架构约束以 [architecture.md](architecture.md) 为准。本文记录第一轮静态代码梳理确认的问题、目标职责和后续处理顺序，不表示对应改造已经完成。
+业务语义以 [architecture.md](architecture.md) 为准，类型所有权、目录和编码约定以 [code-style.md](code-style.md) 为准。本文列出后续实施需要核对的目标与顺序，不表示改造已经完成。
 
-本轮重点追踪任务提交、分支调度、Run 执行、历史接纳、模型选择及前端分支入口。主要问题是核心概念的实际归属与共识不一致，不是目录或文件数量本身。应先明确所有权和调用关系，再确定必要的类型、接口与目录调整。
+执行与历史按 Session、Run、Turn 和 Entry 组织。Session 是主任务的隔离范围；Core Coordinator 管理已加载会话、输入路由、队列和 Main Run 交接，Run 负责本次执行，Loop 负责 ReAct 迭代。
 
-目标是：
+## 二、职责与调用核对
 
-- 分支独立拥有任务队列、模型选择和执行占用，页面选择不参与执行调度。
-- Turn 表示完整 ReAct 迭代，ModelRequest 表示实际模型调用，两者不混用生命周期。
-- 已完成 Turn 具有明确的历史边界，分叉使用该边界而不是推测消息位置。
-- 历史接纳有唯一责任边界，内部消费已经接纳的事实，不重复审判。
-- 保留已有的直接编排、只读历史共享和按需读取能力，不为重构额外增加管理层。
+### 2.1 会话与任务调度
 
-## 二、已确认的问题与目标职责
+- `core/coordinator` 按 SessionID 定位队列和 Main Run 占用。
+- 同一 Session 同时最多有一个活动 Main Run，占用覆盖准备、运行和必要收尾。
+- 不同 Session 可以并行；切换查看对象不改变后台执行资格或清空队列。
+- TaskQueue 封装 FIFO、领取、取消待办和暂停恢复；Coordinator 决定何时启动下一项。
+- Main 的普通任务输入用于后续 Run，不注入当前 Run。
+- 停止命令定位具体 RunID；较早命令不能在等待后作用于新的执行。
+- 关闭 Session 停止全部所属执行并等待收尾，然后释放登记和调度资源，保留历史。
 
-### 2.1 分支执行状态与会话唯一写入绑定混在一起
+### 2.2 会话加载与配置
 
-代码位置：
-
-- `backend/internal/service/coordinator/coordinator.go`：`bindings` 按 `SessionID` 保存唯一 `sessionBinding`，绑定同时持有分支、任务队列和关闭状态。
-- `backend/internal/service/coordinator/task.go`：任务准入要求匹配该会话绑定的分支。
-- `backend/internal/service/coordinator/queue.go`：调度从会话绑定取得队列与目标分支。
-- `backend/internal/service/coordinator/session.go`：`navigationBinding` 在存在活动 Run 或排队任务时拒绝导航；`releaseBinding` 删除绑定并清空其队列。
-
-当前混乱点：查看哪个分支与哪个分支拥有执行资格被同一份绑定状态连接。活动 Run 的键虽然包含 `BranchID`，但上游队列和准入仍然依赖会话唯一绑定，尚未形成分支独立调度。
-
-目标职责：
-
-- 队列与主代理执行占用按分支持有，同一分支串行，不同分支可并行。
-- 切换查看对象不参与执行资格判断，不释放其他分支的执行状态，不清空其队列。
-- 关闭整个会话与切换分支是不同操作，不能共用释放语义。
-- 控制命令明确定位目标分支和 Run。
-- `BindingID` 是否保留取决于梳理后的实际职责，不能只是改名后继续承载会话唯一执行资格。
-
-前端关联：
-
-- `frontend/src/features/agent/agentStore.ts` 的 `receive` 忽略非当前分支事件。
-- 应区分当前分支的正文展示与其他分支的轻量运行状态；后台状态不能只由当前页面承载。
-- 这不要求前端缓存全部分支正文，也不要求为隐藏分支持续构建完整对话视图。
-
-### 2.2 模型选择仍属于 Session，而不是 Branch
-
-代码位置：
-
-- `backend/internal/service/session/opened_session.go`：已打开会话只有一个 `modelSelection`。
-- `backend/internal/service/session/model_selection.go`：模型选择按 `SessionID` 更新和读取。
-- `backend/internal/service/session/configuration.go`：`RunConfiguration` 只接受 `SessionID`；配置重载只处理一份模型选择。
-- `backend/wails/bindings/bindings_session_model.go`：模型选择入口没有目标分支。
-
-当前实现已经在 Run 准备时固定模型参数，但参数固定之前的选择来源仍是整个会话。
-
-目标归属：
-
-| 内容 | 所有者 |
+| 内容 | 所有者与契约 |
 | --- | --- |
-| 模型目录、Provider 凭据、工具与审批配置 | Session 的只读配置 |
-| 当前模型与推理等级 | Branch |
-| 本次执行实际使用的参数 | Run |
+| 已加载 Session 的登记、查找和移除 | Core Coordinator 的私有 `sessionRegistry` |
+| Session 的实际加载 | 装配时提供的 Repo 能力，成功即返回可用核心对象 |
+| 日志读取、索引重建和必要中断收尾 | 加载实现内部完成，不向 Service 暴露恢复步骤 |
+| 当前模型和推理等级 | Session |
+| 已加载只读配置引用 | 按 Session 保存，通过明确入口替换 |
+| 本次实际执行配置 | Run 开始时固定 |
 
-需要一起梳理模型选择的存放位置、入口参数、配置重载和队列启动时的读取位置，不是只给 `SelectModel` 增加一个参数。不同分支共享会话配置，不复制整份目录和凭据。
+`GetSession` 只定位已加载对象；`LoadSession` 按需加载并登记。Service 不维护另一份会话注册表，不逐条读取历史组装 Session。
 
-### 2.3 Turn 与 ModelRequest 的生命周期混用
+Reload 协调目标 Session 的暂停、停止和等待，再加载并替换配置引用。其他 Session 和已经固定的 Run 配置保持各自语义。模型失效阻塞与用户主动暂停分别表达。
 
-代码位置：
+### 2.3 Run 与 Loop
 
-- `backend/internal/core/agent/run/turn.go`：`TurnRecord` 持有单个 `RequestID`，按实际请求推进序号。
-- `backend/internal/service/agent/run/progress.go`：`BeginRequestTurn` 和请求记录一起推进当前 Turn。
-- `backend/internal/core/toolexecution/review.go`：风险审核调用 `BeginRequestTurn`。
-- `backend/internal/core/loop/request.go`：摘要主动结束并开启 Turn。
-- `backend/internal/core/loop/turn.go`：Loop 发布 `TurnCompleted`，但发布位置与持久化结束 Turn 的位置没有统一。
+- Run 统一保存身份、配置、状态、结果、时间、统计和已接纳 Entry 的只读引用。
+- `Run.Execute` 组织准备、直接调用 Loop、子执行收尾和终态保存，完成必要收尾后返回。
+- `activeRun` 等控制对象只保存 Run 引用、取消及就绪和完成资源，不复制业务状态。
+- Loop 每轮读取已接纳历史，经 ContextBuilder 构建上下文，必要时压缩，再请求模型和执行工具。
+- Loop 不领取 Task，不依赖 Run 的执行对象；Run、Loop 和 Session 共同使用 `core/entry`。
+- Run 的正常收尾使用 `ending`，中断使用 `interrupted`；终态不重新启动同一个 Run。
 
-当前混乱点：普通模型提出工具调用后，工具审核会推进另一个 Turn；摘要也占用 Turn 序号。请求身份和迭代身份没有真正分开。
+### 2.4 Turn 与 ModelRequest
 
-目标职责：
-
-- Turn 由 ReAct 迭代流程开始和结束，包含普通请求、必要审核、工具执行以及输出和回执接纳。
+- Turn 由 ReAct 迭代流程开始和结束，包含普通请求、必要审核、工具执行及结果接纳。
 - 普通请求和它触发的风险审核关联同一个 Turn。
 - 两轮之间的摘要属于 Run，不强行关联某个 Turn。
-- 每个 ModelRequest 独立记录状态与用量，请求记录不负责推进 Turn。
-- Turn 完成必须由直接调用确定并记录；通知只描述已确定事实。
-- 不为 Turn 和 ModelRequest 分别建立重复的执行管理机制。
+- 每个 ModelRequest 独立记录实际状态、用量和计时，请求记录不推进 Turn。
+- Turn 的展示序号可以从同一 Run 的历史顺序派生，不额外保存 Sequence。
+- Turn 完成通过直接流程确定和记录，通知只表达已确定结果。
 
-### 2.4 分叉依赖 Run 结束节点，缺少 Turn 完成边界
+### 2.5 Entry、提交与历史读取
 
-代码位置：
+- `core/entry` 表达公共执行事实；持久化统一使用 Loop 和 Run 调用的 `AppendEntry`。
+- 具体消息与执行元数据使用具体 Payload，ContextBuilder 按语义选择模型可见内容。
+- Entry 与前端 Event 分别设计，不复制通知路由信封。
+- Session 和所属 Run 的存储归属在提交入口及必要存储元数据中保留；RequestID、CallID、报告和消息标识由有引用需要的 Payload 携带。
+- 各日志按追加顺序读取，不要求所有 Entry 具有通用 ID 或 ParentID。
+- 主历史跨多个 Run 持续保留，子代理的中间历史独立读取。
+- 正文按需分页；模型上下文按摘要和保留内容选择范围，不受界面页大小限制。
+- Run 的状态、请求和用量索引基于同一事实维护，不形成平行写入入口。
+- 消费已经接纳的只读事实时，不重复进行入口准入判断。
 
-- `backend/internal/core/session/branches.go`：`PrepareBranch` 要求分叉节点满足 `node.Run`，历史树的 `Safe` 同样取自 `node.Run`。
-- `backend/internal/core/session/entry/node.go`：`node.Run` 来自 Entry 是否为 Run 结果节点。
-- `frontend/src/features/session/useBranchNavigation.ts`：分叉入口使用历史树的安全标记，并限制为已结束执行的末尾。
+### 2.6 记录、通知与前端
 
-当前实现只能从 Run 结束节点分叉，不能从某个 Run 内部已完成的 Turn 分叉。
+- 执行流程分别调用 `AppendEntry` 和 Emitter；记录入口不隐式发布，通知订阅者不保存或推进业务。
+- SessionID 绑定到发布函数和 `praxis:session:<sessionId>` 通道。
+- 通知统一传递 `kind`、可选 `runId` 和 `data`；TurnID、RequestID、CallID 等按具体事件需要提供。
+- 每个已加载 Session 使用固定作用域的 sessionStore；普通数据与流式输出分别通知订阅者。
+- Store 保存数据，纯函数接纳事件，Hook 组织异步请求和操作，组件负责展示。
+- 目录按 task、run、agent、history 等功能语义组织，不把全部会话能力集中到一个文件。
+- 初始化先订阅再加载，保留加载期间的新变化；旧响应和旧 Run 通知不覆盖新的状态。
+- 停止请求不等于 Run 已中断；Turn 完成不等于 Run 已结束。
+- 用量接纳包含普通、审核和摘要请求，不受聊天展示筛选影响。
 
-目标职责：
+### 2.7 子代理与失败收尾
 
-- 执行流程明确记录哪个 Turn 已完成，以及完成时历史截止到哪个 Entry。
-- 分叉只接收已完成 Turn 的历史边界，不能从模型增量或未完成工具交互切开。
-- 原分支可以继续执行；新分支只继承截至所选边界的历史，不包含原分支后续 Entry。
-- 新分支后续任务形成新的 Run，不恢复旧 Run，也不重放历史工具。
-- 共享祖先历史，不复制既有正文，不恢复或隔离项目文件。
+- 子代理严格属于创建它的父 Run，通过 ParentRunID 和 ParentCallID 保留来源。
+- 父 Run 持有子执行句柄和完成回调接收对象，不按会话当前 Run 重新定位接收者。
+- 子执行保存结果后直接回调，父 Run 保存收到的引用后交付或唤醒等待。
+- 每个 Session 最多 10 个子代理执行名额，取消收尾完成后才释放。
+- 保存失败明确报告并停止相关执行，不为补日志重新执行模型或工具。
+- 加载时只对必要候选进行中断收尾，不自动继续旧 Run。
 
-此项依赖 Turn 语义先落实，不能只放宽 `PrepareBranch` 校验。边界既不能根据最后一条回答推测，也不能依赖前端是否收到过完成通知。
+## 三、实施顺序
 
-### 2.5 Entry 接纳后仍存在再次拒绝的内部路径
+1. 固定 Session 调度范围、连续日志归属及外部接口定位方式。
+2. 落实 Core Coordinator、唯一 sessionRegistry 和 Repo 可用对象加载契约。
+3. 统一 Run 和 `Run.Execute`，将共享记录与计时放入公共模块。
+4. 收敛唯一 `AppendEntry`，区分 Turn 与模型请求，明确用量和结果的事实来源。
+5. 对齐 Session 通道、前端 sessionStore、初始化、分页和流式输出职责。
+6. 核对配置重载、停止、子代理回调、关闭和错误收尾的直接调用关系。
 
-代码位置：
+结构调整服务于这些职责，不机械地为每个概念创建管理器或通用接口。
 
-- `backend/internal/core/session/context_entries.go`：Session 负责 Entry 接纳和重复提交判断。
-- `backend/internal/core/agent/run/run.go`：`Run.Accept` 接收已接纳 Entry，但仍可能因身份或内容检查拒绝。
-- `backend/internal/service/agent/run/entries.go`：先提交 Session，再调用 `Run.Accept`，因此需要处理前者已接纳而后者拒绝的分支。
+## 四、风险与验证
 
-目标是区分两类职责：
+核心风险是重复登记或执行状态、错误的完成目标、资源提前释放，以及日志和派生索引不一致。按单一所有者、固定接收对象和完整收尾边界处理。持久化格式实施时明确数据影响及匹配备份，不在文档阶段操作真实历史。
 
-| 职责 | 含义 |
-| --- | --- |
-| 接纳事实 | 决定是否新增，处理必要的重复提交及归属判断 |
-| 消费已接纳事实 | 持有只读引用、更新本次执行统计、发布通知 |
+后续实施按以下场景人工核对：
 
-消费方不重新审判已经接纳的内部事实。现有共享只读 Entry 的方向应保留。
+1. Session A、B 并行，同一 Session 内 Main Run 按 FIFO 串行。
+2. 切换会话不影响后台执行、待办、控制目标和用量接纳。
+3. 模型选择按 Session 独立，已启动的 Run 配置稳定。
+4. 普通请求与审核属于同一 Turn，摘要不伪造 Turn，用量按实际请求累计。
+5. 历史分页与实时输出分开，浏览旧记录后提交任务仍接续当前主历史。
+6. 没有通知订阅者时，提交、Run 收尾和下一项调度仍然正确。
+7. 子执行回调始终交给创建它的父 Run；关闭等待主、子执行完整退出。
+8. Run 资源释放后历史可查询，重启不重复执行模型或工具。
 
-不能直接批量删除检查。应先明确正常提交、重复提交和恢复路径各自的入口与负责人，再去除没有独立职责的判断。
-
-## 三、应保留的实现基础
-
-以下能力已有对应实现，不应为了统一形式而重做：
-
-- 调度、Loop、工具执行、历史提交和 Run 收尾通过直接调用连接，关键流程不依赖通知推进。
-- Run 运行实例与历史记录已有区分，资源释放不等于删除历史。
-- 主代理与子代理已有独立历史路径，子执行通过结果交接，不直接混用父上下文。
-- 模型上下文读取与界面分页已有区分，历史正文按需读取。
-- 停止命令定位具体分支和 Run，不以命令到达时的当前对象替换目标。
-- 重启恢复路径做必要收尾，不自动重放工具或继续旧任务。
-
-运行状态、历史投影与存储索引可能分别承担必要职责，不能因为保存了相关字段就一概认定为重复状态。应按所有权、生命周期和用途逐项判断。
-
-## 四、处理顺序与第一阶段范围
-
-按以下顺序逐项落实到字段、函数和调用路径，不先设计新的 Manager、Service 或通用接口：
-
-1. 分支状态归属：任务队列、模型选择、活动 Run 和页面选择。
-2. Turn 完成事实：迭代边界、模型请求关联和历史分叉。
-3. 接纳与收尾职责：去除内部重复判断，明确失败后的可见状态。
-
-第一阶段先理清以下执行链：
-
-```text
-提交到指定分支
-  → 进入该分支队列
-  → 占用该分支执行槽
-  → 读取该分支模型选择
-  → 创建固定配置的 Run
-  → 执行并收尾
-  → 释放执行槽、调度该分支下一项
-```
-
-页面当前查看哪个分支不参与这条执行链。结构调整只服务于这些职责，不机械地为每个概念创建类型或管理器，也不顺带扩大到 Provider、工具协议等无关实现。
-
-## 五、风险与回退边界
-
-- 分支状态调整涉及 Coordinator、会话配置、Wails 入口和前端状态定位，不能只放开导航限制而保留会话唯一队列。
-- Turn 与分叉涉及历史记录和索引语义，具体存储调整及已有数据处理方式需要在该阶段确认，不能假设修改校验即可完成。
-- 正常重复提交处理与不必要的内部防御检查必须区分，不能以清理为由破坏已接纳结果的确认路径。
-- 停止执行不撤销工具已经产生的外部副作用；任何收尾改造都必须保留真实结果。
-- 分阶段保持改动范围清晰。代码回退不能被视为历史数据或项目文件回滚，涉及持久化格式时需单独明确兼容与回退条件。
-- 本文是静态梳理记录，不包含已经完成改造或运行验证的结论。
-
-## 六、验证方式
-
-实现后按 [architecture.md](architecture.md) 中的场景核对，重点包括：
-
-1. 分支 A、B 同时执行，同一分支内任务保持 FIFO 串行。
-2. 查看 B 时，A 的执行、待办与控制目标不变。
-3. A、B 分别选择模型，已开始的 Run 参数不随之后的选择改变。
-4. 普通请求与审核处于同一 Turn，两轮之间的摘要不占用新 Turn；用量按实际请求累计。
-5. 从某个 Run 内已完成 Turn 分叉，只继承截止该边界的历史，未完成交互不能分叉。
-6. 没有事件观察者时，历史接纳、Turn 完成、Run 收尾和队列调度仍然正确。
-7. Run 资源释放后历史可查询，重新打开应用不重复执行工具。
-
-验证遵守仓库约定：
-
-- 后端使用 `go build ./...`、`go vet ./...`、`go list ./...`。
-- Wails 签名变化后在 `backend/` 执行 `go run -tags bindings .` 生成绑定，不手工修改生成文件。
-- 前端使用 `npm run check`。
-- 不新增、保留或运行自动化测试；数据验证使用独立临时目录，不使用真实用户数据。
-- 不自动启动开发服务；需要启动才能人工验证时先取得授权。
+验证遵守仓库约定：后端使用 `go build ./...`、`go vet ./...`、`go list ./...`；签名变化时按已有流程重新生成 Wails 绑定，前端使用 `npm run check`。不新增或运行自动化测试，不自动启动开发服务；数据验证使用独立临时目录。

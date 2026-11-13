@@ -1,621 +1,203 @@
-# Praxis Agent / Run / Turn 架构重构方案
+# Praxis Session / Run / Turn / Entry 实施方案
 
-## 一、背景、目标与边界
+## 一、目标与边界
 
-本方案规定 Agent 的运行主体、执行层级、队列、控制、历史提交和模块职责。通知信封、展示快照和前端消费以 [directory-structure.md](directory-structure.md) 为准。
+业务语义以 [architecture.md](../architecture.md) 为准，所有权、目录及编码约定以 [code-style.md](../code-style.md) 为准。本文规定执行编排的实施清单，通知与前端接入参见 [directory-structure.md](directory-structure.md)。本文描述目标，不表示代码已经完成。
 
-目标是：长期 Main Agent 持续接收任务；每项任务形成一次 Run，由 ReAct Loop 完成多个 Turn；Subagent 使用相同执行能力完成一次委派；执行状态和控制资源只有一个所有者。
+Session 组织持续工作，用户任务经队列形成一次 Main Run；Run 的 `Execute` 直接调用 Loop 完成多个 Turn；Entry 保存具体执行事实。子代理使用相同 Run 和 Loop 能力完成一次委派。
 
-本文只描述目标契约和实施清单，不表示代码已完成。后端相对路径以 `backend/` 为根。
-
-### 1.1 执行层级
-
-```text
-Agent（长期运行）
-  ├── Run A（一次完整执行）
-  │     └── ReAct Loop
-  │           ├── Turn 1：模型请求 → 工具执行 → 回执
-  │           ├── Turn 2：模型请求 → 工具执行 → 回执
-  │           └── Turn 3：模型请求 → 最终回答
-  └── Run B（下一次完整执行）
-        └── ReAct Loop
-              └── Turns
-```
-
-该层级表示执行事实的归属，不表示 Run 对象负责调用或编排 Loop。
-
-| 概念 | 职责 | 生命周期 |
+| 概念 | 职责 | 范围 |
 | --- | --- | --- |
-| AgentDefinition | 定义角色、指令和能力 | 配置生命周期 |
-| Main Agent | 持有稳定身份，管理分支任务队列和活动 Run | Session 生命周期 |
-| Subagent | 完成 Main Agent 的一次委派 | 单次委派 |
-| Task | 等待执行的用户输入 | 入队至领取 |
-| Run | Agent 的一次完整连续执行 | 准备、运行至结算 |
-| Turn | Loop 内的一次 ReAct 迭代 | 一次迭代模型请求及其工具处理 |
-| ToolExecution | 单个工具的授权与执行 | 单次工具执行 |
-| Session | 组织会话历史、分支和持久化事实 | 会话生命周期 |
-| RunService | 协调 Run、Loop 与 Session | 服务生命周期 |
-| Coordinator | Agent 注册、会话写入绑定与跨 Agent 协调 | 应用生命周期 |
+| Session | 身份、模型选择、只读配置引用和连续主历史 | 会话 |
+| Coordinator | 已加载会话定位、输入路由、队列调度和执行控制交接 | Core 共享协调入口 |
+| TaskQueue | FIFO、领取、取消待办、暂停和恢复 | 每个 Session 一个实例 |
+| Run | 身份、配置、状态、结果、统计和完整执行入口 | 单次任务或委派 |
+| Turn | 一次 ReAct 迭代，包括普通请求及其触发的审核和工具处理 | Run 内 |
+| Entry | 消息、请求、工具回执、摘要和状态等已接纳事实 | 所属日志 |
+| Agent | 主代理或子代理的身份、角色和定义关联 | 身份语义 |
+| ModelRequest | 一次真实模型调用及状态、用量和计时 | 所属 Run，必要时关联 Turn |
 
-同一 Run 可以包含多个 Turn。单个 Turn 完成不代表 Run 已结束。模型请求的 `stopReason` 描述本次模型响应；最终 Run outcome 由执行服务在业务结束边界确定。
+这些职责不要求机械地各建一个管理器、运行环境或接口层。
 
-### 1.2 整体结构
+## 二、Session 与调度
 
-```text
-Application
-  └── Coordinator
-        ├── Agent Registry
-        ├── Session Write Bindings
-        └── Main Agent
-              ├── Branch A
-              │     ├── TaskQueue
-              │     └── CurrentRun
-              ├── Branch B
-              │     ├── TaskQueue
-              │     └── CurrentRun
-              └── Subagents
-                    ├── Subagent A → 一个 Run → 多个 Turn
-                    └── Subagent B → 一个 Run → 多个 Turn
-```
+### 2.1 会话隔离
 
-TaskQueue 和 CurrentRun 归 Agent 的对应 Branch 管理。相同 Main Agent 的不同 Branch 可以独立执行，同一 Branch 同时只有一个活动 Run。
+- 同一 Session 只有一条连续主历史、一份当前模型选择和一个普通任务队列。
+- 同一 Session 同时最多一个活动 Main Run，不同 Session 可以并行。
+- Coordinator 从准备阶段预留 Main Run 位置，必要收尾完成后才释放。
+- 主代理身份跨多个 Run 保留，不持有或调度另一份队列与执行状态。
+- 页面查看和历史浏览不决定执行资格，不释放后台会话的调度资源。
 
-## 二、Agent、Branch 与调度
+### 2.2 任务交接
 
-### 2.1 长期 Agent 身份
+1. Coordinator 按 SessionID 接收输入并调用 TaskQueue 入队。
+2. 没有活动 Main Run 且允许领取时，在同一并发边界内领取 Task 并预留位置。
+3. 从 Task 创建 Run，取得 Session 当前模型选择和只读配置引用。
+4. 调用 `Run.Execute`，准备、模型、工具与存储在索引锁外执行。
+5. 正常完成并收尾后接回控制权，释放占用，再按队列状态决定下一项。
 
-Main Agent 的逻辑生命周期绑定 Session，不绑定单次 Run 或写入 Binding。Agent 由所属运行管理流程建立，Run 的创建不重新创建 Main Agent。
+Main 的普通输入只用于后续 Run。当前 Run 运行期间不注入用户任务，不立即打断模型请求或工具调用。中断后的剩余队列遵守明确的暂停与恢复规则，不当作正常完成自动交接。
 
-Agent 负责：
+### 2.3 展示与控制
 
-- 持有稳定的 Agent 身份、种类和定义关联。
-- 管理所属 Branch 的 TaskQueue，保持 FIFO。
-- 保证同一 Branch 的 Run 串行启动。
-- 持有各 Branch 当前 Run 的运行句柄。
-- 接收 Steer，并将停止、审批等控制交给目标 Run。
-- 根据调度规则，在当前 Run 结束后领取下一项 Task。
+Agent 的运行展示依据后端明确给出的 Run 状态和等待事实，不另存一套生命周期。当前活动 Run 与最近已结束 Run 分开展示，启动下一次不清除上一次结果。
 
-Agent 不负责 Provider 协议、具体工具实现、模型上下文编码、JSONL 存储或全局页面管理。
+控制入口使用 SessionID 和具体 RunID。停止请求已接受不代表执行已经退出；较早 Run 的通知或命令不能改写新 Run。
 
-Main Agent 的 AgentID 与 SessionID 保持既定关联。Branch 不额外创建新的 Agent 身份。
+## 三、Run 与执行资源
 
-### 2.2 Branch 隔离
+### 3.1 单一 Run 实体
 
-```text
-Main Agent
-  ├── Branch A
-  │     ├── TaskQueue
-  │     └── CurrentRun
-  └── Branch B
-        ├── TaskQueue
-        └── CurrentRun
-```
+`core/agent/run` 的 Run 统一拥有本次执行信息和行为：
 
-队列、活动句柄、停止目标和运行展示均按 AgentID＋BranchID 定位。不能仅用 AgentID 确定同一 Main Agent 的停止目标。
-
-前端工作区按 SessionID 持有唯一会话页。关闭会话页时，前端按 SessionID 请求停止该会话的全部执行并清空待办；后端等待执行收尾后释放写入绑定与会话内存，不删除持久化执行历史。核心流程直接处理关闭，不交给事件订阅者推进。
-
-### 2.3 Agent 状态与 Run 结果
-
-Agent 的运行展示状态从对应 Branch 的活动 Run、等待行为和队列投影，不独立保存另一套执行状态机。
-
-| 条件 | Agent 展示状态 |
+| 信息 | 语义 |
 | --- | --- |
-| 没有活动 Run | Idle |
-| Run 正在运行 | Executing |
-| Run 等待工具审批 | Waiting |
-| Run 正在响应停止 | Stopping |
+| ID、SessionID、Agent 关联 | 本次执行与所属会话 |
+| SourceTaskID | 普通任务来源 |
+| ParentRunID、ParentCallID | 子执行的父 Run 和委派调用 |
+| Config | 本次固定的定义、指令和模型配置 |
+| Status、结果与原因 | 实际执行阶段和完成结果 |
+| 时间与统计 | 本次请求、用量、输出和工具等累计信息 |
+| Entry 只读引用 | 本次实际接纳的执行证据 |
 
-失败、完成、yield 和中断记录在 `RunRecord.Outcome`。一次 Run 失败不表示长期 Agent 永久进入 Failed 状态。
+持久化通过 Entry 表达事实，加载实现根据事实构造可查询的 Run。历史 Run 的构造不启动 Loop，也不创建取消、审批或其他活动执行资源。查询和通知使用实际所需字段，不为持久化与前端分别复制同形执行实体。
 
-查询应区分当前活动 Run 与最近已结束 Run。启动下一次 Run 不清除上一次结果；Agent 全局概览可以汇总各 Branch 的运行展示。
+### 3.2 状态与控制资源
 
-## 三、Run：完整执行记录与运行实例
+正常状态依次为 `starting`、`running`、`ending`、`ended`；准备、运行和收尾期间中断进入 `interrupted`。`ending` 只表示正常收尾，`ended` 和 `interrupted` 都是终态。
 
-### 3.1 RunRecord
+状态、结果和统计由 Run 维护。`activeRun` 等窄控制对象保存 Run 引用、取消、就绪和完成信号，不复制业务状态。完成信号覆盖工具、子执行和必要持久化收尾。
 
-`core/agent/run` 定义一次完整执行的事实，不承担 Loop 编排。
+### 3.3 完整执行入口
 
-| 数据 | 含义 |
+Run 的 `Execute` 负责：
+
+1. 固定本次配置与能力，提交任务输入和初始执行事实。
+2. 直接调用 Loop，提供历史读取、`AppendEntry`、模型、工具与通知能力。
+3. 根据 Loop 返回值处理本次结果，取消和等待仍活动的子执行。
+4. 提交终态并完成必要收尾，向 Coordinator 返回本次结果或明确错误。
+
+Run 不领取下一项 Task。Loop 不反向依赖 Run 执行对象，Run 和 Loop 使用 `core/entry`、`core/timing` 等公共数据类型。
+
+## 四、Loop、Turn 与历史
+
+### 4.1 ReAct 迭代
+
+Loop 每轮完成：
+
+1. 读取已经接纳的历史，调用 ContextBuilder 选择并编码本次上下文，必要时压缩。
+2. 开始 Turn，提交对应事实并独立发布运行通知。
+3. 请求模型，产生并提交实际 Assistant 内容。
+4. 对工具声明执行授权、必要审核和真实调用，提交实际回执。
+5. 确认本轮完成，继续下一 Turn 或返回 Run 的结束原因。
+
+模型上下文使用历史的只读引用与本次选择范围，不维护需要与 Session 同步修改的完整可变副本。Provider 编码和裁剪不改写原始 Entry。
+
+### 4.2 Turn 与模型请求
+
+Turn 是完整 ReAct 迭代，ModelRequest 是一次实际模型调用。
+
+- 普通模型请求及其触发的风险审核属于同一 Turn。
+- 摘要请求属于 Run，发生在两轮之间时不伪造 Turn。
+- 每次模型请求有明确 RequestID，独立记录开始、成功、失败或取消及已取得用量。
+- Turn 不额外保存 Sequence，展示次序由同一 Run 的事实顺序派生。
+- Turn 完成和模型 StopReason 不代表整个 Run 已结束。
+
+### 4.3 单一事实提交
+
+Loop 和 Run 统一调用 `AppendEntry`。共享类型位于 `core/entry`，不建立按记录类型平行的业务写入入口。
+
+- 消息与执行元数据使用具体 Payload，成功、失败和取消分别表达。
+- Entry 与通知的信封分开设计，不要求所有事实保存通用 ID、RunID、TurnID 或 ParentID。
+- 存储归属在绑定入口及必要存储元数据中保留，可恢复的信息不能丢失。
+- RequestID、CallID、报告和消息等引用标识只进入需要它的 Payload。
+- 同一日志按追加位置确定历史顺序，不维护历史父指针树。
+- Run 消费已接纳的只读引用并维护统计，不重复进行事实入口的准入判断。
+
+主执行事实写入 Session 主日志，多个 Main Run 持续接续同一主历史。子代理事实写入独立日志，中间交互不混入主上下文。摘要改变后续上下文选择范围，原始记录保留。
+
+### 4.4 记录与通知独立
+
+执行流程分别调用 `AppendEntry` 和 Emitter。记录入口不隐式发布，订阅者不保存、调度、执行工具或唤醒业务等待。
+
+通知表达实际运行变化，提交结果表达是否保存成功。日志失败明确报告并停止相关执行；已经发生的工具结果不能被改写为虚构失败，也不能为补日志重新执行工具。
+
+## 五、Subagent
+
+### 5.1 归属与调用
+
+Subagent 严格属于创建它的 Main Run，一次委派执行一个 Run，其中可以包含多个 Turn。
+
+- 只接收父 Run 的委派和明确补充指令，不拥有普通 TaskQueue，不再次委派子代理。
+- 与主代理复用 Run、Loop、公共 Entry 和计时能力。
+- 使用独立上下文、RunID 和历史，通过 ParentRunID 与 ParentCallID 保留调用来源。
+- 父 Run 持有子执行句柄和固定接收回调，不根据 Session 当前 Run 重新定位接收者。
+
+### 5.2 报告、完成与等待
+
+1. 子执行通过 `AppendEntry` 保存报告或最终结果。
+2. 直接调用已绑定父 Run 的接收方法。
+3. 父 Run 保存收到的报告或结果引用。
+4. 保存成功后交付给上下文构建或唤醒原生等待。
+
+中间报告与最终结果接收分别表达。正常最终回答直接复用，中断与超时交付状态及原因，部分输出保留在子代理历史。ReportID 用于报告消费，消息标识用于补充指令接纳，不重复复制结果正文。
+
+等待先消费已收到的结果，再按明确的 any、all 和取消条件挂起，不轮询。回调只接纳结果和信号，后续模型推进仍由父执行流程完成。
+
+### 5.3 并发与释放
+
+每个 Session 最多 10 个子代理执行名额，运行和取消收尾期间持续占用，不额外建立等待队列。并行委派由真实工具调度路径支持。
+
+父 Run 取消传播到子执行，完成回调不依赖已经取消的子 Context。父 Run 在结束前等待必要的子执行收尾；资源释放后结果和历史仍可查询。
+
+授权在委派入口确定，同时约束 Provider 工具描述和实际工具执行。真实执行的权限检查保留在执行边界，不复制多套授权规则。
+
+## 六、会话加载、配置与关闭
+
+Core Coordinator 的私有 `sessionRegistry` 只保存已加载 Session 引用，负责登记、查找和移除。加载流程与 Registry 分开。
+
+| 入口 | 行为 |
 | --- | --- |
-| `ID`、`AgentID`、`SessionID`、`BranchID` | 本次执行及所属范围 |
-| `SourceTaskID` | Main Agent 从 FIFO 领取的来源任务 |
-| `ParentRunID`、`ParentCallID` | 子执行对应的父执行和父工具调用 |
-| `RequestID`、`InputEntryID` | 准入请求和输入条目关联 |
-| `Config` | 本次执行冻结的定义、指令和模型配置 |
-| `Status` | Run 生命周期阶段 |
-| `Progress` | 模型请求、用量和输出等执行统计 |
-| `CreatedAt`、`StartedAt`、`EndedAt` | 执行时间 |
-| `Outcome`、`FailureCode`、`FailureMessage` | 最终结果与原因 |
+| LoadSession | 已加载则复用，否则调用装配提供的 Repo 能力，成功后登记可用对象 |
+| GetSession | 只查找已加载对象，不隐式读取或恢复 |
+| CloseSession | 停止所属执行、等待完整收尾，再释放登记和调度资源 |
 
-RunRecord 在准备阶段就存在，运行过程中更新，结束后保留结果。它不是只在结束时产生的结果对象，也不是包含所有输出内容的完整结果包。
+日志读取、索引重建和必要恢复由加载实现内部完成。Service 通过 Core 入口使用会话，不维护会话注册表，不显式组织恢复。正文按需读取，可用对象不要求全部正文常驻。加载不自动继续旧 Run、重新调用模型或重放工具。
 
-模型回答、用户输入、工具声明和工具回执通过关联的 Session Entry 表达，不嵌入 RunRecord。运行中的取消句柄、等待唤醒和上下文也不是持久化记录字段。
+Session 当前模型选择和只读配置引用独立维护；Run 启动后固定本次引用。Reload 由应用用例协调目标 Session 的暂停、停止、等待和配置加载，Core 维护替换与调度的并发边界，其他 Session 使用原引用。
 
-### 3.2 生命周期与结果
+前端每个 Session 只有一个会话页和固定作用域状态。切换页面只改变显示；关闭会话通过明确的 Core 入口处理，不由事件订阅者清理执行或队列。
 
-Run 保持四阶段生命周期：
+## 七、目标模块
 
-```text
-Starting → Running → Ending → Ended
-```
+后端路径以 `backend/internal/` 为根。
 
-最终 outcome 使用：
-
-```text
-Completed / Yielded / Failed / Interrupted
-```
-
-工具审批等待属于执行期间的行为，不为此增加另一套 Run 生命周期。
-
-Turn 不承担上述完整执行状态机。它只标识本次迭代，提供模型响应结束原因和相关事实。
-
-### 3.3 run.Run
-
-`RunRecord` 是执行事实记录；`run.Run` 是本次执行从准备到结算的内存运行实例。
-
-Run 持有：
-
-- 本次 RunRecord。
-- 本次已接纳 Entry 的只读引用及必要索引，用于执行证据和统计。
-- 取消信号、准备阶段占用和工具审批唤醒能力。
-- 待接纳的 Steer 输入及完成接纳边界。
-
-Agent 持有其所属 Branch 的活动 Run。Coordinator 不保存第二套执行 ID、取消句柄、ending 标志或审批唤醒状态。
-
-模型迭代上下文由本次 Loop 维护独立引用列表，Entry 内容按只读值共享；Run 不再维护另一份需要与 Loop 同步推进的模型上下文。
-
-`run.Run` 不创建或持有可变 Agent 对象。它使用已经确定的身份和值，避免 Agent 持有 Run 时产生包循环依赖。
-
-### 3.4 准备阶段与执行槽位
-
-活动句柄必须覆盖准备期，不能等持久化完成或模型启动后才阻止同一 Branch 重复启动。
-
-```text
-Agent 领取 Task
-    ↓
-占用对应 Branch 的执行槽位
-    ↓
-执行服务准备输入、冻结配置并保存 RunRecord
-    ↓
-启动 Loop
-    ↓
-执行服务结算 Run
-    ↓
-释放槽位，向 Agent 返回结果
-```
-
-准备失败后释放槽位，并按既定规则处理 Task 的队首恢复。已接纳输入和请求身份的重复提交沿用现有准入约定，不通过事件触发业务重试。
-
-Run 不负责领取后续 Task。下一项任务是否允许启动，由 Agent 的调度策略决定。
-
-## 四、RunService、Loop 与 Session 的协作
-
-### 4.1 编排所有权
-
-由 `service/agent/run` 统一编排一次完整执行，不向 Loop 注入 run.Run、RunRecord 或 Session 服务。
-
-```text
-RunService
-  ├── Run：生命周期、控制、统计和结果
-  ├── Session：初始历史、条目接纳和持久化
-  └── Loop：模型请求、工具调度和多轮迭代
-```
-
-执行服务负责：
-
-1. 完成任务准入，准备 Run 和初始 Session Entry。
-2. 绑定本次冻结模型、工具能力和身份值，操作计时随结果交给对应 Entry。
-3. 启动 Loop，并提供条目提交、模型请求事实记录和运行中输入接纳等必要协作入口。
-4. 将 Loop 产生的事实提交给 Session，更新本次执行记录。
-5. 根据 Loop 返回信息及输入接纳边界确定最终 outcome，结算并释放资源。
-6. 在事实已接纳后发布展示通知。
-
-这些操作入口只暴露当前协作所需的值与错误，不暴露完整业务对象，不以通知或 Hook 隐藏核心提交。
-
-### 4.2 Loop 的职责
-
-`core/loop` 完整负责 ReAct 迭代：
-
-1. 接收初始 Entry，构建并持有本次模型上下文。
-2. 在安全迭代边界接纳新增输入。
-3. 构建模型请求，消费模型响应。
-4. 产生 Assistant Entry，交给外部提交入口接纳。
-5. 根据工具声明调度工具执行，产生并提交真实回执。
-6. 将已接纳 Entry 加入本地上下文，进入下一 Turn。
-7. 判断模型是否已经给出最终回答，并在完成确认后返回。
-
-Loop 可以接收 RunID、AgentID、BranchID、TurnID 等普通身份值及冻结配置；这不等于依赖它们对应的可变运行对象。
-
-Loop 不持有 Agent、run.Run、RunRecord、Session 或存储服务，不调用执行服务的生命周期方法，也不决定队列调度。
-
-继续复用现有 Provider、ToolExecutor 和 ContextBuilder。不为编排再建立第二个 Loop Runner 或通用执行框架。
-
-### 4.3 初始历史与增量条目
-
-Entry 类型继续定义在 `core/session/entry`，包含用户输入、模型输出、工具声明、真实回执和上下文摘要；它不是仅属于最终回答的输出类型。
-
-```text
-Session.BranchEntries
-    ↓
-执行服务准备初始 Entry
-    ↓
-Loop 构建本地上下文
-    ↓
-模型响应／工具执行产生新 Entry
-    ↓
-同步条目提交入口进入执行服务
-    ├── Session 接纳并尝试追加日志
-    ├── Run 接纳同一条目的引用，更新执行证据
-    └── 发布条目通知
-    ↓
-返回已接纳 Entry／错误
-    ↓
-Loop 更新本地上下文并继续，或因错误退出
-```
-
-条目逐条提交，不等待整个 Run 结束后才统一回写。条目提交入口需要同步返回已接纳值和错误，不是可有可无的观察者回调，也不是事件总线订阅。
-
-Session 负责确定历史父节点、创建时间和分支 Head。Loop 使用返回的已接纳条目，不自行维护第二套 Session 历史关系。
-
-主执行写入主分支路径；子执行写入对应子 Agent 历史，不推进主分支 Head。历史跨 Run 保留，后续 Run 可以继续使用所属分支的上下文。
-
-Session 接纳内存条目后追加日志，日志失败不撤销已接纳事实。执行服务仍接纳对应执行证据并报告保存错误；工具已经取得的真实回执不能改写为虚构失败，也不能为保存失败重新执行工具。
-
-模型请求的编码和裁剪不改写原始 Entry。上下文摘要通过同一提交边界保存，改变后续上下文引用范围，但不删除原始历史。
-
-### 4.4 Turn 与请求序号
-
-```text
-RunID
-  ├── TurnID 1
-  │     ├── 迭代模型请求
-  │     ├── 工具审核请求（适用时）
-  │     └── ToolExecutions
-  ├── TurnID 2
-  │     └── 迭代模型请求
-  └── 轮后摘要请求（不伪造 Turn）
-```
-
-TurnID 表示一次 ReAct 迭代，可由 RunID 与对应迭代请求序号生成。不为 Turn 建立另一套完整执行管理器或复杂生命周期。
-
-一次模型请求使用 Run 内稳定的 `requestSequence`。普通模型请求、工具风险审核和摘要分别分配请求序号；审核请求关联触发它的 Turn，轮后摘要没有 ReAct Turn 时不伪造归属。
-
-TurnID 不替代模型请求唯一身份。模型请求记录、通知和用量查询统一使用 RunID＋requestSequence 归并。
-
-## 五、Steer 与 Followup
-
-### 5.1 Steer
-
-Steer 是当前活动 Run 的新增输入，不是另一次 Run，也不加入普通 Task FIFO。
-
-```text
-Main Agent
-  ├── TaskQueue → Followup
-  └── CurrentRun
-        ├── Turn 1
-        ├── PendingSteer → 用户输入
-        └── Turn 2 → 消费 Steer 后继续
-```
-
-规则：
-
-- 必须存在可继续接纳输入的活动 Run。
-- 不立即中断正在进行的模型请求或工具执行。
-- 执行服务在安全 Turn 边界取出待处理输入，提交 Session，并把已接纳 Entry 交给 Loop。
-- 同一 Run 可以接收多次 Steer，Loop 根据新增输入继续后续 Turn。
-- 当 Run 已进入不可继续的结束阶段，明确拒绝新的 Steer；由调用方选择提交为 Followup，不静默改变输入模式。
-
-### 5.2 最终回答与完成确认
-
-必须区分：
-
-- 某个 Turn 的模型响应完成。
-- 整个 Run 的业务完成。
-
-已接受的 Steer 必须在 Run 最终提交前处理。输入接纳与结束确认使用所属 Run 的同一控制边界，不能先宣布 Run 已完成，再发现已接受输入并重新执行。
-
-Loop 负责根据接纳的输入继续迭代；执行服务负责确认本次 Run 是否已经允许进入结束阶段。`FinalStopReason`、`FinalAssistantID` 和最终输出 Hook 应遵循该业务完成边界，不把某次模型 `stopReason` 直接当作最终提交。
-
-### 5.3 待处理输入的可靠性边界
-
-TaskQueue 和待处理 Steer 可以采用进程内机制。Steer 正式接纳为上下文条目时写入 Session；尚未消费的输入不承诺跨进程重启恢复。
-
-如果业务要求提交成功的待处理输入在崩溃后仍可恢复，必须另行明确返回成功前的持久化与消费规则。本次架构不额外承诺该可靠性，也不为此新增输入队列框架。
-
-### 5.4 Followup
-
-Followup 使用 Agent 对应 Branch 的 TaskQueue，保持 FIFO：
-
-```text
-Run A 运行中
-    ↓
-Task B 入队
-    ↓
-Run A 结束
-    ↓
-Agent 按调度策略领取 Task B
-    ↓
-Run B
-```
-
-中断后是否自动执行剩余队列，遵守显式恢复调度规则，不因模块重组改变行为。
-
-## 六、Subagent
-
-### 6.1 生命周期与能力
-
-```text
-Created → Running → Report Result → Closed
-```
-
-一次 Subagent 只执行一个 Run，该 Run 内可以有多个 Turn。
-
-Subagent：
-
-- 只接收 Main Agent 的委派，不直接接收用户输入。
-- 不拥有 TaskQueue，不支持 Followup 或 Steer。
-- 不再委派 Subagent。
-- 与 Main Agent 复用相同的 RunService 和 ReAct Loop。
-
-### 6.2 调用与结果归属
-
-```text
-Main Agent
-  └── Main Run
-        └── Turn
-              └── 委派工具调用
-                    └── Subagent
-                          └── Subagent Run
-                                ├── Turn 1
-                                ├── Turn 2
-                                └── 最终结果
-                                      ↓
-                                父工具调用回执
-                                      ↓
-                                Main Run 继续下一 Turn
-```
-
-Coordinator 的 `RunSubagent` 负责父执行定位、子 Agent 登记、委派调用与资源交接；实际执行使用共享执行服务。
-
-子执行通过 `ParentRunID`＋`ParentCallID` 确定来源。父调用所属 Turn 用于迭代归属，不替代完整父 Run 的身份。
-
-子 Agent 的中间历史不直接合并到主 Agent 上下文。Main Agent 接纳的是对应委派工具的结果。
-
-### 6.3 并发、取消与释放
-
-一个 Main Run 可以委派多个独立 Subagent。每个子 Agent 使用独立 AgentID、RunID、上下文和条目耗时，将结果返回对应父 CallID，不占用主 Agent 的 TaskQueue。
-
-并行执行必须由工具调度路径实际支持，不能只建立多个子 Agent 对象而仍串行等待所有调用。
-
-子执行的取消关系从父 Run 派生。父执行取消后，子执行完成必要结算并向父调用提供明确的成功、失败或中断结果。
-
-Closed 只表示子运行资源释放，不删除 RunRecord、工具记录或历史 Entry。子 Agent 登记通知必须先于其首次输出，资源释放通知不销毁长期 Main Agent。
-
-## 七、Coordinator、页面与资源所有权
-
-### 7.1 职责划分
-
-| 职责 | 所有者 |
+| 模块 | 内容 |
 | --- | --- |
-| Agent 注册、查找与跨 Agent 协调 | Coordinator |
-| 已打开会话集合、唯一会话页及分支选择 | 前端工作区 |
-| Session 写入 Binding 与执行生命周期协调 | Coordinator |
-| TaskQueue、下一任务领取、当前执行句柄 | Agent 对应 Branch |
-| 单次执行的生命周期、取消和审批唤醒状态 | run.Run |
-| Run、Loop 和 Session 之间的业务编排 | RunService |
-| 模型上下文和 ReAct 多轮迭代 | Loop |
-| 条目历史、分支、日志接纳与查询 | Session |
+| core/session | 会话身份、模型选择、连续历史读取及会话规则 |
+| core/task | 待执行输入及 FIFO 队列行为 |
+| core/coordinator | 会话入口、队列调度、Main Run 占用及停止关闭 |
+| core/agent/run | 单一 Run、Execute、结果接收、子执行控制及本次收尾 |
+| core/loop | ReAct、上下文构建调用、模型请求及工具处理 |
+| core/entry | 公共事实、内容块和具体 Payload |
+| core/timing | 通用计时记录 |
+| core/event | 类型化通知、共享 Emitter 和会话作用域绑定 |
+| service/session | 应用用例、配置加载与保存协作 |
+| repository、infra | 存储契约、可用对象加载和具体协议、文件实现 |
+| bootstrap | 依赖创建及外部能力绑定 |
 
-Coordinator 路由命令到目标 Agent／Branch／Run，不额外保存一份完整活动运行状态，也不直接控制 ReAct Turn。
+Core 不导入 service 或 infra，外部能力通过实际边界上的接口或函数提供。内部直接调用明确行为，不为形式增加转发层。
 
-### 7.2 Binding 与 Agent 生命周期
+## 八、实施与验证
 
-```text
-前端工作区
-  └── SessionID → 唯一会话页
+1. 对齐 Session 主历史和队列归属、输入及控制定位。
+2. 落实 Core Coordinator、私有 Registry 和 Repo 加载契约。
+3. 统一 Run 与 Execute，落实准备期占用、取消和收尾资源的所有者。
+4. 收敛公共 Entry、唯一 AppendEntry 及 Turn 和 ModelRequest 事实。
+5. 对齐子执行回调、配置重载和 Session 关闭。
+6. 同步通知、初始化、生成绑定和前端消费。
 
-Session
-  ├── Main Agent
-  │     ├── Branch A → TaskQueue + CurrentRun
-  │     └── Branch B → TaskQueue + CurrentRun
-  └── Write Binding → 当前 Branch
-```
+持久化格式实施时明确数据影响和匹配备份，不自动处理真实用户历史。代码回退不能撤销工具已经产生的副作用。
 
-前端维护会话页的打开、选择和关闭，后端按 SessionID 定位会话实例与写入绑定，不登记页面身份。首次提交输入时建立写入 Binding；切换分支前，当前绑定必须没有活动执行和待办。关闭会话时停止全部所属执行，等待收尾后释放绑定与会话内存；其他会话继续执行。
-
-应用退出可以释放内存运行资源；再次打开 Session 时，根据持久化历史恢复逻辑身份和展示事实。历史恢复不等于自动恢复模型请求、工具执行或进程内待办队列。
-
-## 八、目标目录与类型归属
-
-```text
-backend/internal/
-├── core/
-│   ├── agent/
-│   │   ├── agent.go
-│   │   ├── definition.go
-│   │   ├── role.go
-│   │   ├── errors.go
-│   │   └── run/
-│   │       ├── run.go
-│   │       ├── run.go
-│   │       ├── config.go
-│   │       ├── usage.go
-│   │       ├── failure.go
-│   │       ├── model_request.go
-│   │       ├── snapshot.go
-│   │       └── timing/
-│   ├── task/
-│   │   ├── task.go
-│   │   └── queue.go
-│   ├── loop/
-│   │   ├── run.go
-│   │   ├── turn.go
-│   │   ├── model.go
-│   │   ├── tools.go
-│   │   ├── context.go
-│   │   └── ...
-│   ├── session/
-│   │   ├── session.go
-│   │   ├── branches.go
-│   │   ├── entries.go
-│   │   ├── runs.go
-│   │   ├── entry/
-│   │   │   ├── entry.go
-│   │   │   ├── tool_call.go
-│   │   │   ├── reasoning_state.go
-│   │   │   └── role/
-│   │   └── ...
-│   ├── toolexecution/
-│   └── event/
-├── service/
-│   ├── agent/
-│   │   ├── query.go
-│   │   ├── definitions.go
-│   │   └── run/
-│   │       ├── service.go
-│   │       ├── prepare.go
-│   │       ├── run.go
-│   │       ├── entries.go
-│   │       ├── progress.go
-│   │       ├── settle.go
-│   │       └── ...
-│   ├── coordinator/
-│   └── session/
-├── repository/
-├── infra/
-└── bootstrap/
-```
-
-目录约束：
-
-- `core/agent` 保存长期身份和运行规则；`core/agent/run` 保存单次执行的事实与运行句柄，不反向依赖可变 Agent。
-- `core/task` 定义 Agent 分支待办任务与 FIFO，不承担会话历史职责。
-- `core/loop` 负责完整迭代，以 Turn 为单位组织迭代模型请求与工具处理。
-- `core/session/entry` 是内部共享内容模型，Session、Loop、Context、工具和事件直接复用，不复制同形业务类型。
-- `service/agent/run` 是一次执行的编排入口，业务提交不交给事件订阅者。
-- `snapshot.go` 只提供 Run 的只读状态投影，供查询和通知复用；不持久化另一份快照，不形成第二套可变状态。公开契约见事件方案。
-- 只按实际改造需要调整文件，不为目录完整创建空壳模块或重复管理器。
-
-## 九、身份、工具关联与持久化
-
-### 9.1 身份契约
-
-| 字段／类型 | 语义 |
-| --- | --- |
-| `AgentID` | 稳定 Agent 身份 |
-| `BranchID` | 会话执行分支 |
-| `RunID` | 一次完整 Run |
-| `TurnID` | Run 内一次 ReAct 迭代 |
-| `ParentRunID` | 子执行对应的父完整执行 |
-| `ParentCallID` | 委派来源工具调用 |
-| `SourceTaskID` | Main Run 的来源任务 |
-| `requestSequence` | Run 内一次模型请求的序号 |
-
-记录、Entry、Provider、Hook、事件、计时和查询使用同一身份语义，不根据字符串格式推断另一层业务身份。
-
-### 9.2 工具关联
-
-工具调用与审批、回执、子任务关联使用 RunID＋CallID。TurnID 表示触发迭代，不替代工具调用定位。
-
-CallID 遵守已有的执行内关联约定，不额外增加 ToolExecutionID、全局工具定位服务或为假设冲突建立通用身份重写层。
-
-### 9.3 模型请求与用量
-
-每次普通、审核和摘要模型请求记录所属 RunID、稳定请求序号及适用 TurnID。请求序号在请求事实中保留，查询和通知使用相同去重键。
-
-一次 Turn 可以关联迭代请求和工具审核请求；没有 ReAct 迭代的摘要请求不创建伪 Turn。模型请求消耗由已接纳事实提交，不依赖展示事件是否送达。
-
-### 9.4 Session 历史
-
-Session 保存或组织以下持久化事实：
-
-- ContextEntry 与 Branch。
-- RunRecord。
-- ModelRequestRecord。
-- Entry 自身的耗时数据与工具相关记录。
-
-日志事件和字段是独立的持久化契约，运行模型命名不改变存量记录的编码。RunID 和 TurnID 保持对应业务语义；任何新增持久化字段必须同步编解码与恢复边界，不能只修改内存类型。
-
-持久化接纳、执行状态更新和展示通知的失败窗口由执行服务明确处理。事件不重试业务操作，历史重放不重新执行工具，也不自动恢复已中断的 Loop。
-
-## 十、实施顺序
-
-### 10.1 固定执行契约与协作边界
-
-- 对齐所有记录、Provider、Hook 和通知中的 Run／Turn 语义。
-- 明确 Entry 提交、模型请求事实记录和运行中输入接纳入口。
-- 完成请求序号在记录、查询与通知中的一致表达。
-- 将完整 ReAct 迭代收敛到 `core/loop`，由执行服务负责外部业务提交。
-
-验收：单任务 ReAct、工具审批、条目历史和执行结算使用同一事实提交路径，Loop 不依赖完整 Run 或 Session 对象。
-
-### 10.2 调整 Agent 生命周期与分支队列
-
-- Main Agent 使用长期身份，不由 run.Run 创建。
-- Agent 持有所属 Branch 的队列和活动运行句柄。
-- TaskQueue 的生命周期由后端执行流程管理，不依赖前端组件是否显示，保留 FIFO 和显式恢复调度规则。
-- Agent 展示状态从活动执行事实派生。
-
-验收：同一 Main Agent 连续完成多个 Run；分支隔离、会话关闭和队列消费遵守同一生命周期边界，关闭一个会话不影响其他会话。
-
-### 10.3 收敛运行控制
-
-- Run 覆盖准备、运行和结算阶段。
-- Coordinator 不重复持有取消、ending 或审批唤醒状态。
-- 控制接口通过 BranchID 和适用 RunID 精确定位目标。
-- 准备失败、取消、保存失败和资源释放使用明确的直接调用路径。
-
-验收：准备槽位、审批等待、停止和下一任务交接的所有者清楚，重复结算不重复提交或通知。
-
-### 10.4 接入 Steer
-
-- 在活动 Run 中接纳待处理输入。
-- 执行服务在 Turn 边界完成 Session 提交，Loop 消费已接纳输入。
-- 将最终输出与 Run 完成确认对齐。
-- 保持进程内待处理输入的可靠性边界明确。
-
-验收：Steer 不创建新的 Run；已接受输入在最终结算前处理，已有真实工具回执不丢失或改写。
-
-### 10.5 统一 Subagent 与展示契约
-
-- Subagent 单次执行、上报、释放，禁止嵌套委派。
-- Main Agent 和 Subagent 共用执行服务与 Loop。
-- 父 Run 取消传播到子执行。
-- 通知、初始化快照、生成绑定与前端消费共同交付。
-- 并行委派与工具调度配套实现，不扩展为另一套执行框架。
-
-验收：子执行结果正确关联父调用，资源释放后历史仍可查询，父执行结束后不遗留本次委派资源。
-
-## 十一、风险、回滚与验证
-
-### 11.1 关键风险
-
-- Run 与 Turn 是不同层级；Turn 完成或某次模型停止原因不能提前结束完整执行。
-- Session 历史、Run 执行证据和 Loop 上下文共享只读 Entry，但各自的引用列表承担不同职责，不能维护两套相互校验的可变内容。
-- 移交活动运行句柄必须覆盖准备阶段，避免同一 Branch 重复准入。
-- Steer 接纳与最终结束使用同一业务控制边界，不能靠事件顺序解决业务竞争。
-- 页面释放、子 Agent 释放和 Run 结束不删除长期 Main Agent 身份。
-- 保存失败不能导致真实工具副作用重复执行；未消费的进程内输入不承诺跨重启恢复。
-
-### 11.2 回滚边界
-
-程序、前端、生成绑定与持久化数据使用匹配版本交付。涉及持久化字段变更时，以对应数据备份恢复，不在核心调用中叠加长期兼容状态机。
-
-### 11.3 验证方式
-
-按仓库已有流程执行构建和静态检查，不自动启动开发服务，不新增、保留或运行自动化测试。
-
-```sh
-cd backend
-wails3 task bindings
-go build ./...
-go vet ./...
-go list ./...
-cd ../frontend
-npm run check
-```
-
-仅通过源类型生成绑定，不手工修改生成文件。人工回归使用已有应用或取得明确启动授权后的应用，检查连续 Run、多 Turn、分支隔离、Steer、审批、取消、子执行和保存失败行为。
-
-最终职责是：**Agent 持续运行，执行服务编排 Run、Loop 与 Session，Loop 迭代多个 Turn，Session 保存历史。**
+后续按仓库流程生成必要绑定，执行后端 `go build ./...`、`go vet ./...`、`go list ./...` 和前端 `npm run check`。不新增或运行自动化测试，不自动启动开发服务。人工核对连续 Run、多 Turn、多会话并行、FIFO、审批、停止、子执行回调、保存失败和重启后的历史查询。

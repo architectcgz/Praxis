@@ -2,7 +2,7 @@
 
 ## 一、背景
 
-本计划覆盖前端交互正确性、可读性、代码风格与渲染效率，依据当前工作区代码的静态 review 制定。
+本计划覆盖前端交互正确性、可读性、代码风格与渲染效率。业务语义以 [architecture.md](../architecture.md) 为准，Session 作用域、目录和状态职责以 [code-style.md](../code-style.md) 为准。
 
 前端继续采用现有的 `app / features / api / components / styles` 组织方式，保留按会话持有状态、查询与流式输出分别订阅、统一设计令牌及 Wails API 边界。
 
@@ -64,21 +64,21 @@
 - [x] 历史消息区域只呈现所选节点的历史范围，不附加当前 Run 的流式内容、等待响应占位或当前协作结果。
 - [x] 保留后台事件订阅及实际执行；返回最新位置时直接显示最新状态。
 - [x] 如历史浏览期间保留当前运行状态、停止或审批操作，放在明确标识的实时操作区域，不伪装成历史快照的一部分。
-- [x] 维持显式创建分支后继续执行的规则，不因为展示重构改变历史写入限制。
+- [ ] 历史浏览只改变展示范围；提交任务仍接续当前 Session 的主历史，不改写过去记录。
 
 **主要文件**
 
 - `frontend/src/features/workspace/SessionWorkspace.tsx`
 - `frontend/src/features/agent/AgentSessionPanel.tsx`
 - `frontend/src/features/agent/AgentConversation.tsx`
-- `frontend/src/features/session/useBranchNavigation.ts`，仅在模式传递需要时修改。
+- `frontend/src/features/agent/history/`，仅在历史范围和模式传递需要时修改。
 
 **验收标准**
 
 - 在执行期间浏览旧节点，历史区域不会继续追加当前执行的输出。
-- 历史分页与当前分支分页互不混用。
+- 固定历史范围的分页与当前实时展示互不混用。
 - 返回最新位置后，当前输出、执行状态和必要操作入口完整恢复。
-- 已有分支创建与历史提交限制保持不变。
+- 浏览旧记录后提交任务，仍在当前 Session 主历史末尾开始新的 Run。
 
 ### 3. 多会话实例的 ID 与焦点归属
 
@@ -86,7 +86,6 @@
 - [x] 使用 `useId()` 生成输入框、命令菜单、菜单选项及其他关联控件的实例级 ID。
 - [x] 同步调整 `aria-controls`、`aria-activedescendant`、`htmlFor` 等引用。
 - [x] `useSlashCommandMenu` 明确依赖所属输入框，外部点击与焦点退出判断不再把其他会话输入框视为自身输入框。
-- [x] 分支弹窗关闭后的焦点恢复由所属入口负责，避免与 `Overlay` 的恢复行为相互覆盖。
 
 **主要文件**
 
@@ -94,7 +93,6 @@
 - `frontend/src/features/agent/PrimaryAgentTaskInput.tsx`
 - `frontend/src/features/agent/SlashCommandMenu.tsx`
 - `frontend/src/features/agent/ApprovalModeSelect.tsx`
-- `frontend/src/features/session/BranchNavigation.tsx`
 
 **验收标准**
 
@@ -137,7 +135,7 @@
 - `frontend/src/features/workspace/useSessionPage.ts`
 - `frontend/src/features/workspace/ProjectWorkspace.tsx`
 - `frontend/src/features/workspace/SessionWorkspace.tsx`
-- `frontend/src/features/session/useBranchNavigation.ts`
+- `frontend/src/features/agent/history/`
 
 **验收标准**
 
@@ -165,7 +163,7 @@
 
 ## 五、第二阶段：可读性与职责整理
 
-### 7. 清理无调用方状态与不可达分支
+### 7. 清理无调用方状态与不可达逻辑
 
 - [x] 在发送与滚动方案确定后，重新检查 `beginInput / acceptInput / rejectInput`、`pendingUserMessages` 及其类型、透传参数、展示组件的实际用途。
 - [x] 对确实不再承担业务职责的完整调用链进行删除，不保留仅为兼容内部代码而存在的空接口。
@@ -197,7 +195,7 @@
 
 - `frontend/src/features/agent/agentStore.ts`
 - `frontend/src/features/agent/AgentTaskInput.tsx`
-- `frontend/src/features/session/useBranchNavigation.ts`
+- `frontend/src/features/agent/history/`
 - `frontend/src/features/workspace/useWorkspaceCommands.ts`
 - `frontend/src/features/setting/model-config/ModelDialog.tsx`
 
@@ -328,7 +326,7 @@ npm --prefix frontend run check
 | 首次审批查询失败 | 错误可见、可重试、成功后恢复审批入口 |
 | 批准与拒绝失败 | pending 正确收尾，失败反馈属于对应操作 |
 | 执行中浏览历史 | 历史不混入实时输出，返回最新后数据完整 |
-| 历史分页 | 页码身份、条目顺序、加载状态与当前分支隔离 |
+| 历史分页 | 游标、条目顺序、加载状态与当前实时展示隔离 |
 | 两个以上会话切换 | 当前输入聚焦、隐藏页面不干扰、ARIA 关联唯一 |
 | 命令与选择器 | Escape、Tab、方向键、外部点击、焦点恢复 |
 | 滚离底部后发送 | 成功恢复跟随，失败保留草稿，后台增量不抢滚动 |
