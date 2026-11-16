@@ -1,0 +1,391 @@
+package entry
+
+import (
+	"encoding/json"
+	"fmt"
+	"praxis/internal/core/timing"
+	"praxis/internal/identity"
+	"time"
+)
+
+// Payload 是执行事实的封闭集合，与进程通知分别定义。
+type Payload interface{ factKind() string }
+
+type UserInput struct {
+	MessageID string
+	Text      string
+}
+
+func (UserInput) factKind() string { return "user_input" }
+
+type RunPrepared struct{ Run RunRecord }
+
+func (RunPrepared) factKind() string { return "run_prepared" }
+
+type RunStarted struct{ At time.Time }
+
+func (RunStarted) factKind() string { return "run_started" }
+
+type RunEndingStarted struct{}
+
+func (RunEndingStarted) factKind() string { return "run_ending" }
+
+type RunCompleted struct{ Result RunResult }
+
+func (RunCompleted) factKind() string { return "run_completed" }
+
+type RunFailed struct{ Result RunResult }
+
+func (RunFailed) factKind() string { return "run_failed" }
+
+type RunInterrupted struct{ Result RunResult }
+
+func (RunInterrupted) factKind() string { return "run_interrupted" }
+
+type SubagentYielded struct{ Result RunResult }
+
+func (SubagentYielded) factKind() string { return "subagent_yielded" }
+
+type TurnStarted struct{ Turn TurnRecord }
+
+func (TurnStarted) factKind() string { return "turn_started" }
+
+type TurnCompleted struct{ Turn TurnRecord }
+
+func (TurnCompleted) factKind() string { return "turn_completed" }
+
+type TurnFailed struct{ Turn TurnRecord }
+
+func (TurnFailed) factKind() string { return "turn_failed" }
+
+type TurnInterrupted struct{ Turn TurnRecord }
+
+func (TurnInterrupted) factKind() string { return "turn_interrupted" }
+
+type ModelRequestStarted struct {
+	Request ModelRequestRecord
+	Timing  *timing.Record
+}
+
+func (ModelRequestStarted) factKind() string { return "model_request_started" }
+
+type ModelRequestCompleted struct {
+	Request ModelRequestRecord
+	Timing  *timing.Record
+}
+
+func (ModelRequestCompleted) factKind() string { return "model_request_completed" }
+
+type ModelRequestFailed struct {
+	Request ModelRequestRecord
+	Timing  *timing.Record
+}
+
+func (ModelRequestFailed) factKind() string { return "model_request_failed" }
+
+type ModelRequestInterrupted struct {
+	Request ModelRequestRecord
+	Timing  *timing.Record
+}
+
+func (ModelRequestInterrupted) factKind() string { return "model_request_interrupted" }
+
+type storedPayload struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data"`
+}
+
+func encodePayload(value Payload) (json.RawMessage, error) {
+	if value == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(storedPayload{Kind: value.factKind(), Data: data})
+}
+
+func decodePayload(data json.RawMessage) (Payload, error) {
+	if len(data) == 0 || string(data) == "null" {
+		return nil, nil
+	}
+	var stored storedPayload
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return nil, err
+	}
+	switch stored.Kind {
+	case "subagent_instruction_accepted":
+		var value SubagentInstructionAccepted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "subagent_instruction_received":
+		var value SubagentInstructionReceived
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "subagent_report_accepted":
+		var value SubagentReportAccepted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "subagent_report_received":
+		var value SubagentReportReceived
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "user_input":
+		var value UserInput
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "run_prepared":
+		var value RunPrepared
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "run_started":
+		var value RunStarted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "run_ending":
+		return RunEndingStarted{}, nil
+	case "run_completed":
+		var value RunCompleted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "run_failed":
+		var value RunFailed
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "run_interrupted":
+		var value RunInterrupted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "subagent_yielded":
+		var value SubagentYielded
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "turn_started":
+		var value TurnStarted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "turn_completed":
+		var value TurnCompleted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "turn_failed":
+		var value TurnFailed
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "turn_interrupted":
+		var value TurnInterrupted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "model_request_started":
+		var value ModelRequestStarted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "model_request_completed":
+		var value ModelRequestCompleted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "model_request_failed":
+		var value ModelRequestFailed
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	case "model_request_interrupted":
+		var value ModelRequestInterrupted
+		err := json.Unmarshal(stored.Data, &value)
+		return value, err
+	default:
+		return nil, fmt.Errorf("unknown entry payload %q", stored.Kind)
+	}
+}
+
+func (e ContextEntry) RequestFact() (*ModelRequestRecord, *timing.Record) {
+	switch p := e.Payload.(type) {
+	case ModelRequestStarted:
+		return &p.Request, p.Timing
+	case ModelRequestCompleted:
+		return &p.Request, p.Timing
+	case ModelRequestFailed:
+		return &p.Request, p.Timing
+	case ModelRequestInterrupted:
+		return &p.Request, p.Timing
+	default:
+		return nil, nil
+	}
+}
+
+// Apply 将已经接纳的同一事实投影到执行状态；不做准入、持久化或通知。
+func Apply(r RunRecord, e *ContextEntry) RunRecord {
+	switch p := e.Payload.(type) {
+	case RunPrepared:
+		r = p.Run
+	case RunStarted:
+		r.Start(p.At)
+	case RunEndingStarted:
+		r.Status = RunEnding
+	case TurnStarted:
+		r.CurrentTurn = p.Turn
+		r.Progress.Iterations++
+	case TurnCompleted:
+		r.CurrentTurn = p.Turn
+	case TurnFailed:
+		r.CurrentTurn = p.Turn
+	case TurnInterrupted:
+		r.CurrentTurn = p.Turn
+	case ModelRequestStarted:
+		r.Progress.ModelRequests++
+	}
+	if request, _ := e.RequestFact(); request != nil && request.Status != RequestRunning {
+		r.Progress.ModelOutputBytes += int64(request.OutputBytes)
+		r.Progress.OutputBytes += int64(request.OutputBytes)
+		if u := request.Usage; u != nil {
+			r.Progress.Usage.Add(u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
+		}
+	}
+	if p := e.ExecutionResult(); p != nil {
+		r.Status = RunEnded
+		r.Outcome = RunOutcome(p.Outcome)
+		r.FailureCode = RunFailureCode(p.FailureCode)
+		r.FailureMessage = p.FailureMessage
+		r.StartedAt = p.StartedAt
+		r.EndedAt = p.EndedAt
+		r.Progress = RunProgress{
+			Usage:            p.Usage,
+			ModelRequests:    p.ModelRequests,
+			Iterations:       p.Iterations,
+			OutputBytes:      p.OutputBytes,
+			ToolCalls:        p.ToolCalls,
+			FinalAssistantID: p.FinalAssistantID,
+			FinalStopReason:  p.FinalStopReason,
+		}
+	} else {
+		r.Progress.AcceptEntry(e)
+	}
+	return r
+}
+
+func ApplySummary(p HistorySummary, e *ContextEntry) HistorySummary {
+	if v, ok := e.Payload.(RunPrepared); ok {
+		return v.Run.HistorySummary()
+	}
+	if p.ID == "" {
+		return p
+	}
+	record := RunRecord{
+		ID:             p.ID,
+		SessionID:      p.SessionID,
+		AgentID:        p.AgentID,
+		AgentName:      p.AgentName,
+		ParentRunID:    p.ParentRunID,
+		SourceTaskID:   p.SourceTaskID,
+		InputEntryID:   p.InputEntryID,
+		CreatedAt:      p.CreatedAt,
+		Status:         p.Status,
+		Outcome:        p.Outcome,
+		StartedAt:      p.StartedAt,
+		EndedAt:        p.EndedAt,
+		FailureCode:    p.FailureCode,
+		FailureMessage: p.FailureMessage,
+		Config:         RunConfig{AgentDefinitionID: p.DefinitionID},
+		Progress: RunProgress{
+			Usage:         p.Usage,
+			ModelRequests: p.ModelRequests,
+			Iterations:    p.Iterations,
+			OutputBytes:   p.OutputBytes,
+			ToolCalls:     p.ToolCalls,
+		},
+	}
+	return Apply(record, e).HistorySummary()
+}
+
+func (e ContextEntry) ExecutionResult() *RunResult {
+	switch v := e.Payload.(type) {
+	case RunCompleted:
+		return &v.Result
+	case RunFailed:
+		return &v.Result
+	case RunInterrupted:
+		return &v.Result
+	case SubagentYielded:
+		return &v.Result
+	default:
+		return nil
+	}
+}
+
+func ModelRequestEntry(request ModelRequestRecord, measured *timing.Record) ContextEntry {
+	var payload Payload
+	suffix := "finished"
+	switch request.Status {
+	case RequestRunning:
+		payload = ModelRequestStarted{Request: request, Timing: measured}
+		suffix = "started"
+	case RequestCompleted:
+		payload = ModelRequestCompleted{Request: request, Timing: measured}
+	case RequestFailed:
+		payload = ModelRequestFailed{Request: request, Timing: measured}
+	case RequestInterrupted:
+		payload = ModelRequestInterrupted{Request: request, Timing: measured}
+	}
+	return ContextEntry{
+		ID:      "request:" + request.ID.String() + ":" + suffix,
+		RunID:   request.RunID.String(),
+		TurnID:  request.TurnID.String(),
+		Payload: payload,
+	}
+}
+
+func (e ContextEntry) InputMessageID() string {
+	if p, ok := e.Payload.(UserInput); ok {
+		return p.MessageID
+	}
+	return ""
+}
+func (e ContextEntry) IsMetadata() bool {
+	if e.Payload == nil {
+		return false
+	}
+	switch e.Payload.(type) {
+	case UserInput, SubagentReportAccepted, SubagentInstructionAccepted:
+		return false
+	default:
+		return true
+	}
+}
+
+type SubagentReportReceived struct{ Report SubagentResult }
+
+func (SubagentReportReceived) factKind() string { return "subagent_report_received" }
+
+type SubagentReportAccepted struct{ ReportID string }
+
+func (SubagentReportAccepted) factKind() string { return "subagent_report_accepted" }
+
+type SubagentInstructionReceived struct {
+	MessageID string
+	Text      string
+}
+
+func (SubagentInstructionReceived) factKind() string { return "subagent_instruction_received" }
+
+type SubagentInstructionAccepted struct{ MessageID string }
+
+func (SubagentInstructionAccepted) factKind() string { return "subagent_instruction_accepted" }
+
+type SubagentResult struct {
+	ReportID     string
+	AgentID      identity.AgentID
+	RunID        identity.RunID
+	ParentRunID  identity.RunID
+	ParentCallID string
+	Outcome      RunOutcome
+	FailureCode  RunFailureCode
+	Text         string
+	Final        bool
+	Partial      bool
+}
+type SubagentReceipt struct {
+	ReportID string           `json:"reportId"`
+	AgentID  identity.AgentID `json:"agentId"`
+	Outcome  RunOutcome       `json:"outcome"`
+	Final    bool             `json:"final"`
+}

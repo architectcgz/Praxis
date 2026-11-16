@@ -21,8 +21,8 @@ func (f Files) Directory(sessionID identity.SessionID) string {
 }
 
 // Bound 在 Entry 创建之前转存完整结果，保留工具的错误和副作用状态。
-func (f Files) Bound(sessionID identity.SessionID, result tool.ToolResult) (tool.ToolResult, error) {
-	if len(result.Payload) <= tool.MaxInlineResultBytes {
+func (f Files) Bound(sessionID identity.SessionID, result tool.ToolResult, limit int) (tool.ToolResult, error) {
+	if len(result.Payload) <= limit {
 		return result, nil
 	}
 	file, err := Save(f.Directory(sessionID), result.Payload)

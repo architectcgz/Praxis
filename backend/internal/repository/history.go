@@ -1,17 +1,15 @@
 package repository
 
 import (
-	agentrun "praxis/internal/core/agent/run"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/identity"
 )
 
 // LogPosition 只用于存储边界，不进入业务 Entry 或前端协议。
 type LogPosition struct {
-	BranchID identity.BranchID
-	AgentID  identity.AgentID
-	Offset   int64
-	Length   int64
+	AgentID identity.AgentID
+	Offset  int64
+	Length  int64
 }
 
 type IndexedEntry struct {
@@ -23,21 +21,20 @@ type IndexedEntry struct {
 type HistoryUpdate struct {
 	Position   LogPosition
 	Entry      *sessionentry.Node
-	Run        *agentrun.HistorySummary
+	Run        *sessionentry.HistorySummary
 	EndEntryID string
-	Request    *agentrun.ModelRequestRecord
+	Request    *sessionentry.ModelRequestRecord
 	Calls      []string
 	Results    []string
 }
 
 type RunLocation struct {
-	Record     agentrun.HistorySummary
+	Record     sessionentry.HistorySummary
 	EndEntryID string
 	Position   LogPosition
 }
 
 type AgentHead struct {
-	AgentID  identity.AgentID
-	BranchID identity.BranchID
-	EntryID  string
+	AgentID identity.AgentID
+	EntryID string
 }

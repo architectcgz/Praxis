@@ -3,9 +3,9 @@ package openaichat
 import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
 )
 
 // encodeContext 编码官方文本与工具消息；不支持续传的推理状态只在本次请求中忽略。

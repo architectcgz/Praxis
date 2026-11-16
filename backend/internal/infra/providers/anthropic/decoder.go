@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
 )
@@ -21,7 +22,7 @@ type contentBlockState struct {
 	HasArgumentDelta bool
 	Signed           bool
 	Closed           bool
-	ReasoningState   *sessionentry.ReasoningState
+	ReasoningState   *modelapi.ReasoningState
 }
 
 // Decode 按事件、Content Block 和 Delta 三层类型分派；工具只在 message_stop 后释放。
@@ -158,10 +159,10 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				if err != nil {
 					return "", err
 				}
-				if len(payload) > sessionentry.MaxReasoningStateBytes {
+				if len(payload) > modelapi.MaxReasoningStateBytes {
 					return "", errors.New("anthropic reasoning state payload exceeds size limit")
 				}
-				state.ReasoningState = &sessionentry.ReasoningState{
+				state.ReasoningState = &modelapi.ReasoningState{
 					Protocol: string(modelconfig.APIFormatAnthropicMessages),
 					Payload:  payload,
 				}
@@ -297,7 +298,7 @@ func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit stream
 	}
 	return &next, nil
 }
-func normalizeMessageUsage(reported *tokenCounts) *providerapi.Usage {
+func normalizeMessageUsage(reported *tokenCounts) *modelusage.Usage {
 	if reported == nil || reported.InputTokens == nil {
 		return nil
 	}
@@ -308,7 +309,7 @@ func normalizeMessageUsage(reported *tokenCounts) *providerapi.Usage {
 		}
 	}
 	// 协议计数按只读值共享；缓存计数计入统一输入分母。
-	usage := &providerapi.Usage{
+	usage := &modelusage.Usage{
 		InputTokens:              total,
 		OutputTokens:             reported.OutputTokens,
 		CacheReadInputTokens:     reported.CacheReadInputTokens,

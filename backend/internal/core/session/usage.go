@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	modelusage "praxis/internal/core/model/usage"
-	providerapi "praxis/internal/core/provider"
 	"praxis/internal/identity"
 )
 
@@ -15,7 +14,7 @@ func (s *Session) UsageTotals() (modelusage.Totals, uint64) {
 }
 
 // UsageRecords 仅查询当前展示涉及的 Turn，内存接纳值替换同一请求的磁盘投影。
-func (s *Session) UsageRecords(ctx context.Context, turnIDs []identity.TurnID) ([]providerapi.UsageRecord, error) {
+func (s *Session) UsageRecords(ctx context.Context, turnIDs []identity.TurnID) ([]modelusage.UsageRecord, error) {
 	s.commitMu.Lock()
 	defer s.commitMu.Unlock()
 	if err := s.syncHistory(ctx); err != nil {
@@ -25,7 +24,7 @@ func (s *Session) UsageRecords(ctx context.Context, turnIDs []identity.TurnID) (
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[identity.ModelRequestID]providerapi.UsageRecord)
+	byID := make(map[identity.ModelRequestID]modelusage.UsageRecord)
 	wanted := make(map[identity.TurnID]bool, len(turnIDs))
 	for _, id := range turnIDs {
 		wanted[id] = true
@@ -42,7 +41,7 @@ func (s *Session) UsageRecords(ctx context.Context, turnIDs []identity.TurnID) (
 			continue
 		}
 		owner := s.data.Runs[s.data.RunIndex(request.RunID)]
-		byID[request.ID] = providerapi.UsageRecord{
+		byID[request.ID] = modelusage.UsageRecord{
 			SessionID: owner.SessionID.String(),
 			AgentID:   owner.AgentID.String(),
 			RunID:     owner.ID.String(),
@@ -52,9 +51,18 @@ func (s *Session) UsageRecords(ctx context.Context, turnIDs []identity.TurnID) (
 		}
 	}
 	s.mu.RUnlock()
-	records := make([]providerapi.UsageRecord, 0, len(byID))
+	records := make([]modelusage.UsageRecord, 0, len(byID))
 	for _, record := range byID {
 		records = append(records, record)
 	}
-	return sorted(records, func(a, b providerapi.UsageRecord) int { return cmp.Compare(a.RequestID, b.RequestID) }), nil
+	return sorted(records, func(a, b modelusage.UsageRecord) int { return cmp.Compare(a.RequestID, b.RequestID) }), nil
+}
+
+// SessionUsageSummary 汇总主、子 Run 的累计值；请求明细只用于逐次展示。
+// CacheReadRatio 使用 0 到 1，零输入或存在未知缓存计数时为 nil。
+type SessionUsageSummary struct {
+	modelusage.Totals
+	TotalRequests     uint64
+	CacheReadRatio    *float64
+	CacheReadComplete bool
 }

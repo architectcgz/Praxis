@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	appcontext "praxis/internal/core/context"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
@@ -24,10 +23,9 @@ type Dependencies struct {
 }
 
 type Provider struct {
-	baseURL       string
-	apiKey        string
-	client        *http.Client
-	contextWindow int
+	baseURL string
+	apiKey  string
+	client  *http.Client
 }
 
 // New 使用入口已校验的端点创建 OpenAI Chat Completions 协议适配器，并检查凭据。
@@ -37,10 +35,9 @@ func New(config Config, deps Dependencies) (*Provider, error) {
 		return nil, errors.New("openai chat API key is required")
 	}
 	return &Provider{
-		baseURL:       config.BaseURL,
-		apiKey:        apiKey,
-		client:        deps.HTTPClient,
-		contextWindow: config.ContextWindow,
+		baseURL: config.BaseURL,
+		apiKey:  apiKey,
+		client:  deps.HTTPClient,
 	}, nil
 }
 
@@ -56,9 +53,6 @@ func (p *Provider) Stream(
 	}
 	payload, err := buildPayload(request)
 	if err != nil {
-		return nil, err
-	}
-	if err := appcontext.ExceedsContextWindow(payload, request.MaxOutputTokens, p.contextWindow); err != nil {
 		return nil, err
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v1/chat/completions", bytes.NewReader(payload))

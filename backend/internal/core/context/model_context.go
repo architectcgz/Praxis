@@ -1,7 +1,7 @@
 package context
 
 import (
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/core/tool"
 )
 

@@ -45,7 +45,7 @@ func Open(client *http.Client, request *http.Request) (*http.Response, error) {
 }
 
 // Start 异步将 SSE 响应解码为统一模型流事件；解码停止时关闭响应体和事件通道。
-// 调用方在终态前停止消费时必须取消 ctx，避免解码协程阻塞。
+// 调用方提前停止处理时取消 ctx，并消费剩余事件直到通道关闭，以等待资源释放。
 func Start(
 	ctx context.Context,
 	response *http.Response,
@@ -68,14 +68,15 @@ func Start(
 			}
 		}
 		stopReason, err := decoder.Decode(ctx, NewSSEReader(response.Body), emit)
+		_ = response.Body.Close()
 		if err != nil {
-			_ = emit(providerapi.Event{Kind: providerapi.StreamError, Err: RedactError(err, sensitiveValues)})
+			events <- providerapi.Event{Kind: providerapi.StreamError, Err: RedactError(err, sensitiveValues)}
 			return
 		}
-		_ = emit(providerapi.Event{
+		events <- providerapi.Event{
 			Kind:       providerapi.StreamComplete,
 			StopReason: stopReason,
-		})
+		}
 	}()
 	return events
 }

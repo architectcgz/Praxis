@@ -1,4 +1,4 @@
-// Package project 负责项目创建、配置查询和项目目录内的文件预览。
+// Package project 负责项目创建和配置查询。
 package project
 
 import (
@@ -8,7 +8,6 @@ import (
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/projectfile"
 	"praxis/internal/repository"
 	"sync"
 )
@@ -18,23 +17,21 @@ type Directory interface {
 	Ensure(context.Context, string) (created bool, err error)
 }
 
-// Dependencies 包含项目创建、配置查询和文件预览所需的依赖。
+// Dependencies 包含项目创建和配置查询所需的依赖。
 type Dependencies struct {
-	Projects   repository.Project
-	Sessions   repository.Session
-	Clock      clock.Clock
-	Directory  Directory
-	TextReader projectfile.TextReader
+	Projects  repository.Project
+	Sessions  repository.Session
+	Clock     clock.Clock
+	Directory Directory
 }
 
 // Service 管理项目记录，并按会话所属项目限制文件访问范围。
 type Service struct {
-	createMu   sync.Mutex
-	projects   repository.Project
-	sessions   repository.Session
-	clock      clock.Clock
-	directory  Directory
-	textReader projectfile.TextReader
+	createMu  sync.Mutex
+	projects  repository.Project
+	sessions  repository.Session
+	clock     clock.Clock
+	directory Directory
 }
 
 // CreateInput 包含输入边界已校验的身份及规范化后的项目名称、绝对路径。
@@ -48,11 +45,10 @@ type CreateInput struct {
 // NewService 创建项目业务服务。
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		projects:   deps.Projects,
-		sessions:   deps.Sessions,
-		clock:      deps.Clock,
-		directory:  deps.Directory,
-		textReader: deps.TextReader,
+		projects:  deps.Projects,
+		sessions:  deps.Sessions,
+		clock:     deps.Clock,
+		directory: deps.Directory,
 	}
 }
 

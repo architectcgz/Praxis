@@ -98,21 +98,17 @@ func (d *Dispatcher) BeforeModelRequest(ctx context.Context, event ModelRequest)
 	return nil
 }
 
-func (d *Dispatcher) BeforeToolExecution(ctx context.Context, event ToolExecution) (string, error) {
-	value := event.Arguments
+func (d *Dispatcher) BeforeToolExecution(ctx context.Context, event ToolExecution) error {
 	for _, registered := range d.registered() {
 		handler, ok := registered.(BeforeToolExecutionHook)
 		if !ok {
 			continue
 		}
-		next, err := handler.BeforeToolExecution(ctx, event)
-		if err != nil {
-			return "", &Error{Point: "BeforeToolExecution", Cause: err}
+		if err := handler.BeforeToolExecution(ctx, event); err != nil {
+			return &Error{Point: "BeforeToolExecution", Cause: err}
 		}
-		value = next
-		event.Arguments = value
 	}
-	return value, nil
+	return nil
 }
 
 func (d *Dispatcher) AfterToolExecution(ctx context.Context, event ToolExecutionResult) error {

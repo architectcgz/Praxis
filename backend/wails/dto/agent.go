@@ -1,33 +1,26 @@
 package dto
 
 import (
-	agentmodel "praxis/internal/core/agent"
-	agentrun "praxis/internal/core/agent/run"
-	"praxis/internal/core/agent/run/timing"
-	sessionservice "praxis/internal/service/session"
 	"time"
 )
 
 type StopAgentRequest struct {
 	SessionID string `json:"sessionId" validate:"session_id"`
-	BranchID  string `json:"branchId" validate:"id"`
-	AgentID   string `json:"agentId" validate:"id"`
-	RunID     string `json:"runId" validate:"id"`
+
+	AgentID string `json:"agentId" validate:"id"`
+	RunID   string `json:"runId" validate:"id"`
 }
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
 type AgentEvent struct {
-	BranchID  string `json:"branchId"`
-	BindingID string `json:"bindingId"`
-	Kind      string `json:"kind"`
-	SessionID string `json:"sessionId,omitempty"`
-	AgentID   string `json:"agentId"`
-	RunID     string `json:"runId"`
-	TurnID    string `json:"turnId,omitempty"`
-	Data      any    `json:"data"`
+	Kind   string `json:"kind"`
+	RunID  string `json:"runId,omitempty"`
+	TurnID string `json:"turnId,omitempty"`
+	Data   any    `json:"data"`
 }
 
 type AgentEntriesAppended struct {
+	AgentID string  `json:"agentId"`
 	Entries []Entry `json:"entries"`
 }
 
@@ -40,17 +33,21 @@ type AgentThinkingDelta struct {
 }
 
 type AgentModelRequestStarted struct {
-	RequestID   string         `json:"requestId"`
-	RequestKind string         `json:"requestKind"`
-	Timing      *timing.Record `json:"timing,omitempty"`
+	RetryCount  int     `json:"retryCount"`
+	RequestID   string  `json:"requestId"`
+	RequestKind string  `json:"requestKind"`
+	Timing      *Timing `json:"timing,omitempty"`
 }
 
-type AgentModelRequestFinished struct {
-	RequestID   string         `json:"requestId"`
-	RequestKind string         `json:"requestKind"`
-	StopReason  string         `json:"stopReason"`
-	Usage       *ModelUsage    `json:"usage,omitempty"`
-	Timing      *timing.Record `json:"timing,omitempty"`
+type AgentModelRequestResult struct {
+	Status      string      `json:"status"`
+	RetryCount  int         `json:"retryCount"`
+	Error       string      `json:"error,omitempty"`
+	RequestID   string      `json:"requestId"`
+	RequestKind string      `json:"requestKind"`
+	StopReason  string      `json:"stopReason"`
+	Usage       *ModelUsage `json:"usage,omitempty"`
+	Timing      *Timing     `json:"timing,omitempty"`
 }
 
 // AgentToolCall 的 Name 是工具注册键，Arguments 保留模型返回的参数原文。
@@ -66,10 +63,10 @@ type AgentToolApprovalRequired struct {
 }
 
 type AgentToolResult struct {
-	CallID  string         `json:"callId"`
-	Result  string         `json:"result"`
-	IsError bool           `json:"isError"`
-	Timing  *timing.Record `json:"timing,omitempty"`
+	CallID  string  `json:"callId"`
+	Result  string  `json:"result"`
+	IsError bool    `json:"isError"`
+	Timing  *Timing `json:"timing,omitempty"`
 }
 
 type AgentTurnCompleted struct {
@@ -77,7 +74,8 @@ type AgentTurnCompleted struct {
 }
 
 type AgentRunStarted struct {
-	Run agentrun.Snapshot `json:"run"`
+	AgentID string     `json:"agentId"`
+	Run     RunSummary `json:"run"`
 }
 
 type AgentRunControl struct {
@@ -85,28 +83,59 @@ type AgentRunControl struct {
 }
 
 type AgentRunEnded struct {
-	Run     agentrun.Snapshot     `json:"run"`
-	State   agentmodel.AgentState `json:"state"`
-	Entries []Entry               `json:"entries"`
+	Run     RunSummary `json:"run"`
+	State   string     `json:"state"`
+	Entries []Entry    `json:"entries"`
 }
 
 type AgentSubagentStarted struct {
-	Agent         sessionservice.AgentView `json:"agent"`
-	Entries       []Entry                  `json:"entries"`
-	ParentAgentID string                   `json:"parentAgentId"`
-	ParentRunID   string                   `json:"parentRunId"`
-	CallID        string                   `json:"callId"`
+	Agent         AgentView `json:"agent"`
+	Entries       []Entry   `json:"entries"`
+	ParentAgentID string    `json:"parentAgentId"`
+	ParentRunID   string    `json:"parentRunId"`
+	CallID        string    `json:"callId"`
 }
 
 type AgentTaskQueueChanged struct {
-	Tasks []QueuedTask `json:"tasks"`
+	Tasks  []QueuedTask `json:"tasks"`
+	Paused bool         `json:"paused"`
 }
 
 type AgentToolStarted struct {
-	CallID string         `json:"callId"`
-	Timing *timing.Record `json:"timing,omitempty"`
+	CallID string  `json:"callId"`
+	Timing *Timing `json:"timing,omitempty"`
 }
 
 type AgentErrorOccurred struct {
 	Message string `json:"message"`
+}
+
+// RunSummary 是外部展示摘要，不携带执行配置、句柄或推理续传状态。
+type RunSummary struct {
+	ID             string
+	Status         string
+	Outcome        string
+	StartedAt      time.Time
+	EndedAt        time.Time
+	FailureCode    string
+	FailureMessage string
+	Iterations     uint64
+	ToolCalls      int
+	OutputBytes    int64
+}
+type AgentView struct {
+	ID           string
+	SessionID    string
+	DefinitionID string
+	Kind         string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Name         string      `json:"name"`
+	State        string      `json:"state"`
+	CurrentRunID string      `json:"currentRunId"`
+	CurrentRun   *RunSummary `json:"currentRun"`
+	LatestRun    *RunSummary `json:"latestRun"`
+}
+type AgentStateChanged struct {
+	State string `json:"state"`
 }

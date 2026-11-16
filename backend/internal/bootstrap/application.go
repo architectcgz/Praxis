@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"praxis/internal/clock"
+	"praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
 	fs "praxis/internal/infra/filesystem"
 	"praxis/internal/logging"
 	approvalservice "praxis/internal/service/approval"
-	"praxis/internal/service/coordinator"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/bindings"
@@ -76,16 +77,16 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	if err != nil {
 		return nil, err
 	}
-	a.sessions = buildSessions(a.storage, hooks, config, root)
-	coordinator := buildCoordinator(resources, a.sessions, hooks, emitter, options.Runner)
+	coordinator := buildCoordinator(resources, func(ctx context.Context) (*sessionmodel.Configuration, error) {
+		return config.loadSessionConfiguration(ctx, root)
+	}, hooks, emitter, options.Runner)
+	a.sessions = buildSessions(a.storage, hooks, coordinator)
 	a.coordinator = coordinator
-	models := buildModelService(config, a.logger)
 	projects := projectservice.NewService(projectservice.Dependencies{
-		Projects:   a.storage.Projects,
-		Sessions:   a.storage.Sessions,
-		Directory:  fs.Filesystem{},
-		TextReader: fs.Filesystem{},
-		Clock:      clock.UTCClock{},
+		Projects:  a.storage.Projects,
+		Sessions:  a.storage.Sessions,
+		Directory: fs.Filesystem{},
+		Clock:     clock.UTCClock{},
 	})
 	approvals := approvalservice.NewService(approvalservice.Dependencies{
 		Sessions: a.sessions,
@@ -97,7 +98,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Approvals:      approvals,
 		Sessions:       a.sessions,
 		Commands:       a.coordinator,
-		ModelConfig:    models,
 		Emitter:        emitter,
 		Usages:         a.coordinator,
 		SessionLogPath: a.storage.Sessions.SessionLogPath,

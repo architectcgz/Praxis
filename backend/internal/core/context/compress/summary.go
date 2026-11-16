@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	appcontext "praxis/internal/core/context"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 )
 
 const (
@@ -50,9 +50,6 @@ func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, sum
 		text, err := requestSummary(ctx, summaryContext(summary, string(remaining[:low])), summaryLimit)
 		if err != nil {
 			return "", fmt.Errorf("summarize context: %w", err)
-		}
-		if err := ctx.Err(); err != nil {
-			return "", err
 		}
 		// 调用边界提供已处理的摘要，算法只校验容量。
 		summary = text

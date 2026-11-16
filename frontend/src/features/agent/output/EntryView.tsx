@@ -16,6 +16,12 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
     copyContent?: string
 }) {
     if (item.kind === 'run') return null
+    if (item.kind === 'model_request') return <details className="message message-assistant">
+        <summary>模型请求{item.status === 'interrupted' ? '已中断' : '失败'} · 第 {(item.retryCount || 0) + 1} 次尝试 · {item.requestKind}</summary>
+        {item.error && <p role="alert">{item.error}</p>}
+        {item.content.length > 0 && <><p>本次请求的部分输出</p><MessageMarkdown content={item.content.map((block) => block.text || '').join('')} /></>}
+        <DurationLabel record={item.timing} label="请求耗时" />
+    </details>
     const message = item
     const content = message.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')
     const messageBlocks = message.content
@@ -28,14 +34,14 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
                     <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
                 </div>
                 <div className="acts">
-                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} runId={message.runId || ''} timing={message.timing} key={`${block.callId}-${index}`} />)}
+                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} runId={message.runId || ''} timing={block.timing || message.timing} key={`${block.callId}-${index}`} />)}
                 </div>
             </article>
         )
     }
     const messageRole = message.role
     const messageClass = messageRole === 'assistant' || messageRole === 'user' ? messageRole : 'unknown'
-    const author = message.kind === 'summary' ? '上下文摘要' : messageRole === 'assistant' ? agentName : messageRole === 'user' ? '你' : '未知来源'
+    const author = message.kind === 'subagent_report' ? '子代理报告' : message.kind === 'instruction' ? '主代理指令' : message.kind === 'summary' ? '上下文摘要' : messageRole === 'assistant' ? agentName : messageRole === 'user' ? '你' : '未知来源'
     const contentToCopy = copyContent ?? content
     const segments = messageRole === 'assistant' ? groupAssistantBlocks(messageBlocks) : []
     return (
@@ -60,12 +66,12 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
                         </div>
                     }) : content && <MessageMarkdown content={content} />}
                 </>
-            ) : content && <p>{content}</p>}
+            ) : content && (message.kind==='subagent_report' ? <MessageMarkdown content={content}/> : <p>{content}</p>)}
             {message.error && <p role="alert">{message.error}</p>}
             <MessageActions content={hasContinuation ? '' : contentToCopy}>
                 {message.kind === 'summary'
                     ? <DurationLabel record={message.timing} label="压缩耗时" />
-                    : messageRole === 'assistant' && <MessageTiming runId={message.runId || ''} turnId={message.turnId} record={message.timing} />}
+                    : messageRole === 'assistant' && <MessageTiming runId={message.runId || ''} turnId={message.turnId} requestId={message.requestId} record={message.timing} />}
             </MessageActions>
         </article>
     )

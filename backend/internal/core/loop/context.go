@@ -3,8 +3,8 @@ package loop
 import (
 	"context"
 	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/core/hook"
-	sessionentry "praxis/internal/core/session/entry"
 )
 
 // BuildContext 只选择本轮所需的 Entry 引用；Hook 只读观察，容量评估在构建完成后执行。

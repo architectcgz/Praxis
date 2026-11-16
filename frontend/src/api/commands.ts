@@ -1,7 +1,7 @@
 import { getCommandBinding } from './bindings'
 import { parseToolCallInput, type ToolCallInput } from './tools'
 
-export type StopAgentRequest = { sessionId: string; branchId: string; agentId: string; runId: string }
+export type StopAgentRequest = { sessionId: string; agentId: string; runId: string }
 
 /** 中断用户选择的具体 Run，不将目标替换为命令到达时的新执行。 */
 export function stopAgent(request: StopAgentRequest) {

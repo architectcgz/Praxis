@@ -2,15 +2,13 @@ package bindings
 
 import (
 	"context"
-	agentmodel "praxis/internal/core/agent"
+	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
-	sessionservice "praxis/internal/service/session"
+	"praxis/internal/core/timing"
 	"praxis/wails/dto"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
-
-const agentEventName = "praxis:agent-event"
 
 type Host interface {
 	BindingContext() (context.Context, Services, error)
@@ -25,7 +23,6 @@ type Bindings struct {
 	sessions *SessionBindings
 	agents   *AgentBindings
 	commands *CommandBindings
-	models   *ModelBindings
 }
 
 func New(host Host) *Bindings {
@@ -35,7 +32,6 @@ func New(host Host) *Bindings {
 		sessions: &SessionBindings{host: host},
 		agents:   &AgentBindings{host: host},
 		commands: &CommandBindings{host: host},
-		models:   &ModelBindings{host: host},
 	}
 }
 
@@ -45,7 +41,6 @@ func (b *Bindings) All() []application.Service {
 		application.NewService(b.sessions),
 		application.NewService(b.agents),
 		application.NewService(b.commands),
-		application.NewService(b.models),
 	}
 }
 
@@ -54,52 +49,48 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	var data any
 	switch payload := event.Payload.(type) {
 	case coreevent.SessionConfigReloaded:
-		b.host.EmitEvent("praxis:session-config-reloaded", event.Source.SessionID.String())
-		return
+		data = struct{}{}
+	case coreevent.AgentStateChanged:
+		data = dto.AgentStateChanged{State: string(payload.State)}
 	case coreevent.EntriesAppended:
-		data = dto.AgentEntriesAppended{
+		data = dto.AgentEntriesAppended{AgentID: event.Source.AgentID.String(),
 			Entries: publicEntries(payload.Entries),
 		}
-	case coreevent.TurnStarted, coreevent.SubagentReleased:
+	case coreevent.TurnStarted, coreevent.TurnFailed, coreevent.TurnInterrupted, coreevent.SubagentReleased:
 		data = struct{}{}
 	case coreevent.ModelRequestStarted:
 		data = dto.AgentModelRequestStarted{
+			RetryCount:  payload.Request.RetryCount,
 			RequestID:   payload.Request.ID.String(),
 			RequestKind: string(payload.Request.Kind),
-			Timing:      payload.Timing,
+			Timing:      publicTiming(payload.Timing),
 		}
-	case coreevent.ModelRequestFinished:
-		value := dto.AgentModelRequestFinished{
-			RequestID:   payload.Request.ID.String(),
-			RequestKind: string(payload.Request.Kind),
-			StopReason:  string(payload.Request.StopReason),
-			Timing:      payload.Timing,
-		}
-		if payload.Request.Usage != nil {
-			value.Usage = new(publicUsage(*payload.Request.Usage))
-		}
-		data = value
+	case coreevent.ModelRequestCompleted:
+		data = publicRequestResult(payload.Request, payload.Timing)
+	case coreevent.ModelRequestFailed:
+		data = publicRequestResult(payload.Request, payload.Timing)
+	case coreevent.ModelRequestInterrupted:
+		data = publicRequestResult(payload.Request, payload.Timing)
 	case coreevent.RunStarted:
-		data = dto.AgentRunStarted{
-			Run: payload.Run,
+		data = dto.AgentRunStarted{AgentID: event.Source.AgentID.String(),
+			Run: publicRun(payload.Run),
 		}
 	case coreevent.RunInterruptRequested:
 		data = dto.AgentRunControl{AppliedAt: payload.AppliedAt}
 	case coreevent.SubagentStarted:
 		record := payload.Run
 		data = dto.AgentSubagentStarted{
-			Agent: sessionservice.AgentView{
-				ID:           event.Source.AgentID,
-				SessionID:    event.Source.SessionID,
-				BranchID:     event.Source.BranchID,
-				DefinitionID: payload.DefinitionID,
-				Kind:         agentmodel.KindSubagent,
+			Agent: dto.AgentView{
+				ID:           event.Source.AgentID.String(),
+				SessionID:    event.Source.SessionID.String(),
+				DefinitionID: payload.DefinitionID.String(),
+				Kind:         "subagent",
 				CreatedAt:    payload.CreatedAt,
 				UpdatedAt:    payload.CreatedAt,
 				Name:         payload.Name,
-				State:        agentmodel.AgentExecuting,
-				CurrentRunID: record.ID,
-				CurrentRun:   &record,
+				State:        "executing",
+				CurrentRunID: record.ID.String(),
+				CurrentRun:   new(publicRun(record)),
 			},
 			Entries:       publicEntries(payload.Entries),
 			ParentAgentID: payload.ParentAgentID.String(),
@@ -116,7 +107,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 				CreatedAt: task.CreatedAt,
 			})
 		}
-		data = dto.AgentTaskQueueChanged{Tasks: tasks}
+		data = dto.AgentTaskQueueChanged{Tasks: tasks, Paused: payload.Paused}
 	case coreevent.TextDelta:
 		data = dto.AgentTextDelta{Text: payload.Text}
 	case coreevent.ThinkingDelta:
@@ -132,27 +123,27 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	case coreevent.ToolStarted:
 		data = dto.AgentToolStarted{
 			CallID: payload.CallID,
-			Timing: payload.Timing,
+			Timing: publicTiming(payload.Timing),
 		}
 	case coreevent.ToolResult:
 		data = dto.AgentToolResult{
 			CallID:  payload.CallID,
 			Result:  payload.Result,
 			IsError: payload.IsError,
-			Timing:  payload.Timing,
+			Timing:  publicTiming(payload.Timing),
 		}
 	case coreevent.TurnCompleted:
 		data = dto.AgentTurnCompleted{StopReason: string(payload.StopReason)}
 	case coreevent.RunEnded:
 		data = dto.AgentRunEnded{
-			Run:     payload.Run,
-			State:   payload.State,
+			Run:     publicRun(payload.Run),
+			State:   string(payload.State),
 			Entries: publicEntries(payload.Entries),
 		}
 	case coreevent.RequestCanceled:
 		data = dto.AgentRunEnded{
-			Run:     payload.Run,
-			State:   payload.State,
+			Run:     publicRun(payload.Run),
+			State:   string(payload.State),
 			Entries: publicEntries(payload.Entries),
 		}
 	case coreevent.ErrorOccurred:
@@ -161,14 +152,27 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		b.host.LogError("unsupported agent event payload: %T", event.Payload)
 		return
 	}
-	b.host.EmitEvent(agentEventName, dto.AgentEvent{
-		Kind:      string(event.Kind()),
-		SessionID: event.Source.SessionID.String(),
-		AgentID:   event.Source.AgentID.String(),
-		BranchID:  event.Source.BranchID.String(),
-		BindingID: event.Source.BindingID,
-		RunID:     event.Source.RunID.String(),
-		TurnID:    event.Source.TurnID.String(),
-		Data:      data,
+	b.host.EmitEvent("praxis:session:"+event.Source.SessionID.String(), dto.AgentEvent{
+		Kind: string(event.Kind()),
+
+		RunID:  event.Source.RunID.String(),
+		TurnID: event.Source.TurnID.String(),
+		Data:   data,
 	})
+}
+
+func publicRequestResult(request sessionentry.ModelRequestRecord, measured *timing.Record) dto.AgentModelRequestResult {
+	value := dto.AgentModelRequestResult{
+		RequestID:   request.ID.String(),
+		RequestKind: string(request.Kind),
+		Status:      string(request.Status),
+		RetryCount:  request.RetryCount,
+		StopReason:  request.StopReason,
+		Error:       request.Error,
+		Timing:      publicTiming(measured),
+	}
+	if request.Usage != nil {
+		value.Usage = new(publicUsage(*request.Usage))
+	}
+	return value
 }

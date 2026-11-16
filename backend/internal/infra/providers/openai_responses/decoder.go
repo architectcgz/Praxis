@@ -7,9 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	modelapi "praxis/internal/core/model"
 	modelconfig "praxis/internal/core/model/config"
+	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
 	"strings"
@@ -484,7 +485,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if item.Status != nil && *item.Status != "completed" {
 				return "", errors.New("responses completed with incomplete reasoning")
 			}
-			if stringValue(item.EncryptedContent) != "" && len(s.Items[index].Raw) > sessionentry.MaxReasoningStateBytes {
+			if stringValue(item.EncryptedContent) != "" && len(s.Items[index].Raw) > modelapi.MaxReasoningStateBytes {
 				return "", errors.New("responses reasoning state payload exceeds size limit")
 			}
 		}
@@ -502,7 +503,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			}
 			if err := emit(providerapi.Event{
 				Kind: providerapi.StreamReasoningState,
-				ReasoningState: &sessionentry.ReasoningState{
+				ReasoningState: &modelapi.ReasoningState{
 					Protocol: string(modelconfig.APIFormatOpenAIResponses),
 					Payload:  bytes.Clone(s.Items[index].Raw),
 				},
@@ -532,9 +533,9 @@ func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.DecodeUsage(raw, &reported, string(modelconfig.APIFormatOpenAIResponses)) {
 		return nil
 	}
-	var usage *providerapi.Usage
+	var usage *modelusage.Usage
 	if reported.InputTokens != nil {
-		usage = &providerapi.Usage{
+		usage = &modelusage.Usage{
 			InputTokens:  *reported.InputTokens,
 			OutputTokens: reported.OutputTokens,
 		}

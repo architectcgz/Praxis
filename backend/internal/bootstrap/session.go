@@ -1,27 +1,21 @@
 package bootstrap
 
 import (
-	"context"
 	"praxis/internal/clock"
+	"praxis/internal/core/coordinator"
 	"praxis/internal/core/hook"
-	"praxis/internal/dataroot"
 	"praxis/internal/identity"
 	"praxis/internal/infra/storage"
 	sessionservice "praxis/internal/service/session"
 )
 
-func buildSessions(store *storage.Store, hooks *hook.Dispatcher, config *configuration, root dataroot.DataRoot) *sessionservice.Service {
+func buildSessions(store *storage.Store, hooks *hook.Dispatcher, core *coordinator.Coordinator) *sessionservice.Service {
 	return sessionservice.NewService(sessionservice.Dependencies{
-		LoadConfig: func(ctx context.Context) (*sessionservice.Configuration, error) {
-			return config.loadSessionConfiguration(ctx, root)
-		},
+		Core:           core,
 		HookDispatcher: hooks,
 		Projects:       store.Projects,
 		Sessions:       store.Sessions,
-		OpenLog: func(ctx context.Context, id identity.SessionID) (sessionservice.LogStore, error) {
-			return store.Sessions.OpenLog(ctx, id)
-		},
-		Clock: clock.UTCClock{},
-		IDs:   identity.SecureIDGenerator{},
+		Clock:          clock.UTCClock{},
+		IDs:            identity.SecureIDGenerator{},
 	})
 }

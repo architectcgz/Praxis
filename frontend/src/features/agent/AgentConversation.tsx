@@ -7,8 +7,6 @@ import { AgentActivityView, PendingOutputView, StreamingTurnView } from './outpu
 import { buildEntryHistory, EntryHistory } from './output/EntryHistory'
 
 export type AgentConversationProps = {
-    branchId: string
-    historyEntryId: string | null
     submissionRevision: number
     agent: AgentView
     entries: Entry[]
@@ -23,16 +21,15 @@ export type AgentConversationProps = {
     composer: ReactNode
 }
 
-export function AgentConversation({ branchId, historyEntryId, submissionRevision, agent, entries, collaboration, streamingOutput, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, busy, composer }: AgentConversationProps) {
+export function AgentConversation({ submissionRevision, agent, entries, collaboration, streamingOutput, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, busy, composer }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousViewRef = useRef('')
     const previousSubmissionRevisionRef = useRef(submissionRevision)
     const [showScrollButton, setShowScrollButton] = useState(false)
-    const historical = historyEntryId !== null
-    const viewKey = JSON.stringify([agent.ID, historyEntryId])
-    const active = agent.state === 'executing'
-    const waitingForOutput = !historical && active && !busy && !streamingOutput
+    const viewKey = agent.ID
+    const active = Boolean(agent.currentRunId)
+    const waitingForOutput = active && !busy && !streamingOutput
     const history = useMemo(() => buildEntryHistory(entries), [entries])
     // 已落盘回合仍可能等待工具结果；这些事件继续交给对应历史消息，不重复呈现正文。
     const historyOutput = streamingOutput?.turns.some((turn) => history.assistantTurns.has(JSON.stringify([streamingOutput.runId, turn.turnId])))
@@ -42,7 +39,7 @@ export function AgentConversation({ branchId, historyEntryId, submissionRevision
         turns: streamingOutput.turns.filter((turn) => !history.assistantTurns.has(JSON.stringify([streamingOutput.runId, turn.turnId]))),
     } : null
     const latestRun = agent.latestRun
-    const runError = !historical && !agent.currentRunId && latestRun?.Status === 'ended' && latestRun.Outcome === 'failed' &&
+    const runError = !agent.currentRunId && latestRun?.Status === 'ended' && latestRun.Outcome === 'failed' &&
         !history.errorRuns.has(latestRun.ID)
         ? latestRun.FailureMessage || `执行失败：${latestRun.FailureCode}` : ''
 
@@ -105,9 +102,9 @@ export function AgentConversation({ branchId, historyEntryId, submissionRevision
         setShowScrollButton(false)
     }, [])
 
-    return <ToolApprovalsProvider key={`${agent.SessionID}-${branchId}-${agent.ID}`} agentId={agent.ID} runId={agent.currentRunId} sessionId={agent.SessionID}>
+    return <ToolApprovalsProvider key={`${agent.SessionID}-${agent.ID}`} agentId={agent.ID} runId={agent.currentRunId} sessionId={agent.SessionID}>
         <div className="agent-conversation">
-            <ToolApprovalScope historical={historical}>
+            <ToolApprovalScope historical={false}>
             <div className="message-thread-container">
                 <div
                     className={`message-thread thread ${threadEmpty ? 'empty' : ''}`}
@@ -122,9 +119,9 @@ export function AgentConversation({ branchId, historyEntryId, submissionRevision
                                 <div className="message-empty-icon" aria-hidden="true">
                                     <MessageSquare size={24} strokeWidth={1.6} />
                                 </div>
-                                <h3 className="message-empty-title">{historical ? '此位置没有历史消息' : '开始新对话'}</h3>
+                                <h3 className="message-empty-title">开始新对话</h3>
                                 <p className="message-empty-text">
-                                    {historical ? '选择其他历史节点，或返回最新位置。' : `向 ${agent.name} 发送消息以开始协作。您可以提出问题、请求帮助或分配任务。`}
+                                    {`向 ${agent.name} 发送消息以开始协作。您可以提出问题、请求帮助或分配任务。`}
                                 </p>
                             </div>
                         </div>
@@ -160,7 +157,6 @@ export function AgentConversation({ branchId, historyEntryId, submissionRevision
                 )}
             </div>
             </ToolApprovalScope>
-            {historical && <div className="command-band agent-input-accessory" role="status">历史浏览中 · 以下为实时操作区{active ? '（当前执行中）' : ''}</div>}
             <ApprovalGate />
             {composer}
         </div>

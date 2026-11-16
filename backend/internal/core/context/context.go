@@ -1,6 +1,6 @@
 package context
 
-import sessionentry "praxis/internal/core/session/entry"
+import sessionentry "praxis/internal/core/entry"
 
 // ModelEntries 保持 Session 提供的顺序，只排除不参与模型对话的执行事实。
 func ModelEntries(entries []*sessionentry.ContextEntry) []*sessionentry.ContextEntry {

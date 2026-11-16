@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	appcontext "praxis/internal/core/context"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 )
 
 const (
@@ -30,7 +30,11 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
-	if !appcontext.NearContextLimit(estimated+options.ReservedTokens, options.MaxOutputTokens, options.ContextWindow) {
+	nearInput := estimated + options.ReservedTokens
+	if options.InputTokens > 0 {
+		nearInput = options.InputTokens
+	}
+	if !appcontext.NearContextLimit(nearInput, options.MaxOutputTokens, options.ContextWindow) {
 		return value, false, nil
 	}
 	history, retained := splitHistory(value.Entries, input)
@@ -56,9 +60,6 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 			},
 		}},
 	}
-	for _, entry := range retained {
-		compressed.Entries[0].Compression.RetainedEntryIDs = append(compressed.Entries[0].Compression.RetainedEntryIDs, entry.ID)
-	}
 	compressed.Entries = append(compressed.Entries, retained...)
 	baseline, err := compressed.EstimatedTokens()
 	if err != nil {
@@ -72,13 +73,17 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 			ContextWindow:        options.ContextWindow,
 		}
 	}
-	encoded, err := json.Marshal(summaryEntries(history))
+	summaryInput := value.SummaryInput
+	if summaryInput == nil {
+		summaryInput = value.Entries
+	}
+	encoded, err := json.Marshal(summaryEntries(summaryInput))
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
 	// 必留原文先占用窗口，摘要只使用剩余空间，不能靠压缩它们腾出预算。
 	limit := min(maxSummaryTokens, options.MaxOutputTokens, max(1, percent(available, compressionTargetPercent)))
-	text, err := summarizeTranscript(ctx, encoded, options.ContextWindow, limit, requestSummary)
+	text, err := summarizeTranscript(ctx, encoded, options.ContextWindow-appcontext.Margin(options.ContextWindow)-128, limit, requestSummary)
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
@@ -104,24 +109,38 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 
 // splitHistory 接收已配对工具回执的模型上下文，最近一条工具声明及其全部回执不可拆开。
 func splitHistory(entries []*sessionentry.ContextEntry, input *sessionentry.ContextEntry) (history, retained []*sessionentry.ContextEntry) {
-	toolStart, toolEnd := len(entries), len(entries)
-latestToolCall:
-	for index := len(entries) - 1; index >= 0; index-- {
-		for _, block := range entries[index].Content {
-			if _, ok := block.(sessionentry.ToolCallBlock); ok {
-				toolStart, toolEnd = index, index+1
-				for toolEnd < len(entries) && entries[toolEnd].Role == role.Tool {
-					toolEnd++
-				}
-				break latestToolCall
+	type key struct{ run, call string }
+	calls := make(map[key]bool)
+	for i := len(entries) - 1; i >= 0; i-- {
+		for _, block := range entries[i].Content {
+			if c, ok := block.(sessionentry.ToolCallBlock); ok {
+				calls[key{entries[i].RunID, c.CallID}] = true
 			}
 		}
+		if len(calls) > 0 {
+			break
+		}
 	}
-	for index, entry := range entries {
-		if entry == input || index >= toolStart && index < toolEnd {
-			retained = append(retained, entry)
+	inputID := ""
+	inputRun := ""
+	if input != nil {
+		inputID = input.InputMessageID()
+		inputRun = input.RunID
+	}
+	for _, e := range entries {
+		keep := inputID != "" && e.RunID == inputRun && e.InputMessageID() == inputID
+		for _, block := range e.Content {
+			switch b := block.(type) {
+			case sessionentry.ToolCallBlock:
+				keep = keep || calls[key{e.RunID, b.CallID}]
+			case sessionentry.ToolResultBlock:
+				keep = keep || calls[key{e.RunID, b.CallID}]
+			}
+		}
+		if keep {
+			retained = append(retained, e)
 		} else {
-			history = append(history, entry)
+			history = append(history, e)
 		}
 	}
 	return history, retained

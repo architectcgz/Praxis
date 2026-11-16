@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { getSessionModelSelection, isBindingAvailable, selectSessionModel, type ApiErrorCode, type ModelOption, type ModelSelection } from '../../api'
 import { apiErrorCode, readableError } from '../../shared/errors'
 
@@ -21,10 +21,10 @@ function defaultReasoning(model: ModelOption): string {
 export function useAgentTaskInput(
     sessionID: string,
     models: ModelOption[],
-    setError: Dispatch<SetStateAction<string>>,
-    setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>,
 ) {
     const [input, setInput] = useState('')
+    const [selectionError,setError] = useState('')
+    const [selectionErrorCode,setErrorCode] = useState<ApiErrorCode | undefined>()
     const [state, setState] = useState<SelectionState>({ sessionID: '', selection: emptySelection, confirmedKey: '', failed: false })
     const syncQueue = useRef<Promise<void>>(Promise.resolve())
     const generation = useRef(0)
@@ -50,11 +50,12 @@ export function useAgentTaskInput(
             })
         }
         return () => { generation.current += 1 }
-    }, [sessionID, setError, setErrorCode])
+    }, [sessionID])
 
     const applySelection = useCallback((next: ModelSelection) => {
         if (!sessionID) return
         const request = ++generation.current
+        setError('');setErrorCode(undefined)
         setState({ sessionID, selection: next, confirmedKey: '', failed: false })
         // 请求携带固定会话身份；串行提交防止较早选择覆盖较新选择。
         const sync = syncQueue.current.catch(() => undefined).then(() => selectSessionModel(sessionID, next))
@@ -68,7 +69,7 @@ export function useAgentTaskInput(
             setError(readableError(error))
             setErrorCode(apiErrorCode(error))
         })
-    }, [sessionID, setError, setErrorCode])
+    }, [sessionID])
 
     const selectModel = useCallback((providerId: string, modelId: string) => {
         if (!modelId) {
@@ -91,7 +92,7 @@ export function useAgentTaskInput(
 
     const confirmed = state.sessionID === sessionID && state.confirmedKey === selectionKey
     return {
-        input, setInput, selectModel, selectReasoning,
+        selectionError, selectionErrorCode, input, setInput, selectModel, selectReasoning,
         selectedProviderID: draftProviderID ?? selection.providerId,
         selectedModelID: draftProviderID === undefined ? selection.modelId : '',
         reasoning: draftProviderID === undefined ? selection.reasoningLevel : '',

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { ChevronDown, ShieldCheck } from 'lucide-react'
 import { getSessionApprovalMode, setSessionApprovalMode, type ApprovalMode, type SessionApprovalMode } from '../../api/sessions'
 import { readableError } from '../../shared/errors'
-import { subscribeSessionConfigReloaded } from '../../api/models'
+import { subscribeAgentEvents } from '../../api/events'
 
 type ApprovalModeSelectProps = {
     sessionId: string
@@ -37,8 +37,8 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
         return () => { active = false }
     }, [sessionId, retry])
 
-    useEffect(() => subscribeSessionConfigReloaded((id) => {
-        if (id === sessionId) setRetry((value) => value + 1)
+    useEffect(() => subscribeAgentEvents(sessionId, (event) => {
+        if (event.kind === 'session_config_reloaded') setRetry((value) => value + 1)
     }), [sessionId])
 
     const save = async (mode: ApprovalMode | null) => {

@@ -1,12 +1,9 @@
 import { getSessionBinding } from './bindings'
 import type { AgentView, HistoryPage } from './agents'
 import type { QueuedTask } from './tasks'
-import type { Branch } from '../../bindings/praxis/internal/core/session/models'
-export type { Branch }
 
 export type SessionSnapshot = {
-    bindingId: string
-    branch: Branch
+    queuePaused: boolean
     id: string
     projectId: string
     title: string
@@ -74,26 +71,11 @@ export function getSessionModelSelection(sessionID: string): Promise<ModelSelect
 }
 
 /** 后端快照投影保证集合为数组；前端直接接纳，不重新校验内部协议。 */
-export function selectSession(sessionID: string, branchID = '') {
-    return getSessionBinding().SelectSession(sessionID, branchID) as Promise<SessionSnapshot>
+export function selectSession(sessionID: string) {
+    return getSessionBinding().SelectSession(sessionID) as Promise<SessionSnapshot>
 }
 
 export function getSessionSummary(sessionID: string) { return getSessionBinding().GetSessionSummary(sessionID) }
-export function createBranch(session: SessionSnapshot, entryId: string, name = '', requestId: string = crypto.randomUUID()) {
-    return getSessionBinding().CreateBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, entryId, name, requestId }) as Promise<SessionSnapshot>
-}
-export function switchBranch(session: SessionSnapshot, name: string) {
-    return getSessionBinding().SwitchBranch({ sessionId: session.id, branchId: session.branch.id, bindingId: session.bindingId, name }) as Promise<SessionSnapshot>
-}
-export async function listBranches(sessionId: string) { return await getSessionBinding().ListBranches(sessionId) ?? [] }
-export async function getEntryTree(sessionId: string) { return await getSessionBinding().GetEntryTree(sessionId) ?? [] }
-export function getEntriesAt(sessionId: string, entryId: string, before = '') {
-    return getSessionBinding().GetEntriesAt({ sessionId, headEntryId: entryId, beforeEntryId: before, limit: 50 }) as Promise<HistoryPage>
-}
-export function deleteBranch(session: SessionSnapshot, targetBranchId: string) {
-    return getSessionBinding().DeleteBranch({ sessionId: session.id, branchId: session.branch.id, targetBranchId, bindingId: session.bindingId })
-}
-
 export function getSessionUsageSummary(sessionID: string) {
     return getSessionBinding().GetSessionUsageSummary(sessionID) as Promise<SessionUsageSummary>
 }

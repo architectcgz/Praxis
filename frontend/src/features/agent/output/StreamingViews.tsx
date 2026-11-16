@@ -51,7 +51,7 @@ export function StreamingTurnView({ agentName, events, runId, run, turnId, activ
     hasContinuation?: boolean
 }) {
     const started = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_started' }> => event.kind === 'model_request_started')
-    const finished = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_finished' }> => event.kind === 'model_request_finished')
+    const finished = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_completed' }> => event.kind === 'model_request_completed')
     const segments: ReactNode[] = []
     const pendingStatus = active ? 'running' : 'unknown'
     let tools: AgentEvent[] = []
@@ -83,7 +83,7 @@ export function StreamingTurnView({ agentName, events, runId, run, turnId, activ
         </div>}
         {segments}
         <div className="agent-activity turn-foot">
-            <MessageTiming runId={runId} turnId={turnId} record={finished?.data.timing || started?.data.timing} running={active && !finished} />
+            <MessageTiming runId={runId} turnId={turnId} requestId={finished?.data.requestId || started?.data.requestId} record={finished?.data.timing || started?.data.timing} running={active && !finished} />
         </div>
     </div>
 }

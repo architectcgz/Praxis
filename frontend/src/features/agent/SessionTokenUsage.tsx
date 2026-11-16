@@ -34,14 +34,14 @@ export function ModelUsageProvider({ sessionId, revision, entries, children }: {
                 if (active && id === request) setLoading(false)
             }
         }
-        const unsubscribe = subscribeAgentEvents((event) => {
+        const unsubscribe = subscribeAgentEvents(sessionId, (event) => {
             if (!active) return
-            if (event.kind === 'model_request_finished' && event.sessionId === sessionId) {
+            if ((event.kind === 'model_request_completed' || event.kind === 'model_request_failed' || event.kind === 'model_request_interrupted')) {
                 // 后端已接纳请求结果，重新查询同一业务快照的 Run 汇总。
                 void load()
             }
             // 回合结束时重新查询，可恢复断线或未及时收到的用量事件。
-            if ((event.kind === 'run_ended' || event.kind === 'request_canceled') && event.sessionId === sessionId) void load()
+            if ((event.kind === 'run_ended' || event.kind === 'request_canceled')) void load()
         })
         void load()
         return () => { active = false; unsubscribe() }
@@ -60,9 +60,9 @@ export function ModelUsageProvider({ sessionId, revision, entries, children }: {
                 if (active) setRecords((current) => mergeModelUsageRecords(current, incoming))
             } catch (reason) { if (active) setRecordsError(readableError(reason)) }
         }
-        const unsubscribe = subscribeAgentEvents((event) => {
-            if (event.sessionId === sessionId && event.kind === 'model_request_finished' && event.turnId && wanted.has(event.turnId) && event.data.usage) {
-                const record = { sessionId, runId: event.runId, turnId: event.turnId, usage: event.data.usage }
+        const unsubscribe = subscribeAgentEvents(sessionId, (event) => {
+            if ((event.kind === 'model_request_completed' || event.kind === 'model_request_failed' || event.kind === 'model_request_interrupted') && event.turnId && wanted.has(event.turnId) && event.data.usage) {
+                const record = { sessionId, requestId: event.data.requestId, runId: event.runId, turnId: event.turnId, usage: event.data.usage }
                 setRecords((current) => mergeModelUsageRecords(current, [record]))
             }
         })

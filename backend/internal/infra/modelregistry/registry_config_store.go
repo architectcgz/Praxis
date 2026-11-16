@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	modelconfig "praxis/internal/core/model/config"
 )
 
@@ -70,49 +69,6 @@ func readCredentialsFile(path string) (ProviderCredentials, error) {
 		return nil, fmt.Errorf("auth config: invalid JSON: %w", err)
 	}
 	return document, nil
-}
-
-// writeConfigAtomically 完整替换持久化配置，确保启动和设置读取方不会读到部分写入的文件。
-//
-// 通过临时文件和同目录重命名，在写入失败时保留之前的有效文档。
-// 文件权限保持 0600，因为凭据文档包含 Provider 密钥，模型配置也仅允许所有者访问。
-func writeConfigAtomically(path string, payload any) error {
-	encoded, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode %s: %w", filepath.Base(path), err)
-	}
-	encoded = append(encoded, '\n')
-	directory := filepath.Dir(path)
-	temporary, err := os.CreateTemp(directory, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary config: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	cleanup := func() { _ = os.Remove(temporaryPath) }
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		cleanup()
-		return fmt.Errorf("secure temporary config: %w", err)
-	}
-	if _, err := temporary.Write(encoded); err != nil {
-		_ = temporary.Close()
-		cleanup()
-		return fmt.Errorf("write temporary config: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		cleanup()
-		return fmt.Errorf("flush temporary config: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close temporary config: %w", err)
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("replace config: %w", err)
-	}
-	return nil
 }
 
 func ensureEOF(decoder *json.Decoder) error {

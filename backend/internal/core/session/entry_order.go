@@ -1,12 +1,12 @@
 package session
 
 import (
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 )
 
 // orderToolResults 只整理实际读取范围内的引用，将中断恢复补写的回执归回声明。
-// 不改变 Entry、ParentID 或日志顺序。
+// 不改变 Entry 或日志顺序。
 func orderToolResults(entries []*sessionentry.ContextEntry) []*sessionentry.ContextEntry {
 	type callKey struct{ runID, callID string }
 	calls := make(map[callKey]bool)

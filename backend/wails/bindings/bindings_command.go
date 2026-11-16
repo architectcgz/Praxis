@@ -1,9 +1,9 @@
 package bindings
 
 import (
+	execution "praxis/internal/core/coordinator"
+	taskmodel "praxis/internal/core/task"
 	"praxis/internal/identity"
-	execution "praxis/internal/service/coordinator"
-	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 	"strings"
@@ -21,9 +21,8 @@ func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTask
 	if err != nil {
 		return dto.CreateTaskResponse{}, err
 	}
-	input := sessionservice.TaskInput{
-		BindingID:    wire.BindingID,
-		BranchID:     identity.BranchID(wire.BranchID),
+	input := taskmodel.Input{
+
 		SubmissionID: identity.TaskID(wire.SubmissionID),
 		SessionID:    identity.SessionID(wire.SessionID),
 		Prompt:       wire.Prompt,
@@ -33,8 +32,8 @@ func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTask
 		return dto.CreateTaskResponse{}, publicError(b.host, "CommandBindings.CreateTask", err)
 	}
 	return dto.CreateTaskResponse{
-		TaskID:          result.Task.ID.String(),
-		BindingID:       result.BindingID,
+		TaskID: result.Task.ID.String(),
+
 		SchedulingError: result.SchedulingError,
 	}, nil
 }
@@ -49,9 +48,9 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) error {
 	}
 	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, execution.RunControl{
 		SessionID: identity.SessionID(wire.SessionID),
-		BranchID:  identity.BranchID(wire.BranchID),
-		AgentID:   identity.AgentID(wire.AgentID),
-		RunID:     identity.RunID(wire.RunID),
+
+		AgentID: identity.AgentID(wire.AgentID),
+		RunID:   identity.RunID(wire.RunID),
 	}))
 }
 
@@ -64,5 +63,5 @@ func (b *CommandBindings) CancelTask(wire dto.CancelTaskRequest) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CommandBindings.CancelTask", services.Commands.CancelTask(ctx, identity.SessionID(wire.SessionID), wire.BindingID, identity.TaskID(wire.TaskID)))
+	return publicError(b.host, "CommandBindings.CancelTask", services.Commands.CancelTask(ctx, identity.SessionID(wire.SessionID), identity.TaskID(wire.TaskID)))
 }

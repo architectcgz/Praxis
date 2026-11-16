@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	appcontext "praxis/internal/core/context"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/httpclient"
 	"praxis/internal/infra/providers/streaming"
@@ -28,7 +27,6 @@ type Dependencies struct {
 type Provider struct {
 	baseURL, apiKey, version string
 	client                   *http.Client
-	contextWindow            int
 }
 
 // New 使用入口已校验的端点创建协议适配器，检查凭据并补齐默认协议版本。
@@ -42,11 +40,10 @@ func New(config Config, deps Dependencies) (*Provider, error) {
 		version = "2023-06-01"
 	}
 	return &Provider{
-		baseURL:       config.BaseURL,
-		apiKey:        apiKey,
-		version:       version,
-		client:        deps.HTTPClient,
-		contextWindow: config.ContextWindow,
+		baseURL: config.BaseURL,
+		apiKey:  apiKey,
+		version: version,
+		client:  deps.HTTPClient,
 	}, nil
 }
 
@@ -63,9 +60,6 @@ func (p *Provider) Stream(
 	}
 	payload, err := buildPayload(request)
 	if err != nil {
-		return nil, err
-	}
-	if err := appcontext.ExceedsContextWindow(payload, request.MaxOutputTokens, p.contextWindow); err != nil {
 		return nil, err
 	}
 	httpRequest, err := http.NewRequestWithContext(

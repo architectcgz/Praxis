@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	appcontext "praxis/internal/core/context"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/errorcode"
 )
 
@@ -65,6 +66,12 @@ func NewModelFailure(err error) error {
 func FailureClassification(err error) FailureCode {
 	if f, ok := errors.AsType[*Failure](err); ok {
 		return f.code
+	}
+	if _, ok := errors.AsType[*appcontext.ContextWindowExceededError](err); ok {
+		return FailureResourceLimit
+	}
+	if errors.Is(err, toolexecution.ErrRiskReviewFailed) {
+		return FailureProvider
 	}
 	return FailureInternal
 }

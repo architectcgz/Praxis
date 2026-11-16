@@ -37,3 +37,15 @@ type ToolCatalog interface {
 	List() []ToolDefinition
 	Get(ToolName) (Tool, bool)
 }
+
+// ReadOnlyTool 是工具实现对副作用边界的明确声明，未知扩展默认串行执行。
+type ReadOnlyTool interface{ ReadOnly() bool }
+
+func IsReadOnly(catalog ToolCatalog, name ToolName) bool {
+	t, ok := catalog.Get(name)
+	if !ok {
+		return false
+	}
+	capability, ok := t.(ReadOnlyTool)
+	return ok && capability.ReadOnly()
+}

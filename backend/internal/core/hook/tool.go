@@ -2,7 +2,7 @@ package hook
 
 import (
 	"context"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/core/tool"
 )
 
@@ -20,7 +20,7 @@ type ToolExecutionResult struct {
 }
 
 type BeforeToolExecutionHook interface {
-	BeforeToolExecution(context.Context, ToolExecution) (string, error)
+	BeforeToolExecution(context.Context, ToolExecution) error
 }
 
 // AfterToolExecutionHook 观察已提交的执行结果，不能覆盖回执；通知失败不改变执行事实。

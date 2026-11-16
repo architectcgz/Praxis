@@ -1,8 +1,8 @@
 package loop
 
 import (
+	sessionentry "praxis/internal/core/entry"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
 	"strings"
 )
 

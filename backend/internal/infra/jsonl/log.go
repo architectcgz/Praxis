@@ -79,7 +79,9 @@ func ScanFrom(ctx context.Context, path string, offset int64, apply func(Positio
 
 func readFrom(ctx context.Context, path, backupDir string, offset int64, recoverTail bool, apply func(Position, []byte) error) (err error) {
 	flags := os.O_RDONLY
-	if recoverTail { flags = os.O_RDWR }
+	if recoverTail {
+		flags = os.O_RDWR
+	}
 	file, err := os.OpenFile(path, flags, 0o600)
 	if err != nil {
 		return err

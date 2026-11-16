@@ -2,7 +2,6 @@
 package config
 
 import (
-	"context"
 	"slices"
 )
 
@@ -58,16 +57,6 @@ type Option struct {
 	ProviderName          string
 	ReasoningLevels       []string
 	DefaultReasoningLevel string
-}
-
-// ConfigManager 管理模型配置、Provider 凭据和模型发现，不暴露具体存储格式。
-type ConfigManager interface {
-	Config() Config
-	// Save 保存输入边界已准备的配置，不再次规范化或修改配置内容。
-	Save(Config) error
-	SetProviderKey(string, string) error
-	HasProviderKey(string) bool
-	DiscoverProviderModels(context.Context, string) ([]string, error)
 }
 
 // Clone 返回配置的深拷贝，调用方修改嵌套模型或推理等级不会影响原配置。

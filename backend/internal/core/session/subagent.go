@@ -2,45 +2,33 @@ package session
 
 import (
 	"context"
-	agentrun "praxis/internal/core/agent/run"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
-func (s *Session) CreateSubagent(ctx context.Context, branchID identity.BranchID, record agentrun.RunRecord, input sessionentry.ContextEntry) (*sessionentry.ContextEntry, error) {
+func (s *Session) CreateSubagent(ctx context.Context, agentID identity.AgentID) error {
 	s.commitMu.Lock()
-	s.mu.RLock()
-	_, exists := s.data.AgentHistories[record.AgentID]
-	s.mu.RUnlock()
-	if !exists {
-		if err := s.log.CreateSubagent(ctx, branchID, record.AgentID); err != nil {
-			s.commitMu.Unlock()
-			return nil, err
-		}
-		s.mu.Lock()
-		s.data.AgentHistories[record.AgentID] = AgentHistory{BranchID: branchID}
-		s.mu.Unlock()
+	defer s.commitMu.Unlock()
+	if err := s.log.CreateSubagent(ctx, agentID); err != nil {
+		return err
 	}
-	s.commitMu.Unlock()
-	stored, _, err := s.AppendSubagentEntry(ctx, record.AgentID, input)
-	if err != nil {
-		return stored, err
-	}
-	_, err = s.SaveRun(ctx, record)
-	return stored, err
+	s.mu.Lock()
+	s.data.AgentHistories[agentID] = AgentHistory{}
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Session) AppendSubagentEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
 	s.commitMu.Lock()
 	defer s.commitMu.Unlock()
 	s.mu.RLock()
-	history, exists := s.data.AgentHistories[agentID]
+	_, exists := s.data.AgentHistories[agentID]
 	s.mu.RUnlock()
 	if !exists {
 		return nil, false, errorcode.ErrNotFound
 	}
-	return s.appendEntry(ctx, history.BranchID, agentID, value)
+	return s.appendEntry(ctx, agentID, value)
 }
 
 func (s *Session) SubagentEntries(ctx context.Context, agentID identity.AgentID) ([]*sessionentry.ContextEntry, error) {
@@ -52,5 +40,14 @@ func (s *Session) SubagentEntries(ctx context.Context, agentID identity.AgentID)
 	if !exists {
 		return nil, errorcode.ErrNotFound
 	}
-	return s.contextEntries(ctx, history.HeadEntryID)
+	return s.contextEntries(ctx, history.HeadEntryID, "")
+}
+
+func (s *Session) BindHistory(agentID identity.AgentID) sessionentry.AppendEntry {
+	if agentID == s.data.MainAgentID() {
+		return s.AppendEntry
+	}
+	return func(ctx context.Context, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
+		return s.AppendSubagentEntry(ctx, agentID, value)
+	}
 }

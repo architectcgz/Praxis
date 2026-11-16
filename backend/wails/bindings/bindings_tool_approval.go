@@ -1,8 +1,8 @@
 package bindings
 
 import (
+	execution "praxis/internal/core/coordinator"
 	"praxis/internal/identity"
-	execution "praxis/internal/service/coordinator"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
 )

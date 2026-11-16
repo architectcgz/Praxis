@@ -3,8 +3,8 @@ package toolexecution
 import (
 	"context"
 	"encoding/json"
+	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/core/security"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/identity"
 	"time"
 )

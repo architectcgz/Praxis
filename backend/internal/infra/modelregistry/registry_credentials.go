@@ -2,7 +2,6 @@ package modelregistry
 
 import (
 	"fmt"
-	modelconfig "praxis/internal/core/model/config"
 	"regexp"
 )
 
@@ -28,32 +27,6 @@ func validateCredentials(document ProviderCredentials) (ProviderCredentials, err
 		validated[id] = credential
 	}
 	return validated, nil
-}
-
-// SetProviderKey 保存或清除输入边界已校验的 Provider API 密钥。
-// 在锁内检查 Provider 是否仍存在；只写凭据文档，模型配置文档不包含密钥。
-func (r *Registry) SetProviderKey(providerID, value string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.providersByID[providerID]; !exists {
-		return fmt.Errorf("provider %q is not configured", providerID)
-	}
-	credentials := cloneCredentials(r.credentials)
-	if value == "" {
-		delete(credentials, providerID)
-	} else {
-		credentials[providerID] = ProviderCredential{Type: CredentialTypeAPIKey, Key: value}
-	}
-	if !credentialsChanged(r.credentials, credentials) {
-		return nil
-	}
-	if r.credentialsPath != "" {
-		if err := writeConfigAtomically(r.credentialsPath, credentials); err != nil {
-			return &ConfigurationError{Path: r.credentialsPath, Err: err}
-		}
-	}
-	r.credentials = credentials
-	return nil
 }
 
 // CredentialSnapshot 只保存本次加载的凭据，不读取后续编辑状态。
@@ -98,38 +71,4 @@ func (r *Registry) credentialKeyLocked(providerID string) string {
 		return ""
 	}
 	return credential.Key
-}
-
-func cloneCredentials(credentials ProviderCredentials) ProviderCredentials {
-	cloned := make(ProviderCredentials, len(credentials)+1)
-	for providerID, credential := range credentials {
-		cloned[providerID] = credential
-	}
-	return cloned
-}
-
-// retainCredentialsForProviders 返回属于已配置 Provider 的凭据，
-// 因此保存下一份模型配置时也会删除已移除 Provider 的密钥。
-// 未保存凭据的 Provider 保持缺省，不创建空条目。
-func retainCredentialsForProviders(credentials ProviderCredentials, providers []modelconfig.Provider) ProviderCredentials {
-	retained := make(ProviderCredentials, len(providers))
-	for _, provider := range providers {
-		if credential, exists := credentials[provider.ID]; exists {
-			retained[provider.ID] = credential
-		}
-	}
-	return retained
-}
-
-func credentialsChanged(current, next ProviderCredentials) bool {
-	if len(current) != len(next) {
-		return true
-	}
-	for providerID, credential := range next {
-		existing, exists := current[providerID]
-		if !exists || existing != credential {
-			return true
-		}
-	}
-	return false
 }

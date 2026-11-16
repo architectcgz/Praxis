@@ -3,7 +3,7 @@ package provider
 import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 	"regexp"
 )
 

@@ -70,11 +70,12 @@ export function useWorkspaceData() {
         return () => { catalogRequest.current += 1; viewRequestRef.current += 1 }
     }, [refreshCatalog])
     useEffect(() => { rememberSelectedSession(selectedSessionID) }, [selectedSessionID])
-    useEffect(() => subscribeAgentEvents((event) => {
-        if ((event.kind === 'run_ended' || event.kind === 'request_canceled') && event.sessionId === event.agentId) {
-            void refreshSummary(event.sessionId)
-        }
-    }), [refreshSummary])
+    useEffect(() => {
+        const subscriptions = openedSessionIDs.map((id) => subscribeAgentEvents(id, (event) => {
+            if ((event.kind === 'run_ended' || event.kind === 'request_canceled')) void refreshSummary(id)
+        }))
+        return () => subscriptions.forEach((unsubscribe) => unsubscribe())
+    }, [openedSessionIDs, refreshSummary])
 
     const dataError = sessionsError ?? projectsError
     return {

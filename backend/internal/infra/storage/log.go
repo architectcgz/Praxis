@@ -2,10 +2,8 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"praxis/internal/identity"
@@ -16,7 +14,7 @@ import (
 // SessionLog 持有会话目录和已登记的子代理日志路径，不读取业务 Run。
 // 路径在加载期或会话同步提交边界登记，追加也由同一提交边界串行调用；定点读取使用调用方已有的位置。
 type SessionLog struct {
-	database      *sql.DB
+	index         *historyIndex
 	sessionID     identity.SessionID
 	directory     string
 	backupDir     string
@@ -30,7 +28,7 @@ func (r SessionRepository) OpenLog(ctx context.Context, id identity.SessionID) (
 		return nil, err
 	}
 	return &SessionLog{
-		database:      r.database,
+		index:         newHistoryIndex(),
 		sessionID:     id,
 		directory:     sessionPath(r.dataRoot, info.ProjectID, id),
 		backupDir:     r.dataRoot,
@@ -39,8 +37,8 @@ func (r SessionRepository) OpenLog(ctx context.Context, id identity.SessionID) (
 	}, nil
 }
 
-func (l SessionLog) ReadFrom(ctx context.Context, branchID identity.BranchID, agentID identity.AgentID, offset int64, recoverTail bool, apply func(jsonl.Position, []byte) error) error {
-	path := l.path(branchID, agentID)
+func (l SessionLog) ReadFrom(ctx context.Context, agentID identity.AgentID, offset int64, recoverTail bool, apply func(jsonl.Position, []byte) error) error {
+	path := l.path(agentID)
 	if err := jsonl.CheckRegularFile(path); err != nil {
 		return err
 	}
@@ -50,17 +48,17 @@ func (l SessionLog) ReadFrom(ctx context.Context, branchID identity.BranchID, ag
 	return jsonl.ScanFrom(ctx, path, offset, apply)
 }
 
-func (l SessionLog) ReadAt(ctx context.Context, branchID identity.BranchID, agentID identity.AgentID, position jsonl.Position) ([]byte, error) {
-	return jsonl.ReadAt(ctx, l.path(branchID, agentID), position)
+func (l SessionLog) ReadAt(ctx context.Context, agentID identity.AgentID, position jsonl.Position) ([]byte, error) {
+	return jsonl.ReadAt(ctx, l.path(agentID), position)
 }
 
-func (l SessionLog) Append(ctx context.Context, branchID identity.BranchID, agentID identity.AgentID, data []byte) (jsonl.Position, error) {
+func (l SessionLog) Append(ctx context.Context, agentID identity.AgentID, data []byte) (jsonl.Position, error) {
 	if err := ctx.Err(); err != nil {
 		return jsonl.Position{}, err
 	}
 	path := l.subagentPaths[agentID]
 	if agentID == l.mainAgent {
-		path = l.path(branchID, agentID)
+		path = l.path(agentID)
 	}
 	position, err := jsonl.Append(path, data)
 	if err != nil {
@@ -69,8 +67,8 @@ func (l SessionLog) Append(ctx context.Context, branchID identity.BranchID, agen
 	return position, nil
 }
 
-func (l SessionLog) CreateSubagent(ctx context.Context, branchID identity.BranchID, agentID identity.AgentID) error {
-	path := l.path(branchID, agentID)
+func (l SessionLog) CreateSubagent(ctx context.Context, agentID identity.AgentID) error {
+	path := l.path(agentID)
 	if err := jsonl.Create(ctx, path); err != nil {
 		return err
 	}
@@ -78,11 +76,11 @@ func (l SessionLog) CreateSubagent(ctx context.Context, branchID identity.Branch
 	return nil
 }
 
-func (l SessionLog) Subagents(ctx context.Context, branchID identity.BranchID) ([]identity.AgentID, error) {
+func (l SessionLog) Subagents(ctx context.Context) ([]identity.AgentID, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(filepath.Join(l.directory, "branches", branchID.String(), "subagents"))
+	entries, err := os.ReadDir(filepath.Join(l.directory, "subagents"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -94,23 +92,14 @@ func (l SessionLog) Subagents(ctx context.Context, branchID identity.BranchID) (
 		if name, matched := strings.CutSuffix(entry.Name(), ".jsonl"); !entry.IsDir() && matched {
 			agentID := identity.AgentID(name)
 			agents = append(agents, agentID)
-			l.subagentPaths[agentID] = l.path(branchID, agentID)
+			l.subagentPaths[agentID] = l.path(agentID)
 		}
 	}
 	return agents, nil
 }
 
-func (l SessionLog) RemoveBranch(ctx context.Context, branchID identity.BranchID) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	directory := filepath.Join(l.directory, "branches", branchID.String())
-	maps.DeleteFunc(l.subagentPaths, func(_ identity.AgentID, path string) bool { return filepath.Dir(filepath.Dir(path)) == directory })
-	return os.RemoveAll(directory)
-}
-
-func (l SessionLog) path(branchID identity.BranchID, agentID identity.AgentID) string {
-	base := filepath.Join(l.directory, "branches", branchID.String())
+func (l SessionLog) path(agentID identity.AgentID) string {
+	base := l.directory
 	if agentID == l.mainAgent {
 		return filepath.Join(base, "main.jsonl")
 	}

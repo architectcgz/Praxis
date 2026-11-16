@@ -8,15 +8,13 @@ import (
 	"io"
 	"path/filepath"
 	"praxis/internal/clock"
-	agentrun "praxis/internal/core/agent/run"
-	"praxis/internal/core/agent/run/timing"
+	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
-	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/timing"
 	"praxis/internal/core/tool"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"strings"
 	"sync"
@@ -34,7 +32,7 @@ type ExecutorDependencies struct {
 // OutputFiles 是工具结果的文件边界；临时目录解析与实际落盘由 Infra 提供。
 type OutputFiles interface {
 	Directory(identity.SessionID) string
-	Bound(identity.SessionID, tool.ToolResult) (tool.ToolResult, error)
+	Bound(identity.SessionID, tool.ToolResult, int) (tool.ToolResult, error)
 }
 
 // Executor 只定位活跃 ToolCall；调用退出后立即释放审批和工具控制状态。
@@ -58,9 +56,26 @@ func NewExecutor(deps ExecutorDependencies) *Executor {
 	return &Executor{deps: deps, active: make(map[Key]*callState)}
 }
 
+// RunOwner 提供已绑定执行的只读事实，不依赖具体 Run 实现。
+type RunOwner interface {
+	BeginWaiting()
+	EndWaiting()
+	Main() bool
+	Snapshot() sessionentry.RunRecord
+	Entry(string) (*sessionentry.ContextEntry, bool)
+	EventSource(identity.TurnID) coreevent.EventSource
+}
+
+// RequestProgress 已绑定本次执行，审核只提交请求事实。
+type RequestProgress interface {
+	RecordModelRequest(context.Context, sessionentry.ModelRequestRecord, *timing.Record) error
+	RecordModelResponse(context.Context, sessionentry.ModelRequestRecord, *timing.Record) error
+}
+
 // RunTools 只绑定本次已取得运行权的 AgentRun 的环境。
 type RunTools struct {
-	run           *agentrun.Run
+	run           RunOwner
+	progress      RequestProgress
 	executor      *Executor
 	projectPath   string
 	catalog       tool.ToolCatalog
@@ -79,10 +94,11 @@ type CallResult struct {
 	Err         error
 }
 
-func (e *Executor) ForRun(run *agentrun.Run, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, awaitApproval func(context.Context) error) *RunTools {
+func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, progress RequestProgress, awaitApproval func(context.Context) error) *RunTools {
 	return &RunTools{
 		executor:      e,
 		run:           run,
+		progress:      progress,
 		projectPath:   projectPath,
 		catalog:       catalog,
 		mode:          mode,
@@ -96,19 +112,12 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 	s := tools.executor
 	owner := tools.run.Snapshot()
 	s.mu.Lock()
-	if s.active[call.Key] != nil {
-		s.mu.Unlock()
-		return CallResult{}, errorcode.ErrRequestConflict
-	}
 	s.active[call.Key] = &callState{
 		call:         call,
 		sourceTaskID: owner.SourceTaskID,
 	}
 	s.mu.Unlock()
 	defer s.unregister(call.Key)
-	if stored, found := tools.run.Result(call.Key); found {
-		return existingResult(stored), nil
-	}
 	if err := ctx.Err(); err != nil {
 		return callError("tool_interrupted", err.Error()), nil
 	}
@@ -117,10 +126,6 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 		return callError("tool_not_allowed", "The requested tool is disabled or unregistered."), nil
 	}
 	operationID := hook.NewOperationID()
-	modified, hookErr := s.deps.HookDispatcher.BeforeToolExecution(ctx, toolHookEvent(call, call.Arguments, operationID))
-	if hookErr != nil {
-		return CallResult{}, hookErr
-	}
 	if err := ctx.Err(); err != nil {
 		return callError("tool_interrupted", err.Error()), nil
 	}
@@ -133,7 +138,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 		// 解码前保留业务默认路径，显式空值仍按该工具自己的缺省规则处理。
 		defaultPath = *path
 	}
-	if err := decodeToolArguments(modified, arguments); err != nil {
+	if err := decodeToolArguments(call.Arguments, arguments); err != nil {
 		return callError("invalid_tool_call", err.Error()), nil
 	}
 	// 项目根目录已由业务入口校验；模型路径只在此处解析，准备与授权均使用规范化后的同一值。
@@ -163,6 +168,9 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 	args, err := json.Marshal(prepared.Arguments)
 	if err != nil {
 		return CallResult{}, fmt.Errorf("encode prepared tool arguments: %w", err)
+	}
+	if err := s.deps.HookDispatcher.BeforeToolExecution(ctx, toolHookEvent(call, string(args), operationID)); err != nil {
+		return CallResult{}, err
 	}
 	return tools.execute(ctx, call, prepared, args, operationID)
 }
@@ -244,7 +252,7 @@ func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, 
 			value.ErrorClass = "tool_execution_failed"
 		}
 	}
-	bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value)
+	bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value, tool.MaxInlineResultBytes)
 	if outputErr != nil {
 		sideEffect := value.SideEffect
 		value = tool.NewToolError("tool_output_save_failed", "The tool has already run, but saving its output failed: "+outputErr.Error()+". Do not rerun the operation solely to recover its output.")
@@ -267,7 +275,7 @@ type observedCall struct {
 	call     func(context.Context) (tool.ToolResult, error)
 	name     tool.ToolName
 	timing   *timing.Record
-	run      *agentrun.Run
+	run      RunOwner
 	hooks    *hook.Dispatcher
 	emitter  *coreevent.Emitter
 	identity hook.Identity
@@ -315,12 +323,6 @@ func callError(code, message string) CallResult {
 	return CallResult{ToolResult: tool.NewToolError(code, message)}
 }
 
-// existingResult 只复用已接纳回执，不重复执行工具或后置 Hook。
-func existingResult(entry sessionentry.ContextEntry) CallResult {
-	block := entry.Content[0].(sessionentry.ToolResultBlock)
-	result := tool.ToolResult{Payload: block.Text}
-	if block.IsError {
-		result.ErrorClass = "tool_execution_failed"
-	}
-	return CallResult{ToolResult: result, Timing: block.Timing}
+func (tools *RunTools) BoundResult(result tool.ToolResult, limit int) (tool.ToolResult, error) {
+	return tools.executor.deps.Outputs.Bound(tools.run.Snapshot().SessionID, result, limit)
 }

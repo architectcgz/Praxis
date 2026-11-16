@@ -2,7 +2,8 @@ package provider
 
 import (
 	"context"
-	sessionentry "praxis/internal/core/session/entry"
+	modelapi "praxis/internal/core/model"
+	modelusage "praxis/internal/core/model/usage"
 )
 
 // EventKind 标识模型 Provider 适配器产生的流事件类型。
@@ -39,16 +40,18 @@ type Event struct {
 	Kind           EventKind
 	Text           string
 	ToolCall       ToolCall
-	Usage          *Usage
+	Usage          *modelusage.Usage
 	StopReason     StopReason
 	Err            error
-	ReasoningState *sessionentry.ReasoningState
+	ReasoningState *modelapi.ReasoningState
 	// OutputIndex 保存协议输出块顺序，Loop 收集后按此顺序构造历史，不影响实时展示。
 	OutputIndex *int
 }
 
 // Provider 定义模型调用方消费的统一模型流接口。
 // Provider 适配器实现此接口，不向调用方暴露协议细节。
+// Provider 每次 Stream 只发起一次尝试；取消后释放流资源并关闭通道。
+// 消费者提前停止处理时应取消 Context，并消费剩余事件直到通道关闭。
 type Provider interface {
 	// Stream 发起模型请求并返回事件通道；请求无效或连接失败时返回错误。
 	// 返回 nil 错误时，事件通道必须非 nil。

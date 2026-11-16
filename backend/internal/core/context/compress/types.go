@@ -8,6 +8,7 @@ import (
 
 // Options 使用调用方提供的模型窗口，ReservedTokens 为工具定义等请求开销。
 type Options struct {
+	InputTokens     int
 	ContextWindow   int
 	MaxOutputTokens int
 	ReservedTokens  int

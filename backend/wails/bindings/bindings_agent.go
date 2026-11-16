@@ -21,7 +21,7 @@ func (b *AgentBindings) ListAgentEntries(request dto.AgentHistoryRequest) (dto.H
 	if err != nil {
 		return dto.HistoryPage{}, err
 	}
-	page, err := services.Commands.ListAgentEntries(ctx, identity.SessionID(request.SessionID), identity.AgentID(request.AgentID), identity.BranchID(request.BranchID), request.HeadEntryID, request.BeforeEntryID, request.Limit)
+	page, err := services.Commands.ListAgentEntries(ctx, identity.SessionID(request.SessionID), identity.AgentID(request.AgentID), request.HeadEntryID, request.BeforeEntryID, request.Limit)
 	if err != nil {
 		return dto.HistoryPage{}, publicError(b.host, "ListAgentEntries", err)
 	}
@@ -35,14 +35,4 @@ func publicHistoryPage(page sessionmodel.HistoryPage) dto.HistoryPage {
 		HasMore:     page.HasMore,
 		NextCursor:  page.NextCursor,
 	}
-}
-
-func validateAgentQuery(sessionID, branchID, agentID string) error {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return err
-	}
-	if err := validation.ID("branchId", branchID); err != nil {
-		return err
-	}
-	return validation.ID("agentId", agentID)
 }

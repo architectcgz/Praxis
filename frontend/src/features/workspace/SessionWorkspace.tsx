@@ -8,7 +8,6 @@ import { AgentTaskInput } from '../agent/AgentTaskInput'
 import { PrimaryAgentTaskInput } from '../agent/PrimaryAgentTaskInput'
 import { AgentsPanel } from '../agent/AgentsPanel'
 import { SessionPanel } from '../session/SessionPanel'
-import { BranchDialog, BranchStatus } from '../session/BranchNavigation'
 import { TaskQueue } from '../task/TaskQueue'
 import { WORKSPACE_COMMANDS } from './useWorkspaceCommands'
 import { useSessionPage, type SessionPageOptions } from './useSessionPage'
@@ -26,7 +25,6 @@ type Props = SessionPageOptions & {
 export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSettings, onStateChange, ...options }: Props) {
     const page = useSessionPage(options)
     const inputRef = useRef<HTMLTextAreaElement>(null)
-    const history = page.agent?.Kind === 'main' ? page.browsing : null
     const title = page.session?.title || options.title || ''
     const { busy, refreshing, models, refresh, close } = page
     useEffect(() => {
@@ -43,33 +41,34 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
             )}
             <SessionPanel loading={page.sessionLoading} hasSession={Boolean(page.session)} sessionsCount={sessionsCount}>
                 {page.session && <AgentSessionPanel
-                    branchId={page.session.branch.id}
-                    historyEntryId={history?.entryId ?? null}
                     submissionRevision={page.submissionRevision}
                     usageRevision={page.usageRevision}
-                    loading={!history && page.agentLoading}
+                    loading={page.agentLoading}
                     agents={page.agents}
                     agent={page.agent}
-                    entries={history ? history.entries : page.entries}
+                    entries={page.entries}
                     agentEntries={page.agentEntries}
                     agentEntriesErrors={page.agentEntriesErrors}
                     outputStore={page.outputStore}
                     onSelectAgent={page.selectAgent}
-                    entriesError={history ? page.previewError : page.entriesError}
-                    hasEarlier={history ? history.page.hasMore : page.hasEarlier}
-                    historyLoading={history ? page.previewHistoryLoading : page.historyLoading}
-                    onLoadEarlier={history ? page.loadEarlierPreview : page.loadEarlier}
-                    onRetryHistory={history ? page.loadEarlierPreview : page.retryHistory}
+                    entriesError={page.entriesError}
+                    hasEarlier={page.hasEarlier}
+                    historyLoading={page.historyLoading}
+                    onLoadEarlier={page.loadEarlier}
+                    onRetryHistory={page.retryHistory}
                     busy={page.busy}
-                    composer={page.agent ? <>
+                    composer={page.agent?.Kind === 'subagent' ? <div className="agent-input-accessory">
+                        <p>子代理接收主代理的补充指令。</p>
+                        <button type="button" onClick={() => page.selectAgent(page.session!.id)}>返回主代理</button>
+                        {page.agent.currentRunId && <button type="button" disabled={page.busy} onClick={() => void page.stop()}>停止子代理</button>}
+                    </div> : page.agent ? <>
                         <div className="command-band agent-input-accessory">
-                            <BranchStatus branch={page.session.branch} browsing={Boolean(page.browsing)} busy={page.busy} onReturn={page.returnToHead} cleanupPending={Boolean(page.cleanupTarget)} cleanupLoading={page.cleanupLoading} cleanupError={page.cleanupError} onRetryCleanup={() => void page.retryCleanup()} />
-                            <TaskQueue tasks={page.session.tasks} busy={page.busy} onCancel={page.cancelQueuedTask} />
+                            <TaskQueue tasks={page.session.tasks} paused={page.session.queuePaused} busy={page.busy} onCancel={page.cancelQueuedTask} onChangePaused={page.changeQueue} />
                         </div>
                         <AgentTaskInput
                             inputRef={inputRef}
                             sessionId={page.session.id}
-                            active={page.agent.state === 'executing'}
+                            active={Boolean(page.agent.currentRunId)}
                             canQueue={page.canQueue}
                             input={page.input}
                             setInput={page.setInput}
@@ -105,17 +104,6 @@ export function SessionWorkspace({ active, sessionsCount, modalOpen, onOpenSetti
             onSelectAgent={page.selectAgent}
         />
         {active && <Toast message={page.error ? '' : page.commandNotice} onDismiss={page.clearCommandNotice} />}
-        {active && page.branchDialog && page.session && <BranchDialog
-            key={`${page.session.branch.id}-${page.branchDialog}`}
-            returnFocusRef={inputRef}
-            kind={page.branchDialog}
-            branches={page.branches}
-            tree={page.tree}
-            currentBranchId={page.session.branch.id}
-            onSwitch={page.switchBranch}
-            onBrowse={page.browseEntries}
-            onDelete={page.deleteBranch}
-            onClose={page.closeBranchDialog}
-        />}
+
     </div>
 }

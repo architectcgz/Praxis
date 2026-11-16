@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	agentrun "praxis/internal/core/agent/run"
-	"praxis/internal/core/agent/run/timing"
+	"fmt"
 	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
+	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
-	"praxis/internal/errorcode"
+	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 	"strings"
 	"unicode/utf8"
@@ -47,16 +48,13 @@ type ReviewRequest struct {
 }
 
 type Reviewer struct {
-	Progress interface {
-		BeginRequestTurn(context.Context, *agentrun.Run) (identity.TurnID, error)
-		RecordModelRequest(context.Context, *agentrun.Run, agentrun.ModelRequestRecord, *timing.Record) error
-		RecordModelResponse(context.Context, *agentrun.Run, agentrun.ModelRequestRecord, *timing.Record) error
-	}
 	HookDispatcher *hook.Dispatcher
 }
 
 // reviewRunError 表示执行状态或进度记录失败，不能降级为人工审批。
 type reviewRunError struct{ error }
+
+var ErrRiskReviewFailed = errors.New("risk review failed")
 
 func (e *reviewRunError) Unwrap() error { return e.error }
 
@@ -96,11 +94,8 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 }
 
 // review 由执行调用方生成请求身份、应用模型限制并记录审核结果。
-func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string) (review RiskReview, err error) {
+func (t *RunTools) reviewAttempt(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string, retryCount int) (review RiskReview, err error) {
 	task := t.run.Snapshot()
-	if task.Status != agentrun.RunRunning || call.RunID != task.ID {
-		return review, &reviewRunError{error: errorcode.ErrRequestConflict}
-	}
 	input, found := t.run.Entry(task.InputEntryID)
 	if !found || input.TextContent() == "" {
 		return review, &reviewRunError{error: errors.New("risk review cannot locate the task input")}
@@ -116,37 +111,49 @@ func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args 
 		ProviderID: model.ProviderID,
 		ModelID:    model.ModelID,
 	}
-	turnID, err := r.Progress.BeginRequestTurn(ctx, t.run)
-	if err != nil {
-		return review, &reviewRunError{error: err}
+	inputTokens, budgetErr := request.Context.EstimatedTokens()
+	if budgetErr != nil {
+		return review, &reviewRunError{error: budgetErr}
 	}
-	// 与普通请求、摘要共用 Turn 序号；进度接纳失败时不调用 Provider。
-	if err := r.Progress.RecordModelRequest(ctx, t.run, agentrun.ModelRequestRecord{
-		ID:     review.RequestID,
-		RunID:  task.ID,
-		TurnID: turnID,
-		CallID: call.CallID,
-		Kind:   agentrun.ModelRequestRiskReview,
-		Status: agentrun.ModelRequestRunning,
+	inputTokens += appcontext.EstimateTokens(string(request.OutputSchema.Schema)) + 128
+	if capacityErr := appcontext.CheckCapacity(inputTokens, model.MaxOutputTokens, model.ContextWindow); capacityErr != nil {
+		return review, &reviewRunError{error: capacityErr}
+	}
+	turnID := call.TurnID
+	// 审核复用触发工具的 Turn；摘要不关联 Turn，进度接纳失败时不调用 Provider。
+	if err := t.progress.RecordModelRequest(ctx, sessionentry.ModelRequestRecord{
+		ID:         review.RequestID,
+		RunID:      task.ID,
+		TurnID:     turnID,
+		CallID:     call.CallID,
+		Kind:       sessionentry.ModelRequestRiskReview,
+		Status:     sessionentry.RequestRunning,
+		RetryCount: retryCount,
 	}, nil); err != nil {
 		return review, &reviewRunError{error: err}
 	}
 	outputBytes := 0
-	var usage *providerapi.Usage
+	var text strings.Builder
+	span := timing.NewSpan()
+	span.Start()
+	var usage *modelusage.Usage
 	var stopReason providerapi.StopReason
 	defer func() {
 		// 审核与普通请求共享结果保存边界，存储失败不能降级为人工审批。
-		if progressErr := r.Progress.RecordModelResponse(context.WithoutCancel(ctx), t.run, agentrun.ModelRequestRecord{
+		if progressErr := t.progress.RecordModelResponse(context.WithoutCancel(ctx), sessionentry.ModelRequestRecord{
 			ID:          review.RequestID,
 			RunID:       task.ID,
 			TurnID:      turnID,
 			CallID:      call.CallID,
-			Kind:        agentrun.ModelRequestRiskReview,
-			Status:      agentrun.RequestStatus(ctx, err),
-			StopReason:  stopReason,
+			Kind:        sessionentry.ModelRequestRiskReview,
+			Status:      sessionentry.RequestStatus(ctx, err),
+			StopReason:  string(stopReason),
 			OutputBytes: outputBytes,
 			Usage:       usage,
-		}, nil); progressErr != nil {
+			RetryCount:  retryCount,
+			Error:       errorText(err),
+			Partial:     []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text.String()}},
+		}, span.End()); progressErr != nil {
 			err = &reviewRunError{error: errors.Join(err, progressErr)}
 		}
 	}()
@@ -162,7 +169,9 @@ func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args 
 		ReferenceID: review.RequestID.String(),
 	})
 	defer func() { scope.End(hook.Result{Err: err}) }()
-	stream, err := t.provider.Stream(ctx, providerapi.Request{
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	stream, err := t.provider.Stream(streamCtx, providerapi.Request{
 		RunID:           call.RunID,
 		PromptCacheKey:  call.SessionID.String(),
 		Context:         request.Context,
@@ -179,7 +188,11 @@ func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args 
 	if stream == nil {
 		return review, errors.New("risk review returned a nil stream")
 	}
-	var text strings.Builder
+	defer func() {
+		cancelStream()
+		for range stream {
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -246,4 +259,29 @@ func validateRiskAssessment(a security.RiskAssessment) error {
 		return errors.New("risk assessment requires a canonical reason within 1000 bytes")
 	}
 	return nil
+}
+
+func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string) (RiskReview, error) {
+	var result RiskReview
+	var err error
+	for retry := 0; retry <= 3; retry++ {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		result, err = t.reviewAttempt(ctx, call, args, ruleID, retry)
+		if err == nil {
+			return result, nil
+		}
+		if _, ok := errors.AsType[*reviewRunError](err); ok {
+			return result, err
+		}
+		t.executor.deps.Emitter.Emit(coreevent.Event{Source: t.run.EventSource(call.TurnID), Payload: coreevent.ErrorOccurred{Message: fmt.Sprintf("Risk review failed (attempt %d/4): %v", retry+1, err)}})
+	}
+	return result, &reviewRunError{error: errors.Join(ErrRiskReviewFailed, fmt.Errorf("risk review failed after four attempts: %w", err))}
+}
+func errorText(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { CircleAlert, LoaderCircle, X } from 'lucide-react'
 import { Overlay } from '../../components/ui'
@@ -14,7 +14,6 @@ import { useProjectWorkspace } from './useProjectWorkspace'
 import { SessionWorkspace, type SessionPageControls } from './SessionWorkspace'
 import { WorkspaceHeader } from './WorkspaceHeader'
 
-const ModelConfigPanel = lazy(() => import('../setting/model-config/ModelConfigPanel').then((module) => ({ default: module.ModelConfigPanel })))
 
 export function ProjectWorkspace() {
     const workspace = useProjectWorkspace()
@@ -24,11 +23,11 @@ export function ProjectWorkspace() {
     const [navigationOpen, setNavigationOpen] = useState(false)
     const navigationWasOpen = useRef(false)
     const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({})
-    const [page, setPage] = useState<'project' | 'session' | 'settings' | 'models'>('session')
+    const [page, setPage] = useState<'project' | 'session' | 'settings'>('session')
     const [selectedProjectID, setSelectedProjectID] = useState('')
     const [pageControls, setPageControls] = useState<Record<string, SessionPageControls>>({})
     const [closingSessionID, setClosingSessionID] = useState('')
-    const settingsOpen = page === 'settings' || page === 'models'
+    const settingsOpen = page === 'settings'
     const activePage = pageControls[workspace.selectedSessionID]
     const projectGroups = useMemo(() => groupSessions(workspace.sessions, workspace.projects), [workspace.sessions, workspace.projects])
     const activeProject = page === 'project' ? projectGroups.find((item) => item.id === selectedProjectID)
@@ -109,7 +108,7 @@ export function ProjectWorkspace() {
         <WorkspaceHeader
             busy={workspace.busy || Boolean(activePage?.busy)} refreshing={workspace.refreshing || Boolean(activePage?.refreshing)}
             projectName={settingsOpen ? '设置' : activeProject?.name}
-            sessionTitle={page === 'models' ? 'Provider 与 Model' : page === 'project' ? '项目概览' : activePage?.title}
+            sessionTitle={page === 'project' ? '项目概览' : activePage?.title}
             onRefresh={() => void refresh()} navigationOpen={navigationOpen} onOpenNavigation={() => setNavigationOpen(true)}
         />
         {workspace.openedSessionIDs.length > 0 && <nav className="session-tabs" aria-label="已打开的会话">
@@ -132,8 +131,7 @@ export function ProjectWorkspace() {
             />)}
             {(page !== 'session' || !workspace.openedSessionIDs.length) && <>
                 <main className="main-panel">
-                    {page === 'settings' ? <SettingsPanel models={activePage?.models || []} onOpenModels={() => setPage('models')} />
-                    : page === 'models' ? <Suspense fallback={<div className="management-loading" role="status" aria-label="加载配置中"><LoaderCircle size={20} className="is-spinning" aria-hidden="true" /></div>}><ModelConfigPanel onRefresh={() => void refresh()} onBack={() => setPage('settings')} /></Suspense>
+                    {page === 'settings' ? <SettingsPanel models={activePage?.models || []} />
                     : page === 'project' ? <ProjectOverview project={projectGroups.find((item) => item.id === selectedProjectID) || { id: selectedProjectID, name: '项目', path: '', sessions: [] }} selectedSessionID={workspace.selectedSessionID} onSelectSession={selectSession} onOpenSession={openSession} />
                     : <SessionPanel loading={false} hasSession={false} sessionsCount={workspace.sessions.length} />}
                 </main>
@@ -145,7 +143,7 @@ export function ProjectWorkspace() {
         {closingSessionID && <Overlay labelledBy="close-session-page-title" onClose={() => { if (!pageControls[closingSessionID]?.busy) setClosingSessionID('') }}>
             <section className="session-close-dialog">
                 <h2 id="close-session-page-title">关闭会话页？</h2>
-                <p>将停止此会话的全部执行并清空待办队列，未发送的草稿会丢失。已保存的会话历史仍然保留，重新打开时需重新选择模型。</p>
+                <p>将停止此会话的全部执行并清空待办队列，未发送的草稿会丢失。已保存的会话历史仍然保留。</p>
                 <div className="session-close-actions">
                     <button type="button" className="modal-secondary" disabled={pageControls[closingSessionID]?.busy} onClick={() => setClosingSessionID('')}>取消</button>
                     <button type="button" className="modal-primary modal-danger" disabled={pageControls[closingSessionID]?.busy} onClick={() => void closePage()}>结束执行并关闭</button>

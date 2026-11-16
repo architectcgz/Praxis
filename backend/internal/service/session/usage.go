@@ -3,20 +3,11 @@ package session
 import (
 	"context"
 	modelusage "praxis/internal/core/model/usage"
-	providerapi "praxis/internal/core/provider"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 )
 
-// SessionUsageSummary 汇总主、子 Run 的累计值；请求明细只用于逐次展示。
-// CacheReadRatio 使用 0 到 1，零输入或存在未知缓存计数时为 nil。
-type SessionUsageSummary struct {
-	modelusage.Totals
-	TotalRequests     uint64
-	CacheReadRatio    *float64
-	CacheReadComplete bool
-}
-
-func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.SessionID, turnIDs []identity.TurnID) ([]providerapi.UsageRecord, error) {
+func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.SessionID, turnIDs []identity.TurnID) ([]modelusage.UsageRecord, error) {
 	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -24,13 +15,13 @@ func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.Sessi
 	return owner.UsageRecords(ctx, turnIDs)
 }
 
-func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID identity.SessionID) (SessionUsageSummary, error) {
+func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID identity.SessionID) (sessionmodel.SessionUsageSummary, error) {
 	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
-		return SessionUsageSummary{}, err
+		return sessionmodel.SessionUsageSummary{}, err
 	}
 	totals, requests := owner.UsageTotals()
-	summary := SessionUsageSummary{
+	summary := sessionmodel.SessionUsageSummary{
 		Totals:            totals,
 		TotalRequests:     requests,
 		CacheReadComplete: totals.CacheReadReports == requests,

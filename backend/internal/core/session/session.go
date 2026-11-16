@@ -11,16 +11,19 @@ import (
 // 日志写入失败不撤销内存更新；发布后的 Entry 及其内部载荷只读。
 // 模型请求、工具执行和 Hook 不持有会话锁。
 type Session struct {
-	commitMu sync.Mutex
-	mu       sync.RWMutex
-	data     *Data
-	log      EventLog
-	clock    clock.Clock
-	ids      identity.IDGenerator
+	configMu      sync.RWMutex
+	configuration *Configuration
+	choice        ModelChoice
+	commitMu      sync.Mutex
+	mu            sync.RWMutex
+	data          *Data
+	log           EntryLog
+	clock         clock.Clock
+	ids           identity.IDGenerator
 }
 
 // New 接管完成索引与必要恢复的数据；发布实例后不再直接修改 data。
-func New(data *Data, log EventLog, clock clock.Clock, ids identity.IDGenerator) *Session {
+func New(data *Data, log EntryLog, clock clock.Clock, ids identity.IDGenerator) *Session {
 	return &Session{
 		data:  data,
 		log:   log,
@@ -32,12 +35,7 @@ func New(data *Data, log EventLog, clock clock.Clock, ids identity.IDGenerator) 
 func (s *Session) Empty() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, branch := range s.data.Branches {
-		if branch.HeadEntryID != "" {
-			return false
-		}
-	}
-	return true
+	return s.data.HeadEntryID == ""
 }
 
 func capped[T any](values []T, limit int) []T {

@@ -2,7 +2,6 @@ import { System } from '@wailsio/runtime'
 import {
     AgentBindings,
     CommandBindings,
-    ModelBindings,
     ProjectBindings,
     SessionBindings,
 } from '../../bindings/praxis/wails/bindings'
@@ -40,8 +39,4 @@ export function getAgentBinding() {
 
 export function getCommandBinding() {
     return requireBinding(CommandBindings)
-}
-
-export function getModelBinding() {
-    return requireBinding(ModelBindings)
 }

@@ -1,33 +1,32 @@
 package bootstrap
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"praxis/internal/clock"
+	agentrun "praxis/internal/core/agent/run"
+	"praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	sessionmodel "praxis/internal/core/session"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	tooloutput "praxis/internal/infra/tools/output"
-	runservice "praxis/internal/service/agent/run"
-	"praxis/internal/service/coordinator"
-	sessionservice "praxis/internal/service/session"
 	"time"
 )
 
-func buildCoordinator(resources storageResources, sessions *sessionservice.Service, hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
-	runService := runservice.NewService(runservice.Dependencies{
+func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*sessionmodel.Configuration, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
+	runDeps := agentrun.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
 		Sessions:       resources.storage.Sessions,
-		Records:        sessions,
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
-	})
+	}
 	reviewer := &executionmodel.Reviewer{
-		Progress:       runService,
 		HookDispatcher: hooks,
 	}
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
@@ -51,14 +50,14 @@ func buildCoordinator(resources storageResources, sessions *sessionservice.Servi
 	if runnerDeps.Logf == nil {
 		runnerDeps.Logf = func(string, ...any) {}
 	}
-	// 执行状态由业务服务按次绑定；复制共享依赖，不改写外部 Runner。
+	// 执行状态由所属 Run 按次维护；复制共享依赖，不改写外部 Runner。
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
 	runner := loop.NewRunner(runnerDeps)
 	return coordinator.NewCoordinator(coordinator.Config{
 		Loop:              &runner,
-		Operations:        runService,
-		Sessions:          sessions,
+		RunDependencies:   runDeps,
+		LoadConfig:        loadConfig,
 		HookDispatcher:    hooks,
 		Logger:            resources.logger,
 		Tools:             executor,

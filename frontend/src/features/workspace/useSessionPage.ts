@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { API_ERROR_CODES, isBindingAvailable, subscribeAgentEvents, subscribeSessionConfigReloaded, type ApiErrorCode, type SessionSnapshot } from '../../api'
-import { apiErrorCode, readableError } from '../../shared/errors'
+import { useCallback, useEffect, useState } from 'react'
+import { readableError } from '../../shared/errors'
 import { useAgentData } from '../agent/useAgentData'
-import { useAgentCommands } from '../agent/useAgentCommands'
+import { useRunControl } from '../run/useRunControl'
 import { useSessionData } from '../session/useSessionData'
-import { useBranchNavigation } from '../session/useBranchNavigation'
+import { createSessionStore } from '../session/sessionStore'
 import { useTaskSubmission } from '../task/useTaskSubmission'
-import { useModelCatalog } from '../setting/model-config/useModelCatalog'
+import { useModelCatalog } from '../session/useModelCatalog'
 import { useWorkspaceCommands } from './useWorkspaceCommands'
 
 export type SessionPageOptions = {
@@ -15,101 +14,42 @@ export type SessionPageOptions = {
     createNewSession: (projectID: string) => Promise<boolean>
     refreshCatalog: (manual?: boolean, throwOnError?: boolean) => Promise<void>
 }
-
-/** 页面实例拥有会话状态和订阅，是否显示不改变其生命周期。 */
-export function useSessionPage({ sessionID, title, createNewSession, refreshCatalog }: SessionPageOptions) {
-    const [busy, setBusy] = useState(false)
+/** 页面只组合身份、动作和操作反馈，不持有其他 Hook 的请求资源。 */
+export function useSessionPage({ sessionID, title, createNewSession }: SessionPageOptions) {
+    const [store] = useState(() => createSessionStore(sessionID))
+    const data = useSessionData(store)
+    const { session, updateTitle, loadSession } = data
+    const catalog = useModelCatalog(session?.id || '')
+    const { refreshModels } = catalog
+    const agents = useAgentData({ store, models: catalog.models })
+    const controls = useRunControl(agents.agent)
+    const main = agents.agents.find((agent) => agent.Kind === 'main')
+    const submission = useTaskSubmission({ sessionID, input: agents.input, mainActive: Boolean(main?.currentRunId), setInput: agents.setInput })
+    const commands = useWorkspaceCommands({ sessionID, projectID: session?.projectId || '', createNewSession, refreshModels, setInput: agents.setInput })
     const [submissionRevision, setSubmissionRevision] = useState(0)
-    const [error, setError] = useState('')
-    const [errorCode, setErrorCode] = useState<ApiErrorCode | undefined>()
-    const viewRequestRef = useRef(0)
-    const { session, sessionLoading, sessionError, loadSession, releaseSession, adoptSession, bindSubmission, updateTitle } = useSessionData(sessionID)
-    const { models, loading: modelsLoading, error: modelsError, refreshModels } = useModelCatalog(session?.id || '')
-    const { loadForSession, ...agents } = useAgentData({ sessionID: session?.id || '', models, setError, setErrorCode })
-
-    const initialize = useCallback(async () => {
-        try {
-            const value = await loadSession()
-            if (value) await loadForSession(value)
-        } catch (reason) {
-            setError(readableError(reason))
-            setErrorCode(apiErrorCode(reason))
-        }
-    }, [loadSession, loadForSession])
-
-    useEffect(() => {
-        void initialize()
-        return () => { viewRequestRef.current += 1 }
-    }, [initialize])
     useEffect(() => { if (title !== undefined) updateTitle(title) }, [title, updateTitle])
-
-    const applySession = useCallback(async (value: SessionSnapshot) => {
-        adoptSession(value)
-        await loadForSession(value)
-    }, [adoptSession, loadForSession])
-    const branch = useBranchNavigation({ session, applySession, setError })
-    const controls = useAgentCommands({
-        agent: agents.agent, busy, getSelectedAgentID: agents.getSelectedAgentID,
-        setBusy, setError, setErrorCode, viewRequestRef,
-    })
-    const submission = useTaskSubmission({
-        agent: agents.agent, busy, input: agents.input,
-        sessionID, bindingID: session?.bindingId || '',
-        prepareSubmission: branch.prepareSubmission, bindSubmission,
-        getSelectedAgentID: agents.getSelectedAgentID,
-        setBusy, setError, setErrorCode, setInput: agents.setInput, viewRequestRef,
-    })
-    const commands = useWorkspaceCommands({
-        createBranch: branch.createBranch, switchBranch: branch.switchBranch, showBranches: branch.showBranches,
-        session, bridgeAvailable: isBindingAvailable(), busy, createNewSession,
-        refreshCatalog, refreshModels, viewRequestRef,
-        selectedAgentID: agents.selectedAgentID, getSelectedAgentID: agents.getSelectedAgentID,
-        setBusy, setError, setErrorCode, setInput: agents.setInput,
-    })
-
-    useEffect(() => subscribeAgentEvents((event) => {
-        if (event.kind === 'error' && event.sessionId === sessionID && event.branchId === session?.branch.id) {
-            setError(event.data.message)
-            setErrorCode(undefined)
-        }
-    }), [sessionID, session?.branch.id])
-    useEffect(() => subscribeSessionConfigReloaded((id) => {
-        if (id === sessionID) void refreshModels(false)
-    }), [sessionID, refreshModels])
-    useEffect(() => {
-        if (agents.modelSelectionReady && errorCode === API_ERROR_CODES.modelNotConfigured) { setError(''); setErrorCode(undefined) }
-    }, [agents.modelSelectionReady, errorCode])
-
+    useEffect(() => { if (data.configRevision) void refreshModels(false) }, [data.configRevision, refreshModels])
     const refresh = useCallback(async () => {
-        if (!session) { await initialize(); return }
+        if (!session) { await loadSession(); return }
         await refreshModels(false)
-    }, [session, initialize, refreshModels])
-    const close = useCallback(async () => {
-        setBusy(true)
-        try {
-            await releaseSession()
-            return true
-        } catch (reason) {
-            setError(readableError(reason)); setErrorCode(apiErrorCode(reason))
-            return false
-        } finally { setBusy(false) }
-    }, [releaseSession])
+    }, [session, loadSession, refreshModels])
     const submitInput = async () => {
-        if (agents.input.trim().startsWith('/')) {
-            await commands.runCommand(agents.input.trim())
-        } else if (await submission.submitTask()) {
-            branch.returnToHead()
-            setSubmissionRevision((value) => value + 1)
-        }
+        if (agents.input.trim().startsWith('/')) await commands.runCommand(agents.input.trim())
+        else if (await submission.submitTask()) setSubmissionRevision((current) => current + 1)
     }
-    const dataError = sessionError ?? modelsError
+    const operationError = submission.error || controls.error || commands.error
+    const error = operationError || agents.selectionError || (data.sessionError ? readableError(data.sessionError) : '') || (catalog.error ? readableError(catalog.error) : '')
     return {
-        ...agents, ...branch, ...controls, ...commands,
-        session, sessionLoading, models,
-        busy: busy || agents.modelSelectionPending, refreshing: modelsLoading,
-        error: error || (dataError === undefined ? '' : readableError(dataError)),
-        errorCode: error ? errorCode : apiErrorCode(dataError),
-        submitInput, submissionRevision, canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask,
-        refresh, close,
+        ...agents,
+        session, sessionLoading: data.sessionLoading, models: catalog.models,
+        busy: submission.busy || controls.busy || commands.busy || data.closing || agents.modelSelectionPending,
+        refreshing: catalog.loading,
+        error, errorCode: !operationError && agents.selectionError ? agents.selectionErrorCode : undefined,
+        usageRevision: data.usageRevision,
+        submitInput, submissionRevision,
+        canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask, changeQueue: submission.changeQueue,
+        stop: controls.stop,
+        runCommand: commands.runCommand, commandNotice: commands.commandNotice, clearCommandNotice: commands.clearCommandNotice,
+        refresh, close: data.releaseSession,
     }
 }

@@ -3,16 +3,16 @@ package bindings
 import (
 	"context"
 	"errors"
+	execution "praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
 	modelconfig "praxis/internal/core/model/config"
+	modelusage "praxis/internal/core/model/usage"
 	projectmodel "praxis/internal/core/project"
-	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
+	taskmodel "praxis/internal/core/task"
 	"praxis/internal/identity"
 	approvalservice "praxis/internal/service/approval"
-	execution "praxis/internal/service/coordinator"
-	modelservice "praxis/internal/service/model"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	toolservice "praxis/internal/service/toolexecution"
@@ -22,7 +22,6 @@ import (
 type ProjectService interface {
 	ListProjects(context.Context, int) ([]projectmodel.Project, error)
 	CreateProject(context.Context, projectservice.CreateInput) (projectmodel.Project, error)
-	PreviewFile(context.Context, identity.SessionID, string) (projectservice.FilePreview, error)
 }
 
 type ApprovalService interface {
@@ -31,8 +30,9 @@ type ApprovalService interface {
 }
 
 type SessionService interface {
+	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
+	DeleteSession(context.Context, identity.SessionID) error
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
-	ListSessionAgents(context.Context, identity.SessionID, identity.BranchID, int) ([]sessionservice.AgentView, error)
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
@@ -40,39 +40,26 @@ type SessionService interface {
 }
 
 type AgentCommands interface {
-	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
-	SelectSession(context.Context, identity.SessionID, identity.BranchID) (execution.BindingView, error)
+	SelectSession(context.Context, identity.SessionID) (execution.SessionView, error)
 	CloseSession(context.Context, identity.SessionID) error
-	CreateBranch(context.Context, identity.SessionID, identity.BranchID, string, sessionmodel.BranchInput) (execution.BindingView, error)
-	SwitchBranch(context.Context, identity.SessionID, identity.BranchID, string, string) (execution.BindingView, error)
-	ListBranches(context.Context, identity.SessionID) ([]execution.BranchView, error)
-	Tree(context.Context, identity.SessionID) ([]sessionmodel.TreeNode, error)
-	EntriesAt(context.Context, identity.SessionID, string, string, int) (sessionmodel.HistoryPage, error)
-	SessionContent(context.Context, identity.SessionID, identity.BranchID) (execution.SessionContent, error)
-	DeleteBranch(context.Context, identity.SessionID, identity.BranchID, identity.BranchID, string) (execution.BranchDeletion, error)
-	DeleteSession(context.Context, identity.SessionID) error
-	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, identity.BranchID, string, string, int) (sessionmodel.HistoryPage, error)
+	SessionContent(context.Context, identity.SessionID) (execution.SessionContent, error)
+	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, string, string, int) (sessionmodel.HistoryPage, error)
 	StopAgent(context.Context, execution.RunControl) error
 	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]toolservice.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error
-	SubmitTask(context.Context, sessionservice.TaskInput) (execution.SubmitResult, error)
-	CancelTask(context.Context, identity.SessionID, string, identity.TaskID) error
+	SubmitTask(context.Context, taskmodel.Input) (execution.SubmitResult, error)
+	CancelTask(context.Context, identity.SessionID, identity.TaskID) error
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
 	ReloadSessionConfig(context.Context, identity.SessionID) error
-}
-
-type ModelConfigService interface {
-	Configuration() modelservice.ConfigSnapshot
-	SaveModelConfig(modelconfig.Config) error
-	SetProviderKey(string, string) error
-	DiscoverProviderModels(context.Context, string) ([]string, error)
+	PauseQueue(context.Context, identity.SessionID) error
+	ResumeQueue(context.Context, identity.SessionID) error
 }
 
 type UsageService interface {
-	ListSessionUsage(context.Context, identity.SessionID, []identity.TurnID) ([]providerapi.UsageRecord, error)
-	GetSessionUsageSummary(context.Context, identity.SessionID) (sessionservice.SessionUsageSummary, error)
+	ListSessionUsage(context.Context, identity.SessionID, []identity.TurnID) ([]modelusage.UsageRecord, error)
+	GetSessionUsageSummary(context.Context, identity.SessionID) (sessionmodel.SessionUsageSummary, error)
 }
 
 // Services 由 Bootstrap 注入业务对象和只读日志定位能力，不创建中间应用层。
@@ -81,7 +68,6 @@ type Services struct {
 	Approvals      ApprovalService
 	Sessions       SessionService
 	Commands       AgentCommands
-	ModelConfig    ModelConfigService
 	Emitter        *coreevent.Emitter
 	Usages         UsageService
 	SessionLogPath func(context.Context, identity.SessionID) (string, error)
@@ -90,14 +76,13 @@ type Services struct {
 // Validate 在宿主接入边界检查完整装配，失败时不开放 binding。
 func (s Services) Validate() error {
 	for name, missing := range map[string]bool{
-		"projects":            s.Projects == nil,
-		"approvals":           s.Approvals == nil,
-		"sessions":            s.Sessions == nil,
-		"commands":            s.Commands == nil,
-		"model configuration": s.ModelConfig == nil,
-		"event emitter":       s.Emitter == nil,
-		"usages":              s.Usages == nil,
-		"session log path":    s.SessionLogPath == nil,
+		"projects":         s.Projects == nil,
+		"approvals":        s.Approvals == nil,
+		"sessions":         s.Sessions == nil,
+		"commands":         s.Commands == nil,
+		"event emitter":    s.Emitter == nil,
+		"usages":           s.Usages == nil,
+		"session log path": s.SessionLogPath == nil,
 	} {
 		if missing {
 			return errors.New("frontend " + name + " is required")

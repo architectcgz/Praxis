@@ -4,54 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	agentrun "praxis/internal/core/agent/run"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"reflect"
 	"slices"
 )
 
-func (s *Session) AppendEntry(ctx context.Context, branchID identity.BranchID, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
+func (s *Session) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
 	s.commitMu.Lock()
 	defer s.commitMu.Unlock()
-	return s.appendEntry(ctx, branchID, s.data.MainAgentID(), value)
+	return s.appendEntry(ctx, s.data.MainAgentID(), value)
 }
 
-// appendEntry 的调用方持有提交锁；磁盘读取和提交期间不持有数据锁。
-func (s *Session) appendEntry(ctx context.Context, branchID identity.BranchID, agentID identity.AgentID, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
-	prior, err := s.entry(ctx, value.ID)
-	if err == nil {
-		value.ParentID, value.CreatedAt = prior.ParentID, prior.CreatedAt
-		if !reflect.DeepEqual(*prior, value) {
-			return nil, false, errorcode.ErrRequestConflict
-		}
-		node, err := s.node(ctx, value.ID)
-		if err != nil {
-			return nil, false, err
-		}
-		if node.AgentID != agentID {
-			return nil, false, errorcode.ErrRequestConflict
-		}
-		if agentID == s.data.MainAgentID() {
-			s.mu.RLock()
-			branch := s.data.Branch(branchID)
-			var head string
-			if branch != nil {
-				head = branch.HeadEntryID
-			}
-			s.mu.RUnlock()
-			nodes, err := s.pathNodes(ctx, head)
-			if err != nil {
-				return nil, false, err
-			}
-			if !slices.ContainsFunc(nodes, func(node sessionentry.Node) bool { return node.ID == prior.ID }) {
-				return nil, false, errorcode.ErrRequestConflict
-			}
-		}
-		return prior, false, nil
+// appendEntry 在唯一接纳边界同步保存，写入失败交给所属执行明确停止。
+func (s *Session) appendEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
-	if !errors.Is(err, errorcode.ErrNotFound) {
+	if prior, err := s.entry(ctx, value.ID); err == nil {
+		return prior, false, nil
+	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return nil, false, err
 	}
 	s.mu.Lock()
@@ -59,37 +32,24 @@ func (s *Session) appendEntry(ctx context.Context, branchID identity.BranchID, a
 		s.mu.Unlock()
 		return nil, false, errorcode.ErrInvalidTransition
 	}
-	if agentID == s.data.MainAgentID() {
-		branch := s.data.Branch(branchID)
-		if branch == nil {
+	if agentID != s.data.MainAgentID() {
+		if _, ok := s.data.AgentHistories[agentID]; !ok {
 			s.mu.Unlock()
 			return nil, false, errorcode.ErrNotFound
 		}
-		value.ParentID = branch.HeadEntryID
-	} else {
-		history, found := s.data.AgentHistories[agentID]
-		if !found || history.BranchID != branchID {
-			s.mu.Unlock()
-			return nil, false, errorcode.ErrNotFound
-		}
-		value.ParentID = history.HeadEntryID
 	}
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = s.clock.Now()
 	}
-	stored := s.data.acceptEntry(branchID, agentID, value)
+	stored := s.data.acceptEntry(agentID, value)
 	s.mu.Unlock()
-	persisted, err := s.log.AppendEvent(ctx, Event{
-		Type:      EventEntryAppended,
-		Key:       stored.ID,
-		BranchID:  branchID,
-		AgentID:   agentID,
-		CreatedAt: s.clock.Now(),
-		Payload:   *stored,
-	})
+	persisted, err := s.log.AppendEntry(ctx, agentID, *stored)
 	if persisted {
 		s.mu.Lock()
 		s.data.releaseEntry(stored.ID)
+		if stored.IsRun() {
+			delete(s.data.RunStates, identity.RunID(stored.RunID))
+		}
 		s.mu.Unlock()
 	}
 	return stored, true, err
@@ -132,6 +92,38 @@ func (s *Session) readEntries(ctx context.Context, ids []string) ([]*sessionentr
 		return nil, err
 	}
 	for _, entry := range entries {
+		var reference string
+		switch v := entry.Payload.(type) {
+		case sessionentry.SubagentReportAccepted:
+			reference = v.ReportID
+		case sessionentry.SubagentInstructionAccepted:
+			reference = v.MessageID
+		}
+		if reference != "" {
+			sources, err := s.log.Entries(ctx, []string{reference})
+			if err != nil {
+				return nil, err
+			}
+			if len(sources) != 1 {
+				return nil, fmt.Errorf("accepted message source %s is missing", reference)
+			}
+			text := ""
+			switch v := sources[0].Payload.(type) {
+			case sessionentry.SubagentReportReceived:
+				status := string(v.Report.Outcome)
+				if status == "" {
+					status = "progress"
+				}
+				text = fmt.Sprintf("[Subagent report %s] agent=%s run=%s outcome=%s final=%t partial=%t failure=%s\n%s", v.Report.ReportID, v.Report.AgentID, v.Report.RunID, status, v.Report.Final, v.Report.Partial, v.Report.FailureCode, v.Report.Text)
+			case sessionentry.SubagentInstructionReceived:
+				text = v.Text
+			}
+			view := *entry
+			view.Role = role.User
+			view.AuthorKind = sessionentry.AuthorAgent
+			view.Content = []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text}}
+			entry = &view
+		}
 		pending[entry.ID] = entry
 	}
 	values := make([]*sessionentry.ContextEntry, 0, len(ids))
@@ -161,64 +153,49 @@ func (s *Session) pathNodes(ctx context.Context, head string) ([]sessionentry.No
 	if err := s.syncHistory(ctx); err != nil {
 		return nil, err
 	}
-	var tail []sessionentry.Node
-	s.mu.RLock()
-	for head != "" {
-		node, found := s.data.PendingNodes[head]
-		if !found {
-			break
-		}
-		tail = append(tail, node)
-		head = node.ParentID
-	}
-	s.mu.RUnlock()
-	nodes, err := s.log.PathNodes(ctx, head)
-	if err != nil {
-		return nil, err
-	}
-	if head != "" && (len(nodes) == 0 || nodes[len(nodes)-1].ID != head) {
-		return nil, errorcode.ErrNotFound
-	}
-	slices.Reverse(tail)
-	return append(nodes, tail...), nil
+	return s.log.PathNodes(ctx, head)
 }
 
-// BranchEntries 只读取最后摘要、保留原文和其后的模型可见历史，与界面页大小无关。
-func (s *Session) BranchEntries(ctx context.Context, branchID identity.BranchID) ([]*sessionentry.ContextEntry, error) {
+// Entries 选择最近摘要及其后的完整历史，不受界面分页范围限制。
+func (s *Session) Entries(ctx context.Context) ([]*sessionentry.ContextEntry, error) {
 	s.commitMu.Lock()
 	defer s.commitMu.Unlock()
 	s.mu.RLock()
-	branch := s.data.Branch(branchID)
-	var head string
-	if branch != nil {
-		head = branch.HeadEntryID
-	}
+	head := s.data.HeadEntryID
 	s.mu.RUnlock()
-	if branch == nil {
-		return nil, errorcode.ErrNotFound
-	}
-	return s.contextEntries(ctx, head)
+	return s.contextEntries(ctx, head, "")
 }
 
-func (s *Session) contextEntries(ctx context.Context, head string) ([]*sessionentry.ContextEntry, error) {
+func (s *Session) contextEntries(ctx context.Context, head, inputMessageID string) ([]*sessionentry.ContextEntry, error) {
 	nodes, err := s.pathNodes(ctx, head)
 	if err != nil {
 		return nil, err
 	}
+
 	start := 0
-	retained := make(map[string]bool)
-	for index := len(nodes) - 1; index >= 0; index-- {
-		if nodes[index].Summary {
-			start = index
-			for _, id := range nodes[index].RetainedEntryIDs {
-				retained[id] = true
-			}
+	currentRun := ""
+	for _, node := range nodes {
+		if node.MessageID == inputMessageID && inputMessageID != "" {
+			currentRun = node.RunID
+		}
+	}
+	latestTurn := ""
+	for i := len(nodes) - 1; i >= 0; i-- {
+		if nodes[i].HasToolCalls && nodes[i].RunID == currentRun {
+			latestTurn = nodes[i].TurnID
+			break
+		}
+	}
+	for i := len(nodes) - 1; i >= 0; i-- {
+		if nodes[i].Summary {
+			start = i
 			break
 		}
 	}
 	var ids []string
-	for index, node := range nodes {
-		if !node.Run && (index >= start || retained[node.ID]) {
+	for i, node := range nodes {
+		keep := i >= start || inputMessageID != "" && node.MessageID == inputMessageID || latestTurn != "" && node.RunID == currentRun && node.TurnID == latestTurn
+		if keep && !node.Run && !node.Metadata {
 			ids = append(ids, node.ID)
 		}
 	}
@@ -253,6 +230,13 @@ func (s *Session) Page(ctx context.Context, head, before string, limit int) (His
 }
 
 func (s *Session) page(ctx context.Context, head, before string, limit int, nodes []sessionentry.Node) (HistoryPage, error) {
+	visible := make([]sessionentry.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Visible {
+			visible = append(visible, node)
+		}
+	}
+	nodes = visible
 	end := len(nodes)
 	if before != "" {
 		end = slices.IndexFunc(nodes, func(node sessionentry.Node) bool { return node.ID == before })
@@ -279,17 +263,11 @@ func (s *Session) page(ctx context.Context, head, before string, limit int, node
 	return page, nil
 }
 
-func (s *Session) AgentPage(ctx context.Context, branchID identity.BranchID, agentID identity.AgentID, head, before string, limit int) (HistoryPage, error) {
+func (s *Session) AgentPage(ctx context.Context, agentID identity.AgentID, head, before string, limit int) (HistoryPage, error) {
 	s.commitMu.Lock()
 	defer s.commitMu.Unlock()
 	s.mu.RLock()
-	branch := s.data.Branch(branchID)
-	if branch == nil {
-		s.mu.RUnlock()
-		return HistoryPage{}, errorcode.ErrNotFound
-	}
-	branchHead := branch.HeadEntryID
-	current := branchHead
+	current := s.data.HeadEntryID
 	if agentID != s.data.MainAgentID() {
 		history, found := s.data.AgentHistories[agentID]
 		if !found {
@@ -298,27 +276,15 @@ func (s *Session) AgentPage(ctx context.Context, branchID identity.BranchID, age
 		}
 		current = history.HeadEntryID
 	}
-	runs := slices.Clone(s.data.Runs)
 	s.mu.RUnlock()
-	if agentID != s.data.MainAgentID() {
-		nodes, err := s.pathNodes(ctx, branchHead)
-		if err != nil {
-			return HistoryPage{}, err
-		}
-		visible := visibleRuns(runs, branchID, nodes)
-		if !slices.ContainsFunc(visible, func(run agentrun.HistorySummary) bool { return run.AgentID == agentID }) {
-			return HistoryPage{}, errorcode.ErrNotFound
-		}
-	}
-	if head == "" {
-		head = current
-	}
 	nodes, err := s.pathNodes(ctx, current)
 	if err != nil {
 		return HistoryPage{}, err
 	}
+	if head == "" {
+		head = current
+	}
 	if head != "" {
-		// 固定 Head 必须属于当前主路径或被选择子代理的独立路径。
 		index := slices.IndexFunc(nodes, func(node sessionentry.Node) bool { return node.ID == head })
 		if index < 0 {
 			return HistoryPage{}, errorcode.ErrRequestConflict
@@ -326,4 +292,16 @@ func (s *Session) AgentPage(ctx context.Context, branchID identity.BranchID, age
 		nodes = nodes[:index+1]
 	}
 	return s.page(ctx, head, before, limit, nodes)
+}
+
+func (s *Session) ModelEntries(ctx context.Context, agentID identity.AgentID, inputMessageID string) ([]*sessionentry.ContextEntry, error) {
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+	s.mu.RLock()
+	head := s.data.HeadEntryID
+	if agentID != s.data.MainAgentID() {
+		head = s.data.AgentHistories[agentID].HeadEntryID
+	}
+	s.mu.RUnlock()
+	return s.contextEntries(ctx, head, inputMessageID)
 }

@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
 	"strings"
 )
 

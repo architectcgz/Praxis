@@ -7,7 +7,7 @@ const stateLabels: Record<string, string> = {
 }
 
 export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }: AgentsPanelProps) {
-    const agents = session?.agents || []
+    const agents = (session?.agents || []).filter((agent) => agent.Kind === 'main' || agent.currentRunId || agent.ID === selectedAgentID)
     return (
         <aside className="sidebar side right agents-panel">
             <div className="sidebar-heading side-head">

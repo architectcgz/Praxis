@@ -1,14 +1,11 @@
-import { Children, createContext, isValidElement, memo, useContext, useDeferredValue, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
+import { Children, isValidElement, memo, useDeferredValue, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { openExternalURL } from '../../../api/filePreview'
+import { openExternalURL } from '../../../api/externalLinks'
 import { readableError } from '../../../shared/errors'
 import { parseMessageLink } from './messageLinks'
 import { CopyIconButton } from './CopyIconButton'
-
-/** 由会话预览容器提供打开文件的动作；预览内的相对链接以当前文件为基准。 */
-export const FilePreviewContext = createContext<{ openFile: (path: string) => void; basePath?: string } | null>(null)
 
 const markdownPlugins = [remarkGfm]
 const markdownComponents: Components = {
@@ -61,9 +58,8 @@ const MarkdownContent = memo(function MarkdownContent({ content, streaming }: { 
 })
 
 function MessageLink({ href = '', children, title }: ComponentPropsWithoutRef<'a'>) {
-    const preview = useContext(FilePreviewContext)
     const [error, setError] = useState('')
-    const link = parseMessageLink(href, preview?.basePath)
+    const link = parseMessageLink(href)
     const openExternal = async (url: string) => {
         setError('')
         try {
@@ -72,10 +68,7 @@ function MessageLink({ href = '', children, title }: ComponentPropsWithoutRef<'a
             setError(`打开链接失败：${readableError(reason)}`)
         }
     }
-    if (link.kind === 'file') {
-        return <button className="message-file-link" type="button" disabled={!preview}
-            onClick={() => preview?.openFile(link.path)}>{children}</button>
-    }
+    if (link.kind === 'file') return <code title={link.path}>{children}</code>
     if (link.kind === 'external') {
         return <><a href={link.url} target="_blank" rel="noopener noreferrer" title={title || '在浏览器中打开'}
             onClick={(event) => { event.preventDefault(); void openExternal(link.url) }}>{children}</a>

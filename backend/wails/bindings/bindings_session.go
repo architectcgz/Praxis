@@ -2,9 +2,9 @@ package bindings
 
 import (
 	"context"
+	coordinator "praxis/internal/core/coordinator"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	coordinator "praxis/internal/service/coordinator"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -46,7 +46,7 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 		RequestID: identity.RequestID(wire.RequestID),
 		ProjectID: identity.ProjectID(wire.ProjectID),
 	}
-	result, err := services.Commands.CreateSession(ctx, params)
+	result, err := services.Sessions.CreateSession(ctx, params)
 	if err != nil {
 		return dto.CreateSessionResponse{}, publicError(b.host, "SessionBindings.CreateSession", err)
 	}
@@ -56,40 +56,37 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	}, nil
 }
 
-// SelectSession 完成会话数据加载并返回当前分支的计时快照，后续命令直接使用已加载实例。
-func (b *SessionBindings) SelectSession(sessionID, branchID string) (dto.SessionSnapshot, error) {
+// SelectSession 完成会话加载并返回主历史、代理状态及队列快照，后续命令直接使用已加载实例。
+func (b *SessionBindings) SelectSession(sessionID string) (dto.SessionSnapshot, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
-	}
-	if err := validation.Value("branchId", branchID, "omitempty,id"); err != nil {
 		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return dto.SessionSnapshot{}, err
 	}
-	view, err := services.Commands.SelectSession(ctx, identity.SessionID(sessionID), identity.BranchID(branchID))
+	view, err := services.Commands.SelectSession(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession", err)
 	}
 	return b.sessionSnapshot(ctx, services, view)
 }
 
-func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services, view coordinator.BindingView) (dto.SessionSnapshot, error) {
-	content, err := services.Commands.SessionContent(ctx, view.Session.ID, view.Branch.ID)
+func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services, view coordinator.SessionView) (dto.SessionSnapshot, error) {
+	content, err := services.Commands.SessionContent(ctx, view.Session.ID)
 	agents := content.Agents
 	if err != nil {
 		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.agents", err)
 	}
 	result := dto.SessionSnapshot{
-		BindingID: view.BindingID,
-		Branch:    view.Branch,
+		QueuePaused: view.QueuePaused,
+
 		ID:        view.Session.ID.String(),
 		ProjectID: view.Session.ProjectID.String(),
 		Title:     view.Session.Title,
 		CreatedAt: view.Session.CreatedAt,
 		UpdatedAt: view.Session.UpdatedAt,
-		Agents:    agents,
+		Agents:    publicAgents(agents),
 		Tasks:     make([]dto.QueuedTask, 0, len(view.Tasks)),
 		Entries:   map[string]dto.HistoryPage{view.Session.ID.String(): publicHistoryPage(content.Page)},
 	}
@@ -140,7 +137,7 @@ func (b *SessionBindings) DeleteSession(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := services.Commands.DeleteSession(ctx, identity.SessionID(sessionID)); err != nil {
+	if err := services.Sessions.DeleteSession(ctx, identity.SessionID(sessionID)); err != nil {
 		return publicError(b.host, "SessionBindings.DeleteSession", err)
 	}
 	return nil
@@ -172,4 +169,29 @@ func sessionSummary(value sessionmodel.SessionInfo) dto.SessionSummary {
 		CreatedAt: value.CreatedAt,
 		UpdatedAt: value.UpdatedAt,
 	}
+}
+
+func (b *SessionBindings) GetSessionSummary(sessionID string) (dto.SessionSummary, error) {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return dto.SessionSummary{}, publicInputError(b.host, "GetSessionSummary", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return dto.SessionSummary{}, err
+	}
+	info, err := services.Sessions.GetSessionInfo(ctx, identity.SessionID(sessionID))
+	if err != nil {
+		return dto.SessionSummary{}, publicError(b.host, "GetSessionSummary", err)
+	}
+	return sessionSummary(info), nil
+}
+func (b *SessionBindings) CloseSession(sessionID string) error {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return publicInputError(b.host, "CloseSession", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return err
+	}
+	return publicError(b.host, "CloseSession", services.Commands.CloseSession(ctx, identity.SessionID(sessionID)))
 }

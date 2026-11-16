@@ -22,6 +22,7 @@ type SessionInfo struct {
 	ID           identity.SessionID
 	ProjectID    identity.ProjectID
 	Title        string
+	ModelChoice  ModelChoice
 	State        SessionState
 	ApprovalMode *security.ApprovalMode `json:",omitempty"`
 	CreatedAt    time.Time

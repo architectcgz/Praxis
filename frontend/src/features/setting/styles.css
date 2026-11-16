@@ -1,4 +1,2 @@
 /* 设置 feature 样式入口。页面总览和 Provider/Model 管理保持独立文件。 */
 @import './settings.css';
-@import './model-config/styles.css';
-@import './model-config/dialogs.css';

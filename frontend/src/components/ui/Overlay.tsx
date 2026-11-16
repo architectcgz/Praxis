@@ -18,7 +18,7 @@ export function Overlay({ labelledBy, onClose, children, className = '', returnF
     // 在子元素 autoFocus 执行前记录触发器，关闭后才能恢复到页面内的真实入口。
     const [previousActiveElement] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null)
     const restoreFocus = useEffectEvent(() => {
-        // 分支切换可能重建输入区，关闭时恢复到入口当前持有的节点。
+        // 页面更新可能重建输入区，关闭时恢复到入口当前持有的节点。
         const target = returnFocusRef?.current ?? previousActiveElement
         if (target?.isConnected) target.focus({ preventScroll: true })
     })

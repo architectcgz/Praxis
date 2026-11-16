@@ -2,15 +2,15 @@ package hook
 
 import (
 	"context"
-	agentrun "praxis/internal/core/agent/run"
+	sessionentry "praxis/internal/core/entry"
 	providerapi "praxis/internal/core/provider"
 )
 
-type ModelRequestKind = agentrun.ModelRequestKind
+type ModelRequestKind = sessionentry.ModelRequestKind
 
 const (
-	ModelRequestIteration = agentrun.ModelRequestIteration
-	ModelRequestSummary   = agentrun.ModelRequestSummary
+	ModelRequestIteration = sessionentry.ModelRequestIteration
+	ModelRequestSummary   = sessionentry.ModelRequestSummary
 )
 
 // ModelRequest 携带本次请求的只读快照，处理器不返回修改后的请求。

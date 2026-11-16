@@ -3,8 +3,6 @@ import type { QueuedTask as GeneratedQueuedTask } from '../../bindings/praxis/wa
 
 export type QueuedTask = Pick<GeneratedQueuedTask, 'id' | 'prompt' | 'sequence'>
 export type CreateTaskRequest = {
-    bindingId: string
-    branchId: string
     submissionId: string
     sessionId: string
     prompt: string
@@ -12,4 +10,7 @@ export type CreateTaskRequest = {
 
 /** 创建 Session 输入并排队，Agent 与请求身份由后端调度时分配。 */
 export function createTask(request: CreateTaskRequest) { return getCommandBinding().CreateTask(request) }
-export function cancelTask(sessionId: string, bindingId: string, taskId: string) { return getCommandBinding().CancelTask({ sessionId, bindingId, taskId }) }
+export function cancelTask(sessionId: string, taskId: string) { return getCommandBinding().CancelTask({ sessionId, taskId }) }
+
+export function pauseQueue(sessionId: string) { return getCommandBinding().PauseQueue(sessionId) }
+export function resumeQueue(sessionId: string) { return getCommandBinding().ResumeQueue(sessionId) }

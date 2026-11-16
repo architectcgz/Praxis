@@ -2,11 +2,13 @@ package loop
 
 import (
 	"context"
-	"praxis/internal/core/agent/run/timing"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
+	sessionentry "praxis/internal/core/entry"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
-	sessionentry "praxis/internal/core/session/entry"
+	providerapi "praxis/internal/core/provider"
+	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 )
 
@@ -35,14 +37,25 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 			r.Logf("after context compression hook failed: %v", hookErr)
 		}
 	}()
+	request := providerapi.Request{
+		Context:         value,
+		Model:           params.Model,
+		Tools:           r.Tools.List(),
+		MaxOutputTokens: params.Model.MaxOutputTokens,
+	}
+	inputTokens, _, err := requestTokens(request, deps.Budget)
+	if err != nil {
+		return value, NewFailure(FailureContract, err)
+	}
 	span := timing.NewSpan()
 	span.Start()
 	var requests []identity.ModelRequestID
 	var turnID identity.TurnID
 	generated, needed, err := contextcompress.Compress(ctx, value, input, contextcompress.Options{
+		InputTokens:     inputTokens,
 		ContextWindow:   params.Model.ContextWindow,
 		MaxOutputTokens: params.Model.MaxOutputTokens,
-		ReservedTokens:  reservedTokens,
+		ReservedTokens:  reservedTokens + appcontext.Margin(params.Model.ContextWindow) + 128,
 	}, func(summaryCtx context.Context, summaryInput appcontext.ModelContext, limit int) (string, error) {
 		text, requestID, requestTurn, err := r.summarizeContext(summaryCtx, params, deps, summaryInput, limit)
 		turnID = requestTurn
@@ -64,14 +77,14 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	entry.AuthorID, entry.RunID = params.AgentID.String(), params.ID.String()
 	entry.ID = "summary:" + requests[len(requests)-1].String()
 	entry.TurnID = turnID.String()
-	accepted, _, err := deps.AppendEntry(ctx, *entry)
-	if accepted != nil {
-		compressed, changed = generated, true
-		compressed.Entries[0] = accepted
-	}
+	accepted, _, err := deps.AppendEntry(context.WithoutCancel(ctx), *entry)
 	if err != nil {
-		return compressed, err
+		return value, err
 	}
+	compressed, changed = generated, true
+	compressed.Entries[0] = accepted
+	r.emit(params, "", coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*accepted}})
+
 	r.Logf("context compressed run_id=%s entriesBefore=%d entriesAfter=%d", params.ID, len(value.Entries), len(compressed.Entries))
 	return compressed, nil
 }

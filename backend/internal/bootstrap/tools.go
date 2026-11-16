@@ -14,6 +14,7 @@ import (
 
 // builtinTool 只连接 Core 参数规则与 Infra 执行能力，不决定默认值或业务策略。
 type builtinTool[Arguments any] struct {
+	readOnly   bool
 	definition func() tool.ToolDefinition
 	arguments  func() Arguments
 	prepare    func(Arguments) (Arguments, error)
@@ -47,6 +48,7 @@ func buildToolRegistry(extensions []tool.Tool) (*tool.ToolRegistry, error) {
 	builtins := []tool.Tool{
 		builtinTool[readfile.Arguments]{
 			definition: readfile.Definition,
+			readOnly:   true,
 			arguments:  readfile.NewArguments,
 			prepare:    readfile.Prepare,
 			call:       readinfra.Call,
@@ -71,3 +73,5 @@ func buildToolRegistry(extensions []tool.Tool) (*tool.ToolRegistry, error) {
 	}
 	return registry, nil
 }
+
+func (t builtinTool[Arguments]) ReadOnly() bool { return t.readOnly }

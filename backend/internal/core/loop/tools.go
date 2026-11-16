@@ -3,12 +3,17 @@ package loop
 import (
 	"context"
 	"errors"
+	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
+	"slices"
+	"sync"
 	"time"
 )
 
@@ -30,63 +35,163 @@ func prepareToolCalls(params RunParams, turnID identity.TurnID, values []provide
 	return calls
 }
 
-// runToolCalls 返回已取得真实回执的调用数，与回执是否成功写入日志无关。
-func (r *Runner) runToolCalls(ctx context.Context, params RunParams, appendEntry AppendEntry, executor ToolExecutor, calls []sessionentry.ToolCall) (int, error) {
-	for index, call := range calls {
-		outcome, err := executor.Execute(ctx, call)
-		if err != nil {
-			if _, ok := errors.AsType[*hook.Error](err); ok {
-				return index, NewFailure(FailureInternal, err)
-			}
-			return index, NewFailure(FailureStorage, err)
+// runToolCalls 用只读批次和修改屏障执行，完成顺序只影响通知，全部回执按声明顺序一次保存。
+func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDependencies, executor ToolExecutor, calls []sessionentry.ToolCall) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	batchCtx, cancelBatch := context.WithCancel(ctx)
+	defer cancelBatch()
+	outcomes := make([]toolexecution.CallResult, len(calls))
+	failures := make([]error, len(calls))
+	completed := make([]bool, len(calls))
+	execute := func(index int) {
+		call := calls[index]
+		outcomes[index], failures[index] = executor.Execute(batchCtx, call)
+		if failures[index] != nil {
+			cancelBatch()
 		}
-		entry := call.ResultEntry(outcome.ToolResult)
-		block := entry.Content[0].(sessionentry.ToolResultBlock)
-		block.Timing = outcome.Timing
-		entry.Content[0] = block
+		completed[index] = true
+		result := outcomes[index].ToolResult
+		if failures[index] != nil && result.Payload == "" {
+			result = tool.NewToolError("tool_execution_failed", failures[index].Error())
+			outcomes[index].ToolResult = result
+		}
 		r.emit(params, call.TurnID, coreevent.ToolResult{
-			CallID:  block.CallID,
-			Result:  block.Text,
-			IsError: block.IsError,
-			Timing:  outcome.Timing,
+			CallID:  call.CallID,
+			Result:  result.Payload,
+			IsError: result.ErrorClass != "",
+			Timing:  outcomes[index].Timing,
 		})
-		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		_, inserted, err := appendEntry(commitCtx, entry)
-		cancel()
-		if err != nil {
-			return index + 1, err
-		}
-		if inserted && outcome.OperationID != "" {
-			identity := runIdentity(params, call.TurnID)
-			identity.OperationID = outcome.OperationID
-			if hookErr := r.HookDispatcher.AfterToolExecution(context.WithoutCancel(ctx), hook.ToolExecutionResult{
-				ToolExecution: hook.ToolExecution{
-					Identity:  identity,
-					Call:      call,
-					Arguments: string(outcome.Arguments),
-				},
-				Result: outcome.ToolResult,
-				Err:    outcome.Err,
-			}); hookErr != nil {
-				r.Logf("after tool execution hook failed: %v", hookErr)
-			}
-		}
+	}
+	var executionErr error
+	for index := 0; index < len(calls); {
 		if err := ctx.Err(); err != nil {
-			return index + 1, err
+			executionErr = err
+			break
+		}
+		end := index + 1
+		if tool.IsReadOnly(r.Tools, calls[index].Name) {
+			for end < len(calls) && tool.IsReadOnly(r.Tools, calls[end].Name) {
+				end++
+			}
+			var group sync.WaitGroup
+			for current := index; current < end; current++ {
+				group.Go(func() { execute(current) })
+			}
+			group.Wait()
+		} else {
+			execute(index)
+		}
+		for _, err := range failures[index:end] {
+			executionErr = errors.Join(executionErr, err)
+		}
+		if executionErr != nil {
+			break
+		}
+		index = end
+	}
+	for index := range calls {
+		if !completed[index] {
+			outcomes[index].ToolResult = tool.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available.")
 		}
 	}
-	return len(calls), nil
+	if err := r.boundToolResults(ctx, params, deps, executor, outcomes); err != nil {
+		executionErr = errors.Join(executionErr, err)
+	}
+	content := make([]sessionentry.ContentBlock, len(calls))
+	for index, call := range calls {
+		result := outcomes[index]
+		content[index] = sessionentry.ToolResultBlock{
+			CallID:  call.CallID,
+			Name:    call.Name,
+			Text:    result.ToolResult.Payload,
+			IsError: result.ToolResult.ErrorClass != "",
+			Timing:  result.Timing,
+		}
+	}
+	value := sessionentry.ContextEntry{
+		ID:         "tools:" + calls[0].TurnID.String(),
+		RunID:      params.ID.String(),
+		TurnID:     calls[0].TurnID.String(),
+		Role:       role.Tool,
+		AuthorKind: sessionentry.AuthorTool,
+		Content:    content,
+	}
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	stored, inserted, err := deps.AppendEntry(commitCtx, value)
+	if err != nil {
+		return NewFailure(FailureStorage, errors.Join(executionErr, err))
+	}
+	r.emit(params, calls[0].TurnID, coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}})
+	if inserted {
+		for index, result := range outcomes {
+			if result.OperationID == "" {
+				continue
+			}
+			identity := runIdentity(params, calls[index].TurnID)
+			identity.OperationID = result.OperationID
+			if err := r.HookDispatcher.AfterToolExecution(context.WithoutCancel(ctx), hook.ToolExecutionResult{ToolExecution: hook.ToolExecution{Identity: identity, Call: calls[index], Arguments: string(result.Arguments)}, Result: result.ToolResult, Err: result.Err}); err != nil {
+				r.Logf("after tool execution hook failed: %v", err)
+			}
+		}
+	}
+	return executionErr
 }
 
-// interruptToolCalls 只补齐尚未取得真实回执的调用，不执行工具。
-func interruptToolCalls(ctx context.Context, appendEntry AppendEntry, calls []sessionentry.ToolCall) error {
-	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	for _, call := range calls {
-		entry := call.ResultEntry(tool.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available."))
-		if _, _, err := appendEntry(commitCtx, entry); err != nil {
-			return err
+// boundToolResults 在正式回执创建前共享整组预算，优先转存最大的结果，不截断结构化内容。
+func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps RunDependencies, executor ToolExecutor, results []toolexecution.CallResult) error {
+	limiter, ok := executor.(interface {
+		BoundResult(tool.ToolResult, int) (tool.ToolResult, error)
+	})
+	if !ok {
+		return nil
+	}
+	entries, err := deps.ReadEntries(context.WithoutCancel(ctx))
+	if err != nil {
+		return NewFailure(FailureStorage, err)
+	}
+	request := providerapi.Request{
+		Context:         r.BuildContext(ctx, params, entries),
+		Model:           params.Model,
+		Tools:           r.Tools.List(),
+		MaxOutputTokens: params.Model.MaxOutputTokens,
+	}
+	input, _, err := requestTokens(request, deps.Budget)
+	if err != nil {
+		return err
+	}
+	budget := max(0, params.Model.ContextWindow-params.Model.MaxOutputTokens-appcontext.Margin(params.Model.ContextWindow)-input)
+	if params.Model.ContextWindow <= 0 {
+		return nil
+	}
+	sizes := make([]int, len(results))
+	order := make([]int, len(results))
+	total := 0
+	for i, result := range results {
+		sizes[i] = appcontext.EstimateTokens(result.ToolResult.Payload) + 32
+		total += sizes[i]
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return sizes[b] - sizes[a] })
+	for _, index := range order {
+		if total <= budget {
+			break
 		}
+		if sizes[index] <= 256 {
+			continue
+		}
+		prior := results[index].ToolResult
+		bounded, err := limiter.BoundResult(prior, 0)
+		if err != nil {
+			bounded = tool.NewToolError("tool_output_save_failed", "The operation already ran, but saving its output failed: "+err.Error()+". Do not rerun the operation to recover output.")
+			bounded.SideEffect = prior.SideEffect
+		}
+		results[index].ToolResult = bounded
+		total -= sizes[index]
+		sizes[index] = appcontext.EstimateTokens(bounded.Payload) + 32
+		total += sizes[index]
 	}
 	return nil
 }

@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/security"
-	sessionentry "praxis/internal/core/session/entry"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"time"
@@ -25,6 +25,16 @@ type authorizationResult struct {
 func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string) (*tool.ToolResult, error) {
 	e := t.executor
 	decision := security.ResolveApprovalDecision(t.mode)
+	if !t.run.Main() && (decision.Action == security.ApprovalAsk || decision.Action == security.ApprovalAuto) {
+		denied := tool.NewToolError("subagent_approval_unavailable", "This operation requires approval outside the subagent authorization snapshot.")
+		return &denied, nil
+	}
+	waiting := false
+	defer func() {
+		if waiting {
+			t.run.EndWaiting()
+		}
+	}()
 	for {
 		e.mu.Lock()
 		if err := e.checkUnfinished(ctx, call); err != nil {
@@ -54,6 +64,10 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 
 		// Hook、模型请求和人工等待均在控制锁外执行，控制入口只登记决定或停止并唤醒。
 		if result.pending {
+			if !waiting {
+				t.run.BeginWaiting()
+				waiting = true
+			}
 			t.notifyWaiting(ctx, call, args, operationID, sourceTaskID)
 			if err := t.awaitApproval(ctx); err != nil {
 				return nil, err
@@ -62,6 +76,10 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 		}
 		if !result.review {
 			return result.denied, nil
+		}
+		if !waiting {
+			t.run.BeginWaiting()
+			waiting = true
 		}
 		reviewCtx, cancel := context.WithTimeout(ctx, time.Minute)
 		review, reviewErr := t.review(reviewCtx, call, args, decision.RuleID)
@@ -76,11 +94,9 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 			return nil, ctx.Err()
 		}
 		if reviewErr != nil {
-			review.Assessment = security.RiskAssessment{
-				Verdict: security.RiskUncertain,
-				Reason:  "Risk assessment failed or returned an invalid result; manual approval is required.",
-			}
+			return nil, reviewErr
 		}
+
 		record := ReviewRecord{
 			Key:        call.Key,
 			SessionID:  call.SessionID,

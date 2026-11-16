@@ -14,7 +14,7 @@ type CollaborationViewsProps = {
     onSelectAgent: (id: string) => void
 }
 
-/** 展示同一会话的委派任务和并行分支；只以实际执行结算判断完成，不推测百分比。 */
+/** 展示同一会话的委派任务和并行任务；只以实际执行结算判断完成，不推测百分比。 */
 export function CollaborationViews({ agents, agentEntries, entriesErrors, streamingOutputs, onSelectAgent }: CollaborationViewsProps) {
     const subagents = agents.filter((agent) => agent.Kind === 'subagent')
     if (subagents.length === 0) return null
@@ -36,7 +36,7 @@ export function CollaborationViews({ agents, agentEntries, entriesErrors, stream
                         <button className="output-button" type="button" onClick={() => onSelectAgent(task.agent.ID)}><ExternalLink size={12} aria-hidden="true" />查看 Agent</button>
                     </article>)}
                 </div>
-                <p className="output-muted">{completed} / {tasks.length} 已完成 · {running} 执行中{blocked > 0 && ` · ${blocked} 个分支待处理`}</p>
+                <p className="output-muted">{completed} / {tasks.length} 已完成 · {running} 执行中{blocked > 0 && ` · ${blocked} 个任务待处理`}</p>
             </div>
         </section>}
         <section className="output-card output-handoff" aria-label="委派与交接">
@@ -81,10 +81,10 @@ function taskView(agent: AgentView, entries?: Entry[], streaming?: StreamingOutp
     } else if (task?.Outcome === 'interrupted') {
         status = 'cancelled'
         label = '已中断'
-    } else if (agent.state === 'waiting' || task?.Outcome === 'yielded') {
+    } else if (agent.state === 'waiting') {
         status = 'blocked'
         label = '等待输入'
-    } else if (task?.Status === 'ended' && task.Outcome === 'completed') {
+    } else if (task?.Status === 'ended' && (task.Outcome === 'completed' || task.Outcome === 'yielded')) {
         status = 'completed'
         label = '已完成'
     }

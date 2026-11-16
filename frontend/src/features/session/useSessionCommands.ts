@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
     createSession,
     deleteSession as deleteSessionAPI,
@@ -10,35 +10,34 @@ import { apiErrorCode, readableError } from '../../shared/errors'
 
 type SessionCommandContext = {
     bridgeAvailable: boolean
-    busy: boolean
+    selectedSessionID: string
     refreshCatalog: (manual?: boolean) => Promise<void>
     clearSelectedSession: (id: string) => void
     selectSession: (id: string) => void
-    setBusy: Dispatch<SetStateAction<boolean>>
-    setError: Dispatch<SetStateAction<string>>
-    setErrorCode: Dispatch<SetStateAction<ApiErrorCode | undefined>>
     updateSessionTitle: (id: string, title: string) => void
-    viewRequestRef: RefObject<number>
 }
 
 /** 创建或管理 Session，并在完成后同步工作区选中状态。 */
 export function useSessionCommands({
     bridgeAvailable,
-    busy,
+    selectedSessionID,
     refreshCatalog,
     clearSelectedSession,
     selectSession,
-    setBusy,
-    setError,
-    setErrorCode,
     updateSessionTitle,
-    viewRequestRef,
 }: SessionCommandContext) {
+    const [busy, setBusy] = useState(false)
+    const [error, setError] = useState('')
+    const [errorCode, setErrorCode] = useState<ApiErrorCode | undefined>()
+    const viewRequestRef = useRef(0)
+    const pending = useRef(false)
+    useEffect(() => { viewRequestRef.current += 1; return () => { viewRequestRef.current += 1 } }, [selectedSessionID])
     const createNewSession = useCallback(async (projectID: string) => {
-        if (busy || !projectID || !bridgeAvailable) {
+        if (pending.current || !projectID || !bridgeAvailable) {
             return false
         }
         const viewRequestID = viewRequestRef.current
+        pending.current = true
         setBusy(true)
         setError('')
         setErrorCode(undefined)
@@ -60,15 +59,17 @@ export function useSessionCommands({
             }
             return false
         } finally {
+            pending.current = false
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, refreshCatalog, selectSession, setBusy, setError, setErrorCode, viewRequestRef])
+    }, [bridgeAvailable, refreshCatalog, selectSession, setBusy, setError, setErrorCode, viewRequestRef])
 
     const deleteSession = useCallback(async (sessionID: string) => {
-        if (busy || !sessionID || !bridgeAvailable) {
+        if (pending.current || !sessionID || !bridgeAvailable) {
             return false
         }
         const viewRequestID = viewRequestRef.current
+        pending.current = true
         setBusy(true)
         setError('')
         setErrorCode(undefined)
@@ -84,15 +85,17 @@ export function useSessionCommands({
             }
             return false
         } finally {
+            pending.current = false
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, refreshCatalog, clearSelectedSession, setBusy, setError, setErrorCode, viewRequestRef])
+    }, [bridgeAvailable, refreshCatalog, clearSelectedSession, setBusy, setError, setErrorCode, viewRequestRef])
 
     const renameSession = useCallback(async (sessionID: string, title: string) => {
-        if (busy || !sessionID || !title.trim() || !bridgeAvailable) {
+        if (pending.current || !sessionID || !title.trim() || !bridgeAvailable) {
             return false
         }
         const viewRequestID = viewRequestRef.current
+        pending.current = true
         setBusy(true)
         setError('')
         setErrorCode(undefined)
@@ -108,13 +111,15 @@ export function useSessionCommands({
             }
             return false
         } finally {
+            pending.current = false
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, refreshCatalog, updateSessionTitle, setBusy, setError, setErrorCode, viewRequestRef])
+    }, [bridgeAvailable, refreshCatalog, updateSessionTitle, setBusy, setError, setErrorCode, viewRequestRef])
 
     const revealSessionFile = useCallback(async (sessionID: string) => {
-        if (busy || !sessionID || !bridgeAvailable) return false
+        if (pending.current || !sessionID || !bridgeAvailable) return false
         const viewRequestID = viewRequestRef.current
+        pending.current = true
         setBusy(true)
         setError('')
         setErrorCode(undefined)
@@ -128,9 +133,10 @@ export function useSessionCommands({
             }
             return false
         } finally {
+            pending.current = false
             setBusy(false)
         }
-    }, [bridgeAvailable, busy, setBusy, setError, setErrorCode, viewRequestRef])
+    }, [bridgeAvailable, setBusy, setError, setErrorCode, viewRequestRef])
 
-    return { createNewSession, deleteSession, renameSession, revealSessionFile }
+    return { createNewSession, deleteSession, renameSession, revealSessionFile, busy, error, errorCode }
 }

@@ -29,7 +29,7 @@ func (u *Totals) Add(input int64, output, cacheRead, cacheCreation *int64) {
 	}
 }
 
-// Subtract 用于以同一 Run 的新投影替换旧值，或移除已删除分支所属 Run。
+// Subtract 用于以同一 Run 的新投影替换旧值。
 func (u *Totals) Subtract(value Totals) {
 	u.InputTokens -= value.InputTokens
 	u.OutputTokens -= value.OutputTokens

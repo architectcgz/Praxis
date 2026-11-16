@@ -1,7 +1,11 @@
 // Catalog 将工具可用性配置应用到注册目录。
 package tool
 
-import "maps"
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
 
 type ToolConfig struct {
 	Enabled bool `json:"enabled"`
@@ -49,3 +53,33 @@ func (c *Catalog) List() []ToolDefinition {
 	}
 	return result
 }
+
+// Restrict 冻结本次委派的工具子集，同一目录用于模型暴露和执行鉴权。
+type restrictedCatalog struct {
+	registry    ToolCatalog
+	names       map[ToolName]bool
+	definitions []ToolDefinition
+}
+
+func Restrict(parent ToolCatalog, names []ToolName) (ToolCatalog, error) {
+	c := &restrictedCatalog{registry: parent, names: make(map[ToolName]bool), definitions: make([]ToolDefinition, 0, len(names))}
+	for _, name := range names {
+		if _, ok := parent.Get(name); !ok {
+			return nil, fmt.Errorf("tool %s is outside the parent authorization", name)
+		}
+		c.names[name] = true
+	}
+	for _, d := range parent.List() {
+		if c.names[d.Name] {
+			c.definitions = append(c.definitions, d)
+		}
+	}
+	return c, nil
+}
+func (c *restrictedCatalog) Get(name ToolName) (Tool, bool) {
+	if !c.names[name] {
+		return nil, false
+	}
+	return c.registry.Get(name)
+}
+func (c *restrictedCatalog) List() []ToolDefinition { return slices.Clone(c.definitions) }

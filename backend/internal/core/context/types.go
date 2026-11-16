@@ -4,12 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 )
 
 // ModelContext 是本轮模型输入的只读引用视图，与 Session 共享 Entry 对象及内部载荷。
 // 请求可以选择不同的条目列表，但不复制、改写或重排已接纳的历史。
 type ModelContext struct {
+	SummaryInput []*sessionentry.ContextEntry `json:"-"`
 	SystemPrompt string
 	Entries      []*sessionentry.ContextEntry
 }

@@ -29,19 +29,22 @@ var _ repository.Session = SessionRepository{}
 
 func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sessionmodel.SessionInfo, error) {
 	return scanSession(r.database.QueryRowContext(ctx, `
-		SELECT id, project_id, title, state, created_at, updated_at, approval_mode
+		SELECT id, project_id, title, state, created_at, updated_at, approval_mode, provider_id, model_id, reasoning_level
 		FROM sessions WHERE id = ?`, id.String()))
 }
 
-// Create 将会话、唯一根分支与默认选择放入同一个 SQLite 事务。
-func (r SessionRepository) Create(ctx context.Context, value sessionmodel.SessionInfo, root sessionmodel.Branch) (err error) {
+// Create 保存会话元数据并创建连续主日志。
+func (r SessionRepository) Create(ctx context.Context, value sessionmodel.SessionInfo) (err error) {
 	if _, err := r.Get(ctx, value.ID); err == nil {
 		return errorcode.ErrRequestConflict
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return err
 	}
-	dir := branchPath(r.dataRoot, value.ProjectID, value.ID, root.ID)
-	if err := createBranchLog(ctx, dir); err != nil {
+	dir := sessionPath(r.dataRoot, value.ProjectID, value.ID)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if err := jsonl.Create(ctx, filepath.Join(dir, "main.jsonl")); err != nil {
 		return err
 	}
 	defer func() {
@@ -55,21 +58,14 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO sessions (id, project_id, title, state, created_at, updated_at, approval_mode)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO sessions (id, project_id, title, state, created_at, updated_at, approval_mode, provider_id, model_id, reasoning_level)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID.String(), value.ProjectID.String(), value.Title,
-		string(value.State), value.CreatedAt.UnixNano(), value.UpdatedAt.UnixNano(), value.ApprovalMode)
+		string(value.State), value.CreatedAt.UnixNano(), value.UpdatedAt.UnixNano(), value.ApprovalMode, value.ModelChoice.ProviderID, value.ModelChoice.ModelID, value.ModelChoice.ReasoningLevel)
 	if err != nil {
 		return fmt.Errorf("create session metadata: %w", err)
 	}
-	if err := insertBranch(ctx, tx, value.ID, root); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO session_defaults (session_id, root_branch_id, branch_id) VALUES (?, ?, ?)`,
-		value.ID.String(), root.ID.String(), root.ID.String()); err != nil {
-		return fmt.Errorf("create session branch selection: %w", err)
-	}
+
 	return tx.Commit()
 }
 
@@ -84,7 +80,7 @@ func (r SessionRepository) SearchTitle(ctx context.Context, title string, limit 
 }
 func (r SessionRepository) find(ctx context.Context, project identity.ProjectID, title string, limit int) ([]sessionmodel.SessionInfo, error) {
 	rows, err := r.database.QueryContext(ctx, `
-		SELECT id, project_id, title, state, created_at, updated_at, approval_mode
+		SELECT id, project_id, title, state, created_at, updated_at, approval_mode, provider_id, model_id, reasoning_level
 		FROM sessions WHERE (? = '' OR project_id = ?)
 		ORDER BY updated_at DESC, id`, project.String(), project.String())
 	if err != nil {
@@ -130,7 +126,7 @@ func (r SessionRepository) UpdateTitle(ctx context.Context, id identity.SessionI
 func (r SessionRepository) SetApprovalMode(ctx context.Context, id identity.SessionID, mode *security.ApprovalMode, at time.Time) (sessionmodel.SessionInfo, error) {
 	value, err := scanSession(r.database.QueryRowContext(ctx, `
 		UPDATE sessions SET approval_mode = ?, updated_at = ? WHERE id = ?
-		RETURNING id, project_id, title, state, created_at, updated_at, approval_mode`,
+		RETURNING id, project_id, title, state, created_at, updated_at, approval_mode, provider_id, model_id, reasoning_level`,
 		mode, at.UnixNano(), id.String()))
 	if err != nil {
 		return sessionmodel.SessionInfo{}, fmt.Errorf("update session approval mode: %w", err)
@@ -143,7 +139,7 @@ func (r SessionRepository) SetApprovalMode(ctx context.Context, id identity.Sess
 func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) error {
 	value, err := scanSession(r.database.QueryRowContext(ctx, `
 		DELETE FROM sessions WHERE id = ?
-		RETURNING id, project_id, title, state, created_at, updated_at, approval_mode`, id.String()))
+		RETURNING id, project_id, title, state, created_at, updated_at, approval_mode, provider_id, model_id, reasoning_level`, id.String()))
 	if err != nil {
 		return fmt.Errorf("delete session metadata: %w", err)
 	}
@@ -157,11 +153,7 @@ func (r SessionRepository) SessionLogPath(ctx context.Context, id identity.Sessi
 	if err != nil {
 		return "", err
 	}
-	var branchID identity.BranchID
-	if err := r.database.QueryRowContext(ctx, `SELECT branch_id FROM session_defaults WHERE session_id = ?`, id.String()).Scan(&branchID); err != nil {
-		return "", fmt.Errorf("read default branch: %w", err)
-	}
-	path := filepath.Join(branchPath(r.dataRoot, value.ProjectID, id, branchID), "main.jsonl")
+	path := filepath.Join(sessionPath(r.dataRoot, value.ProjectID, id), "main.jsonl")
 	if err := jsonl.CheckRegularFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", errorcode.ErrNotFound
@@ -178,6 +170,23 @@ func openSessionMetadataDatabase(ctx context.Context, dataRoot string) (*sql.DB,
 	}
 	// 单连接避免 SQLite 连接间竞争写锁，结构变更由事务保证原子性。
 	db.SetMaxOpenConns(1)
+	var hasSessions int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sessions'").Scan(&hasSessions); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if hasSessions > 0 {
+		var columns int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('sessions') WHERE name IN ('provider_id','model_id','reasoning_level')").Scan(&columns); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if columns != 3 {
+			_ = db.Close()
+			return nil, fmt.Errorf("session database format is unsupported; select a new data directory")
+		}
+	}
+
 	_, err = db.ExecContext(ctx, `
 		PRAGMA foreign_keys = ON;
 		CREATE TABLE IF NOT EXISTS sessions (
@@ -187,33 +196,13 @@ func openSessionMetadataDatabase(ctx context.Context, dataRoot string) (*sql.DB,
 			state TEXT NOT NULL,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
-			approval_mode TEXT CHECK (approval_mode IN ('ask', 'auto', 'yolo'))
+			approval_mode TEXT CHECK (approval_mode IN ('ask', 'auto', 'yolo')),
+			provider_id TEXT NOT NULL DEFAULT '',
+			model_id TEXT NOT NULL DEFAULT '',
+			reasoning_level TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS sessions_project_updated ON sessions (project_id, updated_at DESC, id);
-		CREATE TABLE IF NOT EXISTS session_branches (
-			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			id TEXT NOT NULL,
-			name TEXT NOT NULL,
-			request_id TEXT NOT NULL,
-			source_branch_id TEXT,
-			base_entry_id TEXT NOT NULL,
-			created_at INTEGER NOT NULL,
-			PRIMARY KEY (session_id, id),
-			UNIQUE (session_id, name),
-			UNIQUE (session_id, request_id),
-			FOREIGN KEY (session_id, source_branch_id) REFERENCES session_branches(session_id, id),
-			CHECK ((source_branch_id IS NULL AND base_entry_id = '') OR (source_branch_id IS NOT NULL AND base_entry_id <> ''))
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS session_branch_root ON session_branches(session_id) WHERE source_branch_id IS NULL;
-		CREATE INDEX IF NOT EXISTS session_branch_parent ON session_branches(session_id, source_branch_id);
-		CREATE TABLE IF NOT EXISTS session_defaults (
-			session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-			root_branch_id TEXT NOT NULL,
-			branch_id TEXT NOT NULL,
-			FOREIGN KEY (session_id, root_branch_id) REFERENCES session_branches(session_id, id),
-			FOREIGN KEY (session_id, branch_id) REFERENCES session_branches(session_id, id)
-		);
-	`+historySchema)
+	`)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("initialize session database: %w", err), db.Close())
 	}
@@ -224,7 +213,7 @@ func scanSession(row interface{ Scan(...any) error }) (sessionmodel.SessionInfo,
 	var value sessionmodel.SessionInfo
 	var createdAt, updatedAt int64
 	var mode sql.NullString
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.State, &createdAt, &updatedAt, &mode); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.State, &createdAt, &updatedAt, &mode, &value.ModelChoice.ProviderID, &value.ModelChoice.ModelID, &value.ModelChoice.ReasoningLevel); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sessionmodel.SessionInfo{}, errorcode.ErrNotFound
 		}
@@ -238,4 +227,13 @@ func scanSession(row interface{ Scan(...any) error }) (sessionmodel.SessionInfo,
 		return sessionmodel.SessionInfo{}, err
 	}
 	return value, nil
+}
+
+func sessionPath(dataRoot string, projectID identity.ProjectID, sessionID identity.SessionID) string {
+	return filepath.Join(dataRoot, "projects", projectID.String(), "sessions", sessionID.String())
+}
+
+func (r SessionRepository) SetModelChoice(ctx context.Context, id identity.SessionID, choice sessionmodel.ModelChoice, at time.Time) error {
+	_, err := r.database.ExecContext(ctx, `UPDATE sessions SET provider_id=?,model_id=?,reasoning_level=?,updated_at=? WHERE id=?`, choice.ProviderID, choice.ModelID, choice.ReasoningLevel, at.UnixNano(), id)
+	return err
 }

@@ -2,7 +2,7 @@ package toolexecution
 
 import (
 	"context"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/errorcode"
 )
 

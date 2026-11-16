@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
 )
 
 type anthropicContext struct {
@@ -37,22 +37,28 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthrop
 			}
 		}
 	}
-	for _, message := range result.Messages {
+
+	for index := range result.Messages {
+		message := &result.Messages[index]
 		if message.Role != "user" {
 			continue
 		}
-		seenOther := false
+		results := make([]json.RawMessage, 0, len(message.Content))
+		others := make([]json.RawMessage, 0, len(message.Content))
 		for _, raw := range message.Content {
 			var block blockHeader
 			if err := json.Unmarshal(raw, &block); err != nil {
 				return anthropicContext{}, err
 			}
-			if block.Type == "tool_result" && seenOther {
-				return anthropicContext{}, errors.New("anthropic tool_result must precede user text")
+			if block.Type == "tool_result" {
+				results = append(results, raw)
+			} else {
+				others = append(others, raw)
 			}
-			seenOther = seenOther || block.Type != "tool_result"
 		}
+		message.Content = append(results, others...)
 	}
+
 	return result, nil
 }
 

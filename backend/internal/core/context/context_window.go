@@ -3,8 +3,8 @@ package context
 import (
 	"encoding/json"
 	"fmt"
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 	"unicode/utf8"
 )
 
@@ -63,27 +63,6 @@ func (e *ContextWindowExceededError) Error() string {
 		"estimated %d input tokens plus %d reserved output tokens exceed the model context window %d",
 		e.EstimatedInputTokens, e.MaxOutputTokens, e.ContextWindow,
 	)
-}
-
-// ExceedsContextWindow 报告一次已编码请求是否装不进模型的上下文窗口：把请求体估算成
-// 输入 token，加上本次预留的输出 token，再与窗口比较。装得下、或窗口未记录（<=0）时
-// 返回 nil。
-//
-// 判定放在 provider adapter 而不是 task engine：只有 adapter 知道本协议最终序列
-// 化出的请求体（含工具 schema、system prompt、tool result），引擎侧的全局启发式必然漏项。
-func ExceedsContextWindow(payload []byte, maxOutputTokens, contextWindow int) error {
-	if contextWindow <= 0 {
-		return nil
-	}
-	estimated := EstimateTokens(string(payload))
-	if estimated+maxOutputTokens > contextWindow {
-		return &ContextWindowExceededError{
-			EstimatedInputTokens: estimated,
-			MaxOutputTokens:      maxOutputTokens,
-			ContextWindow:        contextWindow,
-		}
-	}
-	return nil
 }
 
 // NearContextLimit 将输入与输出预留一起计入模型窗口，达到九成时触发压缩评估或收尾提醒。

@@ -11,10 +11,9 @@ func (r *Runner) emit(params RunParams, turnID identity.TurnID, payload coreeven
 		Source: coreevent.EventSource{
 			SessionID: params.SessionID,
 			AgentID:   params.AgentID,
-			BranchID:  params.BranchID,
-			BindingID: params.BindingID,
-			RunID:     params.ID,
-			TurnID:    turnID,
+
+			RunID:  params.ID,
+			TurnID: turnID,
 		},
 		Payload: payload,
 	})

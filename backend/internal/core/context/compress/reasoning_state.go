@@ -1,8 +1,8 @@
 package compress
 
 import (
-	sessionentry "praxis/internal/core/session/entry"
-	"praxis/internal/core/session/entry/role"
+	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 )
 
 // summaryEntry 只承载摘要模型需要的角色和正文，不复制会话条目的身份、计时及其他执行事实。

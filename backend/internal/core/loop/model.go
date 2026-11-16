@@ -6,21 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	agentrun "praxis/internal/core/agent/run"
-	"praxis/internal/core/agent/run/timing"
+	appcontext "praxis/internal/core/context"
+	sessionentry "praxis/internal/core/entry"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
+	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
-	sessionentry "praxis/internal/core/session/entry"
+	"praxis/internal/core/timing"
+	"praxis/internal/identity"
 	"slices"
 )
 
 // Response 保存一次模型响应；内容块和工具调用都从同一份有序事件转换。
 type Response struct {
+	RequestID  identity.ModelRequestID
 	events     []providerapi.Event
 	textBytes  int
 	StopReason providerapi.StopReason
-	Usage      *providerapi.Usage
+	Usage      *modelusage.Usage
 	Timing     *timing.Record
 }
 
@@ -41,6 +45,14 @@ func requestModel(
 	if err != nil {
 		return Response{}, err
 	}
+	if input == nil {
+		return Response{}, errors.New("provider returned a nil stream")
+	}
+	defer func() {
+		cancel()
+		for range input {
+		}
+	}()
 	response, err := collectModelResponse(streamCtx, input, onEvent)
 	if err == nil {
 		err = response.bindReasoningState(request.Model)
@@ -55,6 +67,7 @@ func (r *Runner) callModel(
 	deps RunDependencies,
 	request providerapi.Request,
 	requestKind hook.ModelRequestKind,
+	retryCount int,
 	onEvent func(providerapi.Event),
 ) (response Response, err error) {
 	boundary := hook.ModelRequest{
@@ -67,28 +80,40 @@ func (r *Runner) callModel(
 	if hookErr := r.HookDispatcher.BeforeModelRequest(ctx, boundary); hookErr != nil {
 		return response, NewFailure(FailureInternal, hookErr)
 	}
+	observationContext := request.Context
 	if requestKind == hook.ModelRequestIteration {
-		request, err = remindContextBudget(request)
+		request, err = remindContextBudget(request, deps.Budget)
 		if err != nil {
-			return response, NewFailure(FailureContract, err)
+			return response, NewModelFailure(err)
+		}
+	}
+	if requestKind != hook.ModelRequestIteration {
+		tokens, _, budgetErr := requestTokens(request, nil)
+		if budgetErr != nil {
+			return response, NewFailure(FailureContract, budgetErr)
+		}
+		if capacityErr := appcontext.CheckCapacity(tokens, request.MaxOutputTokens, request.Model.ContextWindow); capacityErr != nil {
+			return response, NewModelFailure(capacityErr)
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return response, err
 	}
-	var span *timing.Span
-	if requestKind == hook.ModelRequestIteration {
-		span = timing.NewSpan()
+	span := timing.NewSpan()
+
+	started := sessionentry.ModelRequestRecord{
+		ID:         request.ID,
+		RunID:      params.ID,
+		TurnID:     request.TurnID,
+		Kind:       requestKind,
+		Status:     sessionentry.RequestRunning,
+		RetryCount: retryCount,
 	}
-	if err := deps.Recorder.RecordModelRequest(ctx, agentrun.ModelRequestRecord{
-		ID:     request.ID,
-		RunID:  params.ID,
-		TurnID: request.TurnID,
-		Kind:   requestKind,
-		Status: agentrun.ModelRequestRunning,
-	}, span.Snapshot()); err != nil {
+	if _, _, err := deps.AppendEntry(ctx, sessionentry.ModelRequestEntry(started, span.Snapshot())); err != nil {
 		return response, err
 	}
+	r.emit(params, request.TurnID, coreevent.ModelRequestStarted{Request: started, Timing: span.Snapshot()})
+
 	boundary.Request = request
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
 		Identity:    boundary.Identity,
@@ -98,18 +123,33 @@ func (r *Runner) callModel(
 	})
 	defer func() {
 		// 取消或断流也保存已知请求事实，明细与累计快照使用同一次日志提交。
-		if progressErr := deps.Recorder.RecordModelResponse(context.WithoutCancel(ctx), agentrun.ModelRequestRecord{
+
+		finished := sessionentry.ModelRequestRecord{
 			ID:          request.ID,
 			RunID:       params.ID,
 			TurnID:      request.TurnID,
 			Kind:        requestKind,
-			Status:      agentrun.RequestStatus(ctx, err),
-			StopReason:  response.StopReason,
+			Status:      sessionentry.RequestStatus(ctx, err),
+			StopReason:  string(response.StopReason),
 			OutputBytes: response.textBytes,
 			Usage:       response.Usage,
-		}, response.Timing); progressErr != nil {
-			err = NewFailure(FailureClassification(progressErr), errors.Join(err, progressErr))
+			RetryCount:  retryCount,
 		}
+		if err != nil {
+			finished.Error = err.Error()
+			finished.Partial = response.Blocks()
+		}
+		stored, _, progressErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.ModelRequestEntry(finished, response.Timing))
+		if progressErr != nil {
+			err = NewFailure(FailureStorage, errors.Join(err, progressErr))
+		}
+		if progressErr == nil {
+			r.emit(params, request.TurnID, coreevent.RequestResult(finished, response.Timing))
+			if finished.Status != sessionentry.RequestCompleted {
+				r.emit(params, request.TurnID, coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}})
+			}
+		}
+
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
 			Request:     boundary,
 			OutputBytes: response.textBytes,
@@ -133,6 +173,20 @@ func (r *Runner) callModel(
 		}
 	})
 	response.Timing = span.End()
+	response.RequestID = request.ID
+	if requestKind == hook.ModelRequestIteration && err == nil {
+		_, key, shapeErr := requestTokens(request, deps.Budget)
+		if shapeErr != nil {
+			return response, NewFailure(FailureContract, shapeErr)
+		}
+		tokens := 0
+		if response.Usage != nil {
+			tokens = int(response.Usage.InputTokens)
+		}
+		if deps.Budget != nil {
+			deps.Budget.Observe(observationContext, key, tokens)
+		}
+	}
 	return response, err
 }
 
@@ -145,66 +199,62 @@ func collectModelResponse(
 ) (Response, error) {
 	var response Response
 	for {
-		select {
-		case <-ctx.Done():
-			return response, ctx.Err()
-		case event, ok := <-stream:
-			if !ok {
-				return response, fmt.Errorf("provider stream ended before a terminal event: %w", io.ErrUnexpectedEOF)
+		event, ok := <-stream
+		if !ok {
+			if ctx.Err() != nil {
+				return response, ctx.Err()
 			}
-			switch event.Kind {
-			case providerapi.StreamTextDelta, providerapi.StreamThinkingDelta:
-				if event.Kind == providerapi.StreamTextDelta {
-					response.textBytes += len(event.Text)
-				}
-				last := len(response.events) - 1
-				if last >= 0 && response.events[last].Kind == event.Kind && sameOutputIndex(response.events[last].OutputIndex, event.OutputIndex) {
-					response.events[last].Text += event.Text
-				} else {
-					response.events = append(response.events, providerapi.Event{Kind: event.Kind, Text: event.Text, OutputIndex: event.OutputIndex})
-				}
-			case providerapi.StreamToolCall:
-				response.events = append(response.events, providerapi.Event{Kind: providerapi.StreamToolCall, ToolCall: event.ToolCall, OutputIndex: event.OutputIndex})
-			case providerapi.StreamReasoningState:
-				response.events = append(response.events, providerapi.Event{
-					Kind:           providerapi.StreamReasoningState,
-					ReasoningState: event.ReasoningState,
-					OutputIndex:    event.OutputIndex,
-				})
-				// 推理状态仅保存在内部，观察者不接收签名或加密载荷。
-				continue
-			case providerapi.StreamUsage:
-				response.Usage = event.Usage
-			case providerapi.StreamComplete:
-				if err := ctx.Err(); err != nil {
-					return response, err
-				}
-				response.StopReason = event.StopReason
-				indexed := len(response.events) > 0 && response.events[0].OutputIndex != nil
-				for _, content := range response.events {
-					if (content.OutputIndex != nil) != indexed || content.OutputIndex != nil && *content.OutputIndex < 0 {
-						return response, errors.New("provider emitted inconsistent output ordering")
-					}
-				}
-				// 输出块按协议顺序重放；工具事件可在流终态才发送，不改变它在 Entry 中的位置。
-				slices.SortStableFunc(response.events, func(a, b providerapi.Event) int {
-					if a.OutputIndex == nil || b.OutputIndex == nil {
-						return 0
-					}
-					return cmp.Compare(*a.OutputIndex, *b.OutputIndex)
-				})
-				return response, response.stopError()
-			case providerapi.StreamError:
-				if event.Err != nil {
-					return response, event.Err
-				}
-				return response, errors.New("provider stream failed")
-			default:
-				return response, errors.New("provider stream emitted an unknown event")
+			return response, fmt.Errorf("provider stream ended before a terminal event: %w", io.ErrUnexpectedEOF)
+		}
+		switch event.Kind {
+		case providerapi.StreamTextDelta, providerapi.StreamThinkingDelta:
+			if event.Kind == providerapi.StreamTextDelta {
+				response.textBytes += len(event.Text)
 			}
-			if onEvent != nil {
-				onEvent(event)
+			last := len(response.events) - 1
+			if last >= 0 && response.events[last].Kind == event.Kind && sameOutputIndex(response.events[last].OutputIndex, event.OutputIndex) {
+				response.events[last].Text += event.Text
+			} else {
+				response.events = append(response.events, providerapi.Event{Kind: event.Kind, Text: event.Text, OutputIndex: event.OutputIndex})
 			}
+		case providerapi.StreamToolCall:
+			response.events = append(response.events, providerapi.Event{Kind: providerapi.StreamToolCall, ToolCall: event.ToolCall, OutputIndex: event.OutputIndex})
+		case providerapi.StreamReasoningState:
+			response.events = append(response.events, providerapi.Event{
+				Kind:           providerapi.StreamReasoningState,
+				ReasoningState: event.ReasoningState,
+				OutputIndex:    event.OutputIndex,
+			})
+			// 推理状态仅保存在内部，观察者不接收签名或加密载荷。
+			continue
+		case providerapi.StreamUsage:
+			response.Usage = event.Usage
+		case providerapi.StreamComplete:
+			response.StopReason = event.StopReason
+			indexed := len(response.events) > 0 && response.events[0].OutputIndex != nil
+			for _, content := range response.events {
+				if (content.OutputIndex != nil) != indexed || content.OutputIndex != nil && *content.OutputIndex < 0 {
+					return response, errors.New("provider emitted inconsistent output ordering")
+				}
+			}
+			// 输出块按协议顺序重放；工具事件可在流终态才发送，不改变它在 Entry 中的位置。
+			slices.SortStableFunc(response.events, func(a, b providerapi.Event) int {
+				if a.OutputIndex == nil || b.OutputIndex == nil {
+					return 0
+				}
+				return cmp.Compare(*a.OutputIndex, *b.OutputIndex)
+			})
+			return response, response.stopError()
+		case providerapi.StreamError:
+			if event.Err != nil {
+				return response, event.Err
+			}
+			return response, errors.New("provider stream failed")
+		default:
+			return response, errors.New("provider stream emitted an unknown event")
+		}
+		if onEvent != nil {
+			onEvent(event)
 		}
 	}
 }

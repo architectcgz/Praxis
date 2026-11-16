@@ -2,7 +2,7 @@ package hook
 
 import (
 	"context"
-	sessionentry "praxis/internal/core/session/entry"
+	sessionentry "praxis/internal/core/entry"
 )
 
 // EntryCommitted 只携带首次保存成功的条目，不允许处理器改变已经提交的事实。
