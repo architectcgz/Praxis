@@ -5,7 +5,6 @@ package validation
 import (
 	"errors"
 	"fmt"
-	modelconfig "praxis/internal/core/model/config"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -23,8 +22,7 @@ import (
 )
 
 var (
-	configIDPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+	configIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	// 校验器仅在初始化时注册规则，之后并发复用规则和结构体元数据缓存。
 	requestValidator = newValidator()
 )
@@ -56,9 +54,6 @@ func newValidator() *validator.Validate {
 		"config_id_format": func(field validator.FieldLevel) bool {
 			return configIDPattern.MatchString(field.Field().String())
 		},
-		"definition_id_format": func(field validator.FieldLevel) bool {
-			return definitionIDPattern.MatchString(field.Field().String())
-		},
 		"project_name_format": func(field validator.FieldLevel) bool {
 			value := field.Field().String()
 			return value != "." && value != ".." && !strings.ContainsAny(value, "\\/:*?\"<>|\x00\r\n")
@@ -66,22 +61,10 @@ func newValidator() *validator.Validate {
 		"absolute_path": func(field validator.FieldLevel) bool {
 			return pathutil.IsAbsoluteNormalized(field.Field().String())
 		},
-		"preview_path": func(field validator.FieldLevel) bool {
-			value := field.Field().String()
-			return !strings.ContainsRune(value, '\x00') && !strings.HasPrefix(value, `\\`) && !strings.HasPrefix(value, "//")
-		},
 		"task_text": func(field validator.FieldLevel) bool {
 			value := field.Field().String()
 			// validator 的 max 按字符计数，正文协议限制必须按 UTF-8 字节计算。
 			return utf8.ValidString(value) && len(value) <= taskmodel.MaxInputBytes
-		},
-		"model_base_url": func(field validator.FieldLevel) bool {
-			_, err := modelconfig.ValidateModelBaseURL(field.Field().String())
-			return err == nil
-		},
-		"model_proxy_url": func(field validator.FieldLevel) bool {
-			_, err := modelconfig.ValidateModelProxyURL(field.Field().String())
-			return err == nil
 		},
 	} {
 		if err := v.RegisterValidation(name, rule); err != nil {
@@ -93,7 +76,6 @@ func newValidator() *validator.Validate {
 	v.RegisterAlias("project_id", "required,project_identity")
 	v.RegisterAlias("session_id", "required,session_identity")
 	v.RegisterAlias("config_id", "required,normalized,config_id_format")
-	v.RegisterAlias("definition_id", "required,normalized,definition_id_format")
 	v.RegisterAlias("project_name", "required,notblank,project_name_format")
 	v.RegisterAlias("project_path", "required,absolute_path")
 	v.RegisterAlias("task_prompt", "required,notblank,task_text")
@@ -108,11 +90,6 @@ func Struct(request any) error {
 // Value 按标签校验独立参数，不改变现有 Wails 方法签名。
 func Value(field string, value any, tags string) error {
 	return inputError(requestValidator.Var(value, tags), field)
-}
-
-// ID 校验独立的身份参数，规则与 DTO 的 id 标签一致。
-func ID(field, value string) error {
-	return Value(field, value, "id")
 }
 
 func inputError(err error, field string) error {
@@ -135,14 +112,14 @@ func inputError(err error, field string) error {
 	// 保留身份、普通字段和项目输入各自使用的公开错误码。
 	var code error = errorcode.ErrInvalidValue
 	switch failure.Tag() {
-	case "id", "project_id", "session_id", "definition_id", "required_with":
+	case "id", "project_id", "session_id":
 		code = apperr.ErrInvalidRequest
 	case "project_name", "project_path":
 		code = projectservice.ErrProjectInvalid
 	}
 	reason := "must satisfy " + failure.ActualTag()
 	switch failure.ActualTag() {
-	case "required", "notblank", "required_with":
+	case "required", "notblank":
 		reason = "required"
 	case "normalized":
 		reason = "must be normalized"
@@ -150,18 +127,14 @@ func inputError(err error, field string) error {
 		reason = "must not contain control characters"
 	case "project_identity", "session_identity":
 		reason = "must be a valid resource identity of at most 180 characters"
-	case "config_id_format", "definition_id_format":
+	case "config_id_format":
 		reason = "invalid identity format"
 	case "project_name_format":
 		reason = "invalid project name"
 	case "absolute_path":
 		reason = "must be an absolute normalized path"
-	case "preview_path":
-		reason = "file path is invalid"
 	case "oneof":
 		reason = "must be one of " + failure.Param()
-	case "model_base_url", "model_proxy_url":
-		reason = "invalid model URL"
 	}
 	if failure.Tag() == "task_prompt" {
 		reason = "prompt must be non-empty UTF-8 text within the size limit"

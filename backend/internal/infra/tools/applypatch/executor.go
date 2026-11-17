@@ -37,19 +37,15 @@ type output struct {
 	Files []fileResult `json:"files"`
 }
 
-// Call 在项目目录内校验并应用完整补丁。
+// Call 在项目目录内应用已在 Prepare 阶段解析的完整补丁。
 func Call(ctx context.Context, toolArguments patchtool.Arguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return tool.ToolResult{}, err
-	}
-	operations, err := patchtool.Parse(toolArguments.Patch)
-	if err != nil {
 		return tool.ToolResult{}, err
 	}
 	if !projectDirectory(toolArguments.Path, environment.ProjectPath) {
 		return tool.ToolResult{}, errors.New("apply_patch root is outside the project")
 	}
-	changes, results, err := prepareChanges(ctx, toolArguments.Path, environment.ProjectPath, operations)
+	changes, results, err := prepareChanges(ctx, toolArguments.Path, environment.ProjectPath, toolArguments.Operations)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -291,7 +287,7 @@ func commitChanges(changes []*fileChange) error {
 }
 
 func projectDirectory(path, projectRoot string) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
+	if !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
 	info, err := os.Lstat(path)
@@ -307,7 +303,7 @@ func projectDirectory(path, projectRoot string) bool {
 }
 
 func projectWritePath(path, projectRoot string, allowMissing bool) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
+	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
 	realRoot, err := filepath.EvalSymlinks(projectRoot)

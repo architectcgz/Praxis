@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/streaming"
-	"strings"
 )
 
 type Config struct {
@@ -28,15 +26,11 @@ type Provider struct {
 	client  *http.Client
 }
 
-// New 使用入口已校验的端点创建 OpenAI Chat Completions 协议适配器，并检查凭据。
+// New 使用入口已校验的端点和凭据创建 OpenAI Chat Completions 协议适配器。
 func New(config Config, deps Dependencies) (*Provider, error) {
-	apiKey := strings.TrimSpace(config.APIKey)
-	if apiKey == "" {
-		return nil, errors.New("openai chat API key is required")
-	}
 	return &Provider{
 		baseURL: config.BaseURL,
-		apiKey:  apiKey,
+		apiKey:  config.APIKey,
 		client:  deps.HTTPClient,
 	}, nil
 }
@@ -70,12 +64,6 @@ func (p *Provider) Stream(
 }
 
 func buildPayload(request providerapi.Request) ([]byte, error) {
-	if request.Model.ModelID == "" {
-		return nil, errors.New("openai chat model is required")
-	}
-	if request.MaxOutputTokens <= 0 {
-		return nil, errors.New("openai chat max output tokens is required")
-	}
 	messages, err := encodeContext(request.Context)
 	if err != nil {
 		return nil, err
@@ -89,13 +77,10 @@ func buildPayload(request providerapi.Request) ([]byte, error) {
 		},
 		MaxCompletionTokens: request.MaxOutputTokens,
 		N:                   1,
-		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Task ID 或上下文摘要。
+		// 同一会话的多轮请求共用路由 key，不能使用每次变化的 Run ID、Request ID 或上下文摘要。
 		PromptCacheKey: request.PromptCacheKey,
 	}
 	if schema := request.OutputSchema; schema != nil {
-		if err := schema.Validate(); err != nil {
-			return nil, fmt.Errorf("openai chat output schema: %w", err)
-		}
 		payload.ResponseFormat = &chatResponseFormat{
 			Type: "json_schema",
 			JSONSchema: chatJSONSchema{

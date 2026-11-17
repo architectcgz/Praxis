@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Clock, LoaderCircle, ShieldAlert } from 'lucide-react'
+import { Check, ChevronRight, CircleAlert, Clock, LoaderCircle, ShieldAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { statusLabels } from './OutputStatus'
 import type { ToolStatus } from './toolPresentation'
@@ -52,6 +52,7 @@ export function ActivityItem({ tone, name, argument, status, statusLabel, durati
     const meta = exceptional || !duration ? label : duration
     return <details className="act" data-tone={tone} open={open || undefined}>
         <summary className="act-row">
+            <ChevronRight className="act-chevron" size={13} strokeWidth={2} aria-hidden="true" />
             <span className="act-name">{name}</span>
             <span className="act-arg" title={argument}>{argument}</span>
             <span className="act-time">{meta}</span>

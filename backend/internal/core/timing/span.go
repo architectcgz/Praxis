@@ -1,22 +1,29 @@
 package timing
 
-import (
-	"sync"
-	"time"
-)
+import "time"
 
-// Span 只测量耗时，不保存数据或发送事件；nil 表示该操作不计时。
+// Record 是所属 Entry 的只读耗时数据，操作身份由 Entry 提供。
+// DurationMS 为 nil 表示尚未结束或无法确定实际耗时。
+type Record struct {
+	StartedAt       time.Time `json:"startedAt"`
+	FinishedAt      time.Time `json:"finishedAt,omitzero"`
+	DurationMS      *int64    `json:"durationMs,omitempty"`
+	FirstResponseMS *int64    `json:"firstResponseMs,omitempty"`
+}
+
+// Span 只测量耗时，不保存数据或发送事件；nil 表示该操作不计时，由单个执行协程顺序调用。
 type Span struct {
-	mu       sync.Mutex
 	record   Record
 	started  time.Time
 	finished bool
 }
 
 func NewSpan() *Span {
-	return &Span{record: Record{
-		StartedAt: time.Now().UTC(),
-	}}
+	return &Span{
+		record: Record{
+			StartedAt: time.Now().UTC(),
+		},
+	}
 }
 
 // Snapshot 返回只读快照，后续测量只替换字段，不修改已发布的耗时指针。
@@ -24,8 +31,6 @@ func (s *Span) Snapshot() *Record {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return new(s.record)
 }
 
@@ -37,12 +42,7 @@ func (s *Span) Start() {
 }
 
 func (s *Span) FirstResponse() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.finished || s.record.FirstResponseMS != nil {
+	if s == nil || s.finished || s.record.FirstResponseMS != nil {
 		return
 	}
 	s.record.FirstResponseMS = new(time.Since(s.started).Milliseconds())
@@ -53,8 +53,6 @@ func (s *Span) End() *Record {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.finished {
 		return new(s.record)
 	}

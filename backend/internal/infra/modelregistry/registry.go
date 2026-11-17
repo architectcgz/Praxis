@@ -1,113 +1,186 @@
-// Registry 加载并管理模型配置和凭据。
+// Package modelregistry 加载并校验模型配置和凭据快照。
 package modelregistry
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/infra/providers/httpclient"
-	"slices"
-	"strings"
-	"sync"
+	"regexp"
 )
 
-const maxProviderCatalogBytes = 1 << 20
+var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// Registry 管理可编辑的模型配置与凭据，锁只保护管理端的并发查询和保存。
-// 已加载的模型文档交给业务目录处理；执行路径不依赖此可变对象。
-type Registry struct {
-	mu              sync.RWMutex
-	modelsPath      string
-	credentialsPath string
-	config          modelconfig.Config
-	credentials     ProviderCredentials
-	client          *http.Client
-	providerClients map[string]*http.Client
-	providersByID   map[string]modelconfig.Provider
+// ProviderCredential 表示凭据文档中的一项 Provider 凭据。
+type ProviderCredential struct {
+	Type CredentialType `json:"type"`
+	Key  string         `json:"key"`
 }
 
-func (r *Registry) providerClientLocked(providerID string) *http.Client {
-	if client := r.providerClients[providerID]; client != nil {
-		return client
+type CredentialType string
+
+const CredentialTypeAPIKey CredentialType = "api_key"
+
+// ProviderCredentials 将稳定的 Provider ID 映射到凭据。
+// 凭据与模型配置分开持久化，使 Provider 元数据的读取、编辑和共享不会暴露密钥。
+type ProviderCredentials map[string]ProviderCredential
+
+// ConfigurationError 标识阻止加载的配置文件，底层原因不包含已解析的密钥值。
+type ConfigurationError struct {
+	Path string
+	Err  error
+}
+
+func (e *ConfigurationError) Error() string {
+	if e == nil {
+		return "configuration error"
 	}
-	return httpclient.RequestClient(r.client)
+	return fmt.Sprintf("configuration %q: %v", e.Path, e.Err)
 }
 
-// Config 返回编辑配置的独立副本，读取方不能修改注册表内部状态。
+func (e *ConfigurationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// CredentialSnapshot 只保存本次加载的凭据快照。
+type CredentialSnapshot struct {
+	keys map[string]string
+}
+
+func (s CredentialSnapshot) ProviderKey(providerID string) string {
+	return s.keys[providerID]
+}
+
+// Registry 保存本次只读加载的模型配置与凭据快照，供装配期构造只读目录。
+type Registry struct {
+	config      modelconfig.Config
+	credentials ProviderCredentials
+}
+
+// Load 读取并校验模型配置与凭据文件，然后返回不可变快照。
+func Load(modelsPath, credentialsPath string, client *http.Client) (*Registry, error) {
+	config, err := readModelConfigFile(modelsPath)
+	if err != nil {
+		return nil, &ConfigurationError{
+			Path: modelsPath,
+			Err:  err,
+		}
+	}
+	credentials, err := readCredentialsFile(credentialsPath)
+	if err != nil {
+		return nil, &ConfigurationError{
+			Path: credentialsPath,
+			Err:  err,
+		}
+	}
+	credentials, err = validateCredentials(credentials)
+	if err != nil {
+		return nil, &ConfigurationError{
+			Path: credentialsPath,
+			Err:  err,
+		}
+	}
+	for _, provider := range config.Providers {
+		if _, err := httpclient.NewProxyClient(client, provider.ProxyURL); err != nil {
+			return nil, &ConfigurationError{
+				Path: modelsPath,
+				Err:  fmt.Errorf("provider %q: %w", provider.ID, err),
+			}
+		}
+	}
+	return &Registry{
+		config:      config,
+		credentials: credentials,
+	}, nil
+}
+
+// Config 返回模型配置的独立副本，调用方不能修改内部状态。
 func (r *Registry) Config() modelconfig.Config {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	return r.config.Clone()
 }
 
-// DiscoverProviderModels 获取已配置的 OpenAI 兼容 Provider 公布的模型 ID。
-// 凭据仅在进程内解析，不返回给调用方。
-func (r *Registry) DiscoverProviderModels(ctx context.Context, providerID string) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+// Credentials 生成本次配置中已启用 Provider 的只读凭据快照。
+func (r *Registry) Credentials() CredentialSnapshot {
+	keys := make(map[string]string, len(r.config.Providers))
+	for _, provider := range r.config.Providers {
+		credential, exists := r.credentials[provider.ID]
+		if exists && credential.Type == CredentialTypeAPIKey {
+			keys[provider.ID] = credential.Key
+		}
 	}
-	r.mu.RLock()
-	provider, exists := r.providersByID[providerID]
-	client := r.providerClientLocked(providerID)
-	key := r.credentialKeyLocked(providerID)
-	r.mu.RUnlock()
-	if !exists {
-		return nil, fmt.Errorf("provider %q is not configured", providerID)
-	}
-	if key == "" {
-		return nil, fmt.Errorf("API key is not configured for provider %q", providerID)
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.BaseURL+"/v1/models", nil)
+	return CredentialSnapshot{keys: keys}
+}
+
+// readModelConfigFile 解码并只读校验持久化的 canonical 配置，不清洗或静默修复字段。
+func readModelConfigFile(path string) (modelconfig.Config, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("build provider model request: %w", err)
+		return modelconfig.Config{}, fmt.Errorf("open models config: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+key)
-	request.Header.Set("Accept", "application/json")
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("retrieve provider models: %w", err)
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, httpclient.DecodeErrorResponse(response)
-	}
-	defer response.Body.Close()
-	var payload struct {
-		Data json.RawMessage `json:"data"`
-	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, maxProviderCatalogBytes))
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, errors.New("provider model catalog response is invalid")
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	var config modelconfig.Config
+	if err := decoder.Decode(&config); err != nil {
+		return modelconfig.Config{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return nil, errors.New("provider model catalog response is invalid")
+		return modelconfig.Config{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
-	if len(payload.Data) == 0 || string(bytes.TrimSpace(payload.Data)) == "null" {
-		return nil, errors.New("provider model catalog response is invalid")
+	if err := modelconfig.Validate(config); err != nil {
+		return modelconfig.Config{}, err
 	}
-	var items []struct {
-		ID string `json:"id"`
+	return config, nil
+}
+
+// readCredentialsFile 只读加载凭据文件，不创建目录或缺失文件。
+func readCredentialsFile(path string) (ProviderCredentials, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open auth config: %w", err)
 	}
-	if err := json.Unmarshal(payload.Data, &items); err != nil {
-		return nil, errors.New("provider model catalog response is invalid")
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	document := ProviderCredentials{}
+	if err := decoder.Decode(&document); err != nil {
+		return nil, fmt.Errorf("auth config: invalid JSON: %w", err)
 	}
-	seen := make(map[string]struct{}, len(items))
-	models := make([]string, 0, len(items))
-	for _, item := range items {
-		id := strings.TrimSpace(item.ID)
-		if id == "" {
-			continue
+	if err := ensureEOF(decoder); err != nil {
+		return nil, fmt.Errorf("auth config: invalid JSON: %w", err)
+	}
+	return document, nil
+}
+
+// validateCredentials 只读校验凭据身份，原样复制密钥，不裁剪内容。
+func validateCredentials(document ProviderCredentials) (ProviderCredentials, error) {
+	validated := make(ProviderCredentials, len(document))
+	for providerID, credential := range document {
+		if !idPattern.MatchString(providerID) {
+			return nil, fmt.Errorf("auth config: invalid provider id %q", providerID)
 		}
-		if _, exists := seen[id]; exists {
-			continue
+		if credential.Type != CredentialTypeAPIKey {
+			return nil, fmt.Errorf("auth config: provider %q: unsupported credential type %q", providerID, credential.Type)
 		}
-		seen[id] = struct{}{}
-		models = append(models, id)
+		if credential.Key == "" {
+			return nil, fmt.Errorf("auth config: provider %q: credential key is required", providerID)
+		}
+		validated[providerID] = credential
 	}
-	slices.Sort(models)
-	return models, nil
+	return validated, nil
+}
+
+func ensureEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("trailing data")
+	}
+	return nil
 }

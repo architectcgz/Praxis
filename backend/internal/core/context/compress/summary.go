@@ -1,3 +1,4 @@
+// Package compress 在模型请求前压缩较早历史，保留当前输入与最近完整工具交互。
 package compress
 
 import (
@@ -13,6 +14,43 @@ const (
 	compressionTargetPercent = 60
 	maxSummaryTokens         = 4096
 )
+
+// Options 使用调用方提供的模型窗口，ReservedTokens 为工具定义等请求开销。
+type Options struct {
+	InputTokens     int
+	ContextWindow   int
+	MaxOutputTokens int
+	ReservedTokens  int
+}
+
+// RequestSummaryFunc 只负责无工具的摘要模型请求，不决定压缩范围或修改输入条目。
+// 调用方负责请求身份、用量记录、取消和错误处理；返回值只能作为不可信上下文内容。
+type RequestSummaryFunc func(context.Context, appcontext.ModelContext, int) (string, error)
+
+// summaryEntry 只承载摘要模型需要的角色和正文，不复制会话条目的身份、计时及其他执行事实。
+type summaryEntry struct {
+	Role    role.Role                   `json:"role"`
+	Content []sessionentry.ContentBlock `json:"content"`
+}
+
+// summaryEntries 不把签名、加密载荷或展示性思考正文发送给摘要模型。
+func summaryEntries(entries []*sessionentry.ContextEntry) []summaryEntry {
+	var selected []summaryEntry
+	for _, entry := range entries {
+		value := summaryEntry{Role: entry.Role}
+		for _, block := range entry.Content {
+			switch block.(type) {
+			case sessionentry.ReasoningStateBlock, sessionentry.ThinkingBlock:
+			default:
+				value.Content = append(value.Content, block)
+			}
+		}
+		if len(value.Content) > 0 {
+			selected = append(selected, value)
+		}
+	}
+	return selected
+}
 
 func summarizeTranscript(ctx context.Context, encoded []byte, contextWindow, summaryLimit int, requestSummary RequestSummaryFunc) (string, error) {
 	remaining := []rune(string(encoded))

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/streaming"
-	"strings"
 )
 
 type Config struct {
@@ -28,15 +27,11 @@ type Provider struct {
 	client  *http.Client
 }
 
-// New 使用入口已校验的端点创建 OpenAI Responses 协议适配器，并检查凭据。
+// New 使用入口已校验的端点和凭据创建 OpenAI Responses 协议适配器。
 func New(config Config, deps Dependencies) (*Provider, error) {
-	apiKey := strings.TrimSpace(config.APIKey)
-	if apiKey == "" {
-		return nil, errors.New("openai responses API key is required")
-	}
 	return &Provider{
 		baseURL: config.BaseURL,
-		apiKey:  apiKey,
+		apiKey:  config.APIKey,
 		client:  deps.HTTPClient,
 	}, nil
 }
@@ -73,12 +68,6 @@ func (p *Provider) Stream(
 }
 
 func buildPayload(request providerapi.Request) ([]byte, int, error) {
-	if request.Model.ModelID == "" {
-		return nil, 0, errors.New("openai responses model is required")
-	}
-	if request.MaxOutputTokens <= 0 {
-		return nil, 0, errors.New("openai responses max output tokens is required")
-	}
 	input, err := encodeContext(request.Context, request.Model)
 	if err != nil {
 		return nil, 0, err
@@ -90,13 +79,10 @@ func buildPayload(request providerapi.Request) ([]byte, int, error) {
 		Store:           false,
 		Include:         []string{"reasoning.encrypted_content"},
 		MaxOutputTokens: request.MaxOutputTokens,
-		// 同一会话的多轮请求共用路由 key，不能使用每轮变化的 Task ID 或上下文摘要。
+		// 同一会话的多轮请求共用路由 key，不能使用每次变化的 Run ID、Request ID 或上下文摘要。
 		PromptCacheKey: request.PromptCacheKey,
 	}
 	if schema := request.OutputSchema; schema != nil {
-		if err := schema.Validate(); err != nil {
-			return nil, 0, fmt.Errorf("openai responses output schema: %w", err)
-		}
 		payload.Text = &responseTextConfig{
 			Format: responseJSONSchema{
 				Type:   "json_schema",

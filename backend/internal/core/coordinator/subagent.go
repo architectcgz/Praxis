@@ -17,9 +17,6 @@ import (
 
 func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment agentrun.Assignment, callID string) (agentrun.SubagentStatus, error) {
 	parentRecord := parent.Snapshot()
-	if !parent.Main() {
-		return agentrun.SubagentStatus{}, fmt.Errorf("subagents cannot delegate")
-	}
 	catalog, err := tool.Restrict(parentActive.config.Tools, assignment.AllowedTools)
 	if err != nil {
 		return agentrun.SubagentStatus{}, err

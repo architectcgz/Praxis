@@ -45,5 +45,6 @@ export function useTaskSubmission({ sessionID, input, mainActive, setInput }: Op
         catch (reason) { if (request === generation.current) setError(readableError(reason)) }
         finally { pending.current = false; if (request === generation.current) setBusy(false) }
     }, [sessionID])
-    return { busy, error, canQueue: mainActive, submitTask, cancelQueuedTask, changeQueue }
+    const clearError = useCallback(() => setError(''), [])
+    return { busy, error, clearError, canQueue: mainActive, submitTask, cancelQueuedTask, changeQueue }
 }

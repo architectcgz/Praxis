@@ -10,7 +10,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/infra/providers/httpclient"
 	"praxis/internal/infra/providers/streaming"
-	"strings"
 )
 
 type Config struct {
@@ -29,19 +28,15 @@ type Provider struct {
 	client                   *http.Client
 }
 
-// New 使用入口已校验的端点创建协议适配器，检查凭据并补齐默认协议版本。
+// New 使用入口已校验的端点和凭据创建协议适配器，仅补齐默认协议版本。
 func New(config Config, deps Dependencies) (*Provider, error) {
-	apiKey := strings.TrimSpace(config.APIKey)
-	if apiKey == "" {
-		return nil, errors.New("anthropic API key is required")
-	}
-	version := strings.TrimSpace(config.Version)
+	version := config.Version
 	if version == "" {
 		version = "2023-06-01"
 	}
 	return &Provider{
 		baseURL: config.BaseURL,
-		apiKey:  apiKey,
+		apiKey:  config.APIKey,
 		version: version,
 		client:  deps.HTTPClient,
 	}, nil
@@ -81,12 +76,6 @@ func (p *Provider) Stream(
 
 func buildPayload(request providerapi.Request) ([]byte, error) {
 	modelID := request.Model.ModelID
-	if modelID == "" {
-		return nil, errors.New("anthropic model is required")
-	}
-	if request.MaxOutputTokens <= 0 {
-		return nil, errors.New("anthropic max output tokens is required")
-	}
 	encodedContext, err := encodeContext(request.Context, request.Model)
 	if err != nil {
 		return nil, err
@@ -116,9 +105,6 @@ func buildPayload(request providerapi.Request) ([]byte, error) {
 		}
 	}
 	if schema := request.OutputSchema; schema != nil {
-		if err := schema.Validate(); err != nil {
-			return nil, fmt.Errorf("anthropic output schema: %w", err)
-		}
 		// 格式与 effort 共用 output_config，追加格式时保留已选的推理强度。
 		if body.OutputConfig == nil {
 			body.OutputConfig = &anthropicOutputConfig{}

@@ -3,6 +3,8 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"praxis/internal/clock"
 	"praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
@@ -11,13 +13,49 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
+	"praxis/internal/identity"
 	fs "praxis/internal/infra/filesystem"
+	"praxis/internal/infra/storage"
 	"praxis/internal/logging"
 	approvalservice "praxis/internal/service/approval"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/bindings"
 )
+
+type storageResources struct {
+	storage *storage.Store
+	logger  *logging.Logger
+}
+
+func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
+	logger, err := logging.NewFactory().Application(filepath.Join(root.Root, "praxis.log"))
+	if err != nil {
+		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
+	}
+	logger.Infof("application open started root=%s", root.Root)
+	state, err := storage.Open(ctx, root.Root)
+	if err != nil {
+		logger.Errorf("open storage failed: %v", err)
+		_ = logger.Close()
+		return storageResources{}, fmt.Errorf("open storage: %w", err)
+	}
+	return storageResources{
+		storage: state,
+		logger:  logger,
+	}, nil
+}
+
+func buildSessions(store *storage.Store, hooks *hook.Dispatcher, core *coordinator.Coordinator) *sessionservice.Service {
+	return sessionservice.NewService(sessionservice.Dependencies{
+		Core:           core,
+		HookDispatcher: hooks,
+		Projects:       store.Projects,
+		Sessions:       store.Sessions,
+		Clock:          clock.UTCClock{},
+		IDs:            identity.SecureIDGenerator{},
+	})
+}
 
 // Application 拥有进程资源；业务状态与执行生命周期分别由业务能力和 Coordinator 管理。
 type Application struct {

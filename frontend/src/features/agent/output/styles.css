@@ -1,8 +1,8 @@
 /* 工具调用、终端、文件变更与协作结果的样式。
 
    三条结构约定：
-   1) 工具调用是「有先后的动作」，留在正文列里按发生顺序排成一张活动账本（.acts），
-      每行 28px，不占整行卡片；一次运行里的连续调用合并成同一张账本。
+   1) 工具调用是「有先后的动作」，留在正文列里按发生顺序排列在活动账本（.acts）内，
+      每条调用各自成卡并保留清晰垂直间距，避免连续命令与展开面板首尾粘连。
    2) 展开后的参数与输出属于仪器域。仪器域内部是**扁平**的：只有分区和 1px 分隔线，
       不允许再嵌套圆角盒子，否则会形成「盒子里的盒子里的盒子」。
    3) 协作结果是阅读内容，留在纸上，因此 .output-card / .output-fold 的默认配色是纸张色。 */
@@ -19,26 +19,32 @@
 
 .acts {
     display: grid;
+    gap: 8px;
     margin: var(--message-content-gap, 14px) 0;
+}
+
+.act {
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: var(--radius-card);
     background: var(--paper-2);
+    transition: border-color var(--motion-duration) var(--ease-standard);
 }
 
-.act + .act {
-    border-top: 1px solid var(--line);
+.act[open] {
+    border-color: var(--line-strong);
 }
 
 .act-row {
     display: grid;
-    grid-template-columns: 60px minmax(0, 1fr) 72px 14px;
-    gap: 12px;
+    grid-template-columns: 14px 124px minmax(0, 1fr) 72px 14px;
+    gap: 10px;
     align-items: center;
-    min-height: 28px;
-    padding: 0 12px;
+    min-height: 34px;
+    padding: 5px 12px;
     cursor: pointer;
     list-style: none;
+    transition: background-color var(--motion-duration) var(--ease-standard);
 }
 
 .act-row::-webkit-details-marker {
@@ -47,6 +53,36 @@
 
 .act-row:hover {
     background: var(--fill);
+}
+
+.act[open] > .act-row {
+    background: var(--paper-strong);
+}
+
+.act[data-tone='live'][open] > .act-row {
+    background: var(--live-soft);
+}
+
+.act[data-tone='wait'][open] > .act-row {
+    background: var(--warn-soft);
+}
+
+.act[data-tone='bad'][open] > .act-row {
+    background: var(--danger-soft);
+}
+
+.act[open] > .act-row:hover {
+    background: var(--fill);
+}
+
+.act-chevron {
+    color: var(--faint);
+    transition: transform var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
+
+.act[open] > .act-row .act-chevron {
+    color: var(--ink);
+    transform: rotate(90deg);
 }
 
 .act-row:focus-visible {
@@ -103,6 +139,7 @@
 }
 
 .act[data-tone='live'] {
+    border-color: var(--live-line);
     background: var(--live-soft);
 }
 
@@ -116,6 +153,7 @@
 }
 
 .act[data-tone='wait'] {
+    border-color: var(--warn-line);
     background: var(--warn-soft);
 }
 
@@ -128,6 +166,7 @@
 }
 
 .act[data-tone='bad'] {
+    border-color: var(--danger-line);
     background: var(--danger-soft);
 }
 
@@ -156,21 +195,113 @@
     display: grid;
     min-width: 0;
     gap: 8px;
-    padding: 8px 12px 10px;
+    padding: 10px 14px 12px;
 }
 
 .instrument .output-section + .output-section {
     border-top: 1px solid var(--inst-line);
 }
 
-/* 分区标签是 11px 微型结构标签，只说明这一段是什么，不参与层级竞争。 */
+.instrument .output-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 22px;
+}
+
+/* 分区标签说明这一段是什么，中文标签不拉大字距。 */
 .instrument .output-section-label {
     color: var(--inst-dim);
     font-family: var(--mono);
     font-size: var(--font-size-meta);
     font-weight: 650;
-    letter-spacing: var(--track-micro);
-    text-transform: uppercase;
+    line-height: 1.3;
+}
+
+.output-kv-grid {
+    display: grid;
+    grid-template-columns: minmax(68px, auto) minmax(0, 1fr);
+    gap: 6px 14px;
+    align-items: baseline;
+    margin: 0;
+    font-size: var(--font-size-meta);
+    line-height: var(--line-height-meta);
+}
+
+.output-kv-grid dt {
+    color: var(--inst-dim);
+    white-space: nowrap;
+}
+
+.output-kv-grid dd {
+    min-width: 0;
+    margin: 0;
+    color: var(--inst-ink);
+    overflow-wrap: anywhere;
+}
+
+.output-kv-grid dd code {
+    font-family: var(--mono);
+    color: var(--inst-ink);
+}
+
+.output-kv-text {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--mono);
+}
+
+.output-kv-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+}
+
+.output-kv-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border: 1px solid var(--inst-line);
+    border-radius: var(--radius-chip);
+    background: var(--inst-fill);
+    color: var(--inst-ink);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    line-height: 1.35;
+}
+
+.output-kv-items {
+    display: grid;
+    gap: 10px;
+}
+
+.output-kv-item + .output-kv-item {
+    padding-top: 10px;
+    border-top: 1px solid var(--inst-line);
+}
+
+.instrument-copy-button {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-chip);
+    background: transparent;
+    color: var(--inst-dim);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
+
+.instrument-copy-button:hover:not(:disabled) {
+    background: var(--inst-fill);
+    color: var(--inst-ink);
+}
+
+.instrument-copy-button.copied {
+    color: var(--inst-accent);
 }
 
 .instrument .output-section-actions {
@@ -229,6 +360,10 @@
 
 .instrument .output-input .output-text {
     max-height: 180px;
+}
+
+.instrument .output-file-content {
+    max-height: 360px;
 }
 
 .instrument .output-muted,
@@ -301,7 +436,7 @@
 
 /* ---------- diff：整段平铺，只在增删行上着色 ---------- */
 .instrument .output-diff {
-    max-height: 320px;
+    max-height: 360px;
     overflow: auto;
     padding: 6px 0;
     border: 0;
@@ -313,9 +448,13 @@
     line-height: var(--line-height-code);
 }
 
+.instrument .output-diff-hunk {
+    padding: 2px 12px;
+}
+
 .instrument .output-diff-row {
     display: grid;
-    grid-template-columns: 32px 32px 16px max-content;
+    grid-template-columns: minmax(36px, auto) minmax(36px, auto) 18px max-content;
     min-width: 100%;
 }
 
@@ -324,6 +463,12 @@
     user-select: none;
     color: var(--inst-dim);
     text-align: right;
+}
+
+.instrument .output-diff-number {
+    padding: 0 6px;
+    border-right: 1px solid var(--inst-line);
+    font-variant-numeric: tabular-nums;
 }
 
 .instrument .output-diff-sign {
@@ -599,6 +744,43 @@
     white-space: nowrap;
 }
 
+.output-file-action {
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid var(--inst-line);
+    border-radius: var(--radius-chip);
+    background: var(--inst-fill);
+    color: var(--inst-dim);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    line-height: 1.3;
+}
+
+.output-file-action[data-action='added'] {
+    color: var(--inst-add-ink);
+}
+
+.output-file-action[data-action='deleted'] {
+    color: var(--inst-del-ink);
+}
+
+.output-file-diffstat {
+    display: inline-flex;
+    flex: none;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    font-variant-numeric: tabular-nums;
+}
+
+.output-file-diffstat .is-add {
+    color: var(--inst-add-ink);
+}
+
+.output-file-diffstat .is-del {
+    color: var(--inst-del-ink);
+}
+
 .output-lanes {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
@@ -710,8 +892,9 @@
 
 @media (max-width: 720px) {
     .act-row {
-        grid-template-columns: 52px minmax(0, 1fr) 64px 14px;
+        grid-template-columns: 12px 92px minmax(0, 1fr) 64px 14px;
         gap: 8px;
+        padding: 4px 10px;
     }
 }
 

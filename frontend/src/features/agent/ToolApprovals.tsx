@@ -65,7 +65,7 @@ export function ToolApprovalScope({ historical, children }: { historical: boolea
     return <ToolApprovalsContext value={historical ? null : approvals}>{children}</ToolApprovalsContext>
 }
 
-/** 按任务与调用身份关联审核，供活动账本读取后端冻结的参数。 */
+/** 按执行与调用身份关联审核，供活动账本读取后端冻结的参数。 */
 export function useToolApproval(runId: string, callId?: string) {
     const approvals = useContext(ToolApprovalsContext)
     return approvals ? { ...approvals, pendingApproval: approvals.pendingApprovals.find((pendingApproval) => pendingApproval.runId === runId && pendingApproval.callId === callId) } : null
@@ -82,6 +82,9 @@ export function ApprovalGate() {
     const disabled = approvals.busy !== '' || approvals.loading
     const path = pending?.arguments.path
     const summary = pending?.name === 'bash' ? pending.arguments.command : path
+    const readRange = pending?.name === 'read_file' && (pending.arguments.offset !== undefined || pending.arguments.limit !== undefined)
+        ? [pending.arguments.offset !== undefined ? `起始行 ${pending.arguments.offset}` : '', pending.arguments.limit !== undefined ? `最多 ${pending.arguments.limit} 行` : ''].filter(Boolean).join(' · ')
+        : ''
     return <section className="approval-gate" aria-label="当前执行的审批" aria-busy={busy || approvals.loading}>
         <div className="approval-gate-box">
             <div className="approval-gate-head">
@@ -91,12 +94,24 @@ export function ApprovalGate() {
                 {total > 1 && <span className="approval-gate-count">{1} / {total}</span>}
             </div>
             {pending && <dl className="approval-gate-details">
-                <div><dt>工具</dt><dd>{pending.name}</dd></div>
+                <div><dt>工具</dt><dd><code>{pending.name}</code></dd></div>
                 {path && <div><dt>操作路径</dt><dd><code>{path}</code></dd></div>}
+                {readRange && <div><dt>读取范围</dt><dd>{readRange}</dd></div>}
                 <div><dt>命中规则</dt><dd>{pending.ruleId === 'default' ? '项目或全局默认' : pending.ruleId}</dd></div>
                 <div><dt>处理方式</dt><dd>{pending.action === 'auto' ? '模型不确定，转人工' : '必须人工确认'}</dd></div>
                 {pending.riskVerdict && <div><dt>模型审核</dt><dd>{pending.riskReason || pending.riskVerdict}</dd></div>}
             </dl>}
+            {pending?.name === 'bash' && (
+                <pre className="instrument approval-gate-preview" aria-label="待执行完整命令">
+                    <span className="output-command-prompt" aria-hidden="true">$</span>
+                    {pending.arguments.command}
+                </pre>
+            )}
+            {pending?.name === 'apply_patch' && pending.arguments.patch && (
+                <pre className="instrument approval-gate-preview" aria-label="待执行补丁预览">
+                    {pending.arguments.patch}
+                </pre>
+            )}
             {approvals.queryError && <p className="approval-gate-error" role="alert">
                 <AlertCircle size={13} aria-hidden="true" /><span>审批查询失败：{approvals.queryError}</span>
                 <button className="quiet-button" type="button" disabled={disabled} onClick={() => { setRetried(true); void approvals.reload() }}>

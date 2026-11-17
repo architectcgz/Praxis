@@ -37,5 +37,6 @@ export function useWorkspaceCommands({ sessionID, projectID, createNewSession, r
         } catch (reason) { if (request === generation.current) setError(readableError(reason)); return false }
         finally { pending.current = false; if (request === generation.current) setBusy(false) }
     }, [createNewSession, projectID, refreshModels, sessionID, setInput])
-    return { busy, error, runCommand, commandNotice, clearCommandNotice }
+    const clearError = useCallback(() => setError(''), [])
+    return { busy, error, clearError, runCommand, commandNotice, clearCommandNotice }
 }

@@ -63,9 +63,11 @@
 
 .session-tabs {
     display: flex;
+    align-items: center;
     gap: 4px;
     min-width: 0;
-    padding: 4px 8px;
+    min-height: 44px;
+    padding: 6px 10px;
     overflow-x: auto;
     background: var(--side);
     border-bottom: 1px solid var(--line);
@@ -76,29 +78,94 @@
     flex: 0 0 auto;
     align-items: center;
     max-width: 240px;
+    padding-right: 4px;
+    border: 1px solid transparent;
     border-radius: var(--radius-control);
     color: var(--muted);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
+
+.session-tab:hover:not([data-active='true']) {
+    background: var(--fill);
+    color: var(--ink);
 }
 
 .session-tab[data-active='true'] {
+    border-color: var(--line);
     background: var(--selected);
     color: var(--ink);
 }
 
 .session-tab-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     min-width: 0;
-    height: var(--control-height);
-    padding: 0 8px;
-    overflow: hidden;
+    height: var(--control-height-compact);
+    padding: 0 6px 0 10px;
     border: 0;
     background: transparent;
     color: inherit;
+    font-size: var(--font-size-meta);
+    font-weight: 600;
+    text-align: left;
+}
+
+.session-tab[data-active='true'] .session-tab-select {
+    font-weight: 650;
+}
+
+.session-tab-label {
+    min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+.session-tab-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--faint);
+}
+
+.session-tab-dot.is-executing {
+    background: var(--live);
+    box-shadow: 0 0 0 3px var(--live-halo);
+}
+
+.session-tab-dot.is-waiting {
+    background: var(--warn);
+}
+
+.session-tab-dot.is-failed,
+.session-tab-dot.is-interrupted {
+    background: var(--danger);
+}
+
+.session-tab-queue {
+    flex: none;
+    padding: 0 5px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-chip);
+    background: var(--paper);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.4;
+}
+
 .session-tab-close {
     flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    color: var(--faint);
+}
+
+.session-tab-close:hover:not(:disabled) {
+    color: var(--ink);
 }
 
 .session-close-dialog {

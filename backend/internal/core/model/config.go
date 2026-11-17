@@ -6,8 +6,8 @@ import (
 
 // Config 保存 Run 选定并持久化的只读模型配置，能力列表在执行链路中共享。
 //
-// 这些字段不能在 task 运行期间从当前模型配置重新读取，否则修改配置
-// 会改变已经创建的 task 的请求协议和资源边界。
+// 这些字段不能在 Run 运行期间从当前模型配置重新读取，否则修改配置
+// 会改变已经创建的 Run 的请求协议和资源边界。
 type Config struct {
 	ProviderID      string
 	ModelID         string

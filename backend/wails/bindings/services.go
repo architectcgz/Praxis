@@ -11,11 +11,11 @@ import (
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	approvalservice "praxis/internal/service/approval"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
-	toolservice "praxis/internal/service/toolexecution"
 )
 
 // 接口只声明 Wails 实际消费的业务能力，协议投影留在 binding。
@@ -45,7 +45,7 @@ type AgentCommands interface {
 	SessionContent(context.Context, identity.SessionID) (execution.SessionContent, error)
 	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, string, string, int) (sessionmodel.HistoryPage, error)
 	StopAgent(context.Context, execution.RunControl) error
-	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]toolservice.Approval, error)
+	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]executionmodel.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error
 	DenyToolCall(context.Context, execution.ToolDecision) error

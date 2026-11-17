@@ -59,6 +59,7 @@
 .astate.run,
 .state-executing {
     background: var(--live);
+    box-shadow: 0 0 0 3px var(--live-halo);
 }
 
 .astate.wait,

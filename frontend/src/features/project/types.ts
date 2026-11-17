@@ -13,6 +13,7 @@ export type ProjectPanelProps = {
     sessionsCount: number
     selectedSessionID: string
     selectedProjectID: string
+    activeProjectID: string
     lookupID: string
     searchOpen: boolean
     collapsedProjects: Record<string, boolean>

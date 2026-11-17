@@ -1,16 +1,21 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, MessageSquare } from 'lucide-react'
+import { ArrowDown, ArrowLeft, Bot, CircleAlert, MessageSquare, Square } from 'lucide-react'
 import type { Entry, AgentView } from '../../api'
 import type { StreamingOutput } from './types'
 import { ApprovalGate, ToolApprovalScope, ToolApprovalsProvider } from './ToolApprovals'
 import { AgentActivityView, PendingOutputView, StreamingTurnView } from './output/MessageViews'
 import { buildEntryHistory, EntryHistory } from './output/EntryHistory'
+import { OutputStatus } from './output/OutputStatus'
+import type { ToolStatus } from './output/toolPresentation'
+import { RunDuration } from '../timing/DurationLabel'
 
 export type AgentConversationProps = {
     submissionRevision: number
     agent: AgentView
     entries: Entry[]
     collaboration?: ReactNode
+    onReturnToMain?: () => void
+    onStop?: () => void
     streamingOutput: StreamingOutput | null
     entriesError: string
     hasEarlier: boolean
@@ -21,7 +26,18 @@ export type AgentConversationProps = {
     composer: ReactNode
 }
 
-export function AgentConversation({ submissionRevision, agent, entries, collaboration, streamingOutput, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, busy, composer }: AgentConversationProps) {
+function subagentStatus(agent: AgentView): { status: ToolStatus; label: string } {
+    const run = agent.currentRun || agent.latestRun
+    if (agent.state === 'executing') return { status: 'running', label: '执行中' }
+    if (agent.state === 'waiting') return { status: 'blocked', label: '等待中' }
+    if (agent.state === 'failed' || run?.Outcome === 'failed') return { status: 'failed', label: '失败' }
+    if (agent.state === 'interrupted' || run?.Outcome === 'interrupted') return { status: 'cancelled', label: '已中断' }
+    if (run?.Outcome === 'yielded') return { status: 'completed', label: '已交付' }
+    if (run?.Outcome === 'completed') return { status: 'completed', label: '已完成' }
+    return { status: 'queued', label: '空闲' }
+}
+
+export function AgentConversation({ submissionRevision, agent, entries, collaboration, onReturnToMain, onStop, streamingOutput, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, busy, composer }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousViewRef = useRef('')
@@ -102,8 +118,38 @@ export function AgentConversation({ submissionRevision, agent, entries, collabor
         setShowScrollButton(false)
     }, [])
 
+    const subagentView = agent.Kind === 'subagent' ? subagentStatus(agent) : null
+    const subagentRun = agent.currentRun || agent.latestRun
+
     return <ToolApprovalsProvider key={`${agent.SessionID}-${agent.ID}`} agentId={agent.ID} runId={agent.currentRunId} sessionId={agent.SessionID}>
         <div className="agent-conversation">
+            {agent.Kind === 'subagent' && subagentView && (
+                <div className="subagent-context-bar">
+                    <div className="subagent-context-inner">
+                        {onReturnToMain && (
+                            <button className="quiet-button" type="button" onClick={onReturnToMain}>
+                                <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" />
+                                <span>返回主代理</span>
+                            </button>
+                        )}
+                        <div className="subagent-context-identity">
+                            <Bot size={15} strokeWidth={1.8} aria-hidden="true" />
+                            <strong>{agent.name}</strong>
+                            <span className="subagent-context-kind">子代理 · 上下文隔离</span>
+                        </div>
+                        <div className="subagent-context-meta">
+                            <OutputStatus status={subagentView.status} label={subagentView.label} />
+                            <RunDuration run={subagentRun} label="耗时" />
+                            {agent.currentRunId && onStop && (
+                                <button className="subagent-stop-button" type="button" disabled={busy} onClick={onStop}>
+                                    <Square size={12} strokeWidth={2} aria-hidden="true" />
+                                    <span>停止</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
             <ToolApprovalScope historical={false}>
             <div className="message-thread-container">
                 <div
@@ -111,17 +157,35 @@ export function AgentConversation({ submissionRevision, agent, entries, collabor
                     ref={messageThreadRef}
                     onScroll={updateOutputFollowing}
                 >
-                    {hasEarlier && <button className="quiet-button" type="button" disabled={historyLoading} onClick={() => { followingOutputRef.current = false; void onLoadEarlier() }} aria-busy={historyLoading}>{historyLoading ? '正在加载历史…' : '加载更早的历史'}</button>}
-                    {entriesError && <p role="alert">{entriesError} <button className="quiet-button" type="button" disabled={historyLoading} onClick={() => void onRetryHistory()}>重试加载</button></p>}
+                    {hasEarlier && (
+                        <div className="thread-top-slot">
+                            <button className="quiet-button" type="button" disabled={historyLoading} onClick={() => { followingOutputRef.current = false; void onLoadEarlier() }} aria-busy={historyLoading}>
+                                {historyLoading ? '正在加载历史…' : '加载更早的历史'}
+                            </button>
+                        </div>
+                    )}
+                    {entriesError && (
+                        <div className="thread-top-slot">
+                            <div className="message-error-box thread-error-box" role="alert">
+                                <CircleAlert size={15} strokeWidth={1.8} aria-hidden="true" />
+                                <span>{entriesError}</span>
+                                <button className="quiet-button" type="button" disabled={historyLoading} onClick={() => void onRetryHistory()}>重试加载</button>
+                            </div>
+                        </div>
+                    )}
                     {threadEmpty ? (
                         <div className="message-empty" role="status">
                             <div className="message-empty-content">
                                 <div className="message-empty-icon" aria-hidden="true">
-                                    <MessageSquare size={24} strokeWidth={1.6} />
+                                    {agent.Kind === 'subagent' ? <Bot size={24} strokeWidth={1.6} /> : <MessageSquare size={24} strokeWidth={1.6} />}
                                 </div>
-                                <h3 className="message-empty-title">开始新对话</h3>
+                                <h3 className="message-empty-title">
+                                    {agent.Kind === 'subagent' ? `${agent.name} 暂无输出记录` : '开始新对话'}
+                                </h3>
                                 <p className="message-empty-text">
-                                    {`向 ${agent.name} 发送消息以开始协作。您可以提出问题、请求帮助或分配任务。`}
+                                    {agent.Kind === 'subagent'
+                                        ? '子代理由主代理委派启动，使用独立的上下文与工具授权。开始执行后，思考过程、工具活动与汇报会展示在这里。'
+                                        : `向 ${agent.name} 发送任务或问题开始推进工作，执行过程中可随时排队追加任务或审批高风险工具。`}
                                 </p>
                             </div>
                         </div>

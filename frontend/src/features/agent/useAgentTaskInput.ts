@@ -90,9 +90,14 @@ export function useAgentTaskInput(
         }
     }, [applySelection, models, selection.providerId, selection.modelId])
 
+    const clearSelectionError = useCallback(() => {
+        setError('')
+        setErrorCode(undefined)
+    }, [])
+
     const confirmed = state.sessionID === sessionID && state.confirmedKey === selectionKey
     return {
-        selectionError, selectionErrorCode, input, setInput, selectModel, selectReasoning,
+        selectionError, selectionErrorCode, clearSelectionError, input, setInput, selectModel, selectReasoning,
         selectedProviderID: draftProviderID ?? selection.providerId,
         selectedModelID: draftProviderID === undefined ? selection.modelId : '',
         reasoning: draftProviderID === undefined ? selection.reasoningLevel : '',

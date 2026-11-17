@@ -78,7 +78,7 @@ function MessageLink({ href = '', children, title }: ComponentPropsWithoutRef<'a
     return <span>{children}</span>
 }
 
-function MarkdownCodeBlock({ children, streaming }: ComponentPropsWithoutRef<'pre'> & { streaming: boolean }) {
+function MarkdownCodeBlock({ children }: ComponentPropsWithoutRef<'pre'> & { streaming: boolean }) {
     const code = Children.toArray(children)[0]
     if (!isValidElement<ComponentPropsWithoutRef<'code'>>(code)) {
         return <pre>{children}</pre>
@@ -90,7 +90,7 @@ function MarkdownCodeBlock({ children, streaming }: ComponentPropsWithoutRef<'pr
 
     return (
         <div className="markdown-code-block instrument">
-            <details open={streaming || undefined}>
+            <details open>
                 <summary className="markdown-code-toolbar">
                     <span className="markdown-code-language">{language}</span>
                     {changes && <span className="markdown-code-changes"><span>+{changes.added}</span><span>-{changes.removed}</span></span>}

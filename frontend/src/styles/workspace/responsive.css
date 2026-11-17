@@ -1,7 +1,7 @@
 /* 工作区断点集中定义，窄屏保留同一套 Grid 收缩约束。 */
 @media (max-width: 1180px) {
-    .workspace-grid {
-        grid-template-columns: 248px minmax(0, 1fr);
+    .workspace-stage-body {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .agents-panel {

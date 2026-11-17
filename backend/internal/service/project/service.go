@@ -17,6 +17,8 @@ type Directory interface {
 	Ensure(context.Context, string) (created bool, err error)
 }
 
+const ErrProjectInvalid errorcode.Code = "project.invalid"
+
 // Dependencies 包含项目创建和配置查询所需的依赖。
 type Dependencies struct {
 	Projects  repository.Project

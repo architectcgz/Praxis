@@ -57,13 +57,14 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
         }
     }
 
-    const pending = settings !== null && (settings.sessionMode ?? settings.globalMode) !== settings.effectiveMode
+    const savedTarget = settings ? (settings.sessionMode ?? settings.globalMode) : undefined
+    const pending = settings !== null && savedTarget !== settings.effectiveMode
     const title = settings
-        ? `当前会话已加载的审批模式：${settings.effectiveMode}。ask 询问用户；auto 由模型判断，危险拒绝、不确定询问；yolo 跳过审核，但不能使用已禁用工具。保存选择后需在会话空闲时执行 /reload 才生效。`
+        ? `当前会话已加载的审批模式：${settings.effectiveMode}${pending ? `（已保存为 ${savedTarget}，空闲时执行 /reload 后生效）` : ''}。ask 询问用户；auto 由模型判断，危险拒绝、不确定询问；yolo 跳过审核，但不能使用已禁用工具。`
         : '正在读取会话审批模式'
     const unavailable = disabled || loading || saving || !settings
     const label = saving ? '保存中…' : loading ? '加载中…' : !settings ? '授权不可用'
-        : settings.effectiveMode
+        : pending ? `${settings.effectiveMode} → ${savedTarget}` : settings.effectiveMode
     const options: { mode: ApprovalMode | null; label: string; description: string }[] = [
         { mode: null, label: '继承全局', description: settings?.globalMode ?? '' },
         { mode: 'ask', label: 'ask', description: '询问' },
@@ -72,7 +73,7 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
     ]
     return <div className={`composer-select-picker composer-approval-mode ${unavailable ? 'is-disabled' : ''}`} ref={pickerRef}>
         <button
-            className="composer-select-trigger composer-approval-trigger"
+            className={`composer-select-trigger composer-approval-trigger ${pending ? 'is-pending' : ''}`}
             type="button"
             title={title}
             aria-label={`审批模式（会话默认）：${label}`}
@@ -101,8 +102,7 @@ export function ApprovalModeSelect({ sessionId, disabled, pickerRef, open, onTog
                 <span className="model-picker-option-provider">{option.description}</span>
             </button>)}
         </div>}
-        {saving && <span role="status" className="composer-approval-status">保存中…</span>}
-        {!saving && pending && <span role="status" className="composer-approval-status">已保存，/reload 后生效</span>}
+        {!saving && pending && <span role="status" className="composer-approval-status" title="执行 /reload 后应用已保存的审批模式">待 /reload</span>}
         {error && <span role="alert" className="composer-approval-error">
             <span>{error}</span>
             <button type="button" disabled={disabled || loading || saving} onClick={() => setRetry((value) => value + 1)}>重新读取</button>

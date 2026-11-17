@@ -36,7 +36,7 @@ func Call(ctx context.Context, toolArguments readtool.Arguments, environment too
 	}
 	defer file.Close()
 	fileInfo, err := file.Stat()
-	if err != nil || !fileInfo.Mode().IsRegular() || !readableFile(toolArguments.Path, environment) {
+	if err != nil || !fileInfo.Mode().IsRegular() {
 		return tool.ToolResult{}, errors.New("read_file requires a regular file within the project or current session output directory")
 	}
 	if err := ctx.Err(); err != nil {
@@ -155,7 +155,7 @@ func encodeOutput(toolArguments readtool.Arguments, offset int, fileSize int64, 
 
 // projectFile 保留普通文件和符号链接检查，读取范围由项目根目录确定。
 func projectFile(path, projectRoot string) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
+	if projectRoot == "" || !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
 	realPath, err := filepath.EvalSymlinks(path)

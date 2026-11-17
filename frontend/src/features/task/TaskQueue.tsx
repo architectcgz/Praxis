@@ -19,7 +19,7 @@ export const TaskQueue = memo(function TaskQueue({ tasks, paused, busy, onCancel
             <div className="task-queue-head">
                 <ListOrdered size={15} strokeWidth={1.8} aria-hidden="true" />
                 <strong role="status">待执行 {pending.length}</strong>
-                <span>{paused ? '队列已暂停' : '按发送顺序执行 · 重启后清空'}</span>
+                <span className={paused ? 'is-paused' : undefined}>{paused ? '队列已暂停' : '按发送顺序执行 · 重启后清空'}</span>
                 <button className="icon-button" type="button" disabled={busy} aria-label={paused ? '恢复任务队列' : '暂停任务队列'} title={paused ? '恢复任务队列' : '暂停任务队列'} onClick={() => void onChangePaused(!paused)}>
                     {paused ? <Play size={15} /> : <Pause size={15} />}
                 </button>

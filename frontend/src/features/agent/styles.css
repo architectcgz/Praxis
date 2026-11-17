@@ -24,10 +24,107 @@
     flex-direction: column;
 }
 
+/* 查看 Subagent 独立历史时的上下文导航条，与阅读列同宽对齐。 */
+.subagent-context-bar {
+    flex: none;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper-2);
+}
+
+.subagent-context-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    width: min(var(--session-content-width, 940px), calc(100cqi - var(--session-gutter, 32px) * 2));
+    max-width: var(--session-content-width, 940px);
+    min-height: 40px;
+    margin: 0 auto;
+    padding: 6px 0;
+}
+
+.subagent-context-identity {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.subagent-context-identity > svg {
+    flex: none;
+    color: var(--accent);
+}
+
+.subagent-context-identity strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subagent-context-kind {
+    flex: none;
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+}
+
+.subagent-context-meta {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 10px;
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+}
+
+.subagent-stop-button {
+    display: inline-flex;
+    min-height: var(--control-height-compact);
+    align-items: center;
+    gap: 5px;
+    padding: 0 10px;
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--danger);
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+    transition: background-color var(--motion-duration) var(--ease-standard);
+}
+
+.subagent-stop-button:hover:not(:disabled) {
+    background: var(--danger-soft);
+}
+
+.thread-top-slot {
+    display: flex;
+    justify-content: center;
+    width: min(var(--session-content-width, 940px), calc(100cqi - var(--session-gutter, 32px) * 2));
+    max-width: var(--session-content-width, 940px);
+    min-width: 0;
+    justify-self: start;
+    margin: 0 0 var(--message-content-gap, 14px) max(var(--session-gutter, 32px), calc((100cqi - min(var(--session-content-width, 940px), calc(100cqi - var(--session-gutter, 32px) * 2))) / 2));
+}
+
+.thread-error-box {
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0;
+}
+
+.thread-error-box > span {
+    flex: 1;
+    min-width: 0;
+}
+
 .scroll-to-bottom-button {
     position: absolute;
     /* 与内容列右缘对齐：宽屏下跟随阅读列，不停靠在 Region 边缘。 */
-    right: max(24px, calc((100% - min(var(--session-content-width, 744px), 100% - 32px)) / 2));
+    right: max(var(--session-gutter, 32px), calc((100cqi - min(var(--session-content-width, 940px), calc(100cqi - var(--session-gutter, 32px) * 2))) / 2));
     bottom: 16px;
     z-index: var(--z-raised);
     display: grid;
@@ -60,7 +157,11 @@
     padding-right: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 720px) {
+    .agent-conversation {
+        --session-gutter: 16px;
+    }
+
     .scroll-to-bottom-button {
         right: 16px;
         bottom: 12px;
@@ -72,16 +173,16 @@
    它对「不处理就没法继续」负责，所以放在你本来就要操作的位置。
    ===================================================================== */
 .approval-gate {
-    width: min(var(--session-content-width, 744px), calc(100% - 32px));
+    width: min(var(--session-content-width, 940px), calc(100cqi - var(--session-gutter, 32px) * 2));
     flex: none;
     margin: 0 auto;
-    padding: 0 0 4px;
+    padding: 0 0 6px;
 }
 
 .approval-gate-box {
     display: grid;
     gap: 8px;
-    max-width: var(--session-content-width, 744px);
+    max-width: var(--session-content-width, 940px);
     margin: 0 auto;
     padding: 10px 12px;
     border: 1px solid var(--warn-line);
@@ -144,6 +245,16 @@
 .approval-gate-details code {
     font-family: var(--mono);
     font-size: var(--font-size-meta);
+}
+
+.approval-gate-preview {
+    max-height: 120px;
+    margin: 0;
+    overflow: auto;
+    padding: 8px 10px;
+    line-height: var(--line-height-code);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .approval-gate-error {

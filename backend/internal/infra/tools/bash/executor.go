@@ -124,7 +124,7 @@ func encodeOutput(toolOutput output, directory string) ([]byte, error) {
 
 // projectDirectory 拒绝项目外目录和符号链接路径；这不是 Bash 进程隔离。
 func projectDirectory(path, projectRoot string) bool {
-	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsAbsoluteNormalized(projectRoot) || !pathutil.IsWithin(projectRoot, path) {
+	if !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
 	realPath, err := filepath.EvalSymlinks(path)

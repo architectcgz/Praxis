@@ -27,15 +27,15 @@
     background: var(--paper);
 }
 
-/* 空状态不使用卡片容器，只有图标、标题、说明和快捷键提示。 */
+/* 空状态不使用卡片容器，只有图标、标题、说明和行动提示。 */
 .session-empty-state {
     display: flex;
     flex: 1 1 auto;
-    min-height: 0;
+    min-height: 100%;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    max-width: 580px;
+    max-width: min(820px, 100%);
     margin: 0 auto;
     padding: 32px 24px;
     text-align: center;
@@ -43,6 +43,7 @@
 
 .session-empty-container {
     display: flex;
+    width: 100%;
     min-width: 0;
     flex-direction: column;
     align-items: center;
@@ -54,17 +55,17 @@
 
 .session-empty-hero {
     display: flex;
-    max-width: 520px;
+    max-width: 560px;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     text-align: center;
 }
 
 .session-empty-icon {
     display: grid;
-    width: 64px;
-    height: 64px;
+    width: 52px;
+    height: 52px;
     place-items: center;
     border-radius: var(--radius-card);
     background: var(--selected);
@@ -81,7 +82,7 @@
 }
 
 .session-empty-description {
-    max-width: 480px;
+    max-width: 520px;
     margin: 0;
     color: var(--muted);
     font-size: var(--font-size-body);
@@ -92,8 +93,9 @@
     display: grid;
     width: 100%;
     max-width: 780px;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 24px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px;
+    text-align: left;
 }
 
 .session-empty-feature {
@@ -141,7 +143,32 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
+}
+
+.session-empty-cta {
+    display: inline-flex;
+    min-height: var(--control-height);
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 16px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-control);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: var(--font-size-ui);
+    font-weight: 650;
+    transition: background-color var(--motion-duration) var(--ease-standard), border-color var(--motion-duration) var(--ease-standard);
+}
+
+.session-empty-cta:hover:not(:disabled) {
+    border-color: var(--accent-ink);
+    background: var(--accent-ink);
+}
+
+.session-empty-sep {
+    color: var(--faint);
 }
 
 .session-empty-hint {

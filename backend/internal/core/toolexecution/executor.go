@@ -94,6 +94,14 @@ type CallResult struct {
 	Err         error
 }
 
+// ControlRequest 将审批和取消绑定到消息声明的归属。
+type ControlRequest struct {
+	SessionID identity.SessionID
+	AgentID   identity.AgentID
+	RunID     identity.RunID
+	CallID    string
+}
+
 func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, progress RequestProgress, awaitApproval func(context.Context) error) *RunTools {
 	return &RunTools{
 		executor:      e,

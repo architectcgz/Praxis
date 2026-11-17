@@ -18,6 +18,12 @@ const toolLabels: Record<string, string> = {
     bash: '运行',
     read_file: '读取',
     apply_patch: '补丁',
+    subagent_start: '委派子代理',
+    subagent_status: '查询子代理',
+    subagent_wait: '等待子代理',
+    send_to_subagent: '补充指令',
+    subagent_cancel: '取消子代理',
+    report_to_parent: '汇报父任务',
 }
 
 /** 读取工具的 JSON 对象；普通文本、数组和无效 JSON 保留给正文展示。 */
@@ -34,7 +40,14 @@ export function toolRecord(value: unknown): Record<string, unknown> {
 
 /** 格式化原始工具参数，无法序列化时保留可读文本。 */
 export function formatToolInput(input: unknown): string {
-    if (typeof input === 'string') return input
+    if (typeof input === 'string') {
+        try {
+            const parsed = JSON.parse(input) as unknown
+            return JSON.stringify(parsed, null, 2) || input
+        } catch {
+            return input
+        }
+    }
     try {
         return JSON.stringify(input ?? {}, null, 2) || '{}'
     } catch {
@@ -42,12 +55,59 @@ export function formatToolInput(input: unknown): string {
     }
 }
 
+/** 为各类工具提取紧凑且可扫描的单行摘要。 */
+function summarizeToolInput(name: string, input: Record<string, unknown>): string {
+    const command = stringValue(input.command)
+    if (command) return command
+    const path = stringValue(input.path)
+    if (path) {
+        if (name === 'read_file') {
+            const offset = typeof input.offset === 'number' ? input.offset : undefined
+            const limit = typeof input.limit === 'number' ? input.limit : undefined
+            if (offset !== undefined || limit !== undefined) {
+                const range = [offset !== undefined ? `L${offset}` : '', limit !== undefined ? `+${limit}行` : ''].filter(Boolean).join(' ')
+                return `${path} (${range})`
+            }
+        }
+        return path
+    }
+    const pattern = stringValue(input.pattern)
+    if (pattern) return pattern
+    if (name === 'subagent_start') {
+        const task = stringValue(input.task).replace(/\s+/g, ' ').trim()
+        const tools = Array.isArray(input.allowedTools) ? input.allowedTools.filter((item) => typeof item === 'string') : []
+        if (task) return tools.length > 0 ? `[${tools.join(', ')}] ${task}` : task
+    }
+    if (name === 'subagent_wait') {
+        const ids = Array.isArray(input.ids) ? input.ids.length : 0
+        const mode = stringValue(input.mode) === 'all' ? '全部' : '任一'
+        return `等待 ${ids} 个子代理 · ${mode}`
+    }
+    if (name === 'subagent_status') {
+        const ids = Array.isArray(input.ids) ? input.ids.length : 0
+        return ids > 0 ? `查询 ${ids} 个子代理状态` : '查询全部子代理状态'
+    }
+    if (name === 'send_to_subagent') {
+        const message = stringValue(input.message).replace(/\s+/g, ' ').trim()
+        if (message) return message
+    }
+    if (name === 'subagent_cancel') {
+        const id = stringValue(input.id)
+        if (id) return `取消 ${id}`
+    }
+    if (name === 'report_to_parent') {
+        const message = stringValue(input.message).replace(/\s+/g, ' ').trim()
+        if (message) return message
+    }
+    return name || '工具'
+}
+
 /** 按真实结果生成状态和必要提示；错误详情保留在正文，没有结果时使用调用方状态。 */
 export function presentTool(name: string, inputValue: unknown, resultText?: string, isError = false, pendingStatus: ToolStatus = 'running'): ToolPresentation {
     const input = toolRecord(inputValue)
     const result = toolRecord(resultText)
     const label = toolLabels[name] || name || '工具'
-    const summary = stringValue(input.command) || stringValue(input.path) || stringValue(input.pattern) || name || '工具'
+    const summary = summarizeToolInput(name, input)
     const content = typeof result.output === 'string' ? result.output
         : typeof result.content === 'string' ? result.content
         : typeof result.message === 'string' ? result.message

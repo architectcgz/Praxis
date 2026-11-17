@@ -43,10 +43,20 @@
 }
 
 .project-overview-path {
-    gap: 7px;
+    gap: 8px;
     margin: 20px 0 0;
+    padding: 7px 10px;
     font-size: var(--font-size-meta);
     overflow-wrap: anywhere;
+}
+
+.project-overview-path > svg:first-child {
+    flex: none;
+}
+
+.project-overview-path > span {
+    min-width: 0;
+    flex: 1;
 }
 
 .project-overview-stats {

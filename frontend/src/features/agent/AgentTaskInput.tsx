@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, type CSSProperties, type KeyboardEvent, type RefObject } from 'react'
-import { Brain, ChevronDown, Cpu, Plus, Send, Server, Square } from 'lucide-react'
+import { Brain, ChevronDown, Cpu, ListPlus, Send, Server, Square } from 'lucide-react'
 import type { ModelOption } from '../../api'
 import { useSlashCommandMenu } from './SlashCommandMenu'
 import { SessionTokenUsage } from './SessionTokenUsage'
@@ -64,8 +64,14 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
         }
         textarea.style.height = 'auto'
         const contentHeight = textarea.scrollHeight
+        const maxHeight = Number.parseFloat(window.getComputedStyle(textarea).maxHeight)
+        if (Number.isFinite(maxHeight) && contentHeight > maxHeight) {
+            textarea.style.height = `${maxHeight}px`
+            textarea.style.overflowY = 'auto'
+            return
+        }
         textarea.style.height = `${contentHeight}px`
-        textarea.style.overflowY = 'auto'
+        textarea.style.overflowY = 'hidden'
     }, [input, inputRef])
 
     const sendDisabled = busy || !input.trim()
@@ -80,16 +86,6 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
         <div className="command-band">
             {slash.menu}
             <div className="composer-shell">
-                <button
-                    className="composer-icon-button"
-                    type="button"
-                    title="聚焦执行输入"
-                    aria-label="聚焦执行输入"
-                    onClick={() => inputRef.current?.focus()}
-                    disabled={busy}
-                >
-                    <Plus size={18} strokeWidth={1.9} aria-hidden="true" />
-                </button>
                 <textarea
                     className="composer-textarea"
                     id={inputID}
@@ -103,7 +99,7 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                     value={input}
                     onChange={(event) => slash.changeInput(event.target.value)}
                     onKeyDown={handleInputKeyDown}
-                    placeholder={canQueue ? '编写后续任务，发送后排队执行' : '为此代理编写新任务'}
+                    placeholder={canQueue ? '输入后续任务，发送后按 FIFO 排队执行（/ 触发命令）' : '为此代理编写新任务（/ 触发命令，Shift+Enter 换行）'}
                     disabled={busy}
                     rows={1}
                 />
@@ -257,14 +253,21 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                             </button>
                         )}
                         <button
-                            className="composer-submit"
+                            className={`composer-submit ${canQueue ? 'composer-submit-queue' : ''}`}
                             type="button"
                             title={canQueue ? '加入任务队列' : '发送输入'}
                             aria-label={canQueue ? '加入任务队列' : '发送输入'}
                             onClick={onSend}
                             disabled={sendDisabled}
                         >
-                            <Send size={16} strokeWidth={2.1} aria-hidden="true" />
+                            {canQueue ? (
+                                <>
+                                    <ListPlus size={15} strokeWidth={2} aria-hidden="true" />
+                                    <span>排队</span>
+                                </>
+                            ) : (
+                                <Send size={16} strokeWidth={2.1} aria-hidden="true" />
+                            )}
                         </button>
                     </div>
                 </div>

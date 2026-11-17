@@ -3,8 +3,10 @@ package bindings
 import (
 	"context"
 	coordinator "praxis/internal/core/coordinator"
+	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
+	approvalservice "praxis/internal/service/approval"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/dto"
 	"praxis/wails/validation"
@@ -80,15 +82,14 @@ func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services
 	}
 	result := dto.SessionSnapshot{
 		QueuePaused: view.QueuePaused,
-
-		ID:        view.Session.ID.String(),
-		ProjectID: view.Session.ProjectID.String(),
-		Title:     view.Session.Title,
-		CreatedAt: view.Session.CreatedAt,
-		UpdatedAt: view.Session.UpdatedAt,
-		Agents:    publicAgents(agents),
-		Tasks:     make([]dto.QueuedTask, 0, len(view.Tasks)),
-		Entries:   map[string]dto.HistoryPage{view.Session.ID.String(): publicHistoryPage(content.Page)},
+		ID:          view.Session.ID.String(),
+		ProjectID:   view.Session.ProjectID.String(),
+		Title:       view.Session.Title,
+		CreatedAt:   view.Session.CreatedAt,
+		UpdatedAt:   view.Session.UpdatedAt,
+		Agents:      publicAgents(agents),
+		Tasks:       make([]dto.QueuedTask, 0, len(view.Tasks)),
+		Entries:     map[string]dto.HistoryPage{view.Session.ID.String(): publicHistoryPage(content.Page)},
 	}
 	for _, value := range view.Tasks {
 		result.Tasks = append(result.Tasks, dto.QueuedTask{
@@ -185,6 +186,7 @@ func (b *SessionBindings) GetSessionSummary(sessionID string) (dto.SessionSummar
 	}
 	return sessionSummary(info), nil
 }
+
 func (b *SessionBindings) CloseSession(sessionID string) error {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return publicInputError(b.host, "CloseSession", err)
@@ -194,4 +196,169 @@ func (b *SessionBindings) CloseSession(sessionID string) error {
 		return err
 	}
 	return publicError(b.host, "CloseSession", services.Commands.CloseSession(ctx, identity.SessionID(sessionID)))
+}
+
+// ListModels 返回指定会话已加载的模型目录，不暴露凭据。
+func (b *SessionBindings) ListModels(sessionID string) ([]dto.ModelOption, error) {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return nil, publicInputError(b.host, "SessionBindings.ListModels.request", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return nil, err
+	}
+	models, err := services.Sessions.ModelOptions(ctx, identity.SessionID(sessionID))
+	if err != nil {
+		return nil, publicError(b.host, "SessionBindings.ListModels", err)
+	}
+	result := make([]dto.ModelOption, 0, len(models))
+	for _, option := range models {
+		result = append(result, dto.ModelOption{
+			ProviderID:            option.ProviderID,
+			ModelID:               option.ModelID,
+			Label:                 option.Label,
+			ProviderName:          option.ProviderName,
+			ReasoningLevels:       option.ReasoningLevels,
+			DefaultReasoningLevel: option.DefaultReasoningLevel,
+		})
+	}
+	return result, nil
+}
+
+// ReloadConfig 只重新加载指定会话；执行中拒绝重载，加载失败保留原配置。
+func (b *SessionBindings) ReloadConfig(sessionID string) error {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return publicInputError(b.host, "SessionBindings.ReloadConfig.request", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return err
+	}
+	if err := services.Commands.ReloadSessionConfig(ctx, identity.SessionID(sessionID)); err != nil {
+		return publicError(b.host, "SessionBindings.ReloadConfig", err)
+	}
+	return nil
+}
+
+// SelectModel 只更新指定会话的选择；队列唤醒由 Coordinator 编排。
+func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
+	wire.ProviderID = strings.TrimSpace(wire.ProviderID)
+	wire.ModelID = strings.TrimSpace(wire.ModelID)
+	wire.ReasoningLevel = strings.TrimSpace(wire.ReasoningLevel)
+	if err := validation.Struct(wire); err != nil {
+		return publicInputError(b.host, "SessionBindings.SelectModel.request", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return err
+	}
+	choice := sessionmodel.ModelChoice{
+		ProviderID:     wire.ProviderID,
+		ModelID:        wire.ModelID,
+		ReasoningLevel: wire.ReasoningLevel,
+	}
+	if err := services.Commands.SelectModel(ctx, identity.SessionID(wire.SessionID), choice); err != nil {
+		return publicError(b.host, "SessionBindings.SelectModel", err)
+	}
+	return nil
+}
+
+// GetModelSelection 返回会话自身的选择；查询不会设置模型或唤醒预约。
+func (b *SessionBindings) GetModelSelection(sessionID string) (dto.ModelSelection, error) {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return dto.ModelSelection{}, publicInputError(b.host, "SessionBindings.GetModelSelection.request", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return dto.ModelSelection{}, err
+	}
+	choice, err := services.Sessions.SelectedModel(ctx, identity.SessionID(sessionID))
+	if err != nil {
+		return dto.ModelSelection{}, publicError(b.host, "SessionBindings.GetModelSelection", err)
+	}
+	return dto.ModelSelection{
+		ProviderID:     choice.ProviderID,
+		ModelID:        choice.ModelID,
+		ReasoningLevel: choice.ReasoningLevel,
+	}, nil
+}
+
+// RevealSessionFile 打开系统文件管理器定位会话日志；非法 ID、文件缺失或启动失败时返回公开错误。
+func (b *SessionBindings) RevealSessionFile(sessionID string) error {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return publicInputError(b.host, "SessionBindings.RevealSessionFile.request", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return err
+	}
+	path, err := services.SessionLogPath(ctx, identity.SessionID(sessionID))
+	if err != nil {
+		return publicError(b.host, "SessionBindings.RevealSessionFile", err)
+	}
+	command, err := revealFileCommand(path)
+	if err != nil {
+		return publicError(b.host, "SessionBindings.RevealSessionFile", err)
+	}
+	if err := command.Start(); err != nil {
+		return publicError(b.host, "SessionBindings.RevealSessionFile", err)
+	}
+	// 文件管理器可能持续运行，不阻塞 binding；后台等待以释放子进程资源。
+	go func() {
+		if err := command.Wait(); err != nil {
+			b.host.LogError("session file manager exited: %v", err)
+		}
+	}()
+	return nil
+}
+
+// GetSessionApprovalMode 读取会话授权选择；空或非 canonical 会话身份返回校验错误。
+func (b *SessionBindings) GetSessionApprovalMode(sessionID string) (dto.SessionApprovalMode, error) {
+	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
+		return dto.SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.GetSessionApprovalMode.request", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return dto.SessionApprovalMode{}, err
+	}
+	value, err := services.Approvals.GetApprovalMode(ctx, identity.SessionID(sessionID))
+	if err != nil {
+		return dto.SessionApprovalMode{}, publicError(b.host, "SessionBindings.GetSessionApprovalMode", err)
+	}
+	return approvalModeDTO(value), nil
+}
+
+// SetSessionApprovalMode 保存会话授权选择；null 恢复继承，有效模式在会话显式 reload 后更新。
+func (b *SessionBindings) SetSessionApprovalMode(wire dto.SetSessionApprovalModeRequest) (dto.SessionApprovalMode, error) {
+	if wire.Mode != nil {
+		wire.Mode = new(strings.TrimSpace(*wire.Mode))
+	}
+	if err := validation.Struct(wire); err != nil {
+		return dto.SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.SetSessionApprovalMode.request", err)
+	}
+	ctx, services, err := b.host.BindingContext()
+	if err != nil {
+		return dto.SessionApprovalMode{}, err
+	}
+	var mode *security.ApprovalMode
+	if wire.Mode != nil {
+		mode = new(security.ApprovalMode(*wire.Mode))
+	}
+	value, err := services.Approvals.SetApprovalMode(ctx, identity.SessionID(wire.SessionID), mode)
+	if err != nil {
+		return dto.SessionApprovalMode{}, publicError(b.host, "SessionBindings.SetSessionApprovalMode", err)
+	}
+	return approvalModeDTO(value), nil
+}
+
+func approvalModeDTO(value approvalservice.ApprovalSettings) dto.SessionApprovalMode {
+	result := dto.SessionApprovalMode{
+		SessionID:     value.SessionID.String(),
+		GlobalMode:    string(value.GlobalMode),
+		EffectiveMode: string(value.EffectiveMode),
+	}
+	if value.SessionMode != nil {
+		result.SessionMode = new(string(*value.SessionMode))
+	}
+	return result
 }

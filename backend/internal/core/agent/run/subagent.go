@@ -57,12 +57,6 @@ func (r *Run) RegisterSubagent(handle SubagentHandle) {
 	r.collaboration.children[handle.AgentID] = handle
 }
 func (r *Run) StartSubagent(ctx context.Context, a Assignment, callID string) (SubagentStatus, error) {
-	if !r.Main() || r.collaboration.spawn == nil {
-		return SubagentStatus{}, fmt.Errorf("subagent delegation is unavailable")
-	}
-	if a.Task == "" || a.AllowedTools == nil || a.TimeoutSeconds < 1 || a.TimeoutSeconds > 600 {
-		return SubagentStatus{}, fmt.Errorf("task, allowedTools and timeoutSeconds (1-600) are required")
-	}
 	return r.collaboration.spawn(ctx, a, callID)
 }
 func (r *Run) SubagentStatuses(ids []identity.AgentID) ([]SubagentStatus, error) {
@@ -121,9 +115,6 @@ func (r *Run) receiveInstruction(ctx context.Context, text string) (string, erro
 	if !r.collaboration.accepting {
 		return "", fmt.Errorf("subagent execution has ended")
 	}
-	if text == "" {
-		return "", fmt.Errorf("instruction text is required")
-	}
 	id := r.deps.IDs.New("instruction")
 	if _, _, err := r.AppendEntry(ctx, sessionentry.ContextEntry{ID: id, Payload: sessionentry.SubagentInstructionReceived{MessageID: id, Text: text}}); err != nil {
 		return "", err
@@ -162,9 +153,6 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 	if parent == nil {
 		return fmt.Errorf("this run has no parent")
 	}
-	if text == "" {
-		return fmt.Errorf("report text is required")
-	}
 	record := r.Snapshot()
 	result := sessionentry.SubagentResult{
 		ReportID:     r.deps.IDs.New("report"),
@@ -198,9 +186,6 @@ func (r *Run) AcceptSubagentResult(ctx context.Context, result sessionentry.Suba
 	return nil
 }
 func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]sessionentry.SubagentReceipt, error) {
-	if len(ids) == 0 {
-		return nil, fmt.Errorf("at least one subagent is required")
-	}
 	wanted := make(map[identity.AgentID]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true

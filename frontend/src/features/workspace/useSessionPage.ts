@@ -39,12 +39,30 @@ export function useSessionPage({ sessionID, title, createNewSession }: SessionPa
     }
     const operationError = submission.error || controls.error || commands.error
     const error = operationError || agents.selectionError || (data.sessionError ? readableError(data.sessionError) : '') || (catalog.error ? readableError(catalog.error) : '')
+    const clearSubmissionError = submission.clearError
+    const clearControlError = controls.clearError
+    const clearCommandError = commands.clearError
+    const clearSelectionError = agents.clearSelectionError
+    const clearError = useCallback(() => {
+        clearSubmissionError()
+        clearControlError()
+        clearCommandError()
+        clearSelectionError()
+    }, [clearSubmissionError, clearControlError, clearCommandError, clearSelectionError])
+    const status = agents.agents.some((item) => item.state === 'waiting') ? 'waiting'
+        : agents.agents.some((item) => item.state === 'executing') ? 'executing'
+        : main?.state === 'failed' ? 'failed'
+        : main?.state === 'interrupted' ? 'interrupted'
+        : 'idle'
+    const queuedCount = session?.tasks.length ?? 0
     return {
         ...agents,
         session, sessionLoading: data.sessionLoading, models: catalog.models,
         busy: submission.busy || controls.busy || commands.busy || data.closing || agents.modelSelectionPending,
         refreshing: catalog.loading,
+        status, queuedCount,
         error, errorCode: !operationError && agents.selectionError ? agents.selectionErrorCode : undefined,
+        clearError,
         usageRevision: data.usageRevision,
         submitInput, submissionRevision,
         canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask, changeQueue: submission.changeQueue,

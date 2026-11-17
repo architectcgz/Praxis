@@ -5,7 +5,6 @@ import (
 	"errors"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
-	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -13,8 +12,7 @@ import (
 )
 
 type SubmitResult struct {
-	Task taskmodel.Task
-
+	Task            taskmodel.Task
 	SchedulingError string
 }
 
@@ -39,7 +37,7 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input taskmodel.Input) (Su
 		return result, err
 	}
 	s.loop.Emitter.Emit(*notification)
-	if err := s.schedule(context.WithoutCancel(ctx), input.SessionID, true); err != nil {
+	if err := s.schedule(context.WithoutCancel(ctx), input.SessionID); err != nil {
 		result.SchedulingError = err.Error()
 	}
 	return result, nil
@@ -64,9 +62,7 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 			return SubmitResult{}, nil, err
 		}
 	}
-	result := SubmitResult{
-		Task: task,
-	}
+	result := SubmitResult{Task: task}
 	if prior, err := binding.session.FindRunByTask(ctx, identity.AgentID(input.SessionID), task.ID); err == nil {
 		entry, err := binding.session.Entry(ctx, prior.InputEntryID)
 		if err != nil {
@@ -122,31 +118,81 @@ func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.Session
 	return err
 }
 
+func (s *Coordinator) PauseQueue(ctx context.Context, id identity.SessionID) error {
+	return s.changeQueue(ctx, id, true)
+}
+
+func (s *Coordinator) ResumeQueue(ctx context.Context, id identity.SessionID) error {
+	return s.changeQueue(ctx, id, false)
+}
+
+func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pause bool) error {
+	if err := s.enter(); err != nil {
+		return err
+	}
+	defer s.running.Done()
+	unlock, err := s.lockSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	binding := s.schedules[id]
+	s.mu.Unlock()
+	if binding == nil {
+		unlock()
+		return errorcode.ErrNotFound
+	}
+	if pause {
+		binding.queue.Pause()
+	} else {
+		binding.queue.Resume()
+	}
+	notification := taskQueueEvent(binding)
+	unlock()
+	s.loop.Emitter.Emit(notification)
+	if !pause {
+		s.mu.Lock()
+		active := s.runs[runKey{identity.AgentID(id)}]
+		s.mu.Unlock()
+		// 显式恢复可以等待已取消的旧执行收尾，不能让恢复意图丢在占用窗口里。
+		if active != nil && active.ctx.Err() != nil {
+			select {
+			case <-active.done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return s.schedule(ctx, id)
+	}
+	return nil
+}
+
 func taskQueueEvent(binding *sessionSchedule) coreevent.Event {
 	return coreevent.Event{
 		Source: coreevent.EventSource{
 			AgentID:   identity.AgentID(binding.sessionID),
 			SessionID: binding.sessionID,
 		},
-		Payload: coreevent.TaskQueueChanged{Tasks: binding.queue.List(0), Paused: binding.queue.Paused()},
+		Payload: coreevent.TaskQueueChanged{
+			Tasks:  binding.queue.List(0),
+			Paused: binding.queue.Paused(),
+		},
 	}
 }
 
 func (s *Coordinator) createTask(ctx context.Context, input taskmodel.Input) (taskmodel.Task, error) {
-	prompt, err := s.hookDispatcher.BeforeUserInput(ctx, hook.UserInput{SessionID: input.SessionID, Prompt: input.Prompt})
+	prompt, err := s.hookDispatcher.BeforeUserInput(ctx, hook.UserInput{
+		SessionID: input.SessionID,
+		Prompt:    input.Prompt,
+	})
 	if err != nil {
 		return taskmodel.Task{}, err
 	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" || len(prompt) > taskmodel.MaxInputBytes {
-		return taskmodel.Task{}, errorcode.ErrInvalidValue
-	}
-	info, err := s.sessionRecords.Get(ctx, input.SessionID)
-	if err != nil {
-		return taskmodel.Task{}, err
-	}
-	if info.State != sessionmodel.SessionActive {
-		return taskmodel.Task{}, errorcode.ErrRequestConflict
+	if prompt != input.Prompt {
+		prompt = strings.TrimSpace(prompt)
+		if prompt == "" || len(prompt) > taskmodel.MaxInputBytes {
+			return taskmodel.Task{}, errorcode.ErrInvalidValue
+		}
 	}
 	return taskmodel.NewTask(input.SubmissionID, input.SessionID, prompt, s.runDependencies.Clock.Now()), nil
 }

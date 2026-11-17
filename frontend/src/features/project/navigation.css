@@ -16,15 +16,28 @@
     padding: 10px 10px 12px;
 }
 
-.projects-panel > .scroll-region:has(> .muted-copy) {
+.projects-panel > .scroll-region:has(> .muted-copy),
+.projects-panel > .scroll-region:has(> .projects-empty-state) {
     display: flex;
     flex-direction: column;
     scrollbar-gutter: auto;
 }
 
-.projects-panel > .scroll-region > .muted-copy {
+.projects-panel > .scroll-region > .muted-copy,
+.projects-empty-state {
     margin: auto 0;
     text-align: center;
+}
+
+.projects-empty-state {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    padding: 16px 8px;
+}
+
+.projects-empty-state .muted-copy {
+    margin: 0;
 }
 
 .project-list {
@@ -71,10 +84,17 @@
 
 .project-heading:hover,
 .project-heading:focus-within,
-.project-heading.selected,
-.session-row:hover,
-.session-row.selected {
+.session-row:hover {
     background: var(--fill);
+}
+
+.project-heading.selected,
+.session-row.selected {
+    background: var(--selected);
+}
+
+.project-heading.has-active-session .project-heading-copy strong {
+    color: var(--accent-ink);
 }
 
 .project-toggle,
@@ -295,12 +315,39 @@
     gap: 6px;
 }
 
+.lookup-input-wrap {
+    position: relative;
+    min-width: 0;
+}
+
+.lookup-input-wrap input {
+    padding-right: 28px;
+}
+
+.lookup-clear {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    transform: translateY(-50%);
+}
+
 .lookup-button {
+    display: grid;
+    place-items: center;
     min-width: 32px;
+    height: var(--control-height);
     padding: 0;
+    border: 0;
     border-radius: var(--radius-control);
     background: var(--accent);
     color: var(--on-accent);
+    transition: background-color var(--motion-duration) var(--ease-standard);
+}
+
+.lookup-button:hover:not(:disabled) {
+    background: var(--accent-ink);
 }
 
 #session-id:focus-visible {

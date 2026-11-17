@@ -18,5 +18,6 @@ export function useRunControl(agent: AgentView | null) {
         catch (reason) { if (request === generation.current) setError(readableError(reason)) }
         finally { pending.current = false; setBusy(false) }
     }, [agent])
-    return { stop, busy, error }
+    const clearError = useCallback(() => setError(''), [])
+    return { stop, busy, error, clearError }
 }

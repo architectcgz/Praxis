@@ -48,7 +48,7 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 		}, nil
 	})
 	if err != nil {
-		r.logger.Errorf("run id=%s failed: %v", record.ID, err)
+		r.logger.Errorf("run failed run_id=%s: %v", record.ID, err)
 	}
 	if !run.Main() {
 		if active.onDone != nil {
@@ -77,7 +77,7 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 	var input taskmodel.Task
 	var scheduleErr error
 	if err == nil && run.Snapshot().Outcome == sessionentry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), agentrun.ErrInterrupted) {
-		input, binding, next, scheduleErr = r.claimTaskLocked(queueCtx, record.SessionID, false)
+		input, binding, next, scheduleErr = r.claimTaskLocked(queueCtx, record.SessionID)
 	}
 	unlock()
 	active.cancel(nil)

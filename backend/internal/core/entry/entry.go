@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"praxis/internal/core/entry/role"
+	"praxis/internal/core/timing"
+	"praxis/internal/identity"
 	"strings"
 	"time"
 )
@@ -16,6 +18,21 @@ const (
 	AuthorTool   AuthorKind = "tool"
 	AuthorSystem AuthorKind = "system"
 )
+
+// ModelResponse 只描述产生本条文本、思考或工具声明的模型响应。
+type ModelResponse struct {
+	RequestID  identity.ModelRequestID `json:"requestId"`
+	StopReason string                  `json:"stopReason,omitempty"`
+	Error      string                  `json:"error,omitempty"`
+	Timing     *timing.Record          `json:"timing,omitempty"`
+}
+
+// Compression 描述 Run 级摘要及仍需保留的原文，不属于压缩前后任一 Turn。
+// 分片摘要可能包含多个模型请求；保留条目通过 ID 关联 Session 中的同一份 Entry。
+type Compression struct {
+	RequestIDs []identity.ModelRequestID `json:"requestIds"`
+	Timing     *timing.Record            `json:"timing,omitempty"`
+}
 
 // ContextEntry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
 type ContextEntry struct {
@@ -81,6 +98,25 @@ func (e ContextEntry) TextContent() string {
 	return text.String()
 }
 
+// Preview 提供历史目录的短文本，不保存第二份正文。
+func (e ContextEntry) Preview() string {
+	if e.IsRun() {
+		return "执行结束 · " + e.ExecutionResult().Outcome
+	}
+	if e.IsSummary() {
+		return "上下文摘要"
+	}
+	text := strings.Join(strings.Fields(e.TextContent()), " ")
+	if text == "" {
+		text = string(e.Role)
+	}
+	runes := []rune(text)
+	if len(runes) > 100 {
+		text = string(runes[:100]) + "…"
+	}
+	return text
+}
+
 // Values 为请求或展示边界创建值列表，内部载荷仍按只读数据共享。
 func Values(entries []*ContextEntry) []ContextEntry {
 	values := make([]ContextEntry, len(entries))
@@ -102,8 +138,57 @@ func (e ContextEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		value
 		Payload json.RawMessage `json:"payload,omitempty"`
-	}{value: value(e), Payload: payload})
+	}{
+		value:   value(e),
+		Payload: payload,
+	})
 }
 
 // AppendEntry 是执行流程唯一的同步事实提交能力，归属在准备时绑定。
 type AppendEntry func(context.Context, ContextEntry) (*ContextEntry, bool, error)
+
+// Node 只保存历史结构、预览与上下文选择信息，不持有正文或文件位置。
+// 子代理节点用于独立路径读取，不进入主会话历史。
+type Node struct {
+	ID           string
+	AgentID      identity.AgentID
+	RunID        string
+	TurnID       string
+	Role         role.Role
+	Summary      bool
+	Run          bool
+	Visible      bool
+	Metadata     bool
+	MessageID    string
+	HasToolCalls bool
+	PreviewText  string
+	CreatedAt    time.Time
+}
+
+func NewNode(agentID identity.AgentID, value ContextEntry) Node {
+	node := Node{
+		ID:          value.ID,
+		AgentID:     agentID,
+		RunID:       value.RunID,
+		TurnID:      value.TurnID,
+		Role:        value.Role,
+		Summary:     value.IsSummary(),
+		Run:         value.IsRun(),
+		Metadata:    value.IsMetadata(),
+		Visible:     !value.IsMetadata() || value.ExecutionResult() != nil,
+		MessageID:   value.InputMessageID(),
+		PreviewText: value.Preview(),
+		CreatedAt:   value.CreatedAt,
+	}
+
+	if request, _ := value.RequestFact(); request != nil && (request.Status == RequestFailed || request.Status == RequestInterrupted) {
+		node.Visible = true
+	}
+	for _, block := range value.Content {
+		if _, ok := block.(ToolCallBlock); ok {
+			node.HasToolCalls = true
+			break
+		}
+	}
+	return node
+}

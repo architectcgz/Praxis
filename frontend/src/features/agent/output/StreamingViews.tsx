@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from 'react'
-import { LoaderCircle } from 'lucide-react'
+import { CircleAlert, LoaderCircle } from 'lucide-react'
 import type { AgentEvent, RunSnapshot } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { StreamingToolCallsView } from './ToolCallViews'
@@ -35,7 +35,7 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, str
         <div className="agent-activity" aria-live="polite">
             {providerWaiting && <div className="message-pending-status"><LoaderCircle size={16} strokeWidth={1.8} aria-hidden="true" /><span>等待模型响应</span></div>}
             {thinking && <ThinkingDetails content={thinking} streaming={streaming} />}
-            {error && <p role="alert">{error}</p>}
+            {error && <div className="message-error-box" role="alert"><CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" /><span>{error}</span></div>}
         </div>
     )
 })
@@ -55,25 +55,29 @@ export function StreamingTurnView({ agentName, events, runId, run, turnId, activ
     const segments: ReactNode[] = []
     const pendingStatus = active ? 'running' : 'unknown'
     let tools: AgentEvent[] = []
+    const flushTools = (index: number) => {
+        if (tools.length === 0) return
+        segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${index}`} />)
+        tools = []
+    }
     events.forEach((event, index) => {
         if (event.kind === 'tool_call' || event.kind === 'tool_started' || event.kind === 'tool_approval_required' || event.kind === 'tool_result') {
             tools.push(event)
             return
         }
-        if (tools.length > 0) {
-            segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${index}`} />)
-            tools = []
-        }
         if (event.kind === 'model_request_started' && active && index === events.length - 1) {
+            flushTools(index)
             segments.push(<AgentActivityView providerWaiting key={`provider-waiting-${index}`} />)
-        } else if (event.kind === 'thinking_delta' && event.data.text) {
+        } else if (event.kind === 'thinking_delta' && event.data.text.trim()) {
+            flushTools(index)
             // 只有当前末尾的思考仍在流式输出；工具或正文出现后，前一段思考结束并收起。
             segments.push(<AgentActivityView thinking={event.data.text} streaming={active && index === events.length - 1} key={`thinking-${index}`} />)
-        } else if (event.kind === 'text_delta' && event.data.text) {
+        } else if (event.kind === 'text_delta' && event.data.text.trim()) {
+            flushTools(index)
             segments.push(<StreamingOutputView content={event.data.text} key={`text-${index}`} />)
         }
     })
-    if (tools.length > 0) segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${events.length}`} />)
+    flushTools(events.length)
     return <div className={`streaming-turn${hasContinuation ? ' streaming-turn-continued' : ''}`}>
         {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">

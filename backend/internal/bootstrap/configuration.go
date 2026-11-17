@@ -2,9 +2,14 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
-	agentmodel "praxis/internal/core/agent"
+	"os"
 	modelapi "praxis/internal/core/model"
+	modelconfig "praxis/internal/core/model/config"
+	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
@@ -13,12 +18,10 @@ import (
 	"praxis/internal/infra/providers"
 	"praxis/internal/infra/toolregistry"
 	"praxis/internal/settings"
-	"sync"
 )
 
 // configuration 只拥有固定的工具实现，每次加载返回独立只读配置，不向执行路径发布可变目录。
 type configuration struct {
-	mu       sync.RWMutex
 	registry *tool.ToolRegistry
 }
 
@@ -35,8 +38,6 @@ func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configu
 }
 
 func (c *configuration) loadSessionConfiguration(ctx context.Context, root dataroot.DataRoot) (*sessionmodel.Configuration, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -53,9 +54,6 @@ func (c *configuration) loadSessionConfiguration(ctx context.Context, root datar
 		return nil, err
 	}
 	definitions := agents.List()
-	if err := agentmodel.ValidateDefinitions(nil, definitions); err != nil {
-		return nil, err
-	}
 	tools, err := toolregistry.Load(root.ToolConfig, c.registry)
 	if err != nil {
 		return nil, err
@@ -70,4 +68,48 @@ func (c *configuration) loadSessionConfiguration(ctx context.Context, root datar
 		}),
 		GlobalApprovalMode: configured.ApprovalMode,
 	}, nil
+}
+
+// initializeDefaultFiles 只补充缺失文件，配置加载和重载均不调用此步骤。
+func initializeDefaultFiles(ctx context.Context, root dataroot.DataRoot) error {
+	files := map[string]any{
+		root.ModelProvidersConfig: modelconfig.Config{
+			Groups:    []modelconfig.Group{},
+			Providers: []modelconfig.Provider{},
+		},
+		root.ModelCredentialsFile: map[string]any{},
+		root.ToolConfig: tool.Config{
+			Tools: map[tool.ToolName]tool.ToolConfig{},
+		},
+		root.SettingsFile: settings.Config{
+			ApprovalMode: security.ApprovalAsk,
+		},
+	}
+	for path, value := range files {
+		encoded, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := createDefaultFile(ctx, path, append(encoded, '\n')); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createDefaultFile(ctx context.Context, path string, value []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create default config %q: %w", path, err)
+	}
+	_, writeErr := file.Write(value)
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	return errors.Join(writeErr, syncErr, closeErr)
 }

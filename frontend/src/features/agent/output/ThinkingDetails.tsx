@@ -12,7 +12,11 @@ export const ThinkingDetails = memo(function ThinkingDetails({ content, streamin
             onToggle={(event) => setExpanded(event.currentTarget.open)}>
             <summary className="thinking-toggle" aria-label="展开或收起思考内容" title="展开或收起思考内容">
                 <Brain className="thinking-mark" size={14} strokeWidth={1.8} aria-hidden="true" />
-                <span className="thinking-preview" aria-hidden="true">{thinkingPreview(formattedContent)}</span>
+                {expanded ? (
+                    <span className="thinking-label">{streaming ? '正在思考' : '思考过程'}</span>
+                ) : (
+                    <span className="thinking-preview" aria-hidden="true">{thinkingPreview(formattedContent)}</span>
+                )}
                 <ChevronDown className="thinking-chevron" size={14} strokeWidth={1.8} aria-hidden="true" />
             </summary>
             {/* 原生 details 只隐藏 DOM，收起时不挂载正文，避免继续解析不断增长的思考。 */}

@@ -1,79 +1,81 @@
-import { FolderPlus, MessageSquare, Zap } from 'lucide-react'
+import { FolderPlus, GitBranch, ListOrdered, ShieldCheck, Terminal } from 'lucide-react'
 
 type SessionEmptyStateProps = {
     sessionsCount: number
+    projectsCount?: number
+    onOpenProject?: () => void
 }
 
-export function SessionEmptyState({ sessionsCount }: SessionEmptyStateProps) {
+export function SessionEmptyState({ sessionsCount, projectsCount = 0, onOpenProject }: SessionEmptyStateProps) {
     const hasExistingSessions = sessionsCount > 0
+    const hasProjects = projectsCount > 0
 
     return (
         <div className="session-empty-container">
             <div className="session-empty-hero">
                 <div className="session-empty-icon" aria-hidden="true">
-                    <MessageSquare size={26} strokeWidth={1.6} />
+                    <Terminal size={24} strokeWidth={1.7} />
                 </div>
-
-                <h2 className="session-empty-title">
-                    {hasExistingSessions ? '选择一个会话开始工作' : '开始您的第一次协作'}
-                </h2>
-
+                <span className="empty-kicker">PRAXIS · 本地多 AGENT 工作台</span>
+                <h1 className="session-empty-title">
+                    {!hasProjects ? '绑定项目目录，开始编排任务' : hasExistingSessions ? '选择或新建会话' : '在项目中新建会话'}
+                </h1>
                 <p className="session-empty-description">
-                    {hasExistingSessions
-                        ? '从左侧面板中选择一个会话，查看对话历史并继续与 AI 代理协作。'
-                        : '会话是您与 AI 代理协作的工作空间。在会话中，您可以与代理对话、执行任务、管理项目进度。'}
+                    以本地项目目录为执行边界，由主代理持续推进任务、受控调用工具，并委派上下文隔离的子代理协同完成工作。
                 </p>
             </div>
 
             <div className="session-empty-features">
                 <div className="session-empty-feature">
-                    <div className="session-empty-feature-icon">
-                        <MessageSquare size={20} strokeWidth={1.8} />
+                    <div className="session-empty-feature-icon" aria-hidden="true">
+                        <GitBranch size={18} strokeWidth={1.8} />
                     </div>
                     <div className="session-empty-feature-content">
-                        <h3 className="session-empty-feature-title">智能对话</h3>
+                        <h2 className="session-empty-feature-title">主从代理分工</h2>
                         <p className="session-empty-feature-text">
-                            与 AI 代理进行自然对话，获得即时帮助和建议
+                            主代理拆解任务并委派子代理并行处理，子代理上下文独立并在完成后交付汇报。
                         </p>
                     </div>
                 </div>
 
                 <div className="session-empty-feature">
-                    <div className="session-empty-feature-icon">
-                        <Zap size={20} strokeWidth={1.8} />
+                    <div className="session-empty-feature-icon" aria-hidden="true">
+                        <ShieldCheck size={18} strokeWidth={1.8} />
                     </div>
                     <div className="session-empty-feature-content">
-                        <h3 className="session-empty-feature-title">任务执行</h3>
+                        <h2 className="session-empty-feature-title">授权与审批闸口</h2>
                         <p className="session-empty-feature-text">
-                            自动执行复杂任务，提高工作效率
+                            文件补丁与终端命令按 ask / auto / yolo 策略执行，高风险操作固定在输入区上方确认。
                         </p>
                     </div>
                 </div>
 
                 <div className="session-empty-feature">
-                    <div className="session-empty-feature-icon">
-                        <FolderPlus size={20} strokeWidth={1.8} />
+                    <div className="session-empty-feature-icon" aria-hidden="true">
+                        <ListOrdered size={18} strokeWidth={1.8} />
                     </div>
                     <div className="session-empty-feature-content">
-                        <h3 className="session-empty-feature-title">项目管理</h3>
+                        <h2 className="session-empty-feature-title">队列与连续日志</h2>
                         <p className="session-empty-feature-text">
-                            组织和跟踪多个项目的工作进展
+                            执行中可按 FIFO 追加后续输入，历史、耗时与 Token 用量按条目落盘，支持 /reload 热重载。
                         </p>
                     </div>
                 </div>
             </div>
 
             <div className="session-empty-action">
-                {hasExistingSessions ? (
-                    <div className="session-empty-hint">
-                        <kbd className="session-empty-kbd">←</kbd>
-                        <span>从左侧选择会话</span>
-                    </div>
+                {!hasProjects && onOpenProject ? (
+                    <button className="session-empty-cta" type="button" onClick={onOpenProject}>
+                        <FolderPlus size={16} strokeWidth={1.8} aria-hidden="true" />
+                        <span>新建项目</span>
+                    </button>
                 ) : (
                     <div className="session-empty-hint">
-                        <span>选择一个项目，然后点击</span>
-                        <kbd className="session-empty-kbd">新建会话</kbd>
-                        <span>开始</span>
+                        <span>{hasExistingSessions ? '从左侧项目栏选择会话，或点击项目右侧新建会话' : '点击左侧项目右侧的新建会话按钮开始执行'}</span>
+                        <span className="session-empty-sep" aria-hidden="true">·</span>
+                        <span>会话内输入</span>
+                        <kbd className="session-empty-kbd">/</kbd>
+                        <span>可执行 /new 与 /reload</span>
                     </div>
                 )}
             </div>

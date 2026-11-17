@@ -1,21 +1,24 @@
 import { CalendarClock, FolderOpen, MessageSquare, MessageSquarePlus } from 'lucide-react'
+import { CopyIconButton } from '../agent/output/CopyIconButton'
 import type { ProjectGroup } from './types'
 
 type ProjectOverviewProps = {
     project: ProjectGroup
     selectedSessionID: string
+    openedSessionIDs?: string[]
     onSelectSession: (id: string) => void
     onOpenSession: (project: ProjectGroup) => void
 }
 
-export function ProjectOverview({ project, selectedSessionID, onSelectSession, onOpenSession }: ProjectOverviewProps) {
+export function ProjectOverview({ project, selectedSessionID, openedSessionIDs = [], onSelectSession, onOpenSession }: ProjectOverviewProps) {
     const latestSession = project.sessions[0]
+    const openedSet = new Set(openedSessionIDs)
     return (
         <div className="scroll-region">
             <section className="page project-overview" aria-labelledby="project-overview-title">
                 <header className="project-overview-header">
                     <div className="project-overview-title-row">
-                        <div className="project-overview-icon" aria-hidden="true"><FolderOpen size={24} strokeWidth={1.8} /></div>
+                        <div className="project-overview-icon" aria-hidden="true"><FolderOpen size={20} strokeWidth={1.8} /></div>
                         <div>
                             <span className="section-label">项目</span>
                             <h1 id="project-overview-title">{project.name}</h1>
@@ -27,7 +30,18 @@ export function ProjectOverview({ project, selectedSessionID, onSelectSession, o
                     </button>
                 </header>
 
-                <div className="project-overview-path"><FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" /><span>{project.path}</span></div>
+                {project.path && (
+                    <div className="project-overview-path">
+                        <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
+                        <span>{project.path}</span>
+                        <CopyIconButton
+                            className="message-copy-button"
+                            copiedLabel="项目路径已复制"
+                            label="复制项目目录路径"
+                            getText={() => project.path}
+                        />
+                    </div>
+                )}
 
                 <div className="project-overview-stats" aria-label="项目统计">
                     <div><strong>{project.sessions.length}</strong><span>个会话</span></div>
@@ -36,14 +50,18 @@ export function ProjectOverview({ project, selectedSessionID, onSelectSession, o
 
                 <section className="project-overview-section" aria-labelledby="project-sessions-title">
                     <div className="project-overview-section-heading">
-                        <div><MessageSquare size={17} strokeWidth={1.8} aria-hidden="true" /><h2 id="project-sessions-title">会话</h2></div>
+                        <div><MessageSquare size={17} strokeWidth={1.8} aria-hidden="true" /><h2 id="project-sessions-title">会话列表</h2></div>
                         <span>{project.sessions.length}</span>
                     </div>
                     {project.sessions.length ? (
                         <div className="project-overview-sessions">
                             {project.sessions.map((session) => (
                                 <button className={`project-overview-session ${session.id === selectedSessionID ? 'selected' : ''}`} key={session.id} type="button" onClick={() => onSelectSession(session.id)}>
-                                    <span className="project-overview-session-copy"><strong>{session.title || '未命名会话'}</strong><small>{formatDate(session.updatedAt)}</small></span>
+                                    <span className="project-overview-session-copy">
+                                        <strong>{session.title || '未命名会话'}</strong>
+                                        <small>{formatDate(session.updatedAt)} · <code>{session.id}</code></small>
+                                    </span>
+                                    {openedSet.has(session.id) && <span className="project-overview-session-open">已打开</span>}
                                     <CalendarClock size={16} strokeWidth={1.8} aria-hidden="true" />
                                 </button>
                             ))}

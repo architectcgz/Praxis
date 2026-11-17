@@ -74,6 +74,9 @@ func (s *Coordinator) collaborationTools(run *agentrun.Run, active *activeRun, b
 			if err := decodeNative(raw, &a); err != nil {
 				return nil, err
 			}
+			if a.Task == "" || a.AllowedTools == nil || a.TimeoutSeconds < 1 || a.TimeoutSeconds > 600 {
+				return nil, fmt.Errorf("task, allowedTools and timeoutSeconds (1-600) are required")
+			}
 			return run.StartSubagent(ctx, a, callID)
 		}); err != nil {
 			return nil, err
@@ -97,6 +100,9 @@ func (s *Coordinator) collaborationTools(run *agentrun.Run, active *activeRun, b
 			if err := decodeNative(raw, &a); err != nil {
 				return nil, err
 			}
+			if len(a.IDs) == 0 {
+				return nil, fmt.Errorf("at least one subagent is required")
+			}
 			if a.Mode != "all" && a.Mode != "any" {
 				return nil, fmt.Errorf("mode must be any or all")
 			}
@@ -111,6 +117,9 @@ func (s *Coordinator) collaborationTools(run *agentrun.Run, active *activeRun, b
 			}
 			if err := decodeNative(raw, &a); err != nil {
 				return nil, err
+			}
+			if a.Message == "" {
+				return nil, fmt.Errorf("instruction text is required")
 			}
 			id, err := run.SendToSubagent(ctx, a.ID, a.Message)
 			return map[string]any{"status": "accepted", "messageId": id}, err
@@ -135,6 +144,9 @@ func (s *Coordinator) collaborationTools(run *agentrun.Run, active *activeRun, b
 			}
 			if err := decodeNative(raw, &a); err != nil {
 				return nil, err
+			}
+			if a.Message == "" {
+				return nil, fmt.Errorf("report text is required")
 			}
 			return map[string]string{"status": "accepted"}, run.ReportToParent(ctx, a.Message)
 		}); err != nil {

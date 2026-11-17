@@ -17,7 +17,7 @@ import { WorkspaceHeader } from './WorkspaceHeader'
 
 export function ProjectWorkspace() {
     const workspace = useProjectWorkspace()
-    const [lookupID, setLookupID] = useState(workspace.selectedSessionID)
+    const [lookupID, setLookupID] = useState('')
     const [searchOpen, setSearchOpen] = useState(false)
     const [projectOpen, setProjectOpen] = useState(false)
     const [navigationOpen, setNavigationOpen] = useState(false)
@@ -35,7 +35,6 @@ export function ProjectWorkspace() {
     const onPageState = useCallback((id: string, controls: SessionPageControls) => {
         setPageControls((current) => ({ ...current, [id]: controls }))
     }, [])
-    useEffect(() => { setLookupID(workspace.selectedSessionID) }, [workspace.selectedSessionID])
     useEffect(() => {
         const media = window.matchMedia('(max-width: 860px)')
         if (!navigationOpen) {
@@ -55,7 +54,6 @@ export function ProjectWorkspace() {
 
     const selectSession = (id: string) => {
         setNavigationOpen(false)
-        setLookupID(id)
         setPage('session')
         workspace.selectSession(id)
     }
@@ -92,7 +90,8 @@ export function ProjectWorkspace() {
         projectGroups={projectGroups}
         sessionsCount={workspace.sessions.length}
         selectedSessionID={page === 'session' ? workspace.selectedSessionID : ''}
-        selectedProjectID={page === 'project' ? selectedProjectID : page === 'session' ? activeProject?.id || '' : ''}
+        selectedProjectID={page === 'project' ? selectedProjectID : ''}
+        activeProjectID={page === 'session' ? activeProject?.id || '' : ''}
         lookupID={lookupID} searchOpen={searchOpen} collapsedProjects={collapsedProjects}
         busy={workspace.busy} bridgeAvailable={workspace.bridgeAvailable}
         onLookupChange={setLookupID} onLoadSession={loadSession} onToggleSearch={() => setSearchOpen((open) => !open)}
@@ -104,41 +103,69 @@ export function ProjectWorkspace() {
         onOpenSettings={openSettings} settingsOpen={settingsOpen}
         onCloseNavigation={navigationOpen ? () => setNavigationOpen(false) : undefined}
     />
-    return <div className={`app-shell${workspace.openedSessionIDs.length ? ' has-session-tabs' : ''}`} inert={navigationOpen}>
+    const hasTabs = workspace.openedSessionIDs.length > 0
+    const headerProjectName = settingsOpen ? '工作区设置' : activeProject?.name
+    const headerSessionTitle = settingsOpen ? undefined
+        : page === 'project' ? '项目概览'
+        : hasTabs ? (activePage?.title || '未命名会话')
+        : undefined
+    return <div className="app-shell" inert={navigationOpen}>
         <WorkspaceHeader
             busy={workspace.busy || Boolean(activePage?.busy)} refreshing={workspace.refreshing || Boolean(activePage?.refreshing)}
-            projectName={settingsOpen ? '设置' : activeProject?.name}
-            sessionTitle={page === 'project' ? '项目概览' : activePage?.title}
+            projectName={headerProjectName}
+            sessionTitle={headerSessionTitle}
             onRefresh={() => void refresh()} navigationOpen={navigationOpen} onOpenNavigation={() => setNavigationOpen(true)}
         />
-        {workspace.openedSessionIDs.length > 0 && <nav className="session-tabs" aria-label="已打开的会话">
-            {workspace.openedSessionIDs.map((id) => {
-                const title = pageControls[id]?.title || workspace.sessions.find((item) => item.id === id)?.title || '未命名会话'
-                return <div className="session-tab" key={id} data-active={page === 'session' && workspace.selectedSessionID === id}>
-                    <button type="button" className="session-tab-select" aria-current={page === 'session' && workspace.selectedSessionID === id ? 'page' : undefined} onClick={() => selectSession(id)} title={title}>{title}</button>
-                    <button type="button" className="icon-button session-tab-close" disabled={pageControls[id]?.busy} onClick={() => setClosingSessionID(id)} aria-label={`关闭会话页：${title}`} title="关闭会话页"><X size={13} aria-hidden="true" /></button>
-                </div>
-            })}
-        </nav>}
         <div className="workspace-grid">
             {navigationOpen ? <Overlay labelledBy="workspace-navigation-title" onClose={() => setNavigationOpen(false)} className="workspace-navigation-overlay">{projectsPanel}</Overlay> : projectsPanel}
-            {workspace.openedSessionIDs.map((id) => <SessionWorkspace
-                key={id} sessionID={id} title={workspace.sessions.find((item) => item.id === id)?.title}
-                active={page === 'session' && workspace.selectedSessionID === id}
-                sessionsCount={workspace.sessions.length} modalOpen={navigationOpen || projectOpen || Boolean(closingSessionID)}
-                createNewSession={workspace.createNewSession} refreshCatalog={workspace.refreshCatalog}
-                onOpenSettings={openSettings} onStateChange={onPageState}
-            />)}
-            {(page !== 'session' || !workspace.openedSessionIDs.length) && <>
-                <main className="main-panel">
-                    {page === 'settings' ? <SettingsPanel models={activePage?.models || []} />
-                    : page === 'project' ? <ProjectOverview project={projectGroups.find((item) => item.id === selectedProjectID) || { id: selectedProjectID, name: '项目', path: '', sessions: [] }} selectedSessionID={workspace.selectedSessionID} onSelectSession={selectSession} onOpenSession={openSession} />
-                    : <SessionPanel loading={false} hasSession={false} sessionsCount={workspace.sessions.length} />}
-                </main>
-                <AgentsPanel loading={false} session={null} agentEntries={{}} selectedAgentID="" onSelectAgent={() => { }} />
-            </>}
+            <div className={`workspace-stage${hasTabs ? ' has-session-tabs' : ''}`}>
+                {hasTabs && <nav className="session-tabs" aria-label="已打开的会话">
+                    {workspace.openedSessionIDs.map((id) => {
+                        const controls = pageControls[id]
+                        const title = controls?.title || workspace.sessions.find((item) => item.id === id)?.title || '未命名会话'
+                        const tabStatus = controls?.status || 'idle'
+                        const queuedCount = controls?.queuedCount || 0
+                        const isActive = page === 'session' && workspace.selectedSessionID === id
+                        return <div className="session-tab" key={id} data-active={isActive} data-status={tabStatus}>
+                            <button type="button" className="session-tab-select" aria-current={isActive ? 'page' : undefined} onClick={() => selectSession(id)} title={`${title}${queuedCount > 0 ? ` · ${queuedCount} 个待办` : ''}`}>
+                                {tabStatus !== 'idle' && <span className={`session-tab-dot is-${tabStatus}`} aria-hidden="true" />}
+                                <span className="session-tab-label">{title}</span>
+                                {queuedCount > 0 && <span className="session-tab-queue" title={`${queuedCount} 个待执行任务`}>{queuedCount}</span>}
+                            </button>
+                            <button type="button" className="icon-button session-tab-close" disabled={controls?.busy} onClick={() => setClosingSessionID(id)} aria-label={`关闭会话页：${title}`} title="关闭会话页"><X size={13} aria-hidden="true" /></button>
+                        </div>
+                    })}
+                </nav>}
+                <div className="workspace-stage-body">
+                    {workspace.openedSessionIDs.map((id) => <SessionWorkspace
+                        key={id} sessionID={id} title={workspace.sessions.find((item) => item.id === id)?.title}
+                        active={page === 'session' && workspace.selectedSessionID === id}
+                        sessionsCount={workspace.sessions.length} projectsCount={projectGroups.length}
+                        modalOpen={navigationOpen || projectOpen || Boolean(closingSessionID)}
+                        onOpenProject={() => { setNavigationOpen(false); workspace.clearError(); setProjectOpen(true) }}
+                        createNewSession={workspace.createNewSession} refreshCatalog={workspace.refreshCatalog}
+                        onOpenSettings={openSettings} onStateChange={onPageState}
+                    />)}
+                    {(page !== 'session' || !hasTabs) && <>
+                        <main className="main-panel">
+                            {page === 'settings' ? <SettingsPanel models={activePage?.models || []} hasActiveSession={Boolean(activePage)} activeSessionTitle={activePage?.title} />
+                            : page === 'project' ? <ProjectOverview project={projectGroups.find((item) => item.id === selectedProjectID) || { id: selectedProjectID, name: '项目', path: '', sessions: [] }} selectedSessionID={workspace.selectedSessionID} openedSessionIDs={workspace.openedSessionIDs} onSelectSession={selectSession} onOpenSession={openSession} />
+                            : <SessionPanel loading={false} hasSession={false} sessionsCount={workspace.sessions.length} projectsCount={projectGroups.length} onOpenProject={() => { setNavigationOpen(false); workspace.clearError(); setProjectOpen(true) }} />}
+                        </main>
+                        <AgentsPanel loading={false} session={null} agentEntries={{}} selectedAgentID="" onSelectAgent={() => { }} />
+                    </>}
+                </div>
+            </div>
         </div>
-        {workspace.error && createPortal(<div className="error-banner" role="alert" aria-atomic="true"><span className="error-banner-message"><CircleAlert size={18} aria-hidden="true" /><span>{workspace.error}</span></span></div>, document.body)}
+        {workspace.error && createPortal(
+            <div className={`error-banner${hasTabs ? ' has-tabs' : ''}`} role="alert" aria-atomic="true">
+                <span className="error-banner-message"><CircleAlert size={18} aria-hidden="true" /><span>{workspace.error}</span></span>
+                <button className="icon-button error-banner-close" type="button" title="关闭提示" aria-label="关闭错误提示" onClick={workspace.clearError}>
+                    <X size={15} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+            </div>,
+            document.body,
+        )}
         {projectOpen && <NewProjectDialog bridgeAvailable={workspace.bridgeAvailable} onCreated={(id) => { void workspace.refreshCatalog(true); setSelectedProjectID(id); setPage('project') }} onClose={() => setProjectOpen(false)} />}
         {closingSessionID && <Overlay labelledBy="close-session-page-title" onClose={() => { if (!pageControls[closingSessionID]?.busy) setClosingSessionID('') }}>
             <section className="session-close-dialog">

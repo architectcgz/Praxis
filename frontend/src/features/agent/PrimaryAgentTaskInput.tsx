@@ -1,5 +1,5 @@
-import { useEffect, useId, type KeyboardEvent, type RefObject } from 'react'
-import { Plus, Send } from 'lucide-react'
+import { useEffect, useId, useLayoutEffect, type KeyboardEvent, type RefObject } from 'react'
+import { Send } from 'lucide-react'
 import { useSlashCommandMenu } from './SlashCommandMenu'
 
 type PrimaryAgentTaskInputProps = {
@@ -23,6 +23,21 @@ export function PrimaryAgentTaskInput({ inputRef, input, setInput, busy, onSend,
         }
     }, [busy, inputRef])
 
+    useLayoutEffect(() => {
+        const textarea = inputRef.current
+        if (!textarea) return
+        textarea.style.height = 'auto'
+        const contentHeight = textarea.scrollHeight
+        const maxHeight = Number.parseFloat(window.getComputedStyle(textarea).maxHeight)
+        if (Number.isFinite(maxHeight) && contentHeight > maxHeight) {
+            textarea.style.height = `${maxHeight}px`
+            textarea.style.overflowY = 'auto'
+            return
+        }
+        textarea.style.height = `${contentHeight}px`
+        textarea.style.overflowY = 'hidden'
+    }, [input, inputRef])
+
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
         if (slash.handleKeyDown(event)) return
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -39,10 +54,7 @@ export function PrimaryAgentTaskInput({ inputRef, input, setInput, busy, onSend,
             <div className="command-band">
                 {slash.menu}
                 <div className="composer-shell">
-                    <button className="composer-icon-button" type="button" title="聚焦执行输入" aria-label="聚焦执行输入" onClick={() => inputRef.current?.focus()} disabled={busy}>
-                        <Plus size={18} strokeWidth={1.9} aria-hidden="true" />
-                    </button>
-                    <textarea className="composer-textarea" id={inputID} ref={inputRef} aria-label="执行输入" role="combobox" aria-autocomplete="list" aria-expanded={slash.menuOpen} aria-controls={slash.menuOpen ? slash.menuID : undefined} aria-activedescendant={slash.selectedOptionID} value={input} onChange={(event) => slash.changeInput(event.target.value)} onKeyDown={handleKeyDown} placeholder="为主代理编写新任务" disabled={busy} rows={1} />
+                    <textarea className="composer-textarea" id={inputID} ref={inputRef} aria-label="执行输入" role="combobox" aria-autocomplete="list" aria-expanded={slash.menuOpen} aria-controls={slash.menuOpen ? slash.menuID : undefined} aria-activedescendant={slash.selectedOptionID} value={input} onChange={(event) => slash.changeInput(event.target.value)} onKeyDown={handleKeyDown} placeholder="为主代理编写新任务（/ 触发命令，Shift+Enter 换行）" disabled={busy} rows={1} />
                     <div className="composer-tools">
                         <button className="composer-submit" type="button" title="发送输入" aria-label="发送输入" onClick={onSend} disabled={busy || !input.trim()}>
                             <Send size={16} strokeWidth={2.1} />
