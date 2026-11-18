@@ -1,6 +1,7 @@
 package payload
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"praxis/internal/core/entry/record"
@@ -37,35 +38,19 @@ type RunEndingStarted struct{}
 
 func (RunEndingStarted) factKind() string { return "run_ending" }
 
-type RunCompleted struct{ Result record.RunResult }
-
-func (RunCompleted) factKind() string { return "run_completed" }
-
-type RunFailed struct{ Result record.RunResult }
-
-func (RunFailed) factKind() string { return "run_failed" }
-
-type RunInterrupted struct{ Result record.RunResult }
-
-func (RunInterrupted) factKind() string { return "run_interrupted" }
-
-type SubagentYielded struct{ Result record.RunResult }
-
-func (SubagentYielded) factKind() string { return "subagent_yielded" }
-
-type TurnStarted struct{ Turn record.TurnRecord }
+type TurnStarted struct{}
 
 func (TurnStarted) factKind() string { return "turn_started" }
 
-type TurnCompleted struct{ Turn record.TurnRecord }
+type TurnCompleted struct{}
 
 func (TurnCompleted) factKind() string { return "turn_completed" }
 
-type TurnFailed struct{ Turn record.TurnRecord }
+type TurnFailed struct{}
 
 func (TurnFailed) factKind() string { return "turn_failed" }
 
-type TurnInterrupted struct{ Turn record.TurnRecord }
+type TurnInterrupted struct{}
 
 func (TurnInterrupted) factKind() string { return "turn_interrupted" }
 
@@ -97,7 +82,20 @@ type ModelRequestInterrupted struct {
 
 func (ModelRequestInterrupted) factKind() string { return "model_request_interrupted" }
 
-type SubagentReportReceived struct{ Report record.SubagentResult }
+type SubagentReport struct {
+	ReportID     string
+	AgentID      identity.AgentID
+	RunID        identity.RunID
+	ParentRunID  identity.RunID
+	ParentCallID string
+	Outcome      RunOutcome
+	FailureCode  RunFailureCode
+	Text         string
+	Final        bool
+	Partial      bool
+}
+
+type SubagentReportReceived struct{ Report SubagentReport }
 
 func (SubagentReportReceived) factKind() string { return "subagent_report_received" }
 
@@ -174,37 +172,21 @@ func Decode(data json.RawMessage) (Payload, error) {
 	case "run_ending":
 		return RunEndingStarted{}, nil
 	case "run_completed":
-		var value RunCompleted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[RunCompleted](stored.Data)
 	case "run_failed":
-		var value RunFailed
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[RunFailed](stored.Data)
 	case "run_interrupted":
-		var value RunInterrupted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[RunInterrupted](stored.Data)
 	case "subagent_yielded":
-		var value SubagentYielded
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[SubagentYielded](stored.Data)
 	case "turn_started":
-		var value TurnStarted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[TurnStarted](stored.Data)
 	case "turn_completed":
-		var value TurnCompleted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[TurnCompleted](stored.Data)
 	case "turn_failed":
-		var value TurnFailed
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[TurnFailed](stored.Data)
 	case "turn_interrupted":
-		var value TurnInterrupted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+		return decodePayloadData[TurnInterrupted](stored.Data)
 	case "model_request_started":
 		var value ModelRequestStarted
 		err := json.Unmarshal(stored.Data, &value)
@@ -224,4 +206,14 @@ func Decode(data json.RawMessage) (Payload, error) {
 	default:
 		return nil, fmt.Errorf("unknown entry payload %q", stored.Kind)
 	}
+}
+
+func decodePayloadData[T Payload](data json.RawMessage) (Payload, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var value T
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return value, nil
 }

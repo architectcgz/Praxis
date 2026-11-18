@@ -58,7 +58,7 @@ type Run struct {
 	input         *sessionentry.Entry
 	createdAt     time.Time
 	startedAt     time.Time
-	result        *sessionentry.RunResult
+	terminal      entryPayload.RunTerminal
 	progress      runProgress
 	currentTurnID identity.TurnID
 	entries       []*sessionentry.Entry
@@ -95,7 +95,7 @@ type toolUpdate struct {
 	saved   chan error
 }
 
-// runProgress 只在本次执行内累计，结束时固化到 RunResult。
+// runProgress 只在本次执行内累计，结束时写入终态载荷。
 type runProgress struct {
 	Usage            modelusage.Totals
 	Iterations       uint64
@@ -110,8 +110,8 @@ func (r *Run) Main() bool { return r.parentCallID == "" }
 
 // Snapshot 由所属执行流程在通知和完成交付时调用，接收方只读使用。
 func (r *Run) Snapshot() sessionentry.RunSnapshot {
-	if r.result != nil {
-		return r.result.Snapshot(r.id)
+	if r.terminal != nil {
+		return sessionentry.SnapshotFromTerminal(r.id, r.terminal)
 	}
 	return sessionentry.RunSnapshot{
 		ID:          r.id,
@@ -157,13 +157,13 @@ func (r *Run) accept(value *sessionentry.Entry) {
 	case entryPayload.RunEndingStarted:
 		r.status = sessionentry.RunEnding
 	case entryPayload.TurnStarted:
-		r.currentTurnID = p.Turn.ID
+		r.currentTurnID = identity.TurnID(value.TurnID)
 		r.progress.Iterations++
 	case entryPayload.ModelRequestStarted:
 		r.progress.ModelRequests++
 	}
-	if result := value.ExecutionResult(); result != nil {
-		r.result = result
+	if terminal, ok := value.Payload.(entryPayload.RunTerminal); ok {
+		r.terminal = terminal
 	} else {
 		r.progress.accept(value)
 	}
@@ -212,7 +212,7 @@ func (r *Run) Cancel(cause error)                              { r.cancel(cause)
 func (r *Run) BeginWaiting() { r.toolUpdates <- toolUpdate{waiting: 1} }
 func (r *Run) EndWaiting()   { r.toolUpdates <- toolUpdate{waiting: -1} }
 
-func (r *Run) TerminalSaved() bool { return r.result != nil }
+func (r *Run) TerminalSaved() bool { return r.terminal != nil }
 
 // executeTools 在所属执行流程接纳工具消息，直到本批工具及其清理全部完成。
 // 取消通过工具 Context 传播，此处仍接纳收尾事实，不提前退出等待。
@@ -274,11 +274,11 @@ func (r *Run) Model() modelapi.Config {
 	return r.model
 }
 
-func (r *Run) Outcome() sessionentry.RunOutcome {
-	if r.result == nil {
+func (r *Run) Outcome() entryPayload.RunOutcome {
+	if r.terminal == nil {
 		return ""
 	}
-	return sessionentry.RunOutcome(r.result.Outcome)
+	return r.terminal.Outcome()
 }
 
 // RecordModelRequest 将审核事实交给所属执行流程，并等待保存结果。

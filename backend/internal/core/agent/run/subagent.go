@@ -40,9 +40,9 @@ type instruction struct {
 type collaboration struct {
 	mu           sync.Mutex
 	children     map[identity.AgentID]SubagentHandle
-	reports      []sessionentry.SubagentResult
+	reports      []entryPayload.SubagentReport
 	consumed     map[string]bool
-	accepted     []sessionentry.SubagentResult
+	accepted     []entryPayload.SubagentReport
 	wake         chan struct{}
 	parent       *Run
 	spawn        func(context.Context, Assignment, string) (SubagentStatus, error)
@@ -190,7 +190,7 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	result := sessionentry.SubagentResult{
+	result := entryPayload.SubagentReport{
 		ReportID:     r.deps.IDs.New("report"),
 		AgentID:      r.agentID,
 		RunID:        r.id,
@@ -202,7 +202,7 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 }
 
 // AcceptSubagentResult 只更新 Parent Run Memory，不绕过 Parent Loop 写入 History。
-func (r *Run) AcceptSubagentResult(ctx context.Context, result sessionentry.SubagentResult) error {
+func (r *Run) AcceptSubagentResult(ctx context.Context, result entryPayload.SubagentReport) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -233,7 +233,7 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 				finished = false
 			}
 		}
-		var fresh []sessionentry.SubagentResult
+		var fresh []entryPayload.SubagentReport
 		for _, report := range r.collaboration.reports {
 			if wanted[report.AgentID] && !r.collaboration.consumed[report.ReportID] {
 				fresh = append(fresh, report)
@@ -292,7 +292,7 @@ func (r *Run) acceptReports(ctx context.Context) error {
 	return nil
 }
 
-func subagentReportText(report sessionentry.SubagentResult) string {
+func subagentReportText(report entryPayload.SubagentReport) string {
 	status := string(report.Outcome)
 	if status == "" {
 		status = "progress"
@@ -317,18 +317,19 @@ func (r *Run) finishChildren() {
 	}
 }
 
-func (r *Run) ResultForParent() sessionentry.SubagentResult {
-	result := sessionentry.SubagentResult{
+func (r *Run) ResultForParent() entryPayload.SubagentReport {
+	code, _ := r.terminal.Failure()
+	result := entryPayload.SubagentReport{
 		ReportID:     r.deps.IDs.New("report"),
 		AgentID:      r.agentID,
 		RunID:        r.id,
 		ParentRunID:  r.collaboration.parent.ID(),
 		ParentCallID: r.parentCallID,
-		Outcome:      sessionentry.RunOutcome(r.result.Outcome),
-		FailureCode:  sessionentry.RunFailureCode(r.result.FailureCode),
+		Outcome:      r.terminal.Outcome(),
+		FailureCode:  code,
 		Final:        true,
 	}
-	if index, ok := r.entryIndexes[r.result.FinalAssistantID]; ok {
+	if index, ok := r.entryIndexes[r.terminal.Stats().FinalAssistantID]; ok {
 		result.Text = r.entries[index].TextContent()
 	} else {
 		for i := len(r.entries) - 1; i >= 0; i-- {

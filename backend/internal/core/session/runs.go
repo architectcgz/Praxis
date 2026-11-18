@@ -84,10 +84,11 @@ func (s *Session) readAgentView(ctx context.Context, view *AgentView) error {
 	var latestID string
 	prepared := false
 	return s.walkHistory(ctx, view.ID, func(value *sessionentry.Entry) bool {
+		terminal, ended := value.Payload.(entryPayload.RunTerminal)
 		if latestID == "" {
 			latestID = value.RunID
 			view.UpdatedAt = value.CreatedAt
-			if !value.IsRun() {
+			if !ended {
 				view.CurrentRun = &sessionentry.RunSnapshot{
 					ID:     identity.RunID(latestID),
 					Status: sessionentry.RunStarting,
@@ -95,10 +96,10 @@ func (s *Session) readAgentView(ctx context.Context, view *AgentView) error {
 				view.State = agentmodel.AgentExecuting
 			}
 		}
-		if result := value.ExecutionResult(); result != nil && view.LatestRun == nil {
-			view.LatestRun = new(result.Snapshot(identity.RunID(value.RunID)))
+		if ended && view.LatestRun == nil {
+			view.LatestRun = new(sessionentry.SnapshotFromTerminal(identity.RunID(value.RunID), terminal))
 			if view.CurrentRun == nil {
-				view.State = result.AgentState()
+				view.State = sessionentry.AgentStateFromOutcome(terminal.Outcome())
 			}
 		}
 		if value.RunID == latestID {

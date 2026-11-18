@@ -113,8 +113,8 @@ func (e Entry) TextContent() string {
 
 // Preview 提供历史目录的短文本，不保存第二份正文。
 func (e Entry) Preview() string {
-	if e.IsRun() {
-		return "执行结束 · " + e.ExecutionResult().Outcome
+	if terminal, ok := e.Payload.(entryPayload.RunTerminal); ok {
+		return "执行结束 · " + string(terminal.Outcome())
 	}
 	if e.IsSummary() {
 		return "上下文摘要"

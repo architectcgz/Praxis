@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	agentrun "praxis/internal/core/agent/run"
-	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/loop"
 	taskmodel "praxis/internal/core/task"
@@ -86,7 +86,7 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 	var binding *sessionSchedule
 	var input taskmodel.Task
 	var scheduleErr error
-	if err == nil && run.Outcome() == sessionentry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), agentrun.ErrInterrupted) {
+	if err == nil && run.Outcome() == entryPayload.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), agentrun.ErrInterrupted) {
 		input, binding, next, scheduleErr = r.claimTaskLocked(queueCtx, run.SessionID())
 	}
 	unlock()

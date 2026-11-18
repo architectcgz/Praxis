@@ -179,16 +179,12 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			return turnID, NewModelFailure(err)
 		}
 		turnID = identity.TurnID((identity.SecureIDGenerator{}).New("turn"))
-		turn := sessionentry.TurnRecord{
-			ID:        turnID,
-			RunID:     params.ID,
-			StartedAt: time.Now().UTC(),
-		}
 		_, _, err = deps.AppendEntry(ctx, sessionentry.Entry{
-			ID:      turnID.String() + ":start",
-			RunID:   params.ID.String(),
-			TurnID:  turnID.String(),
-			Payload: entryPayload.TurnStarted{Turn: turn},
+			ID:        turnID.String() + ":start",
+			RunID:     params.ID.String(),
+			TurnID:    turnID.String(),
+			CreatedAt: time.Now().UTC(),
+			Payload:   entryPayload.TurnStarted{},
 		})
 		if err != nil {
 			return turnID, err
@@ -205,19 +201,20 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 		}
 		r.emit(params, turnID, coreevent.TurnStarted{})
 		finished, err := r.runTurn(ctx, params, deps, executor, request)
-		turn.EndedAt = time.Now().UTC()
-		var ending entryPayload.Payload = entryPayload.TurnCompleted{Turn: turn}
+		endedAt := time.Now().UTC()
+		var ending entryPayload.Payload = entryPayload.TurnCompleted{}
 		if err != nil {
-			ending = entryPayload.TurnFailed{Turn: turn}
+			ending = entryPayload.TurnFailed{}
 			if ctx.Err() != nil {
-				ending = entryPayload.TurnInterrupted{Turn: turn}
+				ending = entryPayload.TurnInterrupted{}
 			}
 		}
 		_, _, saveErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
-			ID:      turnID.String() + ":end",
-			RunID:   params.ID.String(),
-			TurnID:  turnID.String(),
-			Payload: ending,
+			ID:        turnID.String() + ":end",
+			RunID:     params.ID.String(),
+			TurnID:    turnID.String(),
+			CreatedAt: endedAt,
+			Payload:   ending,
 		})
 		if saveErr != nil {
 			return turnID, NewFailure(FailureStorage, saveErr)

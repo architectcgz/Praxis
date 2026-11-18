@@ -6,7 +6,7 @@ import (
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	agentrun "praxis/internal/core/agent/run"
-	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/tool"
@@ -107,7 +107,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	err = s.launchLocked(child, active)
 	s.mu.Unlock()
 	if err != nil {
-		saveErr := child.Settle(context.WithoutCancel(ctx), sessionentry.OutcomeInterrupted, sessionentry.RunFailureCancelled, "")
+		saveErr := child.Settle(context.WithoutCancel(ctx), entryPayload.OutcomeInterrupted, entryPayload.RunFailureCancelled, "")
 		err = errors.Join(err, saveErr)
 		s.releaseFailedChild(active)
 		stopParent()

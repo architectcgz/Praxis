@@ -2,7 +2,6 @@ package entry
 
 import (
 	entryPayload "praxis/internal/core/entry/payload"
-	"praxis/internal/core/entry/record"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 )
@@ -19,21 +18,6 @@ func (e Entry) RequestFact() (*ModelRequestRecord, *timing.Record) {
 		return &p.Request, p.Timing
 	default:
 		return nil, nil
-	}
-}
-
-func (e Entry) ExecutionResult() *RunResult {
-	switch v := e.Payload.(type) {
-	case entryPayload.RunCompleted:
-		return &v.Result
-	case entryPayload.RunFailed:
-		return &v.Result
-	case entryPayload.RunInterrupted:
-		return &v.Result
-	case entryPayload.SubagentYielded:
-		return &v.Result
-	default:
-		return nil
 	}
 }
 
@@ -78,11 +62,9 @@ func (e Entry) IsMetadata() bool {
 	}
 }
 
-type SubagentResult = record.SubagentResult
-
 type SubagentReceipt struct {
-	ReportID string           `json:"reportId"`
-	AgentID  identity.AgentID `json:"agentId"`
-	Outcome  RunOutcome       `json:"outcome"`
-	Final    bool             `json:"final"`
+	ReportID string                  `json:"reportId"`
+	AgentID  identity.AgentID        `json:"agentId"`
+	Outcome  entryPayload.RunOutcome `json:"outcome"`
+	Final    bool                    `json:"final"`
 }

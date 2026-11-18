@@ -71,7 +71,7 @@ func (r *Run) SettlePreparation(ctx context.Context, err error) error {
 
 // Execute 覆盖本次准备、完整 Loop 和必要收尾；调用方只负责执行位置和后续调度。
 func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (loop.ToolExecutor, error)) (err error) {
-	if r.status != sessionentry.RunStarting || r.result != nil {
+	if r.status != sessionentry.RunStarting || r.terminal != nil {
 		return errorcode.ErrInvalidTransition
 	}
 	ctx, scope := r.deps.HookDispatcher.Start(ctx, hook.Operation{
@@ -118,10 +118,10 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	}
 	r.finishChildren()
 	outcome, code, message := r.classifyOutcome(ctx, err)
-	if !r.Main() && outcome == sessionentry.OutcomeCompleted {
-		outcome = sessionentry.OutcomeYielded
+	if !r.Main() && outcome == entryPayload.OutcomeCompleted {
+		outcome = entryPayload.OutcomeYielded
 	}
-	if err != nil && outcome == sessionentry.OutcomeFailed {
+	if err != nil && outcome == entryPayload.OutcomeFailed {
 		r.emitError(r.currentTurnID, err)
 	}
 	// 收尾不继承已取消的执行 Context，保存失败明确返回，不自动重投。
@@ -152,11 +152,8 @@ func (r *Run) ConfirmRunning(ctx context.Context) error {
 	return nil
 }
 
-func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code sessionentry.RunFailureCode, message string) error {
-	result := sessionentry.RunResult{
-		Outcome:          string(outcome),
-		FailureCode:      string(code),
-		FailureMessage:   message,
+func (r *Run) Settle(ctx context.Context, outcome entryPayload.RunOutcome, code entryPayload.RunFailureCode, message string) error {
+	stats := entryPayload.RunStats{
 		StartedAt:        r.startedAt,
 		EndedAt:          r.deps.Clock.Now(),
 		Usage:            r.progress.Usage,
@@ -167,21 +164,28 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 		FinalAssistantID: r.progress.FinalAssistantID,
 		FinalStopReason:  r.progress.FinalStopReason,
 	}
-	var payload entryPayload.Payload
+	var payload entryPayload.RunTerminal
 	switch outcome {
-	case sessionentry.OutcomeCompleted:
-		payload = entryPayload.RunCompleted{Result: result}
-	case sessionentry.OutcomeYielded:
-		payload = entryPayload.SubagentYielded{Result: result}
-	case sessionentry.OutcomeFailed:
-		payload = entryPayload.RunFailed{Result: result}
-	case sessionentry.OutcomeInterrupted:
-		payload = entryPayload.RunInterrupted{Result: result}
+	case entryPayload.OutcomeCompleted:
+		payload = entryPayload.RunCompleted{RunStats: stats}
+	case entryPayload.OutcomeYielded:
+		payload = entryPayload.SubagentYielded{RunStats: stats}
+	case entryPayload.OutcomeFailed:
+		payload = entryPayload.RunFailed{
+			RunStats:   stats,
+			RunFailure: entryPayload.RunFailure{Code: code, Message: message},
+		}
+	case entryPayload.OutcomeInterrupted:
+		payload = entryPayload.RunInterrupted{
+			RunStats:   stats,
+			RunFailure: entryPayload.RunFailure{Code: code, Message: message},
+		}
 	}
 	stored, err := r.history.CommitTerminal(ctx, sessionentry.Entry{
-		ID:      "run:" + r.id.String(),
-		RunID:   r.id.String(),
-		Payload: payload,
+		ID:        "run:" + r.id.String(),
+		RunID:     r.id.String(),
+		CreatedAt: stats.EndedAt,
+		Payload:   payload,
 	})
 	if err != nil {
 		return storageFailure(err)
@@ -198,61 +202,61 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 		Source: r.EventSource(""),
 		Payload: coreevent.RunEnded{
 			Run:     r.Snapshot(),
-			State:   r.result.AgentState(),
+			State:   sessionentry.AgentStateFromOutcome(r.terminal.Outcome()),
 			Entries: []sessionentry.Entry{*stored},
 		},
 	})
 	return nil
 }
 
-func (r *Run) classifyOutcome(ctx context.Context, err error) (sessionentry.RunOutcome, sessionentry.RunFailureCode, string) {
+func (r *Run) classifyOutcome(ctx context.Context, err error) (entryPayload.RunOutcome, entryPayload.RunFailureCode, string) {
 	if loop.FailureClassification(context.Cause(ctx)) == loop.FailureStorage {
-		return sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, ""
+		return entryPayload.OutcomeFailed, entryPayload.RunFailureStorage, ""
 	}
 	if err == nil {
-		return sessionentry.OutcomeCompleted, "", ""
+		return entryPayload.OutcomeCompleted, "", ""
 	}
 	code := failureCode(err)
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-		return sessionentry.OutcomeFailed, sessionentry.RunFailureTimeout, ""
+		return entryPayload.OutcomeFailed, entryPayload.RunFailureTimeout, ""
 	}
-	if code != sessionentry.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
-		code = sessionentry.RunFailureCancelled
+	if code != entryPayload.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
+		code = entryPayload.RunFailureCancelled
 		if errors.Is(context.Cause(ctx), ErrInterrupted) {
-			code = sessionentry.RunFailureRequestCanceled
+			code = entryPayload.RunFailureRequestCanceled
 		}
-		return sessionentry.OutcomeInterrupted, code, ""
+		return entryPayload.OutcomeInterrupted, code, ""
 	}
 	message := ""
-	if code == sessionentry.RunFailureProvider {
+	if code == entryPayload.RunFailureProvider {
 		text := []rune(strings.TrimSpace(err.Error()))
-		if len(text) > sessionentry.MaxRunFailureMessageRunes {
-			text = text[:sessionentry.MaxRunFailureMessageRunes]
+		if len(text) > entryPayload.MaxRunFailureMessageRunes {
+			text = text[:entryPayload.MaxRunFailureMessageRunes]
 		}
 		message = string(text)
 	}
-	return sessionentry.OutcomeFailed, code, message
+	return entryPayload.OutcomeFailed, code, message
 }
 
-func failureCode(err error) sessionentry.RunFailureCode {
+func failureCode(err error) entryPayload.RunFailureCode {
 	switch loop.FailureClassification(err) {
 	case loop.FailureProviderUnavailable:
-		return sessionentry.RunFailureProviderUnavailable
+		return entryPayload.RunFailureProviderUnavailable
 	case loop.FailureProvider:
-		return sessionentry.RunFailureProvider
+		return entryPayload.RunFailureProvider
 	case loop.FailureTool:
-		return sessionentry.RunFailureTool
+		return entryPayload.RunFailureTool
 	case loop.FailurePolicyBlocked:
-		return sessionentry.RunFailurePolicyBlocked
+		return entryPayload.RunFailurePolicyBlocked
 	case loop.FailureResourceLimit:
-		return sessionentry.RunFailureResourceLimit
+		return entryPayload.RunFailureResourceLimit
 	case loop.FailureStorage:
-		return sessionentry.RunFailureStorage
+		return entryPayload.RunFailureStorage
 	case loop.FailureContract:
-		return sessionentry.RunFailureContract
+		return entryPayload.RunFailureContract
 	case loop.FailureBusy:
-		return sessionentry.RunFailureBusy
+		return entryPayload.RunFailureBusy
 	default:
-		return sessionentry.RunFailureInternal
+		return entryPayload.RunFailureInternal
 	}
 }
