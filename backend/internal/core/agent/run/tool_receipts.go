@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/identity"
@@ -15,7 +16,8 @@ func (r *Run) closeToolCalls(ctx context.Context) error {
 	values := r.Entries()
 	completed := make(map[string]bool)
 	for _, e := range values {
-		for _, b := range e.Content {
+		_, blocks := e.Dialogue()
+		for _, b := range blocks {
 			if result, ok := b.(entry.ToolResultBlock); ok {
 				completed[result.CallID] = true
 			}
@@ -23,7 +25,8 @@ func (r *Run) closeToolCalls(ctx context.Context) error {
 	}
 	for _, e := range values {
 		var results []entry.ContentBlock
-		for _, b := range e.Content {
+		_, blocks := e.Dialogue()
+		for _, b := range blocks {
 			call, ok := b.(entry.ToolCallBlock)
 			if !ok || completed[call.CallID] {
 				continue
@@ -41,9 +44,11 @@ func (r *Run) closeToolCalls(ctx context.Context) error {
 		stored, _, err := r.AppendEntry(ctx, entry.Entry{
 			ID:         "tools:" + e.TurnID,
 			TurnID:     e.TurnID,
-			Role:       role.Tool,
 			AuthorKind: entry.AuthorTool,
-			Content:    results,
+			Payload: entryPayload.Message{
+				Role:    role.Tool,
+				Content: results,
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("close tool receipts: %w", err)

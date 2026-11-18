@@ -1,6 +1,5 @@
 import { Fragment } from 'react'
-import type { AgentEvent, MessageBlock } from '../../../api'
-import type { Timing } from '../../../api/timings'
+import type { AgentEvent, MessageBlock, Timing } from '../../../api'
 import { CopyIconButton } from './CopyIconButton'
 import { FileChanges } from './FileChanges'
 import { TerminalOutput } from './TerminalOutput'
@@ -29,10 +28,10 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
 export type PairedToolResult = {
     text: string
     isError?: boolean
-    timing?: Timing
+    timing?: Timing | null
 }
 
-export function ToolCallBlock({ block, events, runId, pairedResult }: { block: MessageBlock; events: AgentEvent[]; runId: string; pairedResult?: PairedToolResult }) {
+export function ToolCallBlock({ block, events, runId, pairedResult, onOpenSubagent }: { block: MessageBlock; events: AgentEvent[]; runId: string; pairedResult?: PairedToolResult; onOpenSubagent: (id: string) => void }) {
     const liveResult = events.findLast((event): event is Extract<AgentEvent, { kind: 'tool_result' }> => event.kind === 'tool_result' && event.data.callId === block.callId)
     const started = events.findLast((event): event is Extract<AgentEvent, { kind: 'tool_started' }> => event.kind === 'tool_started' && event.data.callId === block.callId)
     const resultText = liveResult ? liveResult.data.result : pairedResult?.text
@@ -44,15 +43,16 @@ export function ToolCallBlock({ block, events, runId, pairedResult }: { block: M
         isError={isError}
         timing={timing}
         pendingStatus={started ? 'running' : 'unknown'} runId={runId} callId={block.callId}
+        onOpenSubagent={onOpenSubagent}
     />
 }
 
-export function ToolResultBlock({ block, runId, timing }: { block: MessageBlock; runId: string; timing?: Timing }) {
-    return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} timing={timing} pendingStatus="unknown" runId={runId} callId={block.callId} />
+export function ToolResultBlock({ block, runId, timing, onOpenSubagent }: { block: MessageBlock; runId: string; timing?: Timing | null; onOpenSubagent: (id: string) => void }) {
+    return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} timing={timing} pendingStatus="unknown" runId={runId} callId={block.callId} onOpenSubagent={onOpenSubagent} />
 }
 
-function ToolCard({ name, input, result, isError = false, pendingStatus = 'running', runId, callId, timing }: {
-    name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; runId: string; callId?: string; timing?: Timing
+function ToolCard({ name, input, result, isError = false, pendingStatus = 'running', runId, callId, timing, onOpenSubagent }: {
+    name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; runId: string; callId?: string; timing?: Timing | null; onOpenSubagent?: (id: string) => void
 }) {
     const approval = useToolApproval(runId, callId)
     const pendingApproval = result === undefined ? approval?.pendingApproval : undefined
@@ -69,6 +69,7 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     const formattedInput = toolInput !== undefined ? formatToolInput(toolInput) : ''
     const inputRecord = toolInput !== undefined ? toolRecord(toolInput) : {}
     const hasStructuredInput = Object.keys(inputRecord).length > 0
+    const childId = name === 'subagent_start' && tool.status === 'completed' && typeof tool.result.agentId === 'string' ? tool.result.agentId : ''
     return <ActivityItem
         tone={activityTone(tool.status)}
         name={tool.name || tool.label || '工具'}
@@ -110,6 +111,7 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
             {result === undefined ? <p className="output-muted">{tool.status === 'running' ? '正在执行，等待工具返回结果…' : '暂无输出'}</p>
                 : tool.content ? <ToolResultContent content={tool.content} toolName={name} />
                 : <p className="output-muted">{tool.notice || '暂无输出'}</p>}
+            {childId && onOpenSubagent && <button className="quiet-button" type="button" onClick={() => onOpenSubagent(childId)}>查看子代理历史</button>}
         </section>}
     </ActivityItem>
 }

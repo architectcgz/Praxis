@@ -15,7 +15,8 @@ func BuildToolCallIDMap(ctx appcontext.ModelContext) map[string]string {
 	ids := make(map[string]string)
 	used := make(map[string]bool)
 	for _, entry := range ctx.Entries {
-		for _, block := range entry.Content {
+		_, blocks := entry.Dialogue()
+		for _, block := range blocks {
 			if callID, ok := toolCallID(block); ok {
 				ids[callID] = callID
 				used[callID] = true
@@ -24,7 +25,8 @@ func BuildToolCallIDMap(ctx appcontext.ModelContext) map[string]string {
 	}
 	sequence := 1
 	for _, entry := range ctx.Entries {
-		for _, block := range entry.Content {
+		_, blocks := entry.Dialogue()
+		for _, block := range blocks {
 			callID, ok := toolCallID(block)
 			if !ok {
 				continue

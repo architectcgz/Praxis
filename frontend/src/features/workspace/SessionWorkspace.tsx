@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, Bot, CircleAlert, Square, X } from 'lucide-react'
 import { Toast } from '../../components/ui'
-import { API_ERROR_CODES } from '../../api'
+import { activeRunId, API_ERROR_CODES } from '../../api'
 import { AgentSessionPanel } from '../agent/AgentSessionPanel'
 import { AgentTaskInput } from '../agent/AgentTaskInput'
 import { PrimaryAgentTaskInput } from '../agent/PrimaryAgentTaskInput'
@@ -76,7 +76,7 @@ export function SessionWorkspace({ active, sessionsCount, projectsCount, modalOp
                                     <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" />
                                     <span>返回主代理</span>
                                 </button>
-                                {page.agent.currentRunId && (
+                                {activeRunId(page.agent) && (
                                     <button className="subagent-stop-button" type="button" disabled={page.busy} onClick={() => void page.stop()}>
                                         <Square size={12} strokeWidth={2} aria-hidden="true" />
                                         <span>停止子代理</span>
@@ -91,8 +91,7 @@ export function SessionWorkspace({ active, sessionsCount, projectsCount, modalOp
                         <AgentTaskInput
                             inputRef={inputRef}
                             sessionId={page.session.id}
-                            usage={page.usage}
-                            active={Boolean(page.agent.currentRunId)}
+                            active={Boolean(activeRunId(page.agent))}
                             canQueue={page.canQueue}
                             input={page.input}
                             setInput={page.setInput}

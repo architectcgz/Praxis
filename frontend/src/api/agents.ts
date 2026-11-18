@@ -1,34 +1,49 @@
 import type {
-    AgentView as GeneratedAgentView,
     HistoryMessage as GeneratedHistoryMessage,
     HistoryPage as GeneratedHistoryPage,
-    MessageBlock as GeneratedMessageBlock,
+    MessageBlock,
     ModelRequestActivity as GeneratedModelRequestActivity,
     ModelRequestResult as GeneratedModelRequestResult,
     ModelUsage as GeneratedModelUsage,
-    RunSummary as RunSnapshot,
-} from '../../bindings/praxis/internal/dto/models'
+} from '../../bindings/praxis/wails/bindings'
 import { getAgentBinding } from './bindings'
-import type { Timing } from './timings'
 
-export type HistoryMessage = Omit<GeneratedHistoryMessage, 'content' | 'timing'> & { content: MessageBlock[]; timing?: Timing }
-export type MessageBlock = Omit<GeneratedMessageBlock, 'timing'> & { timing?: Timing }
+export type { MessageBlock }
+export type HistoryMessage = Omit<GeneratedHistoryMessage, 'content'> & { content: MessageBlock[] }
 export type ModelUsage = { [Key in keyof GeneratedModelUsage]: NonNullable<GeneratedModelUsage[Key]> }
 export type ModelRequestResult = Omit<GeneratedModelRequestResult, 'status' | 'usage'> & {
     status: 'completed' | 'failed' | 'interrupted'
     usage?: ModelUsage
 }
-export type ModelRequestActivity = Omit<GeneratedModelRequestActivity, 'requestKind' | 'timing' | 'result'> & {
+export type ModelRequestActivity = Omit<GeneratedModelRequestActivity, 'requestKind' | 'result'> & {
     requestKind: 'iteration' | 'summary' | 'risk_review'
-    timing?: Timing
     result?: ModelRequestResult
 }
 export type HistoryPage = Omit<GeneratedHistoryPage, 'messages' | 'requests'> & {
     messages: HistoryMessage[]
     requests: ModelRequestActivity[]
 }
-export type { RunSnapshot }
-export type AgentView = Omit<GeneratedAgentView, 'state'> & { state: 'idle' | 'executing' | 'waiting' | 'interrupted' | 'failed' }
+export type RunOutcome = 'completed' | 'yielded' | 'failed' | 'interrupted'
+
+export type AgentView = {
+    ID: string
+    SessionID: string
+    Kind: 'main' | 'subagent'
+    createdAt?: string
+    name: string
+    state: 'unknown' | 'idle' | 'executing' | 'waiting' | 'interrupted' | 'failed'
+    runId?: string
+    runStartedAt?: string
+    runEndedAt?: string
+    runOutcome?: RunOutcome
+    runFailure?: string
+    runIterations?: number
+    runToolCalls?: number
+}
+
+export function activeRunId(agent?: AgentView | null) {
+    return agent?.runEndedAt ? undefined : agent?.runId
+}
 
 export type { AgentEvent } from './events'
 export { subscribeAgentEvents } from './events'

@@ -2,9 +2,8 @@ package bindings
 
 import (
 	"context"
-	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
-	"praxis/internal/dto"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -45,113 +44,135 @@ func (b *Bindings) All() []application.Service {
 
 // EmitAgentEvent 显式映射核心载荷和条目，不向前端序列化领域对象。
 func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
+	runID, turnID := event.Source.RunID.String(), event.Source.TurnID.String()
 	var data any
+	var requestInfo *coreevent.ModelRequestInfo
+	var requestResult *ModelRequestResult
 	switch payload := event.Payload.(type) {
 	case coreevent.SessionConfigReloaded, coreevent.SessionTitleChanged:
 		data = struct{}{}
 	case coreevent.AgentStateChanged:
-		data = dto.AgentStateChanged{State: string(payload.State)}
+		data = AgentStateChanged{State: string(payload.State)}
 	case coreevent.EntriesAppended:
 		messages := publicMessages(payload.Entries)
 		if len(messages) == 0 {
 			return
 		}
-		data = dto.AgentMessagesAppended{Messages: messages}
-	case coreevent.TurnStarted, coreevent.TurnFailed, coreevent.TurnInterrupted, coreevent.SubagentReleased:
+		data = AgentMessagesAppended{Messages: messages}
+	case coreevent.TurnStarted, coreevent.TurnFailed, coreevent.TurnInterrupted, coreevent.RunEnding, coreevent.SubagentReleased:
 		data = struct{}{}
 	case coreevent.ModelRequestStarted:
-		data = publicRequestEvent(payload.Entry)
+		requestInfo = &payload.Info
 	case coreevent.ModelRequestCompleted:
-		data = publicRequestEvent(payload.Entry)
+		requestInfo = &payload.Info
+		requestResult = &ModelRequestResult{
+			Status:     string(entryPayload.RequestCompleted),
+			StopReason: payload.StopReason,
+			Usage:      (*ModelUsage)(payload.Usage),
+		}
 	case coreevent.ModelRequestFailed:
-		data = publicRequestEvent(payload.Entry)
+		requestInfo = &payload.Info
+		requestResult = &ModelRequestResult{
+			Status:     string(entryPayload.RequestFailed),
+			StopReason: payload.StopReason,
+			Error:      payload.Error,
+			Partial:    payload.Partial,
+			Usage:      (*ModelUsage)(payload.Usage),
+		}
 	case coreevent.ModelRequestInterrupted:
-		data = publicRequestEvent(payload.Entry)
+		requestInfo = &payload.Info
+		requestResult = &ModelRequestResult{
+			Status:     string(entryPayload.RequestInterrupted),
+			StopReason: payload.StopReason,
+			Error:      payload.Error,
+			Partial:    payload.Partial,
+			Usage:      (*ModelUsage)(payload.Usage),
+		}
 	case coreevent.RunStarted:
-		data = dto.AgentRunChanged{Run: publicRun(payload.Run)}
-	case coreevent.RunEnding:
-		data = dto.AgentRunChanged{Run: publicRun(payload.Run)}
+		data = AgentRunStarted{StartedAt: payload.StartedAt}
 	case coreevent.SubagentStarted:
-		record := payload.Run
-		data = dto.AgentSubagentStarted{
-			Agent: dto.AgentView{
-				ID:           event.Source.AgentID.String(),
-				SessionID:    event.Source.SessionID.String(),
-				DefinitionID: payload.DefinitionID.String(),
-				Kind:         "subagent",
-				CreatedAt:    payload.CreatedAt,
-				UpdatedAt:    payload.CreatedAt,
-				Name:         payload.Name,
-				State:        "executing",
-				CurrentRunID: record.ID.String(),
-				CurrentRun:   new(publicRun(record)),
-			},
+		data = AgentSubagentStarted{
+			Name:          payload.Name,
+			CreatedAt:     payload.CreatedAt,
 			Messages:      publicMessages(payload.Entries),
 			ParentAgentID: payload.ParentAgentID.String(),
 			ParentRunID:   payload.ParentRunID.String(),
 			CallID:        payload.CallID,
 		}
 	case coreevent.TaskQueueChanged:
-		tasks := make([]dto.QueuedTask, 0, len(payload.Tasks))
+		tasks := make([]QueuedTask, 0, len(payload.Tasks))
 		for _, task := range payload.Tasks {
-			tasks = append(tasks, dto.QueuedTask{
+			tasks = append(tasks, QueuedTask{
 				ID:        task.ID.String(),
 				Prompt:    task.Prompt,
 				Sequence:  task.Sequence,
 				CreatedAt: task.CreatedAt,
 			})
 		}
-		data = dto.AgentTaskQueueChanged{Tasks: tasks, Paused: payload.Paused}
+		data = AgentTaskQueueChanged{Tasks: tasks, Paused: payload.Paused}
 	case coreevent.TextDelta:
-		data = dto.AgentTextDelta{Text: payload.Text}
+		data = AgentTextDelta{Text: payload.Text}
 	case coreevent.ThinkingDelta:
-		data = dto.AgentThinkingDelta{Text: payload.Text}
+		data = AgentThinkingDelta{Text: payload.Text}
 	case coreevent.ToolCall:
-		data = dto.AgentToolCall{
+		data = AgentToolCall{
 			CallID:    payload.CallID,
 			Name:      payload.Name,
 			Arguments: payload.Arguments,
 		}
 	case coreevent.ToolApprovalRequired:
-		data = dto.AgentToolApprovalRequired{CallID: payload.CallID}
+		data = AgentToolApprovalRequired{CallID: payload.CallID}
 	case coreevent.ToolStarted:
-		data = dto.AgentToolStarted{
+		data = AgentToolStarted{
 			CallID: payload.CallID,
-			Timing: publicTiming(payload.Timing),
+			Timing: (*Timing)(payload.Timing),
 		}
 	case coreevent.ToolResult:
-		data = dto.AgentToolResult{
+		data = AgentToolResult{
 			CallID:  payload.CallID,
 			Result:  payload.Result,
 			IsError: payload.IsError,
-			Timing:  publicTiming(payload.Timing),
+			Timing:  (*Timing)(payload.Timing),
 		}
 	case coreevent.TurnCompleted:
-		data = dto.AgentTurnCompleted{StopReason: string(payload.StopReason)}
+		data = AgentTurnCompleted{StopReason: string(payload.StopReason)}
 	case coreevent.RunEnded:
-		data = dto.AgentRunEnded{
-			Run:      publicRun(payload.Run),
-			State:    string(payload.State),
-			Messages: publicMessages(payload.Entries),
+		data = AgentRunEnded{
+			StartedAt:      payload.StartedAt,
+			EndedAt:        payload.EndedAt,
+			State:          string(payload.State),
+			Outcome:        string(payload.Outcome),
+			Iterations:     payload.Iterations,
+			ToolCalls:      payload.ToolCalls,
+			FailureCode:    string(payload.FailureCode),
+			FailureMessage: payload.FailureMessage,
 		}
 	case coreevent.ErrorOccurred:
-		data = dto.AgentErrorOccurred{Message: payload.Message}
+		data = AgentErrorOccurred{Message: payload.Message}
 	case coreevent.TaskQueueStorageFailed:
-		data = dto.AgentErrorOccurred{Message: payload.Message}
+		data = AgentErrorOccurred{Message: payload.Message}
 	default:
 		b.host.LogError("unsupported agent event payload: %T", event.Payload)
 		return
 	}
-	b.host.EmitEvent("praxis:session:"+event.Source.SessionID.String(), dto.AgentEvent{
+	if requestInfo != nil {
+		data = ModelRequestActivity{
+			RequestID:   requestInfo.RequestID.String(),
+			RunID:       runID,
+			TurnID:      turnID,
+			RequestKind: string(requestInfo.Kind),
+			RetryCount:  requestInfo.RetryCount,
+			CreatedAt:   requestInfo.CreatedAt,
+			Timing:      (*Timing)(requestInfo.Timing),
+			HistoryEnd:  requestInfo.HistoryEnd,
+			Result:      requestResult,
+		}
+	}
+	b.host.EmitEvent("praxis:session:"+event.Source.SessionID.String(), AgentEvent{
 		Kind:    string(event.Kind()),
 		AgentID: event.Source.AgentID.String(),
-		RunID:   event.Source.RunID.String(),
-		TurnID:  event.Source.TurnID.String(),
+		RunID:   runID,
+		TurnID:  turnID,
 		Data:    data,
 	})
-}
-
-func publicRequestEvent(value sessionentry.Entry) dto.ModelRequestActivity {
-	request, measured := value.RequestFact()
-	return publicRequest(value, *request, measured)
 }

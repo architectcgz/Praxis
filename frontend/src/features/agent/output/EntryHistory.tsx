@@ -79,11 +79,12 @@ export function buildEntryHistory(entries: HistoryMessage[], requests: RequestAc
     return { rows, assistantTurns, errorRuns }
 }
 
-export const EntryHistory = memo(function EntryHistory({ rows, requests, agentName, streamingOutput }: {
+export const EntryHistory = memo(function EntryHistory({ rows, requests, agentName, streamingOutput, onOpenSubagent }: {
     rows: ReturnType<typeof buildEntryHistory>['rows']
     requests: RequestActivities
     agentName: string
     streamingOutput: StreamingOutput | null
+    onOpenSubagent: (id: string) => void
 }) {
     return rows.map((row) => {
         if ('request' in row) return <RequestFailure request={row.request} key={`request:${row.request.requestId}`} />
@@ -98,6 +99,7 @@ export const EntryHistory = memo(function EntryHistory({ rows, requests, agentNa
             continuation={continuation}
             hasContinuation={hasContinuation}
             copyContent={copyContent}
+            onOpenSubagent={onOpenSubagent}
         />
     })
 })

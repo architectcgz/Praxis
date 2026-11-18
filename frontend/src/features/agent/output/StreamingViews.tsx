@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from 'react'
 import { CircleAlert, LoaderCircle } from 'lucide-react'
-import type { AgentEvent, RunSnapshot } from '../../../api'
+import type { AgentEvent } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { StreamingToolCallsView } from './ToolCallViews'
 import { ThinkingDetails } from './ThinkingDetails'
@@ -15,12 +15,12 @@ export const StreamingOutputView = memo(function StreamingOutputView({ content }
     )
 })
 
-export function PendingOutputView({ agentName, run }: { agentName: string; run?: RunSnapshot | null }) {
+export function PendingOutputView({ agentName, runStartedAt }: { agentName: string; runStartedAt?: string }) {
     return (
         <article className="message message-assistant message-pending" role="status">
             <div className="message-meta">
                 <strong>{agentName}</strong>
-                <RunDuration run={run} label="运行中" activeOnly />
+                <RunDuration startedAt={runStartedAt} label="运行中" />
             </div>
             <div className="message-pending-status">
                 <LoaderCircle size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -40,10 +40,10 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, str
     )
 })
 
-export function StreamingTurnView({ agentName, events, run, active, continuation = false, hasContinuation = false }: {
+export function StreamingTurnView({ agentName, events, runStartedAt, active, continuation = false, hasContinuation = false }: {
     agentName: string
     events: AgentEvent[]
-    run?: RunSnapshot | null
+    runStartedAt?: string
     active: boolean
     continuation?: boolean
     hasContinuation?: boolean
@@ -81,7 +81,7 @@ export function StreamingTurnView({ agentName, events, run, active, continuation
         {!continuation && <div className="message message-assistant streaming-turn-header">
             <div className="message-meta">
                 <strong>{agentName}</strong>
-                <RunDuration run={run} label="运行中" activeOnly />
+                <RunDuration startedAt={runStartedAt} label="运行中" />
             </div>
         </div>}
         {segments}

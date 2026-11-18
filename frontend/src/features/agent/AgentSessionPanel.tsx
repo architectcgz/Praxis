@@ -55,6 +55,7 @@ export function AgentSessionPanel({ submissionRevision, loading, agents, agent, 
                 />
             ) : undefined}
             onReturnToMain={agent.Kind === 'subagent' ? () => onSelectAgent(agent.SessionID) : undefined}
+            onOpenSubagent={onSelectAgent}
             onStop={onStop}
             streamingOutput={streamingOutputs[agent.ID] || null}
             entriesError={entriesError}

@@ -41,7 +41,6 @@ type SessionService interface {
 type AgentCommands interface {
 	SelectSession(context.Context, identity.SessionID) (execution.SessionView, error)
 	CloseSession(context.Context, identity.SessionID) error
-	SessionContent(context.Context, identity.SessionID) (execution.SessionContent, error)
 	AgentHistory(context.Context, identity.SessionID, identity.AgentID, *int64, int) (sessionmodel.HistoryPage, error)
 	StopRun(context.Context, identity.SessionID, identity.RunID) error
 	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]executionmodel.Approval, error)

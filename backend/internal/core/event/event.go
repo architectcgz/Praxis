@@ -4,6 +4,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
 	entryPayload "praxis/internal/core/entry/payload"
+	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/timing"
@@ -69,7 +70,7 @@ type Event struct {
 
 func (e Event) Kind() Kind { return e.Payload.Kind() }
 
-// Payload 由本包封闭定义，事件种类仅由载荷类型决定。
+// Payload 由本包封闭定义，事件种类由载荷类型决定。
 type Payload interface {
 	Kind() Kind
 	isPayload()
@@ -97,47 +98,45 @@ type TurnStarted struct{}
 func (TurnStarted) Kind() Kind { return KindTurnStarted }
 func (TurnStarted) isPayload() {}
 
-type ModelRequestStarted struct {
-	Entry sessionentry.Entry
+// ModelRequestInfo 是各阶段共用的请求信息，HistoryEnd 用于与分页结果合并。
+type ModelRequestInfo struct {
+	RequestID  identity.ModelRequestID
+	Kind       entryPayload.ModelRequestKind
+	RetryCount int
+	CreatedAt  time.Time
+	HistoryEnd int64
+	Timing     *timing.Record
 }
+
+type ModelRequestStarted struct{ Info ModelRequestInfo }
 
 func (ModelRequestStarted) Kind() Kind { return KindModelRequestStarted }
 func (ModelRequestStarted) isPayload() {}
 
 type ModelRequestCompleted struct {
-	Entry sessionentry.Entry
+	Info       ModelRequestInfo
+	StopReason string
+	Usage      *modelusage.Usage
 }
 
 func (ModelRequestCompleted) Kind() Kind { return KindModelRequestCompleted }
 func (ModelRequestCompleted) isPayload() {}
 
 type ModelRequestFailed struct {
-	Entry sessionentry.Entry
+	Info       ModelRequestInfo
+	StopReason string
+	Error      string
+	Partial    string
+	Usage      *modelusage.Usage
 }
 
 func (ModelRequestFailed) Kind() Kind { return KindModelRequestFailed }
 func (ModelRequestFailed) isPayload() {}
 
-type ModelRequestInterrupted struct {
-	Entry sessionentry.Entry
-}
+type ModelRequestInterrupted ModelRequestFailed
 
 func (ModelRequestInterrupted) Kind() Kind { return KindModelRequestInterrupted }
 func (ModelRequestInterrupted) isPayload() {}
-
-// ModelRequestFact 根据已经提交的请求事实选择对应的通知。
-func ModelRequestFact(value sessionentry.Entry) Payload {
-	switch value.Payload.(type) {
-	case entryPayload.ModelRequestStarted:
-		return ModelRequestStarted{Entry: value}
-	case entryPayload.ModelRequestCompleted:
-		return ModelRequestCompleted{Entry: value}
-	case entryPayload.ModelRequestInterrupted:
-		return ModelRequestInterrupted{Entry: value}
-	default:
-		return ModelRequestFailed{Entry: value}
-	}
-}
 
 type TextDelta struct {
 	Text string
@@ -195,23 +194,26 @@ func (TurnCompleted) Kind() Kind { return KindTurnCompleted }
 func (TurnCompleted) isPayload() {}
 
 type RunStarted struct {
-	Run sessionentry.RunSnapshot
+	StartedAt time.Time
 }
 
 func (RunStarted) Kind() Kind { return KindRunStarted }
 func (RunStarted) isPayload() {}
 
-type RunEnding struct {
-	Run sessionentry.RunSnapshot
-}
+type RunEnding struct{}
 
 func (RunEnding) Kind() Kind { return KindRunEnding }
 func (RunEnding) isPayload() {}
 
 type RunEnded struct {
-	Run     sessionentry.RunSnapshot
-	State   agentmodel.AgentState
-	Entries []sessionentry.Entry
+	StartedAt      time.Time
+	EndedAt        time.Time
+	Outcome        entryPayload.RunOutcome
+	Iterations     uint64
+	ToolCalls      int
+	FailureCode    entryPayload.RunFailureCode
+	FailureMessage string
+	State          agentmodel.AgentState
 }
 
 func (RunEnded) Kind() Kind { return KindRunEnded }
@@ -219,9 +221,7 @@ func (RunEnded) isPayload() {}
 
 type SubagentStarted struct {
 	Name          string
-	DefinitionID  identity.AgentDefinitionID
 	CreatedAt     time.Time
-	Run           sessionentry.RunSnapshot
 	Entries       []sessionentry.Entry
 	ParentAgentID identity.AgentID
 	ParentRunID   identity.RunID

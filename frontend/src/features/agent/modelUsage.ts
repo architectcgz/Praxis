@@ -22,7 +22,7 @@ const compactCount = new Intl.NumberFormat('en', { notation: 'compact', maximumF
 const exactCount = new Intl.NumberFormat('zh-CN')
 
 /** 统一展示已上报分项，保留零值；不完整计数标为下限，缓存不重复计入总量。 */
-export function formatModelUsage(usage: {
+function formatModelUsage(usage: {
     inputTokens: number
     outputTokens: number
     totalTokens: number

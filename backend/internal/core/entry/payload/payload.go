@@ -3,22 +3,14 @@ package payload
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"praxis/internal/core/entry/record"
-	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 	"time"
 )
 
 // Payload 是执行事实的封闭集合，与进程通知分别定义。
-type Payload interface{ factKind() string }
-
-type UserInput struct {
-	MessageID string
-	Text      string
-}
-
-func (UserInput) factKind() string { return "user_input" }
+type Payload interface{ isPayload() }
 
 // RunPrepared 只记录创建时的归属信息，不保存可变执行状态或冻结配置。
 type RunPrepared struct {
@@ -28,135 +20,127 @@ type RunPrepared struct {
 	InputEntryID string
 }
 
-func (RunPrepared) factKind() string { return "run_prepared" }
+func (RunPrepared) isPayload() {}
 
 type RunStarted struct{ At time.Time }
 
-func (RunStarted) factKind() string { return "run_started" }
+func (RunStarted) isPayload() {}
 
 type RunEndingStarted struct{}
 
-func (RunEndingStarted) factKind() string { return "run_ending" }
+func (RunEndingStarted) isPayload() {}
 
 type TurnStarted struct{}
 
-func (TurnStarted) factKind() string { return "turn_started" }
+func (TurnStarted) isPayload() {}
 
 type TurnCompleted struct{}
 
-func (TurnCompleted) factKind() string { return "turn_completed" }
+func (TurnCompleted) isPayload() {}
 
 type TurnFailed struct{}
 
-func (TurnFailed) factKind() string { return "turn_failed" }
+func (TurnFailed) isPayload() {}
 
 type TurnInterrupted struct{}
 
-func (TurnInterrupted) factKind() string { return "turn_interrupted" }
+func (TurnInterrupted) isPayload() {}
 
-type ModelRequestStarted struct {
-	Request record.ModelRequestRecord
-	Timing  *timing.Record
-}
+const (
+	kindMessage         = "message"
+	kindSummary         = "summary"
+	kindRunPrepared     = "run_prepared"
+	kindRunStarted      = "run_started"
+	kindRunEnding       = "run_ending"
+	kindRunCompleted    = "run_completed"
+	kindRunFailed       = "run_failed"
+	kindRunInterrupted  = "run_interrupted"
+	kindSubagentYielded = "subagent_yielded"
+	kindTurnStarted     = "turn_started"
+	kindTurnCompleted   = "turn_completed"
+	kindTurnFailed      = "turn_failed"
+	kindTurnInterrupted = "turn_interrupted"
+	kindModelRequest    = "model_request"
+)
 
-func (ModelRequestStarted) factKind() string { return "model_request_started" }
-
-type ModelRequestCompleted struct {
-	Request record.ModelRequestRecord
-	Timing  *timing.Record
-}
-
-func (ModelRequestCompleted) factKind() string { return "model_request_completed" }
-
-type ModelRequestFailed struct {
-	Request record.ModelRequestRecord
-	Timing  *timing.Record
-}
-
-func (ModelRequestFailed) factKind() string { return "model_request_failed" }
-
-type ModelRequestInterrupted struct {
-	Request record.ModelRequestRecord
-	Timing  *timing.Record
-}
-
-func (ModelRequestInterrupted) factKind() string { return "model_request_interrupted" }
-
-type storedPayload struct {
-	Kind string          `json:"kind"`
-	Data json.RawMessage `json:"data"`
-}
-
-// Encode 将具体载荷写成历史使用的 kind 和 data 字段。
-func Encode(value Payload) (json.RawMessage, error) {
-	if value == nil {
-		return nil, nil
+// Encode 将历史条目的类型与载荷分开返回；内存中不保存额外的 kind。
+func Encode(value Payload) (string, json.RawMessage, error) {
+	var kind string
+	switch value.(type) {
+	case Message:
+		kind = kindMessage
+	case Summary:
+		kind = kindSummary
+	case RunPrepared:
+		kind = kindRunPrepared
+	case RunStarted:
+		kind = kindRunStarted
+	case RunEndingStarted:
+		kind = kindRunEnding
+	case RunCompleted:
+		kind = kindRunCompleted
+	case RunFailed:
+		kind = kindRunFailed
+	case RunInterrupted:
+		kind = kindRunInterrupted
+	case SubagentYielded:
+		kind = kindSubagentYielded
+	case TurnStarted:
+		kind = kindTurnStarted
+	case TurnCompleted:
+		kind = kindTurnCompleted
+	case TurnFailed:
+		kind = kindTurnFailed
+	case TurnInterrupted:
+		kind = kindTurnInterrupted
+	case ModelRequest:
+		kind = kindModelRequest
+	default:
+		return "", nil, fmt.Errorf("unsupported entry payload type %T", value)
 	}
 	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(storedPayload{Kind: value.factKind(), Data: data})
+	return kind, data, err
 }
 
-// Decode 从历史的 kind 恢复具体载荷。
-func Decode(data json.RawMessage) (Payload, error) {
+// Decode 使用 Entry 顶层的 kind 恢复具体载荷。
+func Decode(kind string, data json.RawMessage) (Payload, error) {
+	if kind == "" {
+		return nil, errors.New("history entry requires a top-level kind")
+	}
 	if len(data) == 0 || string(data) == "null" {
-		return nil, nil
+		return nil, fmt.Errorf("entry kind %q requires a payload", kind)
 	}
-	var stored storedPayload
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, err
-	}
-	switch stored.Kind {
-	case "user_input":
-		var value UserInput
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "run_prepared":
-		var value RunPrepared
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "run_started":
-		var value RunStarted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "run_ending":
-		return RunEndingStarted{}, nil
-	case "run_completed":
-		return decodePayloadData[RunCompleted](stored.Data)
-	case "run_failed":
-		return decodePayloadData[RunFailed](stored.Data)
-	case "run_interrupted":
-		return decodePayloadData[RunInterrupted](stored.Data)
-	case "subagent_yielded":
-		return decodePayloadData[SubagentYielded](stored.Data)
-	case "turn_started":
-		return decodePayloadData[TurnStarted](stored.Data)
-	case "turn_completed":
-		return decodePayloadData[TurnCompleted](stored.Data)
-	case "turn_failed":
-		return decodePayloadData[TurnFailed](stored.Data)
-	case "turn_interrupted":
-		return decodePayloadData[TurnInterrupted](stored.Data)
-	case "model_request_started":
-		var value ModelRequestStarted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "model_request_completed":
-		var value ModelRequestCompleted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "model_request_failed":
-		var value ModelRequestFailed
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "model_request_interrupted":
-		var value ModelRequestInterrupted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
+	switch kind {
+	case kindMessage:
+		return decodePayloadData[Message](data)
+	case kindSummary:
+		return decodePayloadData[Summary](data)
+	case kindRunPrepared:
+		return decodePayloadData[RunPrepared](data)
+	case kindRunStarted:
+		return decodePayloadData[RunStarted](data)
+	case kindRunEnding:
+		return decodePayloadData[RunEndingStarted](data)
+	case kindRunCompleted:
+		return decodePayloadData[RunCompleted](data)
+	case kindRunFailed:
+		return decodePayloadData[RunFailed](data)
+	case kindRunInterrupted:
+		return decodePayloadData[RunInterrupted](data)
+	case kindSubagentYielded:
+		return decodePayloadData[SubagentYielded](data)
+	case kindTurnStarted:
+		return decodePayloadData[TurnStarted](data)
+	case kindTurnCompleted:
+		return decodePayloadData[TurnCompleted](data)
+	case kindTurnFailed:
+		return decodePayloadData[TurnFailed](data)
+	case kindTurnInterrupted:
+		return decodePayloadData[TurnInterrupted](data)
+	case kindModelRequest:
+		return decodePayloadData[ModelRequest](data)
 	default:
-		return nil, fmt.Errorf("unknown entry payload %q", stored.Kind)
+		return nil, fmt.Errorf("unknown entry kind %q", kind)
 	}
 }
 

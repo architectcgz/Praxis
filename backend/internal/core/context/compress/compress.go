@@ -6,7 +6,7 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
+	entryPayload "praxis/internal/core/entry/payload"
 )
 
 const (
@@ -52,11 +52,9 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 	compressed := appcontext.ModelContext{
 		SystemPrompt: value.SystemPrompt,
 		Entries: []*sessionentry.Entry{{
-			Compression: &sessionentry.Compression{},
-			Role:        role.User,
-			AuthorKind:  sessionentry.AuthorSystem,
-			Content: []sessionentry.ContentBlock{
-				sessionentry.TextBlock{Text: summaryResultPrefix},
+			AuthorKind: sessionentry.AuthorSystem,
+			Payload: entryPayload.Summary{
+				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: summaryResultPrefix}},
 			},
 		}},
 	}
@@ -87,8 +85,8 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
-	compressed.Entries[0].Content = []sessionentry.ContentBlock{
-		sessionentry.TextBlock{Text: summaryResultPrefix + text},
+	compressed.Entries[0].Payload = entryPayload.Summary{
+		Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: summaryResultPrefix + text}},
 	}
 	after, err := compressed.EstimatedTokens()
 	if err != nil {
@@ -112,7 +110,8 @@ func splitHistory(entries []*sessionentry.Entry, input *sessionentry.Entry) (his
 	type key struct{ run, call string }
 	calls := make(map[key]bool)
 	for i := len(entries) - 1; i >= 0; i-- {
-		for _, block := range entries[i].Content {
+		_, blocks := entries[i].Dialogue()
+		for _, block := range blocks {
 			if c, ok := block.(sessionentry.ToolCallBlock); ok {
 				calls[key{entries[i].RunID, c.CallID}] = true
 			}
@@ -121,15 +120,10 @@ func splitHistory(entries []*sessionentry.Entry, input *sessionentry.Entry) (his
 			break
 		}
 	}
-	inputID := ""
-	inputRun := ""
-	if input != nil {
-		inputID = input.InputMessageID()
-		inputRun = input.RunID
-	}
 	for _, e := range entries {
-		keep := inputID != "" && e.RunID == inputRun && e.InputMessageID() == inputID
-		for _, block := range e.Content {
+		keep := input != nil && e.RunID == input.RunID && e.ID == input.ID
+		_, blocks := e.Dialogue()
+		for _, block := range blocks {
 			switch b := block.(type) {
 			case sessionentry.ToolCallBlock:
 				keep = keep || calls[key{e.RunID, b.CallID}]

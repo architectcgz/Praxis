@@ -1,6 +1,6 @@
 import { mergeMessages, mergeRequests, type RequestActivities } from '../agent/history/entries'
-import type { AgentView, HistoryMessage, HistoryPage, SessionSnapshot, SessionUsageSummary } from '../../api'
-import { isRequestEvent, type AgentEvent, type RequestEvent } from '../../api/events'
+import { activeRunId, type AgentView, type HistoryMessage, type HistoryPage, type SessionSnapshot } from '../../api'
+import type { AgentEvent } from '../../api/events'
 import type { StreamingOutputs } from '../agent/types'
 import { applySessionEvent, clearHistory } from './applySessionEvent'
 
@@ -13,12 +13,11 @@ export type AgentEntry = {
     error: string
 }
 export type SessionData = {
-    session: Omit<SessionSnapshot, 'agents' | 'history' | 'usage'> | null
+    session: Omit<SessionSnapshot, 'history'> | null
     selectedId: string
     ids: string[]
     byId: Record<string, AgentEntry>
     endedRuns: ReadonlySet<string>
-    usage: SessionUsageSummary | null
     configRevision: number
 }
 export type SessionOutput = { streamingOutputs: StreamingOutputs }
@@ -31,29 +30,18 @@ export function createSessionStore(sessionId: string) {
         ids: [],
         byId: {},
         endedRuns: new Set(),
-        usage: null,
         configRevision: 0,
     }
     let output: SessionOutput = { streamingOutputs: {} }
     let buffered: AgentEvent[] = []
     let initialized = false
-    const requestEvents = new Set<string>()
     const dataListeners = new Set<() => void>()
     const outputListeners = new Set<() => void>()
     const emitData = () => dataListeners.forEach((listener) => listener())
     const emitOutput = () => outputListeners.forEach((listener) => listener())
 
     const apply = (event: AgentEvent) => {
-        // 快照按 Agent 标记已计入的日志前缀；分别接纳每次尝试的开始和结果。
-        if (isRequestEvent(event)) {
-            const key = JSON.stringify([event.agentId, event.runId, event.data.requestId, event.kind === 'model_request_started'])
-            if (requestEvents.has(key)) return
-            requestEvents.add(key)
-            if (data.usage && event.data.historyEnd > (data.usage.historyEnds[event.agentId] ?? 0)) {
-                data = { ...data, usage: accumulateUsage(data.usage, event) }
-            }
-        }
-        const next = applySessionEvent(data, output, event)
+        const next = applySessionEvent(sessionId, data, output, event)
         data = next.data
         output = next.output
     }
@@ -85,32 +73,23 @@ export function createSessionStore(sessionId: string) {
         subscribeOutput(listener: () => void) { outputListeners.add(listener); return () => { outputListeners.delete(listener) } },
         receive,
         beginLoad() { initialized = false },
-        initialize({ agents, history, usage, ...session }: SessionSnapshot) {
-            const byId: Record<string, AgentEntry> = {}
-            const endedRuns = new Set<string>()
-            for (const agent of agents) {
-                const firstPage = agent.ID === session.id ? history : undefined
-                byId[agent.ID] = {
-                    agent,
-                    entries: firstPage?.messages ?? [],
-                    requests: mergeRequests(new Map(), firstPage?.requests ?? []),
-                    page: firstPage && { hasMore: firstPage.hasMore, nextCursor: firstPage.nextCursor },
-                    loading: false,
-                    error: '',
-                }
-                if (agent.latestRun) endedRuns.add(agent.latestRun.ID)
-            }
+        initialize({ history, ...session }: SessionSnapshot) {
             data = {
                 ...data,
-                selectedId: byId[data.selectedId] ? data.selectedId : session.id,
-                endedRuns,
+                selectedId: sessionId,
+                endedRuns: new Set(),
                 session,
-                ids: agents.map((agent) => agent.ID),
-                byId,
-                usage,
+                ids: [sessionId],
+                byId: {
+                    [sessionId]: {
+                        ...historyAgent(sessionId, sessionId),
+                        entries: history.messages,
+                        requests: mergeRequests(new Map(), history.requests),
+                        page: { hasMore: history.hasMore, nextCursor: history.nextCursor },
+                    },
+                },
             }
             initialized = true
-            requestEvents.clear()
             const previousOutput = output
             for (const event of buffered) apply(event)
             buffered = []
@@ -121,9 +100,10 @@ export function createSessionStore(sessionId: string) {
             if (id === data.selectedId) return
             const previous = data.byId[data.selectedId]
             const byId = { ...data.byId }
-            if (previous?.agent.Kind === 'subagent' && !previous.agent.currentRunId) {
+            if (previous?.agent.Kind === 'subagent' && !activeRunId(previous.agent)) {
                 byId[data.selectedId] = clearHistory(previous)
             }
+            byId[id] ??= historyAgent(sessionId, id)
             data = { ...data, selectedId: id, byId }
             emitData()
         },
@@ -150,21 +130,14 @@ export function createSessionStore(sessionId: string) {
     }
 }
 
-function accumulateUsage(summary: SessionUsageSummary, event: RequestEvent): SessionUsageSummary {
-    if (event.kind === 'model_request_started') return { ...summary, totalRequests: summary.totalRequests + 1 }
-    const usage = event.data.result?.usage
-    if (!usage) return summary
+function historyAgent(sessionId: string, agentId: string): AgentEntry {
+    const main = agentId === sessionId
     return {
-        ...summary,
-        reportedRequests: summary.reportedRequests + 1,
-        inputTokens: summary.inputTokens + (usage.inputTokens ?? 0),
-        outputTokens: summary.outputTokens + (usage.outputTokens ?? 0),
-        cacheReadInputTokens: summary.cacheReadInputTokens + (usage.cacheReadInputTokens ?? 0),
-        cacheCreationInputTokens: summary.cacheCreationInputTokens + (usage.cacheCreationInputTokens ?? 0),
-        inputReports: summary.inputReports + Number(usage.inputTokens !== undefined),
-        outputReports: summary.outputReports + Number(usage.outputTokens !== undefined),
-        cacheReadReports: summary.cacheReadReports + Number(usage.cacheReadInputTokens !== undefined),
-        cacheCreationReports: summary.cacheCreationReports + Number(usage.cacheCreationInputTokens !== undefined),
+        agent: {
+            ID: agentId, SessionID: sessionId, Kind: main ? 'main' : 'subagent',
+            name: main ? '主代理' : '子代理', state: 'unknown',
+        },
+        entries: [], requests: new Map(), loading: false, error: '',
     }
 }
 

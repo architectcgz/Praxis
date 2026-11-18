@@ -64,20 +64,21 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthrop
 
 func anthropicEntry(entry *sessionentry.Entry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
 	var messages []anthropicMessage
-	for index, block := range entry.Content {
-		messageRole := string(entry.Role)
+	entryRole, blocks := entry.Dialogue()
+	for index, block := range blocks {
+		messageRole := string(entryRole)
 		var content any
 		var raw json.RawMessage
 		switch block := block.(type) {
 		case sessionentry.ThinkingBlock:
 			continue
 		case sessionentry.TextBlock:
-			if entry.Role == role.Tool {
+			if entryRole == role.Tool {
 				return nil, errors.New("anthropic tool role requires tool results")
 			}
 			content = requestTextBlock{Type: "text", Text: block.Text}
 		case sessionentry.ToolCallBlock:
-			if entry.Role != role.Assistant {
+			if entryRole != role.Assistant {
 				return nil, errors.New("anthropic tool_use requires assistant role")
 			}
 			content = requestToolUseBlock{
@@ -126,7 +127,8 @@ func anthropicEntry(entry *sessionentry.Entry, config modelapi.Config, ids map[s
 func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 	var values []string
 	for _, entry := range ctx.Entries {
-		for _, block := range entry.Content {
+		_, blocks := entry.Dialogue()
+		for _, block := range blocks {
 			state, ok := block.(sessionentry.ReasoningStateBlock)
 			if !ok {
 				continue

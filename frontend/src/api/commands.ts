@@ -1,4 +1,4 @@
-import type { StopRunRequest } from '../../bindings/praxis/internal/dto/models'
+import type { StopRunRequest } from '../../bindings/praxis/wails/bindings'
 import { getCommandBinding } from './bindings'
 import { parseToolCallInput, type ToolCallInput } from './tools'
 

@@ -17,10 +17,11 @@ type Budget struct {
 func visibleHashes(c ModelContext) ([][32]byte, error) {
 	hashes := make([][32]byte, len(c.Entries))
 	for i, e := range c.Entries {
+		messageRole, blocks := e.Dialogue()
 		data, err := json.Marshal(struct {
 			Role    string
 			Content []sessionentry.ContentBlock
-		}{Role: string(e.Role), Content: e.Content})
+		}{Role: string(messageRole), Content: blocks})
 		if err != nil {
 			return nil, err
 		}

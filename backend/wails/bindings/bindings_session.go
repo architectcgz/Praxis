@@ -1,22 +1,88 @@
 package bindings
 
 import (
-	"context"
-	coordinator "praxis/internal/core/coordinator"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/dto"
 	"praxis/internal/identity"
 	approvalservice "praxis/internal/service/approval"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/validation"
 	"strings"
+	"time"
 )
 
 type SessionBindings struct{ host Host }
 
+type SessionSnapshot struct {
+	QueuePaused bool         `json:"queuePaused"`
+	ID          string       `json:"id"`
+	ProjectID   string       `json:"projectId"`
+	Title       string       `json:"title"`
+	CreatedAt   time.Time    `json:"createdAt"`
+	UpdatedAt   time.Time    `json:"updatedAt"`
+	Tasks       []QueuedTask `json:"tasks"`
+	History     HistoryPage  `json:"history"`
+}
+
+type SessionSummary struct {
+	ID        string    `json:"id"`
+	ProjectID string    `json:"projectId"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type CreateSessionRequest struct {
+	SessionID string `json:"sessionId" validate:"session_id"`
+	ProjectID string `json:"projectId" validate:"project_id"`
+	RequestID string `json:"requestId" validate:"id"`
+}
+
+type CreateSessionResponse struct {
+	SessionID string `json:"sessionId"`
+	ProjectID string `json:"projectId"`
+}
+
+type ModelOption struct {
+	ProviderID            string   `json:"providerId"`
+	ModelID               string   `json:"modelId"`
+	Label                 string   `json:"label"`
+	ProviderName          string   `json:"providerName"`
+	ReasoningLevels       []string `json:"reasoningLevels"`
+	DefaultReasoningLevel string   `json:"defaultReasoningLevel"`
+}
+
+// SelectModelRequest 只向指定会话提交完整的模型选择。
+type SelectModelRequest struct {
+	SessionID      string `json:"sessionId" validate:"session_id"`
+	ProviderID     string `json:"providerId" validate:"required,config_id"`
+	ModelID        string `json:"modelId" validate:"required,id"`
+	ReasoningLevel string `json:"reasoningLevel" validate:"omitempty,id"`
+}
+
+// ModelSelection 只返回会话选择的公开字段，不包含完整模型配置。
+type ModelSelection struct {
+	ProviderID     string `json:"providerId"`
+	ModelID        string `json:"modelId"`
+	ReasoningLevel string `json:"reasoningLevel"`
+}
+
+// SetSessionApprovalModeRequest 设置会话覆盖；mode=null 表示继承全局授权模式。
+type SetSessionApprovalModeRequest struct {
+	SessionID string  `json:"sessionId" validate:"session_id"`
+	Mode      *string `json:"mode" validate:"omitempty,oneof=ask auto yolo"`
+}
+
+// SessionApprovalMode 返回已保存的会话覆盖和当前已加载的有效模式；二者可在 reload 前不同。
+type SessionApprovalMode struct {
+	SessionID     string  `json:"sessionId"`
+	GlobalMode    string  `json:"globalMode"`
+	SessionMode   *string `json:"sessionMode"`
+	EffectiveMode string  `json:"effectiveMode"`
+}
+
 // ListSessions 返回指定项目的持久化会话。
-func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, error) {
+func (b *SessionBindings) ListSessions(projectID string) ([]SessionSummary, error) {
 	if err := validation.Value("projectId", projectID, "project_id"); err != nil {
 		return nil, publicInputError(b.host, "SessionBindings.ListSessions.request", err)
 	}
@@ -28,20 +94,20 @@ func (b *SessionBindings) ListSessions(projectID string) ([]dto.SessionSummary, 
 	if err != nil {
 		return nil, publicError(b.host, "SessionBindings.ListSessions", err)
 	}
-	result := make([]dto.SessionSummary, 0, len(values))
+	result := make([]SessionSummary, 0, len(values))
 	for _, value := range values {
 		result = append(result, sessionSummary(value))
 	}
 	return result, nil
 }
 
-func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.CreateSessionResponse, error) {
+func (b *SessionBindings) CreateSession(wire CreateSessionRequest) (CreateSessionResponse, error) {
 	if err := validation.Struct(wire); err != nil {
-		return dto.CreateSessionResponse{}, publicInputError(b.host, "SessionBindings.CreateSession.request", err)
+		return CreateSessionResponse{}, publicInputError(b.host, "SessionBindings.CreateSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.CreateSessionResponse{}, err
+		return CreateSessionResponse{}, err
 	}
 	params := sessionservice.CreateInput{
 		SessionID: identity.SessionID(wire.SessionID),
@@ -50,49 +116,43 @@ func (b *SessionBindings) CreateSession(wire dto.CreateSessionRequest) (dto.Crea
 	}
 	result, err := services.Sessions.CreateSession(ctx, params)
 	if err != nil {
-		return dto.CreateSessionResponse{}, publicError(b.host, "SessionBindings.CreateSession", err)
+		return CreateSessionResponse{}, publicError(b.host, "SessionBindings.CreateSession", err)
 	}
-	return dto.CreateSessionResponse{
+	return CreateSessionResponse{
 		SessionID: result.Session.ID.String(),
 		ProjectID: result.Session.ProjectID.String(),
 	}, nil
 }
 
-// SelectSession 完成会话加载并返回主历史、代理状态及队列快照，后续命令直接使用已加载实例。
-func (b *SessionBindings) SelectSession(sessionID string) (dto.SessionSnapshot, error) {
+// SelectSession 加载会话并返回主历史首屏和待办队列，不从历史重建代理或执行状态。
+func (b *SessionBindings) SelectSession(sessionID string) (SessionSnapshot, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return dto.SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
+		return SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.SessionSnapshot{}, err
+		return SessionSnapshot{}, err
 	}
 	view, err := services.Commands.SelectSession(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession", err)
+		return SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession", err)
 	}
-	return b.sessionSnapshot(ctx, services, view)
-}
-
-func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services, view coordinator.SessionView) (dto.SessionSnapshot, error) {
-	content, err := services.Commands.SessionContent(ctx, view.Session.ID)
+	page, err := services.Commands.AgentHistory(ctx, view.Session.ID, view.Session.MainAgentID(), nil, defaultHistoryLimit)
 	if err != nil {
-		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot", err)
+		return SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession.history", err)
 	}
-	result := dto.SessionSnapshot{
+	result := SessionSnapshot{
 		QueuePaused: view.QueuePaused,
 		ID:          view.Session.ID.String(),
 		ProjectID:   view.Session.ProjectID.String(),
 		Title:       view.Session.Title,
 		CreatedAt:   view.Session.CreatedAt,
 		UpdatedAt:   view.Session.UpdatedAt,
-		Agents:      publicAgents(content.Agents),
-		Tasks:       make([]dto.QueuedTask, 0, len(view.Tasks)),
-		History:     publicHistoryPage(content.Page),
-		Usage:       publicUsageSummary(content.Usage),
+		Tasks:       make([]QueuedTask, 0, len(view.Tasks)),
+		History:     publicHistoryPage(page),
 	}
 	for _, value := range view.Tasks {
-		result.Tasks = append(result.Tasks, dto.QueuedTask{
+		result.Tasks = append(result.Tasks, QueuedTask{
 			ID:        value.ID.String(),
 			Prompt:    value.Prompt,
 			Sequence:  value.Sequence,
@@ -134,8 +194,8 @@ func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	return nil
 }
 
-func sessionSummary(value sessionmodel.SessionInfo) dto.SessionSummary {
-	return dto.SessionSummary{
+func sessionSummary(value sessionmodel.SessionInfo) SessionSummary {
+	return SessionSummary{
 		ID:        value.ID.String(),
 		ProjectID: value.ProjectID.String(),
 		Title:     value.Title,
@@ -144,17 +204,17 @@ func sessionSummary(value sessionmodel.SessionInfo) dto.SessionSummary {
 	}
 }
 
-func (b *SessionBindings) GetSessionSummary(sessionID string) (dto.SessionSummary, error) {
+func (b *SessionBindings) GetSessionSummary(sessionID string) (SessionSummary, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return dto.SessionSummary{}, publicInputError(b.host, "GetSessionSummary", err)
+		return SessionSummary{}, publicInputError(b.host, "GetSessionSummary", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.SessionSummary{}, err
+		return SessionSummary{}, err
 	}
 	info, err := services.Sessions.GetSessionInfo(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return dto.SessionSummary{}, publicError(b.host, "GetSessionSummary", err)
+		return SessionSummary{}, publicError(b.host, "GetSessionSummary", err)
 	}
 	return sessionSummary(info), nil
 }
@@ -171,7 +231,7 @@ func (b *SessionBindings) CloseSession(sessionID string) error {
 }
 
 // ListModels 返回指定会话已加载的模型目录，不暴露凭据。
-func (b *SessionBindings) ListModels(sessionID string) ([]dto.ModelOption, error) {
+func (b *SessionBindings) ListModels(sessionID string) ([]ModelOption, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return nil, publicInputError(b.host, "SessionBindings.ListModels.request", err)
 	}
@@ -183,9 +243,9 @@ func (b *SessionBindings) ListModels(sessionID string) ([]dto.ModelOption, error
 	if err != nil {
 		return nil, publicError(b.host, "SessionBindings.ListModels", err)
 	}
-	result := make([]dto.ModelOption, 0, len(models))
+	result := make([]ModelOption, 0, len(models))
 	for _, option := range models {
-		result = append(result, dto.ModelOption{
+		result = append(result, ModelOption{
 			ProviderID:            option.ProviderID,
 			ModelID:               option.ModelID,
 			Label:                 option.Label,
@@ -213,7 +273,7 @@ func (b *SessionBindings) ReloadConfig(sessionID string) error {
 }
 
 // SelectModel 只更新指定会话的选择；队列唤醒由 Coordinator 编排。
-func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
+func (b *SessionBindings) SelectModel(wire SelectModelRequest) error {
 	wire.ProviderID = strings.TrimSpace(wire.ProviderID)
 	wire.ModelID = strings.TrimSpace(wire.ModelID)
 	wire.ReasoningLevel = strings.TrimSpace(wire.ReasoningLevel)
@@ -236,19 +296,19 @@ func (b *SessionBindings) SelectModel(wire dto.SelectModelRequest) error {
 }
 
 // GetModelSelection 返回会话自身的选择；查询不会设置模型或唤醒预约。
-func (b *SessionBindings) GetModelSelection(sessionID string) (dto.ModelSelection, error) {
+func (b *SessionBindings) GetModelSelection(sessionID string) (ModelSelection, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return dto.ModelSelection{}, publicInputError(b.host, "SessionBindings.GetModelSelection.request", err)
+		return ModelSelection{}, publicInputError(b.host, "SessionBindings.GetModelSelection.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.ModelSelection{}, err
+		return ModelSelection{}, err
 	}
 	choice, err := services.Sessions.SelectedModel(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return dto.ModelSelection{}, publicError(b.host, "SessionBindings.GetModelSelection", err)
+		return ModelSelection{}, publicError(b.host, "SessionBindings.GetModelSelection", err)
 	}
-	return dto.ModelSelection{
+	return ModelSelection{
 		ProviderID:     choice.ProviderID,
 		ModelID:        choice.ModelID,
 		ReasoningLevel: choice.ReasoningLevel,
@@ -285,32 +345,32 @@ func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 }
 
 // GetSessionApprovalMode 读取会话授权选择；空或非 canonical 会话身份返回校验错误。
-func (b *SessionBindings) GetSessionApprovalMode(sessionID string) (dto.SessionApprovalMode, error) {
+func (b *SessionBindings) GetSessionApprovalMode(sessionID string) (SessionApprovalMode, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return dto.SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.GetSessionApprovalMode.request", err)
+		return SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.GetSessionApprovalMode.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.SessionApprovalMode{}, err
+		return SessionApprovalMode{}, err
 	}
 	value, err := services.Approvals.GetApprovalMode(ctx, identity.SessionID(sessionID))
 	if err != nil {
-		return dto.SessionApprovalMode{}, publicError(b.host, "SessionBindings.GetSessionApprovalMode", err)
+		return SessionApprovalMode{}, publicError(b.host, "SessionBindings.GetSessionApprovalMode", err)
 	}
-	return approvalModeDTO(value), nil
+	return publicApprovalMode(value), nil
 }
 
 // SetSessionApprovalMode 保存会话授权选择；null 恢复继承，有效模式在会话显式 reload 后更新。
-func (b *SessionBindings) SetSessionApprovalMode(wire dto.SetSessionApprovalModeRequest) (dto.SessionApprovalMode, error) {
+func (b *SessionBindings) SetSessionApprovalMode(wire SetSessionApprovalModeRequest) (SessionApprovalMode, error) {
 	if wire.Mode != nil {
 		wire.Mode = new(strings.TrimSpace(*wire.Mode))
 	}
 	if err := validation.Struct(wire); err != nil {
-		return dto.SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.SetSessionApprovalMode.request", err)
+		return SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.SetSessionApprovalMode.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
-		return dto.SessionApprovalMode{}, err
+		return SessionApprovalMode{}, err
 	}
 	var mode *security.ApprovalMode
 	if wire.Mode != nil {
@@ -318,13 +378,13 @@ func (b *SessionBindings) SetSessionApprovalMode(wire dto.SetSessionApprovalMode
 	}
 	value, err := services.Approvals.SetApprovalMode(ctx, identity.SessionID(wire.SessionID), mode)
 	if err != nil {
-		return dto.SessionApprovalMode{}, publicError(b.host, "SessionBindings.SetSessionApprovalMode", err)
+		return SessionApprovalMode{}, publicError(b.host, "SessionBindings.SetSessionApprovalMode", err)
 	}
-	return approvalModeDTO(value), nil
+	return publicApprovalMode(value), nil
 }
 
-func approvalModeDTO(value approvalservice.ApprovalSettings) dto.SessionApprovalMode {
-	result := dto.SessionApprovalMode{
+func publicApprovalMode(value approvalservice.ApprovalSettings) SessionApprovalMode {
+	result := SessionApprovalMode{
 		SessionID:     value.SessionID.String(),
 		GlobalMode:    string(value.GlobalMode),
 		EffectiveMode: string(value.EffectiveMode),

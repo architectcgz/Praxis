@@ -17,12 +17,6 @@ type SessionView struct {
 	Tasks       []taskmodel.Task
 }
 
-type SessionContent struct {
-	Agents []sessionmodel.AgentView
-	Page   sessionmodel.HistoryPage
-	Usage  sessionmodel.UsageSnapshot
-}
-
 func (s *Coordinator) GetSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -282,34 +276,4 @@ func (s *Coordinator) AgentHistory(ctx context.Context, id identity.SessionID, a
 		return sessionmodel.HistoryPage{}, err
 	}
 	return owner.AgentPage(ctx, agentID, before, limit)
-}
-
-func (s *Coordinator) SessionContent(ctx context.Context, id identity.SessionID) (SessionContent, error) {
-	owner, err := s.GetSession(ctx, id)
-	if err != nil {
-		return SessionContent{}, err
-	}
-	info, err := s.sessionRecords.Get(ctx, id)
-	if err != nil {
-		return SessionContent{}, err
-	}
-	definition, err := owner.Definition(agentmodel.DefinitionPrimary)
-	if err != nil {
-		return SessionContent{}, err
-	}
-	agents, err := owner.Agents(ctx, info, definition)
-	if err != nil {
-		return SessionContent{}, err
-	}
-	usage, err := owner.UsageSnapshot(ctx)
-	if err != nil {
-		return SessionContent{}, err
-	}
-	head := usage.HistoryEnds[info.MainAgentID()]
-	page, err := owner.AgentPage(ctx, info.MainAgentID(), &head, 50)
-	return SessionContent{
-		Agents: agents,
-		Page:   page,
-		Usage:  usage,
-	}, err
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 )
 
@@ -37,8 +38,9 @@ type summaryEntry struct {
 func summaryEntries(entries []*sessionentry.Entry) []summaryEntry {
 	var selected []summaryEntry
 	for _, entry := range entries {
-		value := summaryEntry{Role: entry.Role}
-		for _, block := range entry.Content {
+		messageRole, blocks := entry.Dialogue()
+		value := summaryEntry{Role: messageRole}
+		for _, block := range blocks {
 			switch block.(type) {
 			case sessionentry.ReasoningStateBlock, sessionentry.ThinkingBlock:
 			default:
@@ -107,9 +109,11 @@ func summaryContext(previous, transcript string) appcontext.ModelContext {
 	return appcontext.ModelContext{
 		SystemPrompt: summaryPrompt,
 		Entries: []*sessionentry.Entry{{
-			Role: role.User,
-			Content: []sessionentry.ContentBlock{
-				sessionentry.TextBlock{Text: previousSummaryHeader + previous + transcriptHeader + transcript},
+			Payload: entryPayload.Message{
+				Role: role.User,
+				Content: []sessionentry.ContentBlock{
+					sessionentry.TextBlock{Text: previousSummaryHeader + previous + transcriptHeader + transcript},
+				},
 			},
 		}},
 	}

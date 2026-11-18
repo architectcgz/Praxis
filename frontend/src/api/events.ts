@@ -1,16 +1,25 @@
 import { Events } from '@wailsio/runtime'
+import type { Timing } from '../../bindings/praxis/wails/bindings'
 import { isBindingAvailable } from './bindings'
-import type { AgentView, HistoryMessage, ModelRequestActivity, RunSnapshot } from './agents'
-import type { Timing } from './timings'
+import type { AgentView, HistoryMessage, ModelRequestActivity, RunOutcome } from './agents'
 import type { QueuedTask } from './tasks'
 
 type RunData = {
     entries_appended: { messages: HistoryMessage[] }
-    run_started: { run: RunSnapshot }
-    run_ending: { run: RunSnapshot }
+    run_started: { startedAt: string }
+    run_ending: Record<string, never>
     agent_state_changed: { state: AgentView['state'] }
-    run_ended: { run: RunSnapshot; state: AgentView['state']; messages: HistoryMessage[] }
-    subagent_started: { agent: AgentView; messages: HistoryMessage[]; parentAgentId: string; parentRunId: string; callId: string }
+    run_ended: {
+        startedAt?: string
+        endedAt: string
+        state: AgentView['state']
+        outcome: RunOutcome
+        iterations: number
+        toolCalls: number
+        failureCode?: string
+        failureMessage?: string
+    }
+    subagent_started: { name: string; createdAt: string; messages: HistoryMessage[]; parentAgentId: string; parentRunId: string; callId: string }
     subagent_released: Record<string, never>
     error: { message: string }
 }

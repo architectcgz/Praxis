@@ -22,7 +22,7 @@ type authorizationResult struct {
 
 // authorize 使用会话已冻结的审批模式调度模型审核和人工审批。
 // args 由执行流程冻结；授权过程中不读取全局配置，审批与审核共享只读参数。
-func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string) (*tool.ToolResult, error) {
+func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string, saveRequest SaveModelRequest) (*tool.ToolResult, error) {
 	e := t.executor
 	decision := security.ResolveApprovalDecision(t.mode)
 	if !t.run.Main() && (decision.Action == security.ApprovalAsk || decision.Action == security.ApprovalAuto) {
@@ -85,7 +85,7 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 			waiting = true
 		}
 		reviewCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		review, reviewErr := t.review(reviewCtx, call, args, decision.RuleID)
+		review, reviewErr := t.review(reviewCtx, call, args, decision.RuleID, saveRequest)
 		if reviewErr == nil {
 			reviewErr = reviewCtx.Err()
 		}

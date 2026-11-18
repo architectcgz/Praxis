@@ -441,23 +441,6 @@
     margin-left: auto;
 }
 
-.composer-token-usage {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px 12px;
-    min-height: var(--icon-button-size);
-    padding: 5px 12px;
-    border-top: 1px solid var(--line);
-    color: var(--faint);
-    font-size: var(--font-size-meta);
-    font-variant-numeric: tabular-nums;
-}
-
-.composer-token-usage > span {
-    white-space: nowrap;
-}
-
 .composer-approval-mode {
     display: flex;
     flex-wrap: wrap;

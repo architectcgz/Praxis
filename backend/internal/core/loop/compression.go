@@ -7,6 +7,7 @@ import (
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -77,9 +78,11 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 		return value, nil
 	}
 	entry := generated.Entries[0]
-	entry.Compression.Timing = measured
-	entry.Compression.RequestIDs = requests
-	entry.AuthorID, entry.RunID = params.AgentID.String(), params.ID.String()
+	summary := entry.Payload.(entryPayload.Summary)
+	summary.Timing = measured
+	summary.RequestIDs = requests
+	entry.Payload = summary
+	entry.RunID = params.ID.String()
 	entry.ID = "summary:" + requests[len(requests)-1].String()
 	entry.TurnID = turnID.String()
 	accepted, _, err := deps.AppendEntry(context.WithoutCancel(ctx), *entry)
@@ -131,9 +134,11 @@ func remindContextBudget(request providerapi.Request, budget *appcontext.Budget)
 	}
 	if appcontext.NearContextLimit(tokens, request.MaxOutputTokens, request.Model.ContextWindow) {
 		hint := &sessionentry.Entry{
-			Role: role.User,
-			Content: []sessionentry.ContentBlock{
-				sessionentry.TextBlock{Text: fmt.Sprintf("[本次请求的运行提示] 估算输入 %d tokens，输出预留 %d tokens，窗口 %d tokens。请优先完成当前任务，并按需分段读取工具输出。", tokens, request.MaxOutputTokens, request.Model.ContextWindow)},
+			Payload: entryPayload.Message{
+				Role: role.User,
+				Content: []sessionentry.ContentBlock{
+					sessionentry.TextBlock{Text: fmt.Sprintf("[本次请求的运行提示] 估算输入 %d tokens，输出预留 %d tokens，窗口 %d tokens。请优先完成当前任务，并按需分段读取工具输出。", tokens, request.MaxOutputTokens, request.Model.ContextWindow)},
+				},
 			},
 		}
 		request.Context.Entries = append(slices.Clone(request.Context.Entries), hint)

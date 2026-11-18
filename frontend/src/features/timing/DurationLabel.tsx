@@ -1,33 +1,32 @@
 import { useEffect, useState } from 'react'
-import type { RunSnapshot } from '../../api'
-import type { Timing } from '../../api/timings'
+import type { Timing } from '../../api'
 import { formatDuration } from './timing'
 import './styles.css'
 
 /** 耗时直接来自所属条目；是否正在执行由调用方的业务状态决定。 */
 export function DurationLabel({ record, running = false, label = '耗时', compact = false }: {
-    record?: Timing
+    record?: Timing | null
     running?: boolean
     label?: string
     compact?: boolean
 }) {
-    const elapsed = useElapsed(record?.startedAt, running, record?.durationMs)
+    const elapsed = useElapsed(record?.startedAt, running, record?.durationMs ?? undefined)
     if (!record) return null
     const value = elapsed === undefined ? '未知（中断）' : `${running ? '约 ' : ''}${formatDuration(elapsed)}`
     const text = label ? `${label} ${value}` : value
-    const firstResponse = record.firstResponseMs === undefined ? '' : ` · 首响应 ${formatDuration(record.firstResponseMs)}`
+    const firstResponse = record.firstResponseMs == null ? '' : ` · 首响应 ${formatDuration(record.firstResponseMs)}`
     return <span className="operation-duration" title={`${text}${firstResponse}${running ? '；运行中为估算值，结束后使用后端实测耗时' : ''}`}>
         {text}{compact ? '' : firstResponse}
     </span>
 }
 
 /** Run 总耗时直接读取其生命周期，不构造独立计时记录。 */
-export function RunDuration({ run, label = '耗时', activeOnly = false }: { run?: RunSnapshot | null; label?: string; activeOnly?: boolean }) {
-    const running = run?.Status === 'running' || run?.Status === 'ending'
-    const duration = run?.Result ? Math.max(0, Date.parse(run.Result.EndedAt) - Date.parse(run.StartedAt)) : undefined
-    const elapsed = useElapsed(run?.StartedAt, running, duration)
-    if (!run || run.Status === 'starting' || activeOnly && !running) return null
-    const text = `${label} ${elapsed === undefined ? '未知' : `${running ? '约 ' : ''}${formatDuration(elapsed)}`}`
+export function RunDuration({ startedAt, endedAt, label = '耗时' }: { startedAt?: string; endedAt?: string; label?: string }) {
+    const running = Boolean(startedAt && !endedAt)
+    const duration = startedAt && endedAt ? Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)) : undefined
+    const elapsed = useElapsed(startedAt, running, duration)
+    if (elapsed === undefined) return null
+    const text = `${label} ${running ? '约 ' : ''}${formatDuration(elapsed)}`
     return <span className="operation-duration" title={text}>{text}</span>
 }
 

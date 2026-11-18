@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { activeRunId } from '../../api'
 import { readableError } from '../../shared/errors'
 import { useAgentData } from '../agent/useAgentData'
 import { useRunControl } from '../run/useRunControl'
@@ -22,9 +23,9 @@ export function useSessionPage({ sessionID, title, createNewSession }: SessionPa
     const catalog = useModelCatalog(session?.id || '')
     const { refreshModels } = catalog
     const agents = useAgentData({ store, models: catalog.models })
-    const controls = useRunControl(sessionID, agents.agent?.currentRunId)
+    const controls = useRunControl(sessionID, activeRunId(agents.agent))
     const main = agents.agents.find((agent) => agent.Kind === 'main')
-    const submission = useTaskSubmission({ sessionID, input: agents.input, mainActive: Boolean(main?.currentRunId), setInput: agents.setInput })
+    const submission = useTaskSubmission({ sessionID, input: agents.input, mainActive: Boolean(activeRunId(main)), setInput: agents.setInput })
     const commands = useWorkspaceCommands({ sessionID, projectID: session?.projectId || '', createNewSession, refreshModels, setInput: agents.setInput })
     const [submissionRevision, setSubmissionRevision] = useState(0)
     useEffect(() => { if (title !== undefined) updateTitle(title) }, [title, updateTitle])
@@ -59,7 +60,6 @@ export function useSessionPage({ sessionID, title, createNewSession }: SessionPa
         status, queuedCount,
         error, errorCode: !operationError && agents.selectionError ? agents.selectionErrorCode : undefined,
         clearError,
-        usage: data.usage,
         submitInput, submissionRevision,
         canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask, changeQueue: submission.changeQueue,
         stop: controls.stop,

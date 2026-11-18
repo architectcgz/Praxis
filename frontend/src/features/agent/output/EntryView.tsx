@@ -8,7 +8,7 @@ import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock, type PairedToolResult } from './ToolCallViews'
 import { MessageTiming } from './MessageTiming'
 
-export const EntryView = memo(function EntryView({ agentName, item, events = [], pairedResults, usage, continuation = false, hasContinuation = false, copyContent }: {
+export const EntryView = memo(function EntryView({ agentName, item, events = [], pairedResults, usage, continuation = false, hasContinuation = false, copyContent, onOpenSubagent }: {
     agentName: string
     item: HistoryMessage
     events?: AgentEvent[]
@@ -17,6 +17,7 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
     continuation?: boolean
     hasContinuation?: boolean
     copyContent?: string
+    onOpenSubagent: (id: string) => void
 }) {
     const message = item
     const content = message.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')
@@ -30,7 +31,7 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
                     <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
                 </div>
                 <div className="acts">
-                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} runId={message.runId || ''} timing={block.timing || message.timing} key={`${block.callId}-${index}`} />)}
+                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} runId={message.runId || ''} timing={block.timing || message.timing} onOpenSubagent={onOpenSubagent} key={`${block.callId}-${index}`} />)}
                 </div>
             </article>
         )
@@ -81,6 +82,7 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
                                 runId={message.runId || ''}
                                 events={events}
                                 pairedResult={block.callId ? pairedResults?.[block.callId] : undefined}
+                                onOpenSubagent={onOpenSubagent}
                                 key={`${block.callId}-${index}`}
                             />)}
                         </div>

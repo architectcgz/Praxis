@@ -7,6 +7,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -80,9 +81,11 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 		Context: appcontext.ModelContext{
 			SystemPrompt: riskReviewPrompt,
 			Entries: []*sessionentry.Entry{{
-				Role: role.User,
-				Content: []sessionentry.ContentBlock{
-					sessionentry.TextBlock{Text: string(data)},
+				Payload: entryPayload.Message{
+					Role: role.User,
+					Content: []sessionentry.ContentBlock{
+						sessionentry.TextBlock{Text: string(data)},
+					},
 				},
 			}},
 		},
@@ -93,8 +96,15 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 	}, nil
 }
 
-// review 由执行调用方生成请求身份、应用模型限制并记录审核结果。
-func (t *RunTools) reviewAttempt(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string, retryCount int) (review RiskReview, err error) {
+// doRequestToolReview 只发起一次审核，开始和结束事实保存成功后才继续对应步骤。
+func (t *RunTools) doRequestToolReview(
+	ctx context.Context,
+	call sessionentry.ToolCall,
+	args json.RawMessage,
+	ruleID string,
+	retryCount int,
+	saveRequest SaveModelRequest,
+) (review RiskReview, err error) {
 	r := t.executor.deps.Reviewer
 	model := t.run.Model()
 	request, err := prepareReview(t.run.InputText(), string(call.Name), args, t.projectPath, ruleID)
@@ -115,16 +125,15 @@ func (t *RunTools) reviewAttempt(ctx context.Context, call sessionentry.ToolCall
 		return review, &reviewRunError{error: capacityErr}
 	}
 	turnID := call.TurnID
-	// 审核复用触发工具的 Turn；摘要不关联 Turn，进度接纳失败时不调用 Provider。
-	if err := t.progress.RecordModelRequest(ctx, sessionentry.ModelRequestRecord{
+	if err := saveRequest(ctx, entryPayload.ModelRequest{
 		ID:         review.RequestID,
 		RunID:      t.run.ID(),
 		TurnID:     turnID,
 		CallID:     call.CallID,
-		Kind:       sessionentry.ModelRequestRiskReview,
-		Status:     sessionentry.RequestRunning,
+		Kind:       entryPayload.ModelRequestRiskReview,
+		Status:     entryPayload.RequestRunning,
 		RetryCount: retryCount,
-	}, nil); err != nil {
+	}); err != nil {
 		return review, &reviewRunError{error: err}
 	}
 	outputBytes := 0
@@ -135,21 +144,22 @@ func (t *RunTools) reviewAttempt(ctx context.Context, call sessionentry.ToolCall
 	var stopReason providerapi.StopReason
 	defer func() {
 		// 审核与普通请求共享结果保存边界，存储失败不能降级为人工审批。
-		if progressErr := t.progress.RecordModelRequest(context.WithoutCancel(ctx), sessionentry.ModelRequestRecord{
+		if saveErr := saveRequest(context.WithoutCancel(ctx), entryPayload.ModelRequest{
 			ID:          review.RequestID,
 			RunID:       t.run.ID(),
 			TurnID:      turnID,
 			CallID:      call.CallID,
-			Kind:        sessionentry.ModelRequestRiskReview,
-			Status:      sessionentry.RequestStatus(ctx, err),
+			Kind:        entryPayload.ModelRequestRiskReview,
+			Status:      entryPayload.RequestStatus(ctx, err),
 			StopReason:  string(stopReason),
 			OutputBytes: outputBytes,
 			Usage:       usage,
 			RetryCount:  retryCount,
 			Error:       errorText(err),
 			Partial:     []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text.String()}},
-		}, span.End()); progressErr != nil {
-			err = &reviewRunError{error: errors.Join(err, progressErr)}
+			Timing:      span.End(),
+		}); saveErr != nil {
+			err = &reviewRunError{error: errors.Join(err, saveErr)}
 		}
 	}()
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
@@ -256,14 +266,14 @@ func validateRiskAssessment(a security.RiskAssessment) error {
 	return nil
 }
 
-func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string) (RiskReview, error) {
+func (t *RunTools) review(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string, saveRequest SaveModelRequest) (RiskReview, error) {
 	var result RiskReview
 	var err error
 	for retry := 0; retry <= 3; retry++ {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		result, err = t.reviewAttempt(ctx, call, args, ruleID, retry)
+		result, err = t.doRequestToolReview(ctx, call, args, ruleID, retry, saveRequest)
 		if err == nil {
 			return result, nil
 		}

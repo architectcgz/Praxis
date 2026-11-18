@@ -1,6 +1,7 @@
 package entry
 
 import (
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
@@ -22,7 +23,8 @@ type ToolCall struct {
 // ToolCalls 从 Assistant Entry 取得调用，供执行查询与启动恢复使用。
 func (m Entry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
 	calls := make([]ToolCall, 0)
-	for _, block := range m.Content {
+	_, blocks := m.Dialogue()
+	for _, block := range blocks {
 		call, ok := block.(ToolCallBlock)
 		if !ok {
 			continue
@@ -51,15 +53,16 @@ func (c ToolCall) ResultEntry(result tool.ToolResult) Entry {
 		ID:         "tool-result:" + c.RunID.String() + ":" + c.CallID,
 		RunID:      c.RunID.String(),
 		TurnID:     c.TurnID.String(),
-		Role:       role.Tool,
 		AuthorKind: AuthorTool,
-		AuthorID:   string(c.Name),
-		Content: []ContentBlock{
-			ToolResultBlock{
-				CallID:  c.CallID,
-				Name:    c.Name,
-				Text:    result.Payload,
-				IsError: result.ErrorClass != "",
+		Payload: entryPayload.Message{
+			Role: role.Tool,
+			Content: []ContentBlock{
+				ToolResultBlock{
+					CallID:  c.CallID,
+					Name:    c.Name,
+					Text:    result.Payload,
+					IsError: result.ErrorClass != "",
+				},
 			},
 		},
 	}

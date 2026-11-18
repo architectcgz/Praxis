@@ -95,9 +95,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	}
 	s.loop.Emitter.Emit(coreevent.Event{Source: child.EventSource(""), Payload: coreevent.SubagentStarted{
 		Name:          definition.Name,
-		DefinitionID:  definition.ID,
 		CreatedAt:     child.CreatedAt(),
-		Run:           initial,
 		Entries:       child.Entries(),
 		ParentAgentID: parent.AgentID(),
 		ParentRunID:   parent.ID(),

@@ -15,7 +15,7 @@ import (
 	modelapi "praxis/internal/core/model"
 	modelusage "praxis/internal/core/model/usage"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/core/timing"
+	"praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"sync"
@@ -51,7 +51,6 @@ type Run struct {
 	waiting       int
 	id            identity.RunID
 	sessionID     identity.SessionID
-	agentID       identity.AgentID
 	definition    agentmodel.AgentDefinition
 	model         modelapi.Config
 	parentCallID  string
@@ -73,7 +72,6 @@ func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *R
 		history:      history,
 		id:           identity.RunID(deps.IDs.New("run")),
 		sessionID:    history.SessionID(),
-		agentID:      history.AgentID(),
 		sourceTaskID: config.SourceTaskID,
 		parentCallID: config.ParentCallID,
 		definition:   config.Definition,
@@ -88,11 +86,10 @@ func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *R
 }
 
 // toolUpdate 将并行工具的等待变化和审核事实交给所属执行流程。
-// 审核事实必须收到保存确认后才能继续调用模型。
+// 开始和结束事实分别在调用模型和应用审核结论之前确认保存。
 type toolUpdate struct {
 	ctx     context.Context
-	request sessionentry.ModelRequestRecord
-	timing  *timing.Record
+	request entryPayload.ModelRequest
 	waiting int
 	saved   chan error
 }
@@ -161,8 +158,6 @@ func (r *Run) accept(value *sessionentry.Entry) {
 	case entryPayload.TurnStarted:
 		r.currentTurnID = identity.TurnID(value.TurnID)
 		r.progress.Iterations++
-	case entryPayload.ModelRequestStarted:
-		r.progress.ModelRequests++
 	}
 	if terminal, ok := value.Payload.(entryPayload.RunTerminal); ok {
 		r.terminalMu.Lock()
@@ -172,24 +167,33 @@ func (r *Run) accept(value *sessionentry.Entry) {
 		r.progress.accept(value)
 	}
 	if parent := r.collaboration.parent; parent != nil {
-		parent.ReceiveSubagentStatus(r.agentID, r.Snapshot())
+		parent.ReceiveSubagentStatus(r.AgentID(), r.Snapshot())
 	}
 }
 
 func (p *runProgress) accept(value *sessionentry.Entry) {
-	if request, _ := value.RequestFact(); request != nil && request.Status != sessionentry.RequestRunning {
-		p.OutputBytes += int64(request.OutputBytes)
-		if u := request.Usage; u != nil {
-			p.Usage.Add(*u)
+	if request, ok := value.Payload.(entryPayload.ModelRequest); ok {
+		if request.Status == entryPayload.RequestRunning {
+			p.ModelRequests++
+		} else {
+			p.OutputBytes += int64(request.OutputBytes)
+			if u := request.Usage; u != nil {
+				p.Usage.Add(*u)
+			}
 		}
+		return
 	}
-	if value.Role == role.Assistant {
+	message, ok := value.Payload.(entryPayload.Message)
+	if !ok {
+		return
+	}
+	if message.Role == role.Assistant {
 		p.FinalAssistantID, p.FinalStopReason = "", ""
-		if value.Response != nil && (value.Response.StopReason == "completed" || value.Response.StopReason == "stop_sequence") {
-			p.FinalAssistantID, p.FinalStopReason = value.ID, value.Response.StopReason
+		if response := message.Response; response != nil && (response.StopReason == "completed" || response.StopReason == "stop_sequence") {
+			p.FinalAssistantID, p.FinalStopReason = value.ID, response.StopReason
 		}
 	}
-	for _, block := range value.Content {
+	for _, block := range message.Content {
 		switch block := block.(type) {
 		case sessionentry.ToolCallBlock:
 			p.ToolCalls++
@@ -203,7 +207,7 @@ func (p *runProgress) accept(value *sessionentry.Entry) {
 func (r *Run) EventSource(turnID identity.TurnID) coreevent.EventSource {
 	return coreevent.EventSource{
 		SessionID: r.sessionID,
-		AgentID:   r.agentID,
+		AgentID:   r.AgentID(),
 		RunID:     r.id,
 		TurnID:    turnID,
 	}
@@ -222,13 +226,26 @@ func (r *Run) TerminalSaved() bool {
 	return r.terminal != nil
 }
 
-// executeTools 在所属执行流程接纳工具消息，直到本批工具及其清理全部完成。
-// 取消通过工具 Context 传播，此处仍接纳收尾事实，不提前退出等待。
-func (r *Run) executeTools(execute func()) {
+// executeTools 在所属协程处理等待状态和审核保存；提交回调仅在本批工具中有效。
+// 取消由工具 Context 传播，此处仍接纳收尾事实，直到本批工具全部退出。
+func (r *Run) executeTools(saveRequest toolexecution.SaveModelRequest, execute func(toolexecution.SaveModelRequest)) {
+	submitRequest := func(ctx context.Context, request entryPayload.ModelRequest) error {
+		update := toolUpdate{
+			ctx:     ctx,
+			request: request,
+			saved:   make(chan error, 1),
+		}
+		select {
+		case r.toolUpdates <- update:
+			return <-update.saved
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		execute()
+		execute(submitRequest)
 	}()
 	for {
 		select {
@@ -249,7 +266,7 @@ func (r *Run) executeTools(execute func()) {
 				}
 				continue
 			}
-			update.saved <- r.commitToolRequest(update)
+			update.saved <- saveRequest(update.ctx, update.request)
 		}
 	}
 }
@@ -263,7 +280,7 @@ func (r *Run) SessionID() identity.SessionID {
 }
 
 func (r *Run) AgentID() identity.AgentID {
-	return r.agentID
+	return r.history.AgentID()
 }
 
 func (r *Run) CreatedAt() time.Time {
@@ -289,41 +306,12 @@ func (r *Run) Outcome() entryPayload.RunOutcome {
 	return r.terminal.Outcome()
 }
 
-// RecordModelRequest 将审核事实交给所属执行流程，并等待保存结果。
-func (r *Run) RecordModelRequest(ctx context.Context, request sessionentry.ModelRequestRecord, measured *timing.Record) error {
-	update := toolUpdate{
-		ctx:     ctx,
-		request: request,
-		timing:  measured,
-		saved:   make(chan error, 1),
-	}
-	select {
-	case r.toolUpdates <- update:
-		return <-update.saved
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (r *Run) commitToolRequest(update toolUpdate) error {
-	request, measured := update.request, update.timing
-	stored, _, err := r.AppendEntry(update.ctx, sessionentry.ModelRequestEntry(request, measured))
-	if err != nil {
-		return err
-	}
-	r.deps.Emitter.Emit(coreevent.Event{
-		Source:  r.EventSource(request.TurnID),
-		Payload: coreevent.ModelRequestFact(*stored),
-	})
-	return nil
-}
-
 func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {
 	return loop.RunParams{
 			ID:           s.id,
 			SourceTaskID: s.sourceTaskID,
 			SessionID:    s.sessionID,
-			AgentID:      s.agentID,
+			AgentID:      s.AgentID(),
 			SystemPrompt: s.definition.Instructions,
 			Model:        s.model,
 		}, loop.RunDependencies{
@@ -352,7 +340,7 @@ func runIdentity(run *Run, turnID identity.TurnID) hook.Identity {
 	return hook.Identity{
 		SourceTaskID: run.sourceTaskID,
 		SessionID:    run.sessionID,
-		AgentID:      run.agentID,
+		AgentID:      run.AgentID(),
 		RunID:        run.id,
 		TurnID:       turnID,
 	}

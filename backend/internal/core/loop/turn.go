@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -35,18 +36,28 @@ func (r *Runner) runTurn(
 		}
 	}()
 	r.Logf("provider request prepared run_id=%s model=%s contextEntries=%d turn_id=%s", params.ID, params.Model.ModelID, len(request.Context.Entries), turnID)
-	response, err := r.Request(ctx, params, deps, request, hook.ModelRequestIteration)
+	response, err := r.Request(ctx, params, deps, request, entryPayload.ModelRequestIteration)
 	stopReason = response.StopReason
-	request.ID = response.RequestID
-	blocks := response.Blocks()
-	entry := assistantEntry(params, request, stopReason, blocks)
-	entry.Response.Timing = response.Timing
 	if err != nil {
 		return false, NewModelFailure(err)
 	}
 
 	calls := prepareToolCalls(params, turnID, response.ToolCalls())
-	stored, inserted, err := deps.AppendEntry(context.WithoutCancel(ctx), entry)
+	stored, inserted, err := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
+		ID:         "assistant:" + response.RequestID.String(),
+		RunID:      params.ID.String(),
+		TurnID:     turnID.String(),
+		AuthorKind: sessionentry.AuthorAgent,
+		Payload: entryPayload.Message{
+			Role:    role.Assistant,
+			Content: response.Blocks(),
+			Response: &entryPayload.ModelResponse{
+				RequestID:  response.RequestID,
+				StopReason: string(stopReason),
+				Timing:     response.Timing,
+			},
+		},
+	})
 	if err == nil {
 		r.emit(params, turnID, coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}})
 	}
@@ -75,22 +86,6 @@ func (r *Runner) runTurn(
 		})
 	}
 	return false, r.runToolCalls(ctx, params, deps, executor, calls)
-}
-
-func assistantEntry(params RunParams, request providerapi.Request, stopReason providerapi.StopReason, blocks []sessionentry.ContentBlock) sessionentry.Entry {
-	return sessionentry.Entry{
-		ID:     "assistant:" + request.ID.String(),
-		RunID:  params.ID.String(),
-		TurnID: request.TurnID.String(),
-		Response: &sessionentry.ModelResponse{
-			RequestID:  request.ID,
-			StopReason: string(stopReason),
-		},
-		Role:       role.Assistant,
-		AuthorKind: sessionentry.AuthorAgent,
-		AuthorID:   params.AgentID.String(),
-		Content:    blocks,
-	}
 }
 
 // entryBlocksFromEvents 把模型流事件转换为有序上下文 block。

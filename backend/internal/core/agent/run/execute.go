@@ -37,14 +37,12 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 		return false, err
 	}
 	stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
-		ID: inputID,
-		Payload: entryPayload.UserInput{
-			MessageID: inputID,
-			Text:      prompt,
-		},
-		Role:       role.User,
+		ID:         inputID,
 		AuthorKind: authorKind,
-		Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: prompt}},
+		Payload: entryPayload.Message{
+			Role:    role.User,
+			Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: prompt}},
+		},
 	})
 	if err != nil {
 		return true, err
@@ -114,7 +112,7 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 		} else {
 			r.deps.Emitter.Emit(coreevent.Event{
 				Source:  r.EventSource(""),
-				Payload: coreevent.RunEnding{Run: r.Snapshot()},
+				Payload: coreevent.RunEnding{},
 			})
 		}
 	}
@@ -149,7 +147,7 @@ func (r *Run) ConfirmRunning(ctx context.Context) error {
 	}
 	r.deps.Emitter.Emit(coreevent.Event{
 		Source:  r.EventSource(""),
-		Payload: coreevent.RunStarted{Run: r.Snapshot()},
+		Payload: coreevent.RunStarted{StartedAt: at},
 	})
 	return nil
 }
@@ -203,9 +201,14 @@ func (r *Run) Settle(ctx context.Context, outcome entryPayload.RunOutcome, code 
 	r.deps.Emitter.Emit(coreevent.Event{
 		Source: r.EventSource(""),
 		Payload: coreevent.RunEnded{
-			Run:     r.Snapshot(),
-			State:   sessionentry.AgentStateFromOutcome(r.terminal.Outcome()),
-			Entries: []sessionentry.Entry{*stored},
+			StartedAt:      stats.StartedAt,
+			EndedAt:        stats.EndedAt,
+			Outcome:        outcome,
+			Iterations:     stats.Iterations,
+			ToolCalls:      stats.ToolCalls,
+			FailureCode:    code,
+			FailureMessage: message,
+			State:          sessionentry.AgentStateFromOutcome(outcome),
 		},
 	})
 	return nil

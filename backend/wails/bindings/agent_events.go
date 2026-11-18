@@ -1,13 +1,6 @@
-package dto
+package bindings
 
-import (
-	"time"
-)
-
-type StopRunRequest struct {
-	SessionID string `json:"sessionId" validate:"session_id"`
-	RunID     string `json:"runId" validate:"id"`
-}
+import "time"
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
 type AgentEvent struct {
@@ -53,18 +46,24 @@ type AgentTurnCompleted struct {
 	StopReason string `json:"stopReason"`
 }
 
-type AgentRunChanged struct {
-	Run RunSummary `json:"run"`
+type AgentRunStarted struct {
+	StartedAt time.Time `json:"startedAt"`
 }
 
 type AgentRunEnded struct {
-	Run      RunSummary       `json:"run"`
-	State    string           `json:"state"`
-	Messages []HistoryMessage `json:"messages"`
+	StartedAt      time.Time `json:"startedAt,omitzero"`
+	EndedAt        time.Time `json:"endedAt"`
+	State          string    `json:"state"`
+	Outcome        string    `json:"outcome"`
+	Iterations     uint64    `json:"iterations"`
+	ToolCalls      int       `json:"toolCalls"`
+	FailureCode    string    `json:"failureCode,omitempty"`
+	FailureMessage string    `json:"failureMessage,omitempty"`
 }
 
 type AgentSubagentStarted struct {
-	Agent         AgentView        `json:"agent"`
+	Name          string           `json:"name"`
+	CreatedAt     time.Time        `json:"createdAt"`
 	Messages      []HistoryMessage `json:"messages"`
 	ParentAgentID string           `json:"parentAgentId"`
 	ParentRunID   string           `json:"parentRunId"`
@@ -85,37 +84,6 @@ type AgentErrorOccurred struct {
 	Message string `json:"message"`
 }
 
-// RunSummary 是外部展示摘要，不携带执行配置、句柄或推理续传状态。
-type RunSummary struct {
-	ID          string
-	Status      string
-	StartedAt   time.Time
-	Iterations  uint64
-	ToolCalls   int
-	OutputBytes int64
-	Result      *RunResult `json:"Result,omitempty"`
-}
-
-// RunResult 只在执行结束后出现，失败原因归属于结果而非运行阶段。
-type RunResult struct {
-	Outcome        string
-	EndedAt        time.Time
-	FailureCode    string
-	FailureMessage string
-}
-type AgentView struct {
-	ID           string
-	SessionID    string
-	DefinitionID string
-	Kind         string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Name         string      `json:"name"`
-	State        string      `json:"state"`
-	CurrentRunID string      `json:"currentRunId"`
-	CurrentRun   *RunSummary `json:"currentRun"`
-	LatestRun    *RunSummary `json:"latestRun"`
-}
 type AgentStateChanged struct {
 	State string `json:"state"`
 }

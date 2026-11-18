@@ -164,10 +164,10 @@ type nativeExecutor struct {
 	catalog *nativeCatalog
 }
 
-func (e *nativeExecutor) Execute(ctx context.Context, call sessionentry.ToolCall) (toolexecution.CallResult, error) {
+func (e *nativeExecutor) Execute(ctx context.Context, call sessionentry.ToolCall, saveRequest toolexecution.SaveModelRequest) (toolexecution.CallResult, error) {
 	native := e.catalog.tools[call.Name]
 	if native == nil {
-		return e.base.Execute(ctx, call)
+		return e.base.Execute(ctx, call, saveRequest)
 	}
 	span := timing.NewSpan()
 	span.Start()

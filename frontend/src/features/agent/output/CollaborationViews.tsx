@@ -1,5 +1,5 @@
 import { Bot, ChevronDown, ExternalLink, GitBranch } from 'lucide-react'
-import type { HistoryMessage, AgentView } from '../../../api'
+import { activeRunId, type HistoryMessage, type AgentView } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { OutputStatus } from './OutputStatus'
 import type { ToolStatus } from './toolPresentation'
@@ -44,7 +44,7 @@ export function CollaborationViews({ agents, agentEntries, entriesErrors, stream
                                         <strong>{item.agent.name}</strong>
                                         <OutputStatus status={item.status} label={item.label} />
                                     </div>
-                                    <RunDuration run={item.run} label="耗时" />
+                                    <RunDuration startedAt={item.agent.runStartedAt} endedAt={item.agent.runEndedAt} />
                                     <p className="output-lane-task">{item.task || '尚未提供任务输入'}</p>
                                     <div className="output-lane-track" data-status={item.status} aria-hidden="true"><span /></div>
                                     <p className="output-lane-result">{item.error || item.result || '尚未返回结果'}</p>
@@ -60,7 +60,7 @@ export function CollaborationViews({ agents, agentEntries, entriesErrors, stream
                             <summary className="output-fold-button">
                                 <strong>{item.agent.name}</strong>
                                 <OutputStatus status={item.status} label={item.label} />
-                                <RunDuration run={item.run} label="耗时" />
+                                <RunDuration startedAt={item.agent.runStartedAt} endedAt={item.agent.runEndedAt} />
                                 <ChevronDown className="output-chevron" size={14} aria-hidden="true" />
                             </summary>
                             <div className="output-fold-body">
@@ -90,9 +90,8 @@ export function CollaborationViews({ agents, agentEntries, entriesErrors, stream
 }
 
 function subagentHandoffView(agent: AgentView, entries?: HistoryMessage[], streaming?: StreamingOutput, entriesError?: string) {
-    const run = agent.currentRun || agent.latestRun
-    const live = streaming?.runId === agent.currentRunId ? streaming : undefined
-    const runId = live?.runId || run?.ID || ''
+    const live = streaming?.runId === activeRunId(agent) ? streaming : undefined
+    const runId = agent.runId
     const messages = (entries || []).filter((item) => !runId || item.runId === runId)
     const text = (item?: HistoryMessage) => item?.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') || ''
     const input = messages.find((item) => item.role === 'user')
@@ -112,18 +111,15 @@ function subagentHandoffView(agent: AgentView, entries?: HistoryMessage[], strea
     } else if (agent.state === 'executing' || live) {
         status = 'running'
         label = '进行中'
-    } else if (agent.state === 'failed' || run?.Result?.Outcome === 'failed') {
+    } else if (agent.state === 'failed') {
         status = 'failed'
         label = '失败'
-    } else if (run?.Result?.Outcome === 'interrupted') {
-        status = 'cancelled'
-        label = '已中断'
     } else if (agent.state === 'waiting') {
         status = 'blocked'
         label = '等待输入'
-    } else if (run?.Status === 'ended' && (run.Result?.Outcome === 'completed' || run.Result?.Outcome === 'yielded')) {
+    } else if (agent.runOutcome === 'completed' || agent.runOutcome === 'yielded') {
         status = 'completed'
         label = '已完成'
     }
-    return { agent, runId, run, task: entries ? text(input) : '选择该 Agent 后加载任务历史', result, status, label, error: entriesError ? `条目加载失败：${entriesError}` : live?.error || run?.Result?.FailureCode || '' }
+    return { agent, runId, task: entries ? text(input) : '选择该 Agent 后加载任务历史', result, status, label, error: entriesError ? `条目加载失败：${entriesError}` : live?.error || agent.runFailure || '' }
 }

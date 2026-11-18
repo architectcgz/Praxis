@@ -39,7 +39,7 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 			return nil, err
 		}
 		runner.Tools = catalog
-		base := r.tools.ForRun(run, project.Path, active.config.Tools, active.config.ApprovalMode, runner.Provider, run)
+		base := r.tools.ForRun(run, project.Path, active.config.Tools, active.config.ApprovalMode, runner.Provider)
 		return &nativeExecutor{
 			base:    base,
 			catalog: catalog,

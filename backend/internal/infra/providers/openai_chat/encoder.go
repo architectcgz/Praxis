@@ -28,17 +28,18 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 
 func chatMessagesFromContext(entry *sessionentry.Entry, ids map[string]string) ([]chatMessage, error) {
 	var messages []chatMessage
-	result := chatMessage{Role: string(entry.Role)}
+	messageRole, blocks := entry.Dialogue()
+	result := chatMessage{Role: string(messageRole)}
 	flush := func() {
 		if result.Content != nil || len(result.ToolCalls) > 0 {
 			messages = append(messages, result)
-			result = chatMessage{Role: string(entry.Role)}
+			result = chatMessage{Role: string(messageRole)}
 		}
 	}
-	for index, block := range entry.Content {
+	for index, block := range blocks {
 		switch block := block.(type) {
 		case sessionentry.TextBlock:
-			if entry.Role == role.Tool {
+			if messageRole == role.Tool {
 				return nil, fmt.Errorf("tool role requires tool results")
 			}
 			if result.Content == nil {
@@ -47,7 +48,7 @@ func chatMessagesFromContext(entry *sessionentry.Entry, ids map[string]string) (
 				*result.Content += block.Text
 			}
 		case sessionentry.ToolCallBlock:
-			if entry.Role != role.Assistant {
+			if messageRole != role.Assistant {
 				return nil, fmt.Errorf("tool call requires assistant role")
 			}
 			result.ToolCalls = append(result.ToolCalls, chatToolCall{

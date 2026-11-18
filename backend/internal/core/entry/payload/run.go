@@ -70,7 +70,7 @@ func (f RunFailure) Failure() (RunFailureCode, string) { return f.Code, f.Messag
 
 type RunCompleted struct{ RunStats }
 
-func (RunCompleted) factKind() string                  { return "run_completed" }
+func (RunCompleted) isPayload()                        {}
 func (RunCompleted) Outcome() RunOutcome               { return OutcomeCompleted }
 func (RunCompleted) Failure() (RunFailureCode, string) { return "", "" }
 
@@ -79,7 +79,7 @@ type RunFailed struct {
 	RunFailure
 }
 
-func (RunFailed) factKind() string    { return "run_failed" }
+func (RunFailed) isPayload()          {}
 func (RunFailed) Outcome() RunOutcome { return OutcomeFailed }
 
 type RunInterrupted struct {
@@ -87,11 +87,11 @@ type RunInterrupted struct {
 	RunFailure
 }
 
-func (RunInterrupted) factKind() string    { return "run_interrupted" }
+func (RunInterrupted) isPayload()          {}
 func (RunInterrupted) Outcome() RunOutcome { return OutcomeInterrupted }
 
 type SubagentYielded struct{ RunStats }
 
-func (SubagentYielded) factKind() string                  { return "subagent_yielded" }
+func (SubagentYielded) isPayload()                        {}
 func (SubagentYielded) Outcome() RunOutcome               { return OutcomeYielded }
 func (SubagentYielded) Failure() (RunFailureCode, string) { return "", "" }

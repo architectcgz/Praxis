@@ -13,6 +13,25 @@ type ContentBlock interface {
 	contentBlock()
 }
 
+type Content []ContentBlock
+
+func (c *Content) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	blocks := make(Content, len(raw))
+	for index, value := range raw {
+		block, err := decodeContentBlock(value)
+		if err != nil {
+			return err
+		}
+		blocks[index] = block
+	}
+	*c = blocks
+	return nil
+}
+
 type TextBlock struct {
 	Text string `json:"text"`
 }
@@ -102,7 +121,7 @@ func (b ReasoningStateBlock) MarshalJSON() ([]byte, error) {
 	}{Kind: "reasoning_state", value: value(b)})
 }
 
-func DecodeContentBlock(data json.RawMessage) (ContentBlock, error) {
+func decodeContentBlock(data json.RawMessage) (ContentBlock, error) {
 	var header struct {
 		Kind string `json:"kind"`
 	}

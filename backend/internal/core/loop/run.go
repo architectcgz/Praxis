@@ -21,7 +21,7 @@ import (
 // ToolExecutor 完成授权、审批等待和执行，返回实际结果及后置 Hook 所需的调用信息。
 // Loop 提交真实回执后调用后置 Hook，历史写入由条目提交入口负责。
 type ToolExecutor interface {
-	Execute(context.Context, sessionentry.ToolCall) (toolexecution.CallResult, error)
+	Execute(context.Context, sessionentry.ToolCall, toolexecution.SaveModelRequest) (toolexecution.CallResult, error)
 }
 
 type (
@@ -53,7 +53,7 @@ type RunDependencies struct {
 	Budget                *appcontext.Budget
 	ReadEntries           func(context.Context) ([]*sessionentry.Entry, error)
 	AppendEntry           AppendEntry
-	ExecuteTools          func(func())
+	ExecuteTools          func(saveRequest toolexecution.SaveModelRequest, execute func(submitRequest toolexecution.SaveModelRequest))
 }
 
 type FailureCode string
@@ -255,7 +255,7 @@ func (r *Runner) BuildContext(ctx context.Context, params RunParams, entries []*
 }
 
 // Request 接收一次模型响应；断流时同时返回已收到内容，由所属调用流程决定如何记录。
-func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependencies, request providerapi.Request, kind hook.ModelRequestKind) (Response, error) {
+func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependencies, request providerapi.Request, kind entryPayload.ModelRequestKind) (Response, error) {
 	var response Response
 	var err error
 	for retry := 0; retry <= 3; retry++ {
@@ -263,7 +263,7 @@ func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependen
 			request.ID = identity.NewModelRequestID()
 		}
 		response, err = r.callModel(ctx, params, deps, request, kind, retry, func(event providerapi.Event) {
-			if kind == hook.ModelRequestIteration {
+			if kind == entryPayload.ModelRequestIteration {
 				r.emitModelEvent(params, request.TurnID, event)
 			}
 		})

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	"praxis/internal/core/tool"
 	"unicode/utf8"
@@ -54,10 +55,11 @@ func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.Entry)
 func ModelEntries(entries []*sessionentry.Entry) []*sessionentry.Entry {
 	selected := make([]*sessionentry.Entry, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Response != nil && entry.Response.Error != "" || entry.IsRun() {
+		if message, ok := entry.Payload.(entryPayload.Message); ok && message.Response != nil && message.Response.Error != "" {
 			continue
 		}
-		for _, block := range entry.Content {
+		_, blocks := entry.Dialogue()
+		for _, block := range blocks {
 			if _, thinking := block.(sessionentry.ThinkingBlock); !thinking {
 				selected = append(selected, entry)
 				break
@@ -98,8 +100,9 @@ func (c ModelContext) EstimatedTokens() (int, error) {
 	}
 	values := make([]modelEntry, 0, len(c.Entries))
 	for _, entry := range c.Entries {
-		value := modelEntry{Role: entry.Role}
-		for _, block := range entry.Content {
+		messageRole, blocks := entry.Dialogue()
+		value := modelEntry{Role: messageRole}
+		for _, block := range blocks {
 			if _, thinking := block.(sessionentry.ThinkingBlock); !thinking {
 				value.Content = append(value.Content, block)
 			}

@@ -2,62 +2,8 @@ package entry
 
 import (
 	entryPayload "praxis/internal/core/entry/payload"
-	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 )
-
-func (e Entry) RequestFact() (*ModelRequestRecord, *timing.Record) {
-	switch p := e.Payload.(type) {
-	case entryPayload.ModelRequestStarted:
-		return &p.Request, p.Timing
-	case entryPayload.ModelRequestCompleted:
-		return &p.Request, p.Timing
-	case entryPayload.ModelRequestFailed:
-		return &p.Request, p.Timing
-	case entryPayload.ModelRequestInterrupted:
-		return &p.Request, p.Timing
-	default:
-		return nil, nil
-	}
-}
-
-func ModelRequestEntry(request ModelRequestRecord, measured *timing.Record) Entry {
-	var payload entryPayload.Payload
-	suffix := "finished"
-	switch request.Status {
-	case RequestRunning:
-		payload = entryPayload.ModelRequestStarted{Request: request, Timing: measured}
-		suffix = "started"
-	case RequestCompleted:
-		payload = entryPayload.ModelRequestCompleted{Request: request, Timing: measured}
-	case RequestFailed:
-		payload = entryPayload.ModelRequestFailed{Request: request, Timing: measured}
-	case RequestInterrupted:
-		payload = entryPayload.ModelRequestInterrupted{Request: request, Timing: measured}
-	}
-	return Entry{
-		ID:      "request:" + request.ID.String() + ":" + suffix,
-		RunID:   request.RunID.String(),
-		TurnID:  request.TurnID.String(),
-		Payload: payload,
-	}
-}
-
-func (e Entry) InputMessageID() string {
-	if p, ok := e.Payload.(entryPayload.UserInput); ok {
-		return p.MessageID
-	}
-	return ""
-}
-
-func (e Entry) IsMetadata() bool {
-	switch e.Payload.(type) {
-	case nil, entryPayload.UserInput:
-		return false
-	default:
-		return true
-	}
-}
 
 type SubagentReceipt struct {
 	ReportID string                  `json:"reportId"`

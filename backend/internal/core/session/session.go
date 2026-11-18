@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"maps"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
@@ -138,12 +137,6 @@ func (s *Session) RestoreAgentContext(agentID identity.AgentID, entries []*sessi
 	}
 	s.data.AgentContexts[agentID] = AgentContext{Entries: slices.Clone(entries)}
 	return nil
-}
-
-func (s *Session) agentIDs() []identity.AgentID {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return slices.Sorted(maps.Keys(s.data.AgentContexts))
 }
 
 func (s *Session) Close(ctx context.Context) error {

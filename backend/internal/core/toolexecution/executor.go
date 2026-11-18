@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"praxis/internal/clock"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
@@ -71,20 +72,17 @@ type RunOwner interface {
 	EventSource(identity.TurnID) coreevent.EventSource
 }
 
-// RequestProgress 已绑定本次执行，审核只提交请求事实。
-type RequestProgress interface {
-	RecordModelRequest(context.Context, sessionentry.ModelRequestRecord, *timing.Record) error
-}
+// SaveModelRequest 在工具批次内同步提交审核请求事实，审核必须等到保存结果再继续。
+type SaveModelRequest func(context.Context, entryPayload.ModelRequest) error
 
 // RunTools 只绑定本次已取得运行权的 AgentRun 的环境。
 type RunTools struct {
-	run           RunOwner
-	progress      RequestProgress
-	executor      *Executor
-	projectPath   string
-	catalog       tool.ToolCatalog
-	mode          security.ApprovalMode
-	provider      providerapi.Provider
+	run         RunOwner
+	executor    *Executor
+	projectPath string
+	catalog     tool.ToolCatalog
+	mode        security.ApprovalMode
+	provider    providerapi.Provider
 }
 
 // CallResult 将实际结果和耗时交给调用方一起提交；仅执行路径携带 OperationID 和已准备参数。
@@ -105,20 +103,19 @@ type ControlRequest struct {
 	CallID    string
 }
 
-func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, progress RequestProgress) *RunTools {
+func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider) *RunTools {
 	return &RunTools{
-		executor:      e,
-		run:           run,
-		progress:      progress,
-		projectPath:   projectPath,
-		catalog:       catalog,
-		mode:          mode,
-		provider:      provider,
+		executor:    e,
+		run:         run,
+		projectPath: projectPath,
+		catalog:     catalog,
+		mode:        mode,
+		provider:    provider,
 	}
 }
 
-// Execute 准备并冻结工具参数，取得最终授权后返回实际结果；不写历史或调用后置 Hook。
-func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) (CallResult, error) {
+// Execute 冻结工具参数并取得最终授权；审核请求通过本批回调提交，工具回执由 Loop 保存。
+func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall, saveRequest SaveModelRequest) (CallResult, error) {
 	s := tools.executor
 	s.mu.Lock()
 	s.active[call.Key] = &callState{
@@ -182,7 +179,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 	if err := s.deps.HookDispatcher.BeforeToolExecution(ctx, toolHookEvent(call, string(args), operationID)); err != nil {
 		return CallResult{}, err
 	}
-	return tools.execute(ctx, call, prepared, args, operationID)
+	return tools.execute(ctx, call, prepared, args, operationID, saveRequest)
 }
 
 // decodeToolArguments 只接受单个 JSON 对象，不修复原文，也不忽略对象后的多余内容。
@@ -206,9 +203,9 @@ func decodeToolArguments(raw string, target any) error {
 	return nil
 }
 
-func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string) (CallResult, error) {
+func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string, saveRequest SaveModelRequest) (CallResult, error) {
 	s := tools.executor
-	denied, err := tools.authorize(ctx, call, args, operationID)
+	denied, err := tools.authorize(ctx, call, args, operationID, saveRequest)
 	if errors.Is(err, errCallStopped) {
 		return callError("tool_interrupted", err.Error()), nil
 	}

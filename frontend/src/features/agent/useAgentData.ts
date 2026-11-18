@@ -25,10 +25,6 @@ export function useAgentData({ store, models }: { store: SessionStore; models: M
             if (belongs()) store.loaded(id, page)
         } catch (reason) { if (belongs()) store.failed(id, readableError(reason)) }
     }, [store])
-    const selectAgent = useCallback((id: string) => {
-        if (!store.getData().byId[id]) return
-        store.select(id)
-    }, [store])
     const loadEarlier = useCallback(() => loadHistory(store.getSelectedAgentID(), true), [store, loadHistory])
     const retryHistory = useCallback(() => {
         const id = store.getSelectedAgentID()
@@ -54,6 +50,6 @@ export function useAgentData({ store, models }: { store: SessionStore; models: M
         historyLoading: selected?.loading ?? false, hasEarlier: selected?.page?.hasMore ?? false,
         entries: selected?.entries ?? emptyEntries, requests: selected?.requests ?? emptyRequests, entriesError: selected?.error || '',
         selectedAgentID: data.selectedId, getSelectedAgentID: store.getSelectedAgentID,
-        outputStore, selectAgent, loadEarlier, retryHistory,
+        outputStore, selectAgent: store.select, loadEarlier, retryHistory,
     }
 }

@@ -38,6 +38,7 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) ([]json.
 func responseItems(entry *sessionentry.Entry, config modelapi.Config, ids map[string]string) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	var text strings.Builder
+	messageRole, blocks := entry.Dialogue()
 	appendItem := func(item any) error {
 		encoded, err := json.Marshal(item)
 		if err != nil {
@@ -51,11 +52,11 @@ func responseItems(entry *sessionentry.Entry, config modelapi.Config, ids map[st
 			return nil
 		}
 		// 官方 EasyInputMessage 的历史 assistant 文本同样使用 input_text。
-		err := appendItem(inputMessage{Type: "message", Role: string(entry.Role), Content: []inputText{{Type: "input_text", Text: text.String()}}})
+		err := appendItem(inputMessage{Type: "message", Role: string(messageRole), Content: []inputText{{Type: "input_text", Text: text.String()}}})
 		text.Reset()
 		return err
 	}
-	for index, block := range entry.Content {
+	for index, block := range blocks {
 		if _, thinking := block.(sessionentry.ThinkingBlock); thinking {
 			continue
 		}
@@ -66,12 +67,12 @@ func responseItems(entry *sessionentry.Entry, config modelapi.Config, ids map[st
 		}
 		switch block := block.(type) {
 		case sessionentry.TextBlock:
-			if entry.Role == role.Tool {
+			if messageRole == role.Tool {
 				return nil, errors.New("responses tool role requires tool results")
 			}
 			text.WriteString(block.Text)
 		case sessionentry.ToolCallBlock:
-			if entry.Role != role.Assistant {
+			if messageRole != role.Assistant {
 				return nil, errors.New("responses function call requires assistant role")
 			}
 			if err := appendItem(inputFunctionCall{
@@ -109,7 +110,8 @@ func responseItems(entry *sessionentry.Entry, config modelapi.Config, ids map[st
 func sensitiveStateValues(ctx appcontext.ModelContext) []string {
 	var values []string
 	for _, entry := range ctx.Entries {
-		for _, block := range entry.Content {
+		_, blocks := entry.Dialogue()
+		for _, block := range blocks {
 			state, ok := block.(sessionentry.ReasoningStateBlock)
 			if !ok {
 				continue

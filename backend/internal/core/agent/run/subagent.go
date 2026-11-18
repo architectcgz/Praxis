@@ -190,14 +190,12 @@ func (r *Run) acceptInstructions(ctx context.Context) (bool, error) {
 	}
 	for _, instruction := range instructions {
 		stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
-			ID: instruction.id,
-			Payload: entryPayload.UserInput{
-				MessageID: instruction.id,
-				Text:      instruction.text,
-			},
-			Role:       role.User,
+			ID:         instruction.id,
 			AuthorKind: sessionentry.AuthorAgent,
-			Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: instruction.text}},
+			Payload: entryPayload.Message{
+				Role:    role.User,
+				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: instruction.text}},
+			},
 		})
 		if err != nil {
 			return false, err
@@ -221,7 +219,7 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 	}
 	result := SubagentReport{
 		ReportID:     r.deps.IDs.New("report"),
-		AgentID:      r.agentID,
+		AgentID:      r.AgentID(),
 		RunID:        r.id,
 		ParentRunID:  parent.ID(),
 		ParentCallID: r.parentCallID,
@@ -301,14 +299,12 @@ func (r *Run) acceptReports(ctx context.Context) error {
 	for _, report := range reports {
 		text := subagentReportText(report)
 		stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
-			ID: "report:" + report.ReportID,
-			Payload: entryPayload.UserInput{
-				MessageID: report.ReportID,
-				Text:      text,
-			},
-			Role:       role.User,
+			ID:         "report:" + report.ReportID,
 			AuthorKind: sessionentry.AuthorAgent,
-			Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text}},
+			Payload: entryPayload.Message{
+				Role:    role.User,
+				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text}},
+			},
 		})
 		if err != nil {
 			return err
@@ -350,7 +346,7 @@ func (r *Run) ResultForParent() SubagentReport {
 	code, _ := r.terminal.Failure()
 	result := SubagentReport{
 		ReportID:     r.deps.IDs.New("report"),
-		AgentID:      r.agentID,
+		AgentID:      r.AgentID(),
 		RunID:        r.id,
 		ParentRunID:  r.collaboration.parent.ID(),
 		ParentCallID: r.parentCallID,
@@ -362,8 +358,8 @@ func (r *Run) ResultForParent() SubagentReport {
 		result.Text = r.entries[index].TextContent()
 	} else {
 		for i := len(r.entries) - 1; i >= 0; i-- {
-			request, _ := r.entries[i].RequestFact()
-			if request == nil {
+			request, ok := r.entries[i].Payload.(entryPayload.ModelRequest)
+			if !ok {
 				continue
 			}
 			for _, b := range request.Partial {

@@ -1,28 +1,19 @@
 import { Bot, Check, CircleAlert, Wrench } from 'lucide-react'
-import type { AgentView } from '../../api'
+import { activeRunId, type AgentView } from '../../api'
 import type { AgentsPanelProps } from './types'
 
 const stateLabels: Record<string, string> = {
     idle: '空闲', executing: '执行中', waiting: '等待中',
-    interrupted: '已中断', failed: '失败', unknown: '未知',
+    interrupted: '已中断', failed: '失败', unknown: '仅历史',
 }
 
 function agentStatusLabel(agent: AgentView): string {
     if (agent.state !== 'idle') return stateLabels[agent.state] || stateLabels.unknown
-    if (agent.Kind === 'subagent' && agent.latestRun?.Status === 'ended') {
-        if (agent.latestRun.Result?.Outcome === 'yielded') return '已交付'
-        if (agent.latestRun.Result?.Outcome === 'completed') return '已完成'
-        if (agent.latestRun.Result?.Outcome === 'failed') return '失败'
-        if (agent.latestRun.Result?.Outcome === 'interrupted') return '已中断'
+    if (agent.Kind === 'subagent') {
+        if (agent.runOutcome === 'yielded') return '已交付'
+        if (agent.runOutcome === 'completed') return '已完成'
     }
     return stateLabels.idle
-}
-
-function agentToneState(agent: AgentView): string {
-    if (agent.state !== 'idle') return agent.state
-    if (agent.Kind === 'subagent' && agent.latestRun?.Result?.Outcome === 'failed') return 'failed'
-    if (agent.Kind === 'subagent' && agent.latestRun?.Result?.Outcome === 'interrupted') return 'interrupted'
-    return 'idle'
 }
 
 export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }: AgentsPanelProps) {
@@ -31,17 +22,17 @@ export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }
     const subagents = allAgents
         .filter((agent) => agent.Kind === 'subagent')
         .sort((left, right) => {
-            const leftActive = left.currentRunId ? 1 : 0
-            const rightActive = right.currentRunId ? 1 : 0
+            const leftActive = activeRunId(left) ? 1 : 0
+            const rightActive = activeRunId(right) ? 1 : 0
             if (leftActive !== rightActive) return rightActive - leftActive
-            return right.UpdatedAt.localeCompare(left.UpdatedAt)
+            const leftAt = left.runEndedAt ?? left.runStartedAt ?? left.createdAt ?? ''
+            const rightAt = right.runEndedAt ?? right.runStartedAt ?? right.createdAt ?? ''
+            return rightAt.localeCompare(leftAt)
         })
     const activeCount = allAgents.filter((agent) => agent.state === 'executing' || agent.state === 'waiting').length
 
     const renderAgentRow = (item: AgentView) => {
-        const run = item.currentRun || item.latestRun
         const state = agentStatusLabel(item)
-        const tone = agentToneState(item)
         return (
             <button
                 className={`agent-row agent ${item.ID === selectedAgentID ? 'selected' : ''}`}
@@ -50,14 +41,14 @@ export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }
                 onClick={() => onSelectAgent(item.ID)}
                 aria-current={item.ID === selectedAgentID ? 'true' : undefined}
             >
-                <span className={`state-marker astate state-${tone}`} aria-hidden="true" />
+                <span className={`state-marker astate state-${item.state}`} aria-hidden="true" />
                 <span className="agent-row-copy">
                     <strong className="nm">{item.name}</strong>
-                    <span className="agent-row-metrics">
-                        <span title="最近执行的模型迭代数"><Check size={11} aria-hidden="true" />{run?.Iterations ?? 0}</span>
-                        <span title="最近执行的工具调用数"><Wrench size={11} aria-hidden="true" />{run?.ToolCalls ?? 0}</span>
-                        {run?.Result?.Outcome === 'failed' && <span className="agent-metric-danger" title="最近执行失败"><CircleAlert size={11} aria-hidden="true" /></span>}
-                    </span>
+                    {item.runEndedAt && <span className="agent-row-metrics">
+                        <span title="最近执行的模型迭代数"><Check size={11} aria-hidden="true" />{item.runIterations}</span>
+                        <span title="最近执行的工具调用数"><Wrench size={11} aria-hidden="true" />{item.runToolCalls}</span>
+                        {item.state === 'failed' && <span className="agent-metric-danger" title="最近执行失败"><CircleAlert size={11} aria-hidden="true" /></span>}
+                    </span>}
                 </span>
                 <span className="state-text st">{state}</span>
             </button>
@@ -74,7 +65,7 @@ export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }
                 <>
                     <div className="session-meta session-note">
                         <b className="session-title">{session.title || '未命名会话'}</b>
-                        <span>{activeCount > 0 ? `${activeCount} 个运行中 · 共 ${allAgents.length} 个代理` : `全部空闲 · 共 ${allAgents.length} 个代理`}</span>
+                        <span>{activeCount > 0 ? `${activeCount} 个运行中 · 共 ${allAgents.length} 个代理` : `共 ${allAgents.length} 个代理`}</span>
                     </div>
                     <div className="scroll-region scroll">
                         {subagents.length > 0 ? (

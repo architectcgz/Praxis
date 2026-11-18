@@ -5,6 +5,7 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -45,53 +46,56 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	outcomes := make([]toolexecution.CallResult, len(calls))
 	failures := make([]error, len(calls))
 	completed := make([]bool, len(calls))
-	execute := func(index int) {
-		call := calls[index]
-		outcomes[index], failures[index] = executor.Execute(batchCtx, call)
-		if failures[index] != nil {
-			cancelBatch()
-		}
-		completed[index] = true
-		result := outcomes[index].ToolResult
-		if failures[index] != nil && result.Payload == "" {
-			result = tool.NewToolError("tool_execution_failed", failures[index].Error())
-			outcomes[index].ToolResult = result
-		}
-		r.emit(params, call.TurnID, coreevent.ToolResult{
-			CallID:  call.CallID,
-			Result:  result.Payload,
-			IsError: result.ErrorClass != "",
-			Timing:  outcomes[index].Timing,
-		})
+	saveRequest := func(ctx context.Context, request entryPayload.ModelRequest) error {
+		return r.saveModelRequest(ctx, params, deps.AppendEntry, request)
 	}
 	var executionErr error
-	deps.ExecuteTools(func() {
-	for index := 0; index < len(calls); {
-		if err := ctx.Err(); err != nil {
-			executionErr = err
-			break
-		}
-		end := index + 1
-		if tool.IsReadOnly(r.Tools, calls[index].Name) {
-			for end < len(calls) && tool.IsReadOnly(r.Tools, calls[end].Name) {
-				end++
+	deps.ExecuteTools(saveRequest, func(submitRequest toolexecution.SaveModelRequest) {
+		execute := func(index int) {
+			call := calls[index]
+			outcomes[index], failures[index] = executor.Execute(batchCtx, call, submitRequest)
+			if failures[index] != nil {
+				cancelBatch()
 			}
-			var group sync.WaitGroup
-			for current := index; current < end; current++ {
-				group.Go(func() { execute(current) })
+			completed[index] = true
+			result := outcomes[index].ToolResult
+			if failures[index] != nil && result.Payload == "" {
+				result = tool.NewToolError("tool_execution_failed", failures[index].Error())
+				outcomes[index].ToolResult = result
 			}
-			group.Wait()
-		} else {
-			execute(index)
+			r.emit(params, call.TurnID, coreevent.ToolResult{
+				CallID:  call.CallID,
+				Result:  result.Payload,
+				IsError: result.ErrorClass != "",
+				Timing:  outcomes[index].Timing,
+			})
 		}
-		for _, err := range failures[index:end] {
-			executionErr = errors.Join(executionErr, err)
+		for index := 0; index < len(calls); {
+			if err := ctx.Err(); err != nil {
+				executionErr = err
+				break
+			}
+			end := index + 1
+			if tool.IsReadOnly(r.Tools, calls[index].Name) {
+				for end < len(calls) && tool.IsReadOnly(r.Tools, calls[end].Name) {
+					end++
+				}
+				var group sync.WaitGroup
+				for current := index; current < end; current++ {
+					group.Go(func() { execute(current) })
+				}
+				group.Wait()
+			} else {
+				execute(index)
+			}
+			for _, err := range failures[index:end] {
+				executionErr = errors.Join(executionErr, err)
+			}
+			if executionErr != nil {
+				break
+			}
+			index = end
 		}
-		if executionErr != nil {
-			break
-		}
-		index = end
-	}
 	})
 	for index := range calls {
 		if !completed[index] {
@@ -116,9 +120,11 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 		ID:         "tools:" + calls[0].TurnID.String(),
 		RunID:      params.ID.String(),
 		TurnID:     calls[0].TurnID.String(),
-		Role:       role.Tool,
 		AuthorKind: sessionentry.AuthorTool,
-		Content:    content,
+		Payload: entryPayload.Message{
+			Role:    role.Tool,
+			Content: content,
+		},
 	}
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()

@@ -1,22 +1,9 @@
 import { getSessionBinding } from './bindings'
-import type { SessionUsageSummary as GeneratedSessionUsageSummary } from '../../bindings/praxis/internal/dto/models'
-import type { AgentView, HistoryPage } from './agents'
+import type { SessionSnapshot as GeneratedSessionSnapshot } from '../../bindings/praxis/wails/bindings'
+import type { HistoryPage } from './agents'
 import type { QueuedTask } from './tasks'
 
-export type SessionUsageSummary = Omit<GeneratedSessionUsageSummary, 'historyEnds'> & { historyEnds: Record<string, number> }
-
-export type SessionSnapshot = {
-    queuePaused: boolean
-    id: string
-    projectId: string
-    title: string
-    createdAt: string
-    updatedAt: string
-    agents: AgentView[]
-    tasks: QueuedTask[]
-    history: HistoryPage
-    usage: SessionUsageSummary
-}
+export type SessionSnapshot = Omit<GeneratedSessionSnapshot, 'history' | 'tasks'> & { history: HistoryPage; tasks: QueuedTask[] }
 
 export type SessionSummary = {
     id: string
