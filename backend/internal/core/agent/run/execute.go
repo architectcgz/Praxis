@@ -19,8 +19,10 @@ const ErrInterrupted errorcode.Code = "run.interrupted"
 // Prepare 提交 Run 和输入事实。返回值表示 RunPrepared 已写入历史。
 func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	inputID := "input:" + r.id.String()
+	authorKind := sessionentry.AuthorAgent
 	if r.Main() {
 		inputID = "input:" + r.sourceTaskID.String()
+		authorKind = sessionentry.AuthorUser
 	}
 	if _, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 		ID:        "prepared:" + r.id.String(),
@@ -41,7 +43,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 			Text:      prompt,
 		},
 		Role:       role.User,
-		AuthorKind: sessionentry.AuthorUser,
+		AuthorKind: authorKind,
 		Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: prompt}},
 	})
 	if err != nil {

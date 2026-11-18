@@ -82,38 +82,6 @@ type ModelRequestInterrupted struct {
 
 func (ModelRequestInterrupted) factKind() string { return "model_request_interrupted" }
 
-type SubagentReport struct {
-	ReportID     string
-	AgentID      identity.AgentID
-	RunID        identity.RunID
-	ParentRunID  identity.RunID
-	ParentCallID string
-	Outcome      RunOutcome
-	FailureCode  RunFailureCode
-	Text         string
-	Final        bool
-	Partial      bool
-}
-
-type SubagentReportReceived struct{ Report SubagentReport }
-
-func (SubagentReportReceived) factKind() string { return "subagent_report_received" }
-
-type SubagentReportAccepted struct{ ReportID string }
-
-func (SubagentReportAccepted) factKind() string { return "subagent_report_accepted" }
-
-type SubagentInstructionReceived struct {
-	MessageID string
-	Text      string
-}
-
-func (SubagentInstructionReceived) factKind() string { return "subagent_instruction_received" }
-
-type SubagentInstructionAccepted struct{ MessageID string }
-
-func (SubagentInstructionAccepted) factKind() string { return "subagent_instruction_accepted" }
-
 type storedPayload struct {
 	Kind string          `json:"kind"`
 	Data json.RawMessage `json:"data"`
@@ -141,22 +109,6 @@ func Decode(data json.RawMessage) (Payload, error) {
 		return nil, err
 	}
 	switch stored.Kind {
-	case "subagent_instruction_accepted":
-		var value SubagentInstructionAccepted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "subagent_instruction_received":
-		var value SubagentInstructionReceived
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "subagent_report_accepted":
-		var value SubagentReportAccepted
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
-	case "subagent_report_received":
-		var value SubagentReportReceived
-		err := json.Unmarshal(stored.Data, &value)
-		return value, err
 	case "user_input":
 		var value UserInput
 		err := json.Unmarshal(stored.Data, &value)

@@ -5,24 +5,23 @@ import "time"
 type MessageKind string
 
 const (
-	MessageSubagentReport MessageKind = "subagent_report"
-	MessageInstruction    MessageKind = "instruction"
-	MessageChat           MessageKind = "message"
-	MessageSummary        MessageKind = "summary"
+	MessageChat    MessageKind = "message"
+	MessageSummary MessageKind = "summary"
 )
 
 // HistoryMessage 承载可展示的对话内容。
 type HistoryMessage struct {
-	ID        string         `json:"id"`
-	RunID     string         `json:"runId"`
-	TurnID    string         `json:"turnId,omitempty"`
-	RequestID string         `json:"requestId,omitempty"`
-	CreatedAt time.Time      `json:"createdAt"`
-	Role      string         `json:"role"`
-	Kind      MessageKind    `json:"kind"`
-	Content   []MessageBlock `json:"content"`
-	Error     string         `json:"error,omitempty"`
-	Timing    *Timing        `json:"timing,omitempty"`
+	ID         string         `json:"id"`
+	RunID      string         `json:"runId"`
+	TurnID     string         `json:"turnId,omitempty"`
+	RequestID  string         `json:"requestId,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	Role       string         `json:"role"`
+	AuthorKind string         `json:"authorKind"`
+	Kind       MessageKind    `json:"kind"`
+	Content    []MessageBlock `json:"content"`
+	Error      string         `json:"error,omitempty"`
+	Timing     *Timing        `json:"timing,omitempty"`
 }
 
 type MessageBlock struct {

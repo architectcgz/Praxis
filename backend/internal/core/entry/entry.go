@@ -94,7 +94,6 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	}
 	if p, ok := e.Payload.(entryPayload.UserInput); ok {
 		e.Role = role.User
-		e.AuthorKind = AuthorUser
 		e.Content = []ContentBlock{TextBlock{Text: p.Text}}
 	}
 	return nil
@@ -167,10 +166,6 @@ func (e Entry) ContributesToModelContext() bool {
 	}
 	if request, _ := e.RequestFact(); request != nil {
 		return false
-	}
-	switch e.Payload.(type) {
-	case entryPayload.UserInput, entryPayload.SubagentReportAccepted, entryPayload.SubagentInstructionAccepted:
-		return true
 	}
 	return e.Role == role.User || e.Role == role.Assistant || e.Role == role.Tool
 }

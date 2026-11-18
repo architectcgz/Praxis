@@ -51,11 +51,8 @@ func (e Entry) InputMessageID() string {
 }
 
 func (e Entry) IsMetadata() bool {
-	if e.Payload == nil {
-		return false
-	}
 	switch e.Payload.(type) {
-	case entryPayload.UserInput, entryPayload.SubagentReportAccepted, entryPayload.SubagentInstructionAccepted:
+	case nil, entryPayload.UserInput:
 		return false
 	default:
 		return true

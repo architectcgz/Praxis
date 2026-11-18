@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from 'react'
-import { Archive, Bot, ChevronDown, CircleAlert, Send } from 'lucide-react'
+import { Archive, ChevronDown, CircleAlert } from 'lucide-react'
 import type { AgentEvent, HistoryMessage, MessageBlock, ModelUsage } from '../../../api'
 import { DurationLabel } from '../../timing/DurationLabel'
 import { MessageMarkdown } from './MarkdownViews'
@@ -7,14 +7,6 @@ import { CopyIconButton } from './CopyIconButton'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock, type PairedToolResult } from './ToolCallViews'
 import { MessageTiming } from './MessageTiming'
-
-const reportOutcomeLabels: Record<string, { label: string; tone: string }> = {
-    yielded: { label: '已交付', tone: 'ok' },
-    completed: { label: '已完成', tone: 'ok' },
-    progress: { label: '进展汇报', tone: 'info' },
-    failed: { label: '失败', tone: 'bad' },
-    interrupted: { label: '已中断', tone: 'warn' },
-}
 
 export const EntryView = memo(function EntryView({ agentName, item, events = [], pairedResults, usage, continuation = false, hasContinuation = false, copyContent }: {
     agentName: string
@@ -64,50 +56,11 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
         )
     }
 
-    if (message.kind === 'subagent_report') {
-        const parsed = parseSubagentReport(content)
-        const outcomeInfo = parsed.outcome ? reportOutcomeLabels[parsed.outcome] || { label: parsed.outcome, tone: '' } : null
-        return (
-            <article className="message entry-system-card entry-subagent-report">
-                <div className="entry-system-head">
-                    <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
-                    <strong>子代理汇报</strong>
-                    {outcomeInfo && <span className="output-chip" data-tone={outcomeInfo.tone}><span className="output-chip-dot" aria-hidden="true" />{outcomeInfo.label}</span>}
-                    {parsed.partial && <span className="output-chip">阶段汇报</span>}
-                    <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
-                </div>
-                {(parsed.agentId || parsed.failureCode) && (
-                    <div className="entry-system-meta">
-                        {parsed.agentId && <span>代理 <code>{parsed.agentId}</code></span>}
-                        {parsed.runId && <span>执行 <code>{parsed.runId}</code></span>}
-                        {parsed.failureCode && <span>原因 <code>{parsed.failureCode}</code></span>}
-                    </div>
-                )}
-                {parsed.body && <MessageMarkdown content={parsed.body} />}
-                {message.error && <div className="message-error-box" role="alert"><CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" /><span>{message.error}</span></div>}
-                <MessageActions content={parsed.body || content} />
-            </article>
-        )
-    }
-
-    if (message.kind === 'instruction') {
-        return (
-            <article className="message entry-system-card entry-instruction-card">
-                <div className="entry-system-head">
-                    <Send size={13} strokeWidth={1.8} aria-hidden="true" />
-                    <strong>主代理补充指令</strong>
-                    <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
-                </div>
-                {content && <MessageMarkdown content={content} />}
-                {message.error && <div className="message-error-box" role="alert"><CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" /><span>{message.error}</span></div>}
-                <MessageActions content={content} />
-            </article>
-        )
-    }
-
     const messageRole = message.role
     const messageClass = messageRole === 'assistant' || messageRole === 'user' ? messageRole : 'unknown'
-    const author = messageRole === 'assistant' ? agentName : messageRole === 'user' ? '你' : '未知来源'
+    let author = '未知来源'
+    if (messageRole === 'assistant') author = agentName
+    if (messageRole === 'user') author = message.authorKind === 'agent' ? '代理' : '你'
     const contentToCopy = copyContent ?? content
     const segments = messageRole === 'assistant' ? groupAssistantBlocks(messageBlocks) : []
     return (
@@ -141,22 +94,6 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
         </article>
     )
 })
-
-function parseSubagentReport(raw: string) {
-    const match = raw.match(/^\[Subagent report ([^\]]+)\]\s+agent=([^\s]+)\s+run=([^\s]+)\s+outcome=([^\s]+)\s+final=(true|false)\s+partial=(true|false)\s+failure=([^\n]*)\n?([\s\S]*)$/)
-    if (!match) {
-        return { reportId: '', agentId: '', runId: '', outcome: '', partial: false, failureCode: '', body: raw }
-    }
-    return {
-        reportId: match[1],
-        agentId: match[2],
-        runId: match[3],
-        outcome: match[4],
-        partial: match[6] === 'true',
-        failureCode: match[7].trim(),
-        body: match[8].trim(),
-    }
-}
 
 type AssistantSegment =
     | { key: string; kind: 'thinking'; text: string }

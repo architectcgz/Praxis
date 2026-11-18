@@ -32,6 +32,20 @@ type SubagentStatus struct {
 	Run     sessionentry.RunSnapshot `json:"run"`
 }
 
+// SubagentReport 是子 Run 交给父 Run 的运行时报告。
+type SubagentReport struct {
+	ReportID     string
+	AgentID      identity.AgentID
+	RunID        identity.RunID
+	ParentRunID  identity.RunID
+	ParentCallID string
+	Outcome      entryPayload.RunOutcome
+	FailureCode  entryPayload.RunFailureCode
+	Text         string
+	Final        bool
+	Partial      bool
+}
+
 type instruction struct {
 	id   string
 	text string
@@ -40,9 +54,9 @@ type instruction struct {
 type collaboration struct {
 	mu           sync.Mutex
 	children     map[identity.AgentID]SubagentHandle
-	reports      []entryPayload.SubagentReport
+	reports      []SubagentReport
 	consumed     map[string]bool
-	accepted     []entryPayload.SubagentReport
+	accepted     []SubagentReport
 	wake         chan struct{}
 	parent       *Run
 	spawn        func(context.Context, Assignment, string) (SubagentStatus, error)
@@ -190,7 +204,7 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	result := entryPayload.SubagentReport{
+	result := SubagentReport{
 		ReportID:     r.deps.IDs.New("report"),
 		AgentID:      r.agentID,
 		RunID:        r.id,
@@ -202,7 +216,7 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 }
 
 // AcceptSubagentResult 只更新 Parent Run Memory，不绕过 Parent Loop 写入 History。
-func (r *Run) AcceptSubagentResult(ctx context.Context, result entryPayload.SubagentReport) error {
+func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -233,7 +247,7 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 				finished = false
 			}
 		}
-		var fresh []entryPayload.SubagentReport
+		var fresh []SubagentReport
 		for _, report := range r.collaboration.reports {
 			if wanted[report.AgentID] && !r.collaboration.consumed[report.ReportID] {
 				fresh = append(fresh, report)
@@ -292,7 +306,7 @@ func (r *Run) acceptReports(ctx context.Context) error {
 	return nil
 }
 
-func subagentReportText(report entryPayload.SubagentReport) string {
+func subagentReportText(report SubagentReport) string {
 	status := string(report.Outcome)
 	if status == "" {
 		status = "progress"
@@ -317,9 +331,9 @@ func (r *Run) finishChildren() {
 	}
 }
 
-func (r *Run) ResultForParent() entryPayload.SubagentReport {
+func (r *Run) ResultForParent() SubagentReport {
 	code, _ := r.terminal.Failure()
-	result := entryPayload.SubagentReport{
+	result := SubagentReport{
 		ReportID:     r.deps.IDs.New("report"),
 		AgentID:      r.agentID,
 		RunID:        r.id,

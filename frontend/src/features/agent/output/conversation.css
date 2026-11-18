@@ -224,25 +224,6 @@
     font-size: var(--font-size-meta);
 }
 
-.entry-system-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 14px;
-    margin: 8px 0;
-    color: var(--faint);
-    font-size: var(--font-size-meta);
-}
-
-.entry-system-meta code {
-    font-family: var(--mono);
-    color: var(--muted);
-}
-
-.entry-subagent-report > .entry-system-head,
-.entry-instruction-card > .entry-system-head {
-    margin-bottom: var(--message-head-gap, 10px);
-}
-
 .entry-system-card .message-markdown {
     font-size: var(--font-size-ui);
 }

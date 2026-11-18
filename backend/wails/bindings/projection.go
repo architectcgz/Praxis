@@ -2,7 +2,6 @@ package bindings
 
 import (
 	"praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/timing"
 	"praxis/internal/dto"
@@ -18,13 +17,14 @@ func publicMessages(values []entry.Entry) []dto.HistoryMessage {
 			continue
 		}
 		projected := dto.HistoryMessage{
-			ID:        value.ID,
-			RunID:     value.RunID,
-			TurnID:    value.TurnID,
-			CreatedAt: value.CreatedAt,
-			Role:      string(value.Role),
-			Kind:      dto.MessageChat,
-			Content:   make([]dto.MessageBlock, 0, len(value.Content)),
+			ID:         value.ID,
+			RunID:      value.RunID,
+			TurnID:     value.TurnID,
+			CreatedAt:  value.CreatedAt,
+			Role:       string(value.Role),
+			AuthorKind: string(value.AuthorKind),
+			Kind:       dto.MessageChat,
+			Content:    make([]dto.MessageBlock, 0, len(value.Content)),
 		}
 		if value.Response != nil {
 			projected.RequestID = value.Response.RequestID.String()
@@ -62,12 +62,6 @@ func publicMessages(values []entry.Entry) []dto.HistoryMessage {
 					IsError: block.IsError,
 				})
 			}
-		}
-		switch value.Payload.(type) {
-		case entryPayload.SubagentReportAccepted:
-			projected.Kind = dto.MessageSubagentReport
-		case entryPayload.SubagentInstructionAccepted:
-			projected.Kind = dto.MessageInstruction
 		}
 		if value.IsSummary() {
 			projected.Kind = dto.MessageSummary
