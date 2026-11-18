@@ -8,10 +8,6 @@ import (
 	"praxis/internal/identity"
 )
 
-func (s *Session) AppendEntry(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
-	return s.appendEntry(ctx, s.data.MainAgentID(), value, false)
-}
-
 func (s *Session) appendEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.Entry, terminal bool) (*sessionentry.Entry, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
@@ -115,9 +111,4 @@ func (s *Session) AgentPage(ctx context.Context, agentID identity.AgentID, curso
 		return HistoryPage{}, fmt.Errorf("read agent history: %w", err)
 	}
 	return page, nil
-}
-
-// ModelEntries 返回当前 Agent 已经确定参与模型请求的 Entry。
-func (s *Session) ModelEntries(ctx context.Context, agentID identity.AgentID) ([]*sessionentry.Entry, error) {
-	return s.AgentContext(agentID)
 }

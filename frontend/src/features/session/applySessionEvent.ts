@@ -14,6 +14,7 @@ export function applySessionEvent(data: SessionData, output: SessionOutput, even
         return { data, output }
     }
     if (event.kind === 'session_config_reloaded') return { data: { ...data, configRevision: data.configRevision + 1 }, output }
+    if (event.kind === 'session_title_changed' || event.kind === 'task_queue_storage_failed') return { data, output }
     const id = event.agentId
     const current = data.byId[id]
     if (event.kind === 'subagent_started') {

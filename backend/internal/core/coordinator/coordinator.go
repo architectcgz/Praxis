@@ -125,9 +125,9 @@ func (s *Coordinator) releaseSessionCommand(id identity.SessionID, command *sess
 // activeRun 是所属会话或 Parent 持有的控制句柄，不提供运行状态查询。
 // 准备字段在 ready 关闭前绑定，完成后不再修改。
 type activeRun struct {
-	parent    *agentrun.Run
-	onDone    func() error
-	sessionID identity.SessionID
+	parent  *agentrun.Run
+	onDone  func() error
+	session *sessionmodel.Session
 
 	config         *sessionmodel.Configuration
 	cancelSubagent func(identity.AgentID) error
@@ -137,14 +137,14 @@ type activeRun struct {
 	ready          chan struct{}
 }
 
-func newActiveRun(ctx context.Context, sessionID identity.SessionID) *activeRun {
+func newActiveRun(ctx context.Context, session *sessionmodel.Session) *activeRun {
 	runCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
 	return &activeRun{
-		sessionID:        sessionID,
-		ctx:              runCtx,
-		cancel:           cancel,
-		ready:            make(chan struct{}),
-		done:             make(chan struct{}),
+		session: session,
+		ctx:     runCtx,
+		cancel:  cancel,
+		ready:   make(chan struct{}),
+		done:    make(chan struct{}),
 	}
 }
 

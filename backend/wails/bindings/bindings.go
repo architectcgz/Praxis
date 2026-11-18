@@ -47,7 +47,7 @@ func (b *Bindings) All() []application.Service {
 func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	var data any
 	switch payload := event.Payload.(type) {
-	case coreevent.SessionConfigReloaded:
+	case coreevent.SessionConfigReloaded, coreevent.SessionTitleChanged:
 		data = struct{}{}
 	case coreevent.AgentStateChanged:
 		data = dto.AgentStateChanged{State: string(payload.State)}
@@ -135,6 +135,8 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 			Messages: publicMessages(payload.Entries),
 		}
 	case coreevent.ErrorOccurred:
+		data = dto.AgentErrorOccurred{Message: payload.Message}
+	case coreevent.TaskQueueStorageFailed:
 		data = dto.AgentErrorOccurred{Message: payload.Message}
 	default:
 		b.host.LogError("unsupported agent event payload: %T", event.Payload)

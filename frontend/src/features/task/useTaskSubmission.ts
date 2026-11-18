@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { cancelTask, createTask, pauseQueue, resumeQueue } from '../../api'
+import { cancelTask, createTask, pauseQueue, resumeQueue, subscribeAgentEvents } from '../../api'
 import { readableError } from '../../shared/errors'
 
 type Options = { sessionID: string; input: string; mainActive: boolean; setInput: (value: string) => void }
@@ -11,6 +11,9 @@ export function useTaskSubmission({ sessionID, input, mainActive, setInput }: Op
     const generation = useRef(0)
     const submission = useRef<{ prompt: string; id: string } | null>(null)
     useEffect(() => () => { generation.current += 1 }, [])
+    useEffect(() => subscribeAgentEvents(sessionID, (event) => {
+        if (event.kind === 'task_queue_storage_failed') setError(`会话历史保存失败，队列已暂停：${event.data.message}`)
+    }), [sessionID])
     const submitTask = useCallback(async () => {
         if (!input.trim() || pending.current) return false
         pending.current = true

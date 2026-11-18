@@ -193,7 +193,7 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 		ReportID:     r.deps.IDs.New("report"),
 		AgentID:      r.agentID,
 		RunID:        r.id,
-		ParentRunID:  r.parentRunID,
+		ParentRunID:  parent.ID(),
 		ParentCallID: r.parentCallID,
 		Text:         text,
 	}
@@ -321,7 +321,7 @@ func (r *Run) ResultForParent() sessionentry.SubagentResult {
 		ReportID:     r.deps.IDs.New("report"),
 		AgentID:      r.agentID,
 		RunID:        r.id,
-		ParentRunID:  r.parentRunID,
+		ParentRunID:  r.collaboration.parent.ID(),
 		ParentCallID: r.parentCallID,
 		Outcome:      sessionentry.RunOutcome(r.result.Outcome),
 		FailureCode:  sessionentry.RunFailureCode(r.result.FailureCode),

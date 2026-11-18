@@ -6,6 +6,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	agentrun "praxis/internal/core/agent/run"
 	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/identity"
@@ -45,41 +46,35 @@ func (r *Coordinator) claimTaskLocked(ctx context.Context, sessionID identity.Se
 	if !ok {
 		return taskmodel.Task{}, nil, nil, nil
 	}
-	active = newActiveRun(ctx, sessionID)
+	active = newActiveRun(ctx, binding.session)
 	r.mu.Lock()
 	binding.active = active
 	r.mu.Unlock()
 	return input, binding, active, nil
 }
 
-func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, binding *sessionSchedule, active *activeRun) (err error) {
-	prepareCtx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(active.ctx, cancel)
-	defer func() { stop(); cancel() }()
-	defer func() {
-		if err == nil {
-			return
-		}
-		unlock, _ := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
-		binding.queue.Retry(input)
-		r.mu.Lock()
-		binding.active = nil
-		close(active.ready)
-		close(active.done)
-		r.mu.Unlock()
-		active.cancel(nil)
-		notification := taskQueueEvent(binding)
-		unlock()
-		r.loop.Emitter.Emit(notification)
-	}()
-	run, config, err := r.prepareNext(prepareCtx, input, identity.AgentID(input.SessionID), binding)
+func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, binding *sessionSchedule, active *activeRun) error {
+	prepareCtx, cancel := context.WithCancelCause(active.ctx)
+	stop := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	defer stop()
+	defer cancel(nil)
+
+	run, config, err := r.newTaskRun(input, binding)
 	if err != nil {
-		if run != nil {
-			binding.queue.Complete(input)
-			saveErr := run.Settle(context.WithoutCancel(ctx), sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, "")
-			err = errors.Join(err, saveErr)
+		return r.finishTaskStart(input, binding, active, true, err)
+	}
+	prepared, err := run.Prepare(prepareCtx, input.Prompt)
+	if err != nil {
+		canceled := errors.Is(err, context.Canceled) && errors.Is(context.Cause(prepareCtx), agentrun.ErrInterrupted)
+		if prepared {
+			if saveErr := run.SettlePreparation(prepareCtx, err); saveErr != nil {
+				return r.finishTaskStart(input, binding, active, false, loop.NewFailure(loop.FailureStorage, errors.Join(err, saveErr)))
+			}
 		}
-		return err
+		if canceled {
+			return r.finishTaskStart(input, binding, active, false, nil)
+		}
+		return r.finishTaskStart(input, binding, active, !prepared, err)
 	}
 	unlock, _ := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
 	binding.queue.Complete(input)
@@ -87,13 +82,48 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, bindi
 	active.config = config
 	err = r.launchLocked(run, active)
 	r.mu.Unlock()
+	if err == nil {
+		notification := taskQueueEvent(binding)
+		unlock()
+		r.loop.Emitter.Emit(notification)
+		return nil
+	}
+	unlock()
+	endCtx, cancelEnd := r.transitionContext()
+	defer cancelEnd()
+	if saveErr := run.Settle(endCtx, sessionentry.OutcomeInterrupted, sessionentry.RunFailureCancelled, ""); saveErr != nil {
+		err = loop.NewFailure(loop.FailureStorage, errors.Join(err, saveErr))
+	}
+	return r.finishTaskStart(input, binding, active, false, err)
+}
+
+func (r *Coordinator) finishTaskStart(input taskmodel.Task, binding *sessionSchedule, active *activeRun, retry bool, err error) error {
+	unlock, _ := r.lockSession(context.Background(), input.SessionID)
+	storageFailed := loop.FailureClassification(err) == loop.FailureStorage
+	if storageFailed {
+		binding.queue.Pause()
+	}
+	if retry {
+		binding.queue.Retry(input)
+	} else {
+		binding.queue.Complete(input)
+	}
+	r.mu.Lock()
+	binding.active = nil
+	close(active.ready)
+	close(active.done)
+	r.mu.Unlock()
+	active.cancel(nil)
 	notification := taskQueueEvent(binding)
 	unlock()
 	r.loop.Emitter.Emit(notification)
+	if storageFailed {
+		r.emitQueueStorageFailure(input.SessionID, err)
+	}
 	return err
 }
 
-func (r *Coordinator) prepareNext(ctx context.Context, input taskmodel.Task, ownerID identity.AgentID, binding *sessionSchedule) (*agentrun.Run, *sessionmodel.Configuration, error) {
+func (r *Coordinator) newTaskRun(input taskmodel.Task, binding *sessionSchedule) (*agentrun.Run, *sessionmodel.Configuration, error) {
 	config, model, err := binding.session.RunConfiguration()
 	if err != nil {
 		return nil, nil, err
@@ -102,6 +132,11 @@ func (r *Coordinator) prepareNext(ctx context.Context, input taskmodel.Task, own
 	if err != nil {
 		return nil, nil, err
 	}
-	run, err := agentrun.PrepareTask(ctx, r.runDependencies, input, ownerID, definition, model, binding.session)
-	return run, config, err
+	agentID := identity.AgentID(input.SessionID)
+	run := agentrun.New(r.runDependencies, agentrun.Config{
+		SourceTaskID: input.ID,
+		Definition:   definition,
+		Model:        model,
+	}, binding.session.BindHistory(agentID))
+	return run, config, nil
 }

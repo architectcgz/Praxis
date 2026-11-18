@@ -14,6 +14,7 @@ type Kind string
 
 const (
 	KindSessionConfigReloaded   Kind = "session_config_reloaded"
+	KindSessionTitleChanged     Kind = "session_title_changed"
 	KindEntriesAppended         Kind = "entries_appended"
 	KindTurnStarted             Kind = "turn_started"
 	KindModelRequestStarted     Kind = "model_request_started"
@@ -36,6 +37,7 @@ const (
 	KindSubagentStarted         Kind = "subagent_started"
 	KindSubagentReleased        Kind = "subagent_released"
 	KindTaskQueueChanged        Kind = "task_queue_changed"
+	KindTaskQueueStorageFailed  Kind = "task_queue_storage_failed"
 	KindError                   Kind = "error"
 )
 
@@ -83,6 +85,11 @@ type SessionConfigReloaded struct{}
 
 func (SessionConfigReloaded) Kind() Kind { return KindSessionConfigReloaded }
 func (SessionConfigReloaded) isPayload() {}
+
+type SessionTitleChanged struct{}
+
+func (SessionTitleChanged) Kind() Kind { return KindSessionTitleChanged }
+func (SessionTitleChanged) isPayload() {}
 
 type TurnStarted struct{}
 
@@ -235,6 +242,13 @@ type TaskQueueChanged struct {
 
 func (TaskQueueChanged) Kind() Kind { return KindTaskQueueChanged }
 func (TaskQueueChanged) isPayload() {}
+
+type TaskQueueStorageFailed struct {
+	Message string
+}
+
+func (TaskQueueStorageFailed) Kind() Kind { return KindTaskQueueStorageFailed }
+func (TaskQueueStorageFailed) isPayload() {}
 
 type ErrorOccurred struct {
 	Message string

@@ -50,7 +50,9 @@ export type AgentEvent =
     | { [K in keyof TurnData]: RunSource & { kind: K; turnId: string; data: TurnData[K] } }[keyof TurnData]
     | RequestEvent
     | { kind: 'task_queue_changed'; data: { tasks: QueuedTask[]; paused: boolean } }
+    | { kind: 'task_queue_storage_failed'; data: { message: string } }
     | { kind: 'session_config_reloaded'; data: Record<string, never> }
+    | { kind: 'session_title_changed'; data: Record<string, never> }
 
 export function subscribeAgentEvents(sessionId: string, listener: (event: AgentEvent) => void) {
     if (!isBindingAvailable()) return () => { }

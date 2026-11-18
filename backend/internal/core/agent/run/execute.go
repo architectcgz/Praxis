@@ -3,104 +3,69 @@ package run
 import (
 	"context"
 	"errors"
-	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
-	modelapi "praxis/internal/core/model"
-	sessionmodel "praxis/internal/core/session"
-	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
-	"praxis/internal/identity"
 	"strings"
 	"time"
 )
 
 const ErrInterrupted errorcode.Code = "run.interrupted"
 
-type SubagentInput struct {
-	Task         taskmodel.Task
-	AgentID      identity.AgentID
-	ParentRunID  identity.RunID
-	ParentCallID string
-	Definition   agentmodel.AgentDefinition
-	Model        modelapi.Config
-	Owner        SessionContext
-}
-
-func PrepareTask(ctx context.Context, deps Dependencies, input taskmodel.Task, agentID identity.AgentID, definition agentmodel.AgentDefinition, model modelapi.Config, owner SessionContext) (*Run, error) {
-	run, err := prepare(ctx, deps, input, agentID, "", "", definition, model, owner)
-	return run, err
-}
-
-func PrepareSubagent(ctx context.Context, deps Dependencies, input SubagentInput) (*Run, error) {
-	if err := input.Owner.CreateSubagent(ctx, input.AgentID); err != nil {
-		return nil, err
+// Prepare 提交 Run 和输入事实。返回值表示 RunPrepared 已写入历史。
+func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
+	inputID := "input:" + r.id.String()
+	if r.Main() {
+		inputID = "input:" + r.sourceTaskID.String()
 	}
-	return prepare(ctx, deps, input.Task, input.AgentID, input.ParentRunID, input.ParentCallID, input.Definition, input.Model, input.Owner)
-}
-
-func prepare(ctx context.Context, deps Dependencies, input taskmodel.Task, agentID identity.AgentID, parentID identity.RunID, parentCall string, definition agentmodel.AgentDefinition, model modelapi.Config, owner SessionContext) (*Run, error) {
-	run := &Run{
-		main:         parentID == "",
-		Session:      owner,
-		deps:         deps,
-		id:           identity.RunID(deps.IDs.New("run")),
-		sessionID:    input.SessionID,
-		agentID:      agentID,
-		definitionID: definition.ID,
-		systemPrompt: definition.Instructions,
-		model:        model,
-		parentRunID:  parentID,
-		parentCallID: parentCall,
-		sourceTaskID: input.ID,
-		status:       sessionentry.RunStarting,
-		inputEntryID: "input:" + input.ID.String(),
-		inputText:    input.Prompt,
-		toolUpdates:  make(chan toolUpdate),
-		createdAt:    deps.Clock.Now().UTC(),
-		entryIndexes: make(map[string]int),
-		appendFact:   owner.BindHistory(agentID),
-	}
-	run.initCollaboration()
-	if _, _, err := run.AppendEntry(ctx, sessionentry.Entry{
-		ID:        "prepared:" + run.id.String(),
-		CreatedAt: run.createdAt,
+	if _, _, err := r.AppendEntry(ctx, sessionentry.Entry{
+		ID:        "prepared:" + r.id.String(),
+		CreatedAt: r.createdAt,
 		Payload: sessionentry.RunPrepared{
-			AgentName:    definition.Name,
-			DefinitionID: definition.ID,
-			SourceTaskID: input.ID,
-			InputEntryID: run.inputEntryID,
+			AgentName:    r.definition.Name,
+			DefinitionID: r.definition.ID,
+			SourceTaskID: r.sourceTaskID,
+			InputEntryID: inputID,
 		},
 	}); err != nil {
-		return run, err
+		return false, err
 	}
-	stored, _, err := run.AppendEntry(ctx, sessionentry.Entry{
-		ID: run.inputEntryID,
+	stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
+		ID: inputID,
 		Payload: sessionentry.UserInput{
-			MessageID: run.inputEntryID,
-			Text:      input.Prompt,
+			MessageID: inputID,
+			Text:      prompt,
 		},
 		Role:       role.User,
 		AuthorKind: sessionentry.AuthorUser,
-		Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: input.Prompt}},
+		Content:    []sessionentry.ContentBlock{sessionentry.TextBlock{Text: prompt}},
 	})
 	if err != nil {
-		return run, err
+		return true, err
 	}
-	deps.Emitter.Emit(coreevent.Event{
-		Source:  run.EventSource(""),
+	r.input = stored
+	r.deps.Emitter.Emit(coreevent.Event{
+		Source:  r.EventSource(""),
 		Payload: coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}},
 	})
-	if hookErr := deps.HookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{
-		Identity: runIdentity(run, ""),
+	if hookErr := r.deps.HookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{
+		Identity: runIdentity(r, ""),
 		Entry:    *stored,
 	}); hookErr != nil {
-		deps.Logger.Errorf("user input committed hook failed: %v", hookErr)
+		r.deps.Logger.Errorf("user input committed hook failed: %v", hookErr)
 	}
-	return run, nil
+	return true, nil
+}
+
+// SettlePreparation 结束已经写入 RunPrepared、但没有进入 Loop 的执行。
+func (r *Run) SettlePreparation(ctx context.Context, err error) error {
+	outcome, code, message := r.classifyOutcome(ctx, err)
+	endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	return r.Settle(endCtx, outcome, code, message)
 }
 
 // Execute 覆盖本次准备、完整 Loop 和必要收尾；调用方只负责执行位置和后续调度。
@@ -111,7 +76,7 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	ctx, scope := r.deps.HookDispatcher.Start(ctx, hook.Operation{
 		Identity: runIdentity(r, ""),
 		Kind:     hook.OperationAgent,
-		Name:     r.definitionID.String(),
+		Name:     r.definition.ID.String(),
 	})
 	defer func() {
 		scope.End(hook.Result{
@@ -119,9 +84,11 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 			Err:     err,
 		})
 	}()
-	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	err = r.ConfirmRunning(startCtx)
-	cancel()
+	if err = ctx.Err(); err == nil {
+		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		err = r.ConfirmRunning(startCtx)
+		cancel()
+	}
 	if err == nil {
 		if hookErr := r.deps.HookDispatcher.RunStarted(context.WithoutCancel(ctx), hook.RunEvent{Identity: runIdentity(r, "")}); hookErr != nil {
 			r.deps.Logger.Errorf("run start hook failed: %v", hookErr)
@@ -130,9 +97,8 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 			var tools loop.ToolExecutor
 			tools, err = prepareTools(ctx)
 			if err == nil {
-				input, _ := r.Entry(r.inputEntryID)
 				params, deps := r.modelRunParams()
-				_, err = runner.Run(ctx, params, deps, input, tools)
+				_, err = runner.Run(ctx, params, deps, r.input, tools)
 			}
 		}
 	}
@@ -154,17 +120,19 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	if !r.Main() && outcome == sessionentry.OutcomeCompleted {
 		outcome = sessionentry.OutcomeYielded
 	}
-	if err != nil {
+	if err != nil && outcome == sessionentry.OutcomeFailed {
 		r.emitError(r.currentTurnID, err)
 	}
 	// 收尾不继承已取消的执行 Context，保存失败明确返回，不自动重投。
 	endCtx, cancelEnd := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancelEnd()
 	if closeErr := r.closeToolCalls(endCtx); closeErr != nil {
-		return errors.Join(err, closeErr)
+		return storageFailure(errors.Join(err, closeErr))
 	}
-	saveErr := r.Settle(endCtx, outcome, code, message)
-	return errors.Join(err, saveErr)
+	if saveErr := r.Settle(endCtx, outcome, code, message); saveErr != nil {
+		return storageFailure(errors.Join(err, saveErr))
+	}
+	return err
 }
 
 func (r *Run) ConfirmRunning(ctx context.Context) error {
@@ -173,13 +141,14 @@ func (r *Run) ConfirmRunning(ctx context.Context) error {
 		ID:      "started:" + r.id.String(),
 		Payload: sessionentry.RunStarted{At: at},
 	})
-	if err == nil {
-		r.deps.Emitter.Emit(coreevent.Event{
-			Source:  r.EventSource(""),
-			Payload: coreevent.RunStarted{Run: r.Snapshot()},
-		})
+	if err != nil {
+		return storageFailure(err)
 	}
-	return err
+	r.deps.Emitter.Emit(coreevent.Event{
+		Source:  r.EventSource(""),
+		Payload: coreevent.RunStarted{Run: r.Snapshot()},
+	})
+	return nil
 }
 
 func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code sessionentry.RunFailureCode, message string) error {
@@ -208,53 +177,31 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 	case sessionentry.OutcomeInterrupted:
 		payload = sessionentry.RunInterrupted{Result: result}
 	}
-	stored, err := r.Session.CommitTerminal(ctx, r.agentID, sessionentry.Entry{
+	stored, err := r.history.CommitTerminal(ctx, sessionentry.Entry{
 		ID:      "run:" + r.id.String(),
 		RunID:   r.id.String(),
 		Payload: payload,
 	})
-	if err == nil {
-		r.accept(stored)
-		if hookErr := r.deps.HookDispatcher.RunCommitted(context.WithoutCancel(ctx), hook.RunEvent{
-			Identity:    runIdentity(r, ""),
-			Outcome:     string(outcome),
-			FailureCode: string(code),
-		}); hookErr != nil {
-			r.deps.Logger.Errorf("run committed hook failed: %v", hookErr)
-		}
-		if r.Main() && outcome == sessionentry.OutcomeCompleted {
-			r.nameSession(ctx)
-		}
+	if err != nil {
+		return storageFailure(err)
 	}
-	if err == nil {
-		snapshot := r.Snapshot()
-		r.deps.Emitter.Emit(coreevent.Event{
-			Source: r.EventSource(""),
-			Payload: coreevent.RunEnded{
-				Run:     snapshot,
-				State:   r.result.AgentState(),
-				Entries: []sessionentry.Entry{*stored},
-			},
-		})
+	r.accept(stored)
+	if hookErr := r.deps.HookDispatcher.RunCommitted(context.WithoutCancel(ctx), hook.RunEvent{
+		Identity:    runIdentity(r, ""),
+		Outcome:     string(outcome),
+		FailureCode: string(code),
+	}); hookErr != nil {
+		r.deps.Logger.Errorf("run committed hook failed: %v", hookErr)
 	}
-	return err
-}
-
-func (r *Run) nameSession(ctx context.Context) {
-	info, err := r.deps.Sessions.Get(ctx, r.sessionID)
-	if err != nil || info.Title != "" {
-		return
-	}
-	input, ok := r.Entry(r.inputEntryID)
-	if !ok {
-		return
-	}
-	title := sessionmodel.TitleFromInput(input.TextContent())
-	if title != "" {
-		if err := r.deps.Sessions.UpdateTitle(ctx, info.ID, info.Title, title, r.deps.Clock.Now()); err != nil {
-			r.deps.Logger.Errorf("name session: %v", err)
-		}
-	}
+	r.deps.Emitter.Emit(coreevent.Event{
+		Source: r.EventSource(""),
+		Payload: coreevent.RunEnded{
+			Run:     r.Snapshot(),
+			State:   r.result.AgentState(),
+			Entries: []sessionentry.Entry{*stored},
+		},
+	})
+	return nil
 }
 
 func (r *Run) classifyOutcome(ctx context.Context, err error) (sessionentry.RunOutcome, sessionentry.RunFailureCode, string) {

@@ -72,7 +72,7 @@ export function useWorkspaceData() {
     useEffect(() => { rememberSelectedSession(selectedSessionID) }, [selectedSessionID])
     useEffect(() => {
         const subscriptions = openedSessionIDs.map((id) => subscribeAgentEvents(id, (event) => {
-            if (event.kind === 'run_ended') void refreshSummary(id)
+            if (event.kind === 'run_ended' || event.kind === 'session_title_changed') void refreshSummary(id)
         }))
         return () => subscriptions.forEach((unsubscribe) => unsubscribe())
     }, [openedSessionIDs, refreshSummary])

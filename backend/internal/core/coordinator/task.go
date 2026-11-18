@@ -5,6 +5,7 @@ import (
 	"errors"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
+	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -14,6 +15,7 @@ import (
 type SubmitResult struct {
 	Task            taskmodel.Task
 	SchedulingError string
+	titleChanged    bool
 }
 
 func (s *Coordinator) SubmitTask(ctx context.Context, input taskmodel.Input) (SubmitResult, error) {
@@ -35,6 +37,12 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input taskmodel.Input) (Su
 	result, notification, err := s.enqueueTask(ctx, input, task)
 	if err != nil || notification == nil {
 		return result, err
+	}
+	if result.titleChanged {
+		s.loop.Emitter.Emit(coreevent.Event{
+			Source:  coreevent.EventSource{SessionID: input.SessionID},
+			Payload: coreevent.SessionTitleChanged{},
+		})
 	}
 	s.loop.Emitter.Emit(*notification)
 	if err := s.schedule(context.WithoutCancel(ctx), input.SessionID); err != nil {
@@ -65,13 +73,15 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 	result := SubmitResult{Task: task}
 	if inputID, err := binding.session.FindTaskInputID(ctx, task.ID); err == nil {
 		entry, err := binding.session.Entry(ctx, inputID)
-		if err != nil {
+		if err == nil {
+			if entry.TextContent() != task.Prompt {
+				return SubmitResult{}, nil, errorcode.ErrRequestConflict
+			}
+			return result, nil, nil
+		}
+		if !errors.Is(err, errorcode.ErrNotFound) {
 			return SubmitResult{}, nil, err
 		}
-		if entry.TextContent() != task.Prompt {
-			return SubmitResult{}, nil, errorcode.ErrRequestConflict
-		}
-		return result, nil, nil
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return SubmitResult{}, nil, err
 	}
@@ -83,6 +93,14 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 			result.Task = prior
 			return result, nil, nil
 		}
+	}
+	title := sessionmodel.TitleFromInput(task.Prompt)
+	if err := s.sessionRecords.UpdateTitle(ctx, task.SessionID, "", title, s.runDependencies.Clock.Now()); err != nil {
+		if !errors.Is(err, errorcode.ErrRequestConflict) {
+			return SubmitResult{}, nil, err
+		}
+	} else {
+		result.titleChanged = true
 	}
 	task, err = binding.queue.Enqueue(task)
 	if err != nil {

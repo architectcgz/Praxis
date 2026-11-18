@@ -16,15 +16,33 @@ func (s *Session) CreateSubagent(ctx context.Context, agentID identity.AgentID) 
 	return nil
 }
 
-func (s *Session) AppendSubagentEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
-	return s.appendEntry(ctx, agentID, value, false)
+// AgentHistory 将历史读写和终态提交绑定到同一个 Agent。
+type AgentHistory struct {
+	session *Session
+	agentID identity.AgentID
 }
 
-func (s *Session) BindHistory(agentID identity.AgentID) sessionentry.AppendEntry {
-	if agentID == s.data.MainAgentID() {
-		return s.AppendEntry
+func (s *Session) BindHistory(agentID identity.AgentID) AgentHistory {
+	return AgentHistory{
+		session: s,
+		agentID: agentID,
 	}
-	return func(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
-		return s.AppendSubagentEntry(ctx, agentID, value)
+}
+
+func (h AgentHistory) SessionID() identity.SessionID { return h.session.data.ID }
+func (h AgentHistory) AgentID() identity.AgentID     { return h.agentID }
+
+func (h AgentHistory) Append(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
+	return h.session.appendEntry(ctx, h.agentID, value, false)
+}
+
+func (h AgentHistory) ModelEntries(ctx context.Context) ([]*sessionentry.Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
+	return h.session.AgentContext(h.agentID)
+}
+
+func (h AgentHistory) CommitTerminal(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, error) {
+	return h.session.CommitTerminal(ctx, h.agentID, value)
 }

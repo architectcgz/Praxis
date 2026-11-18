@@ -13,10 +13,10 @@ import (
 	"praxis/internal/core/loop"
 	modelapi "praxis/internal/core/model"
 	modelusage "praxis/internal/core/model/usage"
+	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
-	"praxis/internal/repository"
 	"time"
 )
 
@@ -24,17 +24,16 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	Emitter        *coreevent.Emitter
-	Sessions       repository.Session
 	Clock          clock.Clock
 	IDs            identity.IDGenerator
 }
 
-// SessionContext 在执行准备时绑定，执行期间不再通过 SessionID 查找可变会话。
-type SessionContext interface {
-	ModelEntries(context.Context, identity.AgentID) ([]*sessionentry.Entry, error)
-	BindHistory(identity.AgentID) sessionentry.AppendEntry
-	CommitTerminal(context.Context, identity.AgentID, sessionentry.Entry) (*sessionentry.Entry, error)
-	CreateSubagent(context.Context, identity.AgentID) error
+// Config 保存调度准入时确定的执行身份和模型配置。
+type Config struct {
+	SourceTaskID identity.TaskID
+	ParentCallID string
+	Definition   agentmodel.AgentDefinition
+	Model        modelapi.Config
 }
 
 // Run 的可变执行状态由所属流程独占；工具通过消息交接，子任务只交付不可变快照。
@@ -43,24 +42,19 @@ type Run struct {
 	collaboration collaboration
 	toolUpdates   chan toolUpdate
 	deps          Dependencies
-	Session       SessionContext
+	history       sessionmodel.AgentHistory
 
 	cancel        context.CancelCauseFunc
 	waiting       int
-	main          bool
-	appendFact    sessionentry.AppendEntry
 	id            identity.RunID
 	sessionID     identity.SessionID
 	agentID       identity.AgentID
-	definitionID  identity.AgentDefinitionID
-	systemPrompt  string
+	definition    agentmodel.AgentDefinition
 	model         modelapi.Config
-	parentRunID   identity.RunID
 	parentCallID  string
 	sourceTaskID  identity.TaskID
 	status        sessionentry.RunStatus
-	inputEntryID  string
-	inputText     string
+	input         *sessionentry.Entry
 	createdAt     time.Time
 	startedAt     time.Time
 	result        *sessionentry.RunResult
@@ -68,6 +62,26 @@ type Run struct {
 	currentTurnID identity.TurnID
 	entries       []*sessionentry.Entry
 	entryIndexes  map[string]int
+}
+
+func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *Run {
+	run := &Run{
+		deps:         deps,
+		history:      history,
+		id:           identity.RunID(deps.IDs.New("run")),
+		sessionID:    history.SessionID(),
+		agentID:      history.AgentID(),
+		sourceTaskID: config.SourceTaskID,
+		parentCallID: config.ParentCallID,
+		definition:   config.Definition,
+		model:        config.Model,
+		status:       sessionentry.RunStarting,
+		toolUpdates:  make(chan toolUpdate),
+		createdAt:    deps.Clock.Now().UTC(),
+		entryIndexes: make(map[string]int),
+	}
+	run.initCollaboration()
+	return run
 }
 
 // toolUpdate 将并行工具的等待变化和审核事实交给所属执行流程。
@@ -91,7 +105,7 @@ type runProgress struct {
 	FinalAssistantID string
 }
 
-func (r *Run) Main() bool { return r.main }
+func (r *Run) Main() bool { return r.parentCallID == "" }
 
 // Snapshot 由所属执行流程在通知和完成交付时调用，接收方只读使用。
 func (r *Run) Snapshot() sessionentry.RunSnapshot {
@@ -118,12 +132,15 @@ func (r *Run) AppendEntry(ctx context.Context, value sessionentry.Entry) (*sessi
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = r.deps.Clock.Now()
 	}
-	stored, inserted, err := r.appendFact(ctx, value)
-	if stored != nil && inserted {
-		r.accept(stored)
-	}
+	stored, inserted, err := r.history.Append(ctx, value)
 	if err != nil {
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return stored, inserted, err
+		}
 		return stored, inserted, storageFailure(err)
+	}
+	if inserted {
+		r.accept(stored)
 	}
 	return stored, inserted, nil
 }
@@ -176,15 +193,6 @@ func (p *runProgress) accept(value *sessionentry.Entry) {
 			p.OutputBytes += int64(len(block.Text))
 		}
 	}
-}
-
-// Entry 返回当前 Run 已接纳的同一条目。
-func (r *Run) Entry(id string) (*sessionentry.Entry, bool) {
-	index, found := r.entryIndexes[id]
-	if !found {
-		return nil, false
-	}
-	return r.entries[index], true
 }
 
 func (r *Run) EventSource(turnID identity.TurnID) coreevent.EventSource {
@@ -258,7 +266,7 @@ func (r *Run) SourceTaskID() identity.TaskID {
 }
 
 func (r *Run) InputText() string {
-	return r.inputText
+	return r.input.TextContent()
 }
 
 func (r *Run) Model() modelapi.Config {
@@ -307,7 +315,7 @@ func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {
 			SourceTaskID: s.sourceTaskID,
 			SessionID:    s.sessionID,
 			AgentID:      s.agentID,
-			SystemPrompt: s.systemPrompt,
+			SystemPrompt: s.definition.Instructions,
 			Model:        s.model,
 		}, loop.RunDependencies{
 			AcceptSubagentReports: s.acceptReports,
@@ -321,11 +329,11 @@ func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {
 }
 
 func (s *Run) loopEntries(ctx context.Context) ([]*sessionentry.Entry, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	entries, err := s.Session.ModelEntries(ctx, s.agentID)
+	entries, err := s.history.ModelEntries(ctx)
 	if err != nil {
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return nil, err
+		}
 		return nil, storageFailure(err)
 	}
 	return entries, nil

@@ -22,7 +22,6 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
-		Sessions:       resources.storage.Sessions,
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
 	}

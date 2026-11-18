@@ -9,7 +9,6 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/loop"
-	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"time"
@@ -30,7 +29,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		return agentrun.SubagentStatus{}, fmt.Errorf("session subagent limit of 10 is reached")
 	}
 	agentID := identity.AgentID(s.runDependencies.IDs.New("agent"))
-	active := newActiveRun(ctx, parent.SessionID())
+	active := newActiveRun(ctx, parentActive.session)
 	config := *parentActive.config
 	config.Tools = catalog
 	active.config = &config
@@ -44,24 +43,31 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		cancelTimeout()
 		return agentrun.SubagentStatus{}, err
 	}
-	input := taskmodel.Task{
-		ID:        identity.TaskID(s.runDependencies.IDs.New("task")),
-		SessionID: parent.SessionID(),
-		Prompt:    assignment.Task,
+	if err := active.session.CreateSubagent(active.ctx, agentID); err != nil {
+		s.releaseFailedChild(active)
+		stopParent()
+		cancelTimeout()
+		if active.ctx.Err() != nil && errors.Is(err, active.ctx.Err()) {
+			return agentrun.SubagentStatus{}, err
+		}
+		err = loop.NewFailure(loop.FailureStorage, err)
+		parent.Cancel(err)
+		return agentrun.SubagentStatus{}, err
 	}
-	child, err := agentrun.PrepareSubagent(active.ctx, s.runDependencies, agentrun.SubagentInput{
-		Task:         input,
-		AgentID:      agentID,
-		ParentRunID:  parent.ID(),
+	child := agentrun.New(s.runDependencies, agentrun.Config{
 		ParentCallID: callID,
 		Definition:   definition,
 		Model:        parent.Model(),
-		Owner:        parent.Session,
-	})
+	}, active.session.BindHistory(agentID))
+	prepared, err := child.Prepare(active.ctx, assignment.Task)
 	if err != nil {
-		if child != nil {
-			saveErr := child.Settle(context.WithoutCancel(ctx), sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, "")
-			err = errors.Join(err, saveErr)
+		if prepared {
+			if saveErr := child.SettlePreparation(active.ctx, err); saveErr != nil {
+				err = loop.NewFailure(loop.FailureStorage, errors.Join(err, saveErr))
+			}
+		}
+		if loop.FailureClassification(err) == loop.FailureStorage {
+			parent.Cancel(err)
 		}
 		s.releaseFailedChild(active)
 		stopParent()

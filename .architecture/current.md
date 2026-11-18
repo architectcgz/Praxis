@@ -15,7 +15,9 @@
 - 不同 Session 可以并行；切换查看对象不改变后台执行资格或清空队列。
 - TaskQueue 只在内存中维护 FIFO、领取、取消待办和暂停恢复；Coordinator 决定何时启动下一项。队列不持久化，不把已启动的 Run 当作待办清理。
 - Main Run 正常 `completed` 且队列未暂停时自动领取下一项；主动 `interrupted` 不自动推进后续任务。
+- 历史写入失败时报告错误并暂停所属 Session 的队列，等待显式恢复。
 - Main 的普通任务输入用于后续 Run，不注入当前 Run。
+- Session 首次接纳用户输入时用原文生成标题，标题为空时才写入。
 - 停止命令定位具体 RunID；较早命令不能在等待后作用于新的执行。
 - 关闭 Session 停止全部所属执行并等待收尾，然后释放登记和调度资源，保留历史。
 
@@ -37,6 +39,7 @@
 ### 2.3 Run 与 Loop
 
 - Run 统一保存身份、配置、状态、结果、时间、统计和已接纳 Entry 的只读引用。
+- Coordinator 确定执行配置并绑定 Session 提供的 Agent 历史。Run 构造完成后显式提交准备及输入事实，Loop 和工具审核共用已提交的输入 Entry。
 - `Run.Execute` 组织准备、直接调用 Loop、子执行收尾和终态保存，完成必要收尾后返回。
 - Provider 只负责一次模型请求尝试；模型请求重试由 `core/loop` 按业务策略负责，每次尝试使用新的 RequestID、独立计时和独立 ModelRequest 事实，复用原 TurnID。
 - 首次请求失败后最多重试三次，共最多四次尝试；每次 ModelRequest 保存 `retryCount`，首次为 0，重试依次递增，不从请求顺序推导。
