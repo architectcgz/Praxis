@@ -4,9 +4,9 @@ import (
 	"time"
 )
 
-type StopAgentRequest struct {
+type StopRunRequest struct {
 	SessionID string `json:"sessionId" validate:"session_id"`
-	AgentID   string `json:"agentId" validate:"id"`
+	RunID     string `json:"runId" validate:"id"`
 }
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。

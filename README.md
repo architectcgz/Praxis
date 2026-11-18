@@ -127,7 +127,7 @@ npm run check
 - `GetSessionUsageSummary(sessionID)`：返回唯一保留 Run 的累计及已知性，不附带 Turn 明细。
 - `ListSessionUsage({ sessionId, turnIds })`：只批量查询当前加载 Entry 涉及的 Turn，每次最多 2000 个身份。
 - `ListToolApprovals(sessionID, branchID, agentID)`：直接查询工具执行器登记的待审批调用，无待审批项时返回空数组；不查询 Run 展示状态。
-- `StopAgent({ sessionId, branchId, agentId, runId })`：只中断请求指定的执行，目标不匹配时返回请求冲突；不把目标替换为随后启动的新 Run，也不清空待办。
+- `StopRun({ sessionId, runId })` 停止指定的活动执行。命中 Main Run 时暂停队列并保留待办，命中子 Run 时由父 Run 转交取消信号。已结束的目标直接返回。
 - `CancelTask({ sessionId, bindingId, taskId })`：三个身份均必填，只取消该会话当前绑定中尚未领取的输入。绑定不匹配、正在关闭或任务已被领取时返回请求冲突，任务不存在时返回未找到；不影响当前执行。
 
 主会话 AgentID 由 SessionID 确定，子代理使用独立身份，其上下文与主会话隔离。角色、名称、状态及最近执行统计由配置与 Run 展示投影提供，不为列出 Agent 展开正文。主、子 Run 都在构造时确定 BranchID，事实写入该分支的主日志或子代理日志。活跃子代理持续接收实时输出，结束后未选中的正文释放；选择已结束子代理才加载历史。Run 释放后仍可按位置查询历史，再次打开会话不重建旧 Run 或继续执行。

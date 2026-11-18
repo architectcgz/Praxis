@@ -63,6 +63,9 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, bindi
 	if err != nil {
 		return r.finishTaskStart(input, binding, active, true, err)
 	}
+	r.mu.Lock()
+	active.run = run
+	r.mu.Unlock()
 	prepared, err := run.Prepare(prepareCtx, input.Prompt)
 	if err != nil {
 		canceled := errors.Is(err, context.Canceled) && errors.Is(context.Cause(prepareCtx), agentrun.ErrInterrupted)
@@ -110,7 +113,6 @@ func (r *Coordinator) finishTaskStart(input taskmodel.Task, binding *sessionSche
 	}
 	r.mu.Lock()
 	binding.active = nil
-	close(active.ready)
 	close(active.done)
 	r.mu.Unlock()
 	active.cancel(nil)

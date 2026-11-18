@@ -36,18 +36,15 @@ func (b *CommandBindings) CreateTask(wire dto.CreateTaskRequest) (dto.CreateTask
 	}, nil
 }
 
-func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) error {
+func (b *CommandBindings) StopRun(wire dto.StopRunRequest) error {
 	if err := validation.Struct(wire); err != nil {
-		return publicInputError(b.host, "CommandBindings.StopAgent.request", err)
+		return publicInputError(b.host, "CommandBindings.StopRun.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, execution.AgentControl{
-		SessionID: identity.SessionID(wire.SessionID),
-		AgentID:   identity.AgentID(wire.AgentID),
-	}))
+	return publicError(b.host, "CommandBindings.StopRun", services.Commands.StopRun(ctx, identity.SessionID(wire.SessionID), identity.RunID(wire.RunID)))
 }
 
 // CancelTask 只移除该 Session 尚未开始的输入，不影响当前 Loop。

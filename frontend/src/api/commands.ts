@@ -1,11 +1,10 @@
+import type { StopRunRequest } from '../../bindings/praxis/internal/dto/models'
 import { getCommandBinding } from './bindings'
 import { parseToolCallInput, type ToolCallInput } from './tools'
 
-export type StopAgentRequest = { sessionId: string; agentId: string }
-
-/** 停止指定 Agent，子任务由所属 Parent 接收取消请求。 */
-export function stopAgent(request: StopAgentRequest) {
-    return getCommandBinding().StopAgent(request)
+/** 停止指定 Run。 */
+export function stopRun(request: StopRunRequest) {
+    return getCommandBinding().StopRun(request)
 }
 
 export type ToolCancelRequest = { sessionId: string; agentId: string; runId: string; callId: string }

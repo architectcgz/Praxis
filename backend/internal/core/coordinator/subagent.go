@@ -117,7 +117,6 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	return agentrun.SubagentStatus{AgentID: agentID, Run: initial}, nil
 }
 func (s *Coordinator) releaseFailedChild(active *activeRun) {
-	close(active.ready)
 	close(active.done)
 	active.cancel(nil)
 }

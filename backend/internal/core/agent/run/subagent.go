@@ -123,6 +123,21 @@ func (r *Run) CancelSubagent(id identity.AgentID) error {
 	return nil
 }
 
+// CancelSubagentRun 将停止信号交给本 Run 持有的指定子执行。
+func (r *Run) CancelSubagentRun(id identity.RunID) {
+	r.collaboration.mu.Lock()
+	for _, child := range r.collaboration.children {
+		if child.Run != nil && child.Run.ID() == id {
+			r.collaboration.mu.Unlock()
+			if !child.Run.TerminalSaved() {
+				child.Cancel(ErrInterrupted)
+			}
+			return
+		}
+	}
+	r.collaboration.mu.Unlock()
+}
+
 func (r *Run) SendToSubagent(ctx context.Context, id identity.AgentID, text string) (string, error) {
 	r.collaboration.mu.Lock()
 	handle, ok := r.collaboration.children[id]

@@ -22,7 +22,7 @@ export function useSessionPage({ sessionID, title, createNewSession }: SessionPa
     const catalog = useModelCatalog(session?.id || '')
     const { refreshModels } = catalog
     const agents = useAgentData({ store, models: catalog.models })
-    const controls = useRunControl(agents.agent)
+    const controls = useRunControl(sessionID, agents.agent?.currentRunId)
     const main = agents.agents.find((agent) => agent.Kind === 'main')
     const submission = useTaskSubmission({ sessionID, input: agents.input, mainActive: Boolean(main?.currentRunId), setInput: agents.setInput })
     const commands = useWorkspaceCommands({ sessionID, projectID: session?.projectId || '', createNewSession, refreshModels, setInput: agents.setInput })

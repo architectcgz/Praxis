@@ -18,6 +18,7 @@ import (
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
+	"sync"
 	"time"
 )
 
@@ -44,6 +45,7 @@ type Run struct {
 	toolUpdates   chan toolUpdate
 	deps          Dependencies
 	history       sessionmodel.AgentHistory
+	terminalMu    sync.Mutex // 终态提交与外部停止命令共用此锁。
 
 	cancel        context.CancelCauseFunc
 	waiting       int
@@ -163,7 +165,9 @@ func (r *Run) accept(value *sessionentry.Entry) {
 		r.progress.ModelRequests++
 	}
 	if terminal, ok := value.Payload.(entryPayload.RunTerminal); ok {
+		r.terminalMu.Lock()
 		r.terminal = terminal
+		r.terminalMu.Unlock()
 	} else {
 		r.progress.accept(value)
 	}
@@ -212,7 +216,11 @@ func (r *Run) Cancel(cause error)                              { r.cancel(cause)
 func (r *Run) BeginWaiting() { r.toolUpdates <- toolUpdate{waiting: 1} }
 func (r *Run) EndWaiting()   { r.toolUpdates <- toolUpdate{waiting: -1} }
 
-func (r *Run) TerminalSaved() bool { return r.terminal != nil }
+func (r *Run) TerminalSaved() bool {
+	r.terminalMu.Lock()
+	defer r.terminalMu.Unlock()
+	return r.terminal != nil
+}
 
 // executeTools 在所属执行流程接纳工具消息，直到本批工具及其清理全部完成。
 // 取消通过工具 Context 传播，此处仍接纳收尾事实，不提前退出等待。
