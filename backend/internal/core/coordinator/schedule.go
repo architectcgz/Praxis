@@ -16,7 +16,7 @@ func (r *Coordinator) schedule(ctx context.Context, sessionID identity.SessionID
 	if err != nil || active == nil {
 		return err
 	}
-	return r.startNext(ctx, input, runKey{identity.AgentID(sessionID)}, binding, active)
+	return r.startNext(ctx, input, binding, active)
 }
 
 func (r *Coordinator) claimTask(ctx context.Context, sessionID identity.SessionID) (taskmodel.Task, *sessionSchedule, *activeRun, error) {
@@ -36,8 +36,7 @@ func (r *Coordinator) claimTaskLocked(ctx context.Context, sessionID identity.Se
 		r.mu.Unlock()
 		return taskmodel.Task{}, nil, nil, errCoordinatorClosed
 	}
-	key := runKey{identity.AgentID(sessionID)}
-	active := r.runs[key]
+	active := binding.active
 	r.mu.Unlock()
 	if active != nil {
 		return taskmodel.Task{}, nil, nil, nil
@@ -48,12 +47,12 @@ func (r *Coordinator) claimTaskLocked(ctx context.Context, sessionID identity.Se
 	}
 	active = newActiveRun(ctx, sessionID)
 	r.mu.Lock()
-	r.runs[key] = active
+	binding.active = active
 	r.mu.Unlock()
 	return input, binding, active, nil
 }
 
-func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, key runKey, binding *sessionSchedule, active *activeRun) (err error) {
+func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, binding *sessionSchedule, active *activeRun) (err error) {
 	prepareCtx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(active.ctx, cancel)
 	defer func() { stop(); cancel() }()
@@ -64,7 +63,7 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, key r
 		unlock, _ := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
 		binding.queue.Retry(input)
 		r.mu.Lock()
-		delete(r.runs, key)
+		binding.active = nil
 		close(active.ready)
 		close(active.done)
 		r.mu.Unlock()
@@ -73,21 +72,20 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, key r
 		unlock()
 		r.loop.Emitter.Emit(notification)
 	}()
-	run, config, err := r.prepareNext(prepareCtx, input, key.agentID, binding)
+	run, config, err := r.prepareNext(prepareCtx, input, identity.AgentID(input.SessionID), binding)
 	if err != nil {
 		if run != nil {
 			binding.queue.Complete(input)
-			_, saveErr := run.Settle(context.WithoutCancel(ctx), sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, "")
+			saveErr := run.Settle(context.WithoutCancel(ctx), sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, "")
 			err = errors.Join(err, saveErr)
 		}
 		return err
 	}
-	runID := run.Snapshot().ID
 	unlock, _ := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
 	binding.queue.Complete(input)
 	r.mu.Lock()
 	active.config = config
-	err = r.launchLocked(run, runID, active)
+	err = r.launchLocked(run, active)
 	r.mu.Unlock()
 	notification := taskQueueEvent(binding)
 	unlock()

@@ -18,7 +18,13 @@ type UserInput struct {
 
 func (UserInput) factKind() string { return "user_input" }
 
-type RunPrepared struct{ Run RunRecord }
+// RunPrepared 只记录创建时的归属信息，不保存可变执行状态或冻结配置。
+type RunPrepared struct {
+	AgentName    string
+	DefinitionID identity.AgentDefinitionID
+	SourceTaskID identity.TaskID
+	InputEntryID string
+}
 
 func (RunPrepared) factKind() string { return "run_prepared" }
 
@@ -198,7 +204,7 @@ func decodePayload(data json.RawMessage) (Payload, error) {
 	}
 }
 
-func (e ContextEntry) RequestFact() (*ModelRequestRecord, *timing.Record) {
+func (e Entry) RequestFact() (*ModelRequestRecord, *timing.Record) {
 	switch p := e.Payload.(type) {
 	case ModelRequestStarted:
 		return &p.Request, p.Timing
@@ -213,91 +219,7 @@ func (e ContextEntry) RequestFact() (*ModelRequestRecord, *timing.Record) {
 	}
 }
 
-// Apply 将已经接纳的同一事实投影到执行状态；不做准入、持久化或通知。
-func Apply(r RunRecord, e *ContextEntry) RunRecord {
-	switch p := e.Payload.(type) {
-	case RunPrepared:
-		r = p.Run
-	case RunStarted:
-		r.Start(p.At)
-	case RunEndingStarted:
-		r.Status = RunEnding
-	case TurnStarted:
-		r.CurrentTurn = p.Turn
-		r.Progress.Iterations++
-	case TurnCompleted:
-		r.CurrentTurn = p.Turn
-	case TurnFailed:
-		r.CurrentTurn = p.Turn
-	case TurnInterrupted:
-		r.CurrentTurn = p.Turn
-	case ModelRequestStarted:
-		r.Progress.ModelRequests++
-	}
-	if request, _ := e.RequestFact(); request != nil && request.Status != RequestRunning {
-		r.Progress.ModelOutputBytes += int64(request.OutputBytes)
-		r.Progress.OutputBytes += int64(request.OutputBytes)
-		if u := request.Usage; u != nil {
-			r.Progress.Usage.Add(u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
-		}
-	}
-	if p := e.ExecutionResult(); p != nil {
-		r.Status = RunEnded
-		r.Outcome = RunOutcome(p.Outcome)
-		r.FailureCode = RunFailureCode(p.FailureCode)
-		r.FailureMessage = p.FailureMessage
-		r.StartedAt = p.StartedAt
-		r.EndedAt = p.EndedAt
-		r.Progress = RunProgress{
-			Usage:            p.Usage,
-			ModelRequests:    p.ModelRequests,
-			Iterations:       p.Iterations,
-			OutputBytes:      p.OutputBytes,
-			ToolCalls:        p.ToolCalls,
-			FinalAssistantID: p.FinalAssistantID,
-			FinalStopReason:  p.FinalStopReason,
-		}
-	} else {
-		r.Progress.AcceptEntry(e)
-	}
-	return r
-}
-
-func ApplySummary(p HistorySummary, e *ContextEntry) HistorySummary {
-	if v, ok := e.Payload.(RunPrepared); ok {
-		return v.Run.HistorySummary()
-	}
-	if p.ID == "" {
-		return p
-	}
-	record := RunRecord{
-		ID:             p.ID,
-		SessionID:      p.SessionID,
-		AgentID:        p.AgentID,
-		AgentName:      p.AgentName,
-		ParentRunID:    p.ParentRunID,
-		SourceTaskID:   p.SourceTaskID,
-		InputEntryID:   p.InputEntryID,
-		CreatedAt:      p.CreatedAt,
-		Status:         p.Status,
-		Outcome:        p.Outcome,
-		StartedAt:      p.StartedAt,
-		EndedAt:        p.EndedAt,
-		FailureCode:    p.FailureCode,
-		FailureMessage: p.FailureMessage,
-		Config:         RunConfig{AgentDefinitionID: p.DefinitionID},
-		Progress: RunProgress{
-			Usage:         p.Usage,
-			ModelRequests: p.ModelRequests,
-			Iterations:    p.Iterations,
-			OutputBytes:   p.OutputBytes,
-			ToolCalls:     p.ToolCalls,
-		},
-	}
-	return Apply(record, e).HistorySummary()
-}
-
-func (e ContextEntry) ExecutionResult() *RunResult {
+func (e Entry) ExecutionResult() *RunResult {
 	switch v := e.Payload.(type) {
 	case RunCompleted:
 		return &v.Result
@@ -312,7 +234,7 @@ func (e ContextEntry) ExecutionResult() *RunResult {
 	}
 }
 
-func ModelRequestEntry(request ModelRequestRecord, measured *timing.Record) ContextEntry {
+func ModelRequestEntry(request ModelRequestRecord, measured *timing.Record) Entry {
 	var payload Payload
 	suffix := "finished"
 	switch request.Status {
@@ -326,7 +248,7 @@ func ModelRequestEntry(request ModelRequestRecord, measured *timing.Record) Cont
 	case RequestInterrupted:
 		payload = ModelRequestInterrupted{Request: request, Timing: measured}
 	}
-	return ContextEntry{
+	return Entry{
 		ID:      "request:" + request.ID.String() + ":" + suffix,
 		RunID:   request.RunID.String(),
 		TurnID:  request.TurnID.String(),
@@ -334,13 +256,13 @@ func ModelRequestEntry(request ModelRequestRecord, measured *timing.Record) Cont
 	}
 }
 
-func (e ContextEntry) InputMessageID() string {
+func (e Entry) InputMessageID() string {
 	if p, ok := e.Payload.(UserInput); ok {
 		return p.MessageID
 	}
 	return ""
 }
-func (e ContextEntry) IsMetadata() bool {
+func (e Entry) IsMetadata() bool {
 	if e.Payload == nil {
 		return false
 	}

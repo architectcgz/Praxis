@@ -48,6 +48,7 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 			return nil, err
 		}
 		sourceTaskID := callState.sourceTaskID
+		wake := callState.wake
 		if result.pending {
 			// 判断与请求登记共享控制锁，通知前请求已可查询，不能与停止或用户决定交错修改。
 			if callState.request == nil {
@@ -69,8 +70,10 @@ func (t *RunTools) authorize(ctx context.Context, call sessionentry.ToolCall, ar
 				waiting = true
 			}
 			t.notifyWaiting(ctx, call, args, operationID, sourceTaskID)
-			if err := t.awaitApproval(ctx); err != nil {
-				return nil, err
+			select {
+			case <-wake:
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			}
 			continue
 		}

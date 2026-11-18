@@ -7,14 +7,18 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	modelapi "praxis/internal/core/model"
+	modelusage "praxis/internal/core/model/usage"
 	"praxis/internal/core/timing"
+	"praxis/internal/dto"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
-	"sync"
+	"time"
 )
 
 type Dependencies struct {
@@ -28,49 +32,90 @@ type Dependencies struct {
 
 // SessionContext 在执行准备时绑定，执行期间不再通过 SessionID 查找可变会话。
 type SessionContext interface {
-	ModelEntries(context.Context, identity.AgentID, string) ([]*sessionentry.ContextEntry, error)
-	Entry(context.Context, string) (*sessionentry.ContextEntry, error)
-	Entries(context.Context) ([]*sessionentry.ContextEntry, error)
-	SubagentEntries(context.Context, identity.AgentID) ([]*sessionentry.ContextEntry, error)
+	ModelEntries(context.Context, identity.AgentID) ([]*sessionentry.Entry, error)
 	BindHistory(identity.AgentID) sessionentry.AppendEntry
+	CommitTerminal(context.Context, identity.AgentID, sessionentry.Entry) (*sessionentry.Entry, error)
 	CreateSubagent(context.Context, identity.AgentID) error
 }
 
-// Run 表示一次执行的内存实例，由 Coordinator 独占生命周期，Agent 身份及配置保存在执行记录中。
-// 记录与执行证据仅由所属执行路径串行访问；查询读取 Session 已接纳的值，控制入口只提交控制意图。
-// 执行证据共享 Session 已接纳的只读 Entry；Loop 按轮读取 Session 历史构建模型请求。
+// Run 的可变执行状态由所属流程独占；工具通过消息交接，子任务只交付不可变快照。
+// 终态事实提交成功后才发布结果，配置和身份在创建后只读。
 type Run struct {
 	collaboration collaboration
-	commitMu      sync.Mutex
-	mu            sync.RWMutex
+	toolUpdates   chan toolUpdate
 	deps          Dependencies
 	Session       SessionContext
 
 	cancel        context.CancelCauseFunc
-	terminalSaved bool
 	waiting       int
 	main          bool
 	appendFact    sessionentry.AppendEntry
-	record        sessionentry.RunRecord
-	entries       []*sessionentry.ContextEntry
+	id            identity.RunID
+	sessionID     identity.SessionID
+	agentID       identity.AgentID
+	definitionID  identity.AgentDefinitionID
+	systemPrompt  string
+	model         modelapi.Config
+	parentRunID   identity.RunID
+	parentCallID  string
+	sourceTaskID  identity.TaskID
+	status        sessionentry.RunStatus
+	inputEntryID  string
+	inputText     string
+	createdAt     time.Time
+	startedAt     time.Time
+	result        *sessionentry.RunResult
+	progress      runProgress
+	currentTurnID identity.TurnID
+	entries       []*sessionentry.Entry
 	entryIndexes  map[string]int
+}
+
+// toolUpdate 将并行工具的等待变化和审核事实交给所属执行流程。
+// 审核事实必须收到保存确认后才能继续调用模型。
+type toolUpdate struct {
+	ctx     context.Context
+	request sessionentry.ModelRequestRecord
+	timing  *timing.Record
+	waiting int
+	saved   chan error
+}
+
+// runProgress 只在本次执行内累计，结束时固化到 RunResult。
+type runProgress struct {
+	Usage            modelusage.Totals
+	Iterations       uint64
+	ModelRequests    uint64
+	OutputBytes      int64
+	ToolCalls        int
+	FinalStopReason  string
+	FinalAssistantID string
 }
 
 func (r *Run) Main() bool { return r.main }
 
-func (r *Run) Snapshot() sessionentry.RunRecord { r.mu.RLock(); defer r.mu.RUnlock(); return r.record }
+// Snapshot 由所属执行流程在通知和完成交付时调用，接收方只读使用。
+func (r *Run) Snapshot() dto.RunSummary {
+	if r.result != nil {
+		return r.result.Snapshot(r.id)
+	}
+	return dto.RunSummary{
+		ID:          r.id.String(),
+		Status:      string(r.status),
+		StartedAt:   r.startedAt,
+		Iterations:  r.progress.Iterations,
+		ToolCalls:   r.progress.ToolCalls,
+		OutputBytes: r.progress.OutputBytes,
+	}
+}
 
-func (r *Run) Entries() []sessionentry.ContextEntry {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *Run) Entries() []sessionentry.Entry {
 	return sessionentry.Values(r.entries)
 }
 
-// AppendEntry 保存事实并接纳同一只读引用；通知和观察 Hook 由执行流程显式调用。
-func (r *Run) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
-	r.commitMu.Lock()
-	defer r.commitMu.Unlock()
-	value.RunID = r.Snapshot().ID.String()
+// AppendEntry 保存普通事实；Entry 顺序由所属 Run Loop 决定。
+func (r *Run) AppendEntry(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
+	value.RunID = r.id.String()
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = r.deps.Clock.Now()
 	}
@@ -84,18 +129,58 @@ func (r *Run) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) 
 	return stored, inserted, nil
 }
 
-// accept 只消费接纳边界给出的只读事实，不重新执行准入校验。
-func (r *Run) accept(value *sessionentry.ContextEntry) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.acceptEvidence(value)
-	r.record = sessionentry.Apply(r.record, value)
+// accept 只消费已经持久化成功的事实，并推进运行时状态。
+func (r *Run) accept(value *sessionentry.Entry) {
+	r.entryIndexes[value.ID] = len(r.entries)
+	r.entries = append(r.entries, value)
+	switch p := value.Payload.(type) {
+	case sessionentry.RunStarted:
+		r.status = sessionentry.RunRunning
+		r.startedAt = p.At.UTC()
+	case sessionentry.RunEndingStarted:
+		r.status = sessionentry.RunEnding
+	case sessionentry.TurnStarted:
+		r.currentTurnID = p.Turn.ID
+		r.progress.Iterations++
+	case sessionentry.ModelRequestStarted:
+		r.progress.ModelRequests++
+	}
+	if result := value.ExecutionResult(); result != nil {
+		r.result = result
+	} else {
+		r.progress.accept(value)
+	}
+	if parent := r.collaboration.parent; parent != nil {
+		parent.ReceiveSubagentStatus(r.agentID, r.Snapshot())
+	}
 }
 
-// Entry 返回 Session 已接纳的同一条目，调用方只读使用。
-func (r *Run) Entry(id string) (*sessionentry.ContextEntry, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (p *runProgress) accept(value *sessionentry.Entry) {
+	if request, _ := value.RequestFact(); request != nil && request.Status != sessionentry.RequestRunning {
+		p.OutputBytes += int64(request.OutputBytes)
+		if u := request.Usage; u != nil {
+			p.Usage.Add(u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
+		}
+	}
+	if value.Role == role.Assistant {
+		p.FinalAssistantID, p.FinalStopReason = "", ""
+		if value.Response != nil && (value.Response.StopReason == "completed" || value.Response.StopReason == "stop_sequence") {
+			p.FinalAssistantID, p.FinalStopReason = value.ID, value.Response.StopReason
+		}
+	}
+	for _, block := range value.Content {
+		switch block := block.(type) {
+		case sessionentry.ToolCallBlock:
+			p.ToolCalls++
+			p.FinalAssistantID, p.FinalStopReason = "", ""
+		case sessionentry.ToolResultBlock:
+			p.OutputBytes += int64(len(block.Text))
+		}
+	}
+}
+
+// Entry 返回当前 Run 已接纳的同一条目。
+func (r *Run) Entry(id string) (*sessionentry.Entry, bool) {
 	index, found := r.entryIndexes[id]
 	if !found {
 		return nil, false
@@ -103,17 +188,11 @@ func (r *Run) Entry(id string) (*sessionentry.ContextEntry, bool) {
 	return r.entries[index], true
 }
 
-func (r *Run) acceptEvidence(entry *sessionentry.ContextEntry) {
-	r.entryIndexes[entry.ID] = len(r.entries)
-	r.entries = append(r.entries, entry)
-}
-
 func (r *Run) EventSource(turnID identity.TurnID) coreevent.EventSource {
-	record := r.Snapshot()
 	return coreevent.EventSource{
-		SessionID: record.SessionID,
-		AgentID:   record.AgentID,
-		RunID:     record.ID,
+		SessionID: r.sessionID,
+		AgentID:   r.agentID,
+		RunID:     r.id,
 		TurnID:    turnID,
 	}
 }
@@ -122,47 +201,101 @@ func (r *Run) EventSource(turnID identity.TurnID) coreevent.EventSource {
 func (r *Run) BindCancellation(cancel context.CancelCauseFunc) { r.cancel = cancel }
 func (r *Run) Cancel(cause error)                              { r.cancel(cause) }
 
-func (r *Run) BeginWaiting() {
-	r.mu.Lock()
-	r.waiting++
-	first := r.waiting == 1
-	r.mu.Unlock()
-	if first {
-		r.deps.Emitter.Emit(coreevent.Event{
-			Source:  r.EventSource(""),
-			Payload: coreevent.AgentStateChanged{State: agentmodel.AgentWaiting},
-		})
+func (r *Run) BeginWaiting() { r.toolUpdates <- toolUpdate{waiting: 1} }
+func (r *Run) EndWaiting()   { r.toolUpdates <- toolUpdate{waiting: -1} }
+
+func (r *Run) TerminalSaved() bool { return r.result != nil }
+
+// executeTools 在所属执行流程接纳工具消息，直到本批工具及其清理全部完成。
+// 取消通过工具 Context 传播，此处仍接纳收尾事实，不提前退出等待。
+func (r *Run) executeTools(execute func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		execute()
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		case update := <-r.toolUpdates:
+			if update.waiting != 0 {
+				r.waiting += update.waiting
+				if r.waiting == 0 || update.waiting > 0 && r.waiting == 1 {
+					state := agentmodel.AgentExecuting
+					if r.waiting > 0 {
+						state = agentmodel.AgentWaiting
+					}
+					r.deps.Emitter.Emit(coreevent.Event{
+						Source:  r.EventSource(""),
+						Payload: coreevent.AgentStateChanged{State: state},
+					})
+				}
+				continue
+			}
+			update.saved <- r.commitToolRequest(update)
+		}
 	}
 }
 
-func (r *Run) EndWaiting() {
-	r.mu.Lock()
-	r.waiting--
-	last := r.waiting == 0
-	r.mu.Unlock()
-	if last {
-		r.deps.Emitter.Emit(coreevent.Event{
-			Source:  r.EventSource(""),
-			Payload: coreevent.AgentStateChanged{State: agentmodel.AgentExecuting},
-		})
-	}
+func (r *Run) ID() identity.RunID {
+	return r.id
 }
 
-func (r *Run) State() agentmodel.AgentState {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if r.waiting > 0 && r.record.Snapshot().Active() {
-		return agentmodel.AgentWaiting
-	}
-	return r.record.AgentState()
+func (r *Run) SessionID() identity.SessionID {
+	return r.sessionID
 }
 
-func (r *Run) TerminalSaved() bool { r.mu.RLock(); defer r.mu.RUnlock(); return r.terminalSaved }
+func (r *Run) AgentID() identity.AgentID {
+	return r.agentID
+}
 
-// RecordModelRequest 与 RecordModelResponse 复用唯一事实提交入口；调用者只提供本次尝试的事实。
+func (r *Run) CreatedAt() time.Time {
+	return r.createdAt
+}
+
+func (r *Run) SourceTaskID() identity.TaskID {
+	return r.sourceTaskID
+}
+
+func (r *Run) InputText() string {
+	return r.inputText
+}
+
+func (r *Run) Model() modelapi.Config {
+	return r.model
+}
+
+func (r *Run) Outcome() sessionentry.RunOutcome {
+	if r.result == nil {
+		return ""
+	}
+	return sessionentry.RunOutcome(r.result.Outcome)
+}
+
+// RecordModelRequest 将审核事实交给所属执行流程，并等待保存结果。
 func (r *Run) RecordModelRequest(ctx context.Context, request sessionentry.ModelRequestRecord, measured *timing.Record) error {
-	_, _, err := r.AppendEntry(ctx, sessionentry.ModelRequestEntry(request, measured))
-	if err == nil {
+	update := toolUpdate{
+		ctx:     ctx,
+		request: request,
+		timing:  measured,
+		saved:   make(chan error, 1),
+	}
+	select {
+	case r.toolUpdates <- update:
+		return <-update.saved
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (r *Run) commitToolRequest(update toolUpdate) error {
+	request, measured := update.request, update.timing
+	stored, _, err := r.AppendEntry(update.ctx, sessionentry.ModelRequestEntry(request, measured))
+	if err != nil {
+		return err
+	}
+	if request.Status == sessionentry.RequestRunning {
 		r.deps.Emitter.Emit(coreevent.Event{
 			Source: r.EventSource(request.TurnID),
 			Payload: coreevent.ModelRequestStarted{
@@ -170,37 +303,29 @@ func (r *Run) RecordModelRequest(ctx context.Context, request sessionentry.Model
 				Timing:  measured,
 			},
 		})
-	}
-	return err
-}
-
-func (r *Run) RecordModelResponse(ctx context.Context, request sessionentry.ModelRequestRecord, measured *timing.Record) error {
-	stored, _, err := r.AppendEntry(ctx, sessionentry.ModelRequestEntry(request, measured))
-	if err != nil {
-		return err
+		return nil
 	}
 	if request.Status != sessionentry.RequestCompleted {
 		r.deps.Emitter.Emit(coreevent.Event{
 			Source:  r.EventSource(request.TurnID),
-			Payload: coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}},
+			Payload: coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}},
 		})
 	}
 	r.deps.Emitter.Emit(coreevent.Event{
 		Source:  r.EventSource(request.TurnID),
 		Payload: coreevent.RequestResult(request, measured),
 	})
-	return err
+	return nil
 }
 
 func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {
-	record := s.Snapshot()
 	return loop.RunParams{
-			ID:           record.ID,
-			SourceTaskID: record.SourceTaskID,
-			SessionID:    record.SessionID,
-			AgentID:      record.AgentID,
-			SystemPrompt: record.Config.SystemPrompt,
-			Model:        record.Config.Model,
+			ID:           s.id,
+			SourceTaskID: s.sourceTaskID,
+			SessionID:    s.sessionID,
+			AgentID:      s.agentID,
+			SystemPrompt: s.systemPrompt,
+			Model:        s.model,
 		}, loop.RunDependencies{
 			AcceptSubagentReports: s.acceptReports,
 			AcceptInstructions:    s.acceptInstructions,
@@ -208,16 +333,15 @@ func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {
 			Budget:                &appcontext.Budget{},
 			ReadEntries:           s.loopEntries,
 			AppendEntry:           s.AppendEntry,
+			ExecuteTools:          s.executeTools,
 		}
 }
 
-// loopEntries 从本次执行绑定的 Session 读取主历史或子历史的只读引用列表。
-func (s *Run) loopEntries(ctx context.Context) ([]*sessionentry.ContextEntry, error) {
+func (s *Run) loopEntries(ctx context.Context) ([]*sessionentry.Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	record := s.Snapshot()
-	entries, err := s.Session.ModelEntries(ctx, record.AgentID, record.InputEntryID)
+	entries, err := s.Session.ModelEntries(ctx, s.agentID)
 	if err != nil {
 		return nil, storageFailure(err)
 	}
@@ -225,12 +349,11 @@ func (s *Run) loopEntries(ctx context.Context) ([]*sessionentry.ContextEntry, er
 }
 
 func runIdentity(run *Run, turnID identity.TurnID) hook.Identity {
-	record := run.Snapshot()
 	return hook.Identity{
-		SourceTaskID: record.SourceTaskID,
-		SessionID:    record.SessionID,
-		AgentID:      record.AgentID,
-		RunID:        record.ID,
+		SourceTaskID: run.sourceTaskID,
+		SessionID:    run.sessionID,
+		AgentID:      run.agentID,
+		RunID:        run.id,
 		TurnID:       turnID,
 	}
 }

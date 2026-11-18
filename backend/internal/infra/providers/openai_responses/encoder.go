@@ -35,7 +35,7 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) ([]json.
 	return input, nil
 }
 
-func responseItems(entry *sessionentry.ContextEntry, config modelapi.Config, ids map[string]string) ([]json.RawMessage, error) {
+func responseItems(entry *sessionentry.Entry, config modelapi.Config, ids map[string]string) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	var text strings.Builder
 	appendItem := func(item any) error {

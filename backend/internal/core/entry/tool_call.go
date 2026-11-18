@@ -20,7 +20,7 @@ type ToolCall struct {
 }
 
 // ToolCalls 从 Assistant Entry 取得调用，供执行查询与启动恢复使用。
-func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
+func (m Entry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
 	calls := make([]ToolCall, 0)
 	for _, block := range m.Content {
 		call, ok := block.(ToolCallBlock)
@@ -40,14 +40,14 @@ func (m ContextEntry) ToolCalls(sessionID identity.SessionID, agentID identity.A
 }
 
 // ResultEntry 为正常结果和中断回执使用相同的确定性身份及调用归属，不分配历史序号或时间。
-func (c ToolCall) ResultEntry(result tool.ToolResult) ContextEntry {
+func (c ToolCall) ResultEntry(result tool.ToolResult) Entry {
 	if len(result.Payload) > tool.MaxInlineResultBytes {
 		result = tool.NewToolError("tool_execution_failed", "Tool result exceeds the inline size limit.")
 	}
 	if result.Payload == "" {
 		result.Payload = "(empty tool result)"
 	}
-	return ContextEntry{
+	return Entry{
 		ID:         "tool-result:" + c.RunID.String() + ":" + c.CallID,
 		RunID:      c.RunID.String(),
 		TurnID:     c.TurnID.String(),

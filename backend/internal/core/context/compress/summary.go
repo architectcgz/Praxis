@@ -34,7 +34,7 @@ type summaryEntry struct {
 }
 
 // summaryEntries 不把签名、加密载荷或展示性思考正文发送给摘要模型。
-func summaryEntries(entries []*sessionentry.ContextEntry) []summaryEntry {
+func summaryEntries(entries []*sessionentry.Entry) []summaryEntry {
 	var selected []summaryEntry
 	for _, entry := range entries {
 		value := summaryEntry{Role: entry.Role}
@@ -106,7 +106,7 @@ func percent(value, ratio int) int {
 func summaryContext(previous, transcript string) appcontext.ModelContext {
 	return appcontext.ModelContext{
 		SystemPrompt: summaryPrompt,
-		Entries: []*sessionentry.ContextEntry{{
+		Entries: []*sessionentry.Entry{{
 			Role: role.User,
 			Content: []sessionentry.ContentBlock{
 				sessionentry.TextBlock{Text: previousSummaryHeader + previous + transcriptHeader + transcript},

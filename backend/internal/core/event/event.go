@@ -6,6 +6,7 @@ import (
 	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/timing"
+	"praxis/internal/dto"
 	"praxis/internal/identity"
 	"time"
 )
@@ -31,7 +32,6 @@ const (
 	KindToolResult              Kind = "tool_result"
 	KindTurnCompleted           Kind = "turn_completed"
 	KindRunStarted              Kind = "run_started"
-	KindRunInterruptRequested   Kind = "run_interrupt_requested"
 	KindRunEnded                Kind = "run_ended"
 	KindSubagentStarted         Kind = "subagent_started"
 	KindSubagentReleased        Kind = "subagent_released"
@@ -74,7 +74,7 @@ type Payload interface {
 }
 
 type EntriesAppended struct {
-	Entries []sessionentry.ContextEntry
+	Entries []sessionentry.Entry
 }
 
 func (EntriesAppended) Kind() Kind { return KindEntriesAppended }
@@ -190,21 +190,16 @@ func (TurnCompleted) Kind() Kind { return KindTurnCompleted }
 func (TurnCompleted) isPayload() {}
 
 type RunStarted struct {
-	Run sessionentry.RunSnapshot
+	Run dto.RunSummary
 }
 
 func (RunStarted) Kind() Kind { return KindRunStarted }
 func (RunStarted) isPayload() {}
 
-type RunInterruptRequested struct{ AppliedAt time.Time }
-
-func (RunInterruptRequested) Kind() Kind { return KindRunInterruptRequested }
-func (RunInterruptRequested) isPayload() {}
-
 type RunEnded struct {
-	Run     sessionentry.RunSnapshot
+	Run     dto.RunSummary
 	State   agentmodel.AgentState
-	Entries []sessionentry.ContextEntry
+	Entries []sessionentry.Entry
 }
 
 func (RunEnded) Kind() Kind { return KindRunEnded }
@@ -214,8 +209,8 @@ type SubagentStarted struct {
 	Name          string
 	DefinitionID  identity.AgentDefinitionID
 	CreatedAt     time.Time
-	Run           sessionentry.RunSnapshot
-	Entries       []sessionentry.ContextEntry
+	Run           dto.RunSummary
+	Entries       []sessionentry.Entry
 	ParentAgentID identity.AgentID
 	ParentRunID   identity.RunID
 	CallID        string
@@ -238,9 +233,9 @@ func (TaskQueueChanged) Kind() Kind { return KindTaskQueueChanged }
 func (TaskQueueChanged) isPayload() {}
 
 type RequestCanceled struct {
-	Run     sessionentry.RunSnapshot
+	Run     dto.RunSummary
 	State   agentmodel.AgentState
-	Entries []sessionentry.ContextEntry
+	Entries []sessionentry.Entry
 }
 
 func (RequestCanceled) Kind() Kind { return KindRequestCanceled }

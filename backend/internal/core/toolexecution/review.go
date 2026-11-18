@@ -79,7 +79,7 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 	return ReviewRequest{
 		Context: appcontext.ModelContext{
 			SystemPrompt: riskReviewPrompt,
-			Entries: []*sessionentry.ContextEntry{{
+			Entries: []*sessionentry.Entry{{
 				Role: role.User,
 				Content: []sessionentry.ContentBlock{
 					sessionentry.TextBlock{Text: string(data)},
@@ -95,14 +95,9 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 
 // review 由执行调用方生成请求身份、应用模型限制并记录审核结果。
 func (t *RunTools) reviewAttempt(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, ruleID string, retryCount int) (review RiskReview, err error) {
-	record := t.run.Snapshot()
-	input, found := t.run.Entry(record.InputEntryID)
-	if !found || input.TextContent() == "" {
-		return review, &reviewRunError{error: errors.New("risk review cannot locate the run input")}
-	}
 	r := t.executor.deps.Reviewer
-	model := record.Config.Model
-	request, err := prepareReview(input.TextContent(), string(call.Name), args, t.projectPath, ruleID)
+	model := t.run.Model()
+	request, err := prepareReview(t.run.InputText(), string(call.Name), args, t.projectPath, ruleID)
 	if err != nil {
 		return review, err
 	}
@@ -123,7 +118,7 @@ func (t *RunTools) reviewAttempt(ctx context.Context, call sessionentry.ToolCall
 	// 审核复用触发工具的 Turn；摘要不关联 Turn，进度接纳失败时不调用 Provider。
 	if err := t.progress.RecordModelRequest(ctx, sessionentry.ModelRequestRecord{
 		ID:         review.RequestID,
-		RunID:      record.ID,
+		RunID:      t.run.ID(),
 		TurnID:     turnID,
 		CallID:     call.CallID,
 		Kind:       sessionentry.ModelRequestRiskReview,
@@ -140,9 +135,9 @@ func (t *RunTools) reviewAttempt(ctx context.Context, call sessionentry.ToolCall
 	var stopReason providerapi.StopReason
 	defer func() {
 		// 审核与普通请求共享结果保存边界，存储失败不能降级为人工审批。
-		if progressErr := t.progress.RecordModelResponse(context.WithoutCancel(ctx), sessionentry.ModelRequestRecord{
+		if progressErr := t.progress.RecordModelRequest(context.WithoutCancel(ctx), sessionentry.ModelRequestRecord{
 			ID:          review.RequestID,
-			RunID:       record.ID,
+			RunID:       t.run.ID(),
 			TurnID:      turnID,
 			CallID:      call.CallID,
 			Kind:        sessionentry.ModelRequestRiskReview,

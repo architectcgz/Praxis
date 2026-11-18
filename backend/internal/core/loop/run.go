@@ -50,8 +50,9 @@ type RunDependencies struct {
 	AcceptInstructions    func(context.Context) (bool, error)
 	FinishInstructions    func(context.Context) (bool, error)
 	Budget                *appcontext.Budget
-	ReadEntries           func(context.Context) ([]*sessionentry.ContextEntry, error)
+	ReadEntries           func(context.Context) ([]*sessionentry.Entry, error)
 	AppendEntry           AppendEntry
+	ExecuteTools          func(func())
 }
 
 type FailureCode string
@@ -159,7 +160,7 @@ func NewRunner(deps Dependencies) Runner {
 
 // Run 每轮读取 Session 已接纳的历史，逐条提交模型输出和工具回执，直到最终回答或失败。
 // 返回最后一次 Turn 身份，供执行服务关联失败展示；Run 结算由调用方负责。
-func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.ContextEntry, executor ToolExecutor) (turnID identity.TurnID, err error) {
+func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.Entry, executor ToolExecutor) (turnID identity.TurnID, err error) {
 	for {
 		if _, err := deps.AcceptInstructions(ctx); err != nil {
 			return turnID, err
@@ -182,7 +183,7 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			RunID:     params.ID,
 			StartedAt: time.Now().UTC(),
 		}
-		_, _, err = deps.AppendEntry(ctx, sessionentry.ContextEntry{
+		_, _, err = deps.AppendEntry(ctx, sessionentry.Entry{
 			ID:      turnID.String() + ":start",
 			RunID:   params.ID.String(),
 			TurnID:  turnID.String(),
@@ -211,7 +212,7 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 				ending = sessionentry.TurnInterrupted{Turn: turn}
 			}
 		}
-		_, _, saveErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.ContextEntry{
+		_, _, saveErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
 			ID:      turnID.String() + ":end",
 			RunID:   params.ID.String(),
 			TurnID:  turnID.String(),
@@ -242,7 +243,7 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 }
 
 // BuildContext 只选择本轮所需的 Entry 引用；Hook 只读观察，容量评估在构建完成后执行。
-func (r *Runner) BuildContext(ctx context.Context, params RunParams, entries []*sessionentry.ContextEntry) appcontext.ModelContext {
+func (r *Runner) BuildContext(ctx context.Context, params RunParams, entries []*sessionentry.Entry) appcontext.ModelContext {
 	built := appcontext.ModelContextFromEntries(params.SystemPrompt, entries)
 	identity := runIdentity(params, "")
 	identity.OperationID = hook.NewOperationID()

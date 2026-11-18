@@ -48,7 +48,7 @@ func (r *Runner) runTurn(
 	calls := prepareToolCalls(params, turnID, response.ToolCalls())
 	stored, inserted, err := deps.AppendEntry(context.WithoutCancel(ctx), entry)
 	if err == nil {
-		r.emit(params, turnID, coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}})
+		r.emit(params, turnID, coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}})
 	}
 	if err != nil {
 		return false, err
@@ -77,8 +77,8 @@ func (r *Runner) runTurn(
 	return false, r.runToolCalls(ctx, params, deps, executor, calls)
 }
 
-func assistantEntry(params RunParams, request providerapi.Request, stopReason providerapi.StopReason, blocks []sessionentry.ContentBlock) sessionentry.ContextEntry {
-	return sessionentry.ContextEntry{
+func assistantEntry(params RunParams, request providerapi.Request, stopReason providerapi.StopReason, blocks []sessionentry.ContentBlock) sessionentry.Entry {
+	return sessionentry.Entry{
 		ID:     "assistant:" + request.ID.String(),
 		RunID:  params.ID.String(),
 		TurnID: request.TurnID.String(),

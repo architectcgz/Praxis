@@ -2,350 +2,122 @@ package session
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"slices"
 )
 
-func (s *Session) AppendEntry(ctx context.Context, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	return s.appendEntry(ctx, s.data.MainAgentID(), value)
+func (s *Session) AppendEntry(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
+	return s.appendEntry(ctx, s.data.MainAgentID(), value, false)
 }
 
-// appendEntry 在唯一接纳边界同步保存，写入失败交给所属执行明确停止。
-func (s *Session) appendEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.ContextEntry) (*sessionentry.ContextEntry, bool, error) {
+func (s *Session) appendEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.Entry, terminal bool) (*sessionentry.Entry, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
-	if prior, err := s.entry(ctx, value.ID); err == nil {
-		return prior, false, nil
-	} else if !errors.Is(err, errorcode.ErrNotFound) {
-		return nil, false, err
+	s.mu.RLock()
+	exists := s.data.HasAgent(agentID)
+	s.mu.RUnlock()
+	if !exists {
+		return nil, false, errorcode.ErrNotFound
 	}
-	s.mu.Lock()
-	if s.data.RunEndEntries[identity.RunID(value.RunID)] != "" {
-		s.mu.Unlock()
-		return nil, false, errorcode.ErrInvalidTransition
-	}
-	if agentID != s.data.MainAgentID() {
-		if _, ok := s.data.AgentHistories[agentID]; !ok {
-			s.mu.Unlock()
-			return nil, false, errorcode.ErrNotFound
-		}
+	if value.RunID == "" || value.ID == "" {
+		return nil, false, errorcode.ErrInvalidValue
 	}
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = s.clock.Now()
 	}
-	stored := s.data.acceptEntry(agentID, value)
-	s.mu.Unlock()
-	persisted, err := s.log.AppendEntry(ctx, agentID, *stored)
-	if persisted {
-		s.mu.Lock()
-		s.data.releaseEntry(stored.ID)
-		if stored.IsRun() {
-			delete(s.data.RunStates, identity.RunID(stored.RunID))
+	stored := new(value)
+	if terminal {
+		if err := s.log.CommitTerminal(ctx, agentID, *stored); err != nil {
+			return nil, false, err
 		}
-		s.mu.Unlock()
+	} else if err := s.log.Append(ctx, agentID, *stored); err != nil {
+		return nil, false, err
 	}
-	return stored, true, err
+	s.mu.Lock()
+	s.data.Accept(agentID, stored)
+	s.mu.Unlock()
+	return stored, true, nil
 }
 
-func (s *Session) Entry(ctx context.Context, id string) (*sessionentry.ContextEntry, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	return s.entry(ctx, id)
+// CommitTerminal 提交 Run 的最后一条 Entry 并建立 durability boundary。
+func (s *Session) CommitTerminal(ctx context.Context, agentID identity.AgentID, value sessionentry.Entry) (*sessionentry.Entry, error) {
+	stored, _, err := s.appendEntry(ctx, agentID, value, true)
+	return stored, err
 }
 
-func (s *Session) entry(ctx context.Context, id string) (*sessionentry.ContextEntry, error) {
-	entries, err := s.readEntries(ctx, []string{id})
+func (s *Session) Entry(ctx context.Context, id string) (*sessionentry.Entry, error) {
+	return s.findEntry(ctx, s.data.MainAgentID(), id)
+}
+
+func (s *Session) findEntry(ctx context.Context, agentID identity.AgentID, id string) (*sessionentry.Entry, error) {
+	var found *sessionentry.Entry
+	err := s.walkHistory(ctx, agentID, func(value *sessionentry.Entry) bool {
+		if value.ID == id {
+			found = value
+			return false
+		}
+		return true
+	})
 	if err != nil {
 		return nil, err
 	}
-	if len(entries) == 0 {
+	if found == nil {
 		return nil, errorcode.ErrNotFound
 	}
-	return entries[0], nil
+	return found, nil
 }
 
-func (s *Session) readEntries(ctx context.Context, ids []string) ([]*sessionentry.ContextEntry, error) {
-	if err := s.syncHistory(ctx); err != nil {
-		return nil, err
-	}
+// walkHistory 从新到旧逐页访问事实，调用方可在取得所需信息后停止。
+func (s *Session) walkHistory(ctx context.Context, agentID identity.AgentID, visit func(*sessionentry.Entry) bool) error {
 	s.mu.RLock()
-	pending := make(map[string]*sessionentry.ContextEntry)
-	var diskIDs []string
-	for _, id := range ids {
-		if entry := s.data.PendingEntries[id]; entry != nil {
-			pending[id] = entry
-		} else {
-			diskIDs = append(diskIDs, id)
-		}
-	}
+	exists := s.data.HasAgent(agentID)
 	s.mu.RUnlock()
-	entries, err := s.log.Entries(ctx, diskIDs)
-	if err != nil {
-		return nil, err
+	if !exists {
+		return errorcode.ErrNotFound
 	}
-	for _, entry := range entries {
-		var reference string
-		switch v := entry.Payload.(type) {
-		case sessionentry.SubagentReportAccepted:
-			reference = v.ReportID
-		case sessionentry.SubagentInstructionAccepted:
-			reference = v.MessageID
+	var cursor *int64
+	for {
+		page, err := s.log.ReadBackward(ctx, agentID, cursor, 200)
+		if err != nil {
+			return err
 		}
-		if reference != "" {
-			sources, err := s.log.Entries(ctx, []string{reference})
-			if err != nil {
-				return nil, err
+		for index := len(page.Entries) - 1; index >= 0; index-- {
+			if !visit(&page.Entries[index]) {
+				return nil
 			}
-			if len(sources) != 1 {
-				return nil, fmt.Errorf("accepted message source %s is missing", reference)
-			}
-			text := ""
-			switch v := sources[0].Payload.(type) {
-			case sessionentry.SubagentReportReceived:
-				status := string(v.Report.Outcome)
-				if status == "" {
-					status = "progress"
-				}
-				text = fmt.Sprintf("[Subagent report %s] agent=%s run=%s outcome=%s final=%t partial=%t failure=%s\n%s", v.Report.ReportID, v.Report.AgentID, v.Report.RunID, status, v.Report.Final, v.Report.Partial, v.Report.FailureCode, v.Report.Text)
-			case sessionentry.SubagentInstructionReceived:
-				text = v.Text
-			}
-			view := *entry
-			view.Role = role.User
-			view.AuthorKind = sessionentry.AuthorAgent
-			view.Content = []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text}}
-			entry = &view
 		}
-		pending[entry.ID] = entry
-	}
-	values := make([]*sessionentry.ContextEntry, 0, len(ids))
-	for _, id := range ids {
-		if entry := pending[id]; entry != nil {
-			values = append(values, entry)
+		if !page.HasMore {
+			return nil
 		}
+		cursor = page.NextCursor
 	}
-	return values, nil
 }
 
-func (s *Session) node(ctx context.Context, id string) (sessionentry.Node, error) {
-	if err := s.syncHistory(ctx); err != nil {
-		return sessionentry.Node{}, err
-	}
-	s.mu.RLock()
-	node, found := s.data.PendingNodes[id]
-	s.mu.RUnlock()
-	if found {
-		return node, nil
-	}
-	return s.log.Node(ctx, id)
-}
-
-// pathNodes 批量读取已落盘路径，只逐个连接尚未落盘的短尾部。
-func (s *Session) pathNodes(ctx context.Context, head string) ([]sessionentry.Node, error) {
-	if err := s.syncHistory(ctx); err != nil {
-		return nil, err
-	}
-	return s.log.PathNodes(ctx, head)
-}
-
-// Entries 选择最近摘要及其后的完整历史，不受界面分页范围限制。
-func (s *Session) Entries(ctx context.Context) ([]*sessionentry.ContextEntry, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	s.mu.RLock()
-	head := s.data.HeadEntryID
-	s.mu.RUnlock()
-	return s.contextEntries(ctx, head, "")
-}
-
-func (s *Session) contextEntries(ctx context.Context, head, inputMessageID string) ([]*sessionentry.ContextEntry, error) {
-	nodes, err := s.pathNodes(ctx, head)
-	if err != nil {
-		return nil, err
-	}
-
-	start := 0
-	currentRun := ""
-	for _, node := range nodes {
-		if node.MessageID == inputMessageID && inputMessageID != "" {
-			currentRun = node.RunID
-		}
-	}
-	latestTurn := ""
-	for i := len(nodes) - 1; i >= 0; i-- {
-		if nodes[i].HasToolCalls && nodes[i].RunID == currentRun {
-			latestTurn = nodes[i].TurnID
-			break
-		}
-	}
-	for i := len(nodes) - 1; i >= 0; i-- {
-		if nodes[i].Summary {
-			start = i
-			break
-		}
-	}
-	var ids []string
-	for i, node := range nodes {
-		keep := i >= start || inputMessageID != "" && node.MessageID == inputMessageID || latestTurn != "" && node.RunID == currentRun && node.TurnID == latestTurn
-		if keep && !node.Run && !node.Metadata {
-			ids = append(ids, node.ID)
-		}
-	}
-	entries, err := s.readEntries(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	if len(entries) != len(ids) {
-		return nil, fmt.Errorf("context path contains an entry without a complete record")
-	}
-	return orderToolResults(entries), nil
-}
-
+// HistoryPage 表示一个 Agent 的完整 History 页面，Entry 顺序为旧到新。
 type HistoryPage struct {
-	HeadEntryID string
-	Entries     []sessionentry.ContextEntry
-	HasMore     bool
-	NextCursor  string
+	Entries    []sessionentry.Entry
+	NextCursor *int64
+	HasMore    bool
 }
 
-func (s *Session) Page(ctx context.Context, head, before string, limit int) (HistoryPage, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	nodes, err := s.pathNodes(ctx, head)
+func (s *Session) AgentPage(ctx context.Context, agentID identity.AgentID, cursor *int64, limit int) (HistoryPage, error) {
+	s.mu.RLock()
+	exists := s.data.HasAgent(agentID)
+	s.mu.RUnlock()
+	if !exists {
+		return HistoryPage{}, errorcode.ErrNotFound
+	}
+	page, err := s.log.ReadBackward(ctx, agentID, cursor, limit)
 	if err != nil {
-		return HistoryPage{}, err
-	}
-	if len(nodes) > 0 && nodes[len(nodes)-1].AgentID != s.data.MainAgentID() {
-		return HistoryPage{}, errorcode.ErrRequestConflict
-	}
-	return s.page(ctx, head, before, limit, nodes)
-}
-
-func (s *Session) page(ctx context.Context, head, before string, limit int, nodes []sessionentry.Node) (HistoryPage, error) {
-	visible := make([]sessionentry.Node, 0, len(nodes))
-	for _, node := range nodes {
-		if node.Visible {
-			visible = append(visible, node)
-		}
-	}
-	nodes = visible
-	end := len(nodes)
-	if before != "" {
-		end = slices.IndexFunc(nodes, func(node sessionentry.Node) bool { return node.ID == before })
-		if end < 0 {
-			return HistoryPage{}, errorcode.ErrRequestConflict
-		}
-	}
-	start := max(0, end-limit)
-	ids := make([]string, 0, end-start)
-	for _, node := range nodes[start:end] {
-		ids = append(ids, node.ID)
-	}
-	entries, err := s.readEntries(ctx, ids)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	if len(entries) != len(ids) {
-		return HistoryPage{}, errors.New("history page contains an entry without a complete record")
-	}
-	page := HistoryPage{HeadEntryID: head, Entries: sessionentry.Values(entries), HasMore: start > 0}
-	if page.HasMore {
-		page.NextCursor = nodes[start].ID
+		return HistoryPage{}, fmt.Errorf("read agent history: %w", err)
 	}
 	return page, nil
 }
 
-func (s *Session) AgentPage(ctx context.Context, agentID identity.AgentID, head, before string, limit int) (HistoryPage, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	s.mu.RLock()
-	current := s.data.HeadEntryID
-	if agentID != s.data.MainAgentID() {
-		history, found := s.data.AgentHistories[agentID]
-		if !found {
-			s.mu.RUnlock()
-			return HistoryPage{}, errorcode.ErrNotFound
-		}
-		current = history.HeadEntryID
-	}
-	s.mu.RUnlock()
-	nodes, err := s.pathNodes(ctx, current)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	if head == "" {
-		head = current
-	}
-	if head != "" {
-		index := slices.IndexFunc(nodes, func(node sessionentry.Node) bool { return node.ID == head })
-		if index < 0 {
-			return HistoryPage{}, errorcode.ErrRequestConflict
-		}
-		nodes = nodes[:index+1]
-	}
-	return s.page(ctx, head, before, limit, nodes)
-}
-
-func (s *Session) ModelEntries(ctx context.Context, agentID identity.AgentID, inputMessageID string) ([]*sessionentry.ContextEntry, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	s.mu.RLock()
-	head := s.data.HeadEntryID
-	if agentID != s.data.MainAgentID() {
-		head = s.data.AgentHistories[agentID].HeadEntryID
-	}
-	s.mu.RUnlock()
-	return s.contextEntries(ctx, head, inputMessageID)
-}
-
-// orderToolResults 只整理实际读取范围内的引用，将中断恢复补写的回执归回声明。
-// 不改变 Entry 或日志顺序。
-func orderToolResults(entries []*sessionentry.ContextEntry) []*sessionentry.ContextEntry {
-	type callKey struct{ runID, callID string }
-	calls := make(map[callKey]bool)
-	results := make(map[callKey]*sessionentry.ContextEntry)
-	for _, entry := range entries {
-		for _, block := range entry.Content {
-			switch block := block.(type) {
-			case sessionentry.ToolCallBlock:
-				calls[callKey{entry.RunID, block.CallID}] = true
-			case sessionentry.ToolResultBlock:
-				results[callKey{entry.RunID, block.CallID}] = entry
-			}
-		}
-	}
-	ordered := make([]*sessionentry.ContextEntry, 0, len(entries))
-	placed := make(map[*sessionentry.ContextEntry]bool)
-	for _, entry := range entries {
-		pairedResult := false
-		if entry.Role == role.Tool {
-			for _, block := range entry.Content {
-				if result, ok := block.(sessionentry.ToolResultBlock); ok && calls[callKey{entry.RunID, result.CallID}] {
-					pairedResult = true
-					break
-				}
-			}
-		}
-		if !pairedResult {
-			ordered = append(ordered, entry)
-		}
-		for _, block := range entry.Content {
-			if call, ok := block.(sessionentry.ToolCallBlock); ok {
-				result := results[callKey{entry.RunID, call.CallID}]
-				if result != nil && !placed[result] {
-					ordered = append(ordered, result)
-					placed[result] = true
-				}
-			}
-		}
-	}
-	return ordered
+// ModelEntries 返回当前 Agent 已经确定参与模型请求的 Entry。
+func (s *Session) ModelEntries(ctx context.Context, agentID identity.AgentID) ([]*sessionentry.Entry, error) {
+	return s.AgentContext(agentID)
 }

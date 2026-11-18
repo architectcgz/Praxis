@@ -4,7 +4,7 @@ import (
 	execution "praxis/internal/core/coordinator"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/identity"
-	"praxis/wails/dto"
+	"praxis/internal/dto"
 	"praxis/wails/validation"
 	"strings"
 )
@@ -44,7 +44,7 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, execution.RunControl{
+	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, execution.AgentControl{
 		SessionID: identity.SessionID(wire.SessionID),
 		AgentID:   identity.AgentID(wire.AgentID),
 		RunID:     identity.RunID(wire.RunID),
@@ -166,7 +166,6 @@ func (b *CommandBindings) StopToolCall(wire dto.ToolCancelRequest) error {
 	request := execution.ToolControl{
 		SessionID: identity.SessionID(wire.SessionID),
 		AgentID:   identity.AgentID(wire.AgentID),
-		RunID:     identity.RunID(wire.RunID),
 		CallID:    wire.CallID,
 	}
 	return publicError(b.host, "CommandBindings.StopToolCall", services.Commands.StopToolCall(ctx, request))

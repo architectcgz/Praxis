@@ -44,7 +44,7 @@ type AgentCommands interface {
 	CloseSession(context.Context, identity.SessionID) error
 	SessionContent(context.Context, identity.SessionID) (execution.SessionContent, error)
 	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, string, string, int) (sessionmodel.HistoryPage, error)
-	StopAgent(context.Context, execution.RunControl) error
+	StopAgent(context.Context, execution.AgentControl) error
 	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]executionmodel.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
 	ApproveToolCall(context.Context, execution.ToolDecision) error

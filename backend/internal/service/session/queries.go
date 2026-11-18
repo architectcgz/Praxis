@@ -41,36 +41,12 @@ func (s *Service) ListAgentEntries(ctx context.Context, sessionID identity.Sessi
 	return owner.AgentPage(ctx, agentID, head, before, limit)
 }
 
-func (s *Service) Entry(ctx context.Context, sessionID identity.SessionID, id string) (*sessionentry.ContextEntry, error) {
+func (s *Service) Entry(ctx context.Context, sessionID identity.SessionID, id string) (*sessionentry.Entry, error) {
 	owner, err := s.OpenedSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	return owner.Entry(ctx, id)
-}
-
-func (s *Service) GetRun(ctx context.Context, sessionID identity.SessionID, id identity.RunID) (record sessionentry.RunRecord, err error) {
-	owner, err := s.OpenedSession(ctx, sessionID)
-	if err != nil {
-		return record, err
-	}
-	return owner.GetRun(ctx, id)
-}
-
-func (s *Service) FindRunByTask(ctx context.Context, agentID identity.AgentID, taskID identity.TaskID) (record sessionentry.RunRecord, err error) {
-	owner, err := s.OpenedSession(ctx, identity.SessionID(agentID))
-	if err != nil {
-		return record, err
-	}
-	return owner.FindRunByTask(ctx, agentID, taskID)
-}
-
-func (s *Service) ListSessionRuns(ctx context.Context, sessionID identity.SessionID) ([]sessionentry.HistorySummary, error) {
-	owner, err := s.OpenedSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return owner.ListSessionRuns(ctx)
 }
 
 func (s *Service) ListSessionUsage(ctx context.Context, sessionID identity.SessionID, turnIDs []identity.TurnID) ([]modelusage.UsageRecord, error) {
@@ -86,7 +62,10 @@ func (s *Service) GetSessionUsageSummary(ctx context.Context, sessionID identity
 	if err != nil {
 		return sessionmodel.SessionUsageSummary{}, err
 	}
-	totals, requests := owner.UsageTotals()
+	totals, requests, err := owner.UsageTotals(ctx)
+	if err != nil {
+		return sessionmodel.SessionUsageSummary{}, err
+	}
 	summary := sessionmodel.SessionUsageSummary{
 		Totals:            totals,
 		TotalRequests:     requests,

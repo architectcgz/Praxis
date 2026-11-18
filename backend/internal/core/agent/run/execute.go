@@ -43,33 +43,44 @@ func PrepareSubagent(ctx context.Context, deps Dependencies, input SubagentInput
 }
 
 func prepare(ctx context.Context, deps Dependencies, input taskmodel.Task, agentID identity.AgentID, parentID identity.RunID, parentCall string, definition agentmodel.AgentDefinition, model modelapi.Config, owner SessionContext) (*Run, error) {
-	record := sessionentry.NewRunRecord(identity.RunID(deps.IDs.New("run")), input.SessionID, agentID, input.ID, "input:"+input.ID.String(), sessionentry.RunConfig{
-		AgentDefinitionID: definition.ID,
-		SystemPrompt:      definition.Instructions,
-		Model:             model,
-	}, deps.Clock.Now())
-	record.AgentName = definition.Name
-	record.ParentRunID = parentID
-	record.ParentCallID = parentCall
 	run := &Run{
-		record:       record,
-		main:         parentID == "",
-		Session:      owner,
-		deps:         deps,
-		entryIndexes: make(map[string]int),
-		appendFact:   owner.BindHistory(agentID),
+		main:          parentID == "",
+		Session:       owner,
+		deps:          deps,
+		id:            identity.RunID(deps.IDs.New("run")),
+		sessionID:     input.SessionID,
+		agentID:       agentID,
+		definitionID:  definition.ID,
+		systemPrompt:  definition.Instructions,
+		model:         model,
+		parentRunID:   parentID,
+		parentCallID:  parentCall,
+		sourceTaskID:  input.ID,
+		status:        sessionentry.RunStarting,
+		inputEntryID:  "input:" + input.ID.String(),
+		inputText:     input.Prompt,
+		toolUpdates:   make(chan toolUpdate),
+		createdAt:     deps.Clock.Now().UTC(),
+		entryIndexes:  make(map[string]int),
+		appendFact:    owner.BindHistory(agentID),
 	}
 	run.initCollaboration()
-	if _, _, err := run.AppendEntry(ctx, sessionentry.ContextEntry{
-		ID:      "prepared:" + record.ID.String(),
-		Payload: sessionentry.RunPrepared{Run: record},
+	if _, _, err := run.AppendEntry(ctx, sessionentry.Entry{
+		ID:        "prepared:" + run.id.String(),
+		CreatedAt: run.createdAt,
+		Payload: sessionentry.RunPrepared{
+			AgentName:    definition.Name,
+			DefinitionID: definition.ID,
+			SourceTaskID: input.ID,
+			InputEntryID: run.inputEntryID,
+		},
 	}); err != nil {
 		return run, err
 	}
-	stored, _, err := run.AppendEntry(ctx, sessionentry.ContextEntry{
-		ID: record.InputEntryID,
+	stored, _, err := run.AppendEntry(ctx, sessionentry.Entry{
+		ID: run.inputEntryID,
 		Payload: sessionentry.UserInput{
-			MessageID: record.InputEntryID,
+			MessageID: run.inputEntryID,
 			Text:      input.Prompt,
 		},
 		Role:       role.User,
@@ -81,7 +92,7 @@ func prepare(ctx context.Context, deps Dependencies, input taskmodel.Task, agent
 	}
 	deps.Emitter.Emit(coreevent.Event{
 		Source:  run.EventSource(""),
-		Payload: coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}},
+		Payload: coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}},
 	})
 	if hookErr := deps.HookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{
 		Identity: runIdentity(run, ""),
@@ -94,17 +105,17 @@ func prepare(ctx context.Context, deps Dependencies, input taskmodel.Task, agent
 
 // Execute 覆盖本次准备、完整 Loop 和必要收尾；调用方只负责执行位置和后续调度。
 func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (loop.ToolExecutor, error)) (err error) {
-	if r.Snapshot().Status != sessionentry.RunStarting {
+	if r.status != sessionentry.RunStarting || r.result != nil {
 		return errorcode.ErrInvalidTransition
 	}
 	ctx, scope := r.deps.HookDispatcher.Start(ctx, hook.Operation{
 		Identity: runIdentity(r, ""),
 		Kind:     hook.OperationAgent,
-		Name:     r.Snapshot().Config.AgentDefinitionID.String(),
+		Name:     r.definitionID.String(),
 	})
 	defer func() {
 		scope.End(hook.Result{
-			Outcome: string(r.Snapshot().Outcome),
+			Outcome: string(r.Outcome()),
 			Err:     err,
 		})
 	}()
@@ -119,27 +130,27 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 			var tools loop.ToolExecutor
 			tools, err = prepareTools(ctx)
 			if err == nil {
-				input, _ := r.Entry(r.Snapshot().InputEntryID)
+				input, _ := r.Entry(r.inputEntryID)
 				params, deps := r.modelRunParams()
 				_, err = runner.Run(ctx, params, deps, input, tools)
 			}
 		}
 	}
 	if err == nil {
-		if _, _, saveErr := r.AppendEntry(context.WithoutCancel(ctx), sessionentry.ContextEntry{
-			ID:      "ending:" + r.Snapshot().ID.String(),
+		if _, _, saveErr := r.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
+			ID:      "ending:" + r.id.String(),
 			Payload: sessionentry.RunEndingStarted{},
 		}); saveErr != nil {
 			err = errors.Join(err, saveErr)
 		}
 	}
 	r.finishChildren()
-	outcome, code, message := r.result(ctx, err)
+	outcome, code, message := r.classifyOutcome(ctx, err)
 	if !r.Main() && outcome == sessionentry.OutcomeCompleted {
 		outcome = sessionentry.OutcomeYielded
 	}
 	if err != nil {
-		r.emitError(r.Snapshot().CurrentTurn.ID, err)
+		r.emitError(r.currentTurnID, err)
 	}
 	// 收尾不继承已取消的执行 Context，保存失败明确返回，不自动重投。
 	endCtx, cancelEnd := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -147,41 +158,39 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	if closeErr := r.closeToolCalls(endCtx); closeErr != nil {
 		return errors.Join(err, closeErr)
 	}
-	_, saveErr := r.Settle(endCtx, outcome, code, message)
+	saveErr := r.Settle(endCtx, outcome, code, message)
 	return errors.Join(err, saveErr)
 }
 
 func (r *Run) ConfirmRunning(ctx context.Context) error {
-	record := r.Snapshot()
 	at := r.deps.Clock.Now()
-	_, _, err := r.AppendEntry(ctx, sessionentry.ContextEntry{
-		ID:      "started:" + record.ID.String(),
+	_, _, err := r.AppendEntry(ctx, sessionentry.Entry{
+		ID:      "started:" + r.id.String(),
 		Payload: sessionentry.RunStarted{At: at},
 	})
 	if err == nil {
 		r.deps.Emitter.Emit(coreevent.Event{
 			Source:  r.EventSource(""),
-			Payload: coreevent.RunStarted{Run: r.Snapshot().Snapshot()},
+			Payload: coreevent.RunStarted{Run: r.Snapshot()},
 		})
 	}
 	return err
 }
 
-func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code sessionentry.RunFailureCode, message string) (sessionentry.RunRecord, error) {
-	record := r.Snapshot()
+func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code sessionentry.RunFailureCode, message string) error {
 	result := sessionentry.RunResult{
 		Outcome:          string(outcome),
 		FailureCode:      string(code),
 		FailureMessage:   message,
-		StartedAt:        record.StartedAt,
+		StartedAt:        r.startedAt,
 		EndedAt:          r.deps.Clock.Now(),
-		Usage:            record.Progress.Usage,
-		ModelRequests:    record.Progress.ModelRequests,
-		Iterations:       record.Progress.Iterations,
-		OutputBytes:      record.Progress.OutputBytes,
-		ToolCalls:        record.Progress.ToolCalls,
-		FinalAssistantID: record.Progress.FinalAssistantID,
-		FinalStopReason:  record.Progress.FinalStopReason,
+		Usage:            r.progress.Usage,
+		ModelRequests:    r.progress.ModelRequests,
+		Iterations:       r.progress.Iterations,
+		OutputBytes:      r.progress.OutputBytes,
+		ToolCalls:        r.progress.ToolCalls,
+		FinalAssistantID: r.progress.FinalAssistantID,
+		FinalStopReason:  r.progress.FinalStopReason,
 	}
 	var payload sessionentry.Payload
 	switch outcome {
@@ -194,14 +203,13 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 	case sessionentry.OutcomeInterrupted:
 		payload = sessionentry.RunInterrupted{Result: result}
 	}
-	stored, _, err := r.AppendEntry(ctx, sessionentry.ContextEntry{
-		ID:      "run:" + record.ID.String(),
+	stored, err := r.Session.CommitTerminal(ctx, r.agentID, sessionentry.Entry{
+		ID:      "run:" + r.id.String(),
+		RunID:   r.id.String(),
 		Payload: payload,
 	})
 	if err == nil {
-		r.mu.Lock()
-		r.terminalSaved = true
-		r.mu.Unlock()
+		r.accept(stored)
 		if hookErr := r.deps.HookDispatcher.RunCommitted(context.WithoutCancel(ctx), hook.RunEvent{
 			Identity:    runIdentity(r, ""),
 			Outcome:     string(outcome),
@@ -214,25 +222,25 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 		}
 	}
 	if err == nil {
+		snapshot := r.Snapshot()
 		r.deps.Emitter.Emit(coreevent.Event{
 			Source: r.EventSource(""),
 			Payload: coreevent.RunEnded{
-				Run:     r.Snapshot().Snapshot(),
-				State:   r.Snapshot().AgentState(),
-				Entries: []sessionentry.ContextEntry{*stored},
+				Run:     snapshot,
+				State:   r.result.AgentState(),
+				Entries: []sessionentry.Entry{*stored},
 			},
 		})
 	}
-	return r.Snapshot(), err
+	return err
 }
 
 func (r *Run) nameSession(ctx context.Context) {
-	record := r.Snapshot()
-	info, err := r.deps.Sessions.Get(ctx, record.SessionID)
+	info, err := r.deps.Sessions.Get(ctx, r.sessionID)
 	if err != nil || info.Title != "" {
 		return
 	}
-	input, ok := r.Entry(record.InputEntryID)
+	input, ok := r.Entry(r.inputEntryID)
 	if !ok {
 		return
 	}
@@ -244,7 +252,7 @@ func (r *Run) nameSession(ctx context.Context) {
 	}
 }
 
-func (r *Run) result(ctx context.Context, err error) (sessionentry.RunOutcome, sessionentry.RunFailureCode, string) {
+func (r *Run) classifyOutcome(ctx context.Context, err error) (sessionentry.RunOutcome, sessionentry.RunFailureCode, string) {
 	if loop.FailureClassification(context.Cause(ctx)) == loop.FailureStorage {
 		return sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, ""
 	}

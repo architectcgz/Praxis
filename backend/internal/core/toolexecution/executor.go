@@ -11,6 +11,7 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
+	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
 	"praxis/internal/core/timing"
@@ -50,6 +51,7 @@ type callState struct {
 	decision     *UserDecision
 	review       *ReviewRecord
 	stopped      bool
+	wake         chan struct{}
 }
 
 func NewExecutor(deps ExecutorDependencies) *Executor {
@@ -61,15 +63,17 @@ type RunOwner interface {
 	BeginWaiting()
 	EndWaiting()
 	Main() bool
-	Snapshot() sessionentry.RunRecord
-	Entry(string) (*sessionentry.ContextEntry, bool)
+	ID() identity.RunID
+	SessionID() identity.SessionID
+	SourceTaskID() identity.TaskID
+	Model() modelapi.Config
+	InputText() string
 	EventSource(identity.TurnID) coreevent.EventSource
 }
 
 // RequestProgress 已绑定本次执行，审核只提交请求事实。
 type RequestProgress interface {
 	RecordModelRequest(context.Context, sessionentry.ModelRequestRecord, *timing.Record) error
-	RecordModelResponse(context.Context, sessionentry.ModelRequestRecord, *timing.Record) error
 }
 
 // RunTools 只绑定本次已取得运行权的 AgentRun 的环境。
@@ -81,7 +85,6 @@ type RunTools struct {
 	catalog       tool.ToolCatalog
 	mode          security.ApprovalMode
 	provider      providerapi.Provider
-	awaitApproval func(context.Context) error
 }
 
 // CallResult 将实际结果和耗时交给调用方一起提交；仅执行路径携带 OperationID 和已准备参数。
@@ -102,7 +105,7 @@ type ControlRequest struct {
 	CallID    string
 }
 
-func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, progress RequestProgress, awaitApproval func(context.Context) error) *RunTools {
+func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider, progress RequestProgress) *RunTools {
 	return &RunTools{
 		executor:      e,
 		run:           run,
@@ -111,18 +114,17 @@ func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCat
 		catalog:       catalog,
 		mode:          mode,
 		provider:      provider,
-		awaitApproval: awaitApproval,
 	}
 }
 
 // Execute 准备并冻结工具参数，取得最终授权后返回实际结果；不写历史或调用后置 Hook。
 func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) (CallResult, error) {
 	s := tools.executor
-	owner := tools.run.Snapshot()
 	s.mu.Lock()
 	s.active[call.Key] = &callState{
 		call:         call,
-		sourceTaskID: owner.SourceTaskID,
+		sourceTaskID: tools.run.SourceTaskID(),
+		wake:         make(chan struct{}, 1),
 	}
 	s.mu.Unlock()
 	defer s.unregister(call.Key)
@@ -167,7 +169,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall) 
 	}
 	prepared, err := t.Prepare(arguments, tool.Environment{
 		ProjectPath:     tools.projectPath,
-		OutputDirectory: s.deps.Outputs.Directory(owner.SessionID),
+		OutputDirectory: s.deps.Outputs.Directory(tools.run.SessionID()),
 	})
 	if err != nil {
 		return callError("invalid_tool_call", err.Error()), nil
@@ -332,5 +334,5 @@ func callError(code, message string) CallResult {
 }
 
 func (tools *RunTools) BoundResult(result tool.ToolResult, limit int) (tool.ToolResult, error) {
-	return tools.executor.deps.Outputs.Bound(tools.run.Snapshot().SessionID, result, limit)
+	return tools.executor.deps.Outputs.Bound(tools.run.SessionID(), result, limit)
 }

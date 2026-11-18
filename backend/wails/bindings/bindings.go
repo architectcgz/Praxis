@@ -5,7 +5,7 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/timing"
-	"praxis/wails/dto"
+	"praxis/internal/dto"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )

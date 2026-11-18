@@ -34,6 +34,7 @@ type SessionSnapshot struct {
 	Agents      []AgentView            `json:"agents"`
 	Tasks       []QueuedTask           `json:"tasks"`
 	Entries     map[string]HistoryPage `json:"entries"`
+	Usage       SessionUsageSummary    `json:"usage"`
 }
 
 type SessionSummary struct {

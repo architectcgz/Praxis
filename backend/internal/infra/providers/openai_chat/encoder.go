@@ -26,7 +26,7 @@ func encodeContext(ctx appcontext.ModelContext) ([]chatMessage, error) {
 	return messages, nil
 }
 
-func chatMessagesFromContext(entry *sessionentry.ContextEntry, ids map[string]string) ([]chatMessage, error) {
+func chatMessagesFromContext(entry *sessionentry.Entry, ids map[string]string) ([]chatMessage, error) {
 	var messages []chatMessage
 	result := chatMessage{Role: string(entry.Role)}
 	flush := func() {

@@ -9,11 +9,11 @@ import (
 
 // storedEntry 只附加日志归属信息，不复用前端通知信封。
 type storedEntry struct {
-	AgentID identity.AgentID          `json:"agent_id"`
-	Entry   sessionentry.ContextEntry `json:"entry"`
+	AgentID identity.AgentID   `json:"agent_id"`
+	Entry   sessionentry.Entry `json:"entry"`
 }
 
-func encodeEntry(agentID identity.AgentID, entry sessionentry.ContextEntry) ([]byte, error) {
+func encodeEntry(agentID identity.AgentID, entry sessionentry.Entry) ([]byte, error) {
 	data, err := json.Marshal(storedEntry{AgentID: agentID, Entry: entry})
 	if err != nil {
 		return nil, err

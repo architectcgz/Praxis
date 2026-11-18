@@ -8,7 +8,7 @@ import (
 	"praxis/internal/identity"
 	approvalservice "praxis/internal/service/approval"
 	sessionservice "praxis/internal/service/session"
-	"praxis/wails/dto"
+	"praxis/internal/dto"
 	"praxis/wails/validation"
 	"strings"
 )

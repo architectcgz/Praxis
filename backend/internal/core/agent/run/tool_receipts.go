@@ -38,7 +38,7 @@ func (r *Run) closeToolCalls(ctx context.Context) error {
 		if len(results) == 0 {
 			continue
 		}
-		stored, _, err := r.AppendEntry(ctx, entry.ContextEntry{
+		stored, _, err := r.AppendEntry(ctx, entry.Entry{
 			ID:         "tools:" + e.TurnID,
 			TurnID:     e.TurnID,
 			Role:       role.Tool,
@@ -50,7 +50,7 @@ func (r *Run) closeToolCalls(ctx context.Context) error {
 		}
 		r.deps.Emitter.Emit(coreevent.Event{
 			Source:  r.EventSource(identity.TurnID(e.TurnID)),
-			Payload: coreevent.EntriesAppended{Entries: []entry.ContextEntry{*stored}},
+			Payload: coreevent.EntriesAppended{Entries: []entry.Entry{*stored}},
 		})
 	}
 	return nil

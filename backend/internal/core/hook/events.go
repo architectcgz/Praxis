@@ -139,7 +139,7 @@ type AfterContextCompressionHook interface {
 // 通知在业务锁外执行，不保证跨重启必达或并发提交的全局顺序。
 type EntryCommitted struct {
 	Identity
-	Entry sessionentry.ContextEntry
+	Entry sessionentry.Entry
 }
 
 type UserInputCommittedHook interface {

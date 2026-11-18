@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"maps"
 	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
@@ -15,17 +16,14 @@ import (
 	"sync"
 )
 
-// EntryLog 绑定会话日志，实际文件写入、索引和解码由存储实现完成。
-type EntryLog interface {
+// HistoryStore 保存和读取 Agent 的完整 History，不解释 Entry 的业务语义。
+type HistoryStore interface {
 	CreateSubagent(context.Context, identity.AgentID) error
-	AppendEntry(context.Context, identity.AgentID, sessionentry.ContextEntry) (bool, error)
-	Sync(context.Context) error
-	Node(context.Context, string) (sessionentry.Node, error)
-	IndexedNodes(context.Context, []string) ([]sessionentry.Node, error)
-	PathNodes(context.Context, string) ([]sessionentry.Node, error)
-	Entries(context.Context, []string) ([]*sessionentry.ContextEntry, error)
-	Requests(context.Context, []identity.TurnID) ([]sessionentry.ModelRequestRecord, error)
-	Run(context.Context, identity.RunID) (sessionentry.RunRecord, error)
+	Append(context.Context, identity.AgentID, sessionentry.Entry) error
+	CommitTerminal(context.Context, identity.AgentID, sessionentry.Entry) error
+	Sync(context.Context, identity.AgentID) error
+	ReadBackward(context.Context, identity.AgentID, *int64, int) (HistoryPage, error)
+	Close(context.Context) error
 }
 
 // Configuration 属于已打开的会话；发布后只读，只有显式 reload 才整体替换。
@@ -55,22 +53,19 @@ type ModelChoice struct {
 	ReasoningLevel string
 }
 
-// Session 持有会话数据；提交锁保证接纳与同步追加顺序，数据锁保护内存配置与状态。
-// 日志写入失败不撤销内存更新；发布后的 Entry 及其内部载荷只读。
-// 模型请求、工具执行和 Hook 不持有会话锁。
+// Session 持有会话配置和各 Agent 的 AgentContext。
+// 数据锁保护配置、Agent 登记与上下文；各 Agent 的 History 读写由存储串行化。
 type Session struct {
-	commitMu      sync.Mutex
 	mu            sync.RWMutex
 	configuration *Configuration
 	choice        ModelChoice
 	data          *Data
-	log           EntryLog
+	log           HistoryStore
 	clock         clock.Clock
 	ids           identity.IDGenerator
 }
 
-// New 接管完成索引与必要恢复的数据；发布实例后不再直接修改 data。
-func New(data *Data, log EntryLog, clock clock.Clock, ids identity.IDGenerator) *Session {
+func New(data *Data, log HistoryStore, clock clock.Clock, ids identity.IDGenerator) *Session {
 	return &Session{
 		data:  data,
 		log:   log,
@@ -112,33 +107,36 @@ func (s *Session) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDef
 func (s *Session) Empty() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.data.HeadEntryID == ""
+	return len(s.data.Context(s.data.MainAgentID()).Entries) == 0
 }
 
-// syncHistory 由提交边界调用。追加曾报告失败但后来确认完整落盘的不可变 Entry，
-// 在索引补齐后释放保留引用；缺少完整记录的接纳结果继续由会话持有。
-func (s *Session) syncHistory(ctx context.Context) error {
-	if err := s.log.Sync(ctx); err != nil {
-		return err
-	}
+// AgentContext 返回指定 Agent 当前有效的模型上下文快照。
+func (s *Session) AgentContext(agentID identity.AgentID) ([]*sessionentry.Entry, error) {
 	s.mu.RLock()
-	ids := make([]string, 0, len(s.data.PendingEntries))
-	for id := range s.data.PendingEntries {
-		ids = append(ids, id)
+	defer s.mu.RUnlock()
+	if !s.data.HasAgent(agentID) {
+		return nil, fmt.Errorf("agent %s is not part of session", agentID)
 	}
-	s.mu.RUnlock()
-	if len(ids) == 0 {
-		return nil
-	}
-	nodes, err := s.log.IndexedNodes(ctx, ids)
-	if err != nil {
-		return err
-	}
+	return s.data.Context(agentID).Snapshot(), nil
+}
+
+// RegisterAgent 记录已存在的 Agent History 作用域。
+func (s *Session) RegisterAgent(agentID identity.AgentID) {
 	s.mu.Lock()
-	for _, node := range nodes {
-		s.data.releaseEntry(node.ID)
+	defer s.mu.Unlock()
+	if !s.data.HasAgent(agentID) {
+		s.data.AgentContexts[agentID] = AgentContext{}
 	}
-	s.mu.Unlock()
+}
+
+// RestoreAgentContext 发布启动恢复得到的当前模型上下文。
+func (s *Session) RestoreAgentContext(agentID identity.AgentID, entries []*sessionentry.Entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.data.HasAgent(agentID) {
+		return fmt.Errorf("agent %s is not part of session", agentID)
+	}
+	s.data.AgentContexts[agentID] = AgentContext{Entries: slices.Clone(entries)}
 	return nil
 }
 
@@ -152,4 +150,14 @@ func capped[T any](values []T, limit int) []T {
 func sorted[T any](values []T, compare func(T, T) int) []T {
 	slices.SortFunc(values, compare)
 	return values
+}
+
+func (s *Session) agentIDs() []identity.AgentID {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Sorted(maps.Keys(s.data.AgentContexts))
+}
+
+func (s *Session) Close(ctx context.Context) error {
+	return s.log.Close(ctx)
 }

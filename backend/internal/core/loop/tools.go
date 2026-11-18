@@ -65,6 +65,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 		})
 	}
 	var executionErr error
+	deps.ExecuteTools(func() {
 	for index := 0; index < len(calls); {
 		if err := ctx.Err(); err != nil {
 			executionErr = err
@@ -91,6 +92,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 		}
 		index = end
 	}
+	})
 	for index := range calls {
 		if !completed[index] {
 			outcomes[index].ToolResult = tool.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available.")
@@ -110,7 +112,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 			Timing:  result.Timing,
 		}
 	}
-	value := sessionentry.ContextEntry{
+	value := sessionentry.Entry{
 		ID:         "tools:" + calls[0].TurnID.String(),
 		RunID:      params.ID.String(),
 		TurnID:     calls[0].TurnID.String(),
@@ -124,7 +126,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	if err != nil {
 		return NewFailure(FailureStorage, errors.Join(executionErr, err))
 	}
-	r.emit(params, calls[0].TurnID, coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}})
+	r.emit(params, calls[0].TurnID, coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}})
 	if inserted {
 		for index, result := range outcomes {
 			if result.OperationID == "" {

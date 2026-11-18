@@ -34,6 +34,10 @@ func (e *Executor) StopCall(ctx context.Context, request ControlRequest) error {
 		return err
 	}
 	callState.stopped = true
+	select {
+	case callState.wake <- struct{}{}:
+	default:
+	}
 	if callState.tool != nil {
 		callState.tool.Stop()
 	}
@@ -74,6 +78,10 @@ func (e *Executor) DecideApproval(ctx context.Context, request ControlRequest, a
 		SessionID: callState.call.SessionID,
 		Approved:  approve,
 		DecidedAt: e.deps.Clock.Now().UTC(),
+	}
+	select {
+	case callState.wake <- struct{}{}:
+	default:
 	}
 	return nil
 }

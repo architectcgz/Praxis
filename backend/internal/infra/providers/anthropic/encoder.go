@@ -23,7 +23,7 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthrop
 	result := anthropicContext{System: ctx.SystemPrompt}
 	ids := providerapi.BuildToolCallIDMap(ctx)
 	for index, entry := range ctx.Entries {
-		messages, err := anthropicContextEntry(entry, config, ids)
+		messages, err := anthropicEntry(entry, config, ids)
 		if err != nil {
 			return anthropicContext{}, fmt.Errorf("anthropic context entry %d: %w", index, err)
 		}
@@ -62,7 +62,7 @@ func encodeContext(ctx appcontext.ModelContext, config modelapi.Config) (anthrop
 	return result, nil
 }
 
-func anthropicContextEntry(entry *sessionentry.ContextEntry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
+func anthropicEntry(entry *sessionentry.Entry, config modelapi.Config, ids map[string]string) ([]anthropicMessage, error) {
 	var messages []anthropicMessage
 	for index, block := range entry.Content {
 		messageRole := string(entry.Role)

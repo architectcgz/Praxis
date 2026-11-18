@@ -46,13 +46,12 @@ type Coordinator struct {
 	logger            *logging.Logger
 	transitionTimeout time.Duration
 
-	// mu 保护已加载会话、队列绑定、会话命令信号量及活跃执行索引；
+	// mu 保护已加载会话、队列绑定、会话命令信号量及会话执行句柄；
 	// 存储读写、会话数据访问与 Run 执行均不持有 mu。
 	mu              sync.Mutex
 	closed          bool
 	registry        sessionRegistry
 	sessionCommands map[identity.SessionID]*sessionCommand
-	runs            map[runKey]*activeRun
 	schedules       map[identity.SessionID]*sessionSchedule
 	running         sync.WaitGroup
 }
@@ -123,20 +122,19 @@ func (s *Coordinator) releaseSessionCommand(id identity.SessionID, command *sess
 	}
 }
 
-// activeRun 从准备队首开始存在，直到结算成功才移除；字段变更由 Coordinator.mu 保护。
+// activeRun 是所属会话或 Parent 持有的控制句柄，不提供运行状态查询。
+// 准备字段在 ready 关闭前绑定，完成后不再修改。
 type activeRun struct {
 	parent    *agentrun.Run
 	onDone    func() error
 	sessionID identity.SessionID
 
-	run              *agentrun.Run
-	config           *sessionmodel.Configuration
-	runID            identity.RunID
-	ctx              context.Context
-	cancel           context.CancelCauseFunc
-	done             chan struct{}
-	ready            chan struct{}
-	toolApprovalWake chan struct{}
+	config         *sessionmodel.Configuration
+	cancelSubagent func(identity.AgentID) error
+	ctx            context.Context
+	cancel         context.CancelCauseFunc
+	done           chan struct{}
+	ready          chan struct{}
 }
 
 func newActiveRun(ctx context.Context, sessionID identity.SessionID) *activeRun {
@@ -147,7 +145,6 @@ func newActiveRun(ctx context.Context, sessionID identity.SessionID) *activeRun 
 		cancel:           cancel,
 		ready:            make(chan struct{}),
 		done:             make(chan struct{}),
-		toolApprovalWake: make(chan struct{}, 1),
 	}
 }
 
@@ -159,7 +156,6 @@ func NewCoordinator(config Config) *Coordinator {
 		projects:          config.Projects,
 		loop:              config.Loop,
 		sessionCommands:   make(map[identity.SessionID]*sessionCommand),
-		runs:              make(map[runKey]*activeRun),
 		schedules:         make(map[identity.SessionID]*sessionSchedule),
 		runDependencies:   config.RunDependencies,
 		hookDispatcher:    config.HookDispatcher,
@@ -180,13 +176,12 @@ func (r *Coordinator) enter() error {
 }
 
 // launchLocked 只接收已由调度器标记忙碌的执行，不再竞争槽位；调用方持有 mu。
-func (r *Coordinator) launchLocked(run *agentrun.Run, runID identity.RunID, active *activeRun) error {
+func (r *Coordinator) launchLocked(run *agentrun.Run, active *activeRun) error {
 	if r.closed {
 		return errCoordinatorClosed
 	}
 	run.BindCancellation(active.cancel)
-	active.run = run
-	active.runID = runID
+	active.cancelSubagent = run.CancelSubagent
 	close(active.ready)
 	r.running.Go(func() { r.run(active.ctx, run, active) })
 	return nil
@@ -197,9 +192,11 @@ func (r *Coordinator) launchLocked(run *agentrun.Run, runID identity.RunID, acti
 func (r *Coordinator) Close(ctx context.Context) error {
 	r.mu.Lock()
 	r.closed = true
-	executions := make([]*activeRun, 0, len(r.runs))
-	for _, active := range r.runs {
-		executions = append(executions, active)
+	executions := make([]*activeRun, 0, len(r.schedules))
+	for _, schedule := range r.schedules {
+		if schedule.active != nil {
+			executions = append(executions, schedule.active)
+		}
 	}
 	r.mu.Unlock()
 	for _, active := range executions {
@@ -224,14 +221,11 @@ func (r *Coordinator) transitionContext() (context.Context, context.CancelFunc) 
 	return context.WithTimeout(context.Background(), r.transitionTimeout)
 }
 
-type runKey struct {
-	agentID identity.AgentID
-}
-
 type sessionSchedule struct {
 	sessionID identity.SessionID
 	session   *sessionmodel.Session
 	queue     taskmodel.TaskQueue
+	active    *activeRun
 	closing   bool
 	reloading bool
 }

@@ -148,7 +148,7 @@ func (r *Runner) callModel(
 		if progressErr == nil {
 			r.emit(params, request.TurnID, coreevent.RequestResult(finished, response.Timing))
 			if finished.Status != sessionentry.RequestCompleted {
-				r.emit(params, request.TurnID, coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*stored}})
+				r.emit(params, request.TurnID, coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}})
 			}
 		}
 

@@ -34,8 +34,8 @@ type Compression struct {
 	Timing     *timing.Record            `json:"timing,omitempty"`
 }
 
-// ContextEntry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
-type ContextEntry struct {
+// Entry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
+type Entry struct {
 	Payload     Payload        `json:"-"`
 	ID          string         `json:"id"`
 	RunID       string         `json:"runId,omitempty"`
@@ -51,13 +51,13 @@ type ContextEntry struct {
 }
 
 // IsSummary 识别摘要事实；上下文选择按最近摘要及后续历史进行。
-func (e ContextEntry) IsSummary() bool {
+func (e Entry) IsSummary() bool {
 	return e.Compression != nil
 }
 
 // UnmarshalJSON 在持久化读取入口按 kind 解码内容，内部直接使用具体类型。
-func (e *ContextEntry) UnmarshalJSON(data []byte) error {
-	type entry ContextEntry
+func (e *Entry) UnmarshalJSON(data []byte) error {
+	type entry Entry
 	decoded := struct {
 		*entry
 		RawContent []json.RawMessage `json:"content"`
@@ -88,7 +88,7 @@ func (e *ContextEntry) UnmarshalJSON(data []byte) error {
 }
 
 // TextContent 返回正文块，保留完整历史中的其他内容供各消费方选择。
-func (e ContextEntry) TextContent() string {
+func (e Entry) TextContent() string {
 	var text strings.Builder
 	for _, block := range e.Content {
 		if value, ok := block.(TextBlock); ok {
@@ -99,7 +99,7 @@ func (e ContextEntry) TextContent() string {
 }
 
 // Preview 提供历史目录的短文本，不保存第二份正文。
-func (e ContextEntry) Preview() string {
+func (e Entry) Preview() string {
 	if e.IsRun() {
 		return "执行结束 · " + e.ExecutionResult().Outcome
 	}
@@ -118,16 +118,16 @@ func (e ContextEntry) Preview() string {
 }
 
 // Values 为请求或展示边界创建值列表，内部载荷仍按只读数据共享。
-func Values(entries []*ContextEntry) []ContextEntry {
-	values := make([]ContextEntry, len(entries))
+func Values(entries []*Entry) []Entry {
+	values := make([]Entry, len(entries))
 	for index, entry := range entries {
 		values[index] = *entry
 	}
 	return values
 }
 
-func (e ContextEntry) MarshalJSON() ([]byte, error) {
-	type value ContextEntry
+func (e Entry) MarshalJSON() ([]byte, error) {
+	type value Entry
 	payload, err := encodePayload(e.Payload)
 	if err != nil {
 		return nil, err
@@ -144,51 +144,23 @@ func (e ContextEntry) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// ContributesToModelContext 判断 Entry 是否会进入下一次模型请求。
+func (e Entry) ContributesToModelContext() bool {
+	if e.IsSummary() {
+		return true
+	}
+	if e.IsRun() {
+		return false
+	}
+	if request, _ := e.RequestFact(); request != nil {
+		return false
+	}
+	switch e.Payload.(type) {
+	case UserInput, SubagentReportAccepted, SubagentInstructionAccepted:
+		return true
+	}
+	return e.Role == role.User || e.Role == role.Assistant || e.Role == role.Tool
+}
+
 // AppendEntry 是执行流程唯一的同步事实提交能力，归属在准备时绑定。
-type AppendEntry func(context.Context, ContextEntry) (*ContextEntry, bool, error)
-
-// Node 只保存历史结构、预览与上下文选择信息，不持有正文或文件位置。
-// 子代理节点用于独立路径读取，不进入主会话历史。
-type Node struct {
-	ID           string
-	AgentID      identity.AgentID
-	RunID        string
-	TurnID       string
-	Role         role.Role
-	Summary      bool
-	Run          bool
-	Visible      bool
-	Metadata     bool
-	MessageID    string
-	HasToolCalls bool
-	PreviewText  string
-	CreatedAt    time.Time
-}
-
-func NewNode(agentID identity.AgentID, value ContextEntry) Node {
-	node := Node{
-		ID:          value.ID,
-		AgentID:     agentID,
-		RunID:       value.RunID,
-		TurnID:      value.TurnID,
-		Role:        value.Role,
-		Summary:     value.IsSummary(),
-		Run:         value.IsRun(),
-		Metadata:    value.IsMetadata(),
-		Visible:     !value.IsMetadata() || value.ExecutionResult() != nil,
-		MessageID:   value.InputMessageID(),
-		PreviewText: value.Preview(),
-		CreatedAt:   value.CreatedAt,
-	}
-
-	if request, _ := value.RequestFact(); request != nil && (request.Status == RequestFailed || request.Status == RequestInterrupted) {
-		node.Visible = true
-	}
-	for _, block := range value.Content {
-		if _, ok := block.(ToolCallBlock); ok {
-			node.HasToolCalls = true
-			break
-		}
-	}
-	return node
-}
+type AppendEntry func(context.Context, Entry) (*Entry, bool, error)

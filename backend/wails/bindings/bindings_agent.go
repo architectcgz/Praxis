@@ -4,7 +4,7 @@ import (
 	modelusage "praxis/internal/core/model/usage"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	"praxis/wails/dto"
+	"praxis/internal/dto"
 	"praxis/wails/validation"
 )
 

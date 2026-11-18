@@ -3,7 +3,6 @@ package coordinator
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
-	agentrun "praxis/internal/core/agent/run"
 	coreevent "praxis/internal/core/event"
 	modelusage "praxis/internal/core/model/usage"
 	"praxis/internal/core/security"
@@ -157,23 +156,19 @@ func (s *Coordinator) CloseSession(ctx context.Context, id identity.SessionID) e
 	if binding != nil {
 		binding.closing = true
 	}
-	var active []*activeRun
-	for _, run := range s.runs {
-		if run.sessionID == id {
-			active = append(active, run)
-		}
+	var active *activeRun
+	if binding != nil {
+		active = binding.active
 	}
 	s.mu.Unlock()
 	if binding != nil {
 		binding.queue.Clear()
 	}
 	unlock()
-	for _, run := range active {
-		run.cancel(context.Canceled)
-	}
-	for _, run := range active {
+	if active != nil {
+		active.cancel(context.Canceled)
 		select {
-		case <-run.done:
+		case <-active.done:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -213,13 +208,11 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 	}
 	defer unlock()
 	s.mu.Lock()
-	for _, active := range s.runs {
-		if active.sessionID == id {
-			s.mu.Unlock()
-			return agentmodel.ErrExecuting
-		}
-	}
 	binding := s.schedules[id]
+	if binding != nil && binding.active != nil {
+		s.mu.Unlock()
+		return agentmodel.ErrExecuting
+	}
 	if binding != nil {
 		binding.reloading = true
 	}
@@ -308,18 +301,6 @@ func (s *Coordinator) SessionContent(ctx context.Context, id identity.SessionID)
 	if err != nil {
 		return SessionContent{}, err
 	}
-	for i := range agents {
-		s.mu.Lock()
-		active := s.runs[runKey{agents[i].ID}]
-		var run *agentrun.Run
-		if active != nil {
-			run = active.run
-		}
-		s.mu.Unlock()
-		if run != nil {
-			agents[i].State = run.State()
-		}
-	}
 	page, err := owner.AgentPage(ctx, info.MainAgentID(), "", "", 50)
 	return SessionContent{
 		Agents: agents,
@@ -340,7 +321,10 @@ func (s *Coordinator) GetSessionUsageSummary(ctx context.Context, id identity.Se
 	if err != nil {
 		return sessionmodel.SessionUsageSummary{}, err
 	}
-	totals, requests := owner.UsageTotals()
+	totals, requests, err := owner.UsageTotals(ctx)
+	if err != nil {
+		return sessionmodel.SessionUsageSummary{}, err
+	}
 	summary := sessionmodel.SessionUsageSummary{
 		Totals:            totals,
 		TotalRequests:     requests,

@@ -2,89 +2,51 @@ package coordinator
 
 import (
 	"context"
-	"errors"
-	sessionentry "praxis/internal/core/entry"
-	coreevent "praxis/internal/core/event"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"time"
 )
 
-// RunControl 定位用户选择的执行，不以命令到达时的当前执行替换目标。
-type RunControl struct {
+// AgentControl 以会话和 Agent 身份定位控制入口，不要求调用方知道执行编号。
+type AgentControl struct {
 	SessionID identity.SessionID
 	AgentID   identity.AgentID
-	RunID     identity.RunID
 }
 
 type ToolDecision = executionmodel.ControlRequest
 type ToolControl = executionmodel.ControlRequest
 
-// StopAgent 中断请求指定的 Run，保留尚未开始的输入。
-func (s *Coordinator) StopAgent(ctx context.Context, request RunControl) error {
+// StopAgent 取消指定 Agent；子任务的取消能力由 Parent 持有。
+func (s *Coordinator) StopAgent(ctx context.Context, request AgentControl) error {
 	if err := s.enter(); err != nil {
 		return err
 	}
 	defer s.running.Done()
 
-	active, applied, err := s.cancelRun(ctx, request, errRunInterrupted)
-	if err != nil || !applied {
-		return err
-	}
 	s.mu.Lock()
 	binding := s.schedules[request.SessionID]
-	source := coreevent.EventSource{
-		SessionID: active.sessionID,
-		AgentID:   request.AgentID,
-		RunID:     active.runID,
+	var active *activeRun
+	if binding != nil {
+		active = binding.active
 	}
-	s.mu.Unlock()
-	if binding != nil && request.AgentID == identity.AgentID(request.SessionID) {
-		binding.queue.Pause()
-		s.loop.Emitter.Emit(taskQueueEvent(binding))
-	}
-	s.loop.Emitter.Emit(coreevent.Event{
-		Source:  source,
-		Payload: coreevent.RunInterruptRequested{AppliedAt: time.Now().UTC()},
-	})
-	return nil
-}
-
-func (s *Coordinator) cancelRun(ctx context.Context, request RunControl, cause error) (*activeRun, bool, error) {
-	key := runKey{request.AgentID}
-	s.mu.Lock()
-	active := s.runs[key]
 	s.mu.Unlock()
 	if active == nil {
-		return nil, false, nil
+		return nil
 	}
-	// Run 可能刚保存、尚未登记身份；只等待本次准备完成，不等待执行退出。
-	// 保留本次查找到的执行句柄，避免等待期间换成下一次执行后误中断。
+	if request.AgentID == identity.AgentID(request.SessionID) {
+		binding.queue.Pause()
+		s.loop.Emitter.Emit(taskQueueEvent(binding))
+		active.cancel(errRunInterrupted)
+		return nil
+	}
 	select {
 	case <-active.ready:
 	case <-ctx.Done():
-		return nil, false, ctx.Err()
+		return ctx.Err()
 	}
-	s.mu.Lock()
-	if s.closed || s.runs[key] != active {
-		s.mu.Unlock()
-		return nil, false, nil
+	if active.cancelSubagent == nil {
+		return nil
 	}
-	if active.sessionID != request.SessionID || active.runID != request.RunID {
-		s.mu.Unlock()
-		return nil, false, errorcode.ErrRequestConflict
-	}
-	run := active.run
-	s.mu.Unlock()
-	if run != nil && run.Snapshot().Status == sessionentry.RunEnding {
-		return nil, false, nil
-	}
-	if active.ctx.Err() != nil {
-		return active, errors.Is(context.Cause(active.ctx), cause), nil
-	}
-	active.cancel(cause)
-	return active, true, nil
+	return active.cancelSubagent(request.AgentID)
 }
 
 func (s *Coordinator) ApproveToolCall(ctx context.Context, params ToolDecision) error {
@@ -101,11 +63,7 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, a
 		return err
 	}
 	defer s.running.Done()
-	if err := s.tools.DecideApproval(ctx, params, approve); err != nil {
-		return err
-	}
-	s.notifyToolApprovalWaiter(params.RunID)
-	return nil
+	return s.tools.DecideApproval(ctx, params, approve)
 }
 
 func (s *Coordinator) ListToolApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]executionmodel.Approval, error) {
@@ -122,36 +80,5 @@ func (s *Coordinator) StopToolCall(ctx context.Context, request ToolControl) err
 		return err
 	}
 	defer s.running.Done()
-	if err := s.tools.StopCall(ctx, request); err != nil {
-		return err
-	}
-	s.notifyToolApprovalWaiter(request.RunID)
-	return nil
-}
-
-// notifyToolApprovalWaiter 按唯一执行标识通知等待者，不依赖请求声明的 Agent 归属，也不承载决定本身。
-// 通道保留提前到达的通知；已有待处理通知时合并发送，避免持锁阻塞。
-func (s *Coordinator) notifyToolApprovalWaiter(runID identity.RunID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, active := range s.runs {
-		if active.runID != runID {
-			continue
-		}
-		select {
-		case active.toolApprovalWake <- struct{}{}:
-		default:
-		}
-		return
-	}
-}
-
-// waitForToolApproval 等待审批决定或工具停止通知；取消执行时直接退出等待，不重启 Loop。
-func (s *Coordinator) waitForToolApproval(ctx context.Context, active *activeRun) error {
-	select {
-	case <-active.toolApprovalWake:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return s.tools.StopCall(ctx, request)
 }

@@ -4,7 +4,7 @@ import (
 	"praxis/internal/identity"
 	projectservice "praxis/internal/service/project"
 	"praxis/internal/utils/pathutil"
-	"praxis/wails/dto"
+	"praxis/internal/dto"
 	"praxis/wails/validation"
 	"strings"
 )

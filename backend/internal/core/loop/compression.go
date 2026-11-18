@@ -18,7 +18,7 @@ import (
 )
 
 // Compress 在上下文构建完成后独立评估容量，按需生成摘要并通过统一入口提交 Session。
-func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.ContextEntry, value appcontext.ModelContext) (compressed appcontext.ModelContext, err error) {
+func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.Entry, value appcontext.ModelContext) (compressed appcontext.ModelContext, err error) {
 	reservedTokens, err := estimateRequestOverhead(r.Tools.List(), nil)
 	if err != nil {
 		return value, NewFailure(FailureContract, err)
@@ -88,7 +88,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	}
 	compressed, changed = generated, true
 	compressed.Entries[0] = accepted
-	r.emit(params, "", coreevent.EntriesAppended{Entries: []sessionentry.ContextEntry{*accepted}})
+	r.emit(params, "", coreevent.EntriesAppended{Entries: []sessionentry.Entry{*accepted}})
 
 	r.Logf("context compressed run_id=%s entriesBefore=%d entriesAfter=%d", params.ID, len(value.Entries), len(compressed.Entries))
 	return compressed, nil
@@ -130,7 +130,7 @@ func remindContextBudget(request providerapi.Request, budget *appcontext.Budget)
 		return request, err
 	}
 	if appcontext.NearContextLimit(tokens, request.MaxOutputTokens, request.Model.ContextWindow) {
-		hint := &sessionentry.ContextEntry{
+		hint := &sessionentry.Entry{
 			Role: role.User,
 			Content: []sessionentry.ContentBlock{
 				sessionentry.TextBlock{Text: fmt.Sprintf("[本次请求的运行提示] 估算输入 %d tokens，输出预留 %d tokens，窗口 %d tokens。请优先完成当前任务，并按需分段读取工具输出。", tokens, request.MaxOutputTokens, request.Model.ContextWindow)},

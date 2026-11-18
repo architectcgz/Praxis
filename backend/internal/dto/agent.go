@@ -6,9 +6,7 @@ import (
 
 type StopAgentRequest struct {
 	SessionID string `json:"sessionId" validate:"session_id"`
-
-	AgentID string `json:"agentId" validate:"id"`
-	RunID   string `json:"runId" validate:"id"`
+	AgentID   string `json:"agentId" validate:"id"`
 }
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
@@ -78,10 +76,6 @@ type AgentRunStarted struct {
 	Run     RunSummary `json:"run"`
 }
 
-type AgentRunControl struct {
-	AppliedAt time.Time `json:"appliedAt"`
-}
-
 type AgentRunEnded struct {
 	Run     RunSummary `json:"run"`
 	State   string     `json:"state"`
@@ -112,16 +106,21 @@ type AgentErrorOccurred struct {
 
 // RunSummary 是外部展示摘要，不携带执行配置、句柄或推理续传状态。
 type RunSummary struct {
-	ID             string
-	Status         string
+	ID          string
+	Status      string
+	StartedAt   time.Time
+	Iterations  uint64
+	ToolCalls   int
+	OutputBytes int64
+	Result      *RunResult
+}
+
+// RunResult 只在执行结束后出现，失败原因归属于结果而非运行阶段。
+type RunResult struct {
 	Outcome        string
-	StartedAt      time.Time
 	EndedAt        time.Time
 	FailureCode    string
 	FailureMessage string
-	Iterations     uint64
-	ToolCalls      int
-	OutputBytes    int64
 }
 type AgentView struct {
 	ID           string

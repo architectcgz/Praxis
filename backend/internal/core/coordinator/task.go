@@ -63,8 +63,8 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 		}
 	}
 	result := SubmitResult{Task: task}
-	if prior, err := binding.session.FindRunByTask(ctx, identity.AgentID(input.SessionID), task.ID); err == nil {
-		entry, err := binding.session.Entry(ctx, prior.InputEntryID)
+	if inputID, err := binding.session.FindTaskInputID(ctx, task.ID); err == nil {
+		entry, err := binding.session.Entry(ctx, inputID)
 		if err != nil {
 			return SubmitResult{}, nil, err
 		}
@@ -152,7 +152,7 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 	s.loop.Emitter.Emit(notification)
 	if !pause {
 		s.mu.Lock()
-		active := s.runs[runKey{identity.AgentID(id)}]
+		active := binding.active
 		s.mu.Unlock()
 		// 显式恢复可以等待已取消的旧执行收尾，不能让恢复意图丢在占用窗口里。
 		if active != nil && active.ctx.Err() != nil {

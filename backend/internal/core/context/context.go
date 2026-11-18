@@ -14,9 +14,9 @@ import (
 // ModelContext 是本轮模型输入的只读引用视图，与 Session 共享 Entry 对象及内部载荷。
 // 请求可以选择不同的条目列表，但不复制、改写或重排已接纳的历史。
 type ModelContext struct {
-	SummaryInput []*sessionentry.ContextEntry `json:"-"`
+	SummaryInput []*sessionentry.Entry `json:"-"`
 	SystemPrompt string
-	Entries      []*sessionentry.ContextEntry
+	Entries      []*sessionentry.Entry
 }
 
 // Digest 返回当前完整模型上下文的内容摘要。
@@ -30,12 +30,12 @@ func (c ModelContext) Digest() (string, error) {
 }
 
 // ModelContextFromEntries 使用已经按事实语义选中的原文，摘要置前；摘要输入只包含最近摘要及其后的新增记录。
-func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.ContextEntry) ModelContext {
+func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.Entry) ModelContext {
 	selected := entries
 	summaryInput := entries
 	for i := len(entries) - 1; i >= 0; i-- {
 		if entries[i].IsSummary() {
-			selected = make([]*sessionentry.ContextEntry, 0, len(entries))
+			selected = make([]*sessionentry.Entry, 0, len(entries))
 			selected = append(selected, entries[i])
 			selected = append(selected, entries[:i]...)
 			selected = append(selected, entries[i+1:]...)
@@ -51,8 +51,8 @@ func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.Contex
 }
 
 // ModelEntries 保持 Session 提供的顺序，只排除不参与模型对话的执行事实。
-func ModelEntries(entries []*sessionentry.ContextEntry) []*sessionentry.ContextEntry {
-	selected := make([]*sessionentry.ContextEntry, 0, len(entries))
+func ModelEntries(entries []*sessionentry.Entry) []*sessionentry.Entry {
+	selected := make([]*sessionentry.Entry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Response != nil && entry.Response.Error != "" || entry.IsRun() {
 			continue

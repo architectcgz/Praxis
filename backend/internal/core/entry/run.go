@@ -2,19 +2,11 @@ package entry
 
 import (
 	agentmodel "praxis/internal/core/agent"
-	"praxis/internal/core/entry/role"
-	modelapi "praxis/internal/core/model"
 	modelusage "praxis/internal/core/model/usage"
+	"praxis/internal/dto"
 	"praxis/internal/identity"
 	"time"
 )
-
-// RunConfig 持有所选的只读会话配置，模型能力列表共享底层数据。
-type RunConfig struct {
-	AgentDefinitionID identity.AgentDefinitionID
-	SystemPrompt      string
-	Model             modelapi.Config
-}
 
 // TurnRecord 表达一轮 ReAct 迭代，请求尝试及审核不单独创建轮次。
 type TurnRecord struct {
@@ -64,7 +56,7 @@ type RunResult struct {
 	FinalStopReason  string            `json:"finalStopReason,omitempty"`
 }
 
-func (e ContextEntry) IsRun() bool { return e.ExecutionResult() != nil }
+func (e Entry) IsRun() bool { return e.ExecutionResult() != nil }
 
 type RunStatus string
 
@@ -84,119 +76,9 @@ const (
 	OutcomeInterrupted RunOutcome = "interrupted"
 )
 
-// RunProgress 记录本次执行累计；结束时将消息统计与用量一并固化。
-type RunProgress struct {
-	Usage            modelusage.Totals
-	Iterations       uint64
-	ModelRequests    uint64
-	ModelOutputBytes int64
-	OutputBytes      int64
-	ToolCalls        int
-	FinalStopReason  string
-	FinalAssistantID string
-}
-
-// RunRecord 保存一次执行的身份、配置、状态和进度，不持有运行时资源。
-type RunRecord struct {
-	Progress       RunProgress
-	CurrentTurn    TurnRecord
-	ID             identity.RunID
-	SessionID      identity.SessionID
-	AgentID        identity.AgentID
-	AgentName      string
-	ParentRunID    identity.RunID
-	ParentCallID   string
-	SourceTaskID   identity.TaskID
-	Status         RunStatus
-	InputEntryID   string
-	Config         RunConfig
-	CreatedAt      time.Time
-	StartedAt      time.Time
-	EndedAt        time.Time
-	Outcome        RunOutcome
-	FailureCode    RunFailureCode
-	FailureMessage string
-}
-
-// NewRunRecord 创建已准入的执行记录；模型上下文由 Loop 从初始历史构建。
-func NewRunRecord(
-	id identity.RunID,
-	sessionID identity.SessionID,
-	agentID identity.AgentID,
-	taskID identity.TaskID,
-	inputMessageID string,
-	config RunConfig,
-	at time.Time,
-) RunRecord {
-	return RunRecord{
-		ID:           id,
-		SessionID:    sessionID,
-		AgentID:      agentID,
-		SourceTaskID: taskID,
-		Status:       RunStarting,
-		InputEntryID: inputMessageID,
-		Config:       config,
-		CreatedAt:    at.UTC(),
-	}
-}
-
-func (e RunRecord) Active() bool {
-	return e.Status == RunStarting || e.Status == RunRunning || e.Status == RunEnding
-}
-
-// AgentState 从执行事实投影展示状态，不为历史记录创建 Agent 实例。
-func (e RunRecord) AgentState() agentmodel.AgentState {
-	return e.Snapshot().AgentState()
-}
-
-// Start 记录首次启动状态和时间；调用方负责确认执行尚未启动。
-func (e *RunRecord) Start(at time.Time) {
-	e.Status = RunRunning
-	e.StartedAt = at.UTC()
-}
-
-// AcceptEntry 只接收首次接纳的所属条目；去重由 Run 的条目接纳入口完成。
-func (progress *RunProgress) AcceptEntry(entry *ContextEntry) {
-	if entry.Role == role.Assistant {
-		progress.FinalAssistantID, progress.FinalStopReason = "", ""
-		if entry.Response != nil && (entry.Response.StopReason == "completed" || entry.Response.StopReason == "stop_sequence") {
-			progress.FinalAssistantID, progress.FinalStopReason = entry.ID, entry.Response.StopReason
-		}
-	}
-	for _, block := range entry.Content {
-		switch value := block.(type) {
-		case ToolCallBlock:
-			progress.ToolCalls++
-			progress.FinalAssistantID, progress.FinalStopReason = "", ""
-		case ToolResultBlock:
-			progress.OutputBytes += int64(len(value.Text))
-		}
-	}
-}
-
-// RunSnapshot 是初始化与事件共用的执行展示摘要，不携带配置、内部进度或运行资源。
-type RunSnapshot struct {
-	ID             identity.RunID
-	Status         RunStatus
-	Outcome        RunOutcome
-	StartedAt      time.Time
-	EndedAt        time.Time
-	FailureCode    RunFailureCode
-	FailureMessage string
-	Iterations     uint64
-	ToolCalls      int
-	OutputBytes    int64
-}
-
-func (r RunSnapshot) Active() bool {
-	return r.Status == RunStarting || r.Status == RunRunning || r.Status == RunEnding
-}
-
-func (r RunSnapshot) AgentState() agentmodel.AgentState {
-	if r.Active() {
-		return agentmodel.AgentExecuting
-	}
-	switch r.Outcome {
+// AgentState 从结束结果提取展示状态，不把失败原因作为运行阶段。
+func (r RunResult) AgentState() agentmodel.AgentState {
+	switch RunOutcome(r.Outcome) {
 	case OutcomeInterrupted:
 		return agentmodel.AgentInterrupted
 	case OutcomeFailed:
@@ -206,49 +88,20 @@ func (r RunSnapshot) AgentState() agentmodel.AgentState {
 	}
 }
 
-func (r RunRecord) Snapshot() RunSnapshot {
-	return RunSnapshot{
-		ID:             r.ID,
-		Status:         r.Status,
-		Outcome:        r.Outcome,
-		StartedAt:      r.StartedAt,
-		EndedAt:        r.EndedAt,
-		FailureCode:    r.FailureCode,
-		FailureMessage: r.FailureMessage,
-		Iterations:     r.Progress.Iterations,
-		ToolCalls:      r.Progress.ToolCalls,
-		OutputBytes:    r.Progress.OutputBytes,
-	}
-}
-
-// HistorySummary 是可重建的执行目录，不包含冻结配置或历史正文。
-// 完整 RunRecord 仅在执行和必要恢复中读取，展示与累计使用该投影。
-type HistorySummary struct {
-	RunSnapshot
-	SessionID     identity.SessionID
-	AgentID       identity.AgentID
-	AgentName     string
-	DefinitionID  identity.AgentDefinitionID
-	ParentRunID   identity.RunID
-	SourceTaskID  identity.TaskID
-	InputEntryID  string
-	CreatedAt     time.Time
-	Usage         modelusage.Totals
-	ModelRequests uint64
-}
-
-func (r RunRecord) HistorySummary() HistorySummary {
-	return HistorySummary{
-		RunSnapshot:   r.Snapshot(),
-		SessionID:     r.SessionID,
-		AgentID:       r.AgentID,
-		AgentName:     r.AgentName,
-		DefinitionID:  r.Config.AgentDefinitionID,
-		ParentRunID:   r.ParentRunID,
-		SourceTaskID:  r.SourceTaskID,
-		InputEntryID:  r.InputEntryID,
-		CreatedAt:     r.CreatedAt,
-		Usage:         r.Progress.Usage,
-		ModelRequests: r.Progress.ModelRequests,
+// Snapshot 直接构造查询与通知共用的 DTO，不重建运行时对象。
+func (r RunResult) Snapshot(id identity.RunID) dto.RunSummary {
+	return dto.RunSummary{
+		ID:          id.String(),
+		Status:      string(RunEnded),
+		StartedAt:   r.StartedAt,
+		Iterations:  r.Iterations,
+		ToolCalls:   r.ToolCalls,
+		OutputBytes: r.OutputBytes,
+		Result: &dto.RunResult{
+			Outcome:        r.Outcome,
+			EndedAt:        r.EndedAt,
+			FailureCode:    r.FailureCode,
+			FailureMessage: r.FailureMessage,
+		},
 	}
 }

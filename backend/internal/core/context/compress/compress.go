@@ -22,7 +22,7 @@ const (
 
 // Compress 在模型上下文构建完成后评估容量，只压缩较早历史。
 // 当前输入与最近完整工具交互保留原文；摘要提交前不修改已接纳的 Entry。
-func Compress(ctx context.Context, value appcontext.ModelContext, input *sessionentry.ContextEntry, options Options, requestSummary RequestSummaryFunc) (appcontext.ModelContext, bool, error) {
+func Compress(ctx context.Context, value appcontext.ModelContext, input *sessionentry.Entry, options Options, requestSummary RequestSummaryFunc) (appcontext.ModelContext, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
@@ -51,7 +51,7 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 	}
 	compressed := appcontext.ModelContext{
 		SystemPrompt: value.SystemPrompt,
-		Entries: []*sessionentry.ContextEntry{{
+		Entries: []*sessionentry.Entry{{
 			Compression: &sessionentry.Compression{},
 			Role:        role.User,
 			AuthorKind:  sessionentry.AuthorSystem,
@@ -108,7 +108,7 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 }
 
 // splitHistory 接收已配对工具回执的模型上下文，最近一条工具声明及其全部回执不可拆开。
-func splitHistory(entries []*sessionentry.ContextEntry, input *sessionentry.ContextEntry) (history, retained []*sessionentry.ContextEntry) {
+func splitHistory(entries []*sessionentry.Entry, input *sessionentry.Entry) (history, retained []*sessionentry.Entry) {
 	type key struct{ run, call string }
 	calls := make(map[key]bool)
 	for i := len(entries) - 1; i >= 0; i-- {

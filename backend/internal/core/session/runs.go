@@ -5,133 +5,122 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/dto"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"slices"
-	"time"
 )
 
-func (s *Session) GetRun(ctx context.Context, id identity.RunID) (sessionentry.RunRecord, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	return s.run(ctx, id)
-}
-
-func (s *Session) run(ctx context.Context, id identity.RunID) (sessionentry.RunRecord, error) {
-	if err := s.syncHistory(ctx); err != nil {
-		return sessionentry.RunRecord{}, err
-	}
-	s.mu.RLock()
-	pending, found := s.data.RunStates[id]
-	s.mu.RUnlock()
-	if found {
-		return pending, nil
-	}
-	return s.log.Run(ctx, id)
-}
-
-func (s *Session) FindRunByTask(ctx context.Context, agentID identity.AgentID, taskID identity.TaskID) (sessionentry.RunRecord, error) {
-	s.commitMu.Lock()
-	defer s.commitMu.Unlock()
-	s.mu.RLock()
-	var id identity.RunID
-	for _, value := range s.data.Runs {
-		if value.AgentID == agentID && value.SourceTaskID == taskID {
-			id = value.ID
-			break
+// FindTaskInputID 只定位已接纳任务的输入，不重建执行对象。
+func (s *Session) FindTaskInputID(ctx context.Context, taskID identity.TaskID) (string, error) {
+	var inputID string
+	err := s.walkHistory(ctx, s.data.MainAgentID(), func(value *sessionentry.Entry) bool {
+		prepared, ok := value.Payload.(sessionentry.RunPrepared)
+		if ok && prepared.SourceTaskID == taskID {
+			inputID = prepared.InputEntryID
+			return false
 		}
-	}
-	s.mu.RUnlock()
-	if id == "" {
-		return sessionentry.RunRecord{}, errorcode.ErrNotFound
-	}
-	return s.run(ctx, id)
-}
-
-func runOrder(a, b sessionentry.HistorySummary) int {
-	return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
-}
-
-func (s *Session) ListSessionRuns(ctx context.Context) ([]sessionentry.HistorySummary, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.mu.RLock()
-	values := slices.Clone(s.data.Runs)
-	s.mu.RUnlock()
-	return sorted(values, func(a, b sessionentry.HistorySummary) int { return -runOrder(a, b) }), nil
-}
-
-// AgentView 只携带展示信息，不借用活跃 Run 或展开历史正文。
-type AgentView struct {
-	ID           identity.AgentID
-	SessionID    identity.SessionID
-	DefinitionID identity.AgentDefinitionID
-	Kind         agentmodel.AgentKind
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Name         string                    `json:"name"`
-	State        agentmodel.AgentState     `json:"state"`
-	CurrentRunID identity.RunID            `json:"currentRunId"`
-	CurrentRun   *sessionentry.RunSnapshot `json:"currentRun"`
-	LatestRun    *sessionentry.RunSnapshot `json:"latestRun"`
-}
-
-func (s *Session) Agents(ctx context.Context, info SessionInfo, definition agentmodel.AgentDefinition, limit int) ([]AgentView, error) {
-	runs, err := s.ListSessionRuns(ctx)
+		return true
+	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	views := []AgentView{{
-		ID:           info.MainAgentID(),
-		SessionID:    info.ID,
-		DefinitionID: agentmodel.DefinitionPrimary,
-		Kind:         agentmodel.KindMain,
-		CreatedAt:    info.CreatedAt,
-		UpdatedAt:    info.UpdatedAt,
-		Name:         definition.Name,
-		State:        agentmodel.AgentIdle,
-	}}
-	indexes := map[identity.AgentID]int{info.MainAgentID(): 0}
-	// 执行记录按新到旧排列，当前执行与最近结束结果分别保留。
-	for _, record := range runs {
-		index, found := indexes[record.AgentID]
-		if !found {
-			index = len(views)
-			indexes[record.AgentID] = index
-			views = append(views, AgentView{
-				ID:           record.AgentID,
-				SessionID:    info.ID,
-				DefinitionID: record.DefinitionID,
-				Kind:         agentmodel.KindSubagent,
-				CreatedAt:    record.CreatedAt,
-				Name:         record.AgentName,
-			})
-		}
-		view := &views[index]
-		if view.CurrentRun == nil && view.LatestRun == nil {
-			view.State = record.AgentState()
-			view.UpdatedAt = record.CreatedAt
-			if !record.StartedAt.IsZero() {
-				view.UpdatedAt = record.StartedAt
-			}
-			if !record.EndedAt.IsZero() {
-				view.UpdatedAt = record.EndedAt
-			}
-		}
-		if record.Active() && view.CurrentRun == nil {
-			view.CurrentRunID = record.ID
-			view.CurrentRun = new(record.RunSnapshot)
-		}
-		if record.Status == sessionentry.RunEnded && view.LatestRun == nil {
-			view.LatestRun = new(record.RunSnapshot)
-		}
+	if inputID == "" {
+		return "", errorcode.ErrNotFound
 	}
-	slices.SortFunc(views[1:], func(a, b AgentView) int {
+	return inputID, nil
+}
+
+func (s *Session) Agents(ctx context.Context, info SessionInfo, definition agentmodel.AgentDefinition, limit int) ([]dto.AgentView, error) {
+	views := make([]dto.AgentView, 0)
+	for _, id := range s.agentIDs() {
+		view := dto.AgentView{
+			ID:        id.String(),
+			SessionID: info.ID.String(),
+			Kind:      string(agentmodel.KindSubagent),
+			State:     string(agentmodel.AgentIdle),
+		}
+		if id == info.MainAgentID() {
+			view.Kind = string(agentmodel.KindMain)
+			view.DefinitionID = definition.ID.String()
+			view.Name = definition.Name
+			view.CreatedAt = info.CreatedAt
+			view.UpdatedAt = info.UpdatedAt
+		}
+		if err := s.readAgentView(ctx, &view); err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+	slices.SortFunc(views, func(a, b dto.AgentView) int {
+		if a.Kind != b.Kind {
+			if a.Kind == string(agentmodel.KindMain) {
+				return -1
+			}
+			return 1
+		}
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	})
-	if limit > 0 {
-		views = views[:min(limit, len(views))]
-	}
-	return views, nil
+	return capped(views, limit), nil
+}
+
+// readAgentView 按需读取最近执行的展示事实；不在 Session 中缓存第二套执行状态。
+func (s *Session) readAgentView(ctx context.Context, view *dto.AgentView) error {
+	var latestID string
+	prepared := false
+	return s.walkHistory(ctx, identity.AgentID(view.ID), func(value *sessionentry.Entry) bool {
+		if latestID == "" {
+			latestID = value.RunID
+			view.UpdatedAt = value.CreatedAt
+			if !value.IsRun() {
+				view.CurrentRunID = latestID
+				view.CurrentRun = &dto.RunSummary{
+					ID:     view.CurrentRunID,
+					Status: string(sessionentry.RunStarting),
+				}
+				view.State = string(agentmodel.AgentExecuting)
+			}
+		}
+		if result := value.ExecutionResult(); result != nil && view.LatestRun == nil {
+			view.LatestRun = new(result.Snapshot(identity.RunID(value.RunID)))
+			if view.CurrentRun == nil {
+				view.State = string(result.AgentState())
+			}
+		}
+		if value.RunID == latestID {
+			if metadata, ok := value.Payload.(sessionentry.RunPrepared); ok {
+				prepared = true
+				if view.Kind == string(agentmodel.KindSubagent) {
+					view.Name = metadata.AgentName
+					view.DefinitionID = metadata.DefinitionID.String()
+					view.CreatedAt = value.CreatedAt
+				}
+			}
+			if current := view.CurrentRun; current != nil {
+				switch fact := value.Payload.(type) {
+				case sessionentry.RunEndingStarted:
+					current.Status = string(sessionentry.RunEnding)
+				case sessionentry.RunStarted:
+					current.StartedAt = fact.At
+					if current.Status == string(sessionentry.RunStarting) {
+						current.Status = string(sessionentry.RunRunning)
+					}
+				case sessionentry.TurnStarted:
+					current.Iterations++
+				}
+				if request, _ := value.RequestFact(); request != nil && request.Status != sessionentry.RequestRunning {
+					current.OutputBytes += int64(request.OutputBytes)
+				}
+				for _, block := range value.Content {
+					switch block := block.(type) {
+					case sessionentry.ToolCallBlock:
+						current.ToolCalls++
+					case sessionentry.ToolResultBlock:
+						current.OutputBytes += int64(len(block.Text))
+					}
+				}
+			}
+		}
+		return !prepared || view.LatestRun == nil
+	})
 }
