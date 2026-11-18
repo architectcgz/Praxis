@@ -137,7 +137,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		Sessions:       a.sessions,
 		Commands:       a.coordinator,
 		Emitter:        emitter,
-		Usages:         a.coordinator,
 		SessionLogPath: a.storage.Sessions.SessionLogPath,
 	}
 	a.logger.Infof("application open completed ready=true")

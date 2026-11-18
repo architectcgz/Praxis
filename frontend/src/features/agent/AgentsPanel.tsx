@@ -10,18 +10,18 @@ const stateLabels: Record<string, string> = {
 function agentStatusLabel(agent: AgentView): string {
     if (agent.state !== 'idle') return stateLabels[agent.state] || stateLabels.unknown
     if (agent.Kind === 'subagent' && agent.latestRun?.Status === 'ended') {
-        if (agent.latestRun.Outcome === 'yielded') return '已交付'
-        if (agent.latestRun.Outcome === 'completed') return '已完成'
-        if (agent.latestRun.Outcome === 'failed') return '失败'
-        if (agent.latestRun.Outcome === 'interrupted') return '已中断'
+        if (agent.latestRun.Result?.Outcome === 'yielded') return '已交付'
+        if (agent.latestRun.Result?.Outcome === 'completed') return '已完成'
+        if (agent.latestRun.Result?.Outcome === 'failed') return '失败'
+        if (agent.latestRun.Result?.Outcome === 'interrupted') return '已中断'
     }
     return stateLabels.idle
 }
 
 function agentToneState(agent: AgentView): string {
     if (agent.state !== 'idle') return agent.state
-    if (agent.Kind === 'subagent' && agent.latestRun?.Outcome === 'failed') return 'failed'
-    if (agent.Kind === 'subagent' && agent.latestRun?.Outcome === 'interrupted') return 'interrupted'
+    if (agent.Kind === 'subagent' && agent.latestRun?.Result?.Outcome === 'failed') return 'failed'
+    if (agent.Kind === 'subagent' && agent.latestRun?.Result?.Outcome === 'interrupted') return 'interrupted'
     return 'idle'
 }
 
@@ -56,7 +56,7 @@ export function AgentsPanel({ loading, session, selectedAgentID, onSelectAgent }
                     <span className="agent-row-metrics">
                         <span title="最近执行的模型迭代数"><Check size={11} aria-hidden="true" />{run?.Iterations ?? 0}</span>
                         <span title="最近执行的工具调用数"><Wrench size={11} aria-hidden="true" />{run?.ToolCalls ?? 0}</span>
-                        {run?.Outcome === 'failed' && <span className="agent-metric-danger" title="最近执行失败"><CircleAlert size={11} aria-hidden="true" /></span>}
+                        {run?.Result?.Outcome === 'failed' && <span className="agent-metric-danger" title="最近执行失败"><CircleAlert size={11} aria-hidden="true" /></span>}
                     </span>
                 </span>
                 <span className="state-text st">{state}</span>

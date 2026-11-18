@@ -78,9 +78,10 @@ function StructuredObject({ record }: { record: Record<string, unknown> }) {
 function renderResultValue(key: string, value: unknown) {
     if (key === 'run' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
         const run = value as Record<string, unknown>
+        const outcome = run.Result && typeof run.Result === 'object' && 'Outcome' in run.Result ? run.Result.Outcome : run.Outcome
         const parts = [
             typeof run.Status === 'string' ? run.Status : '',
-            typeof run.Outcome === 'string' && run.Outcome ? run.Outcome : '',
+            typeof outcome === 'string' ? outcome : '',
             typeof run.ID === 'string' ? run.ID : '',
         ].filter(Boolean)
         if (parts.length > 0) return <code>{parts.join(' · ')}</code>

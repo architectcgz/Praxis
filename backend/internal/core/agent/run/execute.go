@@ -44,25 +44,25 @@ func PrepareSubagent(ctx context.Context, deps Dependencies, input SubagentInput
 
 func prepare(ctx context.Context, deps Dependencies, input taskmodel.Task, agentID identity.AgentID, parentID identity.RunID, parentCall string, definition agentmodel.AgentDefinition, model modelapi.Config, owner SessionContext) (*Run, error) {
 	run := &Run{
-		main:          parentID == "",
-		Session:       owner,
-		deps:          deps,
-		id:            identity.RunID(deps.IDs.New("run")),
-		sessionID:     input.SessionID,
-		agentID:       agentID,
-		definitionID:  definition.ID,
-		systemPrompt:  definition.Instructions,
-		model:         model,
-		parentRunID:   parentID,
-		parentCallID:  parentCall,
-		sourceTaskID:  input.ID,
-		status:        sessionentry.RunStarting,
-		inputEntryID:  "input:" + input.ID.String(),
-		inputText:     input.Prompt,
-		toolUpdates:   make(chan toolUpdate),
-		createdAt:     deps.Clock.Now().UTC(),
-		entryIndexes:  make(map[string]int),
-		appendFact:    owner.BindHistory(agentID),
+		main:         parentID == "",
+		Session:      owner,
+		deps:         deps,
+		id:           identity.RunID(deps.IDs.New("run")),
+		sessionID:    input.SessionID,
+		agentID:      agentID,
+		definitionID: definition.ID,
+		systemPrompt: definition.Instructions,
+		model:        model,
+		parentRunID:  parentID,
+		parentCallID: parentCall,
+		sourceTaskID: input.ID,
+		status:       sessionentry.RunStarting,
+		inputEntryID: "input:" + input.ID.String(),
+		inputText:    input.Prompt,
+		toolUpdates:  make(chan toolUpdate),
+		createdAt:    deps.Clock.Now().UTC(),
+		entryIndexes: make(map[string]int),
+		appendFact:   owner.BindHistory(agentID),
 	}
 	run.initCollaboration()
 	if _, _, err := run.AppendEntry(ctx, sessionentry.Entry{
@@ -142,6 +142,11 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 			Payload: sessionentry.RunEndingStarted{},
 		}); saveErr != nil {
 			err = errors.Join(err, saveErr)
+		} else {
+			r.deps.Emitter.Emit(coreevent.Event{
+				Source:  r.EventSource(""),
+				Payload: coreevent.RunEnding{Run: r.Snapshot()},
+			})
 		}
 	}
 	r.finishChildren()

@@ -19,8 +19,8 @@ import (
 // HistoryStore 保存和读取 Agent 的完整 History，不解释 Entry 的业务语义。
 type HistoryStore interface {
 	CreateSubagent(context.Context, identity.AgentID) error
-	Append(context.Context, identity.AgentID, sessionentry.Entry) error
-	CommitTerminal(context.Context, identity.AgentID, sessionentry.Entry) error
+	Append(context.Context, identity.AgentID, *sessionentry.Entry) error
+	CommitTerminal(context.Context, identity.AgentID, *sessionentry.Entry) error
 	Sync(context.Context, identity.AgentID) error
 	ReadBackward(context.Context, identity.AgentID, *int64, int) (HistoryPage, error)
 	Close(context.Context) error
@@ -138,18 +138,6 @@ func (s *Session) RestoreAgentContext(agentID identity.AgentID, entries []*sessi
 	}
 	s.data.AgentContexts[agentID] = AgentContext{Entries: slices.Clone(entries)}
 	return nil
-}
-
-func capped[T any](values []T, limit int) []T {
-	if limit <= 0 {
-		return values
-	}
-	return values[:min(len(values), limit)]
-}
-
-func sorted[T any](values []T, compare func(T, T) int) []T {
-	slices.SortFunc(values, compare)
-	return values
 }
 
 func (s *Session) agentIDs() []identity.AgentID {

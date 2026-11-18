@@ -25,16 +25,16 @@ type ProjectSummary struct {
 }
 
 type SessionSnapshot struct {
-	QueuePaused bool                   `json:"queuePaused"`
-	ID          string                 `json:"id"`
-	ProjectID   string                 `json:"projectId"`
-	Title       string                 `json:"title"`
-	CreatedAt   time.Time              `json:"createdAt"`
-	UpdatedAt   time.Time              `json:"updatedAt"`
-	Agents      []AgentView            `json:"agents"`
-	Tasks       []QueuedTask           `json:"tasks"`
-	Entries     map[string]HistoryPage `json:"entries"`
-	Usage       SessionUsageSummary    `json:"usage"`
+	QueuePaused bool                `json:"queuePaused"`
+	ID          string              `json:"id"`
+	ProjectID   string              `json:"projectId"`
+	Title       string              `json:"title"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	UpdatedAt   time.Time           `json:"updatedAt"`
+	Agents      []AgentView         `json:"agents"`
+	Tasks       []QueuedTask        `json:"tasks"`
+	History     HistoryPage         `json:"history"`
+	Usage       SessionUsageSummary `json:"usage"`
 }
 
 type SessionSummary struct {

@@ -142,20 +142,17 @@ func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.DecodeUsage(raw, &reported, "openai_chat") {
 		return nil
 	}
-	var usage *modelusage.Usage
-	if reported.PromptTokens != nil {
-		usage = &modelusage.Usage{
-			InputTokens:  *reported.PromptTokens,
-			OutputTokens: reported.CompletionTokens,
-		}
-		if reported.PromptTokensDetails != nil {
-			usage.CacheReadInputTokens = reported.PromptTokensDetails.CachedTokens
-		}
+	usage := modelusage.Usage{
+		InputTokens:  reported.PromptTokens,
+		OutputTokens: reported.CompletionTokens,
 	}
-	if usage == nil {
+	if reported.PromptTokensDetails != nil {
+		usage.CacheReadInputTokens = reported.PromptTokensDetails.CachedTokens
+	}
+	if !usage.Reported() {
 		return nil
 	}
-	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage})
+	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: &usage})
 }
 
 // mapStopReason 将 finish_reason 映射为统一结束语义；空值或未知值返回 StopUnknown。

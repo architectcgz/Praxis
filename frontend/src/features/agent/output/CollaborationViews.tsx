@@ -1,5 +1,5 @@
 import { Bot, ChevronDown, ExternalLink, GitBranch } from 'lucide-react'
-import type { Entry, AgentView } from '../../../api'
+import type { HistoryMessage, AgentView } from '../../../api'
 import { MessageMarkdown } from './MarkdownViews'
 import { OutputStatus } from './OutputStatus'
 import type { ToolStatus } from './toolPresentation'
@@ -8,7 +8,7 @@ import { RunDuration } from '../../timing/DurationLabel'
 
 type CollaborationViewsProps = {
     agents: AgentView[]
-    agentEntries: Record<string, Entry[]>
+    agentEntries: Record<string, HistoryMessage[]>
     entriesErrors: Record<string, string>
     streamingOutputs: Record<string, StreamingOutput>
     onSelectAgent: (id: string) => void
@@ -89,12 +89,12 @@ export function CollaborationViews({ agents, agentEntries, entriesErrors, stream
     )
 }
 
-function subagentHandoffView(agent: AgentView, entries?: Entry[], streaming?: StreamingOutput, entriesError?: string) {
+function subagentHandoffView(agent: AgentView, entries?: HistoryMessage[], streaming?: StreamingOutput, entriesError?: string) {
     const run = agent.currentRun || agent.latestRun
     const live = streaming?.runId === agent.currentRunId ? streaming : undefined
     const runId = live?.runId || run?.ID || ''
     const messages = (entries || []).filter((item) => !runId || item.runId === runId)
-    const text = (item?: Entry) => item?.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') || ''
+    const text = (item?: HistoryMessage) => item?.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') || ''
     const input = messages.find((item) => item.role === 'user')
     const reply = messages.findLast((item) => item.role === 'assistant' && text(item))
     const result = live?.turns
@@ -112,18 +112,18 @@ function subagentHandoffView(agent: AgentView, entries?: Entry[], streaming?: St
     } else if (agent.state === 'executing' || live) {
         status = 'running'
         label = '进行中'
-    } else if (agent.state === 'failed' || run?.Outcome === 'failed') {
+    } else if (agent.state === 'failed' || run?.Result?.Outcome === 'failed') {
         status = 'failed'
         label = '失败'
-    } else if (run?.Outcome === 'interrupted') {
+    } else if (run?.Result?.Outcome === 'interrupted') {
         status = 'cancelled'
         label = '已中断'
     } else if (agent.state === 'waiting') {
         status = 'blocked'
         label = '等待输入'
-    } else if (run?.Status === 'ended' && (run.Outcome === 'completed' || run.Outcome === 'yielded')) {
+    } else if (run?.Status === 'ended' && (run.Result?.Outcome === 'completed' || run.Result?.Outcome === 'yielded')) {
         status = 'completed'
         label = '已完成'
     }
-    return { agent, runId, run, task: entries ? text(input) : '选择该 Agent 后加载任务历史', result, status, label, error: entriesError ? `条目加载失败：${entriesError}` : live?.error || run?.FailureCode || '' }
+    return { agent, runId, run, task: entries ? text(input) : '选择该 Agent 后加载任务历史', result, status, label, error: entriesError ? `条目加载失败：${entriesError}` : live?.error || run?.Result?.FailureCode || '' }
 }

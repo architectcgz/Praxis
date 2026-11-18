@@ -14,8 +14,8 @@ type entryLog struct {
 
 var _ sessionmodel.HistoryStore = (*entryLog)(nil)
 
-func (l *entryLog) Append(ctx context.Context, agentID identity.AgentID, value sessionentry.Entry) error {
-	data, err := encodeEntry(agentID, value)
+func (l *entryLog) Append(ctx context.Context, agentID identity.AgentID, value *sessionentry.Entry) error {
+	data, err := encodeEntry(agentID, *value)
 	if err != nil {
 		return err
 	}
@@ -23,12 +23,15 @@ func (l *entryLog) Append(ctx context.Context, agentID identity.AgentID, value s
 	if err != nil {
 		return err
 	}
-	_, err = writer.Append(ctx, data)
+	position, err := writer.Append(ctx, data)
+	if err == nil {
+		value.HistoryEnd = position.Offset + position.Length
+	}
 	return err
 }
 
-func (l *entryLog) CommitTerminal(ctx context.Context, agentID identity.AgentID, value sessionentry.Entry) error {
-	data, err := encodeEntry(agentID, value)
+func (l *entryLog) CommitTerminal(ctx context.Context, agentID identity.AgentID, value *sessionentry.Entry) error {
+	data, err := encodeEntry(agentID, *value)
 	if err != nil {
 		return err
 	}
@@ -36,7 +39,10 @@ func (l *entryLog) CommitTerminal(ctx context.Context, agentID identity.AgentID,
 	if err != nil {
 		return err
 	}
-	_, err = writer.CommitTerminal(ctx, data)
+	position, err := writer.CommitTerminal(ctx, data)
+	if err == nil {
+		value.HistoryEnd = position.Offset + position.Length
+	}
 	return err
 }
 
@@ -62,6 +68,7 @@ func (l *entryLog) ReadBackward(ctx context.Context, agentID identity.AgentID, c
 		if stored.AgentID != agentID {
 			return sessionmodel.HistoryPage{}, fmt.Errorf("history ownership mismatch for agent %s", agentID)
 		}
+		stored.Entry.HistoryEnd = record.Offset + record.Length
 		entries = append(entries, stored.Entry)
 	}
 	return sessionmodel.HistoryPage{

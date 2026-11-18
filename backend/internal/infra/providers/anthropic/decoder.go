@@ -299,23 +299,26 @@ func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit stream
 	return &next, nil
 }
 func normalizeMessageUsage(reported *tokenCounts) *modelusage.Usage {
-	if reported == nil || reported.InputTokens == nil {
-		return nil
-	}
-	total := *reported.InputTokens
-	for _, count := range []*int64{reported.CacheReadInputTokens, reported.CacheCreationInputTokens} {
-		if count != nil {
-			total += *count
+	var input *int64
+	if reported.InputTokens != nil {
+		total := *reported.InputTokens
+		for _, count := range []*int64{reported.CacheReadInputTokens, reported.CacheCreationInputTokens} {
+			if count != nil {
+				total += *count
+			}
 		}
+		input = &total
 	}
-	// 协议计数按只读值共享；缓存计数计入统一输入分母。
-	usage := &modelusage.Usage{
-		InputTokens:              total,
+	usage := modelusage.Usage{
+		InputTokens:              input,
 		OutputTokens:             reported.OutputTokens,
 		CacheReadInputTokens:     reported.CacheReadInputTokens,
 		CacheCreationInputTokens: reported.CacheCreationInputTokens,
 	}
-	return usage
+	if !usage.Reported() {
+		return nil
+	}
+	return &usage
 }
 
 // mapStopReason 保留截断、拒绝和自定义停止序列的独立语义。

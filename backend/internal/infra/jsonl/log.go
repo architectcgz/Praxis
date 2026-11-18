@@ -68,6 +68,7 @@ const (
 )
 
 type command struct {
+	ctx    context.Context
 	kind   commandKind
 	data   []byte
 	cursor *int64
@@ -133,7 +134,7 @@ func (w *Writer) run(file *os.File) {
 			}
 			request.result <- commandResult{position: position, err: err}
 		case readCommand:
-			records, nextCursor, hasMore, err := readBackwardFile(ctx, file, request.cursor, request.limit)
+			records, nextCursor, hasMore, err := readBackwardFile(request.ctx, file, request.cursor, request.limit)
 			request.result <- commandResult{records: records, nextCursor: nextCursor, hasMore: hasMore, err: err}
 		case closeCommand:
 			err := errors.Join(file.Sync(), file.Close())
@@ -190,6 +191,7 @@ func (w *Writer) ReadBackward(ctx context.Context, cursor *int64, limit int) ([]
 		return nil, nil, false, w.closeErr
 	}
 	request := command{
+		ctx:    ctx,
 		kind:   readCommand,
 		cursor: cursor,
 		limit:  limit,
@@ -243,19 +245,6 @@ func (w *Writer) Close(ctx context.Context) error {
 	w.closed = true
 	w.closeErr = result.err
 	return result.err
-}
-
-// ReadBackward 从 exclusive end offset 反向读取最多 limit 条完整记录，并按旧到新返回。
-func ReadBackward(ctx context.Context, path string, cursor *int64, limit int) ([]Record, *int64, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, nil, false, err
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	defer func() { _ = file.Close() }()
-	return readBackwardFile(ctx, file, cursor, limit)
 }
 
 func readBackwardFile(ctx context.Context, file *os.File, cursor *int64, limit int) ([]Record, *int64, bool, error) {

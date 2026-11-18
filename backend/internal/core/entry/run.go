@@ -3,7 +3,6 @@ package entry
 import (
 	agentmodel "praxis/internal/core/agent"
 	modelusage "praxis/internal/core/model/usage"
-	"praxis/internal/dto"
 	"praxis/internal/identity"
 	"time"
 )
@@ -88,19 +87,36 @@ func (r RunResult) AgentState() agentmodel.AgentState {
 	}
 }
 
-// Snapshot 直接构造查询与通知共用的 DTO，不重建运行时对象。
-func (r RunResult) Snapshot(id identity.RunID) dto.RunSummary {
-	return dto.RunSummary{
-		ID:          id.String(),
-		Status:      string(RunEnded),
+// RunSnapshot 是 Run 当前阶段、执行累计及已提交结果的只读快照。
+type RunSnapshot struct {
+	ID          identity.RunID
+	Status      RunStatus
+	StartedAt   time.Time
+	Iterations  uint64
+	ToolCalls   int
+	OutputBytes int64
+	Result      *RunConclusion
+}
+
+type RunConclusion struct {
+	Outcome        RunOutcome
+	EndedAt        time.Time
+	FailureCode    RunFailureCode
+	FailureMessage string
+}
+
+func (r RunResult) Snapshot(id identity.RunID) RunSnapshot {
+	return RunSnapshot{
+		ID:          id,
+		Status:      RunEnded,
 		StartedAt:   r.StartedAt,
 		Iterations:  r.Iterations,
 		ToolCalls:   r.ToolCalls,
 		OutputBytes: r.OutputBytes,
-		Result: &dto.RunResult{
-			Outcome:        r.Outcome,
+		Result: &RunConclusion{
+			Outcome:        RunOutcome(r.Outcome),
 			EndedAt:        r.EndedAt,
-			FailureCode:    r.FailureCode,
+			FailureCode:    RunFailureCode(r.FailureCode),
 			FailureMessage: r.FailureMessage,
 		},
 	}

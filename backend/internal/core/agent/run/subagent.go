@@ -7,7 +7,6 @@ import (
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/tool"
-	"praxis/internal/dto"
 	"praxis/internal/identity"
 	"slices"
 	"sync"
@@ -20,7 +19,7 @@ type Assignment struct {
 }
 
 type SubagentHandle struct {
-	Result  dto.RunSummary
+	Result  sessionentry.RunSnapshot
 	AgentID identity.AgentID
 	Run     *Run
 	Cancel  context.CancelCauseFunc
@@ -29,7 +28,7 @@ type SubagentHandle struct {
 
 type SubagentStatus struct {
 	AgentID identity.AgentID         `json:"agentId"`
-	Run     dto.RunSummary `json:"run"`
+	Run     sessionentry.RunSnapshot `json:"run"`
 }
 
 type instruction struct {
@@ -358,7 +357,7 @@ func (r *Run) WakeSubagentWaiters() {
 }
 
 // CompleteSubagent 在交付和收尾完成后释放子执行正文，只保留状态和必要控制身份。
-func (r *Run) CompleteSubagent(id identity.AgentID, result dto.RunSummary) {
+func (r *Run) CompleteSubagent(id identity.AgentID, result sessionentry.RunSnapshot) {
 	r.collaboration.mu.Lock()
 	defer r.collaboration.mu.Unlock()
 	h := r.collaboration.children[id]
@@ -382,7 +381,7 @@ func (r *Run) ActiveSubagents() int {
 }
 
 // ReceiveSubagentStatus 接收子任务主动交付的不可变状态，不读取子 Run 的可变字段。
-func (r *Run) ReceiveSubagentStatus(id identity.AgentID, snapshot dto.RunSummary) {
+func (r *Run) ReceiveSubagentStatus(id identity.AgentID, snapshot sessionentry.RunSnapshot) {
 	r.collaboration.mu.Lock()
 	defer r.collaboration.mu.Unlock()
 	handle := r.collaboration.children[id]

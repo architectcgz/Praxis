@@ -1,22 +1,13 @@
 package usage
 
-import "praxis/internal/identity"
-
-// Usage 记录一次模型请求的累计 token 用量；InputTokens 包含缓存读取和写入部分。
-// 可选计数为 nil 表示 Provider 未提供该值，不能当作零用量。
+// Usage 记录一次模型请求的已知用量；输入计数包含已知的缓存读取和写入。
 type Usage struct {
-	InputTokens              int64  `json:"inputTokens"`
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
 	OutputTokens             *int64 `json:"outputTokens,omitempty"`
 	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
 	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
-// UsageRecord 是按请求查询的已知用量投影，执行累计值由 Run 保存。
-type UsageRecord struct {
-	SessionID string                  `json:"sessionId"`
-	AgentID   string                  `json:"agentId"`
-	RunID     string                  `json:"runId"`
-	RequestID identity.ModelRequestID `json:"requestId"`
-	TurnID    identity.TurnID         `json:"turnId,omitempty"`
-	Usage     Usage                   `json:"usage"`
+func (u Usage) Reported() bool {
+	return u.InputTokens != nil || u.OutputTokens != nil || u.CacheReadInputTokens != nil || u.CacheCreationInputTokens != nil
 }

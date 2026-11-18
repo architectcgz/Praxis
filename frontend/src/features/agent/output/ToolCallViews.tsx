@@ -1,5 +1,5 @@
 import { Fragment } from 'react'
-import type { AgentEvent, EntryBlock } from '../../../api'
+import type { AgentEvent, MessageBlock } from '../../../api'
 import type { Timing } from '../../../api/timings'
 import { CopyIconButton } from './CopyIconButton'
 import { FileChanges } from './FileChanges'
@@ -32,7 +32,7 @@ export type PairedToolResult = {
     timing?: Timing
 }
 
-export function ToolCallBlock({ block, events, runId, pairedResult }: { block: EntryBlock; events: AgentEvent[]; runId: string; pairedResult?: PairedToolResult }) {
+export function ToolCallBlock({ block, events, runId, pairedResult }: { block: MessageBlock; events: AgentEvent[]; runId: string; pairedResult?: PairedToolResult }) {
     const liveResult = events.findLast((event): event is Extract<AgentEvent, { kind: 'tool_result' }> => event.kind === 'tool_result' && event.data.callId === block.callId)
     const started = events.findLast((event): event is Extract<AgentEvent, { kind: 'tool_started' }> => event.kind === 'tool_started' && event.data.callId === block.callId)
     const resultText = liveResult ? liveResult.data.result : pairedResult?.text
@@ -47,7 +47,7 @@ export function ToolCallBlock({ block, events, runId, pairedResult }: { block: E
     />
 }
 
-export function ToolResultBlock({ block, runId, timing }: { block: EntryBlock; runId: string; timing?: Timing }) {
+export function ToolResultBlock({ block, runId, timing }: { block: MessageBlock; runId: string; timing?: Timing }) {
     return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} timing={timing} pendingStatus="unknown" runId={runId} callId={block.callId} />
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	coreevent "praxis/internal/core/event"
-	modelusage "praxis/internal/core/model/usage"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -21,6 +20,7 @@ type SessionView struct {
 type SessionContent struct {
 	Agents []sessionmodel.AgentView
 	Page   sessionmodel.HistoryPage
+	Usage  sessionmodel.UsageSnapshot
 }
 
 func (s *Coordinator) GetSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
@@ -276,12 +276,12 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 	return nil
 }
 
-func (s *Coordinator) ListAgentEntries(ctx context.Context, id identity.SessionID, agentID identity.AgentID, head, before string, limit int) (sessionmodel.HistoryPage, error) {
+func (s *Coordinator) AgentHistory(ctx context.Context, id identity.SessionID, agentID identity.AgentID, before *int64, limit int) (sessionmodel.HistoryPage, error) {
 	owner, err := s.GetSession(ctx, id)
 	if err != nil {
 		return sessionmodel.HistoryPage{}, err
 	}
-	return owner.AgentPage(ctx, agentID, head, before, limit)
+	return owner.AgentPage(ctx, agentID, before, limit)
 }
 
 func (s *Coordinator) SessionContent(ctx context.Context, id identity.SessionID) (SessionContent, error) {
@@ -297,41 +297,19 @@ func (s *Coordinator) SessionContent(ctx context.Context, id identity.SessionID)
 	if err != nil {
 		return SessionContent{}, err
 	}
-	agents, err := owner.Agents(ctx, info, definition, 0)
+	agents, err := owner.Agents(ctx, info, definition)
 	if err != nil {
 		return SessionContent{}, err
 	}
-	page, err := owner.AgentPage(ctx, info.MainAgentID(), "", "", 50)
+	usage, err := owner.UsageSnapshot(ctx)
+	if err != nil {
+		return SessionContent{}, err
+	}
+	head := usage.HistoryEnds[info.MainAgentID()]
+	page, err := owner.AgentPage(ctx, info.MainAgentID(), &head, 50)
 	return SessionContent{
 		Agents: agents,
 		Page:   page,
+		Usage:  usage,
 	}, err
-}
-
-func (s *Coordinator) ListSessionUsage(ctx context.Context, id identity.SessionID, ids []identity.TurnID) ([]modelusage.UsageRecord, error) {
-	owner, err := s.GetSession(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return owner.UsageRecords(ctx, ids)
-}
-
-func (s *Coordinator) GetSessionUsageSummary(ctx context.Context, id identity.SessionID) (sessionmodel.SessionUsageSummary, error) {
-	owner, err := s.GetSession(ctx, id)
-	if err != nil {
-		return sessionmodel.SessionUsageSummary{}, err
-	}
-	totals, requests, err := owner.UsageTotals(ctx)
-	if err != nil {
-		return sessionmodel.SessionUsageSummary{}, err
-	}
-	summary := sessionmodel.SessionUsageSummary{
-		Totals:            totals,
-		TotalRequests:     requests,
-		CacheReadComplete: totals.CacheReadReports == requests,
-	}
-	if summary.CacheReadComplete && totals.InputTokens > 0 {
-		summary.CacheReadRatio = new(float64(totals.CacheReadInputTokens) / float64(totals.InputTokens))
-	}
-	return summary, nil
 }

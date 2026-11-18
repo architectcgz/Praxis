@@ -533,20 +533,17 @@ func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.DecodeUsage(raw, &reported, string(modelconfig.APIFormatOpenAIResponses)) {
 		return nil
 	}
-	var usage *modelusage.Usage
-	if reported.InputTokens != nil {
-		usage = &modelusage.Usage{
-			InputTokens:  *reported.InputTokens,
-			OutputTokens: reported.OutputTokens,
-		}
-		if reported.InputTokensDetails != nil {
-			usage.CacheReadInputTokens = reported.InputTokensDetails.CachedTokens
-		}
+	usage := modelusage.Usage{
+		InputTokens:  reported.InputTokens,
+		OutputTokens: reported.OutputTokens,
 	}
-	if usage == nil {
+	if reported.InputTokensDetails != nil {
+		usage.CacheReadInputTokens = reported.InputTokensDetails.CachedTokens
+	}
+	if !usage.Reported() {
 		return nil
 	}
-	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: usage})
+	return emit(providerapi.Event{Kind: providerapi.StreamUsage, Usage: &usage})
 }
 
 // mapStopReason 只将官方终态和明确的截断原因映射为内部结束语义。

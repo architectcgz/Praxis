@@ -1,5 +1,5 @@
 import { getCommandBinding } from './bindings'
-import type { QueuedTask as GeneratedQueuedTask } from '../../bindings/praxis/wails/dto/models'
+import type { QueuedTask as GeneratedQueuedTask } from '../../bindings/praxis/internal/dto/models'
 
 export type QueuedTask = Pick<GeneratedQueuedTask, 'id' | 'prompt' | 'sequence'>
 export type CreateTaskRequest = {

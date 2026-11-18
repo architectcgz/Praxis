@@ -6,7 +6,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/timing"
-	"praxis/internal/dto"
 	"praxis/internal/identity"
 	"time"
 )
@@ -32,11 +31,11 @@ const (
 	KindToolResult              Kind = "tool_result"
 	KindTurnCompleted           Kind = "turn_completed"
 	KindRunStarted              Kind = "run_started"
+	KindRunEnding               Kind = "run_ending"
 	KindRunEnded                Kind = "run_ended"
 	KindSubagentStarted         Kind = "subagent_started"
 	KindSubagentReleased        Kind = "subagent_released"
 	KindTaskQueueChanged        Kind = "task_queue_changed"
-	KindRequestCanceled         Kind = "request_canceled"
 	KindError                   Kind = "error"
 )
 
@@ -91,46 +90,44 @@ func (TurnStarted) Kind() Kind { return KindTurnStarted }
 func (TurnStarted) isPayload() {}
 
 type ModelRequestStarted struct {
-	Request sessionentry.ModelRequestRecord
-	Timing  *timing.Record
+	Entry sessionentry.Entry
 }
 
 func (ModelRequestStarted) Kind() Kind { return KindModelRequestStarted }
 func (ModelRequestStarted) isPayload() {}
 
 type ModelRequestCompleted struct {
-	Request sessionentry.ModelRequestRecord
-	Timing  *timing.Record
+	Entry sessionentry.Entry
 }
 
 func (ModelRequestCompleted) Kind() Kind { return KindModelRequestCompleted }
 func (ModelRequestCompleted) isPayload() {}
 
 type ModelRequestFailed struct {
-	Request sessionentry.ModelRequestRecord
-	Timing  *timing.Record
+	Entry sessionentry.Entry
 }
 
 func (ModelRequestFailed) Kind() Kind { return KindModelRequestFailed }
 func (ModelRequestFailed) isPayload() {}
 
 type ModelRequestInterrupted struct {
-	Request sessionentry.ModelRequestRecord
-	Timing  *timing.Record
+	Entry sessionentry.Entry
 }
 
 func (ModelRequestInterrupted) Kind() Kind { return KindModelRequestInterrupted }
 func (ModelRequestInterrupted) isPayload() {}
 
-// RequestResult 选择已经确定的请求结果通知，不推进请求或 Turn 状态。
-func RequestResult(request sessionentry.ModelRequestRecord, measured *timing.Record) Payload {
-	switch request.Status {
-	case sessionentry.RequestCompleted:
-		return ModelRequestCompleted{Request: request, Timing: measured}
-	case sessionentry.RequestInterrupted:
-		return ModelRequestInterrupted{Request: request, Timing: measured}
+// ModelRequestFact 根据已经提交的请求事实选择对应的通知。
+func ModelRequestFact(value sessionentry.Entry) Payload {
+	switch value.Payload.(type) {
+	case sessionentry.ModelRequestStarted:
+		return ModelRequestStarted{Entry: value}
+	case sessionentry.ModelRequestCompleted:
+		return ModelRequestCompleted{Entry: value}
+	case sessionentry.ModelRequestInterrupted:
+		return ModelRequestInterrupted{Entry: value}
 	default:
-		return ModelRequestFailed{Request: request, Timing: measured}
+		return ModelRequestFailed{Entry: value}
 	}
 }
 
@@ -190,14 +187,21 @@ func (TurnCompleted) Kind() Kind { return KindTurnCompleted }
 func (TurnCompleted) isPayload() {}
 
 type RunStarted struct {
-	Run dto.RunSummary
+	Run sessionentry.RunSnapshot
 }
 
 func (RunStarted) Kind() Kind { return KindRunStarted }
 func (RunStarted) isPayload() {}
 
+type RunEnding struct {
+	Run sessionentry.RunSnapshot
+}
+
+func (RunEnding) Kind() Kind { return KindRunEnding }
+func (RunEnding) isPayload() {}
+
 type RunEnded struct {
-	Run     dto.RunSummary
+	Run     sessionentry.RunSnapshot
 	State   agentmodel.AgentState
 	Entries []sessionentry.Entry
 }
@@ -209,7 +213,7 @@ type SubagentStarted struct {
 	Name          string
 	DefinitionID  identity.AgentDefinitionID
 	CreatedAt     time.Time
-	Run           dto.RunSummary
+	Run           sessionentry.RunSnapshot
 	Entries       []sessionentry.Entry
 	ParentAgentID identity.AgentID
 	ParentRunID   identity.RunID
@@ -231,15 +235,6 @@ type TaskQueueChanged struct {
 
 func (TaskQueueChanged) Kind() Kind { return KindTaskQueueChanged }
 func (TaskQueueChanged) isPayload() {}
-
-type RequestCanceled struct {
-	Run     dto.RunSummary
-	State   agentmodel.AgentState
-	Entries []sessionentry.Entry
-}
-
-func (RequestCanceled) Kind() Kind { return KindRequestCanceled }
-func (RequestCanceled) isPayload() {}
 
 type ErrorOccurred struct {
 	Message string

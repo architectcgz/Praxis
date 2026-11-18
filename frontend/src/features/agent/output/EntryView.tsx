@@ -1,18 +1,12 @@
 import { memo, type ReactNode } from 'react'
 import { Archive, Bot, ChevronDown, CircleAlert, Send } from 'lucide-react'
-import type { AgentEvent, Entry, EntryBlock } from '../../../api'
+import type { AgentEvent, HistoryMessage, MessageBlock, ModelUsage } from '../../../api'
 import { DurationLabel } from '../../timing/DurationLabel'
 import { MessageMarkdown } from './MarkdownViews'
 import { CopyIconButton } from './CopyIconButton'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock, type PairedToolResult } from './ToolCallViews'
 import { MessageTiming } from './MessageTiming'
-
-const requestKindLabels: Record<string, string> = {
-    iteration: '模型迭代',
-    risk_review: '风险审核',
-    summary: '上下文摘要',
-}
 
 const reportOutcomeLabels: Record<string, { label: string; tone: string }> = {
     yielded: { label: '已交付', tone: 'ok' },
@@ -22,35 +16,16 @@ const reportOutcomeLabels: Record<string, { label: string; tone: string }> = {
     interrupted: { label: '已中断', tone: 'warn' },
 }
 
-export const EntryView = memo(function EntryView({ agentName, item, events = [], pairedResults, continuation = false, hasContinuation = false, copyContent }: {
+export const EntryView = memo(function EntryView({ agentName, item, events = [], pairedResults, usage, continuation = false, hasContinuation = false, copyContent }: {
     agentName: string
-    item: Entry
+    item: HistoryMessage
     events?: AgentEvent[]
     pairedResults?: Record<string, PairedToolResult>
+    usage?: ModelUsage
     continuation?: boolean
     hasContinuation?: boolean
     copyContent?: string
 }) {
-    if (item.kind === 'run') return null
-    if (item.kind === 'model_request') {
-        const statusText = item.status === 'interrupted' ? '已中断' : '失败'
-        const requestLabel = requestKindLabels[item.requestKind || ''] || item.requestKind || '模型请求'
-        return <details className="message entry-model-request">
-            <summary className="entry-model-request-summary">
-                <CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
-                <span className="entry-model-request-title">{requestLabel}{statusText} · 第 {(item.retryCount || 0) + 1} 次尝试</span>
-                <DurationLabel record={item.timing} label="" compact />
-                <ChevronDown className="entry-model-request-chevron" size={14} aria-hidden="true" />
-            </summary>
-            <div className="entry-model-request-body">
-                {item.error && <div className="message-error-box" role="alert"><CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" /><span>{item.error}</span></div>}
-                {item.content.length > 0 && <div className="entry-model-request-partial">
-                    <span className="entry-section-kicker">本次请求的部分输出</span>
-                    <MessageMarkdown content={item.content.map((block) => block.text || '').join('')} />
-                </div>}
-            </div>
-        </details>
-    }
     const message = item
     const content = message.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('')
     const messageBlocks = message.content
@@ -161,7 +136,7 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
             ) : content && <p>{content}</p>}
             {message.error && <div className="message-error-box" role="alert"><CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" /><span>{message.error}</span></div>}
             <MessageActions content={hasContinuation ? '' : contentToCopy}>
-                {messageRole === 'assistant' && <MessageTiming runId={message.runId || ''} turnId={message.turnId} requestId={message.requestId} record={message.timing} />}
+                {messageRole === 'assistant' && <MessageTiming usage={usage} record={message.timing} />}
             </MessageActions>
         </article>
     )
@@ -186,10 +161,10 @@ function parseSubagentReport(raw: string) {
 type AssistantSegment =
     | { key: string; kind: 'thinking'; text: string }
     | { key: string; kind: 'text'; text: string }
-    | { key: string; kind: 'tools'; blocks: EntryBlock[] }
+    | { key: string; kind: 'tools'; blocks: MessageBlock[] }
 
 /** 相邻的工具调用归入同一张活动账本，跳过纯空白块以免打断连续工具并留下空节点。 */
-function groupAssistantBlocks(blocks: EntryBlock[]): AssistantSegment[] {
+function groupAssistantBlocks(blocks: MessageBlock[]): AssistantSegment[] {
     const segments: AssistantSegment[] = []
     blocks.forEach((block, index) => {
         if (block.kind === 'thinking') {

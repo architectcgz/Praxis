@@ -1,10 +1,6 @@
 package dto
 
-import (
-	modelusage "praxis/internal/core/model/usage"
-	"praxis/internal/core/timing"
-	"time"
-)
+import "time"
 
 type MessageKind string
 
@@ -13,42 +9,44 @@ const (
 	MessageInstruction    MessageKind = "instruction"
 	MessageChat           MessageKind = "message"
 	MessageSummary        MessageKind = "summary"
-	MessageRequestError   MessageKind = "model_request"
 )
 
-// HistoryMessage 只承载对话展示字段，不暴露内部事实载荷、配置或推理续传状态。
+// HistoryMessage 承载可展示的对话内容。
 type HistoryMessage struct {
-	ID          string          `json:"id"`
-	RunID       string          `json:"runId,omitempty"`
-	TurnID      string          `json:"turnId,omitempty"`
-	RequestID   string          `json:"requestId,omitempty"`
-	CreatedAt   time.Time       `json:"createdAt"`
-	Role        string          `json:"role"`
-	Kind        MessageKind     `json:"kind"`
-	RequestKind string          `json:"requestKind,omitempty"`
-	Status      string          `json:"status,omitempty"`
-	RetryCount  int             `json:"retryCount,omitzero"`
-	Content     []MessageBlock  `json:"content"`
-	Error       string          `json:"error,omitempty"`
-	Timing      *timing.Record  `json:"timing,omitempty"`
+	ID        string         `json:"id"`
+	RunID     string         `json:"runId"`
+	TurnID    string         `json:"turnId,omitempty"`
+	RequestID string         `json:"requestId,omitempty"`
+	CreatedAt time.Time      `json:"createdAt"`
+	Role      string         `json:"role"`
+	Kind      MessageKind    `json:"kind"`
+	Content   []MessageBlock `json:"content"`
+	Error     string         `json:"error,omitempty"`
+	Timing    *Timing        `json:"timing,omitempty"`
 }
 
-// MessageBlock 只包含可展示的正文、思考和工具活动。
 type MessageBlock struct {
-	Timing  *timing.Record `json:"timing,omitempty"`
-	Kind    string         `json:"kind"`
-	Text    string         `json:"text,omitempty"`
-	CallID  string         `json:"callId,omitempty"`
-	Name    string         `json:"name,omitempty"`
-	Input   string         `json:"input,omitempty"`
-	IsError bool           `json:"isError,omitzero"`
+	Timing  *Timing `json:"timing,omitempty"`
+	Kind    string  `json:"kind"`
+	Text    string  `json:"text,omitempty"`
+	CallID  string  `json:"callId,omitempty"`
+	Name    string  `json:"name,omitempty"`
+	Input   string  `json:"input,omitempty"`
+	IsError bool    `json:"isError,omitzero"`
+}
+
+type Timing struct {
+	StartedAt       time.Time `json:"startedAt"`
+	FinishedAt      time.Time `json:"finishedAt,omitzero"`
+	DurationMS      *int64    `json:"durationMs,omitempty"`
+	FirstResponseMS *int64    `json:"firstResponseMs,omitempty"`
 }
 
 type HistoryPage struct {
-	Messages   []HistoryMessage   `json:"messages"`
-	Usage      []ModelUsageRecord `json:"usage"`
-	HasMore    bool               `json:"hasMore"`
-	NextCursor *int64             `json:"nextCursor"`
+	Messages   []HistoryMessage       `json:"messages"`
+	Requests   []ModelRequestActivity `json:"requests"`
+	HasMore    bool                   `json:"hasMore"`
+	NextCursor *int64                 `json:"nextCursor"`
 }
 
 type AgentHistoryRequest struct {
@@ -58,16 +56,45 @@ type AgentHistoryRequest struct {
 	Limit     int    `json:"limit" validate:"min=1,max=200"`
 }
 
-// ModelUsageRecord 随历史页返回，请求运行中的用量直接随结果事件交付。
-type ModelUsageRecord struct {
-	RunID     string           `json:"runId"`
-	RequestID string           `json:"requestId"`
-	TurnID    string           `json:"turnId"`
-	Usage     modelusage.Usage `json:"usage"`
+// ModelRequestActivity 独立记录一次请求尝试，随历史查询或请求事件交付。
+type ModelRequestActivity struct {
+	RequestID   string              `json:"requestId"`
+	RunID       string              `json:"runId"`
+	TurnID      string              `json:"turnId,omitempty"`
+	RequestKind string              `json:"requestKind"`
+	RetryCount  int                 `json:"retryCount"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	Timing      *Timing             `json:"timing,omitempty"`
+	HistoryEnd  int64               `json:"historyEnd"`
+	Result      *ModelRequestResult `json:"result,omitempty"`
 }
 
-// SessionUsageSummary 是会话初始化时的历史累计，运行期由请求事件增量更新。
+type ModelRequestResult struct {
+	Status     string      `json:"status"`
+	Error      string      `json:"error,omitempty"`
+	StopReason string      `json:"stopReason,omitempty"`
+	Partial    string      `json:"partial,omitempty"`
+	Usage      *ModelUsage `json:"usage,omitempty"`
+}
+
+type ModelUsage struct {
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
+	OutputTokens             *int64 `json:"outputTokens,omitempty"`
+	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
+}
+
+// SessionUsageSummary 是初始化时的累计；HistoryEnds 标记各 Agent 已计入的位置。
 type SessionUsageSummary struct {
-	modelusage.Totals
-	TotalRequests uint64 `json:"totalRequests"`
+	TotalRequests            uint64           `json:"totalRequests"`
+	ReportedRequests         uint64           `json:"reportedRequests"`
+	InputTokens              int64            `json:"inputTokens"`
+	OutputTokens             int64            `json:"outputTokens"`
+	CacheReadInputTokens     int64            `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int64            `json:"cacheCreationInputTokens"`
+	InputReports             uint64           `json:"inputReports"`
+	OutputReports            uint64           `json:"outputReports"`
+	CacheReadReports         uint64           `json:"cacheReadReports"`
+	CacheCreationReports     uint64           `json:"cacheCreationReports"`
+	HistoryEnds              map[string]int64 `json:"historyEnds"`
 }

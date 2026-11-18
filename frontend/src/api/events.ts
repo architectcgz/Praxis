@@ -1,17 +1,16 @@
 import { Events } from '@wailsio/runtime'
 import { isBindingAvailable } from './bindings'
-import type { AgentView, Entry, RunSnapshot, ModelUsage } from './agents'
+import type { AgentView, HistoryMessage, ModelRequestActivity, RunSnapshot } from './agents'
 import type { Timing } from './timings'
 import type { QueuedTask } from './tasks'
 
 type RunData = {
-    entries_appended: { agentId: string; entries: Entry[] }
-    run_started: { agentId: string; run: RunSnapshot }
-    run_interrupt_requested: { appliedAt: string }
+    entries_appended: { messages: HistoryMessage[] }
+    run_started: { run: RunSnapshot }
+    run_ending: { run: RunSnapshot }
     agent_state_changed: { state: AgentView['state'] }
-    run_ended: { run: RunSnapshot; state: AgentView['state']; entries: Entry[] }
-    request_canceled: { run: RunSnapshot; state: AgentView['state']; entries: Entry[] }
-    subagent_started: { agent: AgentView; entries: Entry[]; parentAgentId: string; parentRunId: string; callId: string }
+    run_ended: { run: RunSnapshot; state: AgentView['state']; messages: HistoryMessage[] }
+    subagent_started: { agent: AgentView; messages: HistoryMessage[]; parentAgentId: string; parentRunId: string; callId: string }
     subagent_released: Record<string, never>
     error: { message: string }
 }
@@ -27,19 +26,25 @@ type TurnData = {
     tool_approval_required: { callId: string }
     tool_result: { callId: string; result: string; isError: boolean; timing?: Timing }
 }
-type RunSource = { runId: string }
-type RequestCommon = { requestId: string; retryCount: number; timing?: Timing }
-type RequestResults = {
-    model_request_started: RequestCommon
-    model_request_completed: RequestCommon & { status: 'completed'; stopReason: string; usage?: ModelUsage }
-    model_request_failed: RequestCommon & { status: 'failed'; stopReason: string; error: string; usage?: ModelUsage }
-    model_request_interrupted: RequestCommon & { status: 'interrupted'; stopReason: string; error: string; usage?: ModelUsage }
+type RunSource = { agentId: string; runId: string }
+type RequestEventKind = 'model_request_started' | 'model_request_completed' | 'model_request_failed' | 'model_request_interrupted'
+export type RequestEvent = {
+    [K in RequestEventKind]: RunSource & { kind: K; turnId?: string; data: ModelRequestActivity }
+}[RequestEventKind]
+
+export function isRequestEvent(event: AgentEvent): event is RequestEvent {
+    switch (event.kind) {
+        case 'model_request_started':
+        case 'model_request_completed':
+        case 'model_request_failed':
+        case 'model_request_interrupted':
+            return true
+        default:
+            return false
+    }
 }
-type RequestEvent = { [K in keyof RequestResults]:
-    | (RunSource & { kind: K; turnId: string; data: RequestResults[K] & { requestKind: 'iteration' | 'risk_review' } })
-    | (RunSource & { kind: K; turnId?: never; data: RequestResults[K] & { requestKind: 'summary' } })
-}[keyof RequestResults]
-/** 身份由事件的业务范围决定；Session 身份已经绑定到通道。 */
+
+/** Session 身份已绑定到通道，运行事件按 Agent 身份路由。 */
 export type AgentEvent =
     | { [K in keyof RunData]: RunSource & { kind: K; data: RunData[K] } }[keyof RunData]
     | { [K in keyof TurnData]: RunSource & { kind: K; turnId: string; data: TurnData[K] } }[keyof TurnData]

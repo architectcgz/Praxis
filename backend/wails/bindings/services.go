@@ -6,7 +6,6 @@ import (
 	execution "praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
 	modelconfig "praxis/internal/core/model/config"
-	modelusage "praxis/internal/core/model/usage"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
@@ -43,7 +42,7 @@ type AgentCommands interface {
 	SelectSession(context.Context, identity.SessionID) (execution.SessionView, error)
 	CloseSession(context.Context, identity.SessionID) error
 	SessionContent(context.Context, identity.SessionID) (execution.SessionContent, error)
-	ListAgentEntries(context.Context, identity.SessionID, identity.AgentID, string, string, int) (sessionmodel.HistoryPage, error)
+	AgentHistory(context.Context, identity.SessionID, identity.AgentID, *int64, int) (sessionmodel.HistoryPage, error)
 	StopAgent(context.Context, execution.AgentControl) error
 	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]executionmodel.Approval, error)
 	StopToolCall(context.Context, execution.ToolControl) error
@@ -57,11 +56,6 @@ type AgentCommands interface {
 	ResumeQueue(context.Context, identity.SessionID) error
 }
 
-type UsageService interface {
-	ListSessionUsage(context.Context, identity.SessionID, []identity.TurnID) ([]modelusage.UsageRecord, error)
-	GetSessionUsageSummary(context.Context, identity.SessionID) (sessionmodel.SessionUsageSummary, error)
-}
-
 // Services 由 Bootstrap 注入业务对象和只读日志定位能力，不创建中间应用层。
 type Services struct {
 	Projects       ProjectService
@@ -69,7 +63,6 @@ type Services struct {
 	Sessions       SessionService
 	Commands       AgentCommands
 	Emitter        *coreevent.Emitter
-	Usages         UsageService
 	SessionLogPath func(context.Context, identity.SessionID) (string, error)
 }
 
@@ -81,7 +74,6 @@ func (s Services) Validate() error {
 		"sessions":         s.Sessions == nil,
 		"commands":         s.Commands == nil,
 		"event emitter":    s.Emitter == nil,
-		"usages":           s.Usages == nil,
 		"session log path": s.SessionLogPath == nil,
 	} {
 		if missing {

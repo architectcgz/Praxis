@@ -111,10 +111,11 @@ func (r *Runner) callModel(
 		Status:     sessionentry.RequestRunning,
 		RetryCount: retryCount,
 	}
-	if _, _, err := deps.AppendEntry(ctx, sessionentry.ModelRequestEntry(started, span.Snapshot())); err != nil {
+	stored, _, err := deps.AppendEntry(ctx, sessionentry.ModelRequestEntry(started, span.Snapshot()))
+	if err != nil {
 		return response, err
 	}
-	r.emit(params, request.TurnID, coreevent.ModelRequestStarted{Request: started, Timing: span.Snapshot()})
+	r.emit(params, request.TurnID, coreevent.ModelRequestFact(*stored))
 
 	boundary.Request = request
 	ctx, scope := r.HookDispatcher.Start(ctx, hook.Operation{
@@ -144,12 +145,8 @@ func (r *Runner) callModel(
 		stored, _, progressErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.ModelRequestEntry(finished, response.Timing))
 		if progressErr != nil {
 			err = NewFailure(FailureStorage, errors.Join(err, progressErr))
-		}
-		if progressErr == nil {
-			r.emit(params, request.TurnID, coreevent.RequestResult(finished, response.Timing))
-			if finished.Status != sessionentry.RequestCompleted {
-				r.emit(params, request.TurnID, coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}})
-			}
+		} else {
+			r.emit(params, request.TurnID, coreevent.ModelRequestFact(*stored))
 		}
 
 		if hookErr := r.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
@@ -182,8 +179,8 @@ func (r *Runner) callModel(
 			return response, NewFailure(FailureContract, shapeErr)
 		}
 		tokens := 0
-		if response.Usage != nil {
-			tokens = int(response.Usage.InputTokens)
+		if response.Usage != nil && response.Usage.InputTokens != nil {
+			tokens = int(*response.Usage.InputTokens)
 		}
 		if deps.Budget != nil {
 			deps.Budget.Observe(observationContext, key, tokens)

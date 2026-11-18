@@ -49,11 +49,11 @@ export function SessionWorkspace({ active, sessionsCount, projectsCount, modalOp
             <SessionPanel loading={page.sessionLoading} hasSession={Boolean(page.session)} sessionsCount={sessionsCount} projectsCount={projectsCount} onOpenProject={onOpenProject}>
                 {page.session && <AgentSessionPanel
                     submissionRevision={page.submissionRevision}
-                    usageRevision={page.usageRevision}
                     loading={page.agentLoading}
                     agents={page.agents}
                     agent={page.agent}
                     entries={page.entries}
+                    requests={page.requests}
                     agentEntries={page.agentEntries}
                     agentEntriesErrors={page.agentEntriesErrors}
                     outputStore={page.outputStore}
@@ -91,6 +91,7 @@ export function SessionWorkspace({ active, sessionsCount, projectsCount, modalOp
                         <AgentTaskInput
                             inputRef={inputRef}
                             sessionId={page.session.id}
+                            usage={page.usage}
                             active={Boolean(page.agent.currentRunId)}
                             canQueue={page.canQueue}
                             input={page.input}

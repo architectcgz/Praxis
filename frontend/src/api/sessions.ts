@@ -1,6 +1,9 @@
 import { getSessionBinding } from './bindings'
+import type { SessionUsageSummary as GeneratedSessionUsageSummary } from '../../bindings/praxis/internal/dto/models'
 import type { AgentView, HistoryPage } from './agents'
 import type { QueuedTask } from './tasks'
+
+export type SessionUsageSummary = Omit<GeneratedSessionUsageSummary, 'historyEnds'> & { historyEnds: Record<string, number> }
 
 export type SessionSnapshot = {
     queuePaused: boolean
@@ -11,7 +14,8 @@ export type SessionSnapshot = {
     updatedAt: string
     agents: AgentView[]
     tasks: QueuedTask[]
-    entries: Record<string, HistoryPage>
+    history: HistoryPage
+    usage: SessionUsageSummary
 }
 
 export type SessionSummary = {
@@ -20,20 +24,6 @@ export type SessionSummary = {
     title: string
     createdAt: string
     updatedAt: string
-}
-
-export type SessionUsageSummary = {
-    totalRequests: number
-    inputTokens: number
-    outputTokens: number
-    cacheReadInputTokens: number
-    cacheCreationInputTokens: number
-    reportedRequests: number
-    outputReports: number
-    cacheReadReports: number
-    cacheCreationReports: number
-    cacheReadRatio: number | null
-    cacheReadComplete: boolean
 }
 
 export type CreateSessionRequest = { sessionId: string; projectId: string; requestId: string }
@@ -76,10 +66,6 @@ export function selectSession(sessionID: string) {
 }
 
 export function getSessionSummary(sessionID: string) { return getSessionBinding().GetSessionSummary(sessionID) }
-export function getSessionUsageSummary(sessionID: string) {
-    return getSessionBinding().GetSessionUsageSummary(sessionID) as Promise<SessionUsageSummary>
-}
-
 export function closeSession(sessionID: string) { return getSessionBinding().CloseSession(sessionID) }
 export function deleteSession(sessionID: string) { return getSessionBinding().DeleteSession(sessionID) }
 export function renameSession(sessionID: string, title: string) { return getSessionBinding().RenameSession(sessionID, title) }

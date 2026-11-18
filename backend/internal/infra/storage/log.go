@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"strings"
+	"sync"
 )
 
 // SessionLog 管理一个 Session 下各 Agent 的 JSONL 文件和专属 Writer。
@@ -17,7 +19,7 @@ type SessionLog struct {
 	directory string
 	backupDir string
 	mainAgent identity.AgentID
-	paths     map[identity.AgentID]string
+	mu        sync.RWMutex
 	writers   map[identity.AgentID]*jsonl.Writer
 }
 
@@ -31,7 +33,6 @@ func (r SessionRepository) OpenLog(ctx context.Context, id identity.SessionID) (
 		directory: sessionPath(r.dataRoot, info.ProjectID, id),
 		backupDir: r.dataRoot,
 		mainAgent: identity.AgentID(id),
-		paths:     make(map[identity.AgentID]string),
 		writers:   make(map[identity.AgentID]*jsonl.Writer),
 	}
 	mainPath := log.path(log.mainAgent)
@@ -42,7 +43,6 @@ func (r SessionRepository) OpenLog(ctx context.Context, id identity.SessionID) (
 	if err != nil {
 		return nil, err
 	}
-	log.paths[log.mainAgent] = mainPath
 	log.writers[log.mainAgent] = writer
 
 	entries, err := os.ReadDir(filepath.Join(log.directory, "subagents"))
@@ -69,7 +69,6 @@ func (r SessionRepository) OpenLog(ctx context.Context, id identity.SessionID) (
 			_ = log.Close(context.Background())
 			return nil, err
 		}
-		log.paths[agentID] = path
 		log.writers[agentID] = subagentWriter
 	}
 	return log, nil
@@ -83,7 +82,9 @@ func (l *SessionLog) recoverFile(ctx context.Context, path string) error {
 }
 
 func (l *SessionLog) writer(agentID identity.AgentID) (*jsonl.Writer, error) {
+	l.mu.RLock()
 	writer, ok := l.writers[agentID]
+	l.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("history for agent %s is not open", agentID)
 	}
@@ -91,15 +92,18 @@ func (l *SessionLog) writer(agentID identity.AgentID) (*jsonl.Writer, error) {
 }
 
 func (l *SessionLog) readBackward(ctx context.Context, agentID identity.AgentID, cursor *int64, limit int) ([]jsonl.Record, *int64, bool, error) {
-	path, ok := l.paths[agentID]
-	if !ok {
-		return nil, nil, false, fmt.Errorf("history for agent %s is not open", agentID)
+	writer, err := l.writer(agentID)
+	if err != nil {
+		return nil, nil, false, err
 	}
-	return jsonl.ReadBackward(ctx, path, cursor, limit)
+	return writer.ReadBackward(ctx, cursor, limit)
 }
 
 func (l *SessionLog) CreateSubagent(ctx context.Context, agentID identity.AgentID) error {
-	if _, exists := l.writers[agentID]; exists {
+	l.mu.RLock()
+	_, exists := l.writers[agentID]
+	l.mu.RUnlock()
+	if exists {
 		return nil
 	}
 	path := l.path(agentID)
@@ -113,14 +117,18 @@ func (l *SessionLog) CreateSubagent(ctx context.Context, agentID identity.AgentI
 	if err != nil {
 		return err
 	}
-	l.paths[agentID] = path
+	l.mu.Lock()
 	l.writers[agentID] = writer
+	l.mu.Unlock()
 	return nil
 }
 
 func (l *SessionLog) Close(ctx context.Context) error {
+	l.mu.RLock()
+	writers := maps.Clone(l.writers)
+	l.mu.RUnlock()
 	var err error
-	for _, writer := range l.writers {
+	for _, writer := range writers {
 		err = errors.Join(err, writer.Close(ctx))
 	}
 	return err
@@ -128,6 +136,8 @@ func (l *SessionLog) Close(ctx context.Context) error {
 
 // Agents 返回已经打开 History 的 Agent 作用域。
 func (l *SessionLog) Agents() []identity.AgentID {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	agents := make([]identity.AgentID, 0, len(l.writers))
 	for agentID := range l.writers {
 		agents = append(agents, agentID)

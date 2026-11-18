@@ -14,7 +14,6 @@ import (
 	modelapi "praxis/internal/core/model"
 	modelusage "praxis/internal/core/model/usage"
 	"praxis/internal/core/timing"
-	"praxis/internal/dto"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/repository"
@@ -95,13 +94,13 @@ type runProgress struct {
 func (r *Run) Main() bool { return r.main }
 
 // Snapshot 由所属执行流程在通知和完成交付时调用，接收方只读使用。
-func (r *Run) Snapshot() dto.RunSummary {
+func (r *Run) Snapshot() sessionentry.RunSnapshot {
 	if r.result != nil {
 		return r.result.Snapshot(r.id)
 	}
-	return dto.RunSummary{
-		ID:          r.id.String(),
-		Status:      string(r.status),
+	return sessionentry.RunSnapshot{
+		ID:          r.id,
+		Status:      r.status,
 		StartedAt:   r.startedAt,
 		Iterations:  r.progress.Iterations,
 		ToolCalls:   r.progress.ToolCalls,
@@ -159,7 +158,7 @@ func (p *runProgress) accept(value *sessionentry.Entry) {
 	if request, _ := value.RequestFact(); request != nil && request.Status != sessionentry.RequestRunning {
 		p.OutputBytes += int64(request.OutputBytes)
 		if u := request.Usage; u != nil {
-			p.Usage.Add(u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
+			p.Usage.Add(*u)
 		}
 	}
 	if value.Role == role.Assistant {
@@ -295,25 +294,9 @@ func (r *Run) commitToolRequest(update toolUpdate) error {
 	if err != nil {
 		return err
 	}
-	if request.Status == sessionentry.RequestRunning {
-		r.deps.Emitter.Emit(coreevent.Event{
-			Source: r.EventSource(request.TurnID),
-			Payload: coreevent.ModelRequestStarted{
-				Request: request,
-				Timing:  measured,
-			},
-		})
-		return nil
-	}
-	if request.Status != sessionentry.RequestCompleted {
-		r.deps.Emitter.Emit(coreevent.Event{
-			Source:  r.EventSource(request.TurnID),
-			Payload: coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}},
-		})
-	}
 	r.deps.Emitter.Emit(coreevent.Event{
 		Source:  r.EventSource(request.TurnID),
-		Payload: coreevent.RequestResult(request, measured),
+		Payload: coreevent.ModelRequestFact(*stored),
 	})
 	return nil
 }

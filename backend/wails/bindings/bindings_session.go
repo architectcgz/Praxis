@@ -5,10 +5,10 @@ import (
 	coordinator "praxis/internal/core/coordinator"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
+	"praxis/internal/dto"
 	"praxis/internal/identity"
 	approvalservice "praxis/internal/service/approval"
 	sessionservice "praxis/internal/service/session"
-	"praxis/internal/dto"
 	"praxis/wails/validation"
 	"strings"
 )
@@ -76,9 +76,8 @@ func (b *SessionBindings) SelectSession(sessionID string) (dto.SessionSnapshot, 
 
 func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services, view coordinator.SessionView) (dto.SessionSnapshot, error) {
 	content, err := services.Commands.SessionContent(ctx, view.Session.ID)
-	agents := content.Agents
 	if err != nil {
-		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot.agents", err)
+		return dto.SessionSnapshot{}, publicError(b.host, "SessionBindings.sessionSnapshot", err)
 	}
 	result := dto.SessionSnapshot{
 		QueuePaused: view.QueuePaused,
@@ -87,9 +86,10 @@ func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services
 		Title:       view.Session.Title,
 		CreatedAt:   view.Session.CreatedAt,
 		UpdatedAt:   view.Session.UpdatedAt,
-		Agents:      publicAgents(agents),
+		Agents:      publicAgents(content.Agents),
 		Tasks:       make([]dto.QueuedTask, 0, len(view.Tasks)),
-		Entries:     map[string]dto.HistoryPage{view.Session.ID.String(): publicHistoryPage(content.Page)},
+		History:     publicHistoryPage(content.Page),
+		Usage:       publicUsageSummary(content.Usage),
 	}
 	for _, value := range view.Tasks {
 		result.Tasks = append(result.Tasks, dto.QueuedTask{
@@ -100,34 +100,6 @@ func (b *SessionBindings) sessionSnapshot(ctx context.Context, services Services
 		})
 	}
 	return result, nil
-}
-
-// GetSessionUsageSummary 直接投影业务侧的一致用量快照。
-func (b *SessionBindings) GetSessionUsageSummary(sessionID string) (dto.SessionUsageSummary, error) {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return dto.SessionUsageSummary{}, publicInputError(b.host, "SessionBindings.GetSessionUsageSummary.request", err)
-	}
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return dto.SessionUsageSummary{}, err
-	}
-	value, err := services.Usages.GetSessionUsageSummary(ctx, identity.SessionID(sessionID))
-	if err != nil {
-		return dto.SessionUsageSummary{}, publicError(b.host, "SessionBindings.GetSessionUsageSummary", err)
-	}
-	return dto.SessionUsageSummary{
-		TotalRequests:            value.TotalRequests,
-		InputTokens:              value.InputTokens,
-		OutputTokens:             value.OutputTokens,
-		CacheReadInputTokens:     value.CacheReadInputTokens,
-		CacheCreationInputTokens: value.CacheCreationInputTokens,
-		ReportedRequests:         value.ReportedRequests,
-		OutputReports:            value.OutputReports,
-		CacheReadReports:         value.CacheReadReports,
-		CacheCreationReports:     value.CacheCreationReports,
-		CacheReadRatio:           value.CacheReadRatio,
-		CacheReadComplete:        value.CacheReadComplete,
-	}, nil
 }
 
 func (b *SessionBindings) DeleteSession(sessionID string) error {

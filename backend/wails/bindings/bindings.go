@@ -4,7 +4,6 @@ import (
 	"context"
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
-	"praxis/internal/core/timing"
 	"praxis/internal/dto"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -53,30 +52,25 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	case coreevent.AgentStateChanged:
 		data = dto.AgentStateChanged{State: string(payload.State)}
 	case coreevent.EntriesAppended:
-		data = dto.AgentEntriesAppended{AgentID: event.Source.AgentID.String(),
-			Entries: publicEntries(payload.Entries),
+		messages := publicMessages(payload.Entries)
+		if len(messages) == 0 {
+			return
 		}
+		data = dto.AgentMessagesAppended{Messages: messages}
 	case coreevent.TurnStarted, coreevent.TurnFailed, coreevent.TurnInterrupted, coreevent.SubagentReleased:
 		data = struct{}{}
 	case coreevent.ModelRequestStarted:
-		data = dto.AgentModelRequestStarted{
-			RetryCount:  payload.Request.RetryCount,
-			RequestID:   payload.Request.ID.String(),
-			RequestKind: string(payload.Request.Kind),
-			Timing:      publicTiming(payload.Timing),
-		}
+		data = publicRequestEvent(payload.Entry)
 	case coreevent.ModelRequestCompleted:
-		data = publicRequestResult(payload.Request, payload.Timing)
+		data = publicRequestEvent(payload.Entry)
 	case coreevent.ModelRequestFailed:
-		data = publicRequestResult(payload.Request, payload.Timing)
+		data = publicRequestEvent(payload.Entry)
 	case coreevent.ModelRequestInterrupted:
-		data = publicRequestResult(payload.Request, payload.Timing)
+		data = publicRequestEvent(payload.Entry)
 	case coreevent.RunStarted:
-		data = dto.AgentRunStarted{AgentID: event.Source.AgentID.String(),
-			Run: publicRun(payload.Run),
-		}
-	case coreevent.RunInterruptRequested:
-		data = dto.AgentRunControl{AppliedAt: payload.AppliedAt}
+		data = dto.AgentRunChanged{Run: publicRun(payload.Run)}
+	case coreevent.RunEnding:
+		data = dto.AgentRunChanged{Run: publicRun(payload.Run)}
 	case coreevent.SubagentStarted:
 		record := payload.Run
 		data = dto.AgentSubagentStarted{
@@ -92,7 +86,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 				CurrentRunID: record.ID.String(),
 				CurrentRun:   new(publicRun(record)),
 			},
-			Entries:       publicEntries(payload.Entries),
+			Messages:      publicMessages(payload.Entries),
 			ParentAgentID: payload.ParentAgentID.String(),
 			ParentRunID:   payload.ParentRunID.String(),
 			CallID:        payload.CallID,
@@ -136,15 +130,9 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		data = dto.AgentTurnCompleted{StopReason: string(payload.StopReason)}
 	case coreevent.RunEnded:
 		data = dto.AgentRunEnded{
-			Run:     publicRun(payload.Run),
-			State:   string(payload.State),
-			Entries: publicEntries(payload.Entries),
-		}
-	case coreevent.RequestCanceled:
-		data = dto.AgentRunEnded{
-			Run:     publicRun(payload.Run),
-			State:   string(payload.State),
-			Entries: publicEntries(payload.Entries),
+			Run:      publicRun(payload.Run),
+			State:    string(payload.State),
+			Messages: publicMessages(payload.Entries),
 		}
 	case coreevent.ErrorOccurred:
 		data = dto.AgentErrorOccurred{Message: payload.Message}
@@ -153,26 +141,15 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 		return
 	}
 	b.host.EmitEvent("praxis:session:"+event.Source.SessionID.String(), dto.AgentEvent{
-		Kind: string(event.Kind()),
-
-		RunID:  event.Source.RunID.String(),
-		TurnID: event.Source.TurnID.String(),
-		Data:   data,
+		Kind:    string(event.Kind()),
+		AgentID: event.Source.AgentID.String(),
+		RunID:   event.Source.RunID.String(),
+		TurnID:  event.Source.TurnID.String(),
+		Data:    data,
 	})
 }
 
-func publicRequestResult(request sessionentry.ModelRequestRecord, measured *timing.Record) dto.AgentModelRequestResult {
-	value := dto.AgentModelRequestResult{
-		RequestID:   request.ID.String(),
-		RequestKind: string(request.Kind),
-		Status:      string(request.Status),
-		RetryCount:  request.RetryCount,
-		StopReason:  request.StopReason,
-		Error:       request.Error,
-		Timing:      publicTiming(measured),
-	}
-	if request.Usage != nil {
-		value.Usage = new(publicUsage(*request.Usage))
-	}
-	return value
+func publicRequestEvent(value sessionentry.Entry) dto.ModelRequestActivity {
+	request, measured := value.RequestFact()
+	return publicRequest(value, *request, measured)
 }

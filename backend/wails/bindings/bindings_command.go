@@ -3,8 +3,8 @@ package bindings
 import (
 	execution "praxis/internal/core/coordinator"
 	taskmodel "praxis/internal/core/task"
-	"praxis/internal/identity"
 	"praxis/internal/dto"
+	"praxis/internal/identity"
 	"praxis/wails/validation"
 	"strings"
 )
@@ -47,7 +47,6 @@ func (b *CommandBindings) StopAgent(wire dto.StopAgentRequest) error {
 	return publicError(b.host, "CommandBindings.StopAgent", services.Commands.StopAgent(ctx, execution.AgentControl{
 		SessionID: identity.SessionID(wire.SessionID),
 		AgentID:   identity.AgentID(wire.AgentID),
-		RunID:     identity.RunID(wire.RunID),
 	}))
 }
 

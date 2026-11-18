@@ -40,7 +40,7 @@ export function ToolApprovalsProvider({ agentId, runId, sessionId, children }: {
     }, [agentId, sessionId])
     useEffect(() => {
         const unsubscribe = subscribeAgentEvents(sessionId, (event) => {
-            if ('runId' in event && event.runId === runId && ['tool_approval_required', 'tool_result', 'run_ended', 'request_canceled'].includes(event.kind)) void reload()
+            if ('runId' in event && event.runId === runId && ['tool_approval_required', 'tool_result', 'run_ended'].includes(event.kind)) void reload()
         })
         void reload()
         return () => { requestGeneration.current += 1; unsubscribe() }

@@ -30,10 +30,10 @@ func (s *Session) appendEntry(ctx context.Context, agentID identity.AgentID, val
 	}
 	stored := new(value)
 	if terminal {
-		if err := s.log.CommitTerminal(ctx, agentID, *stored); err != nil {
+		if err := s.log.CommitTerminal(ctx, agentID, stored); err != nil {
 			return nil, false, err
 		}
-	} else if err := s.log.Append(ctx, agentID, *stored); err != nil {
+	} else if err := s.log.Append(ctx, agentID, stored); err != nil {
 		return nil, false, err
 	}
 	s.mu.Lock()

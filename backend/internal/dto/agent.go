@@ -11,15 +11,15 @@ type StopAgentRequest struct {
 
 // AgentEvent 是展示流的传输信封；Data 由绑定层按核心载荷显式映射，不直接序列化核心接口。
 type AgentEvent struct {
-	Kind   string `json:"kind"`
-	RunID  string `json:"runId,omitempty"`
-	TurnID string `json:"turnId,omitempty"`
-	Data   any    `json:"data"`
+	Kind    string `json:"kind"`
+	AgentID string `json:"agentId,omitempty"`
+	RunID   string `json:"runId,omitempty"`
+	TurnID  string `json:"turnId,omitempty"`
+	Data    any    `json:"data"`
 }
 
-type AgentEntriesAppended struct {
-	AgentID string  `json:"agentId"`
-	Entries []Entry `json:"entries"`
+type AgentMessagesAppended struct {
+	Messages []HistoryMessage `json:"messages"`
 }
 
 type AgentTextDelta struct {
@@ -28,24 +28,6 @@ type AgentTextDelta struct {
 
 type AgentThinkingDelta struct {
 	Text string `json:"text"`
-}
-
-type AgentModelRequestStarted struct {
-	RetryCount  int     `json:"retryCount"`
-	RequestID   string  `json:"requestId"`
-	RequestKind string  `json:"requestKind"`
-	Timing      *Timing `json:"timing,omitempty"`
-}
-
-type AgentModelRequestResult struct {
-	Status      string      `json:"status"`
-	RetryCount  int         `json:"retryCount"`
-	Error       string      `json:"error,omitempty"`
-	RequestID   string      `json:"requestId"`
-	RequestKind string      `json:"requestKind"`
-	StopReason  string      `json:"stopReason"`
-	Usage       *ModelUsage `json:"usage,omitempty"`
-	Timing      *Timing     `json:"timing,omitempty"`
 }
 
 // AgentToolCall 的 Name 是工具注册键，Arguments 保留模型返回的参数原文。
@@ -71,23 +53,22 @@ type AgentTurnCompleted struct {
 	StopReason string `json:"stopReason"`
 }
 
-type AgentRunStarted struct {
-	AgentID string     `json:"agentId"`
-	Run     RunSummary `json:"run"`
+type AgentRunChanged struct {
+	Run RunSummary `json:"run"`
 }
 
 type AgentRunEnded struct {
-	Run     RunSummary `json:"run"`
-	State   string     `json:"state"`
-	Entries []Entry    `json:"entries"`
+	Run      RunSummary       `json:"run"`
+	State    string           `json:"state"`
+	Messages []HistoryMessage `json:"messages"`
 }
 
 type AgentSubagentStarted struct {
-	Agent         AgentView `json:"agent"`
-	Entries       []Entry   `json:"entries"`
-	ParentAgentID string    `json:"parentAgentId"`
-	ParentRunID   string    `json:"parentRunId"`
-	CallID        string    `json:"callId"`
+	Agent         AgentView        `json:"agent"`
+	Messages      []HistoryMessage `json:"messages"`
+	ParentAgentID string           `json:"parentAgentId"`
+	ParentRunID   string           `json:"parentRunId"`
+	CallID        string           `json:"callId"`
 }
 
 type AgentTaskQueueChanged struct {
@@ -112,7 +93,7 @@ type RunSummary struct {
 	Iterations  uint64
 	ToolCalls   int
 	OutputBytes int64
-	Result      *RunResult
+	Result      *RunResult `json:"Result,omitempty"`
 }
 
 // RunResult 只在执行结束后出现，失败原因归属于结果而非运行阶段。

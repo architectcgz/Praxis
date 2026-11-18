@@ -36,6 +36,7 @@ type Compression struct {
 
 // Entry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
 type Entry struct {
+	HistoryEnd  int64          `json:"-"` // 记录的结束位置，由 History 提供。
 	Payload     Payload        `json:"-"`
 	ID          string         `json:"id"`
 	RunID       string         `json:"runId,omitempty"`

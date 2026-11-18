@@ -63,7 +63,7 @@ export function useSessionPage({ sessionID, title, createNewSession }: SessionPa
         status, queuedCount,
         error, errorCode: !operationError && agents.selectionError ? agents.selectionErrorCode : undefined,
         clearError,
-        usageRevision: data.usageRevision,
+        usage: data.usage,
         submitInput, submissionRevision,
         canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask, changeQueue: submission.changeQueue,
         stop: controls.stop,

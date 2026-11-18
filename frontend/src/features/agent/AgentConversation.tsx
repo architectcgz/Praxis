@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowLeft, Bot, CircleAlert, MessageSquare, Square } from 'lucide-react'
-import type { Entry, AgentView } from '../../api'
+import type { HistoryMessage, AgentView } from '../../api'
+import type { RequestActivities } from './history/entries'
 import type { StreamingOutput } from './types'
 import { ApprovalGate, ToolApprovalScope, ToolApprovalsProvider } from './ToolApprovals'
 import { AgentActivityView, PendingOutputView, StreamingTurnView } from './output/MessageViews'
@@ -12,7 +13,8 @@ import { RunDuration } from '../timing/DurationLabel'
 export type AgentConversationProps = {
     submissionRevision: number
     agent: AgentView
-    entries: Entry[]
+    entries: HistoryMessage[]
+    requests: RequestActivities
     collaboration?: ReactNode
     onReturnToMain?: () => void
     onStop?: () => void
@@ -30,14 +32,14 @@ function subagentStatus(agent: AgentView): { status: ToolStatus; label: string }
     const run = agent.currentRun || agent.latestRun
     if (agent.state === 'executing') return { status: 'running', label: '执行中' }
     if (agent.state === 'waiting') return { status: 'blocked', label: '等待中' }
-    if (agent.state === 'failed' || run?.Outcome === 'failed') return { status: 'failed', label: '失败' }
-    if (agent.state === 'interrupted' || run?.Outcome === 'interrupted') return { status: 'cancelled', label: '已中断' }
-    if (run?.Outcome === 'yielded') return { status: 'completed', label: '已交付' }
-    if (run?.Outcome === 'completed') return { status: 'completed', label: '已完成' }
+    if (agent.state === 'failed' || run?.Result?.Outcome === 'failed') return { status: 'failed', label: '失败' }
+    if (agent.state === 'interrupted' || run?.Result?.Outcome === 'interrupted') return { status: 'cancelled', label: '已中断' }
+    if (run?.Result?.Outcome === 'yielded') return { status: 'completed', label: '已交付' }
+    if (run?.Result?.Outcome === 'completed') return { status: 'completed', label: '已完成' }
     return { status: 'queued', label: '空闲' }
 }
 
-export function AgentConversation({ submissionRevision, agent, entries, collaboration, onReturnToMain, onStop, streamingOutput, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, busy, composer }: AgentConversationProps) {
+export function AgentConversation({ submissionRevision, agent, entries, requests, collaboration, onReturnToMain, onStop, streamingOutput, entriesError, hasEarlier, historyLoading, onLoadEarlier, onRetryHistory, busy, composer }: AgentConversationProps) {
     const messageThreadRef = useRef<HTMLDivElement>(null)
     const followingOutputRef = useRef(true)
     const previousViewRef = useRef('')
@@ -46,7 +48,7 @@ export function AgentConversation({ submissionRevision, agent, entries, collabor
     const viewKey = agent.ID
     const active = Boolean(agent.currentRunId)
     const waitingForOutput = active && !busy && !streamingOutput
-    const history = useMemo(() => buildEntryHistory(entries), [entries])
+    const history = useMemo(() => buildEntryHistory(entries, requests), [entries, requests])
     // 已落盘回合仍可能等待工具结果；这些事件继续交给对应历史消息，不重复呈现正文。
     const historyOutput = streamingOutput?.turns.some((turn) => history.assistantTurns.has(JSON.stringify([streamingOutput.runId, turn.turnId])))
         ? streamingOutput : null
@@ -55,11 +57,11 @@ export function AgentConversation({ submissionRevision, agent, entries, collabor
         turns: streamingOutput.turns.filter((turn) => !history.assistantTurns.has(JSON.stringify([streamingOutput.runId, turn.turnId]))),
     } : null
     const latestRun = agent.latestRun
-    const runError = !agent.currentRunId && latestRun?.Status === 'ended' && latestRun.Outcome === 'failed' &&
+    const runError = !agent.currentRunId && latestRun?.Status === 'ended' && latestRun.Result?.Outcome === 'failed' &&
         !history.errorRuns.has(latestRun.ID)
-        ? latestRun.FailureMessage || `执行失败：${latestRun.FailureCode}` : ''
+        ? latestRun.Result?.FailureMessage || `执行失败：${latestRun.Result?.FailureCode}` : ''
 
-    const threadEmpty = entries.length === 0 && !streamingOutput && !waitingForOutput && !collaboration && !entriesError
+    const threadEmpty = history.rows.length === 0 && !streamingOutput && !waitingForOutput && !collaboration && !entriesError
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
@@ -79,7 +81,7 @@ export function AgentConversation({ submissionRevision, agent, entries, collabor
         })
         followingOutputRef.current = true
         previousViewRef.current = viewKey
-    }, [viewKey, submissionRevision, entries, streamingOutput, waitingForOutput, collaboration])
+    }, [viewKey, submissionRevision, history, streamingOutput, waitingForOutput, collaboration])
 
     useLayoutEffect(() => {
         const messageThread = messageThreadRef.current
@@ -189,15 +191,13 @@ export function AgentConversation({ submissionRevision, agent, entries, collabor
                                 </p>
                             </div>
                         </div>
-                    ) : <EntryHistory rows={history.rows} agentName={agent.name} streamingOutput={historyOutput} />}
+                    ) : <EntryHistory rows={history.rows} requests={requests} agentName={agent.name} streamingOutput={historyOutput} />}
                     {collaboration}
                     {visibleStreamingOutput?.turns.map((turn, index) => (
                         <StreamingTurnView
                             agentName={agent.name}
                             events={turn.events}
-                            runId={visibleStreamingOutput.runId}
                             run={agent.currentRun?.ID === visibleStreamingOutput.runId ? agent.currentRun : agent.latestRun}
-                            turnId={turn.turnId}
                             active={active && index === visibleStreamingOutput.turns.length - 1 && !visibleStreamingOutput.error}
                             continuation={index > 0}
                             hasContinuation={index < visibleStreamingOutput.turns.length - 1}

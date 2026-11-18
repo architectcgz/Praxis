@@ -1,3 +1,4 @@
+import type { SessionUsageSummary } from '../../api'
 import { useEffect, useId, useLayoutEffect, type CSSProperties, type KeyboardEvent, type RefObject } from 'react'
 import { Brain, ChevronDown, Cpu, ListPlus, Send, Server, Square } from 'lucide-react'
 import type { ModelOption } from '../../api'
@@ -9,6 +10,7 @@ import { useInputPickers } from './useInputPickers'
 type AgentTaskInputProps = {
     inputRef: RefObject<HTMLTextAreaElement | null>
     sessionId: string
+    usage: SessionUsageSummary | null
     active: boolean
     canQueue: boolean
     input: string
@@ -26,7 +28,7 @@ type AgentTaskInputProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+export function AgentTaskInput({ inputRef, sessionId, usage, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
     const inputID = useId()
     const providerMenuID = useId()
     const modelMenuID = useId()
@@ -103,7 +105,7 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                     disabled={busy}
                     rows={1}
                 />
-                <SessionTokenUsage key={sessionId} />
+                <SessionTokenUsage summary={usage} />
                 <div className="composer-tools">
                     <div className={`composer-select-picker composer-provider-picker ${models.length === 0 ? 'is-disabled' : ''}`} ref={providerPickerRef}>
                         <button

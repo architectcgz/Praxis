@@ -1,17 +1,24 @@
 import { memo } from 'react'
-import type { Entry } from '../../../api'
+import { ChevronDown, CircleAlert } from 'lucide-react'
+import type { HistoryMessage, ModelRequestActivity } from '../../../api'
+import type { RequestActivities } from '../history/entries'
 import type { StreamingOutput } from '../types'
 import { EntryView } from './EntryView'
+import { MessageMarkdown } from './MarkdownViews'
+import { MessageTiming } from './MessageTiming'
 import type { PairedToolResult } from './ToolCallViews'
 
 function toolCallKey(runId?: string, callId?: string): string {
     return `${runId || ''}:${callId || ''}`
 }
 
-/** 历史派生数据只随持久化条目更新，配对工具回执并保留相邻助手消息连续性。 */
-export function buildEntryHistory(entries: Entry[]) {
+type HistoryItem = { message: HistoryMessage } | { request: ModelRequestActivity }
+const itemTime = (item: HistoryItem) => ('message' in item ? item.message : item.request).createdAt
+
+/** 配对工具回执，并将失败的请求活动插入相应位置。 */
+export function buildEntryHistory(entries: HistoryMessage[], requests: RequestActivities) {
     const assistantTurns = new Set<string>()
-    const errorRuns = new Set<Entry['runId']>()
+    const errorRuns = new Set<string>()
     const toolResultsByCall = new Map<string, PairedToolResult>()
     const visibleCallKeys = new Set<string>()
 
@@ -19,9 +26,7 @@ export function buildEntryHistory(entries: Entry[]) {
         if (item.role === 'assistant' && item.kind === 'message') {
             assistantTurns.add(JSON.stringify([item.runId, item.turnId]))
             for (const block of item.content) {
-                if (block.kind === 'tool_call' && block.callId) {
-                    visibleCallKeys.add(toolCallKey(item.runId, block.callId))
-                }
+                if (block.kind === 'tool_call' && block.callId) visibleCallKeys.add(toolCallKey(item.runId, block.callId))
             }
         }
         if (item.error) errorRuns.add(item.runId)
@@ -38,22 +43,27 @@ export function buildEntryHistory(entries: Entry[]) {
         }
     }
 
-    // 所有回执均已配对到可见 assistant tool_call 的工具条目不再重复渲染为孤立卡片。
-    const visibleEntries = entries.filter((item) => {
-        if (item.kind === 'run') return false
-        if (item.role !== 'tool') return true
-        const results = item.content.filter((block) => block.kind === 'tool_result')
-        if (results.length === 0) return false
-        return results.some((block) => !block.callId || !visibleCallKeys.has(toolCallKey(item.runId, block.callId)))
-    })
+    const visible: HistoryItem[] = entries
+        .filter((item) => item.role !== 'tool' || item.content.some((block) =>
+            block.kind === 'tool_result' && (!block.callId || !visibleCallKeys.has(toolCallKey(item.runId, block.callId)))))
+        .map((message) => ({ message }))
+    for (const request of requests.values()) {
+        if (request.result?.status === 'failed' || request.result?.status === 'interrupted') {
+            visible.push({ request })
+            if (request.result.error) errorRuns.add(request.runId)
+        }
+    }
+    visible.sort((left, right) => Date.parse(itemTime(left)) - Date.parse(itemTime(right)))
 
     let groupStart = 0
-    const rows = visibleEntries.map((item, index) => {
-        const continuation = sameAssistantRun(visibleEntries[index - 1], item)
-        const hasContinuation = sameAssistantRun(item, visibleEntries[index + 1])
+    const rows = visible.map((row, index) => {
+        if ('request' in row) return row
+        const item = row.message
+        const continuation = sameAssistantRun(visible[index - 1], row)
+        const hasContinuation = sameAssistantRun(row, visible[index + 1])
         if (!continuation) groupStart = index
-        const copyContent = hasContinuation ? '' : visibleEntries.slice(groupStart, index + 1)
-            .map((entry) => entry.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join(''))
+        const copyContent = hasContinuation ? '' : visible.slice(groupStart, index + 1)
+            .map((entry) => 'message' in entry ? entry.message.content.filter((block) => block.kind === 'text').map((block) => block.text || '').join('') : '')
             .filter(Boolean).join('\n\n')
         const pairedResults = item.role === 'assistant' && item.kind === 'message'
             ? Object.fromEntries(
@@ -64,32 +74,65 @@ export function buildEntryHistory(entries: Entry[]) {
                 }),
             )
             : undefined
-        return { item, continuation, hasContinuation, copyContent, pairedResults }
+        return { message: item, continuation, hasContinuation, copyContent, pairedResults }
     })
     return { rows, assistantTurns, errorRuns }
 }
 
-/** 保留每条消息的稳定 key；只有已落盘回合的工具实时事件需要穿透历史边界。 */
-export const EntryHistory = memo(function EntryHistory({ rows, agentName, streamingOutput }: {
+export const EntryHistory = memo(function EntryHistory({ rows, requests, agentName, streamingOutput }: {
     rows: ReturnType<typeof buildEntryHistory>['rows']
+    requests: RequestActivities
     agentName: string
     streamingOutput: StreamingOutput | null
 }) {
-    return rows.map(({ item, continuation, hasContinuation, copyContent, pairedResults }) => <EntryView
-        key={item.id}
-        agentName={agentName}
-        item={item}
-        events={streamingOutput && streamingOutput.runId === item.runId ? streamingOutput.turns.find((turn) => turn.turnId === item.turnId)?.events : undefined}
-        pairedResults={pairedResults}
-        continuation={continuation}
-        hasContinuation={hasContinuation}
-        copyContent={copyContent}
-    />)
+    return rows.map((row) => {
+        if ('request' in row) return <RequestFailure request={row.request} key={`request:${row.request.requestId}`} />
+        const { message, continuation, hasContinuation, copyContent, pairedResults } = row
+        return <EntryView
+            key={message.id}
+            agentName={agentName}
+            item={message}
+            usage={message.requestId ? requests.get(message.requestId)?.result?.usage : undefined}
+            events={streamingOutput && streamingOutput.runId === message.runId ? streamingOutput.turns.find((turn) => turn.turnId === message.turnId)?.events : undefined}
+            pairedResults={pairedResults}
+            continuation={continuation}
+            hasContinuation={hasContinuation}
+            copyContent={copyContent}
+        />
+    })
 })
 
-/** 仅衔接同一次执行中相邻的助手消息；用户消息、错误和不同执行都保留独立边界。 */
-function sameAssistantRun(left?: Entry, right?: Entry): boolean {
-    return left?.kind === 'message' && right?.kind === 'message' &&
-        left.role === 'assistant' && right.role === 'assistant' &&
-        !left.error && !right.error && !!left.runId && left.runId === right.runId
+const requestKindLabels = {
+    iteration: '模型迭代',
+    risk_review: '风险审核',
+    summary: '上下文摘要',
+}
+
+function RequestFailure({ request }: { request: ModelRequestActivity }) {
+    const result = request.result
+    if (!result) return null
+    const status = result.status === 'interrupted' ? '已中断' : '失败'
+    return <details className="message entry-model-request">
+        <summary className="entry-model-request-summary">
+            <CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+            <span className="entry-model-request-title">{requestKindLabels[request.requestKind]}{status} · 第 {request.retryCount + 1} 次尝试</span>
+            <MessageTiming record={request.timing} usage={result.usage} />
+            <ChevronDown className="entry-model-request-chevron" size={14} aria-hidden="true" />
+        </summary>
+        <div className="entry-model-request-body">
+            {result.error && <div className="message-error-box" role="alert"><CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" /><span>{result.error}</span></div>}
+            {result.partial && <div className="entry-model-request-partial">
+                <span className="entry-section-kicker">本次请求的部分输出</span>
+                <MessageMarkdown content={result.partial} />
+            </div>}
+        </div>
+    </details>
+}
+
+function sameAssistantRun(left?: HistoryItem, right?: HistoryItem): boolean {
+    if (!left || !right || !('message' in left) || !('message' in right)) return false
+    const a = left.message
+    const b = right.message
+    return a.kind === 'message' && b.kind === 'message' && a.role === 'assistant' && b.role === 'assistant' &&
+        !a.error && !b.error && a.runId === b.runId
 }

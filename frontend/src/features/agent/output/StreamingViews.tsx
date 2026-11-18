@@ -40,18 +40,17 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, str
     )
 })
 
-export function StreamingTurnView({ agentName, events, runId, run, turnId, active, continuation = false, hasContinuation = false }: {
+export function StreamingTurnView({ agentName, events, run, active, continuation = false, hasContinuation = false }: {
     agentName: string
     events: AgentEvent[]
-    runId: string
     run?: RunSnapshot | null
-    turnId: string
     active: boolean
     continuation?: boolean
     hasContinuation?: boolean
 }) {
     const started = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_started' }> => event.kind === 'model_request_started')
-    const finished = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_completed' }> => event.kind === 'model_request_completed')
+    const finished = events.findLast((event) => event.kind === 'model_request_completed' || event.kind === 'model_request_failed' || event.kind === 'model_request_interrupted')
+    if (finished?.data.result && finished.data.result.status !== 'completed') return null
     const segments: ReactNode[] = []
     const pendingStatus = active ? 'running' : 'unknown'
     let tools: AgentEvent[] = []
@@ -87,7 +86,7 @@ export function StreamingTurnView({ agentName, events, runId, run, turnId, activ
         </div>}
         {segments}
         <div className="agent-activity turn-foot">
-            <MessageTiming runId={runId} turnId={turnId} requestId={finished?.data.requestId || started?.data.requestId} record={finished?.data.timing || started?.data.timing} running={active && !finished} />
+            <MessageTiming usage={finished?.data.result?.usage} record={finished?.data.timing ?? started?.data.timing} running={active && !finished} />
         </div>
     </div>
 }
