@@ -1,4 +1,4 @@
-import { Menu, Moon, RefreshCw, Sun } from 'lucide-react'
+import { Menu, Moon, Sun } from 'lucide-react'
 import { useColorTheme } from './useColorTheme'
 
 type WorkspaceHeaderProps = {
@@ -6,12 +6,11 @@ type WorkspaceHeaderProps = {
     refreshing: boolean
     projectName?: string
     sessionTitle?: string
-    onRefresh: () => void
     navigationOpen?: boolean
     onOpenNavigation?: () => void
 }
 
-export function WorkspaceHeader({ busy, refreshing, projectName, sessionTitle, onRefresh, navigationOpen = false, onOpenNavigation }: WorkspaceHeaderProps) {
+export function WorkspaceHeader({ busy, refreshing, projectName, sessionTitle, navigationOpen = false, onOpenNavigation }: WorkspaceHeaderProps) {
     const { theme, toggleTheme } = useColorTheme()
     const nextThemeLabel = theme === 'dark' ? '切换到白天主题' : '切换到夜间主题'
     return (
@@ -52,17 +51,6 @@ export function WorkspaceHeader({ busy, refreshing, projectName, sessionTitle, o
                 {theme === 'dark'
                     ? <Sun size={16} strokeWidth={1.8} aria-hidden="true" />
                     : <Moon size={16} strokeWidth={1.8} aria-hidden="true" />}
-            </button>
-            <button
-                className="quiet-button"
-                type="button"
-                aria-label={refreshing ? '刷新中' : '刷新工作区'}
-                title={refreshing ? '刷新中' : '刷新工作区'}
-                onClick={onRefresh}
-                disabled={busy || refreshing}
-            >
-                <RefreshCw size={14} strokeWidth={1.8} aria-hidden="true" />
-                <span className="quiet-button-label">{refreshing ? '刷新中...' : '刷新'}</span>
             </button>
         </header>
     )

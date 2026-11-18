@@ -113,19 +113,6 @@ select:focus-visible {
     transform: scale(0.98);
 }
 
-/* 顶栏内的次级按钮退成幽灵态，降低顶栏视觉噪音。 */
-.topbar .quiet-button {
-    background: transparent;
-    color: var(--muted);
-    font-weight: 400;
-    line-height: 1.35;
-}
-
-.topbar .quiet-button:hover:not(:disabled) {
-    background: var(--fill);
-    color: var(--ink);
-}
-
 /* 图标按钮：默认无形，悬停与激活才有底色。 */
 .icon-button {
     background: transparent;

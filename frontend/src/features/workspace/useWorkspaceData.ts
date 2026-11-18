@@ -43,7 +43,7 @@ export function useWorkspaceData() {
     const refreshCatalog = useCallback(async (manual = false, throwOnError = false) => {
         const requestID = ++catalogRequest.current
         if (!isBindingAvailable()) {
-            if (manual) setCatalogError('桌面连接不可用，请在桌面应用中刷新工作区。')
+            if (manual) setCatalogError('桌面连接不可用，无法读取工作区。')
             setCatalogLoaded(true)
             return
         }

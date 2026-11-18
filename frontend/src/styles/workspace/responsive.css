@@ -39,15 +39,6 @@
         padding: 0 10px;
     }
 
-    .topbar .quiet-button {
-        width: 32px;
-        padding: 0;
-    }
-
-    .topbar .quiet-button-label {
-        display: none;
-    }
-
     .modal-backdrop {
         align-items: end;
         padding: 12px;

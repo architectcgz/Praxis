@@ -38,5 +38,5 @@ export function useSessionData(store: SessionStore) {
         } catch (reason) { setError(() => reason); return false }
         finally { setClosing(false) }
     }, [store])
-    return { ...data, sessionLoading: loading, sessionError: error, closing, loadSession, releaseSession, updateTitle: store.updateTitle }
+    return { ...data, sessionLoading: loading, sessionError: error, closing, releaseSession, updateTitle: store.updateTitle }
 }

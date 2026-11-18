@@ -18,7 +18,7 @@ export type SessionPageOptions = {
 export function useSessionPage({ sessionID, title, createNewSession }: SessionPageOptions) {
     const [store] = useState(() => createSessionStore(sessionID))
     const data = useSessionData(store)
-    const { session, updateTitle, loadSession } = data
+    const { session, updateTitle } = data
     const catalog = useModelCatalog(session?.id || '')
     const { refreshModels } = catalog
     const agents = useAgentData({ store, models: catalog.models })
@@ -29,10 +29,6 @@ export function useSessionPage({ sessionID, title, createNewSession }: SessionPa
     const [submissionRevision, setSubmissionRevision] = useState(0)
     useEffect(() => { if (title !== undefined) updateTitle(title) }, [title, updateTitle])
     useEffect(() => { if (data.configRevision) void refreshModels(false) }, [data.configRevision, refreshModels])
-    const refresh = useCallback(async () => {
-        if (!session) { await loadSession(); return }
-        await refreshModels(false)
-    }, [session, loadSession, refreshModels])
     const submitInput = async () => {
         if (agents.input.trim().startsWith('/')) await commands.runCommand(agents.input.trim())
         else if (await submission.submitTask()) setSubmissionRevision((current) => current + 1)
@@ -68,6 +64,6 @@ export function useSessionPage({ sessionID, title, createNewSession }: SessionPa
         canQueue: submission.canQueue, cancelQueuedTask: submission.cancelQueuedTask, changeQueue: submission.changeQueue,
         stop: controls.stop,
         runCommand: commands.runCommand, commandNotice: commands.commandNotice, clearCommandNotice: commands.clearCommandNotice,
-        refresh, close: data.releaseSession,
+        close: data.releaseSession,
     }
 }

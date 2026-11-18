@@ -99,10 +99,6 @@ svg {
     font-weight: 650;
 }
 
-.quiet-button-label {
-    white-space: nowrap;
-}
-
 /* 图标按钮：28×28 方格，只用背景色表达状态，不改变几何。 */
 .icon-button {
     display: grid;
@@ -120,7 +116,6 @@ svg {
 }
 
 .topbar > .status,
-.topbar > .quiet-button,
 .topbar > .icon-button {
     flex: 0 0 auto;
 }

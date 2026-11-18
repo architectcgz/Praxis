@@ -70,7 +70,6 @@ export function ProjectWorkspace() {
         event.preventDefault()
         if (lookupID.trim() && workspace.bridgeAvailable) { selectSession(lookupID.trim()); setSearchOpen(false) }
     }
-    const refresh = async () => { await Promise.all([workspace.refreshCatalog(true), activePage?.refresh()]) }
     const closePage = async () => {
         const id = closingSessionID
         const controls = pageControls[id]
@@ -114,7 +113,7 @@ export function ProjectWorkspace() {
             busy={workspace.busy || Boolean(activePage?.busy)} refreshing={workspace.refreshing || Boolean(activePage?.refreshing)}
             projectName={headerProjectName}
             sessionTitle={headerSessionTitle}
-            onRefresh={() => void refresh()} navigationOpen={navigationOpen} onOpenNavigation={() => setNavigationOpen(true)}
+            navigationOpen={navigationOpen} onOpenNavigation={() => setNavigationOpen(true)}
         />
         <div className="workspace-grid">
             {navigationOpen ? <Overlay labelledBy="workspace-navigation-title" onClose={() => setNavigationOpen(false)} className="workspace-navigation-overlay">{projectsPanel}</Overlay> : projectsPanel}

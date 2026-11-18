@@ -12,7 +12,7 @@ import { TaskQueue } from '../task/TaskQueue'
 import { WORKSPACE_COMMANDS } from './useWorkspaceCommands'
 import { useSessionPage, type SessionPageOptions } from './useSessionPage'
 
-export type SessionPageControls = Pick<ReturnType<typeof useSessionPage>, 'busy' | 'refreshing' | 'models' | 'refresh' | 'close' | 'status' | 'queuedCount'> & { title: string }
+export type SessionPageControls = Pick<ReturnType<typeof useSessionPage>, 'busy' | 'refreshing' | 'models' | 'close' | 'status' | 'queuedCount'> & { title: string }
 type Props = SessionPageOptions & {
     active: boolean
     sessionsCount: number
@@ -28,10 +28,10 @@ export function SessionWorkspace({ active, sessionsCount, projectsCount, modalOp
     const page = useSessionPage(options)
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const title = page.session?.title || options.title || ''
-    const { busy, refreshing, models, refresh, close, status, queuedCount } = page
+    const { busy, refreshing, models, close, status, queuedCount } = page
     useEffect(() => {
-        onStateChange(options.sessionID, { title, busy, refreshing, models, refresh, close, status, queuedCount })
-    }, [options.sessionID, title, busy, refreshing, models, refresh, close, status, queuedCount, onStateChange])
+        onStateChange(options.sessionID, { title, busy, refreshing, models, close, status, queuedCount })
+    }, [options.sessionID, title, busy, refreshing, models, close, status, queuedCount, onStateChange])
 
     return <div className="session-workspace" hidden={!active}>
         <main className="main-panel">
