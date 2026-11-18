@@ -6,6 +6,7 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
@@ -187,7 +188,7 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			ID:      turnID.String() + ":start",
 			RunID:   params.ID.String(),
 			TurnID:  turnID.String(),
-			Payload: sessionentry.TurnStarted{Turn: turn},
+			Payload: entryPayload.TurnStarted{Turn: turn},
 		})
 		if err != nil {
 			return turnID, err
@@ -205,11 +206,11 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 		r.emit(params, turnID, coreevent.TurnStarted{})
 		finished, err := r.runTurn(ctx, params, deps, executor, request)
 		turn.EndedAt = time.Now().UTC()
-		var ending sessionentry.Payload = sessionentry.TurnCompleted{Turn: turn}
+		var ending entryPayload.Payload = entryPayload.TurnCompleted{Turn: turn}
 		if err != nil {
-			ending = sessionentry.TurnFailed{Turn: turn}
+			ending = entryPayload.TurnFailed{Turn: turn}
 			if ctx.Err() != nil {
-				ending = sessionentry.TurnInterrupted{Turn: turn}
+				ending = entryPayload.TurnInterrupted{Turn: turn}
 			}
 		}
 		_, _, saveErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
@@ -222,9 +223,9 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			return turnID, NewFailure(FailureStorage, saveErr)
 		}
 		switch ending.(type) {
-		case sessionentry.TurnFailed:
+		case entryPayload.TurnFailed:
 			r.emit(params, turnID, coreevent.TurnFailed{})
-		case sessionentry.TurnInterrupted:
+		case entryPayload.TurnInterrupted:
 			r.emit(params, turnID, coreevent.TurnInterrupted{})
 		default:
 			r.emit(params, turnID, coreevent.TurnCompleted{})

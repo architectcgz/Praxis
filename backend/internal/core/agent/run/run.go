@@ -7,6 +7,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -150,15 +151,15 @@ func (r *Run) accept(value *sessionentry.Entry) {
 	r.entryIndexes[value.ID] = len(r.entries)
 	r.entries = append(r.entries, value)
 	switch p := value.Payload.(type) {
-	case sessionentry.RunStarted:
+	case entryPayload.RunStarted:
 		r.status = sessionentry.RunRunning
 		r.startedAt = p.At.UTC()
-	case sessionentry.RunEndingStarted:
+	case entryPayload.RunEndingStarted:
 		r.status = sessionentry.RunEnding
-	case sessionentry.TurnStarted:
+	case entryPayload.TurnStarted:
 		r.currentTurnID = p.Turn.ID
 		r.progress.Iterations++
-	case sessionentry.ModelRequestStarted:
+	case entryPayload.ModelRequestStarted:
 		r.progress.ModelRequests++
 	}
 	if result := value.ExecutionResult(); result != nil {

@@ -3,6 +3,7 @@ package event
 import (
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/timing"
@@ -127,11 +128,11 @@ func (ModelRequestInterrupted) isPayload() {}
 // ModelRequestFact 根据已经提交的请求事实选择对应的通知。
 func ModelRequestFact(value sessionentry.Entry) Payload {
 	switch value.Payload.(type) {
-	case sessionentry.ModelRequestStarted:
+	case entryPayload.ModelRequestStarted:
 		return ModelRequestStarted{Entry: value}
-	case sessionentry.ModelRequestCompleted:
+	case entryPayload.ModelRequestCompleted:
 		return ModelRequestCompleted{Entry: value}
-	case sessionentry.ModelRequestInterrupted:
+	case entryPayload.ModelRequestInterrupted:
 		return ModelRequestInterrupted{Entry: value}
 	default:
 		return ModelRequestFailed{Entry: value}

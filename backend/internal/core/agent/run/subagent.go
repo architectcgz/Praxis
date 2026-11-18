@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/tool"
@@ -161,7 +162,7 @@ func (r *Run) acceptInstructions(ctx context.Context) (bool, error) {
 	for _, instruction := range instructions {
 		stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 			ID: instruction.id,
-			Payload: sessionentry.UserInput{
+			Payload: entryPayload.UserInput{
 				MessageID: instruction.id,
 				Text:      instruction.text,
 			},
@@ -272,7 +273,7 @@ func (r *Run) acceptReports(ctx context.Context) error {
 		text := subagentReportText(report)
 		stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 			ID: "report:" + report.ReportID,
-			Payload: sessionentry.UserInput{
+			Payload: entryPayload.UserInput{
 				MessageID: report.ReportID,
 				Text:      text,
 			},

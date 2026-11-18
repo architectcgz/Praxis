@@ -5,6 +5,7 @@ import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"slices"
@@ -15,7 +16,7 @@ import (
 func (s *Session) FindTaskInputID(ctx context.Context, taskID identity.TaskID) (string, error) {
 	var inputID string
 	err := s.walkHistory(ctx, s.data.MainAgentID(), func(value *sessionentry.Entry) bool {
-		prepared, ok := value.Payload.(sessionentry.RunPrepared)
+		prepared, ok := value.Payload.(entryPayload.RunPrepared)
 		if ok && prepared.SourceTaskID == taskID {
 			inputID = prepared.InputEntryID
 			return false
@@ -101,7 +102,7 @@ func (s *Session) readAgentView(ctx context.Context, view *AgentView) error {
 			}
 		}
 		if value.RunID == latestID {
-			if metadata, ok := value.Payload.(sessionentry.RunPrepared); ok {
+			if metadata, ok := value.Payload.(entryPayload.RunPrepared); ok {
 				prepared = true
 				if view.Kind == agentmodel.KindSubagent {
 					view.Name = metadata.AgentName
@@ -111,14 +112,14 @@ func (s *Session) readAgentView(ctx context.Context, view *AgentView) error {
 			}
 			if current := view.CurrentRun; current != nil {
 				switch fact := value.Payload.(type) {
-				case sessionentry.RunEndingStarted:
+				case entryPayload.RunEndingStarted:
 					current.Status = sessionentry.RunEnding
-				case sessionentry.RunStarted:
+				case entryPayload.RunStarted:
 					current.StartedAt = fact.At
 					if current.Status == sessionentry.RunStarting {
 						current.Status = sessionentry.RunRunning
 					}
-				case sessionentry.TurnStarted:
+				case entryPayload.TurnStarted:
 					current.Iterations++
 				}
 				if request, _ := value.RequestFact(); request != nil && request.Status != sessionentry.RequestRunning {

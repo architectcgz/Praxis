@@ -2,6 +2,7 @@ package bindings
 
 import (
 	"praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/timing"
 	"praxis/internal/dto"
@@ -63,9 +64,9 @@ func publicMessages(values []entry.Entry) []dto.HistoryMessage {
 			}
 		}
 		switch value.Payload.(type) {
-		case entry.SubagentReportAccepted:
+		case entryPayload.SubagentReportAccepted:
 			projected.Kind = dto.MessageSubagentReport
-		case entry.SubagentInstructionAccepted:
+		case entryPayload.SubagentInstructionAccepted:
 			projected.Kind = dto.MessageInstruction
 		}
 		if value.IsSummary() {

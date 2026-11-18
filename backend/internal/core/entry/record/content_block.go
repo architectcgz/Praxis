@@ -1,4 +1,4 @@
-package entry
+package record
 
 import (
 	"encoding/json"
@@ -102,7 +102,7 @@ func (b ReasoningStateBlock) MarshalJSON() ([]byte, error) {
 	}{Kind: "reasoning_state", value: value(b)})
 }
 
-func decodeContentBlock(data json.RawMessage) (ContentBlock, error) {
+func DecodeContentBlock(data json.RawMessage) (ContentBlock, error) {
 	var header struct {
 		Kind string `json:"kind"`
 	}

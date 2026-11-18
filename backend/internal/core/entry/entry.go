@@ -3,6 +3,8 @@ package entry
 import (
 	"context"
 	"encoding/json"
+	entryPayload "praxis/internal/core/entry/payload"
+	"praxis/internal/core/entry/record"
 	"praxis/internal/core/entry/role"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
@@ -34,18 +36,28 @@ type Compression struct {
 	Timing     *timing.Record            `json:"timing,omitempty"`
 }
 
+// Entry 与模型请求的部分响应使用同一组内容块类型。
+type (
+	ContentBlock        = record.ContentBlock
+	TextBlock           = record.TextBlock
+	ThinkingBlock       = record.ThinkingBlock
+	ToolCallBlock       = record.ToolCallBlock
+	ToolResultBlock     = record.ToolResultBlock
+	ReasoningStateBlock = record.ReasoningStateBlock
+)
+
 // Entry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
 type Entry struct {
-	HistoryEnd  int64          `json:"-"` // 记录的结束位置，由 History 提供。
-	Payload     Payload        `json:"-"`
-	ID          string         `json:"id"`
-	RunID       string         `json:"runId,omitempty"`
-	TurnID      string         `json:"turnId,omitempty"`
-	Response    *ModelResponse `json:"response,omitempty"`
-	Compression *Compression   `json:"compression,omitempty"`
-	AuthorKind  AuthorKind     `json:"authorKind,omitempty"`
-	AuthorID    string         `json:"authorId,omitempty"`
-	CreatedAt   time.Time      `json:"createdAt"`
+	HistoryEnd  int64                `json:"-"` // 记录的结束位置，由 History 提供。
+	Payload     entryPayload.Payload `json:"-"`
+	ID          string               `json:"id"`
+	RunID       string               `json:"runId,omitempty"`
+	TurnID      string               `json:"turnId,omitempty"`
+	Response    *ModelResponse       `json:"response,omitempty"`
+	Compression *Compression         `json:"compression,omitempty"`
+	AuthorKind  AuthorKind           `json:"authorKind,omitempty"`
+	AuthorID    string               `json:"authorId,omitempty"`
+	CreatedAt   time.Time            `json:"createdAt"`
 
 	Role    role.Role      `json:"role"`
 	Content []ContentBlock `json:"content"`
@@ -68,19 +80,19 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var err error
-	e.Payload, err = decodePayload(decoded.RawPayload)
+	e.Payload, err = entryPayload.Decode(decoded.RawPayload)
 	if err != nil {
 		return err
 	}
 	e.Content = make([]ContentBlock, len(decoded.RawContent))
 	for index, raw := range decoded.RawContent {
-		block, err := decodeContentBlock(raw)
+		block, err := record.DecodeContentBlock(raw)
 		if err != nil {
 			return err
 		}
 		e.Content[index] = block
 	}
-	if p, ok := e.Payload.(UserInput); ok {
+	if p, ok := e.Payload.(entryPayload.UserInput); ok {
 		e.Role = role.User
 		e.AuthorKind = AuthorUser
 		e.Content = []ContentBlock{TextBlock{Text: p.Text}}
@@ -129,11 +141,11 @@ func Values(entries []*Entry) []Entry {
 
 func (e Entry) MarshalJSON() ([]byte, error) {
 	type value Entry
-	payload, err := encodePayload(e.Payload)
+	payload, err := entryPayload.Encode(e.Payload)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := e.Payload.(UserInput); ok {
+	if _, ok := e.Payload.(entryPayload.UserInput); ok {
 		e.Content = nil
 	}
 	return json.Marshal(struct {
@@ -157,7 +169,7 @@ func (e Entry) ContributesToModelContext() bool {
 		return false
 	}
 	switch e.Payload.(type) {
-	case UserInput, SubagentReportAccepted, SubagentInstructionAccepted:
+	case entryPayload.UserInput, entryPayload.SubagentReportAccepted, entryPayload.SubagentInstructionAccepted:
 		return true
 	}
 	return e.Role == role.User || e.Role == role.Assistant || e.Role == role.Tool

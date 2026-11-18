@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	sessionentry "praxis/internal/core/entry"
+	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -24,7 +25,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	if _, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 		ID:        "prepared:" + r.id.String(),
 		CreatedAt: r.createdAt,
-		Payload: sessionentry.RunPrepared{
+		Payload: entryPayload.RunPrepared{
 			AgentName:    r.definition.Name,
 			DefinitionID: r.definition.ID,
 			SourceTaskID: r.sourceTaskID,
@@ -35,7 +36,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	}
 	stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 		ID: inputID,
-		Payload: sessionentry.UserInput{
+		Payload: entryPayload.UserInput{
 			MessageID: inputID,
 			Text:      prompt,
 		},
@@ -105,7 +106,7 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	if err == nil {
 		if _, _, saveErr := r.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
 			ID:      "ending:" + r.id.String(),
-			Payload: sessionentry.RunEndingStarted{},
+			Payload: entryPayload.RunEndingStarted{},
 		}); saveErr != nil {
 			err = errors.Join(err, saveErr)
 		} else {
@@ -139,7 +140,7 @@ func (r *Run) ConfirmRunning(ctx context.Context) error {
 	at := r.deps.Clock.Now()
 	_, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 		ID:      "started:" + r.id.String(),
-		Payload: sessionentry.RunStarted{At: at},
+		Payload: entryPayload.RunStarted{At: at},
 	})
 	if err != nil {
 		return storageFailure(err)
@@ -166,16 +167,16 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 		FinalAssistantID: r.progress.FinalAssistantID,
 		FinalStopReason:  r.progress.FinalStopReason,
 	}
-	var payload sessionentry.Payload
+	var payload entryPayload.Payload
 	switch outcome {
 	case sessionentry.OutcomeCompleted:
-		payload = sessionentry.RunCompleted{Result: result}
+		payload = entryPayload.RunCompleted{Result: result}
 	case sessionentry.OutcomeYielded:
-		payload = sessionentry.SubagentYielded{Result: result}
+		payload = entryPayload.SubagentYielded{Result: result}
 	case sessionentry.OutcomeFailed:
-		payload = sessionentry.RunFailed{Result: result}
+		payload = entryPayload.RunFailed{Result: result}
 	case sessionentry.OutcomeInterrupted:
-		payload = sessionentry.RunInterrupted{Result: result}
+		payload = entryPayload.RunInterrupted{Result: result}
 	}
 	stored, err := r.history.CommitTerminal(ctx, sessionentry.Entry{
 		ID:      "run:" + r.id.String(),
