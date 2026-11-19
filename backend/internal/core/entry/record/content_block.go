@@ -13,7 +13,58 @@ type ContentBlock interface {
 	contentBlock()
 }
 
+const (
+	kindText           = "text"
+	kindThinking       = "thinking"
+	kindToolCall       = "tool_call"
+	kindToolResult     = "tool_result"
+	kindReasoningState = "reasoning_state"
+)
+
+type blockHeader struct {
+	Kind string `json:"kind"`
+}
+
 type Content []ContentBlock
+
+func (c Content) MarshalJSON() ([]byte, error) {
+	if c == nil {
+		return []byte("null"), nil
+	}
+	blocks := make([]any, len(c))
+	for index, block := range c {
+		switch value := block.(type) {
+		case TextBlock:
+			blocks[index] = struct {
+				blockHeader
+				TextBlock
+			}{blockHeader{Kind: kindText}, value}
+		case ThinkingBlock:
+			blocks[index] = struct {
+				blockHeader
+				ThinkingBlock
+			}{blockHeader{Kind: kindThinking}, value}
+		case ToolCallBlock:
+			blocks[index] = struct {
+				blockHeader
+				ToolCallBlock
+			}{blockHeader{Kind: kindToolCall}, value}
+		case ToolResultBlock:
+			blocks[index] = struct {
+				blockHeader
+				ToolResultBlock
+			}{blockHeader{Kind: kindToolResult}, value}
+		case ReasoningStateBlock:
+			blocks[index] = struct {
+				blockHeader
+				ReasoningStateBlock
+			}{blockHeader{Kind: kindReasoningState}, value}
+		default:
+			return nil, fmt.Errorf("unsupported content block type %T", block)
+		}
+	}
+	return json.Marshal(blocks)
+}
 
 func (c *Content) UnmarshalJSON(data []byte) error {
 	var raw []json.RawMessage
@@ -64,80 +115,21 @@ func (ToolCallBlock) contentBlock()       {}
 func (ToolResultBlock) contentBlock()     {}
 func (ReasoningStateBlock) contentBlock() {}
 
-func (b TextBlock) MarshalJSON() ([]byte, error) {
-	type value TextBlock
-	return json.Marshal(struct {
-		Kind string `json:"kind"`
-		value
-	}{Kind: "text", value: value(b)})
-}
-
-func (b ThinkingBlock) MarshalJSON() ([]byte, error) {
-	type value ThinkingBlock
-	return json.Marshal(struct {
-		Kind string `json:"kind"`
-		value
-	}{Kind: "thinking", value: value(b)})
-}
-
-func (b ToolCallBlock) MarshalJSON() ([]byte, error) {
-	type value ToolCallBlock
-	return json.Marshal(struct {
-		Kind string `json:"kind"`
-		value
-	}{Kind: "tool_call", value: value(b)})
-}
-
-// UnmarshalJSON 接受参数原文字符串或结构化 JSON 值，内存中统一保留原文。
-func (b *ToolCallBlock) UnmarshalJSON(data []byte) error {
-	type value ToolCallBlock
-	decoded := struct {
-		*value
-		Input json.RawMessage `json:"input"`
-	}{value: (*value)(b)}
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	if len(decoded.Input) > 0 && decoded.Input[0] == '"' {
-		return json.Unmarshal(decoded.Input, &b.Arguments)
-	}
-	b.Arguments = string(decoded.Input)
-	return nil
-}
-
-func (b ToolResultBlock) MarshalJSON() ([]byte, error) {
-	type value ToolResultBlock
-	return json.Marshal(struct {
-		Kind string `json:"kind"`
-		value
-	}{Kind: "tool_result", value: value(b)})
-}
-
-func (b ReasoningStateBlock) MarshalJSON() ([]byte, error) {
-	type value ReasoningStateBlock
-	return json.Marshal(struct {
-		Kind string `json:"kind"`
-		value
-	}{Kind: "reasoning_state", value: value(b)})
-}
-
 func decodeContentBlock(data json.RawMessage) (ContentBlock, error) {
-	var header struct {
-		Kind string `json:"kind"`
-	}
+	var header blockHeader
 	if err := json.Unmarshal(data, &header); err != nil {
 		return nil, err
 	}
 	switch header.Kind {
-	case "text":
+	case kindText:
 		return decodeBlock[TextBlock](data)
-	case "thinking":
+	case kindThinking:
 		return decodeBlock[ThinkingBlock](data)
-	case "tool_call":
+	case kindToolCall:
 		return decodeBlock[ToolCallBlock](data)
-	case "tool_result":
+	case kindToolResult:
 		return decodeBlock[ToolResultBlock](data)
-	case "reasoning_state":
+	case kindReasoningState:
 		return decodeBlock[ReasoningStateBlock](data)
 	default:
 		return nil, fmt.Errorf("unknown content block kind %q", header.Kind)

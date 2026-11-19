@@ -7,6 +7,7 @@ import (
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
 	entryPayload "praxis/internal/core/entry/payload"
+	"praxis/internal/core/entry/record"
 	"praxis/internal/core/entry/role"
 	"praxis/internal/core/tool"
 	"unicode/utf8"
@@ -96,7 +97,7 @@ func EstimateTokens(text string) int {
 func (c ModelContext) EstimatedTokens() (int, error) {
 	type modelEntry struct {
 		Role    role.Role
-		Content []sessionentry.ContentBlock
+		Content record.Content
 	}
 	values := make([]modelEntry, 0, len(c.Entries))
 	for _, entry := range c.Entries {

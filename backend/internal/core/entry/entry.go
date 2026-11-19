@@ -47,7 +47,7 @@ func (e Entry) IsSummary() bool {
 }
 
 // Dialogue 返回模型可读的消息内容；摘要作为 user 角色的历史资料提供。
-func (e Entry) Dialogue() (role.Role, []ContentBlock) {
+func (e Entry) Dialogue() (role.Role, record.Content) {
 	switch value := e.Payload.(type) {
 	case entryPayload.Message:
 		return value.Role, value.Content
