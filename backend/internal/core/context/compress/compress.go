@@ -53,9 +53,7 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 		SystemPrompt: value.SystemPrompt,
 		Entries: []*sessionentry.Entry{{
 			AuthorKind: sessionentry.AuthorSystem,
-			Payload: entryPayload.Summary{
-				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: summaryResultPrefix}},
-			},
+			Payload:    entryPayload.Summary{Text: summaryResultPrefix},
 		}},
 	}
 	compressed.Entries = append(compressed.Entries, retained...)
@@ -85,9 +83,7 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
-	compressed.Entries[0].Payload = entryPayload.Summary{
-		Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: summaryResultPrefix + text}},
-	}
+	compressed.Entries[0].Payload = entryPayload.Summary{Text: summaryResultPrefix + text}
 	after, err := compressed.EstimatedTokens()
 	if err != nil {
 		return appcontext.ModelContext{}, false, err

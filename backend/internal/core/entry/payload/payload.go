@@ -114,7 +114,7 @@ func Decode(kind string, data json.RawMessage) (Payload, error) {
 	case kindMessage:
 		return decodePayloadData[Message](data)
 	case kindSummary:
-		return decodePayloadData[Summary](data)
+		return decodeSummary(data)
 	case kindRunPrepared:
 		return decodePayloadData[RunPrepared](data)
 	case kindRunStarted:
@@ -145,11 +145,15 @@ func Decode(kind string, data json.RawMessage) (Payload, error) {
 }
 
 func decodePayloadData[T Payload](data json.RawMessage) (Payload, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var value T
-	if err := decoder.Decode(&value); err != nil {
+	if err := decodeFields(data, &value); err != nil {
 		return nil, err
 	}
 	return value, nil
+}
+
+func decodeFields(data json.RawMessage, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(value)
 }

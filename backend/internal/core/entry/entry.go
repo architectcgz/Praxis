@@ -52,7 +52,7 @@ func (e Entry) Dialogue() (role.Role, record.Content) {
 	case entryPayload.Message:
 		return value.Role, value.Content
 	case entryPayload.Summary:
-		return role.User, value.Content
+		return role.User, record.Content{TextBlock{Text: value.Text}}
 	default:
 		return "", nil
 	}

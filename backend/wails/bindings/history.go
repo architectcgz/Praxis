@@ -3,7 +3,6 @@ package bindings
 import (
 	"praxis/internal/core/entry"
 	entryPayload "praxis/internal/core/entry/payload"
-	"praxis/internal/core/entry/role"
 	sessionmodel "praxis/internal/core/session"
 	"time"
 )
@@ -94,25 +93,22 @@ func publicMessages(values []entry.Entry) []HistoryMessage {
 			CreatedAt:  value.CreatedAt,
 			AuthorKind: string(value.AuthorKind),
 		}
-		var blocks []entry.ContentBlock
 		switch payload := value.Payload.(type) {
 		case entryPayload.Message:
-			projected.Role = string(payload.Role)
 			projected.Kind = MessageChat
 			if response := payload.Response; response != nil {
 				projected.RequestID = response.RequestID.String()
 				projected.Error = response.Error
 				projected.Timing = (*Timing)(response.Timing)
 			}
-			blocks = payload.Content
 		case entryPayload.Summary:
-			projected.Role = string(role.User)
 			projected.Kind = MessageSummary
 			projected.Timing = (*Timing)(payload.Timing)
-			blocks = payload.Content
 		default:
 			continue
 		}
+		messageRole, blocks := value.Dialogue()
+		projected.Role = string(messageRole)
 		projected.Content = make([]MessageBlock, 0, len(blocks))
 		for _, block := range blocks {
 			switch block := block.(type) {
