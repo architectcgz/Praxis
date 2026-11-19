@@ -78,9 +78,7 @@ Core 内的依赖方向是 Run 调用 Loop，Run、Loop 和 Session 共同使用
 | `core/session/` | `session.go`、历史读取和模型选择等会话规则 |
 | `core/task/` | `task.go`、`queue.go`，分别表达待执行输入和队列行为 |
 | `core/coordinator/` | 会话定位、输入接纳、任务调度和活动 Run 控制交接 |
-| `core/entry/` | Entry、内容块、Turn 边界、模型请求和其他共享事实的数据类型 |
-| `core/entry/payload/` | Entry 的具体事实载荷及持久化编码，调用方以 `entryPayload.RunPrepared` 等类型构造或判断载荷 |
-| `core/entry/record/` | Entry 与模型请求共用的内容块、模型请求数据 |
+| `core/entry/` | Entry、具体事实载荷及持久化编码、消息与模型请求共用的内容块 |
 | `core/timing/` | 通用计时记录与测量能力 |
 | `core/agent/run/` | Run 的信息、状态规则、`Execute`、输入与结果接收，以及本次执行的收尾 |
 | `core/loop/` | ReAct、模型请求、工具调用和上下文构建的核心流程 |

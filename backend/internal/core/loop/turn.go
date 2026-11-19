@@ -3,7 +3,6 @@ package loop
 import (
 	"context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -36,7 +35,7 @@ func (r *Runner) runTurn(
 		}
 	}()
 	r.Logf("provider request prepared run_id=%s model=%s contextEntries=%d turn_id=%s", params.ID, params.Model.ModelID, len(request.Context.Entries), turnID)
-	response, err := r.Request(ctx, params, deps, request, entryPayload.ModelRequestIteration)
+	response, err := r.Request(ctx, params, deps, request, sessionentry.ModelRequestIteration)
 	stopReason = response.StopReason
 	if err != nil {
 		return false, NewModelFailure(err)
@@ -48,10 +47,10 @@ func (r *Runner) runTurn(
 		RunID:      params.ID.String(),
 		TurnID:     turnID.String(),
 		AuthorKind: sessionentry.AuthorAgent,
-		Payload: entryPayload.Message{
+		Payload: sessionentry.Message{
 			Role:    role.Assistant,
 			Content: response.Blocks(),
-			Response: &entryPayload.ModelResponse{
+			Response: &sessionentry.ModelResponse{
 				RequestID:  response.RequestID,
 				StopReason: string(stopReason),
 				Timing:     response.Timing,

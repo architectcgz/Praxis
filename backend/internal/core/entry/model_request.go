@@ -1,9 +1,8 @@
-package payload
+package entry
 
 import (
 	"context"
 	"errors"
-	"praxis/internal/core/entry/record"
 	modelusage "praxis/internal/core/model/usage"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
@@ -38,7 +37,7 @@ type ModelRequest struct {
 	StopReason  string                  `json:"stopReason,omitempty"`
 	RetryCount  int                     `json:"retryCount"`
 	Error       string                  `json:"error,omitempty"`
-	Partial     record.Content          `json:"partial,omitempty"`
+	Partial     Content                 `json:"partial,omitempty"`
 	OutputBytes int                     `json:"outputBytes"`
 	Usage       *modelusage.Usage       `json:"usage,omitempty"`
 	Timing      *timing.Record          `json:"timing,omitempty"`
@@ -50,7 +49,7 @@ func (ModelRequest) isPayload() {}
 func (r ModelRequest) PartialText() string {
 	var text strings.Builder
 	for _, block := range r.Partial {
-		if part, ok := block.(record.TextBlock); ok {
+		if part, ok := block.(TextBlock); ok {
 			text.WriteString(part.Text)
 		}
 	}

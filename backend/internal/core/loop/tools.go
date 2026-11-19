@@ -5,7 +5,6 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -46,7 +45,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	outcomes := make([]toolexecution.CallResult, len(calls))
 	failures := make([]error, len(calls))
 	completed := make([]bool, len(calls))
-	saveRequest := func(ctx context.Context, request entryPayload.ModelRequest) error {
+	saveRequest := func(ctx context.Context, request sessionentry.ModelRequest) error {
 		return r.saveModelRequest(ctx, params, deps.AppendEntry, request)
 	}
 	var executionErr error
@@ -121,7 +120,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 		RunID:      params.ID.String(),
 		TurnID:     calls[0].TurnID.String(),
 		AuthorKind: sessionentry.AuthorTool,
-		Payload: entryPayload.Message{
+		Payload: sessionentry.Message{
 			Role:    role.Tool,
 			Content: content,
 		},

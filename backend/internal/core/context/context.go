@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
-	"praxis/internal/core/entry/record"
 	"praxis/internal/core/entry/role"
 	"praxis/internal/core/tool"
 	"unicode/utf8"
@@ -56,7 +54,7 @@ func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.Entry)
 func ModelEntries(entries []*sessionentry.Entry) []*sessionentry.Entry {
 	selected := make([]*sessionentry.Entry, 0, len(entries))
 	for _, entry := range entries {
-		if message, ok := entry.Payload.(entryPayload.Message); ok && message.Response != nil && message.Response.Error != "" {
+		if message, ok := entry.Payload.(sessionentry.Message); ok && message.Response != nil && message.Response.Error != "" {
 			continue
 		}
 		_, blocks := entry.Dialogue()
@@ -97,7 +95,7 @@ func EstimateTokens(text string) int {
 func (c ModelContext) EstimatedTokens() (int, error) {
 	type modelEntry struct {
 		Role    role.Role
-		Content record.Content
+		Content sessionentry.Content
 	}
 	values := make([]modelEntry, 0, len(c.Entries))
 	for _, entry := range c.Entries {

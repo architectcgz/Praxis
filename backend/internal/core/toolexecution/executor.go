@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"praxis/internal/clock"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
@@ -73,7 +72,7 @@ type RunOwner interface {
 }
 
 // SaveModelRequest 在工具批次内同步提交审核请求事实，审核必须等到保存结果再继续。
-type SaveModelRequest func(context.Context, entryPayload.ModelRequest) error
+type SaveModelRequest func(context.Context, sessionentry.ModelRequest) error
 
 // RunTools 只绑定本次已取得运行权的 AgentRun 的环境。
 type RunTools struct {

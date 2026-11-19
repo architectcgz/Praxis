@@ -6,7 +6,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
@@ -184,7 +183,7 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			RunID:     params.ID.String(),
 			TurnID:    turnID.String(),
 			CreatedAt: time.Now().UTC(),
-			Payload:   entryPayload.TurnStarted{},
+			Payload:   sessionentry.TurnStarted{},
 		})
 		if err != nil {
 			return turnID, err
@@ -202,11 +201,11 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 		r.emit(params, turnID, coreevent.TurnStarted{})
 		finished, err := r.runTurn(ctx, params, deps, executor, request)
 		endedAt := time.Now().UTC()
-		var ending entryPayload.Payload = entryPayload.TurnCompleted{}
+		var ending sessionentry.Payload = sessionentry.TurnCompleted{}
 		if err != nil {
-			ending = entryPayload.TurnFailed{}
+			ending = sessionentry.TurnFailed{}
 			if ctx.Err() != nil {
-				ending = entryPayload.TurnInterrupted{}
+				ending = sessionentry.TurnInterrupted{}
 			}
 		}
 		_, _, saveErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
@@ -220,9 +219,9 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			return turnID, NewFailure(FailureStorage, saveErr)
 		}
 		switch ending.(type) {
-		case entryPayload.TurnFailed:
+		case sessionentry.TurnFailed:
 			r.emit(params, turnID, coreevent.TurnFailed{})
-		case entryPayload.TurnInterrupted:
+		case sessionentry.TurnInterrupted:
 			r.emit(params, turnID, coreevent.TurnInterrupted{})
 		default:
 			r.emit(params, turnID, coreevent.TurnCompleted{})
@@ -255,7 +254,7 @@ func (r *Runner) BuildContext(ctx context.Context, params RunParams, entries []*
 }
 
 // Request 接收一次模型响应；断流时同时返回已收到内容，由所属调用流程决定如何记录。
-func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependencies, request providerapi.Request, kind entryPayload.ModelRequestKind) (Response, error) {
+func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependencies, request providerapi.Request, kind sessionentry.ModelRequestKind) (Response, error) {
 	var response Response
 	var err error
 	for retry := 0; retry <= 3; retry++ {
@@ -263,7 +262,7 @@ func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependen
 			request.ID = identity.NewModelRequestID()
 		}
 		response, err = r.callModel(ctx, params, deps, request, kind, retry, func(event providerapi.Event) {
-			if kind == entryPayload.ModelRequestIteration {
+			if kind == sessionentry.ModelRequestIteration {
 				r.emitModelEvent(params, request.TurnID, event)
 			}
 		})

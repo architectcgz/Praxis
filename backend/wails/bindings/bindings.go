@@ -2,7 +2,7 @@ package bindings
 
 import (
 	"context"
-	entryPayload "praxis/internal/core/entry/payload"
+	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -66,14 +66,14 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	case coreevent.ModelRequestCompleted:
 		requestInfo = &payload.Info
 		requestResult = &ModelRequestResult{
-			Status:     string(entryPayload.RequestCompleted),
+			Status:     string(entry.RequestCompleted),
 			StopReason: payload.StopReason,
 			Usage:      (*ModelUsage)(payload.Usage),
 		}
 	case coreevent.ModelRequestFailed:
 		requestInfo = &payload.Info
 		requestResult = &ModelRequestResult{
-			Status:     string(entryPayload.RequestFailed),
+			Status:     string(entry.RequestFailed),
 			StopReason: payload.StopReason,
 			Error:      payload.Error,
 			Partial:    payload.Partial,
@@ -82,7 +82,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	case coreevent.ModelRequestInterrupted:
 		requestInfo = &payload.Info
 		requestResult = &ModelRequestResult{
-			Status:     string(entryPayload.RequestInterrupted),
+			Status:     string(entry.RequestInterrupted),
 			StopReason: payload.StopReason,
 			Error:      payload.Error,
 			Partial:    payload.Partial,

@@ -7,7 +7,6 @@ import (
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -78,7 +77,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 		return value, nil
 	}
 	entry := generated.Entries[0]
-	summary := entry.Payload.(entryPayload.Summary)
+	summary := entry.Payload.(sessionentry.Summary)
 	summary.Timing = measured
 	summary.RequestIDs = requests
 	entry.Payload = summary
@@ -134,7 +133,7 @@ func remindContextBudget(request providerapi.Request, budget *appcontext.Budget)
 	}
 	if appcontext.NearContextLimit(tokens, request.MaxOutputTokens, request.Model.ContextWindow) {
 		hint := &sessionentry.Entry{
-			Payload: entryPayload.Message{
+			Payload: sessionentry.Message{
 				Role: role.User,
 				Content: []sessionentry.ContentBlock{
 					sessionentry.TextBlock{Text: fmt.Sprintf("[本次请求的运行提示] 估算输入 %d tokens，输出预留 %d tokens，窗口 %d tokens。请优先完成当前任务，并按需分段读取工具输出。", tokens, request.MaxOutputTokens, request.Model.ContextWindow)},

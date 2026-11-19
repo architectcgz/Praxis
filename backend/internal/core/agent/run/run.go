@@ -7,7 +7,6 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -59,7 +58,7 @@ type Run struct {
 	input         *sessionentry.Entry
 	createdAt     time.Time
 	startedAt     time.Time
-	terminal      entryPayload.RunTerminal
+	terminal      sessionentry.RunTerminal
 	progress      runProgress
 	currentTurnID identity.TurnID
 	entries       []*sessionentry.Entry
@@ -89,7 +88,7 @@ func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *R
 // 开始和结束事实分别在调用模型和应用审核结论之前确认保存。
 type toolUpdate struct {
 	ctx     context.Context
-	request entryPayload.ModelRequest
+	request sessionentry.ModelRequest
 	waiting int
 	saved   chan error
 }
@@ -150,16 +149,16 @@ func (r *Run) accept(value *sessionentry.Entry) {
 	r.entryIndexes[value.ID] = len(r.entries)
 	r.entries = append(r.entries, value)
 	switch p := value.Payload.(type) {
-	case entryPayload.RunStarted:
+	case sessionentry.RunStarted:
 		r.status = sessionentry.RunRunning
 		r.startedAt = p.At.UTC()
-	case entryPayload.RunEndingStarted:
+	case sessionentry.RunEndingStarted:
 		r.status = sessionentry.RunEnding
-	case entryPayload.TurnStarted:
+	case sessionentry.TurnStarted:
 		r.currentTurnID = identity.TurnID(value.TurnID)
 		r.progress.Iterations++
 	}
-	if terminal, ok := value.Payload.(entryPayload.RunTerminal); ok {
+	if terminal, ok := value.Payload.(sessionentry.RunTerminal); ok {
 		r.terminalMu.Lock()
 		r.terminal = terminal
 		r.terminalMu.Unlock()
@@ -172,8 +171,8 @@ func (r *Run) accept(value *sessionentry.Entry) {
 }
 
 func (p *runProgress) accept(value *sessionentry.Entry) {
-	if request, ok := value.Payload.(entryPayload.ModelRequest); ok {
-		if request.Status == entryPayload.RequestRunning {
+	if request, ok := value.Payload.(sessionentry.ModelRequest); ok {
+		if request.Status == sessionentry.RequestRunning {
 			p.ModelRequests++
 		} else {
 			p.OutputBytes += int64(request.OutputBytes)
@@ -183,7 +182,7 @@ func (p *runProgress) accept(value *sessionentry.Entry) {
 		}
 		return
 	}
-	message, ok := value.Payload.(entryPayload.Message)
+	message, ok := value.Payload.(sessionentry.Message)
 	if !ok {
 		return
 	}
@@ -229,7 +228,7 @@ func (r *Run) TerminalSaved() bool {
 // executeTools 在所属协程处理等待状态和审核保存；提交回调仅在本批工具中有效。
 // 取消由工具 Context 传播，此处仍接纳收尾事实，直到本批工具全部退出。
 func (r *Run) executeTools(saveRequest toolexecution.SaveModelRequest, execute func(toolexecution.SaveModelRequest)) {
-	submitRequest := func(ctx context.Context, request entryPayload.ModelRequest) error {
+	submitRequest := func(ctx context.Context, request sessionentry.ModelRequest) error {
 		update := toolUpdate{
 			ctx:     ctx,
 			request: request,
@@ -299,7 +298,7 @@ func (r *Run) Model() modelapi.Config {
 	return r.model
 }
 
-func (r *Run) Outcome() entryPayload.RunOutcome {
+func (r *Run) Outcome() sessionentry.RunOutcome {
 	if r.terminal == nil {
 		return ""
 	}

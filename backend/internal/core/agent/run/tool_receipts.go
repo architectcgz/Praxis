@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/identity"
@@ -45,7 +44,7 @@ func (r *Run) closeToolCalls(ctx context.Context) error {
 			ID:         "tools:" + e.TurnID,
 			TurnID:     e.TurnID,
 			AuthorKind: entry.AuthorTool,
-			Payload: entryPayload.Message{
+			Payload: entry.Message{
 				Role:    role.Tool,
 				Content: results,
 			},

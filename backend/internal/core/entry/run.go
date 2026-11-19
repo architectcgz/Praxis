@@ -2,7 +2,6 @@ package entry
 
 import (
 	agentmodel "praxis/internal/core/agent"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/identity"
 	"time"
 )
@@ -28,18 +27,18 @@ type RunSnapshot struct {
 }
 
 type RunConclusion struct {
-	Outcome        entryPayload.RunOutcome
+	Outcome        RunOutcome
 	EndedAt        time.Time
-	FailureCode    entryPayload.RunFailureCode
+	FailureCode    RunFailureCode
 	FailureMessage string
 }
 
 // AgentStateFromOutcome 将 Run 终态映射到 Agent 的展示状态。
-func AgentStateFromOutcome(outcome entryPayload.RunOutcome) agentmodel.AgentState {
+func AgentStateFromOutcome(outcome RunOutcome) agentmodel.AgentState {
 	switch outcome {
-	case entryPayload.OutcomeInterrupted:
+	case OutcomeInterrupted:
 		return agentmodel.AgentInterrupted
-	case entryPayload.OutcomeFailed:
+	case OutcomeFailed:
 		return agentmodel.AgentFailed
 	default:
 		return agentmodel.AgentIdle
@@ -47,7 +46,7 @@ func AgentStateFromOutcome(outcome entryPayload.RunOutcome) agentmodel.AgentStat
 }
 
 // SnapshotFromTerminal 为查询和通知投影已提交的 Run 终态。
-func SnapshotFromTerminal(id identity.RunID, terminal entryPayload.RunTerminal) RunSnapshot {
+func SnapshotFromTerminal(id identity.RunID, terminal RunTerminal) RunSnapshot {
 	stats := terminal.Stats()
 	code, message := terminal.Failure()
 	return RunSnapshot{
@@ -67,6 +66,6 @@ func SnapshotFromTerminal(id identity.RunID, terminal entryPayload.RunTerminal) 
 }
 
 func (e Entry) IsRun() bool {
-	_, ok := e.Payload.(entryPayload.RunTerminal)
+	_, ok := e.Payload.(RunTerminal)
 	return ok
 }

@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
@@ -12,7 +11,7 @@ import (
 func (s *Session) FindTaskInputID(ctx context.Context, taskID identity.TaskID) (string, error) {
 	var inputID string
 	err := s.walkHistory(ctx, s.data.MainAgentID(), func(value *sessionentry.Entry) bool {
-		prepared, ok := value.Payload.(entryPayload.RunPrepared)
+		prepared, ok := value.Payload.(sessionentry.RunPrepared)
 		if ok && prepared.SourceTaskID == taskID {
 			inputID = prepared.InputEntryID
 			return false

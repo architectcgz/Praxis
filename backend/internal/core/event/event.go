@@ -3,7 +3,6 @@ package event
 import (
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
 	taskmodel "praxis/internal/core/task"
@@ -101,7 +100,7 @@ func (TurnStarted) isPayload() {}
 // ModelRequestInfo 是各阶段共用的请求信息，HistoryEnd 用于与分页结果合并。
 type ModelRequestInfo struct {
 	RequestID  identity.ModelRequestID
-	Kind       entryPayload.ModelRequestKind
+	Kind       sessionentry.ModelRequestKind
 	RetryCount int
 	CreatedAt  time.Time
 	HistoryEnd int64
@@ -208,10 +207,10 @@ func (RunEnding) isPayload() {}
 type RunEnded struct {
 	StartedAt      time.Time
 	EndedAt        time.Time
-	Outcome        entryPayload.RunOutcome
+	Outcome        sessionentry.RunOutcome
 	Iterations     uint64
 	ToolCalls      int
-	FailureCode    entryPayload.RunFailureCode
+	FailureCode    sessionentry.RunFailureCode
 	FailureMessage string
 	State          agentmodel.AgentState
 }

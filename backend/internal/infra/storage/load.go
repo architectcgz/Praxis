@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"praxis/internal/clock"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	"slices"
@@ -52,9 +51,9 @@ func recoverAgent(ctx context.Context, owner *sessionmodel.Session, log *entryLo
 				ID:        "run:" + last.RunID,
 				RunID:     last.RunID,
 				CreatedAt: now,
-				Payload: entryPayload.RunInterrupted{
-					RunStats:   entryPayload.RunStats{StartedAt: last.CreatedAt, EndedAt: now},
-					RunFailure: entryPayload.RunFailure{Code: entryPayload.RunFailureInterrupted},
+				Payload: sessionentry.RunInterrupted{
+					RunStats:   sessionentry.RunStats{StartedAt: last.CreatedAt, EndedAt: now},
+					RunFailure: sessionentry.RunFailure{Code: sessionentry.RunFailureInterrupted},
 				},
 			}
 			if _, err := owner.CommitTerminal(ctx, agentID, terminal); err != nil {

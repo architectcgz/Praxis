@@ -1,9 +1,8 @@
-package payload
+package entry
 
 import (
 	"encoding/json"
 	"errors"
-	"praxis/internal/core/entry/record"
 	"praxis/internal/core/entry/role"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
@@ -11,7 +10,7 @@ import (
 
 type Message struct {
 	Role     role.Role      `json:"role"`
-	Content  record.Content `json:"content"`
+	Content  Content        `json:"content"`
 	Response *ModelResponse `json:"response,omitempty"`
 }
 
@@ -37,8 +36,8 @@ func (Summary) isPayload() {}
 func decodeSummary(data json.RawMessage) (Payload, error) {
 	var decoded struct {
 		Summary
-		Text    *string        `json:"text"`
-		Content record.Content `json:"content"`
+		Text    *string `json:"text"`
+		Content Content `json:"content"`
 	}
 	if err := decodeFields(data, &decoded); err != nil {
 		return nil, err
@@ -47,7 +46,7 @@ func decodeSummary(data json.RawMessage) (Payload, error) {
 	case decoded.Text != nil && decoded.Content == nil:
 		decoded.Summary.Text = *decoded.Text
 	case decoded.Text == nil && len(decoded.Content) == 1:
-		text, ok := decoded.Content[0].(record.TextBlock)
+		text, ok := decoded.Content[0].(TextBlock)
 		if !ok {
 			return nil, errors.New("summary content requires a text block")
 		}

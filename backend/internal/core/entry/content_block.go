@@ -1,4 +1,4 @@
-package record
+package entry
 
 import (
 	"encoding/json"

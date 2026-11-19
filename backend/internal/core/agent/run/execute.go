@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -27,7 +26,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	if _, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 		ID:        "prepared:" + r.id.String(),
 		CreatedAt: r.createdAt,
-		Payload: entryPayload.RunPrepared{
+		Payload: sessionentry.RunPrepared{
 			AgentName:    r.definition.Name,
 			DefinitionID: r.definition.ID,
 			SourceTaskID: r.sourceTaskID,
@@ -39,7 +38,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 		ID:         inputID,
 		AuthorKind: authorKind,
-		Payload: entryPayload.Message{
+		Payload: sessionentry.Message{
 			Role:    role.User,
 			Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: prompt}},
 		},
@@ -106,7 +105,7 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	if err == nil {
 		if _, _, saveErr := r.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
 			ID:      "ending:" + r.id.String(),
-			Payload: entryPayload.RunEndingStarted{},
+			Payload: sessionentry.RunEndingStarted{},
 		}); saveErr != nil {
 			err = errors.Join(err, saveErr)
 		} else {
@@ -118,10 +117,10 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	}
 	r.finishChildren()
 	outcome, code, message := r.classifyOutcome(ctx, err)
-	if !r.Main() && outcome == entryPayload.OutcomeCompleted {
-		outcome = entryPayload.OutcomeYielded
+	if !r.Main() && outcome == sessionentry.OutcomeCompleted {
+		outcome = sessionentry.OutcomeYielded
 	}
-	if err != nil && outcome == entryPayload.OutcomeFailed {
+	if err != nil && outcome == sessionentry.OutcomeFailed {
 		r.emitError(r.currentTurnID, err)
 	}
 	// 收尾不继承已取消的执行 Context，保存失败明确返回，不自动重投。
@@ -140,7 +139,7 @@ func (r *Run) ConfirmRunning(ctx context.Context) error {
 	at := r.deps.Clock.Now()
 	_, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 		ID:      "started:" + r.id.String(),
-		Payload: entryPayload.RunStarted{At: at},
+		Payload: sessionentry.RunStarted{At: at},
 	})
 	if err != nil {
 		return storageFailure(err)
@@ -152,8 +151,8 @@ func (r *Run) ConfirmRunning(ctx context.Context) error {
 	return nil
 }
 
-func (r *Run) Settle(ctx context.Context, outcome entryPayload.RunOutcome, code entryPayload.RunFailureCode, message string) error {
-	stats := entryPayload.RunStats{
+func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code sessionentry.RunFailureCode, message string) error {
+	stats := sessionentry.RunStats{
 		StartedAt:        r.startedAt,
 		EndedAt:          r.deps.Clock.Now(),
 		Usage:            r.progress.Usage,
@@ -164,21 +163,21 @@ func (r *Run) Settle(ctx context.Context, outcome entryPayload.RunOutcome, code 
 		FinalAssistantID: r.progress.FinalAssistantID,
 		FinalStopReason:  r.progress.FinalStopReason,
 	}
-	var payload entryPayload.RunTerminal
+	var payload sessionentry.RunTerminal
 	switch outcome {
-	case entryPayload.OutcomeCompleted:
-		payload = entryPayload.RunCompleted{RunStats: stats}
-	case entryPayload.OutcomeYielded:
-		payload = entryPayload.SubagentYielded{RunStats: stats}
-	case entryPayload.OutcomeFailed:
-		payload = entryPayload.RunFailed{
+	case sessionentry.OutcomeCompleted:
+		payload = sessionentry.RunCompleted{RunStats: stats}
+	case sessionentry.OutcomeYielded:
+		payload = sessionentry.SubagentYielded{RunStats: stats}
+	case sessionentry.OutcomeFailed:
+		payload = sessionentry.RunFailed{
 			RunStats:   stats,
-			RunFailure: entryPayload.RunFailure{Code: code, Message: message},
+			RunFailure: sessionentry.RunFailure{Code: code, Message: message},
 		}
-	case entryPayload.OutcomeInterrupted:
-		payload = entryPayload.RunInterrupted{
+	case sessionentry.OutcomeInterrupted:
+		payload = sessionentry.RunInterrupted{
 			RunStats:   stats,
-			RunFailure: entryPayload.RunFailure{Code: code, Message: message},
+			RunFailure: sessionentry.RunFailure{Code: code, Message: message},
 		}
 	}
 	stored, err := r.history.CommitTerminal(ctx, sessionentry.Entry{
@@ -214,54 +213,54 @@ func (r *Run) Settle(ctx context.Context, outcome entryPayload.RunOutcome, code 
 	return nil
 }
 
-func (r *Run) classifyOutcome(ctx context.Context, err error) (entryPayload.RunOutcome, entryPayload.RunFailureCode, string) {
+func (r *Run) classifyOutcome(ctx context.Context, err error) (sessionentry.RunOutcome, sessionentry.RunFailureCode, string) {
 	if loop.FailureClassification(context.Cause(ctx)) == loop.FailureStorage {
-		return entryPayload.OutcomeFailed, entryPayload.RunFailureStorage, ""
+		return sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, ""
 	}
 	if err == nil {
-		return entryPayload.OutcomeCompleted, "", ""
+		return sessionentry.OutcomeCompleted, "", ""
 	}
 	code := failureCode(err)
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-		return entryPayload.OutcomeFailed, entryPayload.RunFailureTimeout, ""
+		return sessionentry.OutcomeFailed, sessionentry.RunFailureTimeout, ""
 	}
-	if code != entryPayload.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
-		code = entryPayload.RunFailureCancelled
+	if code != sessionentry.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
+		code = sessionentry.RunFailureCancelled
 		if errors.Is(context.Cause(ctx), ErrInterrupted) {
-			code = entryPayload.RunFailureRequestCanceled
+			code = sessionentry.RunFailureRequestCanceled
 		}
-		return entryPayload.OutcomeInterrupted, code, ""
+		return sessionentry.OutcomeInterrupted, code, ""
 	}
 	message := ""
-	if code == entryPayload.RunFailureProvider {
+	if code == sessionentry.RunFailureProvider {
 		text := []rune(strings.TrimSpace(err.Error()))
-		if len(text) > entryPayload.MaxRunFailureMessageRunes {
-			text = text[:entryPayload.MaxRunFailureMessageRunes]
+		if len(text) > sessionentry.MaxRunFailureMessageRunes {
+			text = text[:sessionentry.MaxRunFailureMessageRunes]
 		}
 		message = string(text)
 	}
-	return entryPayload.OutcomeFailed, code, message
+	return sessionentry.OutcomeFailed, code, message
 }
 
-func failureCode(err error) entryPayload.RunFailureCode {
+func failureCode(err error) sessionentry.RunFailureCode {
 	switch loop.FailureClassification(err) {
 	case loop.FailureProviderUnavailable:
-		return entryPayload.RunFailureProviderUnavailable
+		return sessionentry.RunFailureProviderUnavailable
 	case loop.FailureProvider:
-		return entryPayload.RunFailureProvider
+		return sessionentry.RunFailureProvider
 	case loop.FailureTool:
-		return entryPayload.RunFailureTool
+		return sessionentry.RunFailureTool
 	case loop.FailurePolicyBlocked:
-		return entryPayload.RunFailurePolicyBlocked
+		return sessionentry.RunFailurePolicyBlocked
 	case loop.FailureResourceLimit:
-		return entryPayload.RunFailureResourceLimit
+		return sessionentry.RunFailureResourceLimit
 	case loop.FailureStorage:
-		return entryPayload.RunFailureStorage
+		return sessionentry.RunFailureStorage
 	case loop.FailureContract:
-		return entryPayload.RunFailureContract
+		return sessionentry.RunFailureContract
 	case loop.FailureBusy:
-		return entryPayload.RunFailureBusy
+		return sessionentry.RunFailureBusy
 	default:
-		return entryPayload.RunFailureInternal
+		return sessionentry.RunFailureInternal
 	}
 }

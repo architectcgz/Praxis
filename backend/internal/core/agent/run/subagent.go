@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/tool"
@@ -39,8 +38,8 @@ type SubagentReport struct {
 	RunID        identity.RunID
 	ParentRunID  identity.RunID
 	ParentCallID string
-	Outcome      entryPayload.RunOutcome
-	FailureCode  entryPayload.RunFailureCode
+	Outcome      sessionentry.RunOutcome
+	FailureCode  sessionentry.RunFailureCode
 	Text         string
 	Final        bool
 	Partial      bool
@@ -192,7 +191,7 @@ func (r *Run) acceptInstructions(ctx context.Context) (bool, error) {
 		stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 			ID:         instruction.id,
 			AuthorKind: sessionentry.AuthorAgent,
-			Payload: entryPayload.Message{
+			Payload: sessionentry.Message{
 				Role:    role.User,
 				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: instruction.text}},
 			},
@@ -301,7 +300,7 @@ func (r *Run) acceptReports(ctx context.Context) error {
 		stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
 			ID:         "report:" + report.ReportID,
 			AuthorKind: sessionentry.AuthorAgent,
-			Payload: entryPayload.Message{
+			Payload: sessionentry.Message{
 				Role:    role.User,
 				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text}},
 			},
@@ -358,7 +357,7 @@ func (r *Run) ResultForParent() SubagentReport {
 		result.Text = r.entries[index].TextContent()
 	} else {
 		for i := len(r.entries) - 1; i >= 0; i-- {
-			request, ok := r.entries[i].Payload.(entryPayload.ModelRequest)
+			request, ok := r.entries[i].Payload.(sessionentry.ModelRequest)
 			if !ok {
 				continue
 			}

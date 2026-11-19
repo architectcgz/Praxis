@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/identity"
 )
 
@@ -30,7 +29,7 @@ func decodeEntry(data []byte) (storedEntry, error) {
 	if value.AgentID == "" || value.Entry.ID == "" || value.Entry.RunID == "" || value.Entry.CreatedAt.IsZero() {
 		return value, fmt.Errorf("history entry has invalid identity or creation time")
 	}
-	if request, ok := value.Entry.Payload.(entryPayload.ModelRequest); ok {
+	if request, ok := value.Entry.Payload.(sessionentry.ModelRequest); ok {
 		if err := request.Validate(); err != nil {
 			return value, err
 		}

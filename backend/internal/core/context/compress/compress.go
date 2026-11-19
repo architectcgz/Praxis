@@ -6,7 +6,6 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 )
 
 const (
@@ -53,7 +52,7 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 		SystemPrompt: value.SystemPrompt,
 		Entries: []*sessionentry.Entry{{
 			AuthorKind: sessionentry.AuthorSystem,
-			Payload:    entryPayload.Summary{Text: summaryResultPrefix},
+			Payload:    sessionentry.Summary{Text: summaryResultPrefix},
 		}},
 	}
 	compressed.Entries = append(compressed.Entries, retained...)
@@ -83,7 +82,7 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}
-	compressed.Entries[0].Payload = entryPayload.Summary{Text: summaryResultPrefix + text}
+	compressed.Entries[0].Payload = sessionentry.Summary{Text: summaryResultPrefix + text}
 	after, err := compressed.EstimatedTokens()
 	if err != nil {
 		return appcontext.ModelContext{}, false, err

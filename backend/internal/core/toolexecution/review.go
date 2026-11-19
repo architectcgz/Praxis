@@ -7,7 +7,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -81,7 +80,7 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 		Context: appcontext.ModelContext{
 			SystemPrompt: riskReviewPrompt,
 			Entries: []*sessionentry.Entry{{
-				Payload: entryPayload.Message{
+				Payload: sessionentry.Message{
 					Role: role.User,
 					Content: []sessionentry.ContentBlock{
 						sessionentry.TextBlock{Text: string(data)},
@@ -125,13 +124,13 @@ func (t *RunTools) doRequestToolReview(
 		return review, &reviewRunError{error: capacityErr}
 	}
 	turnID := call.TurnID
-	if err := saveRequest(ctx, entryPayload.ModelRequest{
+	if err := saveRequest(ctx, sessionentry.ModelRequest{
 		ID:         review.RequestID,
 		RunID:      t.run.ID(),
 		TurnID:     turnID,
 		CallID:     call.CallID,
-		Kind:       entryPayload.ModelRequestRiskReview,
-		Status:     entryPayload.RequestRunning,
+		Kind:       sessionentry.ModelRequestRiskReview,
+		Status:     sessionentry.RequestRunning,
 		RetryCount: retryCount,
 	}); err != nil {
 		return review, &reviewRunError{error: err}
@@ -144,13 +143,13 @@ func (t *RunTools) doRequestToolReview(
 	var stopReason providerapi.StopReason
 	defer func() {
 		// 审核与普通请求共享结果保存边界，存储失败不能降级为人工审批。
-		if saveErr := saveRequest(context.WithoutCancel(ctx), entryPayload.ModelRequest{
+		if saveErr := saveRequest(context.WithoutCancel(ctx), sessionentry.ModelRequest{
 			ID:          review.RequestID,
 			RunID:       t.run.ID(),
 			TurnID:      turnID,
 			CallID:      call.CallID,
-			Kind:        entryPayload.ModelRequestRiskReview,
-			Status:      entryPayload.RequestStatus(ctx, err),
+			Kind:        sessionentry.ModelRequestRiskReview,
+			Status:      sessionentry.RequestStatus(ctx, err),
 			StopReason:  string(stopReason),
 			OutputBytes: outputBytes,
 			Usage:       usage,

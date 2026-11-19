@@ -7,8 +7,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
-	"praxis/internal/core/entry/record"
 	"praxis/internal/core/entry/role"
 )
 
@@ -31,8 +29,8 @@ type RequestSummaryFunc func(context.Context, appcontext.ModelContext, int) (str
 
 // summaryEntry 只承载摘要模型需要的角色和正文，不复制会话条目的身份、计时及其他执行事实。
 type summaryEntry struct {
-	Role    role.Role      `json:"role"`
-	Content record.Content `json:"content"`
+	Role    role.Role            `json:"role"`
+	Content sessionentry.Content `json:"content"`
 }
 
 // summaryEntries 不把签名、加密载荷或展示性思考正文发送给摘要模型。
@@ -110,7 +108,7 @@ func summaryContext(previous, transcript string) appcontext.ModelContext {
 	return appcontext.ModelContext{
 		SystemPrompt: summaryPrompt,
 		Entries: []*sessionentry.Entry{{
-			Payload: entryPayload.Message{
+			Payload: sessionentry.Message{
 				Role: role.User,
 				Content: []sessionentry.ContentBlock{
 					sessionentry.TextBlock{Text: previousSummaryHeader + previous + transcriptHeader + transcript},

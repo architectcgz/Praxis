@@ -8,7 +8,6 @@ import (
 	"io"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
@@ -64,9 +63,9 @@ func requestModel(
 }
 
 // saveModelRequest 只在提交成功后发布请求活动，调用者必须处于所属 Run 的串行执行点。
-func (r *Runner) saveModelRequest(ctx context.Context, params RunParams, appendEntry AppendEntry, request entryPayload.ModelRequest) error {
+func (r *Runner) saveModelRequest(ctx context.Context, params RunParams, appendEntry AppendEntry, request sessionentry.ModelRequest) error {
 	suffix := "finished"
-	if request.Status == entryPayload.RequestRunning {
+	if request.Status == sessionentry.RequestRunning {
 		suffix = "started"
 	}
 	stored, _, err := appendEntry(ctx, sessionentry.Entry{
@@ -82,7 +81,7 @@ func (r *Runner) saveModelRequest(ctx context.Context, params RunParams, appendE
 	return nil
 }
 
-func modelRequestEvent(request entryPayload.ModelRequest, createdAt time.Time, historyEnd int64) coreevent.Payload {
+func modelRequestEvent(request sessionentry.ModelRequest, createdAt time.Time, historyEnd int64) coreevent.Payload {
 	info := coreevent.ModelRequestInfo{
 		RequestID:  request.ID,
 		Kind:       request.Kind,
@@ -92,9 +91,9 @@ func modelRequestEvent(request entryPayload.ModelRequest, createdAt time.Time, h
 		Timing:     request.Timing,
 	}
 	switch request.Status {
-	case entryPayload.RequestRunning:
+	case sessionentry.RequestRunning:
 		return coreevent.ModelRequestStarted{Info: info}
-	case entryPayload.RequestCompleted:
+	case sessionentry.RequestCompleted:
 		return coreevent.ModelRequestCompleted{Info: info, StopReason: request.StopReason, Usage: request.Usage}
 	}
 	failure := coreevent.ModelRequestFailed{
@@ -104,7 +103,7 @@ func modelRequestEvent(request entryPayload.ModelRequest, createdAt time.Time, h
 		Partial:    request.PartialText(),
 		Usage:      request.Usage,
 	}
-	if request.Status == entryPayload.RequestInterrupted {
+	if request.Status == sessionentry.RequestInterrupted {
 		return coreevent.ModelRequestInterrupted(failure)
 	}
 	return failure
@@ -116,7 +115,7 @@ func (r *Runner) callModel(
 	params RunParams,
 	deps RunDependencies,
 	request providerapi.Request,
-	requestKind entryPayload.ModelRequestKind,
+	requestKind sessionentry.ModelRequestKind,
 	retryCount int,
 	onEvent func(providerapi.Event),
 ) (response Response, err error) {
@@ -131,13 +130,13 @@ func (r *Runner) callModel(
 		return response, NewFailure(FailureInternal, hookErr)
 	}
 	observationContext := request.Context
-	if requestKind == entryPayload.ModelRequestIteration {
+	if requestKind == sessionentry.ModelRequestIteration {
 		request, err = remindContextBudget(request, deps.Budget)
 		if err != nil {
 			return response, NewModelFailure(err)
 		}
 	}
-	if requestKind != entryPayload.ModelRequestIteration {
+	if requestKind != sessionentry.ModelRequestIteration {
 		tokens, _, budgetErr := requestTokens(request, nil)
 		if budgetErr != nil {
 			return response, NewFailure(FailureContract, budgetErr)
@@ -151,12 +150,12 @@ func (r *Runner) callModel(
 	}
 	span := timing.NewSpan()
 
-	started := entryPayload.ModelRequest{
+	started := sessionentry.ModelRequest{
 		ID:         request.ID,
 		RunID:      params.ID,
 		TurnID:     request.TurnID,
 		Kind:       requestKind,
-		Status:     entryPayload.RequestRunning,
+		Status:     sessionentry.RequestRunning,
 		RetryCount: retryCount,
 		Timing:     span.Snapshot(),
 	}
@@ -173,12 +172,12 @@ func (r *Runner) callModel(
 	})
 	defer func() {
 		// 取消或断流也保存已知请求事实，明细与累计快照使用同一次日志提交。
-		finished := entryPayload.ModelRequest{
+		finished := sessionentry.ModelRequest{
 			ID:          request.ID,
 			RunID:       params.ID,
 			TurnID:      request.TurnID,
 			Kind:        requestKind,
-			Status:      entryPayload.RequestStatus(ctx, err),
+			Status:      sessionentry.RequestStatus(ctx, err),
 			StopReason:  string(response.StopReason),
 			OutputBytes: response.textBytes,
 			Usage:       response.Usage,
@@ -217,7 +216,7 @@ func (r *Runner) callModel(
 	})
 	response.Timing = span.End()
 	response.RequestID = request.ID
-	if requestKind == entryPayload.ModelRequestIteration && err == nil {
+	if requestKind == sessionentry.ModelRequestIteration && err == nil {
 		_, key, shapeErr := requestTokens(request, deps.Budget)
 		if shapeErr != nil {
 			return response, NewFailure(FailureContract, shapeErr)
@@ -363,7 +362,7 @@ func (r *Runner) summarizeContext(ctx context.Context, params RunParams, deps Ru
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	response, err := r.Request(requestCtx, params, deps, request, entryPayload.ModelRequestSummary)
+	response, err := r.Request(requestCtx, params, deps, request, sessionentry.ModelRequestSummary)
 	if err != nil {
 		return "", response.RequestID, turnID, err
 	}

@@ -1,7 +1,6 @@
 package entry
 
 import (
-	entryPayload "praxis/internal/core/entry/payload"
 	"praxis/internal/core/entry/role"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
@@ -54,7 +53,7 @@ func (c ToolCall) ResultEntry(result tool.ToolResult) Entry {
 		RunID:      c.RunID.String(),
 		TurnID:     c.TurnID.String(),
 		AuthorKind: AuthorTool,
-		Payload: entryPayload.Message{
+		Payload: Message{
 			Role: role.Tool,
 			Content: []ContentBlock{
 				ToolResultBlock{

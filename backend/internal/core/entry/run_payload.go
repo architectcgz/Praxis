@@ -1,4 +1,4 @@
-package payload
+package entry
 
 import (
 	modelusage "praxis/internal/core/model/usage"

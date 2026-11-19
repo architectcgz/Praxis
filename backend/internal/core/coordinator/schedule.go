@@ -5,7 +5,7 @@ import (
 	"errors"
 	agentmodel "praxis/internal/core/agent"
 	agentrun "praxis/internal/core/agent/run"
-	entryPayload "praxis/internal/core/entry/payload"
+	"praxis/internal/core/entry"
 	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -94,7 +94,7 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, bindi
 	unlock()
 	endCtx, cancelEnd := r.transitionContext()
 	defer cancelEnd()
-	if saveErr := run.Settle(endCtx, entryPayload.OutcomeInterrupted, entryPayload.RunFailureCancelled, ""); saveErr != nil {
+	if saveErr := run.Settle(endCtx, entry.OutcomeInterrupted, entry.RunFailureCancelled, ""); saveErr != nil {
 		err = loop.NewFailure(loop.FailureStorage, errors.Join(err, saveErr))
 	}
 	return r.finishTaskStart(input, binding, active, false, err)

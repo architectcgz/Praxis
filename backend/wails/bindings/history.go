@@ -2,7 +2,6 @@ package bindings
 
 import (
 	"praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	sessionmodel "praxis/internal/core/session"
 	"time"
 )
@@ -94,14 +93,14 @@ func publicMessages(values []entry.Entry) []HistoryMessage {
 			AuthorKind: string(value.AuthorKind),
 		}
 		switch payload := value.Payload.(type) {
-		case entryPayload.Message:
+		case entry.Message:
 			projected.Kind = MessageChat
 			if response := payload.Response; response != nil {
 				projected.RequestID = response.RequestID.String()
 				projected.Error = response.Error
 				projected.Timing = (*Timing)(response.Timing)
 			}
-		case entryPayload.Summary:
+		case entry.Summary:
 			projected.Kind = MessageSummary
 			projected.Timing = (*Timing)(payload.Timing)
 		default:
@@ -148,7 +147,7 @@ func publicMessages(values []entry.Entry) []HistoryMessage {
 func publicHistoryPage(page sessionmodel.HistoryPage) HistoryPage {
 	requests := make([]ModelRequestActivity, 0)
 	for _, value := range page.Entries {
-		request, ok := value.Payload.(entryPayload.ModelRequest)
+		request, ok := value.Payload.(entry.ModelRequest)
 		if !ok {
 			continue
 		}
@@ -162,13 +161,13 @@ func publicHistoryPage(page sessionmodel.HistoryPage) HistoryPage {
 			Timing:      (*Timing)(request.Timing),
 			HistoryEnd:  value.HistoryEnd,
 		}
-		if request.Status != entryPayload.RequestRunning {
+		if request.Status != entry.RequestRunning {
 			activity.Result = &ModelRequestResult{
 				Status:     string(request.Status),
 				StopReason: request.StopReason,
 				Error:      request.Error,
 			}
-			if request.Status != entryPayload.RequestCompleted {
+			if request.Status != entry.RequestCompleted {
 				activity.Result.Partial = request.PartialText()
 			}
 			if request.Usage != nil && request.Usage.Reported() {

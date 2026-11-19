@@ -3,7 +3,7 @@ package context
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"praxis/internal/core/entry/record"
+	"praxis/internal/core/entry"
 )
 
 // Budget 只在一次 Loop 中保存最近成功普通请求的用量锚点，不形成持久化校准状态。
@@ -20,7 +20,7 @@ func visibleHashes(c ModelContext) ([][32]byte, error) {
 		messageRole, blocks := e.Dialogue()
 		data, err := json.Marshal(struct {
 			Role    string
-			Content record.Content
+			Content entry.Content
 		}{Role: string(messageRole), Content: blocks})
 		if err != nil {
 			return nil, err

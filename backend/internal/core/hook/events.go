@@ -5,7 +5,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	entryPayload "praxis/internal/core/entry/payload"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
@@ -52,7 +51,7 @@ type AfterIterationHook interface {
 // ModelRequest 携带本次请求的只读快照，处理器不返回修改后的请求。
 type ModelRequest struct {
 	Identity
-	Kind    entryPayload.ModelRequestKind
+	Kind    sessionentry.ModelRequestKind
 	Request providerapi.Request
 }
 

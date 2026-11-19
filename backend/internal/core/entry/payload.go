@@ -1,4 +1,4 @@
-package payload
+package entry
 
 import (
 	"bytes"
@@ -63,8 +63,8 @@ const (
 	kindModelRequest    = "model_request"
 )
 
-// Encode 将历史条目的类型与载荷分开返回；内存中不保存额外的 kind。
-func Encode(value Payload) (string, json.RawMessage, error) {
+// encodePayload 将历史条目的类型与载荷分开返回；内存中不保存额外的 kind。
+func encodePayload(value Payload) (string, json.RawMessage, error) {
 	var kind string
 	switch value.(type) {
 	case Message:
@@ -102,8 +102,8 @@ func Encode(value Payload) (string, json.RawMessage, error) {
 	return kind, data, err
 }
 
-// Decode 使用 Entry 顶层的 kind 恢复具体载荷。
-func Decode(kind string, data json.RawMessage) (Payload, error) {
+// decodePayload 使用 Entry 顶层的 kind 恢复具体载荷。
+func decodePayload(kind string, data json.RawMessage) (Payload, error) {
 	if kind == "" {
 		return nil, errors.New("history entry requires a top-level kind")
 	}
