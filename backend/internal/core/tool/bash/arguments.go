@@ -19,8 +19,8 @@ type Arguments struct {
 	Timeout float64 `json:"timeout,omitzero"`
 }
 
-// NewArguments 提供业务默认目录和超时；显式超时为零不会回退到默认值。
-func NewArguments() Arguments {
+// DefaultArguments 提供业务默认目录和超时，显式超时为零时仍按无效值处理。
+func DefaultArguments() Arguments {
 	return Arguments{
 		Path:    ".",
 		Timeout: defaultTimeout,

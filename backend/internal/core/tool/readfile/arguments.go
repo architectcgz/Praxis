@@ -19,8 +19,8 @@ type Arguments struct {
 	Limit  int    `json:"limit,omitzero"`
 }
 
-// NewArguments 提供业务默认值；JSON 解码只覆盖显式输入，limit 为零时仍须按无效值处理。
-func NewArguments() Arguments {
+// DefaultArguments 提供业务默认值，JSON 解码只覆盖显式输入，limit 为零时仍按无效值处理。
+func DefaultArguments() Arguments {
 	return Arguments{Limit: defaultLimit}
 }
 

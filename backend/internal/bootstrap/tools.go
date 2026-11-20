@@ -1,8 +1,6 @@
 package bootstrap
 
 import (
-	"context"
-	"errors"
 	"praxis/internal/core/tool"
 	"praxis/internal/core/tool/applypatch"
 	"praxis/internal/core/tool/bash"
@@ -12,58 +10,33 @@ import (
 	readinfra "praxis/internal/infra/tools/readfile"
 )
 
-// builtinTool 只连接 Core 参数规则与 Infra 执行能力，不决定默认值或业务策略。
-type builtinTool[Arguments any] struct {
-	readOnly   bool
-	definition func() tool.ToolDefinition
-	arguments  func() Arguments
-	prepare    func(Arguments) (Arguments, error)
-	call       func(context.Context, Arguments, tool.Environment) (tool.ToolResult, error)
-}
-
-func (t builtinTool[Arguments]) Definition() tool.ToolDefinition { return t.definition() }
-
-func (t builtinTool[Arguments]) NewArguments() any { return new(t.arguments()) }
-
-func (t builtinTool[Arguments]) Prepare(arguments any, environment tool.Environment) (tool.PreparedCall, error) {
-	args, ok := arguments.(*Arguments)
-	if !ok {
-		return tool.PreparedCall{}, errors.New("tool argument type does not match the registered arguments")
-	}
-	prepared, err := t.prepare(*args)
-	if err != nil {
-		return tool.PreparedCall{}, err
-	}
-	return tool.PreparedCall{
-		Arguments: prepared,
-		// 本次参数和文件访问范围随调用存续，不回写注册表中的共享工具。
-		Call: func(ctx context.Context) (tool.ToolResult, error) {
-			return t.call(ctx, prepared, environment)
-		},
-	}, nil
-}
-
 func buildToolRegistry(extensions []tool.Tool) (*tool.ToolRegistry, error) {
 	registry := tool.NewToolRegistry()
 	builtins := []tool.Tool{
-		builtinTool[readfile.Arguments]{
-			definition: readfile.Definition,
-			readOnly:   true,
-			arguments:  readfile.NewArguments,
-			prepare:    readfile.Prepare,
-			call:       readinfra.Call,
+		tool.Function[readfile.Arguments]{
+			Name:             readfile.Name,
+			Description:      readfile.Description,
+			InputSchema:      []byte(readfile.InputSchema),
+			IsReadOnly:       true,
+			DefaultArguments: readfile.DefaultArguments,
+			PrepareArguments: readfile.Prepare,
+			Execute:          readinfra.Call,
 		},
-		builtinTool[bash.Arguments]{
-			definition: bash.Definition,
-			arguments:  bash.NewArguments,
-			prepare:    bash.Prepare,
-			call:       bashinfra.Call,
+		tool.Function[bash.Arguments]{
+			Name:             bash.Name,
+			Description:      bash.Description,
+			InputSchema:      []byte(bash.InputSchema),
+			DefaultArguments: bash.DefaultArguments,
+			PrepareArguments: bash.Prepare,
+			Execute:          bashinfra.Call,
 		},
-		builtinTool[applypatch.Arguments]{
-			definition: applypatch.Definition,
-			arguments:  applypatch.NewArguments,
-			prepare:    applypatch.Prepare,
-			call:       patchinfra.Call,
+		tool.Function[applypatch.Arguments]{
+			Name:             applypatch.Name,
+			Description:      applypatch.Description,
+			InputSchema:      []byte(applypatch.InputSchema),
+			DefaultArguments: applypatch.DefaultArguments,
+			PrepareArguments: applypatch.Prepare,
+			Execute:          patchinfra.Call,
 		},
 	}
 	for _, candidate := range append(builtins, extensions...) {
@@ -73,5 +46,3 @@ func buildToolRegistry(extensions []tool.Tool) (*tool.ToolRegistry, error) {
 	}
 	return registry, nil
 }
-
-func (t builtinTool[Arguments]) ReadOnly() bool { return t.readOnly }

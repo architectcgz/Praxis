@@ -9,8 +9,8 @@ type Arguments struct {
 	Operations []Operation `json:"-"`
 }
 
-// NewArguments 提供业务默认补丁根目录，由编排层在此基础上解码显式输入。
-func NewArguments() Arguments {
+// DefaultArguments 提供业务默认补丁根目录，由编排层在此基础上解码显式输入。
+func DefaultArguments() Arguments {
 	return Arguments{Path: "."}
 }
 

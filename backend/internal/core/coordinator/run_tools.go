@@ -13,20 +13,20 @@ import (
 func (s *Coordinator) bindRunTools(run *agentrun.Run, active *activeRun) (*tool.ToolRegistry, error) {
 	var collaboration []tool.Tool
 	if run.Main() {
-		collaboration = []tool.Tool{
-			subagent.NewStart(func(ctx context.Context, assignment subagent.Assignment, callID string) (subagent.IDs, error) {
+		collaboration = subagent.MainTools(subagent.ParentOperations{
+			Start: func(ctx context.Context, assignment subagent.Assignment, callID string) (subagent.IDs, error) {
 				return s.startSubagent(ctx, run, active, assignment, callID)
-			}),
-			subagent.NewWait(func(ctx context.Context, ids []identity.AgentID, all bool) ([]entry.SubagentReceipt, error) {
+			},
+			Wait: func(ctx context.Context, ids []identity.AgentID, all bool) ([]entry.SubagentReceipt, error) {
 				run.BeginWaiting()
 				defer run.EndWaiting()
 				return run.WaitSubagents(ctx, ids, all)
-			}),
-			subagent.NewSend(run.SendToSubagent),
-			subagent.NewCancel(run.CancelSubagent),
-		}
+			},
+			Send:   run.SendToSubagent,
+			Cancel: run.CancelSubagent,
+		})
 	} else {
-		collaboration = []tool.Tool{subagent.NewReport(run.ReportToParent)}
+		collaboration = subagent.DelegateTools(run.ReportToParent)
 	}
 	for _, candidate := range collaboration {
 		if err := active.allowedTools.RegisterRunTool(candidate); err != nil {

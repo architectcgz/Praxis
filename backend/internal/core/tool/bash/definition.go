@@ -1,11 +1,14 @@
 package bash
 
-import (
-	"encoding/json"
-	"praxis/internal/core/tool"
-)
+const Name = "bash"
 
-var inputSchema = json.RawMessage(`{
+const Description = "在已授权的项目目录内执行 Bash 命令或多行脚本，返回合并后的 stdout 和 stderr。" +
+	"输入 command，可选 path 和 timeout（秒）；相对 path 按项目根目录解析。" +
+	"脚本在宿主机执行；只在用户显式授予命令权限时可用。" +
+	"输出超过 50 KiB 时完整写入当前会话的临时文件，返回 outputFile、size 和执行状态，可用 read_file 分段读取。" +
+	"脚本受当前执行的取消和超时控制；不适合启动长期进程。"
+
+const InputSchema = `{
   "type": "object",
   "properties": {
     "command": {
@@ -27,17 +30,4 @@ var inputSchema = json.RawMessage(`{
   },
   "required": ["command"],
   "additionalProperties": false
-}`)
-
-// Definition 返回 bash 的模型可见工具契约。
-func Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
-		Name: "bash",
-		Description: "在已授权的项目目录内执行 Bash 命令或多行脚本，返回合并后的 stdout 和 stderr。" +
-			"输入 command，可选 path 和 timeout（秒）；相对 path 按项目根目录解析。" +
-			"脚本在宿主机执行；只在用户显式授予命令权限时可用。" +
-			"输出超过 50 KiB 时完整写入当前会话的临时文件，返回 outputFile、size 和执行状态，可用 read_file 分段读取。" +
-			"脚本受当前执行的取消和超时控制；不适合启动长期进程。",
-		InputSchema: append(json.RawMessage(nil), inputSchema...),
-	}
-}
+}`
