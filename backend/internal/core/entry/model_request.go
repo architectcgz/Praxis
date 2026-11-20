@@ -43,7 +43,7 @@ type ModelRequest struct {
 	Timing      *timing.Record          `json:"timing,omitempty"`
 }
 
-func (ModelRequest) isPayload() {}
+func (ModelRequest) kind() string { return kindModelRequest }
 
 // PartialText 只提取不完整响应中的正文，不向观察者传递内部内容块。
 func (r ModelRequest) PartialText() string {

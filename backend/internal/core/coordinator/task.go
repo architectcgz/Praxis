@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	sessionmodel "praxis/internal/core/session"
@@ -58,34 +59,28 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 	}
 	defer unlock()
 	s.mu.Lock()
-	binding := s.schedules[input.SessionID]
-	valid := binding == nil || !binding.closing && !binding.reloading
+	schedule := s.schedules[input.SessionID]
+	valid := schedule == nil || !schedule.closing && !schedule.reloading
 	s.mu.Unlock()
 	if !valid {
 		return SubmitResult{}, nil, errorcode.ErrRequestConflict
 	}
-	if binding == nil {
-		binding, err = s.bindSubmission(ctx, input)
+	if schedule == nil {
+		schedule, err = s.loadSchedule(ctx, input.SessionID)
 		if err != nil {
 			return SubmitResult{}, nil, err
 		}
 	}
 	result := SubmitResult{Task: task}
-	if inputID, err := binding.session.FindTaskInputID(ctx, task.ID); err == nil {
-		entry, err := binding.session.Entry(ctx, inputID)
-		if err == nil {
-			if entry.TextContent() != task.Prompt {
-				return SubmitResult{}, nil, errorcode.ErrRequestConflict
-			}
-			return result, nil, nil
+	if prior, err := schedule.session.Entry(ctx, entry.TaskInputID(task.ID)); err == nil {
+		if prior.TextContent() != task.Prompt {
+			return SubmitResult{}, nil, errorcode.ErrRequestConflict
 		}
-		if !errors.Is(err, errorcode.ErrNotFound) {
-			return SubmitResult{}, nil, err
-		}
+		return result, nil, nil
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return SubmitResult{}, nil, err
 	}
-	for _, prior := range binding.queue.List(0) {
+	for _, prior := range schedule.queue.List(0) {
 		if prior.ID == task.ID {
 			if prior.Prompt != task.Prompt {
 				return SubmitResult{}, nil, errorcode.ErrRequestConflict
@@ -102,12 +97,12 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 	} else {
 		result.titleChanged = true
 	}
-	task, err = binding.queue.Enqueue(task)
+	task, err = schedule.queue.Enqueue(task)
 	if err != nil {
 		return SubmitResult{}, nil, err
 	}
 	result.Task = task
-	return result, new(taskQueueEvent(binding)), nil
+	return result, new(taskQueueEvent(schedule)), nil
 }
 
 func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.SessionID, id identity.TaskID) error {
@@ -120,15 +115,15 @@ func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.Session
 		return err
 	}
 	s.mu.Lock()
-	binding := s.schedules[sessionID]
-	valid := binding != nil && !binding.closing
+	schedule := s.schedules[sessionID]
+	valid := schedule != nil && !schedule.closing
 	s.mu.Unlock()
 	if !valid {
 		unlock()
 		return errorcode.ErrRequestConflict
 	}
-	err = binding.queue.Cancel(id)
-	notification := taskQueueEvent(binding)
+	err = schedule.queue.Cancel(id)
+	notification := taskQueueEvent(schedule)
 	unlock()
 	if err == nil {
 		s.loop.Emitter.Emit(notification)
@@ -154,23 +149,23 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 		return err
 	}
 	s.mu.Lock()
-	binding := s.schedules[id]
+	schedule := s.schedules[id]
 	s.mu.Unlock()
-	if binding == nil {
+	if schedule == nil {
 		unlock()
 		return errorcode.ErrNotFound
 	}
 	if pause {
-		binding.queue.Pause()
+		schedule.queue.Pause()
 	} else {
-		binding.queue.Resume()
+		schedule.queue.Resume()
 	}
-	notification := taskQueueEvent(binding)
+	notification := taskQueueEvent(schedule)
 	unlock()
 	s.loop.Emitter.Emit(notification)
 	if !pause {
 		s.mu.Lock()
-		active := binding.active
+		active := schedule.active
 		s.mu.Unlock()
 		// 显式恢复可以等待已取消的旧执行收尾，不能让恢复意图丢在占用窗口里。
 		if active != nil && active.ctx.Err() != nil {
@@ -185,15 +180,15 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 	return nil
 }
 
-func taskQueueEvent(binding *sessionSchedule) coreevent.Event {
+func taskQueueEvent(schedule *sessionSchedule) coreevent.Event {
 	return coreevent.Event{
 		Source: coreevent.EventSource{
-			AgentID:   identity.AgentID(binding.sessionID),
-			SessionID: binding.sessionID,
+			AgentID:   identity.AgentID(schedule.sessionID),
+			SessionID: schedule.sessionID,
 		},
 		Payload: coreevent.TaskQueueChanged{
-			Tasks:  binding.queue.List(0),
-			Paused: binding.queue.Paused(),
+			Tasks:  schedule.queue.List(0),
+			Paused: schedule.queue.Paused(),
 		},
 	}
 }

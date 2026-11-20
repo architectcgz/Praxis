@@ -42,7 +42,7 @@ func recoverAgent(ctx context.Context, owner *sessionmodel.Session, log *entryLo
 	}
 	if len(page.Entries) > 0 {
 		last := page.Entries[len(page.Entries)-1]
-		if !last.IsRun() {
+		if last.RunOutcome() == "" {
 			if last.RunID == "" {
 				return fmt.Errorf("history entry %s has no RunID for recovery", last.ID)
 			}
@@ -52,8 +52,8 @@ func recoverAgent(ctx context.Context, owner *sessionmodel.Session, log *entryLo
 				RunID:     last.RunID,
 				CreatedAt: now,
 				Payload: sessionentry.RunInterrupted{
-					RunStats:   sessionentry.RunStats{StartedAt: last.CreatedAt, EndedAt: now},
-					RunFailure: sessionentry.RunFailure{Code: sessionentry.RunFailureInterrupted},
+					RunStats: sessionentry.RunStats{StartedAt: last.CreatedAt, EndedAt: now},
+					Reason:   string(sessionentry.RunFailureInterrupted),
 				},
 			}
 			if _, err := owner.CommitTerminal(ctx, agentID, terminal); err != nil {

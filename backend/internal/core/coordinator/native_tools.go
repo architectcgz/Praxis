@@ -66,29 +66,15 @@ func decodeNative(raw string, target any) error {
 func (s *Coordinator) collaborationTools(run *agentrun.Run, active *activeRun, business tool.ToolCatalog) (*nativeCatalog, error) {
 	catalog := &nativeCatalog{business: business, tools: make(map[tool.ToolName]*nativeTool), definitions: business.List()}
 	if run.Main() {
-		run.BindSubagents(func(ctx context.Context, a agentrun.Assignment, callID string) (agentrun.SubagentStatus, error) {
-			return s.startSubagent(ctx, run, active, a, callID)
-		})
 		if err := catalog.add("subagent_start", "异步委派一个完整子任务。必须显式给出工具授权子集和 1–600 秒超时；子代理只属于当前 Run。", `{"type":"object","properties":{"task":{"type":"string"},"allowedTools":{"type":"array","items":{"type":"string"}},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600}},"required":["task","allowedTools","timeoutSeconds"],"additionalProperties":false}`, func(ctx context.Context, callID, raw string) (any, error) {
-			var a agentrun.Assignment
+			var a subagentAssignment
 			if err := decodeNative(raw, &a); err != nil {
 				return nil, err
 			}
 			if a.Task == "" || a.AllowedTools == nil || a.TimeoutSeconds < 1 || a.TimeoutSeconds > 600 {
 				return nil, fmt.Errorf("task, allowedTools and timeoutSeconds (1-600) are required")
 			}
-			return run.StartSubagent(ctx, a, callID)
-		}); err != nil {
-			return nil, err
-		}
-		if err := catalog.add("subagent_status", "查询当前 Run 创建的子代理状态。", `{"type":"object","properties":{"ids":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}`, func(ctx context.Context, callID, raw string) (any, error) {
-			var a struct {
-				IDs []identity.AgentID `json:"ids"`
-			}
-			if err := decodeNative(raw, &a); err != nil {
-				return nil, err
-			}
-			return run.SubagentStatuses(a.IDs)
+			return s.startSubagent(ctx, run, active, a, callID)
 		}); err != nil {
 			return nil, err
 		}

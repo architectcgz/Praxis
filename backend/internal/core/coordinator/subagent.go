@@ -14,19 +14,30 @@ import (
 	"time"
 )
 
-func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment agentrun.Assignment, callID string) (agentrun.SubagentStatus, error) {
+type subagentAssignment struct {
+	Task           string          `json:"task"`
+	AllowedTools   []tool.ToolName `json:"allowedTools"`
+	TimeoutSeconds int             `json:"timeoutSeconds"`
+}
+
+type subagentIDs struct {
+	AgentID identity.AgentID `json:"agentId"`
+	RunID   identity.RunID   `json:"runId"`
+}
+
+func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment subagentAssignment, callID string) (subagentIDs, error) {
 	catalog, err := tool.Restrict(parentActive.config.Tools, assignment.AllowedTools)
 	if err != nil {
-		return agentrun.SubagentStatus{}, err
+		return subagentIDs{}, err
 	}
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
 	if closed || parentActive.ctx.Err() != nil {
-		return agentrun.SubagentStatus{}, fmt.Errorf("parent execution is closing")
+		return subagentIDs{}, fmt.Errorf("parent execution is closing")
 	}
 	if parent.ActiveSubagents() >= 10 {
-		return agentrun.SubagentStatus{}, fmt.Errorf("session subagent limit of 10 is reached")
+		return subagentIDs{}, fmt.Errorf("session subagent limit of 10 is reached")
 	}
 	agentID := identity.AgentID(s.runDependencies.IDs.New("agent"))
 	active := newActiveRun(ctx, parentActive.session)
@@ -41,18 +52,18 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		s.releaseFailedChild(active)
 		stopParent()
 		cancelTimeout()
-		return agentrun.SubagentStatus{}, err
+		return subagentIDs{}, err
 	}
 	if err := active.session.CreateSubagent(active.ctx, agentID); err != nil {
 		s.releaseFailedChild(active)
 		stopParent()
 		cancelTimeout()
 		if active.ctx.Err() != nil && errors.Is(err, active.ctx.Err()) {
-			return agentrun.SubagentStatus{}, err
+			return subagentIDs{}, err
 		}
 		err = loop.NewFailure(loop.FailureStorage, err)
 		parent.Cancel(err)
-		return agentrun.SubagentStatus{}, err
+		return subagentIDs{}, err
 	}
 	child := agentrun.New(s.runDependencies, agentrun.Config{
 		ParentCallID: callID,
@@ -72,12 +83,10 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		s.releaseFailedChild(active)
 		stopParent()
 		cancelTimeout()
-		return agentrun.SubagentStatus{}, err
+		return subagentIDs{}, err
 	}
 	child.BindParent(parent)
-	initial := child.Snapshot()
 	parent.RegisterSubagent(agentrun.SubagentHandle{
-		Result:  initial,
 		AgentID: agentID,
 		Run:     child,
 		Cancel:  active.cancel,
@@ -110,9 +119,9 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		s.releaseFailedChild(active)
 		stopParent()
 		cancelTimeout()
-		return agentrun.SubagentStatus{}, err
+		return subagentIDs{}, err
 	}
-	return agentrun.SubagentStatus{AgentID: agentID, Run: initial}, nil
+	return subagentIDs{AgentID: agentID, RunID: child.ID()}, nil
 }
 func (s *Coordinator) releaseFailedChild(active *activeRun) {
 	close(active.done)

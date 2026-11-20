@@ -6,29 +6,16 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
-	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 	"slices"
 	"sync"
 )
 
-type Assignment struct {
-	Task           string          `json:"task"`
-	AllowedTools   []tool.ToolName `json:"allowedTools"`
-	TimeoutSeconds int             `json:"timeoutSeconds"`
-}
-
 type SubagentHandle struct {
-	Result  sessionentry.RunSnapshot
 	AgentID identity.AgentID
 	Run     *Run
 	Cancel  context.CancelCauseFunc
 	Done    <-chan struct{}
-}
-
-type SubagentStatus struct {
-	AgentID identity.AgentID         `json:"agentId"`
-	Run     sessionentry.RunSnapshot `json:"run"`
 }
 
 // SubagentReport 是子 Run 交给父 Run 的运行时报告。
@@ -58,7 +45,6 @@ type collaboration struct {
 	accepted     []SubagentReport
 	wake         chan struct{}
 	parent       *Run
-	spawn        func(context.Context, Assignment, string) (SubagentStatus, error)
 	instructions []instruction
 	accepting    bool
 }
@@ -70,45 +56,12 @@ func (r *Run) initCollaboration() {
 	r.collaboration.accepting = true
 }
 
-func (r *Run) BindSubagents(spawn func(context.Context, Assignment, string) (SubagentStatus, error)) {
-	r.collaboration.spawn = spawn
-}
-
 func (r *Run) BindParent(parent *Run) { r.collaboration.parent = parent }
 
 func (r *Run) RegisterSubagent(handle SubagentHandle) {
 	r.collaboration.mu.Lock()
 	defer r.collaboration.mu.Unlock()
 	r.collaboration.children[handle.AgentID] = handle
-}
-
-func (r *Run) StartSubagent(ctx context.Context, a Assignment, callID string) (SubagentStatus, error) {
-	return r.collaboration.spawn(ctx, a, callID)
-}
-
-func (r *Run) SubagentStatuses(ids []identity.AgentID) ([]SubagentStatus, error) {
-	r.collaboration.mu.Lock()
-	handles := make([]SubagentHandle, 0, len(ids))
-	if len(ids) == 0 {
-		for _, h := range r.collaboration.children {
-			handles = append(handles, h)
-		}
-	} else {
-		for _, id := range ids {
-			h, ok := r.collaboration.children[id]
-			if !ok {
-				r.collaboration.mu.Unlock()
-				return nil, fmt.Errorf("subagent %s does not belong to this run", id)
-			}
-			handles = append(handles, h)
-		}
-	}
-	r.collaboration.mu.Unlock()
-	statuses := make([]SubagentStatus, len(handles))
-	for i, h := range handles {
-		statuses[i] = SubagentStatus{AgentID: h.AgentID, Run: h.Result}
-	}
-	return statuses, nil
 }
 
 func (r *Run) CancelSubagent(id identity.AgentID) error {
@@ -342,18 +295,22 @@ func (r *Run) finishChildren() {
 }
 
 func (r *Run) ResultForParent() SubagentReport {
-	code, _ := r.terminal.Failure()
 	result := SubagentReport{
 		ReportID:     r.deps.IDs.New("report"),
 		AgentID:      r.AgentID(),
 		RunID:        r.id,
 		ParentRunID:  r.collaboration.parent.ID(),
 		ParentCallID: r.parentCallID,
-		Outcome:      r.terminal.Outcome(),
-		FailureCode:  code,
+		Outcome:      r.terminal.RunOutcome(),
 		Final:        true,
 	}
-	if index, ok := r.entryIndexes[r.terminal.Stats().FinalAssistantID]; ok {
+	switch payload := r.terminal.Payload.(type) {
+	case sessionentry.RunFailed:
+		result.FailureCode = payload.Code
+	case sessionentry.RunInterrupted:
+		result.FailureCode = sessionentry.RunFailureCode(payload.Reason)
+	}
+	if index, ok := r.entryIndexes[r.progress.FinalAssistantID]; ok {
 		result.Text = r.entries[index].TextContent()
 	} else {
 		for i := len(r.entries) - 1; i >= 0; i-- {
@@ -382,13 +339,12 @@ func (r *Run) WakeSubagentWaiters() {
 	}
 }
 
-// CompleteSubagent 在交付和收尾完成后释放子执行正文，只保留状态和必要控制身份。
-func (r *Run) CompleteSubagent(id identity.AgentID, result sessionentry.RunSnapshot) {
+// CompleteSubagent 在交付后释放子 Run；保留句柄供父 Run 等待收尾。
+func (r *Run) CompleteSubagent(id identity.AgentID) {
 	r.collaboration.mu.Lock()
 	defer r.collaboration.mu.Unlock()
 	h := r.collaboration.children[id]
 	h.Run = nil
-	h.Result = result
 	r.collaboration.children[id] = h
 }
 
@@ -404,13 +360,4 @@ func (r *Run) ActiveSubagents() int {
 		}
 	}
 	return count
-}
-
-// ReceiveSubagentStatus 接收子任务主动交付的不可变状态，不读取子 Run 的可变字段。
-func (r *Run) ReceiveSubagentStatus(id identity.AgentID, snapshot sessionentry.RunSnapshot) {
-	r.collaboration.mu.Lock()
-	defer r.collaboration.mu.Unlock()
-	handle := r.collaboration.children[id]
-	handle.Result = snapshot
-	r.collaboration.children[id] = handle
 }

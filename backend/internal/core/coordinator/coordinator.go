@@ -46,7 +46,7 @@ type Coordinator struct {
 	logger            *logging.Logger
 	transitionTimeout time.Duration
 
-	// mu 保护已加载会话、队列绑定、会话命令信号量及会话执行句柄；
+	// mu 保护已加载会话、会话调度状态、会话命令信号量及会话执行句柄；
 	// 存储读写、会话数据访问与 Run 执行均不持有 mu。
 	mu              sync.Mutex
 	closed          bool
@@ -124,7 +124,7 @@ func (s *Coordinator) releaseSessionCommand(id identity.SessionID, command *sess
 
 // activeRun 是所属会话或 Parent 持有的控制句柄，不提供运行状态查询。
 type activeRun struct {
-	run     *agentrun.Run // 会话调度绑定的主 Run，在提交准备事实前登记，由 mu 保护。
+	run     *agentrun.Run // 在提交准备事实前登记，由 mu 保护。
 	parent  *agentrun.Run
 	onDone  func() error
 	session *sessionmodel.Session

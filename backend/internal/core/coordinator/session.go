@@ -98,26 +98,26 @@ func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID) 
 	}
 	view := SessionView{Session: info}
 	s.mu.Lock()
-	binding := s.schedules[id]
+	schedule := s.schedules[id]
 	s.mu.Unlock()
-	if binding != nil {
-		if binding.closing {
+	if schedule != nil {
+		if schedule.closing {
 			return SessionView{}, errorcode.ErrRequestConflict
 		}
-		view.Tasks = binding.queue.List(0)
-		view.QueuePaused = binding.queue.Paused()
+		view.Tasks = schedule.queue.List(0)
+		view.QueuePaused = schedule.queue.Paused()
 	}
 	return view, nil
 }
 
-func (s *Coordinator) bindSubmission(ctx context.Context, input taskmodel.Input) (*sessionSchedule, error) {
-	if _, err := s.loadSession(ctx, input.SessionID); err != nil {
+func (s *Coordinator) loadSchedule(ctx context.Context, id identity.SessionID) (*sessionSchedule, error) {
+	if _, err := s.loadSession(ctx, id); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	binding := s.schedules[input.SessionID]
+	schedule := s.schedules[id]
 	s.mu.Unlock()
-	return binding, nil
+	return schedule, nil
 }
 
 func (s *Coordinator) releaseSession(ctx context.Context, id identity.SessionID) error {
@@ -126,11 +126,11 @@ func (s *Coordinator) releaseSession(ctx context.Context, id identity.SessionID)
 	}
 	s.mu.Lock()
 	s.registry.remove(id)
-	binding := s.schedules[id]
+	schedule := s.schedules[id]
 	delete(s.schedules, id)
 	s.mu.Unlock()
-	if binding != nil {
-		binding.queue.Clear()
+	if schedule != nil {
+		schedule.queue.Clear()
 	}
 	return nil
 }
@@ -146,17 +146,17 @@ func (s *Coordinator) CloseSession(ctx context.Context, id identity.SessionID) e
 		return err
 	}
 	s.mu.Lock()
-	binding := s.schedules[id]
-	if binding != nil {
-		binding.closing = true
+	schedule := s.schedules[id]
+	if schedule != nil {
+		schedule.closing = true
 	}
 	var active *activeRun
-	if binding != nil {
-		active = binding.active
+	if schedule != nil {
+		active = schedule.active
 	}
 	s.mu.Unlock()
-	if binding != nil {
-		binding.queue.Clear()
+	if schedule != nil {
+		schedule.queue.Clear()
 	}
 	unlock()
 	if active != nil {
@@ -202,19 +202,19 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 	}
 	defer unlock()
 	s.mu.Lock()
-	binding := s.schedules[id]
-	if binding != nil && binding.active != nil {
+	schedule := s.schedules[id]
+	if schedule != nil && schedule.active != nil {
 		s.mu.Unlock()
 		return agentmodel.ErrExecuting
 	}
-	if binding != nil {
-		binding.reloading = true
+	if schedule != nil {
+		schedule.reloading = true
 	}
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		if binding != nil {
-			binding.reloading = false
+		if schedule != nil {
+			schedule.reloading = false
 		}
 		s.mu.Unlock()
 	}()
@@ -222,9 +222,9 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 	if err != nil {
 		return err
 	}
-	if binding != nil {
-		binding.queue.Clear()
-		s.loop.Emitter.Emit(taskQueueEvent(binding))
+	if schedule != nil {
+		schedule.queue.Clear()
+		s.loop.Emitter.Emit(taskQueueEvent(schedule))
 	}
 	config, err := s.loadConfig(ctx)
 	if err != nil {

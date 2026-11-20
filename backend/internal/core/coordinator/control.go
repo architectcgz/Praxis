@@ -21,13 +21,13 @@ func (s *Coordinator) StopRun(ctx context.Context, sessionID identity.SessionID,
 		return err
 	}
 	s.mu.Lock()
-	binding := s.schedules[sessionID]
-	if binding == nil || binding.active == nil || binding.active.run == nil {
+	schedule := s.schedules[sessionID]
+	if schedule == nil || schedule.active == nil || schedule.active.run == nil {
 		s.mu.Unlock()
 		unlock()
 		return nil
 	}
-	active := binding.active
+	active := schedule.active
 	run := active.run
 	s.mu.Unlock()
 	if run.ID() != runID {
@@ -39,9 +39,9 @@ func (s *Coordinator) StopRun(ctx context.Context, sessionID identity.SessionID,
 		unlock()
 		return nil
 	}
-	binding.queue.Pause()
+	schedule.queue.Pause()
 	active.cancel(errRunInterrupted)
-	notification := taskQueueEvent(binding)
+	notification := taskQueueEvent(schedule)
 	unlock()
 	s.loop.Emitter.Emit(notification)
 	return nil

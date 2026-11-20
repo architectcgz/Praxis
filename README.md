@@ -138,13 +138,13 @@ npm run check
 
 | 通知 | 载荷与消费语义 |
 | --- | --- |
-| `run_started` | 执行展示摘要 `run`；执行归属来自信封，前端设置当前执行并保留最近结束结果。 |
-| `run_interrupt_requested` | 控制请求接受时间 `appliedAt`；表达已经接受中断请求，执行仍需完成收尾。 |
-| `run_ended`、`request_canceled` | 执行展示摘要 `run`、Agent 展示状态 `state` 及本次执行的完整展示条目 `entries`；前端按 RunID 确认结束的目标。 |
-| `subagent_started` | 子 Agent 的名称、角色定义、类型、创建时间与执行展示摘要，父 Agent、父 Execution 和工具调用的关联标识，以及初始展示条目；在子 Run 创建并登记后、输出前发送。 |
+| `run_started` | `startedAt` 表示开始时间；前端按信封中的 AgentID 和 RunID 设置当前执行。 |
+| `agent_state_changed` | `state` 表示 Agent 进入执行或等待状态。 |
+| `run_ended` | `state`、`outcome`、起止时间、轮次、工具调用数及适用的失败信息；前端按 RunID 确认结束的目标。 |
+| `subagent_started` | 子 Agent 的名称、创建时间、父 Agent 和父 Run 的标识、工具调用 ID 及初始消息；在子 Run 登记后、输出前发送。 |
 | `subagent_released` | 通过信封定位释放的子运行实例，清理其临时展示；持久化历史保留在 Session 中。 |
 
-Agent 展示查询、初始化快照与生命周期事件共用 `core/agent/run.Snapshot`，只提供执行 ID、状态、结果、开始与结束时间、原因码和原因说明。`currentRun` 在没有活跃执行时为空，`latestRun` 表达最近结束的执行，没有结束结果时为空；前端仅维护摘要和历史，不重建后端执行记录。开始通知设置当前执行，结束通知更新最近结束结果；清理当前执行和临时输出前按执行 ID 确认归属。终态通知保留本次执行的完整展示条目，以便前端直接合并已接纳的内存结果，包括日志写入失败时保留的结果，不额外查询 Agent 或重载整个会话。
+`subagent_start` 成功后只返回子执行身份，例如 `{"agentId":"agent-1","runId":"run-1"}`。前端按生命周期事件更新 Agent 状态，清理临时输出前核对 RunID。父 Run 通过 `subagent_wait` 等待子任务报告或结束，不轮询状态，也不接收逐条 Entry 的运行快照。
 
 初始化后，页面按 SessionID 和 BranchID 消费事件，队列事件还携带 BindingID。`task_queue_changed` 在入队、领取完成、重试归队和取消后更新队列；模型请求、工具事件和历史 Entry 携带对应计时。Wails 接入按展示契约映射载荷，不直接序列化执行记录，也不重新校验本应用生成的数据结构。
 

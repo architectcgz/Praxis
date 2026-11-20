@@ -14,7 +14,10 @@ type Message struct {
 	Response *ModelResponse `json:"response,omitempty"`
 }
 
-func (Message) isPayload() {}
+func (Message) kind() string { return kindMessage }
+
+// TaskInputID 由主任务身份确定，重复提交时可直接定位同一条输入消息。
+func TaskInputID(taskID identity.TaskID) string { return "input:" + taskID.String() }
 
 // ModelResponse 只描述产生本条消息内容的模型响应。
 type ModelResponse struct {
@@ -31,7 +34,7 @@ type Summary struct {
 	Timing     *timing.Record            `json:"timing,omitempty"`
 }
 
-func (Summary) isPayload() {}
+func (Summary) kind() string { return kindSummary }
 
 func decodeSummary(data json.RawMessage) (Payload, error) {
 	var decoded struct {

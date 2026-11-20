@@ -61,7 +61,7 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 			}
 		}
 		active.cancel(nil)
-		active.parent.CompleteSubagent(run.AgentID(), run.Snapshot())
+		active.parent.CompleteSubagent(run.AgentID())
 		r.loop.Emitter.Emit(coreevent.Event{Source: run.EventSource(""), Payload: coreevent.SubagentReleased{}})
 		return
 	}
@@ -83,11 +83,11 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 		notification = taskQueueEvent(current)
 	}
 	var next *activeRun
-	var binding *sessionSchedule
+	var schedule *sessionSchedule
 	var input taskmodel.Task
 	var scheduleErr error
 	if err == nil && run.Outcome() == entry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), agentrun.ErrInterrupted) {
-		input, binding, next, scheduleErr = r.claimTaskLocked(queueCtx, run.SessionID())
+		input, schedule, next, scheduleErr = r.claimTaskLocked(queueCtx, run.SessionID())
 	}
 	unlock()
 	active.cancel(nil)
@@ -96,7 +96,7 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 		r.emitQueueStorageFailure(run.SessionID(), storageErr)
 	}
 	if next != nil {
-		scheduleErr = r.startNext(queueCtx, input, binding, next)
+		scheduleErr = r.startNext(queueCtx, input, schedule, next)
 	}
 	if scheduleErr != nil {
 		r.logger.Errorf("prepare queued task session=%s: %v", run.SessionID(), scheduleErr)

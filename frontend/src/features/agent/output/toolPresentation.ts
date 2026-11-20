@@ -19,7 +19,6 @@ const toolLabels: Record<string, string> = {
     read_file: '读取',
     apply_patch: '补丁',
     subagent_start: '委派子代理',
-    subagent_status: '查询子代理',
     subagent_wait: '等待子代理',
     send_to_subagent: '补充指令',
     subagent_cancel: '取消子代理',
@@ -82,10 +81,6 @@ function summarizeToolInput(name: string, input: Record<string, unknown>): strin
         const ids = Array.isArray(input.ids) ? input.ids.length : 0
         const mode = stringValue(input.mode) === 'all' ? '全部' : '任一'
         return `等待 ${ids} 个子代理 · ${mode}`
-    }
-    if (name === 'subagent_status') {
-        const ids = Array.isArray(input.ids) ? input.ids.length : 0
-        return ids > 0 ? `查询 ${ids} 个子代理状态` : '查询全部子代理状态'
     }
     if (name === 'send_to_subagent') {
         const message = stringValue(input.message).replace(/\s+/g, ' ').trim()

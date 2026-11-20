@@ -3,6 +3,7 @@ package entry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"praxis/internal/core/entry/role"
 	"strings"
 	"time"
@@ -32,6 +33,22 @@ type Entry struct {
 func (e Entry) IsSummary() bool {
 	_, ok := e.Payload.(Summary)
 	return ok
+}
+
+// RunOutcome 返回终态条目对应的执行结果，其他条目没有结果。
+func (e Entry) RunOutcome() RunOutcome {
+	switch e.Payload.(type) {
+	case RunCompleted:
+		return OutcomeCompleted
+	case RunFailed:
+		return OutcomeFailed
+	case RunInterrupted:
+		return OutcomeInterrupted
+	case SubagentYielded:
+		return OutcomeYielded
+	default:
+		return ""
+	}
 }
 
 // Dialogue 返回模型可读的消息内容；摘要作为 user 角色的历史资料提供。
@@ -76,8 +93,8 @@ func (e Entry) TextContent() string {
 
 // Preview 提供历史目录的短文本，不保存第二份正文。
 func (e Entry) Preview() string {
-	if terminal, ok := e.Payload.(RunTerminal); ok {
-		return "执行结束 · " + string(terminal.Outcome())
+	if outcome := e.RunOutcome(); outcome != "" {
+		return "执行结束 · " + string(outcome)
 	}
 	if e.IsSummary() {
 		return "上下文摘要"
@@ -105,18 +122,17 @@ func Values(entries []*Entry) []Entry {
 
 func (e Entry) MarshalJSON() ([]byte, error) {
 	type value Entry
-	kind, payload, err := encodePayload(e.Payload)
-	if err != nil {
-		return nil, err
+	if e.Payload == nil {
+		return nil, errors.New("history entry requires a payload")
 	}
 	return json.Marshal(struct {
 		value
-		Kind    string          `json:"kind"`
-		Payload json.RawMessage `json:"payload"`
+		Kind    string  `json:"kind"`
+		Payload Payload `json:"payload"`
 	}{
 		value:   value(e),
-		Kind:    kind,
-		Payload: payload,
+		Kind:    e.Payload.kind(),
+		Payload: e.Payload,
 	})
 }
 

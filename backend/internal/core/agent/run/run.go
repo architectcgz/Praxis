@@ -37,7 +37,7 @@ type Config struct {
 	Model        modelapi.Config
 }
 
-// Run 的可变执行状态由所属流程独占；工具通过消息交接，子任务只交付不可变快照。
+// Run 的可变执行状态由所属流程独占；工具通过消息交接，子任务通过报告交付结果。
 // 终态事实提交成功后才发布结果，配置和身份在创建后只读。
 type Run struct {
 	collaboration collaboration
@@ -54,11 +54,10 @@ type Run struct {
 	model         modelapi.Config
 	parentCallID  string
 	sourceTaskID  identity.TaskID
-	status        sessionentry.RunStatus
 	input         *sessionentry.Entry
 	createdAt     time.Time
 	startedAt     time.Time
-	terminal      sessionentry.RunTerminal
+	terminal      *sessionentry.Entry
 	progress      runProgress
 	currentTurnID identity.TurnID
 	entries       []*sessionentry.Entry
@@ -75,7 +74,6 @@ func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *R
 		parentCallID: config.ParentCallID,
 		definition:   config.Definition,
 		model:        config.Model,
-		status:       sessionentry.RunStarting,
 		toolUpdates:  make(chan toolUpdate),
 		createdAt:    deps.Clock.Now().UTC(),
 		entryIndexes: make(map[string]int),
@@ -106,21 +104,6 @@ type runProgress struct {
 
 func (r *Run) Main() bool { return r.parentCallID == "" }
 
-// Snapshot 由所属执行流程在通知和完成交付时调用，接收方只读使用。
-func (r *Run) Snapshot() sessionentry.RunSnapshot {
-	if r.terminal != nil {
-		return sessionentry.SnapshotFromTerminal(r.id, r.terminal)
-	}
-	return sessionentry.RunSnapshot{
-		ID:          r.id,
-		Status:      r.status,
-		StartedAt:   r.startedAt,
-		Iterations:  r.progress.Iterations,
-		ToolCalls:   r.progress.ToolCalls,
-		OutputBytes: r.progress.OutputBytes,
-	}
-}
-
 func (r *Run) Entries() []sessionentry.Entry {
 	return sessionentry.Values(r.entries)
 }
@@ -150,23 +133,12 @@ func (r *Run) accept(value *sessionentry.Entry) {
 	r.entries = append(r.entries, value)
 	switch p := value.Payload.(type) {
 	case sessionentry.RunStarted:
-		r.status = sessionentry.RunRunning
 		r.startedAt = p.At.UTC()
-	case sessionentry.RunEndingStarted:
-		r.status = sessionentry.RunEnding
 	case sessionentry.TurnStarted:
 		r.currentTurnID = identity.TurnID(value.TurnID)
 		r.progress.Iterations++
-	}
-	if terminal, ok := value.Payload.(sessionentry.RunTerminal); ok {
-		r.terminalMu.Lock()
-		r.terminal = terminal
-		r.terminalMu.Unlock()
-	} else {
+	default:
 		r.progress.accept(value)
-	}
-	if parent := r.collaboration.parent; parent != nil {
-		parent.ReceiveSubagentStatus(r.AgentID(), r.Snapshot())
 	}
 }
 
@@ -302,7 +274,7 @@ func (r *Run) Outcome() sessionentry.RunOutcome {
 	if r.terminal == nil {
 		return ""
 	}
-	return r.terminal.Outcome()
+	return r.terminal.RunOutcome()
 }
 
 func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {

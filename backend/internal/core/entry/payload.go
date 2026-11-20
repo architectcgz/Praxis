@@ -5,46 +5,115 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	modelusage "praxis/internal/core/model/usage"
 	"praxis/internal/identity"
 	"time"
 )
 
 // Payload 是执行事实的封闭集合，与进程通知分别定义。
-type Payload interface{ isPayload() }
+type Payload interface{ kind() string }
 
 // RunPrepared 只记录创建时的归属信息，不保存可变执行状态或冻结配置。
 type RunPrepared struct {
 	AgentName    string
 	DefinitionID identity.AgentDefinitionID
 	SourceTaskID identity.TaskID
-	InputEntryID string
 }
 
-func (RunPrepared) isPayload() {}
+func (RunPrepared) kind() string { return kindRunPrepared }
 
 type RunStarted struct{ At time.Time }
 
-func (RunStarted) isPayload() {}
+func (RunStarted) kind() string { return kindRunStarted }
 
 type RunEndingStarted struct{}
 
-func (RunEndingStarted) isPayload() {}
+func (RunEndingStarted) kind() string { return kindRunEnding }
+
+// RunFailureCode 是 Run 终态的稳定原因。
+type RunFailureCode string
+
+const (
+	RunFailureTimeout             RunFailureCode = "execution_timeout"
+	RunFailureProviderUnavailable RunFailureCode = "provider_unavailable"
+	RunFailureProvider            RunFailureCode = "execution_provider_error"
+	RunFailureTool                RunFailureCode = "execution_tool_error"
+	RunFailurePolicyBlocked       RunFailureCode = "execution_policy_blocked"
+	RunFailureApprovalRequired    RunFailureCode = "execution_approval_required"
+	RunFailureResourceLimit       RunFailureCode = "execution_resource_limit"
+	RunFailureStorage             RunFailureCode = "execution_storage_error"
+	RunFailureContract            RunFailureCode = "execution_contract_error"
+	RunFailureBusy                RunFailureCode = "execution_busy"
+	RunFailureInterrupted         RunFailureCode = "execution_interrupted"
+	RunFailureRequestCanceled     RunFailureCode = "request_canceled"
+	RunFailureCancelled           RunFailureCode = "execution_cancelled"
+	RunFailureInternal            RunFailureCode = "execution_failed"
+	RunFailureInvalidOutcome      RunFailureCode = "execution_invalid_outcome"
+)
+
+// MaxRunFailureMessageRunes 限制持久化失败详情的字符数。
+const MaxRunFailureMessageRunes = 4096
+
+type RunOutcome string
+
+const (
+	OutcomeCompleted   RunOutcome = "completed"
+	OutcomeYielded     RunOutcome = "yielded"
+	OutcomeFailed      RunOutcome = "failed"
+	OutcomeInterrupted RunOutcome = "interrupted"
+)
+
+// RunStats 是各 Run 终态都需要保存的时间、用量和输出信息。
+type RunStats struct {
+	StartedAt        time.Time         `json:"startedAt"`
+	EndedAt          time.Time         `json:"endedAt"`
+	Usage            modelusage.Totals `json:"usage"`
+	ModelRequests    uint64            `json:"modelRequests"`
+	Iterations       uint64            `json:"iterations"`
+	OutputBytes      int64             `json:"outputBytes"`
+	ToolCalls        int               `json:"toolCalls"`
+	FinalAssistantID string            `json:"finalAssistantId,omitempty"`
+	FinalStopReason  string            `json:"finalStopReason,omitempty"`
+}
+
+type RunCompleted struct{ RunStats }
+
+func (RunCompleted) kind() string { return kindRunCompleted }
+
+type RunFailed struct {
+	RunStats
+	Code    RunFailureCode `json:"failureCode"`
+	Message string         `json:"failureMessage,omitempty"`
+}
+
+func (RunFailed) kind() string { return kindRunFailed }
+
+type RunInterrupted struct {
+	RunStats
+	Reason string `json:"reason"`
+}
+
+func (RunInterrupted) kind() string { return kindRunInterrupted }
+
+type SubagentYielded struct{ RunStats }
+
+func (SubagentYielded) kind() string { return kindSubagentYielded }
 
 type TurnStarted struct{}
 
-func (TurnStarted) isPayload() {}
+func (TurnStarted) kind() string { return kindTurnStarted }
 
 type TurnCompleted struct{}
 
-func (TurnCompleted) isPayload() {}
+func (TurnCompleted) kind() string { return kindTurnCompleted }
 
 type TurnFailed struct{}
 
-func (TurnFailed) isPayload() {}
+func (TurnFailed) kind() string { return kindTurnFailed }
 
 type TurnInterrupted struct{}
 
-func (TurnInterrupted) isPayload() {}
+func (TurnInterrupted) kind() string { return kindTurnInterrupted }
 
 const (
 	kindMessage         = "message"
@@ -62,45 +131,6 @@ const (
 	kindTurnInterrupted = "turn_interrupted"
 	kindModelRequest    = "model_request"
 )
-
-// encodePayload 将历史条目的类型与载荷分开返回；内存中不保存额外的 kind。
-func encodePayload(value Payload) (string, json.RawMessage, error) {
-	var kind string
-	switch value.(type) {
-	case Message:
-		kind = kindMessage
-	case Summary:
-		kind = kindSummary
-	case RunPrepared:
-		kind = kindRunPrepared
-	case RunStarted:
-		kind = kindRunStarted
-	case RunEndingStarted:
-		kind = kindRunEnding
-	case RunCompleted:
-		kind = kindRunCompleted
-	case RunFailed:
-		kind = kindRunFailed
-	case RunInterrupted:
-		kind = kindRunInterrupted
-	case SubagentYielded:
-		kind = kindSubagentYielded
-	case TurnStarted:
-		kind = kindTurnStarted
-	case TurnCompleted:
-		kind = kindTurnCompleted
-	case TurnFailed:
-		kind = kindTurnFailed
-	case TurnInterrupted:
-		kind = kindTurnInterrupted
-	case ModelRequest:
-		kind = kindModelRequest
-	default:
-		return "", nil, fmt.Errorf("unsupported entry payload type %T", value)
-	}
-	data, err := json.Marshal(value)
-	return kind, data, err
-}
 
 // decodePayload 使用 Entry 顶层的 kind 恢复具体载荷。
 func decodePayload(kind string, data json.RawMessage) (Payload, error) {
