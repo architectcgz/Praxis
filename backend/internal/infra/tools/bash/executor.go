@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"praxis/internal/core/tool"
-	bashtool "praxis/internal/core/tool/bash"
+	"praxis/internal/core/tools"
 	tooloutput "praxis/internal/infra/tools/output"
 	"praxis/internal/utils/pathutil"
 	"runtime"
@@ -26,7 +26,7 @@ type output struct {
 }
 
 // Call 在项目目录内运行 Bash，超过内联限制的 stdout/stderr 合并后完整落盘。
-func Call(ctx context.Context, toolArguments bashtool.Arguments, environment tool.Environment) (tool.ToolResult, error) {
+func Call(ctx context.Context, toolArguments tools.BashArguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}

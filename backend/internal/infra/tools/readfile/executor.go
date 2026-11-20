@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"praxis/internal/core/tool"
-	readtool "praxis/internal/core/tool/readfile"
+	"praxis/internal/core/tools"
 	"praxis/internal/utils/pathutil"
 	"unicode/utf8"
 )
@@ -23,7 +23,7 @@ type output struct {
 }
 
 // Call 分段读取项目文件或当前会话的临时输出，不开放其他会话和整个临时目录。
-func Call(ctx context.Context, toolArguments readtool.Arguments, environment tool.Environment) (tool.ToolResult, error) {
+func Call(ctx context.Context, toolArguments tools.ReadFileArguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -97,7 +97,7 @@ func contentEndAtLimit(content []byte, limit int) (int, error) {
 
 // encodeBoundedOutput 保留 JSON 输出不超过内联工具结果上限的最长 UTF-8 前缀。
 func encodeBoundedOutput(
-	toolArguments readtool.Arguments,
+	toolArguments tools.ReadFileArguments,
 	offset int,
 	fileSize int64,
 	content []byte,
@@ -138,7 +138,7 @@ func utf8RuneEnds(content []byte) []int {
 	return ends
 }
 
-func encodeOutput(toolArguments readtool.Arguments, offset int, fileSize int64, content string) ([]byte, error) {
+func encodeOutput(toolArguments tools.ReadFileArguments, offset int, fileSize int64, content string) ([]byte, error) {
 	contentEnd := offset + len([]byte(content))
 	toolOutput := output{
 		Path:    toolArguments.Path,

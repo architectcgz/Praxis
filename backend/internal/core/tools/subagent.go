@@ -1,4 +1,4 @@
-package subagent
+package tools
 
 import (
 	"context"
@@ -14,12 +14,12 @@ const waitTimeout = 30 * time.Second
 
 var errWaitTimeout = errors.New("subagent wait timed out")
 
-type Assignment struct {
+type SubagentAssignment struct {
 	Task         string          `json:"task"`
 	AllowedTools []tool.ToolName `json:"allowedTools"`
 }
 
-type IDs struct {
+type SubagentIDs struct {
 	AgentID identity.AgentID `json:"agentId"`
 	RunID   identity.RunID   `json:"runId"`
 }
@@ -45,27 +45,27 @@ type cancelArguments struct {
 	ID identity.AgentID `json:"id"`
 }
 
-// ParentOperations 只提供主 Run 的子代理协作操作。
-type ParentOperations struct {
-	Start  func(context.Context, Assignment, string) (IDs, error)
+// SubagentParentOperations 只提供主 Run 的子代理协作操作。
+type SubagentParentOperations struct {
+	Start  func(context.Context, SubagentAssignment, string) (SubagentIDs, error)
 	Wait   func(context.Context, []identity.AgentID, bool) ([]entry.SubagentReceipt, error)
 	Send   func(context.Context, identity.AgentID, string) (string, error)
 	Cancel func(identity.AgentID) error
 }
 
-func MainTools(ops ParentOperations) []tool.Tool {
+func SubagentMainTools(ops SubagentParentOperations) []tool.Tool {
 	return []tool.Tool{
-		tool.Function[Assignment]{
+		tool.Function[SubagentAssignment]{
 			Name:        "subagent_start",
 			Description: "异步委派一个完整子任务。allowedTools 必须显式指定要授权给子代理的工具，工具须在 list_tools 中标记为可委派。无需授权工具时传空数组。子代理只属于本次执行。",
 			InputSchema: []byte(`{"type":"object","properties":{"task":{"type":"string"},"allowedTools":{"type":"array","items":{"type":"string"}}},"required":["task","allowedTools"],"additionalProperties":false}`),
-			PrepareArguments: func(args Assignment) (Assignment, error) {
+			PrepareArguments: func(args SubagentAssignment) (SubagentAssignment, error) {
 				if args.Task == "" || args.AllowedTools == nil {
 					return args, errors.New("task and allowedTools are required")
 				}
 				return args, nil
 			},
-			Execute: func(ctx context.Context, args Assignment, env tool.Environment) (tool.ToolResult, error) {
+			Execute: func(ctx context.Context, args SubagentAssignment, env tool.Environment) (tool.ToolResult, error) {
 				return tool.JSONResult(ops.Start(ctx, args, env.CallID))
 			},
 		},
@@ -142,7 +142,7 @@ type reportArguments struct {
 	Message string `json:"message"`
 }
 
-func DelegateTools(report func(context.Context, string) error) []tool.Tool {
+func SubagentDelegateTools(report func(context.Context, string) error) []tool.Tool {
 	return []tool.Tool{
 		tool.Function[reportArguments]{
 			Name:        "report_to_parent",

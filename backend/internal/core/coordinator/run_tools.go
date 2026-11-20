@@ -5,7 +5,7 @@ import (
 	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/entry"
 	"praxis/internal/core/tool"
-	"praxis/internal/core/tool/subagent"
+	"praxis/internal/core/tools"
 	"praxis/internal/identity"
 )
 
@@ -13,8 +13,8 @@ import (
 func (s *Coordinator) bindRunTools(run *agentrun.Run, active *activeRun) (*tool.ToolRegistry, error) {
 	var collaboration []tool.Tool
 	if run.Main() {
-		collaboration = subagent.MainTools(subagent.ParentOperations{
-			Start: func(ctx context.Context, assignment subagent.Assignment, callID string) (subagent.IDs, error) {
+		collaboration = tools.SubagentMainTools(tools.SubagentParentOperations{
+			Start: func(ctx context.Context, assignment tools.SubagentAssignment, callID string) (tools.SubagentIDs, error) {
 				return s.startSubagent(ctx, run, active, assignment, callID)
 			},
 			Wait: func(ctx context.Context, ids []identity.AgentID, all bool) ([]entry.SubagentReceipt, error) {
@@ -26,7 +26,7 @@ func (s *Coordinator) bindRunTools(run *agentrun.Run, active *activeRun) (*tool.
 			Cancel: run.CancelSubagent,
 		})
 	} else {
-		collaboration = subagent.DelegateTools(run.ReportToParent)
+		collaboration = tools.SubagentDelegateTools(run.ReportToParent)
 	}
 	for _, candidate := range collaboration {
 		if err := active.allowedTools.RegisterRunTool(candidate); err != nil {

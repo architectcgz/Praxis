@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"praxis/internal/core/tool"
-	patchtool "praxis/internal/core/tool/applypatch"
+	"praxis/internal/core/tools"
 	"praxis/internal/utils/pathutil"
 	"runtime"
 	"strings"
@@ -37,8 +37,8 @@ type output struct {
 	Files []fileResult `json:"files"`
 }
 
-// Call 在项目目录内应用已在 Prepare 阶段解析的完整补丁。
-func Call(ctx context.Context, toolArguments patchtool.Arguments, environment tool.Environment) (tool.ToolResult, error) {
+// Call 在项目目录内应用已解析的完整补丁。
+func Call(ctx context.Context, toolArguments tools.ApplyPatchArguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -68,7 +68,7 @@ func prepareChanges(
 	ctx context.Context,
 	root string,
 	projectRoot string,
-	operations []patchtool.Operation,
+	operations []tools.PatchOperation,
 ) ([]*fileChange, []fileResult, error) {
 	changes := make([]*fileChange, 0, len(operations)+1)
 	results := make([]fileResult, 0, len(operations))
@@ -82,7 +82,7 @@ func prepareChanges(
 			return nil, nil, fmt.Errorf("patch target %q is duplicated or invalid", operation.Path)
 		}
 		switch operation.Kind {
-		case patchtool.Add:
+		case tools.PatchAdd:
 			if !projectWritePath(source, projectRoot, true) {
 				return nil, nil, fmt.Errorf("add target %q is outside the project", operation.Path)
 			}
@@ -99,7 +99,7 @@ func prepareChanges(
 				mode:    0o644,
 			})
 			results = append(results, fileResult{Path: operation.Path, Action: "added"})
-		case patchtool.Delete:
+		case tools.PatchDelete:
 			mode, err := statProjectFile(source, projectRoot)
 			if err != nil {
 				return nil, nil, fmt.Errorf("delete target %q: %w", operation.Path, err)
@@ -111,7 +111,7 @@ func prepareChanges(
 				existed: true,
 			})
 			results = append(results, fileResult{Path: operation.Path, Action: "deleted"})
-		case patchtool.Update:
+		case tools.PatchUpdate:
 			content, mode, err := readProjectFile(source, projectRoot)
 			if err != nil {
 				return nil, nil, fmt.Errorf("update target %q: %w", operation.Path, err)
