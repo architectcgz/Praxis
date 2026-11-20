@@ -76,16 +76,16 @@ type SaveModelRequest func(context.Context, sessionentry.ModelRequest) error
 
 // RunTools 只绑定本次已取得运行权的 AgentRun 的环境。
 type RunTools struct {
-	run         RunOwner
-	executor    *Executor
-	projectPath string
-	catalog     tool.ToolCatalog
-	mode        security.ApprovalMode
-	provider    providerapi.Provider
+	run          RunOwner
+	executor     *Executor
+	projectPath  string
+	allowedTools *tool.ToolRegistry
+	mode         security.ApprovalMode
+	provider     providerapi.Provider
 }
 
 // CallResult 将实际结果和耗时交给调用方一起提交；仅执行路径携带 OperationID 和已准备参数。
-// Err 只供后置观察，工具执行失败已编码在 ToolResult 中，不作为编排错误返回。
+// Err 保留工具执行失败的原始错误，供 Loop 识别存储故障并供后置 Hook 观察。
 type CallResult struct {
 	ToolResult  tool.ToolResult
 	OperationID string
@@ -102,14 +102,14 @@ type ControlRequest struct {
 	CallID    string
 }
 
-func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, mode security.ApprovalMode, provider providerapi.Provider) *RunTools {
+func (e *Executor) ForRun(run RunOwner, projectPath string, allowedTools *tool.ToolRegistry, mode security.ApprovalMode, provider providerapi.Provider) *RunTools {
 	return &RunTools{
-		executor:    e,
-		run:         run,
-		projectPath: projectPath,
-		catalog:     catalog,
-		mode:        mode,
-		provider:    provider,
+		executor:     e,
+		run:          run,
+		projectPath:  projectPath,
+		allowedTools: allowedTools,
+		mode:         mode,
+		provider:     provider,
 	}
 }
 
@@ -127,7 +127,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall, 
 	if err := ctx.Err(); err != nil {
 		return callError("tool_interrupted", err.Error()), nil
 	}
-	t, ok := tools.catalog.Get(call.Name)
+	registration, ok := tools.allowedTools.Get(call.Name)
 	if !ok {
 		return callError("tool_not_allowed", "The requested tool is disabled or unregistered."), nil
 	}
@@ -136,7 +136,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall, 
 		return callError("tool_interrupted", err.Error()), nil
 	}
 	// JSON 只在编排边界解码；工具准备与实际执行都使用类型化参数。
-	arguments := t.NewArguments()
+	arguments := registration.Tool.NewArguments()
 	var path *string
 	var defaultPath string
 	if value, ok := arguments.(tool.PathArguments); ok {
@@ -163,7 +163,8 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall, 
 		}
 		*path = filepath.Clean(*path)
 	}
-	prepared, err := t.Prepare(arguments, tool.Environment{
+	prepared, err := registration.Tool.Prepare(arguments, tool.Environment{
+		CallID:          call.CallID,
 		ProjectPath:     tools.projectPath,
 		OutputDirectory: s.deps.Outputs.Directory(tools.run.SessionID()),
 	})
@@ -178,7 +179,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall, 
 	if err := s.deps.HookDispatcher.BeforeToolExecution(ctx, toolHookEvent(call, string(args), operationID)); err != nil {
 		return CallResult{}, err
 	}
-	return tools.execute(ctx, call, prepared, args, operationID, saveRequest)
+	return tools.execute(ctx, call, registration.RunScoped, prepared, args, operationID, saveRequest)
 }
 
 // decodeToolArguments 只接受单个 JSON 对象，不修复原文，也不忽略对象后的多余内容。
@@ -202,22 +203,24 @@ func decodeToolArguments(raw string, target any) error {
 	return nil
 }
 
-func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, prepared tool.PreparedCall, args json.RawMessage, operationID string, saveRequest SaveModelRequest) (CallResult, error) {
-	s := tools.executor
-	denied, err := tools.authorize(ctx, call, args, operationID, saveRequest)
-	if errors.Is(err, errCallStopped) {
-		return callError("tool_interrupted", err.Error()), nil
-	}
-	if err != nil {
-		if ctx.Err() != nil {
-			return callError("tool_interrupted", ctx.Err().Error()), nil
+func (tools *RunTools) execute(ctx context.Context, call sessionentry.ToolCall, runScoped bool, prepared tool.PreparedCall, args json.RawMessage, operationID string, saveRequest SaveModelRequest) (CallResult, error) {
+	if !runScoped {
+		denied, err := tools.authorize(ctx, call, args, operationID, saveRequest)
+		if errors.Is(err, errCallStopped) {
+			return callError("tool_interrupted", err.Error()), nil
 		}
-		return CallResult{}, err
-	}
-	if denied != nil {
-		return CallResult{ToolResult: *denied}, nil
+		if err != nil {
+			if ctx.Err() != nil {
+				return callError("tool_interrupted", ctx.Err().Error()), nil
+			}
+			return CallResult{}, err
+		}
+		if denied != nil {
+			return CallResult{ToolResult: *denied}, nil
+		}
 	}
 
+	s := tools.executor
 	observed := observedCall{
 		call:    prepared.Call,
 		name:    call.Name,

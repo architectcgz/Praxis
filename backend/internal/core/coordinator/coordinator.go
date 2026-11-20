@@ -9,6 +9,7 @@ import (
 	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/core/tool"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
@@ -129,10 +130,11 @@ type activeRun struct {
 	onDone  func() error
 	session *sessionmodel.Session
 
-	config *sessionmodel.Configuration
-	ctx    context.Context
-	cancel context.CancelCauseFunc
-	done   chan struct{}
+	config       *sessionmodel.Configuration
+	allowedTools *tool.ToolRegistry
+	ctx          context.Context
+	cancel       context.CancelCauseFunc
+	done         chan struct{}
 }
 
 func newActiveRun(ctx context.Context, session *sessionmodel.Session) *activeRun {

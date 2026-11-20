@@ -61,7 +61,7 @@ func (c *configuration) loadSessionConfiguration(ctx context.Context, root datar
 	return &sessionmodel.Configuration{
 		Models:      modelapi.NewCatalog(models.Config()),
 		Definitions: definitions,
-		Tools:       tool.NewCatalog(tools, c.registry),
+		Tools:       c.registry.Enabled(tools),
 		Provider: providers.New(providers.Dependencies{
 			Credentials: models.Credentials(),
 			HTTPClient:  http.DefaultClient,

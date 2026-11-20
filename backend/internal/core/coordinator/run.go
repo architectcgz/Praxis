@@ -22,9 +22,6 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 	if runner.Provider == nil {
 		runner.Provider = active.config.Provider
 	}
-	if runner.Tools == nil {
-		runner.Tools = active.config.Tools
-	}
 	err := run.Execute(ctx, &runner, func(prepareCtx context.Context) (loop.ToolExecutor, error) {
 		info, err := r.sessionRecords.Get(prepareCtx, run.SessionID())
 		if err != nil {
@@ -34,18 +31,12 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 		if err != nil {
 			return nil, loop.NewFailure(loop.FailureStorage, err)
 		}
-		catalog, err := r.collaborationTools(run, active, active.config.Tools)
+		visibleTools, err := r.bindRunTools(run, active)
 		if err != nil {
 			return nil, err
 		}
-		runner.Tools = catalog
-		base := r.tools.ForRun(run, project.Path, active.config.Tools, active.config.ApprovalMode, runner.Provider)
-		return &nativeExecutor{
-			base:    base,
-			catalog: catalog,
-			run:     run,
-			emitter: r.loop.Emitter,
-		}, nil
+		runner.VisibleTools = visibleTools
+		return r.tools.ForRun(run, project.Path, active.allowedTools, active.config.ApprovalMode, runner.Provider), nil
 	})
 	if err != nil {
 		r.logger.Errorf("run failed run_id=%s: %v", run.ID(), err)

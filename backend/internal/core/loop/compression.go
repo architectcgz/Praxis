@@ -18,8 +18,8 @@ import (
 )
 
 // Compress 在上下文构建完成后独立评估容量，按需生成摘要并通过统一入口提交 Session。
-func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.Entry, value appcontext.ModelContext) (compressed appcontext.ModelContext, err error) {
-	reservedTokens, err := estimateRequestOverhead(r.Tools.List(), nil)
+func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.Entry, value appcontext.ModelContext, tools []tool.ToolDefinition) (compressed appcontext.ModelContext, err error) {
+	reservedTokens, err := estimateRequestOverhead(tools, nil)
 	if err != nil {
 		return value, NewFailure(FailureContract, err)
 	}
@@ -45,7 +45,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	request := providerapi.Request{
 		Context:         value,
 		Model:           params.Model,
-		Tools:           r.Tools.List(),
+		Tools:           tools,
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 	}
 	inputTokens, _, err := requestTokens(request, deps.Budget)

@@ -71,8 +71,9 @@ type Tool interface {
 	Prepare(arguments any, environment Environment) (PreparedCall, error)
 }
 
-// Environment 是本次工具执行的文件访问范围；临时输出目录只属于当前会话。
+// Environment 保存本次调用的身份和文件访问范围；临时输出目录只属于当前会话。
 type Environment struct {
+	CallID          string
 	ProjectPath     string
 	OutputDirectory string
 }
@@ -91,20 +92,14 @@ type PreparedCall struct {
 	Call      func(context.Context) (ToolResult, error)
 }
 
-// ToolCatalog 提供当前启用的工具定义和实现。
-type ToolCatalog interface {
-	List() []ToolDefinition
-	Get(ToolName) (Tool, bool)
-}
-
 // ReadOnlyTool 是工具实现对副作用边界的明确声明，未知扩展默认串行执行。
 type ReadOnlyTool interface{ ReadOnly() bool }
 
-func IsReadOnly(catalog ToolCatalog, name ToolName) bool {
-	t, ok := catalog.Get(name)
+func IsReadOnly(allowedTools *ToolRegistry, name ToolName) bool {
+	registration, ok := allowedTools.Get(name)
 	if !ok {
 		return false
 	}
-	capability, ok := t.(ReadOnlyTool)
+	capability, ok := registration.Tool.(ReadOnlyTool)
 	return ok && capability.ReadOnly()
 }

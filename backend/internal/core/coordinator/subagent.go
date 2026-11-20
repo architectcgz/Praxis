@@ -9,56 +9,45 @@ import (
 	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/loop"
-	"praxis/internal/core/tool"
+	"praxis/internal/core/tool/subagent"
 	"praxis/internal/identity"
 )
 
-type subagentAssignment struct {
-	Task         string          `json:"task"`
-	AllowedTools []tool.ToolName `json:"allowedTools"`
-}
-
-type subagentIDs struct {
-	AgentID identity.AgentID `json:"agentId"`
-	RunID   identity.RunID   `json:"runId"`
-}
-
-func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment subagentAssignment, callID string) (subagentIDs, error) {
-	catalog, err := tool.Restrict(parentActive.config.Tools, assignment.AllowedTools)
+func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment subagent.Assignment, callID string) (subagent.IDs, error) {
+	allowedTools, err := parentActive.allowedTools.Restrict(assignment.AllowedTools)
 	if err != nil {
-		return subagentIDs{}, err
+		return subagent.IDs{}, err
 	}
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
 	if closed || parentActive.ctx.Err() != nil {
-		return subagentIDs{}, fmt.Errorf("parent execution is closing")
+		return subagent.IDs{}, fmt.Errorf("parent execution is closing")
 	}
 	if parent.ActiveSubagents() >= 10 {
-		return subagentIDs{}, fmt.Errorf("session subagent limit of 10 is reached")
+		return subagent.IDs{}, fmt.Errorf("session subagent limit of 10 is reached")
 	}
 	agentID := identity.AgentID(s.runDependencies.IDs.New("agent"))
 	active := newActiveRun(ctx, parentActive.session)
-	config := *parentActive.config
-	config.Tools = catalog
-	active.config = &config
+	active.config = parentActive.config
+	active.allowedTools = allowedTools
 	active.parent = parent
 	stopParent := context.AfterFunc(parentActive.ctx, func() { active.cancel(context.Cause(parentActive.ctx)) })
-	definition, err := config.Definition(agentmodel.DefinitionDelegate)
+	definition, err := active.config.Definition(agentmodel.DefinitionDelegate)
 	if err != nil {
 		s.releaseFailedChild(active)
 		stopParent()
-		return subagentIDs{}, err
+		return subagent.IDs{}, err
 	}
 	if err := active.session.CreateSubagent(active.ctx, agentID); err != nil {
 		s.releaseFailedChild(active)
 		stopParent()
 		if active.ctx.Err() != nil && errors.Is(err, active.ctx.Err()) {
-			return subagentIDs{}, err
+			return subagent.IDs{}, err
 		}
 		err = loop.NewFailure(loop.FailureStorage, err)
 		parent.Cancel(err)
-		return subagentIDs{}, err
+		return subagent.IDs{}, err
 	}
 	child := agentrun.New(s.runDependencies, agentrun.Config{
 		ParentCallID: callID,
@@ -77,7 +66,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		}
 		s.releaseFailedChild(active)
 		stopParent()
-		return subagentIDs{}, err
+		return subagent.IDs{}, err
 	}
 	child.BindParent(parent)
 	parent.RegisterSubagent(agentrun.SubagentHandle{
@@ -111,9 +100,9 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		err = errors.Join(err, saveErr)
 		s.releaseFailedChild(active)
 		stopParent()
-		return subagentIDs{}, err
+		return subagent.IDs{}, err
 	}
-	return subagentIDs{AgentID: agentID, RunID: child.ID()}, nil
+	return subagent.IDs{AgentID: agentID, RunID: child.ID()}, nil
 }
 func (s *Coordinator) releaseFailedChild(active *activeRun) {
 	close(active.done)

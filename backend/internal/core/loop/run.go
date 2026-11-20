@@ -21,6 +21,7 @@ import (
 // Loop 提交真实回执后调用后置 Hook，历史写入由条目提交入口负责。
 type ToolExecutor interface {
 	Execute(context.Context, sessionentry.ToolCall, toolexecution.SaveModelRequest) (toolexecution.CallResult, error)
+	BoundResult(tool.ToolResult, int) (tool.ToolResult, error)
 }
 
 type (
@@ -140,10 +141,10 @@ func FailureClassification(err error) FailureCode {
 	return FailureInternal
 }
 
-// Dependencies 保存 Loop 的共享能力；Provider 和工具目录在执行开始时绑定会话配置。
+// Dependencies 保存 Loop 的共享能力；Provider 和本次模型可见的工具在执行开始时绑定。
 type Dependencies struct {
 	Provider       providerapi.Provider
-	Tools          tool.ToolCatalog
+	VisibleTools   *tool.ToolRegistry
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
 	Logf           func(string, ...any)
@@ -172,8 +173,9 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 		if err != nil {
 			return turnID, err
 		}
+		definitions := r.VisibleTools.List()
 		modelContext := r.BuildContext(ctx, params, entries)
-		modelContext, err = r.Compress(ctx, params, deps, input, modelContext)
+		modelContext, err = r.Compress(ctx, params, deps, input, modelContext, definitions)
 		if err != nil {
 			return turnID, NewModelFailure(err)
 		}
@@ -194,7 +196,7 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			PromptCacheKey:  params.SessionID.String(),
 			Model:           params.Model,
 			Context:         modelContext,
-			Tools:           r.Tools.List(),
+			Tools:           definitions,
 			MaxOutputTokens: params.Model.MaxOutputTokens,
 			TurnID:          turnID,
 		}

@@ -30,7 +30,7 @@ type HistoryStore interface {
 type Configuration struct {
 	Models             *modelapi.Catalog
 	Definitions        []agentmodel.AgentDefinition
-	Tools              tool.ToolCatalog
+	Tools              *tool.ToolRegistry
 	Provider           providerapi.Provider
 	GlobalApprovalMode security.ApprovalMode
 	ApprovalMode       security.ApprovalMode

@@ -40,6 +40,8 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	if len(calls) == 0 {
 		return nil
 	}
+	// 仅执行本轮已提供给模型的工具。本批披露的定义从下一轮开始生效。
+	visible := r.VisibleTools.Clone()
 	batchCtx, cancelBatch := context.WithCancel(ctx)
 	defer cancelBatch()
 	outcomes := make([]toolexecution.CallResult, len(calls))
@@ -52,7 +54,14 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	deps.ExecuteTools(saveRequest, func(submitRequest toolexecution.SaveModelRequest) {
 		execute := func(index int) {
 			call := calls[index]
-			outcomes[index], failures[index] = executor.Execute(batchCtx, call, submitRequest)
+			if _, ok := visible.Get(call.Name); ok {
+				outcomes[index], failures[index] = executor.Execute(batchCtx, call, submitRequest)
+			} else {
+				outcomes[index].ToolResult = tool.NewToolError("tool_not_available", "The requested tool is unavailable in this request. Use list_tools to discover and load tools for the next request.")
+			}
+			if failures[index] == nil && FailureClassification(outcomes[index].Err) == FailureStorage {
+				failures[index] = outcomes[index].Err
+			}
 			if failures[index] != nil {
 				cancelBatch()
 			}
@@ -75,8 +84,8 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 				break
 			}
 			end := index + 1
-			if tool.IsReadOnly(r.Tools, calls[index].Name) {
-				for end < len(calls) && tool.IsReadOnly(r.Tools, calls[end].Name) {
+			if tool.IsReadOnly(visible, calls[index].Name) {
+				for end < len(calls) && tool.IsReadOnly(visible, calls[end].Name) {
 					end++
 				}
 				var group sync.WaitGroup
@@ -149,12 +158,6 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 
 // boundToolResults 在正式回执创建前共享整组预算，优先转存最大的结果，不截断结构化内容。
 func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps RunDependencies, executor ToolExecutor, results []toolexecution.CallResult) error {
-	limiter, ok := executor.(interface {
-		BoundResult(tool.ToolResult, int) (tool.ToolResult, error)
-	})
-	if !ok {
-		return nil
-	}
 	entries, err := deps.ReadEntries(context.WithoutCancel(ctx))
 	if err != nil {
 		return NewFailure(FailureStorage, err)
@@ -162,7 +165,7 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 	request := providerapi.Request{
 		Context:         r.BuildContext(ctx, params, entries),
 		Model:           params.Model,
-		Tools:           r.Tools.List(),
+		Tools:           r.VisibleTools.List(),
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 	}
 	input, _, err := requestTokens(request, deps.Budget)
@@ -190,7 +193,7 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 			continue
 		}
 		prior := results[index].ToolResult
-		bounded, err := limiter.BoundResult(prior, 0)
+		bounded, err := executor.BoundResult(prior, 0)
 		if err != nil {
 			bounded = tool.NewToolError("tool_output_save_failed", "The operation already ran, but saving its output failed: "+err.Error()+". Do not rerun the operation to recover output.")
 			bounded.SideEffect = prior.SideEffect

@@ -83,6 +83,7 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, sched
 	schedule.queue.Complete(input)
 	r.mu.Lock()
 	active.config = config
+	active.allowedTools = config.Tools.Clone()
 	err = r.launchLocked(run, active)
 	r.mu.Unlock()
 	if err == nil {
