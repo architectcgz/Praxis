@@ -11,13 +11,11 @@ import (
 	"praxis/internal/core/loop"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
-	"time"
 )
 
 type subagentAssignment struct {
-	Task           string          `json:"task"`
-	AllowedTools   []tool.ToolName `json:"allowedTools"`
-	TimeoutSeconds int             `json:"timeoutSeconds"`
+	Task         string          `json:"task"`
+	AllowedTools []tool.ToolName `json:"allowedTools"`
 }
 
 type subagentIDs struct {
@@ -45,19 +43,16 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	config.Tools = catalog
 	active.config = &config
 	active.parent = parent
-	childCtx, cancelTimeout := context.WithTimeout(parentActive.ctx, time.Duration(assignment.TimeoutSeconds)*time.Second)
-	stopParent := context.AfterFunc(childCtx, func() { active.cancel(context.Cause(childCtx)) })
+	stopParent := context.AfterFunc(parentActive.ctx, func() { active.cancel(context.Cause(parentActive.ctx)) })
 	definition, err := config.Definition(agentmodel.DefinitionDelegate)
 	if err != nil {
 		s.releaseFailedChild(active)
 		stopParent()
-		cancelTimeout()
 		return subagentIDs{}, err
 	}
 	if err := active.session.CreateSubagent(active.ctx, agentID); err != nil {
 		s.releaseFailedChild(active)
 		stopParent()
-		cancelTimeout()
 		if active.ctx.Err() != nil && errors.Is(err, active.ctx.Err()) {
 			return subagentIDs{}, err
 		}
@@ -82,7 +77,6 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		}
 		s.releaseFailedChild(active)
 		stopParent()
-		cancelTimeout()
 		return subagentIDs{}, err
 	}
 	child.BindParent(parent)
@@ -94,7 +88,6 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	})
 	active.onDone = func() error {
 		defer stopParent()
-		defer cancelTimeout()
 		if !child.TerminalSaved() {
 			err := loop.NewFailure(loop.FailureStorage, fmt.Errorf("subagent %s did not save its terminal result", agentID))
 			parent.Cancel(err)
@@ -118,7 +111,6 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		err = errors.Join(err, saveErr)
 		s.releaseFailedChild(active)
 		stopParent()
-		cancelTimeout()
 		return subagentIDs{}, err
 	}
 	return subagentIDs{AgentID: agentID, RunID: child.ID()}, nil

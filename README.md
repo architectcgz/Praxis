@@ -144,7 +144,7 @@ npm run check
 | `subagent_started` | 子 Agent 的名称、创建时间、父 Agent 和父 Run 的标识、工具调用 ID 及初始消息；在子 Run 登记后、输出前发送。 |
 | `subagent_released` | 通过信封定位释放的子运行实例，清理其临时展示；持久化历史保留在 Session 中。 |
 
-`subagent_start` 成功后只返回子执行身份，例如 `{"agentId":"agent-1","runId":"run-1"}`。前端按生命周期事件更新 Agent 状态，清理临时输出前核对 RunID。父 Run 通过 `subagent_wait` 等待子任务报告或结束，不轮询状态，也不接收逐条 Entry 的运行快照。
+`subagent_start` 成功后只返回子执行身份，例如 `{"agentId":"agent-1","runId":"run-1"}`。子 Run 不设整体时限。前端按生命周期事件更新 Agent 状态，清理临时输出前核对 RunID。父 Run 通过 `subagent_wait` 等待子任务报告或结束，每次最多等待 30 秒。等待结果包含 `status`、`mode`、`agentIds` 和 `reports`。达到等待条件时返回 `ready` 和报告引用。到期时返回 `timed_out` 和空报告数组，尚未结束的子 Run 继续运行。
 
 初始化后，页面按 SessionID 和 BranchID 消费事件，队列事件还携带 BindingID。`task_queue_changed` 在入队、领取完成、重试归队和取消后更新队列；模型请求、工具事件和历史 Entry 携带对应计时。Wails 接入按展示契约映射载荷，不直接序列化执行记录，也不重新校验本应用生成的数据结构。
 

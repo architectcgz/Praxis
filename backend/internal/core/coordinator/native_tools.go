@@ -16,7 +16,19 @@ import (
 	"praxis/internal/identity"
 	"slices"
 	"strings"
+	"time"
 )
+
+const subagentWaitTimeout = 30 * time.Second
+
+var errSubagentWaitTimeout = errors.New("subagent wait timed out")
+
+type subagentWaitResult struct {
+	Status   string                         `json:"status"`
+	Mode     string                         `json:"mode"`
+	AgentIDs []identity.AgentID             `json:"agentIds"`
+	Reports  []sessionentry.SubagentReceipt `json:"reports"`
+}
 
 type nativeTool struct {
 	definition tool.ToolDefinition
@@ -66,19 +78,20 @@ func decodeNative(raw string, target any) error {
 func (s *Coordinator) collaborationTools(run *agentrun.Run, active *activeRun, business tool.ToolCatalog) (*nativeCatalog, error) {
 	catalog := &nativeCatalog{business: business, tools: make(map[tool.ToolName]*nativeTool), definitions: business.List()}
 	if run.Main() {
-		if err := catalog.add("subagent_start", "异步委派一个完整子任务。必须显式给出工具授权子集和 1–600 秒超时；子代理只属于当前 Run。", `{"type":"object","properties":{"task":{"type":"string"},"allowedTools":{"type":"array","items":{"type":"string"}},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600}},"required":["task","allowedTools","timeoutSeconds"],"additionalProperties":false}`, func(ctx context.Context, callID, raw string) (any, error) {
+		if err := catalog.add("subagent_start", "异步委派一个完整子任务。必须显式给出工具授权子集。子代理只属于当前 Run。", `{"type":"object","properties":{"task":{"type":"string"},"allowedTools":{"type":"array","items":{"type":"string"}}},"required":["task","allowedTools"],"additionalProperties":false}`, func(ctx context.Context, callID, raw string) (any, error) {
 			var a subagentAssignment
 			if err := decodeNative(raw, &a); err != nil {
 				return nil, err
 			}
-			if a.Task == "" || a.AllowedTools == nil || a.TimeoutSeconds < 1 || a.TimeoutSeconds > 600 {
-				return nil, fmt.Errorf("task, allowedTools and timeoutSeconds (1-600) are required")
+			if a.Task == "" || a.AllowedTools == nil {
+				return nil, fmt.Errorf("task and allowedTools are required")
 			}
 			return s.startSubagent(ctx, run, active, a, callID)
 		}); err != nil {
 			return nil, err
 		}
-		if err := catalog.add("subagent_wait", "等待指定子代理的新报告或结束，mode 为 any 或 all。返回引用，已接纳报告在后续上下文中提供。", `{"type":"object","properties":{"ids":{"type":"array","minItems":1,"items":{"type":"string"}},"mode":{"type":"string","enum":["any","all"]}},"required":["ids","mode"],"additionalProperties":false}`, func(ctx context.Context, callID, raw string) (any, error) {
+		waitDescription := fmt.Sprintf("等待指定子代理。any 收到新报告或目标全部结束时返回，all 等待目标全部结束。每次最多等待 %d 秒。ready 返回报告引用，正文在后续上下文中提供。timed_out 表示本次等待到期，尚未结束的子代理继续运行。", subagentWaitTimeout/time.Second)
+		if err := catalog.add("subagent_wait", waitDescription, `{"type":"object","properties":{"ids":{"type":"array","minItems":1,"items":{"type":"string"}},"mode":{"type":"string","enum":["any","all"]}},"required":["ids","mode"],"additionalProperties":false}`, func(ctx context.Context, callID, raw string) (any, error) {
 			var a struct {
 				IDs  []identity.AgentID `json:"ids"`
 				Mode string             `json:"mode"`
@@ -92,7 +105,27 @@ func (s *Coordinator) collaborationTools(run *agentrun.Run, active *activeRun, b
 			if a.Mode != "all" && a.Mode != "any" {
 				return nil, fmt.Errorf("mode must be any or all")
 			}
-			return run.WaitSubagents(ctx, a.IDs, a.Mode == "all")
+			waitCtx, cancel := context.WithTimeoutCause(ctx, subagentWaitTimeout, errSubagentWaitTimeout)
+			defer cancel()
+
+			reports, err := run.WaitSubagents(waitCtx, a.IDs, a.Mode == "all")
+			status := "ready"
+			if err != nil {
+				if !errors.Is(err, context.DeadlineExceeded) || context.Cause(waitCtx) != errSubagentWaitTimeout {
+					return nil, err
+				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				status = "timed_out"
+				reports = []sessionentry.SubagentReceipt{}
+			}
+			return subagentWaitResult{
+				Status:   status,
+				Mode:     a.Mode,
+				AgentIDs: a.IDs,
+				Reports:  reports,
+			}, nil
 		}); err != nil {
 			return nil, err
 		}
@@ -165,8 +198,8 @@ func (e *nativeExecutor) Execute(ctx context.Context, call sessionentry.ToolCall
 	value, err := native.invoke(ctx, call.CallID, call.Arguments)
 	measured := span.End()
 	if err != nil {
-		if loop.FailureClassification(err) == loop.FailureStorage {
-			return toolexecution.CallResult{}, err
+		if loop.FailureClassification(err) == loop.FailureStorage || errors.Is(err, ctx.Err()) {
+			return toolexecution.CallResult{Timing: measured}, err
 		}
 		return toolexecution.CallResult{ToolResult: tool.NewToolError("native_tool_failed", err.Error()), Timing: measured}, nil
 	}

@@ -34,7 +34,6 @@ func (RunEndingStarted) kind() string { return kindRunEnding }
 type RunFailureCode string
 
 const (
-	RunFailureTimeout             RunFailureCode = "execution_timeout"
 	RunFailureProviderUnavailable RunFailureCode = "provider_unavailable"
 	RunFailureProvider            RunFailureCode = "execution_provider_error"
 	RunFailureTool                RunFailureCode = "execution_tool_error"

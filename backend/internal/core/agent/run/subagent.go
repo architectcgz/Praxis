@@ -199,6 +199,10 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 	}
 	for {
 		r.collaboration.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			r.collaboration.mu.Unlock()
+			return nil, err
+		}
 		finished := true
 		for _, id := range ids {
 			h, ok := r.collaboration.children[id]

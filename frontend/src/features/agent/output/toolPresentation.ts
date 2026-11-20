@@ -102,7 +102,7 @@ export function presentTool(name: string, inputValue: unknown, resultText?: stri
     const input = toolRecord(inputValue)
     const result = toolRecord(resultText)
     const label = toolLabels[name] || name || '工具'
-    const summary = summarizeToolInput(name, input)
+    let summary = summarizeToolInput(name, input)
     const content = typeof result.output === 'string' ? result.output
         : typeof result.content === 'string' ? result.content
         : typeof result.message === 'string' ? result.message
@@ -113,7 +113,10 @@ export function presentTool(name: string, inputValue: unknown, resultText?: stri
     let status: ToolStatus = resultText === undefined ? pendingStatus : isError || result.error ? 'failed' : 'completed'
     let notice = ''
     const errorText = `${stringValue(result.error)} ${content}`
-    if (result.timedOut === true || (status === 'failed' && /ETIMEDOUT|deadline exceeded|timed?\s*out|超时/i.test(errorText))) {
+    if (name === 'subagent_wait' && status === 'completed' && result.status === 'timed_out') {
+        summary = `${summary} · 等待超时`
+        notice = '尚未结束的子代理会继续运行。'
+    } else if (result.timedOut === true || (status === 'failed' && /ETIMEDOUT|deadline exceeded|timed?\s*out|超时/i.test(errorText))) {
         status = 'timeout'
         notice = '执行超过等待上限，已返回的输出保留在下方。'
     } else if (status === 'failed' && /cancelled|canceled|context canceled|已取消/i.test(errorText)) {

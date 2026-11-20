@@ -114,9 +114,6 @@ func (r *Run) classifyOutcome(ctx context.Context, err error) (sessionentry.RunO
 		return sessionentry.OutcomeCompleted, "", ""
 	}
 	code := failureCode(err)
-	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-		return sessionentry.OutcomeFailed, sessionentry.RunFailureTimeout, ""
-	}
 	if code != sessionentry.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
 		code = sessionentry.RunFailureCancelled
 		if errors.Is(context.Cause(ctx), ErrInterrupted) {
