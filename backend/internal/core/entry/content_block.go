@@ -28,9 +28,6 @@ type blockHeader struct {
 type Content []ContentBlock
 
 func (c Content) MarshalJSON() ([]byte, error) {
-	if c == nil {
-		return []byte("null"), nil
-	}
 	blocks := make([]any, len(c))
 	for index, block := range c {
 		switch value := block.(type) {

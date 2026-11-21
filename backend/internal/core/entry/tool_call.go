@@ -1,10 +1,13 @@
 package entry
 
 import (
-	"praxis/internal/core/entry/role"
+	"fmt"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
+	"time"
 )
+
+const interruptedToolResultText = "The execution ended before a reliable tool result was available."
 
 // Key 复用工具契约的调用身份。
 type Key = tool.CallKey
@@ -19,50 +22,79 @@ type ToolCall struct {
 	Arguments string
 }
 
-// ToolCalls 从 Assistant Entry 取得调用，供执行查询与启动恢复使用。
-func (m Entry) ToolCalls(sessionID identity.SessionID, agentID identity.AgentID) []ToolCall {
-	calls := make([]ToolCall, 0)
-	_, blocks := m.Dialogue()
-	for _, block := range blocks {
-		call, ok := block.(ToolCallBlock)
-		if !ok {
+// MissingToolResultEntries 按 (RunID, CallID) 差集为未闭合的工具调用生成错误回执条目。
+// 保留原声明顺序，不覆盖已有回执；用于正常中断收尾与异常关闭恢复共用同一事实语义。
+func MissingToolResultEntries(entries []*Entry, createdAt time.Time) []Entry {
+	type callKey struct {
+		runID  string
+		callID string
+	}
+	completed := make(map[callKey]bool)
+	usedIDs := make(map[string]bool, len(entries))
+	for _, value := range entries {
+		if value.ID != "" {
+			usedIDs[value.ID] = true
+		}
+		_, blocks := value.Dialogue()
+		for _, block := range blocks {
+			if result, ok := block.(ToolResultBlock); ok {
+				completed[callKey{runID: value.RunID, callID: result.CallID}] = true
+			}
+		}
+	}
+	var missing []Entry
+	for _, value := range entries {
+		var results Content
+		_, blocks := value.Dialogue()
+		for _, block := range blocks {
+			call, ok := block.(ToolCallBlock)
+			if !ok {
+				continue
+			}
+			key := callKey{runID: value.RunID, callID: call.CallID}
+			if completed[key] {
+				continue
+			}
+			completed[key] = true
+			results = append(results, ToolResultBlock{
+				CallID:  call.CallID,
+				Name:    call.Name,
+				Text:    interruptedToolResultText,
+				IsError: true,
+			})
+		}
+		if len(results) == 0 {
 			continue
 		}
-		calls = append(calls, ToolCall{
-			Key:       Key{RunID: identity.RunID(m.RunID), CallID: call.CallID},
-			SessionID: sessionID,
-			AgentID:   agentID,
-			TurnID:    identity.TurnID(m.TurnID),
-			Name:      call.Name,
-			Arguments: call.Arguments,
+		id := nextToolResultEntryID(value, usedIDs)
+		usedIDs[id] = true
+		missing = append(missing, Entry{
+			ID:         id,
+			RunID:      value.RunID,
+			TurnID:     value.TurnID,
+			AuthorKind: AuthorTool,
+			CreatedAt:  createdAt,
+			Payload: Message{
+				Role:    RoleTool,
+				Content: results,
+			},
 		})
 	}
-	return calls
+	return missing
 }
 
-// ResultEntry 为正常结果和中断回执使用相同的确定性身份及调用归属，不分配历史序号或时间。
-func (c ToolCall) ResultEntry(result tool.ToolResult) Entry {
-	if len(result.Payload) > tool.MaxInlineResultBytes {
-		result = tool.NewToolError("tool_execution_failed", "Tool result exceeds the inline size limit.")
+func nextToolResultEntryID(source *Entry, used map[string]bool) string {
+	base := "tools:" + source.TurnID
+	if source.TurnID == "" {
+		base = "tools:" + source.ID
 	}
-	if result.Payload == "" {
-		result.Payload = "(empty tool result)"
+	if !used[base] {
+		return base
 	}
-	return Entry{
-		ID:         "tool-result:" + c.RunID.String() + ":" + c.CallID,
-		RunID:      c.RunID.String(),
-		TurnID:     c.TurnID.String(),
-		AuthorKind: AuthorTool,
-		Payload: Message{
-			Role: role.Tool,
-			Content: []ContentBlock{
-				ToolResultBlock{
-					CallID:  c.CallID,
-					Name:    c.Name,
-					Text:    result.Payload,
-					IsError: result.ErrorClass != "",
-				},
-			},
-		},
+	for suffix := 2; ; suffix++ {
+		candidate := fmt.Sprintf("%s:%d", base, suffix)
+		if !used[candidate] {
+			return candidate
+		}
 	}
 }

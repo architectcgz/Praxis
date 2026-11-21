@@ -5,7 +5,6 @@ import (
 	"errors"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -121,7 +120,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 		TurnID:     calls[0].TurnID.String(),
 		AuthorKind: sessionentry.AuthorTool,
 		Payload: sessionentry.Message{
-			Role:    role.Tool,
+			Role:    sessionentry.RoleTool,
 			Content: content,
 		},
 	}
@@ -131,7 +130,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	if err != nil {
 		return NewFailure(FailureStorage, errors.Join(executionErr, err))
 	}
-	r.emit(params, calls[0].TurnID, coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}})
+	r.emit(params, calls[0].TurnID, coreevent.EntriesAppended{Entries: []*sessionentry.Entry{stored}})
 	if inserted {
 		for index, result := range outcomes {
 			if result.OperationID == "" {

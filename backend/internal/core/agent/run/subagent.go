@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/identity"
 	"slices"
@@ -145,7 +144,7 @@ func (r *Run) acceptInstructions(ctx context.Context) (bool, error) {
 			ID:         instruction.id,
 			AuthorKind: sessionentry.AuthorAgent,
 			Payload: sessionentry.Message{
-				Role:    role.User,
+				Role:    sessionentry.RoleUser,
 				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: instruction.text}},
 			},
 		})
@@ -154,7 +153,7 @@ func (r *Run) acceptInstructions(ctx context.Context) (bool, error) {
 		}
 		r.deps.Emitter.Emit(coreevent.Event{
 			Source:  r.EventSource(""),
-			Payload: coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}},
+			Payload: coreevent.EntriesAppended{Entries: []*sessionentry.Entry{stored}},
 		})
 	}
 	return true, nil
@@ -192,7 +191,15 @@ func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) e
 	return nil
 }
 
-func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]sessionentry.SubagentReceipt, error) {
+// SubagentReceipt 不包含报告正文；父 Run 会将正文作为独立条目写入历史。
+type SubagentReceipt struct {
+	ReportID string                  `json:"reportId"`
+	AgentID  identity.AgentID        `json:"agentId"`
+	Outcome  sessionentry.RunOutcome `json:"outcome"`
+	Final    bool                    `json:"final"`
+}
+
+func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]SubagentReceipt, error) {
 	wanted := make(map[identity.AgentID]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true
@@ -219,11 +226,11 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 			}
 		}
 		if finished || !all && len(fresh) > 0 {
-			receipts := make([]sessionentry.SubagentReceipt, 0, len(fresh))
+			receipts := make([]SubagentReceipt, 0, len(fresh))
 			for _, report := range fresh {
 				r.collaboration.consumed[report.ReportID] = true
 				r.collaboration.accepted = append(r.collaboration.accepted, report)
-				receipts = append(receipts, sessionentry.SubagentReceipt{
+				receipts = append(receipts, SubagentReceipt{
 					ReportID: report.ReportID,
 					AgentID:  report.AgentID,
 					Outcome:  report.Outcome,
@@ -254,7 +261,7 @@ func (r *Run) acceptReports(ctx context.Context) error {
 			ID:         "report:" + report.ReportID,
 			AuthorKind: sessionentry.AuthorAgent,
 			Payload: sessionentry.Message{
-				Role:    role.User,
+				Role:    sessionentry.RoleUser,
 				Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: text}},
 			},
 		})
@@ -263,7 +270,7 @@ func (r *Run) acceptReports(ctx context.Context) error {
 		}
 		r.deps.Emitter.Emit(coreevent.Event{
 			Source:  r.EventSource(""),
-			Payload: coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}},
+			Payload: coreevent.EntriesAppended{Entries: []*sessionentry.Entry{stored}},
 		})
 	}
 	return nil

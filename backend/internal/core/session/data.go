@@ -6,16 +6,13 @@ import (
 	"slices"
 )
 
-// AgentContext 保存某个 Agent 当前真正参与下一次模型请求的 Entry。
+// AgentContext 保存某个 Agent 最近摘要及之后的活跃历史窗口，供上下文构建筛选。
 type AgentContext struct {
 	Entries []*sessionentry.Entry
 }
 
-// Accept 在 Entry 已成功持久化后更新运行时上下文。
+// Accept 在 Entry 已成功持久化后更新活跃历史窗口。
 func (c *AgentContext) Accept(value *sessionentry.Entry) {
-	if !value.ContributesToModelContext() {
-		return
-	}
 	if value.IsSummary() {
 		c.Entries = []*sessionentry.Entry{value}
 		return

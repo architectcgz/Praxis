@@ -76,7 +76,7 @@ type Payload interface {
 }
 
 type EntriesAppended struct {
-	Entries []sessionentry.Entry
+	Entries []*sessionentry.Entry
 }
 
 func (EntriesAppended) Kind() Kind { return KindEntriesAppended }
@@ -221,7 +221,7 @@ func (RunEnded) isPayload() {}
 type SubagentStarted struct {
 	Name          string
 	CreatedAt     time.Time
-	Entries       []sessionentry.Entry
+	Entries       []*sessionentry.Entry
 	ParentAgentID identity.AgentID
 	ParentRunID   identity.RunID
 	CallID        string

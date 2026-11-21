@@ -7,7 +7,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelusage "praxis/internal/core/model/usage"
@@ -81,7 +80,7 @@ func prepareReview(userTask, toolName string, args json.RawMessage, projectPath,
 			SystemPrompt: riskReviewPrompt,
 			Entries: []*sessionentry.Entry{{
 				Payload: sessionentry.Message{
-					Role: role.User,
+					Role: sessionentry.RoleUser,
 					Content: []sessionentry.ContentBlock{
 						sessionentry.TextBlock{Text: string(data)},
 					},

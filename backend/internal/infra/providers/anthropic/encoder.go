@@ -7,7 +7,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
 )
@@ -73,12 +72,12 @@ func anthropicEntry(entry *sessionentry.Entry, config modelapi.Config, ids map[s
 		case sessionentry.ThinkingBlock:
 			continue
 		case sessionentry.TextBlock:
-			if entryRole == role.Tool {
+			if entryRole == sessionentry.RoleTool {
 				return nil, errors.New("anthropic tool role requires tool results")
 			}
 			content = requestTextBlock{Type: "text", Text: block.Text}
 		case sessionentry.ToolCallBlock:
-			if entryRole != role.Assistant {
+			if entryRole != sessionentry.RoleAssistant {
 				return nil, errors.New("anthropic tool_use requires assistant role")
 			}
 			content = requestToolUseBlock{

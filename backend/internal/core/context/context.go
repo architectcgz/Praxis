@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	"praxis/internal/core/tool"
 	"unicode/utf8"
 )
@@ -50,14 +49,17 @@ func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.Entry)
 	}
 }
 
-// ModelEntries 保持 Session 提供的顺序，只排除不参与模型对话的执行事实。
+// ModelEntries 保持 Session 提供的顺序，只保留参与模型对话的条目。
 func ModelEntries(entries []*sessionentry.Entry) []*sessionentry.Entry {
 	selected := make([]*sessionentry.Entry, 0, len(entries))
 	for _, entry := range entries {
 		if message, ok := entry.Payload.(sessionentry.Message); ok && message.Response != nil && message.Response.Error != "" {
 			continue
 		}
-		_, blocks := entry.Dialogue()
+		messageRole, blocks := entry.Dialogue()
+		if messageRole != sessionentry.RoleUser && messageRole != sessionentry.RoleAssistant && messageRole != sessionentry.RoleTool {
+			continue
+		}
 		for _, block := range blocks {
 			if _, thinking := block.(sessionentry.ThinkingBlock); !thinking {
 				selected = append(selected, entry)
@@ -94,7 +96,7 @@ func EstimateTokens(text string) int {
 // EstimatedTokens 估算上下文正文和结构开销，工具定义需由请求边界另行预留。
 func (c ModelContext) EstimatedTokens() (int, error) {
 	type modelEntry struct {
-		Role    role.Role
+		Role    sessionentry.Role
 		Content sessionentry.Content
 	}
 	values := make([]modelEntry, 0, len(c.Entries))

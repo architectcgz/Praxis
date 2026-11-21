@@ -7,7 +7,6 @@ import (
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -90,7 +89,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	}
 	compressed, changed = generated, true
 	compressed.Entries[0] = accepted
-	r.emit(params, "", coreevent.EntriesAppended{Entries: []sessionentry.Entry{*accepted}})
+	r.emit(params, "", coreevent.EntriesAppended{Entries: []*sessionentry.Entry{accepted}})
 
 	r.Logf("context compressed run_id=%s entriesBefore=%d entriesAfter=%d", params.ID, len(value.Entries), len(compressed.Entries))
 	return compressed, nil
@@ -134,7 +133,7 @@ func remindContextBudget(request providerapi.Request, budget *appcontext.Budget)
 	if appcontext.NearContextLimit(tokens, request.MaxOutputTokens, request.Model.ContextWindow) {
 		hint := &sessionentry.Entry{
 			Payload: sessionentry.Message{
-				Role: role.User,
+				Role: sessionentry.RoleUser,
 				Content: []sessionentry.ContentBlock{
 					sessionentry.TextBlock{Text: fmt.Sprintf("[本次请求的运行提示] 估算输入 %d tokens，输出预留 %d tokens，窗口 %d tokens。请优先完成当前任务，并按需分段读取工具输出。", tokens, request.MaxOutputTokens, request.Model.ContextWindow)},
 				},

@@ -3,7 +3,6 @@ package loop
 import (
 	"context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	providerapi "praxis/internal/core/provider"
@@ -48,7 +47,7 @@ func (r *Runner) runTurn(
 		TurnID:     turnID.String(),
 		AuthorKind: sessionentry.AuthorAgent,
 		Payload: sessionentry.Message{
-			Role:    role.Assistant,
+			Role:    sessionentry.RoleAssistant,
 			Content: response.Blocks(),
 			Response: &sessionentry.ModelResponse{
 				RequestID:  response.RequestID,
@@ -58,7 +57,7 @@ func (r *Runner) runTurn(
 		},
 	})
 	if err == nil {
-		r.emit(params, turnID, coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}})
+		r.emit(params, turnID, coreevent.EntriesAppended{Entries: []*sessionentry.Entry{stored}})
 	}
 	if err != nil {
 		return false, err

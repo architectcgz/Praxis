@@ -42,11 +42,20 @@ func recoverAgent(ctx context.Context, owner *sessionmodel.Session, log *entryLo
 	}
 	if len(page.Entries) > 0 {
 		last := page.Entries[len(page.Entries)-1]
-		if last.RunOutcome() == "" {
+		if !last.IsRunTerminal() {
 			if last.RunID == "" {
 				return fmt.Errorf("history entry %s has no RunID for recovery", last.ID)
 			}
+			runEntries, err := readRunEntries(ctx, log, agentID, last.RunID)
+			if err != nil {
+				return err
+			}
 			now := clock.UTCClock{}.Now()
+			for _, receipt := range sessionentry.MissingToolResultEntries(runEntries, now) {
+				if err := log.Append(ctx, agentID, &receipt); err != nil {
+					return err
+				}
+			}
 			terminal := sessionentry.Entry{
 				ID:        "run:" + last.RunID,
 				RunID:     last.RunID,
@@ -64,8 +73,34 @@ func recoverAgent(ctx context.Context, owner *sessionmodel.Session, log *entryLo
 	return recoverAgentContext(ctx, owner, log, agentID)
 }
 
+func readRunEntries(ctx context.Context, log *entryLog, agentID identity.AgentID, runID string) ([]*sessionentry.Entry, error) {
+	var cursor *int64
+	entries := make([]*sessionentry.Entry, 0)
+	for {
+		page, err := log.ReadBackward(ctx, agentID, cursor, 200)
+		if err != nil {
+			return nil, err
+		}
+		stop := false
+		for index := len(page.Entries) - 1; index >= 0; index-- {
+			value := page.Entries[index]
+			if value.RunID != runID {
+				stop = true
+				break
+			}
+			entries = append(entries, &value)
+		}
+		if stop || !page.HasMore {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	slices.Reverse(entries)
+	return entries, nil
+}
+
 func recoverAgentContext(ctx context.Context, owner *sessionmodel.Session, log *entryLog, agentID identity.AgentID) error {
-	cursor := (*int64)(nil)
+	var cursor *int64
 	entries := make([]*sessionentry.Entry, 0)
 	for {
 		page, err := log.ReadBackward(ctx, agentID, cursor, 200)
@@ -75,13 +110,10 @@ func recoverAgentContext(ctx context.Context, owner *sessionmodel.Session, log *
 		stop := false
 		for index := len(page.Entries) - 1; index >= 0; index-- {
 			value := page.Entries[index]
+			entries = append(entries, &value)
 			if value.IsSummary() {
-				entries = append(entries, &value)
 				stop = true
 				break
-			}
-			if value.ContributesToModelContext() {
-				entries = append(entries, &value)
 			}
 		}
 		if stop || !page.HasMore {

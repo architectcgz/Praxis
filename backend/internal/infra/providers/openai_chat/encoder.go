@@ -4,7 +4,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	providerapi "praxis/internal/core/provider"
 )
 
@@ -39,7 +38,7 @@ func chatMessagesFromContext(entry *sessionentry.Entry, ids map[string]string) (
 	for index, block := range blocks {
 		switch block := block.(type) {
 		case sessionentry.TextBlock:
-			if messageRole == role.Tool {
+			if messageRole == sessionentry.RoleTool {
 				return nil, fmt.Errorf("tool role requires tool results")
 			}
 			if result.Content == nil {
@@ -48,7 +47,7 @@ func chatMessagesFromContext(entry *sessionentry.Entry, ids map[string]string) (
 				*result.Content += block.Text
 			}
 		case sessionentry.ToolCallBlock:
-			if messageRole != role.Assistant {
+			if messageRole != sessionentry.RoleAssistant {
 				return nil, fmt.Errorf("tool call requires assistant role")
 			}
 			result.ToolCalls = append(result.ToolCalls, chatToolCall{

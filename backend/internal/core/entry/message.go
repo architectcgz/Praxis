@@ -3,13 +3,21 @@ package entry
 import (
 	"encoding/json"
 	"errors"
-	"praxis/internal/core/entry/role"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 )
 
+// Role 表示模型对话中的参与方，与条目的实际作者区分。
+type Role string
+
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
+)
+
 type Message struct {
-	Role     role.Role      `json:"role"`
+	Role     Role           `json:"role"`
 	Content  Content        `json:"content"`
 	Response *ModelResponse `json:"response,omitempty"`
 }

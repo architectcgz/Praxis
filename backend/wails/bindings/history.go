@@ -80,75 +80,85 @@ type ModelUsage struct {
 	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
-// publicMessages 为查询和事件推送提供相同的展示投影，空集合统一编码为数组。
-// 内容块按白名单映射，内部推理续传状态和未知块不会穿过协议边界。
-func publicMessages(values []entry.Entry) []HistoryMessage {
+func publicMessages(values []*entry.Entry) []HistoryMessage {
 	result := make([]HistoryMessage, 0, len(values))
 	for _, value := range values {
-		projected := HistoryMessage{
-			ID:         value.ID,
-			RunID:      value.RunID,
-			TurnID:     value.TurnID,
-			CreatedAt:  value.CreatedAt,
-			AuthorKind: string(value.AuthorKind),
+		if message, ok := publicMessage(value); ok {
+			result = append(result, message)
 		}
-		switch payload := value.Payload.(type) {
-		case entry.Message:
-			projected.Kind = MessageChat
-			if response := payload.Response; response != nil {
-				projected.RequestID = response.RequestID.String()
-				projected.Error = response.Error
-				projected.Timing = (*Timing)(response.Timing)
-			}
-		case entry.Summary:
-			projected.Kind = MessageSummary
-			projected.Timing = (*Timing)(payload.Timing)
-		default:
-			continue
-		}
-		messageRole, blocks := value.Dialogue()
-		projected.Role = string(messageRole)
-		projected.Content = make([]MessageBlock, 0, len(blocks))
-		for _, block := range blocks {
-			switch block := block.(type) {
-			case entry.TextBlock:
-				projected.Content = append(projected.Content, MessageBlock{
-					Kind: "text",
-					Text: block.Text,
-				})
-			case entry.ThinkingBlock:
-				projected.Content = append(projected.Content, MessageBlock{
-					Kind: "thinking",
-					Text: block.Text,
-				})
-			case entry.ToolCallBlock:
-				projected.Content = append(projected.Content, MessageBlock{
-					Kind:   "tool_call",
-					CallID: block.CallID,
-					Name:   string(block.Name),
-					Input:  block.Arguments,
-				})
-			case entry.ToolResultBlock:
-				projected.Content = append(projected.Content, MessageBlock{
-					Timing:  (*Timing)(block.Timing),
-					Kind:    "tool_result",
-					Text:    block.Text,
-					CallID:  block.CallID,
-					Name:    string(block.Name),
-					IsError: block.IsError,
-				})
-			}
-		}
-		result = append(result, projected)
 	}
 	return result
 }
 
+// publicMessage 是历史查询和事件推送共用的展示投影，不暴露内部推理续传状态。
+func publicMessage(value *entry.Entry) (HistoryMessage, bool) {
+	projected := HistoryMessage{
+		ID:         value.ID,
+		RunID:      value.RunID,
+		TurnID:     value.TurnID,
+		CreatedAt:  value.CreatedAt,
+		AuthorKind: string(value.AuthorKind),
+	}
+	switch payload := value.Payload.(type) {
+	case entry.Message:
+		projected.Kind = MessageChat
+		if response := payload.Response; response != nil {
+			projected.RequestID = response.RequestID.String()
+			projected.Error = response.Error
+			projected.Timing = (*Timing)(response.Timing)
+		}
+	case entry.Summary:
+		projected.Kind = MessageSummary
+		projected.Timing = (*Timing)(payload.Timing)
+	default:
+		return HistoryMessage{}, false
+	}
+	messageRole, blocks := value.Dialogue()
+	projected.Role = string(messageRole)
+	projected.Content = make([]MessageBlock, 0, len(blocks))
+	for _, block := range blocks {
+		switch block := block.(type) {
+		case entry.TextBlock:
+			projected.Content = append(projected.Content, MessageBlock{
+				Kind: "text",
+				Text: block.Text,
+			})
+		case entry.ThinkingBlock:
+			projected.Content = append(projected.Content, MessageBlock{
+				Kind: "thinking",
+				Text: block.Text,
+			})
+		case entry.ToolCallBlock:
+			projected.Content = append(projected.Content, MessageBlock{
+				Kind:   "tool_call",
+				CallID: block.CallID,
+				Name:   string(block.Name),
+				Input:  block.Arguments,
+			})
+		case entry.ToolResultBlock:
+			projected.Content = append(projected.Content, MessageBlock{
+				Timing:  (*Timing)(block.Timing),
+				Kind:    "tool_result",
+				Text:    block.Text,
+				CallID:  block.CallID,
+				Name:    string(block.Name),
+				IsError: block.IsError,
+			})
+		}
+	}
+	return projected, true
+}
+
 func publicHistoryPage(page sessionmodel.HistoryPage) HistoryPage {
+	messages := make([]HistoryMessage, 0, len(page.Entries))
 	requests := make([]ModelRequestActivity, 0)
-	for _, value := range page.Entries {
+	for i := range page.Entries {
+		value := &page.Entries[i]
 		request, ok := value.Payload.(entry.ModelRequest)
 		if !ok {
+			if message, ok := publicMessage(value); ok {
+				messages = append(messages, message)
+			}
 			continue
 		}
 		activity := ModelRequestActivity{
@@ -177,7 +187,7 @@ func publicHistoryPage(page sessionmodel.HistoryPage) HistoryPage {
 		requests = append(requests, activity)
 	}
 	return HistoryPage{
-		Messages:   publicMessages(page.Entries),
+		Messages:   messages,
 		Requests:   requests,
 		HasMore:    page.HasMore,
 		NextCursor: page.NextCursor,

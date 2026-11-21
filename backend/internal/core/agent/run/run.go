@@ -7,7 +7,6 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -104,8 +103,9 @@ type runProgress struct {
 
 func (r *Run) Main() bool { return r.parentCallID == "" }
 
-func (r *Run) Entries() []sessionentry.Entry {
-	return sessionentry.Values(r.entries)
+// Entries 借出已提交条目的只读列表，只能在 Run 的串行流程中使用。
+func (r *Run) Entries() []*sessionentry.Entry {
+	return r.entries
 }
 
 // AppendEntry 保存普通事实；Entry 顺序由所属 Run Loop 决定。
@@ -158,7 +158,7 @@ func (p *runProgress) accept(value *sessionentry.Entry) {
 	if !ok {
 		return
 	}
-	if message.Role == role.Assistant {
+	if message.Role == sessionentry.RoleAssistant {
 		p.FinalAssistantID, p.FinalStopReason = "", ""
 		if response := message.Response; response != nil && (response.StopReason == "completed" || response.StopReason == "stop_sequence") {
 			p.FinalAssistantID, p.FinalStopReason = value.ID, response.StopReason

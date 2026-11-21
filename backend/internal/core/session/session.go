@@ -109,7 +109,7 @@ func (s *Session) Empty() bool {
 	return len(s.data.Context(s.data.MainAgentID()).Entries) == 0
 }
 
-// AgentContext 返回指定 Agent 当前有效的模型上下文快照。
+// AgentContext 返回指定 Agent 最近摘要及之后的活跃历史窗口快照。
 func (s *Session) AgentContext(agentID identity.AgentID) ([]*sessionentry.Entry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -128,7 +128,7 @@ func (s *Session) RegisterAgent(agentID identity.AgentID) {
 	}
 }
 
-// RestoreAgentContext 发布启动恢复得到的当前模型上下文。
+// RestoreAgentContext 发布启动恢复得到的活跃历史窗口。
 func (s *Session) RestoreAgentContext(agentID identity.AgentID, entries []*sessionentry.Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
 	"strings"
@@ -67,12 +66,12 @@ func responseItems(entry *sessionentry.Entry, config modelapi.Config, ids map[st
 		}
 		switch block := block.(type) {
 		case sessionentry.TextBlock:
-			if messageRole == role.Tool {
+			if messageRole == sessionentry.RoleTool {
 				return nil, errors.New("responses tool role requires tool results")
 			}
 			text.WriteString(block.Text)
 		case sessionentry.ToolCallBlock:
-			if messageRole != role.Assistant {
+			if messageRole != sessionentry.RoleAssistant {
 				return nil, errors.New("responses function call requires assistant role")
 			}
 			if err := appendItem(inputFunctionCall{

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
@@ -37,7 +36,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 		ID:         inputID,
 		AuthorKind: authorKind,
 		Payload: sessionentry.Message{
-			Role:    role.User,
+			Role:    sessionentry.RoleUser,
 			Content: []sessionentry.ContentBlock{sessionentry.TextBlock{Text: prompt}},
 		},
 	})
@@ -47,7 +46,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	r.input = stored
 	r.deps.Emitter.Emit(coreevent.Event{
 		Source:  r.EventSource(""),
-		Payload: coreevent.EntriesAppended{Entries: []sessionentry.Entry{*stored}},
+		Payload: coreevent.EntriesAppended{Entries: []*sessionentry.Entry{stored}},
 	})
 	if hookErr := r.deps.HookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{
 		Identity: runIdentity(r, ""),

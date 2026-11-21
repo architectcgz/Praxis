@@ -7,7 +7,6 @@ import (
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/entry/role"
 )
 
 const (
@@ -29,7 +28,7 @@ type RequestSummaryFunc func(context.Context, appcontext.ModelContext, int) (str
 
 // summaryEntry 只承载摘要模型需要的角色和正文，不复制会话条目的身份、计时及其他执行事实。
 type summaryEntry struct {
-	Role    role.Role            `json:"role"`
+	Role    sessionentry.Role    `json:"role"`
 	Content sessionentry.Content `json:"content"`
 }
 
@@ -109,7 +108,7 @@ func summaryContext(previous, transcript string) appcontext.ModelContext {
 		SystemPrompt: summaryPrompt,
 		Entries: []*sessionentry.Entry{{
 			Payload: sessionentry.Message{
-				Role: role.User,
+				Role: sessionentry.RoleUser,
 				Content: []sessionentry.ContentBlock{
 					sessionentry.TextBlock{Text: previousSummaryHeader + previous + transcriptHeader + transcript},
 				},

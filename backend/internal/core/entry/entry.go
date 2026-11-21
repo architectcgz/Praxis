@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"praxis/internal/core/entry/role"
 	"strings"
 	"time"
 )
@@ -51,13 +50,18 @@ func (e Entry) RunOutcome() RunOutcome {
 	}
 }
 
+// IsRunTerminal 判断 Entry 是否是 Run 的终态记录。
+func (e Entry) IsRunTerminal() bool {
+	return e.RunOutcome() != ""
+}
+
 // Dialogue 返回模型可读的消息内容；摘要作为 user 角色的历史资料提供。
-func (e Entry) Dialogue() (role.Role, Content) {
+func (e Entry) Dialogue() (Role, Content) {
 	switch value := e.Payload.(type) {
 	case Message:
 		return value.Role, value.Content
 	case Summary:
-		return role.User, Content{TextBlock{Text: value.Text}}
+		return RoleUser, Content{TextBlock{Text: value.Text}}
 	default:
 		return "", nil
 	}
@@ -91,35 +95,6 @@ func (e Entry) TextContent() string {
 	return text.String()
 }
 
-// Preview 提供历史目录的短文本，不保存第二份正文。
-func (e Entry) Preview() string {
-	if outcome := e.RunOutcome(); outcome != "" {
-		return "执行结束 · " + string(outcome)
-	}
-	if e.IsSummary() {
-		return "上下文摘要"
-	}
-	text := strings.Join(strings.Fields(e.TextContent()), " ")
-	if text == "" {
-		messageRole, _ := e.Dialogue()
-		text = string(messageRole)
-	}
-	runes := []rune(text)
-	if len(runes) > 100 {
-		text = string(runes[:100]) + "…"
-	}
-	return text
-}
-
-// Values 为请求或展示边界创建值列表，内部载荷仍按只读数据共享。
-func Values(entries []*Entry) []Entry {
-	values := make([]Entry, len(entries))
-	for index, entry := range entries {
-		values[index] = *entry
-	}
-	return values
-}
-
 func (e Entry) MarshalJSON() ([]byte, error) {
 	type value Entry
 	if e.Payload == nil {
@@ -134,12 +109,6 @@ func (e Entry) MarshalJSON() ([]byte, error) {
 		Kind:    e.Payload.kind(),
 		Payload: e.Payload,
 	})
-}
-
-// ContributesToModelContext 判断 Entry 是否会进入下一次模型请求。
-func (e Entry) ContributesToModelContext() bool {
-	messageRole, _ := e.Dialogue()
-	return messageRole == role.User || messageRole == role.Assistant || messageRole == role.Tool
 }
 
 // AppendEntry 是执行流程唯一的同步事实提交能力，归属在准备时绑定。
