@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"praxis/internal/clock"
 	agentrun "praxis/internal/core/agent/run"
+	"praxis/internal/core/approval"
 	"praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	"praxis/internal/core/modelcall"
 	sessionmodel "praxis/internal/core/session"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
@@ -25,19 +27,26 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		Clock:          clock.UTCClock{},
 		IDs:            identity.SecureIDGenerator{},
 	}
-	reviewer := &executionmodel.Reviewer{
+	modelCaller := modelcall.NewCaller(modelcall.Dependencies{
 		HookDispatcher: hooks,
-	}
-	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
-		Reviewer:       reviewer,
+		Emitter:        emitter,
+		Logf:           resources.logger.Infof,
+	})
+	approvals := approval.NewGate(approval.GateDependencies{
+		ModelCaller:    modelCaller,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 		Clock:          clock.UTCClock{},
 		Logf:           resources.logger.Errorf,
+	})
+	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
+		HookDispatcher: hooks,
+		Emitter:        emitter,
 		Outputs:        tooloutput.Files{Root: filepath.Join(os.TempDir(), "praxis", "tool-output")},
 	})
 
 	runnerDeps := loop.Dependencies{
+		ModelCaller:    modelCaller,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 		Logf:           resources.logger.Infof,
@@ -50,6 +59,7 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		runnerDeps.Logf = func(string, ...any) {}
 	}
 	// 执行状态由所属 Run 按次维护；复制共享依赖，不改写外部 Runner。
+	runnerDeps.ModelCaller = modelCaller
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
 	runner := loop.NewRunner(runnerDeps)
@@ -60,7 +70,9 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		HookDispatcher:    hooks,
 		Logger:            resources.logger,
 		Tools:             executor,
+		Approvals:         approvals,
 		SessionRecords:    resources.storage.Sessions,
+		SessionLoader:     resources.storage.Sessions,
 		Projects:          resources.storage.Projects,
 		TransitionTimeout: 30 * time.Second,
 	})

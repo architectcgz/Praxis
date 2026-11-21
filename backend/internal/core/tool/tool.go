@@ -71,10 +71,11 @@ type Tool interface {
 	Prepare(arguments any, environment Environment) (PreparedCall, error)
 }
 
-// Environment 是本次工具执行的文件访问范围；临时输出目录只属于当前会话。
+// Environment 是本次工具执行的文件访问范围与调用身份；临时输出目录只属于当前会话。
 type Environment struct {
 	ProjectPath     string
 	OutputDirectory string
+	CallID          string
 }
 
 // PathArguments 声明需要按项目目录解析的路径字段，具体解析和校验由调用编排负责。
@@ -107,4 +108,12 @@ func IsReadOnly(catalog ToolCatalog, name ToolName) bool {
 	}
 	capability, ok := t.(ReadOnlyTool)
 	return ok && capability.ReadOnly()
+}
+
+// ApprovalPolicy 允许内部协作工具声明免审批；未实现该接口的工具默认受审批策略约束。
+type ApprovalPolicy interface{ RequiresApproval() bool }
+
+func RequiresApproval(value Tool) bool {
+	policy, ok := value.(ApprovalPolicy)
+	return !ok || policy.RequiresApproval()
 }

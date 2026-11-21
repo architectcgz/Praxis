@@ -22,7 +22,6 @@ const ErrProjectInvalid errorcode.Code = "project.invalid"
 // Dependencies 包含项目创建和配置查询所需的依赖。
 type Dependencies struct {
 	Projects  repository.Project
-	Sessions  repository.Session
 	Clock     clock.Clock
 	Directory Directory
 }
@@ -31,7 +30,6 @@ type Dependencies struct {
 type Service struct {
 	createMu  sync.Mutex
 	projects  repository.Project
-	sessions  repository.Session
 	clock     clock.Clock
 	directory Directory
 }
@@ -48,7 +46,6 @@ type CreateInput struct {
 func NewService(deps Dependencies) *Service {
 	return &Service{
 		projects:  deps.Projects,
-		sessions:  deps.Sessions,
 		clock:     deps.Clock,
 		directory: deps.Directory,
 	}

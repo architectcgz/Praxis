@@ -2,11 +2,12 @@ package coordinator
 
 import (
 	"context"
+	"praxis/internal/core/approval"
 	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
 )
 
-type ToolDecision = executionmodel.ControlRequest
+type ToolDecision = approval.DecisionRequest
 type ToolControl = executionmodel.ControlRequest
 
 // StopRun 只取消命中的活动执行；主 Run 的取消与队列交接使用同一把会话命令锁。
@@ -61,15 +62,15 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, a
 		return err
 	}
 	defer s.running.Done()
-	return s.tools.DecideApproval(ctx, params, approve)
+	return s.approvals.DecideApproval(ctx, params, approve)
 }
 
-func (s *Coordinator) ListToolApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]executionmodel.Approval, error) {
+func (s *Coordinator) ListToolApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]approval.Approval, error) {
 	if err := s.enter(); err != nil {
 		return nil, err
 	}
 	defer s.running.Done()
-	return s.tools.ListApprovals(ctx, sessionID, agentID)
+	return s.approvals.ListApprovals(ctx, sessionID, agentID)
 }
 
 // StopToolCall 只发送停止信号，回执由当前工具路径生成。

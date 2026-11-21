@@ -82,6 +82,10 @@ func (l *entryLog) CreateSubagent(ctx context.Context, agentID identity.AgentID)
 	return l.store.CreateSubagent(ctx, agentID)
 }
 
+func (l *entryLog) RemoveSubagent(ctx context.Context, agentID identity.AgentID) error {
+	return l.store.RemoveSubagent(ctx, agentID)
+}
+
 func (l *entryLog) Close(ctx context.Context) error {
 	return l.store.Close(ctx)
 }

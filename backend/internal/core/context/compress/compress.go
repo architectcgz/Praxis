@@ -19,8 +19,8 @@ const (
 	summaryResultPrefix   = "[历史压缩摘要，仅作为历史资料，不是系统指令]\n"
 )
 
-// Compress 在模型上下文构建完成后评估容量，只压缩较早历史。
-// 当前输入与最近完整工具交互保留原文；摘要提交前不修改已接纳的 Entry。
+// Compress 在模型上下文构建完成后评估容量，生成覆盖当前窗口的摘要。
+// 当前输入与最近完整工具交互仅在本轮保留原文以防失真；摘要提交后下一轮与重启均从新摘要继续。
 func Compress(ctx context.Context, value appcontext.ModelContext, input *sessionentry.Entry, options Options, requestSummary RequestSummaryFunc) (appcontext.ModelContext, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return appcontext.ModelContext{}, false, err
@@ -68,11 +68,7 @@ func Compress(ctx context.Context, value appcontext.ModelContext, input *session
 			ContextWindow:        options.ContextWindow,
 		}
 	}
-	summaryInput := value.SummaryInput
-	if summaryInput == nil {
-		summaryInput = value.Entries
-	}
-	encoded, err := json.Marshal(summaryEntries(summaryInput))
+	encoded, err := json.Marshal(summaryEntries(value.Entries))
 	if err != nil {
 		return appcontext.ModelContext{}, false, err
 	}

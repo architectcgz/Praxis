@@ -4,7 +4,6 @@ import (
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
-	approvalservice "praxis/internal/service/approval"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/validation"
 	"strings"
@@ -133,11 +132,11 @@ func (b *SessionBindings) SelectSession(sessionID string) (SessionSnapshot, erro
 	if err != nil {
 		return SessionSnapshot{}, err
 	}
-	view, err := services.Commands.SelectSession(ctx, identity.SessionID(sessionID))
+	view, err := services.Sessions.SelectSession(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession", err)
 	}
-	page, err := services.Commands.AgentHistory(ctx, view.Session.ID, view.Session.MainAgentID(), nil, defaultHistoryLimit)
+	page, err := services.Sessions.AgentHistory(ctx, view.Session.ID, view.Session.MainAgentID(), nil, defaultHistoryLimit)
 	if err != nil {
 		return SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession.history", err)
 	}
@@ -227,7 +226,7 @@ func (b *SessionBindings) CloseSession(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CloseSession", services.Commands.CloseSession(ctx, identity.SessionID(sessionID)))
+	return publicError(b.host, "CloseSession", services.Sessions.CloseSession(ctx, identity.SessionID(sessionID)))
 }
 
 // ListModels 返回指定会话已加载的模型目录，不暴露凭据。
@@ -266,7 +265,7 @@ func (b *SessionBindings) ReloadConfig(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := services.Commands.ReloadSessionConfig(ctx, identity.SessionID(sessionID)); err != nil {
+	if err := services.Sessions.ReloadSessionConfig(ctx, identity.SessionID(sessionID)); err != nil {
 		return publicError(b.host, "SessionBindings.ReloadConfig", err)
 	}
 	return nil
@@ -289,7 +288,7 @@ func (b *SessionBindings) SelectModel(wire SelectModelRequest) error {
 		ModelID:        wire.ModelID,
 		ReasoningLevel: wire.ReasoningLevel,
 	}
-	if err := services.Commands.SelectModel(ctx, identity.SessionID(wire.SessionID), choice); err != nil {
+	if err := services.Sessions.SelectModel(ctx, identity.SessionID(wire.SessionID), choice); err != nil {
 		return publicError(b.host, "SessionBindings.SelectModel", err)
 	}
 	return nil
@@ -324,7 +323,7 @@ func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	path, err := services.SessionLogPath(ctx, identity.SessionID(sessionID))
+	path, err := services.Sessions.SessionLogPath(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return publicError(b.host, "SessionBindings.RevealSessionFile", err)
 	}
@@ -353,7 +352,7 @@ func (b *SessionBindings) GetSessionApprovalMode(sessionID string) (SessionAppro
 	if err != nil {
 		return SessionApprovalMode{}, err
 	}
-	value, err := services.Approvals.GetApprovalMode(ctx, identity.SessionID(sessionID))
+	value, err := services.Sessions.GetApprovalMode(ctx, identity.SessionID(sessionID))
 	if err != nil {
 		return SessionApprovalMode{}, publicError(b.host, "SessionBindings.GetSessionApprovalMode", err)
 	}
@@ -376,14 +375,14 @@ func (b *SessionBindings) SetSessionApprovalMode(wire SetSessionApprovalModeRequ
 	if wire.Mode != nil {
 		mode = new(security.ApprovalMode(*wire.Mode))
 	}
-	value, err := services.Approvals.SetApprovalMode(ctx, identity.SessionID(wire.SessionID), mode)
+	value, err := services.Sessions.SetApprovalMode(ctx, identity.SessionID(wire.SessionID), mode)
 	if err != nil {
 		return SessionApprovalMode{}, publicError(b.host, "SessionBindings.SetSessionApprovalMode", err)
 	}
 	return publicApprovalMode(value), nil
 }
 
-func publicApprovalMode(value approvalservice.ApprovalSettings) SessionApprovalMode {
+func publicApprovalMode(value sessionservice.ApprovalSettings) SessionApprovalMode {
 	result := SessionApprovalMode{
 		SessionID:     value.SessionID.String(),
 		GlobalMode:    string(value.GlobalMode),

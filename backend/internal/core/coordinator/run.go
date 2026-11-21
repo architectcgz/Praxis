@@ -8,6 +8,9 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/loop"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/core/tool"
+	subagenttool "praxis/internal/core/tool/subagent"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -22,42 +25,43 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 	if runner.Provider == nil {
 		runner.Provider = active.config.Provider
 	}
-	if runner.Tools == nil {
-		runner.Tools = active.config.Tools
-	}
-	err := run.Execute(ctx, &runner, func(prepareCtx context.Context) (loop.ToolExecutor, error) {
+	err := run.Execute(ctx, &runner, func(prepareCtx context.Context) (tool.ToolCatalog, loop.ToolExecutor, error) {
 		info, err := r.sessionRecords.Get(prepareCtx, run.SessionID())
 		if err != nil {
-			return nil, loop.NewFailure(loop.FailureStorage, err)
+			return nil, nil, errorcode.ErrStorage.Wrap(err)
 		}
 		project, err := r.projects.Get(prepareCtx, info.ProjectID)
 		if err != nil {
-			return nil, loop.NewFailure(loop.FailureStorage, err)
+			return nil, nil, errorcode.ErrStorage.Wrap(err)
 		}
-		catalog, err := r.collaborationTools(run, active, active.config.Tools)
+		var extras []tool.Tool
+		if run.Main() {
+			extras = subagenttool.MainTools(mainSubagentRuntime{
+				coordinator: r,
+				run:         run,
+				active:      active,
+			})
+		} else {
+			extras = subagenttool.ChildTools(run)
+		}
+		catalog, err := tool.ComposeCatalog(active.config.Tools, extras...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		runner.Tools = catalog
-		base := r.tools.ForRun(run, project.Path, active.config.Tools, active.config.ApprovalMode, runner.Provider)
-		return &nativeExecutor{
-			base:    base,
-			catalog: catalog,
-			run:     run,
-			emitter: r.loop.Emitter,
-		}, nil
+		authorizer := r.approvals.ForRun(run, project.Path, active.config.ApprovalMode, runner.Provider)
+		return catalog, r.tools.ForRun(run, project.Path, catalog, authorizer), nil
 	})
 	if err != nil {
 		r.logger.Errorf("run failed run_id=%s: %v", run.ID(), err)
 	}
 	if !run.Main() {
-		if loop.FailureClassification(err) == loop.FailureStorage {
+		if errors.Is(err, errorcode.ErrStorage) {
 			active.parent.Cancel(err)
 		}
 		if active.onDone != nil {
 			if callbackErr := active.onDone(); callbackErr != nil {
 				r.logger.Errorf("deliver subagent result: %v", callbackErr)
-				active.parent.Cancel(loop.NewFailure(loop.FailureStorage, callbackErr))
+				active.parent.Cancel(errorcode.ErrStorage.Wrap(callbackErr))
 			}
 		}
 		active.cancel(nil)
@@ -73,10 +77,10 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 	current.active = nil
 	r.mu.Unlock()
 	storageErr := err
-	if cause := context.Cause(ctx); loop.FailureClassification(cause) == loop.FailureStorage {
+	if cause := context.Cause(ctx); errors.Is(cause, errorcode.ErrStorage) {
 		storageErr = cause
 	}
-	storageFailed := loop.FailureClassification(storageErr) == loop.FailureStorage
+	storageFailed := errors.Is(storageErr, errorcode.ErrStorage)
 	var notification coreevent.Event
 	if storageFailed {
 		current.queue.Pause()

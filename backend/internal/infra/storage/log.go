@@ -123,6 +123,25 @@ func (l *SessionLog) CreateSubagent(ctx context.Context, agentID identity.AgentI
 	return nil
 }
 
+// RemoveSubagent 关闭并移除尚未写入事实的空子代理日志与专属 Writer。
+func (l *SessionLog) RemoveSubagent(ctx context.Context, agentID identity.AgentID) error {
+	if agentID == l.mainAgent {
+		return nil
+	}
+	l.mu.Lock()
+	writer := l.writers[agentID]
+	delete(l.writers, agentID)
+	l.mu.Unlock()
+	var err error
+	if writer != nil {
+		err = writer.Close(ctx)
+	}
+	if removeErr := os.Remove(l.path(agentID)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		err = errors.Join(err, removeErr)
+	}
+	return err
+}
+
 func (l *SessionLog) Close(ctx context.Context) error {
 	l.mu.RLock()
 	writers := maps.Clone(l.writers)

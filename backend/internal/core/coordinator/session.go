@@ -50,10 +50,6 @@ func (s *Coordinator) loadSession(ctx context.Context, id identity.SessionID) (*
 	if value != nil {
 		return value, nil
 	}
-	owner, err := s.sessionRecords.Load(ctx, id)
-	if err != nil {
-		return nil, err
-	}
 	info, err := s.sessionRecords.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -62,6 +58,10 @@ func (s *Coordinator) loadSession(ctx context.Context, id identity.SessionID) (*
 		return nil, errorcode.ErrRequestConflict
 	}
 	config, err := s.loadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := s.sessionLoader.Load(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +125,16 @@ func (s *Coordinator) releaseSession(ctx context.Context, id identity.SessionID)
 		return err
 	}
 	s.mu.Lock()
+	owner := s.registry.get(id)
 	s.registry.remove(id)
 	schedule := s.schedules[id]
 	delete(s.schedules, id)
 	s.mu.Unlock()
 	if schedule != nil {
 		schedule.queue.Clear()
+	}
+	if owner != nil {
+		return owner.Close(ctx)
 	}
 	return nil
 }

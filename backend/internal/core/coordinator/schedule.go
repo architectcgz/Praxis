@@ -6,9 +6,9 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/entry"
-	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 )
 
@@ -71,7 +71,7 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, sched
 		canceled := errors.Is(err, context.Canceled) && errors.Is(context.Cause(prepareCtx), agentrun.ErrInterrupted)
 		if prepared {
 			if saveErr := run.SettlePreparation(prepareCtx, err); saveErr != nil {
-				return r.finishTaskStart(input, schedule, active, false, loop.NewFailure(loop.FailureStorage, errors.Join(err, saveErr)))
+				return r.finishTaskStart(input, schedule, active, false, errorcode.ErrStorage.Wrap(errors.Join(err, saveErr)))
 			}
 		}
 		if canceled {
@@ -95,14 +95,14 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, sched
 	endCtx, cancelEnd := r.transitionContext()
 	defer cancelEnd()
 	if saveErr := run.Settle(endCtx, entry.OutcomeInterrupted, entry.RunFailureCancelled, ""); saveErr != nil {
-		err = loop.NewFailure(loop.FailureStorage, errors.Join(err, saveErr))
+		err = errorcode.ErrStorage.Wrap(errors.Join(err, saveErr))
 	}
 	return r.finishTaskStart(input, schedule, active, false, err)
 }
 
 func (r *Coordinator) finishTaskStart(input taskmodel.Task, schedule *sessionSchedule, active *activeRun, retry bool, err error) error {
 	unlock, _ := r.lockSession(context.Background(), input.SessionID)
-	storageFailed := loop.FailureClassification(err) == loop.FailureStorage
+	storageFailed := errors.Is(err, errorcode.ErrStorage)
 	if storageFailed {
 		schedule.queue.Pause()
 	}

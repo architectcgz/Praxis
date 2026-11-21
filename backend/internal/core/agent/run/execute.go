@@ -7,6 +7,7 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
 	"time"
 )
@@ -58,7 +59,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 }
 
 // Execute 即使在启动或 Loop 中途失败，也要等待子执行收尾并提交终态。
-func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (loop.ToolExecutor, error)) (err error) {
+func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (tool.ToolCatalog, loop.ToolExecutor, error)) (err error) {
 	ctx, scope := r.deps.HookDispatcher.Start(ctx, hook.Operation{
 		Identity: runIdentity(r, ""),
 		Kind:     hook.OperationAgent,
@@ -95,18 +96,18 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	return err
 }
 
-func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (loop.ToolExecutor, error)) error {
+func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (tool.ToolCatalog, loop.ToolExecutor, error)) error {
 	if hookErr := r.deps.HookDispatcher.RunStarted(context.WithoutCancel(ctx), hook.RunEvent{Identity: runIdentity(r, "")}); hookErr != nil {
 		r.deps.Logger.Errorf("run start hook failed: %v", hookErr)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	tools, err := prepareTools(ctx)
+	catalog, tools, err := prepareTools(ctx)
 	if err != nil {
 		return err
 	}
-	params, deps := r.modelRunParams()
+	params, deps := r.modelRunParams(catalog)
 	if _, err := runner.Run(ctx, params, deps, r.input, tools); err != nil {
 		return err
 	}

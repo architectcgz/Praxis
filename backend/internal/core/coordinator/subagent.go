@@ -8,38 +8,53 @@ import (
 	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
-	"praxis/internal/core/loop"
 	"praxis/internal/core/tool"
+	subagenttool "praxis/internal/core/tool/subagent"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"time"
 )
 
-type subagentAssignment struct {
-	Task           string          `json:"task"`
-	AllowedTools   []tool.ToolName `json:"allowedTools"`
-	TimeoutSeconds int             `json:"timeoutSeconds"`
+type mainSubagentRuntime struct {
+	coordinator *Coordinator
+	run         *agentrun.Run
+	active      *activeRun
 }
 
-type subagentIDs struct {
-	AgentID identity.AgentID `json:"agentId"`
-	RunID   identity.RunID   `json:"runId"`
+func (m mainSubagentRuntime) StartSubagent(ctx context.Context, callID string, assignment subagenttool.Assignment) (subagenttool.StartResult, error) {
+	return m.coordinator.startSubagent(ctx, m.run, m.active, assignment, callID)
 }
 
-func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment subagentAssignment, callID string) (subagentIDs, error) {
+func (m mainSubagentRuntime) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) (any, error) {
+	return m.run.WaitSubagents(ctx, ids, all)
+}
+
+func (m mainSubagentRuntime) SendToSubagent(ctx context.Context, id identity.AgentID, message string) (string, error) {
+	return m.run.SendToSubagent(ctx, id, message)
+}
+
+func (m mainSubagentRuntime) CancelSubagent(id identity.AgentID) error {
+	return m.run.CancelSubagent(id)
+}
+
+func (m mainSubagentRuntime) BeginWaiting() { m.run.BeginWaiting() }
+func (m mainSubagentRuntime) EndWaiting()   { m.run.EndWaiting() }
+
+func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment subagenttool.Assignment, callID string) (subagenttool.StartResult, error) {
 	catalog, err := tool.Restrict(parentActive.config.Tools, assignment.AllowedTools)
 	if err != nil {
-		return subagentIDs{}, err
+		return subagenttool.StartResult{}, err
 	}
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
 	if closed || parentActive.ctx.Err() != nil {
-		return subagentIDs{}, fmt.Errorf("parent execution is closing")
-	}
-	if parent.ActiveSubagents() >= 10 {
-		return subagentIDs{}, fmt.Errorf("session subagent limit of 10 is reached")
+		return subagenttool.StartResult{}, fmt.Errorf("parent execution is closing")
 	}
 	agentID := identity.AgentID(s.runDependencies.IDs.New("agent"))
+	if !parent.ReserveSubagent(agentID, 10) {
+		return subagenttool.StartResult{}, fmt.Errorf("session subagent limit of 10 is reached")
+	}
 	active := newActiveRun(ctx, parentActive.session)
 	config := *parentActive.config
 	config.Tools = catalog
@@ -47,46 +62,55 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	active.parent = parent
 	childCtx, cancelTimeout := context.WithTimeout(parentActive.ctx, time.Duration(assignment.TimeoutSeconds)*time.Second)
 	stopParent := context.AfterFunc(childCtx, func() { active.cancel(context.Cause(childCtx)) })
+	created := false
+	prepared := false
+	launched := false
+	defer func() {
+		if launched {
+			return
+		}
+		parent.ReleaseSubagent(agentID)
+		if created && !prepared {
+			_ = active.session.RemoveSubagent(context.WithoutCancel(ctx), agentID)
+		}
+		s.releaseFailedChild(active)
+		stopParent()
+		cancelTimeout()
+	}()
+
 	definition, err := config.Definition(agentmodel.DefinitionDelegate)
 	if err != nil {
-		s.releaseFailedChild(active)
-		stopParent()
-		cancelTimeout()
-		return subagentIDs{}, err
+		return subagenttool.StartResult{}, err
 	}
 	if err := active.session.CreateSubagent(active.ctx, agentID); err != nil {
-		s.releaseFailedChild(active)
-		stopParent()
-		cancelTimeout()
 		if active.ctx.Err() != nil && errors.Is(err, active.ctx.Err()) {
-			return subagentIDs{}, err
+			return subagenttool.StartResult{}, err
 		}
-		err = loop.NewFailure(loop.FailureStorage, err)
+		err = errorcode.ErrStorage.Wrap(err)
 		parent.Cancel(err)
-		return subagentIDs{}, err
+		return subagenttool.StartResult{}, err
 	}
+	created = true
+
 	child := agentrun.New(s.runDependencies, agentrun.Config{
 		ParentCallID: callID,
 		Definition:   definition,
 		Model:        parent.Model(),
 	}, active.session.BindHistory(agentID))
-	prepared, err := child.Prepare(active.ctx, assignment.Task)
+	prepared, err = child.Prepare(active.ctx, assignment.Task)
 	if err != nil {
 		if prepared {
 			if saveErr := child.SettlePreparation(active.ctx, err); saveErr != nil {
-				err = loop.NewFailure(loop.FailureStorage, errors.Join(err, saveErr))
+				err = errorcode.ErrStorage.Wrap(errors.Join(err, saveErr))
 			}
 		}
-		if loop.FailureClassification(err) == loop.FailureStorage {
+		if errors.Is(err, errorcode.ErrStorage) {
 			parent.Cancel(err)
 		}
-		s.releaseFailedChild(active)
-		stopParent()
-		cancelTimeout()
-		return subagentIDs{}, err
+		return subagenttool.StartResult{}, err
 	}
 	child.BindParent(parent)
-	parent.RegisterSubagent(agentrun.SubagentHandle{
+	parent.AttachSubagent(agentrun.SubagentHandle{
 		AgentID: agentID,
 		Run:     child,
 		Cancel:  active.cancel,
@@ -96,32 +120,39 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		defer stopParent()
 		defer cancelTimeout()
 		if !child.TerminalSaved() {
-			err := loop.NewFailure(loop.FailureStorage, fmt.Errorf("subagent %s did not save its terminal result", agentID))
+			err := errorcode.ErrStorage.Wrap(fmt.Errorf("subagent %s did not save its terminal result", agentID))
 			parent.Cancel(err)
 			return err
 		}
 		return parent.AcceptSubagentResult(context.WithoutCancel(parentActive.ctx), child.ResultForParent())
 	}
-	s.loop.Emitter.Emit(coreevent.Event{Source: child.EventSource(""), Payload: coreevent.SubagentStarted{
-		Name:          definition.Name,
-		CreatedAt:     child.CreatedAt(),
-		Entries:       child.Entries(),
-		ParentAgentID: parent.AgentID(),
-		ParentRunID:   parent.ID(),
-		CallID:        callID,
-	}})
+
 	s.mu.Lock()
-	err = s.launchLocked(child, active)
-	s.mu.Unlock()
-	if err != nil {
+	if s.closed {
+		s.mu.Unlock()
 		saveErr := child.Settle(context.WithoutCancel(ctx), entry.OutcomeInterrupted, entry.RunFailureCancelled, "")
-		err = errors.Join(err, saveErr)
-		s.releaseFailedChild(active)
-		stopParent()
-		cancelTimeout()
-		return subagentIDs{}, err
+		return subagenttool.StartResult{}, errors.Join(errCoordinatorClosed, saveErr)
 	}
-	return subagentIDs{AgentID: agentID, RunID: child.ID()}, nil
+	child.BindCancellation(active.cancel)
+	s.running.Add(1)
+	s.mu.Unlock()
+	launched = true
+	s.loop.Emitter.Emit(coreevent.Event{
+		Source: child.EventSource(""),
+		Payload: coreevent.SubagentStarted{
+			Name:          definition.Name,
+			CreatedAt:     child.CreatedAt(),
+			Entries:       child.Entries(),
+			ParentAgentID: parent.AgentID(),
+			ParentRunID:   parent.ID(),
+			CallID:        callID,
+		},
+	})
+	go func() {
+		defer s.running.Done()
+		s.run(active.ctx, child, active)
+	}()
+	return subagenttool.StartResult{AgentID: agentID, RunID: child.ID()}, nil
 }
 func (s *Coordinator) releaseFailedChild(active *activeRun) {
 	close(active.done)

@@ -5,8 +5,9 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
+	"praxis/internal/core/modelcall"
 	providerapi "praxis/internal/core/provider"
-	"strings"
+	"praxis/internal/errorcode"
 )
 
 func (r *Runner) runTurn(
@@ -20,7 +21,7 @@ func (r *Runner) runTurn(
 	iteration := hook.Iteration{Identity: runIdentity(params, turnID)}
 	iteration.OperationID = hook.NewOperationID()
 	if hookErr := r.HookDispatcher.BeforeIteration(ctx, iteration); hookErr != nil {
-		return false, NewFailure(FailureInternal, hookErr)
+		return false, errorcode.ErrInternal.Wrap(hookErr)
 	}
 	var stopReason providerapi.StopReason
 
@@ -37,7 +38,7 @@ func (r *Runner) runTurn(
 	response, err := r.Request(ctx, params, deps, request, sessionentry.ModelRequestIteration)
 	stopReason = response.StopReason
 	if err != nil {
-		return false, NewModelFailure(err)
+		return false, modelcall.WrapModelError(err)
 	}
 
 	calls := prepareToolCalls(params, turnID, response.ToolCalls())
@@ -84,37 +85,4 @@ func (r *Runner) runTurn(
 		})
 	}
 	return false, r.runToolCalls(ctx, params, deps, executor, calls)
-}
-
-// entryBlocksFromEvents 把模型流事件转换为有序上下文 block。
-// events 来自流消费阶段收集的有序内容和推理状态；参数保留原文，推理状态载荷深拷贝。
-// 空白文本不进入上下文，但模型输出预算仍由流消费阶段按原始文本统计。
-func entryBlocksFromEvents(events []providerapi.Event) []sessionentry.ContentBlock {
-	blocks := make([]sessionentry.ContentBlock, 0, len(events))
-	for _, event := range events {
-		if event.Kind == providerapi.StreamReasoningState {
-			blocks = append(blocks, sessionentry.ReasoningStateBlock{
-				State: event.ReasoningState.Clone(),
-			})
-			continue
-		}
-		if event.Kind == providerapi.StreamToolCall {
-			call := event.ToolCall
-			blocks = append(blocks, sessionentry.ToolCallBlock{
-				CallID:    call.ID,
-				Name:      call.Name,
-				Arguments: call.Arguments,
-			})
-			continue
-		}
-		if (event.Kind != providerapi.StreamTextDelta && event.Kind != providerapi.StreamThinkingDelta) || strings.TrimSpace(event.Text) == "" {
-			continue
-		}
-		if event.Kind == providerapi.StreamThinkingDelta {
-			blocks = append(blocks, sessionentry.ThinkingBlock{Text: event.Text})
-		} else {
-			blocks = append(blocks, sessionentry.TextBlock{Text: event.Text})
-		}
-	}
-	return blocks
 }

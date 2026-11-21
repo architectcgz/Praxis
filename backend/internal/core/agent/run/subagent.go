@@ -57,10 +57,44 @@ func (r *Run) initCollaboration() {
 
 func (r *Run) BindParent(parent *Run) { r.collaboration.parent = parent }
 
-func (r *Run) RegisterSubagent(handle SubagentHandle) {
+// ReserveSubagent 在协作锁内原子检查活跃名额并占位；未启动前必须通过 ReleaseSubagent 释放。
+func (r *Run) ReserveSubagent(id identity.AgentID, limit int) bool {
+	r.collaboration.mu.Lock()
+	defer r.collaboration.mu.Unlock()
+	if !r.collaboration.accepting {
+		return false
+	}
+	active := 0
+	for _, child := range r.collaboration.children {
+		if child.Done == nil {
+			active++
+			continue
+		}
+		select {
+		case <-child.Done:
+		default:
+			active++
+		}
+	}
+	if active >= limit {
+		return false
+	}
+	r.collaboration.children[id] = SubagentHandle{AgentID: id}
+	return true
+}
+
+// AttachSubagent 为已预留的子代理名额绑定运行句柄。
+func (r *Run) AttachSubagent(handle SubagentHandle) {
 	r.collaboration.mu.Lock()
 	defer r.collaboration.mu.Unlock()
 	r.collaboration.children[handle.AgentID] = handle
+}
+
+// ReleaseSubagent 移除尚未启动的预留或失败子代理占位。
+func (r *Run) ReleaseSubagent(id identity.AgentID) {
+	r.collaboration.mu.Lock()
+	defer r.collaboration.mu.Unlock()
+	delete(r.collaboration.children, id)
 }
 
 func (r *Run) CancelSubagent(id identity.AgentID) error {
@@ -69,6 +103,9 @@ func (r *Run) CancelSubagent(id identity.AgentID) error {
 	r.collaboration.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("subagent %s does not belong to this run", id)
+	}
+	if handle.Cancel == nil {
+		return fmt.Errorf("subagent %s is not running", id)
 	}
 	handle.Cancel(ErrInterrupted)
 	return nil
@@ -213,6 +250,10 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 				r.collaboration.mu.Unlock()
 				return nil, fmt.Errorf("unknown subagent %s", id)
 			}
+			if h.Done == nil {
+				finished = false
+				continue
+			}
 			select {
 			case <-h.Done:
 			default:
@@ -294,10 +335,14 @@ func (r *Run) finishChildren() {
 	}
 	r.collaboration.mu.Unlock()
 	for _, h := range children {
-		h.Cancel(context.Canceled)
+		if h.Cancel != nil {
+			h.Cancel(context.Canceled)
+		}
 	}
 	for _, h := range children {
-		<-h.Done
+		if h.Done != nil {
+			<-h.Done
+		}
 	}
 }
 
@@ -360,6 +405,10 @@ func (r *Run) ActiveSubagents() int {
 	defer r.collaboration.mu.Unlock()
 	count := 0
 	for _, child := range r.collaboration.children {
+		if child.Done == nil {
+			count++
+			continue
+		}
 		select {
 		case <-child.Done:
 		default:

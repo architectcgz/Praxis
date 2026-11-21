@@ -13,7 +13,6 @@ import (
 // ModelContext 是本轮模型输入的只读引用视图，与 Session 共享 Entry 对象及内部载荷。
 // 请求可以选择不同的条目列表，但不复制、改写或重排已接纳的历史。
 type ModelContext struct {
-	SummaryInput []*sessionentry.Entry `json:"-"`
 	SystemPrompt string
 	Entries      []*sessionentry.Entry
 }
@@ -28,24 +27,11 @@ func (c ModelContext) Digest() (string, error) {
 	return "sha256-" + hex.EncodeToString(digest[:]), nil
 }
 
-// ModelContextFromEntries 使用已经按事实语义选中的原文，摘要置前；摘要输入只包含最近摘要及其后的新增记录。
+// ModelContextFromEntries 从最近摘要及之后的活跃历史中筛选模型上下文条目。
 func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.Entry) ModelContext {
-	selected := entries
-	summaryInput := entries
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].IsSummary() {
-			selected = make([]*sessionentry.Entry, 0, len(entries))
-			selected = append(selected, entries[i])
-			selected = append(selected, entries[:i]...)
-			selected = append(selected, entries[i+1:]...)
-			summaryInput = entries[i:]
-			break
-		}
-	}
 	return ModelContext{
 		SystemPrompt: systemPrompt,
-		Entries:      ModelEntries(selected),
-		SummaryInput: ModelEntries(summaryInput),
+		Entries:      ModelEntries(entries),
 	}
 }
 

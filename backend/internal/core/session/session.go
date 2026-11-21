@@ -18,6 +18,7 @@ import (
 // HistoryStore 保存和读取 Agent 的完整 History，不解释 Entry 的业务语义。
 type HistoryStore interface {
 	CreateSubagent(context.Context, identity.AgentID) error
+	RemoveSubagent(context.Context, identity.AgentID) error
 	Append(context.Context, identity.AgentID, *sessionentry.Entry) error
 	CommitTerminal(context.Context, identity.AgentID, *sessionentry.Entry) error
 	Sync(context.Context, identity.AgentID) error

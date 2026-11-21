@@ -1,9 +1,9 @@
 package bindings
 
 import (
-	execution "praxis/internal/core/coordinator"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/identity"
+	sessionservice "praxis/internal/service/session"
 	"praxis/wails/validation"
 	"strings"
 	"time"
@@ -79,7 +79,7 @@ func (b *CommandBindings) CreateTask(wire CreateTaskRequest) (CreateTaskResponse
 		SessionID:    identity.SessionID(wire.SessionID),
 		Prompt:       wire.Prompt,
 	}
-	result, err := services.Commands.SubmitTask(ctx, input)
+	result, err := services.Sessions.SubmitTask(ctx, input)
 	if err != nil {
 		return CreateTaskResponse{}, publicError(b.host, "CommandBindings.CreateTask", err)
 	}
@@ -97,7 +97,7 @@ func (b *CommandBindings) StopRun(wire StopRunRequest) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CommandBindings.StopRun", services.Commands.StopRun(ctx, identity.SessionID(wire.SessionID), identity.RunID(wire.RunID)))
+	return publicError(b.host, "CommandBindings.StopRun", services.Sessions.StopRun(ctx, identity.SessionID(wire.SessionID), identity.RunID(wire.RunID)))
 }
 
 // CancelTask 只移除该 Session 尚未开始的输入，不影响当前 Loop。
@@ -109,7 +109,7 @@ func (b *CommandBindings) CancelTask(wire CancelTaskRequest) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "CommandBindings.CancelTask", services.Commands.CancelTask(ctx, identity.SessionID(wire.SessionID), identity.TaskID(wire.TaskID)))
+	return publicError(b.host, "CommandBindings.CancelTask", services.Sessions.CancelTask(ctx, identity.SessionID(wire.SessionID), identity.TaskID(wire.TaskID)))
 }
 
 func (b *CommandBindings) PauseQueue(sessionID string) error {
@@ -120,7 +120,7 @@ func (b *CommandBindings) PauseQueue(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "PauseQueue", services.Commands.PauseQueue(ctx, identity.SessionID(sessionID)))
+	return publicError(b.host, "PauseQueue", services.Sessions.PauseQueue(ctx, identity.SessionID(sessionID)))
 }
 
 func (b *CommandBindings) ResumeQueue(sessionID string) error {
@@ -131,7 +131,7 @@ func (b *CommandBindings) ResumeQueue(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	return publicError(b.host, "ResumeQueue", services.Commands.ResumeQueue(ctx, identity.SessionID(sessionID)))
+	return publicError(b.host, "ResumeQueue", services.Sessions.ResumeQueue(ctx, identity.SessionID(sessionID)))
 }
 
 func (b *CommandBindings) ListToolApprovals(sessionID, agentID string) ([]ToolApproval, error) {
@@ -145,7 +145,7 @@ func (b *CommandBindings) ListToolApprovals(sessionID, agentID string) ([]ToolAp
 	if err != nil {
 		return nil, err
 	}
-	values, err := services.Commands.ListToolApprovals(ctx, identity.SessionID(sessionID), identity.AgentID(agentID))
+	values, err := services.Sessions.ListToolApprovals(ctx, identity.SessionID(sessionID), identity.AgentID(agentID))
 	if err != nil {
 		return nil, publicError(b.host, "CommandBindings.ListToolApprovals", err)
 	}
@@ -187,16 +187,16 @@ func (b *CommandBindings) decideToolCall(wire ToolDecisionRequest, approve bool)
 		return err
 	}
 
-	params := execution.ToolDecision{
+	params := sessionservice.ToolDecision{
 		SessionID: identity.SessionID(wire.SessionID),
 		AgentID:   identity.AgentID(wire.AgentID),
 		RunID:     identity.RunID(wire.RunID),
 		CallID:    wire.CallID,
 	}
 	if approve {
-		err = services.Commands.ApproveToolCall(ctx, params)
+		err = services.Sessions.ApproveToolCall(ctx, params)
 	} else {
-		err = services.Commands.DenyToolCall(ctx, params)
+		err = services.Sessions.DenyToolCall(ctx, params)
 	}
 	if err != nil {
 		return publicError(b.host, "CommandBindings.ToolDecision", err)
@@ -212,10 +212,11 @@ func (b *CommandBindings) StopToolCall(wire ToolCancelRequest) error {
 	if err != nil {
 		return err
 	}
-	request := execution.ToolControl{
+	request := sessionservice.ToolControl{
 		SessionID: identity.SessionID(wire.SessionID),
 		AgentID:   identity.AgentID(wire.AgentID),
+		RunID:     identity.RunID(wire.RunID),
 		CallID:    wire.CallID,
 	}
-	return publicError(b.host, "CommandBindings.StopToolCall", services.Commands.StopToolCall(ctx, request))
+	return publicError(b.host, "CommandBindings.StopToolCall", services.Sessions.StopToolCall(ctx, request))
 }

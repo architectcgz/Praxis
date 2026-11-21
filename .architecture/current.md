@@ -1,164 +1,149 @@
-# 代码实施核对与待办
+# 待讨论架构问题清单
 
-## 一、目标与范围
+本文记录当前后端代码审计发现的架构问题与边界缺陷，按影响程度排序，逐项讨论并确定方案。
 
-业务语义以 [architecture.md](architecture.md) 为准，类型所有权、目录和编码约定以 [code-style.md](code-style.md) 为准。本文列出后续实施需要核对的目标与顺序，不表示改造已经完成。
+---
 
-执行与历史按 Session、Run、Turn 和 Entry 组织。Session 是主任务的隔离范围；Core Coordinator 管理已加载会话、输入路由、队列和 Main Run 交接，Run 负责本次执行，Loop 负责 ReAct 迭代。
+## 1. `Session.Close` 生命周期断层：JSONL Writer 协程与文件句柄全局泄漏
 
-## 二、职责与调用核对
+- 状态：已完成
+- 位置：
+  - `backend/internal/infra/storage/load.go:13-36`
+  - `backend/internal/core/coordinator/session.go:53-68`
+  - `backend/internal/core/coordinator/session.go:123-136`
+  - `backend/internal/core/coordinator/coordinator.go:187-213`
+  - `backend/internal/service/session/service.go:118-139`
+- 现状与问题：
+  - `SessionRepository.Load` 会为每个 Agent（主 Agent 及所有 Subagent）启动常驻 `jsonl.Writer` goroutine 并持有打开的文件句柄，但全项目除 `load.go` 加载失败时的回滚外，没有任何地方调用 `Session.Close`。
+  - `Coordinator.releaseSession` 关闭会话时只删除 map 登记，不关闭文件句柄与 Writer。
+  - `Coordinator.Close` 退出应用时只清空 map，不关闭所有已加载会话。
+  - `Coordinator.loadSession` 在 `Load` 成功后，若 `Get` / `State != SessionActive` / `loadConfig` 失败，直接返回错误，已打开的 `owner` 泄漏。
+  - `SessionService.CleanupEmptySessions` 为判断空会话直接调用 `s.sessions.Load`，未关闭 `owner` 就执行 `s.sessions.Delete`（`os.RemoveAll`），在 Windows 上文件被占用会导致删除失败并泄漏协程。
+- 确定方案：
+  - 从 `repository.Session` 拆出 `SessionLoader`（仅含 `Load`），只注入给 `Coordinator`，由 `Coordinator` 独家拥有 `Session` 的打开与关闭权。
+  - `Coordinator` 在 `loadSession` 失败回滚、`releaseSession` 释放会话、`Coordinator.Close` 应用退出三条路径上统一调用 `owner.Close(ctx)`。
+  - `CleanupEmptySessions` 改为通过存储层轻量检查空日志（不 `Load` 启动 Writer），再执行删除。
 
-### 2.1 会话与任务调度
+---
 
-- `core/coordinator` 按 SessionID 定位队列和 Main Run 占用。
-- 同一 Session 同时最多有一个活动 Main Run，占用覆盖准备、运行和必要收尾。
-- 不同 Session 可以并行；切换查看对象不改变后台执行资格或清空队列。
-- TaskQueue 只在内存中维护 FIFO、领取、取消待办和暂停恢复；Coordinator 决定何时启动下一项。队列不持久化，不把已启动的 Run 当作待办清理。
-- Main Run 正常 `completed` 且队列未暂停时自动领取下一项；主动 `interrupted` 不自动推进后续任务。
-- 历史写入失败时报告错误并暂停所属 Session 的队列，等待显式恢复。
-- Main 的普通任务输入用于后续 Run，不注入当前 Run。
-- Session 首次接纳用户输入时用原文生成标题，标题为空时才写入。
-- 停止命令以 SessionID 和 RunID 定位活动执行。命中活动 Main Run 时暂停队列并取消该 Run，已结束的目标直接返回。
-- 关闭 Session 停止全部所属执行并等待收尾，然后释放登记和调度资源，保留历史。
+## 2. `Coordinator` / `SessionService` / `ApprovalService` / `repository.Session` 职责交叉
 
-### 2.2 会话加载与配置
+- 状态：已完成（方向 A）
+- 位置：
+  - `backend/wails/bindings/services.go:26-56`
+  - `backend/internal/service/session/service.go:16-139`
+  - `backend/internal/service/approval/service.go:1-73`
+  - `backend/internal/repository/session.go:11-22`
+- 现状与问题：
+  - 会话相关操作拆散在三个平行入口：`SelectSession`/`CloseSession`/`SelectModel`/`ReloadSessionConfig`/`AgentHistory` 在 `Coordinator`；`CreateSession`/`DeleteSession`/`RenameSession`/`ModelOptions`/`SelectedModel` 在 `SessionService`（其中后两者只是透传 `Coordinator.GetSession`）；审批配置又单独拆出一个仅 73 行的 `ApprovalService`，同时依赖 `SessionService` 和 `repository.Session`。
+  - `repository.Session` 注释声明“提供会话元数据读写，不加载或持有会话历史”，但接口中仍包含 `Load(...) (*session.Session, error)`，导致 `SessionService` 可绕过 `Coordinator` 独立打开同一会话的 JSONL，存在双 Writer 并发写同一文件的隐患。
+  - `service/session.Dependencies` 与 `Service` 存在未消费的死字段（`HookDispatcher`、`IDs`）。
+- 确定方案：
+  - 外部入口统一收归 `service` 层，`wails/bindings` 不再直接依赖 `core/coordinator` 或 `storage` 裸函数。
+  - 合并 `approval.Service` 与 `SessionLogPath` 到 `service/session`；清理 `service/session` 中未使用的 `HookDispatcher` 和 `IDs` 字段。
+  - `Coordinator` 退回 Core 内部，专注已打开会话的生命周期（`Load`/`Close`）、任务队列、Run/Subagent 调度与运行期并发控制；元数据读写与外部应用用例由 `service` 组合编排。
 
-| 内容 | 所有者与契约 |
-| --- | --- |
-| 已加载 Session 的登记、查找和移除 | Core Coordinator 的私有 `sessionRegistry` |
-| Session 的实际加载 | 装配时提供的 Repo 能力，成功即返回可用核心对象 |
-| 日志读取、索引重建和必要中断收尾 | 加载实现内部完成，不向 Service 暴露恢复步骤 |
-| 当前模型和推理等级 | Session |
-| 已加载只读配置引用 | 按 Session 保存，通过明确入口替换 |
-| 本次实际执行配置 | Run 开始时固定 |
+---
 
-`GetSession` 只定位已加载对象；`LoadSession` 按需加载并登记。Service 不维护另一份会话注册表，不逐条读取历史组装 Session。
+## 3. 子代理协作工具另起炉灶：`native_tools.go` 绕开 `toolexecution` 体系
 
-配置文件是模型目录、Provider 凭据、工具启停和审批默认值的唯一编辑来源。`/reload` 只允许在目标 Session 没有活动 Run 时执行；Reload 期间禁止用户输入和新 Task 入队，并清理未领取的待办。成功后目标 Session 获取新的只读内存快照，其他 Session 保持旧配置引用，已冻结 Run 不受影响；失败时保留原引用。
+- 状态：已完成
+- 位置：
+  - `backend/internal/core/coordinator/native_tools.go:21-183`
+  - `backend/internal/core/coordinator/run.go:21-48`
+  - `backend/internal/core/loop/tools.go:150-156`
+- 现状与问题：
+  - `nativeTool` 实现 `tool.Tool` 接口，但 `Prepare()` 永远返回错误，属于接口伪装。
+  - 在 `native_tools.go` 中重复实现 JSON 严格解码 `decodeNative`（与 `toolexecution/executor.go` 的 `decodeToolArguments` 重复），同时绕开了工具 Hook、单调用停止控制（`StopToolCall` 无法停止阻塞在 `subagent_wait` 的原生调用）以及输出上限裁剪。
+  - `nativeExecutor.BoundResult` 对 `e.base` 做无保护的接口类型断言，`loop/tools.go` 也通过隐式断言获取 `BoundResult`，表明 `loop.ToolExecutor` 接口漏定义了该能力。
+  - `coordinator/run.go` 将 `&runner` 传给 `run.Execute`，又在 `prepareTools` 回调中通过闭包副作用覆写 `runner.Tools = catalog`，控制流隐晦。
+- 确定方案：
+  - 将子代理协作工具定义、参数类型与 `tool.Tool` 实现从 `coordinator` 移至 `core/tool` 下独立子包（如 `core/tool/subagent`），通过运行期能力接口绑定具体协作行为，`coordinator` 只提供运行时实现并组合目录。
+  - 在 `tool.Environment` 中补充 `CallID`，新增可选免审批能力接口（如 `RequiresApproval() bool`），让协作工具统一走 `toolexecution.Executor`，删除 `nativeExecutor` 与 `decodeNative`。
+  - 在 `loop.ToolExecutor` 接口中显式声明 `BoundResult`，移除隐式类型断言。
+  - 调整 `coordinator/run.go` 与 `run.Execute` 的工具准备返回，消除回调闭包修改 `runner.Tools` 的副作用。
 
-### 2.3 Run 与 Loop
+---
 
-- Run 统一保存身份、配置、状态、结果、时间、统计和已接纳 Entry 的只读引用。
-- Coordinator 确定执行配置并绑定 Session 提供的 Agent 历史。Run 构造完成后显式提交准备及输入事实，Loop 和工具审核共用已提交的输入 Entry。
-- `Run.Execute` 组织准备、直接调用 Loop、子执行收尾和终态保存，完成必要收尾后返回。
-- Provider 只负责一次模型请求尝试；模型请求重试由 `core/loop` 按业务策略负责，每次尝试使用新的 RequestID、独立计时和独立 ModelRequest 事实，复用原 TurnID。
-- 首次请求失败后最多重试三次，共最多四次尝试；每次 ModelRequest 保存 `retryCount`，首次为 0，重试依次递增，不从请求顺序推导。
-- Provider client 或流式基础设施负责 HTTP 响应体、解码协程和事件通道的释放，Core 只通过 Context 取消并消费统一事件。
-- Run 通过明确业务行为维护私有状态和结果，不向外暴露任意改写执行记录的通用回调或逐字段 setter；查询只提供所需的只读结果。
-- `activeRun` 等控制对象只保存 Run 引用、取消及就绪和完成资源，不复制业务状态。
-- Loop 每轮读取已接纳历史，经 ContextBuilder 构建上下文，必要时压缩，再请求模型和执行工具。
-- Loop 不领取 Task，不依赖 Run 的执行对象；Run、Loop 和 Session 共同使用 `core/entry`。
-- Run 的生命周期使用 `starting`、`running`、`ending` 和 `ended`；`Outcome=interrupted` 表示用户主动停止或异常关闭恢复，FailureCode 区分具体原因。`yielded` 只表示 Subagent 完成后主动向 Main Run 交付结果；终态不重新启动同一个 Run。
+## 4. 模型请求链路重复实现，且工具审核与工具执行强耦合
 
-### 2.4 Turn 与 ModelRequest
+- 状态：已完成
+- 位置：
+  - `backend/internal/core/loop/model.go:160-195`
+  - `backend/internal/core/toolexecution/review.go:98-284`
+  - `backend/internal/core/toolexecution/authorize.go:1-186`
+  - `backend/internal/core/toolexecution/approval.go:1-78`
+  - `backend/internal/core/agent/run/run.go:202-243`
+- 现状与问题：
+  - `loop/model.go` 和 `toolexecution/review.go` 各自实现了一套完整的“容量评估 -> 记录 running -> `OperationProvider` Hook -> `Provider.Stream` 消费 -> 记录终态 `ModelRequest` -> 最多 4 次尝试重试”流程，且已出现行为漂移（`review.go:157` 正常完成时也写了 `Partial`，漏了 `BeforeModelRequest`/`AfterModelResponse`/`FirstResponse`）。
+  - 工具审批等待、模型风险审核与工具参数准备/执行/输出限制混杂在 `toolexecution` 内，共享同一张 `active` 表和锁，导致 `toolexecution` 反向依赖 `Provider`、`ModelRequest` 落盘与审核 Prompt。
+- 确定方案：
+  - 抽取独立的底层**模型请求组件**（统一承载容量校验、Hook、计时与首响、流消费、`ModelRequest` 事实持久化与 4 次重试），供普通迭代、上下文摘要与风险审核三类请求共用（支持通过持久化回调兼容并发审核时的串行落盘）。
+  - 将**工具授权/审批与风险审核**从 `toolexecution` 剥离为独立组件（负责 `ApprovalMode` 判定、调用模型请求组件执行风险审核、维护待审批列表与用户决策）；`toolexecution` 只保留工具解码、准备、执行、输出限制与单调用取消（通过每个调用独立的派生 `callCtx` 传递取消信号，取消调用即可同时中断审核、审批等待或执行中的工具，双方彻底解耦、不共享锁与状态表）。
 
-- Turn 由 ReAct 迭代流程开始和结束，包含普通请求、必要审核、工具执行及结果接纳。
-- 普通请求和它触发的风险审核关联同一个 Turn。
-- 两轮之间的摘要属于 Run，不关联某个 Turn；摘要保存为正式 Entry。
-- 每个 ModelRequest 独立记录实际状态、用量和计时，请求记录不推进 Turn。
-- 每次模型请求尝试使用独立 RequestID 和计时；重试仍复用原 TurnID，失败、部分输出、已知用量和重试进度按实际事实保存。
-- 已收到但未完成的模型输出不作为完整 Assistant Entry、可执行工具调用或下一次模型上下文。
-- Turn 的展示序号可以从同一 Run 的历史顺序派生，不额外保存 Sequence。
-- Turn 完成通过直接流程确定和记录，通知只表达已确定结果。
+---
 
-### 2.5 Entry、提交与历史读取
+## 5. 错误分类边界倒置：`loop.Failure` 成为全局错误总线与三套平行枚举
 
-- `core/entry` 表达公共执行事实；持久化统一使用 Loop 和 Run 调用的 `AppendEntry`。
-- Provider 事件由 `core/provider` 以协议无关类型表达；具体协议编码、解码和流资源管理位于 `infra/providers`。
-- Provider 流必须区分正常完成、Provider 或协议错误、Context 取消和无终态关闭；通道关闭本身不是成功信号，一次请求最多有一个终态事件。
-- 具体消息与执行元数据使用具体 Payload，ContextBuilder 按语义选择模型可见内容。
-- Entry 保存条目标识、执行归属、来源和创建时间，具体数据由 Payload 持有。落盘时顶层 `kind` 标识载荷类型，`payload` 直接保存具体数据。
-- 用户输入、助手回复和工具回执使用 `message` 载荷，`payload.role` 区分角色，正文与工具内容在 `payload.content` 中。摘要使用 `summary` 载荷；模型请求使用 `model_request` 载荷，阶段由 `payload.status` 表达。
-- Entry 与前端 Event 分别设计，不复制通知路由信封。
-- Session 和所属 Run 的存储归属在提交入口及必要存储元数据中保留；RequestID、CallID、报告和消息标识由有引用需要的 Payload 携带。
-- 各日志按追加顺序读取，不要求所有 Entry 具有通用 ID 或 ParentID。
-- 主历史跨多个 Run 持续保留，子代理的中间历史独立读取。
-- 正文按需分页；模型上下文按摘要和保留内容选择范围，不受界面页大小限制。
-- 同一历史可以多次压缩；下一次压缩使用最近摘要及其后的新增历史，不使用 `RetainedEntryIDs` 或额外的原始 Entry 引用和上下文边界标记。
-- 摘要生成完成后即使 Run 被取消也完成保存；保存失败不能使用仅存在内存中的摘要继续执行。
-- 每个 Session 只有一条连续主历史，不建立 Branch 或其他并行历史树；Entry、事件、查询和外部 API 不携带 BranchID。
-- Run 的状态、请求和用量索引基于同一事实维护，不形成平行写入入口。
-- 历史归属在执行准备、绑定提交入口时确定，调用方不在每次提交时重新选择主历史或子代理历史。
-- 消费已经接纳的只读事实时，不重复比较完整正文、校验同一归属或进行入口准入判断；维护执行证据和索引不形成另一轮准入或写入。
+- 状态：已完成（落点 A）
+- 位置：
+  - `backend/internal/core/loop/run.go:58-141`
+  - `backend/internal/core/agent/run/run.go:343-345`
+  - `backend/internal/core/agent/run/settle.go:138-159`
+  - `backend/internal/core/coordinator/run.go:31-79`
+  - `backend/internal/core/entry/payload.go:34-52`
+- 现状与问题：
+  - `loop` 本应只是 ReAct 迭代引擎，但上层 `coordinator` 与 `agent/run` 反向依赖 `loop.NewFailure` / `loop.FailureClassification` 传递和判断存储失败、资源上限等错误。
+  - `loop/run.go` 中存在 `loop.FailureCode`、一组全项目未使用的 `ErrBusy` / `ErrStorage` 等 `errorcode.Code` 常量及死函数 `fail()`，与 `entry.RunFailureCode` 构成多套平行枚举，跨层只能靠 `settle.go` 手工 `switch` 映射。
+- 确定方案：
+  - 删除 `loop.Failure`、`loop.FailureCode`、未使用的 `loop.Err*` 常量与 `fail()`，解除 `coordinator` 和 `agent/run` 对 `loop` 错误体系的反向依赖。
+  - 各边界直接返回标准类型化错误或哨兵错误（如存储边界返回 `ErrStorage`，模型请求组件返回 `ErrProvider` 或 `*ContextWindowExceededError`，契约错误返回 `ErrContract`）；`coordinator` 用 `errors.Is` 判断存储失败，`agent/run` 结算处统一映射为权威的 `entry.RunFailureCode`。
 
-### 2.6 记录、通知与前端
+---
 
-- 执行流程分别调用 `AppendEntry`、Emitter 和记录相关的观察 Hook；提交、执行证据接纳和通知发布的调用关系明确，不集中隐藏在通用追加包装函数中。
-- 记录入口不隐式发布通知或调用观察 Hook，通知订阅者不保存或推进业务。
-- SessionID 绑定到发布函数和 `praxis:session:<sessionId>` 通道。
-- 通知统一传递 `kind` 和 `data`。Run 级通知携带 `agentId` 和 `runId`，按 Turn 定位的通知同时携带 `turnId`。
-- RequestID、CallID 等同样按实际语义声明；消费端按事件种类缩窄类型，不用空身份补齐必需字段，不复制事件模型或增加内部重复校验。
-- 每个已加载 Session 使用固定作用域的 sessionStore；普通数据与流式输出分别通知订阅者。
-- Store 保存数据，纯函数接纳事件，Hook 组织异步请求、操作与缓存策略，组件负责展示。
-- 操作 Hook 拥有各自的请求状态、结果、错误和过期响应检查，对外返回业务动作与状态；页面派生汇总反馈或禁用状态，不下发共享 `busy`、错误 setter 和内部请求 ref。
-- 跨 Hook 协作只传必要身份和明确回调，不依赖整个页面状态对象，不增加通用命令框架。
-- 目录按 task、run、agent、history 等功能语义组织，不把全部会话能力集中到一个文件。
-- 初始化先订阅再加载，保留加载期间的新变化；旧响应和旧 Run 通知不覆盖新的状态。
-- Run 和 Agent 的执行状态接纳后端明确给出的结果；停止请求只更新操作反馈，不直接置为已中断，Turn 开始和结束不推导执行状态或覆盖 Run 终态。
-- 初始化只读取主 Agent 的历史首屏，不查询代理列表、不从日志恢复 Run 展示状态。会话信息和待办队列随首屏返回，后续 Run 和子代理状态来自实时通知。
-- 历史分页返回 `HistoryMessage` 和独立的模型请求活动，用量随单次请求展示。持久化消息随追加通知交付；子代理历史通过委派回执按需打开。
-- Run 开始通知提供开始时间，收尾通知不带附加数据，结束通知提供时间、结果、代理状态和最终的迭代及工具调用数。前端按通知信封中的 `runId` 跟踪执行，不查询 Run。停止子 Run 时由父 Run 按 RunID 定位自己持有的子执行句柄。
-- 工具调用按 Provider 返回顺序登记；只读工具可以并行，修改文件或其他外部状态的工具按 Provider 顺序串行。结果按 CallID 配对，并按 Provider 顺序组成一个包含多个 ToolResultBlock 的工具结果 Entry。
-- `deny` 是配置或策略产生的默认拒绝，`ask`、`auto`、`yolo` 是前端可选模式；人工拒绝保存为工具回执，审核中状态投影为 `waiting`。Hook 不得修改已经冻结的工具参数。
-- Wails 接口的请求、返回值和事件类型由 `wails/bindings` 定义。绑定层负责入口校验、调用和结果投影，Core 不依赖绑定层。内部 RunRecord、控制句柄、凭据、内部配置和推理状态不得直接暴露。
+## 6. Subagent 名额校验非原子，且启动失败回滚不完整
 
-### 2.7 子代理与失败收尾
+- 状态：已完成
+- 位置：
+  - `backend/internal/core/coordinator/subagent.go:39-125`
+  - `backend/internal/core/agent/run/subagent.go:60-64`
+  - `backend/internal/core/agent/run/subagent.go:358-370`
+- 现状与问题：
+  - `startSubagent` 在第 39 行只读检查 `parent.ActiveSubagents() >= 10`，直到完成 `CreateSubagent` 和 `child.Prepare` 磁盘写入后，才在第 89 行调用 `RegisterSubagent`，名额检查与预留非原子。
+  - 若第 114 行 `launchLocked` 失败，已登记进 `parent.collaboration.children` 的句柄未被移除，且 `SubagentStarted` 事件在启动成功前已提前发出。
+  - 若 `CreateSubagent` 成功但后续 `Prepare` 失败，`Session.data.AgentContexts` 中已登记的空 `agentID` 与新建的空 `.jsonl` 文件未回滚。
+- 确定方案：
+  - 在 `agentrun.Run` 上把名额检查与占位合并为锁内原子操作（`ReserveSubagent` -> 准备后 `AttachSubagent` -> 失败时 `ReleaseSubagent`）。
+  - 改为 `launchLocked` 成功后再发送 `SubagentStarted`，并用统一的失败回滚逻辑清理未成功启动的占位、取消与超时资源。
+  - 仅在 `!prepared`（尚无任何记录写入）时关闭并清理新建的空子代理 Writer 与登记；已写入 `RunPrepared` 时保持走 `SettlePreparation` 写终态保留事实。
 
-- 子代理严格属于创建它的父 Run，通过 ParentRunID 和 ParentCallID 保留来源。
-- 父 Run 持有子执行句柄和完成回调接收对象，不按会话当前 Run 重新定位接收者。
-- Subagent 禁止递归创建；创建时冻结工具集合、工作目录和审批边界，可使用父 Run 工作目录但不拥有请求审批权限。
-- 子执行保存结果后以 `yielded` 主动交付给绑定的父 Run；父 Run 通过明确的等待或收集工具接纳报告，不自动把报告正文注入上下文。
-- 每个 Session 最多 10 个活动子 Run，取消收尾完成后才释放名额；不建立额外 Subagent 等待队列。
-- 保存失败明确报告并停止相关执行，不为补日志重新执行模型或工具。
-- 加载时只对必要候选进行中断收尾，不自动继续旧 Run。
+---
 
-### 2.8 Project、文件输出与外部边界
+## 7. 上下文压缩的 `retained` 视图前后不一致与 `ModelContextFromEntries` 死分支
 
-- Project 创建后工作目录路径不可变；不增加跨 Session 的文件锁或项目协调。
-- 超大工具输出写入系统临时目录，不由 Project 或 Session 长期持有；FilePreview 功能移除，但保留 Agent 的 `read_file` 工具。
-- 移除前端模型配置编辑页及对应的 `SaveModelConfig`、`SetProviderKey` 保存入口，配置文件成为唯一编辑来源。
-- Branch 相关字段、接口、前端状态和存储数据全部清理；不提供旧 Branch 的兼容读取或迁移。实施时按唯一主历史保留范围核对存储清理，不新增兼容层。
+- 状态：已完成（方案 A）
+- 位置：
+  - `backend/internal/core/context/compress/compress.go:39-58`
+  - `backend/internal/core/loop/compression.go:78-92`
+  - `backend/internal/core/session/data.go:15-21`
+  - `backend/internal/core/context/context.go:32-45`
+- 现状与问题：
+  - 压缩时 `splitHistory` 拆分出 `retained` 并组装 `[Summary, retained...]` 供当前轮使用，但 `Summary` 落盘后 `AgentContext.Accept` 立即把窗口重置为 `[Summary]`，导致当前轮与下一轮（及重启恢复后）的上下文构成不一致；同时 `Summary` 实际压缩的是全量 `SummaryInput`（含 `retained`），导致当前轮 `Summary` 与 `retained` 内容重叠。
+  - `ModelContextFromEntries` 中遇到 `Summary` 时将 `entries[:i]` 移至 `Summary` 之后的逻辑，在 `AgentContext` 遇 `Summary` 重置且 `load.go` 遇 `Summary` 停止扫描的前提下永远走不到（若真触发还会把已被摘要的旧历史重新放回上下文）。
+- 确定方案：
+  - 保持 `Summary` 作为 append-only 日志的唯一截断点（摘要仍覆盖全量历史，`load.go` 遇 `Summary` 即停，不增加持久化字段耦合）；明确 `retained` 仅作压缩触发当轮的原文防失真补充。
+  - 删除 `ModelContextFromEntries` 中失效的 `entries[:i]` 重排分支和冗余的 `SummaryInput` 字段，统一直接使用 `ModelEntries(entries)`，补清注释。
 
-### 2.9 命名与局部表达
+---
 
-- Task、Run、Turn 的变量名、方法名和日志字段保持一致；Run 快照不命名为 `task`，`run_id`、`task_id` 和 `source_task_id` 记录各自对应的身份。
-- 多步骤闭包、复杂对象和较长参数列表按语义换行；只有复用、复杂逻辑或明确概念需要时才抽取函数，不为压缩行数建立转发层、参数对象或辅助类型。
+## 8. 功能缺陷：`StopToolCall` 漏传 `RunID` 导致单工具停止永远失败
 
-## 三、实施顺序
-
-1. 固定 Session 调度范围、连续日志归属及外部接口定位方式。
-2. 落实 Core Coordinator、唯一 sessionRegistry 和 Repo 可用对象加载契约。
-3. 统一 Run 和 `Run.Execute`，将共享记录与计时放入公共模块。
-4. 收敛唯一 `AppendEntry`，区分 Turn 与模型请求，明确用量和结果的事实来源。
-5. 对齐 Session 通道、前端 sessionStore、初始化、分页和流式输出职责。
-6. 将 `runToolCalls` 改为按 Provider 顺序登记、只读并行、修改工具顺序屏障和批量 ToolResult Entry。
-7. 移除 `RetainedEntryIDs`，将压缩输入收敛为最近摘要及其后的历史；补齐摘要保存和取消边界。
-8. 核对 Provider 一次尝试、Loop 最多四次尝试、ModelRequest 独立记录、部分响应保存及流终态契约。
-9. 收敛 `/reload` 的无活动 Run 准入、输入封锁、队列清理和 Session 配置快照；移除前端模型配置保存入口。
-10. 清理 Branch 字段、接口、前端状态和存储数据；移除 `PreviewFile` 入口；补齐子代理 `yielded` 交付和 Wails 结果投影。
-11. 核对配置重载、停止、子代理回调、关闭和错误收尾的直接调用关系。
-
-结构调整服务于这些职责，不机械地为每个概念创建管理器或通用接口。
-
-## 四、风险与验证
-
-核心风险是重复登记或执行状态、错误的完成目标、资源提前释放，以及日志和派生索引不一致。按单一所有者、固定接收对象和完整收尾边界处理。持久化格式实施时明确数据影响及匹配备份，不在文档阶段操作真实历史。
-
-后续实施按以下场景人工核对：
-
-1. Session A、B 并行，同一 Session 内 Main Run 按 FIFO 串行。
-2. 切换会话不影响后台执行、待办、控制目标和用量接纳。
-3. 模型选择按 Session 独立，已启动的 Run 配置稳定。
-4. 普通请求与审核属于同一 Turn，摘要不伪造 Turn，用量按实际请求累计。
-5. 历史分页与实时输出分开，浏览旧记录后提交任务仍接续当前主历史。
-6. 没有通知订阅者时，提交、Run 收尾和下一项调度仍然正确。
-7. 子执行回调始终交给创建它的父 Run；关闭等待主、子执行完整退出。
-8. Run 资源释放后历史可查询，重启不重复执行模型或工具。
-9. Provider 只执行一次尝试，重试由 `core/loop` 负责；每次尝试有独立 RequestID、计时和 ModelRequest 记录，但复用同一 TurnID。
-10. 正常完成、Provider 错误、Context 取消和无终态关闭分别收尾；已收到的部分内容、用量和计时得到保存，未完成内容不进入正式 Entry、工具执行或下一次上下文。
-12. 同一响应中的只读工具并行执行，修改工具按 Provider 顺序串行；结果按 CallID 和 Provider 顺序形成一个批量工具结果 Entry。
-13. Subagent 完成后以 `yielded` 主动向绑定的 Main Run 交付结果；父 Run 取消时子 Run 立即取消，收尾完成后释放名额。
-14. `/reload` 仅在无活动 Run 的 Session 执行，期间拒绝输入和入队；成功后只替换目标 Session 的配置快照。
-15. Branch、模型配置编辑入口和 FilePreview 不再出现在目标代码、接口、事件或存储边界；Project 路径不可变，工具大输出使用系统临时目录。
-
-验证遵守仓库约定：后端使用 `go build ./...`、`go vet ./...`、`go list ./...`；签名变化时按已有流程重新生成 Wails 绑定，前端使用 `npm run check`。不新增或运行自动化测试，不自动启动开发服务；数据验证使用独立临时目录。
+- 状态：已完成
+- 位置：
+  - `backend/wails/bindings/bindings_command.go:207-221`
+  - `backend/internal/core/toolexecution/control.go:48-54`
+- 现状与问题：
+  - `CommandBindings.StopToolCall` 构造 `execution.ToolControl` 时漏传 `RunID: identity.RunID(wire.RunID)`。
+  - `Executor.controlledCall` 按 `e.active[Key{RunID: request.RunID, CallID: request.CallID}]` 查找，导致停止单个工具调用必定命中空项并返回 `ErrRequestConflict`。
+- 确定方案：
+  - 在 `CommandBindings.StopToolCall` 中补传 `RunID: identity.RunID(wire.RunID)`。

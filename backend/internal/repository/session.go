@@ -8,11 +8,10 @@ import (
 	"time"
 )
 
-// Session 提供会话元数据读写，不加载或持有会话历史。
+// Session 提供会话元数据与只读文件定位，不打开或持有会话历史 Writer。
 type Session interface {
 	Get(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	SetModelChoice(context.Context, identity.SessionID, sessionmodel.ModelChoice, time.Time) error
-	Load(context.Context, identity.SessionID) (*sessionmodel.Session, error)
 	Create(context.Context, sessionmodel.SessionInfo) error
 	List(context.Context, int) ([]sessionmodel.SessionInfo, error)
 	ListByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
@@ -20,4 +19,11 @@ type Session interface {
 	UpdateTitle(ctx context.Context, id identity.SessionID, expectedTitle, title string, at time.Time) error
 	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode, time.Time) (sessionmodel.SessionInfo, error)
 	Delete(context.Context, identity.SessionID) error
+	SessionLogPath(context.Context, identity.SessionID) (string, error)
+	IsEmpty(context.Context, identity.SessionID) (bool, error)
+}
+
+// SessionLoader 负责打开和恢复可运行 Session，仅由唯一运行期所有者调用。
+type SessionLoader interface {
+	Load(context.Context, identity.SessionID) (*sessionmodel.Session, error)
 }

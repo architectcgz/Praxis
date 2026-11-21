@@ -3,16 +3,14 @@ package bindings
 import (
 	"context"
 	"errors"
-	execution "praxis/internal/core/coordinator"
+	"praxis/internal/core/approval"
 	coreevent "praxis/internal/core/event"
 	modelconfig "praxis/internal/core/model/config"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
-	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/identity"
-	approvalservice "praxis/internal/service/approval"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 )
@@ -23,57 +21,46 @@ type ProjectService interface {
 	CreateProject(context.Context, projectservice.CreateInput) (projectmodel.Project, error)
 }
 
-type ApprovalService interface {
-	GetApprovalMode(context.Context, identity.SessionID) (approvalservice.ApprovalSettings, error)
-	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode) (approvalservice.ApprovalSettings, error)
-}
-
 type SessionService interface {
 	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
 	DeleteSession(context.Context, identity.SessionID) error
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
 	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
-	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
-	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
-}
-
-type AgentCommands interface {
-	SelectSession(context.Context, identity.SessionID) (execution.SessionView, error)
+	SessionLogPath(context.Context, identity.SessionID) (string, error)
+	SelectSession(context.Context, identity.SessionID) (sessionservice.SessionView, error)
 	CloseSession(context.Context, identity.SessionID) error
 	AgentHistory(context.Context, identity.SessionID, identity.AgentID, *int64, int) (sessionmodel.HistoryPage, error)
-	StopRun(context.Context, identity.SessionID, identity.RunID) error
-	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]executionmodel.Approval, error)
-	StopToolCall(context.Context, execution.ToolControl) error
-	ApproveToolCall(context.Context, execution.ToolDecision) error
-	DenyToolCall(context.Context, execution.ToolDecision) error
-	SubmitTask(context.Context, taskmodel.Input) (execution.SubmitResult, error)
-	CancelTask(context.Context, identity.SessionID, identity.TaskID) error
+	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
+	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
+	GetApprovalMode(context.Context, identity.SessionID) (sessionservice.ApprovalSettings, error)
+	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode) (sessionservice.ApprovalSettings, error)
 	ReloadSessionConfig(context.Context, identity.SessionID) error
+	StopRun(context.Context, identity.SessionID, identity.RunID) error
+	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]approval.Approval, error)
+	StopToolCall(context.Context, sessionservice.ToolControl) error
+	ApproveToolCall(context.Context, sessionservice.ToolDecision) error
+	DenyToolCall(context.Context, sessionservice.ToolDecision) error
+	SubmitTask(context.Context, taskmodel.Input) (sessionservice.SubmitResult, error)
+	CancelTask(context.Context, identity.SessionID, identity.TaskID) error
 	PauseQueue(context.Context, identity.SessionID) error
 	ResumeQueue(context.Context, identity.SessionID) error
 }
 
-// Services 由 Bootstrap 注入业务对象和只读日志定位能力，不创建中间应用层。
+// Services 由 Bootstrap 注入外部业务服务与事件源。
 type Services struct {
-	Projects       ProjectService
-	Approvals      ApprovalService
-	Sessions       SessionService
-	Commands       AgentCommands
-	Emitter        *coreevent.Emitter
-	SessionLogPath func(context.Context, identity.SessionID) (string, error)
+	Projects ProjectService
+	Sessions SessionService
+	Emitter  *coreevent.Emitter
 }
 
 // Validate 在宿主接入边界检查完整装配，失败时不开放 binding。
 func (s Services) Validate() error {
 	for name, missing := range map[string]bool{
-		"projects":         s.Projects == nil,
-		"approvals":        s.Approvals == nil,
-		"sessions":         s.Sessions == nil,
-		"commands":         s.Commands == nil,
-		"event emitter":    s.Emitter == nil,
-		"session log path": s.SessionLogPath == nil,
+		"projects":      s.Projects == nil,
+		"sessions":      s.Sessions == nil,
+		"event emitter": s.Emitter == nil,
 	} {
 		if missing {
 			return errors.New("frontend " + name + " is required")

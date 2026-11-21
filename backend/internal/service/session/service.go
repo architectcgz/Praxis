@@ -4,34 +4,32 @@ import (
 	"context"
 	"errors"
 	"praxis/internal/clock"
-	"praxis/internal/core/hook"
+	"praxis/internal/core/approval"
+	"praxis/internal/core/coordinator"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
+	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	"sync"
 )
 
-type SessionAccess interface {
-	LoadSession(context.Context, identity.SessionID) (*sessionmodel.Session, error)
-	GetSession(context.Context, identity.SessionID) (*sessionmodel.Session, error)
-	CloseSession(context.Context, identity.SessionID) error
-}
+type SessionView = coordinator.SessionView
+type SubmitResult = coordinator.SubmitResult
+type ToolDecision = coordinator.ToolDecision
+type ToolControl = coordinator.ToolControl
 
 type Dependencies struct {
-	Core           SessionAccess
-	HookDispatcher *hook.Dispatcher
-	Projects       repository.Project
-	Sessions       repository.Session
-	Clock          clock.Clock
-	IDs            identity.IDGenerator
+	Core     *coordinator.Coordinator
+	Projects repository.Project
+	Sessions repository.Session
+	Clock    clock.Clock
 }
 
-// Service 组织会话应用用例；已加载对象与执行资源由 Core 管理。
+// Service 是会话与执行能力的统一应用服务入口；运行期会话句柄与并发编排由 Core 维护。
 type Service struct {
-	core            SessionAccess
-	hookDispatcher  *hook.Dispatcher
+	core            *coordinator.Coordinator
 	projects        repository.Project
 	sessions        repository.Session
 	clock           clock.Clock
@@ -44,33 +42,51 @@ type CreateInput struct {
 	SessionID identity.SessionID
 	ProjectID identity.ProjectID
 }
+
 type CreateResult struct{ Session sessionmodel.SessionInfo }
 
 func NewService(deps Dependencies) *Service {
 	return &Service{
 		core:            deps.Core,
-		hookDispatcher:  deps.HookDispatcher,
 		projects:        deps.Projects,
 		sessions:        deps.Sessions,
 		clock:           deps.Clock,
 		createdSessions: make(map[identity.SessionID]struct{}),
 	}
 }
+
 func (s *Service) OpenedSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
 	return s.core.GetSession(ctx, id)
 }
+
 func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
 	return s.core.LoadSession(ctx, id)
 }
+
+func (s *Service) SelectSession(ctx context.Context, id identity.SessionID) (SessionView, error) {
+	return s.core.SelectSession(ctx, id)
+}
+
+func (s *Service) CloseSession(ctx context.Context, id identity.SessionID) error {
+	return s.core.CloseSession(ctx, id)
+}
+
 func (s *Service) ListSessionsByProject(ctx context.Context, id identity.ProjectID, limit int) ([]sessionmodel.SessionInfo, error) {
 	return s.sessions.ListByProject(ctx, id, limit)
 }
+
 func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.SessionInfo, error) {
 	return s.sessions.List(ctx, limit)
 }
+
 func (s *Service) GetSessionInfo(ctx context.Context, id identity.SessionID) (sessionmodel.SessionInfo, error) {
 	return s.sessions.Get(ctx, id)
 }
+
+func (s *Service) SessionLogPath(ctx context.Context, id identity.SessionID) (string, error) {
+	return s.sessions.SessionLogPath(ctx, id)
+}
+
 func (s *Service) CreateSession(ctx context.Context, input CreateInput) (CreateResult, error) {
 	if existing, err := s.sessions.Get(ctx, input.SessionID); err == nil {
 		if existing.ProjectID != input.ProjectID {
@@ -96,6 +112,7 @@ func (s *Service) CreateSession(ctx context.Context, input CreateInput) (CreateR
 	s.createdMu.Unlock()
 	return CreateResult{Session: info}, nil
 }
+
 func (s *Service) DeleteSession(ctx context.Context, id identity.SessionID) error {
 	if err := s.core.CloseSession(ctx, id); err != nil {
 		return err
@@ -108,6 +125,7 @@ func (s *Service) DeleteSession(ctx context.Context, id identity.SessionID) erro
 	s.createdMu.Unlock()
 	return nil
 }
+
 func (s *Service) RenameSession(ctx context.Context, id identity.SessionID, title string) error {
 	info, err := s.sessions.Get(ctx, id)
 	if err != nil {
@@ -115,6 +133,8 @@ func (s *Service) RenameSession(ctx context.Context, id identity.SessionID, titl
 	}
 	return s.sessions.UpdateTitle(ctx, id, info.Title, title, s.clock.Now())
 }
+
+// CleanupEmptySessions 在所有运行期会话关闭后清理本次新建且未产生日志内容的空会话。
 func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 	s.createdMu.Lock()
 	ids := make([]identity.SessionID, 0, len(s.createdSessions))
@@ -124,16 +144,59 @@ func (s *Service) CleanupEmptySessions(ctx context.Context) error {
 	s.createdMu.Unlock()
 	var result error
 	for _, id := range ids {
-		owner, err := s.sessions.Load(ctx, id)
+		empty, err := s.sessions.IsEmpty(ctx, id)
+		if errors.Is(err, errorcode.ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			result = errors.Join(result, err)
 			continue
 		}
-		if owner.Empty() {
+		if empty {
 			if err := s.sessions.Delete(ctx, id); err != nil {
 				result = errors.Join(result, err)
 			}
 		}
 	}
 	return result
+}
+
+func (s *Service) AgentHistory(ctx context.Context, id identity.SessionID, agentID identity.AgentID, before *int64, limit int) (sessionmodel.HistoryPage, error) {
+	return s.core.AgentHistory(ctx, id, agentID, before, limit)
+}
+
+func (s *Service) SubmitTask(ctx context.Context, input taskmodel.Input) (SubmitResult, error) {
+	return s.core.SubmitTask(ctx, input)
+}
+
+func (s *Service) CancelTask(ctx context.Context, sessionID identity.SessionID, taskID identity.TaskID) error {
+	return s.core.CancelTask(ctx, sessionID, taskID)
+}
+
+func (s *Service) PauseQueue(ctx context.Context, id identity.SessionID) error {
+	return s.core.PauseQueue(ctx, id)
+}
+
+func (s *Service) ResumeQueue(ctx context.Context, id identity.SessionID) error {
+	return s.core.ResumeQueue(ctx, id)
+}
+
+func (s *Service) StopRun(ctx context.Context, sessionID identity.SessionID, runID identity.RunID) error {
+	return s.core.StopRun(ctx, sessionID, runID)
+}
+
+func (s *Service) ListToolApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]approval.Approval, error) {
+	return s.core.ListToolApprovals(ctx, sessionID, agentID)
+}
+
+func (s *Service) ApproveToolCall(ctx context.Context, params ToolDecision) error {
+	return s.core.ApproveToolCall(ctx, params)
+}
+
+func (s *Service) DenyToolCall(ctx context.Context, params ToolDecision) error {
+	return s.core.DenyToolCall(ctx, params)
+}
+
+func (s *Service) StopToolCall(ctx context.Context, request ToolControl) error {
+	return s.core.StopToolCall(ctx, request)
 }

@@ -13,7 +13,8 @@ import (
 	modelapi "praxis/internal/core/model"
 	modelusage "praxis/internal/core/model/usage"
 	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/core/toolexecution"
+	"praxis/internal/core/tool"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"sync"
@@ -81,13 +82,19 @@ func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *R
 	return run
 }
 
-// toolUpdate 将并行工具的等待变化和审核事实交给所属执行流程。
+type entrySaveResult struct {
+	stored   *sessionentry.Entry
+	inserted bool
+	err      error
+}
+
+// toolUpdate 将并行工具的等待变化和条目保存交给所属执行流程。
 // 开始和结束事实分别在调用模型和应用审核结论之前确认保存。
 type toolUpdate struct {
 	ctx     context.Context
-	request sessionentry.ModelRequest
+	entry   sessionentry.Entry
 	waiting int
-	saved   chan error
+	saved   chan entrySaveResult
 }
 
 // runProgress 只在本次执行内累计，结束时写入终态载荷。
@@ -197,26 +204,27 @@ func (r *Run) TerminalSaved() bool {
 	return r.terminal != nil
 }
 
-// executeTools 在所属协程处理等待状态和审核保存；提交回调仅在本批工具中有效。
+// executeTools 在所属协程处理等待状态和并发工具的条目保存；提交回调仅在本批工具中有效。
 // 取消由工具 Context 传播，此处仍接纳收尾事实，直到本批工具全部退出。
-func (r *Run) executeTools(saveRequest toolexecution.SaveModelRequest, execute func(toolexecution.SaveModelRequest)) {
-	submitRequest := func(ctx context.Context, request sessionentry.ModelRequest) error {
+func (r *Run) executeTools(appendEntry sessionentry.AppendEntry, execute func(sessionentry.AppendEntry)) {
+	submitEntry := func(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
 		update := toolUpdate{
-			ctx:     ctx,
-			request: request,
-			saved:   make(chan error, 1),
+			ctx:   ctx,
+			entry: value,
+			saved: make(chan entrySaveResult, 1),
 		}
 		select {
 		case r.toolUpdates <- update:
-			return <-update.saved
+			result := <-update.saved
+			return result.stored, result.inserted, result.err
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, false, ctx.Err()
 		}
 	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		execute(submitRequest)
+		execute(submitEntry)
 	}()
 	for {
 		select {
@@ -237,7 +245,12 @@ func (r *Run) executeTools(saveRequest toolexecution.SaveModelRequest, execute f
 				}
 				continue
 			}
-			update.saved <- saveRequest(update.ctx, update.request)
+			stored, inserted, err := appendEntry(update.ctx, update.entry)
+			update.saved <- entrySaveResult{
+				stored:   stored,
+				inserted: inserted,
+				err:      err,
+			}
 		}
 	}
 }
@@ -277,7 +290,7 @@ func (r *Run) Outcome() sessionentry.RunOutcome {
 	return r.terminal.RunOutcome()
 }
 
-func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {
+func (s *Run) modelRunParams(tools tool.ToolCatalog) (loop.RunParams, loop.RunDependencies) {
 	return loop.RunParams{
 			ID:           s.id,
 			SourceTaskID: s.sourceTaskID,
@@ -285,6 +298,7 @@ func (s *Run) modelRunParams() (loop.RunParams, loop.RunDependencies) {
 			AgentID:      s.AgentID(),
 			SystemPrompt: s.definition.Instructions,
 			Model:        s.model,
+			Tools:        tools,
 		}, loop.RunDependencies{
 			AcceptSubagentReports: s.acceptReports,
 			AcceptInstructions:    s.acceptInstructions,
@@ -319,20 +333,17 @@ func runIdentity(run *Run, turnID identity.TurnID) hook.Identity {
 
 func (s *Run) emitError(turnID identity.TurnID, err error) {
 	message := "input failed"
-	if failure, ok := errors.AsType[*loop.Failure](err); ok {
-		if failure.Message() != "" {
-			message = failure.Message()
-		} else if loop.FailureClassification(err) == loop.FailureStorage {
-			message = "Failed to save session entries."
-		} else if loop.FailureClassification(err) == loop.FailureResourceLimit {
-			message = "model context window exceeded"
-		} else if loop.FailureClassification(err) == loop.FailureProvider {
-			text := []rune(err.Error())
-			if len(text) > 4096 {
-				text = append(text[:4096], '.', '.', '.')
-			}
-			message = string(text)
+	switch failureCode(err) {
+	case sessionentry.RunFailureStorage:
+		message = "Failed to save session entries."
+	case sessionentry.RunFailureResourceLimit:
+		message = "model context window exceeded"
+	case sessionentry.RunFailureProvider:
+		text := []rune(err.Error())
+		if len(text) > 4096 {
+			text = append(text[:4096], '.', '.', '.')
 		}
+		message = string(text)
 	}
 	s.deps.Emitter.Emit(coreevent.Event{
 		Source:  coreevent.SourceForRun(s, turnID),
@@ -341,5 +352,5 @@ func (s *Run) emitError(turnID identity.TurnID, err error) {
 }
 
 func storageFailure(err error) error {
-	return loop.NewFailure(loop.FailureStorage, err)
+	return errorcode.ErrStorage.Wrap(err)
 }

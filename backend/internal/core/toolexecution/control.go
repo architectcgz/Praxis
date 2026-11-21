@@ -2,86 +2,35 @@ package toolexecution
 
 import (
 	"context"
-	sessionentry "praxis/internal/core/entry"
+	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
 )
 
-func (e *Executor) register(ctx context.Context, call sessionentry.ToolCall, execution *Execution) error {
+func (e *Executor) register(key tool.CallKey, call *activeCall) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if err := e.checkUnfinished(ctx, call); err != nil {
-		return err
-	}
-	e.active[call.Key].tool = execution
-	return nil
+	e.active[key] = call
 }
 
-func (e *Executor) unregister(key Key) {
+func (e *Executor) unregister(key tool.CallKey) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.active, key)
 }
 
-// StopCall 只提交停止信号；尚未启动的调用也由所属执行路径生成唯一回执。
+// StopCall 取消目标活跃工具调用的派生上下文，同时中断审核、审批等待或执行中的工具。
 func (e *Executor) StopCall(ctx context.Context, request ControlRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	callState, err := e.controlledCall(request)
-	if err != nil {
-		return err
-	}
-	callState.stopped = true
-	select {
-	case callState.wake <- struct{}{}:
-	default:
-	}
-	if callState.tool != nil {
-		callState.tool.Stop()
-	}
-	return nil
-}
-
-// controlledCall 只在工具控制锁内定位外部命令，归属来自已登记调用，不查询 Run 展示状态。
-func (e *Executor) controlledCall(request ControlRequest) (*callState, error) {
-	callState := e.active[Key{RunID: request.RunID, CallID: request.CallID}]
-	if callState == nil || callState.call.SessionID != request.SessionID || callState.call.AgentID != request.AgentID {
-		return nil, errorcode.ErrRequestConflict
-	}
-	return callState, nil
-}
-
-// DecideApproval 只更新当前活跃调用，迟到决定不能恢复审批或作用于其他执行。
-func (e *Executor) DecideApproval(ctx context.Context, request ControlRequest, approve bool) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	callState, err := e.controlledCall(request)
-	if err != nil {
-		return err
-	}
-	if callState.stopped || callState.request == nil || callState.tool != nil {
+	active := e.active[tool.CallKey{RunID: request.RunID, CallID: request.CallID}]
+	if active == nil || active.sessionID != request.SessionID || active.agentID != request.AgentID {
+		e.mu.Unlock()
 		return errorcode.ErrRequestConflict
 	}
-	if callState.decision != nil {
-		if callState.decision.Approved != approve {
-			return errorcode.ErrRequestConflict
-		}
-		return nil
-	}
-	callState.decision = &UserDecision{
-		Key:       callState.call.Key,
-		SessionID: callState.call.SessionID,
-		Approved:  approve,
-		DecidedAt: e.deps.Clock.Now().UTC(),
-	}
-	select {
-	case callState.wake <- struct{}{}:
-	default:
-	}
+	cancel := active.cancel
+	e.mu.Unlock()
+	cancel(errCallStopped)
 	return nil
 }

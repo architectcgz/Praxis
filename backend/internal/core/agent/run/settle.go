@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
+	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
+	"praxis/internal/errorcode"
 	"strings"
 	"time"
 )
@@ -104,7 +105,7 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 }
 
 func (r *Run) classifyOutcome(ctx context.Context, err error) (sessionentry.RunOutcome, sessionentry.RunFailureCode, string) {
-	if loop.FailureClassification(context.Cause(ctx)) == loop.FailureStorage {
+	if errors.Is(context.Cause(ctx), errorcode.ErrStorage) {
 		return sessionentry.OutcomeFailed, sessionentry.RunFailureStorage, ""
 	}
 	if err == nil {
@@ -136,24 +137,17 @@ func (r *Run) classifyOutcome(ctx context.Context, err error) (sessionentry.RunO
 }
 
 func failureCode(err error) sessionentry.RunFailureCode {
-	switch loop.FailureClassification(err) {
-	case loop.FailureProviderUnavailable:
-		return sessionentry.RunFailureProviderUnavailable
-	case loop.FailureProvider:
-		return sessionentry.RunFailureProvider
-	case loop.FailureTool:
-		return sessionentry.RunFailureTool
-	case loop.FailurePolicyBlocked:
-		return sessionentry.RunFailurePolicyBlocked
-	case loop.FailureResourceLimit:
-		return sessionentry.RunFailureResourceLimit
-	case loop.FailureStorage:
+	if errors.Is(err, errorcode.ErrStorage) {
 		return sessionentry.RunFailureStorage
-	case loop.FailureContract:
-		return sessionentry.RunFailureContract
-	case loop.FailureBusy:
-		return sessionentry.RunFailureBusy
-	default:
-		return sessionentry.RunFailureInternal
 	}
+	if _, ok := errors.AsType[*appcontext.ContextWindowExceededError](err); ok {
+		return sessionentry.RunFailureResourceLimit
+	}
+	if errors.Is(err, errorcode.ErrProvider) {
+		return sessionentry.RunFailureProvider
+	}
+	if errors.Is(err, errorcode.ErrContract) {
+		return sessionentry.RunFailureContract
+	}
+	return sessionentry.RunFailureInternal
 }

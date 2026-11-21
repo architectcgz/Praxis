@@ -25,7 +25,10 @@ type SessionRepository struct {
 	database *sql.DB
 }
 
-var _ repository.Session = SessionRepository{}
+var (
+	_ repository.Session       = SessionRepository{}
+	_ repository.SessionLoader = SessionRepository{}
+)
 
 func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (sessionmodel.SessionInfo, error) {
 	return scanSession(r.database.QueryRowContext(ctx, `
@@ -161,6 +164,19 @@ func (r SessionRepository) SessionLogPath(ctx context.Context, id identity.Sessi
 		return "", err
 	}
 	return path, nil
+}
+
+// IsEmpty 仅检查主日志是否为空文件，不打开 Writer 或触发历史恢复。
+func (r SessionRepository) IsEmpty(ctx context.Context, id identity.SessionID) (bool, error) {
+	path, err := r.SessionLogPath(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return info.Size() == 0, nil
 }
 
 func openSessionMetadataDatabase(ctx context.Context, dataRoot string) (*sql.DB, error) {

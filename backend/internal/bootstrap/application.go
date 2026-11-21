@@ -13,11 +13,9 @@ import (
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	"praxis/internal/dataroot"
-	"praxis/internal/identity"
 	fs "praxis/internal/infra/filesystem"
 	"praxis/internal/infra/storage"
 	"praxis/internal/logging"
-	approvalservice "praxis/internal/service/approval"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/bindings"
@@ -46,14 +44,12 @@ func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources,
 	}, nil
 }
 
-func buildSessions(store *storage.Store, hooks *hook.Dispatcher, core *coordinator.Coordinator) *sessionservice.Service {
+func buildSessions(store *storage.Store, core *coordinator.Coordinator) *sessionservice.Service {
 	return sessionservice.NewService(sessionservice.Dependencies{
-		Core:           core,
-		HookDispatcher: hooks,
-		Projects:       store.Projects,
-		Sessions:       store.Sessions,
-		Clock:          clock.UTCClock{},
-		IDs:            identity.SecureIDGenerator{},
+		Core:     core,
+		Projects: store.Projects,
+		Sessions: store.Sessions,
+		Clock:    clock.UTCClock{},
 	})
 }
 
@@ -118,26 +114,17 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	coordinator := buildCoordinator(resources, func(ctx context.Context) (*sessionmodel.Configuration, error) {
 		return config.loadSessionConfiguration(ctx, root)
 	}, hooks, emitter, options.Runner)
-	a.sessions = buildSessions(a.storage, hooks, coordinator)
+	a.sessions = buildSessions(a.storage, coordinator)
 	a.coordinator = coordinator
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:  a.storage.Projects,
-		Sessions:  a.storage.Sessions,
 		Directory: fs.Filesystem{},
 		Clock:     clock.UTCClock{},
 	})
-	approvals := approvalservice.NewService(approvalservice.Dependencies{
-		Sessions: a.sessions,
-		Records:  a.storage.Sessions,
-		Clock:    clock.UTCClock{},
-	})
 	a.frontend = bindings.Services{
-		Projects:       projects,
-		Approvals:      approvals,
-		Sessions:       a.sessions,
-		Commands:       a.coordinator,
-		Emitter:        emitter,
-		SessionLogPath: a.storage.Sessions.SessionLogPath,
+		Projects: projects,
+		Sessions: a.sessions,
+		Emitter:  emitter,
 	}
 	a.logger.Infof("application open completed ready=true")
 	ready = true

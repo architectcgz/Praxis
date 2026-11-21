@@ -28,7 +28,7 @@ func (b *AgentBindings) ListAgentHistory(request AgentHistoryRequest) (HistoryPa
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	page, err := services.Commands.AgentHistory(ctx, identity.SessionID(request.SessionID), identity.AgentID(request.AgentID), request.Before, request.Limit)
+	page, err := services.Sessions.AgentHistory(ctx, identity.SessionID(request.SessionID), identity.AgentID(request.AgentID), request.Before, request.Limit)
 	if err != nil {
 		return HistoryPage{}, publicError(b.host, "ListAgentHistory", err)
 	}

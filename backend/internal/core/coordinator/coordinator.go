@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	agentrun "praxis/internal/core/agent/run"
+	"praxis/internal/core/approval"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	sessionmodel "praxis/internal/core/session"
@@ -24,8 +25,10 @@ var (
 
 type Config struct {
 	Tools             *executionmodel.Executor
+	Approvals         *approval.Gate
 	LoadConfig        func(context.Context) (*sessionmodel.Configuration, error)
 	SessionRecords    repository.Session
+	SessionLoader     repository.SessionLoader
 	Projects          repository.Project
 	Loop              *loop.Runner
 	RunDependencies   agentrun.Dependencies
@@ -37,8 +40,10 @@ type Config struct {
 // Coordinator 统一拥有队列调度、执行忙闲状态和取消句柄。
 type Coordinator struct {
 	tools             *executionmodel.Executor
+	approvals         *approval.Gate
 	loadConfig        func(context.Context) (*sessionmodel.Configuration, error)
 	sessionRecords    repository.Session
+	sessionLoader     repository.SessionLoader
 	projects          repository.Project
 	loop              *loop.Runner
 	runDependencies   agentrun.Dependencies
@@ -75,8 +80,13 @@ func (r *sessionRegistry) remove(id identity.SessionID) {
 	delete(r.values, id)
 }
 
-func (r *sessionRegistry) clear() {
+func (r *sessionRegistry) drain() []*sessionmodel.Session {
+	owners := make([]*sessionmodel.Session, 0, len(r.values))
+	for _, owner := range r.values {
+		owners = append(owners, owner)
+	}
 	clear(r.values)
+	return owners
 }
 
 // sessionCommand 串行化同一会话的命令与调度登记，不覆盖模型、工具执行和运行结算。
@@ -148,8 +158,10 @@ func newActiveRun(ctx context.Context, session *sessionmodel.Session) *activeRun
 func NewCoordinator(config Config) *Coordinator {
 	return &Coordinator{
 		tools:             config.Tools,
+		approvals:         config.Approvals,
 		loadConfig:        config.LoadConfig,
 		sessionRecords:    config.SessionRecords,
+		sessionLoader:     config.SessionLoader,
 		projects:          config.Projects,
 		loop:              config.Loop,
 		sessionCommands:   make(map[identity.SessionID]*sessionCommand),
@@ -202,11 +214,15 @@ func (r *Coordinator) Close(ctx context.Context) error {
 	select {
 	case <-done:
 		r.mu.Lock()
+		owners := r.registry.drain()
 		clear(r.schedules)
 		clear(r.sessionCommands)
-		r.registry.clear()
 		r.mu.Unlock()
-		return nil
+		var closeErr error
+		for _, owner := range owners {
+			closeErr = errors.Join(closeErr, owner.Close(ctx))
+		}
+		return closeErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}

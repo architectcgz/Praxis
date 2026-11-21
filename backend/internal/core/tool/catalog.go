@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 )
 
 type ToolConfig struct {
@@ -83,3 +84,42 @@ func (c *restrictedCatalog) Get(name ToolName) (Tool, bool) {
 	return c.registry.Get(name)
 }
 func (c *restrictedCatalog) List() []ToolDefinition { return slices.Clone(c.definitions) }
+
+// ComposeCatalog 将额外工具（如运行期协作工具）与基础业务工具目录组合为单一只读目录。
+func ComposeCatalog(base ToolCatalog, extras ...Tool) (ToolCatalog, error) {
+	composed := &composedCatalog{
+		base:        base,
+		extras:      make(map[ToolName]Tool, len(extras)),
+		definitions: base.List(),
+	}
+	for _, value := range extras {
+		definition := value.Definition()
+		if _, exists := base.Get(definition.Name); exists {
+			return nil, fmt.Errorf("tool name %s is reserved for native collaboration", definition.Name)
+		}
+		if _, duplicated := composed.extras[definition.Name]; duplicated {
+			return nil, fmt.Errorf("duplicate native tool name %s", definition.Name)
+		}
+		composed.extras[definition.Name] = value
+		composed.definitions = append(composed.definitions, definition)
+	}
+	slices.SortFunc(composed.definitions, func(a, b ToolDefinition) int {
+		return strings.Compare(string(a.Name), string(b.Name))
+	})
+	return composed, nil
+}
+
+type composedCatalog struct {
+	base        ToolCatalog
+	extras      map[ToolName]Tool
+	definitions []ToolDefinition
+}
+
+func (c *composedCatalog) Get(name ToolName) (Tool, bool) {
+	if value, ok := c.extras[name]; ok {
+		return value, true
+	}
+	return c.base.Get(name)
+}
+
+func (c *composedCatalog) List() []ToolDefinition { return slices.Clone(c.definitions) }

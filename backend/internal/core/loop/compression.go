@@ -2,25 +2,25 @@ package loop
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	appcontext "praxis/internal/core/context"
 	contextcompress "praxis/internal/core/context/compress"
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
+	"praxis/internal/core/modelcall"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/timing"
-	"praxis/internal/core/tool"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"slices"
 )
 
 // Compress 在上下文构建完成后独立评估容量，按需生成摘要并通过统一入口提交 Session。
 func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.Entry, value appcontext.ModelContext) (compressed appcontext.ModelContext, err error) {
-	reservedTokens, err := estimateRequestOverhead(r.Tools.List(), nil)
+	reservedTokens, err := modelcall.EstimateOverhead(params.Tools.List(), nil)
 	if err != nil {
-		return value, NewFailure(FailureContract, err)
+		return value, errorcode.ErrContract.Wrap(err)
 	}
 	event := hook.ContextCompression{
 		Identity: runIdentity(params, ""),
@@ -28,7 +28,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	}
 	event.OperationID = hook.NewOperationID()
 	if hookErr := r.HookDispatcher.BeforeContextCompression(ctx, event); hookErr != nil {
-		return value, NewFailure(FailureInternal, hookErr)
+		return value, errorcode.ErrInternal.Wrap(hookErr)
 	}
 	compressed, changed := value, false
 	defer func() {
@@ -44,12 +44,12 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	request := providerapi.Request{
 		Context:         value,
 		Model:           params.Model,
-		Tools:           r.Tools.List(),
+		Tools:           params.Tools.List(),
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 	}
-	inputTokens, _, err := requestTokens(request, deps.Budget)
+	inputTokens, _, err := modelcall.EstimateRequestTokens(request, deps.Budget)
 	if err != nil {
-		return value, NewFailure(FailureContract, err)
+		return value, errorcode.ErrContract.Wrap(err)
 	}
 	span := timing.NewSpan()
 	span.Start()
@@ -70,7 +70,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	})
 	measured := span.End()
 	if err != nil {
-		return value, NewModelFailure(err)
+		return value, modelcall.WrapModelError(err)
 	}
 	if !needed {
 		return value, nil
@@ -95,38 +95,8 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	return compressed, nil
 }
 
-func requestShape(request providerapi.Request) (string, int, error) {
-	data, err := json.Marshal(struct {
-		Model  any
-		Tools  []tool.ToolDefinition
-		Schema *providerapi.OutputSchema
-	}{
-		Model:  request.Model,
-		Tools:  request.Tools,
-		Schema: request.OutputSchema,
-	})
-	if err != nil {
-		return "", 0, err
-	}
-	overhead, err := estimateRequestOverhead(request.Tools, request.OutputSchema)
-	return string(data), overhead, err
-}
-
-func requestTokens(request providerapi.Request, budget *appcontext.Budget) (int, string, error) {
-	key, overhead, err := requestShape(request)
-	if err != nil {
-		return 0, "", err
-	}
-	if budget != nil {
-		tokens, err := budget.Estimate(request.Context, key, overhead)
-		return tokens, key, err
-	}
-	tokens, err := request.Context.EstimatedTokens()
-	return tokens + overhead + 128, key, err
-}
-
 func remindContextBudget(request providerapi.Request, budget *appcontext.Budget) (providerapi.Request, error) {
-	tokens, _, err := requestTokens(request, budget)
+	tokens, _, err := modelcall.EstimateRequestTokens(request, budget)
 	if err != nil {
 		return request, err
 	}
@@ -140,24 +110,10 @@ func remindContextBudget(request providerapi.Request, budget *appcontext.Budget)
 			},
 		}
 		request.Context.Entries = append(slices.Clone(request.Context.Entries), hint)
-		tokens, _, err = requestTokens(request, budget)
+		tokens, _, err = modelcall.EstimateRequestTokens(request, budget)
 		if err != nil {
 			return request, err
 		}
 	}
 	return request, appcontext.CheckCapacity(tokens, request.MaxOutputTokens, request.Model.ContextWindow)
-}
-
-func estimateRequestOverhead(tools []tool.ToolDefinition, schema *providerapi.OutputSchema) (int, error) {
-	data, err := json.Marshal(struct {
-		Tools        []tool.ToolDefinition
-		OutputSchema *providerapi.OutputSchema
-	}{
-		Tools:        tools,
-		OutputSchema: schema,
-	})
-	if err != nil {
-		return 0, err
-	}
-	return appcontext.EstimateTokens(string(data)), nil
 }
