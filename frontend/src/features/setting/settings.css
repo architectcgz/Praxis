@@ -1,81 +1,14 @@
-/* 设置页：头部、设置项卡片与信息卡。 */
+/* 设置页：状态徽章、设置项卡片与配置文件信息卡。 */
 .settings-region {
-    background: var(--paper);
-}
-
-/* 页面头部。窗口高度不足 560px 时随内容滚动，避免挤掉设置项。 */
-.settings-hero {
-    position: sticky;
-    top: 0;
-    z-index: var(--z-raised);
-    display: flex;
-    flex: 0 0 auto;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 32px;
-    padding: 22px 24px 16px;
-    border-bottom: 1px solid var(--line);
-    background: var(--paper);
-}
-
-.settings-hero-content {
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    align-items: flex-start;
-    gap: 20px;
-}
-
-.settings-hero-icon {
-    display: grid;
-    width: 34px;
-    height: 34px;
-    flex: 0 0 34px;
-    place-items: center;
-    border-radius: var(--radius-card);
-    background: var(--selected);
-    color: var(--accent);
-}
-
-.settings-hero-text {
-    min-width: 0;
-    flex: 1;
-    padding-top: 2px;
-}
-
-.settings-hero-kicker {
-    display: inline-block;
-    padding: 0;
-    color: var(--faint);
-    font-size: var(--font-size-meta);
-    font-weight: 650;
-    letter-spacing: var(--track-micro);
-    text-transform: uppercase;
-}
-
-.settings-hero-text h1 {
-    margin: 4px 0 0;
-    color: var(--ink);
-    font-size: var(--font-size-display);
-    font-weight: 650;
-    line-height: 1.2;
-    letter-spacing: 0;
-}
-
-.settings-hero-text p {
-    margin: 6px 0 0;
-    color: var(--muted);
-    font-size: var(--font-size-meta);
-    line-height: 1.45;
+    background: transparent;
 }
 
 .settings-status-badge {
-    display: inline-flex;
+    display: inline-block;
     flex: none;
-    align-items: center;
-    gap: 7px;
-    margin-top: 3px;
+    max-width: min(280px, 42vw);
     padding: 0 10px;
+    overflow: hidden;
     border: 1px solid var(--accent-line);
     border-radius: var(--radius-chip);
     background: var(--accent-soft);
@@ -83,6 +16,7 @@
     font-size: var(--font-size-meta);
     font-weight: 650;
     line-height: 22px;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
@@ -337,15 +271,9 @@
 }
 
 @media (max-width: 720px) {
-    .settings-hero,
     .settings-content {
         padding-right: 16px;
         padding-left: 16px;
-    }
-
-    .settings-hero {
-        flex-direction: column;
-        gap: 14px;
     }
 
     .settings-grid {
@@ -354,11 +282,5 @@
 
     .settings-file-row {
         grid-template-columns: minmax(0, 1fr);
-    }
-}
-
-@media (max-height: 560px) {
-    .settings-hero {
-        position: static;
     }
 }

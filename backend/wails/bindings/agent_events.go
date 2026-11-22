@@ -30,8 +30,20 @@ type AgentToolCall struct {
 	Arguments string `json:"arguments"`
 }
 
-// AgentToolApprovalRequired 通过信封中的 runId 与 callId 关联调用，审批详情由查询入口返回。
-type AgentToolApprovalRequired struct {
+// AgentSessionConfigReloaded 在会话重载成功后直接推送最新模型目录与有效授权模式。
+type AgentSessionConfigReloaded struct {
+	Models       []ModelOption       `json:"models"`
+	ApprovalMode SessionApprovalMode `json:"approvalMode"`
+}
+
+// AgentSessionTitleChanged 在首条输入自动命名后直接推送标题与更新时间。
+type AgentSessionTitleChanged struct {
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// AgentToolApprovalResolved 通知前端移除已完成或被取消的待审批调用。
+type AgentToolApprovalResolved struct {
 	CallID string `json:"callId"`
 }
 

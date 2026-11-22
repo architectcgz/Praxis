@@ -8,7 +8,6 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
-	"sync"
 	"time"
 )
 
@@ -27,9 +26,9 @@ type Dependencies struct {
 
 // Service 管理项目记录。
 type Service struct {
-	createMu  sync.Mutex
-	projects  repository.Project
-	directory Directory
+	createGate chan struct{}
+	projects   repository.Project
+	directory  Directory
 }
 
 // CreateInput 包含输入边界已校验的身份及规范化后的项目名称、绝对路径。
@@ -42,15 +41,20 @@ type CreateInput struct {
 // NewService 创建项目业务服务。
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		projects:  deps.Projects,
-		directory: deps.Directory,
+		createGate: make(chan struct{}, 1),
+		projects:   deps.Projects,
+		directory:  deps.Directory,
 	}
 }
 
 // CreateProject 创建目录并保存项目配置；后续失败保留已创建目录供重试。
 func (s *Service) CreateProject(ctx context.Context, params CreateInput) (projectmodel.Project, error) {
-	s.createMu.Lock()
-	defer s.createMu.Unlock()
+	select {
+	case s.createGate <- struct{}{}:
+		defer func() { <-s.createGate }()
+	case <-ctx.Done():
+		return projectmodel.Project{}, ctx.Err()
+	}
 	projects, err := s.projects.List(ctx, 0)
 	if err != nil {
 		return projectmodel.Project{}, err

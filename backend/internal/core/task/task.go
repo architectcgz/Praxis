@@ -6,7 +6,6 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"slices"
-	"sync"
 	"time"
 )
 
@@ -37,10 +36,9 @@ type Input struct {
 	Prompt       string
 }
 
-// TaskQueue 属于单个 Session，待办只驻留内存；零值可用。
+// TaskQueue 属于单个 Session，待办只驻留内存；零值可用，并发访问由调用方会话锁串行化。
 // 同时最多领取一项，准备失败 Retry，保存 Run 后 Complete。
 type TaskQueue struct {
-	mu       sync.Mutex
 	paused   bool
 	pending  []Task
 	claimed  *Task
@@ -49,8 +47,6 @@ type TaskQueue struct {
 
 // Enqueue 只分配 FIFO 顺序，不创建执行身份。
 func (q *TaskQueue) Enqueue(value Task) (Task, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	if q.sequence == math.MaxUint64 {
 		return Task{}, fmt.Errorf("task.sequence: task sequence is exhausted: %w", errorcode.ErrInvalidValue)
 	}
@@ -60,10 +56,8 @@ func (q *TaskQueue) Enqueue(value Task) (Task, error) {
 	return value, nil
 }
 
-// Next 领取队首，不绑定 Agent；取消与领取在同一把锁下仲裁。
+// Next 领取队首，不绑定 Agent。
 func (q *TaskQueue) Next() (Task, bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	if q.paused || len(q.pending) == 0 || q.claimed != nil {
 		return Task{}, false
 	}
@@ -78,8 +72,6 @@ func (q *TaskQueue) Next() (Task, bool) {
 
 // Retry 将未准入输入放回原队首；Clear 后的延迟清理不能重建已释放的队列内容。
 func (q *TaskQueue) Retry(value Task) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	if q.claimed != nil && q.claimed.ID == value.ID {
 		q.pending = slices.Insert(q.pending, 0, value)
 		q.claimed = nil
@@ -88,8 +80,6 @@ func (q *TaskQueue) Retry(value Task) {
 
 // Complete 只在 Run 保存成功后释放领取，正文随之退出内存队列。
 func (q *TaskQueue) Complete(value Task) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	if q.claimed != nil && q.claimed.ID == value.ID {
 		q.claimed = nil
 	}
@@ -97,8 +87,6 @@ func (q *TaskQueue) Complete(value Task) {
 
 // Cancel 只移除未领取输入，不取消当前 Run，也不保留取消墓碑。
 func (q *TaskQueue) Cancel(id identity.TaskID) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	if q.claimed != nil && q.claimed.ID == id {
 		return errorcode.ErrRequestConflict
 	}
@@ -115,8 +103,6 @@ func (q *TaskQueue) Cancel(id identity.TaskID) error {
 
 // Clear 释放正文、底层切片和领取引用；实例的生命周期由所属 Session 管理。
 func (q *TaskQueue) Clear() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.pending = nil
 	q.claimed = nil
 	q.sequence = 0
@@ -124,18 +110,26 @@ func (q *TaskQueue) Clear() {
 
 // List 返回待办快照，包含尚未保存 Run 的已领取队首。
 func (q *TaskQueue) List(limit int) []Task {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	values := slices.Clone(q.pending)
+	total := len(q.pending)
 	if q.claimed != nil {
-		values = slices.Insert(values, 0, *q.claimed)
+		total++
+	}
+	if total == 0 {
+		return nil
 	}
 	if limit > 0 {
-		values = values[:min(len(values), limit)]
+		total = min(total, limit)
+	}
+	values := make([]Task, 0, total)
+	if q.claimed != nil {
+		values = append(values, *q.claimed)
+	}
+	if remaining := total - len(values); remaining > 0 {
+		values = append(values, q.pending[:remaining]...)
 	}
 	return values
 }
 
-func (q *TaskQueue) Pause()       { q.mu.Lock(); defer q.mu.Unlock(); q.paused = true }
-func (q *TaskQueue) Resume()      { q.mu.Lock(); defer q.mu.Unlock(); q.paused = false }
-func (q *TaskQueue) Paused() bool { q.mu.Lock(); defer q.mu.Unlock(); return q.paused }
+func (q *TaskQueue) Pause()       { q.paused = true }
+func (q *TaskQueue) Resume()      { q.paused = false }
+func (q *TaskQueue) Paused() bool { return q.paused }

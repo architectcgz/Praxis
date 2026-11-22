@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronDown, FolderPlus, MessageSquarePlus, Search, Settings, X } from 'lucide-react'
+import { ArrowRight, ChevronDown, FolderPlus, MessageSquarePlus, PanelLeftClose, Search, X } from 'lucide-react'
 import type { ProjectGroup, ProjectPanelProps } from './types'
 import { SessionActions } from './SessionActions'
 
@@ -23,9 +23,7 @@ export function ProjectsPanel({
     onToggleProject,
     onDeleteSession,
     onRenameSession,
-    onOpenSettings,
     onRevealSessionFile,
-    settingsOpen,
     onCloseNavigation,
 }: ProjectPanelProps) {
     const query = searchOpen ? lookupID.trim().toLowerCase() : ''
@@ -71,8 +69,8 @@ export function ProjectsPanel({
                         <Search size={16} strokeWidth={1.8} aria-hidden="true" />
                     </button>
                     {onCloseNavigation && (
-                        <button className="icon-button" type="button" title="关闭项目导航" aria-label="关闭项目导航" onClick={onCloseNavigation}>
-                            <X size={18} strokeWidth={1.8} aria-hidden="true" />
+                        <button className="icon-button" type="button" title="收起项目目录 (Ctrl+K)" aria-label="收起项目目录" onClick={onCloseNavigation}>
+                            <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />
                         </button>
                     )}
                 </div>
@@ -152,19 +150,6 @@ export function ProjectsPanel({
                 ) : query && filteredGroups.length === 0 ? (
                     <p className="muted-copy">没有匹配的项目或会话，可按右侧箭头尝试按 ID 打开。</p>
                 ) : null}
-            </div>
-            <div className="sidebar-footer foot">
-                <button
-                    className={`settings-nav ${settingsOpen ? 'active' : ''}`}
-                    type="button"
-                    title="打开设置"
-                    aria-label="打开设置"
-                    aria-current={settingsOpen ? 'page' : undefined}
-                    onClick={onOpenSettings}
-                >
-                    <Settings size={16} strokeWidth={1.8} aria-hidden="true" />
-                    <span>设置</span>
-                </button>
             </div>
         </aside>
     )

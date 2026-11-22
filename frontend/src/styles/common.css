@@ -65,13 +65,13 @@
 .toast-notice {
     position: fixed;
     z-index: var(--z-modal);
-    top: 52px;
-    left: 50%;
+    top: calc(var(--topbar-height) + 10px);
+    left: calc(50% + var(--rail-width) / 2);
     display: flex;
     align-items: center;
     gap: 8px;
     width: max-content;
-    max-width: calc(100dvw - 32px);
+    max-width: calc(100dvw - var(--rail-width) - 24px);
     padding: 10px 14px;
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-float);
@@ -84,10 +84,6 @@
     pointer-events: none;
 }
 
-.toast-notice.has-tabs {
-    top: 94px;
-}
-
 .toast-notice > svg {
     flex: 0 0 auto;
     color: var(--accent);
@@ -96,15 +92,15 @@
 .error-banner {
     position: fixed;
     z-index: var(--z-popover);
-    top: 52px;
-    left: 50%;
+    top: calc(var(--topbar-height) + 10px);
+    left: calc(50% + var(--rail-width) / 2);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     width: max-content;
-    max-width: min(560px, calc(100dvw - 32px));
-    max-height: calc(100dvh - 82px);
+    max-width: min(560px, calc(100dvw - var(--rail-width) - 24px));
+    max-height: calc(100dvh - 76px);
     overflow: auto;
     padding: 10px 12px 10px 14px;
     border: 1px solid var(--danger-line);
@@ -115,10 +111,6 @@
     overflow-wrap: anywhere;
     box-shadow: var(--shadow-float);
     transform: translateX(-50%);
-}
-
-.error-banner.has-tabs {
-    top: 94px;
 }
 
 .error-banner-message {

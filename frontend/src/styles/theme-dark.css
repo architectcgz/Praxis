@@ -1,84 +1,94 @@
-/* 夜间（dark）主题：只覆盖颜色类令牌，令牌名与白天完全一致。
-   组件样式不需要任何主题分支；切换主题只是换 <html data-theme> 的取值。
-
-   深色下的三条额外规则（不可省略，否则夜间会「糊」）：
-   1. 纵深靠 1px 内高光（inset shadow）而不是半透明玻璃，保持禁用 backdrop-filter；
-   2. 仪器域比阅读面更暗，维持「读的东西在纸上、机器输出在黑里」的域分离；
-   3. 禁用态不得只降 opacity —— 深色下透明度会迅速掉出 4.5:1，改用固定色。 */
+/* 深空暮色（Deep Twilight）主题：覆盖与白昼薄雾对应的全部颜色与表面令牌。 */
 :root[data-theme='dark'] {
     color-scheme: dark;
 
-    /* 表面：整体压暗，靠明度台阶分层 */
-    --canvas: #0c0e11;
-    --bg: #121419;
-    --side: #171a20;
-    --paper: #1a1e25;
-    --paper-2: #13161b;
-    --paper-strong: #232830;
-    --overlay: rgba(0, 0, 0, 0.6);
+    --canvas: #0c0e13;
+    --frame-bg: #0c0e13;
+    --chrome-bg: #11141b;
+    --panel-bg: #161b24;
+    --panel-sub: #12161e;
+    --panel-border: rgba(255, 255, 255, 0.085);
+    --panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 26px -16px rgba(0, 0, 0, 0.72);
+    --paper: #161b24;
+    --paper-2: #12161e;
+    --paper-3: #0e1219;
+    --paper-strong: #1b212c;
+    --overlay: rgba(0, 0, 0, 0.58);
 
-    --ink: #e8ebef;
-    --muted: #a3acb8;
-    --faint: #858f9c;
+    --ink: #eef2f7;
+    --muted: #9aa5b6;
+    --faint: #7c8799;
+    --line: rgba(255, 255, 255, 0.075);
+    --line-strong: rgba(255, 255, 255, 0.15);
+    --fill: rgba(255, 255, 255, 0.055);
+    --fill-soft: rgba(255, 255, 255, 0.035);
+    --fill-strong: rgba(255, 255, 255, 0.095);
+    --selected: rgba(62, 209, 155, 0.13);
 
-    --line: #2a2f37;
-    --line-strong: #3d4653;
-    --fill: #262c35;
-    --fill-soft: rgba(255, 255, 255, 0.05);
-    --fill-strong: #2f3641;
-    --selected: #2a313b;
+    --accent: #3ed19b;
+    --accent-ink: #72e4b8;
+    --accent-line: rgba(62, 209, 155, 0.28);
+    --accent-soft: rgba(62, 209, 155, 0.12);
+    --on-accent: #07130e;
 
-    /* 暗底上深绿不可读，主色升为信号绿：强调色与 live 在夜间合流 */
-    --accent: #3ecf8e;
-    --accent-ink: #6ee0a8;
-    --accent-line: #1f4c36;
-    --accent-soft: #12301f;
-    --on-accent: #0b0d10;
+    --live: #3ed19b;
+    --live-ink: #72e4b8;
+    --live-line: rgba(62, 209, 155, 0.28);
+    --live-soft: rgba(62, 209, 155, 0.12);
+    --live-halo: rgba(62, 209, 155, 0.24);
 
-    --live: #3ecf8e;
-    --live-ink: #6ee0a8;
-    --live-line: #1f4c36;
-    --live-soft: #12301f;
-    --live-halo: rgba(62, 207, 142, 0.22);
+    --ok: #3ed19b;
+    --ok-ink: #72e4b8;
+    --ok-line: rgba(62, 209, 155, 0.28);
+    --ok-soft: rgba(62, 209, 155, 0.12);
 
-    --ok: #3ecf8e;
-    --ok-ink: #6ee0a8;
-    --ok-line: #1f4c36;
-    --ok-soft: #12301f;
+    --done: #6fa9fa;
+    --done-ink: #90bdfb;
+    --done-line: rgba(108, 166, 248, 0.28);
+    --done-soft: rgba(108, 166, 248, 0.12);
 
-    --warn: #f0a132;
-    --warn-ink: #f5b55c;
-    --warn-line: #4d3b1c;
-    --warn-soft: #2e2415;
-    --on-warn: #1a1205;
+    --warn: #e39b30;
+    --warn-ink: #f7c372;
+    --warn-line: rgba(242, 169, 59, 0.3);
+    --warn-soft: rgba(242, 169, 59, 0.12);
+    --on-warn: #171005;
 
-    --danger: #ff6b6b;
-    --danger-ink: #ff8a8a;
-    --danger-line: #512b2e;
-    --danger-soft: #2e1a1c;
+    --danger: #f0726e;
+    --danger-ink: #ff9c9c;
+    --danger-line: rgba(240, 102, 102, 0.3);
+    --danger-soft: rgba(240, 102, 102, 0.13);
     --on-danger: #1a0d0e;
 
-    /* 仪器域：比阅读面更暗一层，夜间同样是凹下去的台面 */
-    --inst-bg: #0e1013;
-    --inst-bg-2: #16191e;
-    --inst-ink: #dfe4ea;
-    --inst-dim: #8792a0;
-    --inst-line: #232830;
+    --user-bubble-bg: rgba(62, 209, 155, 0.11);
+    --user-bubble-line: rgba(62, 209, 155, 0.22);
+    --user-bubble-ink: #e6f7f0;
+    --composer-fade: rgba(22, 27, 36, 0.96);
+    --composer-line: rgba(255, 255, 255, 0.12);
+    --composer-focus-line: rgba(255, 255, 255, 0.28);
+    --composer-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 30px -14px rgba(0, 0, 0, 0.65);
+
+    --tl-track: rgba(255, 255, 255, 0.055);
+    --tl-grid: rgba(255, 255, 255, 0.07);
+
+    --inst-bg: #0c0f15;
+    --inst-bg-2: #12161f;
+    --inst-ink: #dbe3ee;
+    --inst-dim: #7f8b9e;
+    --inst-line: rgba(255, 255, 255, 0.08);
     --inst-fill: rgba(255, 255, 255, 0.06);
     --inst-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    --inst-accent: #3ecf8e;
+    --inst-accent: #3ed19b;
+    --inst-add-bg: rgba(62, 209, 155, 0.13);
+    --inst-add-ink: #84e8bf;
+    --inst-del-bg: rgba(240, 102, 102, 0.14);
+    --inst-del-ink: #ffa0a0;
 
-    --inst-add-bg: rgba(62, 207, 142, 0.14);
-    --inst-add-ink: #8fe3b6;
-    --inst-del-bg: rgba(255, 107, 107, 0.14);
-    --inst-del-ink: #ffa3a3;
+    --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
 
-    --scrollbar-thumb: #39414d;
-    --scrollbar-thumb-hover: #4a5460;
+    --select-chevron: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238a96a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
-    --select-chevron: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23858f9c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-
-    --shadow-top: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-    --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 14px 30px -16px rgba(0, 0, 0, 0.6);
-    --shadow-modal: 0 4px 14px rgba(0, 0, 0, 0.55), 0 28px 60px -22px rgba(0, 0, 0, 0.7);
+    --shadow-top: inset 0 1px 0 rgba(255, 255, 255, 0.075), 0 18px 38px -20px rgba(0, 0, 0, 0.75);
+    --shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 24px 54px -16px rgba(0, 0, 0, 0.88);
+    --shadow-modal: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 28px 60px -18px rgba(0, 0, 0, 0.92);
 }

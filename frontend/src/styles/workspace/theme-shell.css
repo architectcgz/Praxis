@@ -1,5 +1,4 @@
-/* Shell、顶部栏与通用控件的颜色、边框和材质。
-   所有取值来自 global.css / theme-dark.css 的令牌，本文件不写裸色值。 */
+/* F2 桌面框架外壳、左侧功能导轨、一体化顶栏与通用控件的颜色、边框和材质。 */
 button,
 input,
 textarea,
@@ -25,53 +24,129 @@ select:focus-visible {
 }
 
 .app-shell {
-    background: var(--bg);
+    background: var(--frame-bg);
 }
 
 .main-panel {
-    background: var(--paper);
+    background: var(--panel-bg);
 }
 
-/* 顶栏与侧栏使用实色表面和细底边，不使用半透明或 backdrop-filter。 */
-.top,
-.topbar {
-    border-bottom: 1px solid var(--line);
-    background: var(--side);
-    box-shadow: var(--shadow-top);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+.app-rail {
+    border-right: 1px solid var(--line);
+    background: var(--chrome-bg);
 }
 
-/* 品牌块是整屏唯一的实心主色块，负责第一眼定位。 */
-.mark,
-.brand-mark {
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-chip);
+.rail-logo {
     background: var(--accent);
     color: var(--on-accent);
-    box-shadow: none;
 }
 
-.top > b,
-.topbar > b,
-.topbar strong {
+.rail-btn {
+    background: transparent;
+    color: var(--muted);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
+
+.rail-btn:hover,
+.rail-btn.is-open {
+    background: var(--fill);
     color: var(--ink);
 }
 
-.crumb {
+.rail-btn.is-active {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+
+.rail-btn.is-active::before {
+    background: var(--accent);
+}
+
+.rail-sep {
+    background: var(--line);
+}
+
+.topbar {
+    border-bottom: 1px solid var(--line);
+    background: var(--chrome-bg);
+}
+
+.topbar-sep {
+    background: var(--line-strong);
+}
+
+.topbar-page-tab {
+    background: transparent;
+    color: var(--muted);
+}
+
+.topbar-page-tab.is-active {
+    border-color: var(--panel-border);
+    background: var(--panel-bg);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+
+.topbar-quick-nav {
+    border-color: var(--line-strong);
+    background: var(--panel-bg);
+    color: var(--ink);
+    transition: background-color var(--motion-duration) var(--ease-standard), border-color var(--motion-duration) var(--ease-standard);
+}
+
+.topbar-quick-nav:hover {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+
+.topbar-quick-nav kbd {
+    border: 1px solid var(--line);
+    background: var(--panel-sub);
     color: var(--faint);
 }
 
-.crumb span {
+.topbar-progress-btn {
+    background: transparent;
+    color: var(--muted);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard), border-color var(--motion-duration) var(--ease-standard);
+}
+
+.topbar-progress-btn:hover {
+    border-color: var(--line);
+    background: var(--panel-bg);
+    color: var(--ink);
+}
+
+.topbar-mini-bar {
+    background: var(--fill-strong);
+}
+
+.topbar-mini-bar > i.is-done {
+    background: var(--done);
+}
+
+.topbar-mini-bar > i.is-live {
+    background: var(--live);
+}
+
+.topbar-mini-bar > i.is-warn {
+    background: var(--warn);
+}
+
+.topbar-mini-bar > i.is-fail {
+    background: var(--danger);
+}
+
+.topbar-progress-ratio {
     color: var(--ink);
 }
 
 .status {
-    color: var(--faint);
+    color: var(--muted);
     font-size: var(--font-size-meta);
 }
 
-/* 状态圆点：已就绪为主色，正在发生用 live 信号色并轻微呼吸。 */
 .dot {
     border-radius: 50%;
     background: var(--accent);
@@ -98,11 +173,11 @@ select:focus-visible {
     }
 }
 
-/* 次级按钮：灰底实体。 */
 .quiet-button {
     background: var(--fill);
     color: var(--ink);
     box-shadow: none;
+    transition: background-color var(--motion-duration) var(--ease-standard);
 }
 
 .quiet-button:hover:not(:disabled) {
@@ -113,7 +188,6 @@ select:focus-visible {
     transform: scale(0.98);
 }
 
-/* 图标按钮：默认无形，悬停与激活才有底色。 */
 .icon-button {
     background: transparent;
     color: var(--muted);
@@ -127,7 +201,6 @@ select:focus-visible {
     color: var(--ink);
 }
 
-/* 输入控件：聚焦只把边框加深一档中性色，不加外侧 outline、发光或主色边框。 */
 input,
 textarea {
     background: var(--paper-strong);
@@ -144,12 +217,6 @@ input:focus,
 textarea:focus,
 input:focus-visible,
 textarea:focus-visible {
-    border-color: var(--faint);
+    border-color: var(--composer-focus-line);
     outline: none;
-}
-
-@media (max-width: 460px) {
-    .status {
-        font-size: var(--font-size-meta);
-    }
 }

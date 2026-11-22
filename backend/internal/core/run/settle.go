@@ -79,9 +79,8 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 	if err != nil {
 		return storageFailure(err)
 	}
-	r.terminalMu.Lock()
 	r.terminal = stored
-	r.terminalMu.Unlock()
+	r.terminalSaved.Store(true)
 	r.accept(stored)
 	if hookErr := r.deps.HookDispatcher.RunCommitted(context.WithoutCancel(ctx), hook.RunEvent{
 		Identity:    runIdentity(r, ""),

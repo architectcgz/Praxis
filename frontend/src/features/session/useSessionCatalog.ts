@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getSessionSummary, listSessions, type SessionSummary } from '../../api'
+import { listSessions, type SessionSummary } from '../../api'
 
 /** 会话目录只持有元数据，不拥有页面的历史、计时或执行状态。 */
 export function useSessionCatalog() {
@@ -8,7 +8,6 @@ export function useSessionCatalog() {
     const [error, setError] = useState<unknown>()
     const catalog = useRef<SessionSummary[]>([])
     const request = useRef(0)
-    const metadataRequests = useRef(new Map<string, number>())
 
     const refreshSessions = useCallback(async (projectIDs: readonly string[]) => {
         const id = ++request.current
@@ -29,29 +28,16 @@ export function useSessionCatalog() {
         }
     }, [])
 
-    const refreshSummary = useCallback(async (id: string) => {
+    const updateSessionTitle = useCallback((id: string, title: string, updatedAt?: string) => {
         if (!catalog.current.some((item) => item.id === id)) return
-        const version = (metadataRequests.current.get(id) || 0) + 1
-        metadataRequests.current.set(id, version)
-        try {
-            const summary = await getSessionSummary(id)
-            if (metadataRequests.current.get(id) !== version) return
-            const values = catalog.current.map((item) => item.id === id ? summary : item)
-                .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-            catalog.current = values
-            setSessions(values)
-        } catch (reason) {
-            if (metadataRequests.current.get(id) === version) setError(() => reason)
-        }
-    }, [])
-
-    const updateSessionTitle = useCallback((id: string, title: string) => {
-        metadataRequests.current.set(id, (metadataRequests.current.get(id) || 0) + 1)
-        const values = catalog.current.map((item) => item.id === id ? { ...item, title } : item)
+        const values = catalog.current.map((item) => (
+            item.id === id ? { ...item, title, updatedAt: updatedAt ?? item.updatedAt } : item
+        ))
+        if (updatedAt) values.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
         catalog.current = values
         setSessions(values)
     }, [])
 
-    useEffect(() => () => { request.current += 1; metadataRequests.current.clear() }, [])
-    return { sessions, loading, error, refreshSessions, refreshSummary, updateSessionTitle }
+    useEffect(() => () => { request.current += 1 }, [])
+    return { sessions, loading, error, refreshSessions, updateSessionTitle }
 }

@@ -11,10 +11,9 @@ type Options = {
     sessionID: string
     projectID: string
     createNewSession: (projectID: string) => Promise<boolean>
-    refreshModels: () => Promise<unknown>
     setInput: (value: string) => void
 }
-export function useWorkspaceCommands({ sessionID, projectID, createNewSession, refreshModels, setInput }: Options) {
+export function useWorkspaceCommands({ sessionID, projectID, createNewSession, setInput }: Options) {
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState('')
     const [commandNotice, setCommandNotice] = useState('')
@@ -31,12 +30,11 @@ export function useWorkspaceCommands({ sessionID, projectID, createNewSession, r
         try {
             if (command === '/new') return await createNewSession(projectID)
             await reloadConfig(sessionID)
-            await refreshModels()
             if (request === generation.current) { setInput(''); setCommandNotice('当前会话配置已重新加载') }
             return true
         } catch (reason) { if (request === generation.current) setError(readableError(reason)); return false }
         finally { pending.current = false; if (request === generation.current) setBusy(false) }
-    }, [createNewSession, projectID, refreshModels, sessionID, setInput])
+    }, [createNewSession, projectID, sessionID, setInput])
     const clearError = useCallback(() => setError(''), [])
     return { busy, error, clearError, runCommand, commandNotice, clearCommandNotice }
 }

@@ -4,6 +4,7 @@ import (
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
 	modelapi "praxis/internal/core/model"
+	"praxis/internal/core/security"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
@@ -29,6 +30,7 @@ const (
 	KindToolCall                Kind = "tool_call"
 	KindToolStarted             Kind = "tool_started"
 	KindToolApprovalRequired    Kind = "tool_approval_required"
+	KindToolApprovalResolved    Kind = "tool_approval_resolved"
 	KindToolResult              Kind = "tool_result"
 	KindTurnCompleted           Kind = "turn_completed"
 	KindRunStarted              Kind = "run_started"
@@ -72,12 +74,20 @@ type EntriesAppended struct {
 func (EntriesAppended) Kind() Kind { return KindEntriesAppended }
 func (EntriesAppended) isPayload() {}
 
-type SessionConfigReloaded struct{}
+type SessionConfigReloaded struct {
+	Models        []modelapi.Option
+	GlobalMode    security.ApprovalMode
+	SessionMode   *security.ApprovalMode
+	EffectiveMode security.ApprovalMode
+}
 
 func (SessionConfigReloaded) Kind() Kind { return KindSessionConfigReloaded }
 func (SessionConfigReloaded) isPayload() {}
 
-type SessionTitleChanged struct{}
+type SessionTitleChanged struct {
+	Title     string
+	UpdatedAt time.Time
+}
 
 func (SessionTitleChanged) Kind() Kind { return KindSessionTitleChanged }
 func (SessionTitleChanged) isPayload() {}
@@ -159,11 +169,24 @@ func (ToolStarted) Kind() Kind { return KindToolStarted }
 func (ToolStarted) isPayload() {}
 
 type ToolApprovalRequired struct {
-	CallID string
+	CallID      string
+	Name        string
+	Arguments   string
+	RuleID      string
+	Action      security.ApprovalMode
+	RiskVerdict security.RiskVerdict
+	RiskReason  string
 }
 
 func (ToolApprovalRequired) Kind() Kind { return KindToolApprovalRequired }
 func (ToolApprovalRequired) isPayload() {}
+
+type ToolApprovalResolved struct {
+	CallID string
+}
+
+func (ToolApprovalResolved) Kind() Kind { return KindToolApprovalResolved }
+func (ToolApprovalResolved) isPayload() {}
 
 type ToolResult struct {
 	CallID  string

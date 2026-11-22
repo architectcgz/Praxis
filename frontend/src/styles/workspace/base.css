@@ -1,62 +1,188 @@
-/* 工作区顶部栏与通用控件的布局、尺寸和状态结构。
+/* F2 左侧 52px 固定功能导轨、42px 一体化顶栏与通用控件的布局、尺寸和结构。
    颜色、边框与材质由 theme-shell.css 拥有，本文件不写颜色。 */
-.top,
-.topbar {
+.app-rail {
     display: flex;
-    min-width: 0;
-    height: var(--topbar-height);
-    min-height: var(--topbar-height);
+    flex-direction: column;
     align-items: center;
-    gap: 10px;
-    padding: 0 14px;
+    gap: 6px;
+    min-width: 0;
+    min-height: 0;
+    padding: 9px 0 12px;
+    overflow: hidden;
+}
+
+.rail-logo {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    margin-bottom: 6px;
+    place-items: center;
+    border-radius: 7px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1;
+    user-select: none;
+}
+
+.rail-btn {
+    position: relative;
+    display: grid;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-control);
+}
+
+.rail-btn.is-active::before {
+    content: "";
+    position: absolute;
+    top: 7px;
+    bottom: 7px;
+    left: -9px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+}
+
+.rail-spacer {
+    flex: 1 1 auto;
+}
+
+.rail-sep {
+    width: 22px;
+    height: 1px;
+    flex: none;
+    margin: 3px 0;
 }
 
 .topbar {
     position: relative;
     z-index: var(--z-sticky);
-}
-
-.mark,
-.brand-mark {
-    display: grid;
-    width: 22px;
-    height: 22px;
-    flex: 0 0 22px;
-    place-items: center;
-}
-
-.brand-mark {
-    font-size: var(--font-size-meta);
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: 0;
-}
-
-.topbar strong,
-.topbar span {
-    display: block;
-}
-
-.topbar strong,
-.topbar > b {
-    font-size: var(--font-size-ui);
-    font-weight: 650;
-    letter-spacing: 0;
-}
-
-.crumb {
+    display: flex;
     min-width: 0;
+    height: var(--topbar-height);
+    min-height: var(--topbar-height);
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 12px 0 10px;
+}
+
+.topbar-tabs-area {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    height: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.topbar-tabs-area::-webkit-scrollbar {
+    display: none;
+}
+
+.topbar-sep {
+    width: 1px;
+    height: 16px;
+    flex: none;
+    margin: 0 4px;
+}
+
+.topbar-page-tab {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    max-width: 260px;
+    padding: 0 11px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    font-size: var(--font-size-meta);
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.topbar-page-tab > span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.spacer {
-    flex: 1;
+.topbar-quick-nav {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    font-size: var(--font-size-meta);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.topbar-quick-nav kbd {
+    padding: 1px 5px;
+    border-radius: var(--radius-chip);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.topbar-right {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+}
+
+.topbar-progress-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    padding: 0 9px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    font-size: var(--font-size-meta);
+    white-space: nowrap;
+}
+
+.topbar-mini-bar {
+    display: flex;
+    gap: 1px;
+    width: 44px;
+    height: 5px;
+    overflow: hidden;
+    border-radius: var(--radius-pill);
+}
+
+.topbar-mini-bar > i {
+    display: block;
+    height: 100%;
+}
+
+.topbar-progress-ratio {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.topbar-status {
+    padding: 0 6px;
 }
 
 .status {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
 }
@@ -85,7 +211,6 @@ svg {
     display: block;
 }
 
-/* 次级按钮：几何与图标按钮同一档，颜色在主题层。 */
 .quiet-button {
     display: inline-flex;
     min-height: var(--control-height-compact);
@@ -99,7 +224,6 @@ svg {
     font-weight: 650;
 }
 
-/* 图标按钮：28×28 方格，只用背景色表达状态，不改变几何。 */
 .icon-button {
     display: grid;
     width: var(--icon-button-size);
@@ -115,12 +239,6 @@ svg {
     transform: scale(0.96);
 }
 
-.topbar > .status,
-.topbar > .icon-button {
-    flex: 0 0 auto;
-}
-
-/* 通用输入控件：与按钮同一档高度和圆角。 */
 input,
 textarea {
     box-sizing: border-box;

@@ -1,42 +1,69 @@
-/* 工作区断点集中定义，窄屏保留同一套 Grid 收缩约束。 */
-@media (max-width: 1180px) {
-    .workspace-stage-body {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .agents-panel {
+/* 工作区断点集中定义，在中小视口保留 F2 规整框架与同层项目目录可读性。 */
+@media (max-width: 1140px) {
+    .workbench-sheet.main-sheet .workbench-footer-hint {
         display: none;
     }
 }
 
-@media (max-width: 860px) {
-    .workspace-grid {
-        grid-template-columns: minmax(0, 1fr);
+@media (max-width: 1040px) {
+    :root {
+        --sidebar-width: 236px;
     }
 
-    .projects-panel {
-        display: none;
+    .workbench-sheets {
+        flex-direction: column;
+        padding: 8px;
+        gap: 8px;
     }
 
-    .workspace-navigation-trigger {
-        display: grid;
+    .workbench-sheet.main-sheet,
+    .workbench-sheet.right-sheet {
+        min-width: 0;
+        flex: 1 1 0%;
+    }
+
+    .workbench-sheet.main-sheet .workbench-footer-hint {
+        display: inline;
     }
 }
 
 @media (max-width: 720px) {
+    :root {
+        --sidebar-width: min(232px, calc(100dvw - var(--rail-width)));
+    }
+
     .topbar {
+        padding: 0 8px;
+        gap: 8px;
+    }
+
+    .topbar-progress-detail,
+    .workbench-sheet-subtitle,
+    .workbench-footer-hint {
+        display: none;
+    }
+
+    .workbench-sheet-head {
         padding: 0 12px;
     }
 
-    .crumb {
-        display: none;
+    .workbench-sheet-footer {
+        padding: 4px 12px;
     }
 }
 
 @media (max-width: 460px) {
-    .topbar {
-        gap: 8px;
-        padding: 0 10px;
+    :root {
+        --rail-width: 44px;
+    }
+
+    .rail-btn.is-active::before {
+        left: -5px;
+    }
+
+    .topbar-mini-bar,
+    .topbar-quick-nav kbd {
+        display: none;
     }
 
     .modal-backdrop {

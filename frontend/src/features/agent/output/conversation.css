@@ -241,7 +241,7 @@
     margin-bottom: 0;
 }
 
-/* 用户消息是软绿气泡，右对齐并限制宽度。 */
+/* 用户消息采用右置柔玉气泡，非对称尾角与无框代理正文形成阅读呼吸感。 */
 .message-user {
     display: flex;
     flex-direction: column;
@@ -256,15 +256,15 @@
 .message-user > p {
     display: inline-block;
     width: fit-content;
-    max-width: 78%;
+    max-width: 76%;
     margin: 0;
-    padding: 10px 16px;
-    border: 1px solid var(--accent-line);
-    border-radius: var(--radius-card);
-    background: var(--accent-soft);
-    color: var(--accent-ink);
+    padding: 11px 16px;
+    border: 1px solid var(--user-bubble-line);
+    border-radius: 17px 17px 5px 17px;
+    background: var(--user-bubble-bg);
+    color: var(--user-bubble-ink);
     font-size: var(--font-size-body);
-    line-height: 1.62;
+    line-height: 1.65;
     text-align: left;
 }
 

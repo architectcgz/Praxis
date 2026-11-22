@@ -230,7 +230,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			for index := range len(blocks) {
 				state := blocks[index]
 				if state.ReasoningState != nil {
-					if err := emit(providerapi.Event{Kind: providerapi.StreamReasoningState, ReasoningState: state.ReasoningState.Clone(), OutputIndex: &index}); err != nil {
+					if err := emit(providerapi.Event{Kind: providerapi.StreamReasoningState, ReasoningState: state.ReasoningState, OutputIndex: &index}); err != nil {
 						return "", err
 					}
 				}

@@ -1,4 +1,4 @@
-import type { AgentEvent, HistoryMessage, AgentView } from '../../api'
+import type { AgentEvent } from '../../api'
 
 /** 单次执行的临时输出，持久化条目回填后移除。 */
 export type StreamingOutput = {
@@ -8,14 +8,3 @@ export type StreamingOutput = {
 }
 
 export type StreamingOutputs = Record<string, StreamingOutput>
-
-/** Agent 侧栏展示所需的最小 Session 摘要。 */
-export type AgentSessionSummary = { title: string; agents: AgentView[] }
-
-export type AgentsPanelProps = {
-    loading: boolean
-    session: AgentSessionSummary | null
-    agentEntries: Record<string, HistoryMessage[]>
-    selectedAgentID: string
-    onSelectAgent: (id: string) => void
-}

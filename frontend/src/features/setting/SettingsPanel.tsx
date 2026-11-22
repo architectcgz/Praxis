@@ -1,10 +1,9 @@
-import { Cpu, FileJson, RefreshCw, Settings2 } from 'lucide-react'
+import { Cpu, FileJson, RefreshCw } from 'lucide-react'
 import type { ModelOption } from '../../api'
 
 type SettingsPanelProps = {
     models: ModelOption[]
     hasActiveSession: boolean
-    activeSessionTitle?: string
 }
 
 const configFiles = [
@@ -15,26 +14,11 @@ const configFiles = [
     { path: '~/.praxis/config/agents/', description: '主代理与自定义子代理角色定义目录' },
 ] as const
 
-export function SettingsPanel({ models, hasActiveSession, activeSessionTitle }: SettingsPanelProps) {
+export function SettingsPanel({ models, hasActiveSession }: SettingsPanelProps) {
     const providerCount = new Set(models.map((item) => item.providerId)).size
     return (
         <section className="region settings-region" aria-labelledby="settings-title">
             <div className="scroll-region">
-                <div className="page page-header settings-hero">
-                    <div className="settings-hero-content">
-                        <div className="settings-hero-icon" aria-hidden="true">
-                            <Settings2 size={18} strokeWidth={1.8} />
-                        </div>
-                        <div className="settings-hero-text">
-                            <span className="settings-hero-kicker">Configuration</span>
-                            <h1 id="settings-title">工作区设置</h1>
-                            <p>本地配置文件是模型目录、凭据、工具启停和审批默认值的唯一编辑来源。</p>
-                        </div>
-                    </div>
-                    <div className={`settings-status-badge ${hasActiveSession ? '' : 'is-muted'}`}>
-                        <span>{hasActiveSession ? `当前会话：${activeSessionTitle || '未命名会话'}` : '尚未打开会话'}</span>
-                    </div>
-                </div>
                 <div className="page settings-content">
                     <div className="settings-grid">
                         <section className="settings-card" aria-labelledby="settings-models-title">

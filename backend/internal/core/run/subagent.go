@@ -6,7 +6,6 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/identity"
-	"slices"
 	"sync"
 )
 
@@ -51,7 +50,7 @@ type collaboration struct {
 func (r *Run) initCollaboration() {
 	r.collaboration.children = make(map[identity.AgentID]SubagentHandle)
 	r.collaboration.consumed = make(map[identity.ReportID]bool)
-	r.collaboration.wake = make(chan struct{}, 1)
+	r.collaboration.wake = make(chan struct{})
 	r.collaboration.accepting = true
 }
 
@@ -152,7 +151,6 @@ func (r *Run) receiveInstruction(ctx context.Context, text string) (identity.Ent
 	id := identity.NewEntryID()
 	r.collaboration.instructions = append(r.collaboration.instructions, instruction{id: id, text: text})
 	r.collaboration.mu.Unlock()
-	r.WakeSubagentWaiters()
 	return id, nil
 }
 
@@ -163,16 +161,22 @@ func (r *Run) finishInstructions(ctx context.Context) (bool, error) {
 		r.collaboration.mu.Unlock()
 		return false, nil
 	}
+	instructions := r.collaboration.instructions
+	r.collaboration.instructions = nil
 	r.collaboration.mu.Unlock()
-	return r.acceptInstructions(ctx)
+	return r.appendInstructions(ctx, instructions)
 }
 
 // acceptInstructions 在 Subagent Loop 的串行点把运行时指令变成普通 Input Entry。
 func (r *Run) acceptInstructions(ctx context.Context) (bool, error) {
 	r.collaboration.mu.Lock()
-	instructions := slices.Clone(r.collaboration.instructions)
+	instructions := r.collaboration.instructions
 	r.collaboration.instructions = nil
 	r.collaboration.mu.Unlock()
+	return r.appendInstructions(ctx, instructions)
+}
+
+func (r *Run) appendInstructions(ctx context.Context, instructions []instruction) (bool, error) {
 	if len(instructions) == 0 {
 		return false, nil
 	}
@@ -223,8 +227,8 @@ func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) e
 	}
 	r.collaboration.mu.Lock()
 	r.collaboration.reports = append(r.collaboration.reports, result)
+	r.wakeLocked()
 	r.collaboration.mu.Unlock()
-	r.WakeSubagentWaiters()
 	return nil
 }
 
@@ -281,11 +285,12 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 			r.collaboration.mu.Unlock()
 			return receipts, nil
 		}
+		wake := r.collaboration.wake
 		r.collaboration.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-r.collaboration.wake:
+		case <-wake:
 		}
 	}
 }
@@ -293,7 +298,7 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 // acceptReports 在 Parent Loop 的串行点把自包含报告变成普通 Input Entry。
 func (r *Run) acceptReports(ctx context.Context) error {
 	r.collaboration.mu.Lock()
-	reports := slices.Clone(r.collaboration.accepted)
+	reports := r.collaboration.accepted
 	r.collaboration.accepted = nil
 	r.collaboration.mu.Unlock()
 	for _, report := range reports {
@@ -385,10 +390,14 @@ func (r *Run) ResultForParent() SubagentReport {
 }
 
 func (r *Run) WakeSubagentWaiters() {
-	select {
-	case r.collaboration.wake <- struct{}{}:
-	default:
-	}
+	r.collaboration.mu.Lock()
+	r.wakeLocked()
+	r.collaboration.mu.Unlock()
+}
+
+func (r *Run) wakeLocked() {
+	close(r.collaboration.wake)
+	r.collaboration.wake = make(chan struct{})
 }
 
 // CompleteSubagent 在交付后释放子 Run；保留句柄供父 Run 等待收尾。

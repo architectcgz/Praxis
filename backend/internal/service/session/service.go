@@ -6,6 +6,7 @@ import (
 	"praxis/internal/core/approval"
 	"praxis/internal/core/coordinator"
 	projectmodel "praxis/internal/core/project"
+	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	executionmodel "praxis/internal/core/toolexecution"
@@ -17,6 +18,7 @@ import (
 )
 
 type SessionView = coordinator.SessionView
+type ApprovalSettings = coordinator.ApprovalSettings
 type SubmitResult = coordinator.SubmitResult
 type ToolDecision = approval.DecisionRequest
 type ToolControl = executionmodel.ControlRequest
@@ -62,10 +64,6 @@ func (s *Service) CloseSession(ctx context.Context, id identity.SessionID) error
 
 func (s *Service) ListSessionsByProject(ctx context.Context, id identity.ProjectID, limit int) ([]sessionmodel.SessionInfo, error) {
 	return s.sessions.ListByProject(ctx, id, limit)
-}
-
-func (s *Service) GetSessionInfo(ctx context.Context, id identity.SessionID) (sessionmodel.SessionInfo, error) {
-	return s.sessions.Get(ctx, id)
 }
 
 func (s *Service) SessionLogPath(ctx context.Context, id identity.SessionID) (string, error) {
@@ -166,12 +164,20 @@ func (s *Service) ResumeQueue(ctx context.Context, id identity.SessionID) error 
 	return s.core.ResumeQueue(ctx, id)
 }
 
-func (s *Service) StopRun(ctx context.Context, sessionID identity.SessionID, runID identity.RunID) error {
-	return s.core.StopRun(ctx, sessionID, runID)
+func (s *Service) SelectModel(ctx context.Context, id identity.SessionID, choice sessionmodel.ModelChoice) error {
+	return s.core.SelectModel(ctx, id, choice)
 }
 
-func (s *Service) ListToolApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]approval.Approval, error) {
-	return s.core.ListToolApprovals(ctx, sessionID, agentID)
+func (s *Service) SetApprovalMode(ctx context.Context, id identity.SessionID, mode *security.ApprovalMode) (ApprovalSettings, error) {
+	return s.core.SetApprovalMode(ctx, id, mode)
+}
+
+func (s *Service) ReloadSessionConfig(ctx context.Context, id identity.SessionID) error {
+	return s.core.ReloadSessionConfig(ctx, id)
+}
+
+func (s *Service) StopRun(ctx context.Context, sessionID identity.SessionID, runID identity.RunID) error {
+	return s.core.StopRun(ctx, sessionID, runID)
 }
 
 func (s *Service) ApproveToolCall(ctx context.Context, params ToolDecision) error {

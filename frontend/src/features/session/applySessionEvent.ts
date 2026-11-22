@@ -1,8 +1,11 @@
 import { activeRunId } from '../../api/agents'
+import { parseToolApproval } from '../../api/commands'
 import { isRequestEvent, type AgentEvent } from '../../api/events'
+import { normalizeModelOptions } from '../../api/models'
 import { mergeStreamingEvent } from '../run/streaming'
 import type { AgentEntry, SessionData, SessionOutput } from './sessionStore'
 import { mergeMessages, mergeRequests } from '../agent/history/entries'
+import { summarizeRequestsUsage } from '../agent/modelUsage'
 
 /** 接纳后端通知并更新对应 Agent 的展示状态。 */
 export function applySessionEvent(sessionId: string, data: SessionData, output: SessionOutput, event: AgentEvent): { data: SessionData; output: SessionOutput } {
@@ -14,10 +17,49 @@ export function applySessionEvent(sessionId: string, data: SessionData, output: 
         if (data.session) data = { ...data, session: { ...data.session, tasks: event.data.tasks, queuePaused: event.data.paused } }
         return { data, output }
     }
-    if (event.kind === 'session_config_reloaded') return { data: { ...data, configRevision: data.configRevision + 1 }, output }
-    if (event.kind === 'session_title_changed' || event.kind === 'task_queue_storage_failed') return { data, output }
+    if (event.kind === 'session_config_reloaded') {
+        if (data.session) {
+            data = {
+                ...data,
+                session: {
+                    ...data.session,
+                    models: normalizeModelOptions(event.data.models),
+                    approvalMode: event.data.approvalMode,
+                },
+            }
+        }
+        return { data, output }
+    }
+    if (event.kind === 'session_title_changed') {
+        if (data.session) {
+            data = {
+                ...data,
+                session: { ...data.session, title: event.data.title, updatedAt: event.data.updatedAt },
+            }
+        }
+        return { data, output }
+    }
+    if (event.kind === 'task_queue_storage_failed') return { data, output }
     const { agentId: id, runId } = event
     const current = data.byId[id]
+    if (event.kind === 'tool_approval_required' && data.session && !data.endedRuns.has(runId)) {
+        const nextApproval = parseToolApproval(event.data)
+        const pendingApprovals = [
+            ...data.session.pendingApprovals.filter(
+                (item) => !(item.runId === nextApproval.runId && item.callId === nextApproval.callId),
+            ),
+            nextApproval,
+        ]
+        data = { ...data, session: { ...data.session, pendingApprovals } }
+    }
+    if (event.kind === 'tool_approval_resolved' && data.session) {
+        const pendingApprovals = data.session.pendingApprovals.filter(
+            (item) => !(item.runId === runId && item.callId === event.data.callId),
+        )
+        if (pendingApprovals.length !== data.session.pendingApprovals.length) {
+            data = { ...data, session: { ...data.session, pendingApprovals } }
+        }
+    }
     if (event.kind === 'subagent_started') {
         if (data.ids.includes(id) || data.endedRuns.has(runId)) return { data, output }
         data = {
@@ -67,6 +109,12 @@ export function applySessionEvent(sessionId: string, data: SessionData, output: 
         const activeRun = activeRunId(agent)
         const newerRun = activeRun ? activeRun !== runId : (agent.runEndedAt ?? '') > endedAt
         data = { ...data, endedRuns: new Set([...data.endedRuns, runId]) }
+        if (data.session) {
+            const pendingApprovals = data.session.pendingApprovals.filter((item) => item.runId !== runId)
+            if (pendingApprovals.length !== data.session.pendingApprovals.length) {
+                data = { ...data, session: { ...data.session, pendingApprovals } }
+            }
+        }
         if (!newerRun) {
             const runFailure = failureMessage || failureCode
             update(id, (entry) => ({
@@ -109,5 +157,6 @@ export function applySessionEvent(sessionId: string, data: SessionData, output: 
 }
 
 export function clearHistory(entry: AgentEntry): AgentEntry {
-    return { ...entry, entries: [], requests: new Map(), page: undefined, error: '', loading: false }
+    const archivedUsage = entry.requests.size > 0 ? summarizeRequestsUsage(entry.requests) : entry.archivedUsage
+    return { ...entry, entries: [], requests: new Map(), archivedUsage, page: undefined, error: '', loading: false }
 }

@@ -13,8 +13,6 @@
 }
 
 .session-panel {
-    /* 阅读列宽度由全局令牌 --session-content-width 提供：随主栏按比例伸缩，
-       并受上下限约束；这里只声明会话内的横向留白。 */
     --session-content-padding: 24px;
 
     display: flex;
@@ -24,7 +22,7 @@
     flex: 1;
     flex-direction: column;
     margin: 0;
-    background: var(--paper);
+    background: transparent;
 }
 
 /* 空状态不使用卡片容器，只有图标、标题、说明和行动提示。 */

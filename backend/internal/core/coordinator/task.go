@@ -16,7 +16,7 @@ import (
 type SubmitResult struct {
 	Task            taskmodel.Task
 	SchedulingError string
-	titleChanged    bool
+	titleEvent      *coreevent.SessionTitleChanged
 }
 
 func (s *Coordinator) SubmitTask(ctx context.Context, input taskmodel.Input) (SubmitResult, error) {
@@ -26,9 +26,13 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input taskmodel.Input) (Su
 	defer s.running.Done()
 	s.mu.Lock()
 	schedule := s.schedules[input.SessionID]
-	blocked := schedule != nil && (schedule.reloading || schedule.closing)
+	closed := s.closed
+	closing := schedule != nil && schedule.closing
 	s.mu.Unlock()
-	if blocked {
+	if closed {
+		return SubmitResult{}, errCoordinatorClosed
+	}
+	if closing {
 		return SubmitResult{}, errorcode.ErrRequestConflict
 	}
 	task, err := s.createTask(ctx, input)
@@ -39,10 +43,10 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input taskmodel.Input) (Su
 	if err != nil || notification == nil {
 		return result, err
 	}
-	if result.titleChanged {
+	if result.titleEvent != nil {
 		s.loop.Emitter.Emit(coreevent.Event{
 			Source:  coreevent.EventSource{SessionID: input.SessionID},
-			Payload: coreevent.SessionTitleChanged{},
+			Payload: *result.titleEvent,
 		})
 	}
 	s.loop.Emitter.Emit(*notification)
@@ -60,9 +64,13 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 	defer unlock()
 	s.mu.Lock()
 	schedule := s.schedules[input.SessionID]
-	valid := schedule == nil || !schedule.closing && !schedule.reloading
+	closed := s.closed
+	closing := schedule != nil && schedule.closing
 	s.mu.Unlock()
-	if !valid {
+	if closed {
+		return SubmitResult{}, nil, errCoordinatorClosed
+	}
+	if closing {
 		return SubmitResult{}, nil, errorcode.ErrRequestConflict
 	}
 	if schedule == nil {
@@ -90,12 +98,16 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 		}
 	}
 	title := sessionmodel.TitleFromInput(task.Prompt)
-	if err := s.sessionRecords.UpdateTitle(ctx, task.SessionID, "", title, time.Now().UTC()); err != nil {
+	updatedAt := time.Now().UTC()
+	if err := s.sessionRecords.UpdateTitle(ctx, task.SessionID, "", title, updatedAt); err != nil {
 		if !errors.Is(err, errorcode.ErrRequestConflict) {
 			return SubmitResult{}, nil, err
 		}
 	} else {
-		result.titleChanged = true
+		result.titleEvent = &coreevent.SessionTitleChanged{
+			Title:     title,
+			UpdatedAt: updatedAt,
+		}
 	}
 	task, err = schedule.queue.Enqueue(task)
 	if err != nil {
@@ -150,10 +162,15 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 	}
 	s.mu.Lock()
 	schedule := s.schedules[id]
+	closing := schedule != nil && schedule.closing
 	s.mu.Unlock()
 	if schedule == nil {
 		unlock()
 		return errorcode.ErrNotFound
+	}
+	if closing {
+		unlock()
+		return errorcode.ErrRequestConflict
 	}
 	if pause {
 		schedule.queue.Pause()

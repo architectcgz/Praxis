@@ -642,13 +642,8 @@
 }
 
 /* =====================================================================
-   协作结果：阅读内容，留在纸上
+   输出卡片与折叠行：纸张背景下的通用容器
    ===================================================================== */
-.collaboration-messages {
-    display: grid;
-    gap: var(--message-content-gap, 14px);
-}
-
 .output-card {
     overflow: hidden;
     border: 1px solid var(--line);
@@ -779,115 +774,6 @@
 
 .output-file-diffstat .is-del {
     color: var(--inst-del-ink);
-}
-
-.output-lanes {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-    gap: 10px;
-}
-
-.output-lane {
-    display: grid;
-    min-width: 0;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-control);
-    background: var(--paper);
-}
-
-.output-lane-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.output-lane-head strong {
-    min-width: 0;
-    flex: 1;
-    overflow-wrap: anywhere;
-    color: var(--ink);
-    font-size: var(--font-size-ui);
-    font-weight: 650;
-}
-
-.output-lane-task,
-.output-lane-result {
-    display: -webkit-box;
-    margin: 0;
-    overflow: hidden;
-    color: var(--muted);
-    font-size: var(--font-size-meta);
-    line-height: 1.65;
-    overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-}
-
-.output-lane-task {
-    min-height: 40px;
-}
-
-.output-lane-track {
-    height: 4px;
-    overflow: hidden;
-    border-radius: var(--radius-pill);
-    background: var(--fill);
-}
-
-.output-lane-track span {
-    display: block;
-    height: 100%;
-}
-
-.output-lane-track[data-status='completed'] span {
-    background: var(--accent);
-}
-
-.output-lane-track[data-status='running'] span {
-    background: var(--live);
-}
-
-.output-lane-track[data-status='failed'] span {
-    background: var(--danger);
-}
-
-.output-lane .output-button,
-.output-fold-body .output-button {
-    justify-self: start;
-    margin-top: auto;
-}
-
-.output-handoff-meta {
-    display: grid;
-    grid-template-columns: 72px minmax(0, 1fr);
-    gap: 8px 12px;
-    margin: 0;
-    font-size: var(--font-size-meta);
-    line-height: 1.65;
-}
-
-.output-handoff-meta dt {
-    color: var(--faint);
-}
-
-.output-handoff-meta dd {
-    margin: 0;
-    color: var(--muted);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.output-handoff-result {
-    display: grid;
-    gap: 6px;
-    padding-top: 8px;
-    border-top: 1px solid var(--line);
-}
-
-.output-handoff-result .message-markdown {
-    font-size: var(--font-size-meta);
 }
 
 @media (max-width: 720px) {

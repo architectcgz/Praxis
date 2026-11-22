@@ -49,43 +49,46 @@
     font-size: var(--font-size-meta);
 }
 
-/* 输入区与消息阅读列同宽，随主栏按比例伸缩并居中；极窄窗口下由可用宽度兜底，
-   避免最小宽度撑开页面。 */
+/* 输入区与消息阅读列同宽，随主栏按比例伸缩并居中；极窄窗口下由可用宽度兜底。 */
 .command-band {
     position: relative;
     z-index: var(--z-raised);
     display: block;
-    width: min(var(--session-content-width, 940px), calc(100cqi - var(--session-gutter, 32px) * 2));
-    min-width: min(288px, calc(100cqi - var(--session-gutter, 32px) * 2));
+    width: min(var(--session-content-width, 780px), calc(100cqi - var(--session-gutter, 28px) * 2));
+    min-width: min(288px, calc(100cqi - var(--session-gutter, 28px) * 2));
     flex: 0 0 auto;
     margin: 0 auto;
-    padding: 4px 0 16px;
+    padding: 8px 0 14px;
+    background: linear-gradient(180deg, transparent 0%, var(--composer-fade) 24%);
 }
 
 /* 扩展内容与输入框共用阅读列，具体展示由调用方提供。 */
 .agent-input-accessory {
+    padding-top: 0;
     padding-bottom: 8px;
+    background: transparent;
 }
 
 .agent-input-accessory:empty {
     display: none;
 }
 
-/* 输入框聚焦只把边框加深一档中性色，不使用主色边框或外侧光晕。 */
+/* 一体柔和云盒：聚焦只把边框加深一档中性色，不使用主色边框或外侧光晕。 */
 .composer-shell {
     display: block;
     width: 100%;
-    min-height: 80px;
+    min-height: 78px;
     margin-top: 0;
     padding: 0;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-card);
+    border: 1px solid var(--composer-line);
+    border-radius: var(--radius-composer);
     background: var(--paper-strong);
+    box-shadow: var(--composer-shadow);
     transition: border-color var(--motion-duration) var(--ease-standard);
 }
 
 .composer-shell:focus-within {
-    border-color: var(--faint);
+    border-color: var(--composer-focus-line);
     background: var(--paper-strong);
 }
 
@@ -93,9 +96,9 @@
     display: block;
     width: 100%;
     min-width: 0;
-    min-height: 60px;
-    max-height: min(220px, 32dvh);
-    padding: 12px 14px 8px;
+    min-height: 46px;
+    max-height: min(200px, 30dvh);
+    padding: 13px 16px 8px;
     border: 0;
     border-radius: 0;
     outline: none;
@@ -120,7 +123,36 @@
     align-items: center;
     gap: 4px;
     min-width: 0;
-    padding: 6px 8px 8px 10px;
+    padding: 4px 10px 10px 12px;
+}
+
+/* 通用 Token 用量明细条（主面板 34px 底栏与子代理详情顶栏共用）。 */
+.usage-inline {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    font-variant-numeric: tabular-nums;
+}
+
+.usage-inline strong {
+    color: var(--ink);
+    font-weight: 700;
+}
+
+.usage-cache-rate {
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-weight: 650;
+}
+
+.usage-cache-detail {
+    color: var(--faint);
 }
 
 .composer-icon-button {
@@ -393,16 +425,22 @@
 .composer-submit {
     display: grid;
     width: auto;
-    min-width: var(--control-height-compact);
-    height: var(--control-height-compact);
+    min-width: 31px;
+    height: 31px;
     margin-left: auto;
-    padding: 0 10px;
+    padding: 0 9px;
     place-items: center;
     border: 0;
-    border-radius: var(--radius-control);
+    border-radius: 10px;
     background: var(--accent);
     color: var(--on-accent);
     transition: background-color var(--motion-duration) var(--ease-standard), transform var(--motion-duration) var(--ease-standard);
+}
+
+.composer-submit:disabled {
+    background: var(--fill-strong);
+    color: var(--faint);
+    opacity: 1;
 }
 
 .composer-submit:hover:not(:disabled) {
@@ -458,40 +496,6 @@
     color: var(--warn-ink);
     font-size: var(--font-size-meta);
     white-space: nowrap;
-}
-
-.subagent-composer-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px 14px;
-    padding: 10px 14px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-card);
-    background: var(--paper-2);
-}
-
-.subagent-composer-copy {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    color: var(--muted);
-    font-size: var(--font-size-meta);
-}
-
-.subagent-composer-copy > svg {
-    flex: none;
-    color: var(--accent);
-}
-
-.subagent-composer-actions {
-    display: flex;
-    flex: none;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
 }
 
 .composer-approval-error {

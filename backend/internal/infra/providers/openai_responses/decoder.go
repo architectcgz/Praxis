@@ -1,7 +1,6 @@
 package openairesponses
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -369,7 +368,7 @@ func (s *responseDecoderState) finishItem(index int, output responseOutput, emit
 		}
 		part.TextDone, part.Closed = true, true
 	}
-	state.Item, state.Completed, state.Raw = output.Value, true, bytes.Clone(output.Raw)
+	state.Item, state.Completed, state.Raw = output.Value, true, output.Raw
 	return nil
 }
 
@@ -503,7 +502,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 				Kind: providerapi.StreamReasoningState,
 				ReasoningState: &modelapi.ReasoningState{
 					Protocol: string(modelapi.APIFormatOpenAIResponses),
-					Payload:  bytes.Clone(s.Items[index].Raw),
+					Payload:  s.Items[index].Raw,
 				},
 				OutputIndex: &index,
 			}); err != nil {

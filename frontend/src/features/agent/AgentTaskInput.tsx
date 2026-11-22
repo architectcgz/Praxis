@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, type CSSProperties, type KeyboardEvent, type RefObject } from 'react'
-import { Brain, ChevronDown, Cpu, ListPlus, Send, Server, Square } from 'lucide-react'
-import type { ModelOption } from '../../api'
+import { ArrowUp, Brain, ChevronDown, Cpu, ListPlus, Server, Square } from 'lucide-react'
+import type { ModelOption, SessionApprovalMode } from '../../api'
 import { useSlashCommandMenu } from './SlashCommandMenu'
 import { ApprovalModeSelect } from './ApprovalModeSelect'
 import { useInputPickers } from './useInputPickers'
@@ -8,6 +8,8 @@ import { useInputPickers } from './useInputPickers'
 type AgentTaskInputProps = {
     inputRef: RefObject<HTMLTextAreaElement | null>
     sessionId: string
+    approvalMode: SessionApprovalMode | null
+    onApprovalModeSaved: (settings: SessionApprovalMode) => void
     active: boolean
     canQueue: boolean
     input: string
@@ -25,7 +27,27 @@ type AgentTaskInputProps = {
     onCommand: (name: string) => Promise<boolean>
 }
 
-export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, setInput, models, selectedProviderID, selectedModelID, reasoning, busy, onSend, onStop, onModelChange, onReasoningChange, commands, onCommand }: AgentTaskInputProps) {
+export function AgentTaskInput({
+    inputRef,
+    sessionId,
+    approvalMode,
+    onApprovalModeSaved,
+    active,
+    canQueue,
+    input,
+    setInput,
+    models,
+    selectedProviderID,
+    selectedModelID,
+    reasoning,
+    busy,
+    onSend,
+    onStop,
+    onModelChange,
+    onReasoningChange,
+    commands,
+    onCommand,
+}: AgentTaskInputProps) {
     const inputID = useId()
     const providerMenuID = useId()
     const modelMenuID = useId()
@@ -50,7 +72,6 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
     const approvalPickerOpen = openPicker === 'approval'
 
     useEffect(() => {
-        // 解除禁用后恢复输入；用户已聚焦其他控件时不抢焦点。
         if (!busy && inputRef.current?.getClientRects().length && document.activeElement === document.body) {
             inputRef.current.focus({ preventScroll: true })
         }
@@ -58,9 +79,7 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
 
     useLayoutEffect(() => {
         const textarea = inputRef.current
-        if (!textarea) {
-            return
-        }
+        if (!textarea) return
         textarea.style.height = 'auto'
         const contentHeight = textarea.scrollHeight
         const maxHeight = Number.parseFloat(window.getComputedStyle(textarea).maxHeight)
@@ -98,7 +117,7 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                     value={input}
                     onChange={(event) => slash.changeInput(event.target.value)}
                     onKeyDown={handleInputKeyDown}
-                    placeholder={canQueue ? '输入后续任务，发送后按 FIFO 排队执行（/ 触发命令）' : '为此代理编写新任务（/ 触发命令，Shift+Enter 换行）'}
+                    placeholder={canQueue ? '输入后续任务，发送后按 FIFO 排队执行（/ 触发命令）' : '向主代理下达任务或指令（/ 触发命令，Shift+Enter 换行）'}
                     disabled={busy}
                     rows={1}
                 />
@@ -115,9 +134,9 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                             onClick={() => togglePicker('provider')}
                             disabled={busy || models.length === 0}
                         >
-                            <Server size={15} strokeWidth={1.8} aria-hidden="true" />
+                            <Server size={14} strokeWidth={1.8} aria-hidden="true" />
                             <span>{selectedProvider?.providerName || '选择 Provider'}</span>
-                            <ChevronDown className={`composer-select-chevron ${providerPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
+                            <ChevronDown className={`composer-select-chevron ${providerPickerOpen ? 'is-open' : ''}`} size={13} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {providerPickerOpen && (
                             <div className="model-picker-menu" id={providerMenuID} role="menu" aria-label="Provider 选择">
@@ -156,9 +175,9 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                             onClick={() => togglePicker('model')}
                             disabled={busy || models.length === 0}
                         >
-                            <Cpu size={15} strokeWidth={1.8} aria-hidden="true" />
+                            <Cpu size={14} strokeWidth={1.8} aria-hidden="true" />
                             <span>{selectedModel?.label || '选择模型'}</span>
-                            <ChevronDown className={`composer-select-chevron ${modelPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
+                            <ChevronDown className={`composer-select-chevron ${modelPickerOpen ? 'is-open' : ''}`} size={13} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {modelPickerOpen && (
                             <div className="model-picker-menu" id={modelMenuID} role="menu" aria-label="模型选择">
@@ -196,9 +215,9 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                             onClick={() => togglePicker('reasoning')}
                             disabled={busy || !reasoningAvailable}
                         >
-                            <Brain size={15} strokeWidth={1.8} aria-hidden="true" />
+                            <Brain size={14} strokeWidth={1.8} aria-hidden="true" />
                             <span>{selectedReasoning}</span>
-                            <ChevronDown className={`composer-select-chevron ${reasoningPickerOpen ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
+                            <ChevronDown className={`composer-select-chevron ${reasoningPickerOpen ? 'is-open' : ''}`} size={13} strokeWidth={2} aria-hidden="true" />
                         </button>
                         {reasoningPickerOpen && (
                             <div className="thinking-intensity-picker" id={reasoningPickerID} role="group" aria-label="思考强度">
@@ -228,6 +247,7 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                     <ApprovalModeSelect
                         key={sessionId}
                         sessionId={sessionId}
+                        settings={approvalMode}
                         disabled={busy}
                         pickerRef={approvalPickerRef}
                         open={approvalPickerOpen}
@@ -236,6 +256,7 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                             closePickers()
                             approvalPickerRef.current?.querySelector('button')?.focus({ preventScroll: true })
                         }}
+                        onSaved={onApprovalModeSaved}
                     />
                     <div className="composer-send-controls">
                         {active && (
@@ -247,24 +268,24 @@ export function AgentTaskInput({ inputRef, sessionId, active, canQueue, input, s
                                 onClick={onStop}
                                 disabled={busy}
                             >
-                                <Square size={16} strokeWidth={2.1} aria-hidden="true" />
+                                <Square size={14} strokeWidth={2.1} aria-hidden="true" />
                             </button>
                         )}
                         <button
                             className={`composer-submit ${canQueue ? 'composer-submit-queue' : ''}`}
                             type="button"
-                            title={canQueue ? '加入任务队列' : '发送输入'}
+                            title={canQueue ? '加入任务队列' : '发送输入（Enter）'}
                             aria-label={canQueue ? '加入任务队列' : '发送输入'}
                             onClick={onSend}
                             disabled={sendDisabled}
                         >
                             {canQueue ? (
                                 <>
-                                    <ListPlus size={15} strokeWidth={2} aria-hidden="true" />
+                                    <ListPlus size={14} strokeWidth={2} aria-hidden="true" />
                                     <span>排队</span>
                                 </>
                             ) : (
-                                <Send size={16} strokeWidth={2.1} aria-hidden="true" />
+                                <ArrowUp size={16} strokeWidth={2.1} aria-hidden="true" />
                             )}
                         </button>
                     </div>

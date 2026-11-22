@@ -1,6 +1,7 @@
 package bindings
 
 import (
+	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
@@ -13,14 +14,18 @@ import (
 type SessionBindings struct{ host Host }
 
 type SessionSnapshot struct {
-	QueuePaused bool         `json:"queuePaused"`
-	ID          string       `json:"id"`
-	ProjectID   string       `json:"projectId"`
-	Title       string       `json:"title"`
-	CreatedAt   time.Time    `json:"createdAt"`
-	UpdatedAt   time.Time    `json:"updatedAt"`
-	Tasks       []QueuedTask `json:"tasks"`
-	History     HistoryPage  `json:"history"`
+	QueuePaused      bool                `json:"queuePaused"`
+	ID               string              `json:"id"`
+	ProjectID        string              `json:"projectId"`
+	Title            string              `json:"title"`
+	CreatedAt        time.Time           `json:"createdAt"`
+	UpdatedAt        time.Time           `json:"updatedAt"`
+	Tasks            []QueuedTask        `json:"tasks"`
+	History          HistoryPage         `json:"history"`
+	Models           []ModelOption       `json:"models"`
+	ModelSelection   ModelSelection      `json:"modelSelection"`
+	ApprovalMode     SessionApprovalMode `json:"approvalMode"`
+	PendingApprovals []ToolApproval      `json:"pendingApprovals"`
 }
 
 type SessionSummary struct {
@@ -121,7 +126,7 @@ func (b *SessionBindings) CreateSession(wire CreateSessionRequest) (CreateSessio
 	}, nil
 }
 
-// SelectSession 加载会话并返回主历史首屏和待办队列，不从历史重建代理或执行状态。
+// SelectSession 加载会话并返回完整初始快照（首屏历史、待办队列、模型目录、模型选择、审批模式与挂起审批）。
 func (b *SessionBindings) SelectSession(sessionID string) (SessionSnapshot, error) {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return SessionSnapshot{}, publicInputError(b.host, "SessionBindings.SelectSession.request", err)
@@ -147,6 +152,14 @@ func (b *SessionBindings) SelectSession(sessionID string) (SessionSnapshot, erro
 		UpdatedAt:   view.Session.UpdatedAt,
 		Tasks:       make([]QueuedTask, 0, len(view.Tasks)),
 		History:     publicHistoryPage(page),
+		Models:      publicModelOptions(view.Models),
+		ModelSelection: ModelSelection{
+			ProviderID:     view.ModelChoice.ProviderID,
+			ModelID:        view.ModelChoice.ModelID,
+			ReasoningLevel: view.ModelChoice.ReasoningLevel,
+		},
+		ApprovalMode:     publicApprovalMode(view.Approval),
+		PendingApprovals: publicToolApprovals(view.PendingApprovals),
 	}
 	for _, value := range view.Tasks {
 		result.Tasks = append(result.Tasks, QueuedTask{
@@ -201,21 +214,6 @@ func sessionSummary(value sessionmodel.SessionInfo) SessionSummary {
 	}
 }
 
-func (b *SessionBindings) GetSessionSummary(sessionID string) (SessionSummary, error) {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return SessionSummary{}, publicInputError(b.host, "GetSessionSummary", err)
-	}
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return SessionSummary{}, err
-	}
-	info, err := services.Sessions.GetSessionInfo(ctx, identity.SessionID(sessionID))
-	if err != nil {
-		return SessionSummary{}, publicError(b.host, "GetSessionSummary", err)
-	}
-	return sessionSummary(info), nil
-}
-
 func (b *SessionBindings) CloseSession(sessionID string) error {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return publicInputError(b.host, "CloseSession", err)
@@ -225,33 +223,6 @@ func (b *SessionBindings) CloseSession(sessionID string) error {
 		return err
 	}
 	return publicError(b.host, "CloseSession", services.Sessions.CloseSession(ctx, identity.SessionID(sessionID)))
-}
-
-// ListModels 返回指定会话已加载的模型目录，不暴露凭据。
-func (b *SessionBindings) ListModels(sessionID string) ([]ModelOption, error) {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return nil, publicInputError(b.host, "SessionBindings.ListModels.request", err)
-	}
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return nil, err
-	}
-	models, err := services.Sessions.ModelOptions(ctx, identity.SessionID(sessionID))
-	if err != nil {
-		return nil, publicError(b.host, "SessionBindings.ListModels", err)
-	}
-	result := make([]ModelOption, 0, len(models))
-	for _, option := range models {
-		result = append(result, ModelOption{
-			ProviderID:            option.ProviderID,
-			ModelID:               option.ModelID,
-			Label:                 option.Label,
-			ProviderName:          option.ProviderName,
-			ReasoningLevels:       option.ReasoningLevels,
-			DefaultReasoningLevel: option.DefaultReasoningLevel,
-		})
-	}
-	return result, nil
 }
 
 // ReloadConfig 只重新加载指定会话；执行中拒绝重载，加载失败保留原配置。
@@ -292,26 +263,6 @@ func (b *SessionBindings) SelectModel(wire SelectModelRequest) error {
 	return nil
 }
 
-// GetModelSelection 返回会话自身的选择；查询不会设置模型或唤醒预约。
-func (b *SessionBindings) GetModelSelection(sessionID string) (ModelSelection, error) {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return ModelSelection{}, publicInputError(b.host, "SessionBindings.GetModelSelection.request", err)
-	}
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return ModelSelection{}, err
-	}
-	choice, err := services.Sessions.SelectedModel(ctx, identity.SessionID(sessionID))
-	if err != nil {
-		return ModelSelection{}, publicError(b.host, "SessionBindings.GetModelSelection", err)
-	}
-	return ModelSelection{
-		ProviderID:     choice.ProviderID,
-		ModelID:        choice.ModelID,
-		ReasoningLevel: choice.ReasoningLevel,
-	}, nil
-}
-
 // RevealSessionFile 打开系统文件管理器定位会话日志；非法 ID、文件缺失或启动失败时返回公开错误。
 func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
@@ -341,22 +292,6 @@ func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 	return nil
 }
 
-// GetSessionApprovalMode 读取会话授权选择；空或非 canonical 会话身份返回校验错误。
-func (b *SessionBindings) GetSessionApprovalMode(sessionID string) (SessionApprovalMode, error) {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return SessionApprovalMode{}, publicInputError(b.host, "SessionBindings.GetSessionApprovalMode.request", err)
-	}
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return SessionApprovalMode{}, err
-	}
-	value, err := services.Sessions.GetApprovalMode(ctx, identity.SessionID(sessionID))
-	if err != nil {
-		return SessionApprovalMode{}, publicError(b.host, "SessionBindings.GetSessionApprovalMode", err)
-	}
-	return publicApprovalMode(value), nil
-}
-
 // SetSessionApprovalMode 保存会话授权选择；null 恢复继承，有效模式在会话显式 reload 后更新。
 func (b *SessionBindings) SetSessionApprovalMode(wire SetSessionApprovalModeRequest) (SessionApprovalMode, error) {
 	if wire.Mode != nil {
@@ -378,6 +313,25 @@ func (b *SessionBindings) SetSessionApprovalMode(wire SetSessionApprovalModeRequ
 		return SessionApprovalMode{}, publicError(b.host, "SessionBindings.SetSessionApprovalMode", err)
 	}
 	return publicApprovalMode(value), nil
+}
+
+func publicModelOptions(models []modelapi.Option) []ModelOption {
+	result := make([]ModelOption, 0, len(models))
+	for _, option := range models {
+		levels := option.ReasoningLevels
+		if levels == nil {
+			levels = []string{}
+		}
+		result = append(result, ModelOption{
+			ProviderID:            option.ProviderID,
+			ModelID:               option.ModelID,
+			Label:                 option.Label,
+			ProviderName:          option.ProviderName,
+			ReasoningLevels:       levels,
+			DefaultReasoningLevel: option.DefaultReasoningLevel,
+		})
+	}
+	return result
 }
 
 func publicApprovalMode(value sessionservice.ApprovalSettings) SessionApprovalMode {

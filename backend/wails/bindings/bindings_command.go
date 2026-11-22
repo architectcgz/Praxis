@@ -1,6 +1,7 @@
 package bindings
 
 import (
+	"praxis/internal/core/approval"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
@@ -134,21 +135,7 @@ func (b *CommandBindings) ResumeQueue(sessionID string) error {
 	return publicError(b.host, "ResumeQueue", services.Sessions.ResumeQueue(ctx, identity.SessionID(sessionID)))
 }
 
-func (b *CommandBindings) ListToolApprovals(sessionID, agentID string) ([]ToolApproval, error) {
-	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
-		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
-	}
-	if err := validation.Value("agentId", agentID, "agent_id"); err != nil {
-		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
-	}
-	ctx, services, err := b.host.BindingContext()
-	if err != nil {
-		return nil, err
-	}
-	values, err := services.Sessions.ListToolApprovals(ctx, identity.SessionID(sessionID), identity.AgentID(agentID))
-	if err != nil {
-		return nil, publicError(b.host, "CommandBindings.ListToolApprovals", err)
-	}
+func publicToolApprovals(values []approval.Approval) []ToolApproval {
 	result := make([]ToolApproval, 0, len(values))
 	for _, value := range values {
 		review := value.Review
@@ -167,7 +154,7 @@ func (b *CommandBindings) ListToolApprovals(sessionID, agentID string) ([]ToolAp
 			RiskReason:  review.Assessment.Reason,
 		})
 	}
-	return result, nil
+	return result
 }
 
 func (b *CommandBindings) ApproveToolCall(wire ToolDecisionRequest) error {

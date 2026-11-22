@@ -29,27 +29,23 @@ func (r *Coordinator) claimTask(ctx context.Context, sessionID identity.SessionI
 	return r.claimTaskLocked(ctx, sessionID)
 }
 
-// claimTaskLocked 的调用方持有会话命令锁；调度器锁只用于定位和登记，不嵌套队列锁。
+// claimTaskLocked 的调用方持有会话命令锁；队列已由会话命令锁串行化，此处单次临界区原子完成检查、领取与占位。
 func (r *Coordinator) claimTaskLocked(ctx context.Context, sessionID identity.SessionID) (taskmodel.Task, *sessionSchedule, *activeRun, error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	schedule := r.schedules[sessionID]
-	if r.closed || schedule == nil || schedule.closing || schedule.reloading {
-		r.mu.Unlock()
+	if r.closed || schedule == nil || schedule.closing {
 		return taskmodel.Task{}, nil, nil, errCoordinatorClosed
 	}
-	active := schedule.active
-	r.mu.Unlock()
-	if active != nil {
+	if schedule.active != nil {
 		return taskmodel.Task{}, nil, nil, nil
 	}
 	input, ok := schedule.queue.Next()
 	if !ok {
 		return taskmodel.Task{}, nil, nil, nil
 	}
-	active = newActiveRun(ctx, schedule.session)
-	r.mu.Lock()
+	active := newActiveRun(ctx, schedule.session)
 	schedule.active = active
-	r.mu.Unlock()
 	return input, schedule, active, nil
 }
 
@@ -83,7 +79,11 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, sched
 	schedule.queue.Complete(input)
 	r.mu.Lock()
 	active.config = config
-	err = r.launchLocked(run, active)
+	if schedule.closing {
+		err = errorcode.ErrRequestConflict
+	} else {
+		err = r.launchLocked(run, active)
+	}
 	r.mu.Unlock()
 	if err == nil {
 		notification := taskQueueEvent(schedule)

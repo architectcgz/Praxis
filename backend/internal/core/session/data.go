@@ -3,7 +3,6 @@ package session
 import (
 	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/identity"
-	"slices"
 )
 
 // AgentContext 保存某个 Agent 最近摘要及之后的活跃历史窗口，供上下文构建筛选。
@@ -18,10 +17,6 @@ func (c *AgentContext) Accept(value *sessionentry.Entry) {
 		return
 	}
 	c.Entries = append(c.Entries, value)
-}
-
-func (c AgentContext) Snapshot() []*sessionentry.Entry {
-	return slices.Clone(c.Entries)
 }
 
 // Data 只持有 AgentContext 和 Agent 作用域，不缓存完整 History。

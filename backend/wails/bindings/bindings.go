@@ -4,6 +4,7 @@ import (
 	"context"
 	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
+	sessionservice "praxis/internal/service/session"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -49,8 +50,21 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	var requestInfo *coreevent.ModelRequestInfo
 	var requestResult *ModelRequestResult
 	switch payload := event.Payload.(type) {
-	case coreevent.SessionConfigReloaded, coreevent.SessionTitleChanged:
-		data = struct{}{}
+	case coreevent.SessionConfigReloaded:
+		data = AgentSessionConfigReloaded{
+			Models: publicModelOptions(payload.Models),
+			ApprovalMode: publicApprovalMode(sessionservice.ApprovalSettings{
+				SessionID:     event.Source.SessionID,
+				GlobalMode:    payload.GlobalMode,
+				SessionMode:   payload.SessionMode,
+				EffectiveMode: payload.EffectiveMode,
+			}),
+		}
+	case coreevent.SessionTitleChanged:
+		data = AgentSessionTitleChanged{
+			Title:     payload.Title,
+			UpdatedAt: payload.UpdatedAt,
+		}
 	case coreevent.AgentStateChanged:
 		data = AgentStateChanged{State: string(payload.State)}
 	case coreevent.EntriesAppended:
@@ -121,7 +135,22 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 			Arguments: payload.Arguments,
 		}
 	case coreevent.ToolApprovalRequired:
-		data = AgentToolApprovalRequired{CallID: payload.CallID}
+		data = ToolApproval{
+			ToolDecisionRequest: ToolDecisionRequest{
+				SessionID: event.Source.SessionID.String(),
+				AgentID:   event.Source.AgentID.String(),
+				RunID:     runID,
+				CallID:    payload.CallID,
+			},
+			Name:        payload.Name,
+			RuleID:      payload.RuleID,
+			Arguments:   payload.Arguments,
+			Action:      string(payload.Action),
+			RiskVerdict: string(payload.RiskVerdict),
+			RiskReason:  payload.RiskReason,
+		}
+	case coreevent.ToolApprovalResolved:
+		data = AgentToolApprovalResolved{CallID: payload.CallID}
 	case coreevent.ToolStarted:
 		data = AgentToolStarted{
 			CallID: payload.CallID,

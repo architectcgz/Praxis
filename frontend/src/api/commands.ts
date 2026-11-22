@@ -14,6 +14,14 @@ export function stopToolCall({ sessionId, agentId, runId, callId }: ToolCancelRe
 }
 
 export type ToolDecisionRequest = { sessionId: string; agentId: string; runId: string; callId: string }
+export type RawToolApproval = ToolDecisionRequest & {
+    name: string
+    ruleId: string
+    arguments: string
+    action: string
+    riskVerdict: string
+    riskReason: string
+}
 /** 待授权记录携带完整冻结参数与审核结论，展示字段不随授权决策提交。 */
 export type ToolApproval = ToolDecisionRequest & ToolCallInput & {
     ruleId: string
@@ -21,10 +29,11 @@ export type ToolApproval = ToolDecisionRequest & ToolCallInput & {
     riskVerdict: string
     riskReason: string
 }
-export async function listToolApprovals(sessionId: string, agentId: string): Promise<ToolApproval[]> {
-    const values = await getCommandBinding().ListToolApprovals(sessionId, agentId) ?? []
-    return values.map((value) => ({ ...value, ...parseToolCallInput(value.name, value.arguments) }))
+
+export function parseToolApproval(value: RawToolApproval): ToolApproval {
+    return { ...value, ...parseToolCallInput(value.name, value.arguments) }
 }
+
 export function approveToolCall(request: ToolDecisionRequest) {
     return getCommandBinding().ApproveToolCall(toolDecisionRequest(request))
 }

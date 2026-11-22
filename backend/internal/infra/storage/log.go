@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"praxis/internal/identity"
@@ -148,7 +147,10 @@ func (l *SessionLog) RemoveSubagent(ctx context.Context, agentID identity.AgentI
 
 func (l *SessionLog) Close(ctx context.Context) error {
 	l.mu.RLock()
-	writers := maps.Clone(l.writers)
+	writers := make([]*jsonl.Writer, 0, len(l.writers))
+	for _, writer := range l.writers {
+		writers = append(writers, writer)
+	}
 	l.mu.RUnlock()
 	var err error
 	for _, writer := range writers {

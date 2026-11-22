@@ -1,12 +1,24 @@
-/* 容器依次划分 Shell、Region、Scroll、Page，模态框挂载到 #overlay-root。 */
+/* 容器依次划分 Shell（左侧导轨 + 主区）、Region、Scroll、Page，模态框挂载到 #overlay-root。 */
 
-/* Shell 独占视口，避免建立影响浮层定位的变换上下文。 */
+/* Shell 独占视口，采用 F2 左侧固定导轨 + 同层可折叠项目目录 + 主工作区的规整网格。 */
 .app-shell {
+    display: grid;
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    height: 100dvh;
+    overflow: hidden;
+}
+
+.app-shell.is-sidebar-open {
+    grid-template-columns: var(--rail-width) var(--sidebar-width) minmax(0, 1fr);
+}
+
+.workspace-main {
     display: grid;
     grid-template-rows: var(--topbar-height) minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
-    height: 100dvh;
     overflow: hidden;
 }
 
@@ -45,8 +57,7 @@
     background-clip: padding-box;
 }
 
-/* Page 只控制阅读宽度和排版，不创建裁剪或层叠上下文。
-   宽度由 --page-width 提供：随主栏按比例伸缩，并受上下限约束。 */
+/* Page 只控制阅读宽度和排版，不创建裁剪或层叠上下文。 */
 .page {
     width: min(100%, var(--page-width, 920px));
     min-width: 0;

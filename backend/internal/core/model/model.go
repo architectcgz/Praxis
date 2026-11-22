@@ -1,7 +1,6 @@
 package model
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -33,22 +32,12 @@ func (s Config) CanReplayReasoningState(state *ReasoningState) bool {
 }
 
 // ReasoningState 保存模型生成的推理状态，仅供相同 Provider、协议与模型原样续传；不用于展示或转换为文本。
-// 此类型只承载数据；协议解析和来源绑定由对应边界负责。
+// 此类型只承载数据；协议解析和来源绑定由对应边界负责，发布后只读。
 type ReasoningState struct {
 	ProviderID string
 	Protocol   string
 	ModelID    string
 	Payload    json.RawMessage
-}
-
-// Clone 深拷贝载荷；nil 状态仍返回 nil，避免持久化与观察者共享可变字节。
-func (s *ReasoningState) Clone() *ReasoningState {
-	if s == nil {
-		return nil
-	}
-	copied := *s
-	copied.Payload = bytes.Clone(s.Payload)
-	return &copied
 }
 
 // Usage 记录一次模型请求的已知用量；输入计数包含已知的缓存读取和写入。
@@ -124,7 +113,7 @@ func NewCatalog(document Document) *Catalog {
 				ProviderID:      provider.ID,
 				ModelID:         candidate.ID,
 				ReasoningLevel:  candidate.DefaultReasoningLevel,
-				ReasoningLevels: slices.Clone(candidate.ReasoningLevels),
+				ReasoningLevels: candidate.ReasoningLevels,
 				Thinking:        candidate.Thinking,
 				APIFormat:       string(candidate.APIFormat),
 				ContextWindow:   candidate.ContextWindow,
@@ -146,7 +135,7 @@ func NewCatalog(document Document) *Catalog {
 				ModelID:               candidate.ID,
 				Label:                 candidate.DisplayName,
 				ProviderName:          provider.DisplayName,
-				ReasoningLevels:       slices.Clone(candidate.ReasoningLevels),
+				ReasoningLevels:       candidate.ReasoningLevels,
 				DefaultReasoningLevel: candidate.DefaultReasoningLevel,
 			})
 		}
@@ -155,12 +144,9 @@ func NewCatalog(document Document) *Catalog {
 	return catalog
 }
 
+// ListModels 返回只读模型选项列表，调用方不得修改切片或其推理等级列表。
 func (c *Catalog) ListModels() []Option {
-	options := slices.Clone(c.options)
-	for index := range options {
-		options[index].ReasoningLevels = slices.Clone(options[index].ReasoningLevels)
-	}
-	return options
+	return c.options
 }
 
 func (c *Catalog) Get(providerID, modelID, reasoningLevel string) (Config, error) {

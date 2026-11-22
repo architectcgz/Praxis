@@ -74,7 +74,7 @@ func (r Response) Blocks() []sessionentry.ContentBlock {
 	for _, event := range r.events {
 		if event.Kind == providerapi.StreamReasoningState {
 			blocks = append(blocks, sessionentry.ReasoningStateBlock{
-				State: event.ReasoningState.Clone(),
+				State: event.ReasoningState,
 			})
 			continue
 		}

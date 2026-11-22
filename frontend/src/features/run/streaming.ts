@@ -42,6 +42,20 @@ export function mergeStreamingEvent(outputs: StreamingOutputs, agentId: string, 
             }
             return { ...outputs, [agentId]: { ...output, turns } }
         }
+        case 'tool_approval_resolved': {
+            if (!event.turnId) return outputs
+            const turnId = event.turnId
+            const index = output.turns.findIndex((item) => item.turnId === turnId)
+            if (index < 0) return outputs
+            const previousTurn = output.turns[index]
+            const events = previousTurn.events.filter(
+                (item) => !(item.kind === 'tool_approval_required' && item.data.callId === event.data.callId),
+            )
+            if (events.length === previousTurn.events.length) return outputs
+            const turns = [...output.turns]
+            turns[index] = { ...previousTurn, events }
+            return { ...outputs, [agentId]: { ...output, turns } }
+        }
         case 'error':
             return { ...outputs, [agentId]: {
                 ...output,

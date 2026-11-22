@@ -105,7 +105,8 @@ func (g *Gate) ForRun(run RunOwner, projectPath string, mode security.ApprovalMo
 	}
 }
 
-func (g *Gate) ListApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]Approval, error) {
+// ListSessionApprovals 返回指定会话当前全部等待人工审批的调用快照，供会话初始加载使用。
+func (g *Gate) ListSessionApprovals(ctx context.Context, sessionID identity.SessionID) ([]Approval, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -113,7 +114,7 @@ func (g *Gate) ListApprovals(ctx context.Context, sessionID identity.SessionID, 
 	defer g.mu.Unlock()
 	result := make([]Approval, 0)
 	for _, item := range g.pending {
-		if item.call.SessionID != sessionID || item.call.AgentID != agentID || item.hasDecision {
+		if item.call.SessionID != sessionID || item.hasDecision {
 			continue
 		}
 		value := Approval{
@@ -232,10 +233,16 @@ func (r *RunGate) Authorize(
 	r.gate.mu.Lock()
 	r.gate.pending[call.CallKey] = item
 	r.gate.mu.Unlock()
-	defer r.gate.removePending(call.CallKey, item)
+	defer func() {
+		r.gate.removePending(call.CallKey, item)
+		r.gate.deps.Emitter.Emit(coreevent.Event{
+			Source:  r.run.EventSource(call.TurnID),
+			Payload: coreevent.ToolApprovalResolved{CallID: call.CallID},
+		})
+	}()
 
 	beginWaiting()
-	r.notifyWaiting(ctx, call, args, operationID)
+	r.notifyWaiting(ctx, call, args, operationID, decision, review)
 	select {
 	case <-item.decided:
 		if !item.approved {
@@ -248,7 +255,14 @@ func (r *RunGate) Authorize(
 	}
 }
 
-func (r *RunGate) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID identity.OperationID) {
+func (r *RunGate) notifyWaiting(
+	ctx context.Context,
+	call sessionentry.ToolCall,
+	args json.RawMessage,
+	operationID identity.OperationID,
+	decision security.ApprovalDecision,
+	review *RiskReview,
+) {
 	deps := r.gate.deps
 	call.Arguments = string(args)
 	event := hook.ToolExecution{
@@ -266,8 +280,19 @@ func (r *RunGate) notifyWaiting(ctx context.Context, call sessionentry.ToolCall,
 	if err := deps.HookDispatcher.ToolExecutionWaiting(context.WithoutCancel(ctx), event); err != nil && deps.Logf != nil {
 		deps.Logf("tool execution waiting hook failed: %v", err)
 	}
+	payload := coreevent.ToolApprovalRequired{
+		CallID:    call.CallID,
+		Name:      string(call.Name),
+		Arguments: string(args),
+		RuleID:    decision.RuleID,
+		Action:    decision.Action,
+	}
+	if review != nil {
+		payload.RiskVerdict = review.Assessment.Verdict
+		payload.RiskReason = review.Assessment.Reason
+	}
 	deps.Emitter.Emit(coreevent.Event{
 		Source:  r.run.EventSource(call.TurnID),
-		Payload: coreevent.ToolApprovalRequired{CallID: call.CallID},
+		Payload: payload,
 	})
 }

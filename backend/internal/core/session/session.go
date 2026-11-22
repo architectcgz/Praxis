@@ -10,7 +10,6 @@ import (
 	"praxis/internal/core/security"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
-	"slices"
 	"sync"
 )
 
@@ -94,14 +93,14 @@ func (s *Session) RunConfiguration() (*Configuration, modelapi.Config, error) {
 	return s.configuration, model, err
 }
 
-// AgentContext 返回指定 Agent 最近摘要及之后的活跃历史窗口快照。
+// AgentContext 返回指定 Agent 最近摘要及之后的活跃历史窗口只读切片，供所属串行执行筛选使用。
 func (s *Session) AgentContext(agentID identity.AgentID) ([]*sessionentry.Entry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if !s.data.HasAgent(agentID) {
 		return nil, fmt.Errorf("agent %s is not part of session", agentID)
 	}
-	return s.data.Context(agentID).Snapshot(), nil
+	return s.data.Context(agentID).Entries, nil
 }
 
 // RegisterAgent 记录已存在的 Agent History 作用域。
@@ -113,14 +112,14 @@ func (s *Session) RegisterAgent(agentID identity.AgentID) {
 	}
 }
 
-// RestoreAgentContext 发布启动恢复得到的活跃历史窗口。
+// RestoreAgentContext 发布启动恢复得到的活跃历史窗口，接管调用方构造的切片。
 func (s *Session) RestoreAgentContext(agentID identity.AgentID, entries []*sessionentry.Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.data.HasAgent(agentID) {
 		return fmt.Errorf("agent %s is not part of session", agentID)
 	}
-	s.data.AgentContexts[agentID] = AgentContext{Entries: slices.Clone(entries)}
+	s.data.AgentContexts[agentID] = AgentContext{Entries: entries}
 	return nil
 }
 

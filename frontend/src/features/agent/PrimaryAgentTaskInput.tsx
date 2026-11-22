@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, type KeyboardEvent, type RefObject } from 'react'
-import { Send } from 'lucide-react'
+import { ArrowUp } from 'lucide-react'
 import { useSlashCommandMenu } from './SlashCommandMenu'
 
 type PrimaryAgentTaskInputProps = {
@@ -57,7 +57,7 @@ export function PrimaryAgentTaskInput({ inputRef, input, setInput, busy, onSend,
                     <textarea className="composer-textarea" id={inputID} ref={inputRef} aria-label="执行输入" role="combobox" aria-autocomplete="list" aria-expanded={slash.menuOpen} aria-controls={slash.menuOpen ? slash.menuID : undefined} aria-activedescendant={slash.selectedOptionID} value={input} onChange={(event) => slash.changeInput(event.target.value)} onKeyDown={handleKeyDown} placeholder="为主代理编写新任务（/ 触发命令，Shift+Enter 换行）" disabled={busy} rows={1} />
                     <div className="composer-tools">
                         <button className="composer-submit" type="button" title="发送输入" aria-label="发送输入" onClick={onSend} disabled={busy || !input.trim()}>
-                            <Send size={16} strokeWidth={2.1} />
+                            <ArrowUp size={16} strokeWidth={2.1} aria-hidden="true" />
                         </button>
                     </div>
                 </div>

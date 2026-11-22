@@ -30,8 +30,6 @@ export type ProjectPanelProps = {
     onSelectProject: (project: ProjectGroup) => void
     onSelectSession: (id: string) => void
     onToggleProject: (key: string) => void
-    onOpenSettings: () => void
-    settingsOpen: boolean
-    /** 抽屉模式的关闭操作；桌面侧栏不传入。 */
+    /** 收起同层项目目录侧栏。 */
     onCloseNavigation?: () => void
 }

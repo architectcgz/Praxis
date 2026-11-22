@@ -71,7 +71,9 @@ export function SessionEmptyState({ sessionsCount, projectsCount = 0, onOpenProj
                     </button>
                 ) : (
                     <div className="session-empty-hint">
-                        <span>{hasExistingSessions ? '从左侧项目栏选择会话，或点击项目右侧新建会话' : '点击左侧项目右侧的新建会话按钮开始执行'}</span>
+                        <span>点左侧项目图标或按</span>
+                        <kbd className="session-empty-kbd">Ctrl+K</kbd>
+                        <span>{hasExistingSessions ? '选择或新建会话' : '在项目中新建会话'}</span>
                         <span className="session-empty-sep" aria-hidden="true">·</span>
                         <span>会话内输入</span>
                         <kbd className="session-empty-kbd">/</kbd>

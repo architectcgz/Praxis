@@ -1,9 +1,21 @@
 import { getSessionBinding } from './bindings'
 import type { SessionSnapshot as GeneratedSessionSnapshot } from '../../bindings/praxis/wails/bindings'
 import type { HistoryPage } from './agents'
+import { parseToolApproval, type RawToolApproval, type ToolApproval } from './commands'
+import { normalizeModelOptions, type ModelOption } from './models'
 import type { QueuedTask } from './tasks'
 
-export type SessionSnapshot = Omit<GeneratedSessionSnapshot, 'history' | 'tasks'> & { history: HistoryPage; tasks: QueuedTask[] }
+export type SessionSnapshot = Omit<
+    GeneratedSessionSnapshot,
+    'history' | 'tasks' | 'models' | 'modelSelection' | 'approvalMode' | 'pendingApprovals'
+> & {
+    history: HistoryPage
+    tasks: QueuedTask[]
+    models: ModelOption[]
+    modelSelection: ModelSelection
+    approvalMode: SessionApprovalMode
+    pendingApprovals: ToolApproval[]
+}
 
 export type SessionSummary = {
     id: string
@@ -29,11 +41,6 @@ export async function listSessions(projectID: string) {
 
 export function createSession(request: CreateSessionRequest) { return getSessionBinding().CreateSession(request) }
 
-/** 读取后端解析的会话选择和有效模式，不在前端推断授权结果。 */
-export function getSessionApprovalMode(sessionId: string) {
-    return getSessionBinding().GetSessionApprovalMode(sessionId) as Promise<SessionApprovalMode>
-}
-
 /** 保存会话覆盖；null 恢复继承，有效模式在显式 /reload 后更新。 */
 export function setSessionApprovalMode(sessionId: string, mode: ApprovalMode | null) {
     return getSessionBinding().SetSessionApprovalMode({ sessionId, mode }) as Promise<SessionApprovalMode>
@@ -43,16 +50,22 @@ export function selectSessionModel(sessionID: string, selection: ModelSelection)
     return getSessionBinding().SelectModel({ sessionId: sessionID, ...selection })
 }
 
-export function getSessionModelSelection(sessionID: string): Promise<ModelSelection> {
-    return getSessionBinding().GetModelSelection(sessionID)
+/** 后端快照一次返回首屏历史、模型目录、模型选择、审批模式和挂起审批。 */
+export async function selectSession(sessionID: string): Promise<SessionSnapshot> {
+    const raw = await getSessionBinding().SelectSession(sessionID) as unknown as Omit<
+        SessionSnapshot,
+        'models' | 'pendingApprovals'
+    > & {
+        models?: ModelOption[]
+        pendingApprovals?: RawToolApproval[]
+    }
+    return {
+        ...raw,
+        models: normalizeModelOptions(raw.models),
+        pendingApprovals: (raw.pendingApprovals ?? []).map(parseToolApproval),
+    }
 }
 
-/** 后端快照投影保证集合为数组；前端直接接纳，不重新校验内部协议。 */
-export function selectSession(sessionID: string) {
-    return getSessionBinding().SelectSession(sessionID) as Promise<SessionSnapshot>
-}
-
-export function getSessionSummary(sessionID: string) { return getSessionBinding().GetSessionSummary(sessionID) }
 export function closeSession(sessionID: string) { return getSessionBinding().CloseSession(sessionID) }
 export function deleteSession(sessionID: string) { return getSessionBinding().DeleteSession(sessionID) }
 export function renameSession(sessionID: string, title: string) { return getSessionBinding().RenameSession(sessionID, title) }

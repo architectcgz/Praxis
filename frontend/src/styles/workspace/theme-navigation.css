@@ -1,20 +1,18 @@
-/* 导航区域与 Agent 侧栏的颜色、状态和材质。不拥有几何布局。 */
-.workspace-grid {
-    background: var(--bg);
+/* 同层停靠项目目录的颜色、边框与材质。 */
+.workspace-sidebar-pane {
+    border-right: 1px solid var(--line);
+    background: var(--panel-sub);
 }
 
 .side,
 .sidebar {
-    border-right: 1px solid var(--line);
-    background: var(--side);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+    border-right: 0;
+    background: var(--panel-sub);
 }
 
-.side.right,
-.agents-panel {
-    border-right: 0;
-    border-left: 1px solid var(--line);
+.side-head,
+.sidebar-heading {
+    background: var(--chrome-bg);
 }
 
 .side-head,
@@ -31,104 +29,4 @@
     font-size: inherit;
     font-weight: inherit;
     text-transform: none;
-}
-
-/* 导航行：悬停与选中只改变颜色和背景，不改变几何尺寸。 */
-.agent-row {
-    background: transparent;
-    color: var(--muted);
-    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
-}
-
-.agent-row:hover {
-    background: var(--fill);
-    color: var(--ink);
-}
-
-.agent-row.selected {
-    background: var(--selected);
-    color: var(--ink);
-}
-
-/* 代理状态圆点：默认空闲，执行中用 live 信号色，需要处理用提醒色。 */
-.astate,
-.state-marker {
-    background: var(--faint);
-}
-
-.astate.run,
-.state-executing {
-    background: var(--live);
-    box-shadow: 0 0 0 3px var(--live-halo);
-}
-
-.astate.wait,
-.state-waiting {
-    background: var(--warn);
-}
-
-.state-idle {
-    background: var(--accent);
-}
-
-.state-interrupted,
-.state-failed {
-    background: var(--danger);
-}
-
-.agent .nm,
-.agent-row-copy strong {
-    color: var(--ink);
-    font-size: var(--font-size-ui);
-    font-weight: 400;
-    line-height: 1.35;
-}
-
-.agent-row.selected .agent-row-copy strong {
-    font-weight: 650;
-}
-
-.agent .sub,
-.agent-row-copy small {
-    color: var(--faint);
-    font-family: var(--mono);
-    font-size: var(--font-size-meta);
-}
-
-.st,
-.state-text {
-    color: var(--faint);
-    font-size: var(--font-size-meta);
-}
-
-.agent-row-metrics {
-    color: var(--faint);
-    font-family: var(--mono);
-    font-size: var(--font-size-meta);
-    line-height: 1;
-}
-
-.agent-metric-danger {
-    color: var(--danger);
-}
-
-.session-note {
-    border-bottom: 1px solid var(--line);
-}
-
-.session-note b,
-.session-title {
-    color: var(--ink);
-    font-size: var(--font-size-ui);
-    font-weight: 650;
-    line-height: 1.35;
-}
-
-.session-note span:not(.session-title) {
-    color: var(--faint);
-    font-size: var(--font-size-meta);
-}
-
-.panel-placeholder {
-    color: var(--faint);
 }

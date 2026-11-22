@@ -3,9 +3,7 @@ package bindings
 import (
 	"context"
 	"errors"
-	"praxis/internal/core/approval"
 	coreevent "praxis/internal/core/event"
-	modelapi "praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
@@ -25,20 +23,15 @@ type SessionService interface {
 	CreateSession(context.Context, sessionservice.CreateInput) (sessionservice.CreateResult, error)
 	DeleteSession(context.Context, identity.SessionID) error
 	ListSessionsByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
-	GetSessionInfo(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	RenameSession(context.Context, identity.SessionID, string) error
 	SessionLogPath(context.Context, identity.SessionID) (string, error)
 	SelectSession(context.Context, identity.SessionID) (sessionservice.SessionView, error)
 	CloseSession(context.Context, identity.SessionID) error
 	AgentHistory(context.Context, identity.SessionID, identity.AgentID, *int64, int) (sessionmodel.HistoryPage, error)
-	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
-	ModelOptions(context.Context, identity.SessionID) ([]modelapi.Option, error)
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
-	GetApprovalMode(context.Context, identity.SessionID) (sessionservice.ApprovalSettings, error)
 	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode) (sessionservice.ApprovalSettings, error)
 	ReloadSessionConfig(context.Context, identity.SessionID) error
 	StopRun(context.Context, identity.SessionID, identity.RunID) error
-	ListToolApprovals(context.Context, identity.SessionID, identity.AgentID) ([]approval.Approval, error)
 	StopToolCall(context.Context, sessionservice.ToolControl) error
 	ApproveToolCall(context.Context, sessionservice.ToolDecision) error
 	DenyToolCall(context.Context, sessionservice.ToolDecision) error

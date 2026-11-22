@@ -5,11 +5,10 @@ import { CircleCheck } from 'lucide-react'
 type ToastProps = {
     message: string
     onDismiss: () => void
-    hasTabs?: boolean
 }
 
 /** 展示非阻塞的操作完成提示，3 秒后通知调用方清空消息；消息变化或卸载时清理计时器。 */
-export function Toast({ message, onDismiss, hasTabs = false }: ToastProps) {
+export function Toast({ message, onDismiss }: ToastProps) {
     const dismiss = useEffectEvent(onDismiss)
 
     useEffect(() => {
@@ -21,7 +20,7 @@ export function Toast({ message, onDismiss, hasTabs = false }: ToastProps) {
     if (!message) return null
 
     return createPortal(
-        <div className={`toast-notice${hasTabs ? ' has-tabs' : ''}`} role="status" aria-atomic="true">
+        <div className="toast-notice" role="status" aria-atomic="true">
             <CircleCheck size={18} strokeWidth={1.8} aria-hidden="true" />
             <span>{message}</span>
         </div>,

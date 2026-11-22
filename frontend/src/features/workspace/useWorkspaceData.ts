@@ -19,7 +19,7 @@ export function useWorkspaceData() {
     const catalogRequest = useRef(0)
     const initialSelectionApplied = useRef(false)
     const { projects, loading: projectsLoading, error: projectsError, refreshProjects } = useProjectData()
-    const { sessions, loading: sessionsLoading, error: sessionsError, refreshSessions, refreshSummary, updateSessionTitle } = useSessionCatalog()
+    const { sessions, loading: sessionsLoading, error: sessionsError, refreshSessions, updateSessionTitle } = useSessionCatalog()
 
     const clearError = useCallback(() => { setError(''); setErrorCode(undefined) }, [])
     const selectSession = useCallback((id: string) => {
@@ -72,10 +72,10 @@ export function useWorkspaceData() {
     useEffect(() => { rememberSelectedSession(selectedSessionID) }, [selectedSessionID])
     useEffect(() => {
         const subscriptions = openedSessionIDs.map((id) => subscribeAgentEvents(id, (event) => {
-            if (event.kind === 'run_ended' || event.kind === 'session_title_changed') void refreshSummary(id)
+            if (event.kind === 'session_title_changed') updateSessionTitle(id, event.data.title, event.data.updatedAt)
         }))
         return () => subscriptions.forEach((unsubscribe) => unsubscribe())
-    }, [openedSessionIDs, refreshSummary])
+    }, [openedSessionIDs, updateSessionTitle])
 
     const dataError = sessionsError ?? projectsError
     return {

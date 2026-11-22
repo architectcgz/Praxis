@@ -1,7 +1,6 @@
 package openairesponses
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,7 +94,7 @@ func responseItems(entry *sessionentry.Entry, config modelapi.Config, ids map[st
 			if !config.CanReplayReasoningState(state) {
 				continue
 			}
-			items = append(items, bytes.Clone(state.Payload))
+			items = append(items, state.Payload)
 		default:
 			return nil, fmt.Errorf("context block %d has unsupported type %T", index, block)
 		}

@@ -1,5 +1,4 @@
-/* 工作区主内容区布局。 */
-
+/* F2 规整桌面框架主舞台、等高双面板、34px 齐平底栏、一体化顶栏会话标签与抽屉样式。 */
 .workspace-loading {
     display: flex;
     align-items: center;
@@ -9,7 +8,7 @@
     min-height: 0;
     height: 100dvh;
     padding: 24px;
-    background: var(--bg);
+    background: var(--frame-bg);
     color: var(--muted);
     font-size: var(--font-size-meta);
 }
@@ -20,69 +19,152 @@
     min-height: 0;
     min-width: 0;
     padding: 0;
-    background: var(--paper);
 }
 
-.workspace-navigation-trigger {
-    display: none;
-    flex: 0 0 32px;
-    width: 32px;
-    height: 32px;
-}
-
-.modal-backdrop.workspace-navigation-overlay {
-    padding: 0;
-    place-items: stretch start;
-}
-
-.workspace-navigation-overlay .projects-panel {
+/* 规整全幅舞台：单列与双列均 100% 铺满外框，保持跨页边缘秩序一致。 */
+.workbench-sheets {
     display: flex;
-    width: min(320px, calc(100dvw - 44px));
-    height: 100%;
+    flex: 1 1 auto;
+    align-items: stretch;
+    gap: 10px;
+    min-width: 0;
     min-height: 0;
-    background: var(--side);
-    box-shadow: var(--shadow-float);
+    padding: 10px;
+    overflow: hidden;
 }
 
-.workspace-navigation-overlay .icon-button {
-    min-width: 32px;
-    min-height: 32px;
+.workbench-sheet {
+    position: relative;
+    display: flex;
+    flex: 1 1 0%;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sheet);
+    background: var(--panel-bg);
+    box-shadow: var(--panel-shadow);
+    transition: flex var(--motion-duration-emphasized) var(--ease-standard);
 }
 
-.workspace-navigation-overlay .session-row-actions {
-    flex-basis: 32px;
+.workbench-sheet.main-sheet {
+    flex: 1.15 1 0%;
+}
+
+.workbench-sheet.right-sheet {
+    flex: 1.05 1 0%;
+    min-width: 400px;
+}
+
+.workbench-sheet-head {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    height: var(--panel-head-height);
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-sub);
+}
+
+.workbench-sheet-head-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.workbench-sheet-head-left > svg {
+    flex: none;
+    color: var(--accent);
+}
+
+.workbench-sheet-title {
+    overflow: hidden;
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workbench-sheet-subtitle {
+    overflow: hidden;
+    color: var(--faint);
+    font-size: var(--font-size-meta);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workbench-sheet-head-right {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+}
+
+.workbench-sheet-meta {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.workbench-reopen-deck {
+    border: 1px solid var(--line-strong);
+    background: var(--panel-bg);
+}
+
+/* T2 左右面板等高 34px 规整底栏 */
+.workbench-sheet-footer {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: var(--panel-footer-height);
+    padding: 4px 16px;
+    border-top: 1px solid var(--line);
+    background: var(--panel-sub);
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+}
+
+.workbench-footer-hint {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--faint);
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .session-workspace {
-    display: contents;
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
 }
 
 .session-workspace[hidden] {
     display: none;
 }
 
-.session-tabs {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-    min-height: 44px;
-    padding: 6px 10px;
-    overflow-x: auto;
-    background: var(--side);
-    border-bottom: 1px solid var(--line);
-}
-
+/* 42px 一体化顶栏内的会话标签项 */
 .session-tab {
     display: flex;
     flex: 0 0 auto;
     align-items: center;
-    max-width: 240px;
+    height: 28px;
+    max-width: 228px;
     padding-right: 4px;
     border: 1px solid transparent;
-    border-radius: var(--radius-control);
+    border-radius: 7px;
+    background: transparent;
     color: var(--muted);
-    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+    transition: background-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard), border-color var(--motion-duration) var(--ease-standard);
 }
 
 .session-tab:hover:not([data-active='true']) {
@@ -91,9 +173,10 @@
 }
 
 .session-tab[data-active='true'] {
-    border-color: var(--line);
-    background: var(--selected);
+    border-color: var(--panel-border);
+    background: var(--panel-bg);
     color: var(--ink);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
 }
 
 .session-tab-select {
@@ -101,7 +184,7 @@
     align-items: center;
     gap: 7px;
     min-width: 0;
-    height: var(--control-height-compact);
+    height: 26px;
     padding: 0 6px 0 10px;
     border: 0;
     background: transparent;
@@ -148,8 +231,8 @@
     flex: none;
     padding: 0 5px;
     border: 1px solid var(--line);
-    border-radius: var(--radius-chip);
-    background: var(--paper);
+    border-radius: var(--radius-pill);
+    background: var(--panel-sub);
     color: var(--muted);
     font-family: var(--mono);
     font-size: var(--font-size-meta);
@@ -159,13 +242,52 @@
 
 .session-tab-close {
     flex: 0 0 auto;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
     color: var(--faint);
 }
 
 .session-tab-close:hover:not(:disabled) {
     color: var(--ink);
+}
+
+/* 独立世界推演页入口占位 */
+.world-stage-placeholder {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 36px 28px;
+    text-align: center;
+}
+
+.world-stage-placeholder-icon {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    margin-bottom: 14px;
+    place-items: center;
+    border-radius: var(--radius-card);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.world-stage-placeholder h2 {
+    margin: 0 0 8px;
+    color: var(--ink);
+    font-size: var(--font-size-title);
+    font-weight: 650;
+}
+
+.world-stage-placeholder p {
+    margin: 0 0 20px;
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+    line-height: var(--line-height-body);
 }
 
 .session-close-dialog {

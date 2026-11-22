@@ -3,7 +3,6 @@ package tool
 
 import (
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 )
@@ -16,11 +15,6 @@ type Config struct {
 	Tools map[ToolName]ToolConfig `json:"tools"`
 }
 
-func (c Config) clone() Config {
-	c.Tools = maps.Clone(c.Tools)
-	return c
-}
-
 // Catalog 将同一份已校验配置用于工具暴露、准入和启动前检查。
 // 目录在会话内只读，显式 reload 构造新目录，不修改旧实例。
 type Catalog struct {
@@ -29,7 +23,7 @@ type Catalog struct {
 }
 
 func NewCatalog(config Config, registry ToolCatalog) *Catalog {
-	return &Catalog{config: config.clone(), registry: registry}
+	return &Catalog{config: config, registry: registry}
 }
 
 func (c *Catalog) enabled(name ToolName) bool {
@@ -87,14 +81,17 @@ func (c *restrictedCatalog) Get(name ToolName) (Tool, bool) {
 	}
 	return c.registry.Get(name)
 }
-func (c *restrictedCatalog) List() []ToolDefinition { return slices.Clone(c.definitions) }
+func (c *restrictedCatalog) List() []ToolDefinition { return c.definitions }
 
 // ComposeCatalog 将额外工具（如运行期协作工具）与基础业务工具目录组合为单一只读目录。
 func ComposeCatalog(base ToolCatalog, extras ...Tool) (ToolCatalog, error) {
+	baseDefinitions := base.List()
+	definitions := make([]ToolDefinition, len(baseDefinitions), len(baseDefinitions)+len(extras))
+	copy(definitions, baseDefinitions)
 	composed := &composedCatalog{
 		base:        base,
 		extras:      make(map[ToolName]Tool, len(extras)),
-		definitions: base.List(),
+		definitions: definitions,
 	}
 	for _, value := range extras {
 		definition := value.Definition()
@@ -126,4 +123,4 @@ func (c *composedCatalog) Get(name ToolName) (Tool, bool) {
 	return c.base.Get(name)
 }
 
-func (c *composedCatalog) List() []ToolDefinition { return slices.Clone(c.definitions) }
+func (c *composedCatalog) List() []ToolDefinition { return c.definitions }

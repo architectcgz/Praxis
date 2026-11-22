@@ -15,7 +15,7 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/logging"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,7 +40,7 @@ type Run struct {
 	toolUpdates   chan toolUpdate
 	deps          Dependencies
 	history       sessionmodel.AgentHistory
-	terminalMu    sync.Mutex // 终态提交与外部停止命令共用此锁。
+	terminalSaved atomic.Bool // 终态写入成功后置位，供外部停止命令并发判读。
 
 	cancel        context.CancelCauseFunc
 	waiting       int
@@ -195,9 +195,7 @@ func (r *Run) BeginWaiting() { r.toolUpdates <- toolUpdate{waiting: 1} }
 func (r *Run) EndWaiting()   { r.toolUpdates <- toolUpdate{waiting: -1} }
 
 func (r *Run) TerminalSaved() bool {
-	r.terminalMu.Lock()
-	defer r.terminalMu.Unlock()
-	return r.terminal != nil
+	return r.terminalSaved.Load()
 }
 
 // executeTools 在所属协程处理等待状态和并发工具的条目保存；提交回调仅在本批工具中有效。

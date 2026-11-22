@@ -1,6 +1,7 @@
-/* Agent 对话区与滚动控件的布局。颜色由 theme.css 拥有。 */
+/* Agent 对话区、子代理协作浮岛与滚动控件的布局。颜色由 theme.css 拥有。 */
 @import './composer.css';
 @import './conversation.css';
+@import './subagent-deck.css';
 
 .agent-loading {
     display: flex;
@@ -22,63 +23,6 @@
     min-width: 0;
     min-height: 0;
     flex-direction: column;
-}
-
-/* 查看 Subagent 独立历史时的上下文导航条，与阅读列同宽对齐。 */
-.subagent-context-bar {
-    flex: none;
-    border-bottom: 1px solid var(--line);
-    background: var(--paper-2);
-}
-
-.subagent-context-inner {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 12px;
-    width: min(var(--session-content-width, 940px), calc(100cqi - var(--session-gutter, 32px) * 2));
-    max-width: var(--session-content-width, 940px);
-    min-height: 40px;
-    margin: 0 auto;
-    padding: 6px 0;
-}
-
-.subagent-context-identity {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    flex: 1 1 auto;
-}
-
-.subagent-context-identity > svg {
-    flex: none;
-    color: var(--accent);
-}
-
-.subagent-context-identity strong {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--ink);
-    font-size: var(--font-size-ui);
-    font-weight: 650;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.subagent-context-kind {
-    flex: none;
-    color: var(--faint);
-    font-size: var(--font-size-meta);
-}
-
-.subagent-context-meta {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 10px;
-    color: var(--faint);
-    font-size: var(--font-size-meta);
 }
 
 .subagent-stop-button {

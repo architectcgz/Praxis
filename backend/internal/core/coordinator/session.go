@@ -3,7 +3,9 @@ package coordinator
 import (
 	"context"
 	agentmodel "praxis/internal/core/agent"
+	"praxis/internal/core/approval"
 	coreevent "praxis/internal/core/event"
+	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
@@ -12,31 +14,40 @@ import (
 	"time"
 )
 
+// ApprovalSettings 区分已保存的会话覆盖和当前已加载的有效授权模式。
+type ApprovalSettings struct {
+	SessionID     identity.SessionID
+	GlobalMode    security.ApprovalMode
+	SessionMode   *security.ApprovalMode
+	EffectiveMode security.ApprovalMode
+}
+
+// SessionView 是前端打开会话所需的完整初始快照，后续变化通过事件推送。
 type SessionView struct {
-	QueuePaused bool
-	Session     sessionmodel.SessionInfo
-	Tasks       []taskmodel.Task
+	QueuePaused      bool
+	Session          sessionmodel.SessionInfo
+	Tasks            []taskmodel.Task
+	Models           []modelapi.Option
+	ModelChoice      sessionmodel.ModelChoice
+	Approval         ApprovalSettings
+	PendingApprovals []approval.Approval
 }
 
-func (s *Coordinator) GetSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
+// loadSchedule 的调用方必须持有会话命令锁。
+func (s *Coordinator) loadSchedule(ctx context.Context, id identity.SessionID) (*sessionSchedule, error) {
 	s.mu.Lock()
-	value := s.registry.get(id)
+	existing := s.schedules[id]
+	closed := s.closed
+	closing := existing != nil && existing.closing
 	s.mu.Unlock()
-	if value == nil {
-		return nil, errorcode.ErrNotFound
+	if closed {
+		return nil, errCoordinatorClosed
 	}
-	return value, nil
-}
-
-func (s *Coordinator) loadSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
-	s.mu.Lock()
-	value := s.registry.get(id)
-	s.mu.Unlock()
-	if value != nil {
-		return value, nil
+	if closing {
+		return nil, errorcode.ErrRequestConflict
+	}
+	if existing != nil {
+		return existing, nil
 	}
 	info, err := s.sessionRecords.Get(ctx, id)
 	if err != nil {
@@ -55,16 +66,19 @@ func (s *Coordinator) loadSession(ctx context.Context, id identity.SessionID) (*
 	}
 	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
 	owner.Configure(config, info.ModelChoice)
-	s.mu.Lock()
-	s.registry.add(id, owner)
-	if s.schedules[id] == nil {
-		s.schedules[id] = &sessionSchedule{
-			sessionID: id,
-			session:   owner,
-		}
+	schedule := &sessionSchedule{
+		sessionID: id,
+		session:   owner,
 	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		_ = owner.Close(context.Background())
+		return nil, errCoordinatorClosed
+	}
+	s.schedules[id] = schedule
 	s.mu.Unlock()
-	return owner, nil
+	return schedule, nil
 }
 
 func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID) (SessionView, error) {
@@ -77,35 +91,33 @@ func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID) 
 		return SessionView{}, err
 	}
 	defer unlock()
-	if _, err := s.loadSession(ctx, id); err != nil {
+	schedule, err := s.loadSchedule(ctx, id)
+	if err != nil {
 		return SessionView{}, err
 	}
 	info, err := s.sessionRecords.Get(ctx, id)
 	if err != nil {
 		return SessionView{}, err
 	}
-	view := SessionView{Session: info}
-	s.mu.Lock()
-	schedule := s.schedules[id]
-	s.mu.Unlock()
-	if schedule != nil {
-		if schedule.closing {
-			return SessionView{}, errorcode.ErrRequestConflict
-		}
-		view.Tasks = schedule.queue.List(0)
-		view.QueuePaused = schedule.queue.Paused()
+	pendingApprovals, err := s.approvals.ListSessionApprovals(ctx, id)
+	if err != nil {
+		return SessionView{}, err
 	}
-	return view, nil
-}
-
-func (s *Coordinator) loadSchedule(ctx context.Context, id identity.SessionID) (*sessionSchedule, error) {
-	if _, err := s.loadSession(ctx, id); err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	schedule := s.schedules[id]
-	s.mu.Unlock()
-	return schedule, nil
+	config := schedule.session.Configuration()
+	return SessionView{
+		QueuePaused: schedule.queue.Paused(),
+		Session:     info,
+		Tasks:       schedule.queue.List(0),
+		Models:      config.Models.ListModels(),
+		ModelChoice: schedule.session.Choice(),
+		Approval: ApprovalSettings{
+			SessionID:     id,
+			GlobalMode:    config.GlobalApprovalMode,
+			SessionMode:   info.ApprovalMode,
+			EffectiveMode: config.ApprovalMode,
+		},
+		PendingApprovals: pendingApprovals,
+	}, nil
 }
 
 func (s *Coordinator) releaseSession(ctx context.Context, id identity.SessionID) error {
@@ -113,16 +125,12 @@ func (s *Coordinator) releaseSession(ctx context.Context, id identity.SessionID)
 		return err
 	}
 	s.mu.Lock()
-	owner := s.registry.get(id)
-	s.registry.remove(id)
 	schedule := s.schedules[id]
 	delete(s.schedules, id)
 	s.mu.Unlock()
 	if schedule != nil {
 		schedule.queue.Clear()
-	}
-	if owner != nil {
-		return owner.Close(ctx)
+		return schedule.session.Close(ctx)
 	}
 	return nil
 }
@@ -139,11 +147,9 @@ func (s *Coordinator) CloseSession(ctx context.Context, id identity.SessionID) e
 	}
 	s.mu.Lock()
 	schedule := s.schedules[id]
-	if schedule != nil {
-		schedule.closing = true
-	}
 	var active *activeRun
 	if schedule != nil {
+		schedule.closing = true
 		active = schedule.active
 	}
 	s.mu.Unlock()
@@ -173,62 +179,95 @@ func (s *Coordinator) ReloadSessionConfig(ctx context.Context, id identity.Sessi
 		return err
 	}
 	defer s.running.Done()
-	if err := s.reloadIdleSession(ctx, id); err != nil {
+	queueEvent, reloadEvent, err := s.reloadIdleSession(ctx, id)
+	if err != nil {
 		return err
 	}
 	s.logger.Infof("session configuration reloaded session=%s", id)
-	s.loop.Emitter.Emit(coreevent.Event{
-		Source: coreevent.EventSource{
-			SessionID: id,
-			AgentID:   identity.AgentID(id),
-		},
-		Payload: coreevent.SessionConfigReloaded{},
-	})
+	s.loop.Emitter.Emit(queueEvent)
+	s.loop.Emitter.Emit(reloadEvent)
 	return nil
 }
 
-func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.SessionID) error {
+func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.SessionID) (coreevent.Event, coreevent.Event, error) {
 	unlock, err := s.lockSession(ctx, id)
 	if err != nil {
-		return err
+		return coreevent.Event{}, coreevent.Event{}, err
 	}
 	defer unlock()
 	s.mu.Lock()
 	schedule := s.schedules[id]
-	if schedule != nil && schedule.active != nil {
-		s.mu.Unlock()
-		return agentmodel.ErrExecuting
-	}
-	if schedule != nil {
-		schedule.reloading = true
-	}
+	closing := schedule != nil && schedule.closing
+	busy := schedule != nil && schedule.active != nil
 	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		if schedule != nil {
-			schedule.reloading = false
-		}
-		s.mu.Unlock()
-	}()
-	owner, err := s.GetSession(ctx, id)
-	if err != nil {
-		return err
+	if schedule == nil {
+		return coreevent.Event{}, coreevent.Event{}, errorcode.ErrNotFound
 	}
-	if schedule != nil {
-		schedule.queue.Clear()
-		s.loop.Emitter.Emit(taskQueueEvent(schedule))
+	if closing {
+		return coreevent.Event{}, coreevent.Event{}, errorcode.ErrRequestConflict
+	}
+	if busy {
+		return coreevent.Event{}, coreevent.Event{}, agentmodel.ErrExecuting
 	}
 	config, err := s.loadConfig(ctx)
 	if err != nil {
-		return err
+		return coreevent.Event{}, coreevent.Event{}, err
 	}
 	info, err := s.sessionRecords.Get(ctx, id)
 	if err != nil {
-		return err
+		return coreevent.Event{}, coreevent.Event{}, err
 	}
 	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
-	owner.Configure(config, owner.Choice())
-	return nil
+	schedule.session.Configure(config, schedule.session.Choice())
+	schedule.queue.Clear()
+	queueEvent := taskQueueEvent(schedule)
+	reloadEvent := coreevent.Event{
+		Source: coreevent.EventSource{
+			SessionID: id,
+			AgentID:   identity.AgentID(id),
+		},
+		Payload: coreevent.SessionConfigReloaded{
+			Models:        config.Models.ListModels(),
+			GlobalMode:    config.GlobalApprovalMode,
+			SessionMode:   info.ApprovalMode,
+			EffectiveMode: config.ApprovalMode,
+		},
+	}
+	return queueEvent, reloadEvent, nil
+}
+
+// SetApprovalMode 只持久化会话授权覆盖；当前有效模式在显式 reload 成功后才更新。
+func (s *Coordinator) SetApprovalMode(ctx context.Context, id identity.SessionID, mode *security.ApprovalMode) (ApprovalSettings, error) {
+	if err := s.enter(); err != nil {
+		return ApprovalSettings{}, err
+	}
+	defer s.running.Done()
+	unlock, err := s.lockSession(ctx, id)
+	if err != nil {
+		return ApprovalSettings{}, err
+	}
+	defer unlock()
+	s.mu.Lock()
+	schedule := s.schedules[id]
+	closing := schedule != nil && schedule.closing
+	s.mu.Unlock()
+	if schedule == nil {
+		return ApprovalSettings{}, errorcode.ErrNotFound
+	}
+	if closing {
+		return ApprovalSettings{}, errorcode.ErrRequestConflict
+	}
+	info, err := s.sessionRecords.SetApprovalMode(ctx, id, mode, time.Now().UTC())
+	if err != nil {
+		return ApprovalSettings{}, err
+	}
+	config := schedule.session.Configuration()
+	return ApprovalSettings{
+		SessionID:     id,
+		GlobalMode:    config.GlobalApprovalMode,
+		SessionMode:   info.ApprovalMode,
+		EffectiveMode: config.ApprovalMode,
+	}, nil
 }
 
 // SelectModel 定位已打开的会话更新选择，再尝试唤醒该会话的预约，不影响其他会话。
@@ -241,11 +280,19 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 	if err != nil {
 		return err
 	}
-	owner, err := s.GetSession(ctx, sessionID)
-	if err != nil {
+	s.mu.Lock()
+	schedule := s.schedules[sessionID]
+	closing := schedule != nil && schedule.closing
+	s.mu.Unlock()
+	if schedule == nil {
 		unlock()
-		return err
+		return errorcode.ErrNotFound
 	}
+	if closing {
+		unlock()
+		return errorcode.ErrRequestConflict
+	}
+	owner := schedule.session
 	if _, err := owner.Configuration().Models.Get(choice.ProviderID, choice.ModelID, choice.ReasoningLevel); err != nil {
 		unlock()
 		return err
@@ -263,9 +310,19 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 }
 
 func (s *Coordinator) AgentHistory(ctx context.Context, id identity.SessionID, agentID identity.AgentID, before *int64, limit int) (sessionmodel.HistoryPage, error) {
-	owner, err := s.GetSession(ctx, id)
-	if err != nil {
+	if err := s.enter(); err != nil {
 		return sessionmodel.HistoryPage{}, err
 	}
-	return owner.AgentPage(ctx, agentID, before, limit)
+	defer s.running.Done()
+	s.mu.Lock()
+	schedule := s.schedules[id]
+	closing := schedule != nil && schedule.closing
+	s.mu.Unlock()
+	if schedule == nil {
+		return sessionmodel.HistoryPage{}, errorcode.ErrNotFound
+	}
+	if closing {
+		return sessionmodel.HistoryPage{}, errorcode.ErrRequestConflict
+	}
+	return schedule.session.AgentPage(ctx, agentID, before, limit)
 }

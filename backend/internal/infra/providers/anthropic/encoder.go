@@ -1,7 +1,6 @@
 package anthropicmessages
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,7 +98,7 @@ func anthropicEntry(entry *sessionentry.Entry, config modelapi.Config, ids map[s
 			if !config.CanReplayReasoningState(state) {
 				continue
 			}
-			raw = bytes.Clone(state.Payload)
+			raw = state.Payload
 		default:
 			return nil, fmt.Errorf("context block %d has unsupported type %T", index, block)
 		}

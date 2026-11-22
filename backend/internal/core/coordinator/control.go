@@ -62,14 +62,6 @@ func (s *Coordinator) decideToolCall(ctx context.Context, params approval.Decisi
 	return s.approvals.DecideApproval(ctx, params, approve)
 }
 
-func (s *Coordinator) ListToolApprovals(ctx context.Context, sessionID identity.SessionID, agentID identity.AgentID) ([]approval.Approval, error) {
-	if err := s.enter(); err != nil {
-		return nil, err
-	}
-	defer s.running.Done()
-	return s.approvals.ListApprovals(ctx, sessionID, agentID)
-}
-
 // StopToolCall 只发送停止信号，回执由当前工具路径生成。
 func (s *Coordinator) StopToolCall(ctx context.Context, request executionmodel.ControlRequest) error {
 	if err := s.enter(); err != nil {

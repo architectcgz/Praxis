@@ -11,9 +11,3 @@
     font-variant-numeric: tabular-nums;
     overflow-wrap: anywhere;
 }
-
-@media (max-width: 460px) {
-    .output-handoff-task > summary {
-        flex-wrap: wrap;
-    }
-}

@@ -79,20 +79,6 @@ type Option struct {
 	DefaultReasoningLevel string
 }
 
-// Clone 返回配置文档的深拷贝，调用方修改嵌套模型或推理等级不会影响原配置。
-func (d Document) Clone() Document {
-	d.Groups = slices.Clone(d.Groups)
-	d.Providers = slices.Clone(d.Providers)
-	for index := range d.Providers {
-		d.Providers[index].Models = slices.Clone(d.Providers[index].Models)
-		for modelIndex := range d.Providers[index].Models {
-			configured := &d.Providers[index].Models[modelIndex]
-			configured.ReasoningLevels = slices.Clone(configured.ReasoningLevels)
-		}
-	}
-	return d
-}
-
 // ValidateDocument 在请求或配置文件输入边界只读校验完整模型配置文档，不清洗字段或补默认值。
 func ValidateDocument(document Document) error {
 	groupsSeen, err := validateGroups(document.Groups)

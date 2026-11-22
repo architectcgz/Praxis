@@ -57,41 +57,18 @@ func Create(ctx context.Context, path string) error {
 	return nil
 }
 
-type commandKind uint8
+var errWriterClosed = errors.New("JSONL writer is closed")
 
-const (
-	appendCommand commandKind = iota
-	commitCommand
-	readCommand
-	closeCommand
-)
-
-type command struct {
-	ctx    context.Context
-	kind   commandKind
-	data   []byte
-	cursor *int64
-	limit  int
-	result chan commandResult
-}
-
-type commandResult struct {
-	position   Position
-	records    []Record
-	nextCursor *int64
-	hasMore    bool
-	err        error
-}
-
-// Writer 将同一文件的 Append、Sync 和 Close 串行化到一个 goroutine。
+// Writer 使用互斥锁串行化同一日志文件的追加、刷盘、读取与关闭。
 type Writer struct {
-	requests chan command
-	closeMu  sync.Mutex
+	mu       sync.Mutex
+	file     *os.File
 	closed   bool
 	closeErr error
+	fatalErr error
 }
 
-// OpenWriter 打开已经创建的 JSONL 文件并启动专属 Writer。
+// OpenWriter 打开已经创建的 JSONL 文件并返回专属 Writer。
 func OpenWriter(ctx context.Context, path string) (*Writer, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -100,43 +77,7 @@ func OpenWriter(ctx context.Context, path string) (*Writer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open log %s: %w", path, err)
 	}
-	writer := &Writer{requests: make(chan command)}
-	go writer.run(file)
-	return writer, nil
-}
-
-func (w *Writer) run(file *os.File) {
-	var fatalErr error
-	for request := range w.requests {
-		if request.kind != closeCommand && fatalErr != nil {
-			request.result <- commandResult{err: fatalErr}
-			continue
-		}
-
-		switch request.kind {
-		case appendCommand:
-			position, err := appendRecord(file, request.data)
-			request.result <- commandResult{position: position, err: err}
-		case commitCommand:
-			position, err := appendRecord(file, request.data)
-			if err == nil {
-				err = file.Sync()
-			}
-			if err != nil {
-				fatalErr = fmt.Errorf("commit log record: %w", err)
-			}
-			request.result <- commandResult{position: position, err: err}
-		case readCommand:
-			records, nextCursor, hasMore, err := readBackwardFile(request.ctx, file, request.cursor, request.limit)
-			request.result <- commandResult{records: records, nextCursor: nextCursor, hasMore: hasMore, err: err}
-		case closeCommand:
-			err := errors.Join(file.Sync(), file.Close())
-			request.result <- commandResult{err: err}
-			return
-		default:
-			request.result <- commandResult{err: errors.New("unknown JSONL writer command")}
-		}
-	}
+	return &Writer{file: file}, nil
 }
 
 func appendRecord(file *os.File, data []byte) (Position, error) {
@@ -166,72 +107,77 @@ func seek(file *os.File, offset int64) error {
 	return err
 }
 
-// Append 同步等待 Writer 完成完整 Record 的写入。
+// Append 同步写入一条完整 Record。
 func (w *Writer) Append(ctx context.Context, data []byte) (Position, error) {
-	return w.submit(ctx, command{kind: appendCommand, data: bytes.Clone(data)})
+	if err := ctx.Err(); err != nil {
+		return Position{}, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.usableLocked(); err != nil {
+		return Position{}, err
+	}
+	return appendRecord(w.file, data)
 }
 
 // CommitTerminal 连续执行 Terminal Record 的 Append 和 Sync。
 func (w *Writer) CommitTerminal(ctx context.Context, data []byte) (Position, error) {
-	return w.submit(ctx, command{kind: commitCommand, data: bytes.Clone(data)})
+	if err := ctx.Err(); err != nil {
+		return Position{}, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.usableLocked(); err != nil {
+		return Position{}, err
+	}
+	position, err := appendRecord(w.file, data)
+	if err == nil {
+		err = w.file.Sync()
+	}
+	if err != nil {
+		w.fatalErr = fmt.Errorf("commit log record: %w", err)
+	}
+	return position, err
 }
 
-// ReadBackward 通过同一 Writer 读取，保证读取与追加在该 Agent 内按命令顺序执行。
+// ReadBackward 与追加共用同一把文件锁，保证读取不会看到半截写入。
 func (w *Writer) ReadBackward(ctx context.Context, cursor *int64, limit int) ([]Record, *int64, bool, error) {
-	w.closeMu.Lock()
-	defer w.closeMu.Unlock()
-	if w.closed {
-		return nil, nil, false, w.closeErr
+	if err := ctx.Err(); err != nil {
+		return nil, nil, false, err
 	}
-	request := command{
-		ctx:    ctx,
-		kind:   readCommand,
-		cursor: cursor,
-		limit:  limit,
-		result: make(chan commandResult, 1),
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.usableLocked(); err != nil {
+		return nil, nil, false, err
 	}
-	select {
-	case w.requests <- request:
-	case <-ctx.Done():
-		return nil, nil, false, ctx.Err()
-	}
-	result := <-request.result
-	return result.records, result.nextCursor, result.hasMore, result.err
+	return readBackwardFile(ctx, w.file, cursor, limit)
 }
 
-func (w *Writer) submit(ctx context.Context, request command) (Position, error) {
-	w.closeMu.Lock()
-	defer w.closeMu.Unlock()
-	if w.closed {
-		return Position{}, w.closeErr
-	}
-	request.result = make(chan commandResult, 1)
-	select {
-	case w.requests <- request:
-	case <-ctx.Done():
-		return Position{}, ctx.Err()
-	}
-	result := <-request.result
-	return result.position, result.err
-}
-
-// Close 同步关闭 Writer 持有的文件；调用方可以重复调用。
+// Close 同步刷盘并关闭 Writer 持有的文件；可重复调用。
 func (w *Writer) Close(ctx context.Context) error {
-	w.closeMu.Lock()
-	defer w.closeMu.Unlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.closed {
 		return w.closeErr
 	}
-	request := command{kind: closeCommand, result: make(chan commandResult, 1)}
-	select {
-	case w.requests <- request:
-	case <-ctx.Done():
-		return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	result := <-request.result
+	err := errors.Join(w.file.Sync(), w.file.Close())
+	w.file = nil
 	w.closed = true
-	w.closeErr = result.err
-	return result.err
+	w.closeErr = err
+	return err
+}
+
+func (w *Writer) usableLocked() error {
+	if w.closed {
+		return errWriterClosed
+	}
+	if w.fatalErr != nil {
+		return w.fatalErr
+	}
+	return nil
 }
 
 func readBackwardFile(ctx context.Context, file *os.File, cursor *int64, limit int) ([]Record, *int64, bool, error) {

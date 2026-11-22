@@ -1,32 +1,23 @@
-/* 工作区分栏、侧栏与导航行的布局。颜色与视觉状态由 theme-navigation.css 拥有。 */
-.workspace-grid {
-    display: grid;
-    grid-template-columns: 248px minmax(0, 1fr);
+/* 工作区舞台体与同层可折叠项目目录结构。颜色与视觉状态由 theme-navigation.css 拥有。 */
+.workspace-sidebar-pane {
+    display: flex;
     min-width: 0;
     min-height: 0;
-}
-
-.workspace-stage {
-    display: grid;
-    grid-template-rows: minmax(0, 1fr);
-    min-width: 0;
-    min-height: 0;
-}
-
-.workspace-stage.has-session-tabs {
-    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
 }
 
 .workspace-stage-body {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 268px;
+    display: flex;
     min-width: 0;
     min-height: 0;
+    overflow: hidden;
 }
 
 .side,
 .sidebar {
     display: flex;
+    width: 100%;
+    height: 100%;
     min-width: 0;
     min-height: 0;
     flex-direction: column;
@@ -48,8 +39,8 @@
 .side-head,
 .sidebar-heading {
     display: flex;
-    height: 38px;
-    min-height: 38px;
+    height: var(--topbar-height);
+    min-height: var(--topbar-height);
     align-items: center;
     justify-content: space-between;
     padding: 0 10px 0 14px;
@@ -60,120 +51,4 @@
     display: flex;
     align-items: center;
     gap: 2px;
-}
-
-.agent-groups {
-    display: grid;
-    gap: 14px;
-    margin-top: 8px;
-}
-
-.agent-group {
-    display: grid;
-    gap: 4px;
-}
-
-.agent-group-label {
-    padding: 0 8px;
-    color: var(--faint);
-    font-size: var(--font-size-meta);
-    font-weight: 650;
-    letter-spacing: var(--track-micro);
-    text-transform: uppercase;
-}
-
-.agent-list {
-    display: grid;
-    gap: 2px;
-    margin-top: 8px;
-}
-
-.agent-groups .agent-list {
-    margin-top: 0;
-}
-
-.agent-row {
-    display: grid;
-    grid-template-columns: 7px minmax(0, 1fr) auto;
-    gap: 7px;
-    align-items: center;
-    width: 100%;
-    padding: 8px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-control);
-    text-align: left;
-}
-
-.agent-row-copy {
-    min-width: 0;
-    flex: 1;
-}
-
-.astate,
-.state-marker {
-    width: 7px;
-    height: 7px;
-    flex: 0 0 7px;
-    border-radius: 50%;
-}
-
-.agent .sub,
-.agent-row-copy small {
-    margin-top: 3px;
-}
-
-.agent-row-metrics {
-    display: flex;
-    gap: 8px;
-    margin-top: 3px;
-}
-
-.agent-row-metrics span {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-}
-
-.session-note {
-    margin: 4px 8px 10px;
-    padding-bottom: 10px;
-}
-
-.agent-label {
-    display: block;
-    margin: 22px 0 10px;
-}
-
-.agents-panel > .scroll-region {
-    padding: 0 8px 12px;
-}
-
-.panel-placeholder {
-    display: grid;
-    justify-items: center;
-    gap: 8px;
-    margin-top: 56px;
-    text-align: center;
-}
-
-.panel-placeholder p {
-    max-width: 180px;
-    margin: 0;
-    font-size: var(--font-size-meta);
-    line-height: 1.5;
-}
-
-/* 单行省略是所有侧栏文本行的共同要求。 */
-.agent .nm,
-.agent-row-copy strong,
-.agent .sub,
-.agent-row-copy small,
-.session-note b,
-.session-title,
-.st,
-.state-text {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }

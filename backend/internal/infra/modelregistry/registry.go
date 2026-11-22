@@ -101,9 +101,9 @@ func Load(modelsPath, credentialsPath string, client *http.Client) (*Registry, e
 	}, nil
 }
 
-// Config 返回模型配置的独立副本，调用方不能修改内部状态。
+// Config 返回本次加载的只读模型配置文档，调用方不得修改切片内容。
 func (r *Registry) Config() modelapi.Document {
-	return r.config.Clone()
+	return r.config
 }
 
 // Credentials 生成本次配置中已启用 Provider 的只读凭据快照。

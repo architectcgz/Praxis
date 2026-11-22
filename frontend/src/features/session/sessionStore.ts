@@ -1,5 +1,14 @@
 import { mergeMessages, mergeRequests, type RequestActivities } from '../agent/history/entries'
-import { activeRunId, type AgentView, type HistoryMessage, type HistoryPage, type SessionSnapshot } from '../../api'
+import { emptyUsageTotals, summarizeRequestsUsage, type UsageTotals } from '../agent/modelUsage'
+import {
+    activeRunId,
+    type AgentView,
+    type HistoryMessage,
+    type HistoryPage,
+    type ModelSelection,
+    type SessionApprovalMode,
+    type SessionSnapshot,
+} from '../../api'
 import type { AgentEvent } from '../../api/events'
 import type { StreamingOutputs } from '../agent/types'
 import { applySessionEvent, clearHistory } from './applySessionEvent'
@@ -8,9 +17,17 @@ export type AgentEntry = {
     agent: AgentView
     entries: HistoryMessage[]
     requests: RequestActivities
+    archivedUsage?: UsageTotals
     page?: Pick<HistoryPage, 'hasMore' | 'nextCursor'>
     loading: boolean
     error: string
+}
+
+/** 优先读取当前已加载请求的用量；已释放正文的子代理回退到归档的轻量统计。 */
+export function entryUsage(entry?: AgentEntry): UsageTotals {
+    if (!entry) return emptyUsageTotals
+    if (entry.requests.size > 0) return summarizeRequestsUsage(entry.requests)
+    return entry.archivedUsage ?? emptyUsageTotals
 }
 export type SessionData = {
     session: Omit<SessionSnapshot, 'history'> | null
@@ -18,7 +35,6 @@ export type SessionData = {
     ids: string[]
     byId: Record<string, AgentEntry>
     endedRuns: ReadonlySet<string>
-    configRevision: number
 }
 export type SessionOutput = { streamingOutputs: StreamingOutputs }
 
@@ -30,7 +46,6 @@ export function createSessionStore(sessionId: string) {
         ids: [],
         byId: {},
         endedRuns: new Set(),
-        configRevision: 0,
     }
     let output: SessionOutput = { streamingOutputs: {} }
     let buffered: AgentEvent[] = []
@@ -124,6 +139,18 @@ export function createSessionStore(sessionId: string) {
         updateTitle(title: string) {
             if (data.session) {
                 data = { ...data, session: { ...data.session, title } }
+                emitData()
+            }
+        },
+        updateModelSelection(modelSelection: ModelSelection) {
+            if (data.session) {
+                data = { ...data, session: { ...data.session, modelSelection } }
+                emitData()
+            }
+        },
+        updateApprovalMode(approvalMode: SessionApprovalMode) {
+            if (data.session) {
+                data = { ...data, session: { ...data.session, approvalMode } }
                 emitData()
             }
         },

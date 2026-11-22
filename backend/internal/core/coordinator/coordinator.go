@@ -51,42 +51,13 @@ type Coordinator struct {
 	logger            *logging.Logger
 	transitionTimeout time.Duration
 
-	// mu 保护已加载会话、会话调度状态、会话命令信号量及会话执行句柄；
+	// mu 保护会话调度表、会话命令信号量及会话执行句柄；
 	// 存储读写、会话数据访问与 Run 执行均不持有 mu。
 	mu              sync.Mutex
 	closed          bool
-	registry        sessionRegistry
 	sessionCommands map[identity.SessionID]*sessionCommand
 	schedules       map[identity.SessionID]*sessionSchedule
 	running         sync.WaitGroup
-}
-
-type sessionRegistry struct {
-	values map[identity.SessionID]*sessionmodel.Session
-}
-
-func (r *sessionRegistry) get(id identity.SessionID) *sessionmodel.Session {
-	return r.values[id]
-}
-
-func (r *sessionRegistry) add(id identity.SessionID, s *sessionmodel.Session) {
-	if r.values == nil {
-		r.values = make(map[identity.SessionID]*sessionmodel.Session)
-	}
-	r.values[id] = s
-}
-
-func (r *sessionRegistry) remove(id identity.SessionID) {
-	delete(r.values, id)
-}
-
-func (r *sessionRegistry) drain() []*sessionmodel.Session {
-	owners := make([]*sessionmodel.Session, 0, len(r.values))
-	for _, owner := range r.values {
-		owners = append(owners, owner)
-	}
-	clear(r.values)
-	return owners
 }
 
 // sessionCommand 串行化同一会话的命令与调度登记，不覆盖模型、工具执行和运行结算。
@@ -214,7 +185,11 @@ func (r *Coordinator) Close(ctx context.Context) error {
 	select {
 	case <-done:
 		r.mu.Lock()
-		owners := r.registry.drain()
+		owners := make([]*sessionmodel.Session, 0, len(r.schedules))
+		for _, schedule := range r.schedules {
+			schedule.queue.Clear()
+			owners = append(owners, schedule.session)
+		}
 		clear(r.schedules)
 		clear(r.sessionCommands)
 		r.mu.Unlock()
@@ -238,5 +213,4 @@ type sessionSchedule struct {
 	queue     taskmodel.TaskQueue
 	active    *activeRun
 	closing   bool
-	reloading bool
 }
