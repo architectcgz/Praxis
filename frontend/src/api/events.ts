@@ -4,7 +4,7 @@ import { isBindingAvailable } from './bindings'
 import type { AgentView, HistoryMessage, ModelRequestActivity, RunOutcome } from './agents'
 import type { RawToolApproval } from './commands'
 import type { ModelOption } from './models'
-import type { SessionApprovalMode } from './sessions'
+import type { ModelSelection, SessionApprovalMode } from './sessions'
 import type { QueuedTask } from './tasks'
 
 type RunData = {
@@ -64,7 +64,7 @@ export type AgentEvent =
     | RequestEvent
     | { kind: 'task_queue_changed'; data: { tasks: QueuedTask[]; paused: boolean } }
     | { kind: 'task_queue_storage_failed'; data: { message: string } }
-    | { kind: 'session_config_reloaded'; data: { models: ModelOption[]; approvalMode: SessionApprovalMode } }
+    | { kind: 'session_config_reloaded'; data: { models: ModelOption[]; modelSelection: ModelSelection; approvalMode: SessionApprovalMode } }
     | { kind: 'session_title_changed'; data: { title: string; updatedAt: string } }
 
 export function subscribeAgentEvents(sessionId: string, listener: (event: AgentEvent) => void) {

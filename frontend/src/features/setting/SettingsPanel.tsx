@@ -7,7 +7,7 @@ type SettingsPanelProps = {
 }
 
 const configFiles = [
-    { path: '~/.praxis/config/models.json', description: 'Provider、分组与可用模型目录配置' },
+    { path: '~/.praxis/config/models.json', description: 'Provider、分组、模型目录和全局默认模型（defaultModel）' },
     { path: '~/.praxis/config/auth.json', description: 'Provider API 凭据（仅后端本地读取，不暴露至界面）' },
     { path: '~/.praxis/config/settings.json', description: '全局默认工具审批模式（ask / auto / yolo）' },
     { path: '~/.praxis/config/tools.json', description: '工具启停策略（如按工具名禁用 bash 等内置工具）' },
@@ -28,7 +28,7 @@ export function SettingsPanel({ models, hasActiveSession }: SettingsPanelProps) 
                                 </div>
                                 <div className="settings-card-header-text">
                                     <h2 id="settings-models-title">已加载模型目录</h2>
-                                    <p>模型与推理等级在会话打开时加载并按会话独立持有。</p>
+                                    <p>会话优先恢复手动选择；未选择时使用全局默认模型。</p>
                                 </div>
                             </div>
                             <div className="settings-card-body">

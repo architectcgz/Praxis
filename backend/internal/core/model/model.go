@@ -3,11 +3,57 @@ package model
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
-	"strings"
+	"praxis/internal/errorcode"
 )
 
-const MaxReasoningStateBytes = 1024 * 1024
+const (
+	ErrNotConfigured       errorcode.Code = "model.not_configured"
+	MaxReasoningStateBytes                = 1024 * 1024
+)
+
+// APIFormat 标识 Provider 使用的模型 API 协议。
+type APIFormat string
+
+const (
+	APIFormatAnthropicMessages     APIFormat = "anthropic_messages"
+	APIFormatOpenAIResponses       APIFormat = "openai_responses"
+	APIFormatOpenAIChatCompletions APIFormat = "openai_chat_completions"
+)
+
+// Valid 判断模型 API 协议是否受支持。
+func (f APIFormat) Valid() bool {
+	switch f {
+	case APIFormatAnthropicMessages, APIFormatOpenAIResponses, APIFormatOpenAIChatCompletions:
+		return true
+	default:
+		return false
+	}
+}
+
+// ModelThinking 冻结模型的 Thinking 配置与禁用能力；Effort 由独立的 ReasoningLevels 表达。
+// Mode 为空表示使用服务端默认模式，不据此推断是否会产生 thinking blocks。
+type ModelThinking struct {
+	Mode             string `json:"mode,omitempty"`
+	BudgetTokens     int    `json:"budgetTokens,omitzero"`
+	SupportsDisabled bool   `json:"supportsDisabled,omitzero"`
+}
+
+// Option 是模型目录中的可选条目，携带分组与推理能力。
+type Option struct {
+	GroupID               string
+	ProviderID            string
+	ModelID               string
+	Label                 string
+	ProviderName          string
+	ReasoningLevels       []string
+	DefaultReasoningLevel string
+}
+
+// CatalogEntry 保存一条已在输入边界校验并排序的模型目录项及默认运行时配置。
+type CatalogEntry struct {
+	Option Option
+	Config Config
+}
 
 // Config 保存 Run 选定并持久化的只读模型配置，能力列表在执行链路中共享。
 //
@@ -89,11 +135,12 @@ func (u *UsageTotals) Add(value Usage) {
 }
 
 // Catalog 保存加载后的只读模型目录，不包含凭据或存储能力。
-// 只接收输入边界已校验的配置，加载时准备各个已配置推理等级的完整选项。
+// 只接收输入边界已校验并排序的条目，加载时展开各个已配置推理等级的完整配置。
 // 模型配置查询直接返回已准备的只读配置，不重新校验或覆盖参数。
 type Catalog struct {
-	options []Option
-	models  map[modelKey]Config
+	options      []Option
+	models       map[modelKey]Config
+	defaultModel Option
 }
 
 type modelKey struct {
@@ -102,51 +149,38 @@ type modelKey struct {
 	ReasoningLevel string
 }
 
-func NewCatalog(document Document) *Catalog {
+func NewCatalog(entries []CatalogEntry, defaultModel Option) *Catalog {
 	catalog := &Catalog{
-		options: make([]Option, 0),
-		models:  make(map[modelKey]Config),
+		options:      make([]Option, 0, len(entries)),
+		models:       make(map[modelKey]Config, len(entries)),
+		defaultModel: defaultModel,
 	}
-	for _, provider := range document.Providers {
-		for _, candidate := range provider.Models {
-			prepared := Config{
-				ProviderID:      provider.ID,
-				ModelID:         candidate.ID,
-				ReasoningLevel:  candidate.DefaultReasoningLevel,
-				ReasoningLevels: candidate.ReasoningLevels,
-				Thinking:        candidate.Thinking,
-				APIFormat:       string(candidate.APIFormat),
-				ContextWindow:   candidate.ContextWindow,
-				MaxOutputTokens: candidate.MaxOutputTokens,
-				BaseURL:         provider.BaseURL,
-				ProxyURL:        provider.ProxyURL,
-			}
-			// 空等级定位默认选项，其他等级在加载时展开，查询不再覆盖默认值。
-			key := modelKey{ProviderID: provider.ID, ModelID: candidate.ID}
-			catalog.models[key] = prepared
-			for _, level := range candidate.ReasoningLevels {
-				key.ReasoningLevel = level
-				prepared.ReasoningLevel = level
-				catalog.models[key] = prepared
-			}
-			catalog.options = append(catalog.options, Option{
-				GroupID:               candidate.GroupID,
-				ProviderID:            provider.ID,
-				ModelID:               candidate.ID,
-				Label:                 candidate.DisplayName,
-				ProviderName:          provider.DisplayName,
-				ReasoningLevels:       candidate.ReasoningLevels,
-				DefaultReasoningLevel: candidate.DefaultReasoningLevel,
-			})
+	for _, entry := range entries {
+		prepared := entry.Config
+		// 空等级定位默认选项，其他等级在加载时展开，查询不再覆盖默认值。
+		key := modelKey{
+			ProviderID: prepared.ProviderID,
+			ModelID:    prepared.ModelID,
 		}
+		catalog.models[key] = prepared
+		for _, level := range prepared.ReasoningLevels {
+			key.ReasoningLevel = level
+			prepared.ReasoningLevel = level
+			catalog.models[key] = prepared
+		}
+		catalog.options = append(catalog.options, entry.Option)
 	}
-	orderModelOptions(catalog.options, document.Groups)
 	return catalog
 }
 
 // ListModels 返回只读模型选项列表，调用方不得修改切片或其推理等级列表。
 func (c *Catalog) ListModels() []Option {
 	return c.options
+}
+
+// DefaultModel 返回会话可继承的模型；空目录返回零值。
+func (c *Catalog) DefaultModel() Option {
+	return c.defaultModel
 }
 
 func (c *Catalog) Get(providerID, modelID, reasoningLevel string) (Config, error) {
@@ -156,34 +190,13 @@ func (c *Catalog) Get(providerID, modelID, reasoningLevel string) (Config, error
 		ReasoningLevel: reasoningLevel,
 	}]
 	if !ok {
-		return Config{}, fmt.Errorf("model %q for provider %q with reasoning level %q is not configured: %w", modelID, providerID, reasoningLevel, ErrNotConfigured)
+		return Config{}, fmt.Errorf(
+			"model %q for provider %q with reasoning level %q is not configured: %w",
+			modelID,
+			providerID,
+			reasoningLevel,
+			ErrNotConfigured,
+		)
 	}
 	return config, nil
-}
-
-func orderModelOptions(options []Option, groups []Group) {
-	groupOrder := make(map[string]int, len(groups))
-	for index, group := range groups {
-		groupOrder[group.ID] = index
-	}
-	slices.SortStableFunc(options, func(left, right Option) int {
-		leftGroup, leftOK := groupOrder[left.GroupID]
-		rightGroup, rightOK := groupOrder[right.GroupID]
-		if leftOK && rightOK && leftGroup != rightGroup {
-			return leftGroup - rightGroup
-		}
-		if leftOK != rightOK {
-			if leftOK {
-				return -1
-			}
-			return 1
-		}
-		if left.Label == right.Label {
-			if left.ProviderID == right.ProviderID {
-				return strings.Compare(left.ModelID, right.ModelID)
-			}
-			return strings.Compare(left.ProviderID, right.ProviderID)
-		}
-		return strings.Compare(left.Label, right.Label)
-	})
 }

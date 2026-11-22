@@ -52,7 +52,8 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 	switch payload := event.Payload.(type) {
 	case coreevent.SessionConfigReloaded:
 		data = AgentSessionConfigReloaded{
-			Models: publicModelOptions(payload.Models),
+			Models:         publicModelOptions(payload.Models),
+			ModelSelection: ModelSelection(payload.ModelChoice),
 			ApprovalMode: publicApprovalMode(sessionservice.ApprovalSettings{
 				SessionID:     event.Source.SessionID,
 				GlobalMode:    payload.GlobalMode,

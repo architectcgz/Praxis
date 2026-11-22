@@ -30,10 +30,11 @@ type AgentToolCall struct {
 	Arguments string `json:"arguments"`
 }
 
-// AgentSessionConfigReloaded 在会话重载成功后直接推送最新模型目录与有效授权模式。
+// AgentSessionConfigReloaded 在重载成功后同步新的模型目录、有效模型和授权模式。
 type AgentSessionConfigReloaded struct {
-	Models       []ModelOption       `json:"models"`
-	ApprovalMode SessionApprovalMode `json:"approvalMode"`
+	Models         []ModelOption       `json:"models"`
+	ModelSelection ModelSelection      `json:"modelSelection"`
+	ApprovalMode   SessionApprovalMode `json:"approvalMode"`
 }
 
 // AgentSessionTitleChanged 在首条输入自动命名后直接推送标题与更新时间。

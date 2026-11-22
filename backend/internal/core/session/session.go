@@ -43,7 +43,7 @@ func (c *Configuration) Definition(id identity.AgentDefinitionID) (agentmodel.Ag
 	return agentmodel.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
 }
 
-// ModelChoice 表达用户选择的模型和推理等级；查询结果全空表示尚未选择。
+// ModelChoice 在会话元数据中表示显式覆盖，在运行时表示当前有效的模型和推理等级。
 type ModelChoice struct {
 	ProviderID     string
 	ModelID        string
@@ -68,6 +68,14 @@ func New(data *Data, log HistoryStore) *Session {
 }
 
 func (s *Session) Configure(config *Configuration, choice ModelChoice) {
+	if choice.ModelID == "" {
+		option := config.Models.DefaultModel()
+		choice = ModelChoice{
+			ProviderID:     option.ProviderID,
+			ModelID:        option.ModelID,
+			ReasoningLevel: option.DefaultReasoningLevel,
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.configuration = config

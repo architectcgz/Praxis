@@ -217,8 +217,14 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 	if err != nil {
 		return coreevent.Event{}, coreevent.Event{}, err
 	}
+	choice := info.ModelChoice
+	if choice.ModelID != "" {
+		if _, err := config.Models.Get(choice.ProviderID, choice.ModelID, choice.ReasoningLevel); err != nil {
+			return coreevent.Event{}, coreevent.Event{}, err
+		}
+	}
 	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
-	schedule.session.Configure(config, schedule.session.Choice())
+	schedule.session.Configure(config, choice)
 	schedule.queue.Clear()
 	queueEvent := taskQueueEvent(schedule)
 	reloadEvent := coreevent.Event{
@@ -228,6 +234,7 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 		},
 		Payload: coreevent.SessionConfigReloaded{
 			Models:        config.Models.ListModels(),
+			ModelChoice:   schedule.session.Choice(),
 			GlobalMode:    config.GlobalApprovalMode,
 			SessionMode:   info.ApprovalMode,
 			EffectiveMode: config.ApprovalMode,

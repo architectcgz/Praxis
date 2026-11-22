@@ -24,6 +24,7 @@ export function applySessionEvent(sessionId: string, data: SessionData, output: 
                 session: {
                     ...data.session,
                     models: normalizeModelOptions(event.data.models),
+                    modelSelection: event.data.modelSelection,
                     approvalMode: event.data.approvalMode,
                 },
             }

@@ -11,6 +11,8 @@ import (
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/infra/providers/httpclient"
 	"regexp"
+	"slices"
+	"strings"
 )
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -60,7 +62,7 @@ func (s CredentialSnapshot) ProviderKey(providerID string) string {
 
 // Registry 保存本次只读加载的模型配置与凭据快照，供装配期构造只读目录。
 type Registry struct {
-	config      modelapi.Document
+	config      Document
 	credentials ProviderCredentials
 }
 
@@ -101,9 +103,72 @@ func Load(modelsPath, credentialsPath string, client *http.Client) (*Registry, e
 	}, nil
 }
 
-// Config 返回本次加载的只读模型配置文档，调用方不得修改切片内容。
-func (r *Registry) Config() modelapi.Document {
-	return r.config
+// Catalog 根据本次只读加载的配置构造按分组排序的只读模型目录。
+func (r *Registry) Catalog() *modelapi.Catalog {
+	entries := make([]modelapi.CatalogEntry, 0)
+	var defaultOption modelapi.Option
+	ref := r.config.DefaultModel
+	for _, provider := range r.config.Providers {
+		for _, candidate := range provider.Models {
+			option := modelapi.Option{
+				GroupID:               candidate.GroupID,
+				ProviderID:            provider.ID,
+				ModelID:               candidate.ID,
+				Label:                 candidate.DisplayName,
+				ProviderName:          provider.DisplayName,
+				ReasoningLevels:       candidate.ReasoningLevels,
+				DefaultReasoningLevel: candidate.DefaultReasoningLevel,
+			}
+			// 未指定默认值时按文件顺序选择，不受展示排序影响。
+			if (ref == nil && len(entries) == 0) || (ref != nil && ref.ProviderID == provider.ID && ref.ModelID == candidate.ID) {
+				defaultOption = option
+			}
+			entries = append(entries, modelapi.CatalogEntry{
+				Option: option,
+				Config: modelapi.Config{
+					ProviderID:      provider.ID,
+					ModelID:         candidate.ID,
+					ReasoningLevel:  candidate.DefaultReasoningLevel,
+					ReasoningLevels: candidate.ReasoningLevels,
+					Thinking:        candidate.Thinking,
+					APIFormat:       string(candidate.APIFormat),
+					ContextWindow:   candidate.ContextWindow,
+					MaxOutputTokens: candidate.MaxOutputTokens,
+					BaseURL:         provider.BaseURL,
+					ProxyURL:        provider.ProxyURL,
+				},
+			})
+		}
+	}
+	orderCatalogEntries(entries, r.config.Groups)
+	return modelapi.NewCatalog(entries, defaultOption)
+}
+
+func orderCatalogEntries(entries []modelapi.CatalogEntry, groups []Group) {
+	groupOrder := make(map[string]int, len(groups))
+	for index, group := range groups {
+		groupOrder[group.ID] = index
+	}
+	slices.SortStableFunc(entries, func(left, right modelapi.CatalogEntry) int {
+		leftGroup, leftOK := groupOrder[left.Option.GroupID]
+		rightGroup, rightOK := groupOrder[right.Option.GroupID]
+		if leftOK && rightOK && leftGroup != rightGroup {
+			return leftGroup - rightGroup
+		}
+		if leftOK != rightOK {
+			if leftOK {
+				return -1
+			}
+			return 1
+		}
+		if left.Option.Label == right.Option.Label {
+			if left.Option.ProviderID == right.Option.ProviderID {
+				return strings.Compare(left.Option.ModelID, right.Option.ModelID)
+			}
+			return strings.Compare(left.Option.ProviderID, right.Option.ProviderID)
+		}
+		return strings.Compare(left.Option.Label, right.Option.Label)
+	})
 }
 
 // Credentials 生成本次配置中已启用 Provider 的只读凭据快照。
@@ -119,23 +184,23 @@ func (r *Registry) Credentials() CredentialSnapshot {
 }
 
 // readModelConfigFile 解码并只读校验持久化的 canonical 配置，不清洗或静默修复字段。
-func readModelConfigFile(path string) (modelapi.Document, error) {
+func readModelConfigFile(path string) (Document, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return modelapi.Document{}, fmt.Errorf("open models config: %w", err)
+		return Document{}, fmt.Errorf("open models config: %w", err)
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
-	var config modelapi.Document
+	var config Document
 	if err := decoder.Decode(&config); err != nil {
-		return modelapi.Document{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return Document{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return modelapi.Document{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return Document{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
-	if err := modelapi.ValidateDocument(config); err != nil {
-		return modelapi.Document{}, err
+	if err := validateDocument(config); err != nil {
+		return Document{}, err
 	}
 	return config, nil
 }
