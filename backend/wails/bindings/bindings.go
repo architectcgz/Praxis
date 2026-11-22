@@ -2,8 +2,8 @@ package bindings
 
 import (
 	"context"
-	"praxis/internal/core/entry"
-	coreevent "praxis/internal/core/event"
+	"praxis/internal/entry"
+	coreevent "praxis/internal/event"
 	sessionservice "praxis/internal/service/session"
 
 	"github.com/wailsapp/wails/v3/pkg/application"

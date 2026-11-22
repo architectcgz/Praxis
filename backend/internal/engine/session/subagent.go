@@ -1,0 +1,56 @@
+package session
+
+import (
+	"context"
+	"praxis/internal/entry"
+	"praxis/internal/identity"
+)
+
+func (s *Session) CreateSubagent(ctx context.Context, agentID identity.AgentID) error {
+	if err := s.log.CreateSubagent(ctx, agentID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.data.AgentContexts[agentID] = AgentContext{}
+	s.mu.Unlock()
+	return nil
+}
+
+// RemoveSubagent 回滚尚未写入事实的空子代理日志及其内存登记。
+func (s *Session) RemoveSubagent(ctx context.Context, agentID identity.AgentID) error {
+	s.mu.Lock()
+	delete(s.data.AgentContexts, agentID)
+	s.mu.Unlock()
+	return s.log.RemoveSubagent(ctx, agentID)
+}
+
+// AgentHistory 将历史读写和终态提交绑定到同一个 Agent。
+type AgentHistory struct {
+	session *Session
+	agentID identity.AgentID
+}
+
+func (s *Session) BindHistory(agentID identity.AgentID) AgentHistory {
+	return AgentHistory{
+		session: s,
+		agentID: agentID,
+	}
+}
+
+func (h AgentHistory) SessionID() identity.SessionID { return h.session.data.ID }
+func (h AgentHistory) AgentID() identity.AgentID     { return h.agentID }
+
+func (h AgentHistory) Append(ctx context.Context, value entry.Entry) (*entry.Entry, bool, error) {
+	return h.session.appendEntry(ctx, h.agentID, value, false)
+}
+
+func (h AgentHistory) ModelEntries(ctx context.Context) ([]*entry.Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return h.session.AgentContext(h.agentID)
+}
+
+func (h AgentHistory) CommitTerminal(ctx context.Context, value entry.Entry) (*entry.Entry, error) {
+	return h.session.CommitTerminal(ctx, h.agentID, value)
+}

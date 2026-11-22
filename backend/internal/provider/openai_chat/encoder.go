@@ -1,0 +1,69 @@
+package openaichat
+
+import (
+	"fmt"
+	"praxis/internal/context"
+	sessionentry "praxis/internal/entry"
+	"praxis/internal/provider"
+)
+
+// encodeContext 编码官方文本与工具消息；不支持续传的推理状态只在本次请求中忽略。
+// 上下文结构由消息写入与恢复边界保证，此处不复查。
+func encodeContext(ctx context.ModelContext) ([]chatMessage, error) {
+	messages := make([]chatMessage, 0, len(ctx.Entries)+1)
+	if ctx.SystemPrompt != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: &ctx.SystemPrompt})
+	}
+	ids := provider.BuildToolCallIDMap(ctx)
+	for index, entry := range ctx.Entries {
+		encoded, err := chatMessagesFromContext(entry, ids)
+		if err != nil {
+			return nil, fmt.Errorf("openai chat context entry %d: %w", index, err)
+		}
+		messages = append(messages, encoded...)
+	}
+	return messages, nil
+}
+
+func chatMessagesFromContext(entry *sessionentry.Entry, ids map[string]string) ([]chatMessage, error) {
+	var messages []chatMessage
+	messageRole, blocks := entry.Dialogue()
+	result := chatMessage{Role: string(messageRole)}
+	flush := func() {
+		if result.Content != nil || len(result.ToolCalls) > 0 {
+			messages = append(messages, result)
+			result = chatMessage{Role: string(messageRole)}
+		}
+	}
+	for index, block := range blocks {
+		switch block := block.(type) {
+		case sessionentry.TextBlock:
+			if messageRole == sessionentry.RoleTool {
+				return nil, fmt.Errorf("tool role requires tool results")
+			}
+			if result.Content == nil {
+				result.Content = new(block.Text)
+			} else {
+				*result.Content += block.Text
+			}
+		case sessionentry.ToolCallBlock:
+			if messageRole != sessionentry.RoleAssistant {
+				return nil, fmt.Errorf("tool call requires assistant role")
+			}
+			result.ToolCalls = append(result.ToolCalls, chatToolCall{
+				ID:       ids[block.CallID],
+				Type:     "function",
+				Function: chatFunctionCall{Name: string(block.Name), Arguments: block.Arguments},
+			})
+		case sessionentry.ToolResultBlock:
+			flush()
+			messages = append(messages, chatMessage{Role: "tool", ToolCallID: ids[block.CallID], Content: new(block.Text)})
+		case sessionentry.ThinkingBlock, sessionentry.ReasoningStateBlock:
+			continue
+		default:
+			return nil, fmt.Errorf("context block %d has unsupported type %T", index, block)
+		}
+	}
+	flush()
+	return messages, nil
+}

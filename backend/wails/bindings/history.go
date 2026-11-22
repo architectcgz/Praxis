@@ -1,8 +1,8 @@
 package bindings
 
 import (
-	"praxis/internal/core/entry"
-	sessionmodel "praxis/internal/core/session"
+	"praxis/internal/engine/session"
+	"praxis/internal/entry"
 	"time"
 )
 
@@ -147,7 +147,7 @@ func publicMessage(value *entry.Entry) (HistoryMessage, bool) {
 	return projected, true
 }
 
-func publicHistoryPage(page sessionmodel.HistoryPage) HistoryPage {
+func publicHistoryPage(page session.HistoryPage) HistoryPage {
 	messages := make([]HistoryMessage, 0, len(page.Entries))
 	requests := make([]ModelRequestActivity, 0)
 	for i := range page.Entries {

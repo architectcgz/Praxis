@@ -5,18 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"praxis/internal/core/coordinator"
-	coreevent "praxis/internal/core/event"
-	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
-	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/core/tool"
-	"praxis/internal/dataroot"
-	fs "praxis/internal/infra/filesystem"
-	"praxis/internal/infra/storage"
+	"praxis/internal/config"
+	"praxis/internal/engine/coordinator"
+	"praxis/internal/engine/hook"
+	"praxis/internal/engine/loop"
+	"praxis/internal/engine/session"
+	"praxis/internal/event"
 	"praxis/internal/logging"
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
+	"praxis/internal/storage"
+	"praxis/internal/tool"
 	"praxis/wails/bindings"
 )
 
@@ -25,7 +24,7 @@ type storageResources struct {
 	logger  *logging.Logger
 }
 
-func openStorage(ctx context.Context, root dataroot.DataRoot) (storageResources, error) {
+func openStorage(ctx context.Context, root config.DataRoot) (storageResources, error) {
 	logger, err := logging.NewFactory().Application(filepath.Join(root.Root, "praxis.log"))
 	if err != nil {
 		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
@@ -74,7 +73,7 @@ type Options struct {
 }
 
 // Open 只做高层装配；会话 Context 按需恢复，启动不继续旧 Run。
-func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Application, err error) {
+func Open(ctx context.Context, root config.DataRoot, options Options) (_ *Application, err error) {
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
 	}
@@ -100,23 +99,23 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 		_ = a.storage.Close(context.Background())
 		_ = a.logger.Close()
 	}()
-	config, err := loadConfiguration(root, options.Tools)
+	loader, err := loadConfiguration(root, options.Tools)
 	if err != nil {
 		return nil, err
 	}
-	emitter := coreevent.NewEmitter()
+	emitter := event.NewEmitter()
 	hooks, err := hook.NewDispatcher(options.Hooks...)
 	if err != nil {
 		return nil, err
 	}
-	coordinator := buildCoordinator(resources, func(ctx context.Context) (*sessionmodel.Configuration, error) {
-		return config.loadSessionConfiguration(ctx, root)
+	coordinator := buildCoordinator(resources, func(ctx context.Context) (*session.Configuration, error) {
+		return loader.loadSessionConfiguration(ctx, root)
 	}, hooks, emitter, options.Runner)
 	a.sessions = buildSessions(a.storage, coordinator)
 	a.coordinator = coordinator
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:  a.storage.Projects,
-		Directory: fs.Filesystem{},
+		Directory: storage.LocalDirectory{},
 	})
 	a.frontend = bindings.Services{
 		Projects: projects,

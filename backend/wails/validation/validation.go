@@ -5,11 +5,11 @@ package validation
 import (
 	"errors"
 	"fmt"
-	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	"praxis/internal/pathutil"
 	projectservice "praxis/internal/service/project"
-	"praxis/internal/utils/pathutil"
+	"praxis/internal/task"
 	apperr "praxis/wails/error"
 	"reflect"
 	"regexp"
@@ -67,7 +67,7 @@ func newValidator() *validator.Validate {
 		"task_text": func(field validator.FieldLevel) bool {
 			value := field.Field().String()
 			// validator 的 max 按字符计数，正文协议限制必须按 UTF-8 字节计算。
-			return utf8.ValidString(value) && len(value) <= taskmodel.MaxInputBytes
+			return utf8.ValidString(value) && len(value) <= task.MaxInputBytes
 		},
 	} {
 		if err := v.RegisterValidation(name, rule); err != nil {

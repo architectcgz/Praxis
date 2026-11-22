@@ -142,10 +142,10 @@
 **目标**：将 `dataroot`、`settings`、`modelregistry`、`agentregistry`、`toolregistry` 合并为内聚的 `internal/config/` 包，消除重复错误类型与命名冲突。
 
 1. **在 `internal/config/` 下整理文件与公开 API**：
-   - `errors.go`：统一 `ConfigurationError{Path string, Err error}`（供模型配置与角色定义加载共用）。
    - `dataroot.go`：`DataRoot`、`ResolveDataRoot(root string) (DataRoot, error)`、`(d DataRoot) Initialize(ctx context.Context) error`。
    - `settings.go`：`Settings{ApprovalMode security.ApprovalMode}`、`LoadSettings(path string) (Settings, error)`。
    - `models.go` 与 `models_document.go`：
+     - `ConfigurationError{Path string, Err error}` 放在 `models.go`，供模型配置与角色定义加载共用；
      - `ModelDocument`、`ModelGroup`、`ModelProvider`、`ModelRegistry`、`ProviderCredential`、`CredentialType`、`CredentialTypeAPIKey`、`ProviderCredentials`、`CredentialSnapshot`；
      - `LoadModels(modelsPath, credentialsPath string, client *http.Client) (*ModelRegistry, error)`。
    - `roles.go` 与 `role_parser.go`：

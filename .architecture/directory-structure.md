@@ -67,7 +67,7 @@ backend/
     │
     ├── storage/                # 数据持久化实现
     │   ├── store.go            # SQLite 与日志目录生命周期管理
-    │   ├── project.go          # 项目元数据持久化
+    │   ├── project.go          # 项目元数据持久化与本地目录准备
     │   ├── session.go          # 会话元数据持久化
     │   ├── load.go             # 会话日志加载与异常关闭恢复
     │   └── jsonl/              # 追加日志文件读写原语
@@ -106,7 +106,7 @@ backend/
 - 不将 `Project`、`Task`、`Entry`、`ApprovalMode` 等非大模型概念放入 `model/`，避免术语歧义与包内封装边界退化。
 
 ### 2. 历史事实与计时 `internal/entry/`
-- 统一承载持久化事实 `Entry`、封闭 `Payload` 集合、封闭 `ContentBlock` 集合、`ModelRequest`、工具调用配对补齐逻辑，以及与条目紧耦合的 `Record`/`Span` 计时能力。
+- 统一承载持久化事实 `Entry`、封闭 `Payload` 集合、封闭 `ContentBlock` 集合、`ModelRequest`、工具调用配对补齐逻辑，以及与条目紧耦合的 `Timing`/`Span` 计时能力。
 - 只表达事实数据结构、编解码与纯校验规则，不持有运行期句柄、锁或存储 I/O。
 
 ### 3. 核心执行引擎 `internal/engine/`
@@ -137,13 +137,12 @@ backend/
    --> 仅依赖标准库与更底层基础包；严禁依赖 engine/*、event、provider、tool（仅 entry 依赖 tool 标识类型）、config、storage、service、wails
 
 2. 外围能力包（provider / tool / config）与实时事件包（event）
-   --> 仅依赖基础概念包（及各自内部子包）；严禁依赖 engine/*、storage、service、wails
+   --> event 仅依赖基础概念包；外围能力包可依赖基础概念包及各自内部子包
+   --> provider 可消费 tool 的工具协议；config 可消费 tool 的配置契约及 provider/httpclient 的代理配置能力
+   --> 均严禁依赖 engine/*、storage、service、wails；外围能力包不得依赖 event
 
-3. 执行引擎内部（engine/*）单向推进
-   --> hook / session / toolexecution / modelcall
-   --> approval / loop
-   --> run
-   --> coordinator
+3. 执行引擎内部（engine/*）高层只依赖低层，从低到高依次为：
+   hook -> session / toolexecution / modelcall -> approval / loop -> run -> coordinator
    （engine/* 不直接依赖 storage/、config/、service/、wails/）
 
 4. 数据存储（storage）
@@ -151,6 +150,7 @@ backend/
 
 5. 应用服务（service/*）
    --> 依赖基础概念包、engine/coordinator、engine/session 及自身声明的存储接口
+   --> service/session 仅在公开服务类型中引用 engine/approval 和 engine/toolexecution 的值类型
 
 6. 桌面协议边界（wails/*）
    --> 仅通过 service/* 调用业务能力，通过订阅 event.Emitter 推送通知，消费必要基础概念包与分页/元数据视图；

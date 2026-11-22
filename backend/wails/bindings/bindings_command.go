@@ -1,10 +1,9 @@
 package bindings
 
 import (
-	"praxis/internal/core/approval"
-	taskmodel "praxis/internal/core/task"
 	"praxis/internal/identity"
 	sessionservice "praxis/internal/service/session"
+	"praxis/internal/task"
 	"praxis/wails/validation"
 	"strings"
 	"time"
@@ -75,7 +74,7 @@ func (b *CommandBindings) CreateTask(wire CreateTaskRequest) (CreateTaskResponse
 	if err != nil {
 		return CreateTaskResponse{}, err
 	}
-	input := taskmodel.Input{
+	input := task.Input{
 		SubmissionID: identity.TaskID(wire.SubmissionID),
 		SessionID:    identity.SessionID(wire.SessionID),
 		Prompt:       wire.Prompt,
@@ -135,7 +134,7 @@ func (b *CommandBindings) ResumeQueue(sessionID string) error {
 	return publicError(b.host, "ResumeQueue", services.Sessions.ResumeQueue(ctx, identity.SessionID(sessionID)))
 }
 
-func publicToolApprovals(values []approval.Approval) []ToolApproval {
+func publicToolApprovals(values []sessionservice.ToolApproval) []ToolApproval {
 	result := make([]ToolApproval, 0, len(values))
 	for _, value := range values {
 		review := value.Review

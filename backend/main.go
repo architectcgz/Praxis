@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"praxis/internal/bootstrap"
-	"praxis/internal/dataroot"
+	"praxis/internal/config"
 	"praxis/internal/logging"
 	"praxis/wails"
 	"sync"
@@ -83,7 +83,7 @@ func main() {
 			a.FailStartup(fmt.Errorf("resolve data root path: %w", err))
 			return
 		}
-		root, err := dataroot.Resolve(rootPath)
+		root, err := config.ResolveDataRoot(rootPath)
 		if err != nil {
 			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return

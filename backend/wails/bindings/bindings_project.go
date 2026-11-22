@@ -2,8 +2,8 @@ package bindings
 
 import (
 	"praxis/internal/identity"
+	"praxis/internal/pathutil"
 	projectservice "praxis/internal/service/project"
-	"praxis/internal/utils/pathutil"
 	"praxis/wails/validation"
 	"strings"
 )

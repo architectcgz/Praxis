@@ -1,10 +1,10 @@
 package bindings
 
 import (
-	modelapi "praxis/internal/core/model"
-	"praxis/internal/core/security"
-	sessionmodel "praxis/internal/core/session"
+	"praxis/internal/engine/session"
 	"praxis/internal/identity"
+	"praxis/internal/model"
+	"praxis/internal/security"
 	sessionservice "praxis/internal/service/session"
 	"praxis/wails/validation"
 	"strings"
@@ -200,7 +200,7 @@ func (b *SessionBindings) RenameSession(sessionID, title string) error {
 	return nil
 }
 
-func sessionSummary(value sessionmodel.SessionInfo) SessionSummary {
+func sessionSummary(value session.SessionInfo) SessionSummary {
 	return SessionSummary{
 		ID:        value.ID.String(),
 		ProjectID: value.ProjectID.String(),
@@ -248,7 +248,7 @@ func (b *SessionBindings) SelectModel(wire SelectModelRequest) error {
 	if err != nil {
 		return err
 	}
-	choice := modelapi.Choice{
+	choice := model.Choice{
 		ProviderID:     wire.ProviderID,
 		ModelID:        wire.ModelID,
 		ReasoningLevel: wire.ReasoningLevel,
@@ -311,7 +311,7 @@ func (b *SessionBindings) SetSessionApprovalMode(wire SetSessionApprovalModeRequ
 	return publicApprovalMode(value), nil
 }
 
-func publicModelOptions(models []modelapi.Option) []ModelOption {
+func publicModelOptions(models []model.Option) []ModelOption {
 	result := make([]ModelOption, 0, len(models))
 	for _, option := range models {
 		levels := option.ReasoningLevels

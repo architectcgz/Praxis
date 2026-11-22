@@ -4,30 +4,35 @@ package project
 import (
 	"context"
 	"errors"
-	projectmodel "praxis/internal/core/project"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
+	projectmodel "praxis/internal/project"
 	"time"
 )
 
 // Directory 提供项目创建所需的目录操作能力。
 type Directory interface {
-	Ensure(context.Context, string) (created bool, err error)
+	EnsureExists(context.Context, string) (created bool, err error)
 }
 
 const ErrProjectInvalid errorcode.Code = "project.invalid"
 
+type ProjectStore interface {
+	Get(context.Context, identity.ProjectID) (projectmodel.Project, error)
+	Save(context.Context, projectmodel.Project) error
+	List(context.Context, int) ([]projectmodel.Project, error)
+}
+
 // Dependencies 包含项目创建和配置查询所需的依赖。
 type Dependencies struct {
-	Projects  repository.Project
+	Projects  ProjectStore
 	Directory Directory
 }
 
 // Service 管理项目记录。
 type Service struct {
 	createGate chan struct{}
-	projects   repository.Project
+	projects   ProjectStore
 	directory  Directory
 }
 
@@ -64,7 +69,7 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (projec
 			return projectmodel.Project{}, errorcode.ErrRequestConflict
 		}
 	}
-	if _, err := s.directory.Ensure(ctx, params.Path); err != nil {
+	if _, err := s.directory.EnsureExists(ctx, params.Path); err != nil {
 		return projectmodel.Project{}, err
 	}
 	existing, err := s.projects.Get(ctx, params.ProjectID)

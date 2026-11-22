@@ -4,21 +4,21 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"praxis/internal/core/approval"
-	"praxis/internal/core/coordinator"
-	coreevent "praxis/internal/core/event"
-	"praxis/internal/core/hook"
-	"praxis/internal/core/loop"
-	"praxis/internal/core/modelcall"
-	runmodel "praxis/internal/core/run"
-	sessionmodel "praxis/internal/core/session"
-	executionmodel "praxis/internal/core/toolexecution"
-	tooloutput "praxis/internal/infra/tools/output"
+	"praxis/internal/engine/approval"
+	"praxis/internal/engine/coordinator"
+	"praxis/internal/engine/hook"
+	"praxis/internal/engine/loop"
+	"praxis/internal/engine/modelcall"
+	"praxis/internal/engine/run"
+	"praxis/internal/engine/session"
+	"praxis/internal/engine/toolexecution"
+	"praxis/internal/event"
+	"praxis/internal/tool/output"
 	"time"
 )
 
-func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*sessionmodel.Configuration, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
-	runDeps := runmodel.Dependencies{
+func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*session.Configuration, error), hooks *hook.Dispatcher, emitter *event.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
+	runDeps := run.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
@@ -34,10 +34,10 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		Emitter:        emitter,
 		Logf:           resources.logger.Errorf,
 	})
-	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{
+	executor := toolexecution.NewExecutor(toolexecution.ExecutorDependencies{
 		HookDispatcher: hooks,
 		Emitter:        emitter,
-		Outputs:        tooloutput.Files{Root: filepath.Join(os.TempDir(), "praxis", "tool-output")},
+		Outputs:        output.Files{Root: filepath.Join(os.TempDir(), "praxis", "tool-output")},
 	})
 
 	runnerDeps := loop.Dependencies{

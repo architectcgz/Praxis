@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"praxis/internal/core/security"
-	sessionmodel "praxis/internal/core/session"
-	"praxis/internal/core/tool"
-	"praxis/internal/dataroot"
-	"praxis/internal/infra/agentregistry"
-	"praxis/internal/infra/modelregistry"
-	"praxis/internal/infra/providers"
-	"praxis/internal/infra/toolregistry"
-	"praxis/internal/settings"
+	"praxis/internal/config"
+	"praxis/internal/engine/session"
+	"praxis/internal/provider/router"
+	"praxis/internal/security"
+	"praxis/internal/tool"
 )
 
 // configuration 只拥有固定的工具实现，每次加载返回独立只读配置，不向执行路径发布可变目录。
@@ -23,63 +19,62 @@ type configuration struct {
 	registry *tool.ToolRegistry
 }
 
-func loadConfiguration(root dataroot.DataRoot, extensions []tool.Tool) (*configuration, error) {
+func loadConfiguration(root config.DataRoot, extensions []tool.Tool) (*configuration, error) {
 	registry, err := buildToolRegistry(extensions)
 	if err != nil {
 		return nil, err
 	}
-	config := &configuration{registry: registry}
-	if _, err := config.loadSessionConfiguration(context.Background(), root); err != nil {
+	loader := &configuration{registry: registry}
+	if _, err := loader.loadSessionConfiguration(context.Background(), root); err != nil {
 		return nil, err
 	}
-	return config, nil
+	return loader, nil
 }
 
-func (c *configuration) loadSessionConfiguration(ctx context.Context, root dataroot.DataRoot) (*sessionmodel.Configuration, error) {
+func (c *configuration) loadSessionConfiguration(ctx context.Context, root config.DataRoot) (*session.Configuration, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	configured, err := settings.Load(root.SettingsFile)
+	settings, err := config.LoadSettings(root.SettingsFile)
 	if err != nil {
 		return nil, err
 	}
-	models, err := modelregistry.Load(root.ModelProvidersConfig, root.ModelCredentialsFile, nil)
+	models, err := config.LoadModels(root.ModelProvidersConfig, root.ModelCredentialsFile, nil)
 	if err != nil {
 		return nil, err
 	}
-	agents, err := agentregistry.Load(root.AgentDefinitions)
+	definitions, err := config.LoadAgentDefinitions(root.AgentDefinitions)
 	if err != nil {
 		return nil, err
 	}
-	definitions := agents.List()
-	tools, err := toolregistry.Load(root.ToolConfig, c.registry)
+	tools, err := config.LoadTools(root.ToolConfig, c.registry)
 	if err != nil {
 		return nil, err
 	}
-	return &sessionmodel.Configuration{
+	return &session.Configuration{
 		Models:      models.Catalog(),
 		Definitions: definitions,
 		Tools:       tool.NewCatalog(tools, c.registry),
-		Provider: providers.New(providers.Dependencies{
+		Provider: router.New(router.Dependencies{
 			Credentials: models.Credentials(),
 			HTTPClient:  http.DefaultClient,
 		}),
-		GlobalApprovalMode: configured.ApprovalMode,
+		GlobalApprovalMode: settings.ApprovalMode,
 	}, nil
 }
 
 // initializeDefaultFiles 只补充缺失文件，配置加载和重载均不调用此步骤。
-func initializeDefaultFiles(ctx context.Context, root dataroot.DataRoot) error {
+func initializeDefaultFiles(ctx context.Context, root config.DataRoot) error {
 	files := map[string]any{
-		root.ModelProvidersConfig: modelregistry.Document{
-			Groups:    []modelregistry.Group{},
-			Providers: []modelregistry.Provider{},
+		root.ModelProvidersConfig: config.ModelDocument{
+			Groups:    []config.ModelGroup{},
+			Providers: []config.ModelProvider{},
 		},
 		root.ModelCredentialsFile: map[string]any{},
 		root.ToolConfig: tool.Config{
 			Tools: map[tool.ToolName]tool.ToolConfig{},
 		},
-		root.SettingsFile: settings.Config{
+		root.SettingsFile: config.Settings{
 			ApprovalMode: security.ApprovalAsk,
 		},
 	}

@@ -3,17 +3,16 @@ package session
 import (
 	"context"
 	"errors"
-	"praxis/internal/core/approval"
-	"praxis/internal/core/coordinator"
-	modelapi "praxis/internal/core/model"
-	projectmodel "praxis/internal/core/project"
-	"praxis/internal/core/security"
-	sessionmodel "praxis/internal/core/session"
-	taskmodel "praxis/internal/core/task"
-	executionmodel "praxis/internal/core/toolexecution"
+	"praxis/internal/engine/approval"
+	"praxis/internal/engine/coordinator"
+	sessionmodel "praxis/internal/engine/session"
+	"praxis/internal/engine/toolexecution"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
-	"praxis/internal/repository"
+	"praxis/internal/model"
+	projectmodel "praxis/internal/project"
+	"praxis/internal/security"
+	"praxis/internal/task"
 	"sync"
 	"time"
 )
@@ -21,20 +20,35 @@ import (
 type SessionView = coordinator.SessionView
 type ApprovalSettings = coordinator.ApprovalSettings
 type SubmitResult = coordinator.SubmitResult
+type ToolApproval = approval.Approval
 type ToolDecision = approval.DecisionRequest
-type ToolControl = executionmodel.ControlRequest
+type ToolControl = toolexecution.ControlRequest
+
+type ProjectStore interface {
+	Get(context.Context, identity.ProjectID) (projectmodel.Project, error)
+}
+
+type SessionStore interface {
+	Get(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
+	Create(context.Context, sessionmodel.SessionInfo) error
+	ListByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
+	UpdateTitle(ctx context.Context, id identity.SessionID, expectedTitle, title string, at time.Time) error
+	Delete(context.Context, identity.SessionID) error
+	SessionLogPath(context.Context, identity.SessionID) (string, error)
+	IsEmpty(context.Context, identity.SessionID) (bool, error)
+}
 
 type Dependencies struct {
 	Core     *coordinator.Coordinator
-	Projects repository.Project
-	Sessions repository.Session
+	Projects ProjectStore
+	Sessions SessionStore
 }
 
-// Service 是会话与执行能力的统一应用服务入口；运行期会话句柄与并发编排由 Core 维护。
+// Service 提供会话与执行用例，不持有运行期会话句柄；执行调度由协调器负责。
 type Service struct {
 	core            *coordinator.Coordinator
-	projects        repository.Project
-	sessions        repository.Session
+	projects        ProjectStore
+	sessions        SessionStore
 	createdMu       sync.Mutex
 	createdSessions map[identity.SessionID]struct{}
 }
@@ -149,7 +163,7 @@ func (s *Service) AgentHistory(ctx context.Context, id identity.SessionID, agent
 	return s.core.AgentHistory(ctx, id, agentID, before, limit)
 }
 
-func (s *Service) SubmitTask(ctx context.Context, input taskmodel.Input) (SubmitResult, error) {
+func (s *Service) SubmitTask(ctx context.Context, input task.Input) (SubmitResult, error) {
 	return s.core.SubmitTask(ctx, input)
 }
 
@@ -165,7 +179,7 @@ func (s *Service) ResumeQueue(ctx context.Context, id identity.SessionID) error 
 	return s.core.ResumeQueue(ctx, id)
 }
 
-func (s *Service) SelectModel(ctx context.Context, id identity.SessionID, choice modelapi.Choice) error {
+func (s *Service) SelectModel(ctx context.Context, id identity.SessionID, choice model.Choice) error {
 	return s.core.SelectModel(ctx, id, choice)
 }
 

@@ -1,0 +1,350 @@
+package run
+
+import (
+	"context"
+	"errors"
+	"praxis/internal/agent"
+	appcontext "praxis/internal/context"
+	"praxis/internal/engine/hook"
+	"praxis/internal/engine/loop"
+	sessionmodel "praxis/internal/engine/session"
+	"praxis/internal/entry"
+	"praxis/internal/errorcode"
+	"praxis/internal/event"
+	"praxis/internal/identity"
+	"praxis/internal/logging"
+	"praxis/internal/model"
+	"praxis/internal/tool"
+	"sync/atomic"
+	"time"
+)
+
+type Dependencies struct {
+	HookDispatcher *hook.Dispatcher
+	Logger         *logging.Logger
+	Emitter        *event.Emitter
+}
+
+// Config 保存调度准入时确定的执行身份和模型配置。
+type Config struct {
+	SourceTaskID identity.TaskID
+	ParentCallID string
+	Definition   agent.AgentDefinition
+	Model        model.Config
+}
+
+// Run 的可变执行状态由所属流程独占；工具通过消息交接，子任务通过报告交付结果。
+// 终态事实提交成功后才发布结果，配置和身份在创建后只读。
+type Run struct {
+	collaboration collaboration
+	toolUpdates   chan toolUpdate
+	deps          Dependencies
+	history       sessionmodel.AgentHistory
+	terminalSaved atomic.Bool // 终态写入成功后置位，供外部停止命令并发判读。
+
+	cancel        context.CancelCauseFunc
+	waiting       int
+	id            identity.RunID
+	sessionID     identity.SessionID
+	definition    agent.AgentDefinition
+	model         model.Config
+	parentCallID  string
+	sourceTaskID  identity.TaskID
+	input         *entry.Entry
+	createdAt     time.Time
+	startedAt     time.Time
+	terminal      *entry.Entry
+	progress      runProgress
+	currentTurnID identity.TurnID
+	entries       []*entry.Entry
+	entryIndexes  map[identity.EntryID]int
+}
+
+func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *Run {
+	run := &Run{
+		deps:         deps,
+		history:      history,
+		id:           identity.NewRunID(),
+		sessionID:    history.SessionID(),
+		sourceTaskID: config.SourceTaskID,
+		parentCallID: config.ParentCallID,
+		definition:   config.Definition,
+		model:        config.Model,
+		toolUpdates:  make(chan toolUpdate),
+		createdAt:    time.Now().UTC(),
+		entryIndexes: make(map[identity.EntryID]int),
+	}
+	run.initCollaboration()
+	return run
+}
+
+type entrySaveResult struct {
+	stored   *entry.Entry
+	inserted bool
+	err      error
+}
+
+// toolUpdate 将并行工具的等待变化和条目保存交给所属执行流程。
+// 开始和结束事实分别在调用模型和应用审核结论之前确认保存。
+type toolUpdate struct {
+	ctx     context.Context
+	entry   entry.Entry
+	waiting int
+	saved   chan entrySaveResult
+}
+
+// runProgress 只在本次执行内累计，结束时写入终态载荷。
+type runProgress struct {
+	Usage            model.UsageTotals
+	Iterations       uint64
+	ModelRequests    uint64
+	OutputBytes      int64
+	ToolCalls        int
+	FinalStopReason  string
+	FinalAssistantID identity.EntryID
+}
+
+func (r *Run) Main() bool { return r.parentCallID == "" }
+
+// Entries 借出已提交条目的只读列表，只能在 Run 的串行流程中使用。
+func (r *Run) Entries() []*entry.Entry {
+	return r.entries
+}
+
+// AppendEntry 保存普通事实；Entry 顺序由所属 Run Loop 决定。
+func (r *Run) AppendEntry(ctx context.Context, value entry.Entry) (*entry.Entry, bool, error) {
+	value.RunID = r.id
+	if value.CreatedAt.IsZero() {
+		value.CreatedAt = time.Now().UTC()
+	}
+	stored, inserted, err := r.history.Append(ctx, value)
+	if err != nil {
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return stored, inserted, err
+		}
+		return stored, inserted, storageFailure(err)
+	}
+	if inserted {
+		r.accept(stored)
+	}
+	return stored, inserted, nil
+}
+
+// accept 只消费已经持久化成功的事实，并推进运行时状态。
+func (r *Run) accept(value *entry.Entry) {
+	r.entryIndexes[value.ID] = len(r.entries)
+	r.entries = append(r.entries, value)
+	switch p := value.Payload.(type) {
+	case entry.RunStarted:
+		r.startedAt = p.At.UTC()
+	case entry.TurnStarted:
+		r.currentTurnID = value.TurnID
+		r.progress.Iterations++
+	default:
+		r.progress.accept(value)
+	}
+}
+
+func (p *runProgress) accept(value *entry.Entry) {
+	if request, ok := value.Payload.(entry.ModelRequest); ok {
+		if request.Status == entry.RequestRunning {
+			p.ModelRequests++
+		} else {
+			p.OutputBytes += int64(request.OutputBytes)
+			if u := request.Usage; u != nil {
+				p.Usage.Add(*u)
+			}
+		}
+		return
+	}
+	message, ok := value.Payload.(entry.Message)
+	if !ok {
+		return
+	}
+	if message.Role == entry.RoleAssistant {
+		p.FinalAssistantID, p.FinalStopReason = "", ""
+		if response := message.Response; response != nil && (response.StopReason == "completed" || response.StopReason == "stop_sequence") {
+			p.FinalAssistantID, p.FinalStopReason = value.ID, response.StopReason
+		}
+	}
+	for _, block := range message.Content {
+		switch block := block.(type) {
+		case entry.ToolCallBlock:
+			p.ToolCalls++
+			p.FinalAssistantID, p.FinalStopReason = "", ""
+		case entry.ToolResultBlock:
+			p.OutputBytes += int64(len(block.Text))
+		}
+	}
+}
+
+func (r *Run) EventSource(turnID identity.TurnID) event.EventSource {
+	return event.EventSource{
+		SessionID: r.sessionID,
+		AgentID:   r.AgentID(),
+		RunID:     r.id,
+		TurnID:    turnID,
+	}
+}
+
+// BindCancellation 由 Coordinator 在执行准备时绑定，供所属子执行报告无法保存等失败直接停止本次执行。
+func (r *Run) BindCancellation(cancel context.CancelCauseFunc) { r.cancel = cancel }
+func (r *Run) Cancel(cause error)                              { r.cancel(cause) }
+
+func (r *Run) BeginWaiting() { r.toolUpdates <- toolUpdate{waiting: 1} }
+func (r *Run) EndWaiting()   { r.toolUpdates <- toolUpdate{waiting: -1} }
+
+func (r *Run) TerminalSaved() bool {
+	return r.terminalSaved.Load()
+}
+
+// executeTools 在所属协程处理等待状态和并发工具的条目保存；提交回调仅在本批工具中有效。
+// 取消由工具 Context 传播，此处仍接纳收尾事实，直到本批工具全部退出。
+func (r *Run) executeTools(appendEntry entry.AppendEntry, execute func(entry.AppendEntry)) {
+	submitEntry := func(ctx context.Context, value entry.Entry) (*entry.Entry, bool, error) {
+		update := toolUpdate{
+			ctx:   ctx,
+			entry: value,
+			saved: make(chan entrySaveResult, 1),
+		}
+		select {
+		case r.toolUpdates <- update:
+			result := <-update.saved
+			return result.stored, result.inserted, result.err
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		execute(submitEntry)
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		case update := <-r.toolUpdates:
+			if update.waiting != 0 {
+				r.waiting += update.waiting
+				if r.waiting == 0 || update.waiting > 0 && r.waiting == 1 {
+					state := agent.AgentExecuting
+					if r.waiting > 0 {
+						state = agent.AgentWaiting
+					}
+					r.deps.Emitter.Emit(event.Event{
+						Source:  r.EventSource(""),
+						Payload: event.AgentStateChanged{State: state},
+					})
+				}
+				continue
+			}
+			stored, inserted, err := appendEntry(update.ctx, update.entry)
+			update.saved <- entrySaveResult{
+				stored:   stored,
+				inserted: inserted,
+				err:      err,
+			}
+		}
+	}
+}
+
+func (r *Run) ID() identity.RunID {
+	return r.id
+}
+
+func (r *Run) SessionID() identity.SessionID {
+	return r.sessionID
+}
+
+func (r *Run) AgentID() identity.AgentID {
+	return r.history.AgentID()
+}
+
+func (r *Run) CreatedAt() time.Time {
+	return r.createdAt
+}
+
+func (r *Run) SourceTaskID() identity.TaskID {
+	return r.sourceTaskID
+}
+
+func (r *Run) InputText() string {
+	return r.input.TextContent()
+}
+
+func (r *Run) Model() model.Config {
+	return r.model
+}
+
+func (r *Run) Outcome() entry.RunOutcome {
+	if r.terminal == nil {
+		return ""
+	}
+	return r.terminal.RunOutcome()
+}
+
+func (s *Run) modelRunParams(tools tool.ToolCatalog) (loop.RunParams, loop.RunDependencies) {
+	return loop.RunParams{
+			ID:           s.id,
+			SourceTaskID: s.sourceTaskID,
+			SessionID:    s.sessionID,
+			AgentID:      s.AgentID(),
+			SystemPrompt: s.definition.Instructions,
+			Model:        s.model,
+			Tools:        tools,
+		}, loop.RunDependencies{
+			AcceptSubagentReports: s.acceptReports,
+			AcceptInstructions:    s.acceptInstructions,
+			FinishInstructions:    s.finishInstructions,
+			Budget:                &appcontext.Budget{},
+			ReadEntries:           s.loopEntries,
+			AppendEntry:           s.AppendEntry,
+			ExecuteTools:          s.executeTools,
+		}
+}
+
+func (s *Run) loopEntries(ctx context.Context) ([]*entry.Entry, error) {
+	entries, err := s.history.ModelEntries(ctx)
+	if err != nil {
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return nil, err
+		}
+		return nil, storageFailure(err)
+	}
+	return entries, nil
+}
+
+func runIdentity(run *Run, turnID identity.TurnID) hook.Identity {
+	return hook.Identity{
+		SourceTaskID: run.sourceTaskID,
+		SessionID:    run.sessionID,
+		AgentID:      run.AgentID(),
+		RunID:        run.id,
+		TurnID:       turnID,
+	}
+}
+
+func (s *Run) emitError(turnID identity.TurnID, err error) {
+	message := "input failed"
+	switch failureCode(err) {
+	case entry.RunFailureStorage:
+		message = "Failed to save session entries."
+	case entry.RunFailureResourceLimit:
+		message = "model context window exceeded"
+	case entry.RunFailureProvider:
+		text := []rune(err.Error())
+		if len(text) > 4096 {
+			text = append(text[:4096], '.', '.', '.')
+		}
+		message = string(text)
+	}
+	s.deps.Emitter.Emit(event.Event{
+		Source:  s.EventSource(turnID),
+		Payload: event.ErrorOccurred{Message: message},
+	})
+}
+
+func storageFailure(err error) error {
+	return errorcode.ErrStorage.Wrap(err)
+}
