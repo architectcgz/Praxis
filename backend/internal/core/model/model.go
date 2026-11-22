@@ -38,6 +38,13 @@ type ModelThinking struct {
 	SupportsDisabled bool   `json:"supportsDisabled,omitzero"`
 }
 
+// Choice 定位目录中的模型配置；推理等级留空时使用该模型的默认等级。
+type Choice struct {
+	ProviderID     string
+	ModelID        string
+	ReasoningLevel string
+}
+
 // Option 是模型目录中的可选条目，携带分组与推理能力。
 type Option struct {
 	GroupID               string
@@ -47,6 +54,14 @@ type Option struct {
 	ProviderName          string
 	ReasoningLevels       []string
 	DefaultReasoningLevel string
+}
+
+func (o Option) DefaultChoice() Choice {
+	return Choice{
+		ProviderID:     o.ProviderID,
+		ModelID:        o.ModelID,
+		ReasoningLevel: o.DefaultReasoningLevel,
+	}
 }
 
 // CatalogEntry 保存一条已在输入边界校验并排序的模型目录项及默认运行时配置。
@@ -139,26 +154,20 @@ func (u *UsageTotals) Add(value Usage) {
 // 模型配置查询直接返回已准备的只读配置，不重新校验或覆盖参数。
 type Catalog struct {
 	options      []Option
-	models       map[modelKey]Config
+	models       map[Choice]Config
 	defaultModel Option
-}
-
-type modelKey struct {
-	ProviderID     string
-	ModelID        string
-	ReasoningLevel string
 }
 
 func NewCatalog(entries []CatalogEntry, defaultModel Option) *Catalog {
 	catalog := &Catalog{
 		options:      make([]Option, 0, len(entries)),
-		models:       make(map[modelKey]Config, len(entries)),
+		models:       make(map[Choice]Config, len(entries)),
 		defaultModel: defaultModel,
 	}
 	for _, entry := range entries {
 		prepared := entry.Config
 		// 空等级定位默认选项，其他等级在加载时展开，查询不再覆盖默认值。
-		key := modelKey{
+		key := Choice{
 			ProviderID: prepared.ProviderID,
 			ModelID:    prepared.ModelID,
 		}
@@ -183,18 +192,14 @@ func (c *Catalog) DefaultModel() Option {
 	return c.defaultModel
 }
 
-func (c *Catalog) Get(providerID, modelID, reasoningLevel string) (Config, error) {
-	config, ok := c.models[modelKey{
-		ProviderID:     providerID,
-		ModelID:        modelID,
-		ReasoningLevel: reasoningLevel,
-	}]
+func (c *Catalog) Get(choice Choice) (Config, error) {
+	config, ok := c.models[choice]
 	if !ok {
 		return Config{}, fmt.Errorf(
 			"model %q for provider %q with reasoning level %q is not configured: %w",
-			modelID,
-			providerID,
-			reasoningLevel,
+			choice.ModelID,
+			choice.ProviderID,
+			choice.ReasoningLevel,
 			ErrNotConfigured,
 		)
 	}

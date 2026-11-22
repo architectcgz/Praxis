@@ -144,20 +144,16 @@ func (b *SessionBindings) SelectSession(sessionID string) (SessionSnapshot, erro
 		return SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession.history", err)
 	}
 	result := SessionSnapshot{
-		QueuePaused: view.QueuePaused,
-		ID:          view.Session.ID.String(),
-		ProjectID:   view.Session.ProjectID.String(),
-		Title:       view.Session.Title,
-		CreatedAt:   view.Session.CreatedAt,
-		UpdatedAt:   view.Session.UpdatedAt,
-		Tasks:       make([]QueuedTask, 0, len(view.Tasks)),
-		History:     publicHistoryPage(page),
-		Models:      publicModelOptions(view.Models),
-		ModelSelection: ModelSelection{
-			ProviderID:     view.ModelChoice.ProviderID,
-			ModelID:        view.ModelChoice.ModelID,
-			ReasoningLevel: view.ModelChoice.ReasoningLevel,
-		},
+		QueuePaused:      view.QueuePaused,
+		ID:               view.Session.ID.String(),
+		ProjectID:        view.Session.ProjectID.String(),
+		Title:            view.Session.Title,
+		CreatedAt:        view.Session.CreatedAt,
+		UpdatedAt:        view.Session.UpdatedAt,
+		Tasks:            make([]QueuedTask, 0, len(view.Tasks)),
+		History:          publicHistoryPage(page),
+		Models:           publicModelOptions(view.Models),
+		ModelSelection:   ModelSelection(view.ModelChoice),
 		ApprovalMode:     publicApprovalMode(view.Approval),
 		PendingApprovals: publicToolApprovals(view.PendingApprovals),
 	}
@@ -252,7 +248,7 @@ func (b *SessionBindings) SelectModel(wire SelectModelRequest) error {
 	if err != nil {
 		return err
 	}
-	choice := sessionmodel.ModelChoice{
+	choice := modelapi.Choice{
 		ProviderID:     wire.ProviderID,
 		ModelID:        wire.ModelID,
 		ReasoningLevel: wire.ReasoningLevel,

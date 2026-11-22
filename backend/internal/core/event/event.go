@@ -5,7 +5,6 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
-	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
@@ -77,7 +76,7 @@ func (EntriesAppended) isPayload() {}
 
 type SessionConfigReloaded struct {
 	Models        []modelapi.Option
-	ModelChoice   sessionmodel.ModelChoice
+	ModelChoice   modelapi.Choice
 	GlobalMode    security.ApprovalMode
 	SessionMode   *security.ApprovalMode
 	EffectiveMode security.ApprovalMode

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"praxis/internal/core/approval"
+	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	runmodel "praxis/internal/core/run"
@@ -31,6 +32,7 @@ type Config struct {
 	SessionLoader     repository.SessionLoader
 	Projects          repository.Project
 	Loop              *loop.Runner
+	Emitter           *coreevent.Emitter
 	RunDependencies   runmodel.Dependencies
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
@@ -46,6 +48,7 @@ type Coordinator struct {
 	sessionLoader     repository.SessionLoader
 	projects          repository.Project
 	loop              *loop.Runner
+	emitter           *coreevent.Emitter
 	runDependencies   runmodel.Dependencies
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
@@ -135,6 +138,7 @@ func NewCoordinator(config Config) *Coordinator {
 		sessionLoader:     config.SessionLoader,
 		projects:          config.Projects,
 		loop:              config.Loop,
+		emitter:           config.Emitter,
 		sessionCommands:   make(map[identity.SessionID]*sessionCommand),
 		schedules:         make(map[identity.SessionID]*sessionSchedule),
 		runDependencies:   config.RunDependencies,

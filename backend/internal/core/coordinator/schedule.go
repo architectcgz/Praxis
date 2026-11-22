@@ -88,7 +88,7 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, sched
 	if err == nil {
 		notification := taskQueueEvent(schedule)
 		unlock()
-		r.loop.Emitter.Emit(notification)
+		r.emitter.Emit(notification)
 		return nil
 	}
 	unlock()
@@ -118,7 +118,7 @@ func (r *Coordinator) finishTaskStart(input taskmodel.Task, schedule *sessionSch
 	active.cancel(nil)
 	notification := taskQueueEvent(schedule)
 	unlock()
-	r.loop.Emitter.Emit(notification)
+	r.emitter.Emit(notification)
 	if storageFailed {
 		r.emitQueueStorageFailure(input.SessionID, err)
 	}

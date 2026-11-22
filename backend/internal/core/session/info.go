@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
@@ -17,12 +18,12 @@ const (
 	SessionArchived SessionState = "archived"
 )
 
-// SessionInfo 是 Project 的持久化协作容器。
+// SessionInfo 是 Project 的持久化协作容器；ModelChoice 未指定模型时，会话运行时继承默认选择。
 type SessionInfo struct {
 	ID           identity.SessionID
 	ProjectID    identity.ProjectID
 	Title        string
-	ModelChoice  ModelChoice
+	ModelChoice  modelapi.Choice
 	State        SessionState
 	ApprovalMode *security.ApprovalMode `json:",omitempty"`
 	CreatedAt    time.Time

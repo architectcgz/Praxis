@@ -137,7 +137,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 	s.running.Add(1)
 	s.mu.Unlock()
 	launched = true
-	s.loop.Emitter.Emit(coreevent.Event{
+	s.emitter.Emit(coreevent.Event{
 		Source: child.EventSource(""),
 		Payload: coreevent.SubagentStarted{
 			Name:          definition.Name,

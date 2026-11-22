@@ -5,6 +5,7 @@ import (
 	"errors"
 	"praxis/internal/core/approval"
 	"praxis/internal/core/coordinator"
+	modelapi "praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
@@ -164,7 +165,7 @@ func (s *Service) ResumeQueue(ctx context.Context, id identity.SessionID) error 
 	return s.core.ResumeQueue(ctx, id)
 }
 
-func (s *Service) SelectModel(ctx context.Context, id identity.SessionID, choice sessionmodel.ModelChoice) error {
+func (s *Service) SelectModel(ctx context.Context, id identity.SessionID, choice modelapi.Choice) error {
 	return s.core.SelectModel(ctx, id, choice)
 }
 

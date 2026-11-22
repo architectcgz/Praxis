@@ -66,7 +66,7 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 		}
 		active.cancel(nil)
 		active.parent.CompleteSubagent(run.AgentID())
-		r.loop.Emitter.Emit(coreevent.Event{Source: run.EventSource(""), Payload: coreevent.SubagentReleased{}})
+		r.emitter.Emit(coreevent.Event{Source: run.EventSource(""), Payload: coreevent.SubagentReleased{}})
 		return
 	}
 	queueCtx, cancel := r.transitionContext()
@@ -96,7 +96,7 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 	unlock()
 	active.cancel(nil)
 	if storageFailed {
-		r.loop.Emitter.Emit(notification)
+		r.emitter.Emit(notification)
 		r.emitQueueStorageFailure(run.SessionID(), storageErr)
 	}
 	if next != nil {
@@ -108,7 +108,7 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 }
 
 func (r *Coordinator) emitQueueStorageFailure(sessionID identity.SessionID, err error) {
-	r.loop.Emitter.Emit(coreevent.Event{
+	r.emitter.Emit(coreevent.Event{
 		Source:  coreevent.EventSource{SessionID: sessionID},
 		Payload: coreevent.TaskQueueStorageFailed{Message: err.Error()},
 	})

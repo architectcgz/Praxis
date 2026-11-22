@@ -41,7 +41,7 @@ func (s *Coordinator) StopRun(ctx context.Context, sessionID identity.SessionID,
 	active.cancel(errRunInterrupted)
 	notification := taskQueueEvent(schedule)
 	unlock()
-	s.loop.Emitter.Emit(notification)
+	s.emitter.Emit(notification)
 	return nil
 }
 

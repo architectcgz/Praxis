@@ -60,6 +60,7 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 	runner := loop.NewRunner(runnerDeps)
 	return coordinator.NewCoordinator(coordinator.Config{
 		Loop:              &runner,
+		Emitter:           emitter,
 		RunDependencies:   runDeps,
 		LoadConfig:        loadConfig,
 		HookDispatcher:    hooks,

@@ -43,19 +43,12 @@ func (c *Configuration) Definition(id identity.AgentDefinitionID) (agentmodel.Ag
 	return agentmodel.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
 }
 
-// ModelChoice 在会话元数据中表示显式覆盖，在运行时表示当前有效的模型和推理等级。
-type ModelChoice struct {
-	ProviderID     string
-	ModelID        string
-	ReasoningLevel string
-}
-
 // Session 持有会话配置和各 Agent 的 AgentContext。
 // 数据锁保护配置、Agent 登记与上下文；各 Agent 的 History 读写由存储串行化。
 type Session struct {
 	mu            sync.RWMutex
 	configuration *Configuration
-	choice        ModelChoice
+	choice        modelapi.Choice
 	data          *Data
 	log           HistoryStore
 }
@@ -67,14 +60,9 @@ func New(data *Data, log HistoryStore) *Session {
 	}
 }
 
-func (s *Session) Configure(config *Configuration, choice ModelChoice) {
+func (s *Session) Configure(config *Configuration, choice modelapi.Choice) {
 	if choice.ModelID == "" {
-		option := config.Models.DefaultModel()
-		choice = ModelChoice{
-			ProviderID:     option.ProviderID,
-			ModelID:        option.ModelID,
-			ReasoningLevel: option.DefaultReasoningLevel,
-		}
+		choice = config.Models.DefaultModel().DefaultChoice()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,7 +76,7 @@ func (s *Session) Configuration() *Configuration {
 	return s.configuration
 }
 
-func (s *Session) Choice() ModelChoice {
+func (s *Session) Choice() modelapi.Choice {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.choice
@@ -97,7 +85,7 @@ func (s *Session) Choice() ModelChoice {
 func (s *Session) RunConfiguration() (*Configuration, modelapi.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	model, err := s.configuration.Models.Get(s.choice.ProviderID, s.choice.ModelID, s.choice.ReasoningLevel)
+	model, err := s.configuration.Models.Get(s.choice)
 	return s.configuration, model, err
 }
 

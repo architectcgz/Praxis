@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/errorcode"
@@ -236,7 +237,7 @@ func sessionPath(dataRoot string, projectID identity.ProjectID, sessionID identi
 	return filepath.Join(dataRoot, "projects", projectID.String(), "sessions", sessionID.String())
 }
 
-func (r SessionRepository) SetModelChoice(ctx context.Context, id identity.SessionID, choice sessionmodel.ModelChoice, at time.Time) error {
+func (r SessionRepository) SetModelChoice(ctx context.Context, id identity.SessionID, choice modelapi.Choice, at time.Time) error {
 	_, err := r.database.ExecContext(ctx, `UPDATE sessions SET provider_id=?,model_id=?,reasoning_level=?,updated_at=? WHERE id=?`, choice.ProviderID, choice.ModelID, choice.ReasoningLevel, at.UnixNano(), id)
 	return err
 }

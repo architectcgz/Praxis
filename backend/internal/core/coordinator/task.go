@@ -44,12 +44,12 @@ func (s *Coordinator) SubmitTask(ctx context.Context, input taskmodel.Input) (Su
 		return result, err
 	}
 	if result.titleEvent != nil {
-		s.loop.Emitter.Emit(coreevent.Event{
+		s.emitter.Emit(coreevent.Event{
 			Source:  coreevent.EventSource{SessionID: input.SessionID},
 			Payload: *result.titleEvent,
 		})
 	}
-	s.loop.Emitter.Emit(*notification)
+	s.emitter.Emit(*notification)
 	if err := s.schedule(context.WithoutCancel(ctx), input.SessionID); err != nil {
 		result.SchedulingError = err.Error()
 	}
@@ -138,7 +138,7 @@ func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.Session
 	notification := taskQueueEvent(schedule)
 	unlock()
 	if err == nil {
-		s.loop.Emitter.Emit(notification)
+		s.emitter.Emit(notification)
 	}
 	return err
 }
@@ -179,7 +179,7 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 	}
 	notification := taskQueueEvent(schedule)
 	unlock()
-	s.loop.Emitter.Emit(notification)
+	s.emitter.Emit(notification)
 	if !pause {
 		s.mu.Lock()
 		active := schedule.active

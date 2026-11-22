@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	coreevent "praxis/internal/core/event"
+	modelapi "praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
@@ -28,7 +29,7 @@ type SessionService interface {
 	SelectSession(context.Context, identity.SessionID) (sessionservice.SessionView, error)
 	CloseSession(context.Context, identity.SessionID) error
 	AgentHistory(context.Context, identity.SessionID, identity.AgentID, *int64, int) (sessionmodel.HistoryPage, error)
-	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
+	SelectModel(context.Context, identity.SessionID, modelapi.Choice) error
 	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode) (sessionservice.ApprovalSettings, error)
 	ReloadSessionConfig(context.Context, identity.SessionID) error
 	StopRun(context.Context, identity.SessionID, identity.RunID) error

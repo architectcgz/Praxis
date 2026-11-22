@@ -28,7 +28,7 @@ type SessionView struct {
 	Session          sessionmodel.SessionInfo
 	Tasks            []taskmodel.Task
 	Models           []modelapi.Option
-	ModelChoice      sessionmodel.ModelChoice
+	ModelChoice      modelapi.Choice
 	Approval         ApprovalSettings
 	PendingApprovals []approval.Approval
 }
@@ -184,8 +184,8 @@ func (s *Coordinator) ReloadSessionConfig(ctx context.Context, id identity.Sessi
 		return err
 	}
 	s.logger.Infof("session configuration reloaded session=%s", id)
-	s.loop.Emitter.Emit(queueEvent)
-	s.loop.Emitter.Emit(reloadEvent)
+	s.emitter.Emit(queueEvent)
+	s.emitter.Emit(reloadEvent)
 	return nil
 }
 
@@ -219,7 +219,7 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 	}
 	choice := info.ModelChoice
 	if choice.ModelID != "" {
-		if _, err := config.Models.Get(choice.ProviderID, choice.ModelID, choice.ReasoningLevel); err != nil {
+		if _, err := config.Models.Get(choice); err != nil {
 			return coreevent.Event{}, coreevent.Event{}, err
 		}
 	}
@@ -278,7 +278,7 @@ func (s *Coordinator) SetApprovalMode(ctx context.Context, id identity.SessionID
 }
 
 // SelectModel 定位已打开的会话更新选择，再尝试唤醒该会话的预约，不影响其他会话。
-func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.SessionID, choice sessionmodel.ModelChoice) error {
+func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.SessionID, choice modelapi.Choice) error {
 	if err := s.enter(); err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 		return errorcode.ErrRequestConflict
 	}
 	owner := schedule.session
-	if _, err := owner.Configuration().Models.Get(choice.ProviderID, choice.ModelID, choice.ReasoningLevel); err != nil {
+	if _, err := owner.Configuration().Models.Get(choice); err != nil {
 		unlock()
 		return err
 	}
