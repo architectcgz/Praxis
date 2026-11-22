@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"praxis/internal/clock"
 	"praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -49,7 +48,6 @@ func buildSessions(store *storage.Store, core *coordinator.Coordinator) *session
 		Core:     core,
 		Projects: store.Projects,
 		Sessions: store.Sessions,
-		Clock:    clock.UTCClock{},
 	})
 }
 
@@ -119,7 +117,6 @@ func Open(ctx context.Context, root dataroot.DataRoot, options Options) (_ *Appl
 	projects := projectservice.NewService(projectservice.Dependencies{
 		Projects:  a.storage.Projects,
 		Directory: fs.Filesystem{},
-		Clock:     clock.UTCClock{},
 	})
 	a.frontend = bindings.Services{
 		Projects: projects,

@@ -46,14 +46,6 @@ func (l *entryLog) CommitTerminal(ctx context.Context, agentID identity.AgentID,
 	return err
 }
 
-func (l *entryLog) Sync(ctx context.Context, agentID identity.AgentID) error {
-	writer, err := l.store.writer(agentID)
-	if err != nil {
-		return err
-	}
-	return writer.Sync(ctx)
-}
-
 func (l *entryLog) ReadBackward(ctx context.Context, agentID identity.AgentID, cursor *int64, limit int) (sessionmodel.HistoryPage, error) {
 	records, nextCursor, hasMore, err := l.store.readBackward(ctx, agentID, cursor, limit)
 	if err != nil {

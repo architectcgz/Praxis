@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	appcontext "praxis/internal/core/context"
 	modelapi "praxis/internal/core/model"
-	modelusage "praxis/internal/core/model/usage"
 	"praxis/internal/core/tool"
 	"praxis/internal/identity"
 )
@@ -73,7 +72,7 @@ type Event struct {
 	Kind           EventKind
 	Text           string
 	ToolCall       ToolCall
-	Usage          *modelusage.Usage
+	Usage          *modelapi.Usage
 	StopReason     StopReason
 	Err            error
 	ReasoningState *modelapi.ReasoningState

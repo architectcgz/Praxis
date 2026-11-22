@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"praxis/internal/identity"
 	"reflect"
 	"slices"
 )
@@ -34,7 +35,6 @@ func NewDispatcher(hooks ...any) (*Dispatcher, error) {
 			AssistantCommittedHook,
 			FinalOutputCommittedHook,
 			RunStartedHook,
-			RunResumedHook,
 			RunCommittedHook,
 			AfterContextBuildHook,
 			BeforeContextCompressionHook,
@@ -48,15 +48,6 @@ func NewDispatcher(hooks ...any) (*Dispatcher, error) {
 		}
 	}
 	return &Dispatcher{hooks: slices.Clone(hooks)}, nil
-}
-
-// WithHooks 返回独立注册表，不修改正在使用的 Dispatcher。
-func (d *Dispatcher) WithHooks(hooks ...any) (*Dispatcher, error) {
-	var registered []any
-	if d != nil {
-		registered = slices.Clone(d.hooks)
-	}
-	return NewDispatcher(append(registered, hooks...)...)
 }
 
 // registered 在无扩展时返回空列表，执行正确性不依赖 Hook 是否装配。
@@ -181,20 +172,6 @@ func (d *Dispatcher) RunStarted(ctx context.Context, event RunEvent) error {
 	return errors.Join(errs...)
 }
 
-func (d *Dispatcher) RunResumed(ctx context.Context, event RunEvent) error {
-	var errs []error
-	for _, registered := range d.registered() {
-		handler, ok := registered.(RunResumedHook)
-		if !ok {
-			continue
-		}
-		if err := handler.RunResumed(ctx, event); err != nil {
-			errs = append(errs, &Error{Point: "RunResumed", Cause: err})
-		}
-	}
-	return errors.Join(errs...)
-}
-
 func (d *Dispatcher) RunCommitted(ctx context.Context, event RunEvent) error {
 	var errs []error
 	for _, registered := range d.registered() {
@@ -308,7 +285,7 @@ func (d *Dispatcher) ToolExecutionWaiting(ctx context.Context, event ToolExecuti
 // Start 逐级传播 Context；结束时逆序关闭各操作 Scope。
 func (d *Dispatcher) Start(ctx context.Context, operation Operation) (context.Context, Scope) {
 	if operation.OperationID == "" {
-		operation.OperationID = NewOperationID()
+		operation.OperationID = identity.NewOperationID()
 	}
 	var scopes []Scope
 	for _, registered := range d.registered() {

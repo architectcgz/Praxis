@@ -63,7 +63,11 @@ type restrictedCatalog struct {
 }
 
 func Restrict(parent ToolCatalog, names []ToolName) (ToolCatalog, error) {
-	c := &restrictedCatalog{registry: parent, names: make(map[ToolName]bool), definitions: make([]ToolDefinition, 0, len(names))}
+	c := &restrictedCatalog{
+		registry:    parent,
+		names:       make(map[ToolName]bool),
+		definitions: make([]ToolDefinition, 0, len(names)),
+	}
 	for _, name := range names {
 		if _, ok := parent.Get(name); !ok {
 			return nil, fmt.Errorf("tool %s is outside the parent authorization", name)

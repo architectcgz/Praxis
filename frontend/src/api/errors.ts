@@ -3,42 +3,23 @@
 export const API_ERROR_CODES = {
     // wails 层
     invalidRequest: 'invalid_request',
-    validationError: 'validation_error',
-    configuration: 'configuration_error',
     bindingUnavailable: 'binding_unavailable',
     requestCanceled: 'request_canceled',
     requestTimeout: 'request_timeout',
-    internal: 'internal_error',
 
     // 通用业务错误
-    genericInvalidRequest: 'generic.invalid_request',
-    genericRequestCanceled: 'generic.request_canceled',
-    genericRequestTimeout: 'generic.request_timeout',
-    genericInternal: 'generic.internal_error',
+    validation: 'generic.invalid_value',
+    notFound: 'generic.not_found',
+    internal: 'generic.internal_error',
+    requestConflict: 'request.conflict',
+    runStorage: 'execution.storage_error',
+    runProvider: 'execution.provider_error',
+    runContract: 'execution.contract_error',
 
     // 业务领域
-    validation: 'generic.invalid_value',
-    invalidTransition: 'generic.invalid_transition',
-    notFound: 'generic.not_found',
-    notReady: 'orchestration.not_ready',
     projectInvalid: 'project.invalid',
     agentExecuting: 'agent.executing',
-    agentUnavailable: 'agent.unavailable',
-    alreadyEnded: 'agent.already_ended',
-    workQueueEmpty: 'work.queue_empty',
-    requestNotFound: 'request.not_found',
-    requestConflict: 'request.conflict',
     modelNotConfigured: 'model.not_configured',
-    runContract: 'execution.contract_error',
-    runPolicyBlocked: 'execution.policy_blocked',
-    runApprovalRequired: 'execution.approval_required',
-    runStorage: 'execution.storage_error',
-    sessionLogUnavailable: 'session.log_unavailable',
-    runProvider: 'execution.provider_error',
-    runTool: 'execution.tool_error',
-    runResourceLimit: 'execution.resource_limit',
-    runBusy: 'execution.busy',
-    runInterrupted: 'interrupted',
 } as const
 
 export type ApiErrorCode = typeof API_ERROR_CODES[keyof typeof API_ERROR_CODES]

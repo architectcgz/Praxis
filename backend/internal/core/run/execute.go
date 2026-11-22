@@ -9,6 +9,7 @@ import (
 	"praxis/internal/core/loop"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"time"
 )
 
@@ -17,7 +18,7 @@ const ErrInterrupted errorcode.Code = "run.interrupted"
 // Prepare 提交 Run 和输入事实。返回值表示 RunPrepared 已写入历史。
 func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	if _, _, err := r.AppendEntry(ctx, sessionentry.Entry{
-		ID:        "prepared:" + r.id.String(),
+		ID:        identity.NewEntryID(),
 		CreatedAt: r.createdAt,
 		Payload: sessionentry.RunPrepared{
 			AgentName:    r.definition.Name,
@@ -27,10 +28,10 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	}); err != nil {
 		return false, err
 	}
-	inputID := "input:" + r.id.String()
+	inputID := identity.NewEntryID()
 	authorKind := sessionentry.AuthorAgent
 	if r.Main() {
-		inputID = sessionentry.TaskInputID(r.sourceTaskID)
+		inputID = identity.TaskInputEntryID(r.sourceTaskID)
 		authorKind = sessionentry.AuthorUser
 	}
 	stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
@@ -73,9 +74,9 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	}()
 	if err = ctx.Err(); err == nil {
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		at := r.deps.Clock.Now()
+		at := time.Now().UTC()
 		_, _, saveErr := r.AppendEntry(startCtx, sessionentry.Entry{
-			ID:      "started:" + r.id.String(),
+			ID:      identity.NewEntryID(),
 			Payload: sessionentry.RunStarted{At: at},
 		})
 		cancel()
@@ -112,7 +113,7 @@ func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools
 		return err
 	}
 	if _, _, err := r.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
-		ID:      "ending:" + r.id.String(),
+		ID:      identity.NewEntryID(),
 		Payload: sessionentry.RunEndingStarted{},
 	}); err != nil {
 		return err

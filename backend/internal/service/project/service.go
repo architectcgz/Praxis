@@ -4,12 +4,12 @@ package project
 import (
 	"context"
 	"errors"
-	"praxis/internal/clock"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	"sync"
+	"time"
 )
 
 // Directory 提供项目创建所需的目录操作能力。
@@ -22,21 +22,18 @@ const ErrProjectInvalid errorcode.Code = "project.invalid"
 // Dependencies 包含项目创建和配置查询所需的依赖。
 type Dependencies struct {
 	Projects  repository.Project
-	Clock     clock.Clock
 	Directory Directory
 }
 
-// Service 管理项目记录，并按会话所属项目限制文件访问范围。
+// Service 管理项目记录。
 type Service struct {
 	createMu  sync.Mutex
 	projects  repository.Project
-	clock     clock.Clock
 	directory Directory
 }
 
 // CreateInput 包含输入边界已校验的身份及规范化后的项目名称、绝对路径。
 type CreateInput struct {
-	RequestID identity.RequestID
 	ProjectID identity.ProjectID
 	Name      string
 	Path      string
@@ -46,7 +43,6 @@ type CreateInput struct {
 func NewService(deps Dependencies) *Service {
 	return &Service{
 		projects:  deps.Projects,
-		clock:     deps.Clock,
 		directory: deps.Directory,
 	}
 }
@@ -77,7 +73,7 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (projec
 	if !errors.Is(err, errorcode.ErrNotFound) {
 		return projectmodel.Project{}, err
 	}
-	project := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, s.clock.Now())
+	project := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, time.Now().UTC())
 	if err := s.projects.Save(ctx, project); err != nil {
 		return projectmodel.Project{}, err
 	}

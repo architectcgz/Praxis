@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
 	modelapi "praxis/internal/core/model"
@@ -21,7 +20,6 @@ type HistoryStore interface {
 	RemoveSubagent(context.Context, identity.AgentID) error
 	Append(context.Context, identity.AgentID, *sessionentry.Entry) error
 	CommitTerminal(context.Context, identity.AgentID, *sessionentry.Entry) error
-	Sync(context.Context, identity.AgentID) error
 	ReadBackward(context.Context, identity.AgentID, *int64, int) (HistoryPage, error)
 	Close(context.Context) error
 }
@@ -40,7 +38,7 @@ type Configuration struct {
 func (c *Configuration) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
 	for _, definition := range c.Definitions {
 		if definition.ID == id {
-			return definition.Snapshot(), nil
+			return definition, nil
 		}
 	}
 	return agentmodel.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
@@ -61,16 +59,12 @@ type Session struct {
 	choice        ModelChoice
 	data          *Data
 	log           HistoryStore
-	clock         clock.Clock
-	ids           identity.IDGenerator
 }
 
-func New(data *Data, log HistoryStore, clock clock.Clock, ids identity.IDGenerator) *Session {
+func New(data *Data, log HistoryStore) *Session {
 	return &Session{
-		data:  data,
-		log:   log,
-		clock: clock,
-		ids:   ids,
+		data: data,
+		log:  log,
 	}
 }
 
@@ -98,16 +92,6 @@ func (s *Session) RunConfiguration() (*Configuration, modelapi.Config, error) {
 	defer s.mu.RUnlock()
 	model, err := s.configuration.Models.Get(s.choice.ProviderID, s.choice.ModelID, s.choice.ReasoningLevel)
 	return s.configuration, model, err
-}
-
-func (s *Session) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDefinition, error) {
-	return s.Configuration().Definition(id)
-}
-
-func (s *Session) Empty() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.data.Context(s.data.MainAgentID()).Entries) == 0
 }
 
 // AgentContext 返回指定 Agent 最近摘要及之后的活跃历史窗口快照。

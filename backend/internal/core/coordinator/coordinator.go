@@ -4,10 +4,10 @@ package coordinator
 import (
 	"context"
 	"errors"
-	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/approval"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
+	runmodel "praxis/internal/core/run"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	executionmodel "praxis/internal/core/toolexecution"
@@ -20,7 +20,7 @@ import (
 
 var (
 	errCoordinatorClosed = errors.New("execution coordinator is closed")
-	errRunInterrupted    = agentrun.ErrInterrupted
+	errRunInterrupted    = runmodel.ErrInterrupted
 )
 
 type Config struct {
@@ -31,7 +31,7 @@ type Config struct {
 	SessionLoader     repository.SessionLoader
 	Projects          repository.Project
 	Loop              *loop.Runner
-	RunDependencies   agentrun.Dependencies
+	RunDependencies   runmodel.Dependencies
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
@@ -46,7 +46,7 @@ type Coordinator struct {
 	sessionLoader     repository.SessionLoader
 	projects          repository.Project
 	loop              *loop.Runner
-	runDependencies   agentrun.Dependencies
+	runDependencies   runmodel.Dependencies
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
@@ -134,8 +134,8 @@ func (s *Coordinator) releaseSessionCommand(id identity.SessionID, command *sess
 
 // activeRun 是所属会话或 Parent 持有的控制句柄，不提供运行状态查询。
 type activeRun struct {
-	run     *agentrun.Run // 在提交准备事实前登记，由 mu 保护。
-	parent  *agentrun.Run
+	run     *runmodel.Run // 在提交准备事实前登记，由 mu 保护。
+	parent  *runmodel.Run
 	onDone  func() error
 	session *sessionmodel.Session
 
@@ -185,7 +185,7 @@ func (r *Coordinator) enter() error {
 }
 
 // launchLocked 只接收已由调度器标记忙碌的执行，不再竞争槽位；调用方持有 mu。
-func (r *Coordinator) launchLocked(run *agentrun.Run, active *activeRun) error {
+func (r *Coordinator) launchLocked(run *runmodel.Run, active *activeRun) error {
 	if r.closed {
 		return errCoordinatorClosed
 	}

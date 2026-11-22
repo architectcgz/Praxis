@@ -9,6 +9,7 @@ import (
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	"time"
 )
 
 type SessionView struct {
@@ -28,19 +29,6 @@ func (s *Coordinator) GetSession(ctx context.Context, id identity.SessionID) (*s
 		return nil, errorcode.ErrNotFound
 	}
 	return value, nil
-}
-
-func (s *Coordinator) LoadSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
-	if err := s.enter(); err != nil {
-		return nil, err
-	}
-	defer s.running.Done()
-	unlock, err := s.lockSession(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	return s.loadSession(ctx, id)
 }
 
 func (s *Coordinator) loadSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
@@ -262,7 +250,7 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 		unlock()
 		return err
 	}
-	if err := s.sessionRecords.SetModelChoice(ctx, sessionID, choice, s.runDependencies.Clock.Now()); err != nil {
+	if err := s.sessionRecords.SetModelChoice(ctx, sessionID, choice, time.Now().UTC()); err != nil {
 		unlock()
 		return err
 	}

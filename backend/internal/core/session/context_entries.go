@@ -6,6 +6,7 @@ import (
 	sessionentry "praxis/internal/core/entry"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
+	"time"
 )
 
 func (s *Session) appendEntry(ctx context.Context, agentID identity.AgentID, value sessionentry.Entry, terminal bool) (*sessionentry.Entry, bool, error) {
@@ -22,7 +23,7 @@ func (s *Session) appendEntry(ctx context.Context, agentID identity.AgentID, val
 		return nil, false, errorcode.ErrInvalidValue
 	}
 	if value.CreatedAt.IsZero() {
-		value.CreatedAt = s.clock.Now()
+		value.CreatedAt = time.Now().UTC()
 	}
 	stored := new(value)
 	if terminal {
@@ -44,11 +45,11 @@ func (s *Session) CommitTerminal(ctx context.Context, agentID identity.AgentID, 
 	return stored, err
 }
 
-func (s *Session) Entry(ctx context.Context, id string) (*sessionentry.Entry, error) {
+func (s *Session) Entry(ctx context.Context, id identity.EntryID) (*sessionentry.Entry, error) {
 	return s.findEntry(ctx, s.data.MainAgentID(), id)
 }
 
-func (s *Session) findEntry(ctx context.Context, agentID identity.AgentID, id string) (*sessionentry.Entry, error) {
+func (s *Session) findEntry(ctx context.Context, agentID identity.AgentID, id identity.EntryID) (*sessionentry.Entry, error) {
 	var found *sessionentry.Entry
 	err := s.walkHistory(ctx, agentID, func(value *sessionentry.Entry) bool {
 		if value.ID == id {

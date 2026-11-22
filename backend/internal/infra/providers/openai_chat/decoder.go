@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	modelusage "praxis/internal/core/model/usage"
+	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
@@ -142,7 +142,7 @@ func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	if !streaming.DecodeUsage(raw, &reported, "openai_chat") {
 		return nil
 	}
-	usage := modelusage.Usage{
+	usage := modelapi.Usage{
 		InputTokens:  reported.PromptTokens,
 		OutputTokens: reported.CompletionTokens,
 	}

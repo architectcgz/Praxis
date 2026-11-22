@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	agentmodel "praxis/internal/core/agent"
-	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/entry"
+	runmodel "praxis/internal/core/run"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/errorcode"
@@ -68,7 +68,7 @@ func (r *Coordinator) startNext(ctx context.Context, input taskmodel.Task, sched
 	r.mu.Unlock()
 	prepared, err := run.Prepare(prepareCtx, input.Prompt)
 	if err != nil {
-		canceled := errors.Is(err, context.Canceled) && errors.Is(context.Cause(prepareCtx), agentrun.ErrInterrupted)
+		canceled := errors.Is(err, context.Canceled) && errors.Is(context.Cause(prepareCtx), runmodel.ErrInterrupted)
 		if prepared {
 			if saveErr := run.SettlePreparation(prepareCtx, err); saveErr != nil {
 				return r.finishTaskStart(input, schedule, active, false, errorcode.ErrStorage.Wrap(errors.Join(err, saveErr)))
@@ -125,7 +125,7 @@ func (r *Coordinator) finishTaskStart(input taskmodel.Task, schedule *sessionSch
 	return err
 }
 
-func (r *Coordinator) newTaskRun(input taskmodel.Task, schedule *sessionSchedule) (*agentrun.Run, *sessionmodel.Configuration, error) {
+func (r *Coordinator) newTaskRun(input taskmodel.Task, schedule *sessionSchedule) (*runmodel.Run, *sessionmodel.Configuration, error) {
 	config, model, err := schedule.session.RunConfiguration()
 	if err != nil {
 		return nil, nil, err
@@ -135,7 +135,7 @@ func (r *Coordinator) newTaskRun(input taskmodel.Task, schedule *sessionSchedule
 		return nil, nil, err
 	}
 	agentID := identity.AgentID(input.SessionID)
-	run := agentrun.New(r.runDependencies, agentrun.Config{
+	run := runmodel.New(r.runDependencies, runmodel.Config{
 		SourceTaskID: input.ID,
 		Definition:   definition,
 		Model:        model,

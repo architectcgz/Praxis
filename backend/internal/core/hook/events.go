@@ -71,7 +71,7 @@ type AfterModelResponseHook interface {
 	AfterModelResponse(context.Context, ModelResponse) error
 }
 
-// ToolExecution 的调用归属只读；Before 只返回参数，不能替换工具或审批结果。
+// ToolExecution 的调用归属与参数只读；Before 只返回错误以决定是否放行，不能替换工具、参数或审批结果。
 type ToolExecution struct {
 	Identity
 	Call      sessionentry.ToolCall
@@ -152,16 +152,10 @@ type RunEvent struct {
 	Identity
 	Outcome     string
 	FailureCode string
-	// ResumeReason 区分进程恢复和审批唤醒；新执行为空。
-	ResumeReason string
 }
 
 type RunStartedHook interface {
 	RunStarted(context.Context, RunEvent) error
-}
-
-type RunResumedHook interface {
-	RunResumed(context.Context, RunEvent) error
 }
 
 type RunCommittedHook interface {

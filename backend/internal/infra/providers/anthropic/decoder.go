@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	modelapi "praxis/internal/core/model"
-	modelconfig "praxis/internal/core/model/config"
-	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
@@ -163,7 +161,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 					return "", errors.New("anthropic reasoning state payload exceeds size limit")
 				}
 				state.ReasoningState = &modelapi.ReasoningState{
-					Protocol: string(modelconfig.APIFormatAnthropicMessages),
+					Protocol: string(modelapi.APIFormatAnthropicMessages),
 					Payload:  payload,
 				}
 			}
@@ -265,7 +263,7 @@ func activeContentBlock(blocks map[int]*contentBlockState, index *int) (*content
 // updateMessageUsage 合并协议分批提供的计数；未提供的分项沿用此前值。
 func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit streaming.EmitFunc) (*tokenCounts, error) {
 	var delta tokenCounts
-	if !streaming.DecodeUsage(raw, &delta, string(modelconfig.APIFormatAnthropicMessages)) {
+	if !streaming.DecodeUsage(raw, &delta, string(modelapi.APIFormatAnthropicMessages)) {
 		return previous, nil
 	}
 	var next tokenCounts
@@ -298,7 +296,7 @@ func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit stream
 	}
 	return &next, nil
 }
-func normalizeMessageUsage(reported *tokenCounts) *modelusage.Usage {
+func normalizeMessageUsage(reported *tokenCounts) *modelapi.Usage {
 	var input *int64
 	if reported.InputTokens != nil {
 		total := *reported.InputTokens
@@ -309,7 +307,7 @@ func normalizeMessageUsage(reported *tokenCounts) *modelusage.Usage {
 		}
 		input = &total
 	}
-	usage := modelusage.Usage{
+	usage := modelapi.Usage{
 		InputTokens:              input,
 		OutputTokens:             reported.OutputTokens,
 		CacheReadInputTokens:     reported.CacheReadInputTokens,

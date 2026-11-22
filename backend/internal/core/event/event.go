@@ -3,8 +3,7 @@ package event
 import (
 	agentmodel "praxis/internal/core/agent"
 	sessionentry "praxis/internal/core/entry"
-	modelusage "praxis/internal/core/model/usage"
-	providerapi "praxis/internal/core/provider"
+	modelapi "praxis/internal/core/model"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
@@ -49,15 +48,6 @@ type EventSource struct {
 
 	RunID  identity.RunID
 	TurnID identity.TurnID
-}
-
-// RunSource 由发布者提供已绑定的通知身份，公共事件包不读取执行对象。
-type RunSource interface {
-	EventSource(identity.TurnID) EventSource
-}
-
-func SourceForRun(source RunSource, turnID identity.TurnID) EventSource {
-	return source.EventSource(turnID)
 }
 
 // Event 是进程内业务通知，不表示已落盘；重新连接后应查询业务状态恢复视图。
@@ -115,7 +105,7 @@ func (ModelRequestStarted) isPayload() {}
 type ModelRequestCompleted struct {
 	Info       ModelRequestInfo
 	StopReason string
-	Usage      *modelusage.Usage
+	Usage      *modelapi.Usage
 }
 
 func (ModelRequestCompleted) Kind() Kind { return KindModelRequestCompleted }
@@ -126,7 +116,7 @@ type ModelRequestFailed struct {
 	StopReason string
 	Error      string
 	Partial    string
-	Usage      *modelusage.Usage
+	Usage      *modelapi.Usage
 }
 
 func (ModelRequestFailed) Kind() Kind { return KindModelRequestFailed }
@@ -185,9 +175,7 @@ type ToolResult struct {
 func (ToolResult) Kind() Kind { return KindToolResult }
 func (ToolResult) isPayload() {}
 
-type TurnCompleted struct {
-	StopReason providerapi.StopReason
-}
+type TurnCompleted struct{}
 
 func (TurnCompleted) Kind() Kind { return KindTurnCompleted }
 func (TurnCompleted) isPayload() {}

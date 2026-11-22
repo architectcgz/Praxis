@@ -3,7 +3,6 @@ package run
 import (
 	"context"
 	"errors"
-	"praxis/internal/clock"
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
@@ -11,7 +10,6 @@ import (
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	modelapi "praxis/internal/core/model"
-	modelusage "praxis/internal/core/model/usage"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
 	"praxis/internal/errorcode"
@@ -25,8 +23,6 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	Emitter        *coreevent.Emitter
-	Clock          clock.Clock
-	IDs            identity.IDGenerator
 }
 
 // Config 保存调度准入时确定的执行身份和模型配置。
@@ -61,22 +57,22 @@ type Run struct {
 	progress      runProgress
 	currentTurnID identity.TurnID
 	entries       []*sessionentry.Entry
-	entryIndexes  map[string]int
+	entryIndexes  map[identity.EntryID]int
 }
 
 func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *Run {
 	run := &Run{
 		deps:         deps,
 		history:      history,
-		id:           identity.RunID(deps.IDs.New("run")),
+		id:           identity.NewRunID(),
 		sessionID:    history.SessionID(),
 		sourceTaskID: config.SourceTaskID,
 		parentCallID: config.ParentCallID,
 		definition:   config.Definition,
 		model:        config.Model,
 		toolUpdates:  make(chan toolUpdate),
-		createdAt:    deps.Clock.Now().UTC(),
-		entryIndexes: make(map[string]int),
+		createdAt:    time.Now().UTC(),
+		entryIndexes: make(map[identity.EntryID]int),
 	}
 	run.initCollaboration()
 	return run
@@ -99,13 +95,13 @@ type toolUpdate struct {
 
 // runProgress 只在本次执行内累计，结束时写入终态载荷。
 type runProgress struct {
-	Usage            modelusage.Totals
+	Usage            modelapi.UsageTotals
 	Iterations       uint64
 	ModelRequests    uint64
 	OutputBytes      int64
 	ToolCalls        int
 	FinalStopReason  string
-	FinalAssistantID string
+	FinalAssistantID identity.EntryID
 }
 
 func (r *Run) Main() bool { return r.parentCallID == "" }
@@ -117,9 +113,9 @@ func (r *Run) Entries() []*sessionentry.Entry {
 
 // AppendEntry 保存普通事实；Entry 顺序由所属 Run Loop 决定。
 func (r *Run) AppendEntry(ctx context.Context, value sessionentry.Entry) (*sessionentry.Entry, bool, error) {
-	value.RunID = r.id.String()
+	value.RunID = r.id
 	if value.CreatedAt.IsZero() {
-		value.CreatedAt = r.deps.Clock.Now()
+		value.CreatedAt = time.Now().UTC()
 	}
 	stored, inserted, err := r.history.Append(ctx, value)
 	if err != nil {
@@ -142,7 +138,7 @@ func (r *Run) accept(value *sessionentry.Entry) {
 	case sessionentry.RunStarted:
 		r.startedAt = p.At.UTC()
 	case sessionentry.TurnStarted:
-		r.currentTurnID = identity.TurnID(value.TurnID)
+		r.currentTurnID = value.TurnID
 		r.progress.Iterations++
 	default:
 		r.progress.accept(value)
@@ -346,7 +342,7 @@ func (s *Run) emitError(turnID identity.TurnID, err error) {
 		message = string(text)
 	}
 	s.deps.Emitter.Emit(coreevent.Event{
-		Source:  coreevent.SourceForRun(s, turnID),
+		Source:  s.EventSource(turnID),
 		Payload: coreevent.ErrorOccurred{Message: message},
 	})
 }

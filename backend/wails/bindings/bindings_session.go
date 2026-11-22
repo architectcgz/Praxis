@@ -34,7 +34,6 @@ type SessionSummary struct {
 type CreateSessionRequest struct {
 	SessionID string `json:"sessionId" validate:"session_id"`
 	ProjectID string `json:"projectId" validate:"project_id"`
-	RequestID string `json:"requestId" validate:"id"`
 }
 
 type CreateSessionResponse struct {
@@ -110,7 +109,6 @@ func (b *SessionBindings) CreateSession(wire CreateSessionRequest) (CreateSessio
 	}
 	params := sessionservice.CreateInput{
 		SessionID: identity.SessionID(wire.SessionID),
-		RequestID: identity.RequestID(wire.RequestID),
 		ProjectID: identity.ProjectID(wire.ProjectID),
 	}
 	result, err := services.Sessions.CreateSession(ctx, params)

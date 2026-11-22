@@ -8,6 +8,7 @@ import (
 	"praxis/internal/core/modelcall"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 )
 
 func (r *Runner) runTurn(
@@ -19,7 +20,7 @@ func (r *Runner) runTurn(
 ) (finished bool, err error) {
 	turnID := request.TurnID
 	iteration := hook.Iteration{Identity: runIdentity(params, turnID)}
-	iteration.OperationID = hook.NewOperationID()
+	iteration.OperationID = identity.NewOperationID()
 	if hookErr := r.HookDispatcher.BeforeIteration(ctx, iteration); hookErr != nil {
 		return false, errorcode.ErrInternal.Wrap(hookErr)
 	}
@@ -43,9 +44,9 @@ func (r *Runner) runTurn(
 
 	calls := prepareToolCalls(params, turnID, response.ToolCalls())
 	stored, inserted, err := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
-		ID:         "assistant:" + response.RequestID.String(),
-		RunID:      params.ID.String(),
-		TurnID:     turnID.String(),
+		ID:         identity.NewEntryID(),
+		RunID:      params.ID,
+		TurnID:     turnID,
 		AuthorKind: sessionentry.AuthorAgent,
 		Payload: sessionentry.Message{
 			Role:    sessionentry.RoleAssistant,

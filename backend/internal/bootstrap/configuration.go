@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	modelapi "praxis/internal/core/model"
-	modelconfig "praxis/internal/core/model/config"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/core/tool"
@@ -73,9 +72,9 @@ func (c *configuration) loadSessionConfiguration(ctx context.Context, root datar
 // initializeDefaultFiles 只补充缺失文件，配置加载和重载均不调用此步骤。
 func initializeDefaultFiles(ctx context.Context, root dataroot.DataRoot) error {
 	files := map[string]any{
-		root.ModelProvidersConfig: modelconfig.Config{
-			Groups:    []modelconfig.Group{},
-			Providers: []modelconfig.Provider{},
+		root.ModelProvidersConfig: modelapi.Document{
+			Groups:    []modelapi.Group{},
+			Providers: []modelapi.Provider{},
 		},
 		root.ModelCredentialsFile: map[string]any{},
 		root.ToolConfig: tool.Config{

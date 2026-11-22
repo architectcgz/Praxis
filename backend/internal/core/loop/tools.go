@@ -22,7 +22,7 @@ func prepareToolCalls(params RunParams, turnID identity.TurnID, values []provide
 	calls := make([]sessionentry.ToolCall, 0, len(values))
 	for _, call := range values {
 		calls = append(calls, sessionentry.ToolCall{
-			Key: sessionentry.Key{
+			CallKey: tool.CallKey{
 				RunID:  params.ID,
 				CallID: call.ID,
 			},
@@ -47,7 +47,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	failures := make([]error, len(calls))
 	completed := make([]bool, len(calls))
 	var executionErr error
-	deps.ExecuteTools(deps.AppendEntry, func(submitEntry AppendEntry) {
+	deps.ExecuteTools(deps.AppendEntry, func(submitEntry sessionentry.AppendEntry) {
 		execute := func(index int) {
 			call := calls[index]
 			outcomes[index], failures[index] = executor.Execute(batchCtx, call, submitEntry)
@@ -114,9 +114,9 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 		}
 	}
 	value := sessionentry.Entry{
-		ID:         "tools:" + calls[0].TurnID.String(),
-		RunID:      params.ID.String(),
-		TurnID:     calls[0].TurnID.String(),
+		ID:         identity.NewEntryID(),
+		RunID:      params.ID,
+		TurnID:     calls[0].TurnID,
 		AuthorKind: sessionentry.AuthorTool,
 		Payload: sessionentry.Message{
 			Role:    sessionentry.RoleTool,
@@ -163,7 +163,7 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 		return errorcode.ErrStorage.Wrap(err)
 	}
 	request := providerapi.Request{
-		Context:         r.BuildContext(ctx, params, entries),
+		Context:         appcontext.ModelContextFromEntries(params.SystemPrompt, entries),
 		Model:           params.Model,
 		Tools:           params.Tools.List(),
 		MaxOutputTokens: params.Model.MaxOutputTokens,

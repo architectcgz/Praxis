@@ -1,26 +1,105 @@
-package config
+package model
 
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"praxis/internal/errorcode"
 	"regexp"
 	"slices"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
+const ErrNotConfigured errorcode.Code = "model.not_configured"
+
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// ValidateModelConfig 在请求或配置文件输入边界只读校验完整配置，不清洗字段或补默认值。
-func Validate(config Config) error {
-	groupsSeen, err := validateGroups(config.Groups)
+// ModelThinking 冻结模型的 Thinking 配置与禁用能力；Effort 由独立的 ReasoningLevels 表达。
+// Mode 为空表示使用服务端默认模式，不据此推断是否会产生 thinking blocks。
+type ModelThinking struct {
+	Mode             string `json:"mode,omitempty"`
+	BudgetTokens     int    `json:"budgetTokens,omitzero"`
+	SupportsDisabled bool   `json:"supportsDisabled,omitzero"`
+}
+
+// APIFormat 标识 Provider 使用的模型 API 协议。
+type APIFormat string
+
+const (
+	APIFormatAnthropicMessages     APIFormat = "anthropic_messages"
+	APIFormatOpenAIResponses       APIFormat = "openai_responses"
+	APIFormatOpenAIChatCompletions APIFormat = "openai_chat_completions"
+)
+
+// Group 定义模型目录中的分组及展示名称。
+type Group struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+}
+
+// Model 保存可编辑的模型能力与推理等级，不包含运行时凭据。
+type Model struct {
+	ID                    string        `json:"id"`
+	DisplayName           string        `json:"displayName"`
+	GroupID               string        `json:"groupId"`
+	APIFormat             APIFormat     `json:"apiFormat"`
+	ContextWindow         int           `json:"contextWindow"`
+	MaxOutputTokens       int           `json:"maxOutputTokens"`
+	ReasoningLevels       []string      `json:"reasoningLevels,omitempty"`
+	DefaultReasoningLevel string        `json:"defaultReasoningLevel,omitempty"`
+	Thinking              ModelThinking `json:"thinking,omitzero"`
+}
+
+// Provider 保存模型端点和模型目录；密钥由注册表独立管理。
+type Provider struct {
+	ID          string  `json:"id"`
+	DisplayName string  `json:"displayName"`
+	BaseURL     string  `json:"baseUrl"`
+	ProxyURL    string  `json:"proxyUrl,omitempty"`
+	Models      []Model `json:"models"`
+}
+
+// Document 是模型配置的完整文档；业务层只使用输入边界已规范化的值。
+type Document struct {
+	Groups    []Group    `json:"groups"`
+	Providers []Provider `json:"providers"`
+}
+
+// Option 是模型目录中的可选条目，携带分组与推理能力。
+type Option struct {
+	GroupID               string
+	ProviderID            string
+	ModelID               string
+	Label                 string
+	ProviderName          string
+	ReasoningLevels       []string
+	DefaultReasoningLevel string
+}
+
+// Clone 返回配置文档的深拷贝，调用方修改嵌套模型或推理等级不会影响原配置。
+func (d Document) Clone() Document {
+	d.Groups = slices.Clone(d.Groups)
+	d.Providers = slices.Clone(d.Providers)
+	for index := range d.Providers {
+		d.Providers[index].Models = slices.Clone(d.Providers[index].Models)
+		for modelIndex := range d.Providers[index].Models {
+			configured := &d.Providers[index].Models[modelIndex]
+			configured.ReasoningLevels = slices.Clone(configured.ReasoningLevels)
+		}
+	}
+	return d
+}
+
+// ValidateDocument 在请求或配置文件输入边界只读校验完整模型配置文档，不清洗字段或补默认值。
+func ValidateDocument(document Document) error {
+	groupsSeen, err := validateGroups(document.Groups)
 	if err != nil {
 		return err
 	}
-	if err := validateProviders(config.Providers, groupsSeen); err != nil {
-		return err
-	}
-	return nil
+	return validateProviders(document.Providers, groupsSeen)
 }
 
 func validateGroups(groups []Group) (map[string]struct{}, error) {
@@ -53,10 +132,10 @@ func validateProviders(providers []Provider, groupsSeen map[string]struct{}) err
 		if provider.DisplayName == "" || !canonicalString(provider.DisplayName) {
 			return fmt.Errorf("models config: provider %q display name must be normalized and non-empty", provider.ID)
 		}
-		if _, err := ValidateModelBaseURL(provider.BaseURL); err != nil {
+		if err := validateBaseURL(provider.BaseURL); err != nil {
 			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
-		if _, err := ValidateModelProxyURL(provider.ProxyURL); err != nil {
+		if err := validateProxyURL(provider.ProxyURL); err != nil {
 			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
 		if err := validateModels(provider, groupsSeen); err != nil {
@@ -155,6 +234,40 @@ func validateReasoningLevels(levels []string, defaultLevel string) error {
 	}
 	if !slices.Contains(levels, defaultLevel) {
 		return fmt.Errorf("reasoning default %q is not supported", defaultLevel)
+	}
+	return nil
+}
+
+// validateBaseURL 只读校验 canonical 端点；地址必须使用 HTTP 或 HTTPS，不能包含凭据、查询参数或片段。
+func validateBaseURL(value string) error {
+	if value == "" {
+		return errors.New("provider base URL is required")
+	}
+	if !canonicalString(value) || strings.HasSuffix(value, "/") {
+		return errors.New("provider base URL must be normalized")
+	}
+	parsed, err := http.NewRequest(http.MethodGet, value, nil)
+	if err != nil || parsed.URL == nil || parsed.URL.User != nil || parsed.URL.RawQuery != "" || parsed.URL.Fragment != "" {
+		return errors.New("provider base URL must be an absolute URL without credentials, query, or fragment")
+	}
+	if parsed.URL.Scheme != "http" && parsed.URL.Scheme != "https" || parsed.URL.Host == "" {
+		return errors.New("provider base URL must use http or https")
+	}
+	return nil
+}
+
+// validateProxyURL 只读校验 canonical 代理地址，空值表示不覆盖代理；允许认证信息，不能带路径、查询参数或片段。
+func validateProxyURL(value string) error {
+	if value == "" {
+		return nil
+	}
+	if !canonicalString(value) {
+		return errors.New("provider proxy URL must be normalized")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed == nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return errors.New("provider proxy URL must be an absolute HTTP or HTTPS URL without a path, query, or fragment")
 	}
 	return nil
 }

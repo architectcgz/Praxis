@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	modelconfig "praxis/internal/core/model/config"
+	modelapi "praxis/internal/core/model"
 	"praxis/internal/infra/providers/httpclient"
 	"regexp"
 )
@@ -60,7 +60,7 @@ func (s CredentialSnapshot) ProviderKey(providerID string) string {
 
 // Registry 保存本次只读加载的模型配置与凭据快照，供装配期构造只读目录。
 type Registry struct {
-	config      modelconfig.Config
+	config      modelapi.Document
 	credentials ProviderCredentials
 }
 
@@ -102,7 +102,7 @@ func Load(modelsPath, credentialsPath string, client *http.Client) (*Registry, e
 }
 
 // Config 返回模型配置的独立副本，调用方不能修改内部状态。
-func (r *Registry) Config() modelconfig.Config {
+func (r *Registry) Config() modelapi.Document {
 	return r.config.Clone()
 }
 
@@ -119,23 +119,23 @@ func (r *Registry) Credentials() CredentialSnapshot {
 }
 
 // readModelConfigFile 解码并只读校验持久化的 canonical 配置，不清洗或静默修复字段。
-func readModelConfigFile(path string) (modelconfig.Config, error) {
+func readModelConfigFile(path string) (modelapi.Document, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return modelconfig.Config{}, fmt.Errorf("open models config: %w", err)
+		return modelapi.Document{}, fmt.Errorf("open models config: %w", err)
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
-	var config modelconfig.Config
+	var config modelapi.Document
 	if err := decoder.Decode(&config); err != nil {
-		return modelconfig.Config{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return modelapi.Document{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return modelconfig.Config{}, fmt.Errorf("models config: invalid JSON: %w", err)
+		return modelapi.Document{}, fmt.Errorf("models config: invalid JSON: %w", err)
 	}
-	if err := modelconfig.Validate(config); err != nil {
-		return modelconfig.Config{}, err
+	if err := modelapi.ValidateDocument(config); err != nil {
+		return modelapi.Document{}, err
 	}
 	return config, nil
 }

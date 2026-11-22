@@ -30,7 +30,7 @@ func Load(path string) (Config, error) {
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return Config{}, errors.New("settings contain trailing JSON data")
 	}
-	if !value.ApprovalMode.ValidDefault() {
+	if !value.ApprovalMode.Valid() {
 		return Config{}, errors.New("settings approval mode must be ask, auto or yolo")
 	}
 	return value, nil

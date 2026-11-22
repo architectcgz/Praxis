@@ -78,7 +78,11 @@ func (b *Budget) Observe(c ModelContext, key string, input int) {
 func Margin(window int) int { return max(256, window/50) }
 func CheckCapacity(input, output, window int) error {
 	if window > 0 && input+output+Margin(window) > window {
-		return &ContextWindowExceededError{EstimatedInputTokens: input + Margin(window), MaxOutputTokens: output, ContextWindow: window}
+		return &ContextWindowExceededError{
+			EstimatedInputTokens: input + Margin(window),
+			MaxOutputTokens:      output,
+			ContextWindow:        window,
+		}
 	}
 	return nil
 }

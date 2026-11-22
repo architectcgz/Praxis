@@ -13,7 +13,6 @@ import (
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	modelapi "praxis/internal/core/model"
-	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/timing"
 	"praxis/internal/core/tool"
@@ -66,7 +65,7 @@ type Response struct {
 	events     []providerapi.Event
 	TextBytes  int
 	StopReason providerapi.StopReason
-	Usage      *modelusage.Usage
+	Usage      *modelapi.Usage
 	Timing     *timing.Record
 }
 
@@ -125,9 +124,7 @@ func (c *Caller) Do(ctx context.Context, call Call) (Response, error) {
 	var response Response
 	var err error
 	for retry := 0; retry <= 3; retry++ {
-		if retry > 0 {
-			call.Request.ID = identity.NewModelRequestID()
-		}
+		call.Request.ID = identity.NewModelRequestID()
 		response, err = c.doAttempt(ctx, call, retry)
 		if err == nil {
 			return response, nil
@@ -148,12 +145,9 @@ func (c *Caller) Do(ctx context.Context, call Call) (Response, error) {
 
 func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (response Response, err error) {
 	request := call.Request
-	if request.ID == "" {
-		request.ID = identity.NewModelRequestID()
-	}
 	boundary := hook.ModelRequest{
 		Identity: hook.Identity{
-			OperationID:  hook.NewOperationID(),
+			OperationID:  identity.NewOperationID(),
 			SourceTaskID: call.SourceTaskID,
 			SessionID:    call.SessionID,
 			AgentID:      call.AgentID,
@@ -263,7 +257,7 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 		return response, err
 	}
 	if call.Budget != nil {
-		_, key, shapeErr := EstimateRequestTokens(request, call.Budget)
+		key, shapeErr := requestShapeKey(request)
 		if shapeErr != nil {
 			return response, errorcode.ErrContract.Wrap(shapeErr)
 		}
@@ -277,14 +271,10 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 }
 
 func (c *Caller) saveModelRequest(ctx context.Context, call Call, request sessionentry.ModelRequest) error {
-	suffix := "finished"
-	if request.Status == sessionentry.RequestRunning {
-		suffix = "started"
-	}
 	stored, _, err := call.AppendEntry(ctx, sessionentry.Entry{
-		ID:      "request:" + request.ID.String() + ":" + suffix,
-		RunID:   request.RunID.String(),
-		TurnID:  request.TurnID.String(),
+		ID:      identity.NewEntryID(),
+		RunID:   request.RunID,
+		TurnID:  request.TurnID,
 		Payload: request,
 	})
 	if err != nil {
@@ -319,7 +309,11 @@ func modelRequestEvent(request sessionentry.ModelRequest, createdAt time.Time, h
 	case sessionentry.RequestRunning:
 		return coreevent.ModelRequestStarted{Info: info}
 	case sessionentry.RequestCompleted:
-		return coreevent.ModelRequestCompleted{Info: info, StopReason: request.StopReason, Usage: request.Usage}
+		return coreevent.ModelRequestCompleted{
+			Info:       info,
+			StopReason: request.StopReason,
+			Usage:      request.Usage,
+		}
 	}
 	failure := coreevent.ModelRequestFailed{
 		Info:       info,
@@ -377,7 +371,7 @@ func EstimateOverhead(tools []tool.ToolDefinition, schema *providerapi.OutputSch
 	return appcontext.EstimateTokens(string(data)), nil
 }
 
-func requestShape(request providerapi.Request) (string, int, error) {
+func requestShapeKey(request providerapi.Request) (string, error) {
 	data, err := json.Marshal(struct {
 		Model  any
 		Tools  []tool.ToolDefinition
@@ -388,10 +382,18 @@ func requestShape(request providerapi.Request) (string, int, error) {
 		Schema: request.OutputSchema,
 	})
 	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func requestShape(request providerapi.Request) (string, int, error) {
+	key, err := requestShapeKey(request)
+	if err != nil {
 		return "", 0, err
 	}
 	overhead, err := EstimateOverhead(request.Tools, request.OutputSchema)
-	return string(data), overhead, err
+	return key, overhead, err
 }
 
 func streamModel(

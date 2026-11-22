@@ -42,10 +42,6 @@ type AgentToolResult struct {
 	Timing  *Timing `json:"timing,omitempty"`
 }
 
-type AgentTurnCompleted struct {
-	StopReason string `json:"stopReason"`
-}
-
 type AgentRunStarted struct {
 	StartedAt time.Time `json:"startedAt"`
 }

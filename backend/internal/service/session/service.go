@@ -3,28 +3,28 @@ package session
 import (
 	"context"
 	"errors"
-	"praxis/internal/clock"
 	"praxis/internal/core/approval"
 	"praxis/internal/core/coordinator"
 	projectmodel "praxis/internal/core/project"
 	sessionmodel "praxis/internal/core/session"
 	taskmodel "praxis/internal/core/task"
+	executionmodel "praxis/internal/core/toolexecution"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/repository"
 	"sync"
+	"time"
 )
 
 type SessionView = coordinator.SessionView
 type SubmitResult = coordinator.SubmitResult
-type ToolDecision = coordinator.ToolDecision
-type ToolControl = coordinator.ToolControl
+type ToolDecision = approval.DecisionRequest
+type ToolControl = executionmodel.ControlRequest
 
 type Dependencies struct {
 	Core     *coordinator.Coordinator
 	Projects repository.Project
 	Sessions repository.Session
-	Clock    clock.Clock
 }
 
 // Service 是会话与执行能力的统一应用服务入口；运行期会话句柄与并发编排由 Core 维护。
@@ -32,13 +32,11 @@ type Service struct {
 	core            *coordinator.Coordinator
 	projects        repository.Project
 	sessions        repository.Session
-	clock           clock.Clock
 	createdMu       sync.Mutex
 	createdSessions map[identity.SessionID]struct{}
 }
 
 type CreateInput struct {
-	RequestID identity.RequestID
 	SessionID identity.SessionID
 	ProjectID identity.ProjectID
 }
@@ -50,17 +48,8 @@ func NewService(deps Dependencies) *Service {
 		core:            deps.Core,
 		projects:        deps.Projects,
 		sessions:        deps.Sessions,
-		clock:           deps.Clock,
 		createdSessions: make(map[identity.SessionID]struct{}),
 	}
-}
-
-func (s *Service) OpenedSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
-	return s.core.GetSession(ctx, id)
-}
-
-func (s *Service) LoadSession(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
-	return s.core.LoadSession(ctx, id)
 }
 
 func (s *Service) SelectSession(ctx context.Context, id identity.SessionID) (SessionView, error) {
@@ -73,10 +62,6 @@ func (s *Service) CloseSession(ctx context.Context, id identity.SessionID) error
 
 func (s *Service) ListSessionsByProject(ctx context.Context, id identity.ProjectID, limit int) ([]sessionmodel.SessionInfo, error) {
 	return s.sessions.ListByProject(ctx, id, limit)
-}
-
-func (s *Service) ListSessions(ctx context.Context, limit int) ([]sessionmodel.SessionInfo, error) {
-	return s.sessions.List(ctx, limit)
 }
 
 func (s *Service) GetSessionInfo(ctx context.Context, id identity.SessionID) (sessionmodel.SessionInfo, error) {
@@ -103,7 +88,7 @@ func (s *Service) CreateSession(ctx context.Context, input CreateInput) (CreateR
 	if project.State != projectmodel.ProjectActive {
 		return CreateResult{}, errorcode.ErrRequestConflict
 	}
-	info := sessionmodel.NewSessionInfo(input.SessionID, input.ProjectID, s.clock.Now())
+	info := sessionmodel.NewSessionInfo(input.SessionID, input.ProjectID, time.Now().UTC())
 	if err := s.sessions.Create(ctx, info); err != nil {
 		return CreateResult{}, err
 	}
@@ -131,7 +116,7 @@ func (s *Service) RenameSession(ctx context.Context, id identity.SessionID, titl
 	if err != nil {
 		return err
 	}
-	return s.sessions.UpdateTitle(ctx, id, info.Title, title, s.clock.Now())
+	return s.sessions.UpdateTitle(ctx, id, info.Title, title, time.Now().UTC())
 }
 
 // CleanupEmptySessions 在所有运行期会话关闭后清理本次新建且未产生日志内容的空会话。

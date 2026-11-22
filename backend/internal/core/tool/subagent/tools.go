@@ -28,7 +28,7 @@ type StartResult struct {
 type MainRuntime interface {
 	StartSubagent(ctx context.Context, callID string, assignment Assignment) (StartResult, error)
 	WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) (any, error)
-	SendToSubagent(ctx context.Context, id identity.AgentID, message string) (string, error)
+	SendToSubagent(ctx context.Context, id identity.AgentID, message string) (identity.EntryID, error)
 	CancelSubagent(id identity.AgentID) error
 	BeginWaiting()
 	EndWaiting()

@@ -3,10 +3,10 @@ package coordinator
 import (
 	"context"
 	"errors"
-	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/loop"
+	runmodel "praxis/internal/core/run"
 	taskmodel "praxis/internal/core/task"
 	"praxis/internal/core/tool"
 	subagenttool "praxis/internal/core/tool/subagent"
@@ -14,7 +14,7 @@ import (
 	"praxis/internal/identity"
 )
 
-func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *activeRun) {
+func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *activeRun) {
 	defer func() {
 		close(active.done)
 		if active.parent != nil {
@@ -90,7 +90,7 @@ func (r *Coordinator) run(ctx context.Context, run *agentrun.Run, active *active
 	var schedule *sessionSchedule
 	var input taskmodel.Task
 	var scheduleErr error
-	if err == nil && run.Outcome() == entry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), agentrun.ErrInterrupted) {
+	if err == nil && run.Outcome() == entry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), runmodel.ErrInterrupted) {
 		input, schedule, next, scheduleErr = r.claimTaskLocked(queueCtx, run.SessionID())
 	}
 	unlock()

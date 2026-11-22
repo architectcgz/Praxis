@@ -58,7 +58,6 @@ export function NewProjectDialog({
                 projectId: crypto.randomUUID(),
                 projectName: name,
                 path,
-                requestId: crypto.randomUUID(),
             })
             onCreated(created.projectId)
             onClose()

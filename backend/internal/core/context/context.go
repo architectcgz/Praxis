@@ -1,12 +1,9 @@
 package context
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	sessionentry "praxis/internal/core/entry"
-	"praxis/internal/core/tool"
 	"unicode/utf8"
 )
 
@@ -15,16 +12,6 @@ import (
 type ModelContext struct {
 	SystemPrompt string
 	Entries      []*sessionentry.Entry
-}
-
-// Digest 返回当前完整模型上下文的内容摘要。
-func (c ModelContext) Digest() (string, error) {
-	encoded, err := json.Marshal(c)
-	if err != nil {
-		return "", err
-	}
-	digest := sha256.Sum256(encoded)
-	return "sha256-" + hex.EncodeToString(digest[:]), nil
 }
 
 // ModelContextFromEntries 从最近摘要及之后的活跃历史中筛选模型上下文条目。
@@ -39,9 +26,6 @@ func ModelContextFromEntries(systemPrompt string, entries []*sessionentry.Entry)
 func ModelEntries(entries []*sessionentry.Entry) []*sessionentry.Entry {
 	selected := make([]*sessionentry.Entry, 0, len(entries))
 	for _, entry := range entries {
-		if message, ok := entry.Payload.(sessionentry.Message); ok && message.Response != nil && message.Response.Error != "" {
-			continue
-		}
 		messageRole, blocks := entry.Dialogue()
 		if messageRole != sessionentry.RoleUser && messageRole != sessionentry.RoleAssistant && messageRole != sessionentry.RoleTool {
 			continue
@@ -54,15 +38,6 @@ func ModelEntries(entries []*sessionentry.Entry) []*sessionentry.Entry {
 		}
 	}
 	return selected
-}
-
-func NewToolResultBlock(callID, name, payload string, isError bool) sessionentry.ToolResultBlock {
-	return sessionentry.ToolResultBlock{
-		CallID:  callID,
-		Name:    tool.ToolName(name),
-		Text:    payload,
-		IsError: isError,
-	}
 }
 
 // EstimateTokens 估算文本 token 数，ASCII 按四字节一个 token，非 ASCII 按 UTF-8 字节保守计数。

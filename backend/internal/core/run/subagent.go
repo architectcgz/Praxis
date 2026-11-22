@@ -19,7 +19,7 @@ type SubagentHandle struct {
 
 // SubagentReport 是子 Run 交给父 Run 的运行时报告。
 type SubagentReport struct {
-	ReportID     string
+	ReportID     identity.ReportID
 	AgentID      identity.AgentID
 	RunID        identity.RunID
 	ParentRunID  identity.RunID
@@ -32,7 +32,7 @@ type SubagentReport struct {
 }
 
 type instruction struct {
-	id   string
+	id   identity.EntryID
 	text string
 }
 
@@ -40,7 +40,7 @@ type collaboration struct {
 	mu           sync.Mutex
 	children     map[identity.AgentID]SubagentHandle
 	reports      []SubagentReport
-	consumed     map[string]bool
+	consumed     map[identity.ReportID]bool
 	accepted     []SubagentReport
 	wake         chan struct{}
 	parent       *Run
@@ -50,7 +50,7 @@ type collaboration struct {
 
 func (r *Run) initCollaboration() {
 	r.collaboration.children = make(map[identity.AgentID]SubagentHandle)
-	r.collaboration.consumed = make(map[string]bool)
+	r.collaboration.consumed = make(map[identity.ReportID]bool)
 	r.collaboration.wake = make(chan struct{}, 1)
 	r.collaboration.accepting = true
 }
@@ -126,7 +126,7 @@ func (r *Run) CancelSubagentRun(id identity.RunID) {
 	r.collaboration.mu.Unlock()
 }
 
-func (r *Run) SendToSubagent(ctx context.Context, id identity.AgentID, text string) (string, error) {
+func (r *Run) SendToSubagent(ctx context.Context, id identity.AgentID, text string) (identity.EntryID, error) {
 	r.collaboration.mu.Lock()
 	handle, ok := r.collaboration.children[id]
 	r.collaboration.mu.Unlock()
@@ -140,7 +140,7 @@ func (r *Run) SendToSubagent(ctx context.Context, id identity.AgentID, text stri
 }
 
 // receiveInstruction 只把指令交给 Subagent 的运行时协作队列，不直接写 History。
-func (r *Run) receiveInstruction(ctx context.Context, text string) (string, error) {
+func (r *Run) receiveInstruction(ctx context.Context, text string) (identity.EntryID, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -149,7 +149,7 @@ func (r *Run) receiveInstruction(ctx context.Context, text string) (string, erro
 		r.collaboration.mu.Unlock()
 		return "", fmt.Errorf("subagent execution has ended")
 	}
-	id := r.deps.IDs.New("instruction")
+	id := identity.NewEntryID()
 	r.collaboration.instructions = append(r.collaboration.instructions, instruction{id: id, text: text})
 	r.collaboration.mu.Unlock()
 	r.WakeSubagentWaiters()
@@ -206,7 +206,7 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 		return err
 	}
 	result := SubagentReport{
-		ReportID:     r.deps.IDs.New("report"),
+		ReportID:     identity.NewReportID(),
 		AgentID:      r.AgentID(),
 		RunID:        r.id,
 		ParentRunID:  parent.ID(),
@@ -230,7 +230,7 @@ func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) e
 
 // SubagentReceipt 不包含报告正文；父 Run 会将正文作为独立条目写入历史。
 type SubagentReceipt struct {
-	ReportID string                  `json:"reportId"`
+	ReportID identity.ReportID       `json:"reportId"`
 	AgentID  identity.AgentID        `json:"agentId"`
 	Outcome  sessionentry.RunOutcome `json:"outcome"`
 	Final    bool                    `json:"final"`
@@ -299,7 +299,7 @@ func (r *Run) acceptReports(ctx context.Context) error {
 	for _, report := range reports {
 		text := subagentReportText(report)
 		stored, _, err := r.AppendEntry(ctx, sessionentry.Entry{
-			ID:         "report:" + report.ReportID,
+			ID:         identity.NewEntryID(),
 			AuthorKind: sessionentry.AuthorAgent,
 			Payload: sessionentry.Message{
 				Role:    sessionentry.RoleUser,
@@ -348,7 +348,7 @@ func (r *Run) finishChildren() {
 
 func (r *Run) ResultForParent() SubagentReport {
 	result := SubagentReport{
-		ReportID:     r.deps.IDs.New("report"),
+		ReportID:     identity.NewReportID(),
 		AgentID:      r.AgentID(),
 		RunID:        r.id,
 		ParentRunID:  r.collaboration.parent.ID(),
@@ -398,22 +398,4 @@ func (r *Run) CompleteSubagent(id identity.AgentID) {
 	h := r.collaboration.children[id]
 	h.Run = nil
 	r.collaboration.children[id] = h
-}
-
-func (r *Run) ActiveSubagents() int {
-	r.collaboration.mu.Lock()
-	defer r.collaboration.mu.Unlock()
-	count := 0
-	for _, child := range r.collaboration.children {
-		if child.Done == nil {
-			count++
-			continue
-		}
-		select {
-		case <-child.Done:
-		default:
-			count++
-		}
-	}
-	return count
 }

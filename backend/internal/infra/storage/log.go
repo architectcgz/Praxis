@@ -59,6 +59,10 @@ func (r SessionRepository) OpenLog(ctx context.Context, id identity.SessionID) (
 			continue
 		}
 		agentID := identity.AgentID(name)
+		if !agentID.Valid() || agentID == log.mainAgent {
+			_ = log.Close(context.Background())
+			return nil, fmt.Errorf("invalid subagent log name %q", value.Name())
+		}
 		path := log.path(agentID)
 		if err := log.recoverFile(ctx, path); err != nil {
 			_ = log.Close(context.Background())

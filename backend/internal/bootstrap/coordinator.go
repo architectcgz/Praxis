@@ -4,28 +4,24 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"praxis/internal/clock"
-	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/approval"
 	"praxis/internal/core/coordinator"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/core/loop"
 	"praxis/internal/core/modelcall"
+	runmodel "praxis/internal/core/run"
 	sessionmodel "praxis/internal/core/session"
 	executionmodel "praxis/internal/core/toolexecution"
-	"praxis/internal/identity"
 	tooloutput "praxis/internal/infra/tools/output"
 	"time"
 )
 
 func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*sessionmodel.Configuration, error), hooks *hook.Dispatcher, emitter *coreevent.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
-	runDeps := agentrun.Dependencies{
+	runDeps := runmodel.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
-		Clock:          clock.UTCClock{},
-		IDs:            identity.SecureIDGenerator{},
 	}
 	modelCaller := modelcall.NewCaller(modelcall.Dependencies{
 		HookDispatcher: hooks,
@@ -36,7 +32,6 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		ModelCaller:    modelCaller,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
-		Clock:          clock.UTCClock{},
 		Logf:           resources.logger.Errorf,
 	})
 	executor := executionmodel.NewExecutor(executionmodel.ExecutorDependencies{

@@ -4,7 +4,6 @@ export type CreateProjectRequest = {
     projectId: string
     projectName: string
     path: string
-    requestId: string
 }
 
 export type ProjectSummary = {

@@ -16,7 +16,6 @@ type CreateProjectRequest struct {
 	ProjectID   string `json:"projectId" validate:"project_id"`
 	ProjectName string `json:"projectName" validate:"project_name"`
 	Path        string `json:"path" validate:"project_path"`
-	RequestID   string `json:"requestId" validate:"id"`
 }
 
 type CreateProjectResponse struct {
@@ -80,7 +79,6 @@ func (b *ProjectBindings) CreateProject(wire CreateProjectRequest) (CreateProjec
 		ProjectID: identity.ProjectID(wire.ProjectID),
 		Name:      wire.ProjectName,
 		Path:      wire.Path,
-		RequestID: identity.RequestID(wire.RequestID),
 	}
 	result, err := services.Projects.CreateProject(ctx, params)
 	if err != nil {

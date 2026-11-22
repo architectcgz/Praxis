@@ -63,7 +63,7 @@ func (value SessionInfo) Validate() error {
 	if value.State != SessionActive && value.State != SessionArchived {
 		return fmt.Errorf("session.state: unknown session state: %w", errorcode.ErrInvalidValue)
 	}
-	if value.ApprovalMode != nil && !value.ApprovalMode.ValidDefault() {
+	if value.ApprovalMode != nil && !value.ApprovalMode.Valid() {
 		return fmt.Errorf("session.approvalMode: default approval mode must be ask, auto or yolo: %w", errorcode.ErrInvalidValue)
 	}
 	if value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() || value.UpdatedAt.Before(value.CreatedAt) {

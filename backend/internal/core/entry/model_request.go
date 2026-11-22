@@ -3,7 +3,7 @@ package entry
 import (
 	"context"
 	"errors"
-	modelusage "praxis/internal/core/model/usage"
+	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/timing"
 	"praxis/internal/identity"
 	"strings"
@@ -39,7 +39,7 @@ type ModelRequest struct {
 	Error       string                  `json:"error,omitempty"`
 	Partial     Content                 `json:"partial,omitempty"`
 	OutputBytes int                     `json:"outputBytes"`
-	Usage       *modelusage.Usage       `json:"usage,omitempty"`
+	Usage       *modelapi.Usage         `json:"usage,omitempty"`
 	Timing      *timing.Record          `json:"timing,omitempty"`
 }
 

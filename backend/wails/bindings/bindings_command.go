@@ -42,7 +42,7 @@ type StopRunRequest struct {
 
 type ToolDecisionRequest struct {
 	SessionID string `json:"sessionId" validate:"session_id"`
-	AgentID   string `json:"agentId" validate:"id"`
+	AgentID   string `json:"agentId" validate:"agent_id"`
 	RunID     string `json:"runId" validate:"id"`
 	CallID    string `json:"callId" validate:"id"`
 }
@@ -59,7 +59,7 @@ type ToolApproval struct {
 
 type ToolCancelRequest struct {
 	SessionID string `json:"sessionId" validate:"session_id"`
-	AgentID   string `json:"agentId" validate:"id"`
+	AgentID   string `json:"agentId" validate:"agent_id"`
 	RunID     string `json:"runId" validate:"id"`
 	CallID    string `json:"callId" validate:"id"`
 }
@@ -138,7 +138,7 @@ func (b *CommandBindings) ListToolApprovals(sessionID, agentID string) ([]ToolAp
 	if err := validation.Value("sessionId", sessionID, "session_id"); err != nil {
 		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
 	}
-	if err := validation.Value("agentId", agentID, "id"); err != nil {
+	if err := validation.Value("agentId", agentID, "agent_id"); err != nil {
 		return nil, publicInputError(b.host, "CommandBindings.ListToolApprovals.request", err)
 	}
 	ctx, services, err := b.host.BindingContext()

@@ -11,7 +11,7 @@ const defaultHistoryLimit = 50
 
 type AgentHistoryRequest struct {
 	SessionID string `json:"sessionId" validate:"session_id"`
-	AgentID   string `json:"agentId" validate:"id"`
+	AgentID   string `json:"agentId" validate:"agent_id"`
 	Before    *int64 `json:"before" validate:"omitempty,min=0"`
 	Limit     int    `json:"limit" validate:"min=1,max=200"`
 }

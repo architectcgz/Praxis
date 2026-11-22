@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"praxis/internal/clock"
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -24,7 +23,6 @@ type GateDependencies struct {
 	ModelCaller    *modelcall.Caller
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
-	Clock          clock.Clock
 	Logf           func(string, ...any)
 }
 
@@ -69,7 +67,6 @@ type pendingApproval struct {
 	arguments   json.RawMessage
 	decision    security.ApprovalDecision
 	review      *RiskReview
-	requestedAt time.Time
 	hasDecision bool
 	approved    bool
 	decided     chan struct{}
@@ -168,26 +165,19 @@ func (r *RunGate) Authorize(
 	ctx context.Context,
 	call sessionentry.ToolCall,
 	args json.RawMessage,
-	operationID string,
+	operationID identity.OperationID,
 	appendEntry sessionentry.AppendEntry,
 ) (*tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	decision := security.ResolveApprovalDecision(r.mode)
-	if decision.Action == security.ApprovalDeny {
-		denied := tool.NewToolError("tool_not_allowed", "The requested tool is disabled or unregistered.")
-		return &denied, nil
-	}
-	if !r.run.Main() && (decision.Action == security.ApprovalAsk || decision.Action == security.ApprovalAuto) {
-		denied := tool.NewToolError("subagent_approval_unavailable", "This operation requires approval outside the subagent authorization snapshot.")
-		return &denied, nil
-	}
 	if decision.Action == security.ApprovalYolo {
 		return nil, nil
 	}
-	if decision.Action != security.ApprovalAsk && decision.Action != security.ApprovalAuto {
-		return nil, errors.New("tool approval decision is invalid")
+	if !r.run.Main() {
+		denied := tool.NewToolError("subagent_approval_unavailable", "This operation requires approval outside the subagent authorization snapshot.")
+		return &denied, nil
 	}
 
 	waiting := false
@@ -233,17 +223,16 @@ func (r *RunGate) Authorize(
 		return nil, err
 	}
 	item := &pendingApproval{
-		call:        call,
-		arguments:   args,
-		decision:    decision,
-		review:      review,
-		requestedAt: r.gate.deps.Clock.Now().UTC(),
-		decided:     make(chan struct{}),
+		call:      call,
+		arguments: args,
+		decision:  decision,
+		review:    review,
+		decided:   make(chan struct{}),
 	}
 	r.gate.mu.Lock()
-	r.gate.pending[call.Key] = item
+	r.gate.pending[call.CallKey] = item
 	r.gate.mu.Unlock()
-	defer r.gate.removePending(call.Key, item)
+	defer r.gate.removePending(call.CallKey, item)
 
 	beginWaiting()
 	r.notifyWaiting(ctx, call, args, operationID)
@@ -259,7 +248,7 @@ func (r *RunGate) Authorize(
 	}
 }
 
-func (r *RunGate) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID string) {
+func (r *RunGate) notifyWaiting(ctx context.Context, call sessionentry.ToolCall, args json.RawMessage, operationID identity.OperationID) {
 	deps := r.gate.deps
 	call.Arguments = string(args)
 	event := hook.ToolExecution{
@@ -278,7 +267,7 @@ func (r *RunGate) notifyWaiting(ctx context.Context, call sessionentry.ToolCall,
 		deps.Logf("tool execution waiting hook failed: %v", err)
 	}
 	deps.Emitter.Emit(coreevent.Event{
-		Source:  coreevent.SourceForRun(r.run, call.TurnID),
+		Source:  r.run.EventSource(call.TurnID),
 		Payload: coreevent.ToolApprovalRequired{CallID: call.CallID},
 	})
 }

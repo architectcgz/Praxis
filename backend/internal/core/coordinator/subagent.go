@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	agentmodel "praxis/internal/core/agent"
-	agentrun "praxis/internal/core/agent/run"
 	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
+	runmodel "praxis/internal/core/run"
 	"praxis/internal/core/tool"
 	subagenttool "praxis/internal/core/tool/subagent"
 	"praxis/internal/errorcode"
@@ -17,7 +17,7 @@ import (
 
 type mainSubagentRuntime struct {
 	coordinator *Coordinator
-	run         *agentrun.Run
+	run         *runmodel.Run
 	active      *activeRun
 }
 
@@ -29,7 +29,7 @@ func (m mainSubagentRuntime) WaitSubagents(ctx context.Context, ids []identity.A
 	return m.run.WaitSubagents(ctx, ids, all)
 }
 
-func (m mainSubagentRuntime) SendToSubagent(ctx context.Context, id identity.AgentID, message string) (string, error) {
+func (m mainSubagentRuntime) SendToSubagent(ctx context.Context, id identity.AgentID, message string) (identity.EntryID, error) {
 	return m.run.SendToSubagent(ctx, id, message)
 }
 
@@ -40,7 +40,7 @@ func (m mainSubagentRuntime) CancelSubagent(id identity.AgentID) error {
 func (m mainSubagentRuntime) BeginWaiting() { m.run.BeginWaiting() }
 func (m mainSubagentRuntime) EndWaiting()   { m.run.EndWaiting() }
 
-func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, parentActive *activeRun, assignment subagenttool.Assignment, callID string) (subagenttool.StartResult, error) {
+func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, parentActive *activeRun, assignment subagenttool.Assignment, callID string) (subagenttool.StartResult, error) {
 	catalog, err := tool.Restrict(parentActive.config.Tools, assignment.AllowedTools)
 	if err != nil {
 		return subagenttool.StartResult{}, err
@@ -51,7 +51,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	if closed || parentActive.ctx.Err() != nil {
 		return subagenttool.StartResult{}, fmt.Errorf("parent execution is closing")
 	}
-	agentID := identity.AgentID(s.runDependencies.IDs.New("agent"))
+	agentID := identity.NewAgentID()
 	if !parent.ReserveSubagent(agentID, 10) {
 		return subagenttool.StartResult{}, fmt.Errorf("session subagent limit of 10 is reached")
 	}
@@ -92,7 +92,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 	}
 	created = true
 
-	child := agentrun.New(s.runDependencies, agentrun.Config{
+	child := runmodel.New(s.runDependencies, runmodel.Config{
 		ParentCallID: callID,
 		Definition:   definition,
 		Model:        parent.Model(),
@@ -110,7 +110,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *agentrun.Run, p
 		return subagenttool.StartResult{}, err
 	}
 	child.BindParent(parent)
-	parent.AttachSubagent(agentrun.SubagentHandle{
+	parent.AttachSubagent(runmodel.SubagentHandle{
 		AgentID: agentID,
 		Run:     child,
 		Cancel:  active.cancel,

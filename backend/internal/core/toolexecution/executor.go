@@ -34,7 +34,7 @@ type OutputFiles interface {
 
 // Authorizer 在工具执行前裁决授权，与工具准备、执行及结果限制解耦。
 type Authorizer interface {
-	Authorize(context.Context, sessionentry.ToolCall, json.RawMessage, string, sessionentry.AppendEntry) (*tool.ToolResult, error)
+	Authorize(context.Context, sessionentry.ToolCall, json.RawMessage, identity.OperationID, sessionentry.AppendEntry) (*tool.ToolResult, error)
 }
 
 // RunOwner 提供工具执行事件和归属所需的最小只读视图。
@@ -85,7 +85,7 @@ type RunTools struct {
 // Err 只供后置观察，工具执行失败已编码在 ToolResult 中，不作为编排错误返回。
 type CallResult struct {
 	ToolResult  tool.ToolResult
-	OperationID string
+	OperationID identity.OperationID
 	Arguments   json.RawMessage
 	Timing      *timing.Record
 	Err         error
@@ -101,18 +101,47 @@ func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCat
 	}
 }
 
+func (e *Executor) register(key tool.CallKey, call *activeCall) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.active[key] = call
+}
+
+func (e *Executor) unregister(key tool.CallKey) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.active, key)
+}
+
+// StopCall 取消目标活跃工具调用的派生上下文，同时中断审核、审批等待或执行中的工具。
+func (e *Executor) StopCall(ctx context.Context, request ControlRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	active := e.active[tool.CallKey{RunID: request.RunID, CallID: request.CallID}]
+	if active == nil || active.sessionID != request.SessionID || active.agentID != request.AgentID {
+		e.mu.Unlock()
+		return errorcode.ErrRequestConflict
+	}
+	cancel := active.cancel
+	e.mu.Unlock()
+	cancel(errCallStopped)
+	return nil
+}
+
 // Execute 冻结工具参数、按工具策略决定是否授权并执行调用；工具回执由 Loop 统一提交。
 func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall, appendEntry sessionentry.AppendEntry) (CallResult, error) {
 	s := tools.executor
 	callCtx, cancelCall := context.WithCancelCause(ctx)
 	defer cancelCall(nil)
 
-	s.register(call.Key, &activeCall{
+	s.register(call.CallKey, &activeCall{
 		sessionID: call.SessionID,
 		agentID:   call.AgentID,
 		cancel:    cancelCall,
 	})
-	defer s.unregister(call.Key)
+	defer s.unregister(call.CallKey)
 
 	if err := callCtx.Err(); err != nil {
 		return callError("tool_interrupted", cancelReason(callCtx, err)), nil
@@ -121,7 +150,7 @@ func (tools *RunTools) Execute(ctx context.Context, call sessionentry.ToolCall, 
 	if !ok {
 		return callError("tool_not_allowed", "The requested tool is disabled or unregistered."), nil
 	}
-	operationID := hook.NewOperationID()
+	operationID := identity.NewOperationID()
 	if err := callCtx.Err(); err != nil {
 		return callError("tool_interrupted", cancelReason(callCtx, err)), nil
 	}
@@ -284,7 +313,7 @@ func (t *observedCall) Call(ctx context.Context) (result tool.ToolResult, err er
 	defer func() { scope.End(hook.Result{Err: err, ToolErrorClass: result.ErrorClass}) }()
 	span := timing.NewSpan()
 	t.emitter.Emit(coreevent.Event{
-		Source: coreevent.SourceForRun(t.run, t.identity.TurnID),
+		Source: t.run.EventSource(t.identity.TurnID),
 		Payload: coreevent.ToolStarted{
 			CallID: t.callID,
 			Timing: span.Snapshot(),
@@ -296,7 +325,7 @@ func (t *observedCall) Call(ctx context.Context) (result tool.ToolResult, err er
 	return result, err
 }
 
-func toolHookEvent(call sessionentry.ToolCall, args string, operationID string) hook.ToolExecution {
+func toolHookEvent(call sessionentry.ToolCall, args string, operationID identity.OperationID) hook.ToolExecution {
 	return hook.ToolExecution{
 		Identity: hook.Identity{
 			OperationID: operationID,

@@ -23,14 +23,6 @@ type ToolExecutor interface {
 	BoundResult(tool.ToolResult, int) (tool.ToolResult, error)
 }
 
-type (
-	ToolCall                   = providerapi.ToolCall
-	ToolDefinition             = tool.ToolDefinition
-	ModelContext               = appcontext.ModelContext
-	ContextWindowExceededError = appcontext.ContextWindowExceededError
-	Response                   = modelcall.Response
-)
-
 // RunParams 保存一次执行的身份、系统提示词、工具目录与冻结模型配置，供各轮模型请求共用。
 type RunParams struct {
 	ID           identity.RunID
@@ -42,10 +34,6 @@ type RunParams struct {
 	Tools        tool.ToolCatalog
 }
 
-// AppendEntry 同步提交条目，返回已接纳的只读引用、是否新增及保存错误。
-// 保存失败仍可能返回已接纳条目，Loop 不因此重新执行已有副作用的工具。
-type AppendEntry = sessionentry.AppendEntry
-
 // RunDependencies 绑定本次 Loop 的历史读取、事实提交和计时能力，不持有执行或会话对象。
 type RunDependencies struct {
 	AcceptSubagentReports func(context.Context) error
@@ -53,8 +41,8 @@ type RunDependencies struct {
 	FinishInstructions    func(context.Context) (bool, error)
 	Budget                *appcontext.Budget
 	ReadEntries           func(context.Context) ([]*sessionentry.Entry, error)
-	AppendEntry           AppendEntry
-	ExecuteTools          func(appendEntry AppendEntry, execute func(submitEntry AppendEntry))
+	AppendEntry           sessionentry.AppendEntry
+	ExecuteTools          func(appendEntry sessionentry.AppendEntry, execute func(submitEntry sessionentry.AppendEntry))
 }
 
 // Dependencies 保存 Loop 的共享能力；Provider 在执行开始时绑定会话配置。
@@ -101,11 +89,11 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 		if err != nil {
 			return turnID, modelcall.WrapModelError(err)
 		}
-		turnID = identity.TurnID((identity.SecureIDGenerator{}).New("turn"))
+		turnID = identity.NewTurnID()
 		_, _, err = deps.AppendEntry(ctx, sessionentry.Entry{
-			ID:        turnID.String() + ":start",
-			RunID:     params.ID.String(),
-			TurnID:    turnID.String(),
+			ID:        identity.NewEntryID(),
+			RunID:     params.ID,
+			TurnID:    turnID,
 			CreatedAt: time.Now().UTC(),
 			Payload:   sessionentry.TurnStarted{},
 		})
@@ -113,7 +101,6 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			return turnID, err
 		}
 		request := providerapi.Request{
-			ID:              identity.NewModelRequestID(),
 			RunID:           params.ID,
 			PromptCacheKey:  params.SessionID.String(),
 			Model:           params.Model,
@@ -133,9 +120,9 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			}
 		}
 		_, _, saveErr := deps.AppendEntry(context.WithoutCancel(ctx), sessionentry.Entry{
-			ID:        turnID.String() + ":end",
-			RunID:     params.ID.String(),
-			TurnID:    turnID.String(),
+			ID:        identity.NewEntryID(),
+			RunID:     params.ID,
+			TurnID:    turnID,
 			CreatedAt: endedAt,
 			Payload:   ending,
 		})
@@ -166,10 +153,10 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 // BuildContext 只选择本轮所需的 Entry 引用；Hook 只读观察，容量评估在构建完成后执行。
 func (r *Runner) BuildContext(ctx context.Context, params RunParams, entries []*sessionentry.Entry) appcontext.ModelContext {
 	built := appcontext.ModelContextFromEntries(params.SystemPrompt, entries)
-	identity := runIdentity(params, "")
-	identity.OperationID = hook.NewOperationID()
+	hookIdentity := runIdentity(params, "")
+	hookIdentity.OperationID = identity.NewOperationID()
 	if hookErr := r.HookDispatcher.AfterContextBuild(context.WithoutCancel(ctx), hook.ContextBuilt{
-		Identity: identity,
+		Identity: hookIdentity,
 		Context:  built,
 	}); hookErr != nil {
 		r.Logf("after context build hook failed run_id=%s: %v", params.ID, hookErr)
@@ -178,7 +165,7 @@ func (r *Runner) BuildContext(ctx context.Context, params RunParams, entries []*
 }
 
 // Request 通过统一底层模型请求组件接收一次完整模型响应。
-func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependencies, request providerapi.Request, kind sessionentry.ModelRequestKind) (Response, error) {
+func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependencies, request providerapi.Request, kind sessionentry.ModelRequestKind) (modelcall.Response, error) {
 	call := modelcall.Call{
 		Provider:     r.Provider,
 		Request:      request,

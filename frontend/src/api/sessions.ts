@@ -13,7 +13,7 @@ export type SessionSummary = {
     updatedAt: string
 }
 
-export type CreateSessionRequest = { sessionId: string; projectId: string; requestId: string }
+export type CreateSessionRequest = { sessionId: string; projectId: string }
 export type ApprovalMode = 'ask' | 'auto' | 'yolo'
 export type SessionApprovalMode = {
     sessionId: string

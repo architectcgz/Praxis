@@ -1,22 +1,18 @@
 package security
 
-// ApprovalMode 是单次操作的处理动作；deny 是硬性禁止，不能被 yolo 覆盖。
+// ApprovalMode 是单次操作的处理动作。
 type ApprovalMode string
 
 const (
 	ApprovalAsk  ApprovalMode = "ask"
 	ApprovalAuto ApprovalMode = "auto"
 	ApprovalYolo ApprovalMode = "yolo"
-	ApprovalDeny ApprovalMode = "deny"
 )
 
-// Valid 校验审批动作，包括工具禁用时的 deny。
+// Valid 校验全局或会话审批模式。
 func (m ApprovalMode) Valid() bool {
-	return m == ApprovalAsk || m == ApprovalAuto || m == ApprovalYolo || m == ApprovalDeny
+	return m == ApprovalAsk || m == ApprovalAuto || m == ApprovalYolo
 }
-
-// ValidDefault 校验全局或会话默认动作；deny 用于工具禁用决定。
-func (m ApprovalMode) ValidDefault() bool { return m.Valid() && m != ApprovalDeny }
 
 // EffectiveApprovalMode 优先采用会话覆盖，nil 表示继承全局默认动作。
 func EffectiveApprovalMode(global ApprovalMode, session *ApprovalMode) ApprovalMode {
@@ -38,4 +34,19 @@ func ResolveApprovalDecision(mode ApprovalMode) ApprovalDecision {
 		return ApprovalDecision{Action: ApprovalYolo, RuleID: "yolo"}
 	}
 	return ApprovalDecision{Action: mode, RuleID: "default"}
+}
+
+// RiskVerdict 是模型审核结果，不与操作处理动作混用。
+type RiskVerdict string
+
+const (
+	RiskSafe      RiskVerdict = "safe"
+	RiskDangerous RiskVerdict = "dangerous"
+	RiskUncertain RiskVerdict = "uncertain"
+)
+
+// RiskAssessment 只保存输入边界已校验的可展示结论，不保存模型思维过程。
+type RiskAssessment struct {
+	Verdict RiskVerdict `json:"verdict"`
+	Reason  string      `json:"reason"`
 }

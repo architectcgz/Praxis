@@ -59,7 +59,7 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 			return
 		}
 		data = AgentMessagesAppended{Messages: messages}
-	case coreevent.TurnStarted, coreevent.TurnFailed, coreevent.TurnInterrupted, coreevent.RunEnding, coreevent.SubagentReleased:
+	case coreevent.TurnStarted, coreevent.TurnCompleted, coreevent.TurnFailed, coreevent.TurnInterrupted, coreevent.RunEnding, coreevent.SubagentReleased:
 		data = struct{}{}
 	case coreevent.ModelRequestStarted:
 		requestInfo = &payload.Info
@@ -134,8 +134,6 @@ func (b *Bindings) EmitAgentEvent(event coreevent.Event) {
 			IsError: payload.IsError,
 			Timing:  (*Timing)(payload.Timing),
 		}
-	case coreevent.TurnCompleted:
-		data = AgentTurnCompleted{StopReason: string(payload.StopReason)}
 	case coreevent.RunEnded:
 		data = AgentRunEnded{
 			StartedAt:      payload.StartedAt,

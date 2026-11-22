@@ -13,7 +13,6 @@ type Session interface {
 	Get(context.Context, identity.SessionID) (sessionmodel.SessionInfo, error)
 	SetModelChoice(context.Context, identity.SessionID, sessionmodel.ModelChoice, time.Time) error
 	Create(context.Context, sessionmodel.SessionInfo) error
-	List(context.Context, int) ([]sessionmodel.SessionInfo, error)
 	ListByProject(context.Context, identity.ProjectID, int) ([]sessionmodel.SessionInfo, error)
 	// UpdateTitle 仅当原标题等于 expectedTitle 时原子更新；未匹配记录返回 ErrRequestConflict。
 	UpdateTitle(ctx context.Context, id identity.SessionID, expectedTitle, title string, at time.Time) error

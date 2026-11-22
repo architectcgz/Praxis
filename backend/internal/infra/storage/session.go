@@ -13,7 +13,6 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/infra/jsonl"
 	"praxis/internal/repository"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -72,20 +71,11 @@ func (r SessionRepository) Create(ctx context.Context, value sessionmodel.Sessio
 	return tx.Commit()
 }
 
-func (r SessionRepository) List(ctx context.Context, limit int) ([]sessionmodel.SessionInfo, error) {
-	return r.find(ctx, "", "", limit)
-}
 func (r SessionRepository) ListByProject(ctx context.Context, id identity.ProjectID, limit int) ([]sessionmodel.SessionInfo, error) {
-	return r.find(ctx, id, "", limit)
-}
-func (r SessionRepository) SearchTitle(ctx context.Context, title string, limit int) ([]sessionmodel.SessionInfo, error) {
-	return r.find(ctx, "", strings.ToLower(title), limit)
-}
-func (r SessionRepository) find(ctx context.Context, project identity.ProjectID, title string, limit int) ([]sessionmodel.SessionInfo, error) {
 	rows, err := r.database.QueryContext(ctx, `
 		SELECT id, project_id, title, state, created_at, updated_at, approval_mode, provider_id, model_id, reasoning_level
-		FROM sessions WHERE (? = '' OR project_id = ?)
-		ORDER BY updated_at DESC, id`, project.String(), project.String())
+		FROM sessions WHERE project_id = ?
+		ORDER BY updated_at DESC, id`, id.String())
 	if err != nil {
 		return nil, fmt.Errorf("list session metadata: %w", err)
 	}
@@ -95,9 +85,6 @@ func (r SessionRepository) find(ctx context.Context, project identity.ProjectID,
 		value, err := scanSession(rows)
 		if err != nil {
 			return nil, err
-		}
-		if !strings.Contains(strings.ToLower(value.Title), title) {
-			continue
 		}
 		values = append(values, value)
 		if limit > 0 && len(values) == limit {

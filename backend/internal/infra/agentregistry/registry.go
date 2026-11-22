@@ -61,7 +61,7 @@ func (r *Registry) Definition(id identity.AgentDefinitionID) (agentmodel.AgentDe
 	if !ok {
 		return agentmodel.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
 	}
-	return definition.Snapshot(), nil
+	return definition, nil
 }
 
 // List 按 ID 排序返回全部定义的独立快照。

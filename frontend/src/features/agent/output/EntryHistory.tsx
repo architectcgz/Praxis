@@ -29,7 +29,6 @@ export function buildEntryHistory(entries: HistoryMessage[], requests: RequestAc
                 if (block.kind === 'tool_call' && block.callId) visibleCallKeys.add(toolCallKey(item.runId, block.callId))
             }
         }
-        if (item.error) errorRuns.add(item.runId)
         if (item.role === 'tool') {
             for (const block of item.content) {
                 if (block.kind === 'tool_result' && block.callId) {
@@ -135,6 +134,5 @@ function sameAssistantRun(left?: HistoryItem, right?: HistoryItem): boolean {
     if (!left || !right || !('message' in left) || !('message' in right)) return false
     const a = left.message
     const b = right.message
-    return a.kind === 'message' && b.kind === 'message' && a.role === 'assistant' && b.role === 'assistant' &&
-        !a.error && !b.error && a.runId === b.runId
+    return a.kind === 'message' && b.kind === 'message' && a.role === 'assistant' && b.role === 'assistant' && a.runId === b.runId
 }

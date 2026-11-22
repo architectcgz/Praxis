@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	modelapi "praxis/internal/core/model"
-	modelconfig "praxis/internal/core/model/config"
-	modelusage "praxis/internal/core/model/usage"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/tool"
 	"praxis/internal/infra/providers/streaming"
@@ -504,7 +502,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 			if err := emit(providerapi.Event{
 				Kind: providerapi.StreamReasoningState,
 				ReasoningState: &modelapi.ReasoningState{
-					Protocol: string(modelconfig.APIFormatOpenAIResponses),
+					Protocol: string(modelapi.APIFormatOpenAIResponses),
 					Payload:  bytes.Clone(s.Items[index].Raw),
 				},
 				OutputIndex: &index,
@@ -530,10 +528,10 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 
 func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	var reported responseUsage
-	if !streaming.DecodeUsage(raw, &reported, string(modelconfig.APIFormatOpenAIResponses)) {
+	if !streaming.DecodeUsage(raw, &reported, string(modelapi.APIFormatOpenAIResponses)) {
 		return nil
 	}
-	usage := modelusage.Usage{
+	usage := modelapi.Usage{
 		InputTokens:  reported.InputTokens,
 		OutputTokens: reported.OutputTokens,
 	}

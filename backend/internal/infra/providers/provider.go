@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	modelconfig "praxis/internal/core/model/config"
+	modelapi "praxis/internal/core/model"
 	providerapi "praxis/internal/core/provider"
 	anthropicmessages "praxis/internal/infra/providers/anthropic"
 	"praxis/internal/infra/providers/httpclient"
@@ -57,20 +57,20 @@ func (p *Provider) Stream(ctx context.Context, request providerapi.Request) (<-c
 		return nil, fmt.Errorf("create provider client: %w", err)
 	}
 	var protocol providerapi.Provider
-	switch modelconfig.APIFormat(config.APIFormat) {
-	case modelconfig.APIFormatAnthropicMessages:
+	switch modelapi.APIFormat(config.APIFormat) {
+	case modelapi.APIFormatAnthropicMessages:
 		protocol, err = anthropicmessages.New(anthropicmessages.Config{
 			BaseURL:       config.BaseURL,
 			APIKey:        apiKey,
 			ContextWindow: config.ContextWindow,
 		}, anthropicmessages.Dependencies{HTTPClient: client})
-	case modelconfig.APIFormatOpenAIChatCompletions:
+	case modelapi.APIFormatOpenAIChatCompletions:
 		protocol, err = openaichat.New(openaichat.Config{
 			BaseURL:       config.BaseURL,
 			APIKey:        apiKey,
 			ContextWindow: config.ContextWindow,
 		}, openaichat.Dependencies{HTTPClient: client})
-	case modelconfig.APIFormatOpenAIResponses:
+	case modelapi.APIFormatOpenAIResponses:
 		protocol, err = openairesponses.New(openairesponses.Config{
 			BaseURL:       config.BaseURL,
 			APIKey:        apiKey,

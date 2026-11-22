@@ -2,10 +2,11 @@ package session
 
 import (
 	"context"
-	modelconfig "praxis/internal/core/model/config"
+	modelapi "praxis/internal/core/model"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
+	"time"
 )
 
 // ApprovalSettings 区分已保存的会话覆盖和已加载的有效模式。
@@ -24,7 +25,7 @@ func (s *Service) Configuration(ctx context.Context, id identity.SessionID) (*se
 	return owner.Configuration(), nil
 }
 
-func (s *Service) ModelOptions(ctx context.Context, id identity.SessionID) ([]modelconfig.Option, error) {
+func (s *Service) ModelOptions(ctx context.Context, id identity.SessionID) ([]modelapi.Option, error) {
 	config, err := s.Configuration(ctx, id)
 	if err != nil {
 		return nil, err
@@ -61,7 +62,7 @@ func (s *Service) SetApprovalMode(ctx context.Context, id identity.SessionID, mo
 	if _, err := s.Configuration(ctx, id); err != nil {
 		return ApprovalSettings{}, err
 	}
-	info, err := s.sessions.SetApprovalMode(ctx, id, mode, s.clock.Now().UTC())
+	info, err := s.sessions.SetApprovalMode(ctx, id, mode, time.Now().UTC())
 	if err != nil {
 		return ApprovalSettings{}, err
 	}

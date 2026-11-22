@@ -2,9 +2,9 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	appcontext "praxis/internal/core/context"
-	contextcompress "praxis/internal/core/context/compress"
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
@@ -14,6 +14,8 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"slices"
+	"strings"
+	"time"
 )
 
 // Compress 在上下文构建完成后独立评估容量，按需生成摘要并通过统一入口提交 Session。
@@ -26,7 +28,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 		Identity: runIdentity(params, ""),
 		Context:  value,
 	}
-	event.OperationID = hook.NewOperationID()
+	event.OperationID = identity.NewOperationID()
 	if hookErr := r.HookDispatcher.BeforeContextCompression(ctx, event); hookErr != nil {
 		return value, errorcode.ErrInternal.Wrap(hookErr)
 	}
@@ -54,15 +56,13 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	span := timing.NewSpan()
 	span.Start()
 	var requests []identity.ModelRequestID
-	var turnID identity.TurnID
-	generated, needed, err := contextcompress.Compress(ctx, value, input, contextcompress.Options{
+	generated, needed, err := appcontext.Compress(ctx, value, input, appcontext.CompressOptions{
 		InputTokens:     inputTokens,
 		ContextWindow:   params.Model.ContextWindow,
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 		ReservedTokens:  reservedTokens + appcontext.Margin(params.Model.ContextWindow) + 128,
 	}, func(summaryCtx context.Context, summaryInput appcontext.ModelContext, limit int) (string, error) {
-		text, requestID, requestTurn, err := r.summarizeContext(summaryCtx, params, deps, summaryInput, limit)
-		turnID = requestTurn
+		text, requestID, err := r.summarizeContext(summaryCtx, params, deps, summaryInput, limit)
 		if requestID != "" {
 			requests = append(requests, requestID)
 		}
@@ -80,9 +80,8 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	summary.Timing = measured
 	summary.RequestIDs = requests
 	entry.Payload = summary
-	entry.RunID = params.ID.String()
-	entry.ID = "summary:" + requests[len(requests)-1].String()
-	entry.TurnID = turnID.String()
+	entry.ID = identity.NewEntryID()
+	entry.RunID = params.ID
 	accepted, _, err := deps.AppendEntry(context.WithoutCancel(ctx), *entry)
 	if err != nil {
 		return value, err
@@ -116,4 +115,25 @@ func remindContextBudget(request providerapi.Request, budget *appcontext.Budget)
 		}
 	}
 	return request, appcontext.CheckCapacity(tokens, request.MaxOutputTokens, request.Model.ContextWindow)
+}
+
+// summarizeContext 在 Turn 之间生成归属于 Run 的摘要，不执行工具或发布回答文本。
+func (r *Runner) summarizeContext(ctx context.Context, params RunParams, deps RunDependencies, input appcontext.ModelContext, limit int) (string, identity.ModelRequestID, error) {
+	request := providerapi.Request{
+		RunID:           params.ID,
+		PromptCacheKey:  params.SessionID.String(),
+		Context:         input,
+		Model:           params.Model,
+		MaxOutputTokens: limit,
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	response, err := r.Request(requestCtx, params, deps, request, sessionentry.ModelRequestSummary)
+	if err != nil {
+		return "", response.RequestID, err
+	}
+	if len(response.ToolCalls()) != 0 {
+		return "", response.RequestID, errors.New("context summary returned a tool call")
+	}
+	return strings.TrimSpace(response.Text()), response.RequestID, nil
 }

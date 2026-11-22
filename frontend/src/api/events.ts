@@ -25,7 +25,7 @@ type RunData = {
 }
 type TurnData = {
     turn_started: Record<string, never>
-    turn_completed: { stopReason: string }
+    turn_completed: Record<string, never>
     turn_failed: Record<string, never>
     turn_interrupted: Record<string, never>
     text_delta: { text: string }

@@ -11,7 +11,6 @@ import (
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/core/security"
 	"praxis/internal/errorcode"
-	"praxis/internal/identity"
 	"strings"
 	"unicode/utf8"
 )
@@ -37,8 +36,6 @@ const riskReviewSchema = `{
 	"required": ["verdict", "reason"],
 	"additionalProperties": false
 }`
-
-var ErrRiskReviewFailed = errors.New("risk review failed")
 
 type reviewRequest struct {
 	Context      appcontext.ModelContext
@@ -97,7 +94,6 @@ func (r *RunGate) review(
 	response, err := r.gate.deps.ModelCaller.Do(ctx, modelcall.Call{
 		Provider: r.provider,
 		Request: providerapi.Request{
-			ID:              identity.NewModelRequestID(),
 			RunID:           call.RunID,
 			TurnID:          call.TurnID,
 			PromptCacheKey:  call.SessionID.String(),
@@ -133,7 +129,7 @@ func (r *RunGate) review(
 		if _, ok := errors.AsType[*appcontext.ContextWindowExceededError](err); ok {
 			return RiskReview{}, err
 		}
-		return RiskReview{}, errorcode.ErrProvider.Wrap(errors.Join(ErrRiskReviewFailed, fmt.Errorf("risk review failed after four attempts: %w", err)))
+		return RiskReview{}, errorcode.ErrProvider.Wrap(fmt.Errorf("risk review failed after four attempts: %w", err))
 	}
 	return RiskReview{
 		RequestID:  response.RequestID,

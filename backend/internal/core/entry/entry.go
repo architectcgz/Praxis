@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"praxis/internal/identity"
 	"strings"
 	"time"
 )
@@ -19,13 +20,13 @@ const (
 
 // Entry 是会话记录与模型上下文共用的内部有序条目，不定义前端协议。
 type Entry struct {
-	HistoryEnd int64      `json:"-"` // 记录的结束位置，由 History 提供。
-	Payload    Payload    `json:"-"`
-	ID         string     `json:"id"`
-	RunID      string     `json:"runId,omitempty"`
-	TurnID     string     `json:"turnId,omitempty"`
-	AuthorKind AuthorKind `json:"authorKind,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	HistoryEnd int64            `json:"-"` // 记录的结束位置，由 History 提供。
+	Payload    Payload          `json:"-"`
+	ID         identity.EntryID `json:"id"`
+	RunID      identity.RunID   `json:"runId,omitempty"`
+	TurnID     identity.TurnID  `json:"turnId,omitempty"`
+	AuthorKind AuthorKind       `json:"authorKind,omitempty"`
+	CreatedAt  time.Time        `json:"createdAt"`
 }
 
 // IsSummary 识别摘要事实；上下文选择按最近摘要及后续历史进行。

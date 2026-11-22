@@ -3,7 +3,6 @@ package coordinator
 import (
 	"context"
 	"errors"
-	"praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	sessionmodel "praxis/internal/core/session"
@@ -11,6 +10,7 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"strings"
+	"time"
 )
 
 type SubmitResult struct {
@@ -72,7 +72,7 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 		}
 	}
 	result := SubmitResult{Task: task}
-	if prior, err := schedule.session.Entry(ctx, entry.TaskInputID(task.ID)); err == nil {
+	if prior, err := schedule.session.Entry(ctx, identity.TaskInputEntryID(task.ID)); err == nil {
 		if prior.TextContent() != task.Prompt {
 			return SubmitResult{}, nil, errorcode.ErrRequestConflict
 		}
@@ -90,7 +90,7 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input taskmodel.Input, ta
 		}
 	}
 	title := sessionmodel.TitleFromInput(task.Prompt)
-	if err := s.sessionRecords.UpdateTitle(ctx, task.SessionID, "", title, s.runDependencies.Clock.Now()); err != nil {
+	if err := s.sessionRecords.UpdateTitle(ctx, task.SessionID, "", title, time.Now().UTC()); err != nil {
 		if !errors.Is(err, errorcode.ErrRequestConflict) {
 			return SubmitResult{}, nil, err
 		}
@@ -207,5 +207,5 @@ func (s *Coordinator) createTask(ctx context.Context, input taskmodel.Input) (ta
 			return taskmodel.Task{}, errorcode.ErrInvalidValue
 		}
 	}
-	return taskmodel.NewTask(input.SubmissionID, input.SessionID, prompt, s.runDependencies.Clock.Now()), nil
+	return taskmodel.NewTask(input.SubmissionID, input.SessionID, prompt, time.Now().UTC()), nil
 }

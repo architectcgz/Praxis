@@ -3,12 +3,14 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	agentmodel "praxis/internal/core/agent"
 	appcontext "praxis/internal/core/context"
 	sessionentry "praxis/internal/core/entry"
 	coreevent "praxis/internal/core/event"
 	"praxis/internal/core/hook"
 	"praxis/internal/errorcode"
+	"praxis/internal/identity"
 	"strings"
 	"time"
 )
@@ -38,7 +40,7 @@ func (r *Run) settleExecution(ctx context.Context, execErr error) error {
 func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code sessionentry.RunFailureCode, message string) error {
 	stats := sessionentry.RunStats{
 		StartedAt:        r.startedAt,
-		EndedAt:          r.deps.Clock.Now(),
+		EndedAt:          time.Now().UTC(),
 		Usage:            r.progress.Usage,
 		ModelRequests:    r.progress.ModelRequests,
 		Iterations:       r.progress.Iterations,
@@ -69,8 +71,8 @@ func (r *Run) Settle(ctx context.Context, outcome sessionentry.RunOutcome, code 
 		}
 	}
 	stored, err := r.history.CommitTerminal(ctx, sessionentry.Entry{
-		ID:        "run:" + r.id.String(),
-		RunID:     r.id.String(),
+		ID:        identity.NewEntryID(),
+		RunID:     r.id,
 		CreatedAt: stats.EndedAt,
 		Payload:   payload,
 	})
@@ -150,4 +152,20 @@ func failureCode(err error) sessionentry.RunFailureCode {
 		return sessionentry.RunFailureContract
 	}
 	return sessionentry.RunFailureInternal
+}
+
+// closeToolCalls 在失败收尾前补齐已接纳声明的回执，不重新执行工具。
+// 日志尚未确认完整时 AppendEntry 直接返回保存错误，此时不能发布 Run 终态。
+func (r *Run) closeToolCalls(ctx context.Context) error {
+	for _, receipt := range sessionentry.MissingToolResultEntries(r.entries, time.Now().UTC()) {
+		stored, _, err := r.AppendEntry(ctx, receipt)
+		if err != nil {
+			return fmt.Errorf("close tool receipts: %w", err)
+		}
+		r.deps.Emitter.Emit(coreevent.Event{
+			Source:  r.EventSource(receipt.TurnID),
+			Payload: coreevent.EntriesAppended{Entries: []*sessionentry.Entry{stored}},
+		})
+	}
+	return nil
 }

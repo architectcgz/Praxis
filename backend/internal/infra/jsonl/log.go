@@ -61,7 +61,6 @@ type commandKind uint8
 
 const (
 	appendCommand commandKind = iota
-	syncCommand
 	commitCommand
 	readCommand
 	closeCommand
@@ -118,12 +117,6 @@ func (w *Writer) run(file *os.File) {
 		case appendCommand:
 			position, err := appendRecord(file, request.data)
 			request.result <- commandResult{position: position, err: err}
-		case syncCommand:
-			err := file.Sync()
-			if err != nil {
-				fatalErr = fmt.Errorf("sync log: %w", err)
-			}
-			request.result <- commandResult{err: err}
 		case commitCommand:
 			position, err := appendRecord(file, request.data)
 			if err == nil {
@@ -204,12 +197,6 @@ func (w *Writer) ReadBackward(ctx context.Context, cursor *int64, limit int) ([]
 	}
 	result := <-request.result
 	return result.records, result.nextCursor, result.hasMore, result.err
-}
-
-// Sync 等待同一 Writer 完成文件同步。
-func (w *Writer) Sync(ctx context.Context) error {
-	_, err := w.submit(ctx, command{kind: syncCommand})
-	return err
 }
 
 func (w *Writer) submit(ctx context.Context, request command) (Position, error) {

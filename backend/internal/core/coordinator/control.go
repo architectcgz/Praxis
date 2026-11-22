@@ -7,9 +7,6 @@ import (
 	"praxis/internal/identity"
 )
 
-type ToolDecision = approval.DecisionRequest
-type ToolControl = executionmodel.ControlRequest
-
 // StopRun 只取消命中的活动执行；主 Run 的取消与队列交接使用同一把会话命令锁。
 func (s *Coordinator) StopRun(ctx context.Context, sessionID identity.SessionID, runID identity.RunID) error {
 	if err := s.enter(); err != nil {
@@ -48,16 +45,16 @@ func (s *Coordinator) StopRun(ctx context.Context, sessionID identity.SessionID,
 	return nil
 }
 
-func (s *Coordinator) ApproveToolCall(ctx context.Context, params ToolDecision) error {
+func (s *Coordinator) ApproveToolCall(ctx context.Context, params approval.DecisionRequest) error {
 	return s.decideToolCall(ctx, params, true)
 }
 
-func (s *Coordinator) DenyToolCall(ctx context.Context, params ToolDecision) error {
+func (s *Coordinator) DenyToolCall(ctx context.Context, params approval.DecisionRequest) error {
 	return s.decideToolCall(ctx, params, false)
 }
 
 // decideToolCall 只更新活跃调用并唤醒所属执行者，不重启执行生命周期。
-func (s *Coordinator) decideToolCall(ctx context.Context, params ToolDecision, approve bool) error {
+func (s *Coordinator) decideToolCall(ctx context.Context, params approval.DecisionRequest, approve bool) error {
 	if err := s.enter(); err != nil {
 		return err
 	}
@@ -74,7 +71,7 @@ func (s *Coordinator) ListToolApprovals(ctx context.Context, sessionID identity.
 }
 
 // StopToolCall 只发送停止信号，回执由当前工具路径生成。
-func (s *Coordinator) StopToolCall(ctx context.Context, request ToolControl) error {
+func (s *Coordinator) StopToolCall(ctx context.Context, request executionmodel.ControlRequest) error {
 	if err := s.enter(); err != nil {
 		return err
 	}

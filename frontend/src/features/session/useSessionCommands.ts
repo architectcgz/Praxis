@@ -45,7 +45,6 @@ export function useSessionCommands({
             const created = await createSession({
                 sessionId: crypto.randomUUID(),
                 projectId: projectID,
-                requestId: crypto.randomUUID(),
             })
             await refreshCatalog()
             if (viewRequestRef.current === viewRequestID) {

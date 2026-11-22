@@ -24,7 +24,6 @@ type HistoryMessage struct {
 	AuthorKind string         `json:"authorKind"`
 	Kind       MessageKind    `json:"kind"`
 	Content    []MessageBlock `json:"content"`
-	Error      string         `json:"error,omitempty"`
 	Timing     *Timing        `json:"timing,omitempty"`
 }
 
@@ -93,9 +92,9 @@ func publicMessages(values []*entry.Entry) []HistoryMessage {
 // publicMessage 是历史查询和事件推送共用的展示投影，不暴露内部推理续传状态。
 func publicMessage(value *entry.Entry) (HistoryMessage, bool) {
 	projected := HistoryMessage{
-		ID:         value.ID,
-		RunID:      value.RunID,
-		TurnID:     value.TurnID,
+		ID:         value.ID.String(),
+		RunID:      value.RunID.String(),
+		TurnID:     value.TurnID.String(),
 		CreatedAt:  value.CreatedAt,
 		AuthorKind: string(value.AuthorKind),
 	}
@@ -104,7 +103,6 @@ func publicMessage(value *entry.Entry) (HistoryMessage, bool) {
 		projected.Kind = MessageChat
 		if response := payload.Response; response != nil {
 			projected.RequestID = response.RequestID.String()
-			projected.Error = response.Error
 			projected.Timing = (*Timing)(response.Timing)
 		}
 	case entry.Summary:
@@ -163,8 +161,8 @@ func publicHistoryPage(page sessionmodel.HistoryPage) HistoryPage {
 		}
 		activity := ModelRequestActivity{
 			RequestID:   request.ID.String(),
-			RunID:       value.RunID,
-			TurnID:      value.TurnID,
+			RunID:       value.RunID.String(),
+			TurnID:      value.TurnID.String(),
 			RequestKind: string(request.Kind),
 			RetryCount:  request.RetryCount,
 			CreatedAt:   value.CreatedAt,

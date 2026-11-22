@@ -3,7 +3,6 @@ package hook
 
 import (
 	"context"
-	"crypto/rand"
 	providerapi "praxis/internal/core/provider"
 	"praxis/internal/identity"
 )
@@ -11,7 +10,7 @@ import (
 // Identity 显式关联执行归属；OperationID 标识本次操作尝试，恢复后重新生成。
 // 提交通知没有操作尝试，OperationID 为空；没有迭代边界时 TurnID 为空。
 type Identity struct {
-	OperationID  string
+	OperationID  identity.OperationID
 	SourceTaskID identity.TaskID
 	SessionID    identity.SessionID
 	AgentID      identity.AgentID
@@ -20,17 +19,12 @@ type Identity struct {
 	RequestID    identity.ModelRequestID
 }
 
-// NewOperationID 为一次操作尝试生成关联标识，Before、After 和 Scope 共用该值。
-func NewOperationID() string { return rand.Text() }
-
 type OperationKind string
 
 const (
-	OperationAgent         OperationKind = "agent"
-	OperationProvider      OperationKind = "provider"
-	OperationTool          OperationKind = "tool"
-	OperationSessionCreate OperationKind = "session_create"
-	OperationRunSettle     OperationKind = "run_settle"
+	OperationAgent    OperationKind = "agent"
+	OperationProvider OperationKind = "provider"
+	OperationTool     OperationKind = "tool"
 )
 
 // Operation 只携带标识与名称，不包含 Prompt、工具参数、响应正文或凭据。

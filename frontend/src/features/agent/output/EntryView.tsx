@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from 'react'
-import { Archive, ChevronDown, CircleAlert } from 'lucide-react'
+import { Archive, ChevronDown } from 'lucide-react'
 import type { AgentEvent, HistoryMessage, MessageBlock, ModelUsage } from '../../../api'
 import { DurationLabel } from '../../timing/DurationLabel'
 import { MessageMarkdown } from './MarkdownViews'
@@ -89,7 +89,6 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
                     }) : content && <MessageMarkdown content={content} />}
                 </>
             ) : content && <p>{content}</p>}
-            {message.error && <div className="message-error-box" role="alert"><CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" /><span>{message.error}</span></div>}
             <MessageActions content={hasContinuation ? '' : contentToCopy}>
                 {messageRole === 'assistant' && <MessageTiming usage={usage} record={message.timing} />}
             </MessageActions>

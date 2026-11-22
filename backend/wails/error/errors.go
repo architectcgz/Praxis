@@ -11,12 +11,9 @@ import (
 
 const (
 	ErrInvalidRequest     errorcode.Code = "invalid_request"
-	ErrValidation         errorcode.Code = "validation_error"
 	ErrBindingUnavailable errorcode.Code = "binding_unavailable"
-	ErrConfiguration      errorcode.Code = "configuration_error"
 	ErrRequestCanceled    errorcode.Code = "request_canceled"
 	ErrRequestTimeout     errorcode.Code = "request_timeout"
-	ErrInternal           errorcode.Code = "internal_error"
 )
 
 // Coded 由携带稳定错误码的错误实现；Wails 边界据此透传，不依赖具体业务错误类型。
@@ -59,7 +56,7 @@ func PublicError(err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return codedError{code: ErrRequestTimeout.ErrorCode()}
 	}
-	return codedError{code: ErrInternal.ErrorCode()}
+	return codedError{code: errorcode.ErrInternal.ErrorCode()}
 }
 
 // PublicInputError 仅供输入校验出口调用，显式公开该请求的校验详情。
@@ -68,7 +65,7 @@ func PublicInputError(err error) error {
 		return nil
 	}
 	var coded Coded
-	if errors.As(err, &coded) && (errors.Is(err, errorcode.ErrInvalidValue) || errors.Is(err, errorcode.ErrInvalidRequest) || errors.Is(err, ErrInvalidRequest)) {
+	if errors.As(err, &coded) && (errors.Is(err, errorcode.ErrInvalidValue) || errors.Is(err, ErrInvalidRequest)) {
 		return codedError{code: coded.ErrorCode(), message: InputMessage(err)}
 	}
 	return PublicError(err)

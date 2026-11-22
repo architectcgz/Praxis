@@ -3,11 +3,11 @@ package storage
 import (
 	"context"
 	"fmt"
-	"praxis/internal/clock"
 	sessionentry "praxis/internal/core/entry"
 	sessionmodel "praxis/internal/core/session"
 	"praxis/internal/identity"
 	"slices"
+	"time"
 )
 
 func (r SessionRepository) Load(ctx context.Context, id identity.SessionID) (*sessionmodel.Session, error) {
@@ -20,7 +20,7 @@ func (r SessionRepository) Load(ctx context.Context, id identity.SessionID) (*se
 	}
 	log := &entryLog{store: store}
 	data := sessionmodel.Open(id)
-	owner := sessionmodel.New(data, log, clock.UTCClock{}, identity.SecureIDGenerator{})
+	owner := sessionmodel.New(data, log)
 	agents := store.Agents()
 	slices.Sort(agents)
 	for _, agentID := range agents {
@@ -50,14 +50,14 @@ func recoverAgent(ctx context.Context, owner *sessionmodel.Session, log *entryLo
 			if err != nil {
 				return err
 			}
-			now := clock.UTCClock{}.Now()
+			now := time.Now().UTC()
 			for _, receipt := range sessionentry.MissingToolResultEntries(runEntries, now) {
 				if err := log.Append(ctx, agentID, &receipt); err != nil {
 					return err
 				}
 			}
 			terminal := sessionentry.Entry{
-				ID:        "run:" + last.RunID,
+				ID:        identity.NewEntryID(),
 				RunID:     last.RunID,
 				CreatedAt: now,
 				Payload: sessionentry.RunInterrupted{
@@ -73,7 +73,7 @@ func recoverAgent(ctx context.Context, owner *sessionmodel.Session, log *entryLo
 	return recoverAgentContext(ctx, owner, log, agentID)
 }
 
-func readRunEntries(ctx context.Context, log *entryLog, agentID identity.AgentID, runID string) ([]*sessionentry.Entry, error) {
+func readRunEntries(ctx context.Context, log *entryLog, agentID identity.AgentID, runID identity.RunID) ([]*sessionentry.Entry, error) {
 	var cursor *int64
 	entries := make([]*sessionentry.Entry, 0)
 	for {

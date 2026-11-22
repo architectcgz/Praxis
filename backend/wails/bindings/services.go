@@ -5,7 +5,7 @@ import (
 	"errors"
 	"praxis/internal/core/approval"
 	coreevent "praxis/internal/core/event"
-	modelconfig "praxis/internal/core/model/config"
+	modelapi "praxis/internal/core/model"
 	projectmodel "praxis/internal/core/project"
 	"praxis/internal/core/security"
 	sessionmodel "praxis/internal/core/session"
@@ -32,7 +32,7 @@ type SessionService interface {
 	CloseSession(context.Context, identity.SessionID) error
 	AgentHistory(context.Context, identity.SessionID, identity.AgentID, *int64, int) (sessionmodel.HistoryPage, error)
 	SelectedModel(context.Context, identity.SessionID) (sessionmodel.ModelChoice, error)
-	ModelOptions(context.Context, identity.SessionID) ([]modelconfig.Option, error)
+	ModelOptions(context.Context, identity.SessionID) ([]modelapi.Option, error)
 	SelectModel(context.Context, identity.SessionID, sessionmodel.ModelChoice) error
 	GetApprovalMode(context.Context, identity.SessionID) (sessionservice.ApprovalSettings, error)
 	SetApprovalMode(context.Context, identity.SessionID, *security.ApprovalMode) (sessionservice.ApprovalSettings, error)
