@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"praxis/internal/model"
+	"praxis/internal/timing"
 	"praxis/internal/tool"
 )
 
@@ -94,11 +95,11 @@ type ToolCallBlock struct {
 }
 
 type ToolResultBlock struct {
-	CallID  string        `json:"callId"`
-	Name    tool.ToolName `json:"name"`
-	Text    string        `json:"text"`
-	IsError bool          `json:"isError,omitzero"`
-	Timing  *Timing       `json:"timing,omitempty"`
+	CallID  string         `json:"callId"`
+	Name    tool.ToolName  `json:"name"`
+	Text    string         `json:"text"`
+	IsError bool           `json:"isError,omitzero"`
+	Timing  *timing.Timing `json:"timing,omitempty"`
 }
 
 type ReasoningStateBlock struct {

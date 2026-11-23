@@ -2,14 +2,27 @@ import { memo, type ReactNode } from 'react'
 import { Archive, ChevronDown } from 'lucide-react'
 import type { AgentEvent, HistoryMessage, MessageBlock, ModelUsage } from '../../../api'
 import { DurationLabel } from '../../timing/DurationLabel'
+import { AgentDirectiveCard, isHandoffTool, parseSubagentReport, SubagentReportCard, type AgentDirectory } from './HandoffViews'
 import { MessageMarkdown } from './MarkdownViews'
 import { CopyIconButton } from './CopyIconButton'
 import { ThinkingDetails } from './ThinkingDetails'
 import { ToolCallBlock, ToolResultBlock, type PairedToolResult } from './ToolCallViews'
 import { MessageTiming } from './MessageTiming'
 
-export const EntryView = memo(function EntryView({ agentName, item, events = [], pairedResults, usage, continuation = false, hasContinuation = false, copyContent, onOpenSubagent }: {
+export const EntryView = memo(function EntryView({
+    agentName,
+    agentDirectory,
+    item,
+    events = [],
+    pairedResults,
+    usage,
+    continuation = false,
+    hasContinuation = false,
+    copyContent,
+    onOpenSubagent,
+}: {
     agentName: string
+    agentDirectory?: AgentDirectory
     item: HistoryMessage
     events?: AgentEvent[]
     pairedResults?: Record<string, PairedToolResult>
@@ -31,7 +44,16 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
                     <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
                 </div>
                 <div className="acts">
-                    {resultBlocks.map((block, index) => <ToolResultBlock block={block} runId={message.runId || ''} timing={block.timing || message.timing} onOpenSubagent={onOpenSubagent} key={`${block.callId}-${index}`} />)}
+                    {resultBlocks.map((block, index) => (
+                        <ToolResultBlock
+                            block={block}
+                            runId={message.runId || ''}
+                            timing={block.timing || message.timing}
+                            agentDirectory={agentDirectory}
+                            onOpenSubagent={onOpenSubagent}
+                            key={`${block.callId}-${index}`}
+                        />
+                    ))}
                 </div>
             </article>
         )
@@ -57,35 +79,74 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
         )
     }
 
+    // 代理间交接消息（子代理回传报告 / 子代理收到的主代理委派与指令）独立于用户气泡渲染。
+    if (message.role === 'user' && message.authorKind === 'agent') {
+        const formattedTime = formatMessageTime(message.createdAt)
+        const parsedReport = parseSubagentReport(content)
+        if (parsedReport) {
+            return (
+                <SubagentReportCard
+                    report={parsedReport}
+                    createdAt={message.createdAt}
+                    formattedTime={formattedTime}
+                    agentDirectory={agentDirectory}
+                    onOpenSubagent={onOpenSubagent}
+                />
+            )
+        }
+        return <AgentDirectiveCard content={content} createdAt={message.createdAt} formattedTime={formattedTime} />
+    }
+
     const messageRole = message.role
     const messageClass = messageRole === 'assistant' || messageRole === 'user' ? messageRole : 'unknown'
     let author = '未知来源'
     if (messageRole === 'assistant') author = agentName
-    if (messageRole === 'user') author = message.authorKind === 'agent' ? '代理' : '你'
+    if (messageRole === 'user') author = '你'
     const contentToCopy = copyContent ?? content
     const segments = messageRole === 'assistant' ? groupAssistantBlocks(messageBlocks) : []
     return (
         <article className={`message message-${messageClass}${hasContinuation ? ' message-continued' : ''}`}>
-            {!continuation && <div className="message-meta">
-                <strong>{author}</strong>
-                <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
-            </div>}
+            {!continuation && (
+                <div className="message-meta">
+                    <strong>{author}</strong>
+                    <time dateTime={message.createdAt} title={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
+                </div>
+            )}
             {messageRole === 'assistant' ? (
                 <>
                     {segments.length > 0 ? segments.map((segment) => {
                         if (segment.kind === 'thinking') return <ThinkingDetails content={segment.text} key={segment.key} />
                         if (segment.kind === 'text') return <MessageMarkdown content={segment.text} key={segment.key} />
-                        // 一次运行里的连续工具调用合并成同一张活动账本。
-                        return <div className="acts" key={segment.key}>
-                            {segment.blocks.map((block, index) => <ToolCallBlock
-                                block={block}
-                                runId={message.runId || ''}
-                                events={events}
-                                pairedResult={block.callId ? pairedResults?.[block.callId] : undefined}
-                                onOpenSubagent={onOpenSubagent}
-                                key={`${block.callId}-${index}`}
-                            />)}
-                        </div>
+                        if (segment.kind === 'handoff') {
+                            return (
+                                <div className="handoff-slot" key={segment.key}>
+                                    <ToolCallBlock
+                                        block={segment.block}
+                                        runId={message.runId || ''}
+                                        events={events}
+                                        pairedResult={segment.block.callId ? pairedResults?.[segment.block.callId] : undefined}
+                                        agentDirectory={agentDirectory}
+                                        onOpenSubagent={onOpenSubagent}
+                                    />
+                                </div>
+                            )
+                        }
+                        // 连续普通工具调用合并进同一张方案 A 统一细线账本。
+                        return (
+                            <div className="acts" key={segment.key}>
+                                {segment.blocks.map((block, index) => (
+                                    <ToolCallBlock
+                                        block={block}
+                                        runId={message.runId || ''}
+                                        events={events}
+                                        pairedResult={block.callId ? pairedResults?.[block.callId] : undefined}
+                                        agentDirectory={agentDirectory}
+                                        onOpenSubagent={onOpenSubagent}
+                                        key={`${block.callId}-${index}`}
+                                    />
+                                ))}
+                            </div>
+                        )
                     }) : content && <MessageMarkdown content={content} />}
                 </>
             ) : content && <p>{content}</p>}
@@ -99,9 +160,10 @@ export const EntryView = memo(function EntryView({ agentName, item, events = [],
 type AssistantSegment =
     | { key: string; kind: 'thinking'; text: string }
     | { key: string; kind: 'text'; text: string }
+    | { key: string; kind: 'handoff'; block: MessageBlock }
     | { key: string; kind: 'tools'; blocks: MessageBlock[] }
 
-/** 相邻的工具调用归入同一张活动账本，跳过纯空白块以免打断连续工具并留下空节点。 */
+/** 相邻的普通工具调用归入同一张统一细线账本，代理交接工具独立呈现以保持清晰层级。 */
 function groupAssistantBlocks(blocks: MessageBlock[]): AssistantSegment[] {
     const segments: AssistantSegment[] = []
     blocks.forEach((block, index) => {
@@ -114,6 +176,10 @@ function groupAssistantBlocks(blocks: MessageBlock[]): AssistantSegment[] {
             return
         }
         if (block.kind !== 'tool_call') return
+        if (isHandoffTool(block.name)) {
+            segments.push({ key: `handoff-${block.callId || index}`, kind: 'handoff', block })
+            return
+        }
         const last = segments[segments.length - 1]
         if (last?.kind === 'tools') {
             segments[segments.length - 1] = { ...last, blocks: [...last.blocks, block] }
@@ -128,12 +194,14 @@ function MessageActions({ content, children }: { content: string; children?: Rea
     return (
         <div className="message-copy-actions">
             {children}
-            {content && <CopyIconButton
-                className="message-copy-button"
-                copiedLabel="消息已复制"
-                label="复制消息"
-                getText={() => content}
-            />}
+            {content && (
+                <CopyIconButton
+                    className="message-copy-button"
+                    copiedLabel="消息已复制"
+                    label="复制消息"
+                    getText={() => content}
+                />
+            )}
         </div>
     )
 }

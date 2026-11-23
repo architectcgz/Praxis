@@ -297,16 +297,16 @@ func projectDirectory(path, projectRoot string) bool {
 	if err != nil || !pathutil.SamePath(path, realPath) {
 		return false
 	}
+	if path == projectRoot {
+		return true
+	}
 	realRoot, err := filepath.EvalSymlinks(projectRoot)
 	return err == nil && pathutil.SamePath(projectRoot, realRoot) && pathutil.IsWithin(realRoot, realPath)
 }
 
+// projectWritePath 要求项目根目录已通过 projectDirectory 校验。
 func projectWritePath(path, projectRoot string, allowMissing bool) bool {
 	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsWithin(projectRoot, path) {
-		return false
-	}
-	realRoot, err := filepath.EvalSymlinks(projectRoot)
-	if err != nil || !pathutil.SamePath(projectRoot, realRoot) {
 		return false
 	}
 	info, err := os.Lstat(path)
@@ -315,7 +315,7 @@ func projectWritePath(path, projectRoot string, allowMissing bool) bool {
 			return false
 		}
 		realPath, err := filepath.EvalSymlinks(path)
-		return err == nil && pathutil.SamePath(path, realPath) && pathutil.IsWithin(realRoot, realPath)
+		return err == nil && pathutil.SamePath(path, realPath) && pathutil.IsWithin(projectRoot, realPath)
 	}
 	if !allowMissing || !errors.Is(err, os.ErrNotExist) {
 		return false
@@ -323,5 +323,5 @@ func projectWritePath(path, projectRoot string, allowMissing bool) bool {
 	parent := filepath.Dir(path)
 	parentInfo, parentErr := os.Stat(parent)
 	realParent, evalErr := filepath.EvalSymlinks(parent)
-	return parentErr == nil && parentInfo.IsDir() && evalErr == nil && pathutil.SamePath(parent, realParent) && pathutil.IsWithin(realRoot, realParent)
+	return parentErr == nil && parentInfo.IsDir() && evalErr == nil && pathutil.SamePath(parent, realParent) && pathutil.IsWithin(projectRoot, realParent)
 }

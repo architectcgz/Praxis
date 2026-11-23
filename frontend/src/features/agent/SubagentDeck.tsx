@@ -6,6 +6,7 @@ import { RunDuration } from '../timing/DurationLabel'
 import { AgentConversation } from './AgentConversation'
 import type { RequestActivities } from './history/entries'
 import { formatCompactCount, formatUsageDetails, type UsageTotals } from './modelUsage'
+import type { AgentDirectory } from './output/HandoffViews'
 import { OutputStatus } from './output/OutputStatus'
 import type { ToolStatus } from './output/toolPresentation'
 import { ToolApprovalsProvider, useToolApprovals } from './ToolApprovals'
@@ -15,6 +16,7 @@ type OverviewFilter = 'all' | 'active' | 'issue' | 'done'
 
 export type SubagentDeckProps = {
     subagents: AgentView[]
+    agentDirectory?: AgentDirectory
     activeView: 'overview' | string
     inspectedSubagent: AgentView | null
     inspectedEntries: HistoryMessage[]
@@ -107,6 +109,7 @@ function summarizeSubagentActivity(agent: AgentView, entries?: HistoryMessage[],
 /** 右侧 M3 一体化浮岛：永久固定第 0 位「总览」Tab + 横滑子代理标签轨 + O2 微型并行时间线总览 / 单代理详情。 */
 export function SubagentDeck({
     subagents,
+    agentDirectory,
     activeView,
     inspectedSubagent,
     inspectedEntries,
@@ -474,6 +477,7 @@ export function SubagentDeck({
                                 key={`${inspectedSubagent.SessionID}:${inspectedSubagent.ID}`}
                                 submissionRevision={0}
                                 agent={inspectedSubagent}
+                                agentDirectory={agentDirectory}
                                 entries={inspectedEntries}
                                 requests={inspectedRequests}
                                 pendingApprovals={pendingApprovals}

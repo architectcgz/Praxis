@@ -1,17 +1,45 @@
 import { Fragment } from 'react'
+import { FileText, Wrench } from 'lucide-react'
 import type { AgentEvent, MessageBlock, Timing } from '../../../api'
 import { CopyIconButton } from './CopyIconButton'
 import { FileChanges } from './FileChanges'
+import { HandoffToolCard, isHandoffTool, type AgentDirectory } from './HandoffViews'
 import { TerminalOutput } from './TerminalOutput'
 import { ToolResultContent } from './ToolResultContent'
 import { ActivityItem, activityTone, isOpenByDefault } from './ActivityLedger'
-import { formatToolInput, presentTool, toolRecord, type ToolStatus } from './toolPresentation'
+import { formatByteSize, formatToolInput, presentTool, toolRecord, type ToolStatus } from './toolPresentation'
 import { DurationLabel } from '../../timing/DurationLabel'
 import { useToolApproval } from '../ToolApprovals'
 
-export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { tools: AgentEvent[]; pendingStatus?: ToolStatus }) {
-    return <div className="agent-activity output-activity"><div className="acts">
-        {groupToolEvents(tools).map((activity) => <ToolCard
+export function StreamingToolCallsView({
+    tools,
+    pendingStatus = 'running',
+    agentDirectory,
+    onOpenSubagent,
+}: {
+    tools: AgentEvent[]
+    pendingStatus?: ToolStatus
+    agentDirectory?: AgentDirectory
+    onOpenSubagent?: (id: string) => void
+}) {
+    const activities = groupToolEvents(tools)
+    const segments: ({ kind: 'handoff'; item: ToolActivity } | { kind: 'tools'; items: ToolActivity[] })[] = []
+    for (const activity of activities) {
+        const name = activity.call?.data.name || ''
+        if (isHandoffTool(name)) {
+            segments.push({ kind: 'handoff', item: activity })
+            continue
+        }
+        const last = segments.at(-1)
+        if (last?.kind === 'tools') {
+            last.items.push(activity)
+        } else {
+            segments.push({ kind: 'tools', items: [activity] })
+        }
+    }
+
+    const renderActivity = (activity: ToolActivity) => (
+        <ToolCard
             key={activity.key}
             name={activity.call?.data.name || ''}
             input={activity.call?.data.arguments}
@@ -21,8 +49,24 @@ export function StreamingToolCallsView({ tools, pendingStatus = 'running' }: { t
             pendingStatus={activity.approval ? 'awaiting_approval' : activity.started ? pendingStatus : 'queued'}
             runId={activity.call?.runId || activity.approval?.runId || activity.result?.runId || ''}
             callId={activity.call?.data.callId || activity.approval?.data.callId || activity.result?.data.callId}
-        />)}
-    </div></div>
+            agentDirectory={agentDirectory}
+            onOpenSubagent={onOpenSubagent}
+        />
+    )
+
+    return (
+        <div className="agent-activity output-activity">
+            {segments.map((segment, index) => segment.kind === 'handoff' ? (
+                <div className="handoff-slot" key={segment.item.key}>
+                    {renderActivity(segment.item)}
+                </div>
+            ) : (
+                <div className="acts" key={`ledger-${index}`}>
+                    {segment.items.map(renderActivity)}
+                </div>
+            ))}
+        </div>
+    )
 }
 
 export type PairedToolResult = {
@@ -31,28 +75,92 @@ export type PairedToolResult = {
     timing?: Timing | null
 }
 
-export function ToolCallBlock({ block, events, runId, pairedResult, onOpenSubagent }: { block: MessageBlock; events: AgentEvent[]; runId: string; pairedResult?: PairedToolResult; onOpenSubagent: (id: string) => void }) {
+export function ToolCallBlock({
+    block,
+    events,
+    runId,
+    pairedResult,
+    agentDirectory,
+    onOpenSubagent,
+}: {
+    block: MessageBlock
+    events: AgentEvent[]
+    runId: string
+    pairedResult?: PairedToolResult
+    agentDirectory?: AgentDirectory
+    onOpenSubagent: (id: string) => void
+}) {
     const liveResult = events.findLast((event): event is Extract<AgentEvent, { kind: 'tool_result' }> => event.kind === 'tool_result' && event.data.callId === block.callId)
     const started = events.findLast((event): event is Extract<AgentEvent, { kind: 'tool_started' }> => event.kind === 'tool_started' && event.data.callId === block.callId)
     const resultText = liveResult ? liveResult.data.result : pairedResult?.text
     const isError = liveResult ? liveResult.data.isError : pairedResult?.isError
     const timing = liveResult?.data.timing || started?.data.timing || pairedResult?.timing
-    return <ToolCard
-        name={block.name || ''} input={block.input}
-        result={resultText}
-        isError={isError}
-        timing={timing}
-        pendingStatus={started ? 'running' : 'unknown'} runId={runId} callId={block.callId}
-        onOpenSubagent={onOpenSubagent}
-    />
+    return (
+        <ToolCard
+            name={block.name || ''}
+            input={block.input}
+            result={resultText}
+            isError={isError}
+            timing={timing}
+            pendingStatus={started ? 'running' : 'unknown'}
+            runId={runId}
+            callId={block.callId}
+            agentDirectory={agentDirectory}
+            onOpenSubagent={onOpenSubagent}
+        />
+    )
 }
 
-export function ToolResultBlock({ block, runId, timing, onOpenSubagent }: { block: MessageBlock; runId: string; timing?: Timing | null; onOpenSubagent: (id: string) => void }) {
-    return <ToolCard name={block.name || ''} result={block.text || ''} isError={block.isError} timing={timing} pendingStatus="unknown" runId={runId} callId={block.callId} onOpenSubagent={onOpenSubagent} />
+export function ToolResultBlock({
+    block,
+    runId,
+    timing,
+    agentDirectory,
+    onOpenSubagent,
+}: {
+    block: MessageBlock
+    runId: string
+    timing?: Timing | null
+    agentDirectory?: AgentDirectory
+    onOpenSubagent: (id: string) => void
+}) {
+    return (
+        <ToolCard
+            name={block.name || ''}
+            result={block.text || ''}
+            isError={block.isError}
+            timing={timing}
+            pendingStatus="unknown"
+            runId={runId}
+            callId={block.callId}
+            agentDirectory={agentDirectory}
+            onOpenSubagent={onOpenSubagent}
+        />
+    )
 }
 
-function ToolCard({ name, input, result, isError = false, pendingStatus = 'running', runId, callId, timing, onOpenSubagent }: {
-    name: string; input?: unknown; result?: string; isError?: boolean; pendingStatus?: ToolStatus; runId: string; callId?: string; timing?: Timing | null; onOpenSubagent?: (id: string) => void
+function ToolCard({
+    name,
+    input,
+    result,
+    isError = false,
+    pendingStatus = 'running',
+    runId,
+    callId,
+    timing,
+    agentDirectory,
+    onOpenSubagent,
+}: {
+    name: string
+    input?: unknown
+    result?: string
+    isError?: boolean
+    pendingStatus?: ToolStatus
+    runId: string
+    callId?: string
+    timing?: Timing | null
+    agentDirectory?: AgentDirectory
+    onOpenSubagent?: (id: string) => void
 }) {
     const approval = useToolApproval(runId, callId)
     const pendingApproval = result === undefined ? approval?.pendingApproval : undefined
@@ -62,58 +170,170 @@ function ToolCard({ name, input, result, isError = false, pendingStatus = 'runni
     const toolInput = pendingApproval ? pendingApproval.arguments : input
     const tool = presentTool(name, toolInput, result, isError, pendingStatus)
     if (pendingApproval) tool.status = 'awaiting_approval'
-    // 待批准的决策统一在输入区上方的审批闸口完成，卡片内不再重复一组按钮。
     const awaitingApproval = tool.status === 'awaiting_approval'
+
+    if (isHandoffTool(name)) {
+        return <HandoffToolCard tool={tool} duration={duration} agentDirectory={agentDirectory} onOpenSubagent={onOpenSubagent} />
+    }
     if (name === 'bash') return <TerminalOutput tool={tool} duration={duration} />
     if (name === 'apply_patch') return <FileChanges tool={tool} duration={duration} />
+
+    if (name === 'read_file') {
+        return <ReadFileActivity tool={tool} result={result} awaitingApproval={awaitingApproval} duration={duration} />
+    }
+
     const formattedInput = toolInput !== undefined ? formatToolInput(toolInput) : ''
     const inputRecord = toolInput !== undefined ? toolRecord(toolInput) : {}
     const hasStructuredInput = Object.keys(inputRecord).length > 0
-    const childId = name === 'subagent_start' && tool.status === 'completed' && typeof tool.result.agentId === 'string' ? tool.result.agentId : ''
-    return <ActivityItem
-        tone={activityTone(tool.status)}
-        name={tool.name || tool.label || '工具'}
-        argument={tool.summary}
-        status={tool.status}
-        statusLabel={tool.notice.startsWith('搜索无结果') ? '无匹配' : undefined}
-        duration={duration}
-        open={isOpenByDefault(tool.status)}
-        foot={(typeof tool.result.size === 'number' || tool.truncated || tool.notice) ? <>
-            {typeof tool.result.size === 'number' && <span>{tool.result.size} 字节</span>}
-            {tool.nextOffset !== undefined && <span>已截断 · 下一偏移 {tool.nextOffset}</span>}
-            {tool.notice && <span>{tool.notice}</span>}
-        </> : undefined}
-    >
-        {toolInput !== undefined && <section className="output-section output-input">
-            <div className="output-section-head">
-                <span className="output-section-label">参数</span>
-                <CopyIconButton
-                    className="instrument-copy-button"
-                    copiedLabel="参数已复制"
-                    label="复制工具参数"
-                    getText={() => formattedInput}
-                />
-            </div>
-            {hasStructuredInput ? <ToolInputFields name={name} record={inputRecord} /> : <pre className="output-text">{formattedInput}</pre>}
-        </section>}
-        {!awaitingApproval && <section className="output-section output-result">
-            <div className="output-section-head">
-                <span className="output-section-label">输出</span>
-                {tool.content && (
-                    <CopyIconButton
-                        className="instrument-copy-button"
-                        copiedLabel="输出已复制"
-                        label="复制工具输出"
-                        getText={() => tool.content}
-                    />
-                )}
-            </div>
-            {result === undefined ? <p className="output-muted">{tool.status === 'running' ? '正在执行，等待工具返回结果…' : '暂无输出'}</p>
-                : tool.content ? <ToolResultContent content={tool.content} toolName={name} />
-                : <p className="output-muted">{tool.notice || '暂无输出'}</p>}
-            {childId && onOpenSubagent && <button className="quiet-button" type="button" onClick={() => onOpenSubagent(childId)}>查看子代理历史</button>}
-        </section>}
-    </ActivityItem>
+    const resultSize = typeof tool.result.size === 'number' ? tool.result.size : undefined
+    const metrics = (resultSize !== undefined || tool.truncated) ? (
+        <>
+            {resultSize !== undefined && <span className="act-metric-pill">{formatByteSize(resultSize)}</span>}
+            {tool.truncated && <span className="act-metric-pill">已截断</span>}
+        </>
+    ) : undefined
+
+    return (
+        <ActivityItem
+            tone={activityTone(tool.status)}
+            icon={<Wrench size={13} strokeWidth={1.85} aria-hidden="true" />}
+            name={tool.label || tool.name || '工具'}
+            rawName={tool.name || '工具'}
+            argument={tool.summary}
+            metrics={metrics}
+            status={tool.status}
+            statusLabel={tool.notice.startsWith('搜索无结果') ? '无匹配' : undefined}
+            duration={duration}
+            open={isOpenByDefault(tool.status)}
+            foot={(resultSize !== undefined || tool.truncated || tool.notice) ? (
+                <>
+                    {resultSize !== undefined && <span>{formatByteSize(resultSize)}</span>}
+                    {tool.nextOffset !== undefined && <span>已截断 · 下一偏移 {tool.nextOffset}</span>}
+                    {tool.notice && <span>{tool.notice}</span>}
+                </>
+            ) : undefined}
+        >
+            {toolInput !== undefined && (
+                <section className="output-section output-input">
+                    <div className="output-section-head">
+                        <span className="output-section-label">参数</span>
+                        <CopyIconButton
+                            className="instrument-copy-button"
+                            copiedLabel="参数已复制"
+                            label="复制工具参数"
+                            getText={() => formattedInput}
+                        />
+                    </div>
+                    {hasStructuredInput ? <ToolInputFields name={name} record={inputRecord} /> : <pre className="output-text">{formattedInput}</pre>}
+                </section>
+            )}
+            {!awaitingApproval && (
+                <section className="output-section output-result">
+                    <div className="output-section-head">
+                        <span className="output-section-label">输出</span>
+                        {tool.content && (
+                            <CopyIconButton
+                                className="instrument-copy-button"
+                                copiedLabel="输出已复制"
+                                label="复制工具输出"
+                                getText={() => tool.content}
+                            />
+                        )}
+                    </div>
+                    {result === undefined
+                        ? <p className="output-muted">{tool.status === 'running' ? '正在执行，等待工具返回结果…' : '暂无输出'}</p>
+                        : tool.content
+                            ? <ToolResultContent content={tool.content} toolName={name} />
+                            : <p className="output-muted">{tool.notice || '暂无输出'}</p>}
+                </section>
+            )}
+        </ActivityItem>
+    )
+}
+
+/** read_file 专属渲染：路径与偏移已在标题行呈现，展开态直接进入带行号代码视图，不再重复渲染参数区。 */
+function ReadFileActivity({
+    tool,
+    result,
+    awaitingApproval,
+    duration,
+}: {
+    tool: ReturnType<typeof presentTool>
+    result?: string
+    awaitingApproval: boolean
+    duration?: ReturnType<typeof DurationLabel>
+}) {
+    const offset = typeof tool.input.offset === 'number' ? tool.input.offset : 0
+    const limit = typeof tool.input.limit === 'number' ? tool.input.limit : undefined
+    const size = typeof tool.result.size === 'number'
+        ? tool.result.size
+        : tool.content ? new TextEncoder().encode(tool.content).length : undefined
+    const lines = tool.content ? tool.content.replace(/\r\n/g, '\n').split('\n') : []
+    // offset 为 UTF-8 字节偏移；仅当从文件开头读取（offset === 0）时行号精确，避免伪造偏移行号。
+    const showLineNumbers = offset === 0 && lines.length > 0 && tool.status !== 'failed'
+
+    const metrics = (size !== undefined || tool.truncated) ? (
+        <>
+            {size !== undefined && <span className="act-metric-pill">{formatByteSize(size)}</span>}
+            {tool.truncated && <span className="act-metric-pill">已截断</span>}
+        </>
+    ) : undefined
+
+    return (
+        <ActivityItem
+            tone={activityTone(tool.status)}
+            icon={<FileText size={13} strokeWidth={1.85} aria-hidden="true" />}
+            name={tool.label || '读取'}
+            rawName="read_file"
+            argument={tool.summary}
+            metrics={metrics}
+            status={tool.status}
+            duration={duration}
+            open={isOpenByDefault(tool.status)}
+            foot={(size !== undefined || lines.length > 0 || offset > 0 || tool.nextOffset !== undefined || tool.notice) ? (
+                <>
+                    {lines.length > 0 && <span>{lines.length} 行</span>}
+                    {size !== undefined && <span>{formatByteSize(size)}</span>}
+                    {offset > 0 && <span>偏移 {formatByteSize(offset)}</span>}
+                    {limit !== undefined && offset > 0 && <span>上限 {formatByteSize(limit)}</span>}
+                    {tool.nextOffset !== undefined && <span>已截断 · 下一偏移 {tool.nextOffset}</span>}
+                    {tool.notice && <span>{tool.notice}</span>}
+                </>
+            ) : undefined}
+        >
+            {!awaitingApproval && (
+                <section className={`output-section ${showLineNumbers ? 'output-file-numbered' : ''}`}>
+                    {tool.content && (
+                        <div className="output-section-head output-file-head">
+                            <span className="output-section-label">{typeof tool.input.path === 'string' ? tool.input.path : '文件内容'}</span>
+                            <CopyIconButton
+                                className="instrument-copy-button"
+                                copiedLabel="文件内容已复制"
+                                label="复制文件内容"
+                                getText={() => tool.content}
+                            />
+                        </div>
+                    )}
+                    {result === undefined ? (
+                        <p className="output-muted">{tool.status === 'running' ? '正在读取文件…' : '暂无输出'}</p>
+                    ) : !tool.content ? (
+                        <p className="output-muted">{tool.notice || '暂无输出'}</p>
+                    ) : showLineNumbers ? (
+                        <div className="output-code-lines" tabIndex={0} aria-label="文件内容">
+                            {lines.map((line, index) => (
+                                <div className="output-code-row" key={index}>
+                                    <span className="output-code-ln" aria-hidden="true">{index + 1}</span>
+                                    <code>{line || ' '}</code>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <ToolResultContent content={tool.content} toolName="read_file" />
+                    )}
+                </section>
+            )}
+        </ActivityItem>
+    )
 }
 
 const inputFieldLabels: Record<string, string> = {

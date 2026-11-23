@@ -7,6 +7,7 @@ import (
 	"praxis/internal/model"
 	"praxis/internal/security"
 	"praxis/internal/task"
+	"praxis/internal/timing"
 	"time"
 )
 
@@ -52,7 +53,7 @@ type EventSource struct {
 }
 
 // Event 是进程内业务通知，不表示已落盘；重新连接后应查询业务状态恢复视图。
-// Payload 必须使用本包定义的非空值载荷；订阅者不得修改其中的切片与指针。
+// Payload 必须使用本包定义的非空值载荷；接收方不得修改其中的切片与指针。
 type Event struct {
 	Source  EventSource
 	Payload Payload
@@ -104,7 +105,7 @@ type ModelRequestInfo struct {
 	RetryCount int
 	CreatedAt  time.Time
 	HistoryEnd int64
-	Timing     *entry.Timing
+	Timing     *timing.Timing
 }
 
 type ModelRequestStarted struct{ Info ModelRequestInfo }
@@ -162,7 +163,7 @@ func (ToolCall) isPayload() {}
 
 type ToolStarted struct {
 	CallID string
-	Timing *entry.Timing
+	Timing *timing.Timing
 }
 
 func (ToolStarted) Kind() Kind { return KindToolStarted }
@@ -192,7 +193,7 @@ type ToolResult struct {
 	CallID  string
 	Result  string
 	IsError bool
-	Timing  *entry.Timing
+	Timing  *timing.Timing
 }
 
 func (ToolResult) Kind() Kind { return KindToolResult }

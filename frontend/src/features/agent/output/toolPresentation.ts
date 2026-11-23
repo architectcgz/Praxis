@@ -15,14 +15,21 @@ export type ToolPresentation = {
 }
 
 const toolLabels: Record<string, string> = {
-    bash: '运行',
+    bash: '终端',
     read_file: '读取',
     apply_patch: '补丁',
     subagent_start: '委派子代理',
     subagent_wait: '等待子代理',
     send_to_subagent: '补充指令',
     subagent_cancel: '取消子代理',
-    report_to_parent: '汇报父任务',
+    report_to_parent: '向主代理汇报',
+}
+
+/** 将字节数格式化为紧凑可读文本。 */
+export function formatByteSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes >= 10 * 1024 ? 0 : 1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 /** 读取工具的 JSON 对象；普通文本、数组和无效 JSON 保留给正文展示。 */
@@ -61,11 +68,9 @@ function summarizeToolInput(name: string, input: Record<string, unknown>): strin
     const path = stringValue(input.path)
     if (path) {
         if (name === 'read_file') {
-            const offset = typeof input.offset === 'number' ? input.offset : undefined
-            const limit = typeof input.limit === 'number' ? input.limit : undefined
-            if (offset !== undefined || limit !== undefined) {
-                const range = [offset !== undefined ? `L${offset}` : '', limit !== undefined ? `+${limit}行` : ''].filter(Boolean).join(' ')
-                return `${path} (${range})`
+            const offset = typeof input.offset === 'number' && input.offset > 0 ? input.offset : undefined
+            if (offset !== undefined) {
+                return `${path} (@${formatByteSize(offset)})`
             }
         }
         return path

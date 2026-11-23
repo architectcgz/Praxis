@@ -6,6 +6,7 @@ import { activeRunId, API_ERROR_CODES } from '../../api'
 import { AgentSessionPanel } from '../agent/AgentSessionPanel'
 import { AgentTaskInput } from '../agent/AgentTaskInput'
 import { formatCompactCount, formatUsageDetails } from '../agent/modelUsage'
+import type { AgentDirectory } from '../agent/output/HandoffViews'
 import { PrimaryAgentTaskInput } from '../agent/PrimaryAgentTaskInput'
 import { SubagentDeck } from '../agent/SubagentDeck'
 import { SessionPanel } from '../session/SessionPanel'
@@ -54,6 +55,13 @@ export function SessionWorkspace({
 
     const subagents = useMemo(
         () => page.agents.filter((item) => item.Kind === 'subagent'),
+        [page.agents],
+    )
+    const agentDirectory = useMemo<AgentDirectory>(
+        () => Object.fromEntries(page.agents.map((item) => [
+            item.ID,
+            { name: item.name, active: item.state === 'executing' || item.state === 'waiting' },
+        ])),
         [page.agents],
     )
     const hasSubagents = subagents.length > 0
@@ -153,6 +161,7 @@ export function SessionWorkspace({
                                 submissionRevision={page.submissionRevision}
                                 loading={page.mainLoading}
                                 agent={page.mainAgent}
+                                agentDirectory={agentDirectory}
                                 entries={page.mainEntries}
                                 requests={page.mainRequests}
                                 pendingApprovals={page.pendingApprovals}
@@ -234,6 +243,7 @@ export function SessionWorkspace({
                 {showDeck && page.session && (
                     <SubagentDeck
                         subagents={subagents}
+                        agentDirectory={agentDirectory}
                         activeView={rightView}
                         inspectedSubagent={page.subagent}
                         inspectedEntries={page.subagentEntries}

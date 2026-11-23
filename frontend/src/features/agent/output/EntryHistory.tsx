@@ -4,6 +4,7 @@ import type { HistoryMessage, ModelRequestActivity } from '../../../api'
 import type { RequestActivities } from '../history/entries'
 import type { StreamingOutput } from '../types'
 import { EntryView } from './EntryView'
+import type { AgentDirectory } from './HandoffViews'
 import { MessageMarkdown } from './MarkdownViews'
 import { MessageTiming } from './MessageTiming'
 import type { PairedToolResult } from './ToolCallViews'
@@ -78,10 +79,11 @@ export function buildEntryHistory(entries: HistoryMessage[], requests: RequestAc
     return { rows, assistantTurns, errorRuns }
 }
 
-export const EntryHistory = memo(function EntryHistory({ rows, requests, agentName, streamingOutput, onOpenSubagent }: {
+export const EntryHistory = memo(function EntryHistory({ rows, requests, agentName, agentDirectory, streamingOutput, onOpenSubagent }: {
     rows: ReturnType<typeof buildEntryHistory>['rows']
     requests: RequestActivities
     agentName: string
+    agentDirectory?: AgentDirectory
     streamingOutput: StreamingOutput | null
     onOpenSubagent: (id: string) => void
 }) {
@@ -91,6 +93,7 @@ export const EntryHistory = memo(function EntryHistory({ rows, requests, agentNa
         return <EntryView
             key={message.id}
             agentName={agentName}
+            agentDirectory={agentDirectory}
             item={message}
             usage={message.requestId ? requests.get(message.requestId)?.result?.usage : undefined}
             events={streamingOutput && streamingOutput.runId === message.runId ? streamingOutput.turns.find((turn) => turn.turnId === message.turnId)?.events : undefined}

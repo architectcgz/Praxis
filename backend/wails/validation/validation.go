@@ -8,7 +8,6 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/pathutil"
-	projectservice "praxis/internal/service/project"
 	"praxis/internal/task"
 	apperr "praxis/wails/error"
 	"reflect"
@@ -20,6 +19,8 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/go-playground/validator/v10/non-standard/validators"
 )
+
+const errProjectInvalid errorcode.Code = "project.invalid"
 
 var (
 	configIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -119,7 +120,7 @@ func inputError(err error, field string) error {
 	case "id", "project_id", "session_id", "agent_id":
 		code = apperr.ErrInvalidRequest
 	case "project_name", "project_path":
-		code = projectservice.ErrProjectInvalid
+		code = errProjectInvalid
 	}
 	reason := "must satisfy " + failure.ActualTag()
 	switch failure.ActualTag() {

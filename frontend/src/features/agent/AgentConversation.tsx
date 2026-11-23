@@ -5,11 +5,13 @@ import type { RequestActivities } from './history/entries'
 import type { StreamingOutput } from './types'
 import { ApprovalGate, ToolApprovalScope, ToolApprovalsProvider } from './ToolApprovals'
 import { AgentActivityView, PendingOutputView, StreamingTurnView } from './output/MessageViews'
+import type { AgentDirectory } from './output/HandoffViews'
 import { buildEntryHistory, EntryHistory } from './output/EntryHistory'
 
 export type AgentConversationProps = {
     submissionRevision: number
     agent: AgentView
+    agentDirectory?: AgentDirectory
     entries: HistoryMessage[]
     requests: RequestActivities
     pendingApprovals: ToolApproval[]
@@ -27,6 +29,7 @@ export type AgentConversationProps = {
 export function AgentConversation({
     submissionRevision,
     agent,
+    agentDirectory,
     entries,
     requests,
     pendingApprovals,
@@ -159,6 +162,7 @@ export function AgentConversation({
                                     rows={history.rows}
                                     requests={requests}
                                     agentName={agent.name}
+                                    agentDirectory={agentDirectory}
                                     streamingOutput={historyOutput}
                                     onOpenSubagent={onOpenSubagent}
                                 />
@@ -166,11 +170,13 @@ export function AgentConversation({
                             {visibleStreamingOutput?.turns.map((turn, index) => (
                                 <StreamingTurnView
                                     agentName={agent.name}
+                                    agentDirectory={agentDirectory}
                                     events={turn.events}
                                     runStartedAt={runId === visibleStreamingOutput.runId ? agent.runStartedAt : undefined}
                                     active={active && index === visibleStreamingOutput.turns.length - 1 && !visibleStreamingOutput.error}
                                     continuation={index > 0}
                                     hasContinuation={index < visibleStreamingOutput.turns.length - 1}
+                                    onOpenSubagent={onOpenSubagent}
                                     key={`${visibleStreamingOutput.runId}-${turn.turnId}`}
                                 />
                             ))}

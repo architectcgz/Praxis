@@ -3,12 +3,14 @@ import { LoaderCircle } from 'lucide-react'
 import type { HistoryMessage, AgentView, ToolApproval } from '../../api'
 import type { AgentOutputSource } from '../session/sessionStore'
 import { AgentConversation } from './AgentConversation'
+import type { AgentDirectory } from './output/HandoffViews'
 import type { RequestActivities } from './history/entries'
 
 type AgentSessionPanelProps = {
     submissionRevision: number
     loading: boolean
     agent: AgentView | null
+    agentDirectory?: AgentDirectory
     entries: HistoryMessage[]
     requests: RequestActivities
     pendingApprovals: ToolApproval[]
@@ -28,6 +30,7 @@ export function AgentSessionPanel({
     submissionRevision,
     loading,
     agent,
+    agentDirectory,
     entries,
     requests,
     pendingApprovals,
@@ -54,6 +57,7 @@ export function AgentSessionPanel({
             key={`${agent.SessionID}:${agent.ID}`}
             submissionRevision={submissionRevision}
             agent={agent}
+            agentDirectory={agentDirectory}
             entries={entries}
             requests={requests}
             pendingApprovals={pendingApprovals}

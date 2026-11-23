@@ -16,6 +16,7 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/model"
 	"praxis/internal/provider"
+	"praxis/internal/timing"
 	"praxis/internal/tool"
 	"slices"
 	"strings"
@@ -42,20 +43,20 @@ func NewCaller(deps Dependencies) *Caller {
 
 // Call 描述一次模型请求的身份、预算、回调与响应校验约束。
 type Call struct {
-	Provider     provider.Provider
-	Request      provider.Request
-	Kind         entry.ModelRequestKind
-	SessionID    identity.SessionID
-	AgentID      identity.AgentID
-	SourceTaskID identity.TaskID
-	CallID       string
-	Budget       *appcontext.Budget
-	Prepare      func(provider.Request) (provider.Request, error)
-	Validate     func(Response) error
-	MaxTextBytes int
-	AllowTools   bool
-	OnEvent      func(provider.Event)
-	AppendEntry  entry.AppendEntry
+	Provider        provider.Provider
+	Request         provider.Request
+	Kind            entry.ModelRequestKind
+	SessionID       identity.SessionID
+	AgentID         identity.AgentID
+	SourceTaskID    identity.TaskID
+	CallID          string
+	Budget          *appcontext.Budget
+	Prepare         func(provider.Request) (provider.Request, error)
+	Validate        func(Response) error
+	MaxTextBytes    int
+	AllowTools      bool
+	OnProviderEvent func(provider.Event)
+	AppendEntry     entry.AppendEntry
 }
 
 // Response 保存一次模型响应；内容块和工具调用都从同一份有序事件转换。
@@ -65,7 +66,7 @@ type Response struct {
 	TextBytes  int
 	StopReason provider.StopReason
 	Usage      *model.Usage
-	Timing     *entry.Timing
+	Timing     *timing.Timing
 }
 
 func (r Response) Blocks() []entry.ContentBlock {
@@ -178,7 +179,7 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 	if err := ctx.Err(); err != nil {
 		return response, err
 	}
-	span := entry.NewSpan()
+	span := timing.NewSpan()
 	started := entry.ModelRequest{
 		ID:         request.ID,
 		RunID:      request.RunID,
@@ -240,8 +241,8 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 			span.FirstResponse()
 			scope.OnSignal(hook.SignalFirstResponse)
 		}
-		if call.OnEvent != nil {
-			call.OnEvent(event)
+		if call.OnProviderEvent != nil {
+			call.OnProviderEvent(event)
 		}
 	})
 	response.Timing = span.End()
@@ -401,7 +402,7 @@ func streamModel(
 	request provider.Request,
 	allowTools bool,
 	maxTextBytes int,
-	onEvent func(provider.Event),
+	onProviderEvent func(provider.Event),
 ) (Response, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -417,7 +418,7 @@ func streamModel(
 		for range input {
 		}
 	}()
-	response, err := collectResponse(streamCtx, input, allowTools, maxTextBytes, onEvent)
+	response, err := collectResponse(streamCtx, input, allowTools, maxTextBytes, onProviderEvent)
 	if err == nil {
 		err = response.bindReasoningState(request.Model)
 	}
@@ -429,7 +430,7 @@ func collectResponse(
 	stream <-chan provider.Event,
 	allowTools bool,
 	maxTextBytes int,
-	onEvent func(provider.Event),
+	onProviderEvent func(provider.Event),
 ) (Response, error) {
 	var response Response
 	for {
@@ -499,8 +500,8 @@ func collectResponse(
 		default:
 			return response, errors.New("provider stream emitted an unknown event")
 		}
-		if onEvent != nil {
-			onEvent(event)
+		if onProviderEvent != nil {
+			onProviderEvent(event)
 		}
 	}
 }

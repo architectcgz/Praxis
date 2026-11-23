@@ -1,5 +1,5 @@
 import { Children, isValidElement, memo, useDeferredValue, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { AlignLeft, ChevronRight, Code2 } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { openExternalURL } from '../../../api/externalLinks'
@@ -81,20 +81,34 @@ function MessageLink({ href = '', children, title }: ComponentPropsWithoutRef<'a
 function MarkdownCodeBlock({ children }: ComponentPropsWithoutRef<'pre'> & { streaming: boolean }) {
     const code = Children.toArray(children)[0]
     if (!isValidElement<ComponentPropsWithoutRef<'code'>>(code)) {
-        return <pre>{children}</pre>
+        return <pre className="markdown-plain-pre">{children}</pre>
     }
-    const language = codeLanguageLabel(code.props.className)
+    const { label: language, isPlain } = parseCodeLanguage(code.props.className)
     const content = extractTextContent(code.props.children).replace(/\n$/, '')
     const isDiff = isDiffContent(content, code.props.className)
+    const plainBlock = isPlain && !isDiff
     const changes = isDiff ? codeLineChanges(content, code.props.className) : null
+    const lineCount = content ? content.split('\n').length : 0
 
     return (
-        <div className="markdown-code-block instrument">
+        <div className={`markdown-code-block ${plainBlock ? 'is-plain' : 'instrument'}`}>
             <details open>
                 <summary className="markdown-code-toolbar">
-                    <span className="markdown-code-language">{language}</span>
-                    {changes && <span className="markdown-code-changes"><span>+{changes.added}</span><span>-{changes.removed}</span></span>}
-                    <ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
+                    <ChevronRight className="markdown-code-chevron" size={13} strokeWidth={2} aria-hidden="true" />
+                    <span className="markdown-code-kind">
+                        {plainBlock
+                            ? <AlignLeft size={12} strokeWidth={1.85} aria-hidden="true" />
+                            : <Code2 size={12} strokeWidth={1.85} aria-hidden="true" />}
+                        <span className="markdown-code-language">{language}</span>
+                    </span>
+                    {changes ? (
+                        <span className="markdown-code-changes">
+                            <span>+{changes.added}</span>
+                            <span>-{changes.removed}</span>
+                        </span>
+                    ) : lineCount > 0 ? (
+                        <span className="markdown-code-lines">{lineCount} 行</span>
+                    ) : null}
                 </summary>
                 <pre className={isDiff ? 'markdown-code-diff' : undefined}>
                     {isDiff ? <DiffCodeLines content={content} /> : code}
@@ -102,8 +116,8 @@ function MarkdownCodeBlock({ children }: ComponentPropsWithoutRef<'pre'> & { str
             </details>
             <CopyIconButton
                 className="markdown-code-copy-button"
-                copiedLabel={`${language} 代码已复制`}
-                label={`复制 ${language} 代码`}
+                copiedLabel={plainBlock ? '纯文本已复制' : `${language} 代码已复制`}
+                label={plainBlock ? '复制纯文本' : `复制 ${language} 代码`}
                 getText={() => content}
             />
         </div>
@@ -182,10 +196,12 @@ function MarkdownTable({ children }: ComponentPropsWithoutRef<'table'>) {
     )
 }
 
-function codeLanguageLabel(className: string | undefined) {
+function parseCodeLanguage(className: string | undefined): { label: string; isPlain: boolean } {
     const language = className?.match(/language-([a-z0-9+-]+)/i)?.[1]?.toLowerCase()
-    if (!language) return '纯文本'
-    return codeLanguageLabels[language] || language.toUpperCase()
+    if (!language || language === 'text' || language === 'txt' || language === 'plaintext' || language === 'plain') {
+        return { label: '纯文本', isPlain: true }
+    }
+    return { label: codeLanguageLabels[language] || language.toUpperCase(), isPlain: false }
 }
 
 function tableText(table: HTMLTableElement | null) {

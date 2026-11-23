@@ -181,7 +181,7 @@ func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependen
 		call.Prepare = func(req provider.Request) (provider.Request, error) {
 			return remindContextBudget(req, deps.Budget)
 		}
-		call.OnEvent = func(event provider.Event) {
+		call.OnProviderEvent = func(event provider.Event) {
 			r.emitModelEvent(params, request.TurnID, event)
 		}
 	}

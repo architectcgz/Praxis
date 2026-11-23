@@ -1,8 +1,8 @@
-package entry
+package timing
 
 import "time"
 
-// Timing 是所属 Entry 的只读耗时数据，操作身份由 Entry 提供。
+// Timing 是一次操作的只读耗时快照，业务身份由调用方提供。
 // DurationMS 为 nil 表示尚未结束或无法确定实际耗时。
 type Timing struct {
 	StartedAt       time.Time `json:"startedAt"`

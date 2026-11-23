@@ -12,6 +12,7 @@ import (
 	coreevent "praxis/internal/event"
 	"praxis/internal/identity"
 	"praxis/internal/provider"
+	"praxis/internal/timing"
 	"slices"
 	"strings"
 	"time"
@@ -52,7 +53,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	if err != nil {
 		return value, errorcode.ErrContract.Wrap(err)
 	}
-	span := sessionentry.NewSpan()
+	span := timing.NewSpan()
 	span.Start()
 	var requests []identity.ModelRequestID
 	generated, needed, err := appcontext.Compress(ctx, value, input, appcontext.CompressOptions{

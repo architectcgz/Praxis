@@ -156,7 +156,7 @@ npm run check
 
 初始化后，页面按 SessionID 和 BranchID 消费事件，队列事件还携带 BindingID。`task_queue_changed` 在入队、领取完成、重试归队和取消后更新队列；模型请求、工具事件和历史 Entry 携带对应计时。Wails 接入按展示契约映射载荷，不直接序列化执行记录，也不重新校验本应用生成的数据结构。
 
-执行流程在各自的明确边界主动调用 event 和 hook：event 提供发布订阅，hook 提供扩展分发和只读观察。通知元数据和载荷由触发流程组装，Emitter 及事件分发过程不读取 Run、不定位 Session，也不推进执行状态或承担业务提交。Run 负责自身状态行为；Loop 负责模型与工具边界，Session 业务服务负责准入与会话收尾边界，Coordinator 负责运行生命周期边界。必要的核心数据类型引用遵循其语义归属，不为改变依赖箭头复制同形业务模型。
+执行流程在各自的明确边界主动调用 event 和 hook：event 同步通知启动时绑定的接收方，hook 提供扩展分发和只读观察。通知元数据和载荷由触发流程组装，Emitter 不读取 Run、不定位 Session，也不推进执行状态或承担业务提交。Run 负责自身状态行为；Loop 负责模型与工具边界，Session 业务服务负责准入与会话收尾边界，Coordinator 负责运行生命周期边界。必要的核心数据类型引用遵循其语义归属，不为改变依赖箭头复制同形业务模型。
 
 Loop 直接编排模型回合和工具执行，提供上下文构建、模型请求、流式响应处理与摘要生成能力。模型响应中的文本、思考、推理状态和工具调用等内容块随 Assistant Entry 完整记录。正常执行先根据响应准备工具调用，再通过核心 Session 同步记录 Assistant Entry，并将同一引用交给 `Run.Accept`，之后才执行工具；主执行调用 `Session.AppendEntry` 推进当前分支，子执行调用 `Session.AppendSubagentEntry` 写入所属子代理历史和日志，不推进主会话分支 Head。主、子执行均在条目接纳后通知界面。不带工具调用的正常回答同样记录 Assistant Entry，随后结束模型循环。
 

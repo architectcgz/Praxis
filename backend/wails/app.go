@@ -21,12 +21,9 @@ type App struct {
 	service     *bindings.Services
 	logger      *logging.Logger
 	closer      ApplicationCloser
-	unsubscribe func()
 	startupDone chan struct{}
 	startupErr  error
 	closed      bool
-
-	bindings *bindings.Bindings
 }
 
 func New(desktop *application.App, loggers ...*logging.Logger) *App {
@@ -35,18 +32,11 @@ func New(desktop *application.App, loggers ...*logging.Logger) *App {
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = factory.Ensure(loggers[0])
 	}
-	instance := &App{
+	return &App{
 		desktop:     desktop,
 		logger:      factory.Ensure(logger),
 		startupDone: make(chan struct{}),
 	}
-	instance.bindings = bindings.New(instance)
-	return instance
-}
-
-// Bindings 返回完整的 Wails 暴露面。
-func (a *App) Bindings() []application.Service {
-	return a.bindings.All()
 }
 
 // ApplicationCloser 关闭生产宿主。
@@ -62,7 +52,6 @@ func (a *App) Attach(frontend bindings.Services, logger *logging.Logger, closer 
 	if closer == nil {
 		return errors.New("desktop application closer is required")
 	}
-	unsubscribe := frontend.Emitter.Subscribe(a.bindings.EmitAgentEvent)
 	logger = logging.NewFactory().Ensure(logger)
 
 	a.mu.Lock()
@@ -72,23 +61,15 @@ func (a *App) Attach(frontend bindings.Services, logger *logging.Logger, closer 
 			err = errors.New("desktop application is closed")
 		}
 		a.mu.Unlock()
-		if unsubscribe != nil {
-			unsubscribe()
-		}
 		return err
 	}
-	previousUnsubscribe := a.unsubscribe
 	a.service = &frontend
 	a.logger = logger
 	a.closer = closer
-	a.unsubscribe = unsubscribe
 	if a.ctx != nil {
 		a.completeStartupLocked()
 	}
 	a.mu.Unlock()
-	if previousUnsubscribe != nil {
-		previousUnsubscribe()
-	}
 	logger.Infof("desktop dependencies attached")
 	return nil
 }
@@ -130,12 +111,9 @@ func (a *App) FailStartup(err error) {
 	a.logError("desktop startup failed: %v", err)
 }
 
-// Shutdown 在释放 binding context 前关闭生产宿主。
+// Shutdown 先关闭 binding 和通知入口，再关闭生产宿主。
 func (a *App) Shutdown(ctx context.Context) {
-	closer, unsubscribe := a.detach()
-	if unsubscribe != nil {
-		unsubscribe()
-	}
+	closer := a.detach()
 	if closer == nil {
 		a.loggerSnapshot().Warnf("desktop application closer is not attached")
 		return
@@ -228,14 +206,14 @@ func (a *App) completeStartupLocked() {
 }
 
 // detach 释放桌面 context，并一次性取走关闭句柄。
-func (a *App) detach() (ApplicationCloser, func()) {
+func (a *App) detach() ApplicationCloser {
 	a.mu.Lock()
-	closer, unsubscribe := a.closer, a.unsubscribe
+	closer := a.closer
 	a.closed = true
-	a.ctx, a.service, a.closer, a.unsubscribe = nil, nil, nil, nil
+	a.ctx, a.service, a.closer = nil, nil, nil
 	a.completeStartupLocked()
 	a.mu.Unlock()
-	return closer, unsubscribe
+	return closer
 }
 
 func (a *App) logInfo(format string, args ...any) {

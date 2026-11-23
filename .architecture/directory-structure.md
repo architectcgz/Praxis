@@ -80,11 +80,12 @@ backend/
     │   └── tools.go            # 工具启停配置加载
     │
     ├── event/                  # 进程内实时事件通知
-    │   ├── emitter.go          # 订阅管理与同步广播器
+    │   ├── emitter.go          # 启动时绑定接收方，同步转发通知
     │   └── event.go            # EventSource 与封闭的事件 Payload 集合
     │
     ├── model/                  # 大模型领域概念（专指 LLM 模型）
-    ├── entry/                  # 历史事实条目、内容块、编解码、回执补齐与耗时计时
+    ├── entry/                  # 历史事实条目、内容块、编解码与回执补齐
+    ├── timing/                 # 操作耗时测量与只读快照
     ├── context/                # 模型上下文选择、token 预算校准与摘要压缩算法
     ├── agent/                  # Agent 角色、定义与状态值类型
     ├── task/                   # 待执行任务 Task 与内存 FIFO 队列 TaskQueue
@@ -105,9 +106,9 @@ backend/
 - `model.Choice`（`ProviderID`、`ModelID`、`ReasoningLevel`）表达指向 `model.Catalog` 的模型与推理等级选择坐标，由 `model.Catalog`、`engine/session`、`event`、`storage`、`service/session` 及 `wails/bindings` 共用；“空选择继承默认模型”的规则归属 `engine/session`。
 - 不将 `Project`、`Task`、`Entry`、`ApprovalMode` 等非大模型概念放入 `model/`，避免术语歧义与包内封装边界退化。
 
-### 2. 历史事实与计时 `internal/entry/`
-- 统一承载持久化事实 `Entry`、封闭 `Payload` 集合、封闭 `ContentBlock` 集合、`ModelRequest`、工具调用配对补齐逻辑，以及与条目紧耦合的 `Timing`/`Span` 计时能力。
-- 只表达事实数据结构、编解码与纯校验规则，不持有运行期句柄、锁或存储 I/O。
+### 2. 历史事实 `internal/entry/` 与操作计时 `internal/timing/`
+- `entry/` 承载持久化事实 `Entry`、封闭 `Payload` 集合、封闭 `ContentBlock` 集合、`ModelRequest` 和工具调用配对补齐逻辑，不持有运行期句柄、锁或存储 I/O。
+- `timing/` 仅依赖标准库，提供只读耗时快照 `Timing` 和运行期计时器 `Span`。模型调用、工具执行和上下文压缩负责计时边界；历史条目和事件只携带快照。
 
 ### 3. 核心执行引擎 `internal/engine/`
 - 按并发所有权与生命周期划分子包，每个包维护清晰的锁边界与内部不变量：
@@ -133,7 +134,7 @@ backend/
 所有包依赖必须形成无环单向图，严格遵守以下约束：
 
 ```text
-1. 基础概念包（identity / errorcode / pathutil / logging / model / entry / context / agent / task / project / security）
+1. 基础概念包（identity / errorcode / pathutil / logging / model / entry / timing / context / agent / task / project / security）
    --> 仅依赖标准库与更底层基础包；严禁依赖 engine/*、event、provider、tool（仅 entry 依赖 tool 标识类型）、config、storage、service、wails
 
 2. 外围能力包（provider / tool / config）与实时事件包（event）
@@ -153,7 +154,7 @@ backend/
    --> service/session 仅在公开服务类型中引用 engine/approval 和 engine/toolexecution 的值类型
 
 6. 桌面协议边界（wails/*）
-   --> 仅通过 service/* 调用业务能力，通过订阅 event.Emitter 推送通知，消费必要基础概念包与分页/元数据视图；
+   --> 仅通过 service/* 调用业务能力，经启动时绑定的回调接收事件并推送前端通知，消费必要基础概念包与分页/元数据视图；
        严禁直接依赖 engine/coordinator、engine/run、engine/loop、engine/modelcall、engine/approval、engine/toolexecution、storage/、config/、provider/
 
 7. 启动装配（bootstrap）
@@ -163,4 +164,4 @@ backend/
 ### 关键防交叉守则
 - **`event/` 严禁导入任何 `engine/*` 包**：`event/` 被整个执行引擎普遍依赖，事件载荷只使用基础概念包中的值对象与只读事实类型（例如 `SessionConfigReloaded` 使用 `model.Choice` 与 `security.ApprovalMode`），杜绝通过事件层产生向上依赖或循环依赖。
 - **存储端口归消费方声明**：`engine/coordinator`、`service/project`、`service/session` 按各自真实使用的方法声明最小存储接口，`storage/` 提供实现并由 `bootstrap/` 注入，避免在引擎外部维护与核心双向互指的集中仓库接口包。
-- **`event.Emitter` 显式注入**：需要发布事件的引擎组件（包括 `engine/coordinator`）均通过自身依赖结构体显式持有 `*event.Emitter`，不穿透其他组件字段借道发送。
+- **`event.Emitter` 显式注入**：需要发布事件的引擎组件（包括 `engine/coordinator`）均通过自身依赖结构体显式持有 `*event.Emitter`，不穿透其他组件字段借道发送。接收方在启动时绑定，发布过程中不维护订阅列表。

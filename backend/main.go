@@ -10,6 +10,7 @@ import (
 	"praxis/internal/config"
 	"praxis/internal/logging"
 	"praxis/wails"
+	"praxis/wails/bindings"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -69,7 +70,8 @@ func main() {
 		},
 	})
 	a := wails.New(desktop, logging.NewFactory().Console())
-	for _, service := range a.Bindings() {
+	desktopBindings := bindings.New(a)
+	for _, service := range desktopBindings.All() {
 		desktop.RegisterService(service)
 	}
 	// Run 失败也必须关闭业务资源；正常退出时与 Wails 关闭回调共用一次清理。
@@ -88,7 +90,9 @@ func main() {
 			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return
 		}
-		application, err := bootstrap.Open(ctx, root, bootstrap.Options{})
+		application, err := bootstrap.Open(ctx, root, bootstrap.Options{
+			OnAgentEvent: desktopBindings.EmitAgentEvent,
+		})
 		if err != nil {
 			a.FailStartup(fmt.Errorf("initialize application services: %w", err))
 			return

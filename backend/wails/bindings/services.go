@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"praxis/internal/engine/session"
-	"praxis/internal/event"
 	"praxis/internal/identity"
 	"praxis/internal/model"
 	"praxis/internal/project"
@@ -42,19 +41,17 @@ type SessionService interface {
 	ResumeQueue(context.Context, identity.SessionID) error
 }
 
-// Services 由 Bootstrap 注入外部业务服务与事件源。
+// Services 是桌面 binding 调用的业务服务集。
 type Services struct {
 	Projects ProjectService
 	Sessions SessionService
-	Emitter  *event.Emitter
 }
 
 // Validate 在宿主接入边界检查完整装配，失败时不开放 binding。
 func (s Services) Validate() error {
 	for name, missing := range map[string]bool{
-		"projects":      s.Projects == nil,
-		"sessions":      s.Sessions == nil,
-		"event emitter": s.Emitter == nil,
+		"projects": s.Projects == nil,
+		"sessions": s.Sessions == nil,
 	} {
 		if missing {
 			return errors.New("frontend " + name + " is required")

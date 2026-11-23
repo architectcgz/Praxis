@@ -5,6 +5,7 @@ import (
 	"errors"
 	"praxis/internal/identity"
 	"praxis/internal/model"
+	"praxis/internal/timing"
 	"strings"
 )
 
@@ -39,7 +40,7 @@ type ModelRequest struct {
 	Partial     Content                 `json:"partial,omitempty"`
 	OutputBytes int                     `json:"outputBytes"`
 	Usage       *model.Usage            `json:"usage,omitempty"`
-	Timing      *Timing                 `json:"timing,omitempty"`
+	Timing      *timing.Timing          `json:"timing,omitempty"`
 }
 
 func (ModelRequest) kind() string { return kindModelRequest }

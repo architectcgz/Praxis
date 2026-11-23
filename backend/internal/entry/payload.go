@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"praxis/internal/identity"
 	"praxis/internal/model"
+	"praxis/internal/timing"
 	"time"
 )
 
@@ -34,14 +35,14 @@ func (Message) kind() string { return kindMessage }
 type ModelResponse struct {
 	RequestID  identity.ModelRequestID `json:"requestId"`
 	StopReason string                  `json:"stopReason"`
-	Timing     *Timing                 `json:"timing,omitempty"`
+	Timing     *timing.Timing          `json:"timing,omitempty"`
 }
 
 // Summary 保存上下文压缩后的历史资料快照，同时作为活跃模型上下文的截断点。
 type Summary struct {
 	Text       string                    `json:"text"`
 	RequestIDs []identity.ModelRequestID `json:"requestIds"`
-	Timing     *Timing                   `json:"timing,omitempty"`
+	Timing     *timing.Timing            `json:"timing,omitempty"`
 }
 
 func (Summary) kind() string { return kindSummary }

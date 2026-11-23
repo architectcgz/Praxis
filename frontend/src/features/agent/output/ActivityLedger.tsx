@@ -28,17 +28,30 @@ export function isOpenByDefault(status: ToolStatus): boolean {
 }
 
 /**
- * 活动账本的一行：折叠时是 28px 细行，展开后是仪器域面板。
- * 工具调用在正文列里保持发生顺序，因此这里仍是 details，不搬进侧栏。
- *
- * 右列只放一个值，避免「运行中 · 12s」这类组合把参数列挤成逐行抖动：
- * 异常状态（待批准 / 失败）显示状态词，其余显示耗时；没有计时记录时回落到
- * 状态词，不留空列。两者都由标记图标的可访问名称补齐，语义不丢失。
+ * 方案 A 统一细线账本的单行工具项：
+ * 折叠时为紧凑自适应单行（图标动词 + 主参数 + 右侧结果微指标 + 耗时 + 状态图标），
+ * 展开后衔接扁平仪器域视图。
  */
-export function ActivityItem({ tone, name, argument, status, statusLabel, duration, open = false, foot, children }: {
+export function ActivityItem({
+    tone,
+    icon,
+    name,
+    rawName,
+    argument,
+    metrics,
+    status,
+    statusLabel,
+    duration,
+    open = false,
+    foot,
+    children,
+}: {
     tone: ActivityTone
+    icon?: ReactNode
     name: string
+    rawName?: string
     argument: string
+    metrics?: ReactNode
     status: ToolStatus
     statusLabel?: string
     duration?: ReactNode
@@ -50,19 +63,25 @@ export function ActivityItem({ tone, name, argument, status, statusLabel, durati
     const label = statusLabel || statusLabels[status]
     const exceptional = tone === 'wait' || tone === 'bad'
     const meta = exceptional || !duration ? label : duration
-    return <details className="act" data-tone={tone} open={open || undefined}>
-        <summary className="act-row">
-            <ChevronRight className="act-chevron" size={13} strokeWidth={2} aria-hidden="true" />
-            <span className="act-name">{name}</span>
-            <span className="act-arg" title={argument}>{argument}</span>
-            <span className="act-time">{meta}</span>
-            <span className="act-mark" role="img" aria-label={label} title={label}>
-                <Icon size={13} aria-hidden="true" />
-            </span>
-        </summary>
-        <div className="act-body instrument">
-            {children}
-            {foot && <div className="instrument-foot">{foot}</div>}
-        </div>
-    </details>
+    return (
+        <details className="act" data-tone={tone} open={open || undefined}>
+            <summary className="act-row">
+                <ChevronRight className="act-chevron" size={13} strokeWidth={2} aria-hidden="true" />
+                <span className="act-verb" title={rawName || name}>
+                    {icon}
+                    <span>{name}</span>
+                </span>
+                <span className="act-arg" title={argument}>{argument}</span>
+                {metrics && <span className="act-metrics">{metrics}</span>}
+                <span className="act-time">{meta}</span>
+                <span className="act-mark" role="img" aria-label={label} title={label}>
+                    <Icon size={13} aria-hidden="true" />
+                </span>
+            </summary>
+            <div className="act-body instrument">
+                {children}
+                {foot && <div className="instrument-foot">{foot}</div>}
+            </div>
+        </details>
+    )
 }

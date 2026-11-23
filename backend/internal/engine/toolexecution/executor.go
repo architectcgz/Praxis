@@ -12,6 +12,7 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/event"
 	"praxis/internal/identity"
+	"praxis/internal/timing"
 	"praxis/internal/tool"
 	"strings"
 	"sync"
@@ -86,7 +87,7 @@ type CallResult struct {
 	ToolResult  tool.ToolResult
 	OperationID identity.OperationID
 	Arguments   json.RawMessage
-	Timing      *entry.Timing
+	Timing      *timing.Timing
 	Err         error
 }
 
@@ -294,7 +295,7 @@ func decodeToolArguments(raw string, target any) error {
 type observedCall struct {
 	call     func(context.Context) (tool.ToolResult, error)
 	name     tool.ToolName
-	timing   *entry.Timing
+	timing   *timing.Timing
 	run      RunOwner
 	hooks    *hook.Dispatcher
 	emitter  *event.Emitter
@@ -310,7 +311,7 @@ func (t *observedCall) Call(ctx context.Context) (result tool.ToolResult, err er
 		ReferenceID: t.callID,
 	})
 	defer func() { scope.End(hook.Result{Err: err, ToolErrorClass: result.ErrorClass}) }()
-	span := entry.NewSpan()
+	span := timing.NewSpan()
 	t.emitter.Emit(event.Event{
 		Source: t.run.EventSource(t.identity.TurnID),
 		Payload: event.ToolStarted{

@@ -1,45 +1,44 @@
-/* 工具调用、终端、文件变更与协作结果的样式。
+/* 工具调用（方案 A 统一细线账本）、终端、文件补丁与 Agent 交接卡片样式。
 
    三条结构约定：
-   1) 工具调用是「有先后的动作」，留在正文列里按发生顺序排列在活动账本（.acts）内，
-      每条调用各自成卡并保留清晰垂直间距，避免连续命令与展开面板首尾粘连。
-   2) 展开后的参数与输出属于仪器域。仪器域内部是**扁平**的：只有分区和 1px 分隔线，
-      不允许再嵌套圆角盒子，否则会形成「盒子里的盒子里的盒子」。
-   3) 协作结果是阅读内容，留在纸上，因此 .output-card / .output-fold 的默认配色是纸张色。 */
+   1) 连续普通工具调用归入同一张统一细线账本（.acts），项与项之间仅以 1px 细线分隔，
+      折叠态通过语义图标动词、主参数与内联结果微指标一扫即明。
+   2) 展开后的参数与输出属于仪器域，内部严格扁平：只有分区与 1px 分隔线，不嵌套圆角盒子。
+   3) Agent 交接（委派、补充指令、同步等待、子代理汇报、子代理收到的委派任务）独立于用户气泡
+      与普通工具账本，全部采用均匀 1px 细边框卡片或轻态同步条呈现。 */
 
 /* =====================================================================
-   活动账本（正文列）
-
-   每行只放一次调用的四个客观事实，且右列固定宽度并右对齐，
-   这样耗时与状态词在各行之间形成一条整齐的竖线，参数列不会逐行抖动。
+   方案 A：统一细线活动账本（正文列）
    ===================================================================== */
 .output-activity {
     margin-top: 0;
 }
 
 .acts {
-    display: grid;
-    gap: 8px;
+    overflow: hidden;
     margin: var(--message-content-gap, 14px) 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: var(--panel-sub);
+}
+
+.agent-activity .acts {
+    margin: 0;
 }
 
 .act {
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-card);
-    background: var(--paper-2);
-    transition: border-color var(--motion-duration) var(--ease-standard);
+    border-bottom: 1px solid var(--line);
+    background: transparent;
 }
 
-.act[open] {
-    border-color: var(--line-strong);
+.act:last-child {
+    border-bottom: 0;
 }
 
 .act-row {
-    display: grid;
-    grid-template-columns: 14px 124px minmax(0, 1fr) 72px 14px;
-    gap: 10px;
+    display: flex;
     align-items: center;
+    gap: 8px;
     min-height: 34px;
     padding: 5px 12px;
     cursor: pointer;
@@ -56,17 +55,20 @@
 }
 
 .act[open] > .act-row {
-    background: var(--paper-strong);
+    background: var(--panel-bg);
 }
 
+.act[data-tone='live'] > .act-row,
 .act[data-tone='live'][open] > .act-row {
     background: var(--live-soft);
 }
 
+.act[data-tone='wait'] > .act-row,
 .act[data-tone='wait'][open] > .act-row {
     background: var(--warn-soft);
 }
 
+.act[data-tone='bad'] > .act-row,
 .act[data-tone='bad'][open] > .act-row {
     background: var(--danger-soft);
 }
@@ -76,6 +78,7 @@
 }
 
 .act-chevron {
+    flex: none;
     color: var(--faint);
     transition: transform var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
 }
@@ -90,20 +93,25 @@
     outline-offset: -2px;
 }
 
-/* 名称：最重的一档，等宽保证工具名对齐。 */
-.act-name {
-    overflow: hidden;
+/* 语义类别图标 + 中文动词，自适应宽度避免长名截断或短名大段留白。 */
+.act-verb {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 5px;
     color: var(--ink);
-    font-family: var(--mono);
     font-size: var(--font-size-meta);
     font-weight: 650;
     line-height: 1.3;
-    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-/* 参数：这一行的正文，比名称轻、比右列重。 */
+.act-verb > svg {
+    color: var(--muted);
+}
+
 .act-arg {
+    flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     color: var(--muted);
@@ -114,21 +122,61 @@
     white-space: nowrap;
 }
 
-/* 耗时或状态词：固定宽度 + 右对齐 + 等宽数字，是最安静的一档。 */
+/* 折叠态内联结果微指标（+N/-M、退出码、行数、体积、截断标记）。 */
+.act-metrics {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.act-metric-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 19px;
+    padding: 0 6px;
+    border-radius: var(--radius-chip);
+    background: var(--fill);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.act-metric-pill.is-add {
+    background: var(--inst-add-bg);
+    color: var(--inst-add-ink);
+}
+
+.act-metric-pill.is-del {
+    background: var(--inst-del-bg);
+    color: var(--inst-del-ink);
+}
+
+.act-metric-pill.is-bad {
+    border: 1px solid var(--danger-line);
+    background: var(--danger-soft);
+    color: var(--danger-ink);
+}
+
 .act-time {
-    overflow: hidden;
+    flex: none;
     color: var(--faint);
     font-family: var(--mono);
     font-size: var(--font-size-meta);
     font-variant-numeric: tabular-nums;
     line-height: 1.3;
     text-align: right;
-    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .act-mark {
     display: grid;
+    width: 15px;
+    flex: none;
     place-items: center;
     color: var(--faint);
 }
@@ -138,12 +186,8 @@
     color: var(--accent);
 }
 
-.act[data-tone='live'] {
-    border-color: var(--live-line);
-    background: var(--live-soft);
-}
-
-.act[data-tone='live'] .act-name {
+.act[data-tone='live'] .act-verb,
+.act[data-tone='live'] .act-verb > svg {
     color: var(--live-ink);
 }
 
@@ -152,12 +196,8 @@
     animation: praxis-spin var(--motion-duration-spinner) linear var(--motion-iteration-count);
 }
 
-.act[data-tone='wait'] {
-    border-color: var(--warn-line);
-    background: var(--warn-soft);
-}
-
-.act[data-tone='wait'] .act-name {
+.act[data-tone='wait'] .act-verb,
+.act[data-tone='wait'] .act-verb > svg {
     color: var(--warn-ink);
 }
 
@@ -165,12 +205,8 @@
     color: var(--warn);
 }
 
-.act[data-tone='bad'] {
-    border-color: var(--danger-line);
-    background: var(--danger-soft);
-}
-
-.act[data-tone='bad'] .act-name {
+.act[data-tone='bad'] .act-verb,
+.act[data-tone='bad'] .act-verb > svg {
     color: var(--danger-ink);
 }
 
@@ -178,9 +214,6 @@
     color: var(--danger);
 }
 
-/* 账本展开体：它是账本里的一行，不是独立卡片。
-   因此必须与账本同宽、去掉自身的边框与圆角，只靠一条细线与上面的行衔接；
-   否则会形成「圆角盒子套在圆角账本里」的双层轮廓。 */
 .act > .act-body {
     border: 0;
     border-radius: 0;
@@ -189,7 +222,451 @@
 }
 
 /* =====================================================================
-   仪器域内容：扁平分区 + 1px 分隔线，不再嵌套圆角盒子
+   Agent 交接卡片与同步条（统一 1px 细边框，无左侧粗色带）
+   ===================================================================== */
+.handoff-slot {
+    margin: var(--message-content-gap, 14px) 0;
+}
+
+.agent-activity .handoff-slot {
+    margin: 0;
+}
+
+.handoff-message {
+    display: block;
+    text-align: left;
+}
+
+.handoff-card {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: var(--panel-bg);
+}
+
+.handoff-card.is-incoming {
+    border-color: var(--done-line);
+}
+
+.handoff-card.is-live {
+    border-color: var(--live-line);
+}
+
+.handoff-card.is-fail {
+    border-color: var(--danger-line);
+}
+
+.handoff-head,
+.handoff-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-sub);
+}
+
+.handoff-card.is-incoming .handoff-head,
+.handoff-card.is-incoming .handoff-summary {
+    border-bottom-color: var(--done-line);
+    background: var(--done-soft);
+}
+
+.handoff-card.is-fail .handoff-head,
+.handoff-card.is-fail .handoff-summary {
+    border-bottom-color: var(--danger-line);
+    background: var(--danger-soft);
+}
+
+.handoff-card.is-live .handoff-head {
+    border-bottom-color: var(--live-line);
+    background: var(--live-soft);
+}
+
+.handoff-details:not([open]) > .handoff-summary {
+    border-bottom-color: transparent;
+}
+
+.handoff-summary {
+    cursor: pointer;
+    list-style: none;
+    transition: background-color var(--motion-duration) var(--ease-standard);
+}
+
+.handoff-summary::-webkit-details-marker {
+    display: none;
+}
+
+.handoff-summary:hover {
+    filter: brightness(0.985);
+}
+
+.handoff-chev {
+    flex: none;
+    color: var(--faint);
+    transition: transform var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
+
+.handoff-details[open] > .handoff-summary .handoff-chev {
+    color: var(--ink);
+    transform: rotate(90deg);
+}
+
+.handoff-route {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.handoff-pill {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.handoff-pill.is-accent {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+
+.handoff-pill.is-done {
+    border-color: var(--done-line);
+    background: var(--panel-bg);
+    color: var(--done-ink);
+}
+
+.handoff-pill.is-live {
+    border-color: var(--live-line);
+    background: var(--panel-bg);
+    color: var(--live-ink);
+}
+
+.handoff-pill.is-warn {
+    border-color: var(--warn-line);
+    background: var(--warn-soft);
+    color: var(--warn-ink);
+}
+
+.handoff-pill.is-fail {
+    border-color: var(--danger-line);
+    background: var(--panel-bg);
+    color: var(--danger-ink);
+}
+
+.handoff-agent-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.handoff-tag {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: var(--radius-pill);
+    background: var(--fill);
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.handoff-tag.is-done {
+    background: var(--done-soft);
+    color: var(--done-ink);
+}
+
+.handoff-tag.is-accent {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+
+.handoff-tag.is-live {
+    background: var(--live-soft);
+    color: var(--live-ink);
+}
+
+.handoff-tag.is-warn {
+    background: var(--warn-soft);
+    color: var(--warn-ink);
+}
+
+.handoff-tag.is-fail {
+    background: var(--danger-soft);
+    color: var(--danger-ink);
+}
+
+.handoff-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+}
+
+.handoff-time {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.handoff-jump {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--ink);
+    font-size: 11.5px;
+    font-weight: 650;
+    white-space: nowrap;
+    transition: background-color var(--motion-duration) var(--ease-standard), border-color var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
+
+.handoff-jump:hover {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+
+.handoff-body {
+    display: grid;
+    gap: 8px;
+    padding: 10px 12px 11px;
+    background: var(--panel-bg);
+}
+
+.handoff-task-text {
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.handoff-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+}
+
+.handoff-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+}
+
+.handoff-meta-label {
+    color: var(--faint);
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.handoff-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-chip);
+    background: var(--panel-sub);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.handoff-timeout {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.handoff-preview {
+    display: -webkit-box;
+    padding: 8px 12px 10px;
+    overflow: hidden;
+    border-top: 1px solid var(--line);
+    background: var(--panel-bg);
+    color: var(--muted);
+    font-size: var(--font-size-ui);
+    line-height: 1.55;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.handoff-details[open] > .handoff-preview {
+    display: none;
+}
+
+.handoff-report-body {
+    display: grid;
+    gap: 10px;
+    padding: 12px 14px 12px;
+    background: var(--panel-bg);
+}
+
+.handoff-report-body .message-markdown {
+    font-size: var(--font-size-ui);
+}
+
+.handoff-report-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+}
+
+.handoff-report-id {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+.handoff-error-inline {
+    margin-top: 0;
+}
+
+/* 同步等待与取消轻态条（subagent_wait / subagent_cancel） */
+.handoff-strip {
+    display: grid;
+    gap: 8px;
+    padding: 7px 12px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-control);
+    background: var(--panel-sub);
+    color: var(--muted);
+    font-size: var(--font-size-meta);
+}
+
+.handoff-strip.is-live {
+    border-style: solid;
+    border-color: var(--live-line);
+    background: var(--live-soft);
+}
+
+.handoff-strip.is-fail {
+    border-style: solid;
+    border-color: var(--danger-line);
+    background: var(--danger-soft);
+}
+
+.handoff-strip-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+}
+
+.handoff-strip-left {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.handoff-strip-icon {
+    flex: none;
+    color: var(--faint);
+}
+
+.handoff-strip.is-live .handoff-strip-icon {
+    color: var(--live);
+}
+
+.handoff-strip.is-fail .handoff-strip-icon {
+    color: var(--danger);
+}
+
+.handoff-strip-label {
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.handoff-strip-pills {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+}
+
+.handoff-agent-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--panel-bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    transition: border-color var(--motion-duration) var(--ease-standard), background-color var(--motion-duration) var(--ease-standard);
+}
+
+button.handoff-agent-pill:hover {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+
+.handoff-agent-pill-state {
+    color: var(--faint);
+    font-family: inherit;
+    font-weight: 500;
+}
+
+.handoff-strip-right {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+}
+
+.handoff-strip-done {
+    color: var(--accent);
+}
+
+/* =====================================================================
+   仪器域内容：扁平分区 + 1px 分隔线，不嵌套圆角盒子
    ===================================================================== */
 .instrument .output-section {
     display: grid;
@@ -210,13 +687,106 @@
     min-height: 22px;
 }
 
-/* 分区标签说明这一段是什么，中文标签不拉大字距。 */
 .instrument .output-section-label {
+    min-width: 0;
+    overflow: hidden;
     color: var(--inst-dim);
     font-family: var(--mono);
     font-size: var(--font-size-meta);
     font-weight: 650;
     line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* read_file 带行号内容区 */
+.instrument .output-file-numbered {
+    gap: 0;
+    padding: 0;
+}
+
+.instrument .output-file-head {
+    padding: 6px 10px 6px 12px;
+    border-bottom: 1px solid var(--inst-line);
+    background: var(--inst-bg-2);
+}
+
+.output-code-lines {
+    max-height: 360px;
+    overflow: auto;
+    padding: 6px 0;
+    font-family: var(--mono);
+    font-size: var(--font-size-meta);
+    line-height: var(--line-height-code);
+}
+
+.output-code-row {
+    display: grid;
+    grid-template-columns: minmax(40px, auto) max-content;
+    min-width: 100%;
+}
+
+.output-code-ln {
+    padding: 0 8px;
+    border-right: 1px solid var(--inst-line);
+    color: var(--inst-dim);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    user-select: none;
+}
+
+.output-code-row code {
+    padding: 0 12px 0 10px;
+    color: var(--inst-ink);
+    white-space: pre;
+}
+
+/* 单文件 apply_patch 扁平头部与 Diff */
+.instrument .output-patch-single {
+    gap: 0;
+    padding: 0;
+}
+
+.output-patch-file-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--inst-line);
+    background: var(--inst-bg-2);
+}
+
+.output-patch-empty {
+    padding: 10px 12px;
+}
+
+/* Bash 紧凑命令栏 */
+.output-command-bar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px 8px 12px;
+    border-bottom: 1px solid var(--inst-line);
+    background: var(--inst-bg-2);
+}
+
+.output-command-bar-right {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+}
+
+.output-command-dir {
+    max-width: 160px;
+    overflow: hidden;
+    color: var(--inst-dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .output-kv-grid {
@@ -309,8 +879,10 @@
     gap: 8px;
 }
 
-/* ---------- 命令：提示符 + 原文，不用文字标签 ---------- */
+/* ---------- 命令：提示符 + 原文 ---------- */
 .instrument .output-command {
+    flex: 1 1 auto;
+    min-width: 0;
     max-height: 180px;
     margin: 0;
     overflow: auto;
@@ -329,18 +901,6 @@
     color: var(--inst-accent);
     font-weight: 700;
     user-select: none;
-}
-
-.instrument .output-command-context {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    color: var(--inst-dim);
-    font-size: var(--font-size-meta);
-}
-
-.instrument .output-command-context code {
-    color: var(--inst-ink);
 }
 
 /* ---------- 纯文本参数与输出 ---------- */
@@ -400,7 +960,7 @@
     overflow-wrap: anywhere;
 }
 
-/* ---------- 文件列表：扁平行 + 细线，不是一个个盒子 ---------- */
+/* ---------- 文件列表：扁平行 + 细线 ---------- */
 .instrument .output-fold {
     border: 0;
     border-radius: 0;
@@ -412,8 +972,8 @@
 }
 
 .instrument .output-fold-button {
-    min-height: 26px;
-    padding: 2px 0;
+    min-height: 28px;
+    padding: 3px 0;
     color: var(--inst-ink);
 }
 
@@ -481,10 +1041,9 @@
 }
 
 /* ---------- 仪器域内的嵌套内容一律压平 ---------- */
-/* 工具输出若本身是 Markdown，代码块与表格会再次渲染成 .instrument，
-   在仪器域里嵌套圆角盒子；这里把它们压成同一层。 */
 .instrument .instrument,
 .instrument .markdown-code-block,
+.instrument .markdown-code-block.is-plain,
 .instrument .markdown-table {
     border: 0;
     border-radius: 0;
@@ -495,6 +1054,17 @@
 .instrument .markdown-code-block,
 .instrument .markdown-table {
     margin: 0;
+}
+
+.instrument .markdown-code-block.is-plain pre,
+.instrument .markdown-code-block.is-plain pre code {
+    color: var(--inst-ink);
+}
+
+.instrument .markdown-code-block.is-plain .markdown-code-kind,
+.instrument .markdown-code-block.is-plain .markdown-code-lines,
+.instrument .markdown-code-block.is-plain .markdown-code-chevron {
+    color: var(--inst-dim);
 }
 
 .instrument .markdown-code-toolbar,
@@ -522,7 +1092,6 @@
     right: 0;
 }
 
-/* 仪器域内的 Markdown 必须整体翻到深色域配色，否则深底深字不可读。 */
 .instrument .message-markdown {
     color: var(--inst-ink);
 }
@@ -562,7 +1131,6 @@
     background: var(--inst-fill);
 }
 
-/* ---------- 仪器域内的描边按钮 ---------- */
 .instrument .output-button {
     border-color: var(--inst-line);
     color: var(--inst-ink);
@@ -596,7 +1164,7 @@
 }
 
 /* =====================================================================
-   状态芯片：22px / 3px 圆角 / 软底 + 深色文字 + 圆点
+   状态芯片与折叠文件行
    ===================================================================== */
 .output-chip {
     display: inline-flex;
@@ -641,48 +1209,12 @@
     color: var(--danger);
 }
 
-/* =====================================================================
-   输出卡片与折叠行：纸张背景下的通用容器
-   ===================================================================== */
-.output-card {
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-card);
-    background: var(--paper-2);
-}
-
-.output-card-head {
-    display: flex;
-    min-height: 38px;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--line);
-    color: var(--faint);
-}
-
-.output-card-head h3 {
-    min-width: 0;
-    flex: 1;
-    margin: 0;
-    color: var(--ink);
-    font-size: var(--font-size-ui);
-    font-weight: 650;
-}
-
-.output-card-body {
-    display: grid;
-    gap: 12px;
-    padding: 12px;
-}
-
 .output-muted {
     margin: 0;
     color: var(--faint);
     font-size: var(--font-size-meta);
 }
 
-/* 协作卡片里的折叠行属于纸张背景。 */
 .output-fold {
     border: 1px solid var(--line);
     border-radius: var(--radius-control);
@@ -710,12 +1242,6 @@
 
 .output-fold[open] > .output-fold-button {
     border-bottom: 1px solid var(--line);
-}
-
-.output-fold-body {
-    display: grid;
-    gap: 10px;
-    padding: 10px;
 }
 
 .output-chevron {
@@ -778,9 +1304,18 @@
 
 @media (max-width: 720px) {
     .act-row {
-        grid-template-columns: 12px 92px minmax(0, 1fr) 64px 14px;
-        gap: 8px;
-        padding: 4px 10px;
+        gap: 6px;
+        padding: 5px 10px;
+    }
+
+    .act-metrics {
+        display: none;
+    }
+
+    .handoff-head,
+    .handoff-summary {
+        flex-wrap: wrap;
+        padding: 6px 10px;
     }
 }
 

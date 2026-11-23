@@ -469,7 +469,10 @@
 }
 
 /* =====================================================================
-   代码块：机器输出，容器材质来自 common.css 的 .instrument
+   代码块与纯文本框：
+   - 命名代码块沿用 .instrument 仪器域材质；
+   - 无语言 / text 纯文本框采用轻纸面（--panel-sub + 1px 细边），
+     顶栏统一左侧折叠箭头 + 类型图标 + 右侧行数与复制键。
    ===================================================================== */
 .markdown-code-block {
     position: relative;
@@ -477,17 +480,30 @@
     margin: var(--message-content-gap, 14px) 0;
 }
 
+.markdown-code-block.is-plain {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: var(--panel-sub);
+    color: var(--ink);
+}
+
 .markdown-code-toolbar {
     display: flex;
-    min-height: 34px;
+    min-height: 32px;
     align-items: center;
-    gap: 10px;
-    padding: 0 42px 0 14px;
+    gap: 7px;
+    padding: 0 38px 0 11px;
     border-bottom: 1px solid var(--inst-line);
     background: var(--inst-bg-2);
     cursor: pointer;
     list-style: none;
     transition: background-color var(--motion-duration) var(--ease-standard);
+}
+
+.markdown-code-block.is-plain .markdown-code-toolbar {
+    border-bottom-color: var(--line);
+    background: transparent;
 }
 
 .markdown-code-toolbar::-webkit-details-marker {
@@ -498,24 +514,83 @@
     background: var(--inst-fill);
 }
 
+.markdown-code-block.is-plain .markdown-code-toolbar:hover {
+    background: var(--fill-soft);
+}
+
 .markdown-code-block details:not([open]) .markdown-code-toolbar {
     border-bottom: 0;
 }
 
+.markdown-code-chevron {
+    flex: none;
+    color: var(--inst-dim);
+    transition: transform var(--motion-duration) var(--ease-standard), color var(--motion-duration) var(--ease-standard);
+}
+
+.markdown-code-block.is-plain .markdown-code-chevron {
+    color: var(--faint);
+}
+
+.markdown-code-block details[open] > .markdown-code-toolbar .markdown-code-chevron {
+    color: var(--inst-ink);
+    transform: rotate(90deg);
+}
+
+.markdown-code-block.is-plain details[open] > .markdown-code-toolbar .markdown-code-chevron {
+    color: var(--muted);
+}
+
+.markdown-code-kind {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 5px;
+    color: var(--inst-dim);
+}
+
+.markdown-code-block.is-plain .markdown-code-kind {
+    color: var(--muted);
+}
+
+.markdown-code-kind > svg {
+    flex: none;
+}
+
 .markdown-code-language {
     min-width: 0;
-    flex: 1;
     overflow: hidden;
-    color: var(--inst-dim);
+    color: inherit;
     font-family: var(--mono);
     font-size: var(--font-size-meta);
+    font-weight: 600;
     line-height: 1.2;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+.markdown-code-block.is-plain .markdown-code-language {
+    font-family: inherit;
+    font-weight: 600;
+}
+
+.markdown-code-lines {
+    margin-left: auto;
+    flex: none;
+    color: var(--inst-dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.markdown-code-block.is-plain .markdown-code-lines {
+    color: var(--faint);
+}
+
 .markdown-code-changes {
     display: flex;
+    margin-left: auto;
     gap: 8px;
     font-family: var(--mono);
     font-size: var(--font-size-meta);
@@ -530,16 +605,12 @@
     color: var(--inst-del-ink);
 }
 
-.markdown-code-block details[open] summary svg {
-    transform: rotate(180deg);
-}
-
 .markdown-code-block pre {
     max-width: none;
-    max-height: 420px;
+    max-height: 440px;
     margin: 0;
     overflow: auto;
-    padding: 12px 14px;
+    padding: 12px 16px 14px;
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -551,10 +622,43 @@
     font: var(--font-size-meta)/var(--line-height-code) var(--mono);
 }
 
+.markdown-code-block.is-plain pre {
+    color: var(--ink);
+}
+
+.markdown-code-block.is-plain pre code {
+    color: var(--ink);
+    font: 12.5px/1.72 var(--mono);
+}
+
+.markdown-plain-pre {
+    margin: var(--message-content-gap, 14px) 0;
+    padding: 12px 16px;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: var(--panel-sub);
+    color: var(--ink);
+    font: 12.5px/1.72 var(--mono);
+}
+
 .markdown-code-copy-button {
     position: absolute;
-    top: 5px;
-    right: 8px;
+    top: 4px;
+    right: 6px;
+}
+
+.markdown-code-block.is-plain .markdown-code-copy-button {
+    color: var(--faint);
+}
+
+.markdown-code-block.is-plain .markdown-code-copy-button:hover:not(:disabled) {
+    background: var(--fill);
+    color: var(--ink);
+}
+
+.markdown-code-block.is-plain .markdown-code-copy-button.copied {
+    color: var(--accent);
 }
 
 /* diff 行（代码块与工具输出共用） */

@@ -30,7 +30,7 @@ Praxis 的执行与历史按 Session、Run、Turn 和 Entry 组织，Task Queue 
 | `core/task` | Task 数据，以及 FIFO、领取、暂停和恢复等队列行为 | Task 不保存执行配置；队列只存在内存，不推进 Run 状态或自行启动执行 |
 | `core/coordinator` | 会话加载与定位、输入路由、按 Session 隔离的队列调度、活动 Run 登记及控制交接 | 调用队列和 Run 的明确行为，不复制其状态规则，不展开模型、工具和存储实现细节 |
 | `core/entry` | Entry、内容块、Turn 和模型请求等共享事实类型 | 只表达事实数据和身份关联，不引用 Run、Loop 或 Session 执行对象；不携带 BranchID |
-| `core/timing` | 通用计时记录与测量能力 | 供模型、工具和执行流程共享，不依附于 Run 模块 |
+| `internal/timing` | 通用计时记录与测量能力 | 供模型、工具和执行流程共享，不依附于 Run 模块 |
 | `core/event` | 公共通知数据、订阅分发及作用域绑定 | 不反向引用 Run 等执行对象，不承担事实持久化或业务推进 |
 | `core/agent/run` | 单次执行的身份、配置、状态、结果、统计、执行证据和完整执行入口 | Run 自身提供 `Execute`，组织准备、Loop 调用和收尾；不领取下一项 Task |
 | `core/loop` | ReAct 多 Turn 推进、模型请求、工具调用及执行输入边界 | 通过所需接口协作，不依赖完整 Service 或 Coordinator |
@@ -79,7 +79,7 @@ Core 内的依赖方向是 Run 调用 Loop，Run、Loop 和 Session 共同使用
 | `core/task/` | `task.go`、`queue.go`，分别表达待执行输入和队列行为 |
 | `core/coordinator/` | 会话定位、输入接纳、任务调度和活动 Run 控制交接 |
 | `core/entry/` | Entry、具体事实载荷及持久化编码、消息与模型请求共用的内容块 |
-| `core/timing/` | 通用计时记录与测量能力 |
+| `timing/` | 通用计时记录与测量能力 |
 | `core/agent/run/` | Run 的信息、状态规则、`Execute`、输入与结果接收，以及本次执行的收尾 |
 | `core/loop/` | ReAct、模型请求、工具调用和上下文构建的核心流程 |
 | `service/session/` | 会话应用用例、配置加载与保存协作 |
@@ -524,7 +524,7 @@ Store 负责保存、读取和变更通知，事件处理函数负责接纳事�
 2. 将 Coordinator 和唯一的 `sessionRegistry` 收敛到 Core；Service 通过 Core 加载和取得会话。
 3. 明确 Repo 加载成功即返回可用 Session 的契约，将内部记录读取、重建和恢复封装在加载实现内。
 4. 将 Task 和队列行为组织到 `core/task`，由 Coordinator 按 Session 管理队列和 Main Run 占用。
-5. 将共享事实和通用计时放到 `core/entry`、`core/timing`，确保公共模块不反向依赖 Run 或 Loop。
+5. 共享事实和通用计时分别由 `internal/entry`、`internal/timing` 提供，不反向依赖 Run 或 Loop。
 6. 将本次执行的信息和行为统一到 Run，由 `Run.Execute` 直接调用 Loop，明确 Run 收尾与 Coordinator 后续调度的交接边界。
 7. 将 Loop 和 Run 的执行事实提交收敛到唯一的 `AppendEntry`，统一 Turn、模型请求、用量、计时和 Run 终态的保存语义，分别组织记录与通知调用。
 8. 将通知作用域绑定到发布函数与前端通道，前端按 Session 持有固定作用域 Store，按业务语义组织任务提交、运行控制、历史和流式处理模块。

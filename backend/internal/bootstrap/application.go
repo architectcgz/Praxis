@@ -65,11 +65,12 @@ func (a *Application) Services() bindings.Services {
 	return a.frontend
 }
 
-// Options 在初始化阶段注入执行器、工具和 Hook；运行期间不修改注册表。
+// Options 在装配阶段注入运行期固定的依赖。
 type Options struct {
-	Runner *loop.Runner
-	Tools  []tool.Tool
-	Hooks  []any
+	Runner       *loop.Runner
+	Tools        []tool.Tool
+	Hooks        []any
+	OnAgentEvent func(event.Event)
 }
 
 // Open 只做高层装配；会话 Context 按需恢复，启动不继续旧 Run。
@@ -103,7 +104,7 @@ func Open(ctx context.Context, root config.DataRoot, options Options) (_ *Applic
 	if err != nil {
 		return nil, err
 	}
-	emitter := event.NewEmitter()
+	emitter := event.NewEmitter(options.OnAgentEvent)
 	hooks, err := hook.NewDispatcher(options.Hooks...)
 	if err != nil {
 		return nil, err
@@ -120,7 +121,6 @@ func Open(ctx context.Context, root config.DataRoot, options Options) (_ *Applic
 	a.frontend = bindings.Services{
 		Projects: projects,
 		Sessions: a.sessions,
-		Emitter:  emitter,
 	}
 	a.logger.Infof("application open completed ready=true")
 	ready = true

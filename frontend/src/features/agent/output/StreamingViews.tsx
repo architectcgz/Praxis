@@ -1,6 +1,7 @@
 import { memo, type ReactNode } from 'react'
 import { CircleAlert, LoaderCircle } from 'lucide-react'
 import type { AgentEvent } from '../../../api'
+import type { AgentDirectory } from './HandoffViews'
 import { MessageMarkdown } from './MarkdownViews'
 import { StreamingToolCallsView } from './ToolCallViews'
 import { ThinkingDetails } from './ThinkingDetails'
@@ -40,13 +41,24 @@ export const AgentActivityView = memo(function AgentActivityView({ thinking, str
     )
 })
 
-export function StreamingTurnView({ agentName, events, runStartedAt, active, continuation = false, hasContinuation = false }: {
+export function StreamingTurnView({
+    agentName,
+    agentDirectory,
+    events,
+    runStartedAt,
+    active,
+    continuation = false,
+    hasContinuation = false,
+    onOpenSubagent,
+}: {
     agentName: string
+    agentDirectory?: AgentDirectory
     events: AgentEvent[]
     runStartedAt?: string
     active: boolean
     continuation?: boolean
     hasContinuation?: boolean
+    onOpenSubagent?: (id: string) => void
 }) {
     const started = events.findLast((event): event is Extract<AgentEvent, { kind: 'model_request_started' }> => event.kind === 'model_request_started')
     const finished = events.findLast((event) => event.kind === 'model_request_completed' || event.kind === 'model_request_failed' || event.kind === 'model_request_interrupted')
@@ -56,7 +68,15 @@ export function StreamingTurnView({ agentName, events, runStartedAt, active, con
     let tools: AgentEvent[] = []
     const flushTools = (index: number) => {
         if (tools.length === 0) return
-        segments.push(<StreamingToolCallsView tools={tools} pendingStatus={pendingStatus} key={`tools-${index}`} />)
+        segments.push(
+            <StreamingToolCallsView
+                tools={tools}
+                pendingStatus={pendingStatus}
+                agentDirectory={agentDirectory}
+                onOpenSubagent={onOpenSubagent}
+                key={`tools-${index}`}
+            />,
+        )
         tools = []
     }
     events.forEach((event, index) => {
@@ -77,16 +97,20 @@ export function StreamingTurnView({ agentName, events, runStartedAt, active, con
         }
     })
     flushTools(events.length)
-    return <div className={`streaming-turn${hasContinuation ? ' streaming-turn-continued' : ''}`}>
-        {!continuation && <div className="message message-assistant streaming-turn-header">
-            <div className="message-meta">
-                <strong>{agentName}</strong>
-                <RunDuration startedAt={runStartedAt} label="运行中" />
+    return (
+        <div className={`streaming-turn${hasContinuation ? ' streaming-turn-continued' : ''}`}>
+            {!continuation && (
+                <div className="message message-assistant streaming-turn-header">
+                    <div className="message-meta">
+                        <strong>{agentName}</strong>
+                        <RunDuration startedAt={runStartedAt} label="运行中" />
+                    </div>
+                </div>
+            )}
+            {segments}
+            <div className="agent-activity turn-foot">
+                <MessageTiming usage={finished?.data.result?.usage} record={finished?.data.timing ?? started?.data.timing} running={active && !finished} />
             </div>
-        </div>}
-        {segments}
-        <div className="agent-activity turn-foot">
-            <MessageTiming usage={finished?.data.result?.usage} record={finished?.data.timing ?? started?.data.timing} running={active && !finished} />
         </div>
-    </div>
+    )
 }
