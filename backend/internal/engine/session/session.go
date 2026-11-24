@@ -11,6 +11,7 @@ import (
 	"praxis/internal/security"
 	"praxis/internal/tool"
 	"sync"
+	"sync/atomic"
 )
 
 // HistoryStore 保存和读取 Agent 的完整 History，不解释 Entry 的业务语义。
@@ -31,7 +32,6 @@ type Configuration struct {
 	Tools              tool.ToolCatalog
 	Provider           provider.Provider
 	GlobalApprovalMode security.ApprovalMode
-	ApprovalMode       security.ApprovalMode
 }
 
 func (c *Configuration) Definition(id identity.AgentDefinitionID) (agent.AgentDefinition, error) {
@@ -43,80 +43,96 @@ func (c *Configuration) Definition(id identity.AgentDefinitionID) (agent.AgentDe
 	return agent.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
 }
 
-// Session 持有会话配置和各 Agent 的 AgentContext。
-// 数据锁保护配置、Agent 登记与上下文；各 Agent 的 History 读写由存储串行化。
+// sessionSettings 及其引用的配置和审批覆盖在发布后只读。
+type sessionSettings struct {
+	configuration    *Configuration
+	choice           model.Choice
+	approvalOverride *security.ApprovalMode
+}
+
+// Session 的设置原子发布；agentsMu 只保护成员表，各 Agent 的上下文由所属执行串行访问。
 type Session struct {
-	mu            sync.RWMutex
-	configuration *Configuration
-	choice        model.Choice
-	data          *Data
-	log           HistoryStore
+	settings atomic.Pointer[sessionSettings]
+	agentsMu sync.RWMutex
+	data     *Data
+	log      HistoryStore
 }
 
 func New(data *Data, log HistoryStore) *Session {
-	return &Session{
+	s := &Session{
 		data: data,
 		log:  log,
 	}
+	s.settings.Store(&sessionSettings{})
+	return s
 }
 
-func (s *Session) Configure(config *Configuration, choice model.Choice) {
+func (s *Session) Configure(config *Configuration, choice model.Choice, override *security.ApprovalMode) {
 	if choice.ModelID == "" {
 		choice = config.Models.DefaultModel().DefaultChoice()
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.configuration = config
-	s.choice = choice
+	s.settings.Store(&sessionSettings{
+		configuration:    config,
+		choice:           choice,
+		approvalOverride: override,
+	})
 }
 
 func (s *Session) Configuration() *Configuration {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.configuration
+	return s.settings.Load().configuration
 }
 
 func (s *Session) Choice() model.Choice {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.choice
+	return s.settings.Load().choice
+}
+
+func (s *Session) SetChoice(choice model.Choice) {
+	for {
+		current := s.settings.Load()
+		next := new(*current)
+		next.choice = choice
+		if s.settings.CompareAndSwap(current, next) {
+			return
+		}
+	}
+}
+
+func (s *Session) SetApprovalMode(override *security.ApprovalMode) {
+	for {
+		current := s.settings.Load()
+		next := new(*current)
+		next.approvalOverride = override
+		if s.settings.CompareAndSwap(current, next) {
+			return
+		}
+	}
+}
+
+func (s *Session) ApprovalMode() security.ApprovalMode {
+	settings := s.settings.Load()
+	return security.EffectiveApprovalMode(settings.configuration.GlobalApprovalMode, settings.approvalOverride)
 }
 
 func (s *Session) RunConfiguration() (*Configuration, model.Config, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	model, err := s.configuration.Models.Get(s.choice)
-	return s.configuration, model, err
+	settings := s.settings.Load()
+	model, err := settings.configuration.Models.Get(settings.choice)
+	return settings.configuration, model, err
 }
 
 // AgentContext 返回指定 Agent 最近摘要及之后的活跃历史窗口只读切片，供所属串行执行筛选使用。
 func (s *Session) AgentContext(agentID identity.AgentID) ([]*entry.Entry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if !s.data.HasAgent(agentID) {
+	agentCtx := s.agentContext(agentID)
+	if agentCtx == nil {
 		return nil, fmt.Errorf("agent %s is not part of session", agentID)
 	}
-	return s.data.Context(agentID).Entries, nil
+	return agentCtx.Entries, nil
 }
 
-// RegisterAgent 记录已存在的 Agent History 作用域。
-func (s *Session) RegisterAgent(agentID identity.AgentID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.data.HasAgent(agentID) {
-		s.data.AgentContexts[agentID] = AgentContext{}
-	}
-}
-
-// RestoreAgentContext 发布启动恢复得到的活跃历史窗口，接管调用方构造的切片。
-func (s *Session) RestoreAgentContext(agentID identity.AgentID, entries []*entry.Entry) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.data.HasAgent(agentID) {
-		return fmt.Errorf("agent %s is not part of session", agentID)
-	}
-	s.data.AgentContexts[agentID] = AgentContext{Entries: entries}
-	return nil
+func (s *Session) agentContext(agentID identity.AgentID) *AgentContext {
+	s.agentsMu.RLock()
+	agentCtx := s.data.AgentContexts[agentID]
+	s.agentsMu.RUnlock()
+	return agentCtx
 }
 
 func (s *Session) Close(ctx context.Context) error {

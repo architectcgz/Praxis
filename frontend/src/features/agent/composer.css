@@ -225,10 +225,6 @@
     max-width: 148px;
 }
 
-.composer-approval-trigger.is-pending {
-    color: var(--warn-ink);
-}
-
 .composer-select-trigger > span {
     min-width: 0;
     overflow: hidden;
@@ -486,16 +482,6 @@
     gap: 6px;
     max-width: 100%;
     font-size: var(--font-size-meta);
-}
-
-.composer-approval-status {
-    padding: 1px 6px;
-    border: 1px solid var(--warn-line);
-    border-radius: var(--radius-chip);
-    background: var(--warn-soft);
-    color: var(--warn-ink);
-    font-size: var(--font-size-meta);
-    white-space: nowrap;
 }
 
 .composer-approval-error {

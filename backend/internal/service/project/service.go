@@ -3,7 +3,6 @@ package project
 
 import (
 	"context"
-	"errors"
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	projectmodel "praxis/internal/project"
@@ -17,7 +16,6 @@ type Directory interface {
 }
 
 type ProjectStore interface {
-	Get(context.Context, identity.ProjectID) (projectmodel.Project, error)
 	Save(context.Context, projectmodel.Project) error
 	List(context.Context, int) ([]projectmodel.Project, error)
 }
@@ -50,8 +48,11 @@ func NewService(deps Dependencies) *Service {
 	}
 }
 
-// CreateProject 创建目录并保存项目配置；后续失败保留已创建目录供重试。
+// CreateProject 先准备目录，再登记项目；后续冲突或保存失败不会清理已创建目录。
 func (s *Service) CreateProject(ctx context.Context, params CreateInput) (projectmodel.Project, error) {
+	if _, err := s.directory.EnsureExists(ctx, params.Path); err != nil {
+		return projectmodel.Project{}, err
+	}
 	// 仓库按项目 ID 保存，路径查重和保存必须在同一临界区。
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
@@ -60,23 +61,20 @@ func (s *Service) CreateProject(ctx context.Context, params CreateInput) (projec
 	if err != nil {
 		return projectmodel.Project{}, err
 	}
-	for _, existing := range projects {
-		if existing.ID != params.ProjectID && existing.Path == params.Path {
+	var prior *projectmodel.Project
+	for i := range projects {
+		existing := &projects[i]
+		if existing.ID == params.ProjectID {
+			if existing.Name != params.Name || existing.Path != params.Path {
+				return projectmodel.Project{}, errorcode.ErrRequestConflict
+			}
+			prior = existing
+		} else if existing.Path == params.Path {
 			return projectmodel.Project{}, errorcode.ErrRequestConflict
 		}
 	}
-	if _, err := s.directory.EnsureExists(ctx, params.Path); err != nil {
-		return projectmodel.Project{}, err
-	}
-	existing, err := s.projects.Get(ctx, params.ProjectID)
-	if err == nil {
-		if existing.Name != params.Name || existing.Path != params.Path {
-			return projectmodel.Project{}, errorcode.ErrRequestConflict
-		}
-		return existing, nil
-	}
-	if !errors.Is(err, errorcode.ErrNotFound) {
-		return projectmodel.Project{}, err
+	if prior != nil {
+		return *prior, nil
 	}
 	project := projectmodel.NewProject(params.ProjectID, params.Name, params.Path, time.Now().UTC())
 	if err := s.projects.Save(ctx, project); err != nil {

@@ -6,6 +6,7 @@ import (
 	"praxis/internal/entry"
 	"praxis/internal/event"
 	"praxis/internal/identity"
+	"slices"
 	"sync"
 )
 
@@ -38,8 +39,7 @@ type instruction struct {
 type collaboration struct {
 	mu           sync.Mutex
 	children     map[identity.AgentID]SubagentHandle
-	reports      []SubagentReport
-	consumed     map[identity.ReportID]bool
+	pending      []SubagentReport
 	accepted     []SubagentReport
 	wake         chan struct{}
 	parent       *Run
@@ -49,7 +49,6 @@ type collaboration struct {
 
 func (r *Run) initCollaboration() {
 	r.collaboration.children = make(map[identity.AgentID]SubagentHandle)
-	r.collaboration.consumed = make(map[identity.ReportID]bool)
 	r.collaboration.wake = make(chan struct{})
 	r.collaboration.accepting = true
 }
@@ -143,13 +142,16 @@ func (r *Run) receiveInstruction(ctx context.Context, text string) (identity.Ent
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	id := identity.NewEntryID()
 	r.collaboration.mu.Lock()
 	if !r.collaboration.accepting {
 		r.collaboration.mu.Unlock()
 		return "", fmt.Errorf("subagent execution has ended")
 	}
-	id := identity.NewEntryID()
-	r.collaboration.instructions = append(r.collaboration.instructions, instruction{id: id, text: text})
+	r.collaboration.instructions = append(r.collaboration.instructions, instruction{
+		id:   id,
+		text: text,
+	})
 	r.collaboration.mu.Unlock()
 	return id, nil
 }
@@ -226,7 +228,7 @@ func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) e
 		return err
 	}
 	r.collaboration.mu.Lock()
-	r.collaboration.reports = append(r.collaboration.reports, result)
+	r.collaboration.pending = append(r.collaboration.pending, result)
 	r.wakeLocked()
 	r.collaboration.mu.Unlock()
 	return nil
@@ -245,6 +247,7 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 	for _, id := range ids {
 		wanted[id] = true
 	}
+	var fresh []SubagentReport
 	for {
 		r.collaboration.mu.Lock()
 		finished := true
@@ -264,26 +267,19 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 				finished = false
 			}
 		}
-		var fresh []SubagentReport
-		for _, report := range r.collaboration.reports {
-			if wanted[report.AgentID] && !r.collaboration.consumed[report.ReportID] {
+		if finished || !all {
+			r.collaboration.pending = slices.DeleteFunc(r.collaboration.pending, func(report SubagentReport) bool {
+				if !wanted[report.AgentID] {
+					return false
+				}
 				fresh = append(fresh, report)
+				return true
+			})
+			if finished || len(fresh) > 0 {
+				r.collaboration.accepted = append(r.collaboration.accepted, fresh...)
+				r.collaboration.mu.Unlock()
+				break
 			}
-		}
-		if finished || !all && len(fresh) > 0 {
-			receipts := make([]SubagentReceipt, 0, len(fresh))
-			for _, report := range fresh {
-				r.collaboration.consumed[report.ReportID] = true
-				r.collaboration.accepted = append(r.collaboration.accepted, report)
-				receipts = append(receipts, SubagentReceipt{
-					ReportID: report.ReportID,
-					AgentID:  report.AgentID,
-					Outcome:  report.Outcome,
-					Final:    report.Final,
-				})
-			}
-			r.collaboration.mu.Unlock()
-			return receipts, nil
 		}
 		wake := r.collaboration.wake
 		r.collaboration.mu.Unlock()
@@ -293,6 +289,16 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 		case <-wake:
 		}
 	}
+	receipts := make([]SubagentReceipt, 0, len(fresh))
+	for _, report := range fresh {
+		receipts = append(receipts, SubagentReceipt{
+			ReportID: report.ReportID,
+			AgentID:  report.AgentID,
+			Outcome:  report.Outcome,
+			Final:    report.Final,
+		})
+	}
+	return receipts, nil
 }
 
 // acceptReports 在 Parent Loop 的串行点把自包含报告变成普通 Input Entry。

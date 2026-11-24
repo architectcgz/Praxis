@@ -48,7 +48,7 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 		if err != nil {
 			return nil, nil, err
 		}
-		authorizer := r.approvals.ForRun(run, project.Path, active.config.ApprovalMode, runner.Provider)
+		authorizer := r.approvals.ForRun(run, project.Path, active.session.ApprovalMode, runner.Provider)
 		return catalog, r.tools.ForRun(run, project.Path, catalog, authorizer), nil
 	})
 	if err != nil {

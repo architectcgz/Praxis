@@ -80,14 +80,6 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input task.Input, task ta
 		}
 	}
 	result := SubmitResult{Task: task}
-	if prior, err := schedule.session.Entry(ctx, identity.TaskInputEntryID(task.ID)); err == nil {
-		if prior.TextContent() != task.Prompt {
-			return SubmitResult{}, nil, errorcode.ErrRequestConflict
-		}
-		return result, nil, nil
-	} else if !errors.Is(err, errorcode.ErrNotFound) {
-		return SubmitResult{}, nil, err
-	}
 	for _, prior := range schedule.queue.List(0) {
 		if prior.ID == task.ID {
 			if prior.Prompt != task.Prompt {

@@ -43,7 +43,7 @@ func NewEntryID() EntryID               { return EntryID(newPrefixedID("entry"))
 func NewReportID() ReportID             { return ReportID(newPrefixedID("report")) }
 func NewOperationID() OperationID       { return OperationID(newPrefixedID("op")) }
 
-// TaskInputEntryID 由主任务身份确定，重复提交时可直接定位同一条输入消息。
+// TaskInputEntryID 根据主任务身份生成稳定的输入条目 ID。
 func TaskInputEntryID(taskID TaskID) EntryID {
 	return EntryID("input:" + taskID.String())
 }

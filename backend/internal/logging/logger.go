@@ -3,6 +3,7 @@
 package logging
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"log"
@@ -48,13 +49,13 @@ type Logger struct {
 }
 
 // newLogger 为工厂选定的输出目标创建日志器。
-func newLogger(writer io.Writer) *Logger {
+func newLogger(writer io.Writer, level Level) *Logger {
 	if writer == nil {
 		writer = os.Stderr
 	}
 	return &Logger{
 		logger: log.New(writer, "", log.LstdFlags|log.Lmicroseconds),
-		level:  InfoLevel,
+		level:  cmp.Or(level, InfoLevel),
 	}
 }
 
@@ -76,9 +77,7 @@ func (f Factory) Ensure(logger *Logger) *Logger {
 
 // Console 返回写入当前进程 stderr 的日志器。
 func (f Factory) Console() *Logger {
-	result := newLogger(os.Stderr)
-	result.SetLevel(f.level)
-	return result
+	return newLogger(os.Stderr, f.level)
 }
 
 // Application 返回同时写入 stderr 和受保护文件的日志器。
@@ -92,20 +91,9 @@ func (f Factory) Application(path string) (*Logger, error) {
 		return nil, err
 	}
 	// GUI 进程可能没有可用的 stderr，先落盘，避免控制台写入失败截断文件日志。
-	result := newLogger(io.MultiWriter(file, os.Stderr))
+	result := newLogger(io.MultiWriter(file, os.Stderr), f.level)
 	result.file = file
-	result.SetLevel(f.level)
 	return result, nil
-}
-
-// SetLevel 修改后续日志输出的最低级别。
-func (l *Logger) SetLevel(level Level) {
-	if l == nil || level < DebugLevel || level > ErrorLevel {
-		return
-	}
-	l.mu.Lock()
-	l.level = level
-	l.mu.Unlock()
 }
 
 // ParseLevel 解析 debug、info、warn/warning 或 error 日志级别。
@@ -137,15 +125,16 @@ func (l *Logger) Warnf(format string, args ...any) { l.logf(WarnLevel, "WARN", f
 func (l *Logger) Errorf(format string, args ...any) { l.logf(ErrorLevel, "ERROR", format, args...) }
 
 func (l *Logger) logf(level Level, label, format string, args ...any) {
-	if l == nil {
+	if l == nil || level < l.level {
 		return
 	}
+	message := "[" + label + "] " + formatMessage(format, args...)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.closed || level < l.level {
+	if l.closed {
 		return
 	}
-	l.logger.Printf("[%s] %s", label, formatMessage(format, args...))
+	l.logger.Print(message)
 }
 
 func formatMessage(format string, args ...any) string {

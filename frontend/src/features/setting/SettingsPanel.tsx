@@ -85,7 +85,7 @@ export function SettingsPanel({ models, hasActiveSession }: SettingsPanelProps) 
                                     <li>已加载会话使用各自打开时的只读配置快照，正在执行的 Run 参数固定不变。</li>
                                     <li>保存配置文件后，可在目标会话空闲时输入 <code>/reload</code> 单独刷新该会话配置。</li>
                                     <li>存在活动执行或待审批调用时，<code>/reload</code> 会被拒绝；重载成功后会清理未开始的待办队列。</li>
-                                    <li>会话内修改的审批覆盖（<code>ask / auto / yolo</code>）同样在执行 <code>/reload</code> 后生效。</li>
+                                    <li>会话内切换审批模式会立即应用于后续工具调用，不需要重载，也不会影响已发起的审批或待办队列。</li>
                                 </ul>
                             </div>
                         </section>

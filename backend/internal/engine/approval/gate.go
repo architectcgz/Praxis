@@ -86,16 +86,16 @@ func NewGate(deps GateDependencies) *Gate {
 	}
 }
 
-// RunGate 将授权门控绑定到单次 Run 的冻结配置与项目范围。
+// RunGate 使用所属 Run 的 Provider，并在每次授权时读取会话当前模式。
 type RunGate struct {
 	gate        *Gate
 	run         RunOwner
 	projectPath string
-	mode        security.ApprovalMode
+	mode        func() security.ApprovalMode
 	provider    provider.Provider
 }
 
-func (g *Gate) ForRun(run RunOwner, projectPath string, mode security.ApprovalMode, provider provider.Provider) *RunGate {
+func (g *Gate) ForRun(run RunOwner, projectPath string, mode func() security.ApprovalMode, provider provider.Provider) *RunGate {
 	return &RunGate{
 		gate:        g,
 		run:         run,
@@ -161,7 +161,7 @@ func (g *Gate) removePending(key tool.CallKey, item *pendingApproval) {
 	}
 }
 
-// Authorize 按冻结审批模式决定放行、拒绝或进入人工审批等待；ctx 取消会立即中断审核与等待。
+// Authorize 在授权开始时读取模式；已开始的审核或审批等待不受后续模式切换影响。
 func (r *RunGate) Authorize(
 	ctx context.Context,
 	call entry.ToolCall,
@@ -172,12 +172,12 @@ func (r *RunGate) Authorize(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	decision := security.ResolveApprovalDecision(r.mode)
+	decision := security.ResolveApprovalDecision(r.mode())
 	if decision.Action == security.ApprovalYolo {
 		return nil, nil
 	}
 	if !r.run.Main() {
-		denied := tool.NewToolError("subagent_approval_unavailable", "This operation requires approval outside the subagent authorization snapshot.")
+		denied := tool.NewToolError("subagent_approval_unavailable", "Subagents cannot request approval for this operation.")
 		return &denied, nil
 	}
 

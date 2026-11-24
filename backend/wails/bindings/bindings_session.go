@@ -76,7 +76,7 @@ type SetSessionApprovalModeRequest struct {
 	Mode      *string `json:"mode" validate:"omitempty,oneof=ask auto yolo"`
 }
 
-// SessionApprovalMode 返回已保存的会话覆盖和当前已加载的有效模式；二者可在 reload 前不同。
+// SessionApprovalMode 返回全局默认值、会话覆盖和当前有效审批模式。
 type SessionApprovalMode struct {
 	SessionID     string  `json:"sessionId"`
 	GlobalMode    string  `json:"globalMode"`
@@ -288,7 +288,7 @@ func (b *SessionBindings) RevealSessionFile(sessionID string) error {
 	return nil
 }
 
-// SetSessionApprovalMode 保存会话授权选择；null 恢复继承，有效模式在会话显式 reload 后更新。
+// SetSessionApprovalMode 保存并应用会话审批选择；null 恢复继承。
 func (b *SessionBindings) SetSessionApprovalMode(wire SetSessionApprovalModeRequest) (SessionApprovalMode, error) {
 	if wire.Mode != nil {
 		wire.Mode = new(strings.TrimSpace(*wire.Mode))

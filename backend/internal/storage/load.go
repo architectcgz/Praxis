@@ -20,22 +20,23 @@ func (r SessionRepository) Load(ctx context.Context, id identity.SessionID) (*se
 	}
 	log := &entryLog{store: store}
 	data := session.Open(id)
-	owner := session.New(data, log)
 	agents := store.Agents()
 	slices.Sort(agents)
 	for _, agentID := range agents {
-		if agentID != identity.AgentID(id) {
-			owner.RegisterAgent(agentID)
+		agentCtx := data.AgentContexts[agentID]
+		if agentCtx == nil {
+			agentCtx = &session.AgentContext{}
+			data.AgentContexts[agentID] = agentCtx
 		}
-		if err := recoverAgent(ctx, owner, log, agentID); err != nil {
-			_ = owner.Close(context.Background())
+		if err := recoverAgent(ctx, log, agentID, agentCtx); err != nil {
+			_ = log.Close(context.Background())
 			return nil, err
 		}
 	}
-	return owner, nil
+	return session.New(data, log), nil
 }
 
-func recoverAgent(ctx context.Context, owner *session.Session, log *entryLog, agentID identity.AgentID) error {
+func recoverAgent(ctx context.Context, log *entryLog, agentID identity.AgentID, agentCtx *session.AgentContext) error {
 	page, err := log.ReadBackward(ctx, agentID, nil, 1)
 	if err != nil {
 		return err
@@ -65,12 +66,12 @@ func recoverAgent(ctx context.Context, owner *session.Session, log *entryLog, ag
 					Reason:   string(entry.RunFailureInterrupted),
 				},
 			}
-			if _, err := owner.CommitTerminal(ctx, agentID, terminal); err != nil {
+			if err := log.CommitTerminal(ctx, agentID, &terminal); err != nil {
 				return err
 			}
 		}
 	}
-	return recoverAgentContext(ctx, owner, log, agentID)
+	return recoverAgentContext(ctx, log, agentID, agentCtx)
 }
 
 func readRunEntries(ctx context.Context, log *entryLog, agentID identity.AgentID, runID identity.RunID) ([]*entry.Entry, error) {
@@ -99,7 +100,7 @@ func readRunEntries(ctx context.Context, log *entryLog, agentID identity.AgentID
 	return entries, nil
 }
 
-func recoverAgentContext(ctx context.Context, owner *session.Session, log *entryLog, agentID identity.AgentID) error {
+func recoverAgentContext(ctx context.Context, log *entryLog, agentID identity.AgentID, agentCtx *session.AgentContext) error {
 	var cursor *int64
 	entries := make([]*entry.Entry, 0)
 	for {
@@ -122,5 +123,6 @@ func recoverAgentContext(ctx context.Context, owner *session.Session, log *entry
 		cursor = page.NextCursor
 	}
 	slices.Reverse(entries)
-	return owner.RestoreAgentContext(agentID, entries)
+	agentCtx.Entries = entries
+	return nil
 }

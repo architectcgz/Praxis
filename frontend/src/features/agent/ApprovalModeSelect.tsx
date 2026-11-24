@@ -14,7 +14,6 @@ type ApprovalModeSelectProps = {
     onSaved: (settings: SessionApprovalMode) => void
 }
 
-/** 保存会话审批选择；有效模式只在该会话显式 reload 后通过事件推送更新。 */
 export function ApprovalModeSelect({ sessionId, settings, disabled, pickerRef, open, onToggle, onClose, onSaved }: ApprovalModeSelectProps) {
     const menuID = useId()
     const [saving, setSaving] = useState(false)
@@ -37,14 +36,11 @@ export function ApprovalModeSelect({ sessionId, settings, disabled, pickerRef, o
         }
     }
 
-    const savedTarget = settings ? (settings.sessionMode ?? settings.globalMode) : undefined
-    const pending = settings !== null && savedTarget !== settings.effectiveMode
     const title = settings
-        ? `当前会话已加载的审批模式：${settings.effectiveMode}${pending ? `（已保存为 ${savedTarget}，空闲时执行 /reload 后生效）` : ''}。ask 询问用户；auto 由模型判断，危险拒绝、不确定询问；yolo 跳过审核，但不能使用已禁用工具。`
+        ? `当前会话审批模式：${settings.effectiveMode}。切换后影响后续工具审批，已发起的审批不变。ask 询问用户；auto 由模型判断，危险拒绝、不确定询问；yolo 跳过审核，但不能使用已禁用工具。`
         : '正在读取会话审批模式'
     const unavailable = disabled || saving || !settings
-    const label = saving ? '保存中…' : !settings ? '授权不可用'
-        : pending ? `${settings.effectiveMode} → ${savedTarget}` : settings.effectiveMode
+    const label = saving ? '保存中…' : settings?.effectiveMode ?? '审批模式不可用'
     const options: { mode: ApprovalMode | null; label: string; description: string }[] = [
         { mode: null, label: '继承全局', description: settings?.globalMode ?? '' },
         { mode: 'ask', label: 'ask', description: '询问' },
@@ -53,10 +49,10 @@ export function ApprovalModeSelect({ sessionId, settings, disabled, pickerRef, o
     ]
     return <div className={`composer-select-picker composer-approval-mode ${unavailable ? 'is-disabled' : ''}`} ref={pickerRef}>
         <button
-            className={`composer-select-trigger composer-approval-trigger ${pending ? 'is-pending' : ''}`}
+            className="composer-select-trigger composer-approval-trigger"
             type="button"
             title={title}
-            aria-label={`审批模式（会话默认）：${label}`}
+            aria-label={`会话审批模式：${label}`}
             aria-busy={saving}
             aria-expanded={open}
             aria-haspopup="menu"
@@ -68,7 +64,7 @@ export function ApprovalModeSelect({ sessionId, settings, disabled, pickerRef, o
             <span>{label}</span>
             <ChevronDown className={`composer-select-chevron ${open ? 'is-open' : ''}`} size={14} strokeWidth={2} aria-hidden="true" />
         </button>
-        {open && settings && <div className="model-picker-menu" id={menuID} role="menu" aria-label="Approval mode 选择">
+        {open && settings && <div className="model-picker-menu" id={menuID} role="menu" aria-label="选择审批模式">
             {options.map((option) => <button
                 className={`model-picker-option ${settings.sessionMode === option.mode ? 'is-selected' : ''}`}
                 type="button"
@@ -82,7 +78,6 @@ export function ApprovalModeSelect({ sessionId, settings, disabled, pickerRef, o
                 <span className="model-picker-option-provider">{option.description}</span>
             </button>)}
         </div>}
-        {!saving && pending && <span role="status" className="composer-approval-status" title="执行 /reload 后应用已保存的审批模式">待 /reload</span>}
         {error && <span role="alert" className="composer-approval-error">
             <span>{error}</span>
         </span>}

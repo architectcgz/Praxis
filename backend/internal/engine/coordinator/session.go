@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// ApprovalSettings 区分已保存的会话覆盖和当前已加载的有效授权模式。
+// ApprovalSettings 包含全局默认值、会话覆盖和当前有效审批模式。
 type ApprovalSettings struct {
 	SessionID     identity.SessionID
 	GlobalMode    security.ApprovalMode
@@ -64,8 +64,7 @@ func (s *Coordinator) loadSchedule(ctx context.Context, id identity.SessionID) (
 	if err != nil {
 		return nil, err
 	}
-	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
-	owner.Configure(config, info.ModelChoice)
+	owner.Configure(config, info.ModelChoice, info.ApprovalMode)
 	schedule := &sessionSchedule{
 		sessionID: id,
 		session:   owner,
@@ -114,7 +113,7 @@ func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID) 
 			SessionID:     id,
 			GlobalMode:    config.GlobalApprovalMode,
 			SessionMode:   info.ApprovalMode,
-			EffectiveMode: config.ApprovalMode,
+			EffectiveMode: schedule.session.ApprovalMode(),
 		},
 		PendingApprovals: pendingApprovals,
 	}, nil
@@ -223,8 +222,7 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 			return event.Event{}, event.Event{}, err
 		}
 	}
-	config.ApprovalMode = security.EffectiveApprovalMode(config.GlobalApprovalMode, info.ApprovalMode)
-	schedule.session.Configure(config, choice)
+	schedule.session.Configure(config, choice, info.ApprovalMode)
 	schedule.queue.Clear()
 	queueEvent := taskQueueEvent(schedule)
 	reloadEvent := event.Event{
@@ -237,13 +235,13 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 			ModelChoice:   schedule.session.Choice(),
 			GlobalMode:    config.GlobalApprovalMode,
 			SessionMode:   info.ApprovalMode,
-			EffectiveMode: config.ApprovalMode,
+			EffectiveMode: schedule.session.ApprovalMode(),
 		},
 	}
 	return queueEvent, reloadEvent, nil
 }
 
-// SetApprovalMode 只持久化会话授权覆盖；当前有效模式在显式 reload 成功后才更新。
+// SetApprovalMode 在持久化成功后更新会话内存中的审批覆盖，不影响队列和配置快照。
 func (s *Coordinator) SetApprovalMode(ctx context.Context, id identity.SessionID, mode *security.ApprovalMode) (ApprovalSettings, error) {
 	if err := s.enter(); err != nil {
 		return ApprovalSettings{}, err
@@ -268,12 +266,13 @@ func (s *Coordinator) SetApprovalMode(ctx context.Context, id identity.SessionID
 	if err != nil {
 		return ApprovalSettings{}, err
 	}
+	schedule.session.SetApprovalMode(info.ApprovalMode)
 	config := schedule.session.Configuration()
 	return ApprovalSettings{
 		SessionID:     id,
 		GlobalMode:    config.GlobalApprovalMode,
 		SessionMode:   info.ApprovalMode,
-		EffectiveMode: config.ApprovalMode,
+		EffectiveMode: schedule.session.ApprovalMode(),
 	}, nil
 }
 
@@ -308,7 +307,7 @@ func (s *Coordinator) SelectModel(ctx context.Context, sessionID identity.Sessio
 		unlock()
 		return err
 	}
-	owner.Configure(owner.Configuration(), choice)
+	owner.SetChoice(choice)
 	unlock()
 	if err := s.schedule(ctx, sessionID); err != nil {
 		s.logger.Errorf("activate queued task: %v", err)

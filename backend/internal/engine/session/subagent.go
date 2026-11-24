@@ -10,17 +10,17 @@ func (s *Session) CreateSubagent(ctx context.Context, agentID identity.AgentID) 
 	if err := s.log.CreateSubagent(ctx, agentID); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.data.AgentContexts[agentID] = AgentContext{}
-	s.mu.Unlock()
+	s.agentsMu.Lock()
+	s.data.AgentContexts[agentID] = &AgentContext{}
+	s.agentsMu.Unlock()
 	return nil
 }
 
 // RemoveSubagent 回滚尚未写入事实的空子代理日志及其内存登记。
 func (s *Session) RemoveSubagent(ctx context.Context, agentID identity.AgentID) error {
-	s.mu.Lock()
+	s.agentsMu.Lock()
 	delete(s.data.AgentContexts, agentID)
-	s.mu.Unlock()
+	s.agentsMu.Unlock()
 	return s.log.RemoveSubagent(ctx, agentID)
 }
 
@@ -51,6 +51,8 @@ func (h AgentHistory) ModelEntries(ctx context.Context) ([]*entry.Entry, error) 
 	return h.session.AgentContext(h.agentID)
 }
 
+// CommitTerminal 提交 Run 的最后一条 Entry 并同步刷盘。
 func (h AgentHistory) CommitTerminal(ctx context.Context, value entry.Entry) (*entry.Entry, error) {
-	return h.session.CommitTerminal(ctx, h.agentID, value)
+	stored, _, err := h.session.appendEntry(ctx, h.agentID, value, true)
+	return stored, err
 }
