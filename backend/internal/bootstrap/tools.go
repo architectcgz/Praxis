@@ -5,29 +5,26 @@ import (
 	"os/exec"
 	"path/filepath"
 	"praxis/internal/config"
-	"praxis/internal/tool"
-	"praxis/internal/tool/applypatch"
-	"praxis/internal/tool/bash"
-	"praxis/internal/tool/readfile"
+	"praxis/internal/tools"
 	"runtime"
 )
 
-func buildToolRegistry(policy config.ToolRuntime, extensions []tool.Tool) (*tool.ToolRegistry, error) {
-	registry := tool.NewToolRegistry()
-	builtins := []tool.Tool{
-		readfile.New(readfile.Limits{
+func buildToolRegistry(policy config.ToolRuntime, extensions []tools.Tool) (*tools.ToolRegistry, error) {
+	registry := tools.NewToolRegistry()
+	builtins := []tools.Tool{
+		tools.NewReadFile(tools.ReadFileLimits{
 			DefaultReadBytes:  policy.ReadFile.DefaultReadBytes,
 			MaxReadBytes:      policy.ReadFile.MaxReadBytes,
 			InlineResultBytes: policy.InlineResultBytes,
 		}),
-		bash.New(findBash(), bash.Limits{
+		tools.NewBash(findBash(), tools.BashLimits{
 			DefaultTimeoutSeconds: policy.Bash.DefaultTimeoutSeconds,
 			MaxTimeoutSeconds:     policy.Bash.MaxTimeoutSeconds,
 			MaxCommandBytes:       policy.Bash.MaxCommandBytes,
 			ExitWait:              policy.Bash.ExitWait,
 			InlineResultBytes:     policy.InlineResultBytes,
 		}),
-		applypatch.New(policy.MaxPatchBytes),
+		tools.NewApplyPatch(policy.MaxPatchBytes),
 	}
 	for _, candidate := range append(builtins, extensions...) {
 		if err := registry.Register(candidate); err != nil {

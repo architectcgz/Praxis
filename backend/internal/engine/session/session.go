@@ -9,7 +9,7 @@ import (
 	"praxis/internal/model"
 	"praxis/internal/provider"
 	"praxis/internal/security"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"sync"
 	"sync/atomic"
 )
@@ -29,7 +29,7 @@ type HistoryStore interface {
 type Configuration struct {
 	Models             *model.Catalog
 	Definitions        []agent.AgentDefinition
-	Tools              tool.ToolCatalog
+	Tools              tools.ToolCatalog
 	Provider           provider.Provider
 	GlobalApprovalMode security.ApprovalMode
 }

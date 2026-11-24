@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"praxis/internal/model"
 	"praxis/internal/timing"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 )
 
 // ContentBlock 是消息与模型流事件共用的内容，只允许本包定义的具体类型。
@@ -89,14 +89,14 @@ type ThinkingBlock struct {
 }
 
 type ToolCallBlock struct {
-	CallID    string        `json:"callId"`
-	Name      tool.ToolName `json:"name"`
-	Arguments string        `json:"input"`
+	CallID    string         `json:"callId"`
+	Name      tools.ToolName `json:"name"`
+	Arguments string         `json:"input"`
 }
 
 type ToolResultBlock struct {
 	CallID  string         `json:"callId"`
-	Name    tool.ToolName  `json:"name"`
+	Name    tools.ToolName `json:"name"`
 	Text    string         `json:"text"`
 	IsError bool           `json:"isError,omitzero"`
 	Timing  *timing.Timing `json:"timing,omitempty"`

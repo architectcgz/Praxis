@@ -13,13 +13,14 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/provider"
 	"praxis/internal/timing"
+	"praxis/internal/tools"
 	"slices"
 	"strings"
 )
 
 // Compress 在上下文构建完成后独立评估容量，按需生成摘要并通过统一入口提交 Session。
-func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.Entry, value appcontext.ModelContext) (compressed appcontext.ModelContext, err error) {
-	reservedTokens, err := modelcall.EstimateOverhead(params.Tools.List(), nil)
+func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDependencies, input *sessionentry.Entry, value appcontext.ModelContext, definitions []tools.ToolDefinition) (compressed appcontext.ModelContext, err error) {
+	reservedTokens, err := modelcall.EstimateOverhead(definitions, nil)
 	if err != nil {
 		return value, errorcode.ErrContract.Wrap(err)
 	}
@@ -47,7 +48,7 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	request := provider.Request{
 		Context:         value,
 		Model:           params.Model,
-		Tools:           params.Tools.List(),
+		Tools:           definitions,
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 	}
 	inputTokens, err := r.ModelCaller.EstimateRequestTokens(request, deps.Budget)

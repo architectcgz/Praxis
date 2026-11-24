@@ -55,15 +55,17 @@ backend/
     │   ├── streaming/          # SSE 解析、流消费与用量归一化
     │   └── httpclient/         # HTTP 传输与代理配置
     │
-    ├── tool/                   # 工具系统（接口契约、目录与内置工具统一归属此处）
+    ├── tools/                  # 工具协议、注册目录、全部内置工具与输出边界
     │   ├── tool.go             # Tool 接口、ToolDefinition、ToolResult 与运行环境
     │   ├── catalog.go          # 只读工具目录与受限子集裁剪
     │   ├── registry.go         # 工具注册表
-    │   ├── bash/               # Bash 工具：schema、参数校验与命令执行
-    │   ├── readfile/           # 读文件工具：schema、参数校验与分段读取
-    │   ├── applypatch/         # 补丁工具：schema、补丁解析与文件应用
-    │   ├── subagent/           # 主/子代理协作工具定义与运行能力接口
-    │   └── output/             # 超大工具输出的临时文件落盘
+    │   ├── function.go         # 声明式工具定义与类型化参数绑定
+    │   ├── list.go             # 本次 Run 的工具发现与按需加载
+    │   ├── subagent.go         # 主/子代理协作工具
+    │   ├── bash.go             # 命令执行
+    │   ├── read_file.go        # 分段读取文件
+    │   ├── apply_patch*.go     # 补丁参数校验、解析与应用
+    │   └── output_*.go         # 工具输出转存和会话临时目录
     │
     ├── storage/                # 数据持久化实现
     │   ├── store.go            # SQLite 与日志目录生命周期管理
@@ -121,9 +123,9 @@ backend/
   - `engine/toolexecution`：负责工具参数严格解码、项目路径规范化、调用执行、输出上限控制与单调用取消。
   - `engine/hook`：提供执行期扩展 Hook 的注册、分发与操作作用域跟踪。
 
-### 4. 外围能力模块 `provider/`、`tool/`、`config/`、`storage/`
+### 4. 外围能力模块 `provider/`、`tools/`、`config/`、`storage/`
 - `provider/`：聚合中立的 `Provider` 接口、统一流事件与各厂商协议适配器；只负责单次请求编解码与流资源释放，不承担重试、压缩或 Run 状态管理。
-- `tool/`：聚合 `Tool` 契约、目录注册表与内置工具子包；每个内置工具子包内聚自身的 JSON Schema、参数校验与执行实现，不跨目录拆分契约与实现。
+- `tools/`：聚合 `Tool` 契约、目录注册表与内置工具；每项工具就近组织 JSON Schema、参数校验与执行实现。协作工具通过装配时传入的操作调用执行引擎，不反向依赖引擎包。
 - `config/`：集中负责本地数据目录布局与各类用户可编辑配置文件的边界校验和加载。
 - `storage/`：集中负责 SQLite 元数据读写、JSONL 追加日志与会话加载恢复，实现消费方声明的存储接口。
 
@@ -135,11 +137,11 @@ backend/
 
 ```text
 1. 基础概念包（identity / errorcode / pathutil / logging / model / entry / timing / context / agent / task / project / security）
-   --> 仅依赖标准库与更底层基础包；严禁依赖 engine/*、event、provider、tool（仅 entry 依赖 tool 标识类型）、config、storage、service、wails
+   --> 仅依赖标准库与更底层基础包；严禁依赖 engine/*、event、provider、tools（仅 entry 依赖工具标识类型）、config、storage、service、wails
 
-2. 外围能力包（provider / tool / config）与实时事件包（event）
+2. 外围能力包（provider / tools / config）与实时事件包（event）
    --> event 仅依赖基础概念包；外围能力包可依赖基础概念包及各自内部子包
-   --> provider 可消费 tool 的工具协议；config 可消费 tool 的配置契约及 provider/httpclient 的代理配置能力
+   --> provider 可消费 tools 的工具协议；config 可消费 tools 的注册目录及 provider/httpclient 的代理配置能力
    --> 均严禁依赖 engine/*、storage、service、wails；外围能力包不得依赖 event
 
 3. 执行引擎内部（engine/*）高层只依赖低层，从低到高依次为：
@@ -158,7 +160,7 @@ backend/
        严禁直接依赖 engine/coordinator、engine/run、engine/loop、engine/modelcall、engine/approval、engine/toolexecution、storage/、config/、provider/
 
 7. 启动装配（bootstrap）
-   --> 唯一全知装配层，负责实例化并连接 config、storage、provider、tool、event、engine/*、service/* 与 wails/bindings
+   --> 唯一全知装配层，负责实例化并连接 config、storage、provider、tools、event、engine/*、service/* 与 wails/bindings
 ```
 
 ### 关键防交叉守则

@@ -342,7 +342,6 @@ const inputFieldLabels: Record<string, string> = {
     limit: '读取上限',
     command: '命令',
     timeout: '超时',
-    timeoutSeconds: '超时上限',
     task: '委派任务',
     allowedTools: '授权工具',
     ids: '目标代理',
@@ -383,7 +382,7 @@ function renderInputValue(toolName: string, key: string, value: unknown) {
         return <pre className="output-text">{formatToolInput(value)}</pre>
     }
     if (typeof value === 'number') {
-        if (key === 'timeoutSeconds' || (toolName === 'bash' && key === 'timeout')) return <span>{value} 秒</span>
+        if (toolName === 'bash' && key === 'timeout') return <span>{value} 秒</span>
         if (toolName === 'read_file' && (key === 'offset' || key === 'limit')) return <span>{value} 字节</span>
         return <code>{String(value)}</code>
     }

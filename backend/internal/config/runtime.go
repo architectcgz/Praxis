@@ -73,7 +73,6 @@ type ToolRuntime struct {
 	Bash              BashRuntime
 	ReadFile          ReadFileRuntime
 	MaxPatchBytes     int
-	Subagent          SubagentRuntime
 	InlineResultBytes int // 工具结果编码后的内联字节上限，与原文读取上限独立。
 }
 
@@ -87,11 +86,6 @@ type BashRuntime struct {
 type ReadFileRuntime struct {
 	DefaultReadBytes int
 	MaxReadBytes     int
-}
-
-type SubagentRuntime struct {
-	MinTimeoutSeconds int
-	MaxTimeoutSeconds int
 }
 
 const maxHistoryPageSize = 200
@@ -174,11 +168,7 @@ func DefaultRuntime() Runtime {
 				DefaultReadBytes: 32 * 1024,
 				MaxReadBytes:     50 * 1024,
 			},
-			MaxPatchBytes: 512 * 1024,
-			Subagent: SubagentRuntime{
-				MinTimeoutSeconds: 1,
-				MaxTimeoutSeconds: 600,
-			},
+			MaxPatchBytes:     512 * 1024,
 			InlineResultBytes: 50 * 1024,
 		},
 		Pages: PageRuntime{

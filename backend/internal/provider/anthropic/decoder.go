@@ -9,7 +9,7 @@ import (
 	"praxis/internal/model"
 	"praxis/internal/provider"
 	"praxis/internal/provider/streaming"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 )
 
 type decoder struct{ warnf func(string, ...any) }
@@ -239,7 +239,7 @@ func (d decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit s
 						Kind: provider.StreamToolCall,
 						ToolCall: provider.ToolCall{
 							ID:        block.ID,
-							Name:      tool.ToolName(block.Name),
+							Name:      tools.ToolName(block.Name),
 							Arguments: state.Arguments,
 						},
 						OutputIndex: &index,

@@ -15,7 +15,7 @@ import (
 	projectservice "praxis/internal/service/project"
 	sessionservice "praxis/internal/service/session"
 	"praxis/internal/storage"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"praxis/wails/bindings"
 )
 
@@ -68,7 +68,7 @@ func (a *Application) Services() bindings.Services {
 // Options 在装配阶段注入运行期固定的依赖。
 type Options struct {
 	Runner       *loop.Runner
-	Tools        []tool.Tool
+	Tools        []tools.Tool
 	Hooks        []any
 	OnAgentEvent func(event.Event)
 	LogOutput    io.Writer

@@ -18,7 +18,6 @@ import (
 	"praxis/internal/project"
 	"praxis/internal/security"
 	"praxis/internal/task"
-	subagenttool "praxis/internal/tool/subagent"
 	"slices"
 	"sync"
 	"time"
@@ -61,7 +60,6 @@ type Config struct {
 	TransitionTimeout time.Duration
 	ShutdownTimeout   time.Duration
 	ActiveSubagents   int
-	SubagentLimits    subagenttool.TimeoutLimits
 }
 
 // Coordinator 统一拥有队列调度、执行忙闲状态和取消句柄。
@@ -80,7 +78,6 @@ type Coordinator struct {
 	transitionTimeout time.Duration
 	shutdownTimeout   time.Duration
 	activeSubagents   int
-	subagentLimits    subagenttool.TimeoutLimits
 
 	// mu 保护会话调度表、命令信号量、任务队列及其活动占位；
 	// 存储读写、会话数据访问与 Run 执行均不持有 mu。
@@ -177,7 +174,6 @@ func NewCoordinator(config Config) *Coordinator {
 		transitionTimeout: config.TransitionTimeout,
 		shutdownTimeout:   config.ShutdownTimeout,
 		activeSubagents:   config.ActiveSubagents,
-		subagentLimits:    config.SubagentLimits,
 	}
 }
 

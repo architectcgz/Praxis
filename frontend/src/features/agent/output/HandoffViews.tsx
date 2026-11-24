@@ -258,7 +258,6 @@ function SubagentStartCard({
     const allowedTools = Array.isArray(tool.input.allowedTools)
         ? tool.input.allowedTools.filter((item): item is string => typeof item === 'string')
         : []
-    const timeoutSeconds = typeof tool.input.timeoutSeconds === 'number' ? tool.input.timeoutSeconds : undefined
     const childId = typeof tool.result.agentId === 'string' ? tool.result.agentId : ''
     const agentName = childId ? resolveAgentName(childId, agentDirectory) : ''
     const canInspect = Boolean(childId && onOpenSubagent && isAgentActive(childId, agentDirectory))
@@ -299,15 +298,12 @@ function SubagentStartCard({
                         <span>{errorMessage}</span>
                     </div>
                 )}
-                {(allowedTools.length > 0 || timeoutSeconds !== undefined) && (
+                {allowedTools.length > 0 && (
                     <div className="handoff-meta-row">
-                        {allowedTools.length > 0 && (
-                            <div className="handoff-chips">
-                                <span className="handoff-meta-label">授权工具</span>
-                                {allowedTools.map((item) => <code className="handoff-chip" key={item}>{item}</code>)}
-                            </div>
-                        )}
-                        {timeoutSeconds !== undefined && <span className="handoff-timeout">超时 {timeoutSeconds}s</span>}
+                        <div className="handoff-chips">
+                            <span className="handoff-meta-label">授权工具</span>
+                            {allowedTools.map((item) => <code className="handoff-chip" key={item}>{item}</code>)}
+                        </div>
                     </div>
                 )}
             </div>

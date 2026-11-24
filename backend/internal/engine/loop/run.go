@@ -12,7 +12,7 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/model"
 	"praxis/internal/provider"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"time"
 )
 
@@ -20,7 +20,7 @@ import (
 // Loop 提交真实回执后调用后置 Hook，历史写入由条目提交入口负责。
 type ToolExecutor interface {
 	Execute(context.Context, entry.ToolCall, entry.AppendEntry) (toolexecution.CallResult, error)
-	SpillResult(tool.ToolResult) (tool.ToolResult, error)
+	SpillResult(tools.ToolResult) (tools.ToolResult, error)
 }
 
 // RunParams 保存一次执行的身份、系统提示词、工具目录与冻结模型配置，供各轮模型请求共用。
@@ -31,7 +31,7 @@ type RunParams struct {
 	AgentID      identity.AgentID
 	SystemPrompt string
 	Model        model.Config
-	Tools        tool.ToolCatalog
+	Tools        *tools.Discovery
 }
 
 // RunDependencies 绑定本次 Loop 的历史读取、事实提交和计时能力，不持有执行或会话对象。
@@ -88,7 +88,9 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			return turnID, err
 		}
 		modelContext := r.BuildContext(ctx, params, entries)
-		modelContext, err = r.Compress(ctx, params, deps, input, modelContext)
+		visible := params.Tools.Visible()
+		definitions := visible.List()
+		modelContext, err = r.Compress(ctx, params, deps, input, modelContext, definitions)
 		if err != nil {
 			return turnID, modelcall.WrapModelError(err)
 		}
@@ -108,12 +110,12 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 			PromptCacheKey:  params.SessionID.String(),
 			Model:           params.Model,
 			Context:         modelContext,
-			Tools:           params.Tools.List(),
+			Tools:           definitions,
 			MaxOutputTokens: params.Model.MaxOutputTokens,
 			TurnID:          turnID,
 		}
 		r.emit(params, turnID, coreevent.TurnStarted{})
-		finished, err := r.runTurn(ctx, params, deps, executor, request)
+		finished, err := r.runTurn(ctx, params, deps, executor, request, visible)
 		endedAt := time.Now().UTC()
 		var ending entry.Payload = entry.TurnCompleted{}
 		if err != nil {

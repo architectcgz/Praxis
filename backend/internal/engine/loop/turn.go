@@ -9,6 +9,7 @@ import (
 	"praxis/internal/event"
 	"praxis/internal/identity"
 	"praxis/internal/provider"
+	"praxis/internal/tools"
 )
 
 func (r *Runner) runTurn(
@@ -17,6 +18,7 @@ func (r *Runner) runTurn(
 	deps RunDependencies,
 	executor ToolExecutor,
 	request provider.Request,
+	visible tools.ToolCatalog,
 ) (finished bool, err error) {
 	turnID := request.TurnID
 	iteration := hook.Iteration{Identity: runIdentity(params, turnID)}
@@ -90,5 +92,5 @@ func (r *Runner) runTurn(
 			Arguments: call.Arguments,
 		})
 	}
-	return false, r.runToolCalls(ctx, params, deps, executor, calls)
+	return false, r.runToolCalls(ctx, params, deps, executor, calls, visible)
 }

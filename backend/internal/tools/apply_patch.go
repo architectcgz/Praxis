@@ -1,4 +1,4 @@
-package applypatch
+package tools
 
 import (
 	"context"
@@ -9,11 +9,63 @@ import (
 	"os"
 	"path/filepath"
 	"praxis/internal/pathutil"
-	"praxis/internal/tool"
 	"runtime"
 	"strings"
 	"unicode/utf8"
 )
+
+const patchInputSchema = `{
+  "type": "object",
+  "properties": {
+    "patch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": %[1]d,
+      "description": "使用 apply_patch 格式描述的文件补丁；maxLength 按字符计，实际 UTF-8 输入不得超过 %[1]d 字节"
+    },
+    "path": {
+      "type": "string",
+      "description": "补丁目标根目录，可以是绝对路径或相对于项目根目录的路径；省略时使用项目根目录"
+    }
+  },
+  "required": ["patch"],
+  "additionalProperties": false
+}`
+
+type patchArguments struct {
+	Patch      string `json:"patch"`
+	Path       string `json:"path"`
+	operations []operation
+}
+
+func (a *patchArguments) PathArgument() *string { return &a.Path }
+
+func NewApplyPatch(maxPatchBytes int) Tool {
+	return Function[patchArguments]{
+		Name: "apply_patch",
+		Description: "在已授权的项目目录内应用一个或多个文件补丁。" +
+			"patch 必须使用 *** Begin Patch、*** Update File、*** Add File、*** Delete File 和 *** End Patch 格式；" +
+			"path 可选，省略时按项目根目录解析。所有目标文件会先完成格式、内容和写入范围校验，" +
+			"任一目标无效时不会写入文件。",
+		InputSchema:      json.RawMessage(fmt.Sprintf(patchInputSchema, maxPatchBytes)),
+		DefaultArguments: func() patchArguments { return patchArguments{Path: "."} },
+		PrepareArguments: func(args patchArguments) (patchArguments, error) {
+			if args.Patch == "" {
+				return args, errors.New("apply_patch arguments are invalid: patch is required")
+			}
+			if len(args.Patch) > maxPatchBytes {
+				return args, fmt.Errorf("apply_patch arguments are invalid: patch must not exceed %d UTF-8 bytes", maxPatchBytes)
+			}
+			operations, err := parse(args.Patch)
+			if err != nil {
+				return args, fmt.Errorf("apply_patch arguments are invalid: %s", err)
+			}
+			args.operations = operations
+			return args, nil
+		},
+		Execute: applyPatch,
+	}
+}
 
 type fileChange struct {
 	path      string
@@ -32,33 +84,33 @@ type fileResult struct {
 	Action string `json:"action"`
 }
 
-type output struct {
+type patchOutput struct {
 	Files []fileResult `json:"files"`
 }
 
-// call 在项目目录内应用已在 Prepare 阶段解析的完整补丁。
-func call(ctx context.Context, toolArguments arguments, environment tool.Environment) (tool.ToolResult, error) {
+// applyPatch 在项目目录内应用已在 Prepare 阶段解析的完整补丁。
+func applyPatch(ctx context.Context, toolArguments patchArguments, environment Environment) (ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return tool.ToolResult{}, err
+		return ToolResult{}, err
 	}
-	if !projectDirectory(toolArguments.Path, environment.ProjectPath) {
-		return tool.ToolResult{}, errors.New("apply_patch root is outside the project")
+	if !patchProjectDirectory(toolArguments.Path, environment.ProjectPath) {
+		return ToolResult{}, errors.New("apply_patch root is outside the project")
 	}
 	changes, results, err := prepareChanges(ctx, toolArguments.Path, environment.ProjectPath, toolArguments.operations)
 	if err != nil {
-		return tool.ToolResult{}, err
+		return ToolResult{}, err
 	}
-	encoded, err := json.Marshal(output{Files: results})
+	encoded, err := json.Marshal(patchOutput{Files: results})
 	if err != nil {
-		return tool.ToolResult{}, fmt.Errorf("encode apply_patch result: %w", err)
+		return ToolResult{}, fmt.Errorf("encode apply_patch result: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return tool.ToolResult{}, err
+		return ToolResult{}, err
 	}
 	if err := commitChanges(changes); err != nil {
-		return tool.ToolResult{}, err
+		return ToolResult{}, err
 	}
-	result := tool.NewToolSuccess(string(encoded), false)
+	result := NewToolSuccess(string(encoded), false)
 	result.SideEffect = true
 	return result, nil
 }
@@ -285,7 +337,7 @@ func commitChanges(changes []*fileChange) error {
 	return nil
 }
 
-func projectDirectory(path, projectRoot string) bool {
+func patchProjectDirectory(path, projectRoot string) bool {
 	if !pathutil.IsWithin(projectRoot, path) {
 		return false
 	}
@@ -304,7 +356,7 @@ func projectDirectory(path, projectRoot string) bool {
 	return err == nil && pathutil.SamePath(projectRoot, realRoot) && pathutil.IsWithin(realRoot, realPath)
 }
 
-// projectWritePath 要求项目根目录已通过 projectDirectory 校验。
+// projectWritePath 要求项目根目录已通过 patchProjectDirectory 校验。
 func projectWritePath(path, projectRoot string, allowMissing bool) bool {
 	if !pathutil.IsAbsoluteNormalized(path) || !pathutil.IsWithin(projectRoot, path) {
 		return false

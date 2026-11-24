@@ -14,7 +14,7 @@ import (
 	"praxis/internal/model"
 	"praxis/internal/provider"
 	"praxis/internal/security"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"sync"
 	"time"
 )
@@ -79,14 +79,14 @@ type Gate struct {
 	deps         GateDependencies
 	reviewFormat reviewFormat
 	mu           sync.Mutex
-	pending      map[tool.CallKey]*pendingApproval
+	pending      map[tools.CallKey]*pendingApproval
 }
 
 func NewGate(deps GateDependencies) *Gate {
 	return &Gate{
 		deps:         deps,
 		reviewFormat: newReviewFormat(deps.ReviewPolicy.TargetReasonChars),
-		pending:      make(map[tool.CallKey]*pendingApproval),
+		pending:      make(map[tools.CallKey]*pendingApproval),
 	}
 }
 
@@ -141,7 +141,7 @@ func (g *Gate) DecideApproval(ctx context.Context, request DecisionRequest, appr
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	item := g.pending[tool.CallKey{RunID: request.RunID, CallID: request.CallID}]
+	item := g.pending[tools.CallKey{RunID: request.RunID, CallID: request.CallID}]
 	if item == nil || item.call.SessionID != request.SessionID || item.call.AgentID != request.AgentID {
 		return errorcode.ErrRequestConflict
 	}
@@ -157,7 +157,7 @@ func (g *Gate) DecideApproval(ctx context.Context, request DecisionRequest, appr
 	return nil
 }
 
-func (g *Gate) removePending(key tool.CallKey, item *pendingApproval) {
+func (g *Gate) removePending(key tools.CallKey, item *pendingApproval) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.pending[key] == item {
@@ -172,7 +172,7 @@ func (r *RunGate) Authorize(
 	args json.RawMessage,
 	operationID identity.OperationID,
 	appendEntry entry.AppendEntry,
-) (*tool.ToolResult, error) {
+) (*tools.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (r *RunGate) Authorize(
 		return nil, nil
 	}
 	if !r.run.Main() {
-		denied := tool.NewToolError("subagent_approval_unavailable", "Subagents cannot request approval for this operation.")
+		denied := tools.NewToolError("subagent_approval_unavailable", "Subagents cannot request approval for this operation.")
 		return &denied, nil
 	}
 
@@ -217,7 +217,7 @@ func (r *RunGate) Authorize(
 		case security.RiskSafe:
 			return nil, nil
 		case security.RiskDangerous:
-			denied := tool.NewToolError("tool_risk_denied", "Risk review denied this operation: "+assessed.Assessment.Reason)
+			denied := tools.NewToolError("tool_risk_denied", "Risk review denied this operation: "+assessed.Assessment.Reason)
 			return &denied, nil
 		default:
 			review = &assessed
@@ -250,7 +250,7 @@ func (r *RunGate) Authorize(
 	select {
 	case <-item.decided:
 		if !item.approved {
-			denied := tool.NewToolError("tool_approval_denied", "The user denied this tool call.")
+			denied := tools.NewToolError("tool_approval_denied", "The user denied this tool call.")
 			return &denied, nil
 		}
 		return nil, nil

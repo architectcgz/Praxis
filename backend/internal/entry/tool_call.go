@@ -2,7 +2,7 @@ package entry
 
 import (
 	"praxis/internal/identity"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"time"
 )
 
@@ -10,23 +10,23 @@ const interruptedToolResultText = "The execution ended before a reliable tool re
 
 // ToolCall 是工具调用及执行归属的内存表示，调用信息随 Assistant Entry 持久化。
 type ToolCall struct {
-	tool.CallKey
+	tools.CallKey
 	SessionID identity.SessionID
 	AgentID   identity.AgentID
 	TurnID    identity.TurnID
-	Name      tool.ToolName
+	Name      tools.ToolName
 	Arguments string
 }
 
 // MissingToolResultEntries 按 (RunID, CallID) 差集为未闭合的工具调用生成错误回执条目。
 // 保留原声明顺序，不覆盖已有回执；用于正常中断收尾与异常关闭恢复共用同一事实语义。
 func MissingToolResultEntries(entries []*Entry, createdAt time.Time) []Entry {
-	completed := make(map[tool.CallKey]bool)
+	completed := make(map[tools.CallKey]bool)
 	for _, value := range entries {
 		_, blocks := value.Dialogue()
 		for _, block := range blocks {
 			if result, ok := block.(ToolResultBlock); ok {
-				completed[tool.CallKey{RunID: value.RunID, CallID: result.CallID}] = true
+				completed[tools.CallKey{RunID: value.RunID, CallID: result.CallID}] = true
 			}
 		}
 	}
@@ -39,7 +39,7 @@ func MissingToolResultEntries(entries []*Entry, createdAt time.Time) []Entry {
 			if !ok {
 				continue
 			}
-			key := tool.CallKey{RunID: value.RunID, CallID: call.CallID}
+			key := tools.CallKey{RunID: value.RunID, CallID: call.CallID}
 			if completed[key] {
 				continue
 			}

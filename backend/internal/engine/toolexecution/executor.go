@@ -13,7 +13,7 @@ import (
 	"praxis/internal/event"
 	"praxis/internal/identity"
 	"praxis/internal/timing"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"strings"
 	"sync"
 )
@@ -30,12 +30,12 @@ type ExecutorDependencies struct {
 // OutputFiles 由执行器消费；临时目录的布局和文件写入由实现方决定。
 type OutputFiles interface {
 	Directory(identity.SessionID) string
-	Bound(identity.SessionID, tool.ToolResult, int) (tool.ToolResult, error)
+	Bound(identity.SessionID, tools.ToolResult, int) (tools.ToolResult, error)
 }
 
 // Authorizer 在工具执行前裁决授权，与工具准备、执行及结果限制解耦。
 type Authorizer interface {
-	Authorize(context.Context, entry.ToolCall, json.RawMessage, identity.OperationID, entry.AppendEntry) (*tool.ToolResult, error)
+	Authorize(context.Context, entry.ToolCall, json.RawMessage, identity.OperationID, entry.AppendEntry) (*tools.ToolResult, error)
 }
 
 // RunOwner 提供工具执行事件和归属所需的最小只读视图。
@@ -63,13 +63,13 @@ type activeCall struct {
 type Executor struct {
 	deps   ExecutorDependencies
 	mu     sync.Mutex
-	active map[tool.CallKey]*activeCall
+	active map[tools.CallKey]*activeCall
 }
 
 func NewExecutor(deps ExecutorDependencies) *Executor {
 	return &Executor{
 		deps:   deps,
-		active: make(map[tool.CallKey]*activeCall),
+		active: make(map[tools.CallKey]*activeCall),
 	}
 }
 
@@ -78,21 +78,21 @@ type RunTools struct {
 	run         RunOwner
 	executor    *Executor
 	projectPath string
-	catalog     tool.ToolCatalog
+	catalog     tools.ToolCatalog
 	authorizer  Authorizer
 }
 
 // CallResult 将实际结果和耗时交给调用方一起提交；仅执行路径携带 OperationID 和已准备参数。
 // Err 只供后置观察，工具执行失败已编码在 ToolResult 中，不作为编排错误返回。
 type CallResult struct {
-	ToolResult  tool.ToolResult
+	ToolResult  tools.ToolResult
 	OperationID identity.OperationID
 	Arguments   json.RawMessage
 	Timing      *timing.Timing
 	Err         error
 }
 
-func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCatalog, authorizer Authorizer) *RunTools {
+func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tools.ToolCatalog, authorizer Authorizer) *RunTools {
 	return &RunTools{
 		executor:    e,
 		run:         run,
@@ -102,13 +102,13 @@ func (e *Executor) ForRun(run RunOwner, projectPath string, catalog tool.ToolCat
 	}
 }
 
-func (e *Executor) register(key tool.CallKey, call *activeCall) {
+func (e *Executor) register(key tools.CallKey, call *activeCall) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.active[key] = call
 }
 
-func (e *Executor) unregister(key tool.CallKey) {
+func (e *Executor) unregister(key tools.CallKey) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.active, key)
@@ -120,7 +120,7 @@ func (e *Executor) StopCall(ctx context.Context, request ControlRequest) error {
 		return err
 	}
 	e.mu.Lock()
-	active := e.active[tool.CallKey{RunID: request.RunID, CallID: request.CallID}]
+	active := e.active[tools.CallKey{RunID: request.RunID, CallID: request.CallID}]
 	if active == nil || active.sessionID != request.SessionID || active.agentID != request.AgentID {
 		e.mu.Unlock()
 		return errorcode.ErrRequestConflict
@@ -132,8 +132,8 @@ func (e *Executor) StopCall(ctx context.Context, request ControlRequest) error {
 }
 
 // Execute 冻结工具参数、按工具策略决定是否授权并执行调用；工具回执由 Loop 统一提交。
-func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendEntry entry.AppendEntry) (CallResult, error) {
-	s := tools.executor
+func (runTools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendEntry entry.AppendEntry) (CallResult, error) {
+	s := runTools.executor
 	callCtx, cancelCall := context.WithCancelCause(ctx)
 	defer cancelCall(nil)
 
@@ -147,7 +147,7 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 	if err := callCtx.Err(); err != nil {
 		return callError("tool_interrupted", cancelReason(callCtx, err)), nil
 	}
-	t, ok := tools.catalog.Get(call.Name)
+	t, ok := runTools.catalog.Get(call.Name)
 	if !ok {
 		return callError("tool_not_allowed", "The requested tool is disabled or unregistered."), nil
 	}
@@ -160,7 +160,7 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 	arguments := t.NewArguments()
 	var path *string
 	var defaultPath string
-	if value, ok := arguments.(tool.PathArguments); ok {
+	if value, ok := arguments.(tools.PathArguments); ok {
 		path = value.PathArgument()
 		// 解码前保留业务默认路径，显式空值仍按该工具自己的缺省规则处理。
 		defaultPath = *path
@@ -180,13 +180,13 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 			return callError("invalid_tool_call", "path contains control characters"), nil
 		}
 		if !filepath.IsAbs(*path) {
-			*path = filepath.Join(tools.projectPath, *path)
+			*path = filepath.Join(runTools.projectPath, *path)
 		}
 		*path = filepath.Clean(*path)
 	}
-	prepared, err := t.Prepare(arguments, tool.Environment{
-		ProjectPath:     tools.projectPath,
-		OutputDirectory: s.deps.Outputs.Directory(tools.run.SessionID()),
+	prepared, err := t.Prepare(arguments, tools.Environment{
+		ProjectPath:     runTools.projectPath,
+		OutputDirectory: s.deps.Outputs.Directory(runTools.run.SessionID()),
 		CallID:          call.CallID,
 	})
 	if err != nil {
@@ -200,8 +200,8 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 	if err := s.deps.HookDispatcher.BeforeToolExecution(callCtx, toolHookEvent(call, string(args), operationID)); err != nil {
 		return CallResult{}, err
 	}
-	if tool.RequiresApproval(t) && tools.authorizer != nil {
-		denied, authErr := tools.authorizer.Authorize(callCtx, call, args, operationID, appendEntry)
+	if tools.RequiresApproval(t) && runTools.authorizer != nil {
+		denied, authErr := runTools.authorizer.Authorize(callCtx, call, args, operationID, appendEntry)
 		if errors.Is(context.Cause(callCtx), errCallStopped) {
 			return callError("tool_interrupted", errCallStopped.Error()), nil
 		}
@@ -222,7 +222,7 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 	observed := observedCall{
 		call:    prepared.Call,
 		name:    call.Name,
-		run:     tools.run,
+		run:     runTools.run,
 		hooks:   s.deps.HookDispatcher,
 		emitter: s.deps.Emitter,
 		identity: hook.Identity{
@@ -248,7 +248,7 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 			} else if errors.Is(execErr, context.Canceled) || errors.Is(execErr, context.DeadlineExceeded) {
 				code = "tool_interrupted"
 			}
-			value = tool.NewToolError(code, message)
+			value = tools.NewToolError(code, message)
 		} else if value.ErrorClass == "" {
 			value.ErrorClass = "tool_execution_failed"
 		}
@@ -256,7 +256,7 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 	bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value, s.deps.InlineResultBytes)
 	if outputErr != nil {
 		sideEffect := value.SideEffect
-		value = tool.NewToolError("tool_output_save_failed", "The tool has already run, but saving its output failed: "+outputErr.Error()+". Do not rerun the operation solely to recover its output.")
+		value = tools.NewToolError("tool_output_save_failed", "The tool has already run, but saving its output failed: "+outputErr.Error()+". Do not rerun the operation solely to recover its output.")
 		value.SideEffect = sideEffect
 		execErr = errors.Join(execErr, outputErr)
 	} else {
@@ -294,8 +294,8 @@ func decodeToolArguments(raw string, target any) error {
 
 // observedCall 只观察已绑定参数的真实调用，不参与授权、参数准备或结果保存。
 type observedCall struct {
-	call     func(context.Context) (tool.ToolResult, error)
-	name     tool.ToolName
+	call     func(context.Context) (tools.ToolResult, error)
+	name     tools.ToolName
 	timing   *timing.Timing
 	run      RunOwner
 	hooks    *hook.Dispatcher
@@ -304,7 +304,7 @@ type observedCall struct {
 	callID   string
 }
 
-func (t *observedCall) Call(ctx context.Context) (result tool.ToolResult, err error) {
+func (t *observedCall) Call(ctx context.Context) (result tools.ToolResult, err error) {
 	ctx, scope := t.hooks.Start(ctx, hook.Operation{
 		Identity:    t.identity,
 		Kind:        hook.OperationTool,
@@ -348,9 +348,9 @@ func cancelReason(ctx context.Context, fallback error) string {
 }
 
 func callError(code, message string) CallResult {
-	return CallResult{ToolResult: tool.NewToolError(code, message)}
+	return CallResult{ToolResult: tools.NewToolError(code, message)}
 }
 
-func (tools *RunTools) SpillResult(result tool.ToolResult) (tool.ToolResult, error) {
-	return tools.executor.deps.Outputs.Bound(tools.run.SessionID(), result, 0)
+func (runTools *RunTools) SpillResult(result tools.ToolResult) (tools.ToolResult, error) {
+	return runTools.executor.deps.Outputs.Bound(runTools.run.SessionID(), result, 0)
 }

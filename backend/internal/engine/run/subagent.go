@@ -7,6 +7,7 @@ import (
 	"praxis/internal/entry"
 	"praxis/internal/event"
 	"praxis/internal/identity"
+	"praxis/internal/tools"
 	"slices"
 	"sync"
 )
@@ -235,15 +236,7 @@ func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) e
 	return nil
 }
 
-// SubagentReceipt 不包含报告正文；父 Run 会将正文作为独立条目写入历史。
-type SubagentReceipt struct {
-	ReportID identity.ReportID `json:"reportId"`
-	AgentID  identity.AgentID  `json:"agentId"`
-	Outcome  entry.RunOutcome  `json:"outcome"`
-	Final    bool              `json:"final"`
-}
-
-func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]SubagentReceipt, error) {
+func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]tools.SubagentReceipt, error) {
 	wanted := make(map[identity.AgentID]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true
@@ -251,6 +244,10 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 	var fresh []SubagentReport
 	for {
 		r.collaboration.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			r.collaboration.mu.Unlock()
+			return nil, err
+		}
 		finished := true
 		for _, id := range ids {
 			h, ok := r.collaboration.children[id]
@@ -290,12 +287,12 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 		case <-wake:
 		}
 	}
-	receipts := make([]SubagentReceipt, 0, len(fresh))
+	receipts := make([]tools.SubagentReceipt, 0, len(fresh))
 	for _, report := range fresh {
-		receipts = append(receipts, SubagentReceipt{
+		receipts = append(receipts, tools.SubagentReceipt{
 			ReportID: report.ReportID,
 			AgentID:  report.AgentID,
-			Outcome:  report.Outcome,
+			Outcome:  string(report.Outcome),
 			Final:    report.Final,
 		})
 	}

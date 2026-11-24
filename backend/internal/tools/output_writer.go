@@ -1,4 +1,4 @@
-package output
+package tools
 
 import (
 	"bytes"
@@ -6,9 +6,9 @@ import (
 	"os"
 )
 
-// Writer 在达到内联上限前保留小缓冲，超过上限后将已有和后续输出完整写入文件。
-// 同一个 Writer 同时交给 exec.Cmd 的 stdout/stderr，由 exec 保证串行写入。
-type Writer struct {
+// outputWriter 在达到内联上限前保留小缓冲，超过上限后将已有和后续输出完整写入文件。
+// 同一个 outputWriter 同时交给 exec.Cmd 的 stdout/stderr，由 exec 保证串行写入。
+type outputWriter struct {
 	directory   string
 	inlineBytes int
 	buffer      bytes.Buffer
@@ -17,14 +17,14 @@ type Writer struct {
 	err         error
 }
 
-func NewWriter(directory string, inlineBytes int) *Writer {
-	return &Writer{
+func newOutputWriter(directory string, inlineBytes int) *outputWriter {
+	return &outputWriter{
 		directory:   directory,
 		inlineBytes: inlineBytes,
 	}
 }
 
-func (w *Writer) Write(value []byte) (int, error) {
+func (w *outputWriter) Write(value []byte) (int, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
@@ -32,7 +32,7 @@ func (w *Writer) Write(value []byte) (int, error) {
 		return w.buffer.Write(value)
 	}
 	if w.file == nil {
-		w.file, w.err = create(w.directory)
+		w.file, w.err = createOutputFile(w.directory)
 		if w.err != nil {
 			return 0, w.err
 		}
@@ -51,14 +51,14 @@ func (w *Writer) Write(value []byte) (int, error) {
 }
 
 // Finish 关闭文件后才发布路径；保存失败的半成品文件不会被写入工具回执。
-func (w *Writer) Finish() (string, File, error) {
+func (w *outputWriter) Finish() (string, outputFile, error) {
 	if w.file == nil {
-		return w.buffer.String(), File{}, w.err
+		return w.buffer.String(), outputFile{}, w.err
 	}
 	err := errors.Join(w.err, w.file.Close())
 	if err != nil {
 		_ = os.Remove(w.file.Name())
-		return "", File{}, err
+		return "", outputFile{}, err
 	}
-	return "", File{Path: w.file.Name(), Size: w.size}, nil
+	return "", outputFile{Path: w.file.Name(), Size: w.size}, nil
 }

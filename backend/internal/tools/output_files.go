@@ -1,5 +1,4 @@
-// Package output 保存超过内联限制的完整工具输出，文件由系统临时目录管理。
-package output
+package tools
 
 import (
 	"encoding/json"
@@ -8,24 +7,23 @@ import (
 	"os"
 	"path/filepath"
 	"praxis/internal/identity"
-	"praxis/internal/tool"
 )
 
-// Files 不缓存结果；会话共享同一目录，执行结束不删除仍被历史引用的文件。
-type Files struct {
+// OutputFiles 不缓存结果；会话共享同一目录，执行结束不删除仍被历史引用的文件。
+type OutputFiles struct {
 	Root string
 }
 
-func (f Files) Directory(sessionID identity.SessionID) string {
+func (f OutputFiles) Directory(sessionID identity.SessionID) string {
 	return filepath.Join(f.Root, sessionID.String())
 }
 
 // Bound 在 Entry 创建之前转存完整结果，保留工具的错误和副作用状态。
-func (f Files) Bound(sessionID identity.SessionID, result tool.ToolResult, limit int) (tool.ToolResult, error) {
+func (f OutputFiles) Bound(sessionID identity.SessionID, result ToolResult, limit int) (ToolResult, error) {
 	if len(result.Payload) <= limit {
 		return result, nil
 	}
-	file, err := Save(f.Directory(sessionID), result.Payload)
+	file, err := saveOutput(f.Directory(sessionID), result.Payload)
 	if err != nil {
 		return result, err
 	}
@@ -46,26 +44,26 @@ func (f Files) Bound(sessionID identity.SessionID, result tool.ToolResult, limit
 	return result, nil
 }
 
-type File struct {
+type outputFile struct {
 	Path string
 	Size int64
 }
 
-func Save(directory, content string) (File, error) {
-	file, err := create(directory)
+func saveOutput(directory, content string) (outputFile, error) {
+	file, err := createOutputFile(directory)
 	if err != nil {
-		return File{}, err
+		return outputFile{}, err
 	}
 	size, writeErr := io.WriteString(file, content)
 	err = errors.Join(writeErr, file.Close())
 	if err != nil {
 		_ = os.Remove(file.Name())
-		return File{}, err
+		return outputFile{}, err
 	}
-	return File{Path: file.Name(), Size: int64(size)}, nil
+	return outputFile{Path: file.Name(), Size: int64(size)}, nil
 }
 
-func create(directory string) (*os.File, error) {
+func createOutputFile(directory string) (*os.File, error) {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, err
 	}

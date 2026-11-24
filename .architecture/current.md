@@ -58,8 +58,8 @@
   - `nativeExecutor.BoundResult` 对 `e.base` 做无保护的接口类型断言，`loop/tools.go` 也通过隐式断言获取 `BoundResult`，表明 `loop.ToolExecutor` 接口漏定义了该能力。
   - `coordinator/run.go` 将 `&runner` 传给 `run.Execute`，又在 `prepareTools` 回调中通过闭包副作用覆写 `runner.Tools = catalog`，控制流隐晦。
 - 确定方案：
-  - 将子代理协作工具定义、参数类型与 `tool.Tool` 实现从 `coordinator` 移至 `core/tool` 下独立子包（如 `core/tool/subagent`），通过运行期能力接口绑定具体协作行为，`coordinator` 只提供运行时实现并组合目录。
-  - 在 `tool.Environment` 中补充 `CallID`，新增可选免审批能力接口（如 `RequiresApproval() bool`），让协作工具统一走 `toolexecution.Executor`，删除 `nativeExecutor` 与 `decodeNative`。
+  - 子代理协作工具的定义、参数校验和实现归属 `internal/tools/subagent.go`，`coordinator` 绑定本次 Run 的协作操作并组合工具目录。
+  - 协作工具使用 `tools.Environment.CallID` 关联调用，在 `toolexecution.Executor` 中统一执行，并按声明免审批。
   - 在 `loop.ToolExecutor` 接口中显式声明 `BoundResult`，移除隐式类型断言。
   - 调整 `coordinator/run.go` 与 `run.Execute` 的工具准备返回，消除回调闭包修改 `runner.Tools` 的副作用。
 
@@ -114,7 +114,7 @@
   - 若 `CreateSubagent` 成功但后续 `Prepare` 失败，`Session.data.AgentContexts` 中已登记的空 `agentID` 与新建的空 `.jsonl` 文件未回滚。
 - 确定方案：
   - 在 `agentrun.Run` 上把名额检查与占位合并为锁内原子操作（`ReserveSubagent` -> 准备后 `AttachSubagent` -> 失败时 `ReleaseSubagent`）。
-  - 改为 `launchLocked` 成功后再发送 `SubagentStarted`，并用统一的失败回滚逻辑清理未成功启动的占位、取消与超时资源。
+  - 子 Run 登记成功后再发布 `SubagentStarted`，失败时统一释放尚未启动的占位和取消资源。子 Run 不设整体时限；`subagent_wait` 单次最多等待 30 秒，到期后未结束的子 Run 继续执行。
   - 仅在 `!prepared`（尚无任何记录写入）时关闭并清理新建的空子代理 Writer 与登记；已写入 `RunPrepared` 时保持走 `SettlePreparation` 写终态保留事实。
 
 ---

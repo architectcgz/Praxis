@@ -7,7 +7,7 @@ import (
 	"praxis/internal/entry"
 	"praxis/internal/identity"
 	"praxis/internal/provider"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 )
 
 // Error 标记扩展回调失败，业务层可与 Provider、工具及存储错误区分。
@@ -80,7 +80,7 @@ type ToolExecution struct {
 
 type ToolExecutionResult struct {
 	ToolExecution
-	Result tool.ToolResult
+	Result tools.ToolResult
 	Err    error
 }
 

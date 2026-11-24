@@ -10,7 +10,7 @@ import (
 	"praxis/internal/model"
 	"praxis/internal/provider"
 	"praxis/internal/provider/streaming"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"slices"
 	"strings"
 )
@@ -124,7 +124,7 @@ func (d decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit s
 			}
 			if delta.Function != nil {
 				if delta.Function.Name != nil {
-					call.Name += tool.ToolName(*delta.Function.Name)
+					call.Name += tools.ToolName(*delta.Function.Name)
 				}
 				if delta.Function.Arguments != nil {
 					call.Arguments += *delta.Function.Arguments

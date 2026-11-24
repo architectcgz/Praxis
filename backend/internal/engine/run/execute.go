@@ -9,7 +9,7 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/event"
 	"praxis/internal/identity"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"time"
 )
 
@@ -65,7 +65,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 }
 
 // Execute 即使在启动或 Loop 中途失败，也要等待子执行收尾并提交终态。
-func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (tool.ToolCatalog, loop.ToolExecutor, error)) (err error) {
+func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (*tools.Discovery, loop.ToolExecutor, error)) (err error) {
 	ctx, scope := r.deps.HookDispatcher.Start(ctx, hook.Operation{
 		Identity: runIdentity(r, ""),
 		Kind:     hook.OperationAgent,
@@ -102,7 +102,7 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 	return err
 }
 
-func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (tool.ToolCatalog, loop.ToolExecutor, error)) error {
+func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (*tools.Discovery, loop.ToolExecutor, error)) error {
 	prepareCtx, cancelPrepare := context.WithTimeout(ctx, r.deps.PrepareTimeout)
 	defer cancelPrepare()
 	if hookErr := r.deps.HookDispatcher.RunStarted(prepareCtx, hook.RunEvent{Identity: runIdentity(r, "")}); hookErr != nil {
@@ -111,7 +111,7 @@ func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools
 	if err := prepareCtx.Err(); err != nil {
 		return err
 	}
-	catalog, tools, err := prepareTools(prepareCtx)
+	discovery, tools, err := prepareTools(prepareCtx)
 	prepareErr := prepareCtx.Err()
 	cancelPrepare()
 	if err != nil {
@@ -120,7 +120,7 @@ func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools
 	if prepareErr != nil {
 		return prepareErr
 	}
-	params, deps := r.modelRunParams(catalog)
+	params, deps := r.modelRunParams(discovery)
 	if _, err := runner.Run(ctx, params, deps, r.input, tools); err != nil {
 		return err
 	}

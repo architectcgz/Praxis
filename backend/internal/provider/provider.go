@@ -6,13 +6,13 @@ import (
 	appcontext "praxis/internal/context"
 	"praxis/internal/identity"
 	"praxis/internal/model"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 )
 
 // ToolCall 是 Provider 与模型调用方共享的纯工具请求数据。
 type ToolCall struct {
 	ID   string
-	Name tool.ToolName
+	Name tools.ToolName
 	// Arguments 保留模型返回的参数原文，合法性由工具执行入口判断。
 	Arguments string
 }
@@ -26,7 +26,7 @@ type Request struct {
 	Context         appcontext.ModelContext
 	Model           model.Config
 	MaxOutputTokens int
-	Tools           []tool.ToolDefinition
+	Tools           []tools.ToolDefinition
 	TurnID          identity.TurnID
 	// OutputSchema 非空时启用严格 JSON Schema 输出；为空时不指定输出格式。
 	OutputSchema *OutputSchema

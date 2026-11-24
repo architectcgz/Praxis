@@ -11,7 +11,7 @@ import (
 	"praxis/internal/event"
 	"praxis/internal/identity"
 	"praxis/internal/provider"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -21,7 +21,7 @@ func prepareToolCalls(params RunParams, turnID identity.TurnID, values []provide
 	calls := make([]entry.ToolCall, 0, len(values))
 	for _, call := range values {
 		calls = append(calls, entry.ToolCall{
-			CallKey: tool.CallKey{
+			CallKey: tools.CallKey{
 				RunID:  params.ID,
 				CallID: call.ID,
 			},
@@ -36,7 +36,7 @@ func prepareToolCalls(params RunParams, turnID identity.TurnID, values []provide
 }
 
 // runToolCalls 用只读批次和修改屏障执行，完成顺序只影响通知，全部回执按声明顺序一次保存。
-func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDependencies, executor ToolExecutor, calls []entry.ToolCall) error {
+func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDependencies, executor ToolExecutor, calls []entry.ToolCall, visible tools.ToolCatalog) error {
 	if len(calls) == 0 {
 		return nil
 	}
@@ -49,14 +49,18 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	deps.ExecuteTools(deps.AppendEntry, func(submitEntry entry.AppendEntry) {
 		execute := func(index int) {
 			call := calls[index]
-			outcomes[index], failures[index] = executor.Execute(batchCtx, call, submitEntry)
+			if _, ok := visible.Get(call.Name); ok {
+				outcomes[index], failures[index] = executor.Execute(batchCtx, call, submitEntry)
+			} else {
+				outcomes[index].ToolResult = tools.NewToolError("tool_not_available", "The requested tool is unavailable in this request. Use list_tools to discover and load tools for the next request.")
+			}
 			if failures[index] != nil {
 				cancelBatch()
 			}
 			completed[index] = true
 			result := outcomes[index].ToolResult
 			if failures[index] != nil && result.Payload == "" {
-				result = tool.NewToolError("tool_execution_failed", failures[index].Error())
+				result = tools.NewToolError("tool_execution_failed", failures[index].Error())
 				outcomes[index].ToolResult = result
 			}
 			r.emit(params, call.TurnID, event.ToolResult{
@@ -72,8 +76,8 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 				break
 			}
 			end := index + 1
-			if tool.IsReadOnly(params.Tools, calls[index].Name) {
-				for end < len(calls) && tool.IsReadOnly(params.Tools, calls[end].Name) {
+			if tools.IsReadOnly(visible, calls[index].Name) {
+				for end < len(calls) && tools.IsReadOnly(visible, calls[end].Name) {
 					end++
 				}
 				var group sync.WaitGroup
@@ -104,7 +108,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 	})
 	for index := range calls {
 		if !completed[index] {
-			outcomes[index].ToolResult = tool.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available.")
+			outcomes[index].ToolResult = tools.NewToolError("tool_interrupted", "The execution exited before a reliable tool result was available.")
 		}
 	}
 	if err := r.boundToolResults(ctx, params, deps, executor, outcomes); err != nil {
@@ -175,7 +179,7 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 	request := provider.Request{
 		Context:         appcontext.ModelContextFromEntries(params.SystemPrompt, entries),
 		Model:           params.Model,
-		Tools:           params.Tools.List(),
+		Tools:           params.Tools.Visible().List(),
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 	}
 	input, err := r.ModelCaller.EstimateRequestTokens(request, deps.Budget)
@@ -203,7 +207,7 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 		prior := results[index].ToolResult
 		bounded, err := executor.SpillResult(prior)
 		if err != nil {
-			bounded = tool.NewToolError("tool_output_save_failed", "The operation already ran, but saving its output failed: "+err.Error()+". Do not rerun the operation to recover output.")
+			bounded = tools.NewToolError("tool_output_save_failed", "The operation already ran, but saving its output failed: "+err.Error()+". Do not rerun the operation to recover output.")
 			bounded.SideEffect = prior.SideEffect
 		}
 		results[index].ToolResult = bounded

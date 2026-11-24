@@ -13,8 +13,7 @@ import (
 	"praxis/internal/engine/session"
 	"praxis/internal/engine/toolexecution"
 	"praxis/internal/event"
-	"praxis/internal/tool/output"
-	subagenttool "praxis/internal/tool/subagent"
+	"praxis/internal/tools"
 )
 
 func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*session.Configuration, error), hooks *hook.Dispatcher, emitter *event.Emitter, customRunner *loop.Runner, toolOutputDir string, runtime config.Runtime) *coordinator.Coordinator {
@@ -56,7 +55,7 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 	executor := toolexecution.NewExecutor(toolexecution.ExecutorDependencies{
 		HookDispatcher:    hooks,
 		Emitter:           emitter,
-		Outputs:           output.Files{Root: toolOutputDir},
+		Outputs:           tools.OutputFiles{Root: toolOutputDir},
 		InlineResultBytes: runtime.Tools.InlineResultBytes,
 	})
 
@@ -104,9 +103,5 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		TransitionTimeout: runtime.Lifecycle.Transition,
 		ShutdownTimeout:   runtime.Lifecycle.Shutdown,
 		ActiveSubagents:   runtime.Execution.ActiveSubagents,
-		SubagentLimits: subagenttool.TimeoutLimits{
-			MinTimeoutSeconds: runtime.Tools.Subagent.MinTimeoutSeconds,
-			MaxTimeoutSeconds: runtime.Tools.Subagent.MaxTimeoutSeconds,
-		},
 	})
 }

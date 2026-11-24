@@ -10,8 +10,7 @@ import (
 	"praxis/internal/event"
 	"praxis/internal/identity"
 	"praxis/internal/task"
-	"praxis/internal/tool"
-	subagenttool "praxis/internal/tool/subagent"
+	"praxis/internal/tools"
 )
 
 func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *activeRun) {
@@ -25,7 +24,7 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 	if runner.Provider == nil {
 		runner.Provider = active.config.Provider
 	}
-	err := run.Execute(ctx, &runner, func(prepareCtx context.Context) (tool.ToolCatalog, loop.ToolExecutor, error) {
+	err := run.Execute(ctx, &runner, func(prepareCtx context.Context) (*tools.Discovery, loop.ToolExecutor, error) {
 		info, err := r.sessionRecords.Get(prepareCtx, run.SessionID())
 		if err != nil {
 			return nil, nil, errorcode.ErrStorage.Wrap(err)
@@ -34,22 +33,29 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 		if err != nil {
 			return nil, nil, errorcode.ErrStorage.Wrap(err)
 		}
-		var extras []tool.Tool
+		var extras []tools.Tool
 		if run.Main() {
-			extras = subagenttool.MainTools(mainSubagentRuntime{
-				coordinator: r,
-				run:         run,
-				active:      active,
-			}, r.subagentLimits)
+			extras = tools.SubagentMainTools(tools.SubagentParentOperations{
+				Start: func(ctx context.Context, assignment tools.SubagentAssignment, callID string) (tools.SubagentIDs, error) {
+					return r.startSubagent(ctx, run, active, assignment, callID)
+				},
+				Wait: func(ctx context.Context, ids []identity.AgentID, all bool) ([]tools.SubagentReceipt, error) {
+					run.BeginWaiting()
+					defer run.EndWaiting()
+					return run.WaitSubagents(ctx, ids, all)
+				},
+				Send:   run.SendToSubagent,
+				Cancel: run.CancelSubagent,
+			})
 		} else {
-			extras = subagenttool.ChildTools(run)
+			extras = tools.SubagentDelegateTools(run.ReportToParent)
 		}
-		catalog, err := tool.ComposeCatalog(active.config.Tools, extras...)
+		discovery, catalog, err := tools.NewDiscovery(active.config.Tools, extras)
 		if err != nil {
 			return nil, nil, err
 		}
 		authorizer := r.approvals.ForRun(run, project.Path, active.session.ApprovalMode, runner.Provider)
-		return catalog, r.tools.ForRun(run, project.Path, catalog, authorizer), nil
+		return discovery, r.tools.ForRun(run, project.Path, catalog, authorizer), nil
 	})
 	if err != nil {
 		r.logger.Errorf("run failed run_id=%s: %v", run.ID(), err)

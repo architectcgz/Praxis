@@ -17,7 +17,7 @@ import (
 	"praxis/internal/model"
 	"praxis/internal/provider"
 	"praxis/internal/timing"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"slices"
 	"strings"
 	"time"
@@ -382,12 +382,12 @@ func (c *Caller) EstimateRequestTokens(request provider.Request, budget *appcont
 }
 
 // EstimateOverhead 估算工具定义与结构化输出 Schema 占用的请求开销。
-func EstimateOverhead(tools []tool.ToolDefinition, schema *provider.OutputSchema) (int, error) {
+func EstimateOverhead(definitions []tools.ToolDefinition, schema *provider.OutputSchema) (int, error) {
 	data, err := json.Marshal(struct {
-		Tools        []tool.ToolDefinition
+		Tools        []tools.ToolDefinition
 		OutputSchema *provider.OutputSchema
 	}{
-		Tools:        tools,
+		Tools:        definitions,
 		OutputSchema: schema,
 	})
 	if err != nil {
@@ -399,7 +399,7 @@ func EstimateOverhead(tools []tool.ToolDefinition, schema *provider.OutputSchema
 func requestShapeKey(request provider.Request) (string, error) {
 	data, err := json.Marshal(struct {
 		Model  any
-		Tools  []tool.ToolDefinition
+		Tools  []tools.ToolDefinition
 		Schema *provider.OutputSchema
 	}{
 		Model:  request.Model,

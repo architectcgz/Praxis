@@ -9,7 +9,7 @@ import (
 	"praxis/internal/model"
 	"praxis/internal/provider"
 	"praxis/internal/provider/streaming"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"strings"
 )
 
@@ -518,7 +518,7 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 				Kind: provider.StreamToolCall,
 				ToolCall: provider.ToolCall{
 					ID:        item.CallID,
-					Name:      tool.ToolName(item.Name),
+					Name:      tools.ToolName(item.Name),
 					Arguments: item.Arguments,
 				},
 				OutputIndex: &index,

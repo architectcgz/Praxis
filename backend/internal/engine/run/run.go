@@ -14,7 +14,7 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/logging"
 	"praxis/internal/model"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 	"sync/atomic"
 	"time"
 )
@@ -287,7 +287,7 @@ func (r *Run) Outcome() entry.RunOutcome {
 	return r.terminal.RunOutcome()
 }
 
-func (s *Run) modelRunParams(tools tool.ToolCatalog) (loop.RunParams, loop.RunDependencies) {
+func (s *Run) modelRunParams(discovery *tools.Discovery) (loop.RunParams, loop.RunDependencies) {
 	return loop.RunParams{
 			ID:           s.id,
 			SourceTaskID: s.sourceTaskID,
@@ -295,7 +295,7 @@ func (s *Run) modelRunParams(tools tool.ToolCatalog) (loop.RunParams, loop.RunDe
 			AgentID:      s.AgentID(),
 			SystemPrompt: s.definition.Instructions,
 			Model:        s.model,
-			Tools:        tools,
+			Tools:        discovery,
 		}, loop.RunDependencies{
 			AcceptSubagentReports: s.acceptReports,
 			AcceptInstructions:    s.acceptInstructions,

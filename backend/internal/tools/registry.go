@@ -1,4 +1,4 @@
-package tool
+package tools
 
 import (
 	"encoding/json"
@@ -21,18 +21,21 @@ func NewToolRegistry() *ToolRegistry {
 }
 
 // Register 注册扩展工具；名称或 Schema 无效、名称已被占用时返回错误。
-func (r *ToolRegistry) Register(tool Tool) error {
-	if r == nil || tool == nil {
+func (r *ToolRegistry) Register(candidate Tool) error {
+	if r == nil || candidate == nil {
 		return errors.New("tool registry and tool are required")
 	}
-	definition := tool.Definition()
+	definition := candidate.Definition()
+	if definition.Name == listToolsName {
+		return fmt.Errorf("tool name %q is reserved for discovery", definition.Name)
+	}
 	if !toolNamePattern.MatchString(string(definition.Name)) || !json.Valid(definition.InputSchema) || definition.Description == "" {
 		return errors.New("tool definition is invalid")
 	}
 	if _, exists := r.tools[definition.Name]; exists {
 		return fmt.Errorf("tool %q is already registered", definition.Name)
 	}
-	r.tools[definition.Name] = tool
+	r.tools[definition.Name] = candidate
 	return nil
 }
 
@@ -51,8 +54,8 @@ func (r *ToolRegistry) List() []ToolDefinition {
 		return nil
 	}
 	definitions := make([]ToolDefinition, 0, len(r.tools))
-	for _, tool := range r.tools {
-		definitions = append(definitions, tool.Definition())
+	for _, candidate := range r.tools {
+		definitions = append(definitions, candidate.Definition())
 	}
 	slices.SortFunc(definitions, func(left, right ToolDefinition) int {
 		if left.Name < right.Name {

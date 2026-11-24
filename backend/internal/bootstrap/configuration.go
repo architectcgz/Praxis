@@ -10,17 +10,17 @@ import (
 	"praxis/internal/provider/httpclient"
 	"praxis/internal/provider/router"
 	"praxis/internal/provider/streaming"
-	"praxis/internal/tool"
+	"praxis/internal/tools"
 )
 
 // configuration 持有固定的工具实现和进程策略，每次加载返回独立的会话快照。
 type configuration struct {
-	registry *tool.ToolRegistry
+	registry *tools.ToolRegistry
 	model    config.ModelRuntime
 	logger   *logging.Logger
 }
 
-func loadConfiguration(ctx context.Context, root config.DataRoot, runtime config.Runtime, logger *logging.Logger, extensions []tool.Tool) (*configuration, error) {
+func loadConfiguration(ctx context.Context, root config.DataRoot, runtime config.Runtime, logger *logging.Logger, extensions []tools.Tool) (*configuration, error) {
 	registry, err := buildToolRegistry(runtime.Tools, extensions)
 	if err != nil {
 		return nil, err

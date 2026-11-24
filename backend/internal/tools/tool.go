@@ -1,5 +1,5 @@
-// Package tool 定义模型与工具执行共同使用的工具协议、注册目录与结果边界。
-package tool
+// Package tools 定义工具协议、注册目录、内置工具与输出边界。
+package tools
 
 import (
 	"context"
