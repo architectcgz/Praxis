@@ -37,6 +37,7 @@ type ModelProvider struct {
 	DisplayName string  `json:"displayName"`
 	BaseURL     string  `json:"baseUrl"`
 	ProxyURL    string  `json:"proxyUrl,omitempty"`
+	ProxyMode   string  `json:"proxyMode,omitempty"`
 	Models      []Model `json:"models"`
 }
 
@@ -108,9 +109,6 @@ func validateProviders(providers []ModelProvider, groupsSeen map[string]struct{}
 			)
 		}
 		if err := validateBaseURL(provider.BaseURL); err != nil {
-			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
-		}
-		if err := validateProxyURL(provider.ProxyURL); err != nil {
 			return fmt.Errorf("models config: provider %q: %w", provider.ID, err)
 		}
 		if err := validateModels(provider, groupsSeen); err != nil {
@@ -249,13 +247,19 @@ func validateBaseURL(value string) error {
 	return nil
 }
 
-// validateProxyURL 只读校验 canonical 代理地址，空值表示不覆盖代理；允许认证信息，不能带路径、查询参数或片段。
-func validateProxyURL(value string) error {
-	if value == "" {
-		return nil
+// parseProxy 解析后直接交给 HTTP 装配；旧文档省略模式时，空地址继承环境，非空地址使用显式代理。
+func parseProxy(mode, value string) (Proxy, error) {
+	if (mode == "" || mode == "environment") && value == "" {
+		return Proxy{FromEnvironment: true}, nil
+	}
+	if mode == "direct" && value == "" {
+		return Proxy{}, nil
+	}
+	if mode != "" && mode != "explicit" || value == "" {
+		return Proxy{}, errors.New("proxyMode must be environment or direct without proxyUrl, or explicit with proxyUrl")
 	}
 	if !canonicalString(value) {
-		return errors.New("provider proxy URL must be normalized")
+		return Proxy{}, errors.New("provider proxy URL must be normalized")
 	}
 	parsed, err := url.Parse(value)
 	if err != nil ||
@@ -265,11 +269,11 @@ func validateProxyURL(value string) error {
 		parsed.RawQuery != "" ||
 		parsed.Fragment != "" ||
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return errors.New(
+		return Proxy{}, errors.New(
 			"provider proxy URL must be an absolute HTTP or HTTPS URL without a path, query, or fragment",
 		)
 	}
-	return nil
+	return Proxy{URL: parsed}, nil
 }
 
 // canonicalString 只检查首尾空白，不构造清洗后的字符串。

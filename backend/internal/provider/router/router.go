@@ -3,14 +3,13 @@ package router
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"praxis/internal/model"
 	"praxis/internal/provider"
 	"praxis/internal/provider/anthropic"
-	"praxis/internal/provider/httpclient"
 	"praxis/internal/provider/openai_chat"
 	"praxis/internal/provider/openai_responses"
-	"sync"
 )
 
 // Credentials 提供会话已冻结的凭据，不读取运行期间的配置编辑状态。
@@ -20,14 +19,12 @@ type Credentials interface {
 
 type Dependencies struct {
 	Credentials Credentials
-	HTTPClient  *http.Client
+	HTTPClients map[string]*http.Client
 }
 
 // Router 在同一会话内并发复用；只共享固定凭据和 HTTP 连接，不保存请求或解码状态。
 type Router struct {
 	credentials Credentials
-	client      *http.Client
-	mu          sync.Mutex
 	clients     map[string]*http.Client
 }
 
@@ -35,12 +32,17 @@ type Router struct {
 func New(deps Dependencies) *Router {
 	return &Router{
 		credentials: deps.Credentials,
-		client:      deps.HTTPClient,
-		clients:     make(map[string]*http.Client),
+		clients:     deps.HTTPClients,
 	}
 }
 
 var _ provider.Provider = (*Router)(nil)
+
+func (r *Router) CloseIdleConnections() {
+	for client := range maps.Values(r.clients) {
+		client.CloseIdleConnections()
+	}
+}
 
 // Stream 选择本次请求的协议并发起模型调用，事件通道和解码状态仅属于本次调用。
 func (r *Router) Stream(ctx context.Context, request provider.Request) (<-chan provider.Event, error) {
@@ -52,11 +54,9 @@ func (r *Router) Stream(ctx context.Context, request provider.Request) (<-chan p
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key is not configured for provider %q", config.ProviderID)
 	}
-	client, err := r.proxyClient(config.ProxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("create provider client: %w", err)
-	}
+	client := r.clients[config.ProviderID]
 	var protocol provider.Provider
+	var err error
 	switch model.APIFormat(config.APIFormat) {
 	case model.APIFormatAnthropicMessages:
 		protocol, err = anthropicmessages.New(anthropicmessages.Config{
@@ -83,22 +83,4 @@ func (r *Router) Stream(ctx context.Context, request provider.Request) (<-chan p
 		return nil, err
 	}
 	return protocol.Stream(ctx, request)
-}
-
-// proxyClient 按冻结的代理地址复用 HTTP client，后续配置变更不会改写已有连接池。
-func (r *Router) proxyClient(proxyURL string) (*http.Client, error) {
-	if proxyURL == "" {
-		return r.client, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if client := r.clients[proxyURL]; client != nil {
-		return client, nil
-	}
-	client, err := httpclient.NewProxyClient(r.client, proxyURL)
-	if err != nil {
-		return nil, err
-	}
-	r.clients[proxyURL] = client
-	return client, nil
 }

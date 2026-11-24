@@ -27,6 +27,9 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Emitter        *event.Emitter
 	Logf           func(string, ...any)
+	MaxAttempts    int
+	RequestTimeout time.Duration
+	CommitTimeout  time.Duration
 }
 
 // Caller 封装模型请求的容量校验、Hook 观测、计时、事实持久化、流消费与重试策略。
@@ -62,6 +65,7 @@ type Call struct {
 // Response 保存一次模型响应；内容块和工具调用都从同一份有序事件转换。
 type Response struct {
 	RequestID  identity.ModelRequestID
+	Attempts   int
 	events     []provider.Event
 	TextBytes  int
 	StopReason provider.StopReason
@@ -119,13 +123,19 @@ func (r Response) ToolCalls() []provider.ToolCall {
 	return calls
 }
 
-// Do 执行单次逻辑模型请求，对可恢复的供应商错误最多重试三次（共四次尝试）。
+// Do 在同一个请求预算内重试供应商调用，不重放已经执行的工具或整个 Run。
 func (c *Caller) Do(ctx context.Context, call Call) (Response, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, c.deps.RequestTimeout)
+	defer cancel()
 	var response Response
 	var err error
-	for retry := 0; retry <= 3; retry++ {
+	for retry := range c.deps.MaxAttempts {
+		if requestCtx.Err() != nil {
+			break
+		}
 		call.Request.ID = identity.NewModelRequestID()
-		response, err = c.doAttempt(ctx, call, retry)
+		response, err = c.doAttempt(requestCtx, call, retry)
+		response.Attempts = retry + 1
 		if err == nil {
 			return response, nil
 		}
@@ -134,11 +144,25 @@ func (c *Caller) Do(ctx context.Context, call Call) (Response, error) {
 			label = "Risk review"
 		}
 		c.emit(call, event.ErrorOccurred{
-			Message: fmt.Sprintf("%s failed (attempt %d/4): %v", label, retry+1, err),
+			Message: fmt.Sprintf("%s failed (attempt %d/%d): %v", label, response.Attempts, c.deps.MaxAttempts, err),
 		})
-		if ctx.Err() != nil || errors.Is(err, errorcode.ErrStorage) || !errors.Is(err, errorcode.ErrProvider) {
+		if errors.Is(err, errorcode.ErrStorage) {
 			return response, err
 		}
+		requestErr := requestCtx.Err()
+		// 只将裸上下文错误交回请求预算处理；即使显式错误包装了同一原因，也要保留。
+		if !errors.Is(err, errorcode.ErrProvider) && err != requestErr {
+			return response, err
+		}
+		if requestErr != nil {
+			break
+		}
+	}
+	if ctx.Err() != nil {
+		return response, ctx.Err()
+	}
+	if requestCtx.Err() != nil {
+		return response, errorcode.ErrProvider.Wrap(fmt.Errorf("model request exceeded %s: %w", c.deps.RequestTimeout, requestCtx.Err()))
 	}
 	return response, err
 }
@@ -219,10 +243,12 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 			finished.Error = err.Error()
 			finished.Partial = response.Blocks()
 		}
-		if saveErr := c.saveModelRequest(context.WithoutCancel(ctx), call, finished); saveErr != nil {
+		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.deps.CommitTimeout)
+		defer cancel()
+		if saveErr := c.saveModelRequest(commitCtx, call, finished); saveErr != nil {
 			err = errorcode.ErrStorage.Wrap(errors.Join(err, saveErr))
 		}
-		if hookErr := c.deps.HookDispatcher.AfterModelResponse(context.WithoutCancel(ctx), hook.ModelResponse{
+		if hookErr := c.deps.HookDispatcher.AfterModelResponse(commitCtx, hook.ModelResponse{
 			Request:     boundary,
 			OutputBytes: response.TextBytes,
 			StopReason:  response.StopReason,
@@ -251,9 +277,7 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 		err = call.Validate(response)
 	}
 	if err != nil {
-		if ctx.Err() == nil {
-			err = WrapModelError(err)
-		}
+		err = WrapModelError(err)
 		return response, err
 	}
 	if call.Budget != nil {

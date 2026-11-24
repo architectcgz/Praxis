@@ -34,7 +34,9 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	}
 	compressed, changed := value, false
 	defer func() {
-		if hookErr := r.HookDispatcher.AfterContextCompression(context.WithoutCancel(ctx), hook.ContextCompressionResult{
+		commitCtx, cancel := r.commitContext(ctx)
+		defer cancel()
+		if hookErr := r.HookDispatcher.AfterContextCompression(commitCtx, hook.ContextCompressionResult{
 			ContextCompression: event,
 			ContextAfter:       compressed,
 			Changed:            changed,
@@ -82,9 +84,11 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	entry.Payload = summary
 	entry.ID = identity.NewEntryID()
 	entry.RunID = params.ID
-	accepted, _, err := deps.AppendEntry(context.WithoutCancel(ctx), *entry)
+	commitCtx, cancel := r.commitContext(ctx)
+	defer cancel()
+	accepted, _, err := deps.AppendEntry(commitCtx, *entry)
 	if err != nil {
-		return value, err
+		return value, errorcode.ErrStorage.Wrap(err)
 	}
 	compressed, changed = generated, true
 	compressed.Entries[0] = accepted

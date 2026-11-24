@@ -17,6 +17,9 @@ const ErrInterrupted errorcode.Code = "run.interrupted"
 
 // Prepare 提交 Run 和输入事实。返回值表示 RunPrepared 已写入历史。
 func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
+	prepareCtx, cancel := context.WithTimeout(ctx, r.deps.PrepareTimeout)
+	defer cancel()
+	ctx = prepareCtx
 	if _, _, err := r.AppendEntry(ctx, entry.Entry{
 		ID:        identity.NewEntryID(),
 		CreatedAt: r.createdAt,
@@ -50,7 +53,9 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 		Source:  r.EventSource(""),
 		Payload: event.EntriesAppended{Entries: []*entry.Entry{stored}},
 	})
-	if hookErr := r.deps.HookDispatcher.UserInputCommitted(context.WithoutCancel(ctx), hook.EntryCommitted{
+	commitCtx, cancelCommit := r.commitContext(ctx)
+	defer cancelCommit()
+	if hookErr := r.deps.HookDispatcher.UserInputCommitted(commitCtx, hook.EntryCommitted{
 		Identity: runIdentity(r, ""),
 		Entry:    *stored,
 	}); hookErr != nil {
@@ -73,7 +78,7 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 		})
 	}()
 	if err = ctx.Err(); err == nil {
-		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		startCtx, cancel := r.commitContext(ctx)
 		at := time.Now().UTC()
 		_, _, saveErr := r.AppendEntry(startCtx, entry.Entry{
 			ID:      identity.NewEntryID(),
@@ -98,29 +103,42 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 }
 
 func (r *Run) executeLoop(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (tool.ToolCatalog, loop.ToolExecutor, error)) error {
-	if hookErr := r.deps.HookDispatcher.RunStarted(context.WithoutCancel(ctx), hook.RunEvent{Identity: runIdentity(r, "")}); hookErr != nil {
+	prepareCtx, cancelPrepare := context.WithTimeout(ctx, r.deps.PrepareTimeout)
+	defer cancelPrepare()
+	if hookErr := r.deps.HookDispatcher.RunStarted(prepareCtx, hook.RunEvent{Identity: runIdentity(r, "")}); hookErr != nil {
 		r.deps.Logger.Errorf("run start hook failed: %v", hookErr)
 	}
-	if err := ctx.Err(); err != nil {
+	if err := prepareCtx.Err(); err != nil {
 		return err
 	}
-	catalog, tools, err := prepareTools(ctx)
+	catalog, tools, err := prepareTools(prepareCtx)
+	prepareErr := prepareCtx.Err()
+	cancelPrepare()
 	if err != nil {
 		return err
+	}
+	if prepareErr != nil {
+		return prepareErr
 	}
 	params, deps := r.modelRunParams(catalog)
 	if _, err := runner.Run(ctx, params, deps, r.input, tools); err != nil {
 		return err
 	}
-	if _, _, err := r.AppendEntry(context.WithoutCancel(ctx), entry.Entry{
+	commitCtx, cancel := r.commitContext(ctx)
+	defer cancel()
+	if _, _, err := r.AppendEntry(commitCtx, entry.Entry{
 		ID:      identity.NewEntryID(),
 		Payload: entry.RunEndingStarted{},
 	}); err != nil {
-		return err
+		return storageFailure(err)
 	}
 	r.deps.Emitter.Emit(event.Event{
 		Source:  r.EventSource(""),
 		Payload: event.RunEnding{},
 	})
 	return nil
+}
+
+func (r *Run) commitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), r.deps.CommitTimeout)
 }

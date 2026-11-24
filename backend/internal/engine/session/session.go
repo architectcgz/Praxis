@@ -43,6 +43,15 @@ func (c *Configuration) Definition(id identity.AgentDefinitionID) (agent.AgentDe
 	return agent.AgentDefinition{}, fmt.Errorf("agent definition %q is not configured", id)
 }
 
+func (c *Configuration) closeIdleConnections() {
+	if c == nil {
+		return
+	}
+	if closer, ok := c.Provider.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 // sessionSettings 及其引用的配置和审批覆盖在发布后只读。
 type sessionSettings struct {
 	configuration    *Configuration
@@ -67,15 +76,17 @@ func New(data *Data, log HistoryStore) *Session {
 	return s
 }
 
+// Configure 发布会话配置；替换已发布的快照时，调用方须保证没有活跃的 Run。
 func (s *Session) Configure(config *Configuration, choice model.Choice, override *security.ApprovalMode) {
 	if choice.ModelID == "" {
 		choice = config.Models.DefaultModel().DefaultChoice()
 	}
-	s.settings.Store(&sessionSettings{
+	previous := s.settings.Swap(&sessionSettings{
 		configuration:    config,
 		choice:           choice,
 		approvalOverride: override,
 	})
+	previous.configuration.closeIdleConnections()
 }
 
 func (s *Session) Configuration() *Configuration {
@@ -136,5 +147,6 @@ func (s *Session) agentContext(agentID identity.AgentID) *AgentContext {
 }
 
 func (s *Session) Close(ctx context.Context) error {
+	s.Configuration().closeIdleConnections()
 	return s.log.Close(ctx)
 }

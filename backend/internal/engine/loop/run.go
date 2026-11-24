@@ -47,11 +47,13 @@ type RunDependencies struct {
 
 // Dependencies 保存 Loop 的共享能力；Provider 在执行开始时绑定会话配置。
 type Dependencies struct {
-	Provider       provider.Provider
-	ModelCaller    *modelcall.Caller
-	HookDispatcher *hook.Dispatcher
-	Emitter        *coreevent.Emitter
-	Logf           func(string, ...any)
+	CommitTimeout       time.Duration
+	ReadOnlyParallelism int
+	Provider            provider.Provider
+	ModelCaller         *modelcall.Caller
+	HookDispatcher      *hook.Dispatcher
+	Emitter             *coreevent.Emitter
+	Logf                func(string, ...any)
 }
 
 // Runner 负责 ReAct 多轮迭代；模型上下文只用于本轮请求，不持有执行或会话对象。
@@ -60,14 +62,11 @@ type Runner struct {
 }
 
 func NewRunner(deps Dependencies) Runner {
-	if deps.ModelCaller == nil {
-		deps.ModelCaller = modelcall.NewCaller(modelcall.Dependencies{
-			HookDispatcher: deps.HookDispatcher,
-			Emitter:        deps.Emitter,
-			Logf:           deps.Logf,
-		})
-	}
 	return Runner{Dependencies: deps}
+}
+
+func (r *Runner) commitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), r.CommitTimeout)
 }
 
 // Run 每轮读取 Session 已接纳的历史，逐条提交模型输出和工具回执，直到最终回答或失败。
@@ -119,13 +118,15 @@ func (r *Runner) Run(ctx context.Context, params RunParams, deps RunDependencies
 				ending = entry.TurnInterrupted{}
 			}
 		}
-		_, _, saveErr := deps.AppendEntry(context.WithoutCancel(ctx), entry.Entry{
+		commitCtx, cancelCommit := r.commitContext(ctx)
+		_, _, saveErr := deps.AppendEntry(commitCtx, entry.Entry{
 			ID:        identity.NewEntryID(),
 			RunID:     params.ID,
 			TurnID:    turnID,
 			CreatedAt: endedAt,
 			Payload:   ending,
 		})
+		cancelCommit()
 		if saveErr != nil {
 			return turnID, errorcode.ErrStorage.Wrap(saveErr)
 		}
@@ -155,7 +156,9 @@ func (r *Runner) BuildContext(ctx context.Context, params RunParams, entries []*
 	built := appcontext.ModelContextFromEntries(params.SystemPrompt, entries)
 	hookIdentity := runIdentity(params, "")
 	hookIdentity.OperationID = identity.NewOperationID()
-	if hookErr := r.HookDispatcher.AfterContextBuild(context.WithoutCancel(ctx), hook.ContextBuilt{
+	commitCtx, cancel := r.commitContext(ctx)
+	defer cancel()
+	if hookErr := r.HookDispatcher.AfterContextBuild(commitCtx, hook.ContextBuilt{
 		Identity: hookIdentity,
 		Context:  built,
 	}); hookErr != nil {

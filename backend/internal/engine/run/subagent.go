@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"praxis/internal/entry"
 	"praxis/internal/event"
@@ -56,11 +57,11 @@ func (r *Run) initCollaboration() {
 func (r *Run) BindParent(parent *Run) { r.collaboration.parent = parent }
 
 // ReserveSubagent 在协作锁内原子检查活跃名额并占位；未启动前必须通过 ReleaseSubagent 释放。
-func (r *Run) ReserveSubagent(id identity.AgentID, limit int) bool {
+func (r *Run) ReserveSubagent(id identity.AgentID, limit int) error {
 	r.collaboration.mu.Lock()
 	defer r.collaboration.mu.Unlock()
 	if !r.collaboration.accepting {
-		return false
+		return errors.New("parent run is no longer accepting subagents")
 	}
 	active := 0
 	for _, child := range r.collaboration.children {
@@ -75,10 +76,10 @@ func (r *Run) ReserveSubagent(id identity.AgentID, limit int) bool {
 		}
 	}
 	if active >= limit {
-		return false
+		return fmt.Errorf("parent run active subagent limit of %d is reached", limit)
 	}
 	r.collaboration.children[id] = SubagentHandle{AgentID: id}
-	return true
+	return nil
 }
 
 // AttachSubagent 为已预留的子代理名额绑定运行句柄。

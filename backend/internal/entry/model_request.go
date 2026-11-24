@@ -60,7 +60,11 @@ func RequestStatus(ctx context.Context, err error) ModelRequestStatus {
 	if err == nil {
 		return RequestCompleted
 	}
-	if ctx.Err() != nil {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) ||
+		errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		return RequestFailed
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
 		return RequestInterrupted
 	}
 	return RequestFailed
@@ -68,8 +72,11 @@ func RequestStatus(ctx context.Context, err error) ModelRequestStatus {
 
 // Validate 仅在日志读取边界校验请求事实，运行流程使用已确定的内部值。
 func (r ModelRequest) Validate() error {
-	if r.ID == "" || r.RunID == "" || r.OutputBytes < 0 || r.RetryCount < 0 || r.RetryCount > 3 {
+	if r.ID == "" || r.RunID == "" || r.OutputBytes < 0 {
 		return errors.New("invalid model request identity or output size")
+	}
+	if r.RetryCount < 0 {
+		return errors.New("model request retry count must be nonnegative")
 	}
 	switch r.Kind {
 	case ModelRequestIteration:

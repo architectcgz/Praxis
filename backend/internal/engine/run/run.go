@@ -23,6 +23,9 @@ type Dependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Logger         *logging.Logger
 	Emitter        *event.Emitter
+	PrepareTimeout time.Duration
+	CommitTimeout  time.Duration
+	SettleTimeout  time.Duration
 }
 
 // Config 保存调度准入时确定的执行身份和模型配置。

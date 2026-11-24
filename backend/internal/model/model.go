@@ -84,7 +84,6 @@ type Config struct {
 	ContextWindow   int
 	MaxOutputTokens int
 	BaseURL         string
-	ProxyURL        string
 }
 
 // CanReplayReasoningState 判断完整状态的来源是否与目标 Provider、API 和模型完全一致；nil 状态不可重放。

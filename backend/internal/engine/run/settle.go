@@ -18,9 +18,7 @@ import (
 // SettlePreparation 结束已经写入 RunPrepared、但没有进入 Loop 的执行。
 func (r *Run) SettlePreparation(ctx context.Context, err error) error {
 	outcome, code, message := r.classifyOutcome(ctx, err)
-	endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	return r.Settle(endCtx, outcome, code, message)
+	return r.Settle(ctx, outcome, code, message)
 }
 
 // settleExecution 用原执行上下文区分中断和失败；回执和终态的写入不继承执行取消信号。
@@ -29,15 +27,26 @@ func (r *Run) settleExecution(ctx context.Context, execErr error) error {
 	if execErr != nil && outcome == entry.OutcomeFailed {
 		r.emitError(r.currentTurnID, execErr)
 	}
-	endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	endCtx, cancel := r.settlementContext(ctx)
 	defer cancel()
 	if err := r.closeToolCalls(endCtx); err != nil {
 		return err
 	}
-	return r.Settle(endCtx, outcome, code, message)
+	return r.settle(endCtx, outcome, code, message)
 }
 
+func (r *Run) settlementContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), r.deps.SettleTimeout)
+}
+
+// Settle 保存未能启动的 Run 的终态，不继承启动路径的取消信号。
 func (r *Run) Settle(ctx context.Context, outcome entry.RunOutcome, code entry.RunFailureCode, message string) error {
+	endCtx, cancel := r.settlementContext(ctx)
+	defer cancel()
+	return r.settle(endCtx, outcome, code, message)
+}
+
+func (r *Run) settle(ctx context.Context, outcome entry.RunOutcome, code entry.RunFailureCode, message string) error {
 	stats := entry.RunStats{
 		StartedAt:        r.startedAt,
 		EndedAt:          time.Now().UTC(),
@@ -82,7 +91,7 @@ func (r *Run) Settle(ctx context.Context, outcome entry.RunOutcome, code entry.R
 	r.terminal = stored
 	r.terminalSaved.Store(true)
 	r.accept(stored)
-	if hookErr := r.deps.HookDispatcher.RunCommitted(context.WithoutCancel(ctx), hook.RunEvent{
+	if hookErr := r.deps.HookDispatcher.RunCommitted(ctx, hook.RunEvent{
 		Identity:    runIdentity(r, ""),
 		Outcome:     string(outcome),
 		FailureCode: string(code),
@@ -106,7 +115,8 @@ func (r *Run) Settle(ctx context.Context, outcome entry.RunOutcome, code entry.R
 }
 
 func (r *Run) classifyOutcome(ctx context.Context, err error) (entry.RunOutcome, entry.RunFailureCode, string) {
-	if errors.Is(context.Cause(ctx), errorcode.ErrStorage) {
+	cause := context.Cause(ctx)
+	if errors.Is(cause, errorcode.ErrStorage) {
 		return entry.OutcomeFailed, entry.RunFailureStorage, ""
 	}
 	if err == nil {
@@ -116,12 +126,13 @@ func (r *Run) classifyOutcome(ctx context.Context, err error) (entry.RunOutcome,
 		return entry.OutcomeCompleted, "", ""
 	}
 	code := failureCode(err)
-	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+	if code != entry.RunFailureStorage && (errors.Is(cause, context.DeadlineExceeded) ||
+		(code != entry.RunFailureProvider && errors.Is(err, context.DeadlineExceeded))) {
 		return entry.OutcomeFailed, entry.RunFailureTimeout, ""
 	}
-	if code != entry.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
+	if code != entry.RunFailureStorage && ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, cause)) {
 		code = entry.RunFailureCancelled
-		if errors.Is(context.Cause(ctx), ErrInterrupted) {
+		if errors.Is(cause, ErrInterrupted) {
 			code = entry.RunFailureRequestCanceled
 		}
 		return entry.OutcomeInterrupted, code, ""

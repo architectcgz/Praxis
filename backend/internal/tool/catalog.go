@@ -1,4 +1,3 @@
-// Catalog 将工具可用性配置应用到注册目录。
 package tool
 
 import (
@@ -7,45 +6,25 @@ import (
 	"strings"
 )
 
-type ToolConfig struct {
-	Enabled bool `json:"enabled"`
-}
-
-type Config struct {
-	Tools map[ToolName]ToolConfig `json:"tools"`
-}
-
-// Catalog 将同一份已校验配置用于工具暴露、准入和启动前检查。
-// 目录在会话内只读，显式 reload 构造新目录，不修改旧实例。
+// Catalog 同时为模型暴露和执行准入提供装配期解析出的启用工具。
 type Catalog struct {
-	config   Config
-	registry ToolCatalog
+	enabled map[ToolName]Tool
 }
 
-func NewCatalog(config Config, registry ToolCatalog) *Catalog {
-	return &Catalog{config: config, registry: registry}
-}
-
-func (c *Catalog) enabled(name ToolName) bool {
-	tool, specified := c.config.Tools[name]
-	return !specified || tool.Enabled
-}
+// NewCatalog 接管启用集合；发布后不再修改。
+func NewCatalog(enabled map[ToolName]Tool) *Catalog { return &Catalog{enabled: enabled} }
 
 func (c *Catalog) Get(name ToolName) (Tool, bool) {
-	if !c.enabled(name) {
-		return nil, false
-	}
-	return c.registry.Get(name)
+	value, ok := c.enabled[name]
+	return value, ok
 }
 
 func (c *Catalog) List() []ToolDefinition {
-	definitions := c.registry.List()
-	result := make([]ToolDefinition, 0, len(definitions))
-	for _, definition := range definitions {
-		if c.enabled(definition.Name) {
-			result = append(result, definition)
-		}
+	result := make([]ToolDefinition, 0, len(c.enabled))
+	for _, value := range c.enabled {
+		result = append(result, value.Definition())
 	}
+	slices.SortFunc(result, func(a, b ToolDefinition) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
 }
 

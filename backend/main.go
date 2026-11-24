@@ -69,7 +69,8 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
-	a := wails.New(desktop, logging.NewFactory().Console())
+	runtime := config.DefaultRuntime()
+	a := wails.New(desktop, logging.NewFactory().Console(), runtime.Lifecycle.StartupWait, runtime.Lifecycle.Shutdown)
 	desktopBindings := bindings.New(a)
 	for _, service := range desktopBindings.All() {
 		desktop.RegisterService(service)
@@ -90,7 +91,7 @@ func main() {
 			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return
 		}
-		application, err := bootstrap.Open(ctx, root, bootstrap.Options{
+		application, err := bootstrap.Open(ctx, root, runtime, bootstrap.Options{
 			OnAgentEvent: desktopBindings.EmitAgentEvent,
 		})
 		if err != nil {
@@ -99,7 +100,9 @@ func main() {
 		}
 		if err := a.Attach(application.Services(), application.ApplicationLogger(), application); err != nil {
 			a.FailStartup(fmt.Errorf("attach desktop services: %w", err))
-			if closeErr := application.Close(context.Background()); closeErr != nil {
+			closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtime.Lifecycle.Shutdown)
+			defer cancel()
+			if closeErr := application.Close(closeCtx); closeErr != nil {
 				a.LogError("close application after startup failed: %v", closeErr)
 			}
 		}

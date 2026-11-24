@@ -69,34 +69,39 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 		r.emitter.Emit(event.Event{Source: run.EventSource(""), Payload: event.SubagentReleased{}})
 		return
 	}
-	queueCtx, cancel := r.transitionContext()
-	defer cancel()
-	unlock, _ := r.lockSession(context.Background(), run.SessionID())
-	r.mu.Lock()
-	current := r.schedules[run.SessionID()]
-	current.active = nil
-	r.mu.Unlock()
+	queueCtx := context.WithoutCancel(ctx)
+	unlock, lockErr := r.lockSession(queueCtx, run.SessionID())
 	storageErr := err
 	if cause := context.Cause(ctx); errors.Is(cause, errorcode.ErrStorage) {
 		storageErr = cause
 	}
 	storageFailed := errors.Is(storageErr, errorcode.ErrStorage)
+	pauseQueue := storageFailed || lockErr != nil
+	// 交接失败仍须释放占位，并暂停队列，避免后续任务在未暂停状态下停滞。
+	r.mu.Lock()
+	current := r.schedules[run.SessionID()]
+	current.active = nil
 	var notification event.Event
-	if storageFailed {
+	if pauseQueue {
 		current.queue.Pause()
 		notification = taskQueueEvent(current)
 	}
 	var next *activeRun
 	var schedule *sessionSchedule
 	var input task.Task
-	var scheduleErr error
-	if err == nil && run.Outcome() == entry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), runmodel.ErrInterrupted) {
+	scheduleErr := lockErr
+	if lockErr == nil && err == nil && run.Outcome() == entry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), runmodel.ErrInterrupted) {
 		input, schedule, next, scheduleErr = r.claimTaskLocked(queueCtx, run.SessionID())
 	}
-	unlock()
+	r.mu.Unlock()
+	if unlock != nil {
+		unlock()
+	}
 	active.cancel(nil)
-	if storageFailed {
+	if pauseQueue {
 		r.emitter.Emit(notification)
+	}
+	if storageFailed {
 		r.emitQueueStorageFailure(run.SessionID(), storageErr)
 	}
 	if next != nil {

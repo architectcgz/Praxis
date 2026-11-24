@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
+	"net/url"
 	"os"
 	"praxis/internal/model"
-	"praxis/internal/provider/httpclient"
 	"regexp"
 	"slices"
 	"strings"
@@ -55,10 +54,19 @@ func (s CredentialSnapshot) ProviderKey(providerID string) string {
 type ModelRegistry struct {
 	document    ModelDocument
 	credentials ProviderCredentials
+	proxies     map[string]Proxy
 }
 
+// Proxy 表示环境代理、显式地址或直连，地址在加载时已校验。
+type Proxy struct {
+	FromEnvironment bool
+	URL             *url.URL
+}
+
+func (r *ModelRegistry) Proxies() map[string]Proxy { return r.proxies }
+
 // LoadModels 读取并校验模型配置与凭据文件，然后返回不可变快照。
-func LoadModels(modelsPath, credentialsPath string, client *http.Client) (*ModelRegistry, error) {
+func LoadModels(modelsPath, credentialsPath string) (*ModelRegistry, error) {
 	document, err := readModelConfigFile(modelsPath)
 	if err != nil {
 		return nil, &ConfigurationError{
@@ -80,17 +88,21 @@ func LoadModels(modelsPath, credentialsPath string, client *http.Client) (*Model
 			Err:  err,
 		}
 	}
+	proxies := make(map[string]Proxy, len(document.Providers))
 	for _, provider := range document.Providers {
-		if _, err := httpclient.NewProxyClient(client, provider.ProxyURL); err != nil {
+		proxy, err := parseProxy(provider.ProxyMode, provider.ProxyURL)
+		if err != nil {
 			return nil, &ConfigurationError{
 				Path: modelsPath,
 				Err:  fmt.Errorf("provider %q: %w", provider.ID, err),
 			}
 		}
+		proxies[provider.ID] = proxy
 	}
 	return &ModelRegistry{
 		document:    document,
 		credentials: credentials,
+		proxies:     proxies,
 	}, nil
 }
 
@@ -126,7 +138,6 @@ func (r *ModelRegistry) Catalog() *model.Catalog {
 					ContextWindow:   candidate.ContextWindow,
 					MaxOutputTokens: candidate.MaxOutputTokens,
 					BaseURL:         provider.BaseURL,
-					ProxyURL:        provider.ProxyURL,
 				},
 			})
 		}

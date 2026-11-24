@@ -29,7 +29,7 @@ func (f DecoderFunc) Decode(
 }
 
 func Open(client *http.Client, request *http.Request) (*http.Response, error) {
-	response, err := httpclient.RequestClient(client).Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}

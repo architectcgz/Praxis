@@ -74,7 +74,9 @@ type Options struct {
 }
 
 // Open 只做高层装配；会话 Context 按需恢复，启动不继续旧 Run。
-func Open(ctx context.Context, root config.DataRoot, options Options) (_ *Application, err error) {
+func Open(ctx context.Context, root config.DataRoot, runtime config.Runtime, options Options) (_ *Application, err error) {
+	ctx, cancel := context.WithTimeout(ctx, runtime.Lifecycle.StartupWait)
+	defer cancel()
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
 	}
@@ -94,13 +96,15 @@ func Open(ctx context.Context, root config.DataRoot, options Options) (_ *Applic
 		// 关闭日志前保存启动失败原因，不能只依赖桌面宿主的控制台输出。
 		a.logger.Errorf("application open failed: %v", err)
 		// 装配失败先关闭执行入口，再关闭存储与日志资源。
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtime.Lifecycle.Shutdown)
+		defer cancel()
 		if a.coordinator != nil {
-			_ = a.coordinator.Close(context.Background())
+			_ = a.coordinator.Close(closeCtx)
 		}
-		_ = a.storage.Close(context.Background())
+		_ = a.storage.Close(closeCtx)
 		_ = a.logger.Close()
 	}()
-	loader, err := loadConfiguration(root, options.Tools)
+	loader, err := loadConfiguration(ctx, root, runtime.Model, options.Tools)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +115,7 @@ func Open(ctx context.Context, root config.DataRoot, options Options) (_ *Applic
 	}
 	coordinator := buildCoordinator(resources, func(ctx context.Context) (*session.Configuration, error) {
 		return loader.loadSessionConfiguration(ctx, root)
-	}, hooks, emitter, options.Runner)
+	}, hooks, emitter, options.Runner, runtime)
 	a.sessions = buildSessions(a.storage, coordinator)
 	a.coordinator = coordinator
 	projects := projectservice.NewService(projectservice.Dependencies{

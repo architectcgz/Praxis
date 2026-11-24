@@ -80,8 +80,10 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input task.Input, task ta
 		}
 	}
 	result := SubmitResult{Task: task}
+	s.mu.Lock()
 	for _, prior := range schedule.queue.List(0) {
 		if prior.ID == task.ID {
+			s.mu.Unlock()
 			if prior.Prompt != task.Prompt {
 				return SubmitResult{}, nil, errorcode.ErrRequestConflict
 			}
@@ -89,6 +91,7 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input task.Input, task ta
 			return result, nil, nil
 		}
 	}
+	s.mu.Unlock()
 	title := sessionmodel.TitleFromInput(task.Prompt)
 	updatedAt := time.Now().UTC()
 	if err := s.sessionRecords.UpdateTitle(ctx, task.SessionID, "", title, updatedAt); err != nil {
@@ -100,6 +103,11 @@ func (s *Coordinator) enqueueTask(ctx context.Context, input task.Input, task ta
 			Title:     title,
 			UpdatedAt: updatedAt,
 		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return SubmitResult{}, nil, errCoordinatorClosed
 	}
 	task, err = schedule.queue.Enqueue(task)
 	if err != nil {
@@ -121,13 +129,14 @@ func (s *Coordinator) CancelTask(ctx context.Context, sessionID identity.Session
 	s.mu.Lock()
 	schedule := s.schedules[sessionID]
 	valid := schedule != nil && !schedule.closing
-	s.mu.Unlock()
 	if !valid {
+		s.mu.Unlock()
 		unlock()
 		return errorcode.ErrRequestConflict
 	}
 	err = schedule.queue.Cancel(id)
 	notification := taskQueueEvent(schedule)
+	s.mu.Unlock()
 	unlock()
 	if err == nil {
 		s.emitter.Emit(notification)
@@ -155,12 +164,13 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 	s.mu.Lock()
 	schedule := s.schedules[id]
 	closing := schedule != nil && schedule.closing
-	s.mu.Unlock()
 	if schedule == nil {
+		s.mu.Unlock()
 		unlock()
 		return errorcode.ErrNotFound
 	}
 	if closing {
+		s.mu.Unlock()
 		unlock()
 		return errorcode.ErrRequestConflict
 	}
@@ -170,18 +180,19 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 		schedule.queue.Resume()
 	}
 	notification := taskQueueEvent(schedule)
+	active := schedule.active
+	s.mu.Unlock()
 	unlock()
 	s.emitter.Emit(notification)
 	if !pause {
-		s.mu.Lock()
-		active := schedule.active
-		s.mu.Unlock()
 		// 显式恢复可以等待已取消的旧执行收尾，不能让恢复意图丢在占用窗口里。
 		if active != nil && active.ctx.Err() != nil {
+			waitCtx, cancel := context.WithTimeout(ctx, s.transitionTimeout)
+			defer cancel()
 			select {
 			case <-active.done:
-			case <-ctx.Done():
-				return ctx.Err()
+			case <-waitCtx.Done():
+				return waitCtx.Err()
 			}
 		}
 		return s.schedule(ctx, id)
@@ -189,6 +200,7 @@ func (s *Coordinator) changeQueue(ctx context.Context, id identity.SessionID, pa
 	return nil
 }
 
+// taskQueueEvent 在 mu 内取得一致的队列快照，通知在锁外发送。
 func taskQueueEvent(schedule *sessionSchedule) event.Event {
 	return event.Event{
 		Source: event.EventSource{

@@ -24,18 +24,17 @@ type App struct {
 	startupDone chan struct{}
 	startupErr  error
 	closed      bool
+	startupWait time.Duration
+	shutdown    time.Duration
 }
 
-func New(desktop *application.App, loggers ...*logging.Logger) *App {
-	factory := logging.NewFactory()
-	logger := factory.Nop()
-	if len(loggers) > 0 && loggers[0] != nil {
-		logger = factory.Ensure(loggers[0])
-	}
+func New(desktop *application.App, logger *logging.Logger, startupWait, shutdown time.Duration) *App {
 	return &App{
 		desktop:     desktop,
-		logger:      factory.Ensure(logger),
+		logger:      logger,
 		startupDone: make(chan struct{}),
+		startupWait: startupWait,
+		shutdown:    shutdown,
 	}
 }
 
@@ -122,14 +121,14 @@ func (a *App) Shutdown(ctx context.Context) {
 	if ctx != nil {
 		closeContext = context.WithoutCancel(ctx)
 	}
-	closeContext, cancel := context.WithTimeout(closeContext, 30*time.Second)
+	closeContext, cancel := context.WithTimeout(closeContext, a.shutdown)
 	defer cancel()
 	if err := closer.Close(closeContext); err != nil {
 		a.logError("application host close failed: %v", err)
 	}
 }
 
-// BindingContext 等待桌面依赖就绪后返回 context 和服务集，最长等待 30 秒；
+// BindingContext 在启动等待预算内取得桌面 context 和服务集；
 // 启动失败透传具体原因，等待期间取消或超时返回对应错误码，关闭后返回 binding_unavailable。
 func (a *App) BindingContext() (context.Context, bindings.Services, error) {
 	select {
@@ -142,14 +141,14 @@ func (a *App) BindingContext() (context.Context, bindings.Services, error) {
 		if ctx != nil {
 			canceled = ctx.Done()
 		}
-		timer := time.NewTimer(30 * time.Second)
+		timer := time.NewTimer(a.startupWait)
 		defer timer.Stop()
 		select {
 		case <-a.startupDone:
 		case <-canceled:
 			return nil, bindings.Services{}, apperr.PublicError(ctx.Err())
 		case <-timer.C:
-			a.logError("binding startup wait timed out after 30s")
+			a.logError("binding startup wait timed out after %s", a.startupWait)
 			return nil, bindings.Services{}, apperr.PublicError(fmt.Errorf("timed out waiting for Praxis startup: %w", context.DeadlineExceeded))
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"praxis/internal/config"
 	"praxis/internal/engine/approval"
 	"praxis/internal/engine/coordinator"
 	"praxis/internal/engine/hook"
@@ -14,25 +15,31 @@ import (
 	"praxis/internal/engine/toolexecution"
 	"praxis/internal/event"
 	"praxis/internal/tool/output"
-	"time"
 )
 
-func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*session.Configuration, error), hooks *hook.Dispatcher, emitter *event.Emitter, customRunner *loop.Runner) *coordinator.Coordinator {
+func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*session.Configuration, error), hooks *hook.Dispatcher, emitter *event.Emitter, customRunner *loop.Runner, runtime config.Runtime) *coordinator.Coordinator {
 	runDeps := run.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
 		Emitter:        emitter,
+		PrepareTimeout: runtime.Lifecycle.Preparation,
+		CommitTimeout:  runtime.Lifecycle.Commit,
+		SettleTimeout:  runtime.Lifecycle.Settlement,
 	}
 	modelCaller := modelcall.NewCaller(modelcall.Dependencies{
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 		Logf:           resources.logger.Infof,
+		MaxAttempts:    runtime.Model.MaxAttempts,
+		RequestTimeout: runtime.Model.RequestTimeout,
+		CommitTimeout:  runtime.Lifecycle.Commit,
 	})
 	approvals := approval.NewGate(approval.GateDependencies{
 		ModelCaller:    modelCaller,
 		HookDispatcher: hooks,
 		Emitter:        emitter,
 		Logf:           resources.logger.Errorf,
+		CommitTimeout:  runtime.Lifecycle.Commit,
 	})
 	executor := toolexecution.NewExecutor(toolexecution.ExecutorDependencies{
 		HookDispatcher: hooks,
@@ -57,6 +64,8 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 	runnerDeps.ModelCaller = modelCaller
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
+	runnerDeps.CommitTimeout = runtime.Lifecycle.Commit
+	runnerDeps.ReadOnlyParallelism = runtime.Execution.ReadOnlyParallelism
 	runner := loop.NewRunner(runnerDeps)
 	return coordinator.NewCoordinator(coordinator.Config{
 		Loop:              &runner,
@@ -70,6 +79,8 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		SessionRecords:    resources.storage.Sessions,
 		SessionLoader:     resources.storage.Sessions,
 		Projects:          resources.storage.Projects,
-		TransitionTimeout: 30 * time.Second,
+		TransitionTimeout: runtime.Lifecycle.Transition,
+		ShutdownTimeout:   runtime.Lifecycle.Shutdown,
+		ActiveSubagents:   runtime.Execution.ActiveSubagents,
 	})
 }

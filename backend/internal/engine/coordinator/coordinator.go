@@ -4,6 +4,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"maps"
 	"praxis/internal/engine/approval"
 	"praxis/internal/engine/hook"
 	"praxis/internal/engine/loop"
@@ -17,6 +18,7 @@ import (
 	"praxis/internal/project"
 	"praxis/internal/security"
 	"praxis/internal/task"
+	"slices"
 	"sync"
 	"time"
 )
@@ -56,6 +58,8 @@ type Config struct {
 	HookDispatcher    *hook.Dispatcher
 	Logger            *logging.Logger
 	TransitionTimeout time.Duration
+	ShutdownTimeout   time.Duration
+	ActiveSubagents   int
 }
 
 // Coordinator 统一拥有队列调度、执行忙闲状态和取消句柄。
@@ -72,8 +76,10 @@ type Coordinator struct {
 	hookDispatcher    *hook.Dispatcher
 	logger            *logging.Logger
 	transitionTimeout time.Duration
+	shutdownTimeout   time.Duration
+	activeSubagents   int
 
-	// mu 保护会话调度表、会话命令信号量及会话执行句柄；
+	// mu 保护会话调度表、命令信号量、任务队列及其活动占位；
 	// 存储读写、会话数据访问与 Run 执行均不持有 mu。
 	mu              sync.Mutex
 	closed          bool
@@ -90,6 +96,8 @@ type sessionCommand struct {
 }
 
 func (s *Coordinator) lockSession(ctx context.Context, id identity.SessionID) (func(), error) {
+	ctx, cancel := context.WithTimeout(ctx, s.transitionTimeout)
+	defer cancel()
 	s.mu.Lock()
 	command := s.sessionCommands[id]
 	if command == nil {
@@ -164,6 +172,8 @@ func NewCoordinator(config Config) *Coordinator {
 		hookDispatcher:    config.HookDispatcher,
 		logger:            config.Logger,
 		transitionTimeout: config.TransitionTimeout,
+		shutdownTimeout:   config.ShutdownTimeout,
+		activeSubagents:   config.ActiveSubagents,
 	}
 }
 
@@ -208,26 +218,20 @@ func (r *Coordinator) Close(ctx context.Context) error {
 	select {
 	case <-done:
 		r.mu.Lock()
-		owners := make([]*sessionmodel.Session, 0, len(r.schedules))
-		for _, schedule := range r.schedules {
-			schedule.queue.Clear()
-			owners = append(owners, schedule.session)
-		}
-		clear(r.schedules)
+		ids := slices.Collect(maps.Keys(r.schedules))
 		clear(r.sessionCommands)
 		r.mu.Unlock()
 		var closeErr error
-		for _, owner := range owners {
-			closeErr = errors.Join(closeErr, owner.Close(ctx))
+		for _, id := range ids {
+			if ctx.Err() != nil {
+				break
+			}
+			closeErr = errors.Join(closeErr, r.releaseSession(ctx, id))
 		}
-		return closeErr
+		return errors.Join(closeErr, ctx.Err())
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (r *Coordinator) transitionContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), r.transitionTimeout)
 }
 
 type sessionSchedule struct {

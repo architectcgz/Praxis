@@ -24,6 +24,7 @@ type GateDependencies struct {
 	HookDispatcher *hook.Dispatcher
 	Emitter        *coreevent.Emitter
 	Logf           func(string, ...any)
+	CommitTimeout  time.Duration
 }
 
 // RunOwner 提供授权流程所需的只读执行信息，不依赖具体 Run 实现。
@@ -277,8 +278,11 @@ func (r *RunGate) notifyWaiting(
 		Call:      call,
 		Arguments: string(args),
 	}
-	if err := deps.HookDispatcher.ToolExecutionWaiting(context.WithoutCancel(ctx), event); err != nil && deps.Logf != nil {
-		deps.Logf("tool execution waiting hook failed: %v", err)
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deps.CommitTimeout)
+	hookErr := deps.HookDispatcher.ToolExecutionWaiting(commitCtx, event)
+	cancel()
+	if hookErr != nil && deps.Logf != nil {
+		deps.Logf("tool execution waiting hook failed: %v", hookErr)
 	}
 	payload := coreevent.ToolApprovalRequired{
 		CallID:    call.CallID,

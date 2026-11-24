@@ -8,6 +8,7 @@ import (
 	sessionmodel "praxis/internal/engine/session"
 	"praxis/internal/entry"
 	"praxis/internal/errorcode"
+	"praxis/internal/event"
 	"praxis/internal/identity"
 	"praxis/internal/task"
 )
@@ -26,13 +27,13 @@ func (r *Coordinator) claimTask(ctx context.Context, sessionID identity.SessionI
 		return task.Task{}, nil, nil, err
 	}
 	defer unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.claimTaskLocked(ctx, sessionID)
 }
 
-// claimTaskLocked 的调用方持有会话命令锁；队列已由会话命令锁串行化，此处单次临界区原子完成检查、领取与占位。
+// claimTaskLocked 在会话命令锁和 mu 下原子完成检查、领取与占位。
 func (r *Coordinator) claimTaskLocked(ctx context.Context, sessionID identity.SessionID) (task.Task, *sessionSchedule, *activeRun, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	schedule := r.schedules[sessionID]
 	if r.closed || schedule == nil || schedule.closing {
 		return task.Task{}, nil, nil, errCoordinatorClosed
@@ -75,34 +76,47 @@ func (r *Coordinator) startNext(ctx context.Context, input task.Task, schedule *
 		}
 		return r.finishTaskStart(input, schedule, active, !prepared, err)
 	}
-	unlock, _ := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
-	schedule.queue.Complete(input)
-	r.mu.Lock()
-	active.config = config
-	if schedule.closing {
-		err = errorcode.ErrRequestConflict
-	} else {
-		err = r.launchLocked(run, active)
-	}
-	r.mu.Unlock()
+	unlock, err := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
 	if err == nil {
-		notification := taskQueueEvent(schedule)
+		r.mu.Lock()
+		schedule.queue.Complete(input)
+		active.config = config
+		switch {
+		case active.ctx.Err() != nil:
+			err = context.Cause(active.ctx)
+		case schedule.closing:
+			err = errorcode.ErrRequestConflict
+		default:
+			err = r.launchLocked(run, active)
+		}
+		var notification event.Event
+		if err == nil {
+			notification = taskQueueEvent(schedule)
+		}
+		r.mu.Unlock()
 		unlock()
-		r.emitter.Emit(notification)
-		return nil
+		if err == nil {
+			r.emitter.Emit(notification)
+			return nil
+		}
 	}
-	unlock()
-	endCtx, cancelEnd := r.transitionContext()
-	defer cancelEnd()
-	if saveErr := run.Settle(endCtx, entry.OutcomeInterrupted, entry.RunFailureCancelled, ""); saveErr != nil {
+	var saveErr error
+	if errors.Is(err, errCoordinatorClosed) || errors.Is(err, errorcode.ErrRequestConflict) {
+		// 关闭标记可能先于取消信号到达；此时未启动的 Run 仍按关闭取消结算。
+		saveErr = run.Settle(active.ctx, entry.OutcomeInterrupted, entry.RunFailureCancelled, "")
+	} else {
+		saveErr = run.SettlePreparation(active.ctx, err)
+	}
+	if saveErr != nil {
 		err = errorcode.ErrStorage.Wrap(errors.Join(err, saveErr))
 	}
 	return r.finishTaskStart(input, schedule, active, false, err)
 }
 
 func (r *Coordinator) finishTaskStart(input task.Task, schedule *sessionSchedule, active *activeRun, retry bool, err error) error {
-	unlock, _ := r.lockSession(context.Background(), input.SessionID)
 	storageFailed := errors.Is(err, errorcode.ErrStorage)
+	// 必须释放占位；该内存状态不依赖可能已超时的会话命令锁。
+	r.mu.Lock()
 	if storageFailed {
 		schedule.queue.Pause()
 	}
@@ -111,13 +125,11 @@ func (r *Coordinator) finishTaskStart(input task.Task, schedule *sessionSchedule
 	} else {
 		schedule.queue.Complete(input)
 	}
-	r.mu.Lock()
 	schedule.active = nil
-	close(active.done)
+	notification := taskQueueEvent(schedule)
 	r.mu.Unlock()
 	active.cancel(nil)
-	notification := taskQueueEvent(schedule)
-	unlock()
+	close(active.done)
 	r.emitter.Emit(notification)
 	if storageFailed {
 		r.emitQueueStorageFailure(input.SessionID, err)

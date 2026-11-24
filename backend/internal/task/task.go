@@ -36,7 +36,7 @@ type Input struct {
 	Prompt       string
 }
 
-// TaskQueue 属于单个 Session，待办只驻留内存；零值可用，并发访问由调用方会话锁串行化。
+// TaskQueue 属于单个 Session，待办只驻留内存；零值可用，并发访问由调度器串行化。
 // 同时最多领取一项，准备失败 Retry，保存 Run 后 Complete。
 type TaskQueue struct {
 	paused   bool

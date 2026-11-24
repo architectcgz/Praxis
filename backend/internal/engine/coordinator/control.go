@@ -27,19 +27,21 @@ func (s *Coordinator) StopRun(ctx context.Context, sessionID identity.SessionID,
 	}
 	active := schedule.active
 	run := active.run
-	s.mu.Unlock()
 	if run.ID() != runID {
+		s.mu.Unlock()
 		unlock()
 		run.CancelSubagentRun(runID)
 		return nil
 	}
 	if run.TerminalSaved() {
+		s.mu.Unlock()
 		unlock()
 		return nil
 	}
 	schedule.queue.Pause()
-	active.cancel(errRunInterrupted)
 	notification := taskQueueEvent(schedule)
+	s.mu.Unlock()
+	active.cancel(errRunInterrupted)
 	unlock()
 	s.emitter.Emit(notification)
 	return nil

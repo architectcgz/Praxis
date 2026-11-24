@@ -27,7 +27,9 @@ func (r *Runner) runTurn(
 	var stopReason provider.StopReason
 
 	defer func() {
-		if hookErr := r.HookDispatcher.AfterIteration(context.WithoutCancel(ctx), hook.IterationResult{
+		commitCtx, cancel := r.commitContext(ctx)
+		defer cancel()
+		if hookErr := r.HookDispatcher.AfterIteration(commitCtx, hook.IterationResult{
 			Iteration:  iteration,
 			StopReason: stopReason,
 			Err:        err,
@@ -43,7 +45,9 @@ func (r *Runner) runTurn(
 	}
 
 	calls := prepareToolCalls(params, turnID, response.ToolCalls())
-	stored, inserted, err := deps.AppendEntry(context.WithoutCancel(ctx), entry.Entry{
+	commitCtx, cancel := r.commitContext(ctx)
+	defer cancel()
+	stored, inserted, err := deps.AppendEntry(commitCtx, entry.Entry{
 		ID:         identity.NewEntryID(),
 		RunID:      params.ID,
 		TurnID:     turnID,
@@ -62,19 +66,20 @@ func (r *Runner) runTurn(
 		r.emit(params, turnID, event.EntriesAppended{Entries: []*entry.Entry{stored}})
 	}
 	if err != nil {
-		return false, err
+		return false, errorcode.ErrStorage.Wrap(err)
 	}
 	if inserted {
 		committed := hook.EntryCommitted{Identity: runIdentity(params, turnID), Entry: *stored}
-		if hookErr := r.HookDispatcher.AssistantCommitted(context.WithoutCancel(ctx), committed); hookErr != nil {
+		if hookErr := r.HookDispatcher.AssistantCommitted(commitCtx, committed); hookErr != nil {
 			r.Logf("assistant committed hook failed: %v", hookErr)
 		}
 		if len(calls) == 0 && (stopReason == provider.StopCompleted || stopReason == provider.StopSequence) {
-			if hookErr := r.HookDispatcher.FinalOutputCommitted(context.WithoutCancel(ctx), committed); hookErr != nil {
+			if hookErr := r.HookDispatcher.FinalOutputCommitted(commitCtx, committed); hookErr != nil {
 				r.Logf("final output committed hook failed: %v", hookErr)
 			}
 		}
 	}
+	cancel()
 	if len(calls) == 0 && (stopReason == provider.StopCompleted || stopReason == provider.StopSequence) {
 		return true, nil
 	}

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"praxis/internal/provider"
-	"praxis/internal/provider/httpclient"
 	"praxis/internal/provider/streaming"
 )
 
@@ -67,7 +66,7 @@ func (p *Provider) Stream(
 	httpRequest.Header.Set("anthropic-version", p.version)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")
-	response, err := streaming.Open(httpclient.RequestClient(p.client), httpRequest)
+	response, err := streaming.Open(p.client, httpRequest)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request: %w", streaming.RedactError(err, sensitiveStateValues(request.Context)))
 	}

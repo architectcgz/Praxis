@@ -52,8 +52,8 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 		return subagenttool.StartResult{}, fmt.Errorf("parent execution is closing")
 	}
 	agentID := identity.NewAgentID()
-	if !parent.ReserveSubagent(agentID, 10) {
-		return subagenttool.StartResult{}, fmt.Errorf("session subagent limit of 10 is reached")
+	if err := parent.ReserveSubagent(agentID, s.activeSubagents); err != nil {
+		return subagenttool.StartResult{}, err
 	}
 	active := newActiveRun(ctx, parentActive.session)
 	config := *parentActive.config
@@ -71,7 +71,11 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 		}
 		parent.ReleaseSubagent(agentID)
 		if created && !prepared {
-			_ = active.session.RemoveSubagent(context.WithoutCancel(ctx), agentID)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.runDependencies.SettleTimeout)
+			if err := active.session.RemoveSubagent(cleanupCtx, agentID); err != nil {
+				s.logger.Errorf("remove unprepared subagent %s: %v", agentID, err)
+			}
+			cancel()
 		}
 		s.releaseFailedChild(active)
 		stopParent()
@@ -82,7 +86,9 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 	if err != nil {
 		return subagenttool.StartResult{}, err
 	}
-	if err := active.session.CreateSubagent(active.ctx, agentID); err != nil {
+	prepareCtx, cancelPrepare := context.WithTimeout(active.ctx, s.runDependencies.PrepareTimeout)
+	defer cancelPrepare()
+	if err := active.session.CreateSubagent(prepareCtx, agentID); err != nil {
 		if active.ctx.Err() != nil && errors.Is(err, active.ctx.Err()) {
 			return subagenttool.StartResult{}, err
 		}
@@ -97,7 +103,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 		Definition:   definition,
 		Model:        parent.Model(),
 	}, active.session.BindHistory(agentID))
-	prepared, err = child.Prepare(active.ctx, assignment.Task)
+	prepared, err = child.Prepare(prepareCtx, assignment.Task)
 	if err != nil {
 		if prepared {
 			if saveErr := child.SettlePreparation(active.ctx, err); saveErr != nil {
@@ -130,7 +136,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		saveErr := child.Settle(context.WithoutCancel(ctx), entry.OutcomeInterrupted, entry.RunFailureCancelled, "")
+		saveErr := child.Settle(ctx, entry.OutcomeInterrupted, entry.RunFailureCancelled, "")
 		return subagenttool.StartResult{}, errors.Join(errCoordinatorClosed, saveErr)
 	}
 	child.BindCancellation(active.cancel)

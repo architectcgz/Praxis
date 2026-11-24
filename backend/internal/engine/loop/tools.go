@@ -15,7 +15,7 @@ import (
 	"praxis/internal/tool"
 	"slices"
 	"sync"
-	"time"
+	"sync/atomic"
 )
 
 func prepareToolCalls(params RunParams, turnID identity.TurnID, values []provider.ToolCall) []entry.ToolCall {
@@ -78,8 +78,17 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 					end++
 				}
 				var group sync.WaitGroup
-				for current := index; current < end; current++ {
-					group.Go(func() { execute(current) })
+				var next atomic.Int64
+				for range min(end-index, r.ReadOnlyParallelism) {
+					group.Go(func() {
+						for batchCtx.Err() == nil {
+							current := index + int(next.Add(1)) - 1
+							if current >= end {
+								return
+							}
+							execute(current)
+						}
+					})
 				}
 				group.Wait()
 			} else {
@@ -123,7 +132,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 			Content: content,
 		},
 	}
-	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	commitCtx, cancel := r.commitContext(ctx)
 	defer cancel()
 	stored, inserted, err := deps.AppendEntry(commitCtx, value)
 	if err != nil {
@@ -137,7 +146,7 @@ func (r *Runner) runToolCalls(ctx context.Context, params RunParams, deps RunDep
 			}
 			identity := runIdentity(params, calls[index].TurnID)
 			identity.OperationID = result.OperationID
-			if err := r.HookDispatcher.AfterToolExecution(context.WithoutCancel(ctx), hook.ToolExecutionResult{
+			if err := r.HookDispatcher.AfterToolExecution(commitCtx, hook.ToolExecutionResult{
 				ToolExecution: hook.ToolExecution{
 					Identity:  identity,
 					Call:      calls[index],
@@ -158,7 +167,9 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 	if params.Model.ContextWindow <= 0 {
 		return nil
 	}
-	entries, err := deps.ReadEntries(context.WithoutCancel(ctx))
+	readCtx, cancel := r.commitContext(ctx)
+	defer cancel()
+	entries, err := deps.ReadEntries(readCtx)
 	if err != nil {
 		return errorcode.ErrStorage.Wrap(err)
 	}

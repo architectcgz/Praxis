@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"praxis/internal/agent"
 	"praxis/internal/engine/approval"
 	sessionmodel "praxis/internal/engine/session"
@@ -72,7 +73,9 @@ func (s *Coordinator) loadSchedule(ctx context.Context, id identity.SessionID) (
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		_ = owner.Close(context.Background())
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
+		defer cancel()
+		_ = owner.Close(closeCtx)
 		return nil, errCoordinatorClosed
 	}
 	s.schedules[id] = schedule
@@ -103,10 +106,13 @@ func (s *Coordinator) SelectSession(ctx context.Context, id identity.SessionID) 
 		return SessionView{}, err
 	}
 	config := schedule.session.Configuration()
+	s.mu.Lock()
+	paused, tasks := schedule.queue.Paused(), schedule.queue.List(0)
+	s.mu.Unlock()
 	return SessionView{
-		QueuePaused: schedule.queue.Paused(),
+		QueuePaused: paused,
 		Session:     info,
-		Tasks:       schedule.queue.List(0),
+		Tasks:       tasks,
 		Models:      config.Models.ListModels(),
 		ModelChoice: schedule.session.Choice(),
 		Approval: ApprovalSettings{
@@ -125,13 +131,20 @@ func (s *Coordinator) releaseSession(ctx context.Context, id identity.SessionID)
 	}
 	s.mu.Lock()
 	schedule := s.schedules[id]
-	delete(s.schedules, id)
-	s.mu.Unlock()
 	if schedule != nil {
 		schedule.queue.Clear()
-		return schedule.session.Close(ctx)
 	}
-	return nil
+	s.mu.Unlock()
+	if schedule == nil {
+		return nil
+	}
+	err := schedule.session.Close(ctx)
+	if ctx.Err() == nil {
+		s.mu.Lock()
+		delete(s.schedules, id)
+		s.mu.Unlock()
+	}
+	return errors.Join(err, ctx.Err())
 }
 
 // CloseSession 禁止新的任务，取消所属执行，并在完成信号后释放会话。
@@ -140,6 +153,8 @@ func (s *Coordinator) CloseSession(ctx context.Context, id identity.SessionID) e
 		return err
 	}
 	defer s.running.Done()
+	ctx, cancel := context.WithTimeout(ctx, s.shutdownTimeout)
+	defer cancel()
 	unlock, err := s.lockSession(ctx, id)
 	if err != nil {
 		return err
@@ -150,11 +165,9 @@ func (s *Coordinator) CloseSession(ctx context.Context, id identity.SessionID) e
 	if schedule != nil {
 		schedule.closing = true
 		active = schedule.active
-	}
-	s.mu.Unlock()
-	if schedule != nil {
 		schedule.queue.Clear()
 	}
+	s.mu.Unlock()
 	unlock()
 	if active != nil {
 		active.cancel(context.Canceled)
@@ -223,8 +236,10 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 		}
 	}
 	schedule.session.Configure(config, choice, info.ApprovalMode)
+	s.mu.Lock()
 	schedule.queue.Clear()
 	queueEvent := taskQueueEvent(schedule)
+	s.mu.Unlock()
 	reloadEvent := event.Event{
 		Source: event.EventSource{
 			SessionID: id,

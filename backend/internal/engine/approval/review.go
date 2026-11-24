@@ -129,7 +129,7 @@ func (r *RunGate) review(
 		if _, ok := errors.AsType[*appcontext.ContextWindowExceededError](err); ok {
 			return RiskReview{}, err
 		}
-		return RiskReview{}, errorcode.ErrProvider.Wrap(fmt.Errorf("risk review failed after four attempts: %w", err))
+		return RiskReview{}, errorcode.ErrProvider.Wrap(fmt.Errorf("risk review failed (attempts: %d): %w", response.Attempts, err))
 	}
 	return RiskReview{
 		RequestID:  response.RequestID,
