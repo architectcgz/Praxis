@@ -42,7 +42,20 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 				Wait: func(ctx context.Context, ids []identity.AgentID, all bool) ([]tools.SubagentReceipt, error) {
 					run.BeginWaiting()
 					defer run.EndWaiting()
-					return run.WaitSubagents(ctx, ids, all)
+					reports, err := run.WaitSubagents(ctx, ids, all)
+					if err != nil {
+						return nil, err
+					}
+					receipts := make([]tools.SubagentReceipt, len(reports))
+					for i, report := range reports {
+						receipts[i] = tools.SubagentReceipt{
+							ReportID: report.ReportID,
+							AgentID:  report.AgentID,
+							Outcome:  string(report.Outcome),
+							Final:    report.Final,
+						}
+					}
+					return receipts, nil
 				},
 				Send:   run.SendToSubagent,
 				Cancel: run.CancelSubagent,

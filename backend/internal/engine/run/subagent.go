@@ -7,7 +7,6 @@ import (
 	"praxis/internal/entry"
 	"praxis/internal/event"
 	"praxis/internal/identity"
-	"praxis/internal/tools"
 	"slices"
 	"sync"
 )
@@ -236,7 +235,7 @@ func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) e
 	return nil
 }
 
-func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]tools.SubagentReceipt, error) {
+func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]SubagentReport, error) {
 	wanted := make(map[identity.AgentID]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true
@@ -287,16 +286,7 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 		case <-wake:
 		}
 	}
-	receipts := make([]tools.SubagentReceipt, 0, len(fresh))
-	for _, report := range fresh {
-		receipts = append(receipts, tools.SubagentReceipt{
-			ReportID: report.ReportID,
-			AgentID:  report.AgentID,
-			Outcome:  string(report.Outcome),
-			Final:    report.Final,
-		})
-	}
-	return receipts, nil
+	return fresh, nil
 }
 
 // acceptReports 在 Parent Loop 的串行点把自包含报告变成普通 Input Entry。
