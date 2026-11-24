@@ -77,7 +77,7 @@ type ModelSelection struct {
 // SetSessionApprovalModeRequest 设置会话覆盖；mode=null 表示继承全局授权模式。
 type SetSessionApprovalModeRequest struct {
 	SessionID string  `json:"sessionId" validate:"session_id"`
-	Mode      *string `json:"mode" validate:"omitempty,oneof=ask auto yolo"`
+	Mode      *string `json:"mode" validate:"omitnil,approval_mode"`
 }
 
 // SessionApprovalMode 返回全局默认值、会话覆盖和当前有效审批模式。

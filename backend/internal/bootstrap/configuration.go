@@ -9,6 +9,7 @@ import (
 	"praxis/internal/logging"
 	"praxis/internal/provider/httpclient"
 	"praxis/internal/provider/router"
+	"praxis/internal/provider/streaming"
 	"praxis/internal/tool"
 )
 
@@ -66,6 +67,11 @@ func (c *configuration) loadSessionConfiguration(ctx context.Context, root confi
 			Credentials: models.Credentials(),
 			HTTPClients: buildProviderClients(models.Proxies(), c.model),
 			Warnf:       c.logger.Warnf,
+			StreamLimits: streaming.Limits{
+				MaxFrameBytes:       c.model.Stream.MaxFrameBytes,
+				EventBufferCapacity: c.model.Stream.EventBufferCapacity,
+				MaxErrorBodyBytes:   c.model.Stream.MaxErrorBodyBytes,
+			},
 		}),
 		GlobalApprovalMode: settings.ApprovalMode,
 	}, nil

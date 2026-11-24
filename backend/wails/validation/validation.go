@@ -8,10 +8,10 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/pathutil"
+	"praxis/internal/security"
 	"praxis/internal/task"
 	apperr "praxis/wails/error"
 	"reflect"
-	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -22,11 +22,8 @@ import (
 
 const errProjectInvalid errorcode.Code = "project.invalid"
 
-var (
-	configIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	// 校验器仅在初始化时注册规则，之后并发复用规则和结构体元数据缓存。
-	requestValidator = newValidator()
-)
+// 校验器仅在初始化时注册规则，之后并发复用规则和结构体元数据缓存。
+var requestValidator = newValidator()
 
 func newValidator() *validator.Validate {
 	v := validator.New(validator.WithRequiredStructEnabled())
@@ -56,7 +53,10 @@ func newValidator() *validator.Validate {
 			return identity.AgentID(field.Field().String()).Valid()
 		},
 		"config_id_format": func(field validator.FieldLevel) bool {
-			return configIDPattern.MatchString(field.Field().String())
+			return identity.ValidConfigID(field.Field().String())
+		},
+		"approval_mode": func(field validator.FieldLevel) bool {
+			return security.ApprovalMode(field.Field().String()).Valid()
 		},
 		"project_name_format": func(field validator.FieldLevel) bool {
 			value := field.Field().String()
@@ -138,8 +138,8 @@ func inputError(err error, field string) error {
 		reason = "invalid project name"
 	case "absolute_path":
 		reason = "must be an absolute normalized path"
-	case "oneof":
-		reason = "must be one of " + failure.Param()
+	case "approval_mode":
+		reason = "invalid approval mode"
 	}
 	if failure.Tag() == "task_prompt" {
 		reason = "prompt must be non-empty UTF-8 text within the size limit"

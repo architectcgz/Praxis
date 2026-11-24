@@ -328,19 +328,15 @@ func runIdentity(run *Run, turnID identity.TurnID) hook.Identity {
 	}
 }
 
-func (s *Run) emitError(turnID identity.TurnID, err error) {
+func (s *Run) emitError(turnID identity.TurnID, code entry.RunFailureCode, detail string) {
 	message := "input failed"
-	switch failureCode(err) {
+	switch code {
 	case entry.RunFailureStorage:
 		message = "Failed to save session entries."
 	case entry.RunFailureResourceLimit:
 		message = "model context window exceeded"
 	case entry.RunFailureProvider:
-		text := []rune(err.Error())
-		if len(text) > 4096 {
-			text = append(text[:4096], '.', '.', '.')
-		}
-		message = string(text)
+		message = detail
 	}
 	s.deps.Emitter.Emit(event.Event{
 		Source:  s.EventSource(turnID),

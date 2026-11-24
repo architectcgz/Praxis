@@ -31,7 +31,7 @@ func LoadSettings(path string) (Settings, error) {
 		return Settings{}, errors.New("settings contain trailing JSON data")
 	}
 	if !value.ApprovalMode.Valid() {
-		return Settings{}, errors.New("settings approval mode must be ask, auto or yolo")
+		return Settings{}, errors.New("settings approval mode is invalid")
 	}
 	return value, nil
 }

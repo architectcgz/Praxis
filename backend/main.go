@@ -21,6 +21,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+const (
+	defaultWindowWidth  = 1280
+	defaultWindowHeight = 800
+)
+
 // acquireInstanceLock 在启动数据恢复前获取当前用户的独占运行权。
 func acquireInstanceLock() (*os.File, error) {
 	path, err := config.InstanceLockPath()
@@ -109,8 +114,8 @@ func main() {
 	startup(desktop.Context())
 	desktop.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  "Praxis",
-		Width:  1280,
-		Height: 800,
+		Width:  defaultWindowWidth,
+		Height: defaultWindowHeight,
 		URL:    "/",
 	})
 

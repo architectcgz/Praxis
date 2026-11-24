@@ -26,6 +26,14 @@ type ModelRuntime struct {
 	StreamIdleTimeout     time.Duration
 	RequestTimeout        time.Duration
 	MaxAttempts           int
+	Stream                ProviderStreamLimits
+}
+
+// ProviderStreamLimits 是进程内部资源上限，不从用户配置加载。
+type ProviderStreamLimits struct {
+	MaxFrameBytes       int
+	EventBufferCapacity int
+	MaxErrorBodyBytes   int
 }
 
 type Lifecycle struct {
@@ -120,6 +128,11 @@ func DefaultRuntime() Runtime {
 			StreamIdleTimeout:     time.Minute,
 			RequestTimeout:        10 * time.Minute,
 			MaxAttempts:           4,
+			Stream: ProviderStreamLimits{
+				MaxFrameBytes:       2 << 20,
+				EventBufferCapacity: 16,
+				MaxErrorBodyBytes:   16 << 10,
+			},
 		},
 		Lifecycle: Lifecycle{
 			StartupWait: 30 * time.Second,

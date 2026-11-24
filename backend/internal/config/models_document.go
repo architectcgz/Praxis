@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"praxis/internal/identity"
 	"praxis/internal/model"
 	"slices"
 	"strings"
@@ -78,7 +79,7 @@ func validateModelDocument(document ModelDocument) error {
 func validateGroups(groups []ModelGroup) (map[string]struct{}, error) {
 	seen := make(map[string]struct{}, len(groups))
 	for _, group := range groups {
-		if !idPattern.MatchString(group.ID) {
+		if !identity.ValidConfigID(group.ID) {
 			return nil, fmt.Errorf("models config: invalid group id %q", group.ID)
 		}
 		if group.DisplayName == "" || !canonicalString(group.DisplayName) {
@@ -95,7 +96,7 @@ func validateGroups(groups []ModelGroup) (map[string]struct{}, error) {
 func validateProviders(providers []ModelProvider, groupsSeen map[string]struct{}) error {
 	seen := make(map[string]struct{}, len(providers))
 	for _, provider := range providers {
-		if !idPattern.MatchString(provider.ID) {
+		if !identity.ValidConfigID(provider.ID) {
 			return fmt.Errorf("models config: invalid provider id %q", provider.ID)
 		}
 		if _, exists := seen[provider.ID]; exists {

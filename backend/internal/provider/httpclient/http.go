@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-const maxProviderErrorBodyBytes = 16 << 10
-
 // StreamTransport 限制响应体单次等待数据的时间，不限制连续到达数据的长流。
 type StreamTransport struct {
 	Transport   *http.Transport
@@ -66,9 +64,9 @@ func (b *idleBody) Close() error {
 	return b.ReadCloser.Close()
 }
 
-func DecodeErrorResponse(response *http.Response) error {
+func DecodeErrorResponse(response *http.Response, maxBodyBytes int) error {
 	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxProviderErrorBodyBytes+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, int64(maxBodyBytes)+1))
 	if err != nil {
 		return fmt.Errorf(
 			"provider request failed with HTTP %d: %s (read response body: %v)",
@@ -78,8 +76,8 @@ func DecodeErrorResponse(response *http.Response) error {
 		)
 	}
 	detail := strings.Join(strings.Fields(string(body)), " ")
-	if len(detail) > maxProviderErrorBodyBytes {
-		detail = detail[:maxProviderErrorBodyBytes] + "..."
+	if len(detail) > maxBodyBytes {
+		detail = detail[:maxBodyBytes] + "..."
 	}
 	if detail != "" {
 		return fmt.Errorf(

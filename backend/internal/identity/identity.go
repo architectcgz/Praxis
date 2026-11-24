@@ -1,7 +1,16 @@
 // Package identity 定义内核使用的强类型标识，不承载应用层公开契约。
 package identity
 
-import "github.com/google/uuid"
+import (
+	"regexp"
+
+	"github.com/google/uuid"
+)
+
+var configIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ValidConfigID 判断 Provider 和模型分组标识的格式，不规范化输入。
+func ValidConfigID(value string) bool { return configIDPattern.MatchString(value) }
 
 // ID 使用不同类型，防止不同聚合或执行层次的标识符混用，
 // 同时允许所有持久化格式继续使用字符串。

@@ -8,6 +8,7 @@ import (
 	"praxis/internal/identity"
 	"praxis/internal/model"
 	"praxis/internal/timing"
+	"strings"
 	"time"
 )
 
@@ -79,8 +80,18 @@ const (
 	RunFailureInternal        RunFailureCode = "execution_failed"
 )
 
-// MaxRunFailureMessageRunes 限制持久化失败详情的字符数。
+// MaxRunFailureMessageRunes 限制持久化和展示的失败详情，包含截断标记。
 const MaxRunFailureMessageRunes = 4096
+
+// FormatRunFailureMessage 统一移除首尾空白并按 Unicode 字符截断失败详情。
+func FormatRunFailureMessage(message string) string {
+	const ellipsis = "..."
+	text := []rune(strings.TrimSpace(message))
+	if len(text) > MaxRunFailureMessageRunes {
+		return string(text[:MaxRunFailureMessageRunes-len(ellipsis)]) + ellipsis
+	}
+	return string(text)
+}
 
 type RunOutcome string
 

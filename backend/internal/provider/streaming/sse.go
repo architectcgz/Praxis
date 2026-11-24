@@ -12,7 +12,7 @@ import (
 var ErrUnexpectedEOF = errors.New("provider stream ended before a terminal event")
 var ErrFrameTooLarge = errors.New("SSE frame exceeds size limit")
 
-const DefaultMaxFrameBytes = 2 * 1024 * 1024
+const initialScanBufferBytes = 1 << 10
 
 type SSEEvent struct {
 	Type string
@@ -26,21 +26,16 @@ type SSEReader struct {
 	firstLine     bool
 }
 
-// NewSSEReader 创建使用默认单帧大小限制的 SSE reader。
-func NewSSEReader(reader io.Reader) *SSEReader {
-	result, _ := NewSSEReaderWithLimit(reader, DefaultMaxFrameBytes)
-	return result
-}
-
-// NewSSEReaderWithLimit 限制整帧字节数（含注释和多行数据），非正数限制返回错误。
-func NewSSEReaderWithLimit(reader io.Reader, maxFrameBytes int) (*SSEReader, error) {
-	if reader == nil || maxFrameBytes <= 0 {
-		return nil, errors.New("SSE reader and positive frame limit are required")
-	}
+// newSSEReader 使用装配层提供的上限约束单行和整帧（含注释和多行数据）。
+func newSSEReader(reader io.Reader, maxFrameBytes int) *SSEReader {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, min(1024, maxFrameBytes)), maxFrameBytes+2)
+	scanner.Buffer(make([]byte, min(initialScanBufferBytes, maxFrameBytes)), maxFrameBytes+2)
 	scanner.Split(splitSSELine)
-	return &SSEReader{scanner: scanner, maxFrameBytes: maxFrameBytes, firstLine: true}, nil
+	return &SSEReader{
+		scanner:       scanner,
+		maxFrameBytes: maxFrameBytes,
+		firstLine:     true,
+	}
 }
 
 // Next 按 SSE 规则拼接 data；只有空行才提交事件，EOF 不提交未闭合帧。

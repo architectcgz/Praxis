@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"praxis/internal/identity"
 	"praxis/internal/model"
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -24,8 +24,6 @@ func (e *ConfigurationError) Error() string {
 }
 
 func (e *ConfigurationError) Unwrap() error { return e.Err }
-
-var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // ProviderCredential 表示凭据文档中的一项 Provider 凭据。
 type ProviderCredential struct {
@@ -230,7 +228,7 @@ func readCredentialsFile(path string) (ProviderCredentials, error) {
 func validateCredentials(document ProviderCredentials) (ProviderCredentials, error) {
 	validated := make(ProviderCredentials, len(document))
 	for providerID, credential := range document {
-		if !idPattern.MatchString(providerID) {
+		if !identity.ValidConfigID(providerID) {
 			return nil, fmt.Errorf("auth config: invalid provider id %q", providerID)
 		}
 		if credential.Type != CredentialTypeAPIKey {

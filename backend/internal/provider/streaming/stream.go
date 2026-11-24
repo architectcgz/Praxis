@@ -12,29 +12,24 @@ import (
 
 type EmitFunc func(provider.Event) error
 
-const eventBufferCapacity = 16
+// Limits 约束单条模型流使用的缓冲和 HTTP 错误正文读取量。
+type Limits struct {
+	MaxFrameBytes       int
+	EventBufferCapacity int
+	MaxErrorBodyBytes   int
+}
 
 type Decoder interface {
 	Decode(context.Context, *SSEReader, EmitFunc) (provider.StopReason, error)
 }
 
-type DecoderFunc func(context.Context, *SSEReader, EmitFunc) (provider.StopReason, error)
-
-func (f DecoderFunc) Decode(
-	ctx context.Context,
-	reader *SSEReader,
-	emit EmitFunc,
-) (provider.StopReason, error) {
-	return f(ctx, reader, emit)
-}
-
-func Open(client *http.Client, request *http.Request) (*http.Response, error) {
+func (l Limits) Open(client *http.Client, request *http.Request) (*http.Response, error) {
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, httpclient.DecodeErrorResponse(response)
+		return nil, httpclient.DecodeErrorResponse(response, l.MaxErrorBodyBytes)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
@@ -46,13 +41,13 @@ func Open(client *http.Client, request *http.Request) (*http.Response, error) {
 
 // Start 异步将 SSE 响应解码为统一模型流事件；解码停止时关闭响应体和事件通道。
 // 调用方提前停止处理时取消 ctx，并消费剩余事件直到通道关闭，以等待资源释放。
-func Start(
+func (l Limits) Start(
 	ctx context.Context,
 	response *http.Response,
 	decoder Decoder,
 	sensitiveValues ...string,
 ) <-chan provider.Event {
-	events := make(chan provider.Event, eventBufferCapacity)
+	events := make(chan provider.Event, l.EventBufferCapacity)
 	go func() {
 		defer close(events)
 		defer response.Body.Close()
@@ -67,7 +62,7 @@ func Start(
 				return nil
 			}
 		}
-		stopReason, err := decoder.Decode(ctx, NewSSEReader(response.Body), emit)
+		stopReason, err := decoder.Decode(ctx, newSSEReader(response.Body, l.MaxFrameBytes), emit)
 		_ = response.Body.Close()
 		if err != nil {
 			events <- provider.Event{Kind: provider.StreamError, Err: RedactError(err, sensitiveValues)}

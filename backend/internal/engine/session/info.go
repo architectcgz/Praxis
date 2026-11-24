@@ -18,6 +18,8 @@ const (
 	SessionArchived SessionState = "archived"
 )
 
+const maxAutoTitleRunes = 40
+
 // SessionInfo 是 Project 的持久化协作容器；ModelChoice 未指定模型时，会话运行时继承默认选择。
 type SessionInfo struct {
 	ID           identity.SessionID
@@ -50,8 +52,8 @@ func (s SessionInfo) MainAgentID() identity.AgentID {
 // 截断以 Unicode 字符为单位，避免拆断多字节文本。
 func TitleFromInput(content string) string {
 	words := []rune(strings.Join(strings.Fields(content), " "))
-	if len(words) > 40 {
-		words = words[:40]
+	if len(words) > maxAutoTitleRunes {
+		words = words[:maxAutoTitleRunes]
 	}
 	return string(words)
 }
@@ -65,7 +67,7 @@ func (value SessionInfo) Validate() error {
 		return fmt.Errorf("session.state: unknown session state: %w", errorcode.ErrInvalidValue)
 	}
 	if value.ApprovalMode != nil && !value.ApprovalMode.Valid() {
-		return fmt.Errorf("session.approvalMode: default approval mode must be ask, auto or yolo: %w", errorcode.ErrInvalidValue)
+		return fmt.Errorf("session.approvalMode: invalid approval mode: %w", errorcode.ErrInvalidValue)
 	}
 	if value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() || value.UpdatedAt.Before(value.CreatedAt) {
 		return fmt.Errorf("session.timestamps: timestamps are invalid: %w", errorcode.ErrInvalidValue)

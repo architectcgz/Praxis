@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const recoveryBatchSize = 200
+
 func (r SessionRepository) Load(ctx context.Context, id identity.SessionID) (*session.Session, error) {
 	if _, err := r.Get(ctx, id); err != nil {
 		return nil, err
@@ -78,7 +80,7 @@ func readRunEntries(ctx context.Context, log *entryLog, agentID identity.AgentID
 	var cursor *int64
 	entries := make([]*entry.Entry, 0)
 	for {
-		page, err := log.ReadBackward(ctx, agentID, cursor, 200)
+		page, err := log.ReadBackward(ctx, agentID, cursor, recoveryBatchSize)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +106,7 @@ func recoverAgentContext(ctx context.Context, log *entryLog, agentID identity.Ag
 	var cursor *int64
 	entries := make([]*entry.Entry, 0)
 	for {
-		page, err := log.ReadBackward(ctx, agentID, cursor, 200)
+		page, err := log.ReadBackward(ctx, agentID, cursor, recoveryBatchSize)
 		if err != nil {
 			return err
 		}

@@ -11,7 +11,6 @@ import (
 	"praxis/internal/errorcode"
 	"praxis/internal/event"
 	"praxis/internal/identity"
-	"strings"
 	"time"
 )
 
@@ -25,7 +24,7 @@ func (r *Run) SettlePreparation(ctx context.Context, err error) error {
 func (r *Run) settleExecution(ctx context.Context, execErr error) error {
 	outcome, code, message := r.classifyOutcome(ctx, execErr)
 	if execErr != nil && outcome == entry.OutcomeFailed {
-		r.emitError(r.currentTurnID, execErr)
+		r.emitError(r.currentTurnID, code, message)
 	}
 	endCtx, cancel := r.settlementContext(ctx)
 	defer cancel()
@@ -139,11 +138,7 @@ func (r *Run) classifyOutcome(ctx context.Context, err error) (entry.RunOutcome,
 	}
 	message := ""
 	if code == entry.RunFailureProvider {
-		text := []rune(strings.TrimSpace(err.Error()))
-		if len(text) > entry.MaxRunFailureMessageRunes {
-			text = text[:entry.MaxRunFailureMessageRunes]
-		}
-		message = string(text)
+		message = entry.FormatRunFailureMessage(err.Error())
 	}
 	return entry.OutcomeFailed, code, message
 }

@@ -11,37 +11,36 @@ import (
 	"praxis/internal/provider/streaming"
 )
 
+const anthropicVersion = "2023-06-01"
+
 type Config struct {
-	BaseURL       string
-	APIKey        string
-	Version       string
-	ContextWindow int
+	BaseURL string
+	APIKey  string
 }
 
 type Dependencies struct {
-	HTTPClient *http.Client
-	Warnf      func(string, ...any)
+	HTTPClient   *http.Client
+	Warnf        func(string, ...any)
+	StreamLimits streaming.Limits
 }
 
 type Provider struct {
-	baseURL, apiKey, version string
-	client                   *http.Client
-	decoder                  decoder
+	baseURL string
+	apiKey  string
+	client  *http.Client
+	decoder decoder
+	limits  streaming.Limits
 }
 
-// New 使用入口已校验的端点和凭据创建协议适配器，仅补齐默认协议版本。
-func New(config Config, deps Dependencies) (*Provider, error) {
-	version := config.Version
-	if version == "" {
-		version = "2023-06-01"
-	}
+// New 使用入口已校验的端点和凭据创建协议适配器。
+func New(config Config, deps Dependencies) *Provider {
 	return &Provider{
 		baseURL: config.BaseURL,
 		apiKey:  config.APIKey,
-		version: version,
 		client:  deps.HTTPClient,
 		decoder: decoder{warnf: deps.Warnf},
-	}, nil
+		limits:  deps.StreamLimits,
+	}
 }
 
 var _ provider.Provider = (*Provider)(nil)
@@ -66,14 +65,14 @@ func (p *Provider) Stream(
 		return nil, fmt.Errorf("build anthropic request: %w", err)
 	}
 	httpRequest.Header.Set("x-api-key", p.apiKey)
-	httpRequest.Header.Set("anthropic-version", p.version)
+	httpRequest.Header.Set("anthropic-version", anthropicVersion)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")
-	response, err := streaming.Open(p.client, httpRequest)
+	response, err := p.limits.Open(p.client, httpRequest)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request: %w", streaming.RedactError(err, sensitiveStateValues(request.Context)))
 	}
-	return streaming.Start(ctx, response, p.decoder, sensitiveStateValues(request.Context)...), nil
+	return p.limits.Start(ctx, response, p.decoder, sensitiveStateValues(request.Context)...), nil
 }
 
 func buildPayload(request provider.Request) ([]byte, error) {

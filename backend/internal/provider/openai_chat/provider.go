@@ -11,14 +11,14 @@ import (
 )
 
 type Config struct {
-	BaseURL       string
-	APIKey        string
-	ContextWindow int
+	BaseURL string
+	APIKey  string
 }
 
 type Dependencies struct {
-	HTTPClient *http.Client
-	Warnf      func(string, ...any)
+	HTTPClient   *http.Client
+	Warnf        func(string, ...any)
+	StreamLimits streaming.Limits
 }
 
 type Provider struct {
@@ -26,16 +26,18 @@ type Provider struct {
 	apiKey  string
 	client  *http.Client
 	decoder decoder
+	limits  streaming.Limits
 }
 
 // New 使用入口已校验的端点和凭据创建 OpenAI Chat Completions 协议适配器。
-func New(config Config, deps Dependencies) (*Provider, error) {
+func New(config Config, deps Dependencies) *Provider {
 	return &Provider{
 		baseURL: config.BaseURL,
 		apiKey:  config.APIKey,
 		client:  deps.HTTPClient,
 		decoder: decoder{warnf: deps.Warnf},
-	}, nil
+		limits:  deps.StreamLimits,
+	}
 }
 
 var _ provider.Provider = (*Provider)(nil)
@@ -59,11 +61,11 @@ func (p *Provider) Stream(
 	httpRequest.Header.Set("Authorization", "Bearer "+p.apiKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "text/event-stream")
-	response, err := streaming.Open(p.client, httpRequest)
+	response, err := p.limits.Open(p.client, httpRequest)
 	if err != nil {
 		return nil, fmt.Errorf("openai chat request: %w", err)
 	}
-	return streaming.Start(ctx, response, p.decoder), nil
+	return p.limits.Start(ctx, response, p.decoder), nil
 }
 
 func buildPayload(request provider.Request) ([]byte, error) {

@@ -10,6 +10,7 @@ import (
 	"praxis/internal/provider/anthropic"
 	"praxis/internal/provider/openai_chat"
 	"praxis/internal/provider/openai_responses"
+	"praxis/internal/provider/streaming"
 )
 
 // Credentials 提供会话已冻结的凭据，不读取运行期间的配置编辑状态。
@@ -18,9 +19,10 @@ type Credentials interface {
 }
 
 type Dependencies struct {
-	Credentials Credentials
-	HTTPClients map[string]*http.Client
-	Warnf       func(string, ...any)
+	Credentials  Credentials
+	HTTPClients  map[string]*http.Client
+	Warnf        func(string, ...any)
+	StreamLimits streaming.Limits
 }
 
 // Router 在同一会话内并发复用；只共享固定凭据和 HTTP 连接，不保存请求或解码状态。
@@ -28,6 +30,7 @@ type Router struct {
 	credentials Credentials
 	clients     map[string]*http.Client
 	warnf       func(string, ...any)
+	limits      streaming.Limits
 }
 
 // New 保存装配层提供的共享依赖；具体协议及凭据由每次请求的冻结配置确定。
@@ -36,6 +39,7 @@ func New(deps Dependencies) *Router {
 		credentials: deps.Credentials,
 		clients:     deps.HTTPClients,
 		warnf:       deps.Warnf,
+		limits:      deps.StreamLimits,
 	}
 }
 
@@ -59,40 +63,36 @@ func (r *Router) Stream(ctx context.Context, request provider.Request) (<-chan p
 	}
 	client := r.clients[config.ProviderID]
 	var protocol provider.Provider
-	var err error
 	switch model.APIFormat(config.APIFormat) {
 	case model.APIFormatAnthropicMessages:
-		protocol, err = anthropicmessages.New(anthropicmessages.Config{
-			BaseURL:       config.BaseURL,
-			APIKey:        apiKey,
-			ContextWindow: config.ContextWindow,
+		protocol = anthropicmessages.New(anthropicmessages.Config{
+			BaseURL: config.BaseURL,
+			APIKey:  apiKey,
 		}, anthropicmessages.Dependencies{
-			HTTPClient: client,
-			Warnf:      r.warnf,
+			HTTPClient:   client,
+			Warnf:        r.warnf,
+			StreamLimits: r.limits,
 		})
 	case model.APIFormatOpenAIChatCompletions:
-		protocol, err = openaichat.New(openaichat.Config{
-			BaseURL:       config.BaseURL,
-			APIKey:        apiKey,
-			ContextWindow: config.ContextWindow,
+		protocol = openaichat.New(openaichat.Config{
+			BaseURL: config.BaseURL,
+			APIKey:  apiKey,
 		}, openaichat.Dependencies{
-			HTTPClient: client,
-			Warnf:      r.warnf,
+			HTTPClient:   client,
+			Warnf:        r.warnf,
+			StreamLimits: r.limits,
 		})
 	case model.APIFormatOpenAIResponses:
-		protocol, err = openairesponses.New(openairesponses.Config{
-			BaseURL:       config.BaseURL,
-			APIKey:        apiKey,
-			ContextWindow: config.ContextWindow,
+		protocol = openairesponses.New(openairesponses.Config{
+			BaseURL: config.BaseURL,
+			APIKey:  apiKey,
 		}, openairesponses.Dependencies{
-			HTTPClient: client,
-			Warnf:      r.warnf,
+			HTTPClient:   client,
+			Warnf:        r.warnf,
+			StreamLimits: r.limits,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported model API format %q", config.APIFormat)
-	}
-	if err != nil {
-		return nil, err
 	}
 	return protocol.Stream(ctx, request)
 }
