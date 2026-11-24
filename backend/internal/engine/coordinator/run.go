@@ -40,7 +40,7 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 				coordinator: r,
 				run:         run,
 				active:      active,
-			})
+			}, r.subagentLimits)
 		} else {
 			extras = subagenttool.ChildTools(run)
 		}

@@ -9,7 +9,8 @@ import (
 )
 
 type ProjectBindings struct {
-	host Host
+	listLimit int
+	host      Host
 }
 
 type CreateProjectRequest struct {
@@ -49,7 +50,7 @@ func (b *ProjectBindings) ListProjects() ([]ProjectSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	projects, err := services.Projects.ListProjects(ctx, 100)
+	projects, err := services.Projects.ListProjects(ctx, b.listLimit)
 	if err != nil {
 		return nil, publicError(b.host, "ProjectBindings.ListProjects", err)
 	}

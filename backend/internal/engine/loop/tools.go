@@ -5,7 +5,6 @@ import (
 	"errors"
 	appcontext "praxis/internal/context"
 	"praxis/internal/engine/hook"
-	"praxis/internal/engine/modelcall"
 	"praxis/internal/engine/toolexecution"
 	"praxis/internal/entry"
 	"praxis/internal/errorcode"
@@ -179,16 +178,17 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 		Tools:           params.Tools.List(),
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 	}
-	input, _, err := modelcall.EstimateRequestTokens(request, deps.Budget)
+	input, err := r.ModelCaller.EstimateRequestTokens(request, deps.Budget)
 	if err != nil {
 		return err
 	}
-	budget := max(0, params.Model.ContextWindow-params.Model.MaxOutputTokens-appcontext.Margin(params.Model.ContextWindow)-input)
+	margin := r.CompressionPolicy.Margin(params.Model.ContextWindow)
+	budget := max(0, params.Model.ContextWindow-params.Model.MaxOutputTokens-margin-input)
 	sizes := make([]int, len(results))
 	order := make([]int, len(results))
 	total := 0
 	for i, result := range results {
-		sizes[i] = appcontext.EstimateTokens(result.ToolResult.Payload) + 32
+		sizes[i] = appcontext.EstimateTokens(result.ToolResult.Payload) + r.ToolResultOverhead
 		total += sizes[i]
 		order[i] = i
 	}
@@ -197,18 +197,18 @@ func (r *Runner) boundToolResults(ctx context.Context, params RunParams, deps Ru
 		if total <= budget {
 			break
 		}
-		if sizes[index] <= 256 {
+		if sizes[index] <= r.KeepToolResultTokens {
 			continue
 		}
 		prior := results[index].ToolResult
-		bounded, err := executor.BoundResult(prior, 0)
+		bounded, err := executor.SpillResult(prior)
 		if err != nil {
 			bounded = tool.NewToolError("tool_output_save_failed", "The operation already ran, but saving its output failed: "+err.Error()+". Do not rerun the operation to recover output.")
 			bounded.SideEffect = prior.SideEffect
 		}
 		results[index].ToolResult = bounded
 		total -= sizes[index]
-		sizes[index] = appcontext.EstimateTokens(bounded.Payload) + 32
+		sizes[index] = appcontext.EstimateTokens(bounded.Payload) + r.ToolResultOverhead
 		total += sizes[index]
 	}
 	return nil

@@ -2,17 +2,13 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"praxis/internal/config"
 	"praxis/internal/engine/session"
+	"praxis/internal/logging"
 	"praxis/internal/provider/httpclient"
 	"praxis/internal/provider/router"
-	"praxis/internal/security"
 	"praxis/internal/tool"
 )
 
@@ -20,16 +16,18 @@ import (
 type configuration struct {
 	registry *tool.ToolRegistry
 	model    config.ModelRuntime
+	logger   *logging.Logger
 }
 
-func loadConfiguration(ctx context.Context, root config.DataRoot, model config.ModelRuntime, extensions []tool.Tool) (*configuration, error) {
-	registry, err := buildToolRegistry(extensions)
+func loadConfiguration(ctx context.Context, root config.DataRoot, runtime config.Runtime, logger *logging.Logger, extensions []tool.Tool) (*configuration, error) {
+	registry, err := buildToolRegistry(runtime.Tools, extensions)
 	if err != nil {
 		return nil, err
 	}
 	loader := &configuration{
 		registry: registry,
-		model:    model,
+		model:    runtime.Model,
+		logger:   logger,
 	}
 	if _, err := loader.loadSessionConfiguration(ctx, root); err != nil {
 		return nil, err
@@ -67,34 +65,10 @@ func (c *configuration) loadSessionConfiguration(ctx context.Context, root confi
 		Provider: router.New(router.Dependencies{
 			Credentials: models.Credentials(),
 			HTTPClients: buildProviderClients(models.Proxies(), c.model),
+			Warnf:       c.logger.Warnf,
 		}),
 		GlobalApprovalMode: settings.ApprovalMode,
 	}, nil
-}
-
-// initializeDefaultFiles 只补充缺失文件，配置加载和重载均不调用此步骤。
-func initializeDefaultFiles(ctx context.Context, root config.DataRoot) error {
-	files := map[string]any{
-		root.ModelProvidersConfig: config.ModelDocument{
-			Groups:    []config.ModelGroup{},
-			Providers: []config.ModelProvider{},
-		},
-		root.ModelCredentialsFile: map[string]any{},
-		root.ToolConfig:           config.DefaultToolsDocument(),
-		root.SettingsFile: config.Settings{
-			ApprovalMode: security.ApprovalAsk,
-		},
-	}
-	for path, value := range files {
-		encoded, err := json.MarshalIndent(value, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := createDefaultFile(ctx, path, append(encoded, '\n')); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func buildProviderClients(proxies map[string]config.Proxy, policy config.ModelRuntime) map[string]*http.Client {
@@ -123,21 +97,4 @@ func buildProviderClients(proxies map[string]config.Proxy, policy config.ModelRu
 		}}
 	}
 	return clients
-}
-
-func createDefaultFile(ctx context.Context, path string, value []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if errors.Is(err, os.ErrExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("create default config %q: %w", path, err)
-	}
-	_, writeErr := file.Write(value)
-	syncErr := file.Sync()
-	closeErr := file.Close()
-	return errors.Join(writeErr, syncErr, closeErr)
 }

@@ -29,8 +29,8 @@ func (r SessionRepository) OpenLog(ctx context.Context, id identity.SessionID) (
 	}
 	log := &SessionLog{
 		sessionID: id,
-		directory: sessionPath(r.dataRoot, info.ProjectID, id),
-		backupDir: r.dataRoot,
+		directory: sessionPath(r.projectsRoot, info.ProjectID, id),
+		backupDir: r.backupDir,
 		mainAgent: identity.AgentID(id),
 		writers:   make(map[identity.AgentID]*jsonl.Writer),
 	}

@@ -14,13 +14,13 @@ import (
 	"slices"
 )
 
-type ProjectRepository struct{ dataRoot string }
+type ProjectRepository struct{ root string }
 
 func (r ProjectRepository) Get(ctx context.Context, id identity.ProjectID) (project.Project, error) {
 	if err := ctx.Err(); err != nil {
 		return project.Project{}, err
 	}
-	path := projectConfigPath(r.dataRoot, id)
+	path := projectConfigPath(r.root, id)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -50,7 +50,7 @@ func (r ProjectRepository) Save(ctx context.Context, value project.Project) erro
 	if err != nil {
 		return fmt.Errorf("encode project config: %w", err)
 	}
-	path := projectConfigPath(r.dataRoot, value.ID)
+	path := projectConfigPath(r.root, value.ID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create project config directory: %w", err)
 	}
@@ -84,7 +84,7 @@ func (r ProjectRepository) List(ctx context.Context, limit int) ([]project.Proje
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(filepath.Join(r.dataRoot, "projects"))
+	entries, err := os.ReadDir(r.root)
 	if err != nil {
 		return nil, fmt.Errorf("list project directories: %w", err)
 	}
@@ -111,8 +111,8 @@ func (r ProjectRepository) List(ctx context.Context, limit int) ([]project.Proje
 	return values, nil
 }
 
-func projectConfigPath(dataRoot string, id identity.ProjectID) string {
-	return filepath.Join(dataRoot, "projects", id.String(), "project.json")
+func projectConfigPath(projectsRoot string, id identity.ProjectID) string {
+	return filepath.Join(projectsRoot, id.String(), "project.json")
 }
 
 type LocalDirectory struct{}

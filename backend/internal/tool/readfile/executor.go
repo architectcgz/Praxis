@@ -22,7 +22,7 @@ type output struct {
 }
 
 // call 分段读取项目文件或当前会话的临时输出，不开放其他会话和整个临时目录。
-func call(ctx context.Context, toolArguments arguments, environment tool.Environment) (tool.ToolResult, error) {
+func (t *readFileTool) call(ctx context.Context, toolArguments arguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -51,7 +51,7 @@ func call(ctx context.Context, toolArguments arguments, environment tool.Environ
 	}
 	available := fileSize - int64(offset)
 	// 额外读取足够的尾部字节，以识别跨越字节上限的字符。
-	readLimit := int64(toolArguments.Limit + utf8.UTFMax - 1)
+	readLimit := int64(*toolArguments.Limit + utf8.UTFMax - 1)
 	if available < readLimit {
 		readLimit = available
 	}
@@ -62,12 +62,12 @@ func call(ctx context.Context, toolArguments arguments, environment tool.Environ
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	contentEnd, err := contentEndAtLimit(raw, toolArguments.Limit)
+	contentEnd, err := contentEndAtLimit(raw, *toolArguments.Limit)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
 	content := raw[:contentEnd]
-	encoded, contentEnd, err := encodeBoundedOutput(toolArguments, offset, fileSize, content)
+	encoded, contentEnd, err := encodeBoundedOutput(toolArguments, offset, fileSize, content, t.limits.InlineResultBytes)
 	if err != nil {
 		return tool.ToolResult{}, err
 	}
@@ -100,6 +100,7 @@ func encodeBoundedOutput(
 	offset int,
 	fileSize int64,
 	content []byte,
+	inlineBytes int,
 ) ([]byte, int, error) {
 	ends := utf8RuneEnds(content)
 	low, high, best := 0, len(ends)-1, -1
@@ -111,7 +112,7 @@ func encodeBoundedOutput(
 		if err != nil {
 			return nil, 0, errors.New("read_file could not encode its result")
 		}
-		if len(candidate) <= tool.MaxInlineResultBytes {
+		if len(candidate) <= inlineBytes {
 			best, encoded, low = middle, candidate, middle+1
 			continue
 		}
@@ -121,7 +122,7 @@ func encodeBoundedOutput(
 		return encoded, ends[best], nil
 	}
 	empty, err := encodeOutput(toolArguments, offset, fileSize, "")
-	if err != nil || len(empty) > tool.MaxInlineResultBytes {
+	if err != nil || len(empty) > inlineBytes {
 		return nil, 0, errors.New("read_file result metadata exceeds the size limit")
 	}
 	return empty, 0, nil
@@ -142,7 +143,7 @@ func encodeOutput(toolArguments arguments, offset int, fileSize int64, content s
 	toolOutput := output{
 		Path:    toolArguments.Path,
 		Offset:  offset,
-		Limit:   toolArguments.Limit,
+		Limit:   *toolArguments.Limit,
 		Size:    fileSize,
 		Content: content,
 	}

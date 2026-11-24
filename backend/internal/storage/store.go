@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 )
 
 // Store 提供各存储入口并管理数据库生命周期，不缓存会话历史。
@@ -12,12 +10,9 @@ type Store struct {
 	Sessions SessionRepository
 }
 
-// Open 初始化项目配置目录并打开会话元数据库，不加载会话历史。
-func Open(ctx context.Context, dataRoot string) (*Store, error) {
+// Open 使用装配层已初始化的目录打开会话元数据库，不加载会话历史。
+func Open(ctx context.Context, dataRoot, projectsRoot string) (*Store, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Join(dataRoot, "projects"), 0700); err != nil {
 		return nil, err
 	}
 	db, err := openSessionMetadataDatabase(ctx, dataRoot)
@@ -25,11 +20,12 @@ func Open(ctx context.Context, dataRoot string) (*Store, error) {
 		return nil, err
 	}
 	sessions := SessionRepository{
-		dataRoot: dataRoot,
-		database: db,
+		backupDir:    dataRoot,
+		projectsRoot: projectsRoot,
+		database:     db,
 	}
 	return &Store{
-		Projects: ProjectRepository{dataRoot: dataRoot},
+		Projects: ProjectRepository{root: projectsRoot},
 		Sessions: sessions,
 	}, nil
 }

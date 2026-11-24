@@ -20,7 +20,7 @@ import (
 // Loop 提交真实回执后调用后置 Hook，历史写入由条目提交入口负责。
 type ToolExecutor interface {
 	Execute(context.Context, entry.ToolCall, entry.AppendEntry) (toolexecution.CallResult, error)
-	BoundResult(tool.ToolResult, int) (tool.ToolResult, error)
+	SpillResult(tool.ToolResult) (tool.ToolResult, error)
 }
 
 // RunParams 保存一次执行的身份、系统提示词、工具目录与冻结模型配置，供各轮模型请求共用。
@@ -47,13 +47,17 @@ type RunDependencies struct {
 
 // Dependencies 保存 Loop 的共享能力；Provider 在执行开始时绑定会话配置。
 type Dependencies struct {
-	CommitTimeout       time.Duration
-	ReadOnlyParallelism int
-	Provider            provider.Provider
-	ModelCaller         *modelcall.Caller
-	HookDispatcher      *hook.Dispatcher
-	Emitter             *coreevent.Emitter
-	Logf                func(string, ...any)
+	CommitTimeout        time.Duration
+	CompressionPolicy    appcontext.CompressionPolicy
+	SummaryTimeout       time.Duration
+	ToolResultOverhead   int
+	KeepToolResultTokens int
+	ReadOnlyParallelism  int
+	Provider             provider.Provider
+	ModelCaller          *modelcall.Caller
+	HookDispatcher       *hook.Dispatcher
+	Emitter              *coreevent.Emitter
+	Logf                 func(string, ...any)
 }
 
 // Runner 负责 ReAct 多轮迭代；模型上下文只用于本轮请求，不持有执行或会话对象。
@@ -182,7 +186,7 @@ func (r *Runner) Request(ctx context.Context, params RunParams, deps RunDependen
 	if kind == entry.ModelRequestIteration {
 		call.Budget = deps.Budget
 		call.Prepare = func(req provider.Request) (provider.Request, error) {
-			return remindContextBudget(req, deps.Budget)
+			return r.remindContextBudget(req, deps.Budget)
 		}
 		call.OnProviderEvent = func(event provider.Event) {
 			r.emitModelEvent(params, request.TurnID, event)

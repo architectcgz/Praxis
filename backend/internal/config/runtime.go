@@ -1,12 +1,21 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"praxis/internal/logging"
+	"strings"
+	"time"
+)
 
 // Runtime 是装配时确定的进程级运行策略，不随会话重载改变。
 type Runtime struct {
 	Model     ModelRuntime
 	Lifecycle Lifecycle
 	Execution ExecutionLimits
+	Context   ContextRuntime
+	Review    ReviewRuntime
+	Tools     ToolRuntime
+	Pages     PageRuntime
 }
 
 type ModelRuntime struct {
@@ -33,6 +42,74 @@ type ExecutionLimits struct {
 	ActiveSubagents     int
 }
 
+type ContextRuntime struct {
+	NearLimitPercent     int
+	SummaryTargetPercent int
+	MaxSummaryTokens     int
+	MinMarginTokens      int
+	MarginPercent        int
+	RequestReserveTokens int
+	SummaryTimeout       time.Duration
+	ToolResultOverhead   int
+	KeepToolResultTokens int
+}
+
+type ReviewRuntime struct {
+	Timeout           time.Duration
+	MaxTextBytes      int
+	TargetReasonChars int // 提示词与 Schema 说明中的理由长度目标。
+	MaxReasonBytes    int // 接纳理由时按 UTF-8 字节数执行的硬上限。
+}
+
+type ToolRuntime struct {
+	Bash              BashRuntime
+	ReadFile          ReadFileRuntime
+	MaxPatchBytes     int
+	Subagent          SubagentRuntime
+	InlineResultBytes int // 工具结果编码后的内联字节上限，与原文读取上限独立。
+}
+
+type BashRuntime struct {
+	DefaultTimeoutSeconds int
+	MaxTimeoutSeconds     int
+	MaxCommandBytes       int
+	ExitWait              time.Duration
+}
+
+type ReadFileRuntime struct {
+	DefaultReadBytes int
+	MaxReadBytes     int
+}
+
+type SubagentRuntime struct {
+	MinTimeoutSeconds int
+	MaxTimeoutSeconds int
+}
+
+const maxHistoryPageSize = 200
+
+type PageRuntime struct {
+	DefaultHistorySize int
+	MaxHistorySize     int
+	ListLimit          int
+}
+
+// ParseLogLevel 将未设置或空白值解释为 info；非法的非空值阻止启动。
+func ParseLogLevel(value string) (logging.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "info":
+		return logging.InfoLevel, nil
+	case "debug":
+		return logging.DebugLevel, nil
+	case "warn", "warning":
+		return logging.WarnLevel, nil
+	case "error":
+		return logging.ErrorLevel, nil
+	default:
+		return 0, fmt.Errorf("invalid PRAXIS_LOG_LEVEL %q: expected debug, info, warn, or error", value)
+	}
+}
+
 func DefaultRuntime() Runtime {
 	return Runtime{
 		Model: ModelRuntime{
@@ -55,6 +132,46 @@ func DefaultRuntime() Runtime {
 		Execution: ExecutionLimits{
 			ReadOnlyParallelism: 8,
 			ActiveSubagents:     10,
+		},
+		Context: ContextRuntime{
+			NearLimitPercent:     90,
+			SummaryTargetPercent: 60,
+			MaxSummaryTokens:     4096,
+			MinMarginTokens:      256,
+			MarginPercent:        2,
+			RequestReserveTokens: 128,
+			SummaryTimeout:       2 * time.Minute,
+			ToolResultOverhead:   32,
+			KeepToolResultTokens: 256,
+		},
+		Review: ReviewRuntime{
+			Timeout:           time.Minute,
+			MaxTextBytes:      4096,
+			TargetReasonChars: 200,
+			MaxReasonBytes:    1000,
+		},
+		Tools: ToolRuntime{
+			Bash: BashRuntime{
+				DefaultTimeoutSeconds: 120,
+				MaxTimeoutSeconds:     600,
+				MaxCommandBytes:       128 * 1024,
+				ExitWait:              time.Second,
+			},
+			ReadFile: ReadFileRuntime{
+				DefaultReadBytes: 32 * 1024,
+				MaxReadBytes:     50 * 1024,
+			},
+			MaxPatchBytes: 512 * 1024,
+			Subagent: SubagentRuntime{
+				MinTimeoutSeconds: 1,
+				MaxTimeoutSeconds: 600,
+			},
+			InlineResultBytes: 50 * 1024,
+		},
+		Pages: PageRuntime{
+			DefaultHistorySize: min(50, maxHistoryPageSize),
+			MaxHistorySize:     maxHistoryPageSize,
+			ListLimit:          100,
 		},
 	}
 }

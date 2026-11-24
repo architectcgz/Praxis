@@ -7,14 +7,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
-// DataRoot 包含本地产品数据路径；配置和会话按目录管理，应用级日志直接保存在 Root 下。
-// 此类型只解析路径并初始化目录，不读写配置内容。
+// DataRoot 定义应用顶层布局；存储内部文件名由存储层管理。
 type DataRoot struct {
 	Root                 string
 	Config               string
 	Projects             string
+	ApplicationLog       string
+	ToolOutput           string
 	ModelProvidersConfig string
 	ModelCredentialsFile string
 	ToolConfig           string
@@ -22,17 +24,24 @@ type DataRoot struct {
 	AgentDefinitions     string
 }
 
-// ResolveDataRoot 将已确定的数据根目录解析为绝对路径并构建路径布局。
-// 不读取环境变量，不选择默认目录，不创建文件。
+// DefaultDataRoot 固定使用当前用户主目录下的 .praxis，不创建文件。
+func DefaultDataRoot() (DataRoot, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return DataRoot{}, fmt.Errorf("resolve user home directory: %w", err)
+	}
+	return ResolveDataRoot(filepath.Join(home, ".praxis"))
+}
+
+// ResolveDataRoot 将指定目录解析为绝对路径并构建应用布局，不创建文件或目录。
 func ResolveDataRoot(root string) (DataRoot, error) {
 	if root == "" {
 		return DataRoot{}, errors.New("data root is required")
 	}
-	absolute, err := filepath.Abs(root)
+	root, err := filepath.Abs(root)
 	if err != nil {
 		return DataRoot{}, fmt.Errorf("resolve data root: %w", err)
 	}
-	root = absolute
 	if filepath.Dir(root) == root {
 		return DataRoot{}, errors.New("data root cannot be the filesystem root")
 	}
@@ -41,6 +50,8 @@ func ResolveDataRoot(root string) (DataRoot, error) {
 		Root:                 root,
 		Config:               config,
 		Projects:             filepath.Join(root, "projects"),
+		ApplicationLog:       filepath.Join(root, "praxis.log"),
+		ToolOutput:           filepath.Join(os.TempDir(), "praxis", "tool-output"),
 		ModelProvidersConfig: filepath.Join(config, "models.json"),
 		ModelCredentialsFile: filepath.Join(config, "auth.json"),
 		ToolConfig:           filepath.Join(config, "tools.json"),
@@ -54,18 +65,27 @@ func (d DataRoot) Initialize(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for _, path := range []string{
+	directories := []string{
 		d.Root,
 		d.Config,
 		d.Projects,
 		d.AgentDefinitions,
-	} {
-		if path == "" {
-			return errors.New("data root contains an empty required path")
-		}
+	}
+	if d.ApplicationLog == "" || d.ToolOutput == "" || slices.Contains(directories, "") {
+		return errors.New("data root contains an empty required path")
+	}
+	for _, path := range directories {
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			return fmt.Errorf("create data directory %q: %w", path, err)
 		}
 	}
 	return nil
+}
+
+func InstanceLockPath() (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve application instance directory: %w", err)
+	}
+	return filepath.Join(cache, "praxis", "instance.lock"), nil
 }

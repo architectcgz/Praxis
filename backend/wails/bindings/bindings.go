@@ -2,6 +2,7 @@ package bindings
 
 import (
 	"context"
+	"fmt"
 	"praxis/internal/entry"
 	coreevent "praxis/internal/event"
 	sessionservice "praxis/internal/service/session"
@@ -24,12 +25,29 @@ type Bindings struct {
 	commands *CommandBindings
 }
 
-func New(host Host) *Bindings {
+type PageConfig struct {
+	DefaultHistorySize int
+	MaxHistorySize     int
+	ListLimit          int
+}
+
+func New(host Host, pages PageConfig) *Bindings {
 	return &Bindings{
-		host:     host,
-		projects: &ProjectBindings{host: host},
-		sessions: &SessionBindings{host: host},
-		agents:   &AgentBindings{host: host},
+		host: host,
+		projects: &ProjectBindings{
+			host:      host,
+			listLimit: pages.ListLimit,
+		},
+		sessions: &SessionBindings{
+			host:               host,
+			defaultHistorySize: pages.DefaultHistorySize,
+			listLimit:          pages.ListLimit,
+		},
+		agents: &AgentBindings{
+			host:               host,
+			defaultHistorySize: pages.DefaultHistorySize,
+			historyLimitRule:   fmt.Sprintf("min=1,max=%d", pages.MaxHistorySize),
+		},
 		commands: &CommandBindings{host: host},
 	}
 }

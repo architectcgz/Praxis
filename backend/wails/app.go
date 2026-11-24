@@ -51,7 +51,6 @@ func (a *App) Attach(frontend bindings.Services, logger *logging.Logger, closer 
 	if closer == nil {
 		return errors.New("desktop application closer is required")
 	}
-	logger = logging.NewFactory().Ensure(logger)
 
 	a.mu.Lock()
 	if a.closed || a.startupErr != nil {

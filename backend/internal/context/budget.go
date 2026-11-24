@@ -32,7 +32,7 @@ func visibleHashes(c ModelContext) ([][32]byte, error) {
 func shapeHash(c ModelContext, key string) [32]byte {
 	return sha256.Sum256([]byte(key + "\x00" + c.SystemPrompt))
 }
-func (b *Budget) Estimate(c ModelContext, key string, overhead int) (int, error) {
+func (b *Budget) Estimate(c ModelContext, key string, reservedTokens int) (int, error) {
 	hashes, err := visibleHashes(c)
 	if err != nil {
 		return 0, err
@@ -59,7 +59,7 @@ func (b *Budget) Estimate(c ModelContext, key string, overhead int) (int, error)
 	}
 	b.valid = false
 	input, err := c.EstimatedTokens()
-	return input + overhead + 128, err
+	return input + reservedTokens, err
 }
 func (b *Budget) Observe(c ModelContext, key string, input int) {
 	b.valid = false
@@ -75,11 +75,22 @@ func (b *Budget) Observe(c ModelContext, key string, input int) {
 	b.input = input
 	b.valid = true
 }
-func Margin(window int) int { return max(256, window/50) }
-func CheckCapacity(input, output, window int) error {
-	if window > 0 && input+output+Margin(window) > window {
+
+type BudgetPolicy struct {
+	MinMarginTokens      int
+	MarginPercent        int
+	RequestReserveTokens int
+}
+
+func (p BudgetPolicy) Margin(window int) int {
+	return max(p.MinMarginTokens, percent(window, p.MarginPercent))
+}
+
+func (p BudgetPolicy) CheckCapacity(input, output, window int) error {
+	margin := p.Margin(window)
+	if window > 0 && input+output+margin > window {
 		return &ContextWindowExceededError{
-			EstimatedInputTokens: input + Margin(window),
+			EstimatedInputTokens: input + margin,
 			MaxOutputTokens:      output,
 			ContextWindow:        window,
 		}

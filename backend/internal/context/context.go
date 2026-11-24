@@ -101,8 +101,8 @@ func (e *ContextWindowExceededError) Error() string {
 	)
 }
 
-// NearContextLimit 将输入与输出预留一起计入模型窗口，达到九成时触发压缩评估或收尾提醒。
-func NearContextLimit(inputTokens, maxOutputTokens, contextWindow int) bool {
-	threshold := contextWindow/100*90 + contextWindow%100*90/100
+// NearContextLimit 将输入与输出预留一起计入模型窗口，达到阈值时触发压缩评估或收尾提醒。
+func NearContextLimit(inputTokens, maxOutputTokens, contextWindow, thresholdPercent int) bool {
+	threshold := percent(contextWindow, thresholdPercent)
 	return inputTokens+maxOutputTokens >= threshold
 }

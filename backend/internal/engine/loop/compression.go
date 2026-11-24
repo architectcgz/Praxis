@@ -15,7 +15,6 @@ import (
 	"praxis/internal/timing"
 	"slices"
 	"strings"
-	"time"
 )
 
 // Compress 在上下文构建完成后独立评估容量，按需生成摘要并通过统一入口提交 Session。
@@ -51,19 +50,20 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 		Tools:           params.Tools.List(),
 		MaxOutputTokens: params.Model.MaxOutputTokens,
 	}
-	inputTokens, _, err := modelcall.EstimateRequestTokens(request, deps.Budget)
+	inputTokens, err := r.ModelCaller.EstimateRequestTokens(request, deps.Budget)
 	if err != nil {
 		return value, errorcode.ErrContract.Wrap(err)
 	}
 	span := timing.NewSpan()
 	span.Start()
 	var requests []identity.ModelRequestID
+	policy := r.CompressionPolicy
 	generated, needed, err := appcontext.Compress(ctx, value, input, appcontext.CompressOptions{
 		InputTokens:     inputTokens,
 		ContextWindow:   params.Model.ContextWindow,
 		MaxOutputTokens: params.Model.MaxOutputTokens,
-		ReservedTokens:  reservedTokens + appcontext.Margin(params.Model.ContextWindow) + 128,
-	}, func(summaryCtx context.Context, summaryInput appcontext.ModelContext, limit int) (string, error) {
+		ReservedTokens:  reservedTokens + policy.Margin(params.Model.ContextWindow) + policy.RequestReserveTokens,
+	}, policy, func(summaryCtx context.Context, summaryInput appcontext.ModelContext, limit int) (string, error) {
 		text, requestID, err := r.summarizeContext(summaryCtx, params, deps, summaryInput, limit)
 		if requestID != "" {
 			requests = append(requests, requestID)
@@ -98,12 +98,13 @@ func (r *Runner) Compress(ctx context.Context, params RunParams, deps RunDepende
 	return compressed, nil
 }
 
-func remindContextBudget(request provider.Request, budget *appcontext.Budget) (provider.Request, error) {
-	tokens, _, err := modelcall.EstimateRequestTokens(request, budget)
+func (r *Runner) remindContextBudget(request provider.Request, budget *appcontext.Budget) (provider.Request, error) {
+	policy := r.CompressionPolicy
+	tokens, err := r.ModelCaller.EstimateRequestTokens(request, budget)
 	if err != nil {
 		return request, err
 	}
-	if appcontext.NearContextLimit(tokens, request.MaxOutputTokens, request.Model.ContextWindow) {
+	if appcontext.NearContextLimit(tokens, request.MaxOutputTokens, request.Model.ContextWindow, policy.NearLimitPercent) {
 		hint := &sessionentry.Entry{
 			Payload: sessionentry.Message{
 				Role: sessionentry.RoleUser,
@@ -113,12 +114,12 @@ func remindContextBudget(request provider.Request, budget *appcontext.Budget) (p
 			},
 		}
 		request.Context.Entries = append(slices.Clone(request.Context.Entries), hint)
-		tokens, _, err = modelcall.EstimateRequestTokens(request, budget)
+		tokens, err = r.ModelCaller.EstimateRequestTokens(request, budget)
 		if err != nil {
 			return request, err
 		}
 	}
-	return request, appcontext.CheckCapacity(tokens, request.MaxOutputTokens, request.Model.ContextWindow)
+	return request, policy.CheckCapacity(tokens, request.MaxOutputTokens, request.Model.ContextWindow)
 }
 
 // summarizeContext 在 Turn 之间生成归属于 Run 的摘要，不执行工具或发布回答文本。
@@ -130,7 +131,7 @@ func (r *Runner) summarizeContext(ctx context.Context, params RunParams, deps Ru
 		Model:           params.Model,
 		MaxOutputTokens: limit,
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	requestCtx, cancel := context.WithTimeout(ctx, r.SummaryTimeout)
 	defer cancel()
 	response, err := r.Request(requestCtx, params, deps, request, sessionentry.ModelRequestSummary)
 	if err != nil {

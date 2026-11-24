@@ -15,10 +15,10 @@ import (
 	"strings"
 )
 
-type decoder struct{}
+type decoder struct{ warnf func(string, ...any) }
 
 // Decode 只支持 choice 0；finish_reason 后继续读取 Usage，必须收到 [DONE] 才成功。
-func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (provider.StopReason, error) {
+func (d decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (provider.StopReason, error) {
 	calls := map[int]*provider.ToolCall{}
 	stopReason, refused, usageSeen := "", false, false
 	var identity *chatCompletionChunk
@@ -92,7 +92,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 		} else if chunk.Usage != nil {
 			return "", errors.New("openai chat usage requires empty choices")
 		}
-		if err := emitChatUsage(chunk.Usage, emit); err != nil {
+		if err := d.emitChatUsage(chunk.Usage, emit); err != nil {
 			return "", err
 		}
 		if len(chunk.Choices) == 0 {
@@ -137,9 +137,9 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 	}
 }
 
-func emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
+func (d decoder) emitChatUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	var reported chatCompletionUsage
-	if !streaming.DecodeUsage(raw, &reported, "openai_chat") {
+	if !streaming.DecodeUsage(raw, &reported, "openai_chat", d.warnf) {
 		return nil
 	}
 	usage := model.Usage{

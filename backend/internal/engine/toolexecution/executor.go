@@ -21,9 +21,10 @@ import (
 var errCallStopped = errors.New("tool call was stopped")
 
 type ExecutorDependencies struct {
-	HookDispatcher *hook.Dispatcher
-	Emitter        *event.Emitter
-	Outputs        OutputFiles
+	HookDispatcher    *hook.Dispatcher
+	Emitter           *event.Emitter
+	Outputs           OutputFiles
+	InlineResultBytes int
 }
 
 // OutputFiles 由执行器消费；临时目录的布局和文件写入由实现方决定。
@@ -252,7 +253,7 @@ func (tools *RunTools) Execute(ctx context.Context, call entry.ToolCall, appendE
 			value.ErrorClass = "tool_execution_failed"
 		}
 	}
-	bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value, tool.MaxInlineResultBytes)
+	bounded, outputErr := s.deps.Outputs.Bound(call.SessionID, value, s.deps.InlineResultBytes)
 	if outputErr != nil {
 		sideEffect := value.SideEffect
 		value = tool.NewToolError("tool_output_save_failed", "The tool has already run, but saving its output failed: "+outputErr.Error()+". Do not rerun the operation solely to recover its output.")
@@ -350,6 +351,6 @@ func callError(code, message string) CallResult {
 	return CallResult{ToolResult: tool.NewToolError(code, message)}
 }
 
-func (tools *RunTools) BoundResult(result tool.ToolResult, limit int) (tool.ToolResult, error) {
-	return tools.executor.deps.Outputs.Bound(tools.run.SessionID(), result, limit)
+func (tools *RunTools) SpillResult(result tool.ToolResult) (tool.ToolResult, error) {
+	return tools.executor.deps.Outputs.Bound(tools.run.SessionID(), result, 0)
 }

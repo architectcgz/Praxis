@@ -12,7 +12,7 @@ import (
 	"praxis/internal/tool"
 )
 
-type decoder struct{}
+type decoder struct{ warnf func(string, ...any) }
 type contentBlockState struct {
 	Block            contentBlock
 	Raw              map[string]json.RawMessage
@@ -25,7 +25,7 @@ type contentBlockState struct {
 
 // Decode 按事件、Content Block 和 Delta 三层类型分派；工具只在 message_stop 后释放。
 // 签名和 redacted 数据只内部保存，推理续传不重建或丢弃官方附加字段。
-func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (provider.StopReason, error) {
+func (d decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (provider.StopReason, error) {
 	blocks := map[int]*contentBlockState{}
 	started, ending, stopReason := false, false, ""
 	var usage *tokenCounts
@@ -57,7 +57,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 				return "", errors.New("anthropic invalid or duplicate message_start")
 			}
 			started = true
-			usage, err = updateMessageUsage(usage, e.Message.Usage, emit)
+			usage, err = d.updateMessageUsage(usage, e.Message.Usage, emit)
 			if err != nil {
 				return "", err
 			}
@@ -187,7 +187,7 @@ func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit str
 			} else if e.Delta.StopSequence != nil {
 				return "", errors.New("anthropic stop_sequence without stop_reason")
 			}
-			usage, err = updateMessageUsage(usage, e.Usage, emit)
+			usage, err = d.updateMessageUsage(usage, e.Usage, emit)
 			if err != nil {
 				return "", err
 			}
@@ -261,9 +261,9 @@ func activeContentBlock(blocks map[int]*contentBlockState, index *int) (*content
 }
 
 // updateMessageUsage 合并协议分批提供的计数；未提供的分项沿用此前值。
-func updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit streaming.EmitFunc) (*tokenCounts, error) {
+func (d decoder) updateMessageUsage(previous *tokenCounts, raw *json.RawMessage, emit streaming.EmitFunc) (*tokenCounts, error) {
 	var delta tokenCounts
-	if !streaming.DecodeUsage(raw, &delta, string(model.APIFormatAnthropicMessages)) {
+	if !streaming.DecodeUsage(raw, &delta, string(model.APIFormatAnthropicMessages), d.warnf) {
 		return previous, nil
 	}
 	var next tokenCounts

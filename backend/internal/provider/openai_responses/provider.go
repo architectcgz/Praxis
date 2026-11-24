@@ -19,12 +19,14 @@ type Config struct {
 
 type Dependencies struct {
 	HTTPClient *http.Client
+	Warnf      func(string, ...any)
 }
 
 type Provider struct {
 	baseURL string
 	apiKey  string
 	client  *http.Client
+	decoder decoder
 }
 
 // New 使用入口已校验的端点和凭据创建 OpenAI Responses 协议适配器。
@@ -33,6 +35,7 @@ func New(config Config, deps Dependencies) (*Provider, error) {
 		baseURL: config.BaseURL,
 		apiKey:  config.APIKey,
 		client:  deps.HTTPClient,
+		decoder: decoder{warnf: deps.Warnf},
 	}, nil
 }
 
@@ -64,7 +67,7 @@ func (p *Provider) Stream(
 			inputItems, len(payload), streaming.RedactError(err, sensitiveStateValues(request.Context)),
 		)
 	}
-	return streaming.Start(ctx, response, decoder{}, sensitiveStateValues(request.Context)...), nil
+	return streaming.Start(ctx, response, p.decoder, sensitiveStateValues(request.Context)...), nil
 }
 
 func buildPayload(request provider.Request) ([]byte, int, error) {

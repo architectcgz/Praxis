@@ -4,28 +4,31 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"praxis/internal/tool"
 )
 
 // Writer 在达到内联上限前保留小缓冲，超过上限后将已有和后续输出完整写入文件。
 // 同一个 Writer 同时交给 exec.Cmd 的 stdout/stderr，由 exec 保证串行写入。
 type Writer struct {
-	directory string
-	buffer    bytes.Buffer
-	file      *os.File
-	size      int64
-	err       error
+	directory   string
+	inlineBytes int
+	buffer      bytes.Buffer
+	file        *os.File
+	size        int64
+	err         error
 }
 
-func NewWriter(directory string) *Writer {
-	return &Writer{directory: directory}
+func NewWriter(directory string, inlineBytes int) *Writer {
+	return &Writer{
+		directory:   directory,
+		inlineBytes: inlineBytes,
+	}
 }
 
 func (w *Writer) Write(value []byte) (int, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
-	if w.file == nil && w.buffer.Len()+len(value) <= tool.MaxInlineResultBytes {
+	if w.file == nil && w.buffer.Len()+len(value) <= w.inlineBytes {
 		return w.buffer.Write(value)
 	}
 	if w.file == nil {

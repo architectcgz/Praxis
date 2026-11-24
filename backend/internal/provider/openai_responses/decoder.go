@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-type decoder struct{}
+type decoder struct{ warnf func(string, ...any) }
 type responsePartKey struct {
 	Kind  string
 	Index int
@@ -33,6 +33,7 @@ type responseItemState struct {
 	Raw           json.RawMessage
 }
 type responseDecoderState struct {
+	warnf      func(string, ...any)
 	Items      map[int]*responseItemState
 	IDs        map[string]int
 	Identity   *responseSnapshot
@@ -42,8 +43,12 @@ type responseDecoderState struct {
 
 // Decode 按官方具体事件分派，流式状态与最终快照一致后才释放任何工具。
 // output_item.added 的加密状态不能续传，原始推理载荷取自 output_item.done。
-func (decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (provider.StopReason, error) {
-	state := responseDecoderState{Items: map[int]*responseItemState{}, IDs: map[string]int{}}
+func (d decoder) Decode(ctx context.Context, reader *streaming.SSEReader, emit streaming.EmitFunc) (provider.StopReason, error) {
+	state := responseDecoderState{
+		warnf: d.warnf,
+		Items: map[int]*responseItemState{},
+		IDs:   map[string]int{},
+	}
 	lastSequence := int64(-1)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -430,7 +435,7 @@ func (s *responseDecoderState) terminal(response *responseSnapshot, status strin
 			return "", err
 		}
 	}
-	if err := emitResponseUsage(response.Usage, emit); err != nil {
+	if err := s.emitResponseUsage(response.Usage, emit); err != nil {
 		return "", err
 	}
 	if status == "failed" {
@@ -525,9 +530,9 @@ func (s *responseDecoderState) complete(response *responseSnapshot, emit streami
 	return mapStopReason("completed", "", toolCount > 0, false), nil
 }
 
-func emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
+func (s *responseDecoderState) emitResponseUsage(raw *json.RawMessage, emit streaming.EmitFunc) error {
 	var reported responseUsage
-	if !streaming.DecodeUsage(raw, &reported, string(model.APIFormatOpenAIResponses)) {
+	if !streaming.DecodeUsage(raw, &reported, string(model.APIFormatOpenAIResponses), s.warnf) {
 		return nil
 	}
 	usage := model.Usage{

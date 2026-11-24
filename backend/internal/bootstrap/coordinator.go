@@ -2,9 +2,8 @@ package bootstrap
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"praxis/internal/config"
+	appcontext "praxis/internal/context"
 	"praxis/internal/engine/approval"
 	"praxis/internal/engine/coordinator"
 	"praxis/internal/engine/hook"
@@ -15,9 +14,10 @@ import (
 	"praxis/internal/engine/toolexecution"
 	"praxis/internal/event"
 	"praxis/internal/tool/output"
+	subagenttool "praxis/internal/tool/subagent"
 )
 
-func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*session.Configuration, error), hooks *hook.Dispatcher, emitter *event.Emitter, customRunner *loop.Runner, runtime config.Runtime) *coordinator.Coordinator {
+func buildCoordinator(resources storageResources, loadConfig func(context.Context) (*session.Configuration, error), hooks *hook.Dispatcher, emitter *event.Emitter, customRunner *loop.Runner, toolOutputDir string, runtime config.Runtime) *coordinator.Coordinator {
 	runDeps := run.Dependencies{
 		HookDispatcher: hooks,
 		Logger:         resources.logger,
@@ -26,6 +26,11 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		CommitTimeout:  runtime.Lifecycle.Commit,
 		SettleTimeout:  runtime.Lifecycle.Settlement,
 	}
+	budgetPolicy := appcontext.BudgetPolicy{
+		MinMarginTokens:      runtime.Context.MinMarginTokens,
+		MarginPercent:        runtime.Context.MarginPercent,
+		RequestReserveTokens: runtime.Context.RequestReserveTokens,
+	}
 	modelCaller := modelcall.NewCaller(modelcall.Dependencies{
 		HookDispatcher: hooks,
 		Emitter:        emitter,
@@ -33,6 +38,7 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		MaxAttempts:    runtime.Model.MaxAttempts,
 		RequestTimeout: runtime.Model.RequestTimeout,
 		CommitTimeout:  runtime.Lifecycle.Commit,
+		BudgetPolicy:   budgetPolicy,
 	})
 	approvals := approval.NewGate(approval.GateDependencies{
 		ModelCaller:    modelCaller,
@@ -40,11 +46,18 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		Emitter:        emitter,
 		Logf:           resources.logger.Errorf,
 		CommitTimeout:  runtime.Lifecycle.Commit,
+		ReviewPolicy: approval.ReviewPolicy{
+			Timeout:           runtime.Review.Timeout,
+			MaxTextBytes:      runtime.Review.MaxTextBytes,
+			TargetReasonChars: runtime.Review.TargetReasonChars,
+			MaxReasonBytes:    runtime.Review.MaxReasonBytes,
+		},
 	})
 	executor := toolexecution.NewExecutor(toolexecution.ExecutorDependencies{
-		HookDispatcher: hooks,
-		Emitter:        emitter,
-		Outputs:        output.Files{Root: filepath.Join(os.TempDir(), "praxis", "tool-output")},
+		HookDispatcher:    hooks,
+		Emitter:           emitter,
+		Outputs:           output.Files{Root: toolOutputDir},
+		InlineResultBytes: runtime.Tools.InlineResultBytes,
 	})
 
 	runnerDeps := loop.Dependencies{
@@ -65,6 +78,15 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 	runnerDeps.Emitter = emitter
 	runnerDeps.HookDispatcher = hooks
 	runnerDeps.CommitTimeout = runtime.Lifecycle.Commit
+	runnerDeps.CompressionPolicy = appcontext.CompressionPolicy{
+		BudgetPolicy:         budgetPolicy,
+		NearLimitPercent:     runtime.Context.NearLimitPercent,
+		SummaryTargetPercent: runtime.Context.SummaryTargetPercent,
+		MaxSummaryTokens:     runtime.Context.MaxSummaryTokens,
+	}
+	runnerDeps.SummaryTimeout = runtime.Context.SummaryTimeout
+	runnerDeps.ToolResultOverhead = runtime.Context.ToolResultOverhead
+	runnerDeps.KeepToolResultTokens = runtime.Context.KeepToolResultTokens
 	runnerDeps.ReadOnlyParallelism = runtime.Execution.ReadOnlyParallelism
 	runner := loop.NewRunner(runnerDeps)
 	return coordinator.NewCoordinator(coordinator.Config{
@@ -82,5 +104,9 @@ func buildCoordinator(resources storageResources, loadConfig func(context.Contex
 		TransitionTimeout: runtime.Lifecycle.Transition,
 		ShutdownTimeout:   runtime.Lifecycle.Shutdown,
 		ActiveSubagents:   runtime.Execution.ActiveSubagents,
+		SubagentLimits: subagenttool.TimeoutLimits{
+			MinTimeoutSeconds: runtime.Tools.Subagent.MinTimeoutSeconds,
+			MaxTimeoutSeconds: runtime.Tools.Subagent.MaxTimeoutSeconds,
+		},
 	})
 }

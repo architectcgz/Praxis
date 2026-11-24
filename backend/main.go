@@ -21,26 +21,16 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// startupDataRootPath 固定使用当前用户主目录下的 .praxis。
-func startupDataRootPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user home directory: %w", err)
-	}
-	return filepath.Join(home, ".praxis"), nil
-}
-
 // acquireInstanceLock 在启动数据恢复前获取当前用户的独占运行权。
 func acquireInstanceLock() (*os.File, error) {
-	cache, err := os.UserCacheDir()
+	path, err := config.InstanceLockPath()
 	if err != nil {
-		return nil, fmt.Errorf("resolve application instance directory: %w", err)
+		return nil, err
 	}
-	directory := filepath.Join(cache, "praxis")
-	if err := os.MkdirAll(directory, 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create application instance directory: %w", err)
 	}
-	file, err := os.OpenFile(filepath.Join(directory, "instance.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open application instance lock: %w", err)
 	}
@@ -52,9 +42,16 @@ func acquireInstanceLock() (*os.File, error) {
 }
 
 func main() {
+	logOutput := os.Stderr
+	logLevel, err := config.ParseLogLevel(os.Getenv("PRAXIS_LOG_LEVEL"))
+	if err != nil {
+		fmt.Fprintln(logOutput, err)
+		os.Exit(2)
+	}
+	logger := logging.New(logOutput, logLevel)
 	instance, err := acquireInstanceLock()
 	if err != nil {
-		println("fatal:", err.Error())
+		logger.Errorf("startup failed: %v", err)
 		return
 	}
 	// 持有运行权直到 Wails 完成关闭；不删除文件，避免重建文件绕过已有锁。
@@ -70,8 +67,12 @@ func main() {
 		},
 	})
 	runtime := config.DefaultRuntime()
-	a := wails.New(desktop, logging.NewFactory().Console(), runtime.Lifecycle.StartupWait, runtime.Lifecycle.Shutdown)
-	desktopBindings := bindings.New(a)
+	a := wails.New(desktop, logger, runtime.Lifecycle.StartupWait, runtime.Lifecycle.Shutdown)
+	desktopBindings := bindings.New(a, bindings.PageConfig{
+		DefaultHistorySize: runtime.Pages.DefaultHistorySize,
+		MaxHistorySize:     runtime.Pages.MaxHistorySize,
+		ListLimit:          runtime.Pages.ListLimit,
+	})
 	for _, service := range desktopBindings.All() {
 		desktop.RegisterService(service)
 	}
@@ -81,18 +82,15 @@ func main() {
 	defer shutdown()
 	startup := func(ctx context.Context) {
 		a.Startup(ctx)
-		rootPath, err := startupDataRootPath()
-		if err != nil {
-			a.FailStartup(fmt.Errorf("resolve data root path: %w", err))
-			return
-		}
-		root, err := config.ResolveDataRoot(rootPath)
+		root, err := config.DefaultDataRoot()
 		if err != nil {
 			a.FailStartup(fmt.Errorf("initialize data directory: %w", err))
 			return
 		}
 		application, err := bootstrap.Open(ctx, root, runtime, bootstrap.Options{
 			OnAgentEvent: desktopBindings.EmitAgentEvent,
+			LogOutput:    logOutput,
+			LogLevel:     logLevel,
 		})
 		if err != nil {
 			a.FailStartup(fmt.Errorf("initialize application services: %w", err))
@@ -117,6 +115,6 @@ func main() {
 	})
 
 	if err := desktop.Run(); err != nil {
-		println("fatal:", err.Error())
+		logger.Errorf("desktop run failed: %v", err)
 	}
 }

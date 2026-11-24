@@ -11,7 +11,6 @@ import (
 	"praxis/internal/pathutil"
 	"praxis/internal/tool"
 	tooloutput "praxis/internal/tool/output"
-	"runtime"
 	"time"
 )
 
@@ -25,28 +24,31 @@ type output struct {
 }
 
 // call 在项目目录内运行 Bash，超过内联限制的 stdout/stderr 合并后完整落盘。
-func call(ctx context.Context, toolArguments arguments, environment tool.Environment) (tool.ToolResult, error) {
+func (t *bashTool) call(ctx context.Context, toolArguments arguments, environment tool.Environment) (tool.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.ToolResult{}, err
 	}
-	shell, err := resolveShell()
-	if err != nil {
-		return tool.ToolResult{}, err
+	if t.shell == "" {
+		return tool.ToolResult{}, errors.New("bash executable is not available")
+	}
+	// 路径已在装配时选定；实际执行前仍检查普通文件，由操作系统检查执行权限。
+	if info, err := os.Stat(t.shell); err != nil || !info.Mode().IsRegular() {
+		return tool.ToolResult{}, errors.New("bash executable is not available")
 	}
 	if !projectDirectory(toolArguments.Path, environment.ProjectPath) {
 		return tool.ToolResult{}, errors.New("bash working directory is outside the project")
 	}
 
-	runContext, cancel := context.WithTimeout(ctx, time.Duration(toolArguments.Timeout*float64(time.Second)))
+	runContext, cancel := context.WithTimeout(ctx, time.Duration(*toolArguments.Timeout*float64(time.Second)))
 	defer cancel()
 
-	command := exec.CommandContext(runContext, shell, "--noprofile", "--norc", "-c", toolArguments.Command)
+	command := exec.CommandContext(runContext, t.shell, "--noprofile", "--norc", "-c", toolArguments.Command)
 	command.Dir = toolArguments.Path
-	command.WaitDelay = time.Second
-	outputBuffer := tooloutput.NewWriter(environment.OutputDirectory)
+	command.WaitDelay = t.limits.ExitWait
+	outputBuffer := tooloutput.NewWriter(environment.OutputDirectory, t.limits.InlineResultBytes)
 	command.Stdout = outputBuffer
 	command.Stderr = outputBuffer
-	err = command.Run()
+	err := command.Run()
 	content, file, saveErr := outputBuffer.Finish()
 	if saveErr != nil {
 		result := tool.NewToolError("tool_output_save_failed", "The command has already run, but saving its output failed: "+saveErr.Error()+". Do not rerun the command solely to recover its output.")
@@ -76,7 +78,7 @@ func call(ctx context.Context, toolArguments arguments, environment tool.Environ
 			toolOutput.ExitCode = new(0)
 		}
 	}
-	encoded, err := encodeOutput(toolOutput, environment.OutputDirectory)
+	encoded, err := encodeOutput(toolOutput, environment.OutputDirectory, t.limits.InlineResultBytes)
 	if err != nil {
 		result := tool.NewToolError("tool_output_save_failed", "The command has already run, but saving its result failed: "+err.Error()+". Do not rerun the command solely to recover its output.")
 		result.SideEffect = true
@@ -87,27 +89,12 @@ func call(ctx context.Context, toolArguments arguments, environment tool.Environ
 	return result, nil
 }
 
-func resolveShell() (string, error) {
-	if path, err := exec.LookPath("bash"); err == nil {
-		return path, nil
-	}
-	if runtime.GOOS == "windows" {
-		if programFiles := os.Getenv("ProgramFiles"); filepath.IsAbs(programFiles) {
-			gitBash := filepath.Join(programFiles, "Git", "bin", "bash.exe")
-			if path, err := exec.LookPath(gitBash); err == nil {
-				return path, nil
-			}
-		}
-	}
-	return "", errors.New("bash executable is not available")
-}
-
-func encodeOutput(toolOutput output, directory string) ([]byte, error) {
+func encodeOutput(toolOutput output, directory string, inlineBytes int) ([]byte, error) {
 	encoded, err := json.Marshal(toolOutput)
 	if err != nil {
 		return nil, err
 	}
-	if len(encoded) <= tool.MaxInlineResultBytes {
+	if len(encoded) <= inlineBytes || toolOutput.OutputFile != "" {
 		return encoded, nil
 	}
 	// JSON 转义也可能使小正文超过内联上限，此时仍保存完整正文而不是截断。

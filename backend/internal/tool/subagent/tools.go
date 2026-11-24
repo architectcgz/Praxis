@@ -39,10 +39,18 @@ type ChildRuntime interface {
 	ReportToParent(ctx context.Context, message string) error
 }
 
+type TimeoutLimits struct {
+	MinTimeoutSeconds int
+	MaxTimeoutSeconds int
+}
+
 // MainTools 返回绑定到主 Run 运行时能力的子代理协作工具。
-func MainTools(runtime MainRuntime) []tool.Tool {
+func MainTools(runtime MainRuntime, limits TimeoutLimits) []tool.Tool {
 	return []tool.Tool{
-		startTool{runtime: runtime},
+		startTool{
+			runtime: runtime,
+			limits:  limits,
+		},
 		waitTool{runtime: runtime},
 		sendTool{runtime: runtime},
 		cancelTool{runtime: runtime},
@@ -74,15 +82,19 @@ type reportArguments struct {
 	Message string `json:"message"`
 }
 
-type startTool struct{ runtime MainRuntime }
+type startTool struct {
+	runtime MainRuntime
+	limits  TimeoutLimits
+}
 
 func (startTool) RequiresApproval() bool { return false }
 
-func (startTool) Definition() tool.ToolDefinition {
+func (t startTool) Definition() tool.ToolDefinition {
+	minSeconds, maxSeconds := t.limits.MinTimeoutSeconds, t.limits.MaxTimeoutSeconds
 	return tool.ToolDefinition{
 		Name:        "subagent_start",
-		Description: "异步委派一个完整子任务。必须显式给出工具授权子集和 1–600 秒超时；子代理只属于当前 Run。",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"},"allowedTools":{"type":"array","items":{"type":"string"}},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600}},"required":["task","allowedTools","timeoutSeconds"],"additionalProperties":false}`),
+		Description: fmt.Sprintf("异步委派一个完整子任务。必须显式给出工具授权子集和 %d–%d 秒超时；子代理只属于当前 Run。", minSeconds, maxSeconds),
+		InputSchema: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"task":{"type":"string"},"allowedTools":{"type":"array","items":{"type":"string"}},"timeoutSeconds":{"type":"integer","minimum":%d,"maximum":%d}},"required":["task","allowedTools","timeoutSeconds"],"additionalProperties":false}`, minSeconds, maxSeconds)),
 	}
 }
 
@@ -90,8 +102,11 @@ func (startTool) NewArguments() any { return &Assignment{} }
 
 func (t startTool) Prepare(arguments any, environment tool.Environment) (tool.PreparedCall, error) {
 	input := *arguments.(*Assignment)
-	if input.Task == "" || input.AllowedTools == nil || input.TimeoutSeconds < 1 || input.TimeoutSeconds > 600 {
-		return tool.PreparedCall{}, errors.New("task, allowedTools and timeoutSeconds (1-600) are required")
+	if input.Task == "" || input.AllowedTools == nil {
+		return tool.PreparedCall{}, errors.New("task and allowedTools are required")
+	}
+	if input.TimeoutSeconds < t.limits.MinTimeoutSeconds || input.TimeoutSeconds > t.limits.MaxTimeoutSeconds {
+		return tool.PreparedCall{}, fmt.Errorf("timeoutSeconds is required and must be between %d and %d", t.limits.MinTimeoutSeconds, t.limits.MaxTimeoutSeconds)
 	}
 	return tool.PreparedCall{
 		Arguments: input,

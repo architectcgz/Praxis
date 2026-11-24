@@ -18,12 +18,14 @@ type Config struct {
 
 type Dependencies struct {
 	HTTPClient *http.Client
+	Warnf      func(string, ...any)
 }
 
 type Provider struct {
 	baseURL string
 	apiKey  string
 	client  *http.Client
+	decoder decoder
 }
 
 // New 使用入口已校验的端点和凭据创建 OpenAI Chat Completions 协议适配器。
@@ -32,6 +34,7 @@ func New(config Config, deps Dependencies) (*Provider, error) {
 		baseURL: config.BaseURL,
 		apiKey:  config.APIKey,
 		client:  deps.HTTPClient,
+		decoder: decoder{warnf: deps.Warnf},
 	}, nil
 }
 
@@ -60,7 +63,7 @@ func (p *Provider) Stream(
 	if err != nil {
 		return nil, fmt.Errorf("openai chat request: %w", err)
 	}
-	return streaming.Start(ctx, response, decoder{}), nil
+	return streaming.Start(ctx, response, p.decoder), nil
 }
 
 func buildPayload(request provider.Request) ([]byte, error) {

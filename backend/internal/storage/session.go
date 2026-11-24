@@ -20,8 +20,9 @@ import (
 
 // SessionRepository 通过原子 SQL 更新会话元数据，不持有历史业务状态。
 type SessionRepository struct {
-	dataRoot string
-	database *sql.DB
+	backupDir    string
+	projectsRoot string
+	database     *sql.DB
 }
 
 func (r SessionRepository) Get(ctx context.Context, id identity.SessionID) (session.SessionInfo, error) {
@@ -37,7 +38,7 @@ func (r SessionRepository) Create(ctx context.Context, value session.SessionInfo
 	} else if !errors.Is(err, errorcode.ErrNotFound) {
 		return err
 	}
-	dir := sessionPath(r.dataRoot, value.ProjectID, value.ID)
+	dir := sessionPath(r.projectsRoot, value.ProjectID, value.ID)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
@@ -128,7 +129,7 @@ func (r SessionRepository) Delete(ctx context.Context, id identity.SessionID) er
 	if err != nil {
 		return fmt.Errorf("delete session metadata: %w", err)
 	}
-	_ = os.RemoveAll(sessionPath(r.dataRoot, value.ProjectID, id))
+	_ = os.RemoveAll(sessionPath(r.projectsRoot, value.ProjectID, id))
 	return nil
 }
 
@@ -138,7 +139,7 @@ func (r SessionRepository) SessionLogPath(ctx context.Context, id identity.Sessi
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(sessionPath(r.dataRoot, value.ProjectID, id), "main.jsonl")
+	path := filepath.Join(sessionPath(r.projectsRoot, value.ProjectID, id), "main.jsonl")
 	if err := jsonl.CheckRegularFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", errorcode.ErrNotFound
@@ -227,8 +228,8 @@ func scanSession(row interface{ Scan(...any) error }) (session.SessionInfo, erro
 	return value, nil
 }
 
-func sessionPath(dataRoot string, projectID identity.ProjectID, sessionID identity.SessionID) string {
-	return filepath.Join(dataRoot, "projects", projectID.String(), "sessions", sessionID.String())
+func sessionPath(projectsRoot string, projectID identity.ProjectID, sessionID identity.SessionID) string {
+	return filepath.Join(projectsRoot, projectID.String(), "sessions", sessionID.String())
 }
 
 func (r SessionRepository) SetModelChoice(ctx context.Context, id identity.SessionID, choice model.Choice, at time.Time) error {

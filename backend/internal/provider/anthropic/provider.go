@@ -20,11 +20,13 @@ type Config struct {
 
 type Dependencies struct {
 	HTTPClient *http.Client
+	Warnf      func(string, ...any)
 }
 
 type Provider struct {
 	baseURL, apiKey, version string
 	client                   *http.Client
+	decoder                  decoder
 }
 
 // New 使用入口已校验的端点和凭据创建协议适配器，仅补齐默认协议版本。
@@ -38,6 +40,7 @@ func New(config Config, deps Dependencies) (*Provider, error) {
 		apiKey:  config.APIKey,
 		version: version,
 		client:  deps.HTTPClient,
+		decoder: decoder{warnf: deps.Warnf},
 	}, nil
 }
 
@@ -70,7 +73,7 @@ func (p *Provider) Stream(
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request: %w", streaming.RedactError(err, sensitiveStateValues(request.Context)))
 	}
-	return streaming.Start(ctx, response, decoder{}, sensitiveStateValues(request.Context)...), nil
+	return streaming.Start(ctx, response, p.decoder, sensitiveStateValues(request.Context)...), nil
 }
 
 func buildPayload(request provider.Request) ([]byte, error) {

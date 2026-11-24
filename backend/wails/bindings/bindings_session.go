@@ -11,7 +11,11 @@ import (
 	"time"
 )
 
-type SessionBindings struct{ host Host }
+type SessionBindings struct {
+	host               Host
+	defaultHistorySize int
+	listLimit          int
+}
 
 type SessionSnapshot struct {
 	QueuePaused      bool                `json:"queuePaused"`
@@ -93,7 +97,7 @@ func (b *SessionBindings) ListSessions(projectID string) ([]SessionSummary, erro
 	if err != nil {
 		return nil, err
 	}
-	values, err := services.Sessions.ListSessionsByProject(ctx, identity.ProjectID(projectID), 100)
+	values, err := services.Sessions.ListSessionsByProject(ctx, identity.ProjectID(projectID), b.listLimit)
 	if err != nil {
 		return nil, publicError(b.host, "SessionBindings.ListSessions", err)
 	}
@@ -139,7 +143,7 @@ func (b *SessionBindings) SelectSession(sessionID string) (SessionSnapshot, erro
 	if err != nil {
 		return SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession", err)
 	}
-	page, err := services.Sessions.AgentHistory(ctx, view.Session.ID, view.Session.MainAgentID(), nil, defaultHistoryLimit)
+	page, err := services.Sessions.AgentHistory(ctx, view.Session.ID, view.Session.MainAgentID(), nil, b.defaultHistorySize)
 	if err != nil {
 		return SessionSnapshot{}, publicError(b.host, "SessionBindings.SelectSession.history", err)
 	}

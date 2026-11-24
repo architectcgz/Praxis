@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"io"
 	"praxis/internal/config"
 	"praxis/internal/engine/coordinator"
 	"praxis/internal/engine/hook"
@@ -24,13 +24,13 @@ type storageResources struct {
 	logger  *logging.Logger
 }
 
-func openStorage(ctx context.Context, root config.DataRoot) (storageResources, error) {
-	logger, err := logging.NewFactory().Application(filepath.Join(root.Root, "praxis.log"))
+func openStorage(ctx context.Context, root config.DataRoot, logOutput io.Writer, logLevel logging.Level) (storageResources, error) {
+	logger, err := logging.Open(root.ApplicationLog, logOutput, logLevel)
 	if err != nil {
 		return storageResources{}, fmt.Errorf("open runtime log: %w", err)
 	}
 	logger.Infof("application open started root=%s", root.Root)
-	state, err := storage.Open(ctx, root.Root)
+	state, err := storage.Open(ctx, root.Root, root.Projects)
 	if err != nil {
 		logger.Errorf("open storage failed: %v", err)
 		_ = logger.Close()
@@ -71,6 +71,8 @@ type Options struct {
 	Tools        []tool.Tool
 	Hooks        []any
 	OnAgentEvent func(event.Event)
+	LogOutput    io.Writer
+	LogLevel     logging.Level
 }
 
 // Open 只做高层装配；会话 Context 按需恢复，启动不继续旧 Run。
@@ -80,10 +82,10 @@ func Open(ctx context.Context, root config.DataRoot, runtime config.Runtime, opt
 	if err := root.Initialize(ctx); err != nil {
 		return nil, err
 	}
-	if err := initializeDefaultFiles(ctx, root); err != nil {
+	if err := root.InitializeDefaultFiles(ctx); err != nil {
 		return nil, err
 	}
-	resources, err := openStorage(ctx, root)
+	resources, err := openStorage(ctx, root, options.LogOutput, options.LogLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +106,7 @@ func Open(ctx context.Context, root config.DataRoot, runtime config.Runtime, opt
 		_ = a.storage.Close(closeCtx)
 		_ = a.logger.Close()
 	}()
-	loader, err := loadConfiguration(ctx, root, runtime.Model, options.Tools)
+	loader, err := loadConfiguration(ctx, root, runtime, a.logger, options.Tools)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +117,7 @@ func Open(ctx context.Context, root config.DataRoot, runtime config.Runtime, opt
 	}
 	coordinator := buildCoordinator(resources, func(ctx context.Context) (*session.Configuration, error) {
 		return loader.loadSessionConfiguration(ctx, root)
-	}, hooks, emitter, options.Runner, runtime)
+	}, hooks, emitter, options.Runner, root.ToolOutput, runtime)
 	a.sessions = buildSessions(a.storage, coordinator)
 	a.coordinator = coordinator
 	projects := projectservice.NewService(projectservice.Dependencies{
@@ -132,16 +134,12 @@ func Open(ctx context.Context, root config.DataRoot, runtime config.Runtime, opt
 }
 
 func (a *Application) ApplicationLogger() *logging.Logger {
-	factory := logging.NewFactory()
-	if a == nil || a.logger == nil {
-		return factory.Nop()
-	}
-	return factory.Ensure(a.logger)
+	return a.logger
 }
 
 // Close 只有在全部执行退出后才关闭存储；超时保留资源供后续关闭重试。
 func (a *Application) Close(ctx context.Context) error {
-	logger := a.ApplicationLogger()
+	logger := a.logger
 	logger.Infof("application close started")
 	if err := a.coordinator.Close(ctx); err != nil {
 		logger.Errorf("execution close incomplete: %v", err)

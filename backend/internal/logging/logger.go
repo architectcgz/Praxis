@@ -1,14 +1,12 @@
 // Package logging 为桌面应用提供进程级诊断日志输出。
-// 日志写入 stderr，并在配置后同时写入受保护的运行日志文件。
+// 输出目标由启动边界注入，运行日志可同时写入受保护的文件。
 package logging
 
 import (
-	"cmp"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"strings"
 	"sync"
 )
 
@@ -23,21 +21,6 @@ const (
 	ErrorLevel
 )
 
-// Factory 统一管理日志输出目标和环境变量配置。
-// 调用方应依赖返回的 Logger，而不是自行组装输出 Writer。
-type Factory struct {
-	level Level
-}
-
-// NewFactory 创建日志工厂，并在 PRAXIS_LOG_LEVEL 有效时采用该配置。
-func NewFactory() Factory {
-	result := Factory{level: InfoLevel}
-	if level, ok := ParseLevel(os.Getenv("PRAXIS_LOG_LEVEL")); ok {
-		result.level = level
-	}
-	return result
-}
-
 // Logger 串行化写入，防止并发运行时交错写入日志，
 // 或在 Wails 关闭文件时继续写入。
 type Logger struct {
@@ -48,40 +31,18 @@ type Logger struct {
 	closed bool
 }
 
-// newLogger 为工厂选定的输出目标创建日志器。
-func newLogger(writer io.Writer, level Level) *Logger {
+func New(writer io.Writer, level Level) *Logger {
 	if writer == nil {
-		writer = os.Stderr
+		writer = io.Discard
 	}
 	return &Logger{
 		logger: log.New(writer, "", log.LstdFlags|log.Lmicroseconds),
-		level:  cmp.Or(level, InfoLevel),
+		level:  level,
 	}
 }
 
-// newNop 为组件装配前的构造路径创建禁用的日志输出。
-func newNop() *Logger {
-	return &Logger{logger: log.New(io.Discard, "", 0), level: ErrorLevel + 1}
-}
-
-// Nop 为组件装配前的构造路径返回禁用的日志器。
-func (f Factory) Nop() *Logger { return newNop() }
-
-// Ensure 在注入边界将 nil 日志器替换为禁用的日志输出。
-func (f Factory) Ensure(logger *Logger) *Logger {
-	if logger == nil {
-		return f.Nop()
-	}
-	return logger
-}
-
-// Console 返回写入当前进程 stderr 的日志器。
-func (f Factory) Console() *Logger {
-	return newLogger(os.Stderr, f.level)
-}
-
-// Application 返回同时写入 stderr 和受保护文件的日志器。
-func (f Factory) Application(path string) (*Logger, error) {
+// Open 写入受保护的文件；如果注入了外部输出目标，也写入该目标。
+func Open(path string, writer io.Writer, level Level) (*Logger, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -90,26 +51,14 @@ func (f Factory) Application(path string) (*Logger, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	// GUI 进程可能没有可用的 stderr，先落盘，避免控制台写入失败截断文件日志。
-	result := newLogger(io.MultiWriter(file, os.Stderr), f.level)
+	var output io.Writer = file
+	if writer != nil {
+		// 先落盘，避免 GUI 进程的控制台写入失败截断文件日志。
+		output = io.MultiWriter(file, writer)
+	}
+	result := New(output, level)
 	result.file = file
 	return result, nil
-}
-
-// ParseLevel 解析 debug、info、warn/warning 或 error 日志级别。
-func ParseLevel(value string) (Level, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "debug":
-		return DebugLevel, true
-	case "info":
-		return InfoLevel, true
-	case "warn", "warning":
-		return WarnLevel, true
-	case "error":
-		return ErrorLevel, true
-	default:
-		return 0, false
-	}
 }
 
 // Debugf 记录诊断命令或 Provider 调用所需的详细信息。

@@ -30,6 +30,7 @@ type Dependencies struct {
 	MaxAttempts    int
 	RequestTimeout time.Duration
 	CommitTimeout  time.Duration
+	BudgetPolicy   appcontext.BudgetPolicy
 }
 
 // Caller 封装模型请求的容量校验、Hook 观测、计时、事实持久化、流消费与重试策略。
@@ -192,11 +193,11 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 			return response, WrapModelError(err)
 		}
 	} else {
-		tokens, _, budgetErr := EstimateRequestTokens(request, nil)
+		tokens, budgetErr := c.EstimateRequestTokens(request, nil)
 		if budgetErr != nil {
 			return response, errorcode.ErrContract.Wrap(budgetErr)
 		}
-		if capacityErr := appcontext.CheckCapacity(tokens, request.MaxOutputTokens, request.Model.ContextWindow); capacityErr != nil {
+		if capacityErr := c.deps.BudgetPolicy.CheckCapacity(tokens, request.MaxOutputTokens, request.Model.ContextWindow); capacityErr != nil {
 			return response, capacityErr
 		}
 	}
@@ -366,18 +367,18 @@ func WrapModelError(err error) error {
 	return errorcode.ErrProvider.Wrap(err)
 }
 
-// EstimateRequestTokens 估算完整模型请求（上下文、工具定义与输出 Schema）的输入 token 与请求形态键。
-func EstimateRequestTokens(request provider.Request, budget *appcontext.Budget) (int, string, error) {
+// EstimateRequestTokens 估算完整模型请求（含工具定义、输出 Schema 与请求预留）的输入 token。
+func (c *Caller) EstimateRequestTokens(request provider.Request, budget *appcontext.Budget) (int, error) {
 	key, overhead, err := requestShape(request)
 	if err != nil {
-		return 0, "", err
+		return 0, err
 	}
+	reserved := overhead + c.deps.BudgetPolicy.RequestReserveTokens
 	if budget != nil {
-		tokens, err := budget.Estimate(request.Context, key, overhead)
-		return tokens, key, err
+		return budget.Estimate(request.Context, key, reserved)
 	}
 	tokens, err := request.Context.EstimatedTokens()
-	return tokens + overhead + 128, key, err
+	return tokens + reserved, err
 }
 
 // EstimateOverhead 估算工具定义与结构化输出 Schema 占用的请求开销。

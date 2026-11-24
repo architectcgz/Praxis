@@ -25,6 +25,7 @@ type GateDependencies struct {
 	Emitter        *coreevent.Emitter
 	Logf           func(string, ...any)
 	CommitTimeout  time.Duration
+	ReviewPolicy   ReviewPolicy
 }
 
 // RunOwner 提供授权流程所需的只读执行信息，不依赖具体 Run 实现。
@@ -75,15 +76,17 @@ type pendingApproval struct {
 
 // Gate 管理所有等待人工审批的活跃调用，与工具执行器的状态与锁完全隔离。
 type Gate struct {
-	deps    GateDependencies
-	mu      sync.Mutex
-	pending map[tool.CallKey]*pendingApproval
+	deps         GateDependencies
+	reviewFormat reviewFormat
+	mu           sync.Mutex
+	pending      map[tool.CallKey]*pendingApproval
 }
 
 func NewGate(deps GateDependencies) *Gate {
 	return &Gate{
-		deps:    deps,
-		pending: make(map[tool.CallKey]*pendingApproval),
+		deps:         deps,
+		reviewFormat: newReviewFormat(deps.ReviewPolicy.TargetReasonChars),
+		pending:      make(map[tool.CallKey]*pendingApproval),
 	}
 }
 
@@ -198,7 +201,7 @@ func (r *RunGate) Authorize(
 	var review *RiskReview
 	if decision.Action == security.ApprovalAuto {
 		beginWaiting()
-		reviewCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		reviewCtx, cancel := context.WithTimeout(ctx, r.gate.deps.ReviewPolicy.Timeout)
 		assessed, reviewErr := r.review(reviewCtx, call, args, decision.RuleID, appendEntry)
 		if reviewErr == nil {
 			reviewErr = reviewCtx.Err()

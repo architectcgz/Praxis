@@ -10,9 +10,6 @@ import (
 
 type ToolName string
 
-// MaxInlineResultBytes 限制内联结果的 UTF-8 字节数，超出部分不截断，完整结果转存临时文件。
-const MaxInlineResultBytes = 50 * 1024
-
 // ToolDefinition 是 Provider 中立的模型可见工具定义。
 type ToolDefinition struct {
 	Name        ToolName
