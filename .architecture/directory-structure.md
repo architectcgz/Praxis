@@ -78,7 +78,7 @@ backend/
     │   ├── dataroot.go         # 数据根目录初始化与路径布局
     │   ├── settings.go         # 全局审批配置加载
     │   ├── models.go           # 模型目录与凭据配置加载
-    │   ├── roles.go            # Agent 角色定义（ROLE.md）加载
+    │   ├── agents.go           # Agent 定义（AGENT.md）的加载与解析
     │   └── tools.go            # 工具启停配置加载
     │
     ├── event/                  # 进程内实时事件通知
