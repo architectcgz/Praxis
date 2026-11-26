@@ -67,7 +67,7 @@ func SubagentMainTools(ops SubagentParentOperations) []Tool {
 	return []Tool{
 		Function[SubagentAssignment]{
 			Name:         "subagent_start",
-			Description:  "异步委派一个完整子任务。allowedTools 必须显式指定要授权给子代理的工具，工具须在 list_tools 中标记为可委派。无需授权工具时传空数组。子代理只属于本次执行。",
+			Description:  "异步委派一个完整子任务。allowedTools 必须显式指定要授权给子代理的工具，工具须在 list_tools 中标记为可委派。无需授权工具时传空数组。子代理由当前会话持有，本次主执行结束不会取消它；需要等待时可调用 subagent_wait。子任务结束后系统自动交付终态报告，主代理空闲且队列未暂停时会被唤醒。",
 			InputSchema:  []byte(`{"type":"object","properties":{"task":{"type":"string"},"allowedTools":{"type":"array","items":{"type":"string"}}},"required":["task","allowedTools"],"additionalProperties":false}`),
 			SkipApproval: true,
 			PrepareArguments: func(args SubagentAssignment) (SubagentAssignment, error) {
@@ -100,7 +100,7 @@ func SubagentMainTools(ops SubagentParentOperations) []Tool {
 		},
 		Function[sendArguments]{
 			Name:         "send_to_subagent",
-			Description:  "向当前 Run 的子代理补充指令，不改变其工具授权。",
+			Description:  "向当前会话仍在运行的子代理补充指令，不改变其工具授权。",
 			InputSchema:  []byte(`{"type":"object","properties":{"id":{"type":"string"},"message":{"type":"string"}},"required":["id","message"],"additionalProperties":false}`),
 			SkipApproval: true,
 			PrepareArguments: func(args sendArguments) (sendArguments, error) {
@@ -116,7 +116,7 @@ func SubagentMainTools(ops SubagentParentOperations) []Tool {
 		},
 		Function[cancelArguments]{
 			Name:         "subagent_cancel",
-			Description:  "取消当前 Run 创建的指定子代理。返回只表示取消已接收。",
+			Description:  "取消当前会话的指定子代理。返回只表示取消已接收，不影响其他执行。",
 			InputSchema:  []byte(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}`),
 			SkipApproval: true,
 			PrepareArguments: func(args cancelArguments) (cancelArguments, error) {
@@ -157,7 +157,7 @@ func SubagentDelegateTools(report func(context.Context, string) error) []Tool {
 	return []Tool{
 		Function[reportArguments]{
 			Name:         "report_to_parent",
-			Description:  "向创建本子任务的父 Run 提交有意义的纯文本进展。",
+			Description:  "向主代理提交有意义的纯文本进展，由主执行的后续回合接收。任务正常结束、失败或被停止时，系统自动交付终态报告，不需要额外调用本工具。",
 			InputSchema:  []byte(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
 			SkipApproval: true,
 			PrepareArguments: func(args reportArguments) (reportArguments, error) {

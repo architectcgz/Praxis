@@ -33,6 +33,12 @@ function readableApiError(code: string) {
             return '请求已取消。'
         case API_ERROR_CODES.requestTimeout:
             return '请求超时，请稍后重试。'
+        case API_ERROR_CODES.startupFailed:
+            return '应用启动失败，请检查应用日志，处理后重新启动。'
+        case API_ERROR_CODES.configurationInvalid:
+            return '配置内容无效，请检查配置文件的格式和字段。'
+        case API_ERROR_CODES.configurationReadFailed:
+            return '无法读取配置，请检查文件是否存在以及访问权限。'
         case API_ERROR_CODES.projectInvalid:
             return '项目名称、目录或状态无效。'
         case API_ERROR_CODES.modelNotConfigured:

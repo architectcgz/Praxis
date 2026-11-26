@@ -6,6 +6,7 @@ export const API_ERROR_CODES = {
     bindingUnavailable: 'binding_unavailable',
     requestCanceled: 'request_canceled',
     requestTimeout: 'request_timeout',
+    startupFailed: 'application.startup_failed',
 
     // 通用业务错误
     validation: 'generic.invalid_value',
@@ -17,6 +18,8 @@ export const API_ERROR_CODES = {
     runContract: 'execution.contract_error',
 
     // 业务领域
+    configurationInvalid: 'configuration.invalid',
+    configurationReadFailed: 'configuration.read_failed',
     projectInvalid: 'project.invalid',
     agentExecuting: 'agent.executing',
     modelNotConfigured: 'model.not_configured',

@@ -20,15 +20,7 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 	prepareCtx, cancel := context.WithTimeout(ctx, r.deps.PrepareTimeout)
 	defer cancel()
 	ctx = prepareCtx
-	if _, _, err := r.AppendEntry(ctx, entry.Entry{
-		ID:        identity.NewEntryID(),
-		CreatedAt: r.createdAt,
-		Payload: entry.RunPrepared{
-			AgentName:    r.definition.Name,
-			DefinitionID: r.definition.ID,
-			SourceTaskID: r.sourceTaskID,
-		},
-	}); err != nil {
+	if err := r.prepareEntry(ctx); err != nil {
 		return false, err
 	}
 	inputID := identity.NewEntryID()
@@ -53,18 +45,43 @@ func (r *Run) Prepare(ctx context.Context, prompt string) (bool, error) {
 		Source:  r.EventSource(""),
 		Payload: event.EntriesAppended{Entries: []*entry.Entry{stored}},
 	})
-	commitCtx, cancelCommit := r.commitContext(ctx)
-	defer cancelCommit()
-	if hookErr := r.deps.HookDispatcher.UserInputCommitted(commitCtx, hook.EntryCommitted{
-		Identity: runIdentity(r, ""),
-		Entry:    *stored,
-	}); hookErr != nil {
-		r.deps.Logger.Errorf("user input committed hook failed: %v", hookErr)
+	if authorKind == entry.AuthorUser {
+		commitCtx, cancelCommit := r.commitContext(ctx)
+		defer cancelCommit()
+		if hookErr := r.deps.HookDispatcher.UserInputCommitted(commitCtx, hook.EntryCommitted{
+			Identity: runIdentity(r, ""),
+			Entry:    *stored,
+		}); hookErr != nil {
+			r.deps.Logger.Errorf("user input committed hook failed: %v", hookErr)
+		}
 	}
 	return true, nil
 }
 
-// Execute 即使在启动或 Loop 中途失败，也要等待子执行收尾并提交终态。
+// PrepareReports 直接以真实报告准备主 Run，不创建用户任务或伪造用户输入。
+func (r *Run) PrepareReports(ctx context.Context) (bool, error) {
+	prepareCtx, cancel := context.WithTimeout(ctx, r.deps.PrepareTimeout)
+	defer cancel()
+	if err := r.prepareEntry(prepareCtx); err != nil {
+		return false, err
+	}
+	return true, r.acceptReports(prepareCtx)
+}
+
+func (r *Run) prepareEntry(ctx context.Context) error {
+	_, _, err := r.AppendEntry(ctx, entry.Entry{
+		ID:        identity.NewEntryID(),
+		CreatedAt: r.createdAt,
+		Payload: entry.RunPrepared{
+			AgentName:    r.definition.Name,
+			DefinitionID: r.definition.ID,
+			SourceTaskID: r.sourceTaskID,
+		},
+	})
+	return err
+}
+
+// Execute 在本次执行启动或 Loop 结束后提交终态，不接管独立子执行的收尾。
 func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools func(context.Context) (*tools.Discovery, loop.ToolExecutor, error)) (err error) {
 	ctx, scope := r.deps.HookDispatcher.Start(ctx, hook.Operation{
 		Identity: runIdentity(r, ""),
@@ -95,7 +112,6 @@ func (r *Run) Execute(ctx context.Context, runner *loop.Runner, prepareTools fun
 			err = r.executeLoop(ctx, runner, prepareTools)
 		}
 	}
-	r.finishChildren()
 	if settleErr := r.settleExecution(ctx, err); settleErr != nil {
 		return storageFailure(errors.Join(err, settleErr))
 	}

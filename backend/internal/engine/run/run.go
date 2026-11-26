@@ -31,14 +31,17 @@ type Dependencies struct {
 // Config 保存调度准入时确定的执行身份和模型配置。
 type Config struct {
 	SourceTaskID identity.TaskID
+	ParentRunID  identity.RunID
 	ParentCallID string
 	Definition   agent.AgentDefinition
 	Model        model.Config
+	Subagents    *Subagents
 }
 
 // Run 的可变执行状态由所属流程独占；工具通过消息交接，子任务通过报告交付结果。
 // 终态事实提交成功后才发布结果，配置和身份在创建后只读。
 type Run struct {
+	subagents     *Subagents
 	collaboration collaboration
 	toolUpdates   chan toolUpdate
 	deps          Dependencies
@@ -51,6 +54,7 @@ type Run struct {
 	sessionID     identity.SessionID
 	definition    agent.AgentDefinition
 	model         model.Config
+	parentRunID   identity.RunID
 	parentCallID  string
 	sourceTaskID  identity.TaskID
 	input         *entry.Entry
@@ -70,7 +74,9 @@ func New(deps Dependencies, config Config, history sessionmodel.AgentHistory) *R
 		id:           identity.NewRunID(),
 		sessionID:    history.SessionID(),
 		sourceTaskID: config.SourceTaskID,
+		parentRunID:  config.ParentRunID,
 		parentCallID: config.ParentCallID,
+		subagents:    config.Subagents,
 		definition:   config.Definition,
 		model:        config.Model,
 		toolUpdates:  make(chan toolUpdate),

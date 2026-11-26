@@ -24,27 +24,47 @@ func DefaultToolsDocument() ToolsDocument {
 func LoadTools(path string, registry *tools.ToolRegistry) (*tools.Catalog, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("read tool config: %w", err)
+		return nil, &ConfigurationError{Path: path, Err: fmt.Errorf("read tool config: %w", err)}
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
 	var document ToolsDocument
 	if err := decoder.Decode(&document); err != nil {
-		return nil, fmt.Errorf("decode tool config: %w", err)
+		return nil, &ConfigurationError{
+			Path:   path,
+			Err:    fmt.Errorf("decode tool config: %w", err),
+			Detail: "Tool configuration must contain a tools object with boolean enabled fields and no unknown fields.",
+		}
 	}
 	if err := ensureEOF(decoder); err != nil {
-		return nil, fmt.Errorf("decode trailing tool config: %w", err)
+		return nil, &ConfigurationError{
+			Path:   path,
+			Err:    fmt.Errorf("decode trailing tool config: %w", err),
+			Detail: "Tool configuration must contain exactly one JSON object without trailing data.",
+		}
 	}
 	if document.Tools == nil {
-		return nil, errors.New("tool config requires a non-null tools object")
+		return nil, &ConfigurationError{
+			Path:   path,
+			Err:    errors.New("tool config requires a non-null tools object"),
+			Detail: "Tool configuration requires a non-null tools object.",
+		}
 	}
 	for name, setting := range document.Tools {
 		if _, registered := registry.Get(name); !registered {
-			return nil, fmt.Errorf("tool configuration refers to unregistered tool %q", name)
+			return nil, &ConfigurationError{
+				Path:   path,
+				Err:    fmt.Errorf("tool configuration refers to unregistered tool %q", name),
+				Detail: fmt.Sprintf("Tool %q is not registered.", name),
+			}
 		}
 		if setting.Enabled == nil {
-			return nil, fmt.Errorf("tool %q requires a boolean enabled field", name)
+			return nil, &ConfigurationError{
+				Path:   path,
+				Err:    fmt.Errorf("tool %q requires a boolean enabled field", name),
+				Detail: fmt.Sprintf("Tool %q requires a boolean enabled field.", name),
+			}
 		}
 	}
 	definitions := registry.List()

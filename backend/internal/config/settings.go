@@ -19,19 +19,34 @@ type Settings struct {
 func LoadSettings(path string) (Settings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Settings{}, fmt.Errorf("read settings: %w", err)
+		return Settings{}, &ConfigurationError{Path: path, Err: fmt.Errorf("read settings: %w", err)}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var value Settings
 	if err := decoder.Decode(&value); err != nil {
-		return Settings{}, fmt.Errorf("decode settings: %w", err)
+		return Settings{}, &ConfigurationError{
+			Path:   path,
+			Err:    fmt.Errorf("decode settings: %w", err),
+			Detail: "Settings must be a JSON object containing only a valid approvalMode field.",
+		}
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return Settings{}, errors.New("settings contain trailing JSON data")
+		if err == nil {
+			err = errors.New("settings contain trailing JSON data")
+		}
+		return Settings{}, &ConfigurationError{
+			Path:   path,
+			Err:    fmt.Errorf("decode trailing settings: %w", err),
+			Detail: "Settings must contain exactly one JSON object without trailing data.",
+		}
 	}
 	if !value.ApprovalMode.Valid() {
-		return Settings{}, errors.New("settings approval mode is invalid")
+		return Settings{}, &ConfigurationError{
+			Path:   path,
+			Err:    errors.New("settings approval mode is invalid"),
+			Detail: "approvalMode must be ask, auto or yolo.",
+		}
 	}
 	return value, nil
 }

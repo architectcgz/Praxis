@@ -18,22 +18,28 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 	if err != nil {
 		return tools.SubagentIDs{}, err
 	}
-	s.mu.Lock()
-	closed := s.closed
-	s.mu.Unlock()
-	if closed || parentActive.ctx.Err() != nil {
-		return tools.SubagentIDs{}, fmt.Errorf("parent execution is closing")
-	}
 	agentID := identity.NewAgentID()
-	if err := parent.ReserveSubagent(agentID, s.activeSubagents); err != nil {
-		return tools.SubagentIDs{}, err
-	}
-	active := newActiveRun(ctx, parentActive.session)
+	active := newActiveRun(ctx, parentActive.session, parentActive.subagents)
 	config := *parentActive.config
 	config.Tools = catalog
 	active.config = &config
-	active.parent = parent
-	stopParent := context.AfterFunc(parentActive.ctx, func() { active.cancel(context.Cause(parentActive.ctx)) })
+	s.mu.Lock()
+	schedule := s.schedules[parent.SessionID()]
+	if s.closed || schedule.closing || parentActive.ctx.Err() != nil {
+		s.mu.Unlock()
+		s.releaseFailedChild(active)
+		return tools.SubagentIDs{}, fmt.Errorf("parent execution or session is closing")
+	}
+	err = active.subagents.ReserveSubagent(runmodel.SubagentHandle{
+		AgentID: agentID,
+		Cancel:  active.cancel,
+		Done:    active.done,
+	}, s.activeSubagents)
+	s.mu.Unlock()
+	if err != nil {
+		s.releaseFailedChild(active)
+		return tools.SubagentIDs{}, err
+	}
 	created := false
 	prepared := false
 	launched := false
@@ -41,7 +47,6 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 		if launched {
 			return
 		}
-		parent.ReleaseSubagent(agentID)
 		if created && !prepared {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.runDependencies.SettleTimeout)
 			if err := active.session.RemoveSubagent(cleanupCtx, agentID); err != nil {
@@ -50,7 +55,7 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 			cancel()
 		}
 		s.releaseFailedChild(active)
-		stopParent()
+		active.subagents.ReleaseSubagent(agentID)
 	}()
 
 	definition, err := config.Definition(agent.DefinitionDelegate)
@@ -70,9 +75,11 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 	created = true
 
 	child := runmodel.New(s.runDependencies, runmodel.Config{
+		ParentRunID:  parent.ID(),
 		ParentCallID: callID,
 		Definition:   definition,
 		Model:        parent.Model(),
+		Subagents:    active.subagents,
 	}, active.session.BindHistory(agentID))
 	prepared, err = child.Prepare(prepareCtx, assignment.Task)
 	if err != nil {
@@ -86,28 +93,32 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 		}
 		return tools.SubagentIDs{}, err
 	}
-	child.BindParent(parent)
-	parent.AttachSubagent(runmodel.SubagentHandle{
+	active.subagents.AttachSubagent(runmodel.SubagentHandle{
 		AgentID: agentID,
 		Run:     child,
 		Cancel:  active.cancel,
 		Done:    active.done,
 	})
 	active.onDone = func() error {
-		defer stopParent()
 		if !child.TerminalSaved() {
-			err := errorcode.ErrStorage.Wrap(fmt.Errorf("subagent %s did not save its terminal result", agentID))
-			parent.Cancel(err)
-			return err
+			return errorcode.ErrStorage.Wrap(fmt.Errorf("subagent %s did not save its terminal result", agentID))
 		}
-		return parent.AcceptSubagentResult(context.WithoutCancel(parentActive.ctx), child.ResultForParent())
+		return active.subagents.AcceptSubagentResult(context.WithoutCancel(active.ctx), child.ResultForParent())
 	}
 
 	s.mu.Lock()
-	if s.closed {
+	switch {
+	case s.closed:
+		err = errCoordinatorClosed
+	case schedule.closing:
+		err = errorcode.ErrRequestConflict
+	case active.ctx.Err() != nil:
+		err = context.Cause(active.ctx)
+	}
+	if err != nil {
 		s.mu.Unlock()
-		saveErr := child.Settle(ctx, entry.OutcomeInterrupted, entry.RunFailureCancelled, "")
-		return tools.SubagentIDs{}, errors.Join(errCoordinatorClosed, saveErr)
+		saveErr := child.Settle(active.ctx, entry.OutcomeInterrupted, entry.RunFailureCancelled, "")
+		return tools.SubagentIDs{}, errors.Join(err, saveErr)
 	}
 	child.BindCancellation(active.cancel)
 	s.running.Add(1)
@@ -130,7 +141,8 @@ func (s *Coordinator) startSubagent(ctx context.Context, parent *runmodel.Run, p
 	}()
 	return tools.SubagentIDs{AgentID: agentID, RunID: child.ID()}, nil
 }
+
 func (s *Coordinator) releaseFailedChild(active *activeRun) {
-	close(active.done)
 	active.cancel(nil)
+	close(active.done)
 }

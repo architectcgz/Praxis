@@ -140,6 +140,12 @@ func (c *Caller) Do(ctx context.Context, call Call) (Response, error) {
 		if err == nil {
 			return response, nil
 		}
+		requestErr := requestCtx.Err()
+		// 当前请求被取消或耗尽预算时直接收尾，不发布可重试的供应商失败通知；显式业务错误仍保留。
+		if requestErr != nil && errors.Is(err, requestErr) && !errors.Is(err, errorcode.ErrStorage) &&
+			(err == requestErr || errors.Is(err, errorcode.ErrProvider)) {
+			break
+		}
 		label := "Model request"
 		if call.Kind == entry.ModelRequestRiskReview {
 			label = "Risk review"
@@ -150,7 +156,6 @@ func (c *Caller) Do(ctx context.Context, call Call) (Response, error) {
 		if errors.Is(err, errorcode.ErrStorage) {
 			return response, err
 		}
-		requestErr := requestCtx.Err()
 		// 只将裸上下文错误交回请求预算处理；即使显式错误包装了同一原因，也要保留。
 		if !errors.Is(err, errorcode.ErrProvider) && err != requestErr {
 			return response, err
@@ -243,6 +248,10 @@ func (c *Caller) doAttempt(ctx context.Context, call Call, retryCount int) (resp
 		if err != nil {
 			finished.Error = err.Error()
 			finished.Partial = response.Blocks()
+			if finished.Status == entry.RequestInterrupted && errors.Is(err, context.Canceled) {
+				c.deps.Logf("model request canceled request_id=%s run_id=%s agent_id=%s: %v", request.ID, request.RunID, call.AgentID, err)
+				finished.Error = "Model request canceled."
+			}
 		}
 		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.deps.CommitTimeout)
 		defer cancel()

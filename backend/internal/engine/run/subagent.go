@@ -2,7 +2,6 @@ package run
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"praxis/internal/entry"
 	"praxis/internal/event"
@@ -18,7 +17,7 @@ type SubagentHandle struct {
 	Done    <-chan struct{}
 }
 
-// SubagentReport 是子 Run 交给父 Run 的运行时报告。
+// SubagentReport 保留创建者身份，正文由会话内的主 Run 接纳。
 type SubagentReport struct {
 	ReportID     identity.ReportID
 	AgentID      identity.AgentID
@@ -37,71 +36,90 @@ type instruction struct {
 	text string
 }
 
+// Subagents 由会话持有子执行控制句柄和待接纳报告，不随某次主 Run 的结束释放。
+// 已结束子执行保留轻量句柄供后续等待查询，Run 引用在交付后释放；会话关闭时整体释放。
+type Subagents struct {
+	mu       sync.Mutex
+	children map[identity.AgentID]SubagentHandle
+	pending  []SubagentReport
+	accepted []SubagentReport
+	wake     chan struct{}
+}
+
 type collaboration struct {
 	mu           sync.Mutex
-	children     map[identity.AgentID]SubagentHandle
-	pending      []SubagentReport
-	accepted     []SubagentReport
-	wake         chan struct{}
-	parent       *Run
 	instructions []instruction
 	accepting    bool
 }
 
+func NewSubagents() *Subagents {
+	return &Subagents{
+		children: make(map[identity.AgentID]SubagentHandle),
+		wake:     make(chan struct{}),
+	}
+}
+
 func (r *Run) initCollaboration() {
-	r.collaboration.children = make(map[identity.AgentID]SubagentHandle)
-	r.collaboration.wake = make(chan struct{})
 	r.collaboration.accepting = true
 }
 
-func (r *Run) BindParent(parent *Run) { r.collaboration.parent = parent }
-
-// ReserveSubagent 在协作锁内原子检查活跃名额并占位；未启动前必须通过 ReleaseSubagent 释放。
-func (r *Run) ReserveSubagent(id identity.AgentID, limit int) error {
-	r.collaboration.mu.Lock()
-	defer r.collaboration.mu.Unlock()
-	if !r.collaboration.accepting {
-		return errors.New("parent run is no longer accepting subagents")
+// ReserveSubagent 在会话内原子检查活跃名额；准备阶段也登记取消和完成句柄。
+func (s *Subagents) ReserveSubagent(handle SubagentHandle, limit int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeCountLocked() >= limit {
+		return fmt.Errorf("session active subagent limit of %d is reached", limit)
 	}
+	s.children[handle.AgentID] = handle
+	return nil
+}
+
+func (s *Subagents) Active() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeCountLocked() > 0
+}
+
+// HasFinalReports 只关注尚未接纳的终态报告，进展报告不单独启动主 Run。
+func (s *Subagents) HasFinalReports() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	final := func(report SubagentReport) bool { return report.Final }
+	return slices.ContainsFunc(s.pending, final) || slices.ContainsFunc(s.accepted, final)
+}
+
+func (s *Subagents) activeCountLocked() int {
 	active := 0
-	for _, child := range r.collaboration.children {
-		if child.Done == nil {
-			active++
-			continue
-		}
+	for _, child := range s.children {
 		select {
 		case <-child.Done:
 		default:
 			active++
 		}
 	}
-	if active >= limit {
-		return fmt.Errorf("parent run active subagent limit of %d is reached", limit)
-	}
-	r.collaboration.children[id] = SubagentHandle{AgentID: id}
-	return nil
+	return active
 }
 
 // AttachSubagent 为已预留的子代理名额绑定运行句柄。
-func (r *Run) AttachSubagent(handle SubagentHandle) {
-	r.collaboration.mu.Lock()
-	defer r.collaboration.mu.Unlock()
-	r.collaboration.children[handle.AgentID] = handle
+func (s *Subagents) AttachSubagent(handle SubagentHandle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.children[handle.AgentID] = handle
 }
 
-// ReleaseSubagent 移除尚未启动的预留或失败子代理占位。
-func (r *Run) ReleaseSubagent(id identity.AgentID) {
-	r.collaboration.mu.Lock()
-	defer r.collaboration.mu.Unlock()
-	delete(r.collaboration.children, id)
+// ReleaseSubagent 移除已经清理完毕的准备失败占位。
+func (s *Subagents) ReleaseSubagent(id identity.AgentID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.children, id)
 }
 
-func (r *Run) CancelSubagent(id identity.AgentID) error {
-	r.collaboration.mu.Lock()
-	handle, ok := r.collaboration.children[id]
-	r.collaboration.mu.Unlock()
+func (s *Subagents) CancelSubagent(id identity.AgentID) error {
+	s.mu.Lock()
+	handle, ok := s.children[id]
+	s.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("subagent %s does not belong to this run", id)
+		return fmt.Errorf("subagent %s does not belong to this session", id)
 	}
 	if handle.Cancel == nil {
 		return fmt.Errorf("subagent %s is not running", id)
@@ -110,27 +128,27 @@ func (r *Run) CancelSubagent(id identity.AgentID) error {
 	return nil
 }
 
-// CancelSubagentRun 将停止信号交给本 Run 持有的指定子执行。
-func (r *Run) CancelSubagentRun(id identity.RunID) {
-	r.collaboration.mu.Lock()
-	for _, child := range r.collaboration.children {
+// CancelSubagentRun 不依赖创建者 Run 是否仍然活跃。
+func (s *Subagents) CancelSubagentRun(id identity.RunID) {
+	s.mu.Lock()
+	for _, child := range s.children {
 		if child.Run != nil && child.Run.ID() == id {
-			r.collaboration.mu.Unlock()
+			s.mu.Unlock()
 			if !child.Run.TerminalSaved() {
 				child.Cancel(ErrInterrupted)
 			}
 			return
 		}
 	}
-	r.collaboration.mu.Unlock()
+	s.mu.Unlock()
 }
 
-func (r *Run) SendToSubagent(ctx context.Context, id identity.AgentID, text string) (identity.EntryID, error) {
-	r.collaboration.mu.Lock()
-	handle, ok := r.collaboration.children[id]
-	r.collaboration.mu.Unlock()
+func (s *Subagents) SendToSubagent(ctx context.Context, id identity.AgentID, text string) (identity.EntryID, error) {
+	s.mu.Lock()
+	handle, ok := s.children[id]
+	s.mu.Unlock()
 	if !ok {
-		return "", fmt.Errorf("subagent %s does not belong to this run", id)
+		return "", fmt.Errorf("subagent %s does not belong to this session", id)
 	}
 	if handle.Run == nil {
 		return "", fmt.Errorf("subagent execution has ended")
@@ -203,10 +221,9 @@ func (r *Run) appendInstructions(ctx context.Context, instructions []instruction
 	return true, nil
 }
 
-// ReportToParent 只把报告投递到 Parent Run Memory，由 Parent Loop 负责持久化。
+// ReportToParent 投递到会话报告队列，由当前或后续主 Run 的 Loop 负责持久化。
 func (r *Run) ReportToParent(ctx context.Context, text string) error {
-	parent := r.collaboration.parent
-	if parent == nil {
+	if r.Main() {
 		return fmt.Errorf("this run has no parent")
 	}
 	if err := ctx.Err(); err != nil {
@@ -216,47 +233,43 @@ func (r *Run) ReportToParent(ctx context.Context, text string) error {
 		ReportID:     identity.NewReportID(),
 		AgentID:      r.AgentID(),
 		RunID:        r.id,
-		ParentRunID:  parent.ID(),
+		ParentRunID:  r.parentRunID,
 		ParentCallID: r.parentCallID,
 		Text:         text,
 	}
-	return parent.AcceptSubagentResult(ctx, result)
+	return r.subagents.AcceptSubagentResult(ctx, result)
 }
 
-// AcceptSubagentResult 只更新 Parent Run Memory，不绕过 Parent Loop 写入 History。
-func (r *Run) AcceptSubagentResult(ctx context.Context, result SubagentReport) error {
+// AcceptSubagentResult 只更新会话报告队列，不绕过主 Run 的 Loop 写入 History。
+func (s *Subagents) AcceptSubagentResult(ctx context.Context, result SubagentReport) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	r.collaboration.mu.Lock()
-	r.collaboration.pending = append(r.collaboration.pending, result)
-	r.wakeLocked()
-	r.collaboration.mu.Unlock()
+	s.mu.Lock()
+	s.pending = append(s.pending, result)
+	s.wakeLocked()
+	s.mu.Unlock()
 	return nil
 }
 
-func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]SubagentReport, error) {
+func (s *Subagents) WaitSubagents(ctx context.Context, ids []identity.AgentID, all bool) ([]SubagentReport, error) {
 	wanted := make(map[identity.AgentID]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true
 	}
 	var fresh []SubagentReport
 	for {
-		r.collaboration.mu.Lock()
+		s.mu.Lock()
 		if err := ctx.Err(); err != nil {
-			r.collaboration.mu.Unlock()
+			s.mu.Unlock()
 			return nil, err
 		}
 		finished := true
 		for _, id := range ids {
-			h, ok := r.collaboration.children[id]
+			h, ok := s.children[id]
 			if !ok {
-				r.collaboration.mu.Unlock()
+				s.mu.Unlock()
 				return nil, fmt.Errorf("unknown subagent %s", id)
-			}
-			if h.Done == nil {
-				finished = false
-				continue
 			}
 			select {
 			case <-h.Done:
@@ -265,7 +278,7 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 			}
 		}
 		if finished || !all {
-			r.collaboration.pending = slices.DeleteFunc(r.collaboration.pending, func(report SubagentReport) bool {
+			s.pending = slices.DeleteFunc(s.pending, func(report SubagentReport) bool {
 				if !wanted[report.AgentID] {
 					return false
 				}
@@ -273,13 +286,13 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 				return true
 			})
 			if finished || len(fresh) > 0 {
-				r.collaboration.accepted = append(r.collaboration.accepted, fresh...)
-				r.collaboration.mu.Unlock()
+				s.accepted = append(s.accepted, fresh...)
+				s.mu.Unlock()
 				break
 			}
 		}
-		wake := r.collaboration.wake
-		r.collaboration.mu.Unlock()
+		wake := s.wake
+		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -289,13 +302,17 @@ func (r *Run) WaitSubagents(ctx context.Context, ids []identity.AgentID, all boo
 	return fresh, nil
 }
 
-// acceptReports 在 Parent Loop 的串行点把自包含报告变成普通 Input Entry。
+// acceptReports 在主 Loop 的串行点接纳报告，创建者 Run 结束后的报告由后续主 Run 接收。
 func (r *Run) acceptReports(ctx context.Context) error {
-	r.collaboration.mu.Lock()
-	reports := r.collaboration.accepted
-	r.collaboration.accepted = nil
-	r.collaboration.mu.Unlock()
-	for _, report := range reports {
+	if !r.Main() {
+		return nil
+	}
+	r.subagents.mu.Lock()
+	reports := append(r.subagents.accepted, r.subagents.pending...)
+	r.subagents.accepted = nil
+	r.subagents.pending = nil
+	r.subagents.mu.Unlock()
+	for index, report := range reports {
 		text := subagentReportText(report)
 		stored, _, err := r.AppendEntry(ctx, entry.Entry{
 			ID:         identity.NewEntryID(),
@@ -306,7 +323,14 @@ func (r *Run) acceptReports(ctx context.Context) error {
 			},
 		})
 		if err != nil {
+			r.subagents.mu.Lock()
+			r.subagents.accepted = append(reports[index:], r.subagents.accepted...)
+			r.subagents.mu.Unlock()
 			return err
+		}
+		// 报告驱动的主 Run 直接使用首条真实报告作为输入，不生成占位消息。
+		if r.input == nil {
+			r.input = stored
 		}
 		r.deps.Emitter.Emit(event.Event{
 			Source:  r.EventSource(""),
@@ -324,25 +348,37 @@ func subagentReportText(report SubagentReport) string {
 	return fmt.Sprintf("[Subagent report %s] agent=%s run=%s outcome=%s final=%t partial=%t failure=%s\n%s", report.ReportID, report.AgentID, report.RunID, status, report.Final, report.Partial, report.FailureCode, report.Text)
 }
 
-// finishChildren 保持父执行位置，直到所有子执行的回调与收尾均完成。
-func (r *Run) finishChildren() {
-	r.collaboration.mu.Lock()
-	r.collaboration.accepting = false
-	children := make([]SubagentHandle, 0, len(r.collaboration.children))
-	for _, h := range r.collaboration.children {
-		children = append(children, h)
-	}
-	r.collaboration.mu.Unlock()
-	for _, h := range children {
-		if h.Cancel != nil {
-			h.Cancel(context.Canceled)
+// CancelAll 仅由会话或应用关闭流程调用，不与某次主 Run 的收尾绑定。
+func (s *Subagents) CancelAll(cause error) {
+	s.mu.Lock()
+	cancels := make([]context.CancelCauseFunc, 0, len(s.children))
+	for _, child := range s.children {
+		if child.Cancel != nil {
+			cancels = append(cancels, child.Cancel)
 		}
 	}
-	for _, h := range children {
-		if h.Done != nil {
-			<-h.Done
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel(cause)
+	}
+}
+
+// Wait 在调用方已禁止新子执行后等待准备、执行和结果交付完成。
+func (s *Subagents) Wait(ctx context.Context) error {
+	s.mu.Lock()
+	done := make([]<-chan struct{}, 0, len(s.children))
+	for _, child := range s.children {
+		done = append(done, child.Done)
+	}
+	s.mu.Unlock()
+	for _, signal := range done {
+		select {
+		case <-signal:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
+	return nil
 }
 
 func (r *Run) ResultForParent() SubagentReport {
@@ -350,7 +386,7 @@ func (r *Run) ResultForParent() SubagentReport {
 		ReportID:     identity.NewReportID(),
 		AgentID:      r.AgentID(),
 		RunID:        r.id,
-		ParentRunID:  r.collaboration.parent.ID(),
+		ParentRunID:  r.parentRunID,
 		ParentCallID: r.parentCallID,
 		Outcome:      r.terminal.RunOutcome(),
 		Final:        true,
@@ -380,25 +416,35 @@ func (r *Run) ResultForParent() SubagentReport {
 			}
 		}
 	}
+	if result.Outcome == entry.OutcomeInterrupted {
+		result.Text = "Subagent execution was stopped. Do not restart or retry this assignment without a new user request.\n" + result.Text
+	} else if result.Text == "" {
+		if result.Outcome == entry.OutcomeFailed {
+			result.Text = fmt.Sprintf("Subagent execution failed (%s) before producing a final answer. See the subagent history for completed tool calls and partial results.", result.FailureCode)
+		} else {
+			result.Text = "Subagent execution ended without a final textual answer. See the subagent history for tool results."
+		}
+	}
 	return result
 }
 
-func (r *Run) WakeSubagentWaiters() {
-	r.collaboration.mu.Lock()
-	r.wakeLocked()
-	r.collaboration.mu.Unlock()
+func (s *Subagents) WakeSubagentWaiters() {
+	s.mu.Lock()
+	s.wakeLocked()
+	s.mu.Unlock()
 }
 
-func (r *Run) wakeLocked() {
-	close(r.collaboration.wake)
-	r.collaboration.wake = make(chan struct{})
+func (s *Subagents) wakeLocked() {
+	close(s.wake)
+	s.wake = make(chan struct{})
 }
 
-// CompleteSubagent 在交付后释放子 Run；保留句柄供父 Run 等待收尾。
-func (r *Run) CompleteSubagent(id identity.AgentID) {
-	r.collaboration.mu.Lock()
-	defer r.collaboration.mu.Unlock()
-	h := r.collaboration.children[id]
+// CompleteSubagent 在交付后释放运行引用，完成信号仍保留供会话等待收尾。
+func (s *Subagents) CompleteSubagent(id identity.AgentID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := s.children[id]
 	h.Run = nil
-	r.collaboration.children[id] = h
+	h.Cancel = nil
+	s.children[id] = h
 }

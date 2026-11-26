@@ -155,7 +155,7 @@ func (a *App) BindingContext() (context.Context, bindings.Services, error) {
 	ctx, service, startupErr, closed := a.ctx, a.service, a.startupErr, a.closed
 	a.mu.RUnlock()
 	if startupErr != nil && !closed {
-		return nil, bindings.Services{}, apperr.PublicError(startupErr)
+		return nil, bindings.Services{}, apperr.PublicStartupError(startupErr)
 	}
 	if closed || ctx == nil || service == nil {
 		a.logDebug("binding rejected: desktop context is not available")

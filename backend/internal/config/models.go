@@ -7,16 +7,23 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"praxis/internal/errorcode"
 	"praxis/internal/identity"
 	"praxis/internal/model"
 	"slices"
 	"strings"
 )
 
-// ConfigurationError 记录模型配置或角色定义加载失败的位置和底层原因。
+const (
+	ErrInvalid    errorcode.Code = "configuration.invalid"
+	ErrReadFailed errorcode.Code = "configuration.read_failed"
+)
+
+// ConfigurationError 保留配置位置和原始原因；Detail 只能填写明确允许公开的说明，不能复制解析器原文。
 type ConfigurationError struct {
-	Path string
-	Err  error
+	Path   string
+	Err    error
+	Detail string
 }
 
 func (e *ConfigurationError) Error() string {
@@ -24,6 +31,34 @@ func (e *ConfigurationError) Error() string {
 }
 
 func (e *ConfigurationError) Unwrap() error { return e.Err }
+
+func (e *ConfigurationError) Is(target error) bool {
+	return target == errorcode.Code(e.ErrorCode())
+}
+
+func (e *ConfigurationError) ErrorCode() string {
+	if _, ok := errors.AsType[*os.PathError](e.Err); ok {
+		return ErrReadFailed.ErrorCode()
+	}
+	return ErrInvalid.ErrorCode()
+}
+
+// PublicMessage 不回显配置值和解析器原文，凭据文件也遵守相同的公开边界。
+func (e *ConfigurationError) PublicMessage() string {
+	if e.ErrorCode() == ErrReadFailed.ErrorCode() {
+		return fmt.Sprintf("Cannot read configuration %q. Check that it exists and is accessible.", e.Path)
+	}
+	if syntax, ok := errors.AsType[*json.SyntaxError](e.Err); ok {
+		return fmt.Sprintf("Invalid configuration %q: invalid JSON at byte %d.", e.Path, syntax.Offset)
+	}
+	if mismatch, ok := errors.AsType[*json.UnmarshalTypeError](e.Err); ok {
+		return fmt.Sprintf("Invalid configuration %q: incorrect JSON value type at byte %d.", e.Path, mismatch.Offset)
+	}
+	if e.Detail != "" {
+		return fmt.Sprintf("Invalid configuration %q: %s", e.Path, e.Detail)
+	}
+	return fmt.Sprintf("Invalid configuration %q. Check the file format and field values; see the application log for details.", e.Path)
+}
 
 // ProviderCredential 表示凭据文档中的一项 Provider 凭据。
 type ProviderCredential struct {
@@ -68,22 +103,25 @@ func LoadModels(modelsPath, credentialsPath string) (*ModelRegistry, error) {
 	document, err := readModelConfigFile(modelsPath)
 	if err != nil {
 		return nil, &ConfigurationError{
-			Path: modelsPath,
-			Err:  err,
+			Path:   modelsPath,
+			Err:    err,
+			Detail: "Models must contain valid JSON with known fields and valid model definitions.",
 		}
 	}
 	credentials, err := readCredentialsFile(credentialsPath)
 	if err != nil {
 		return nil, &ConfigurationError{
-			Path: credentialsPath,
-			Err:  err,
+			Path:   credentialsPath,
+			Err:    err,
+			Detail: "Credentials must be a JSON object of provider credentials containing only type and key fields.",
 		}
 	}
 	credentials, err = validateCredentials(credentials)
 	if err != nil {
 		return nil, &ConfigurationError{
-			Path: credentialsPath,
-			Err:  err,
+			Path:   credentialsPath,
+			Err:    err,
+			Detail: "Provider IDs must be valid, credential type must be api_key and each key must be nonempty.",
 		}
 	}
 	proxies := make(map[string]Proxy, len(document.Providers))
@@ -91,8 +129,9 @@ func LoadModels(modelsPath, credentialsPath string) (*ModelRegistry, error) {
 		proxy, err := parseProxy(provider.ProxyMode, provider.ProxyURL)
 		if err != nil {
 			return nil, &ConfigurationError{
-				Path: modelsPath,
-				Err:  fmt.Errorf("provider %q: %w", provider.ID, err),
+				Path:   modelsPath,
+				Err:    fmt.Errorf("provider %q: %w", provider.ID, err),
+				Detail: "Provider proxyMode and proxyUrl are inconsistent or invalid.",
 			}
 		}
 		proxies[provider.ID] = proxy
@@ -244,6 +283,9 @@ func validateCredentials(document ProviderCredentials) (ProviderCredentials, err
 
 func ensureEOF(decoder *json.Decoder) error {
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return fmt.Errorf("trailing data: %w", err)
+		}
 		return errors.New("trailing data")
 	}
 	return nil

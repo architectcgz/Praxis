@@ -5,6 +5,7 @@ import (
 	"errors"
 	"praxis/internal/agent"
 	"praxis/internal/engine/approval"
+	runmodel "praxis/internal/engine/run"
 	sessionmodel "praxis/internal/engine/session"
 	"praxis/internal/errorcode"
 	"praxis/internal/event"
@@ -69,6 +70,7 @@ func (s *Coordinator) loadSchedule(ctx context.Context, id identity.SessionID) (
 	schedule := &sessionSchedule{
 		sessionID: id,
 		session:   owner,
+		subagents: runmodel.NewSubagents(),
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -169,12 +171,20 @@ func (s *Coordinator) CloseSession(ctx context.Context, id identity.SessionID) e
 	}
 	s.mu.Unlock()
 	unlock()
+	if schedule != nil {
+		schedule.subagents.CancelAll(context.Canceled)
+	}
 	if active != nil {
 		active.cancel(context.Canceled)
 		select {
 		case <-active.done:
 		case <-ctx.Done():
 			return ctx.Err()
+		}
+	}
+	if schedule != nil {
+		if err := schedule.subagents.Wait(ctx); err != nil {
+			return err
 		}
 	}
 	unlock, err = s.lockSession(ctx, id)
@@ -210,7 +220,7 @@ func (s *Coordinator) reloadIdleSession(ctx context.Context, id identity.Session
 	s.mu.Lock()
 	schedule := s.schedules[id]
 	closing := schedule != nil && schedule.closing
-	busy := schedule != nil && schedule.active != nil
+	busy := schedule != nil && (schedule.active != nil || schedule.subagents.Active())
 	s.mu.Unlock()
 	if schedule == nil {
 		return event.Event{}, event.Event{}, errorcode.ErrNotFound

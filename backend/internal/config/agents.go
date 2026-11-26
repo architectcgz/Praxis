@@ -25,6 +25,9 @@ var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 func LoadAgentDefinitions(root string) ([]agent.AgentDefinition, error) {
 	definitions, err := readAgentDefinitions(root)
 	if err != nil {
+		if _, ok := errors.AsType[*ConfigurationError](err); ok {
+			return nil, err
+		}
 		return nil, &ConfigurationError{
 			Path: root,
 			Err:  err,
@@ -74,52 +77,60 @@ type agentDefinitionMetadata struct {
 func readAgentDefinition(path string) (agent.AgentDefinition, error) {
 	encoded, err := os.ReadFile(path)
 	if err != nil {
-		return agent.AgentDefinition{}, fmt.Errorf("read agent definition %q: %w", path, err)
+		return agent.AgentDefinition{}, &ConfigurationError{Path: path, Err: err}
 	}
-	definition, err := parseAgentDefinition(string(encoded))
-	if err != nil {
-		return agent.AgentDefinition{}, fmt.Errorf("agent definition %q: %w", path, err)
-	}
-	return definition, nil
+	return parseAgentDefinition(path, string(encoded))
 }
 
-func parseAgentDefinition(content string) (agent.AgentDefinition, error) {
+func parseAgentDefinition(path, content string) (agent.AgentDefinition, error) {
 	if !utf8.ValidString(content) {
-		return agent.AgentDefinition{}, fmt.Errorf("%s must be UTF-8: %w", agentDefinitionFile, errorcode.ErrInvalidValue)
+		return invalidAgentDefinition(path, "AGENT.md must be UTF-8.", nil)
 	}
 	// 换行及正文外围空行在文件读取边界处理，模型只接收 Markdown 正文。
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	remaining, ok := strings.CutPrefix(content, "---\n")
 	if !ok {
-		return agent.AgentDefinition{}, fmt.Errorf("%s requires YAML front matter: %w", agentDefinitionFile, errorcode.ErrInvalidValue)
+		return invalidAgentDefinition(path, "AGENT.md requires YAML front matter delimited by --- with name and role fields.", nil)
 	}
 	header, body, ok := strings.Cut(remaining, "\n---\n")
 	if !ok {
-		return agent.AgentDefinition{}, fmt.Errorf("%s front matter is not closed: %w", agentDefinitionFile, errorcode.ErrInvalidValue)
+		return invalidAgentDefinition(path, "AGENT.md YAML front matter must end with a separate --- line.", nil)
 	}
 	decoder := yaml.NewDecoder(strings.NewReader(header))
 	decoder.KnownFields(true)
 	var metadata agentDefinitionMetadata
 	if err := decoder.Decode(&metadata); err != nil {
-		return agent.AgentDefinition{}, fmt.Errorf("%s metadata: %w: %w", agentDefinitionFile, errorcode.ErrInvalidValue, err)
+		return invalidAgentDefinition(path, "AGENT.md metadata must be valid YAML containing only string name and role fields.", err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return agent.AgentDefinition{}, fmt.Errorf("%s metadata must contain one YAML document: %w", agentDefinitionFile, errorcode.ErrInvalidValue)
+		return invalidAgentDefinition(path, "AGENT.md metadata must contain exactly one YAML document.", err)
 	}
 	if metadata.Name == "" || metadata.Name != strings.TrimSpace(metadata.Name) || strings.ContainsFunc(metadata.Name, unicode.IsControl) {
-		return agent.AgentDefinition{}, fmt.Errorf("%s name must be canonical, nonempty and contain no control characters: %w", agentDefinitionFile, errorcode.ErrInvalidValue)
+		return invalidAgentDefinition(path, "AGENT.md name must be nonempty, have no surrounding whitespace and contain no control characters.", nil)
 	}
 	if !metadata.Role.Valid() {
-		return agent.AgentDefinition{}, fmt.Errorf("%s role: unknown agent role: %w", agentDefinitionFile, errorcode.ErrInvalidValue)
+		return invalidAgentDefinition(path, "AGENT.md role must be primary, delegate, advisor or curator.", nil)
 	}
 	instructions := strings.Trim(body, "\n")
 	if instructions == "" || instructions != strings.TrimSpace(instructions) {
-		return agent.AgentDefinition{}, fmt.Errorf("%s body must be canonical and nonempty: %w", agentDefinitionFile, errorcode.ErrInvalidValue)
+		return invalidAgentDefinition(path, "AGENT.md body must be nonempty and have no surrounding whitespace other than blank lines.", nil)
 	}
 	return agent.AgentDefinition{
 		Name:         metadata.Name,
 		Role:         metadata.Role,
 		Instructions: instructions,
 	}, nil
+}
+
+func invalidAgentDefinition(path, detail string, cause error) (agent.AgentDefinition, error) {
+	err := fmt.Errorf("%s: %w", detail, errorcode.ErrInvalidValue)
+	if cause != nil {
+		err = fmt.Errorf("%w: %w", err, cause)
+	}
+	return agent.AgentDefinition{}, &ConfigurationError{
+		Path:   path,
+		Err:    err,
+		Detail: detail,
+	}
 }

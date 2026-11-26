@@ -53,6 +53,10 @@ func (b *idleBody) Read(p []byte) (int, error) {
 	})
 	n, err := b.ReadCloser.Read(p)
 	timer.Stop()
+	// HTTP/2 被取消时可能只返回响应体已关闭；补回取消原因，同时保留底层读取错误。
+	if parentErr := b.parent.Err(); err != nil && parentErr != nil && !errors.Is(err, parentErr) {
+		return n, fmt.Errorf("provider response read interrupted: %w: %w", parentErr, err)
+	}
 	if err != nil && !errors.Is(err, io.EOF) && b.timedOut.Load() && b.parent.Err() == nil {
 		return n, fmt.Errorf("provider response stream idle for %s: %w", b.timeout, os.ErrDeadlineExceeded)
 	}

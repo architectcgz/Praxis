@@ -16,8 +16,8 @@ import (
 func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *activeRun) {
 	defer func() {
 		close(active.done)
-		if active.parent != nil {
-			active.parent.WakeSubagentWaiters()
+		if !run.Main() {
+			active.subagents.WakeSubagentWaiters()
 		}
 	}()
 	runner := *r.loop
@@ -42,7 +42,7 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 				Wait: func(ctx context.Context, ids []identity.AgentID, all bool) ([]tools.SubagentReceipt, error) {
 					run.BeginWaiting()
 					defer run.EndWaiting()
-					reports, err := run.WaitSubagents(ctx, ids, all)
+					reports, err := active.subagents.WaitSubagents(ctx, ids, all)
 					if err != nil {
 						return nil, err
 					}
@@ -57,8 +57,8 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 					}
 					return receipts, nil
 				},
-				Send:   run.SendToSubagent,
-				Cancel: run.CancelSubagent,
+				Send:   active.subagents.SendToSubagent,
+				Cancel: active.subagents.CancelSubagent,
 			})
 		} else {
 			extras = tools.SubagentDelegateTools(run.ReportToParent)
@@ -74,18 +74,23 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 		r.logger.Errorf("run failed run_id=%s: %v", run.ID(), err)
 	}
 	if !run.Main() {
-		if errors.Is(err, errorcode.ErrStorage) {
-			active.parent.Cancel(err)
-		}
 		if active.onDone != nil {
 			if callbackErr := active.onDone(); callbackErr != nil {
 				r.logger.Errorf("deliver subagent result: %v", callbackErr)
-				active.parent.Cancel(errorcode.ErrStorage.Wrap(callbackErr))
+				err = errorcode.ErrStorage.Wrap(errors.Join(err, callbackErr))
 			}
 		}
+		if errors.Is(err, errorcode.ErrStorage) {
+			r.pauseSessionForStorage(run.SessionID(), err)
+		}
 		active.cancel(nil)
-		active.parent.CompleteSubagent(run.AgentID())
+		active.subagents.CompleteSubagent(run.AgentID())
 		r.emitter.Emit(event.Event{Source: run.EventSource(""), Payload: event.SubagentReleased{}})
+		if !errors.Is(err, errorcode.ErrStorage) {
+			if scheduleErr := r.schedule(context.WithoutCancel(ctx), run.SessionID()); scheduleErr != nil && !errors.Is(scheduleErr, errCoordinatorClosed) {
+				r.logger.Errorf("schedule subagent report session_id=%s: %v", run.SessionID(), scheduleErr)
+			}
+		}
 		return
 	}
 	queueCtx := context.WithoutCancel(ctx)
@@ -107,10 +112,10 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 	}
 	var next *activeRun
 	var schedule *sessionSchedule
-	var input task.Task
+	var input *task.Task
 	scheduleErr := lockErr
 	if lockErr == nil && err == nil && run.Outcome() == entry.OutcomeCompleted && !errors.Is(context.Cause(active.ctx), runmodel.ErrInterrupted) {
-		input, schedule, next, scheduleErr = r.claimTaskLocked(queueCtx, run.SessionID())
+		input, schedule, next, scheduleErr = r.claimMainRunLocked(queueCtx, run.SessionID())
 	}
 	r.mu.Unlock()
 	if unlock != nil {
@@ -129,6 +134,21 @@ func (r *Coordinator) run(ctx context.Context, run *runmodel.Run, active *active
 	if scheduleErr != nil {
 		r.logger.Errorf("prepare queued task session=%s: %v", run.SessionID(), scheduleErr)
 	}
+}
+
+// pauseSessionForStorage 处理独立子执行的存储失败，不依赖创建者 Run 是否仍存在。
+func (r *Coordinator) pauseSessionForStorage(sessionID identity.SessionID, err error) {
+	r.mu.Lock()
+	schedule := r.schedules[sessionID]
+	schedule.queue.Pause()
+	active := schedule.active
+	notification := taskQueueEvent(schedule)
+	r.mu.Unlock()
+	if active != nil {
+		active.cancel(err)
+	}
+	r.emitter.Emit(notification)
+	r.emitQueueStorageFailure(sessionID, err)
 }
 
 func (r *Coordinator) emitQueueStorageFailure(sessionID identity.SessionID, err error) {

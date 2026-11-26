@@ -20,20 +20,19 @@ func (s *Coordinator) StopRun(ctx context.Context, sessionID identity.SessionID,
 	}
 	s.mu.Lock()
 	schedule := s.schedules[sessionID]
-	if schedule == nil || schedule.active == nil || schedule.active.run == nil {
+	if schedule == nil {
 		s.mu.Unlock()
 		unlock()
 		return nil
 	}
 	active := schedule.active
-	run := active.run
-	if run.ID() != runID {
+	if active == nil || active.run == nil || active.run.ID() != runID {
 		s.mu.Unlock()
 		unlock()
-		run.CancelSubagentRun(runID)
+		schedule.subagents.CancelSubagentRun(runID)
 		return nil
 	}
-	if run.TerminalSaved() {
+	if active.run.TerminalSaved() {
 		s.mu.Unlock()
 		unlock()
 		return nil

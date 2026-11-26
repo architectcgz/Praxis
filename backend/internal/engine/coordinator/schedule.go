@@ -14,72 +14,81 @@ import (
 )
 
 func (r *Coordinator) schedule(ctx context.Context, sessionID identity.SessionID) error {
-	input, schedule, active, err := r.claimTask(ctx, sessionID)
+	input, schedule, active, err := r.claimMainRun(ctx, sessionID)
 	if err != nil || active == nil {
 		return err
 	}
 	return r.startNext(ctx, input, schedule, active)
 }
 
-func (r *Coordinator) claimTask(ctx context.Context, sessionID identity.SessionID) (task.Task, *sessionSchedule, *activeRun, error) {
+func (r *Coordinator) claimMainRun(ctx context.Context, sessionID identity.SessionID) (*task.Task, *sessionSchedule, *activeRun, error) {
 	unlock, err := r.lockSession(ctx, sessionID)
 	if err != nil {
-		return task.Task{}, nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.claimTaskLocked(ctx, sessionID)
+	return r.claimMainRunLocked(ctx, sessionID)
 }
 
-// claimTaskLocked 在会话命令锁和 mu 下原子完成检查、领取与占位。
-func (r *Coordinator) claimTaskLocked(ctx context.Context, sessionID identity.SessionID) (task.Task, *sessionSchedule, *activeRun, error) {
+// claimMainRunLocked 在会话命令锁和 mu 下领取主执行；input 为 nil 表示由报告直接触发。
+func (r *Coordinator) claimMainRunLocked(ctx context.Context, sessionID identity.SessionID) (*task.Task, *sessionSchedule, *activeRun, error) {
 	schedule := r.schedules[sessionID]
 	if r.closed || schedule == nil || schedule.closing {
-		return task.Task{}, nil, nil, errCoordinatorClosed
+		return nil, nil, nil, errCoordinatorClosed
 	}
 	if schedule.active != nil {
-		return task.Task{}, nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	input, ok := schedule.queue.Next()
-	if !ok {
-		return task.Task{}, nil, nil, nil
+	var input *task.Task
+	if next, ok := schedule.queue.Next(); ok {
+		input = new(next)
+	} else if schedule.queue.Paused() || !schedule.subagents.HasFinalReports() {
+		return nil, nil, nil, nil
 	}
-	active := newActiveRun(ctx, schedule.session)
+	active := newActiveRun(ctx, schedule.session, schedule.subagents)
 	schedule.active = active
 	return input, schedule, active, nil
 }
 
-func (r *Coordinator) startNext(ctx context.Context, input task.Task, schedule *sessionSchedule, active *activeRun) error {
+func (r *Coordinator) startNext(ctx context.Context, input *task.Task, schedule *sessionSchedule, active *activeRun) error {
 	prepareCtx, cancel := context.WithCancelCause(active.ctx)
 	stop := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
 	defer stop()
 	defer cancel(nil)
 
-	run, config, err := r.newTaskRun(input, schedule)
+	run, config, err := r.newMainRun(input, schedule)
 	if err != nil {
-		return r.finishTaskStart(input, schedule, active, true, err)
+		return r.finishMainStart(input, schedule, active, true, err)
 	}
 	r.mu.Lock()
 	active.run = run
 	r.mu.Unlock()
-	prepared, err := run.Prepare(prepareCtx, input.Prompt)
+	var prepared bool
+	if input != nil {
+		prepared, err = run.Prepare(prepareCtx, input.Prompt)
+	} else {
+		prepared, err = run.PrepareReports(prepareCtx)
+	}
 	if err != nil {
 		canceled := errors.Is(err, context.Canceled) && errors.Is(context.Cause(prepareCtx), runmodel.ErrInterrupted)
 		if prepared {
 			if saveErr := run.SettlePreparation(prepareCtx, err); saveErr != nil {
-				return r.finishTaskStart(input, schedule, active, false, errorcode.ErrStorage.Wrap(errors.Join(err, saveErr)))
+				return r.finishMainStart(input, schedule, active, false, errorcode.ErrStorage.Wrap(errors.Join(err, saveErr)))
 			}
 		}
 		if canceled {
-			return r.finishTaskStart(input, schedule, active, false, nil)
+			return r.finishMainStart(input, schedule, active, false, nil)
 		}
-		return r.finishTaskStart(input, schedule, active, !prepared, err)
+		return r.finishMainStart(input, schedule, active, !prepared, err)
 	}
-	unlock, err := r.lockSession(context.WithoutCancel(ctx), input.SessionID)
+	unlock, err := r.lockSession(context.WithoutCancel(ctx), schedule.sessionID)
 	if err == nil {
 		r.mu.Lock()
-		schedule.queue.Complete(input)
+		if input != nil {
+			schedule.queue.Complete(*input)
+		}
 		active.config = config
 		switch {
 		case active.ctx.Err() != nil:
@@ -96,6 +105,9 @@ func (r *Coordinator) startNext(ctx context.Context, input task.Task, schedule *
 		r.mu.Unlock()
 		unlock()
 		if err == nil {
+			if input == nil {
+				r.logger.Infof("main run started for subagent reports session_id=%s run_id=%s", schedule.sessionID, run.ID())
+			}
 			r.emitter.Emit(notification)
 			return nil
 		}
@@ -110,20 +122,22 @@ func (r *Coordinator) startNext(ctx context.Context, input task.Task, schedule *
 	if saveErr != nil {
 		err = errorcode.ErrStorage.Wrap(errors.Join(err, saveErr))
 	}
-	return r.finishTaskStart(input, schedule, active, false, err)
+	return r.finishMainStart(input, schedule, active, false, err)
 }
 
-func (r *Coordinator) finishTaskStart(input task.Task, schedule *sessionSchedule, active *activeRun, retry bool, err error) error {
+func (r *Coordinator) finishMainStart(input *task.Task, schedule *sessionSchedule, active *activeRun, retry bool, err error) error {
 	storageFailed := errors.Is(err, errorcode.ErrStorage)
 	// 必须释放占位；该内存状态不依赖可能已超时的会话命令锁。
 	r.mu.Lock()
 	if storageFailed {
 		schedule.queue.Pause()
 	}
-	if retry {
-		schedule.queue.Retry(input)
-	} else {
-		schedule.queue.Complete(input)
+	if input != nil {
+		if retry {
+			schedule.queue.Retry(*input)
+		} else {
+			schedule.queue.Complete(*input)
+		}
 	}
 	schedule.active = nil
 	notification := taskQueueEvent(schedule)
@@ -132,12 +146,12 @@ func (r *Coordinator) finishTaskStart(input task.Task, schedule *sessionSchedule
 	close(active.done)
 	r.emitter.Emit(notification)
 	if storageFailed {
-		r.emitQueueStorageFailure(input.SessionID, err)
+		r.emitQueueStorageFailure(schedule.sessionID, err)
 	}
 	return err
 }
 
-func (r *Coordinator) newTaskRun(input task.Task, schedule *sessionSchedule) (*runmodel.Run, *sessionmodel.Configuration, error) {
+func (r *Coordinator) newMainRun(input *task.Task, schedule *sessionSchedule) (*runmodel.Run, *sessionmodel.Configuration, error) {
 	config, model, err := schedule.session.RunConfiguration()
 	if err != nil {
 		return nil, nil, err
@@ -146,11 +160,16 @@ func (r *Coordinator) newTaskRun(input task.Task, schedule *sessionSchedule) (*r
 	if err != nil {
 		return nil, nil, err
 	}
-	agentID := identity.AgentID(input.SessionID)
+	var taskID identity.TaskID
+	if input != nil {
+		taskID = input.ID
+	}
+	agentID := identity.AgentID(schedule.sessionID)
 	run := runmodel.New(r.runDependencies, runmodel.Config{
-		SourceTaskID: input.ID,
+		SourceTaskID: taskID,
 		Definition:   definition,
 		Model:        model,
+		Subagents:    schedule.subagents,
 	}, schedule.session.BindHistory(agentID))
 	return run, config, nil
 }

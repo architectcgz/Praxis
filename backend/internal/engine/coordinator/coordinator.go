@@ -133,12 +133,12 @@ func (s *Coordinator) releaseSessionCommand(id identity.SessionID, command *sess
 	}
 }
 
-// activeRun 是所属会话或 Parent 持有的控制句柄，不提供运行状态查询。
+// activeRun 是会话持有的执行控制句柄，不提供运行状态查询。
 type activeRun struct {
-	run     *runmodel.Run // 在提交准备事实前登记，由 mu 保护。
-	parent  *runmodel.Run
-	onDone  func() error
-	session *sessionmodel.Session
+	run       *runmodel.Run // 在提交准备事实前登记，由 mu 保护。
+	onDone    func() error
+	session   *sessionmodel.Session
+	subagents *runmodel.Subagents
 
 	config *sessionmodel.Configuration
 	ctx    context.Context
@@ -146,13 +146,14 @@ type activeRun struct {
 	done   chan struct{}
 }
 
-func newActiveRun(ctx context.Context, session *sessionmodel.Session) *activeRun {
+func newActiveRun(ctx context.Context, session *sessionmodel.Session, subagents *runmodel.Subagents) *activeRun {
 	runCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
 	return &activeRun{
-		session: session,
-		ctx:     runCtx,
-		cancel:  cancel,
-		done:    make(chan struct{}),
+		session:   session,
+		subagents: subagents,
+		ctx:       runCtx,
+		cancel:    cancel,
+		done:      make(chan struct{}),
 	}
 }
 
@@ -204,14 +205,19 @@ func (r *Coordinator) Close(ctx context.Context) error {
 	r.mu.Lock()
 	r.closed = true
 	executions := make([]*activeRun, 0, len(r.schedules))
+	subagents := make([]*runmodel.Subagents, 0, len(r.schedules))
 	for _, schedule := range r.schedules {
 		if schedule.active != nil {
 			executions = append(executions, schedule.active)
 		}
+		subagents = append(subagents, schedule.subagents)
 	}
 	r.mu.Unlock()
 	for _, active := range executions {
 		active.cancel(context.Canceled)
+	}
+	for _, children := range subagents {
+		children.CancelAll(context.Canceled)
 	}
 	done := make(chan struct{})
 	go func() { r.running.Wait(); close(done) }()
@@ -239,5 +245,6 @@ type sessionSchedule struct {
 	session   *sessionmodel.Session
 	queue     task.TaskQueue
 	active    *activeRun
+	subagents *runmodel.Subagents
 	closing   bool
 }
